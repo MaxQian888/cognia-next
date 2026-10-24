@@ -990,6 +990,7 @@ async function runChatPrompt(
         const releaseClock = holdExecutionClock(options.signal)
         void (async () => {
           let decision: Awaited<ReturnType<UnattendedPermissionResponder["onPermissionRequest"]>>
+          let attribution: (typeof decision)["attribution"]
           try {
             const ask: PermissionRequestEvent = {
               ...request,
@@ -1005,6 +1006,11 @@ async function runChatPrompt(
             decision = await answerWithOutboundPolicy(ask, outboundPolicy, (r) =>
               permissions.onPermissionRequest(r)
             )
+            // An allowed outbound ask carries the grant it rests on.
+            attribution =
+              decision.attribution && decision.grant
+                ? { ...decision.attribution, grant: decision.grant }
+                : decision.attribution
           } finally {
             releaseClock()
           }
@@ -1016,7 +1022,7 @@ async function runChatPrompt(
             decision.message,
             decision.updatedInput,
             undefined,
-            decision.attribution
+            attribution
           )
         })().catch((error) =>
           log.warn("Scheduler unattended permission answer failed", { sessionId, error })

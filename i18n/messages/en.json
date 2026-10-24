@@ -10485,10 +10485,12 @@
     "toolApproval": {
       "actionsTitle": "Approval actions",
       "allowAlways": "Allow always",
+      "allowForRequest": "Allow for this request",
       "allowOnce": "Allow once",
       "askedBySubagent": "Asked by {subagent} (run {runId})",
       "cancelRun": "Cancel run",
       "deny": "Deny",
+      "denyFencesNotice": "Deny also stops it sending to these recipients until you give a new instruction.",
       "denyReasonCancel": "Cancel",
       "denyReasonLabel": "Tell the agent why, or what to do instead",
       "denyReasonPlaceholder": "e.g. Don't delete it. Back it up first.",
@@ -10499,6 +10501,12 @@
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
       "noInputDetails": "The agent sent no arguments for this call — only its name.",
       "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
+      "recipientConversation": "Chat {id} via {channel}",
+      "recipientMail": "Email {address}",
+      "recipientPerson": "Person {id} via {channel}",
+      "recipientPublic": "A public link ({tool})",
+      "recipientUnknown": "A recipient it could not name",
+      "recipientsLabel": "Sends to",
       "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
@@ -29262,6 +29270,7 @@
       "title": "Remote sessions"
     },
     "runApprovals": {
+      "allowForRequest": "Allow for this request",
       "approve": "Approve",
       "approvedToast": "Approved. The run continues.",
       "class": {

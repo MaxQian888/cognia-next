@@ -286,4 +286,90 @@ describe("run approvals", () => {
     await park.finish("completed")
     expect((await getDb().executionRuns.get(park.runId()!))?.status).toBe("completed")
   })
+
+  describe("a parked outbound request (ADR-0239)", () => {
+    const named = { kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_1" }
+    const parkOutbound = (
+      targets: Array<{ kind: string; channel: string; recipient: string }>,
+      requestId = "send-1"
+    ) => {
+      const park = createUnattendedPark({
+        origin: "scheduler",
+        sessionId: "s1",
+        label: "Scheduled task: Digest",
+      })
+      const parked = park.park({
+        type: "permission_request",
+        sessionId: "s1",
+        requestId,
+        toolUseID: requestId,
+        toolName: "im_broadcast",
+        input: {},
+        permissionClass: "outbound",
+        outbound: { enforced: true, targets, unauthorized: targets } as never,
+      })
+      return { park, parked }
+    }
+    async function firstApproval() {
+      for (let i = 0; i < 50; i++) {
+        const [approval] = (await listRunApprovals()).items
+        if (approval) return approval
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      throw new Error("nothing parked")
+    }
+
+    it("names the recipients, offers the request, and hands the person's choice to the run", async () => {
+      const { park, parked } = parkOutbound([named])
+      const approval = await firstApproval()
+      expect(approval.outbound).toEqual({ recipients: [named], allowForRequest: true })
+      await expect(
+        respondRunApproval({
+          interruptId: approval.interruptId,
+          decision: "approve",
+          forRequest: true,
+          callerDeviceId: "phone-1",
+        })
+      ).resolves.toEqual({ ok: true, status: "approved" })
+      await expect(parked).resolves.toEqual({
+        kind: "approved",
+        decision: { decision: "allow", forRequest: true },
+      })
+      // The wait is over: the recipients are no longer held.
+      expect((await listRunApprovals()).items).toEqual([])
+      await park.finish("completed")
+    })
+
+    it("offers only this call when a recipient cannot be named", async () => {
+      const { park } = parkOutbound([
+        named,
+        { kind: "public", channel: "tool:deploy_site", recipient: "public:deploy_site" },
+      ])
+      expect((await firstApproval()).outbound?.allowForRequest).toBe(false)
+      await park.finish("cancelled")
+    })
+
+    it("refuses a malformed forRequest, and never sends it with a deny", async () => {
+      const { park, parked } = parkOutbound([named])
+      const approval = await firstApproval()
+      await expect(
+        respondRunApproval({
+          interruptId: approval.interruptId,
+          decision: "approve",
+          forRequest: "yes",
+          callerDeviceId: "phone-1",
+        })
+      ).resolves.toEqual({ ok: false, reason: "invalid-payload", field: "forRequest" })
+      await expect(
+        respondRunApproval({
+          interruptId: approval.interruptId,
+          decision: "deny",
+          forRequest: true,
+          callerDeviceId: "phone-1",
+        })
+      ).resolves.toEqual({ ok: true, status: "denied" })
+      await expect(parked).resolves.toEqual({ kind: "denied" })
+      await park.finish("completed")
+    })
+  })
 })

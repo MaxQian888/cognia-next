@@ -2817,7 +2817,15 @@
     "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
     "supersededNotice": "已被新指令取代——工具调用已被拒绝。",
     "titleFallback": "允许执行 {tool}？",
-    "toolLabel": "工具"
+    "toolLabel": "工具",
+    "allowForRequest": "本次请求内允许",
+    "denyFencesNotice": "拒绝后，在你发出新指令之前，它也不会再向这些收件人发送。",
+    "recipientConversation": "会话 {id}（经 {channel}）",
+    "recipientMail": "邮箱 {address}",
+    "recipientPerson": "成员 {id}（经 {channel}）",
+    "recipientPublic": "公开链接（{tool}）",
+    "recipientUnknown": "无法识别的收件人",
+    "recipientsLabel": "发送给"
   },
   "toolCards": {
     "webSearch": {

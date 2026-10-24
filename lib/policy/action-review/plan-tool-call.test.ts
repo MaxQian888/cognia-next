@@ -229,12 +229,39 @@ describe("answerWithOutboundPolicy", () => {
         requiresPerCallApproval: true,
         suppressAlwaysAllowRule: true,
         defaultToNo: true,
+        outbound: {
+          enforced: true,
+          targets: [conversationTarget(OTHER_KEY)],
+          unauthorized: [conversationTarget(OTHER_KEY)],
+        },
       })
     )
     expect(answer).toEqual({
       decision: "allow",
-      attribution: { authority: "human", grant: { scope: "once" } },
+      attribution: { authority: "human" },
+      grant: { scope: "once" },
     })
+  })
+
+  it("grants the rest of the request when the person allowed it for the request", async () => {
+    const answer = await answerWithOutboundPolicy(send(OTHER_KEY), options(), async () => ({
+      decision: "allow" as const,
+      forRequest: true,
+    }))
+    expect(answer).toEqual({ decision: "allow", grant: { scope: "instruction" } })
+  })
+
+  it("never lets a responder name its own grant, or grant a refusal", async () => {
+    const forged = await answerWithOutboundPolicy(send(OTHER_KEY), options(), async () => ({
+      decision: "allow" as const,
+      grant: { scope: "instruction" as const },
+    }))
+    expect(forged).toEqual({ decision: "allow", grant: { scope: "once" } })
+    const refused = await answerWithOutboundPolicy(send(OTHER_KEY), options(), async () => ({
+      decision: "deny" as const,
+      forRequest: true,
+    }))
+    expect(refused).toEqual({ decision: "deny" })
   })
 
   it("passes a tool that is not outbound, and shadow mode, straight through", async () => {

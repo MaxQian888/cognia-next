@@ -2944,7 +2944,7 @@ export class ConnectorBus {
       const requestId = String(resolvedBinding.payload?.["requestId"] ?? "")
       const toolName = String(resolvedBinding.payload?.["toolName"] ?? "")
       const decision = String(resolvedBinding.payload?.["decision"] ?? "deny") as
-        "allow" | "deny" | "allow_session"
+        "allow" | "deny" | "allow_session" | "allow_request"
       try {
         const [{ applyToolApprovalCallback }, { resolveApproval }] = await Promise.all([
           import("@/lib/connectors/hitl/tool-approval"),

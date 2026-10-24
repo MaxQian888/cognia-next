@@ -225,6 +225,26 @@ export function extractOutboundTargets(
 }
 
 /** `sha256("outbound|<channel>|<recipient>")`, lowercase hex. No message body. */
+/**
+ * A recipient's own id, without the kind and bot prefixes it is keyed by:
+ * what a card shows next to the recipient's kind and bot. Nothing on the host
+ * records chat or member names, so this is the most a card can say.
+ */
+export function outboundRecipientId(target: Pick<OutboundTarget, "kind" | "recipient">): string {
+  switch (target.kind) {
+    case "conversation":
+      return target.recipient.replace(/^conv:[^:]+:[^:]+:/, "")
+    case "person":
+      return target.recipient.replace(/^person:[^:]+:/, "")
+    case "mail":
+      return target.recipient.replace(/^mail:/, "")
+    case "public":
+      return target.recipient.replace(/^public:/, "")
+    case "unknown":
+      return target.recipient
+  }
+}
+
 export function outboundFingerprint(target: Pick<OutboundTarget, "channel" | "recipient">): string {
   return sha256Hex(`outbound|${target.channel}|${target.recipient}`)
 }

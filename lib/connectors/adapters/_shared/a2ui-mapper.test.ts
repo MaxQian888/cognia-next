@@ -404,6 +404,7 @@ describe("resolveButtonWireAction", () => {
     "tapa:",
     "tapd:",
     "taps:",
+    "tapr:",
     "plna:",
     "plnr:",
     "mgs:",

@@ -7,6 +7,7 @@ import {
   extractOutboundTargets,
   mailTarget,
   outboundFingerprint,
+  outboundRecipientId,
   personTarget,
   publicTarget,
   toReviewTarget,
@@ -195,6 +196,22 @@ describe("extractOutboundTargets", () => {
       expect(targets.length).toBeGreaterThan(0)
       expect(targets.every((t) => t.kind !== "unknown")).toBe(true)
     }
+  })
+})
+
+describe("outboundRecipientId", () => {
+  it("strips the prefixes a recipient is keyed by", () => {
+    expect(outboundRecipientId(conversationTarget("lark:bot-a:oc_1:om_2")!)).toBe("oc_1")
+    expect(outboundRecipientId(personTarget("bot-a", "ou_7")!)).toBe("ou_7")
+    expect(outboundRecipientId(mailTarget("Ann <A@B.co>")!)).toBe("a@b.co")
+    expect(outboundRecipientId(publicTarget("deploy_site"))).toBe("deploy_site")
+    expect(outboundRecipientId({ kind: "unknown", recipient: "*" })).toBe("*")
+  })
+
+  it("keeps a chat id that itself contains the separator", () => {
+    expect(outboundRecipientId(conversationTarget("matrix:mx:!room:example.org")!)).toBe(
+      "!room:example.org"
+    )
   })
 })
 

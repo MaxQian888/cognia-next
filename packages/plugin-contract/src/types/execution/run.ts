@@ -479,6 +479,13 @@ export interface RunControlCommand {
    */
   reviewDecision?: SquadReviewDecision
   /**
+   * `approve` on a parked outbound tool request (ADR-0239): allow its
+   * recipients for the rest of the requester's instruction, not just this
+   * call. The host grants that only when every recipient can be named.
+   * Ignored on every other interrupt.
+   */
+  forRequest?: boolean
+  /**
    * Free text for `steer` (and the optional note on a handoff `resume`).
    *
    * Held on the command rather than in the journal on purpose — see

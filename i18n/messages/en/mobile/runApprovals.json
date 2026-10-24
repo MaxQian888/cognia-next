@@ -1,6 +1,7 @@
 {
   "heading": "{count, plural, =1 {1 run is waiting for you} other {# runs are waiting for you}}",
   "approve": "Approve",
+  "allowForRequest": "Allow for this request",
   "deny": "Deny",
   "approvedToast": "Approved. The run continues.",
   "deniedToast": "Denied.",

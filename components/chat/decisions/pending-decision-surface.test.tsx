@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { PendingDecisionSurface, type PendingDecisionStatus } from "./pending-decision-surface"
-import type { PendingApproval } from "@cognia/agent-config-types"
+import type { PendingApproval, PendingOutboundTarget } from "@cognia/agent-config-types"
 import type { AcpElicitationRequest } from "@/types/agent/external-agent"
 
 jest.mock("next-intl", () => ({
@@ -379,6 +379,95 @@ describe("<PendingDecisionSurface /> — tool approval", () => {
     )
     expect(screen.getByTestId("tool-decision-content")).toBeInTheDocument()
     expect(screen.getByTestId("decision-allow")).toBeInTheDocument()
+  })
+})
+
+describe("<PendingDecisionSurface /> — outbound ask (ADR-0239)", () => {
+  const chat: PendingOutboundTarget = {
+    kind: "conversation",
+    channel: "bot-a",
+    recipient: "conv:lark:bot-a:oc_1",
+  }
+  const site: PendingOutboundTarget = {
+    kind: "public",
+    channel: "tool:deploy_site",
+    recipient: "public:deploy_site",
+  }
+  const outboundAsk = (targets: PendingOutboundTarget[], enforced = true): PendingApproval => ({
+    ...approval,
+    toolName: "mcp__cognia-plugin-tools__im_broadcast",
+    input: { conversationKeys: ["lark:bot-a:oc_1"] },
+    suppressAlwaysAllowRule: enforced || undefined,
+    requiresPerCallApproval: enforced || undefined,
+    outbound: { enforced, targets, unauthorized: targets },
+  })
+
+  it("names the recipients and answers once, for the request, or no", async () => {
+    const user = userEvent.setup()
+    const onRespond = jest.fn()
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval: outboundAsk([chat]) }}
+        onApprovalRespond={onRespond}
+      />
+    )
+    expect(screen.getAllByTestId("outbound-recipient")).toHaveLength(1)
+    expect(screen.getByTestId("outbound-deny-fences")).toBeInTheDocument()
+    expect(screen.queryByTestId("decision-allow-always")).not.toBeInTheDocument()
+    expect(screen.getByTestId("decision-secondary-actions")).toHaveClass("grid-cols-2")
+    await user.click(screen.getByTestId("decision-allow"))
+    await user.click(screen.getByTestId("decision-allow-for-request"))
+    await user.click(screen.getByTestId("decision-deny"))
+    expect(onRespond.mock.calls).toEqual([["allow"], ["allow", { forRequest: true }], ["deny"]])
+  })
+
+  it("offers only this call when a recipient cannot be named", () => {
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval: outboundAsk([chat, site]) }}
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    expect(screen.getAllByTestId("outbound-recipient")).toHaveLength(2)
+    expect(screen.queryByTestId("decision-allow-for-request")).not.toBeInTheDocument()
+    expect(screen.getByTestId("decision-secondary-actions")).toHaveClass("grid-cols-1")
+  })
+
+  it("puts an allow for the request through the caller's gate", async () => {
+    const user = userEvent.setup()
+    const onRespond = jest.fn()
+    const confirmAllow = jest.fn(async (run: () => Promise<void>) => {
+      await run()
+    })
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval: outboundAsk([chat]) }}
+        onApprovalRespond={onRespond}
+        confirmAllow={confirmAllow}
+      />
+    )
+    await user.click(screen.getByTestId("decision-allow-for-request"))
+    expect(confirmAllow).toHaveBeenCalledTimes(1)
+    expect(onRespond).toHaveBeenCalledWith("allow", { forRequest: true })
+  })
+
+  it("changes nothing in shadow mode, and shows an observer no recipients", () => {
+    const { rerender } = render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval: outboundAsk([chat], false) }}
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("outbound-recipients")).not.toBeInTheDocument()
+    expect(screen.getByTestId("decision-allow-always")).toBeInTheDocument()
+    expect(screen.queryByTestId("decision-allow-for-request")).not.toBeInTheDocument()
+    rerender(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval: outboundAsk([chat]) }}
+        mode="observe"
+      />
+    )
+    expect(screen.queryByTestId("outbound-recipients")).not.toBeInTheDocument()
   })
 })
 

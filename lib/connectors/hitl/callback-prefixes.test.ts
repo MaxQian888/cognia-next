@@ -10,6 +10,7 @@ it("pins every approval wire namespace, including the independently packaged wor
     "tapa:",
     "tapd:",
     "taps:",
+    "tapr:",
     "plna:",
     "plnr:",
     "mgs:",

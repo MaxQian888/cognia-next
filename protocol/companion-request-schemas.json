@@ -6812,6 +6812,10 @@
           "type": "string",
           "maxLength": 120,
           "description": "Display only: the name the run journal shows for the approver. The actor is the authenticated device the host stamps."
+        },
+        "forRequest": {
+          "type": "boolean",
+          "description": "With approve, on a parked outbound tool request (ADR-0239): allow its recipients for the rest of the request, not just this call. Honoured only when the list offered allowForRequest."
         }
       },
       "additionalProperties": false

@@ -424,6 +424,13 @@ export function useRemoteSessionStream(
               description: evt.description,
               blockedPath: evt.blockedPath,
               decisionReason: evt.decisionReason,
+              // A per-call ask (ADR-0201, an enforced outbound call ADR-0239)
+              // offers no standing grant here either.
+              ...(evt.defaultToNo ? { defaultToNo: true } : {}),
+              ...(evt.suppressAlwaysAllowRule || evt.requiresPerCallApproval
+                ? { suppressAlwaysAllowRule: true }
+                : {}),
+              ...(evt.requiresPerCallApproval ? { requiresPerCallApproval: true } : {}),
             })
             return
           }

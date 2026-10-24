@@ -16,6 +16,12 @@ describe("larkCallbackToast", () => {
       "本会话已允许",
       "Allowed for this session",
     ],
+    [
+      { status: "accepted", kind: "tool_approve", decision: "allow_request" },
+      "success",
+      "本次请求内已允许",
+      "Allowed for this request",
+    ],
     [{ status: "accepted", kind: "plan_approve", action: "cancel" }, "info", "已取消", "Cancelled"],
     [
       { status: "accepted", kind: "plan_approve", action: "approve" },

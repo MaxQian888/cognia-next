@@ -1,5 +1,12 @@
 import { settleApprovalCard } from "./approval-card-state"
 jest.mock("./approval-card-state", () => ({ settleApprovalCard: jest.fn(async () => undefined) }))
+// A run-owned card writes its interrupt row; the row's lifecycle is tested in
+// `lib/execution/run-control.test.ts`.
+jest.mock("@/lib/execution/run-control", () => ({
+  createRunInterrupt: jest.fn(async () => undefined),
+  resolveRunInterruptFromSource: jest.fn(async () => undefined),
+  expireRunInterruptFromSource: jest.fn(async () => undefined),
+}))
 /**
  * Tests for lib/connectors/hitl/tool-approval.ts — the IM permission responder,
  * card builder, and callback applier.
@@ -12,7 +19,9 @@ import {
   TOOL_APPROVE_PREFIX,
   TOOL_DENY_PREFIX,
   TOOL_ALLOW_SESSION_PREFIX,
+  TOOL_ALLOW_REQUEST_PREFIX,
   CONNECTOR_TURN_TIMEOUT_MS,
+  imRecipientLine,
 } from "./tool-approval"
 import {
   DEFAULT_APPROVAL_TTL_MS,
@@ -121,6 +130,126 @@ describe("buildToolApprovalSurface — per-call asks (ADR-0201, ADR-0239)", () =
     const fallback = (s.widget as { fallbackText: string }).fallbackText
     expect(fallback).toMatch(/回复 1 允许 \/ 2 拒绝$/)
     expect(fallback).not.toMatch(/Allow for session/)
+  })
+})
+
+describe("buildToolApprovalSurface — outbound asks (ADR-0239)", () => {
+  const chat = {
+    kind: "conversation",
+    channel: "bot-a",
+    recipient: "conv:lark:bot-a:oc_1",
+  } as const
+
+  it("names the recipients, says a deny fences them, and offers the request third", () => {
+    const s = buildToolApprovalSurface({
+      bindingId: "abcd1234",
+      toolName: "im_broadcast",
+      perCall: true,
+      recipients: [chat],
+      allowForRequest: true,
+    })
+    const comps = s.components as Record<
+      string,
+      { children?: string[]; text?: string; value?: string }
+    >
+    expect(comps.root.children).toEqual(["prompt", "recipients", "actions"])
+    expect(comps.recipients.text).toContain(imRecipientLine(chat))
+    expect(comps.recipients.text).toContain("Deny also stops sending")
+    expect(comps.actions.children).toEqual(["allow", "deny", "allowRequest"])
+    expect(comps.allowRequest.value).toBe(TOOL_ALLOW_REQUEST_PREFIX + "abcd1234")
+    const fallback = (s.widget as { fallbackText: string }).fallbackText
+    expect(fallback).toContain(imRecipientLine(chat))
+    expect(fallback).toMatch(/回复 1 允许 \/ 2 拒绝 \/ 3 本次请求内允许$/)
+  })
+
+  it("offers only this call when a recipient cannot be named", () => {
+    const s = buildToolApprovalSurface({
+      bindingId: "abcd1234",
+      toolName: "deploy_site",
+      perCall: true,
+      recipients: [
+        { kind: "public", channel: "tool:deploy_site", recipient: "public:deploy_site" },
+      ],
+      allowForRequest: false,
+    })
+    const comps = s.components as Record<string, { children?: string[] }>
+    expect(comps.actions.children).toEqual(["allow", "deny"])
+    expect((s.widget as { fallbackText: string }).fallbackText).toContain(
+      "公开链接 / Public link（deploy_site）"
+    )
+  })
+
+  it("writes every kind of recipient", () => {
+    expect(imRecipientLine(chat)).toBe("会话 / Chat oc_1（bot-a）")
+    expect(
+      imRecipientLine({ kind: "person", channel: "bot-a", recipient: "person:bot-a:ou_7" })
+    ).toBe("成员 / Person ou_7（bot-a）")
+    expect(imRecipientLine({ kind: "mail", channel: "mail", recipient: "mail:a@b.co" })).toBe(
+      "邮箱 / Email a@b.co"
+    )
+    expect(imRecipientLine({ kind: "unknown", channel: "tool:x", recipient: "*" })).toMatch(
+      /could not name/
+    )
+  })
+})
+
+describe("makeImPermissionResponder — outbound asks (ADR-0239)", () => {
+  const targets = [
+    { kind: "conversation" as const, channel: "bot-a", recipient: "conv:lark:bot-a:oc_1" },
+  ]
+
+  it("binds allow-for-request and hands the person's choice back", async () => {
+    const h = harness()
+    const pending = makeImPermissionResponder(h.ctx)(
+      req({
+        toolName: "im_broadcast",
+        requiresPerCallApproval: true,
+        outbound: { enforced: true, targets, unauthorized: targets },
+      })
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    expect(h.bindings.map((b) => b.payload?.decision)).toEqual(["allow", "deny", "allow_request"])
+    expect(h.bindings[2]).toMatchObject({
+      actionId: expect.stringMatching(/^tapr:/),
+      allowedActions: ["approve"],
+    })
+    applyToolApprovalCallback({
+      sessionId: "s1",
+      requestId: "req_1",
+      toolName: "im_broadcast",
+      decision: "allow_request",
+      resolve: resolveApproval,
+    })
+    await expect(pending).resolves.toEqual({ decision: "allow", forRequest: true })
+  })
+
+  it("lists the recipients for a paired phone while the run's card waits", async () => {
+    const { runApprovalOutbound } = await import("@/lib/execution/run-approval-outbound")
+    const h = harness()
+    h.ctx.runId = "run-im"
+    const review = { enforced: true, targets, unauthorized: targets }
+    const pending = makeImPermissionResponder(h.ctx)(
+      req({ toolName: "im_broadcast", requiresPerCallApproval: true, outbound: review })
+    )
+    for (let i = 0; i < 50 && !runApprovalOutbound("tool-interrupt:run-im:req_1"); i++) {
+      await new Promise((r) => setTimeout(r, 1))
+    }
+    expect(runApprovalOutbound("tool-interrupt:run-im:req_1")).toBe(review)
+    resolveApproval("s1", "req_1", { decision: "deny" })
+    await pending
+    expect(runApprovalOutbound("tool-interrupt:run-im:req_1")).toBeUndefined()
+  })
+
+  it("shows no recipients in shadow mode", async () => {
+    const h = harness()
+    const pending = makeImPermissionResponder(h.ctx)(
+      req({ toolName: "im_broadcast", outbound: { enforced: false, targets, unauthorized: [] } })
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    expect(JSON.stringify(h.enqueued[0].segments)).not.toContain("Sends to")
+    expect(h.bindings.map((b) => b.payload?.decision)).toEqual(["allow", "deny", "allow_session"])
+    resolveApproval("s1", "req_1", { decision: "deny" })
+    await pending
   })
 })
 
@@ -314,6 +443,23 @@ describe("applyToolApprovalCallback", () => {
       resolve: () => true,
     })
     expect(out.granted).toBe(false)
+  })
+
+  it("allow_request resolves an allow for the request, with no session bypass", () => {
+    const calls: unknown[] = []
+    const out = applyToolApprovalCallback({
+      sessionId: "s8",
+      requestId: "r1",
+      toolName: "im_broadcast",
+      decision: "allow_request",
+      resolve: (_s, _r, d) => {
+        calls.push(d)
+        return true
+      },
+    })
+    expect(out).toEqual({ granted: true, resolved: true })
+    expect(calls).toEqual([{ decision: "allow", forRequest: true }])
+    expect(hasSessionBypass("s8", "im_broadcast")).toBe(false)
   })
 
   it("allow_session grants the per-session bypass", () => {

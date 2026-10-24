@@ -137,6 +137,41 @@ describe("<RunApprovalsCard />", () => {
     expect(toastSuccess).toHaveBeenCalledWith("approvedToast")
   })
 
+  describe("a parked outbound request (ADR-0239)", () => {
+    const chat = { kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_1" }
+
+    it("names the recipients and allows them for the request", async () => {
+      const user = userEvent.setup()
+      listReturns([{ ...toolApproval, outbound: { recipients: [chat], allowForRequest: true } }])
+      render(<RunApprovalsCard />)
+      const row = await screen.findByTestId("run-approval-tool-interrupt:r1:q1")
+      expect(row.querySelectorAll('[data-testid="outbound-recipient"]')).toHaveLength(1)
+      expect(screen.getByTestId("outbound-deny-fences")).toBeInTheDocument()
+      await user.click(screen.getByTestId("run-approval-allow-request-tool-interrupt:r1:q1"))
+      expect(mockCall).toHaveBeenCalledWith("execution_run_approval_respond", {
+        interruptId: "tool-interrupt:r1:q1",
+        decision: "approve",
+        forRequest: true,
+      })
+    })
+
+    it("offers only this call when the host says a recipient cannot be named", async () => {
+      listReturns([{ ...toolApproval, outbound: { recipients: [chat], allowForRequest: false } }])
+      render(<RunApprovalsCard />)
+      await screen.findByTestId("run-approval-tool-interrupt:r1:q1")
+      expect(
+        screen.queryByTestId("run-approval-allow-request-tool-interrupt:r1:q1")
+      ).not.toBeInTheDocument()
+      expect(screen.getByTestId("run-approval-approve-tool-interrupt:r1:q1")).toBeInTheDocument()
+    })
+
+    it("shows no recipients for a request that is not outbound", async () => {
+      render(<RunApprovalsCard />)
+      await screen.findByTestId("run-approval-tool-interrupt:r1:q1")
+      expect(screen.queryByTestId("outbound-recipients")).not.toBeInTheDocument()
+    })
+  })
+
   it("denies, and says so", async () => {
     mockCall.mockImplementation(async (name: string) =>
       name === "execution_run_approval_list"

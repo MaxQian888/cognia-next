@@ -258,7 +258,8 @@ export type ConnectorCallbackDecision =
       status: "accepted"
       kind: ConnectorCallbackBindingKind | "run_control" | "generic"
       action?: string
-      decision?: "allow" | "deny" | "allow_session"
+      /** `allow_request`: an outbound tool card's "allow for this request" (ADR-0239). */
+      decision?: "allow" | "deny" | "allow_session" | "allow_request"
     }
   | { status: "deduped" | "in_flight" | "expired" | "failed" }
   | { status: "denied"; reason: string }

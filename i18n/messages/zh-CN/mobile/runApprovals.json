@@ -1,6 +1,7 @@
 {
   "heading": "{count, plural, other {# 个运行正在等你审批}}",
   "approve": "批准",
+  "allowForRequest": "本次请求内允许",
   "deny": "拒绝",
   "approvedToast": "已批准，运行继续。",
   "deniedToast": "已拒绝。",

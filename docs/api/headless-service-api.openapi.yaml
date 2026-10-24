@@ -55939,6 +55939,40 @@ paths:
                           description: A Bot's proposal, rendered as data. Absent when larger than the inline limit.
                         detailTruncated:
                           type: boolean
+                        outbound:
+                          type: object
+                          description: "ADR-0239: the recipients of a parked outbound tool request, and whether a person may allow them for the
+                            rest of the request. Held in the host's memory while the request waits; absent for any other
+                            request."
+                          required:
+                            - recipients
+                            - allowForRequest
+                          properties:
+                            recipients:
+                              type: array
+                              items:
+                                type: object
+                                required:
+                                  - kind
+                                  - channel
+                                  - recipient
+                                properties:
+                                  kind:
+                                    type: string
+                                    enum:
+                                      - conversation
+                                      - person
+                                      - mail
+                                      - public
+                                      - unknown
+                                  channel:
+                                    type: string
+                                  recipient:
+                                    type: string
+                                additionalProperties: false
+                            allowForRequest:
+                              type: boolean
+                          additionalProperties: false
                         createdAt:
                           type: integer
                         expiresAt:
@@ -56121,6 +56155,10 @@ paths:
                   maxLength: 120
                   description: "Display only: the name the run journal shows for the approver. The actor is the authenticated device the
                     host stamps."
+                forRequest:
+                  type: boolean
+                  description: "With approve, on a parked outbound tool request (ADR-0239): allow its recipients for the rest of the
+                    request, not just this call. Honoured only when the list offered allowForRequest."
               additionalProperties: false
       responses:
         "200":

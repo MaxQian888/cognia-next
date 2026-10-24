@@ -1426,6 +1426,14 @@ export interface PermissionRequestEvent {
    * outside a verified sandbox). The host's parked approval names it.
    */
   permissionClass?: PermissionClass
+  /**
+   * ADR-0239: the outbound policy's view of the call, set by the host on the
+   * request it hands to a responder when the call needs a person
+   * (`answerWithOutboundPolicy`). The sidecar never sets it. A responder that
+   * shows a card names these recipients and may offer "allow for this
+   * request" (`CapturePermissionDecision.forRequest`).
+   */
+  outbound?: PendingOutboundReview
 }
 
 /**

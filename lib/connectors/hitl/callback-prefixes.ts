@@ -2,6 +2,8 @@
 export const TOOL_APPROVE_PREFIX = "tapa:"
 export const TOOL_DENY_PREFIX = "tapd:"
 export const TOOL_ALLOW_SESSION_PREFIX = "taps:"
+/** "Allow for this request" on an outbound tool card (ADR-0239). */
+export const TOOL_ALLOW_REQUEST_PREFIX = "tapr:"
 export const PLAN_APPROVE_PREFIX = "plna:"
 export const PLAN_REJECT_PREFIX = "plnr:"
 export const MEDIA_GRANT_SESSION_PREFIX = "mgs:"
@@ -18,6 +20,7 @@ const CALLBACK_ACTIONS = {
   [TOOL_APPROVE_PREFIX]: "approve",
   [TOOL_DENY_PREFIX]: "cancel",
   [TOOL_ALLOW_SESSION_PREFIX]: "approve",
+  [TOOL_ALLOW_REQUEST_PREFIX]: "approve",
   [PLAN_APPROVE_PREFIX]: "approve",
   [PLAN_REJECT_PREFIX]: "cancel",
   [MEDIA_GRANT_SESSION_PREFIX]: "approve",

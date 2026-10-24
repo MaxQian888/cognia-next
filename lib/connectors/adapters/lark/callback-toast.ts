@@ -53,6 +53,9 @@ export function larkCallbackToast(
       if (decision.decision === "allow_session") {
         return toast("success", "本会话已允许", "Allowed for this session", locale)
       }
+      if (decision.decision === "allow_request") {
+        return toast("success", "本次请求内已允许", "Allowed for this request", locale)
+      }
       if (decision.decision === "deny") {
         return toast("info", "已拒绝", "Declined", locale)
       }

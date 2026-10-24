@@ -11,6 +11,11 @@ import { settleApprovalCard } from "./approval-card-state"
  *      conversation, records a `tool_approve` callback binding per button, and
  *      `await`s the registry until the user taps (or the TTL auto-denies).
  *
+ * An outbound call the policy left to a person (ADR-0239,
+ * `PermissionRequestEvent.outbound`) is asked per call: the card names its
+ * recipients, says a deny fences them, and offers "allow for this request" in
+ * place of "allow for session" when every recipient can be named.
+ *
  * The sidecar blocks the tool until the returned decision arrives, so the turn
  * suspends without any custom machinery. The button-press resolves the pending
  * promise via `bus.dispatchConnectorCallback`'s `tool_approve` short-circuit.
@@ -20,8 +25,9 @@ import {
   TOOL_APPROVE_PREFIX,
   TOOL_DENY_PREFIX,
   TOOL_ALLOW_SESSION_PREFIX,
+  TOOL_ALLOW_REQUEST_PREFIX,
 } from "@/lib/connectors/hitl/callback-prefixes"
-import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { PendingOutboundTarget, PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ConversationDeliveryTarget, ConversationReference } from "@/types/connectors/event"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
@@ -30,6 +36,12 @@ import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-ma
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
+import {
+  forgetRunApprovalOutbound,
+  rememberRunApprovalOutbound,
+} from "@/lib/execution/run-approval-outbound"
+import { outboundRecipientId } from "@/lib/policy/action-review/outbound-targets"
+import { outboundGrantableForRequest } from "@/lib/policy/action-review/policy"
 import {
   awaitApproval,
   grantSessionBypass,
@@ -51,17 +63,43 @@ export {
   TOOL_APPROVE_PREFIX,
   TOOL_DENY_PREFIX,
   TOOL_ALLOW_SESSION_PREFIX,
+  TOOL_ALLOW_REQUEST_PREFIX,
 } from "@/lib/connectors/hitl/callback-prefixes"
 
 /** Decision encoded onto a `tool_approve` binding payload. */
-export type ToolApprovalDecision = "allow" | "deny" | "allow_session"
+export type ToolApprovalDecision = "allow" | "deny" | "allow_session" | "allow_request"
 
 export interface ToolApprovalSurfaceInput {
   bindingId: string
   toolName: string
   /** A per-call ask: no "allow for session" button. */
   perCall?: boolean
+  /** An outbound ask's recipients (ADR-0239): named on the card. */
+  recipients?: readonly PendingOutboundTarget[]
+  /** Offer "allow for this request" (every recipient can be named). */
+  allowForRequest?: boolean
 }
+
+/** One recipient line of an outbound card. Bilingual, like the rest of the card. */
+export function imRecipientLine(target: PendingOutboundTarget): string {
+  const id = outboundRecipientId(target)
+  switch (target.kind) {
+    case "conversation":
+      return `会话 / Chat ${id}（${target.channel}）`
+    case "person":
+      return `成员 / Person ${id}（${target.channel}）`
+    case "mail":
+      return `邮箱 / Email ${id}`
+    case "public":
+      return `公开链接 / Public link（${id}）`
+    case "unknown":
+      return "无法识别的收件人 / A recipient it could not name"
+  }
+}
+
+const RECIPIENTS_HEADING = "发送给 / Sends to:"
+const DENY_FENCES_NOTICE =
+  "拒绝后，在新指令之前也不会再向这些收件人发送。 / Deny also stops sending to these recipients until a new instruction."
 
 /**
  * Pure builder for the Allow / Deny / Allow-for-session card. Card-capable
@@ -72,26 +110,47 @@ export function buildToolApprovalSurface(input: ToolApprovalSurfaceInput): A2UIS
   const approve = TOOL_APPROVE_PREFIX + input.bindingId
   const deny = TOOL_DENY_PREFIX + input.bindingId
   const allowSession = TOOL_ALLOW_SESSION_PREFIX + input.bindingId
+  const allowRequest = TOOL_ALLOW_REQUEST_PREFIX + input.bindingId
   const title = `工具授权 / Tool approval: ${input.toolName}`
   const prompt = `助手想运行工具 “${input.toolName}”。是否允许？ / Allow the assistant to run "${input.toolName}"?`
   const sessionButton = !input.perCall
+  // Only a per-call ask offers the request; it then takes the session's place.
+  const requestButton = !sessionButton && input.allowForRequest === true
+  const recipients = input.recipients?.length
+    ? [RECIPIENTS_HEADING, ...input.recipients.map((target) => `- ${imRecipientLine(target)}`)]
+    : []
+  const recipientsText = recipients.length ? [...recipients, DENY_FENCES_NOTICE].join("\n") : ""
+  const third = sessionButton
+    ? { id: "allowSession", label: "本会话始终允许 / Allow for session", short: "本会话始终允许" }
+    : requestButton
+      ? {
+          id: "allowRequest",
+          label: "本次请求内允许 / Allow for this request",
+          short: "本次请求内允许",
+        }
+      : undefined
   return {
     components: {
-      root: { component: "Card", title, children: ["prompt", "actions"] },
+      root: {
+        component: "Card",
+        title,
+        children: recipientsText ? ["prompt", "recipients", "actions"] : ["prompt", "actions"],
+      },
       prompt: { component: "Text", text: prompt },
+      ...(recipientsText ? { recipients: { component: "Text", text: recipientsText } } : {}),
       actions: {
         component: "Row",
-        children: sessionButton ? ["allow", "deny", "allowSession"] : ["allow", "deny"],
+        children: third ? ["allow", "deny", third.id] : ["allow", "deny"],
       },
       allow: { component: "Button", text: "允许 / Allow", action: "approve", value: approve },
       deny: { component: "Button", text: "拒绝 / Deny", action: "cancel", value: deny },
-      ...(sessionButton
+      ...(third
         ? {
-            allowSession: {
+            [third.id]: {
               component: "Button",
-              text: "本会话始终允许 / Allow for session",
+              text: third.label,
               action: "approve",
-              value: allowSession,
+              value: sessionButton ? allowSession : allowRequest,
             },
           }
         : {}),
@@ -104,10 +163,11 @@ export function buildToolApprovalSurface(input: ToolApprovalSurfaceInput): A2UIS
       fallbackText: [
         `# ${title}`,
         prompt,
-        ...(sessionButton
+        ...(recipientsText ? [recipientsText] : []),
+        ...(third
           ? [
-              "[允许 / Allow] [拒绝 / Deny] [本会话始终允许 / Allow for session]",
-              "回复 1 允许 / 2 拒绝 / 3 本会话始终允许",
+              `[允许 / Allow] [拒绝 / Deny] [${third.label}]`,
+              `回复 1 允许 / 2 拒绝 / 3 ${third.short}`,
             ]
           : ["[允许 / Allow] [拒绝 / Deny]", "回复 1 允许 / 2 拒绝"]),
       ].join("\n"),
@@ -195,7 +255,17 @@ export function makeImPermissionResponder(
       })
     }
     const surfaceId = `tool_approve:${ctx.conversationKey}:${bindingId}`
-    const surface = buildToolApprovalSurface({ bindingId, toolName: req.toolName, perCall })
+    // Shadow mode (`enforced: false`) never reaches here with recipients:
+    // the outbound policy only attaches them to an ask it enforces.
+    const outbound = req.outbound?.enforced ? req.outbound : undefined
+    const allowForRequest = perCall && outboundGrantableForRequest(outbound)
+    const surface = buildToolApprovalSurface({
+      bindingId,
+      toolName: req.toolName,
+      perCall,
+      ...(outbound ? { recipients: outbound.targets } : {}),
+      allowForRequest,
+    })
 
     const buttons: Array<{
       actionId: string
@@ -213,6 +283,15 @@ export function makeImPermissionResponder(
               decision: "allow_session" as const,
             },
           ]),
+      ...(allowForRequest
+        ? [
+            {
+              actionId: TOOL_ALLOW_REQUEST_PREFIX + bindingId,
+              componentId: "allowRequest",
+              decision: "allow_request" as const,
+            },
+          ]
+        : []),
     ]
     let approvalJobId: string | undefined
     let expired = false
@@ -292,7 +371,15 @@ export function makeImPermissionResponder(
         }).catch(() => undefined)
       },
     }
-    const decision = await awaitApproval(ctx.sessionId, req.requestId, opts)
+    // The run's interrupt is listed on a paired phone too, which names the
+    // recipients from the host's memory while the card waits (ADR-0239).
+    if (interruptId && outbound) rememberRunApprovalOutbound(interruptId, outbound)
+    let decision: CapturePermissionDecision
+    try {
+      decision = await awaitApproval(ctx.sessionId, req.requestId, opts)
+    } finally {
+      if (interruptId) forgetRunApprovalOutbound(interruptId)
+    }
     void settleApprovalCard({
       adapterId: ctx.adapterId,
       conversationKey: ctx.conversationKey,
@@ -318,8 +405,10 @@ export function makeImPermissionResponder(
 
 /**
  * Resolve a `tool_approve` button press into a capture decision + apply the
- * "allow for session" bypass. Returns the decision string used for auditing.
- * Called by the bus `tool_approve` short-circuit.
+ * "allow for session" bypass. "Allow for this request" resolves an allow the
+ * outbound policy grants for the rest of the request (ADR-0239). Returns the
+ * decision string used for auditing. Called by the bus `tool_approve`
+ * short-circuit.
  */
 export function applyToolApprovalCallback(input: {
   sessionId: string
@@ -329,7 +418,11 @@ export function applyToolApprovalCallback(input: {
   resolve: (sessionId: string, requestId: string, decision: CapturePermissionDecision) => boolean
 }): { granted: boolean; resolved: boolean } {
   const granted = input.decision !== "deny"
-  const capture: CapturePermissionDecision = granted ? { decision: "allow" } : { decision: "deny" }
+  const capture: CapturePermissionDecision = !granted
+    ? { decision: "deny" }
+    : input.decision === "allow_request"
+      ? { decision: "allow", forRequest: true }
+      : { decision: "allow" }
   const resolved = input.resolve(input.sessionId, input.requestId, capture)
   if (resolved && input.decision === "allow_session")
     grantSessionBypass(input.sessionId, input.toolName)

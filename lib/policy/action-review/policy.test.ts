@@ -9,6 +9,7 @@ import {
   type OutboundTarget,
 } from "./outbound-targets"
 import {
+  outboundGrantableForRequest,
   planActionReview,
   type ActionReviewPlanContext,
   type ActionReviewPlanInput,
@@ -289,5 +290,23 @@ describe("planActionReview: shadow mode", () => {
       planActionReview(input([MAIL_A]), { ...shadow, fencedFingerprints: new Set([fp(MAIL_A)]) })
         .plan
     ).toEqual({ outcome: "deny", enforced: false })
+  })
+})
+
+describe("outboundGrantableForRequest", () => {
+  it("holds only when there are recipients and every one is named", () => {
+    const chat = conversationTarget("lark:bot-a:oc_1")!
+    const mail = mailTarget("a@b.co")!
+    expect(outboundGrantableForRequest({ targets: [chat, mail] })).toBe(true)
+    expect(outboundGrantableForRequest({ targets: [chat, publicTarget("deploy_site")] })).toBe(
+      false
+    )
+    expect(
+      outboundGrantableForRequest({
+        targets: [{ kind: "unknown", channel: "tool:x", recipient: "*" }],
+      })
+    ).toBe(false)
+    expect(outboundGrantableForRequest({ targets: [] })).toBe(false)
+    expect(outboundGrantableForRequest(undefined)).toBe(false)
   })
 })

@@ -25,6 +25,10 @@
 import type { PermissionClass, PermissionRequestEvent } from "@cognia/agent-config-types"
 import type { CapturePermissionDecision } from "./run-and-capture"
 import type { RunApprovalOrigin } from "@/lib/execution/run-approval-push"
+import {
+  forgetRunApprovalOutbound,
+  rememberRunApprovalOutbound,
+} from "@/lib/execution/run-approval-outbound"
 
 /** How long a parked request waits for a person before it is denied. */
 export const UNATTENDED_PARK_TTL_MS = 30 * 60 * 1000
@@ -234,50 +238,57 @@ export function createUnattendedPark(options: UnattendedParkOptions): Unattended
         expiresAt,
         createdAt,
       })
-      await deps
-        .announce(
-          { id: interruptId, runId: run, type: "tool_approval", expiresAt },
-          {
-            origin: options.origin,
-            ...(request.permissionClass ? { permissionClass: request.permissionClass } : {}),
-          }
-        )
-        .catch(() => undefined)
-      let expired = false
-      const decision = await deps.awaitDecision(options.sessionId, request.requestId, {
-        ttlMs,
-        ...(options.signal ? { signal: options.signal } : {}),
-        onExpire: () => {
-          expired = true
-        },
-      })
-      if (expired) {
-        // The registry's TTL fired, or the turn ended with the question open.
-        // Either way nobody answered: the interrupt is expired, not denied.
-        await deps.expireInterrupt(run, interruptId).catch(() => undefined)
+      // An outbound request's recipients, for the phone that answers it
+      // (ADR-0239). Held in memory only: the interrupt row is metadata-only.
+      if (request.outbound) rememberRunApprovalOutbound(interruptId, request.outbound)
+      try {
         await deps
-          .announceResolved({ interruptId, runId: run, status: "expired" })
+          .announce(
+            { id: interruptId, runId: run, type: "tool_approval", expiresAt },
+            {
+              origin: options.origin,
+              ...(request.permissionClass ? { permissionClass: request.permissionClass } : {}),
+            }
+          )
           .catch(() => undefined)
-        return options.signal?.aborted ? { kind: "withdrawn" } : { kind: "expired" }
-      }
-      // An answer came through the control gate, which already resolved the
-      // interrupt row; tell foreground cards it is gone.
-      const approved = decision.decision === "allow"
-      await deps
-        .announceResolved({
-          interruptId,
-          runId: run,
-          status: approved ? "approved" : "denied",
+        let expired = false
+        const decision = await deps.awaitDecision(options.sessionId, request.requestId, {
+          ttlMs,
+          ...(options.signal ? { signal: options.signal } : {}),
+          onExpire: () => {
+            expired = true
+          },
         })
-        .catch(() => undefined)
-      return approved
-        ? { kind: "approved", decision }
-        : {
-            kind: "denied",
-            ...(decision.decision === "deny" && decision.message
-              ? { message: decision.message }
-              : {}),
-          }
+        if (expired) {
+          // The registry's TTL fired, or the turn ended with the question open.
+          // Either way nobody answered: the interrupt is expired, not denied.
+          await deps.expireInterrupt(run, interruptId).catch(() => undefined)
+          await deps
+            .announceResolved({ interruptId, runId: run, status: "expired" })
+            .catch(() => undefined)
+          return options.signal?.aborted ? { kind: "withdrawn" } : { kind: "expired" }
+        }
+        // An answer came through the control gate, which already resolved the
+        // interrupt row; tell foreground cards it is gone.
+        const approved = decision.decision === "allow"
+        await deps
+          .announceResolved({
+            interruptId,
+            runId: run,
+            status: approved ? "approved" : "denied",
+          })
+          .catch(() => undefined)
+        return approved
+          ? { kind: "approved", decision }
+          : {
+              kind: "denied",
+              ...(decision.decision === "deny" && decision.message
+                ? { message: decision.message }
+                : {}),
+            }
+      } finally {
+        forgetRunApprovalOutbound(interruptId)
+      }
     },
     async finish(status, summary) {
       if (finished) return

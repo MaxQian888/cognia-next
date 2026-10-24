@@ -1522,3 +1522,58 @@ describe("bot run control", () => {
     installed.dispose()
   })
 })
+
+describe("parked agent tool approval (ADR-0224 A7, ADR-0239)", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it("passes an allow for the request to the parked responder, and nothing more on a deny", async () => {
+    const { awaitApproval } = await import("@/lib/connectors/hitl/approval-registry")
+    const installed = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "parked-agent",
+      kind: "agent-turn",
+      sourceId: "parked-agent",
+      sessionId: "s-unattended",
+      title: "Scheduled task: Digest",
+      status: "waiting",
+      currentRevision: 0,
+      initiator: { remoteUserId: "operator" },
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    for (const id of ["send-1", "send-2"]) {
+      await getDb().executionRunInterrupts.put({
+        id: `tool-interrupt:parked-agent:${id}`,
+        runId: "parked-agent",
+        type: "tool_approval",
+        title: "Approve im_broadcast (outbound message)",
+        toolName: "im_broadcast",
+        requestDigest: id,
+        status: "pending",
+        createdAt: 1,
+        expiresAt: Date.now() + 60_000,
+      })
+    }
+    const allowed = awaitApproval("s-unattended", "send-1")
+    const denied = awaitApproval("s-unattended", "send-2")
+    const answer = (requestId: string, action: "approve" | "deny", revision: number) =>
+      executeRunControlCommand({
+        runId: "parked-agent",
+        action,
+        interruptId: `tool-interrupt:parked-agent:${requestId}`,
+        expectedRevision: revision,
+        idempotencyKey: `answer-${requestId}`,
+        actor: { remoteUserId: "operator" },
+        forRequest: true,
+      })
+    const first = await answer("send-1", "approve", 0)
+    expect(first).toMatchObject({ accepted: true })
+    await expect(allowed).resolves.toEqual({ decision: "allow", forRequest: true })
+    expect((await answer("send-2", "deny", first.currentRevision ?? 0)).accepted).toBe(true)
+    await expect(denied).resolves.toEqual({ decision: "deny" })
+    installed.dispose()
+  })
+})

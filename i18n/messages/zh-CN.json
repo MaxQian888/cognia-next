@@ -10485,10 +10485,12 @@
     "toolApproval": {
       "actionsTitle": "审批操作",
       "allowAlways": "始终允许",
+      "allowForRequest": "本次请求内允许",
       "allowOnce": "仅本次允许",
       "askedBySubagent": "由子代理 {subagent} 请求（运行 {runId}）",
       "cancelRun": "取消运行",
       "deny": "拒绝",
+      "denyFencesNotice": "拒绝后，在你发出新指令之前，它也不会再向这些收件人发送。",
       "denyReasonCancel": "取消",
       "denyReasonLabel": "告诉代理原因，或改为怎么做",
       "denyReasonPlaceholder": "例如：不要删除，先备份。",
@@ -10499,6 +10501,12 @@
       "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
       "noInputDetails": "代理未提供此次调用的参数，仅给出了名称。",
       "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
+      "recipientConversation": "会话 {id}（经 {channel}）",
+      "recipientMail": "邮箱 {address}",
+      "recipientPerson": "成员 {id}（经 {channel}）",
+      "recipientPublic": "公开链接（{tool}）",
+      "recipientUnknown": "无法识别的收件人",
+      "recipientsLabel": "发送给",
       "supersededNotice": "已被新指令取代——工具调用已被拒绝。",
       "titleFallback": "允许执行 {tool}？",
       "toolLabel": "工具"
@@ -29262,6 +29270,7 @@
       "title": "远程会话"
     },
     "runApprovals": {
+      "allowForRequest": "本次请求内允许",
       "approve": "批准",
       "approvedToast": "已批准，运行继续。",
       "class": {

@@ -430,6 +430,14 @@ export interface CapturePermissionDecision {
   updatedInput?: unknown
   /** Explicit provenance supplied by a responder that knows who decided. */
   attribution?: ApproveToolAttribution
+  /**
+   * An allow on an outbound ask (ADR-0239, `PermissionRequestEvent.outbound`):
+   * the person allowed these recipients for the rest of the request. The
+   * outbound policy turns it into {@link grant}.
+   */
+  forRequest?: boolean
+  /** The grant an allowed outbound ask rests on, set by the outbound policy. */
+  grant?: import("@cognia/agent-config-types/action-review").ActionReviewGrant
 }
 
 async function capturePermissionAttribution(
@@ -1189,11 +1197,10 @@ async function captureAssistantReplyCore(
           // still be draining usage, so check the signal as well as settlement.
           if (settled || abortRequested || signal?.aborted) return
           try {
-            const attribution = await capturePermissionAttribution(
-              sessionId,
-              req.requestId,
-              outcome
-            )
+            const resolved = await capturePermissionAttribution(sessionId, req.requestId, outcome)
+            // The outbound grant rides on whoever the answer is attributed to.
+            const attribution =
+              resolved && outcome.grant ? { ...resolved, grant: outcome.grant } : resolved
             if (settled || abortRequested || signal?.aborted) return
             await approveTool(
               sessionId,

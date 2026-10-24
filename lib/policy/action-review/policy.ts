@@ -202,18 +202,29 @@ export function planActionReview(
 }
 
 /**
+ * Whether a person may allow these recipients for the rest of the request:
+ * only when there is at least one and every one is named. A public link or a
+ * recipient that could not be named is only ever allowed per call. A card
+ * offers "allow for this request" exactly when this holds.
+ */
+export function outboundGrantableForRequest(
+  review: Pick<PendingOutboundReview, "targets"> | undefined
+): boolean {
+  return (
+    review !== undefined &&
+    review.targets.length > 0 &&
+    review.targets.every((target) => target.kind !== "public" && target.kind !== "unknown")
+  )
+}
+
+/**
  * The grant a person's allow on an outbound card rests on: `instruction` when
  * they allowed it for the rest of the request and every recipient can be
- * granted that long (a public link or an unnamed recipient cannot), else this
- * one call.
+ * granted that long ({@link outboundGrantableForRequest}), else this one call.
  */
 export function humanOutboundGrant(
   forRequest: boolean | undefined,
   review?: Pick<PendingOutboundReview, "targets">
 ): ActionReviewGrant {
-  const grantable =
-    review !== undefined &&
-    review.targets.length > 0 &&
-    review.targets.every((target) => target.kind !== "public" && target.kind !== "unknown")
-  return { scope: forRequest && grantable ? "instruction" : "once" }
+  return { scope: forRequest && outboundGrantableForRequest(review) ? "instruction" : "once" }
 }

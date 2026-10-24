@@ -20,13 +20,16 @@
  *     (`callerDeviceId`), never one the payload names.
  */
 
-import type { PermissionClass } from "@cognia/agent-config-types"
+import type { PendingOutboundTarget, PermissionClass } from "@cognia/agent-config-types"
 import { getExecutionRun } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
 import { localConsoleOperatorIds } from "@/lib/execution/local-operator"
 import type { Page } from "@/lib/tauri/companion-paging"
 import type { ExecutionRunInterrupt, ExecutionRunKind } from "@/types/execution/run"
 
+import { outboundGrantableForRequest } from "@/lib/policy/action-review/policy"
+
+import { runApprovalOutbound } from "./run-approval-outbound"
 import { executeRunControlCommand, type RunControlResult } from "./run-control"
 import {
   RUN_APPROVAL_TYPES,
@@ -109,6 +112,12 @@ export interface RunApprovalSummary {
   detail?: Record<string, unknown>
   /** The proposal exists but is too large to show inline. */
   detailTruncated?: boolean
+  /**
+   * A parked outbound tool request (ADR-0239): who it delivers to, and
+   * whether the phone may offer "allow for this request" (every recipient is
+   * named). Read from the host's memory (`run-approval-outbound.ts`).
+   */
+  outbound?: { recipients: PendingOutboundTarget[]; allowForRequest: boolean }
   createdAt: number
   expiresAt: number
 }
@@ -152,6 +161,7 @@ function summarise(
 ): RunApprovalSummary {
   const detail = row.approvalDetail
   const detailSize = detail ? JSON.stringify(detail).length : 0
+  const outbound = row.type === "tool_approval" ? runApprovalOutbound(row.id) : undefined
   return {
     interruptId: row.id,
     runId: row.runId,
@@ -165,6 +175,14 @@ function summarise(
     ...(row.approvalRisk ? { risk: row.approvalRisk } : {}),
     ...(detail && detailSize <= RUN_APPROVAL_DETAIL_MAX_CHARS ? { detail } : {}),
     ...(detail && detailSize > RUN_APPROVAL_DETAIL_MAX_CHARS ? { detailTruncated: true } : {}),
+    ...(outbound?.enforced
+      ? {
+          outbound: {
+            recipients: outbound.targets,
+            allowForRequest: outboundGrantableForRequest(outbound),
+          },
+        }
+      : {}),
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
   }
@@ -200,6 +218,10 @@ export async function respondRunApproval(
   if (decision !== "approve" && decision !== "deny") {
     return { ok: false, reason: "invalid-payload", field: "decision" }
   }
+  const forRequest = payload.forRequest
+  if (forRequest !== undefined && typeof forRequest !== "boolean") {
+    return { ok: false, reason: "invalid-payload", field: "forRequest" }
+  }
   const deviceId = readString(payload, "callerDeviceId")
   if (!deviceId) return { ok: false, reason: "invalid-payload", field: "callerDeviceId" }
   const displayName = readString(payload, "deviceName")
@@ -219,6 +241,9 @@ export async function respondRunApproval(
       expectedRevision: run.currentRevision,
       actor: { remoteUserId: deviceId, ...(displayName ? { displayName } : {}) },
       interruptId,
+      // Only an allow can be for the request; the outbound policy grants it
+      // only when every recipient is named (ADR-0239).
+      ...(decision === "approve" && forRequest === true ? { forRequest: true } : {}),
     },
     { operatorIds: [...(deps.operatorIds ?? localConsoleOperatorIds)(), deviceId] }
   )

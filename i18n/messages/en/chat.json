@@ -2817,7 +2817,15 @@
     "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
     "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
     "titleFallback": "Allow {tool}?",
-    "toolLabel": "Tool"
+    "toolLabel": "Tool",
+    "allowForRequest": "Allow for this request",
+    "denyFencesNotice": "Deny also stops it sending to these recipients until you give a new instruction.",
+    "recipientConversation": "Chat {id} via {channel}",
+    "recipientMail": "Email {address}",
+    "recipientPerson": "Person {id} via {channel}",
+    "recipientPublic": "A public link ({tool})",
+    "recipientUnknown": "A recipient it could not name",
+    "recipientsLabel": "Sends to"
   },
   "toolCards": {
     "webSearch": {

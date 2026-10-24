@@ -339,6 +339,29 @@ describe("useRemoteSessionStream", () => {
     expect(result.current.pendingApproval).toBeNull()
   })
 
+  it("keeps a per-call ask per call on the paired card", async () => {
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    act(() => {
+      streamHandler?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        requestId: "req-out",
+        toolUseID: "tu-out",
+        toolName: "mcp__cognia-plugin-tools__im_broadcast",
+        input: {},
+        requiresPerCallApproval: true,
+        defaultToNo: true,
+      } as unknown as ClaudeEvent)
+    })
+    await waitFor(() => expect(result.current.pendingApproval?.requestId).toBe("req-out"))
+    expect(result.current.pendingApproval).toMatchObject({
+      suppressAlwaysAllowRule: true,
+      requiresPerCallApproval: true,
+      defaultToNo: true,
+    })
+  })
+
   it.each(["allow", "allow_always"] as const)(
     "delivers structured %s answers over the payload-capable direct transport",
     async (decision) => {

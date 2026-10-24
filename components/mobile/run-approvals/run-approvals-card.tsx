@@ -20,6 +20,10 @@
  * control gate as this device; it carries no admin lease (a headless host has
  * nobody to approve one).
  *
+ * A parked outbound tool request (ADR-0239) names its recipients, as the
+ * desktop card does, and offers "allow for this request" when every recipient
+ * can be named; a deny fences them for the rest of the request.
+ *
  * Renders nothing while nothing waits, so mounting it on a page costs that
  * page no space.
  */
@@ -29,6 +33,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { BotIcon, CheckIcon, ClockIcon, ShieldAlertIcon, XIcon } from "lucide-react"
 
+import { OutboundRecipients } from "@/components/chat/decisions/outbound-recipients"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -88,12 +93,13 @@ export function RunApprovalsCard({ className }: { className?: string }) {
   }, [reload])
 
   const respond = useCallback(
-    async (interruptId: string, decision: "approve" | "deny") => {
+    async (interruptId: string, decision: "approve" | "deny", forRequest?: boolean) => {
       setBusyId(interruptId)
       try {
         const result = (await transport.call("execution_run_approval_respond", {
           interruptId,
           decision,
+          ...(forRequest ? { forRequest: true } : {}),
         })) as RunApprovalRespondOutcome | null
         if (result?.ok) {
           setApprovals((prev) => prev.filter((a) => a.interruptId !== interruptId))
@@ -166,6 +172,7 @@ export function RunApprovalsCard({ className }: { className?: string }) {
             {a.detailTruncated ? (
               <p className="text-[11px] text-muted-foreground">{t("detailTruncated")}</p>
             ) : null}
+            {a.outbound ? <OutboundRecipients targets={a.outbound.recipients} fenceNotice /> : null}
             <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
               <ClockIcon className="size-3" aria-hidden="true" />
               {t("expires", { time: new Date(a.expiresAt) })}
@@ -181,6 +188,18 @@ export function RunApprovalsCard({ className }: { className?: string }) {
                 <CheckIcon className="size-4" aria-hidden="true" />
                 {t("approve")}
               </Button>
+              {a.outbound?.allowForRequest ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1"
+                  disabled={busyId === a.interruptId}
+                  onClick={() => void respond(a.interruptId, "approve", true)}
+                  data-testid={`run-approval-allow-request-${a.interruptId}`}
+                >
+                  {t("allowForRequest")}
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="outline"

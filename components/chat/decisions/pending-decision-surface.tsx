@@ -22,6 +22,12 @@ import { approvalElicitationRequest } from "@/lib/mcp/elicitation"
  *    because refusing is the safe direction and making it harder than allowing
  *    inverts the incentive.
  *
+ * An outbound ask the policy enforces (ADR-0239, `PendingApproval.outbound`)
+ * names its recipients, offers "allow for this request" in place of "allow
+ * always" when every recipient can be named, and says a deny fences them. In
+ * shadow mode it renders exactly as before. An observer sees no recipients:
+ * they come from the arguments it is not shown.
+ *
  * `locked-computer-use` renders like a tool approval with the same actions,
  * because that is what it is — a permission decision the Host raised while the
  * screen was locked. It is **not produced yet**: host computer-use consent runs
@@ -35,7 +41,9 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { outboundGrantableForRequest } from "@/lib/policy/action-review/policy"
 import { cn } from "@/lib/utils"
+import { OutboundRecipients } from "./outbound-recipients"
 import { ToolDecisionContent } from "./tool-decision-content"
 import {
   ElicitationForm,
@@ -178,28 +186,27 @@ function ApprovalDecisionBody({
   confirmAllow?: (run: () => Promise<void>) => Promise<void>
 }) {
   const t = useTranslations("chat.toolApproval")
+  const outbound = mode === "control" && approval.outbound?.enforced ? approval.outbound : undefined
 
   const respond = async (decision: ApprovalDecision, options?: ApprovalResponseOptions) => {
     if (!onRespond) return
+    const answer = () => (options ? onRespond(decision, options) : onRespond(decision))
     // Deny is never wrapped: refusing is the safe direction, and putting a
     // biometric prompt in front of it would make the cautious answer the
     // expensive one.
-    if (decision === "deny") {
-      await (options ? onRespond(decision, options) : onRespond(decision))
-      return
-    }
-    if (!confirmAllow) {
-      await onRespond(decision)
+    if (decision === "deny" || !confirmAllow) {
+      await answer()
       return
     }
     await confirmAllow(async () => {
-      await onRespond(decision)
+      await answer()
     })
   }
 
   return (
     <>
       <ToolDecisionContent approval={approval} mode={mode} />
+      {outbound ? <OutboundRecipients targets={outbound.targets} fenceNotice={actionable} /> : null}
       {onDismiss ? (
         <div className="flex justify-end">
           <Button variant="secondary" size="sm" onClick={onDismiss}>
@@ -213,6 +220,11 @@ function ApprovalDecisionBody({
             responding={responding}
             onAllowOnce={() => void respond("allow")}
             onAllowAlways={() => void respond("allow_always")}
+            onAllowForRequest={
+              outbound && outboundGrantableForRequest(outbound)
+                ? () => void respond("allow", { forRequest: true })
+                : undefined
+            }
             onDeny={() => void respond("deny")}
             onCancelRun={onCancelRun}
           />
@@ -326,7 +338,8 @@ function DenyWithReason({
 }
 
 /**
- * Allow once / Allow always / Deny as one action group.
+ * Allow once / Allow always (or, on an outbound ask, Allow for this request) /
+ * Deny as one action group.
  *
  * These used to be three `ConfirmationAction`s in a single non-wrapping row
  * with three different variants (ghost / secondary / default) and a caller
@@ -348,6 +361,7 @@ function ApprovalActions({
   responding,
   onAllowOnce,
   onAllowAlways,
+  onAllowForRequest,
   onDeny,
   onCancelRun,
 }: {
@@ -355,12 +369,16 @@ function ApprovalActions({
   responding: boolean
   onAllowOnce: () => void
   onAllowAlways: () => void
+  /** Offered on an outbound ask whose recipients can all be named (ADR-0239). */
+  onAllowForRequest?: () => void
   onDeny: () => void
   onCancelRun?: (runId: string) => void
 }) {
   const t = useTranslations("chat.toolApproval")
   // A per-call tool (ADR-0201) or a withheld grant never offers a standing rule.
   const offerAlways = !approval.suppressAlwaysAllowRule && !approval.requiresPerCallApproval
+  // An outbound ask is never always-allowed; its widest grant is the request.
+  const offerRequest = !offerAlways && onAllowForRequest !== undefined
   const cancellableRunId =
     approval.origin === "subagent" && onCancelRun ? approval.subagentRunId : undefined
 
@@ -383,9 +401,20 @@ function ApprovalActions({
         data-testid="decision-secondary-actions"
         className={cn(
           "grid gap-2 sm:flex sm:flex-row-reverse",
-          offerAlways ? "grid-cols-2" : "grid-cols-1"
+          offerAlways || offerRequest ? "grid-cols-2" : "grid-cols-1"
         )}
       >
+        {offerRequest && (
+          <Button
+            variant="outline"
+            disabled={responding}
+            onClick={onAllowForRequest}
+            data-testid="decision-allow-for-request"
+            className="min-w-0 sm:w-auto"
+          >
+            <span className="min-w-0 truncate">{t("allowForRequest")}</span>
+          </Button>
+        )}
         {offerAlways && (
           <Button
             variant="outline"

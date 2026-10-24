@@ -195,9 +195,14 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       }
       const { resolveApproval } = await import("@/lib/connectors/hitl/approval-registry")
       if (
-        !resolveApproval(run.sessionId, interrupt.requestDigest, {
-          decision: command.action === "approve" ? "allow" : "deny",
-        })
+        !resolveApproval(
+          run.sessionId,
+          interrupt.requestDigest,
+          command.action === "approve"
+            ? // The outbound policy validates "for this request" (ADR-0239).
+              { decision: "allow", ...(command.forRequest ? { forRequest: true } : {}) }
+            : { decision: "deny" }
+        )
       ) {
         throw new Error("Agent permission request is no longer active")
       }

@@ -76,6 +76,57 @@ export const GenericJson: Story = {
   },
 }
 
+/**
+ * An outbound call the policy enforces (ADR-0239): the recipients are named,
+ * "allow for this request" replaces "allow always", and deny fences them.
+ */
+export const OutboundAsk: Story = {
+  args: {
+    approval: approval({
+      toolName: "mcp__cognia-plugin-tools__im_broadcast",
+      title: "Send a message to two chats?",
+      input: {
+        conversationKeys: ["lark:bot-a:oc_release", "lark:bot-a:oc_ops"],
+        text: "Release 2.4 is out.",
+      },
+      suppressAlwaysAllowRule: true,
+      requiresPerCallApproval: true,
+      defaultToNo: true,
+      outbound: {
+        enforced: true,
+        targets: [
+          { kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_release" },
+          { kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_ops" },
+        ],
+        unauthorized: [
+          { kind: "conversation", channel: "bot-a", recipient: "conv:lark:bot-a:oc_ops" },
+        ],
+      },
+    }),
+  },
+}
+
+/** A public link can only be allowed per call: no "allow for this request". */
+export const OutboundPublicLink: Story = {
+  args: {
+    approval: approval({
+      toolName: "mcp__cognia-plugin-tools__deploy_site",
+      title: "Publish the site?",
+      input: { directory: "out" },
+      suppressAlwaysAllowRule: true,
+      requiresPerCallApproval: true,
+      defaultToNo: true,
+      outbound: {
+        enforced: true,
+        targets: [{ kind: "public", channel: "tool:deploy_site", recipient: "public:deploy_site" }],
+        unauthorized: [
+          { kind: "public", channel: "tool:deploy_site", recipient: "public:deploy_site" },
+        ],
+      },
+    }),
+  },
+}
+
 /** Null approval → the dialog stays closed. */
 export const Closed: Story = {
   args: { approval: null },

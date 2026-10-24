@@ -3,10 +3,11 @@
  *
  * Every path that answers a `permission_request` asks this module about an
  * outbound tool before it shows a card, consults an allow list or parks the
- * call: the desktop chat listener (`hooks/chat/claude-chat-events.ts`), the
- * unattended responder (`lib/claude/unattended-permission-responder.ts`) and
- * the team room (`lib/chat/room/runner.ts`). Each gets the same answer from
- * {@link outboundToolDecision}:
+ * call: the desktop chat listener (`hooks/chat/claude-chat-events.ts`) and the
+ * team room (`lib/chat/room/runner.ts`) through {@link planOutboundAsk}; the
+ * headless captures (`lib/claude/run-and-capture.ts`), the scheduler's own
+ * loop and the CLI through {@link answerWithOutboundPolicy}. Each gets the
+ * same answer from {@link outboundToolDecision}:
  *
  * - `allow`: answer the call at once, with the authority and grant the plan
  *   names (the origin thread, an instruction grant, a policy list);
@@ -310,12 +311,24 @@ export interface OutboundAwareDecision {
   attribution?: OutboundAttribution & {
     actor?: { kind: "local-user" | "device" | "connector-user"; id?: string; label?: string }
   }
+  /**
+   * From a responder, on an allow: the person allowed these recipients for
+   * the rest of the request, not just this call. Never returned.
+   */
+  forRequest?: boolean
+  /**
+   * Returned on an allowed outbound ask: the grant the person's allow rests
+   * on. The caller adds it to whatever attribution it records the answer
+   * with, which for an IM card it only learns after the responder returns.
+   */
+  grant?: ActionReviewGrant
 }
 
 type PermissionRequestLike = OutboundToolCallRequest & {
   suppressAlwaysAllowRule?: boolean
   requiresPerCallApproval?: boolean
   defaultToNo?: boolean
+  outbound?: PendingOutboundReview
 }
 
 /**
@@ -325,10 +338,13 @@ type PermissionRequestLike = OutboundToolCallRequest & {
  *
  * An enforced plan that allows or denies answers the request itself. One that
  * leaves it to a person hands the responder a request marked approve-per-call,
- * so no standing grant can come of it, and turns a human allow into a `once`
- * grant. A tool that is not outbound, or shadow mode, goes to the responder
- * unchanged. A planning failure in enforce mode never allows: the request goes
- * to the responder as a per-call ask.
+ * so no standing grant can come of it, carrying the recipients
+ * (`PermissionRequestEvent.outbound`) for its card. An allow comes back with
+ * `grant`: `instruction` when the person allowed it for the request
+ * (`forRequest`) and every recipient can be granted, else `once`. A tool that
+ * is not outbound, or shadow mode, goes to the responder unchanged. A planning
+ * failure in enforce mode never allows: the request goes to the responder as a
+ * per-call ask, with no recipients to name.
  */
 export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
   request: R,
@@ -337,9 +353,11 @@ export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
 ): Promise<OutboundAwareDecision> {
   if (!isOutboundToolId(request.toolName)) return respond(request)
   let decision: OutboundToolDecision
+  let review: PendingOutboundReview | undefined
   try {
     const plan = await planOutboundToolCall(request, options)
     decision = plan ? outboundToolDecision(plan, request.toolName) : { kind: "unchanged" }
+    if (plan) review = pendingOutboundReview(plan)
   } catch (error) {
     console.warn("[outbound] planning failed; leaving the call to a person", error)
     const { readOutboundAuthorizationMode } = await import("./policy")
@@ -354,21 +372,18 @@ export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
     case "unchanged":
       return respond(request)
     case "ask": {
-      const answer = await respond({
+      const reply = await respond({
         ...request,
         suppressAlwaysAllowRule: true,
         requiresPerCallApproval: true,
         defaultToNo: true,
+        ...(review ? { outbound: review } : {}),
       })
-      const allowed = answer.decision !== "deny"
-      return {
-        ...answer,
-        // A per-call answer never becomes a standing rule.
-        decision: allowed ? "allow" : "deny",
-        ...(allowed && answer.attribution?.authority === "human" && !answer.attribution.grant
-          ? { attribution: { ...answer.attribution, grant: humanOutboundGrant(false) } }
-          : {}),
-      }
+      // The grant is the policy's to name, never the responder's.
+      const { forRequest, grant: _fromResponder, ...answer } = reply
+      // A per-call answer never becomes a standing rule.
+      if (answer.decision === "deny") return answer
+      return { ...answer, decision: "allow", grant: humanOutboundGrant(forRequest, review) }
     }
   }
 }
