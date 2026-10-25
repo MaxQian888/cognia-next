@@ -102,6 +102,7 @@
     "sidecar/src/context/compaction.ts",
     "sidecar/src/platform/net/egress-guard.ts",
     "sidecar/src/policy/permission/resolver.ts",
+    "sidecar/src/policy/permission/permission-classes.ts",
     "sidecar/src/providers/protocol-adapters/openai-compatible-variant-adapter.ts",
     "sidecar/src/providers/siwc-fetch.ts",
     "sidecar/src/providers/siwc-language-model.ts",

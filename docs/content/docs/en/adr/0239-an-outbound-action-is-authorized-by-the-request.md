@@ -5,7 +5,7 @@ description: "Agents can send to third parties through about ten paths, each wit
 
 # ADR 0239 — An outbound action is authorized by the request, not by the tool
 
-**Status:** Proposed
+**Status:** Accepted (phase 1 implemented; shadow mode by default)
 **Date:** 2026-10-24
 **Related:** [ADR-0070](./0070-risk-ceremony-policy-layer) (risk → ceremony; the origin-thread precedent), [ADR-0169](./0169-one-runtime-one-review-one-control-machine) (one review contract), [ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched) (per-run capability grants), [ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings) (unattended runs on a Host)
 **Corrects:** the Action Review contract header, which cites ADR-0102 (an observability decision) and a policy engine that was never built
@@ -136,6 +136,36 @@ An outbound job records `authorizedBy`: the receipt id, the requester actor and 
 | 1 | The engine; the outbound list and targets; origin, grant and draft/park order; the instruction epoch; the fence with its receipt fields and index; both chokepoints; `authorizedBy`; the digest responder; hiding "always allow" for outbound tools; the doc corrections |
 | 2 | Browser form submission and GitHub create/comment, once a reliable "this click submits" signal exists |
 | 3 | Model narrowing through `recommendation` |
+
+## Implementation (phase 1)
+
+Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-phase-1.md`). The engine runs in **shadow mode** by default: every outbound tool call and connector delivery is planned and the plan recorded on its receipt (`plan.enforced: false`), and no send changes. A person turns on enforcement in Settings → Security (`agentPermissions.outboundAuthorization: "enforce"`), after reviewing what it would change.
+
+### Where it lives
+
+- **Engine**: `lib/policy/action-review/policy.ts` (`planActionReview`, `readOutboundAuthorizationMode`) and `plan-context.ts` (origins for a session, a scheduled task `task:<id>`, a Bot `bot:<id>`, a workflow run; fence and instruction grants from receipt `authKeys`, schema v249).
+- **Targets**: `lib/policy/risk/outbound-tools.ts` (the outbound tool list) and `lib/policy/action-review/outbound-targets.ts` (normalized targets and fingerprints).
+- **Tool chokepoint**: `plan-tool-call.ts`, used by the desktop ask path, `run-and-capture.ts` for every headless capture, the scheduler executor and the CLI tool host. The sidecar always asks for outbound-classed tools.
+- **Delivery chokepoint**: `plan-delivery.ts`, called by `enqueueGoverned` / `enqueueAuthorized` in `lib/connectors/delivery-gateway.ts`. Every job records `authorizedBy`. A tool's delivery is matched to the call through `authorized-tool-calls.ts`, an in-memory record of calls planned and allowed.
+- **Policy grants**: `configured-grants.ts` reads three lists only a person writes: a connector instance's `outboundRecipients` (`adapter:<id>`, every unattended send through that account), a conversation's `proactivePush` opt-in, and a Bot installation's `outboundRecipients` (`bot:<id>`, only that installation's runs). They are edited in the connection settings and the Bot detail, through one editor.
+- **Cards**: the desktop and phone approval cards name each recipient and offer "allow for this request" (the `instruction` scope). "Always allow" is hidden for outbound tools.
+- **Shadow report and switch**: `shadow-report.ts` and `components/settings/security/outbound-authorization-card.tsx`.
+
+### Decisions made while implementing
+
+- **A receipt stores no recipient.** A target is persisted as its channel and fingerprint only (`ActionReviewTarget`), because the receipt table is metadata-only. Recipient names exist only on pending approvals in memory. The shadow report names recipients by matching fingerprints against what the device already holds: connector conversation states, bound sessions and the configured lists. A recipient it cannot match is counted, not named.
+- **Lists store the recipient itself**, in the engine's normalized form, so a person can read back whom they allowed. Fingerprints are computed when planning.
+- **Unattended runs are planned where their permission requests are answered** (`answerWithOutboundPolicy` in `run-and-capture.ts`), not inside each responder. The digest turn's approval parks like a scheduled task's when it fires on a schedule, asks in its conversation when a card click started it, and is refused at once from the external bridge.
+- **Notification targets need no list.** Governed notification pushes write their jobs directly; a target set to proactive consent is already the person's grant (recorded as `policy-rule`), and an origin-reply target only carries approval requests.
+- **`authorizedBy` has no requester yet.** The requester is inferred for the epoch but not stamped on connector jobs.
+
+### Known gaps
+
+- A plugin's deprecated direct `send` / `sendText` does not pass the delivery gateway.
+- An approval made on a paired device or through HostState does not go through the host's `approveTool`, so a tool's delivery after it is planned as unattended. The same holds for the `/lark` slash-command path.
+- Under enforcement, an external-bridge digest that would need approval is drafted.
+- On a shell driving a paired Host, the switch and the report are read-only notices: the setting and the receipts live on the Host, with no remote reader yet.
+- Enforce mode has unit and integration coverage but no run on a real desktop and phone yet (an origin reply, a cross-group send, a parked approval answered on the phone, a Bot's scheduled delivery from draft to approved send).
 
 ## Consequences
 

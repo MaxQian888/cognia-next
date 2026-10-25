@@ -5,7 +5,7 @@ description: "智能体有约十条路径可以向第三方发送内容，每条
 
 # ADR 0239 — 外发动作由请求授权，而不是由工具授权
 
-**状态：** 提议中
+**状态：** 已接受（第一期已实现，默认影子模式）
 **日期：** 2026-10-24
 **相关：** [ADR-0070](./0070-risk-ceremony-policy-layer)（风险 → 仪式；“回复到发起线程”的先例）、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)（统一审核契约）、[ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched)（按次运行的能力授予）、[ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings)（在 Host 上的无人值守运行）
 **更正：** Action Review 契约文件头引用了 ADR-0102（一份可观测性决策）和一个从未实现的策略引擎
@@ -136,6 +136,36 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 | 1 | 引擎；外发列表与目标；发起线程、授予、草稿/停泊的判定顺序；指令纪元；屏障及其 receipt 字段与索引；两个咽喉点；`authorizedBy`；digest 响应器；对外发工具隐藏“始终允许”；文档更正 |
 | 2 | 浏览器表单提交、GitHub 创建与评论，前提是有可靠的“这次点击会提交”信号 |
 | 3 | 经由 `recommendation` 的模型收紧 |
+
+## 实现（第一期）
+
+第一期分十二个工作包落地（计划：`docs/plans/2026-10-24-adr-0239-phase-1.md`）。引擎默认运行在**影子模式**：每次外发工具调用和 connector 投递都会规划，计划记在 receipt 上（`plan.enforced: false`），但不改变任何发送。用户在“设置 → 安全”中查看执行后会改变什么，再开启执行（`agentPermissions.outboundAuthorization: "enforce"`）。
+
+### 代码位置
+
+- **引擎**：`lib/policy/action-review/policy.ts`（`planActionReview`、`readOutboundAuthorizationMode`）与 `plan-context.ts`（会话、定时任务 `task:<id>`、Bot `bot:<id>`、workflow 运行的 origin；屏障与本次请求授予取自 receipt 的 `authKeys`，schema v249）。
+- **目标**：`lib/policy/risk/outbound-tools.ts`（外发工具名单）与 `lib/policy/action-review/outbound-targets.ts`（规范化目标与指纹）。
+- **工具咽喉点**：`plan-tool-call.ts`，由桌面询问路径、所有 headless 捕获的 `run-and-capture.ts`、定时任务执行器和 CLI 工具宿主调用。sidecar 对外发类工具总是询问。
+- **投递咽喉点**：`plan-delivery.ts`，由 `lib/connectors/delivery-gateway.ts` 的 `enqueueGoverned` / `enqueueAuthorized` 调用，每个 job 记录 `authorizedBy`。工具发起的投递经 `authorized-tool-calls.ts`（内存中记录已规划、已放行的调用）对应到该次调用。
+- **策略授予**：`configured-grants.ts` 读取三份只能由人写的名单：connector 实例的 `outboundRecipients`（`adapter:<id>`，经该账号的所有无人值守发送）、会话的 `proactivePush` 开关、Bot 安装的 `outboundRecipients`（`bot:<id>`，只覆盖该安装的运行）。在连接设置和 Bot 详情中用同一个编辑器编辑。
+- **卡片**：桌面与手机的审批卡片显示每个收件人，并提供“本次请求允许”（`instruction` 范围）。外发工具不再显示“始终允许”。
+- **影子报告与开关**：`shadow-report.ts` 与 `components/settings/security/outbound-authorization-card.tsx`。
+
+### 实施中的决定
+
+- **receipt 不存收件人。** 目标只以频道和指纹持久化（`ActionReviewTarget`），因为 receipt 表只存元数据。收件人名称只存在于内存中的待审批项上。影子报告用本机已有的数据反查指纹：connector 会话状态、绑定的会话和已配置的名单；查不到的只计数，不显示名称。
+- **名单存收件人原文**（引擎的规范化形式），方便人看清自己允许了谁；指纹在规划时计算。
+- **无人值守运行在应答权限请求的地方规划**（`run-and-capture.ts` 的 `answerWithOutboundPolicy`），而不是在每个 responder 里。digest turn 的审批：定时触发时像定时任务一样停泊；由卡片点击触发时在该会话里询问；来自外部桥接时当场拒绝。
+- **通知目标不需要名单。** 受治理的通知推送直接写 job；设为主动推送的目标本身就是人的授予（记为 `policy-rule`），仅回复发起方的目标只发审批请求。
+- **`authorizedBy` 尚未包含请求人。** 请求人已用于纪元推断，但还没写到 connector job 上。
+
+### 已知缺口
+
+- 插件已弃用的直接 `send` / `sendText` 不经过投递网关。
+- 在配对设备或经 HostState 做出的批准不经过宿主的 `approveTool`，其后的工具投递按无人值守判定；`/lark` 斜杠命令路径同样如此。
+- 执行模式下，外部桥接需要审批的 digest 会转为草稿。
+- 本机驱动配对 Host 时，开关和报告只显示说明：设置和 receipt 都在 Host 上，尚无远程读取。
+- 执行模式已有单元与集成测试，但还没有在真实桌面和手机上跑过（一次发起线程回复、一次跨群发送、一次在手机上批准的停泊审批、一次 Bot 定时投递从草稿到批准发送）。
 
 ## 影响
 
