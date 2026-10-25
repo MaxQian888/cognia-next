@@ -31,6 +31,32 @@ describe("remote transcript source", () => {
     expect(listener).toHaveBeenCalledWith(4)
   })
 
+  it("p6e passes on only well-formed live reply frames of the observed session", () => {
+    let handler: ((event: unknown) => void) | undefined
+    const subscribe = jest.fn((_event: string, next: (event: unknown) => void) => {
+      handler = next
+      return jest.fn()
+    })
+    const listener = jest.fn()
+    const source = createRemoteTranscriptSource({ call: jest.fn(), subscribe } as never)
+    source.subscribeLive?.("s1", listener)
+    expect(subscribe).toHaveBeenCalledWith("transcript://live", expect.any(Function))
+    const frame = {
+      sessionId: "s1",
+      messageId: "assistant-a1",
+      replyTo: "u1",
+      seq: 1,
+      base: 0,
+      keyframe: true,
+      state: "streaming",
+      parts: [{ type: "text", text: "hi" }],
+    }
+    handler?.({ ...frame, sessionId: "s2" })
+    handler?.({ ...frame, seq: 0 })
+    handler?.(frame)
+    expect(listener.mock.calls).toEqual([[frame]])
+  })
+
   // The defect: the callers built their source at module load and captured the
   // transport of that moment. A browser that paired afterwards still read the
   // web stub, so the timeline failed (`no_host_transport`) and a reply kept on

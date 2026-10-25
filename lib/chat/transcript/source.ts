@@ -17,6 +17,11 @@ import {
 } from "@cognia/agent-config-types"
 import type { Transport } from "@/lib/tauri/transport-types"
 
+import {
+  isTranscriptLiveFrame,
+  TRANSCRIPT_LIVE_TOPIC,
+  type TranscriptLiveFrame,
+} from "./live-frames"
 import { projectTranscriptTimeline } from "./projection"
 
 export interface TranscriptSource {
@@ -24,6 +29,8 @@ export interface TranscriptSource {
   timeline(request: SessionTimelineRequest): Promise<SessionTimelinePage>
   turnMessages(request: SessionTurnMessagesRequest): Promise<SessionTurnMessagesPage>
   subscribeRevision?(sessionId: string, listener: (revision: number) => void): () => void
+  /** A member agent's in-flight reply, as the Host relays it (`live-frames.ts`). */
+  subscribeLive?(sessionId: string, listener: (frame: TranscriptLiveFrame) => void): () => void
 }
 
 interface LegacyMessagePage {
@@ -131,6 +138,24 @@ export function createRemoteTranscriptSource(
             listener(event.revision)
           }
         )
+      let unsubscribe = listen()
+      const stopFollowing = options.onTransportChange?.(() => {
+        unsubscribe()
+        unsubscribe = listen()
+      })
+      return () => {
+        stopFollowing?.()
+        unsubscribe()
+      }
+    },
+    subscribeLive(sessionId, listener) {
+      // Opt-in by name (the Host's catalog has it off by default); a Host
+      // without the channel refuses the name and simply never sends one.
+      const listen = () =>
+        current().subscribe<unknown>(TRANSCRIPT_LIVE_TOPIC, (frame) => {
+          if (!isTranscriptLiveFrame(frame) || frame.sessionId !== sessionId) return
+          listener(frame)
+        })
       let unsubscribe = listen()
       const stopFollowing = options.onTransportChange?.(() => {
         unsubscribe()

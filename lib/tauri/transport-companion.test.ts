@@ -1494,6 +1494,32 @@ describe("call() — 4xx errors", () => {
     expect(fetchSpy.mock.calls.length).toBe(1)
   })
 
+  it("p6e keeps the plane up when the Host refuses one command for good", async () => {
+    // A multi-tenant Host answers an isolated execution command this way on
+    // every call; it is an answer, not an outage.
+    fetchSpy.mockResolvedValue(
+      mockResponse(
+        {
+          type: "https://cognia.dev/problems/execution_isolation_unavailable",
+          title: "Service Unavailable",
+          status: 503,
+          detail: "execution_isolation_unavailable",
+          code: "execution_isolation_unavailable",
+          requestId: "req-3",
+          retryable: false,
+        },
+        503
+      )
+    )
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_session_control", {})).rejects.toMatchObject({
+      code: "execution_isolation_unavailable",
+      retryable: false,
+    })
+    expect(fetchSpy.mock.calls.length).toBe(1)
+    expect(transport.getPlaneHealth().rpc).toBe("ready")
+  })
+
   it.each([
     [401, "unauthenticated", "device unauthenticated"],
     [418, "http_418", "HTTP 418"],

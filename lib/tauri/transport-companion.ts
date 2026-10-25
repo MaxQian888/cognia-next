@@ -2111,8 +2111,16 @@ export class CompanionTransport implements Transport {
         retryable: hostSaysRetryable ?? true,
         ...(hostRetryAfterMs === null ? {} : { retryAfterMs: hostRetryAfterMs }),
       })
+      // A 503 the Host itself declares unretryable is its answer about this
+      // one command (`execution_isolation_unavailable` on a multi-tenant
+      // Host), from a plane that is up. Reading it as an outage sent the boot
+      // provider into recover → resync → refused again, with the whole client
+      // pinned on "Reconnecting".
       this.setPlaneHealth({
-        rpc: response.status === 503 || response.status === 504 ? "unavailable" : "ready",
+        rpc:
+          (response.status === 503 || response.status === 504) && hostSaysRetryable !== false
+            ? "unavailable"
+            : "ready",
       })
       if (hostSaysRetryable === false) throw lastError
       if (canRetryRequest && attempt + 1 < HTTP_MAX_ATTEMPTS) {

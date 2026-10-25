@@ -1,4 +1,5 @@
 import type { ExternalAgentEvent } from "@/types/agent/external-agent"
+import type { TranscriptLiveFrame } from "@/lib/chat/transcript/live-frames"
 import { createPersonProcessPlane, type PersonPlaneTransport } from "./process-plane"
 import {
   createPersonAgentRunner,
@@ -65,6 +66,9 @@ function harness(options: { holdLast?: boolean } = {}) {
   const settled: Array<{ actionId: string; outcome: string; errorCode?: string }> = []
   const writes: Array<{ sessionId: string; id: string; parts: unknown[] }> = []
   const envelopes: Array<{ eventId: string; event: Record<string, unknown> }> = []
+  const liveFrames: TranscriptLiveFrame[] = []
+  /** What reached the member and the store, in order. */
+  const order: string[] = []
   const deps: PersonAgentRunnerDeps = {
     plane,
     manager,
@@ -86,6 +90,7 @@ function harness(options: { holdLast?: boolean } = {}) {
     history: jest.fn(async () => "User: earlier\n\nAssistant: reply"),
     writeMessage: jest.fn(async (sessionId, message) => {
       writes.push({ sessionId, id: message.id, parts: message.parts })
+      order.push(`write:${message.parts.length}`)
     }),
     settle: jest.fn(async (actionId, input) => {
       settled.push({ actionId, outcome: input.outcome, errorCode: input.errorCode })
@@ -97,6 +102,11 @@ function harness(options: { holdLast?: boolean } = {}) {
         event: envelope.event as unknown as Record<string, unknown>,
       })
     }),
+    publishLive: jest.fn(async (frame) => {
+      liveFrames.push(frame)
+      order.push(`live:${frame.state}`)
+    }),
+    transcriptRevision: jest.fn(async () => 7),
     applyEvent: (parts, value) =>
       value.type === "message_delta"
         ? [...parts, { type: "text", text: value.delta.text } as never]
@@ -123,7 +133,20 @@ function harness(options: { holdLast?: boolean } = {}) {
   const emit = (name: string, payload: unknown) => {
     for (const handler of transportHandlers.get(name) ?? []) handler(payload)
   }
-  return { runner, deps, manager, turns, timers, settled, writes, envelopes, plane, emit }
+  return {
+    runner,
+    deps,
+    manager,
+    turns,
+    timers,
+    settled,
+    writes,
+    envelopes,
+    liveFrames,
+    order,
+    plane,
+    emit,
+  }
 }
 
 const request = (overrides: Record<string, unknown> = {}) => ({
@@ -138,6 +161,10 @@ const request = (overrides: Record<string, unknown> = {}) => ({
 })
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
+/** Settling reads the revision and sends the final live frame first. */
+const drain = async () => {
+  for (let round = 0; round < 4; round += 1) await flush()
+}
 
 const replyTurn = (text = "hi") =>
   scripted([
@@ -196,13 +223,82 @@ describe("person agent runner", () => {
     expect(new Set(h.envelopes.map((entry) => entry.eventId)).size).toBe(4)
   })
 
+  it("p6e streams the reply live to the member's devices, the final frame before the write", async () => {
+    const h = harness({ holdLast: true })
+    const turn = scripted([
+      event({ type: "session_start", sessionId: "native-1" }),
+      event({ type: "message_delta", sessionId: "native-1", delta: { type: "text", text: "hel" } }),
+      event({ type: "message_delta", sessionId: "native-1", delta: { type: "text", text: "lo" } }),
+      event({ type: "done", sessionId: "native-1", success: true, stopReason: "end_turn" }),
+    ])
+    h.turns.push(turn)
+    await h.runner.startTurn(request())
+    await flush()
+    // The first change goes out at once, whole; the next waits for its slot.
+    expect(h.liveFrames).toEqual([
+      expect.objectContaining({
+        sessionId: "s1",
+        messageId: "assistant-a1",
+        replyTo: "m1",
+        seq: 1,
+        keyframe: true,
+        state: "streaming",
+        parts: [{ type: "text", text: "hel" }],
+      }),
+    ])
+    const slot = h.timers.find((timer) => timer.ms === 100 && !timer.cleared)
+    expect(slot).toBeDefined()
+    slot!.callback()
+    await flush()
+    expect(h.liveFrames[1]).toEqual(
+      expect.objectContaining({
+        seq: 2,
+        base: 1,
+        keyframe: false,
+        parts: [{ type: "text", text: "lo" }],
+      })
+    )
+    turn.release()
+    await flush()
+    await flush()
+    expect(h.liveFrames[2]).toEqual(
+      expect.objectContaining({
+        seq: 3,
+        base: 0,
+        keyframe: true,
+        state: "settled",
+        parts: [
+          { type: "text", text: "hel" },
+          { type: "text", text: "lo" },
+        ],
+        // What was persisted before it: the device waits for a newer timeline.
+        afterRevision: 7,
+      })
+    )
+    expect(h.order.indexOf("live:settled")).toBeLessThan(h.order.lastIndexOf("write:2"))
+  })
+
+  it("p6e sends no live frame for a turn that never produced a part", async () => {
+    const h = harness()
+    h.turns.push(
+      scripted([
+        event({ type: "session_start", sessionId: "native-1" }),
+        event({ type: "done", sessionId: "native-1", success: true, stopReason: "end_turn" }),
+      ])
+    )
+    await h.runner.startTurn(request())
+    await flush()
+    expect(h.settled).toEqual([{ actionId: "a1", outcome: "no_response", errorCode: undefined }])
+    expect(h.liveFrames).toEqual([])
+  })
+
   it("p6e keeps the process between turns and reaps it when idle", async () => {
     const h = harness()
     h.turns.push(replyTurn(), replyTurn("again"))
     await h.runner.startTurn(request())
-    await flush()
+    await drain()
     await h.runner.startTurn(request({ actionId: "a2", messageId: "m2" }))
-    await flush()
+    await drain()
     expect(h.manager.addAgent).toHaveBeenCalledTimes(1)
     expect(h.deps.history).toHaveBeenCalledTimes(1)
     expect(h.manager.executeStreaming).toHaveBeenLastCalledWith("person-agent-id1", "hello", {
@@ -359,12 +455,10 @@ describe("person agent runner", () => {
       },
     ])
     first.release()
-    await flush()
-    await flush()
+    await drain()
     expect(h.manager.executeStreaming).toHaveBeenCalledTimes(2)
     second.release()
-    await flush()
-    await flush()
+    await drain()
     expect(h.settled.map((entry) => [entry.actionId, entry.outcome])).toEqual([
       ["a1", "completed"],
       ["a2", "completed"],

@@ -13,7 +13,9 @@
  *    member's personal workspace at `/workspace`, and writes the broker config.
  * 3. **Stream.** Events become the assistant message's parts with the same
  *    projector the desktop uses, persisted at most once a second and once more
- *    when the turn settles.
+ *    when the turn settles. The same parts reach the member's devices live as
+ *    `transcript://live` frames, at most every 100 ms
+ *    (`lib/chat/transcript/live-frames.ts`).
  * 4. **Decide.** Tool permissions are granted: the sandbox is the boundary
  *    (no egress, only the personal workspace, only the gateway reachable).
  *    Elicitations and interactive questions are declined; a member device
@@ -35,6 +37,11 @@ import type { UIMessage } from "ai"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import type { PersonProcessPlane } from "./process-plane"
+import {
+  createTranscriptLiveEncoder,
+  TRANSCRIPT_LIVE_INTERVAL_MS,
+  type TranscriptLiveFrame,
+} from "@/lib/chat/transcript/live-frames"
 
 /** How long a member's agent process may sit idle before it is stopped. */
 export const PERSON_AGENT_IDLE_MS = 15 * 60_000
@@ -116,6 +123,10 @@ export interface PersonAgentRunnerDeps {
   ): Promise<void>
   /** Feed a runtime observation into HostState. */
   project(envelope: AgentEventEnvelope): Promise<void>
+  /** Send a live reply frame to the member's devices; best effort. */
+  publishLive(frame: TranscriptLiveFrame): Promise<void>
+  /** The conversation's persisted transcript revision, when known. */
+  transcriptRevision(sessionId: string): Promise<number | undefined>
   applyEvent(parts: readonly Part[], event: ExternalAgentEvent): Part[]
   pickAllowOption(options: unknown): string | undefined
   newId(): string
@@ -374,6 +385,33 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
         )
       return writing
     }
+    const liveReply = createTranscriptLiveEncoder({
+      sessionId,
+      messageId: message().id,
+      replyTo: request.messageId,
+      now: deps.now,
+    })
+    let lastLive = Number.NEGATIVE_INFINITY
+    let liveTimer: unknown
+    let liveSending: Promise<void> = Promise.resolve()
+    const sendLive = (frame: TranscriptLiveFrame | null) => {
+      if (!frame) return liveSending
+      liveSending = liveSending
+        .then(() => deps.publishLive(frame))
+        .catch((error) => deps.log("warn", `person agent live frame failed: ${String(error)}`))
+      return liveSending
+    }
+    const emitLive = () => {
+      liveTimer = undefined
+      lastLive = deps.now()
+      void sendLive(liveReply.next(parts))
+    }
+    const scheduleLive = () => {
+      if (liveTimer !== undefined) return
+      const wait = TRANSCRIPT_LIVE_INTERVAL_MS - (deps.now() - lastLive)
+      if (wait <= 0) emitLive()
+      else liveTimer = deps.setTimer(emitLive, wait)
+    }
     let outcome: PersonAgentSettleOutcome = "failed"
     let errorCode: string | undefined
     try {
@@ -415,6 +453,7 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
           parts = next
           dirty = true
           if (deps.now() - lastWrite >= PERSIST_INTERVAL_MS) void flush()
+          scheduleLive()
         }
         result = await stream.next()
       }
@@ -434,7 +473,18 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
       errorCode = "person_agent_exited"
     }
     agent.turn = undefined
+    if (liveTimer !== undefined) deps.clearTimer(liveTimer)
+    liveTimer = undefined
     await writing
+    // The final frame goes before the final transcript write and names the
+    // revision persisted so far: a device keeps drawing the finished reply
+    // until its timeline reads past it, i.e. has the final write.
+    if (parts.length > 0) {
+      const persisted = await deps.transcriptRevision(sessionId).catch(() => undefined)
+      await sendLive(liveReply.next(parts, "settled", persisted))
+    } else {
+      await sendLive(liveReply.reset())
+    }
     const final = message()
     await deps.settle(request.actionId, {
       outcome,

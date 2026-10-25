@@ -1791,7 +1791,70 @@ async function personsChat(person, owner) {
  * in the member's personal workspace, and its model calls go through the org
  * key to the fixture (or the real org model). An agent the org does not allow never runs.
  */
-async function personsAgent(person, owner) {
+/**
+ * Watch one person's `/ws/events` for `transcript://live`, which a client
+ * must ask for by name, and keep every frame until `stop()`.
+ */
+async function personsLiveWatch(person) {
+  const base = person.auth.baseUrl ?? PERSONS_SERVER_URL
+  const ticketPath = "/api/auth/socket-ticket"
+  const response = await fetch(`${base}${ticketPath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${person.auth.accessToken}`,
+      DPoP: await deviceProof(person.auth.privateKey, person.auth.accessJti, "POST", ticketPath),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ channel: "events" }),
+  })
+  const answer = await response.json().catch(() => ({}))
+  const ticket = answer?.ticket
+  check(
+    response.ok && typeof ticket === "string",
+    `${person.subject}: event socket ticket issued (got ${response.status} ${response.ok ? "" : JSON.stringify(answer)})`
+  )
+  const frames = []
+  const ws = new WebSocket(
+    `${base.replace(/^http/, "ws")}/ws/events?ticket=${encodeURIComponent(ticket ?? "")}`
+  )
+  const subscribed = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 10_000)
+    ws.addEventListener("open", () =>
+      ws.send(JSON.stringify({ type: "subscribe", mode: "add", channels: ["transcript://live"] }))
+    )
+    ws.addEventListener("message", (event) => {
+      let frame
+      try {
+        frame = JSON.parse(String(event.data))
+      } catch {
+        return
+      }
+      if (frame.type === "subscribed") {
+        clearTimeout(timer)
+        resolve(frame)
+      } else if (frame.type === "transcript://live") frames.push(frame.payload)
+    })
+    ws.addEventListener("error", () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+  })
+  check(
+    subscribed?.channels?.includes("transcript://live"),
+    `${person.subject} subscribes to transcript://live by name (got ${JSON.stringify(subscribed)})`
+  )
+  return { frames, stop: () => ws.close() }
+}
+
+/** The text of a reply's parts, as a reader sees it. */
+function partsText(parts) {
+  return (parts ?? [])
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+}
+
+async function personsAgent(person, owner, other) {
   const stored = await rpc(
     "org_model_credential_set",
     { provider: PERSONS_MODEL.provider, apiKey: personsOrgKey() },
@@ -1809,6 +1872,10 @@ async function personsAgent(person, owner) {
   check(allowOnly.status === 200, `the owner allows claude-agent-acp (got ${allowOnly.status})`)
   const seed = { provider: PERSONS_MODEL.provider, model: PERSONS_MODEL.model }
   const before = await rpc("org_member_usage_get", {}, owner.auth)
+  // The reply reaches the member's devices live while it is written, and
+  // nobody else's (`transcript://live`).
+  const live = await personsLiveWatch(person)
+  const witness = other ? await personsLiveWatch(other) : null
   const named = await personsTurn(
     person,
     { ...seed, agentRuntimeId: "claude-agent-acp" },
@@ -1819,6 +1886,36 @@ async function personsAgent(person, owner) {
     personsReplied(named) && named.turn === "completed",
     `${person.subject}'s claude-agent-acp turn replies through the org key (turn ${named.turn}, op ${JSON.stringify(named.operation)})`
   )
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  live.stop()
+  witness?.stop()
+  const frames = live.frames.filter((frame) => frame.sessionId === named.sessionId)
+  const settled = frames.find((frame) => frame.state === "settled")
+  const kept = (Array.isArray(named.messages) ? named.messages : []).find(
+    (message) => message?.id === settled?.messageId
+  )
+  check(
+    frames.length >= 2 &&
+      frames[0].keyframe === true &&
+      frames[0].state === "streaming" &&
+      frames.every((frame, index) => index === 0 || frame.seq > frames[index - 1].seq) &&
+      settled?.keyframe === true,
+    `${person.subject}'s agent reply streams to their device as live frames (got ${frames
+      .map((frame) => `${frame.seq}:${frame.state}${frame.keyframe ? "*" : ""}`)
+      .join(" ")})`
+  )
+  check(
+    Boolean(settled) &&
+      partsText(settled.parts).length > 0 &&
+      partsText(settled.parts) === partsText(kept?.parts),
+    `${person.subject}'s final live frame is the reply the Host kept`
+  )
+  if (witness) {
+    check(
+      witness.frames.every((frame) => !String(frame.sessionId).includes(person.subject)),
+      `${other.subject} receives none of ${person.subject}'s live frames (got ${witness.frames.length})`
+    )
+  }
   const after = await rpc("org_member_usage_get", {}, owner.auth)
   const spent = (body) =>
     (body?.members ?? []).find((member) => member.userId === person.userId)?.spentTokens ?? 0
@@ -2123,7 +2220,7 @@ async function tierPersons() {
   else skip("the Host does not advertise tool-less member chat (pre-P6c)")
 
   // 4c. Sandboxed member agents (P6e): needs gVisor and a conforming pool.
-  if (PERSONS_SANDBOX) await personsAgent(ada, owner)
+  if (PERSONS_SANDBOX) await personsAgent(ada, owner, bob)
   else skip("COGNIA_SMOKE_PERSONS_SANDBOX unset: sandboxed member agent turn not exercised")
 
   // 5. The operator sees one partition per person, then purges bob (AC27):

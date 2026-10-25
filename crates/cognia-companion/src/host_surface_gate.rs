@@ -24,6 +24,18 @@ pub struct Refusal { pub status: StatusCode, pub code: &'static str }
 fn forbidden(code: &'static str) -> Refusal { Refusal { status: StatusCode::FORBIDDEN, code } }
 fn unavailable(code: &'static str) -> Refusal { Refusal { status: StatusCode::SERVICE_UNAVAILABLE, code } }
 
+/// Refusals that describe how this Host is deployed, not a passing outage: no
+/// client retry can change them, and a paired client that read them as "the
+/// Host is down" marked its RPC plane unavailable and resynced in a loop.
+const PERMANENT_UNAVAILABLE: [&str; 2] = ["execution_isolation_unavailable", "model_access_unavailable"];
+
+impl From<Refusal> for Problem {
+    fn from(refusal: Refusal) -> Self {
+        let problem = Problem::with_status(refusal.status, refusal.code, refusal.code);
+        if PERMANENT_UNAVAILABLE.contains(&refusal.code) { problem.retryable(false) } else { problem }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait StandingProvider: Send + Sync {
     fn person(&self, principal: &DeviceContext) -> Result<Person, Refusal>;
@@ -160,7 +172,7 @@ pub async fn person_execution_standing(person: &crate::person_partition::PersonP
     #[cfg(any(test, feature = "test-support"))]
     if let Some(result) = person_standing_test_support::get(&person.org_id) { return result; }
     LIVE.person_execution_actions(&Person { org: person.org_id.clone(), user: person.user_id.clone() }).await
-        .map(|_| ()).map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+        .map(|_| ()).map_err(Problem::from)
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -263,7 +275,7 @@ async fn authorize_entry(capability: &str, arm: Option<&str>, execution_channel:
         crate::audit::record_async("host_surface_authorize", &principal.device_id, &principal.scope, "deny",
             json!({ "capability": capability, "arm": arm, "code": refusal.code })).await;
     }
-    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+    result.map_err(Problem::from)
 }
 
 fn channel_execution_refused(mode: DeploymentMode, enabled: bool, execution: bool) -> bool {
@@ -293,7 +305,7 @@ async fn org_policy_standing(mode: DeploymentMode, provider: &dyn StandingProvid
 pub async fn org_policy_person(principal: &DeviceContext) -> Result<Person, Problem> {
     org_policy_standing(deployment_mode(), LIVE.as_ref(), principal).await
         .and_then(|person| person.ok_or_else(|| forbidden("host_principal_unbound")))
-        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+        .map_err(Problem::from)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -363,8 +375,64 @@ async fn person_data_standing(provider: &dyn StandingProvider, principal: &Devic
 pub(crate) async fn operation_person(principal: &DeviceContext) -> Result<Option<crate::person_partition::PersonPartition>, Problem> {
     if deployment_mode() == DeploymentMode::SingleUser || crate::jwt::is_service_scope(Some(principal.scope.as_ref())) { return Ok(None); }
     let person = person_data_standing(LIVE.as_ref(), principal).await
-        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))?;
+        .map_err(Problem::from)?;
     Ok(Some(crate::person_partition::PersonPartition::new(person.org, person.user)))
+}
+
+/// What one device's event stream may carry (P6e live replies).
+///
+/// `/ws/events` and the relay data channel deliver the Host's frames. A frame
+/// with no partition stamp is Host-wide (git status, fleet, connectors, the
+/// operator's own sessions) and needs `host.observe`, which an org member
+/// holds only through `host.global-surfaces`. Without a stream at all a member
+/// never saw their own transcript move, their chat stream or their agent's
+/// live reply: all partition-stamped. So on a Host with person partitions a
+/// member with data standing gets exactly the frames of their partition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EventsAudience {
+    /// Every frame the connection's other visibility rules allow.
+    Host,
+    /// Only frames stamped with this person partition account.
+    Partition(String),
+}
+
+impl EventsAudience {
+    /// Whether this audience may receive `frame`.
+    pub fn allows(&self, frame: &crate::event_bus::EventFrame) -> bool {
+        match self {
+            Self::Host => true,
+            Self::Partition(account) => frame.partition_account_id.as_deref() == Some(account.as_str()),
+        }
+    }
+}
+
+/// Decide a device's event audience now. Called when its socket ticket is
+/// issued and again while the stream lives, so a demotion or departure takes
+/// effect without a reconnect.
+pub async fn events_audience(principal: &DeviceContext) -> Result<EventsAudience, Problem> {
+    let result = events_audience_with(deployment_mode(), execution_enabled(),
+        crate::environment_pool::installed().is_some(), LIVE.as_ref(), principal,
+        crate::person_partition::fleet().is_some()).await;
+    if let Err(refusal) = &result {
+        crate::audit::record_async("host_surface_authorize", &principal.device_id, &principal.scope, "deny",
+            json!({ "capability": "host.observe", "arm": "events", "code": refusal.code })).await;
+    }
+    result.map_err(Problem::from)
+}
+
+async fn events_audience_with(mode: DeploymentMode, execution: bool, sandboxes: bool, provider: &dyn StandingProvider,
+    principal: &DeviceContext, person_fleet: bool) -> Result<EventsAudience, Refusal> {
+    let whole = decide_with_person_fleet(mode, execution, sandboxes, provider, "host.observe", None, principal,
+        None, person_fleet).await;
+    match whole {
+        Ok(()) => Ok(EventsAudience::Host),
+        Err(refusal) if refusal.code == "host_surface_forbidden" && mode == DeploymentMode::MultiTenant
+            && person_fleet && !crate::jwt::is_service_scope(Some(principal.scope.as_ref())) => {
+            let person = person_data_standing(provider, principal).await?;
+            Ok(EventsAudience::Partition(crate::person_partition::PersonPartition::new(person.org, person.user).account_id))
+        }
+        Err(refusal) => Err(refusal),
+    }
 }
 
 pub async fn person_partition(capability: &str, command: &str, principal: &DeviceContext)
@@ -381,7 +449,7 @@ pub async fn person_partition(capability: &str, command: &str, principal: &Devic
     // The normal gate already checked standing. Reuse its bounded cache and
     // derive authority only from the verified binding, never from args.
     let person = person_data_standing(LIVE.as_ref(), principal).await
-        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))?;
+        .map_err(Problem::from)?;
     Ok(Some(crate::person_partition::PersonPartition::new(person.org, person.user)))
 }
 
@@ -610,7 +678,7 @@ pub async fn authorize_execution_mount(state: &crate::SharedState, cwd: &str) ->
             // Concurrent org creations cannot both run before one loses CAS.
             .and_then(|root| WorkspaceMounts::new(root.join("companion/workspace-mounts.json"), base).persist(&decision, &cwd))
     }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")));
-    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+    result.map_err(Problem::from)
 }
 
 async fn resolve_execution_admission(provider: &dyn StandingProvider, lookup: &dyn ExecutionBindingLookup,
@@ -678,7 +746,7 @@ pub async fn persist_execution_binding(state: &crate::SharedState, command: &str
         ExecutionBindings(directory.join("companion/execution-bindings.json"))
             .insert(&key, &decision.binding)
     }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")));
-    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+    result.map_err(Problem::from)
 }
 
 /// Host lifecycle cleanup uses the exact generation captured at spawn. This
@@ -688,7 +756,7 @@ pub fn forget_execution_record(directory: &std::path::Path, command: &str, id: &
     // the exact run's ticket even if persistence cleanup subsequently fails.
     person_execution_lease_revoke(id, expected);
     ExecutionBindings(directory.join("companion/execution-bindings.json")).remove(&record_key(command, id), expected)
-        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+        .map_err(Problem::from)
 }
 
 pub async fn forget_execution_binding(state: &crate::SharedState, command: &str, id: &str) -> Result<(), Problem> {
@@ -708,7 +776,7 @@ pub async fn prune_execution_records(directory: std::path::PathBuf, backend: Arc
     let root = directory.clone();
     let records = tokio::task::spawn_blocking(move || ExecutionBindings(root.join("companion/execution-bindings.json")).read())
         .await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")))
-        .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))?;
+        .map_err(Problem::from)?;
     let mut retired = Vec::new();
     for (key, binding) in records {
         if let Some(id) = key.strip_prefix("external-agent:") {
@@ -724,7 +792,7 @@ pub async fn prune_execution_records(directory: std::path::PathBuf, backend: Arc
         }
         Ok(())
     }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")))
-        .map_err(|refusal: Refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+        .map_err(Problem::from)
 }
 
 /// P6d purge holds person_execution_lock. Kill through the same backend and
@@ -800,7 +868,7 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
             return Err(Problem::with_status(StatusCode::FORBIDDEN, "placement_client_supplied", "placement_client_supplied"));
         }
         if command == "spawn_external_agent" && !person_execution_available().await {
-            return Err(Problem::with_status(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable", "execution_isolation_unavailable"));
+            return Err(unavailable("execution_isolation_unavailable").into());
         }
         let result = async {
             let directory = state.runtime.execution_binding_root(state).ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
@@ -809,7 +877,7 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
             if command == "spawn_external_agent" && store.len() >= EXECUTION_BINDING_LIMIT { return Err(unavailable("execution_binding_store_full")); }
             resolve_execution_admission(LIVE.as_ref(), &store, command, args, principal).await.map(Some)
         }.await;
-        return result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code));
+        return result.map_err(Problem::from);
     }
     if deployment_mode() == DeploymentMode::SingleUser {
         authorize(capability, Some(command), principal, command_workspace(command, args)).await?;
@@ -853,7 +921,7 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
         crate::audit::record_async("host_surface_authorize", &principal.device_id, &principal.scope, "deny",
             json!({ "capability": capability, "arm": command, "code": refusal.code })).await;
     }
-    result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+    result.map_err(Problem::from)
 }
 
 #[cfg(test)]
@@ -1283,6 +1351,49 @@ mod tests {
         }
     }
     fn device(scope: &str) -> DeviceContext { DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: scope.into(), granted_scopes: vec![], authorization_capabilities: None } }
+
+    /// P6e — an org member's event stream carries only their own partition;
+    /// an owner keeps the whole Host's; nobody else gets a stream.
+    #[tokio::test]
+    async fn p6e_member_event_streams_narrow_to_their_partition() {
+        let audience = |result: u8, mode: DeploymentMode, fleet: bool, scope: &'static str| async move {
+            let provider = Fake { result, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            events_audience_with(mode, false, false, &provider, &device(scope), fleet).await
+        };
+        let member = crate::person_partition::PersonPartition::new("org_a".into(), "usr_a".into());
+        assert_eq!(audience(0, DeploymentMode::MultiTenant, true, "device").await.unwrap(), EventsAudience::Host);
+        assert_eq!(audience(1, DeploymentMode::MultiTenant, true, "device").await.unwrap(),
+            EventsAudience::Partition(member.account_id.clone()));
+        // Without partitions there is nothing of a member's own to send.
+        assert_eq!(audience(1, DeploymentMode::MultiTenant, false, "device").await.unwrap_err().code, "host_surface_forbidden");
+        // A person no longer bound, or no longer in the org, gets no stream.
+        assert_eq!(audience(3, DeploymentMode::MultiTenant, true, "device").await.unwrap_err().code, "host_principal_unbound");
+        assert_eq!(audience(4, DeploymentMode::MultiTenant, true, "device").await.unwrap_err().code, "host_surface_forbidden");
+        // A single-user Host is unchanged.
+        assert_eq!(audience(1, DeploymentMode::SingleUser, false, "device").await.unwrap(), EventsAudience::Host);
+
+        let frame = |account: Option<&str>| crate::event_bus::EventFrame { event_type: "transcript://live".into(), seq: 1,
+            payload: json!({}), ts_ms: 0, target_device_id: None, partition_account_id: account.map(str::to_string) };
+        let narrowed = EventsAudience::Partition(member.account_id.clone());
+        assert!(narrowed.allows(&frame(Some(&member.account_id))));
+        assert!(!narrowed.allows(&frame(Some("pb_someone_else"))));
+        assert!(!narrowed.allows(&frame(None)), "a Host-wide frame never reaches a member");
+        assert!(EventsAudience::Host.allows(&frame(None)));
+    }
+
+    /// P6e — a refusal that only a different deployment could lift tells a
+    /// paired client not to retry, so it does not read the Host as down.
+    #[test]
+    fn p6e_deployment_refusals_are_not_retryable_and_outages_are() {
+        for code in PERMANENT_UNAVAILABLE {
+            let problem = Problem::from(unavailable(code));
+            assert_eq!((problem.status, problem.retryable), (503, false), "{code}");
+        }
+        for code in ["execution_binding_store_unavailable", "execution_binding_store_full", "host_authority_unavailable"] {
+            assert!(Problem::from(unavailable(code)).retryable, "{code}");
+        }
+        assert!(!Problem::from(forbidden("host_surface_forbidden")).retryable);
+    }
 
     #[tokio::test]
     async fn host_data_all_manifest_data_arms_refuse_tenants_until_p5() {

@@ -279,6 +279,28 @@ async fn handle_socket(
     let person_live = || person_generation.as_ref().is_none_or(|(account, generation)|
         crate::person_partition::fleet().is_some_and(|fleet| fleet.accepts_bridge(account, generation)));
     if !person_live() { return; }
+    // P6e: what this device may hear. An org member holding only standing in
+    // their own partition hears only that partition's frames. Decided as the
+    // ticket was, and again on every heartbeat (`events_audience`). A person
+    // brain's own stream (`person_generation`) is not a device: its frames are
+    // already its partition's (`person_connection_visible`).
+    let audience_principal = match (scope, tenant_id.as_ref(), person_generation.as_ref()) {
+        (ConnectionScope::Device, Some(tenant), None) => Some(super::middleware::DeviceContext {
+            device_id: device_id.clone(),
+            tenant_id: tenant.clone(),
+            scope: "device".into(),
+            granted_scopes: vec![],
+            authorization_capabilities: None,
+        }),
+        _ => None,
+    };
+    let mut audience = match &audience_principal {
+        Some(principal) => match super::host_surface_gate::events_audience(principal).await {
+            Ok(audience) => audience,
+            Err(_) => return,
+        },
+        None => super::host_surface_gate::EventsAudience::Host,
+    };
     // Channels this connection receives. Starts at the catalog's `default_on`
     // set — i.e. exactly what reached clients before subscriptions existed, so
     // a client that never sends a `subscribe` frame sees no change — and is
@@ -317,6 +339,7 @@ async fn handle_socket(
         .into_iter()
         .filter(|frame| {
             person_frame_visible(frame, tenant_id.as_deref(), &device_id, scope)
+                && audience.allows(frame)
                 && subscription.allows(&frame.event_type)
         })
         .collect();
@@ -402,8 +425,10 @@ async fn handle_socket(
                         // Deliberately after the revocation branch: that channel
                         // is not in the catalog because it is never *delivered*
                         // — it closes the socket. Filtering first would drop the
-                        // frame before it could do its job.
-                        if !subscription.allows(&frame.event_type) {
+                        // frame before it could do its job. The same goes for a
+                        // member's partition audience: a revocation is never
+                        // partition-stamped.
+                        if !audience.allows(&frame) || !subscription.allows(&frame.event_type) {
                             continue;
                         }
                         for batch in batcher.push(frame, Instant::now()) {
@@ -481,6 +506,24 @@ async fn handle_socket(
                 if last_client_activity.elapsed() > idle_timeout {
                     log::debug!("companion-api ws: idle timeout, closing connection");
                     return;
+                }
+                // Standing moves: a promotion widens the stream, a demotion
+                // narrows it, a departure ends it. While the authority cannot
+                // say (a 5xx), the stream keeps the audience it had.
+                if let Some(principal) = &audience_principal {
+                    match super::host_surface_gate::events_audience(principal).await {
+                        Ok(next) => audience = next,
+                        Err(problem) if problem.status < 500 => {
+                            let _ = socket
+                                .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                                    code: 1008,
+                                    reason: "standing changed".into(),
+                                })))
+                                .await;
+                            return;
+                        }
+                        Err(_) => {}
+                    }
                 }
 
                 if let Some(batch) = batcher.drain() {

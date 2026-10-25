@@ -7,6 +7,8 @@ import type { Character } from "@cognia/agent-config-types"
 
 import { SessionMediaProvider } from "@/hooks/chat/session-media-provider"
 import { useTranscriptController } from "@/hooks/chat/use-transcript-controller"
+import { useTranscriptLiveTurn } from "@/hooks/chat/use-transcript-live-turn"
+import { withLiveTurn } from "@/lib/chat/transcript/live-turn-view"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { useCharacters } from "@/lib/data-hooks/context"
@@ -72,7 +74,28 @@ export function CompanionTranscriptMessages({
   const transcript = useTranscriptController(sessionId, companionTranscriptSource)
   const characterById = useStableCharacterById(useCharacters())
   const messageDisplay = useMessageDisplay(messageDisplayOverride)
-  const liveMessages = useMemo(() => selectActiveTurnMessages(messages, status), [messages, status])
+  // A member agent's reply arrives live from the person brain (P6e), never
+  // through this store: draw it in place of the timeline's older copy.
+  const liveReply = useTranscriptLiveTurn(
+    sessionId,
+    companionTranscriptSource,
+    transcript.snapshot.revision
+  )
+  const drawnReply =
+    liveReply &&
+    (liveReply.state === "settled" || status === "streaming" || status === "awaiting_approval")
+      ? liveReply
+      : null
+  const view = useMemo(
+    () =>
+      withLiveTurn({
+        items: transcript.snapshot.items,
+        tail: selectActiveTurnMessages(messages, drawnReply ? "streaming" : status),
+        live: drawnReply,
+      }),
+    [transcript.snapshot.items, messages, status, drawnReply]
+  )
+  const liveMessages = view.liveMessages
   const mutableMessageIds = useMemo(
     () => new Set(messages.map((message) => message.id)),
     [messages]
@@ -82,7 +105,7 @@ export function CompanionTranscriptMessages({
     <SessionMediaProvider sessionId={sessionId} transport={transport}>
       <TranscriptTimelineSurface
         sessionId={sessionId}
-        items={transcript.snapshot.items}
+        items={view.items}
         expandedTurnKeys={transcript.snapshot.expandedTurnKeys}
         getDetail={transcript.getDetail}
         onPageTurn={(turnKey, direction) => void transcript.pageTurn(turnKey, direction)}

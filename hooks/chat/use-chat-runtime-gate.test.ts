@@ -103,6 +103,25 @@ describe("useChatRuntimeGate", () => {
     })
   })
 
+  it("p6e opens it on a member's person partition, which sends through agent_send", () => {
+    // The Host reports `claude_send` unhealthy on a person partition; the
+    // member's brain declares `agent_send` instead.
+    const member = (operations: string[]) =>
+      snapshot({
+        target: companion,
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: { compatible: true, operations, grants: ["agent.run"], personPartition: true },
+      })
+    act(() => setRuntimeSnapshot(member(["agent_send"])))
+    const { result } = renderHook(() => useChatRuntimeGate())
+    expect(result.current.availability.state).toBe("available")
+    expect(result.current.composerDisabled).toBe(false)
+    act(() => setRuntimeSnapshot(member(["claude_send"])))
+    expect(result.current.availability.state).toBe("read-only")
+    expect(result.current.composerDisabled).toBe(true)
+  })
+
   it("routes desktop recovery to local connection settings", () => {
     platformRef.current = "tauri"
     act(() => setRuntimeSnapshot(snapshot({ target: companion, vaultState: "unavailable" })))

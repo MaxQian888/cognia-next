@@ -2378,13 +2378,20 @@ async fn socket_ticket_handler(
     let security = store()?;
     consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     let required_capability = request.channel.capability();
-    super::host_surface_gate::authorize_channel(required_capability, request.channel.execution(), &DeviceContext {
+    let principal = DeviceContext {
         device_id: access.sub.clone(),
         tenant_id: access.tenant_id.clone(),
         scope: "device".into(),
         granted_scopes: vec![],
         authorization_capabilities: Some(snapshot.capabilities.clone()),
-    }).await?;
+    };
+    if matches!(request.channel, SocketChannel::Events) {
+        // An org member with standing in their partition gets a stream of
+        // their own frames; `ws.rs` holds the connection to that audience.
+        super::host_surface_gate::events_audience(&principal).await?;
+    } else {
+        super::host_surface_gate::authorize_channel(required_capability, request.channel.execution(), &principal).await?;
+    }
     if !snapshot
         .capabilities
         .iter()

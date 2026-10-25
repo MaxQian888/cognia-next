@@ -108,6 +108,14 @@ pub fn person_publish_to(bus: &crate::event_bus::EventBus, channel: &str, payloa
         .and_then(|store| store.person_devices(&person.org_id, &person.user_id).ok()).unwrap_or_default();
     person_publish_audience(bus, channel, payload, person, devices);
 }
+/// A member brain's live in-flight reply (`transcript://live`): one frame for
+/// the person's partition, never replayed. Delivery resolves the audience to
+/// the devices bound to the person at that moment (`person_partition::
+/// event_visible`); the person's own brain may see it too, and never
+/// subscribes to it.
+pub fn person_publish_live(bus: &crate::event_bus::EventBus, channel: &str, payload: &Value, person: &PersonPartition) {
+    bus.publish_person_ephemeral(channel.into(), payload.clone(), person.account_id.clone());
+}
 fn person_publish_audience(bus: &crate::event_bus::EventBus, channel: &str, payload: &Value,
     person: &PersonPartition, devices: Vec<String>) {
     bus.publish_person_to(channel.into(), payload.clone(), format!("brain-{}", person.account_id), person.account_id.clone());
@@ -192,6 +200,48 @@ mod tests {
         let legacy = bus.publish("claude://message".into(), serde_json::json!({"sessionId":"p6c-operator-event"}));
         assert!(person_connection_visible(&legacy, "__service__", Some("operator")));
         assert!(!person_connection_visible(&legacy, &brain, Some(&person.account_id)));
+    }
+
+    #[tokio::test]
+    async fn p6e_live_reply_frames_reach_only_the_owners_devices_and_never_replay() {
+        use crate::security_store::{SecurityStore, VerifiedDevicePerson};
+        use cognia_tenant_auth::{OrgId, UserId};
+        let _guard = crate::security_store::test_guard();
+        let previous = crate::security_store::security_store();
+        struct Restore(Option<std::sync::Arc<SecurityStore>>);
+        impl Drop for Restore { fn drop(&mut self) { crate::security_store::install_security_store(self.0.take()); } }
+        let _restore = Restore(previous);
+        let store = SecurityStore::in_memory().unwrap();
+        let owner = VerifiedDevicePerson { org_id:OrgId::parse("org_p6e_live").unwrap(), user_id:UserId::parse("usr_p6e_owner").unwrap() };
+        let other = VerifiedDevicePerson { org_id:owner.org_id.clone(), user_id:UserId::parse("usr_p6e_other").unwrap() };
+        for (device, person) in [("p6e-owner-phone", &owner), ("p6e-owner-web", &owner), ("p6e-other-phone", &other)] {
+            let challenge = store.issue_challenge("p6e-tenant", 100, 60).unwrap();
+            store.register_oidc_device("p6e-tenant", device, person, &challenge.id, &challenge.nonce,
+                device, "Web", "pem", device, "member", 101).unwrap();
+        }
+        crate::security_store::install_security_store(Some(store.clone()));
+        let person = PersonPartition::new(owner.org_id.to_string(), owner.user_id.to_string());
+        let bus = crate::event_bus::EventBus::new();
+        let crate::event_bus::SubscribeResult::Ok { mut receiver, .. } = bus.subscribe(None, 0) else { panic!("live"); };
+        person_publish_live(&bus, "transcript://live", &serde_json::json!({"sessionId":"p6e-live","parts":[]}), &person);
+        let frame = receiver.try_recv().expect("one frame");
+        assert!(receiver.try_recv().is_err(), "one frame for the person, not one per device");
+        let brain = format!("brain-{}", person.account_id);
+        let audience = |frame: &crate::event_bus::EventFrame| -> Vec<String> {
+            [(brain.clone(), Some(person.account_id.clone())),
+                ("p6e-owner-phone".to_string(), Some("p6e-tenant".to_string())), ("p6e-owner-web".to_string(), None),
+                ("p6e-other-phone".to_string(), Some("p6e-tenant".to_string())), ("__service__".to_string(), Some("operator".to_string())),
+                ("brain-other".to_string(), Some("other".to_string()))]
+                .into_iter().filter(|(device, tenant)| person_connection_visible(frame, device, tenant.as_deref())
+                    && crate::person_partition::event_visible(frame, device, tenant.as_deref()))
+                .map(|(device, _)| device).collect()
+        };
+        assert_eq!(audience(&frame), vec![brain.clone(), "p6e-owner-phone".to_string(), "p6e-owner-web".to_string()]);
+        // Delivery re-reads standing: a device moved to someone else stops receiving.
+        store.assign_device_user("p6e-tenant", "p6e-owner-web", Some(other.user_id.as_str()), 102).unwrap();
+        assert_eq!(audience(&frame), vec![brain, "p6e-owner-phone".to_string()]);
+        let crate::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
+        assert!(replay.is_empty());
     }
 
     #[test]

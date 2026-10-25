@@ -414,7 +414,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
        - a mid-conversation `role: "system"` message now joins the IR system prompt, recorded as a merged loss;
        - `thinking: {"type":"adaptive"}` crosses as the reasoning effort alone, recorded as an approximated loss. Budgets stay refused.
    - **Known gaps:**
-     - Agent output reaches devices only as persisted message writes, throttled to 1 s and written at settle; there is no token-level streaming yet.
+     - Agent output reached devices only as persisted message writes, throttled to 1 s and written at settle. Live replies landed later (item 8).
      - Members could not pick the agent from a device before P6g (now done, see item 6).
      - The manifest's `claude.tool-less-chat` health is unchanged.
      - The local rig bundle is the p6d image with a rebuilt `cognia-sandboxd` layered on top, not a full bundle build.
@@ -431,11 +431,15 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
      - Client: the runtime snapshot carries `host.personAgents`. `hooks/chat/use-person-agents.ts` re-reads it on demand. `components/chat/composer/person-agent-chip.tsx` replaces the runtime selector on a member partition: it names the conversation's agent (locked), warns about an agent the org no longer allows, a Host without member execution, a missing org key, a model the org does not serve, or a used-up month, and starts a new conversation with an allowed agent seeded with an org-served provider and model (`lib/chat/person-agent-choice.ts`, `startNewSession` → `hostSessionSeed`).
      - Admin: `components/devices/org-models/org-usage-panel.tsx` in the org models section shows each member's month against their cap and edits the default cap and per-member caps (limit, unlimited, back to the default) through `org_member_usage_get`, `org_usage_cap_set` and `org_member_usage_cap_set`.
    - **Verified (2026-10-25, P6f rig, real `ark-deepseek-v4.1-flash`):** the persons tier is green, including a new check that member ada's own manifest lists `claude-agent-acp`, the served `deepseek` model and a month that covers her charged turns, and names no other person or provider outside the allowlist. Jest covers the manifest round trip and refusals, the snapshot patch, the seed, the chip's labels and the usage panel's edits.
-   - **Not verified:** no browser check. Both surfaces need a client paired to the multi-tenant Host (a member session for the chip, an owner's managed Host for the panel), and the rig has no browser pairing path yet.
+   - **Verified in a browser (2026-10-25, P6f rig, with item 8):** a dev browser paired to the rig Host as ada over OIDC (`cognia-server pair --tenant-id … --advertise-url http://127.0.0.1:27891 --direct` with `COGNIA_DEPLOYMENT_MODE=multi-tenant`; the Host runs `--browser-listener-port 27891` with `COGNIA_ALLOWED_WEB_ORIGINS`).
+     - The chip names a conversation's agent (locked), shows the month ("No monthly limit · 279K tokens used"), starts a new conversation with `claude-agent-acp`, and warns on a conversation whose model the org stopped serving.
+     - The usage panel lists both members against the default cap, and removing the Anthropic key through the org models section seeds the next new conversation with the only served model, `ark-deepseek-v4.1-flash`.
+     - The check found the member composer had never worked; item 8 fixes it.
    - **Known gaps:**
      - Members are listed by organization user id; the Host has no display names to give.
      - A Host older than P6g sends no `models`, so the picker labels every agent "no model" and cannot seed one.
      - A default new conversation is not corrected to an org-served provider and model; the chip warns and offers a new conversation with a served one instead.
+     - The composer's model picker lists the browser's own providers, not the models the org serves, so a member picks an org model only through the chip's seed.
 7. **E2E lane (P6f).**
    - **Compose:** fix `cognia-server-cloud` in `docker-compose.web-headless-e2e.yml`: master key, collab service credential, `COGNIA_EXECUTION=disabled`, and the brain fleet.
    - **Smoke tier:** a `persons` tier in `scripts/smoke/compose-smoke.mjs`. Two OIDC persons of one org pair into one Host, using the fixture's `/e2e/token`, device registration and signed RPC. It checks:
@@ -445,6 +449,23 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
      - purge;
      - once P6c lands, a member's tool-less chat reply through an org credential pointed at `anthropic-fixture`, charged to that member's usage.
    - **CI:** wired into `compose-e2e.yml` tier 2. Sandboxed turns need gVisor, so the sandbox half runs only where `runsc` is available and is otherwise reported as skipped.
+
+8. **Live member replies and member event streams (P6e follow-up, 2026-10-25).**
+   - **Decisions:** the person brain sends part snapshots of the reply in flight on a person-only topic; the client draws them as the live tail and hides the timeline's copy of that turn. A member device gets an event stream of its own partition only.
+   - **Surface:**
+     - Brain: `lib/headless/person-agent/runner.ts` encodes the reply with `lib/chat/transcript/live-frames.ts` (changed parts every 100 ms, a keyframe every 2 s, `settled` with the transcript revision it lands at, `reset` when a frame passes 200 KiB or the turn ends without parts) and publishes `transcript://live`.
+     - Host: `ws_bridge.rs` accepts the topic from a person brain only, rebuilds the frame from its known keys (256 KiB cap), paces streaming frames to 50 ms per member session, and publishes one partition-stamped, never-replayed frame (`EventBus::publish_person_ephemeral`), so it reaches exactly that member's bound devices. The catalog entry is off by default.
+     - Member event streams: `host_surface_gate::events_audience` admits a member with data standing in their partition to `/ws/events` (owners and admins keep the Host-wide stream); `ws.rs` re-checks it on every heartbeat and closes the socket when standing ends; the relay data channel (`signaling/dispatch.rs`) applies the same audience, which also closes a pre-existing leak of Host-wide frames to members over the relay.
+     - Client: `TranscriptSource.subscribeLive`, `hooks/chat/use-transcript-live-turn.ts` and `lib/chat/transcript/live-turn-view.ts` draw the live reply in `CompanionTranscriptMessages` and let go of it once the timeline reads past its revision (10 s at most).
+     - Member composer: on a person partition the send gate reads `agent_send` (the brain declares it healthy exactly when it runs partition chat), and a member's turn goes in as HostState `message.enqueue` (`hostStateSendEligible` gains `personPartition`). Before this the gate read `claude_send`, which is always isolated there, and a direct `agent_send` from a member device is refused.
+     - Retry: gate refusals that describe the deployment (`execution_isolation_unavailable`, `model_access_unavailable`) are sent `retryable: false`, and the transport keeps its RPC plane ready on a 503 the Host marks non-retryable. Before, an open conversation's context-usage probe on a multi-tenant Host marked the plane down, and the boot provider's recover → resync loop drained the read quota and pinned the browser on "Reconnecting".
+   - **Verified (2026-10-25, P6f rig, `ark-deepseek-v4.1-flash`):**
+     - The persons tier is green with new checks: ada's device receives at least two live frames for her agent turn, the first a streaming keyframe, sequence numbers rising, and a settled keyframe whose text equals the kept message; member bob's device is issued an events ticket and receives none of ada's frames.
+     - In the browser (item 6), three member turns streamed: 52–54 frames each, median gap 101 ms, a keyframe every 20 frames, and one settled keyframe; the screen drew the reply as it grew and each reply appears once after settle.
+   - **Known gaps:**
+     - A reply whose frame passes 200 KiB stops live delivery for that turn; the timeline catches it up at settle.
+     - Agent stdout reaches the brain over the Host's event bus, which closes a lagging subscriber; a burst that lags the brain's socket can corrupt a turn. Per-device fan-out of purge invalidations (`publish_person_to`) is one such burst.
+     - The Host's title replaces the browser's optimistic title after the first turn, which briefly re-mounts the transcript.
 
 **Intentional dormancy (Rule 7).**
 

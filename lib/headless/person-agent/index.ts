@@ -13,6 +13,8 @@ import { findRuntimeById } from "@/lib/ai/agent/external/config/install-catalog"
 import { cogniaGatewayRuntime } from "@/lib/ai/agent/external/config/gateway-task"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 import { applyExternalAgentEventToParts } from "@/lib/ai/agent/external/session/event-to-parts"
+import { publishHostEvent } from "@/lib/companion/host-event-publisher"
+import { TRANSCRIPT_LIVE_TOPIC } from "@/lib/chat/transcript/live-frames"
 import { pickPermissionOptionId } from "@/lib/ai/agent/external/session/chat-decision-bridge"
 import type { AcpPermissionOption } from "@/types/agent/external-agent"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
@@ -71,11 +73,13 @@ export async function installPersonAgents(
   }
   const [
     { listMessages, commitMessageDelta },
+    { getSession },
     { settleChatTurn },
     { hostStateRunId },
     writeSource,
   ] = await Promise.all([
     import("@/lib/db/messages"),
+    import("@/lib/db/sessions"),
     import("@/lib/work-submission/chat-adapter"),
     import("@/lib/work-submission/host-adapter"),
     import("@/lib/companion/desktop-write-source"),
@@ -97,6 +101,14 @@ export async function installPersonAgents(
       await settleChatTurn({ runId: hostStateRunId(actionId), ...input })
     },
     project: (envelope) => writeSource.projectBrainRuntimeEnvelope(envelope),
+    // The brain's registered publisher pipes it over the bridge; the Host
+    // delivers it only to this person's devices.
+    publishLive: (frame) => publishHostEvent(TRANSCRIPT_LIVE_TOPIC, frame),
+    // Read the way `session_timeline` reports it, so the device compares like with like.
+    transcriptRevision: async (sessionId) => {
+      const session = await getSession(sessionId)
+      return session ? (session.transcriptRevision ?? 0) : undefined
+    },
     applyEvent: (parts, event) => applyExternalAgentEventToParts(parts, event),
     pickAllowOption: (options) =>
       pickPermissionOptionId(

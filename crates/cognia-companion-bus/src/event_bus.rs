@@ -247,6 +247,35 @@ impl EventBus {
         frame
     }
 
+    /// One frame for a whole person partition, never added to replay.
+    ///
+    /// Untargeted but stamped with the partition: every transport delivers a
+    /// stamped frame only to connections whose device is bound to that person
+    /// right now (`person_partition::event_visible`), so it reaches exactly the
+    /// person's devices without one frame per device. Live in-flight replies
+    /// (`transcript://live`) use it. They arrive ten times a second; a frame
+    /// per device would multiply that by every device the person ever
+    /// registered and push slower subscribers off the shared channel. They are
+    /// superseded within a tenth of a second, and a reconnect reads the
+    /// persisted transcript, so replay would only hold stale copies.
+    pub fn publish_person_ephemeral(
+        &self,
+        event_type: String,
+        payload: Value,
+        account_id: String,
+    ) -> EventFrame {
+        let frame = EventFrame {
+            event_type,
+            seq: self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1,
+            payload,
+            ts_ms: now_ms(),
+            target_device_id: None,
+            partition_account_id: Some(account_id),
+        };
+        let _ = self.tx.send(frame.clone());
+        frame
+    }
+
     /// Subscribe to the bus.
     ///
     /// - `since`: the last sequence number the client has seen.  Pass `None`
@@ -405,6 +434,22 @@ mod tests {
     use serde_json::json;
 
     // ── publish increments seq, buffers frame, broadcasts ────────────────────
+
+    #[test]
+    fn p6e_person_ephemeral_frames_are_one_stamped_frame_never_replayed() {
+        let bus = EventBus::new();
+        let crate::event_bus::SubscribeResult::Ok { mut receiver, .. } = bus.subscribe(None, 0) else { panic!("live"); };
+        let before = bus.buffer_len();
+        let frame = bus.publish_person_ephemeral("transcript://live".into(), json!({"sessionId":"a"}),
+            "pb_person_a".into());
+        // Partition visibility, not a device target, decides who receives it.
+        assert_eq!(frame.partition_account_id.as_deref(), Some("pb_person_a"));
+        assert_eq!(frame.target_device_id, None);
+        assert_eq!(receiver.try_recv().unwrap().seq, frame.seq);
+        assert_eq!(bus.buffer_len(), before);
+        let SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
+        assert!(replay.iter().all(|retained| retained.event_type != "transcript://live"));
+    }
 
     #[test]
     fn p5_targeted_person_events_preserve_legacy_payload_and_replay_visibility() {

@@ -2,6 +2,7 @@ import { hostStateSendEligible, type HostStateSendFacts } from "./host-state-sen
 
 const plain: HostStateSendFacts = {
   pairedHost: false,
+  personPartition: false,
   fusionRun: false,
   routerFusionStamped: false,
   skipAppend: false,
@@ -38,5 +39,13 @@ describe("hostStateSendEligible", () => {
     ["the standalone engine", { standalone: true }],
   ])("keeps %s on the direct path", (_label, change) => {
     expect(hostStateSendEligible({ ...plain, ...change })).toBe(false)
+  })
+
+  it("p6e hands a member's turn to their person partition, which takes only the intent", () => {
+    const member = { ...plain, pairedHost: true, personPartition: true }
+    expect(hostStateSendEligible(member)).toBe(true)
+    // Everything else that keeps a turn on the direct path still does.
+    expect(hostStateSendEligible({ ...member, attachmentCount: 1 })).toBe(false)
+    expect(hostStateSendEligible({ ...member, routerFusionStamped: true })).toBe(false)
   })
 })

@@ -363,10 +363,25 @@ async fn run(
     // ADR-0127 §2: per-subscriber batching lives here, in the send loop.
     let mut batcher = EventBatcher::new();
     let mut rpc_work = RpcWorkQueue::default();
+    // P6e: what this device may hear, as `/ws/events` decides it. `None`
+    // forwards no event frames; inbound RPCs are still answered.
+    let mut audience = rtc_events_audience(&device_id).await.ok();
+    let mut audience_ticker = tokio::time::interval(std::time::Duration::from_secs(25));
+    audience_ticker.tick().await;
 
     loop {
         tokio::select! {
             biased;
+
+            _ = audience_ticker.tick() => {
+                // A promotion widens the stream, a demotion narrows it, a
+                // departure ends it; while the authority cannot say, keep it.
+                match rtc_events_audience(&device_id).await {
+                    Ok(next) => audience = Some(next),
+                    Err(status) if status < 500 => audience = None,
+                    Err(_) => {}
+                }
+            }
 
             completed = rpc_work.complete_next(), if !rpc_work.running.is_empty() => {
                 if let Some(Err(error)) = completed {
@@ -425,6 +440,7 @@ async fn run(
                                                     frame.visible_to(&device_id)
                                                         && crate::person_chat::person_connection_visible(frame, &device_id, None)
                                                         && crate::person_partition::event_visible(frame, &device_id, None)
+                                                        && audience.as_ref().is_some_and(|audience| audience.allows(frame))
                                                         && subscription.allows(&frame.event_type)
                                                 })
                                                 .collect();
@@ -529,6 +545,7 @@ async fn run(
                         if !frame.visible_to(&device_id)
                             || !crate::person_chat::person_connection_visible(&frame, &device_id, None)
                             || !crate::person_partition::event_visible(&frame, &device_id, None)
+                            || !audience.as_ref().is_some_and(|audience| audience.allows(&frame))
                             || !subscription.allows(&frame.event_type)
                         {
                             continue;
@@ -867,6 +884,31 @@ pub(super) fn empty_rpc_for_test(id: &str, method: &str) -> Vec<u8> {
         "params": {},
     }))
     .expect("serialize")
+}
+
+/// The event audience of a paired device on a data channel (P6e): the same
+/// decision `/ws/events` makes (`host_surface_gate::events_audience`), with the
+/// device's tenant resolved the way inbound RPCs resolve it. `Err` carries the
+/// refusal's HTTP status.
+async fn rtc_events_audience(device_id: &str) -> Result<crate::host_surface_gate::EventsAudience, u16> {
+    let multi_tenant = crate::deployment::deployment_mode() == crate::deployment::DeploymentMode::MultiTenant;
+    let tenant = security_store().and_then(|security| if multi_tenant {
+        security.unambiguous_device_tenant(device_id)
+    } else {
+        security.active_device_tenant(device_id)
+    }.ok().flatten());
+    let Some(tenant_id) = tenant else {
+        // A single-user Host's device stream is as it always was.
+        return if multi_tenant { Err(403) } else { Ok(crate::host_surface_gate::EventsAudience::Host) };
+    };
+    let principal = DeviceContext {
+        device_id: device_id.to_string(),
+        tenant_id,
+        scope: "device".to_string(),
+        granted_scopes: Vec::new(),
+        authorization_capabilities: None,
+    };
+    crate::host_surface_gate::events_audience(&principal).await.map_err(|problem| problem.status)
 }
 
 #[cfg(test)]

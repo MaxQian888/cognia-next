@@ -212,6 +212,17 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "session identity plus a monotonic revision; carries no content",
     },
     EventChannelSpec {
+        pattern: "transcript://live",
+        audience: ChannelAudience::Any,
+        // Opt-in by name: only a client rendering a member's live reply asks
+        // for it. Published by direct person-targeted, replay-free frames from
+        // a person brain (`ws_bridge.rs`), never through a Tauri listener.
+        default_on: false,
+        tauri_forwarded: false,
+        note: "the in-flight reply of a member agent turn, as the parts its brain will persist; \
+               the owner's devices only, never replayed",
+    },
+    EventChannelSpec {
         pattern: "goal://status",
         audience: ChannelAudience::Any,
         default_on: true,

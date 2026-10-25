@@ -1343,11 +1343,22 @@ fn route_person_respond(state: &SharedState, account_id: &str, bridges: &PersonB
             if let Ok(response) = serde_json::from_value(payload) { bridges.writes.resolve(response); }
         }
         "companion_event_publish" => {
-            // The data roster publishes only invalidations and transcript
-            // revisions. No service-level publications, worker frames, Host
-            // configuration, orchestration or arbitrary event topics.
+            // The data roster publishes only invalidations, transcript
+            // revisions and its member agent's live reply. No service-level
+            // publications, worker frames, Host configuration, orchestration
+            // or arbitrary event topics.
             let Some(topic) = payload.get("topic").and_then(Value::as_str) else { return; };
             let Some(event) = payload.get("event") else { return; };
+            if topic == TRANSCRIPT_LIVE_TOPIC {
+                let Some(frame) = transcript_live_envelope(event) else {
+                    log::warn!("companion-api ws-bridge: refusing a malformed or oversized live reply frame");
+                    return;
+                };
+                if !TRANSCRIPT_LIVE_PACE.admit(account_id, &frame, live_now_ms()) { return; }
+                let Some(person) = super::person_partition::fleet().and_then(|fleet| fleet.person(account_id)) else { return; };
+                super::person_chat::person_publish_live(&state.event_bus, TRANSCRIPT_LIVE_TOPIC, &frame, &person);
+                return;
+            }
             let event = match topic {
                 "sync://invalidate" => event.clone(),
                 TRANSCRIPT_REVISION_TOPIC => match transcript_revision_envelope(event) { Some(event) => event, None => return },
@@ -1557,6 +1568,81 @@ fn transcript_revision_envelope(event: &Value) -> Option<Value> {
         }
     }
     Some(Value::Object(envelope))
+}
+
+const TRANSCRIPT_LIVE_TOPIC: &str = "transcript://live";
+/// The largest live reply frame a person brain may publish. The brain keeps
+/// its own frames under 200 KiB (`lib/chat/transcript/live-frames.ts`) and
+/// sends `reset` instead of a bigger one; this is the Host's hard ceiling.
+const TRANSCRIPT_LIVE_MAX_BYTES: usize = 256 * 1024;
+/// Ids in a live frame are session and message ids, never content.
+const TRANSCRIPT_LIVE_MAX_ID: usize = 256;
+
+/// The only shape a person brain's `transcript://live` frame may take (P6e).
+///
+/// A member's devices draw the in-flight reply of their agent turn from these
+/// frames: `parts` from index `base` replace the previous frame's tail, and a
+/// `keyframe` (base 0) carries the whole message. `settled` is the final
+/// keyframe, and may name `afterRevision`, the transcript revision persisted
+/// before it; `reset` (no parts) tells devices to drop the live reply and read
+/// the persisted transcript. The frame is rebuilt from these keys only, and a
+/// frame that is malformed, inconsistent or over the size ceiling is refused.
+fn transcript_live_envelope(event: &Value) -> Option<Value> {
+    let id = |key: &str| event.get(key).and_then(Value::as_str)
+        .filter(|id| !id.is_empty() && id.len() <= TRANSCRIPT_LIVE_MAX_ID).map(str::to_string);
+    let (session_id, message_id, reply_to) = (id("sessionId")?, id("messageId")?, id("replyTo")?);
+    let seq = event.get("seq").and_then(Value::as_u64).filter(|seq| *seq >= 1)?;
+    let base = event.get("base").and_then(Value::as_u64)?;
+    let keyframe = event.get("keyframe").and_then(Value::as_bool)?;
+    let state = event.get("state").and_then(Value::as_str)
+        .filter(|state| matches!(*state, "streaming" | "settled" | "reset"))?;
+    let parts = event.get("parts").and_then(Value::as_array)?;
+    let after_revision = match event.get("afterRevision") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(value.as_u64().filter(|_| state == "settled")?),
+    };
+    if parts.iter().any(|part| !part.is_object())
+        || (keyframe && base != 0)
+        || (state == "settled" && !keyframe)
+        || (state == "reset" && !parts.is_empty()) {
+        return None;
+    }
+    let mut envelope = serde_json::json!({
+        "sessionId": session_id, "messageId": message_id, "replyTo": reply_to,
+        "seq": seq, "base": base, "keyframe": keyframe, "state": state, "parts": parts,
+    });
+    if let Some(revision) = after_revision { envelope["afterRevision"] = Value::from(revision); }
+    (serde_json::to_vec(&envelope).ok()?.len() <= TRANSCRIPT_LIVE_MAX_BYTES).then_some(envelope)
+}
+
+/// Streaming frames closer together than this, per person and session, are
+/// dropped: the brain paces itself at 100 ms, so only a runaway brain hits it.
+/// A dropped patch only leaves the device waiting for the next keyframe.
+const TRANSCRIPT_LIVE_MIN_INTERVAL_MS: i64 = 50;
+
+#[derive(Default)]
+struct TranscriptLivePace(parking_lot::Mutex<HashMap<(String, String), i64>>);
+
+impl TranscriptLivePace {
+    /// Whether to deliver `frame` now. `settled` and `reset` always pass: they
+    /// end the live reply, and dropping one would leave a device showing it.
+    fn admit(&self, account_id: &str, frame: &Value, now_ms: i64) -> bool {
+        if frame.get("state").and_then(Value::as_str) != Some("streaming") { return true; }
+        let Some(session) = frame.get("sessionId").and_then(Value::as_str) else { return false; };
+        let mut last = self.0.lock();
+        if last.len() > 1024 { last.retain(|_, at| now_ms - *at < 60_000); }
+        let key = (account_id.to_string(), session.to_string());
+        match last.get(&key) {
+            Some(at) if now_ms - *at < TRANSCRIPT_LIVE_MIN_INTERVAL_MS => false,
+            _ => { last.insert(key, now_ms); true }
+        }
+    }
+}
+
+static TRANSCRIPT_LIVE_PACE: Lazy<TranscriptLivePace> = Lazy::new(TranscriptLivePace::default);
+
+fn live_now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -2622,6 +2708,71 @@ mod tests {
             json!({ "ok": true }),
         );
         assert_eq!(state.sync_bridge.pending_count(), 0);
+    }
+
+    fn live_frame() -> Value {
+        json!({ "sessionId": "s1", "messageId": "assistant-a1", "replyTo": "u1", "seq": 3, "base": 1,
+            "keyframe": false, "state": "streaming", "parts": [{ "type": "text", "text": "hel" }] })
+    }
+
+    /// P6e — a member brain's live reply frame is rebuilt from its own keys
+    /// only, and anything inconsistent or over the ceiling is refused.
+    #[test]
+    fn p6e_live_reply_frames_keep_only_their_keys_and_refuse_bad_shapes() {
+        let mut extra = live_frame();
+        extra["remoteExecutionContext"] = json!({ "originDeviceId": "elsewhere" });
+        extra["leak"] = json!("x");
+        let rebuilt = transcript_live_envelope(&extra).expect("accepted");
+        assert_eq!(rebuilt, live_frame());
+        let settled = json!({ "sessionId": "s1", "messageId": "m", "replyTo": "u", "seq": 4, "base": 0,
+            "keyframe": true, "state": "settled", "parts": [], "afterRevision": 9 });
+        assert_eq!(transcript_live_envelope(&settled), Some(settled.clone()));
+        let mut negative = settled.clone();
+        negative["afterRevision"] = json!(-1);
+        assert!(transcript_live_envelope(&negative).is_none());
+
+        let with = |key: &str, value: Value| { let mut frame = live_frame(); frame[key] = value; frame };
+        let without = |key: &str| { let mut frame = live_frame(); frame.as_object_mut().unwrap().remove(key); frame };
+        for refused in [
+            without("sessionId"), without("replyTo"), without("parts"), without("keyframe"),
+            with("sessionId", json!("")), with("messageId", json!("m".repeat(257))),
+            with("seq", json!(0)), with("base", json!(-1)), with("state", json!("done")),
+            with("parts", json!(["text"])),
+            // Only the final frame names the revision it precedes.
+            with("afterRevision", json!(4)),
+            // A keyframe always carries the whole message; `settled` is one.
+            json!({ "sessionId": "s1", "messageId": "m", "replyTo": "u", "seq": 1, "base": 2,
+                "keyframe": true, "state": "streaming", "parts": [] }),
+            json!({ "sessionId": "s1", "messageId": "m", "replyTo": "u", "seq": 1, "base": 0,
+                "keyframe": false, "state": "settled", "parts": [] }),
+            // `reset` drops the live reply; it carries nothing to draw.
+            json!({ "sessionId": "s1", "messageId": "m", "replyTo": "u", "seq": 1, "base": 0,
+                "keyframe": true, "state": "reset", "parts": [{ "type": "text", "text": "x" }] }),
+            with("parts", json!([{ "type": "text", "text": "x".repeat(TRANSCRIPT_LIVE_MAX_BYTES) }])),
+        ] {
+            assert!(transcript_live_envelope(&refused).is_none(), "accepted {refused}");
+        }
+    }
+
+    /// P6e — a runaway brain cannot flood a member's devices; the frames that
+    /// end a live reply are never the ones dropped.
+    #[test]
+    fn p6e_live_reply_pace_drops_only_streaming_frames_that_come_too_fast() {
+        let pace = TranscriptLivePace::default();
+        let frame = live_frame();
+        assert!(pace.admit("pb_a", &frame, 1_000));
+        assert!(!pace.admit("pb_a", &frame, 1_049));
+        assert!(pace.admit("pb_a", &frame, 1_050));
+        // Another person, or another of the same person's sessions, has its own pace.
+        assert!(pace.admit("pb_b", &frame, 1_051));
+        let mut other_session = live_frame();
+        other_session["sessionId"] = json!("s2");
+        assert!(pace.admit("pb_a", &other_session, 1_051));
+        for state in ["settled", "reset"] {
+            let mut last = live_frame();
+            last["state"] = json!(state);
+            assert!(pace.admit("pb_a", &last, 1_052));
+        }
     }
 
     /// ADR-0131/0136 — the brain publishes host events through the bridge. Only

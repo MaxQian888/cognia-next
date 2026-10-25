@@ -246,6 +246,7 @@ import {
 } from "@/lib/chat/session-aside-context"
 import { createAsideContextDispatch } from "@/lib/context-workbench/aside-context-dispatch"
 import { advanceResourceAsideContextCursor } from "@/lib/db/resource-workbench-sessions"
+import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { runStandaloneTurn } from "@/lib/ai/chat/standalone-engine"
 import type {
@@ -2334,6 +2335,7 @@ export function useClaudeChat() {
         routerFusionGate(useSettingsStore.getState().settings, "chat") === "on" &&
         hostStateSendEligible({
           pairedHost: turnsRunOnPairedHost(),
+          personPartition: getRuntimeSnapshot().host?.personPartition === true,
           fusionRun: false,
           routerFusionStamped: false,
           skipAppend: callOptions?.skipUserAppend === true || callOptions?.steerDrain === true,
@@ -3016,6 +3018,7 @@ export function useClaudeChat() {
         !isSessionAside &&
         hostStateSendEligible({
           pairedHost: turnsRunOnPairedHost(),
+          personPartition: getRuntimeSnapshot().host?.personPartition === true,
           fusionRun: Boolean(sendOptions.routerFusionRun),
           routerFusionStamped: Boolean(sendOptions.routerFusion),
           skipAppend,

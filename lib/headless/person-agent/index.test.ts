@@ -5,6 +5,9 @@ jest.mock("@/lib/db/messages", () => ({
   ]),
   commitMessageDelta: jest.fn(async () => undefined),
 }))
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: jest.fn(async () => ({ id: "s1", transcriptRevision: 3 })),
+}))
 jest.mock("@/lib/work-submission/chat-adapter", () => ({
   settleChatTurn: jest.fn(async () => true),
 }))
