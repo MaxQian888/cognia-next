@@ -16478,6 +16478,14 @@
           "type": "object",
           "additionalProperties": { "type": "array", "items": { "type": "string" } }
         },
+        "modelNames": {
+          "description": "P6 follow-up: per provider, the display name its deployment gives a served model, keyed by model id; only names that differ from the id. A model absent here is shown by its id.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        },
         "usage": {
           "description": "P6g: the calling member's own spend and cap for the current UTC month; null when the Host keeps no usage ledger. Never another person's row.",
           "type": ["object", "null"],

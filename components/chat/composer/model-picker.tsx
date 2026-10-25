@@ -42,7 +42,7 @@ import type {
   ExternalAgentCogniaModelBinding,
   ExternalAgentModelChoice,
 } from "@cognia/agent-config-types"
-import { collectModelOptions } from "@/lib/ai/model-options"
+import { collectModelOptions, resolveModelDisplayName } from "@/lib/ai/model-options"
 import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import {
   ModelSelect,
@@ -162,11 +162,16 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   const memberGroups = useMemo<ModelProviderGroup[]>(() => {
     if (!memberServed) return []
     const section = { id: "person-models", label: t("memberSection") }
-    return memberServed.map(({ provider, models }) => ({
+    // The name the org's deployment gives a model, else this app's own
+    // catalog name for it, else its id.
+    return memberServed.map(({ provider, models, names }) => ({
       providerId: provider,
       providerName: getProviderDisplayName(provider),
       section,
-      models: models.map((id) => ({ id, name: id })),
+      models: models.map((id) => ({
+        id,
+        name: names[id] ?? resolveModelDisplayName(provider, id),
+      })),
     }))
   }, [memberServed, t])
 

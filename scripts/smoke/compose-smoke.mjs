@@ -1419,6 +1419,11 @@ const PERSONS_MEMBER = process.env.COGNIA_SMOKE_PERSONS_MEMBER ?? ""
  * Unset skips that check.
  */
 const PERSONS_UNUSED_MEMBER = process.env.COGNIA_SMOKE_PERSONS_UNUSED_MEMBER ?? ""
+/**
+ * The display name the Host's deployment profile gives the persons model, for
+ * the check that it reaches the member's manifest. Unset skips that check.
+ */
+const PERSONS_MODEL_NAME = process.env.COGNIA_SMOKE_PERSONS_MODEL_NAME ?? ""
 
 /**
  * Whether the Host runs member agents in a gVisor sandbox pool (P6e). Only a
@@ -2218,6 +2223,19 @@ async function personsAgent(person, owner, other) {
       !Object.keys(personAgents?.models ?? {}).some((provider) => !keyed.includes(provider)),
     `${person.subject}'s manifest names nobody else and no provider the org holds no key for`
   )
+  // The deployment's name for the model travels to the member's menu (plan
+  // §9b item 16), and names only models the org serves.
+  if (PERSONS_MODEL_NAME) {
+    check(
+      personAgents?.modelNames?.[seed.provider]?.[seed.model] === PERSONS_MODEL_NAME &&
+        Object.entries(personAgents?.modelNames ?? {}).every(([provider, names]) =>
+          Object.keys(names).every((id) => (personAgents.models?.[provider] ?? []).includes(id))
+        ),
+      `${person.subject}'s manifest names ${seed.model} "${PERSONS_MODEL_NAME}" (got ${JSON.stringify(personAgents?.modelNames)})`
+    )
+  } else {
+    skip("model display names (COGNIA_SMOKE_PERSONS_MODEL_NAME unset)")
+  }
   const withDefault = await rpc(
     "org_agent_policy_set",
     { allowedAgents: ["claude-agent-acp"], defaultAgent: "claude-agent-acp" },

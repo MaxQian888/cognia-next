@@ -2034,6 +2034,26 @@ describe("an org member's shared Host (P6g)", () => {
     expect(screen.queryByText("Auto")).toBeNull()
   })
 
+  it("names each org model as the org's deployment does, else as this app's catalog does", () => {
+    member({
+      ...personAgents,
+      defaultAgent: null,
+      models: { ...personAgents.models, anthropic: [PROVIDERS.anthropic.defaultModel] },
+      modelNames: { deepseek: { "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash" } },
+    })
+    renderPicker(memberSession)
+    // The chip names the conversation's model too.
+    expect(screen.getByRole("button")).toHaveTextContent("DeepSeek V4.1 Flash")
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.getAllByText("DeepSeek V4.1 Flash").length).toBeGreaterThan(0)
+    // No name from the deployment: the id, or the catalog's name for a known one.
+    expect(screen.getAllByText("ark-deepseek-pro").length).toBeGreaterThan(0)
+    const catalogName = PROVIDERS.anthropic.models.find(
+      (model) => model.id === PROVIDERS.anthropic.defaultModel
+    )!.name
+    expect(screen.getAllByText(catalogName).length).toBeGreaterThan(0)
+  })
+
   it("offers tool-less chat every model the org serves", () => {
     member({ ...personAgents, defaultAgent: null })
     renderPicker(memberSession)

@@ -913,6 +913,19 @@ describe("personAgents", () => {
     const parsed = parseHostFeatureManifest(wire({}))
     expect(parsed?.schemaVersion === 2 ? parsed.personAgents : undefined).toEqual(personAgents)
     expect(isPersonAgentsManifest({ ...personAgents, usage: null, models: {} })).toBe(true)
+    // Model names are optional, and checked when present.
+    expect(
+      isPersonAgentsManifest({ ...personAgents, modelNames: { anthropic: { m: "Model M" } } })
+    ).toBe(true)
+    for (const modelNames of [
+      { anthropic: { m: "" } },
+      { anthropic: { m: "x".repeat(201) } },
+      { anthropic: ["Model M"] },
+      { anthropic: { m: 7 } },
+      "names",
+    ]) {
+      expect(isPersonAgentsManifest({ ...personAgents, modelNames })).toBe(false)
+    }
   })
 
   it.each([

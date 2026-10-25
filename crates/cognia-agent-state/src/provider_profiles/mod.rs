@@ -929,6 +929,17 @@ pub fn gateway_snapshot_json(
                 .iter()
                 .map(|model| Value::from(model.id.clone()))
                 .collect();
+            // A model's display name, where the profile gives one, under the
+            // key the gateway's metadata uses (`/v1/models` `display_name`,
+            // the person policy's `modelNames`).
+            let model_metadata: Vec<Value> = deployment
+                .models
+                .iter()
+                .filter_map(|model| {
+                    let name = model.display_name.as_deref()?.trim();
+                    (!name.is_empty()).then(|| serde_json::json!({"id": model.id, "name": name}))
+                })
+                .collect();
             Some(serde_json::json!({
                 "id": deployment.id,
                 "protocol": transport.protocol,
@@ -936,6 +947,7 @@ pub fn gateway_snapshot_json(
                 "apiKey": api_key,
                 "enabled": true,
                 "models": models,
+                "modelMetadata": model_metadata,
                 "deploymentId": deployment.id,
                 "transport": {
                     "authScheme": auth_scheme,
@@ -1369,6 +1381,39 @@ mod tests {
             serde_json::from_value(snapshot).unwrap();
         parsed.validate().unwrap();
         assert!(parsed.provider_by_deployment("glm-anthropic").is_some());
+    }
+
+    #[test]
+    fn gateway_projection_names_the_models_a_profile_names() {
+        let mut d = docs();
+        d.deployment_profiles[0].models.push(DeploymentModelDoc {
+            id: "glm-4.6-air".into(),
+            display_name: Some("  GLM 4.6 Air ".into()),
+            upstream_id: None,
+            offering_ref: None,
+            canonical_model_ref: None,
+            user_override: None,
+        });
+        d.deployment_profiles[0].models.push(DeploymentModelDoc {
+            id: "glm-blank".into(),
+            display_name: Some("   ".into()),
+            upstream_id: None,
+            offering_ref: None,
+            canonical_model_ref: None,
+            user_override: None,
+        });
+        let none = |_: &Value| -> Option<String> { None };
+        let snapshot = gateway_snapshot_json(&d, 1, 0, &none);
+        // Only the named one, trimmed; an unnamed or blank one stays an id.
+        assert_eq!(
+            snapshot["providers"][0]["modelMetadata"],
+            serde_json::json!([{"id": "glm-4.6-air", "name": "GLM 4.6 Air"}])
+        );
+        let parsed: cognia_gateway::snapshot::RoutingSnapshot =
+            serde_json::from_value(snapshot).unwrap();
+        let provider = parsed.provider("glm-anthropic").unwrap();
+        assert_eq!(provider.models, ["glm-4.6", "glm-4.6-air", "glm-blank"]);
+        assert_eq!(provider.model_metadata[0].fields["name"], "GLM 4.6 Air");
     }
 
     #[test]

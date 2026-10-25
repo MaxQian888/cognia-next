@@ -73,7 +73,7 @@ describe("personServedModels", () => {
 
   it("p6g offers an agent conversation only its agent's providers", () => {
     expect(personServedModels(withChat, {})).toEqual([
-      { provider: "deepseek", models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"] },
+      { provider: "deepseek", models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"], names: {} },
     ])
     expect(personServedModels(withChat, { agentRuntimeId: "codex-acp" })).toEqual([])
     expect(personServedModels(withChat, { agentRuntimeId: "pi" })).toEqual([])
@@ -81,8 +81,24 @@ describe("personServedModels", () => {
 
   it("p6g offers tool-less chat every provider the org serves", () => {
     expect(personServedModels({ ...withChat, defaultAgent: null }, {})).toEqual([
-      { provider: "deepseek", models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"] },
-      { provider: "openai", models: ["gpt"] },
+      { provider: "deepseek", models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"], names: {} },
+      { provider: "openai", models: ["gpt"], names: {} },
+    ])
+  })
+
+  it("carries the deployment's model names beside each provider's models", () => {
+    const named = {
+      ...withChat,
+      defaultAgent: null,
+      modelNames: { deepseek: { "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash" } },
+    }
+    expect(personServedModels(named, {})).toEqual([
+      {
+        provider: "deepseek",
+        models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"],
+        names: { "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash" },
+      },
+      { provider: "openai", models: ["gpt"], names: {} },
     ])
   })
 })

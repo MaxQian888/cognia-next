@@ -493,7 +493,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - A conversation on Claude Sonnet 5.5 shows the chat warning. Picking the DeepSeek model clears the warning once the Host's row syncs back (nothing is written locally), and the next send replies.
       - The agent chip renders on member partitions as the dense glyph at the right of the toolbar. The earlier report of a missing chip did not reproduce.
     - **Known gaps:**
-      - The menu names models by id; the gateway snapshot has no display names to give.
+      - ~~The menu names models by id; the gateway snapshot has no display names to give.~~ Fixed by item 16.
       - An agent conversation offers only its agent's providers, so a chat-only provider cannot be picked there.
       - ~~The member browser polls `bot_console_read` (403) and `claude_session_context` (503) on a partition.~~ Fixed in item 11.
 
@@ -567,6 +567,19 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - The persons smoke is green with the new check.
       - In the browser, Ada's new conversation went from "New conversation" to its first message's title and kept it, header and sidebar both. The transcript did not remount after the title change: the only swap is the welcome screen giving way to the chat on send.
     - **Known gaps:** the browser does not generate a model-written title for a HostState conversation; it keeps the 40-character preview. One smoke run in two missed the agent reply's settled live frame on a turn that finished in about a second; the rerun was green.
+
+16. **Member model menu names models (P6 follow-up, 2026-10-26).**
+    - **Decisions:**
+      - The deployment names its models, and that name reaches the member's menu. The Host's profile store already had a `displayName` per deployment model, but its projection into the gateway snapshot dropped it, so the snapshot had no name to give.
+      - A model the deployment does not name takes this app's own catalog name, else its id. The id stays the key everywhere; only the label changes.
+      - Only names that say more than the id travel, trimmed and bounded to 200 characters, and only for models the map serves.
+    - **Surface:**
+      - `cognia-agent-state` `gateway_snapshot_json`: `modelMetadata: [{ id, name }]` for each named deployment model, the key `/v1/models` already maps to `display_name`.
+      - Host `person_agent_policy_get`: `modelNames { provider: { modelId: name } }` beside `models`, read from the snapshot's metadata. The response schema gains the field.
+      - Brain `fetchPersonAgentPolicy` and `PersonAgentsManifest.modelNames` (optional, checked when present). `personServedModels` entries carry `names`, and the model picker labels each row and the chip with them, falling back to `resolveModelDisplayName`.
+      - Smoke: with `COGNIA_SMOKE_PERSONS_MODEL_NAME` set, the member's manifest must name the persons model so, and name nothing it does not serve.
+    - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):** the rig's deployment profile gave the model "DeepSeek V4.1 Flash" (`cognia-server profiles import`, profileVersion 3). The persons smoke is green with the new check. In Ada's browser the composer chip and the menu read "DeepSeek V4.1 Flash", with the id beneath in the menu.
+    - **Known gaps:** a Host that projects its snapshot from app settings instead of the profile store names only models whose settings carry a name (`resolveModelDisplayName`). The welcome screen's usage stats still name the top model by id.
 
 **Intentional dormancy (Rule 7).**
 

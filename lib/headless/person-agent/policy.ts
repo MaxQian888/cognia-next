@@ -19,6 +19,7 @@
  */
 
 import type { ChatSession } from "@cognia/agent-config-types"
+import { MAX_PERSON_MODEL_NAME_LENGTH } from "@/lib/platform/host-feature-manifest"
 
 export interface PersonAllowedAgent {
   runtimeId: string
@@ -47,6 +48,12 @@ export interface PersonAgentPolicy {
    * P6g.
    */
   models: Record<string, string[]>
+  /**
+   * Per provider, the display name the deployment gives a served model, by
+   * model id; absent from a Host that sends none. See
+   * `PersonAgentsManifest.modelNames`.
+   */
+  modelNames?: Record<string, Record<string, string>>
   /** P6g: null when the Host keeps no usage ledger, or is older than P6g. */
   usage: PersonOwnUsage | null
 }
@@ -72,6 +79,34 @@ function readModels(value: unknown): Record<string, string[]> {
       models[provider] = [...ids]
   }
   return models
+}
+
+/**
+ * The names the Host gave, for models it also serves: an entry that is not a
+ * bounded non-empty string, or that names a model the map does not list, is
+ * dropped, so the manifest this feeds stays one the device accepts.
+ */
+function readModelNames(
+  value: unknown,
+  models: Record<string, string[]>
+): Record<string, Record<string, string>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const out: Record<string, Record<string, string>> = {}
+  for (const [provider, names] of Object.entries(value)) {
+    if (!names || typeof names !== "object" || Array.isArray(names)) continue
+    const kept: Record<string, string> = {}
+    for (const [id, name] of Object.entries(names)) {
+      if (
+        typeof name === "string" &&
+        name.length > 0 &&
+        name.length <= MAX_PERSON_MODEL_NAME_LENGTH &&
+        models[provider]?.includes(id)
+      )
+        kept[id] = name
+    }
+    if (Object.keys(kept).length > 0) out[provider] = kept
+  }
+  return out
 }
 
 function readUsage(value: unknown): PersonOwnUsage | null {
@@ -122,6 +157,8 @@ export async function fetchPersonAgentPolicy(
       code: "execution_isolation_unavailable",
     })
   // The optional P6g facts degrade to "unknown", never to a refused turn.
+  const models = readModels(policy.models)
+  const modelNames = readModelNames(policy.modelNames, models)
   return {
     allowedAgents: policy.allowedAgents.map((agent) => ({
       runtimeId: agent.runtimeId,
@@ -130,7 +167,8 @@ export async function fetchPersonAgentPolicy(
     })),
     defaultAgent: policy.defaultAgent,
     execution: policy.execution,
-    models: readModels(policy.models),
+    models,
+    ...(Object.keys(modelNames).length > 0 ? { modelNames } : {}),
     usage: readUsage(policy.usage),
   }
 }

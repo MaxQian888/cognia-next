@@ -100,4 +100,29 @@ describe("person agent policy", () => {
       usage: { monthlyTokens: null },
     })
   })
+
+  it("keeps the deployment's model names for served models only, and omits an empty map", async () => {
+    const { usage: _usage, ...rest } = policy
+    const call = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ...rest,
+        usage: null,
+        models: { anthropic: ["ok", "other"], openai: ["gpt"] },
+        modelNames: {
+          anthropic: { ok: "Okay Model", other: "", unserved: "Ghost" },
+          openai: { gpt: "x".repeat(201) },
+          broken: "nope",
+          missing: { m: "Not served" },
+        },
+      })
+      .mockResolvedValueOnce({ ...rest, usage: null, models: { anthropic: ["ok"] } })
+    await expect(fetchPersonAgentPolicy({ call })).resolves.toMatchObject({
+      models: { anthropic: ["ok", "other"], openai: ["gpt"] },
+      modelNames: { anthropic: { ok: "Okay Model" } },
+    })
+    // A Host that sends none leaves the field out, as an older Host's manifest has it.
+    const plain = await fetchPersonAgentPolicy({ call })
+    expect("modelNames" in plain).toBe(false)
+  })
 })

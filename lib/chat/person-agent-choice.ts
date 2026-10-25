@@ -115,6 +115,8 @@ export function personAgentSeed(
 export interface PersonServedProvider {
   provider: string
   models: string[]
+  /** The deployment's display name for each model that has one, by id. */
+  names: Record<string, string>
 }
 
 /**
@@ -136,7 +138,9 @@ export function personServedModels(
       : Object.keys(agents.models)
   return providers.flatMap((provider) => {
     const models = agents.models[provider] ?? []
-    return models.length > 0 ? [{ provider, models: [...models] }] : []
+    return models.length > 0
+      ? [{ provider, models: [...models], names: { ...agents.modelNames?.[provider] } }]
+      : []
   })
 }
 

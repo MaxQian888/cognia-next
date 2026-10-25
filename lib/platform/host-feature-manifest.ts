@@ -31,6 +31,12 @@ export interface PersonAgentsManifest {
    * tool-less chat can run on. A Host older than that names only the first.
    */
   models: Record<string, string[]>
+  /**
+   * Per provider, the display name its deployment gives a served model,
+   * keyed by model id. Only names that differ from the id; a model absent
+   * here is shown by its id. A Host older than that sends none.
+   */
+  modelNames?: Record<string, Record<string, string>>
   /** The member's own UTC month; `monthlyTokens: null` means no cap. */
   usage: {
     month: string
@@ -38,6 +44,23 @@ export interface PersonAgentsManifest {
     reservedTokens: number
     monthlyTokens: number | null
   } | null
+}
+
+/** The longest model name a Host hands a device (`person_execution.rs`). */
+export const MAX_PERSON_MODEL_NAME_LENGTH = 200
+
+function isModelNames(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  return Object.values(value).every(
+    (names) =>
+      !!names &&
+      typeof names === "object" &&
+      !Array.isArray(names) &&
+      Object.values(names).every(
+        (name) =>
+          typeof name === "string" && name.length > 0 && name.length <= MAX_PERSON_MODEL_NAME_LENGTH
+      )
+  )
 }
 
 function isTokenCount(value: unknown): boolean {
@@ -69,6 +92,7 @@ export function isPersonAgentsManifest(value: unknown): value is PersonAgentsMan
     typeof candidate.models === "object" &&
     !Array.isArray(candidate.models) &&
     Object.values(candidate.models).every(strings) &&
+    (candidate.modelNames === undefined || isModelNames(candidate.modelNames)) &&
     (usage === null ||
       (!!usage &&
         typeof usage === "object" &&
