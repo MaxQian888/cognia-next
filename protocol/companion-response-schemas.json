@@ -16611,7 +16611,8 @@
             },
             "additionalProperties": false
           }
-        }
+        },
+        "membersIncomplete": { "type": "boolean", "const": true }
       },
       "additionalProperties": false
     },

@@ -123010,6 +123010,9 @@ paths:
                           minLength: 1
                           maxLength: 200
                       additionalProperties: false
+                  membersIncomplete:
+                    type: boolean
+                    const: true
                 additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.

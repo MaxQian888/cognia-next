@@ -757,7 +757,8 @@
       "cancel": "取消",
       "save": "保存",
       "saving": "正在保存…",
-      "empty": "组织里还没有人用过这台 Host。"
+      "empty": "组织里还没有人用过这台 Host。",
+      "incomplete": "可能缺少部分成员：{host} 没能取到组织成员名单，这里只列出它已经知道的人。"
     },
     "confirm": {
       "title": "移除 {provider} 密钥？",

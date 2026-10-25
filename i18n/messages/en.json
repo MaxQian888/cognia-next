@@ -15575,6 +15575,7 @@
         "empty": "No one in your organization has used this Host yet.",
         "hint": "Tokens each person spent through the organization's keys in {month} (UTC). A turn that would pass a cap is refused before it reaches the model.",
         "hintNoMonth": "Tokens each person spent through the organization's keys this month (UTC).",
+        "incomplete": "Some members may be missing: {host} could not get the organization's member list, so this shows only people it already knows.",
         "loading": "Asking {host} for this month's usage…",
         "memberSaved": "Saved the cap for {user}",
         "mode": {

@@ -1413,6 +1413,12 @@ const PERSONS_PEOPLE =
  * org-administration checks (P6a, AC32). Unset skips the member refusal.
  */
 const PERSONS_MEMBER = process.env.COGNIA_SMOKE_PERSONS_MEMBER ?? ""
+/**
+ * `userId` of an org member seeded in the collaboration plane who never uses
+ * the Host, for the check that the usage report lists everyone (P6 item 13).
+ * Unset skips that check.
+ */
+const PERSONS_UNUSED_MEMBER = process.env.COGNIA_SMOKE_PERSONS_UNUSED_MEMBER ?? ""
 
 /**
  * Whether the Host runs member agents in a gVisor sandbox pool (P6e). Only a
@@ -1922,6 +1928,30 @@ async function personsChat(person, owner) {
       namedRow.displayName.trim().length > 0,
     `${owner.subject} (owner): the usage report names ${person.subject} (got ${named.status}: ${JSON.stringify(namedRow)})`
   )
+  // It lists the whole org, from the same plane answer, not only people who
+  // already used the Host: the owner can cap someone before their first turn.
+  check(
+    named.body?.membersIncomplete === undefined &&
+      [owner, person].every((who) =>
+        (named.body?.members ?? []).some((member) => member.userId === who.userId)
+      ),
+    `${owner.subject} (owner): the usage report lists every member it was asked for (got ${JSON.stringify(named.body?.members?.map((member) => member.userId))}, incomplete ${named.body?.membersIncomplete})`
+  )
+  if (PERSONS_UNUSED_MEMBER) {
+    const unused = (named.body?.members ?? []).find(
+      (member) => member.userId === PERSONS_UNUSED_MEMBER
+    )
+    check(
+      unused?.spentTokens === 0 &&
+        typeof unused.displayName === "string" &&
+        unused.displayName.trim().length > 0,
+      `${owner.subject} (owner): the usage report names ${PERSONS_UNUSED_MEMBER}, who never used the Host (got ${JSON.stringify(unused)})`
+    )
+  } else {
+    skip(
+      "usage report lists a member who never used the Host (COGNIA_SMOKE_PERSONS_UNUSED_MEMBER unset)"
+    )
+  }
   const capped = await rpc(
     "org_member_usage_cap_set",
     { userId: person.userId, monthlyTokens: 1 },

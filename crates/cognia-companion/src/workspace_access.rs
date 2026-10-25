@@ -354,44 +354,39 @@ pub async fn standing_actions(
     parse_standing_actions(&body)
 }
 
-/// The names the collaboration plane holds for those of `user_ids` who are
-/// members of `org_id`, keyed by user id. Anyone else is absent.
+/// The org's members as the collaboration plane lists them: user id → name.
 ///
-/// For labelling the Host's own per-person records (P6: the org's usage
-/// panel), never for an authorization decision: standing goes through
-/// [`standing_actions`].
-pub async fn org_member_names(
-    org_id: &str,
-    user_ids: &[String],
-) -> Result<std::collections::BTreeMap<String, String>, WorkspaceAccessError> {
-    let config = CollabServiceConfig::from_env().ok_or(WorkspaceAccessError::NotConfigured)?;
-    org_member_names_with(&config, org_id, user_ids).await
+/// For the Host's per-person accounting (P6: the usage panel lists everyone
+/// in the org, named), never for an authorization decision: standing goes
+/// through [`standing_actions`].
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OrgMembers {
+    pub names: std::collections::BTreeMap<String, String>,
+    /// The plane cut the list off at its bound; some members are missing.
+    pub truncated: bool,
 }
 
-async fn org_member_names_with(
+pub async fn org_members(org_id: &str) -> Result<OrgMembers, WorkspaceAccessError> {
+    let config = CollabServiceConfig::from_env().ok_or(WorkspaceAccessError::NotConfigured)?;
+    org_members_with(&config, org_id).await
+}
+
+async fn org_members_with(
     config: &CollabServiceConfig,
     org_id: &str,
-    user_ids: &[String],
-) -> Result<std::collections::BTreeMap<String, String>, WorkspaceAccessError> {
+) -> Result<OrgMembers, WorkspaceAccessError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Person { user_id: String, display_name: String }
     #[derive(Deserialize)]
-    struct People { people: Vec<Person> }
-    if user_ids.is_empty() {
-        return Ok(Default::default());
-    }
+    struct People { people: Vec<Person>, #[serde(default)] truncated: bool }
     let org = OrgId::parse(org_id)
         .map_err(|error| WorkspaceAccessError::InvalidTarget(error.to_string()))?;
-    for user in user_ids {
-        UserId::parse(user.as_str())
-            .map_err(|error| WorkspaceAccessError::InvalidTarget(error.to_string()))?;
-    }
     let endpoint = format!("{}/internal/v1/orgs/{}/people", config.base_url, org.as_str());
     let mut response = collab_client(&endpoint)?
-        .post(&endpoint)
+        .get(&endpoint)
         .bearer_auth(&config.credential)
-        .json(&serde_json::json!({ "userIds": user_ids }))
+        .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
         .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?;
@@ -408,21 +403,24 @@ async fn org_member_names_with(
         .await
         .map_err(|error| WorkspaceAccessError::Unreachable(error.to_string()))?
     {
-        if body.len().saturating_add(chunk.len()) > 256 * 1024 {
+        // 5 000 members at a bounded name length fit well inside this.
+        if body.len().saturating_add(chunk.len()) > 4 * 1024 * 1024 {
             return Err(WorkspaceAccessError::Malformed("people response is too large".into()));
         }
         body.extend_from_slice(&chunk);
     }
     let people: People = serde_json::from_slice(&body)
         .map_err(|error| WorkspaceAccessError::Malformed(error.to_string()))?;
-    // Only the ids that were asked about: the plane answering for anyone else
-    // is a fault, not a name to show.
-    Ok(people
-        .people
-        .into_iter()
-        .filter(|person| user_ids.contains(&person.user_id))
-        .map(|person| (person.user_id, person.display_name))
-        .collect())
+    // An id the plane could not have issued is a fault, not a person to list.
+    Ok(OrgMembers {
+        names: people
+            .people
+            .into_iter()
+            .filter(|person| UserId::is_valid(&person.user_id))
+            .map(|person| (person.user_id, person.display_name))
+            .collect(),
+        truncated: people.truncated,
+    })
 }
 
 fn parse_standing_actions(body: &[u8]) -> Result<Vec<String>, WorkspaceAccessError> {
@@ -586,23 +584,23 @@ mod tests {
     const USER: &str = "usr_alice";
 
     #[tokio::test]
-    async fn org_member_names_ask_the_plane_and_keep_only_the_ids_asked_about() {
+    async fn org_members_list_the_plane_answer_and_drop_malformed_ids() {
         cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
             .unwrap();
         use wiremock::{
-            matchers::{body_json, header, method, path},
+            matchers::{header, method, path},
             Mock, MockServer, ResponseTemplate,
         };
         let server = MockServer::start().await;
-        Mock::given(method("POST"))
+        Mock::given(method("GET"))
             .and(path("/internal/v1/orgs/org_acme/people"))
             .and(header("authorization", "Bearer host-credential"))
-            .and(body_json(serde_json::json!({"userIds": [USER, "usr_bob"]})))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "people": [
                     { "userId": USER, "displayName": "Alice" },
-                    { "userId": "usr_mallory", "displayName": "Not asked about" },
-                ]
+                    { "userId": "../usr_mallory", "displayName": "Not an id" },
+                ],
+                "truncated": true
             })))
             .expect(1)
             .mount(&server)
@@ -610,22 +608,22 @@ mod tests {
         let config =
             CollabServiceConfig::from_parts(Some(server.uri()), Some("host-credential".into()))
                 .unwrap();
-        let names = org_member_names_with(&config, ORG, &[USER.into(), "usr_bob".into()])
-            .await
-            .unwrap();
-        assert_eq!(names, std::collections::BTreeMap::from([(USER.to_string(), "Alice".to_string())]));
-
-        // Nothing to ask about: no request at all (the mock expects exactly one).
-        assert!(org_member_names_with(&config, ORG, &[]).await.unwrap().is_empty());
-        // An id the plane could not have issued never leaves the Host.
+        assert_eq!(
+            org_members_with(&config, ORG).await.unwrap(),
+            OrgMembers {
+                names: std::collections::BTreeMap::from([(USER.to_string(), "Alice".to_string())]),
+                truncated: true,
+            }
+        );
+        // An org id the plane could not have issued never leaves the Host.
         assert!(matches!(
-            org_member_names_with(&config, ORG, &["../usr_alice".into()]).await,
+            org_members_with(&config, "../org_acme").await,
             Err(WorkspaceAccessError::InvalidTarget(_))
         ));
     }
 
     #[tokio::test]
-    async fn org_member_names_refuse_a_credential_the_plane_rejects_or_an_upstream_failure() {
+    async fn org_members_refuse_a_credential_the_plane_rejects_or_an_upstream_failure() {
         cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
             .unwrap();
         use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
@@ -638,7 +636,7 @@ mod tests {
             let config =
                 CollabServiceConfig::from_parts(Some(server.uri()), Some("host-credential".into()))
                     .unwrap();
-            let error = org_member_names_with(&config, ORG, &[USER.into()]).await.unwrap_err();
+            let error = org_members_with(&config, ORG).await.unwrap_err();
             match expected {
                 "unauthorized" => assert!(matches!(error, WorkspaceAccessError::Unauthorized)),
                 _ => assert!(matches!(error, WorkspaceAccessError::Upstream { status: 502 })),

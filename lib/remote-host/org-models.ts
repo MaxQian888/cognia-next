@@ -135,7 +135,14 @@ export interface OrgUsageReport {
   /** `YYYY-MM` in UTC, the Host's billing month. */
   month: string
   defaultMonthlyTokens: number | null
+  /**
+   * Everyone in the org, named, including people who have not used the Host.
+   * Falls back to the people the Host already knows when it cannot get the
+   * org's member list.
+   */
   members: OrgMemberUsage[]
+  /** The Host could not list every member; some may be missing. */
+  membersIncomplete?: boolean
 }
 
 /** The Host refuses larger caps (`MAX_MONTHLY_TOKENS` in cognia-gateway). */
@@ -150,6 +157,7 @@ export async function getOrgUsage(
     month: report?.month ?? "",
     defaultMonthlyTokens: report?.defaultMonthlyTokens ?? null,
     members: Array.isArray(report?.members) ? report.members : [],
+    ...(report?.membersIncomplete === true ? { membersIncomplete: true } : {}),
   }
 }
 

@@ -181,5 +181,20 @@ describe("OrgUsagePanel", () => {
       />
     )
     expect(await screen.findByTestId("org-usage-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("org-usage-incomplete")).not.toBeInTheDocument()
+  })
+
+  it("says when the Host could not list every member, and still shows who it knows", async () => {
+    render(
+      <OrgUsagePanel
+        hostRef="org"
+        host="Org box"
+        deps={deps({ getUsage: jest.fn(async () => ({ ...report, membersIncomplete: true })) })}
+      />
+    )
+    expect(await screen.findByTestId("org-usage-incomplete")).toHaveTextContent(
+      "Some members may be missing: Org box could not get the organization's member list"
+    )
+    expect(screen.getByTestId("org-usage-member-usr_ada")).toBeInTheDocument()
   })
 })

@@ -91,6 +91,26 @@ describe("organization models over the management channel", () => {
       members: [member],
     })
     expect(call).toHaveBeenLastCalledWith("org_member_usage_get", {})
+    // A Host that could not list every member says so; only `true` counts.
+    call.mockResolvedValueOnce({
+      month: "2026-10",
+      defaultMonthlyTokens: null,
+      members: [],
+      membersIncomplete: true,
+    })
+    await expect(getOrgUsage(HOST, deps())).resolves.toEqual({
+      month: "2026-10",
+      defaultMonthlyTokens: null,
+      members: [],
+      membersIncomplete: true,
+    })
+    call.mockResolvedValueOnce({
+      month: "2026-10",
+      defaultMonthlyTokens: null,
+      members: [],
+      membersIncomplete: "yes",
+    })
+    await expect(getOrgUsage(HOST, deps())).resolves.not.toHaveProperty("membersIncomplete")
     call.mockResolvedValueOnce(null)
     await expect(getOrgUsage(HOST, deps())).resolves.toEqual({
       month: "",

@@ -251,7 +251,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/internal/v1/orgs/{org_id}/people",
-            axum::routing::post(internal_org_people),
+            get(internal_org_people),
         )
         .route(
             "/internal/v1/orgs/{org_id}/workspaces/{workspace_id}/access/{user_id}",
@@ -450,45 +450,34 @@ async fn internal_org_access(
     }))
 }
 
-/// The most ids one `/people` request may name: a Host asks for the people it
-/// holds records for, which is bounded by its person-brain fleet.
-pub(crate) const MAX_ORG_PEOPLE: usize = 500;
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OrgPeopleRequest {
-    user_ids: Vec<String>,
-}
+/// The most members one `/people` answer lists. A larger org is cut off at
+/// this many, ordered by id, and says so with `truncated`.
+pub(crate) const MAX_ORG_PEOPLE: usize = 5_000;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OrgPeopleResponse {
     people: Vec<crate::store::OrgMemberName>,
+    truncated: bool,
 }
 
-/// The names of the org members a Host holds records for (P6: the org's
-/// usage panel labels members by name, not by id).
+/// Every member of the org with their name, for a Host that accounts for
+/// people per org (P6: the usage panel lists everyone, including people who
+/// have not used the Host yet, so a cap can be set before a first turn).
 ///
-/// The Host names the ids; members of the org come back with their name,
-/// anyone else is left out. Under `/internal` for the same reason as the
-/// access routes: only the configured Host, scoped to this org, may ask.
+/// Under `/internal` for the same reason as the access routes: only the
+/// configured Host, scoped to this org, may ask.
 async fn internal_org_people(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(org_id): Path<String>,
-    Json(body): Json<OrgPeopleRequest>,
 ) -> Result<Json<OrgPeopleResponse>, Failure> {
     require_service_credential(&state, &headers, Some(&org_id))?;
-    if body.user_ids.len() > MAX_ORG_PEOPLE {
-        return Err(Failure::BadRequest(format!(
-            "at most {MAX_ORG_PEOPLE} userIds per request"
-        )));
-    }
-    for user in &body.user_ids {
-        UserId::parse(user.as_str()).map_err(|error| Failure::BadRequest(error.to_string()))?;
-    }
-    let people = state.store.org_member_names(&org_id, &body.user_ids).await?;
-    Ok(Json(OrgPeopleResponse { people }))
+    OrgId::parse(org_id.clone()).map_err(|error| Failure::BadRequest(error.to_string()))?;
+    let mut people = state.store.org_member_names(&org_id, MAX_ORG_PEOPLE + 1).await?;
+    let truncated = people.len() > MAX_ORG_PEOPLE;
+    people.truncate(MAX_ORG_PEOPLE);
+    Ok(Json(OrgPeopleResponse { people, truncated }))
 }
 
 // No Debug: the token proves the person, and must never appear in logs.
@@ -5782,28 +5771,26 @@ mod tests {
     /// answers about third parties, so holding a grant for yourself is not
     /// permission to ask about somebody else.
     #[tokio::test]
-    async fn the_internal_people_route_names_only_this_orgs_members() {
+    async fn the_internal_people_route_lists_this_orgs_members_with_names() {
         let store = seeded();
-        let outsider = "usr_cccccccccccccccccccccccc";
-        store.add_user(outsider, "Cy");
+        // Someone with an account but no seat in this org is not listed.
+        store.add_user("usr_cccccccccccccccccccccccc", "Cy");
+        store.add_org_member("org_other000000000000000", "usr_cccccccccccccccccccccccc", OrgRole::Owner);
         let path = format!("/internal/v1/orgs/{ORG}/people");
-        let ids = serde_json::json!({ "userIds": [bob().as_str(), outsider, ada().as_str(), ada().as_str()] });
-        let (status, body) =
-            call(host_app(store.clone()), json_post(&path, &service_credential(), ids.clone())).await;
+        let (status, body) = call(host_app(store.clone()), get(&path, &service_credential())).await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        // Ordered by id, each once; the user outside the org is not confirmed.
         assert_eq!(
             body,
             serde_json::json!({ "people": [
                 { "userId": ada().as_str(), "displayName": "Ada" },
                 { "userId": bob().as_str(), "displayName": "Bob" },
-            ] })
+            ], "truncated": false })
         );
 
         // Only the configured Host may ask, and only within its scope.
-        let (status, _) = call(app(store.clone()), json_post(&path, &service_credential(), ids.clone())).await;
+        let (status, _) = call(app(store.clone()), get(&path, &service_credential())).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        let (status, _) = call(host_app(store.clone()), json_post(&path, &token_for(&ada()), ids.clone())).await;
+        let (status, _) = call(host_app(store.clone()), get(&path, &token_for(&ada()))).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         let scoped = router(
             AppState::new(Arc::new(store.clone()), signer(), Arc::new(cognia_tenant_auth::oidc::TestAuthenticator))
@@ -5813,24 +5800,19 @@ mod tests {
                     vec!["org_other".to_owned()],
                 )]))),
         );
-        let (status, body) = call(scoped, json_post(&path, &service_credential(), ids)).await;
+        let (status, body) = call(scoped, get(&path, &service_credential())).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(body, serde_json::json!({"error":"credential_scope"}));
 
-        // Malformed ids and oversized batches are refused, not looked up.
-        let (status, _) = call(
-            host_app(store.clone()),
-            json_post(&path, &service_credential(), serde_json::json!({ "userIds": ["not-a-user"] })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        let many: Vec<String> = (0..=MAX_ORG_PEOPLE).map(|n| format!("usr_{n:024}")).collect();
-        let (status, _) = call(
-            host_app(store),
-            json_post(&path, &service_credential(), serde_json::json!({ "userIds": many })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // A larger org is cut off at the bound, in id order, and says so.
+        for n in 0..MAX_ORG_PEOPLE {
+            store.add_org_member(ORG, &format!("usr_{n:024}"), OrgRole::Member);
+        }
+        let (status, body) = call(host_app(store), get(&path, &service_credential())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["truncated"], true);
+        assert_eq!(body["people"].as_array().unwrap().len(), MAX_ORG_PEOPLE);
+        assert_eq!(body["people"][0]["userId"], format!("usr_{:024}", 0));
     }
 
     #[tokio::test]

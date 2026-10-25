@@ -2637,25 +2637,19 @@ async fn killed_file_queue_skips_mkdir_and_delivers_list_stat_and_read_results_w
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL instance and COLLAB_RLS_ADMIN_DATABASE_URL / COLLAB_RLS_APP_DATABASE_URL"]
-async fn org_member_names_answer_only_this_orgs_members_in_postgres() {
+async fn org_member_names_list_only_this_orgs_members_in_postgres() {
     use cognia_collab_server::{store::OrgMemberName, Store};
-    let (_database, store, owner, member, _guest) = standing_fixture().await;
+    let (_database, store, owner, member, guest) = standing_fixture().await;
     let outsider = bootstrap("names_outsider");
     store.bootstrap_operator(&outsider).await.unwrap();
-    let names = store
-        .org_member_names(
-            &owner.org_id,
-            &[member.user_id.clone(), outsider.user_id.clone(), owner.user_id.clone()],
-        )
-        .await
-        .unwrap();
-    // Ordered by id; the user of another org is not confirmed to exist.
-    assert_eq!(
-        names,
-        vec![
-            OrgMemberName { user_id: member.user_id.clone(), display_name: member.user_name.clone() },
-            OrgMemberName { user_id: owner.user_id.clone(), display_name: owner.user_name.clone() },
-        ]
-    );
-    assert!(store.org_member_names(&owner.org_id, &[]).await.unwrap().is_empty());
+    let names = store.org_member_names(&owner.org_id, 10).await.unwrap();
+    // Ordered by id; the owner of another org is not listed.
+    let mut expected = vec![
+        OrgMemberName { user_id: guest.user_id.clone(), display_name: guest.user_name.clone() },
+        OrgMemberName { user_id: member.user_id.clone(), display_name: member.user_name.clone() },
+        OrgMemberName { user_id: owner.user_id.clone(), display_name: owner.user_name.clone() },
+    ];
+    expected.sort_by(|left, right| left.user_id.cmp(&right.user_id));
+    assert_eq!(names, expected);
+    assert_eq!(store.org_member_names(&owner.org_id, 1).await.unwrap(), expected[..1]);
 }

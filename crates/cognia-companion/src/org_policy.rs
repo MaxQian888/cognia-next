@@ -189,7 +189,14 @@ fn org_usage_apply(registry: &cognia_gateway::route_ticket::RouteTicketRegistry,
 
 async fn org_usage_dispatch(command: &str, args: Value, org: &str, user: &str, device: &str, scope: Option<&str>) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let registry = ORG_USAGE_REGISTRY.read().clone();
-    let people = crate::person_partition::fleet().map(|fleet| fleet.org_people(org)).unwrap_or_default();
+    let mut people = crate::person_partition::fleet().map(|fleet| fleet.org_people(org)).unwrap_or_default();
+    // The usage report lists every member, not only those who already used
+    // this Host, so an admin can cap someone before their first turn.
+    let members = if command == "org_member_usage_get" {
+        let members = crate::workspace_access::org_members(org).await;
+        if let Ok(members) = &members { people.extend(members.names.keys().cloned()); }
+        Some(members)
+    } else { None };
     // Audit only validated ids/numbers; no arbitrary client values or strings.
     let mut audit = json!({ "orgId": org, "userId": user });
     if let Some(member) = args.get("userId").and_then(Value::as_str).filter(|id| cognia_tenant_auth::UserId::parse(*id).is_ok()) {
@@ -209,34 +216,31 @@ async fn org_usage_dispatch(command: &str, args: Value, org: &str, user: &str, d
     }
     let mut report = result.map_err(|error| if error.contains("unavailable") { RpcError::service_unavailable("organization usage store unavailable".into()) }
         else { RpcError::malformed("invalid organization command arguments".into()) })?;
-    if command == "org_member_usage_get" {
-        label_members(&mut report, |ids| async move { crate::workspace_access::org_member_names(org, &ids).await }).await;
-    }
+    if let Some(members) = members { label_members(&mut report, members); }
     Ok(report)
 }
 
-/// Name each member of a usage report as the collaboration plane knows them.
+/// Name each member of a usage report as the collaboration plane lists them.
 ///
-/// A label, not part of the answer's truth: when the plane cannot be asked
-/// (unconfigured, down, refusing this Host) the report goes out with ids
-/// alone, as it did before, and the panel falls back to the id.
-async fn label_members<F, Fut>(report: &mut Value, names: F)
-where
-    F: FnOnce(Vec<String>) -> Fut,
-    Fut: std::future::Future<Output = Result<std::collections::BTreeMap<String, String>, crate::workspace_access::WorkspaceAccessError>>,
-{
-    let Some(members) = report.get_mut("members").and_then(Value::as_array_mut) else { return };
-    let ids: Vec<String> = members.iter().filter_map(|row| row["userId"].as_str().map(str::to_string)).collect();
-    if ids.is_empty() { return; }
-    let names = match names(ids).await {
-        Ok(names) => names,
+/// Names are a label, not part of the answer's truth. When the plane cannot
+/// be asked (unconfigured, down, refusing this Host) or cut its list short,
+/// the report still goes out with the people this Host knows, ids alone, and
+/// says `membersIncomplete` so the panel does not present it as everyone.
+fn label_members(report: &mut Value, members: Result<crate::workspace_access::OrgMembers, crate::workspace_access::WorkspaceAccessError>) {
+    let members = match members {
+        Ok(members) => members,
         Err(error) => {
-            tracing::warn!(code = error.code(), "organization member names unavailable: {error}");
+            tracing::warn!(code = error.code(), "organization members unavailable: {error}");
+            if let Some(object) = report.as_object_mut() { object.insert("membersIncomplete".into(), true.into()); }
             return;
         }
     };
-    for row in members.iter_mut() {
-        let name = row["userId"].as_str().and_then(|id| names.get(id)).map(|name| name.trim()).filter(|name| !name.is_empty());
+    if members.truncated {
+        if let Some(object) = report.as_object_mut() { object.insert("membersIncomplete".into(), true.into()); }
+    }
+    let Some(rows) = report.get_mut("members").and_then(Value::as_array_mut) else { return };
+    for row in rows.iter_mut() {
+        let name = row["userId"].as_str().and_then(|id| members.names.get(id)).map(|name| name.trim()).filter(|name| !name.is_empty());
         if let (Some(name), Some(object)) = (name, row.as_object_mut()) {
             object.insert("displayName".into(), name.chars().take(200).collect::<String>().into());
         }
@@ -263,35 +267,62 @@ pub async fn agents_handler(Path(operation): Path<String>, Extension(principal):
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn p6_usage_report_members_carry_the_planes_names_or_stay_ids() {
+    #[test]
+    fn p6_usage_report_members_carry_the_planes_names_or_stay_ids() {
+        use crate::workspace_access::{OrgMembers, WorkspaceAccessError};
         let report = || json!({"month": "2026-10", "defaultMonthlyTokens": null, "members": [
             {"userId": "usr_ada", "spentTokens": 1, "reservedTokens": 0, "monthlyTokens": null, "capSource": "default"},
             {"userId": "usr_bob", "spentTokens": 0, "reservedTokens": 0, "monthlyTokens": 5, "capSource": "override"},
             {"userId": "usr_cy", "spentTokens": 0, "reservedTokens": 0, "monthlyTokens": null, "capSource": "default"},
         ]});
-        let mut named = report();
-        label_members(&mut named, |ids| async move {
-            assert_eq!(ids, ["usr_ada", "usr_bob", "usr_cy"]);
+        let members = |truncated| OrgMembers {
             // Bob's name is blank, Cy left the org: both stay ids.
-            Ok(std::collections::BTreeMap::from([
+            names: std::collections::BTreeMap::from([
                 ("usr_ada".to_string(), "  Ada Lovelace ".to_string()),
                 ("usr_bob".to_string(), "   ".to_string()),
-            ]))
-        }).await;
+                ("usr_dee".to_string(), "Dee".repeat(100)),
+            ]),
+            truncated,
+        };
+        let mut named = report();
+        label_members(&mut named, Ok(members(false)));
         assert_eq!(named["members"][0]["displayName"], "Ada Lovelace");
         assert!(named["members"][1].get("displayName").is_none());
         assert!(named["members"][2].get("displayName").is_none());
         assert_eq!(named["members"][0]["spentTokens"], 1);
+        assert!(named.get("membersIncomplete").is_none());
 
-        // The plane cannot be asked: the report goes out exactly as before.
+        // A list the plane cut short still names who it can, and says so.
+        let mut cut = report();
+        label_members(&mut cut, Ok(members(true)));
+        assert_eq!(cut["members"][0]["displayName"], "Ada Lovelace");
+        assert_eq!(cut["membersIncomplete"], true);
+
+        // The plane cannot be asked: the rows go out as before, flagged incomplete.
         let mut unnamed = report();
-        label_members(&mut unnamed, |_| async { Err(crate::workspace_access::WorkspaceAccessError::NotConfigured) }).await;
-        assert_eq!(unnamed, report());
+        label_members(&mut unnamed, Err(WorkspaceAccessError::NotConfigured));
+        let mut expected = report();
+        expected["membersIncomplete"] = true.into();
+        assert_eq!(unnamed, expected);
 
-        // No members: nobody is asked.
-        let mut empty = json!({"month": "2026-10", "defaultMonthlyTokens": null, "members": []});
-        label_members(&mut empty, |_| async { panic!("asked for no one") }).await;
+        // A name past the bound is cut to it.
+        let mut long = json!({"month": "2026-10", "defaultMonthlyTokens": null, "members": [
+            {"userId": "usr_dee", "spentTokens": 0, "reservedTokens": 0, "monthlyTokens": null, "capSource": "default"},
+        ]});
+        label_members(&mut long, Ok(members(false)));
+        assert_eq!(long["members"][0]["displayName"].as_str().unwrap().chars().count(), 200);
+    }
+
+    #[test]
+    fn p6_usage_report_lists_members_who_never_used_the_host() {
+        use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore};
+        let registry = RouteTicketRegistry::new(std::sync::Arc::new(InMemoryTicketMetaStore::default()));
+        // Nobody has a ledger row or override: the people passed in are the rows.
+        let report = org_usage_apply(&registry, "org_member_usage_get", &json!({}), "org_acme", &["usr_ada".to_string(), "usr_new".to_string(), "usr_ada".to_string()]).unwrap();
+        let ids: Vec<_> = report["members"].as_array().unwrap().iter().map(|row| row["userId"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, ["usr_ada", "usr_new"]);
+        assert_eq!(report["members"][1]["spentTokens"], 0);
+        assert_eq!(report["members"][1]["capSource"], "default");
     }
     #[test]
     fn p6g_person_own_usage_reports_only_the_callers_month_and_cap() {

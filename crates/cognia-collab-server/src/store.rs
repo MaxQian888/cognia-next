@@ -833,13 +833,13 @@ pub trait Store: Send + Sync {
         workspace_id: &str,
     ) -> Result<Vec<WorkspaceMember>, StoreError>;
 
-    /// The names of those of `user_ids` who are members of `org_id`, ordered
-    /// by id. Anyone else is left out, so the answer never confirms that an id
-    /// outside the org exists.
+    /// Every member of `org_id` with their name, ordered by id, at most
+    /// `limit` of them. A Host lists them to account for people who have not
+    /// used it yet.
     async fn org_member_names(
         &self,
         org_id: &str,
-        user_ids: &[String],
+        limit: usize,
     ) -> Result<Vec<OrgMemberName>, StoreError>;
 
     /// Human assignees must be real users recruited into the target workspace.
@@ -1528,20 +1528,20 @@ impl Store for InMemoryStore {
     async fn org_member_names(
         &self,
         org_id: &str,
-        user_ids: &[String],
+        limit: usize,
     ) -> Result<Vec<OrgMemberName>, StoreError> {
         let tables = self.tables.read();
-        let mut rows: Vec<OrgMemberName> = user_ids
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .filter(|user| tables.org_memberships.contains_key(&(org_id.to_owned(), (*user).clone())))
-            .map(|user| OrgMemberName {
+        let mut rows: Vec<OrgMemberName> = tables
+            .org_memberships
+            .keys()
+            .filter(|(org, _)| org == org_id)
+            .map(|(_, user)| OrgMemberName {
                 user_id: user.clone(),
                 display_name: tables.users.get(user).cloned().unwrap_or_default(),
             })
             .collect();
         rows.sort_by(|left, right| left.user_id.cmp(&right.user_id));
+        rows.truncate(limit);
         Ok(rows)
     }
 
@@ -3757,21 +3757,20 @@ impl Store for PgStore {
     async fn org_member_names(
         &self,
         org_id: &str,
-        user_ids: &[String],
+        limit: usize,
     ) -> Result<Vec<OrgMemberName>, StoreError> {
-        if user_ids.is_empty() {
-            return Ok(Vec::new());
-        }
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let rows = transaction
             .query(
                 "SELECT o.user_id, u.display_name \
                  FROM org_memberships o \
                  JOIN users u ON u.id = o.user_id \
-                 WHERE o.org_id = $1 AND o.user_id = ANY($2) \
-                 ORDER BY o.user_id",
-                &[&org_id, &user_ids],
+                 WHERE o.org_id = $1 \
+                 ORDER BY o.user_id \
+                 LIMIT $2",
+                &[&org_id, &limit],
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;

@@ -341,6 +341,12 @@ export function OrgUsagePanel({
             <p className="text-xs text-muted-foreground">{t("defaultHint")}</p>
           </div>
 
+          {report.membersIncomplete ? (
+            <p className="text-xs text-muted-foreground" data-testid="org-usage-incomplete">
+              {t("incomplete", { host })}
+            </p>
+          ) : null}
+
           {report.members.length > 0 ? (
             <ul className="space-y-1.5" data-testid="org-usage-members">
               {report.members.map(memberRow)}

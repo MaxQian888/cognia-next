@@ -525,10 +525,21 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
 12. **Members named in the usage panel (P6g follow-up, 2026-10-25).**
     - **Decisions:** the Host names each member of its usage report as the org's collaboration plane knows them. The name is a label only: when the plane cannot be asked, the report goes out with ids, as before.
     - **Surface:**
-      - Collaboration server: `POST /internal/v1/orgs/{org_id}/people { userIds }` answers `{ people: [{ userId, displayName }] }` for those ids that are members of the org, ordered by id. Anyone else is left out, so an id outside the org is never confirmed. It takes the Host service credential and its org scope, like the access routes, and at most 500 well-formed ids. `Store::org_member_names` implements it in memory and on Postgres under the org's RLS scope.
-      - Host: `workspace_access::org_member_names` asks with the collab service credential (same client, timeout, proxy and no-redirect policy, 256 KiB cap) and keeps only the ids it asked about. `org_member_usage_get` adds `displayName` (trimmed, at most 200 characters) to each member it got a name for. A failure is logged and omitted. The response schema gains the optional field.
+      - Collaboration server (replaced by item 13's `GET` listing): `POST /internal/v1/orgs/{org_id}/people { userIds }` answered `{ people: [{ userId, displayName }] }` for those ids that are members of the org, ordered by id. Anyone else is left out, so an id outside the org is never confirmed. It takes the Host service credential and its org scope, like the access routes, and at most 500 well-formed ids. `Store::org_member_names` implements it in memory and on Postgres under the org's RLS scope.
+      - Host (`workspace_access::org_members` since item 13): `workspace_access::org_member_names` asked with the collab service credential (same client, timeout, proxy and no-redirect policy, 256 KiB cap) and keeps only the ids it asked about. `org_member_usage_get` adds `displayName` (trimmed, at most 200 characters) to each member it got a name for. A failure is logged and omitted. The response schema gains the optional field.
       - Client: `OrgMemberUsage.displayName`. The usage panel shows the name with the id beneath, falls back to the id, and names the person in the saved-cap toast.
-    - **Known gaps:** the report still lists only people the Host has records for (its person brains and the usage ledger), not every org member, so a cap cannot be set before someone's first use.
+    - **Known gaps:** ~~the report still lists only people the Host has records for (its person brains and the usage ledger), not every org member, so a cap cannot be set before someone's first use.~~ Fixed by item 13.
+
+13. **Every org member in the usage panel (P6g follow-up, 2026-10-25).**
+    - **Decisions:**
+      - The usage report lists everyone in the org, named, including people who have never used the Host, so an admin can cap someone before their first turn. Rows come from one plane answer, which both adds the people and names them.
+      - When the plane cannot be asked or cuts its list short, the report falls back to the people the Host already knows (its person brains, the usage ledger, the cap overrides) and says `membersIncomplete`. The panel then says that some members may be missing. It never presents a partial list as everyone.
+      - A person who left the org keeps their row while the ledger or an override names them, without a name.
+    - **Surface:**
+      - Collaboration server: `GET /internal/v1/orgs/{org_id}/people` answers `{ people: [{ userId, displayName }], truncated }`: the org's members ordered by id, at most 5 000 (`MAX_ORG_PEOPLE`). It takes the Host service credential and its org scope, like the access routes. `Store::org_member_names(org, limit)` implements it in memory and on Postgres under the org's RLS scope (a join of `org_memberships` and `users`). It replaces item 12's `POST`, which had no other caller.
+      - Host: `workspace_access::org_members` asks with the collab service credential (same client, timeout, proxy and no-redirect policy, 4 MiB cap) and drops ids that are not well formed. `org_member_usage_get` fetches the members before it builds the report, adds them to the people it reports on, and names the rows from the same answer (trimmed, at most 200 characters). The response schema gains the optional `membersIncomplete: true`.
+      - Client: `OrgUsageReport.membersIncomplete` (only a literal `true` counts). The panel shows the note above the rows.
+      - Smoke: the owner's report lists both people with no `membersIncomplete`. With `COGNIA_SMOKE_PERSONS_UNUSED_MEMBER` set, it also lists that member, named, at 0 tokens.
 
 **Intentional dormancy (Rule 7).**
 

@@ -15575,6 +15575,7 @@
         "empty": "组织里还没有人用过这台 Host。",
         "hint": "{month}（UTC）每个人通过组织密钥用掉的 token。会超出上限的回合会在到达模型前被拒绝。",
         "hintNoMonth": "本月（UTC）每个人通过组织密钥用掉的 token。",
+        "incomplete": "可能缺少部分成员：{host} 没能取到组织成员名单，这里只列出它已经知道的人。",
         "loading": "正在向 {host} 读取本月用量…",
         "memberSaved": "已保存 {user} 的上限",
         "mode": {

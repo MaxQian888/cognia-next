@@ -757,7 +757,8 @@
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving…",
-      "empty": "No one in your organization has used this Host yet."
+      "empty": "No one in your organization has used this Host yet.",
+      "incomplete": "Some members may be missing: {host} could not get the organization's member list, so this shows only people it already knows."
     },
     "confirm": {
       "title": "Remove the {provider} key?",
