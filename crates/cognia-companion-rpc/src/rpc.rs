@@ -1363,6 +1363,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_set_zoom",
     "browser_find",
     "browser_find_clear",
+    "browser_submission_configure",
+    "browser_submission_drain",
+    "browser_submission_resolve",
     // Lark dual-entry (plan 2026-07-24) — brain-only token minting, intent
     // completion, and allowlisted metric bumps. All SERVICE_ONLY.
     "lark_entry_issue",
@@ -1499,6 +1502,7 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "browser_downloads",
     "browser_find",
     "browser_find_clear",
+    "browser_submission_drain",
     "claude_sidecar_status",
     "claude_has_api_key",
     "claude_has_oauth_bearer",

@@ -788,6 +788,16 @@ const schemas = {
       .optional(),
   }),
   browser_find_clear: browserSession,
+  // ADR-0239 phase 2b: the submission guard (services/workspace-runtime/src/submission-guard.mjs).
+  browser_submission_configure: browserSession.extend({ mode: z.enum(["off", "observe", "hold"]) }),
+  browser_submission_drain: browserSession.extend({
+    pageId: z.string().min(1).optional(),
+    waitMs: z.number().int().nonnegative().max(10_000).optional(),
+  }),
+  browser_submission_resolve: browserSession.extend({
+    holdId: z.string().min(1).max(256),
+    decision: z.enum(["allow", "refuse"]),
+  }),
 
   external_bridge_relay_disable: emptyRequest,
   host_capabilities: emptyRequest,

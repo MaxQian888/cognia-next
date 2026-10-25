@@ -2,10 +2,14 @@ import type { Screenshot } from "@/lib/automation/types"
 import type {
   BrowserActionResult,
   BrowserSnapshot,
+  BrowserSubmissionDecision,
+  BrowserSubmissionDrain,
+  BrowserSubmissionGuardMode,
   ConsoleEntry,
   EvaluateResult,
   NetworkEntry,
   SnapshotOptions,
+  SubmissionGuardedEngine,
 } from "@/lib/browser/protocol"
 import type { BrowserExtension } from "@/lib/browser/extensions-client"
 import {
@@ -81,6 +85,8 @@ export const REMOTE_BROWSER_APPROVAL_OPERATIONS = [
   "browser_set_zoom",
   "browser_recording_control",
   "browser_recording_ref",
+  "browser_submission_configure",
+  "browser_submission_resolve",
 ] as const
 
 function remoteUnsupported(feature: RemoteUnsupportedFeature): BrowserSessionError {
@@ -91,7 +97,7 @@ function remoteUnsupported(feature: RemoteUnsupportedFeature): BrowserSessionErr
 }
 
 /** Companion-RPC adapter; Playwright and CDP remain private to WorkspaceRuntime. */
-export class RemoteChromiumEngine implements BrowserEngine {
+export class RemoteChromiumEngine implements BrowserEngine, SubmissionGuardedEngine {
   readonly backend = "remote-chromium" as const
   constructor(
     private readonly browserSessionId: string,
@@ -104,6 +110,24 @@ export class RemoteChromiumEngine implements BrowserEngine {
 
   navigate(url: string): Promise<void | BrowserMutationResult> {
     return this.call("browser_navigate", { url })
+  }
+  /**
+   * ADR-0239 phase 2b: see {@link SubmissionGuardedEngine}. The gateway takes
+   * no agent lease for these, so a person holding the page never strands a
+   * held submission.
+   */
+  configureSubmissionGuard(mode: BrowserSubmissionGuardMode): Promise<{ mode: string }> {
+    return this.call("browser_submission_configure", { mode })
+  }
+  /** The page in front's submissions, or `pageId`'s. */
+  drainSubmissions(waitMs = 0, pageId?: string): Promise<BrowserSubmissionDrain> {
+    return this.call("browser_submission_drain", { waitMs, ...(pageId ? { pageId } : {}) })
+  }
+  resolveSubmission(
+    holdId: string,
+    decision: BrowserSubmissionDecision
+  ): Promise<{ id: string; decision: string }> {
+    return this.call("browser_submission_resolve", { holdId, decision })
   }
   recordingControl(action: "start" | "resume" | "stop" | "drain"): Promise<unknown> {
     return this.call("browser_recording_control", { action })

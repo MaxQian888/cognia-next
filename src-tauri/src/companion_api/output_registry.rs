@@ -1011,6 +1011,9 @@ mod tests {
         ("browser_set_zoom", OutputShape::Opaque(RootType::Any)),
         ("browser_find", OutputShape::Opaque(RootType::Any)),
         ("browser_find_clear", OutputShape::Opaque(RootType::Any)),
+        ("browser_submission_configure", OutputShape::Opaque(RootType::Any)),
+        ("browser_submission_drain", OutputShape::Opaque(RootType::Any)),
+        ("browser_submission_resolve", OutputShape::Opaque(RootType::Any)),
         // ── runtime environments (rpc/environment.rs) ───────────────────────
         ("sandbox_preview_context", OutputShape::Derived(DerivedOutput { rust_type: "cognia_companion::sandbox_previews::SandboxPreviewContext", schema: schema_of::<cognia_companion::sandbox_previews::SandboxPreviewContext> })),
         ("sandbox_preview_create", OutputShape::Derived(DerivedOutput { rust_type: "cognia_companion::sandbox_previews::CreatedSandboxPreview", schema: schema_of::<cognia_companion::sandbox_previews::CreatedSandboxPreview> })),

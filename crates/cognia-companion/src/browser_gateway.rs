@@ -768,6 +768,9 @@ pub const BROWSER_RPC_COMMANDS: &[&str] = &[
     "browser_set_zoom",
     "browser_find",
     "browser_find_clear",
+    "browser_submission_configure",
+    "browser_submission_drain",
+    "browser_submission_resolve",
 ];
 
 pub fn is_browser_rpc(name: &str) -> bool {
@@ -1234,6 +1237,12 @@ fn browser_operation(
         "browser_set_zoom" => Ok(("browser.set-zoom", true)),
         "browser_find" => Ok(("browser.find", false)),
         "browser_find_clear" => Ok(("browser.find.clear", false)),
+        // The submission guard (ADR-0239 phase 2b) takes no agent lease: the
+        // host answers held submissions even while a person holds the page,
+        // and a lease would make a takeover strand them until they time out.
+        "browser_submission_configure" => Ok(("browser.submission.configure", false)),
+        "browser_submission_drain" => Ok(("browser.submission.drain", false)),
+        "browser_submission_resolve" => Ok(("browser.submission.resolve", false)),
         "browser_wait_for" => {
             let operation = if args.get("networkIdle").and_then(Value::as_bool) == Some(true) {
                 "browser.wait.network-idle"
@@ -1642,6 +1651,24 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Barrier;
+
+    #[test]
+    fn submission_guard_commands_take_no_agent_lease() {
+        // ADR-0239 phase 2b: the host must answer a held submission even while
+        // a person holds the page, so none of these may wait for the lease.
+        for (command, operation) in [
+            ("browser_submission_configure", "browser.submission.configure"),
+            ("browser_submission_drain", "browser.submission.drain"),
+            ("browser_submission_resolve", "browser.submission.resolve"),
+        ] {
+            assert!(is_browser_rpc(command));
+            assert_eq!(
+                browser_operation(command, &Value::Null).unwrap(),
+                (operation, false)
+            );
+            assert!(!browser_operation_refreshes_pages(command));
+        }
+    }
 
     #[test]
     fn browser_rpc_catalog_includes_advanced_control_commands() {

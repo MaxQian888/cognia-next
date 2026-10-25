@@ -11488,6 +11488,161 @@
       "outputTyped": true
     },
     {
+      "name": "browser_submission_configure",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_submission_configure (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "observe",
+              "hold"
+            ]
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "browser"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_submission_drain",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "browser_submission_drain (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "waitMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "browserSessionId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "browser"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "browser_submission_resolve",
+      "category": "development",
+      "resource": "browser",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "browser_submission_resolve (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "holdId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "refuse"
+            ]
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "holdId",
+          "decision"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "browser"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "browser_switch_page",
       "category": "development",
       "resource": "browser",
@@ -102513,5 +102668,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "4ce51f949585b8d47216fe3caee220ecf0410341edc34c781a0afcffd4c4c821"
+  "catalogHash": "ec8cea05e5d7a3cc4eefb82ff552d5eac1899771f765fcc613c8618cff7127a1"
 }

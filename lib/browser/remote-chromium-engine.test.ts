@@ -9,6 +9,7 @@ import {
   RemoteChromiumEngine,
 } from "./remote-chromium-engine"
 import { getCommandManifest } from "@/lib/tauri/command-descriptors"
+import { isSubmissionGuardedEngine } from "./protocol"
 
 const call = transport.call as jest.Mock
 
@@ -87,6 +88,35 @@ describe("RemoteChromiumEngine", () => {
         },
       ],
       ["browser_downloads", { browserSessionId: "session-1" }],
+    ])
+  })
+
+  it("drives the submission guard through companion RPC (ADR-0239 phase 2b)", async () => {
+    call
+      .mockResolvedValueOnce({ mode: "hold" })
+      .mockResolvedValueOnce({ pageId: "page-1", reports: [], windowOpen: false })
+      .mockResolvedValueOnce({ pageId: "page-2", reports: [], windowOpen: true })
+      .mockResolvedValueOnce({ id: "h1", decision: "allow" })
+    const engine = new RemoteChromiumEngine("session-1")
+    expect(isSubmissionGuardedEngine(engine)).toBe(true)
+    await engine.configureSubmissionGuard("hold")
+    await expect(engine.drainSubmissions()).resolves.toMatchObject({ pageId: "page-1" })
+    await engine.drainSubmissions(500, "page-2")
+    await expect(engine.resolveSubmission("h1", "allow")).resolves.toEqual({
+      id: "h1",
+      decision: "allow",
+    })
+    expect(call.mock.calls).toEqual([
+      ["browser_submission_configure", { browserSessionId: "session-1", mode: "hold" }],
+      ["browser_submission_drain", { browserSessionId: "session-1", waitMs: 0 }],
+      [
+        "browser_submission_drain",
+        { browserSessionId: "session-1", waitMs: 500, pageId: "page-2" },
+      ],
+      [
+        "browser_submission_resolve",
+        { browserSessionId: "session-1", holdId: "h1", decision: "allow" },
+      ],
     ])
   })
 

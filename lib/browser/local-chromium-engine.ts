@@ -200,9 +200,9 @@ export class LocalChromiumEngine implements BrowserEngine, SubmissionGuardedEngi
   configureSubmissionGuard(mode: BrowserSubmissionGuardMode): Promise<{ mode: string }> {
     return this.op("browser.submission.configure", { mode })
   }
-  /** This engine's tab's submissions; the runtime addresses the drain by `pageId`. */
-  drainSubmissions(waitMs = 0): Promise<BrowserSubmissionDrain> {
-    return this.op("browser.submission.drain", { waitMs })
+  /** This engine's tab's submissions, or `pageId`'s; the runtime addresses the drain by `pageId`. */
+  drainSubmissions(waitMs = 0, pageId?: string): Promise<BrowserSubmissionDrain> {
+    return this.op("browser.submission.drain", { waitMs, ...(pageId ? { pageId } : {}) })
   }
   resolveSubmission(
     holdId: string,

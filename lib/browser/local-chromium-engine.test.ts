@@ -412,17 +412,19 @@ describe("LocalChromiumEngine addressing a tab", () => {
 })
 
 describe("LocalChromiumEngine submission guard (ADR-0239 phase 2b)", () => {
-  it("maps configure, drain and resolve onto the runtime ops, drain on its own tab", async () => {
+  it("maps configure, drain and resolve onto the runtime ops, drain on its own tab or a named one", async () => {
     const e = new LocalChromiumEngine("s1", "local-chromium", { pageId: "p1" })
     expect(isSubmissionGuardedEngine(e)).toBe(true)
     await e.configureSubmissionGuard("hold")
     await e.drainSubmissions(200)
     await e.drainSubmissions()
+    await e.drainSubmissions(0, "p2")
     await e.resolveSubmission("h1", "refuse")
     expect(mockRpc.mock.calls).toEqual([
       ["browser.submission.configure", { sessionId: "s1", pageId: "p1", mode: "hold" }],
       ["browser.submission.drain", { sessionId: "s1", pageId: "p1", waitMs: 200 }],
       ["browser.submission.drain", { sessionId: "s1", pageId: "p1", waitMs: 0 }],
+      ["browser.submission.drain", { sessionId: "s1", pageId: "p2", waitMs: 0 }],
       [
         "browser.submission.resolve",
         { sessionId: "s1", pageId: "p1", holdId: "h1", decision: "refuse" },

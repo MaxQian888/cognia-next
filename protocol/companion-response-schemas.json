@@ -15065,6 +15065,15 @@
     "browser_stop": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "browser_submission_configure": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_submission_drain": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_submission_resolve": {
+      "$ref": "#/$defs/LegacyResult"
+    },
     "browser_switch_page": {
       "$ref": "#/$defs/LegacyResult"
     },

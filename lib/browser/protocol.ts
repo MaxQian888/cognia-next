@@ -549,8 +549,13 @@ export type BrowserSubmissionDecision = "allow" | "refuse"
  */
 export interface SubmissionGuardedEngine {
   configureSubmissionGuard(mode: BrowserSubmissionGuardMode): Promise<{ mode: string }>
-  /** The engine's page's reports since the last drain, waiting up to `waitMs` for one. */
-  drainSubmissions(waitMs?: number): Promise<BrowserSubmissionDrain>
+  /**
+   * A page's reports since the last drain, waiting up to `waitMs` for one.
+   * The page is `pageId` when given, else the engine's own tab (or, for an
+   * engine not pinned to one, the page in front); the drain names the page it
+   * read, so a caller can pin later drains to the page its action began on.
+   */
+  drainSubmissions(waitMs?: number, pageId?: string): Promise<BrowserSubmissionDrain>
   resolveSubmission(
     holdId: string,
     decision: BrowserSubmissionDecision

@@ -1492,6 +1492,71 @@
         "additionalProperties": false
       }
     },
+    "browser_submission_configure": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "observe",
+              "hold"
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "mode",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "browser_submission_resolve": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "holdId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "refuse"
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "holdId",
+          "decision",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
     "browser_switch_page": {
       "inputSchemaSource": "zod-contract",
       "inputSchema": {
