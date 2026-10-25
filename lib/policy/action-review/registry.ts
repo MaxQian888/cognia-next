@@ -99,6 +99,10 @@ export const DEFAULT_ACTION_REVIEW_ADAPTERS: Record<
   // unattended delivery becomes a draft in the draft center, which is where a
   // person answers it. An interrupt here would be a second, unanswerable copy.
   "connector-delivery": { interruptType: null, defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
+  // Receipt-only too (ADR-0239 phase 2b): a held browser submission is
+  // answered on the host's outbound ask dialog, the run's own approval path
+  // or a parked approval, each of which raises its own question.
+  "browser-submission": { interruptType: null, defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
 }
 
 const overrides = new Map<ActionReviewChannel, ActionReviewChannelAdapter>()

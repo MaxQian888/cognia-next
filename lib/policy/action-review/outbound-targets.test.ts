@@ -17,6 +17,7 @@ import {
   siteTarget,
   toReviewTarget,
   unknownGithubTarget,
+  unknownSiteTarget,
 } from "./outbound-targets"
 
 const GROUP = "lark:bot-a:oc_123"
@@ -337,6 +338,15 @@ describe("unknownGithubTarget", () => {
   it("is never grantable and matches no origin", () => {
     const target = unknownGithubTarget()
     expect(target).toEqual({ kind: "unknown", channel: "github", recipient: "*" })
+    expect(originMatchFingerprint(target)).toBeUndefined()
+  })
+})
+
+describe("unknownSiteTarget", () => {
+  it("is a browser recipient that is never grantable and matches no origin", () => {
+    const target = unknownSiteTarget()
+    expect(target).toEqual({ kind: "unknown", channel: "browser", recipient: "*" })
+    expect(outboundCategoryOf(target)).toBe("browser")
     expect(originMatchFingerprint(target)).toBeUndefined()
   })
 })

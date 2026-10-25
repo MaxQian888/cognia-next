@@ -18,7 +18,11 @@ it("declares a projection for every channel the contract declares", () => {
   )
 })
 
-const RECEIPT_ONLY_CHANNELS = new Set(["connector-workflow", "connector-delivery"])
+const RECEIPT_ONLY_CHANNELS = new Set([
+  "connector-workflow",
+  "connector-delivery",
+  "browser-submission",
+])
 
 it("keeps the receipt-only channels receipt-only, per the contract", () => {
   // The contract calls them "receipt-only, never a waiter" — minting an
@@ -26,6 +30,9 @@ it("keeps the receipt-only channels receipt-only, per the contract", () => {
   // connector delivery is answered in the draft center instead (ADR-0239).
   expect(getActionReviewChannelAdapter("connector-workflow").interruptType).toBeNull()
   expect(getActionReviewChannelAdapter("connector-delivery").interruptType).toBeNull()
+  // A held browser submission is asked on the dialog, the run's own approval
+  // path or a parked approval, each with its own question (ADR-0239 phase 2b).
+  expect(getActionReviewChannelAdapter("browser-submission").interruptType).toBeNull()
 })
 
 it("gives every other channel a run interrupt to park on", () => {

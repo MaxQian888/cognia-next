@@ -240,6 +240,14 @@ export function unknownGithubTarget(): OutboundTarget {
 }
 
 /**
+ * A browser submission whose site could not be named (a `data:` or extension
+ * page): held to the browser category's mode, and only ever allowed per call.
+ */
+export function unknownSiteTarget(): OutboundTarget {
+  return { kind: "unknown", channel: "browser", recipient: "*" }
+}
+
+/**
  * The origin a browser submission sends to: `scheme://host[:port]` of an
  * `http(s)` URL, as `URL` normalizes it (lowercased host, punycode, default
  * port dropped). Returns `undefined` for any other scheme or an opaque origin.

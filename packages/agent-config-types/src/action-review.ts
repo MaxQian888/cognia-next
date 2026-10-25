@@ -67,6 +67,13 @@ export type ActionReviewChannel =
    * unauthorized unattended delivery becomes a draft a person approves.
    */
   | "connector-delivery"
+  /**
+   * What an agent's browser action submits to a site (ADR-0239 phase 2b),
+   * planned at the browser engine boundary. Receipt-only: a person answers on
+   * the host's outbound ask dialog, the run's own approval path, or a parked
+   * approval, each with its own record.
+   */
+  | "browser-submission"
 
 export const ACTION_REVIEW_CHANNELS: readonly ActionReviewChannel[] = [
   "chat-tool",
@@ -85,6 +92,7 @@ export const ACTION_REVIEW_CHANNELS: readonly ActionReviewChannel[] = [
   "agent-team-recovery",
   "generic",
   "connector-delivery",
+  "browser-submission",
 ]
 
 /** RESTATEMENT of `PermissionVerdict` (lib/claude/permissions/ruleset.ts). */
@@ -145,6 +153,12 @@ export type ActionReviewSubjectKind =
    * or a raw authenticated request, planned before it reaches GitHub.
    */
   | "integration-action"
+  /**
+   * A browser submission (ADR-0239 phase 2b): a request or WebSocket frame an
+   * agent action sent, or an action on an engine with no submission signal
+   * that may submit, planned against the site it reaches.
+   */
+  | "browser-submission"
 
 /**
  * A party an outbound action delivers to (ADR-0239), as a receipt records it.
@@ -564,6 +578,7 @@ function validateSubject(subject: unknown, errors: string[]): void {
     "handoff-commit",
     "connector-delivery",
     "integration-action",
+    "browser-submission",
   ]
   if (!memberOf(subject.kind, kinds)) {
     errors.push("subject.kind must be a known ActionReviewSubjectKind")

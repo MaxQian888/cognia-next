@@ -20,6 +20,11 @@ import {
   repositoryTarget,
   siteTarget,
 } from "./outbound-targets"
+import {
+  planBrowserSubmission,
+  type BrowserSubmissionAsker,
+  type PlanBrowserDeps,
+} from "./plan-browser"
 import { buildActionReviewPlanContext } from "./plan-context"
 import { planDelivery, type DeliveryPlanInput, type PlanDeliveryDeps } from "./plan-delivery"
 import {
@@ -266,6 +271,58 @@ describe("shadow mode changes no GitHub write (ADR-0239 phase 2)", () => {
         options(settings)
       )
       expect(observed && outboundToolDecision(observed, "Bash")).toEqual({ kind: "unchanged" })
+    }
+  })
+})
+
+describe("shadow mode changes no browser submission (ADR-0239 phase 2b)", () => {
+  const BROWSER_ENFORCE = {
+    agentPermissions: { outboundAuthorizationByCategory: { browser: "enforce" } },
+  }
+  // The browser observes whatever messaging and GitHub do, and on anything but exactly `enforce`.
+  const BROWSER_SHADOW = [
+    ...SHADOW_SETTINGS,
+    ENFORCE,
+    { agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } } },
+    { agentPermissions: { outboundAuthorizationByCategory: { browser: "shadow" } } },
+    { agentPermissions: { outboundAuthorizationByCategory: { browser: "on" } } },
+  ]
+
+  function planDeps(settings: object, fenced = false): PlanBrowserDeps {
+    const prefix = actionReviewAuthKeyPrefix("deny", "root-1", "epoch-1")
+    const site = outboundFingerprint(siteTarget("https://forms.example.com")!)
+    return {
+      settings: () => settings,
+      listAuthKeys: async (query) => (fenced && query === prefix ? [`${prefix}${site}`] : []),
+      resolveSessionOrigin: async () => ({ rootSessionId: "root-1", instructionEpoch: "epoch-1" }),
+      workflowRunTrigger: async () => undefined,
+      now: () => 1,
+    }
+  }
+
+  const ASKERS: [string, BrowserSubmissionAsker][] = [
+    ["a chat's submission", { kind: "chat", sessionId: "chat" }],
+    ["a scheduled turn's submission", { kind: "turn", sessionId: "chat", unattended: true }],
+    ["a workflow node's submission", { kind: "workflow", workflowId: "wf_1", runId: "wr_1" }],
+    ["a bridge client's submission", { kind: "external-bridge", clientId: "claude" }],
+    ["a plugin's submission", { kind: "plugin", pluginId: "p1" }],
+  ]
+
+  it.each(ASKERS)("lets %s through, fenced or not", async (_name, asker) => {
+    for (const basis of ["request", "possible"] as const) {
+      const input = { url: "https://forms.example.com/submit", basis, operation: "POST", asker }
+      for (const fenced of [false, true]) {
+        // The submission is one enforcement asks about or refuses...
+        const enforced = await planBrowserSubmission(input, planDeps(BROWSER_ENFORCE, fenced))
+        expect(enforced.action).not.toBe("proceed")
+        // ...and shadow mode lets it through, recording what it would have done.
+        for (const settings of BROWSER_SHADOW) {
+          const observed = await planBrowserSubmission(input, planDeps(settings, fenced))
+          expect(observed.action).toBe("proceed")
+          if (observed.action !== "proceed") continue
+          expect(observed.receipt?.request.plan).toMatchObject({ enforced: false })
+        }
+      }
     }
   })
 })
