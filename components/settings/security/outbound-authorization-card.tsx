@@ -11,7 +11,8 @@
  * drafted, parked, asked about or refused, by sender and recipient. Enforcing
  * one never enforces the other. Browser submissions get their switch when
  * they have a chokepoint (phase 2b); until then nothing reads their mode, so
- * the card shows none.
+ * the card shows none. Their global site list is already editable here
+ * ({@link OutboundSiteList}), labeled as not yet in effect.
  *
  * A recipient the device can name can be allowed in place, as the person's
  * own edit: a conversation or address into the sender's Bot list or the bot
@@ -44,6 +45,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { OutboundSiteList } from "@/components/settings/security/outbound-site-list"
 import { useBotInstallations } from "@/hooks/bots/use-bot-installations"
 import { useShadowReport, type ShadowReportView } from "@/hooks/outbound/use-shadow-report"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
@@ -370,6 +372,8 @@ export function OutboundAuthorizationCard() {
       ) : null}
 
       {SWITCHED_CATEGORIES.map(renderCategory)}
+
+      <OutboundSiteList disabled={remote} />
 
       <AlertDialog
         open={confirming !== null}

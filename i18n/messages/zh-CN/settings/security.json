@@ -140,6 +140,11 @@
     "intoAccount": "加入 {name} 账号的名单",
     "chooseAccount": "这次写入没有指明账号。加入：",
     "allowNamedInto": "在 {list} 上允许 {name}",
-    "unrecognizedRepositories": "本设备无法识别 {count} 个仓库（{sends} 次写入）。请在集成中把它们加入某个 GitHub 账号的名单。"
+    "unrecognizedRepositories": "本设备无法识别 {count} 个仓库（{sends} 次写入）。请在集成中把它们加入某个 GitHub 账号的名单。",
+    "sites": {
+      "title": "浏览器提交可到达的站点",
+      "description": "agent 在浏览器里向这些站点提交（表单、注册、发帖）时，无论来自聊天、定时任务还是 workflow，都不再询问。Bot 自己的名单也可以列站点，只对该 Bot 生效。输入的地址按整个站点列入。",
+      "dormant": "尚未生效：浏览器提交还没有接入检查。现在列入的站点在检查上线后生效。"
+    }
   }
 }

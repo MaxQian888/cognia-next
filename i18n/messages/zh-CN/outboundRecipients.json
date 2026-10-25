@@ -41,5 +41,7 @@
   "remove": "移除 {name}",
   "saveFailed": "无法保存收件人名单：{reason}",
   "saved": "收件人名单已保存",
+  "siteNotYetChecked": "站点要等浏览器提交检查上线后才生效（后续更新）。在此之前，这里列出的站点不起任何作用。",
+  "siteOrigin": "将添加 {origin}，即该站点的所有页面。",
   "via": "经由 {account}"
 }

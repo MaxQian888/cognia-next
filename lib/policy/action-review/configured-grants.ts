@@ -26,11 +26,20 @@
  *   turning stacked delivery on (`team-delivery:<teamId>`,
  *   {@link teamDeliveryGrants}).
  *
+ * Browser submissions (ADR-0239 phase 2b) have one more, besides a Bot
+ * installation's list, which may hold sites: the global site list in Settings
+ * → Security (`agentPermissions.outboundSites`, `browser-sites`,
+ * {@link configuredSiteGrants}), which covers every submission to a listed
+ * site, whichever run makes it.
+ *
  * A lookup that fails grants nothing: the plan then asks, drafts or parks,
  * never sends on a failure.
  */
 
-import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
+import {
+  validateOutboundRecipientGrants,
+  type OutboundRecipientGrant,
+} from "@cognia/agent-config-types/action-review"
 import type { CapabilityGrant, ServiceConnection } from "@/types/external-service"
 import type { IntegrationActionRisk } from "@/types/plugin/plugin-integration"
 import type { AgentTeamGithubDeliveryPolicy } from "@/types/agent/agent-team-runtime"
@@ -375,6 +384,48 @@ export function teamDeliveryGrants(
     return target ? [outboundFingerprint(target)] : []
   })
   return fingerprints.length > 0 ? [{ policyRef: `team-delivery:${team.id}`, fingerprints }] : []
+}
+
+// ── Browser sites (ADR-0239 phase 2b) ──────────────────────────────────────
+
+/** The ref the global site list grants under. */
+export const BROWSER_SITES_POLICY_REF = "browser-sites"
+
+/**
+ * The global site list (`agentPermissions.outboundSites`): the sites any
+ * browser submission may reach with nobody asking, whichever run makes it.
+ * Only the Settings → Security card writes it. An entry that is not a valid
+ * `site` grant is dropped, so a hand-edited or partly synced settings object
+ * never grants more than a person listed. Read structurally, like the mode,
+ * so a settings object from any source can be passed.
+ */
+export function readOutboundSiteGrants(
+  settings: { agentPermissions?: unknown } | null | undefined
+): OutboundRecipientGrant[] {
+  const permissions = settings?.agentPermissions
+  if (!permissions || typeof permissions !== "object") return []
+  const list = (permissions as { outboundSites?: unknown }).outboundSites
+  if (!Array.isArray(list)) return []
+  return list.filter(
+    (entry): entry is OutboundRecipientGrant =>
+      validateOutboundRecipientGrants([entry]).length === 0 &&
+      (entry as OutboundRecipientGrant).recipient.kind === "site"
+  )
+}
+
+/**
+ * The global site list as a `policy` grant, for a browser submission's plan.
+ *
+ * Intentionally dormant until the browser chokepoints land (ADR-0239 phase 2b
+ * WP12): nothing plans a browser submission yet, so nothing calls this. The
+ * Security card labels the list "not yet in effect", and
+ * `outbound-site-list.test.tsx` pins that label.
+ */
+export function configuredSiteGrants(
+  settings: { agentPermissions?: unknown } | null | undefined
+): OutboundPolicyGrantList[] {
+  const list = recipientGrantList(BROWSER_SITES_POLICY_REF, readOutboundSiteGrants(settings))
+  return list ? [list] : []
 }
 
 // ── Handler Bots: the run's plugin code ─────────────────────────────────────

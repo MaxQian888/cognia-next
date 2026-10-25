@@ -140,6 +140,11 @@
     "intoAccount": "Adds to the {name} account's list",
     "chooseAccount": "The write named no account. Add to:",
     "allowNamedInto": "Allow {name} on {list}",
-    "unrecognizedRepositories": "{count, plural, one {# repository} other {# repositories}} this device cannot name ({sends, plural, one {# write} other {# writes}}). Add them to a GitHub account's list in Integrations."
+    "unrecognizedRepositories": "{count, plural, one {# repository} other {# repositories}} this device cannot name ({sends, plural, one {# write} other {# writes}}). Add them to a GitHub account's list in Integrations.",
+    "sites": {
+      "title": "Sites browser submissions may reach",
+      "description": "An agent's browser submission (a form, a sign-up, a post) to one of these sites, from a chat, a scheduled task or a workflow, will go ahead without asking. A Bot's own list can hold sites for that Bot alone. A typed address is listed as its whole site.",
+      "dormant": "Not yet in effect: browser submissions are not checked yet. Sites listed now take effect when that check ships."
+    }
   }
 }

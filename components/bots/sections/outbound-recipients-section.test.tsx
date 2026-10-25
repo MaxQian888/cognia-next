@@ -71,6 +71,30 @@ describe("BotOutboundRecipientsSection", () => {
     ])
   })
 
+  it("lists a site as its origin, and says sites are not checked yet (ADR-0239 phase 2b)", async () => {
+    render(<BotOutboundRecipientsSection row={row()} />)
+    expect(screen.queryByTestId("bot-outbound-recipients-editor-note")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Site" }))
+    // Dormant until the browser chokepoints land: the note pins the label.
+    expect(screen.getByTestId("bot-outbound-recipients-editor-note")).toHaveTextContent(
+      "Sites take effect once browser submissions are checked"
+    )
+    fireEvent.change(screen.getByLabelText("https://example.com"), {
+      target: { value: "https://forms.example.com/contact" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(saveOutboundRecipients).toHaveBeenCalledTimes(1))
+    expect(saveOutboundRecipients.mock.calls[0][1]).toEqual([
+      expect.objectContaining({
+        recipient: {
+          kind: "site",
+          channel: "browser",
+          recipient: "site:https://forms.example.com",
+        },
+      }),
+    ])
+  })
+
   it("is read-only where the write cannot land, saying why", () => {
     readiness = { availability: { state: "unsupported", reason: "requires-companion" }, can: false }
     render(<BotOutboundRecipientsSection row={row()} />)

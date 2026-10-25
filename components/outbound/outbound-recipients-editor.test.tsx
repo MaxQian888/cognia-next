@@ -165,6 +165,46 @@ describe("OutboundRecipientsEditor", () => {
     expect(onSave.mock.calls[1][0][0].recipient).toEqual(siteTarget("https://forms.example.com"))
   })
 
+  it("shows the origin a typed site is listed as, before adding it", async () => {
+    const onSave = setup({ kinds: ["site"] })
+    const input = screen.getByLabelText("https://example.com")
+    fireEvent.change(input, { target: { value: "https://user:pw@Forms.Example.com:443/a?b=1" } })
+    expect(screen.getByTestId("outbound-recipients-origin")).toHaveTextContent(
+      "Adds https://forms.example.com, every page of that site."
+    )
+    fireEvent.change(input, { target: { value: "forms.example.com" } })
+    expect(screen.queryByTestId("outbound-recipients-origin")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("That is not a web address.")
+    expect(onSave).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: "http://localhost:3000/form" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0][0].recipient).toEqual(siteTarget("http://localhost:3000"))
+  })
+
+  it("refuses a site already listed under another spelling", async () => {
+    const onSave = setup({ kinds: ["site"], value: [grant(siteTarget("https://example.com")!)] })
+    fireEvent.change(screen.getByLabelText("https://example.com"), {
+      target: { value: "HTTPS://EXAMPLE.COM:443/other" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Already on the list.")
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("shows a kind's note only while that kind is picked", () => {
+    setup({ kinds: ["mail", "site"], kindNotes: { site: "Sites are not checked yet." } })
+    expect(screen.queryByTestId("outbound-recipients-note")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Site" }))
+    expect(screen.getByTestId("outbound-recipients-note")).toHaveTextContent(
+      "Sites are not checked yet."
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Email" }))
+    expect(screen.queryByTestId("outbound-recipients-note")).not.toBeInTheDocument()
+  })
+
   it("offers the repositories this device knows, filtered by what is typed and not yet listed", async () => {
     const WEB = repositoryTarget("acme/web")!
     const API = repositoryTarget("acme/api")!

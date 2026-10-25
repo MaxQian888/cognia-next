@@ -3,13 +3,16 @@ import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-r
 import { STACKED_DELIVERY_DEFAULTS } from "@/lib/stack/team-policy"
 
 import {
+  BROWSER_SITES_POLICY_REF,
   __resetRunningBotGrantsForTesting,
   beginBotOutboundRun,
   botRecipientGrants,
   botScopeGrants,
   configuredGithubGrants,
   configuredPolicyGrants,
+  configuredSiteGrants,
   listsRecipient,
+  readOutboundSiteGrants,
   recipientGrant,
   recipientGrantList,
   runningBotGrantsOf,
@@ -342,6 +345,54 @@ describe("teamDeliveryGrants", () => {
     ).toEqual([])
     expect(
       teamDeliveryGrants({ id: "team_1", config: { githubDeliveryPolicy: consented } }, [bound[2]!])
+    ).toEqual([])
+  })
+})
+
+describe("the global site list (ADR-0239 phase 2b)", () => {
+  const FORMS = siteTarget("https://forms.example.com/submit")!
+  const LOCAL = siteTarget("http://localhost:3000")!
+
+  it("reads the site entries a person listed", () => {
+    const settings = { agentPermissions: { outboundSites: [grant(FORMS), grant(LOCAL)] } }
+    expect(readOutboundSiteGrants(settings)).toEqual([grant(FORMS), grant(LOCAL)])
+    expect(configuredSiteGrants(settings)).toEqual([
+      {
+        policyRef: BROWSER_SITES_POLICY_REF,
+        fingerprints: [outboundFingerprint(FORMS), outboundFingerprint(LOCAL)],
+      },
+    ])
+  })
+
+  it("drops entries that are not valid site grants", () => {
+    const settings = {
+      agentPermissions: {
+        outboundSites: [
+          grant(FORMS),
+          grant(MAIL),
+          grant(repositoryTarget("acme/web")!),
+          { ...grant(LOCAL), addedBy: "agent" },
+          { recipient: { kind: "site", channel: "github", recipient: "site:https://x.io" } },
+          { recipient: { kind: "site", channel: "browser", recipient: "site:" }, addedAt: 1 },
+          "https://evil.example",
+          null,
+        ],
+      },
+    }
+    expect(readOutboundSiteGrants(settings)).toEqual([grant(FORMS)])
+  })
+
+  it.each([undefined, null, {}, { agentPermissions: null }, { agentPermissions: {} }])(
+    "grants nothing without a list (%j)",
+    (settings) => {
+      expect(readOutboundSiteGrants(settings)).toEqual([])
+      expect(configuredSiteGrants(settings)).toEqual([])
+    }
+  )
+
+  it("grants nothing for a list that is not an array", () => {
+    expect(
+      configuredSiteGrants({ agentPermissions: { outboundSites: { 0: grant(FORMS) } } })
     ).toEqual([])
   })
 })

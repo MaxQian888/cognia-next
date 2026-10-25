@@ -31275,6 +31275,8 @@
     "remove": "Remove {name}",
     "saveFailed": "Could not save the recipient list: {reason}",
     "saved": "Recipient list saved",
+    "siteNotYetChecked": "Sites take effect once browser submissions are checked (coming in a later update). Until then a site listed here changes nothing.",
+    "siteOrigin": "Adds {origin}, every page of that site.",
     "via": "via {account}"
   },
   "page": {
@@ -55859,6 +55861,11 @@
           "task": "Scheduled task: {name}",
           "team": "Agent Team: {name}",
           "workflow": "Workflow: {id}"
+        },
+        "sites": {
+          "description": "An agent's browser submission (a form, a sign-up, a post) to one of these sites, from a chat, a scheduled task or a workflow, will go ahead without asking. A Bot's own list can hold sites for that Bot alone. A typed address is listed as its whole site.",
+          "dormant": "Not yet in effect: browser submissions are not checked yet. Sites listed now take effect when that check ships.",
+          "title": "Sites browser submissions may reach"
         },
         "title": "Outbound authorization",
         "unrecognized": "{count, plural, one {# recipient} other {# recipients}} via {account} this device cannot name ({sends, plural, one {# send} other {# sends}}). Add them in the Bot's or the connection's settings.",

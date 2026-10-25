@@ -31275,6 +31275,8 @@
     "remove": "移除 {name}",
     "saveFailed": "无法保存收件人名单：{reason}",
     "saved": "收件人名单已保存",
+    "siteNotYetChecked": "站点要等浏览器提交检查上线后才生效（后续更新）。在此之前，这里列出的站点不起任何作用。",
+    "siteOrigin": "将添加 {origin}，即该站点的所有页面。",
     "via": "经由 {account}"
   },
   "page": {
@@ -55859,6 +55861,11 @@
           "task": "定时任务：{name}",
           "team": "Agent Team：{name}",
           "workflow": "工作流：{id}"
+        },
+        "sites": {
+          "description": "agent 在浏览器里向这些站点提交（表单、注册、发帖）时，无论来自聊天、定时任务还是 workflow，都不再询问。Bot 自己的名单也可以列站点，只对该 Bot 生效。输入的地址按整个站点列入。",
+          "dormant": "尚未生效：浏览器提交还没有接入检查。现在列入的站点在检查上线后生效。",
+          "title": "浏览器提交可到达的站点"
         },
         "title": "外发授权",
         "unrecognized": "经由 {account} 有 {count} 个本机无法识别的收件人（{sends} 次发送）。请在 Bot 或连接的设置里手动添加。",

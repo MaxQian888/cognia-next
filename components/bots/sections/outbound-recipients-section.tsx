@@ -6,10 +6,15 @@
  * Only this installation's runs: its agent turn carries the list, and a
  * handler Bot's own plugin code is covered while a run is live. A bot
  * account's own list (the connector settings) covers every send through that
- * account and is not repeated here. Conversations, email and GitHub
+ * account and is not repeated here. Conversations, email, GitHub
  * repositories (ADR-0239 phase 2: a Bot's GitHub writes outside the PR or
- * issue its event is about); a member is named within one bot account, so
- * that list is where members go.
+ * issue its event is about) and sites (phase 2b: the origins its browser
+ * submissions may reach); a member is named within one bot account, so that
+ * list is where members go.
+ *
+ * Sites are intentionally dormant until the browser chokepoints land (phase
+ * 2b WP12): nothing plans a browser submission yet. The editor says so while
+ * the Site kind is picked, pinned by this section's test.
  *
  * A paired client relays the write to its Host like the other lifecycle
  * writes, and a placeholder of a Bot the Host runs cannot be edited here.
@@ -26,10 +31,11 @@ import { useKnownConversations } from "@/hooks/outbound/use-known-conversations"
 import { useKnownRepositories } from "@/hooks/outbound/use-known-repositories"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
-const BOT_KINDS = ["conversation", "mail", "repository"] as const
+const BOT_KINDS = ["conversation", "mail", "repository", "site"] as const
 
 export function BotOutboundRecipientsSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
+  const tRecipients = useTranslations("outboundRecipients")
   const readiness = useBotLifecycleReadiness()
   const actions = useBotLifecycleActions()
   const known = useKnownConversations()
@@ -44,6 +50,7 @@ export function BotOutboundRecipientsSection({ row }: { row: BotConsoleRow }) {
         kinds={BOT_KINDS}
         knownConversations={known}
         knownRepositories={repositories}
+        kindNotes={{ site: tRecipients("siteNotYetChecked") }}
         disabled={!readiness.can || busy || row.owner !== undefined}
         testId="bot-outbound-recipients-editor"
       />

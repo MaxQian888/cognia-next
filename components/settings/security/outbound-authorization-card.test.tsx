@@ -277,6 +277,8 @@ describe("OutboundAuthorizationCard", () => {
     expect(screen.queryByTestId("outbound-shadow-report-messaging")).not.toBeInTheDocument()
     expect(screen.queryByTestId("outbound-shadow-report-github")).not.toBeInTheDocument()
     expect(useShadowReport).toHaveBeenLastCalledWith(false)
+    // The site list lives on the Host too, so it is read-only here as well.
+    expect(screen.getByLabelText("https://example.com")).toBeDisabled()
   })
 
   it("has a switch per category, and none for browser submissions yet", () => {
@@ -285,6 +287,9 @@ describe("OutboundAuthorizationCard", () => {
     expect(screen.getByText("Enforce for messages and email")).toBeInTheDocument()
     expect(screen.getByText("Enforce for GitHub writes")).toBeInTheDocument()
     expect(screen.queryByTestId("outbound-authorization-browser")).not.toBeInTheDocument()
+    // The browser's site list is editable already, labeled as not yet in effect.
+    expect(screen.getByTestId("outbound-site-list-dormant")).toBeInTheDocument()
+    expect(screen.getByLabelText("https://example.com")).toBeEnabled()
   })
 
   it("lists GitHub writes in their own report, by sender and repository", () => {

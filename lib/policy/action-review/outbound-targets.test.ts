@@ -274,18 +274,49 @@ describe("siteTarget (ADR-0239 phase 2)", () => {
     )
   })
 
+  it("keeps a port other than the scheme's default", () => {
+    expect(siteTarget("http://example.com:80/x")?.recipient).toBe("site:http://example.com")
+    expect(siteTarget("https://example.com:443")?.recipient).toBe("site:https://example.com")
+    expect(siteTarget("https://example.com:8443/x")?.recipient).toBe(
+      "site:https://example.com:8443"
+    )
+    expect(siteTarget("http://example.com:443")?.recipient).toBe("site:http://example.com:443")
+    expect(siteTarget("https://example.com:8443")?.recipient).not.toBe(
+      siteTarget("https://example.com")?.recipient
+    )
+  })
+
+  it("drops credentials, path, query and fragment, and lowercases the scheme and host", () => {
+    expect(siteTarget("HTTPS://User:Secret@EXAMPLE.com/a/b?c=1#d")?.recipient).toBe(
+      "site:https://example.com"
+    )
+    expect(siteTarget("  https://example.com  ")?.recipient).toBe("site:https://example.com")
+  })
+
+  it("names IP literals", () => {
+    expect(siteTarget("http://127.0.0.1:4811/submit")?.recipient).toBe("site:http://127.0.0.1:4811")
+    expect(siteTarget("http://[::1]:8080/")?.recipient).toBe("site:http://[::1]:8080")
+  })
+
   it("tells http and https apart", () => {
     expect(siteTarget("http://example.com")?.recipient).not.toBe(
       siteTarget("https://example.com")?.recipient
     )
   })
 
-  it.each(["", "not a url", "file:///etc/passwd", "data:text/html,x", "javascript:alert(1)"])(
-    "refuses %j",
-    (input) => {
-      expect(siteTarget(input)).toBeUndefined()
-    }
-  )
+  it.each([
+    "",
+    "not a url",
+    "example.com",
+    "file:///etc/passwd",
+    "data:text/html,x",
+    "javascript:alert(1)",
+    "ftp://example.com",
+    "blob:https://example.com/uuid",
+    "about:blank",
+  ])("refuses %j", (input) => {
+    expect(siteTarget(input)).toBeUndefined()
+  })
 })
 
 describe("outboundCategoryOf", () => {

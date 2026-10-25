@@ -4802,6 +4802,20 @@ export interface AppSettings {
       github?: "shadow" | "enforce"
       browser?: "shadow" | "enforce"
     }
+    /**
+     * The global site list (ADR-0239 phase 2b): the sites any browser
+     * submission may reach with nobody asking, whichever run makes it (chat,
+     * a scheduled task, a workflow). Each entry is a `site` recipient
+     * (`site:<origin>`, channel `browser`). Written only by the Settings →
+     * Security card; read only through `readOutboundSiteGrants`, which drops
+     * any entry that is not a valid `site` grant.
+     *
+     * Intentionally dormant until the browser chokepoints land (phase 2b
+     * WP12): nothing plans a browser submission yet, so nothing reads it. The
+     * card labels the list "not yet in effect", pinned by
+     * `components/settings/security/outbound-site-list.test.tsx`.
+     */
+    outboundSites?: import("./action-review").OutboundRecipientGrant[]
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings

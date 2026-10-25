@@ -6,11 +6,13 @@
  *
  * Only a person edits this, so the editor stores what they picked in the
  * engine's normalized form (`conversationTarget` / `personTarget` /
- * `mailTarget` / `repositoryTarget`) and nothing a model said. Conversations
- * are offered from the chats this device knows, by name, and repositories from
- * the ones it works with (ADR-0239 phase 2); a key or an `owner/repo` can
- * still be typed for one that never reached this device. Every add and remove
- * saves the whole list, so what is shown is what is stored.
+ * `mailTarget` / `repositoryTarget` / `siteTarget`) and nothing a model said.
+ * Conversations are offered from the chats this device knows, by name, and
+ * repositories from the ones it works with (ADR-0239 phase 2); a key or an
+ * `owner/repo` can still be typed for one that never reached this device. A
+ * typed site is listed as its origin, which the form shows before adding, so
+ * a pasted page URL visibly becomes the whole site. Every add and remove saves
+ * the whole list, so what is shown is what is stored.
  */
 
 import { useMemo, useState } from "react"
@@ -61,6 +63,8 @@ export interface OutboundRecipientsEditorProps {
    * integration account's list. Default github.com.
    */
   repositoryHost?: string
+  /** A line shown under the kind picker while that kind is picked. */
+  kindNotes?: Partial<Record<OutboundRecipientKind, string>>
   disabled?: boolean
   testId?: string
 }
@@ -75,6 +79,7 @@ export function OutboundRecipientsEditor({
   knownConversations,
   knownRepositories = [],
   repositoryHost,
+  kindNotes,
   disabled = false,
   testId = "outbound-recipients",
 }: OutboundRecipientsEditorProps) {
@@ -130,6 +135,8 @@ export function OutboundRecipientsEditor({
         return siteTarget(raw)
     }
   }
+
+  const siteOrigin = kind === "site" ? siteTarget(text)?.recipient.replace(/^site:/, "") : undefined
 
   async function add(target: OutboundTarget | undefined) {
     const grant = target ? recipientGrant(target) : undefined
@@ -210,6 +217,12 @@ export function OutboundRecipientsEditor({
         </div>
       ) : null}
 
+      {kindNotes?.[kind] ? (
+        <p className="text-xs text-muted-foreground" data-testid={`${testId}-note`}>
+          {kindNotes[kind]}
+        </p>
+      ) : null}
+
       <form
         className="flex items-start gap-2"
         onSubmit={(event) => {
@@ -233,6 +246,10 @@ export function OutboundRecipientsEditor({
           {error ? (
             <p className="text-xs text-destructive" role="alert">
               {error === "invalid" ? t(`invalid.${kind}`) : t(error)}
+            </p>
+          ) : siteOrigin ? (
+            <p className="text-xs text-muted-foreground" data-testid={`${testId}-origin`}>
+              {t("siteOrigin", { origin: siteOrigin })}
             </p>
           ) : null}
         </div>

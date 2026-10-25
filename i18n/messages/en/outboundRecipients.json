@@ -41,5 +41,7 @@
   "remove": "Remove {name}",
   "saveFailed": "Could not save the recipient list: {reason}",
   "saved": "Recipient list saved",
+  "siteNotYetChecked": "Sites take effect once browser submissions are checked (coming in a later update). Until then a site listed here changes nothing.",
+  "siteOrigin": "Adds {origin}, every page of that site.",
   "via": "via {account}"
 }
