@@ -9,6 +9,7 @@ import {
   mailTarget,
   outboundFingerprint,
   personTarget,
+  repositoryTarget,
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
@@ -30,6 +31,7 @@ function receipt(
     enforced?: boolean
     at?: number
     plan?: false
+    input?: Record<string, unknown>
   } = {}
 ): ActionReviewReceipt {
   return {
@@ -40,6 +42,7 @@ function receipt(
         kind: over.kind ?? "tool-call",
         ref: over.ref ?? "im_send",
         targets: (over.targets ?? [CHAT]).map(toReviewTarget),
+        ...(over.input ? { input: over.input } : {}),
       },
       ...(over.plan === false
         ? {}
@@ -87,6 +90,19 @@ describe("shadowSenderOf", () => {
       kind: "bot",
       id: "boti_2",
     })
+    // A stack publish, whether or not it ran in the creating chat's request.
+    expect(
+      shadowSenderOf(receipt({ kind: "integration-action", ref: "agent-team:team_1" }))
+    ).toEqual({ kind: "team", id: "team_1" })
+    expect(
+      shadowSenderOf(
+        receipt({
+          root: "agent-team-run:run_1",
+          kind: "integration-action",
+          ref: "agent-team:team_1",
+        })
+      )
+    ).toEqual({ kind: "team", id: "team_1" })
     expect(shadowSenderOf(receipt({ kind: "connector-delivery", ref: "digest:t9" }))).toEqual({
       kind: "task",
       id: "t9",
@@ -112,13 +128,13 @@ describe("buildShadowReport", () => {
         receipt({ root: "bot:boti_1", targets: [MAIL], outcome: "ask", at: 3 }),
       ],
     })
-    expect(report.sends).toBe(4)
-    expect(report.totals).toEqual({ draft: 2, park: 1, ask: 1 })
-    expect(report.groups.map((group) => group.sender)).toEqual([
+    expect(report.messaging.sends).toBe(4)
+    expect(report.messaging.totals).toEqual({ draft: 2, park: 1, ask: 1 })
+    expect(report.messaging.groups.map((group) => group.sender)).toEqual([
       { kind: "task", id: "t1" },
       { kind: "bot", id: "boti_1" },
     ])
-    const [task, bot] = report.groups
+    const [task, bot] = report.messaging.groups
     expect(task.rows.map((row) => [row.target.recipient, row.sends, row.outcomes])).toEqual([
       [CHAT.recipient, 2, { draft: 1, park: 1 }],
       [OTHER_CHAT.recipient, 1, { draft: 1 }],
@@ -137,7 +153,8 @@ describe("buildShadowReport", () => {
         receipt({ targets: [] }),
       ],
     })
-    expect(report).toEqual({ groups: [], totals: {}, sends: 0 })
+    const empty = { groups: [], totals: {}, sends: 0 }
+    expect(report).toEqual({ messaging: empty, github: empty, browser: empty })
   })
 
   it("counts recipients it cannot name per channel, without a way to allow them", () => {
@@ -149,8 +166,8 @@ describe("buildShadowReport", () => {
         receipt({ root: "task:t1", targets: [personTarget("bot-a", "ou_9")!], at: 3 }),
       ],
     })
-    expect(report.groups[0].rows).toEqual([])
-    expect(report.groups[0].unrecognized).toEqual([
+    expect(report.messaging.groups[0].rows).toEqual([])
+    expect(report.messaging.groups[0].unrecognized).toEqual([
       { channel: "bot-a", recipients: 2, sends: 3, lastAt: 4 },
     ])
   })
@@ -165,7 +182,7 @@ describe("buildShadowReport", () => {
       ],
     })
     const into = Object.fromEntries(
-      report.groups.map((group) => [group.sender.id, group.rows[0].allowInto])
+      report.messaging.groups.map((group) => [group.sender.id, group.rows[0].allowInto])
     )
     expect(into).toEqual({
       boti_1: { kind: "adapter", adapterId: "bot-a" },
@@ -188,10 +205,132 @@ describe("buildShadowReport", () => {
         receipt({ root: "task:t1", targets: [CHAT, OTHER_CHAT] }),
       ],
     })
-    expect(report.sends).toBe(2)
-    expect(report.groups).toHaveLength(1)
-    expect(report.groups[0].rows.map((row) => outboundFingerprint(row.target)).sort()).toEqual(
-      [outboundFingerprint(MAIL), outboundFingerprint(OTHER_CHAT)].sort()
+    expect(report.messaging.sends).toBe(2)
+    expect(report.messaging.groups).toHaveLength(1)
+    expect(
+      report.messaging.groups[0].rows.map((row) => outboundFingerprint(row.target)).sort()
+    ).toEqual([outboundFingerprint(MAIL), outboundFingerprint(OTHER_CHAT)].sort())
+  })
+})
+
+describe("buildShadowReport for GitHub writes (ADR-0239 phase 2)", () => {
+  const WEB = repositoryTarget("acme/web")!
+  const API = repositoryTarget("acme/api")!
+  const GHE = repositoryTarget("ghe.corp.io/acme/tools")!
+  type AccountSeed = { host?: string; list?: OutboundRecipientGrant[] }
+  const accounts = (extra: Record<string, AccountSeed> = {}) =>
+    new Map(
+      Object.entries<AccountSeed>({ acct_1: {}, ...extra }).map(([id, account]) => [
+        id,
+        { ...account, pluginId: "github-delivery", list: account.list ?? [] },
+      ])
     )
+  const base = {
+    candidates: [CHAT, WEB, API, GHE],
+    botLists: new Map([["boti_1", []]]),
+    adapterLists: new Map([["bot-a", []]]),
+  }
+  const write = (over: Parameters<typeof receipt>[0]) =>
+    receipt({ kind: "integration-action", outcome: "park", ...over })
+
+  it("splits the report by category, so each switch reads only its own", () => {
+    const report = buildShadowReport({
+      ...base,
+      githubAccounts: accounts(),
+      receipts: [
+        receipt({ root: "task:t1", targets: [CHAT] }),
+        write({ ref: "workflow:wf_1", targets: [WEB] }),
+        // A `gh api` call that also posts to a chat counts in both.
+        receipt({ root: "task:t1", targets: [WEB, CHAT], outcome: "park" }),
+      ],
+    })
+    expect(report.messaging.sends).toBe(2)
+    expect(report.github.sends).toBe(2)
+    expect(report.github.totals).toEqual({ park: 2 })
+    expect(report.browser).toEqual({ groups: [], totals: {}, sends: 0 })
+    expect(report.github.groups.flatMap((group) => group.rows.map((row) => row.channel))).toEqual([
+      "github",
+      "github",
+    ])
+  })
+
+  it("offers the account the write went through, else the Bot's list for its own writes", () => {
+    const report = buildShadowReport({
+      ...base,
+      githubAccounts: accounts({ acct_2: {} }),
+      receipts: [
+        write({
+          ref: "workflow:wf_1",
+          targets: [WEB],
+          input: { integrationAccount: { pluginId: "github-delivery", accountId: "acct_2" } },
+        }),
+        write({ ref: "bot:boti_1", targets: [WEB] }),
+      ],
+    })
+    const into = Object.fromEntries(
+      report.github.groups.map((group) => [group.sender.kind, group.rows[0].allowInto])
+    )
+    expect(into).toEqual({
+      workflow: { kind: "integration-account", pluginId: "github-delivery", accountId: "acct_2" },
+      bot: { kind: "bot", installationId: "boti_1" },
+    })
+  })
+
+  it("lets the person pick an account when the write named none", () => {
+    const report = buildShadowReport({
+      ...base,
+      githubAccounts: accounts({ acct_2: {}, acct_ghe: { host: "ghe.corp.io" } }),
+      receipts: [
+        // A `gh` command in a chat names no account.
+        receipt({ root: "chat-1", targets: [WEB], outcome: "ask" }),
+        write({ ref: "agent-team:team_1", targets: [GHE], at: 2 }),
+      ],
+    })
+    const [team, chat] = report.github.groups
+    expect(chat.sender).toEqual({ kind: "chat", id: "chat-1" })
+    expect(chat.rows[0].allowInto).toBeUndefined()
+    expect(chat.rows[0].allowChoices).toEqual([
+      { kind: "integration-account", pluginId: "github-delivery", accountId: "acct_1" },
+      { kind: "integration-account", pluginId: "github-delivery", accountId: "acct_2" },
+    ])
+    // Only one account is on the Enterprise host, so it is the list.
+    expect(team.sender).toEqual({ kind: "team", id: "team_1" })
+    expect(team.rows[0].allowInto).toEqual({
+      kind: "integration-account",
+      pluginId: "github-delivery",
+      accountId: "acct_ghe",
+    })
+  })
+
+  it("drops a repository a list now holds: the write's account's, or any for no account", () => {
+    const report = buildShadowReport({
+      ...base,
+      githubAccounts: accounts({ acct_2: { list: [grant(WEB)] } }),
+      receipts: [
+        // Through acct_1, whose list does not hold it: still held.
+        write({
+          ref: "workflow:wf_1",
+          targets: [WEB],
+          input: { integrationAccount: { pluginId: "github-delivery", accountId: "acct_1" } },
+        }),
+        // No account: acct_2's list counts, as the planner reads it for `gh`.
+        receipt({ root: "chat-1", targets: [WEB], outcome: "ask" }),
+        write({ ref: "workflow:wf_1", targets: [API] }),
+      ],
+    })
+    expect(report.github.sends).toBe(2)
+    expect(
+      report.github.groups.flatMap((group) => group.rows.map((row) => row.target.recipient))
+    ).toEqual([WEB.recipient, API.recipient])
+  })
+
+  it("never lists a person's own write", () => {
+    const report = buildShadowReport({
+      ...base,
+      githubAccounts: accounts(),
+      // A human receipt plans `allow`: the click was the authorization.
+      receipts: [write({ ref: "person:stack-panel", targets: [WEB], outcome: "allow" })],
+    })
+    expect(report.github.sends).toBe(0)
   })
 })

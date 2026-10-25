@@ -5,7 +5,12 @@ import {
   allowShadowRecipient,
   type AllowRecipientDeps,
 } from "./allow-recipient"
-import { conversationTarget, mailTarget, type OutboundTarget } from "./outbound-targets"
+import {
+  conversationTarget,
+  mailTarget,
+  repositoryTarget,
+  type OutboundTarget,
+} from "./outbound-targets"
 
 const CHAT = conversationTarget("lark:bot-a:oc_1")!
 const MAIL = mailTarget("ops@example.com")!
@@ -76,5 +81,42 @@ describe("allowShadowRecipient", () => {
         all
       )
     ).rejects.toThrow("cannot be listed")
+  })
+})
+
+describe("allowShadowRecipient into a GitHub account's list (ADR-0239 phase 2)", () => {
+  const WEB = repositoryTarget("acme/web")!
+  const into = {
+    kind: "integration-account",
+    pluginId: "github-delivery",
+    accountId: "acct_1",
+  } as const
+
+  it("appends the repository to the account's list as it stands now", async () => {
+    const existing = grant(repositoryTarget("acme/api")!)
+    const writeAccountList = jest.fn(async () => undefined)
+    const readAccountList = jest.fn(async () => [existing])
+    await expect(
+      allowShadowRecipient(into, WEB, { readAccountList, writeAccountList, now: () => 42 })
+    ).resolves.toBe(true)
+    expect(readAccountList).toHaveBeenCalledWith("github-delivery", "acct_1")
+    expect(writeAccountList).toHaveBeenCalledWith("github-delivery", "acct_1", [
+      existing,
+      { recipient: WEB, addedAt: 42, addedBy: "local-user" },
+    ])
+  })
+
+  it("adds nothing twice, and refuses when the account is gone", async () => {
+    const writeAccountList = jest.fn(async () => undefined)
+    await expect(
+      allowShadowRecipient(into, WEB, {
+        readAccountList: async () => [grant(WEB)],
+        writeAccountList,
+      })
+    ).resolves.toBe(false)
+    expect(writeAccountList).not.toHaveBeenCalled()
+    await expect(
+      allowShadowRecipient(into, WEB, { readAccountList: async () => undefined })
+    ).rejects.toThrow("Integration account acct_1 no longer exists")
   })
 })

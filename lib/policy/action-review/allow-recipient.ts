@@ -5,6 +5,9 @@
  * The list is re-read at the moment of the click rather than taken from the
  * report, so an entry someone added since the report was built is kept, and a
  * recipient already on the list is not added twice.
+ *
+ * A repository goes on a Bot's list (for the Bot's own writes) or on a GitHub
+ * integration account's list (ADR-0239 phase 2), the one the hub edits.
  */
 
 import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
@@ -18,6 +21,15 @@ export interface AllowRecipientDeps {
   writeBotList?: (installationId: string, next: OutboundRecipientGrant[]) => Promise<unknown>
   readAdapterList?: (adapterId: string) => Promise<readonly OutboundRecipientGrant[] | undefined>
   writeAdapterList?: (adapterId: string, next: OutboundRecipientGrant[]) => Promise<unknown>
+  readAccountList?: (
+    pluginId: string,
+    accountId: string
+  ) => Promise<readonly OutboundRecipientGrant[] | undefined>
+  writeAccountList?: (
+    pluginId: string,
+    accountId: string,
+    next: OutboundRecipientGrant[]
+  ) => Promise<unknown>
   now?: () => number
 }
 
@@ -26,7 +38,9 @@ export class AllowRecipientTargetMissingError extends Error {
     super(
       into.kind === "bot"
         ? `Bot installation ${into.installationId} no longer exists`
-        : `Connection ${into.adapterId} no longer exists`
+        : into.kind === "adapter"
+          ? `Connection ${into.adapterId} no longer exists`
+          : `Integration account ${into.accountId} no longer exists`
     )
     this.name = "AllowRecipientTargetMissingError"
   }
@@ -47,6 +61,18 @@ export async function allowShadowRecipient(
     if (!current) throw new AllowRecipientTargetMissingError(into)
     if (listsRecipient(current, target)) return false
     await (deps.writeBotList ?? defaultWriteBotList)(into.installationId, [...current, grant])
+    return true
+  }
+
+  if (into.kind === "integration-account") {
+    const read = deps.readAccountList ?? defaultReadAccountList
+    const current = await read(into.pluginId, into.accountId)
+    if (!current) throw new AllowRecipientTargetMissingError(into)
+    if (listsRecipient(current, target)) return false
+    await (deps.writeAccountList ?? defaultWriteAccountList)(into.pluginId, into.accountId, [
+      ...current,
+      grant,
+    ])
     return true
   }
 
@@ -88,4 +114,22 @@ async function defaultWriteAdapterList(
 ): Promise<unknown> {
   const { setAdapterOutboundRecipients } = await import("@/lib/db/adapter-instances")
   return setAdapterOutboundRecipients(adapterId, next)
+}
+
+async function defaultReadAccountList(
+  pluginId: string,
+  accountId: string
+): Promise<readonly OutboundRecipientGrant[] | undefined> {
+  const { getIntegrationAccount } = await import("@/lib/db/integrations")
+  const row = await getIntegrationAccount(pluginId, accountId)
+  return row ? (row.outboundRecipients ?? []) : undefined
+}
+
+async function defaultWriteAccountList(
+  pluginId: string,
+  accountId: string,
+  next: OutboundRecipientGrant[]
+): Promise<unknown> {
+  const { setIntegrationAccountOutboundRecipients } = await import("@/lib/db/integrations")
+  return setIntegrationAccountOutboundRecipients(pluginId, accountId, next)
 }

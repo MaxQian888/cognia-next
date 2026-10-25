@@ -205,6 +205,33 @@ async function resolveTeamRepositories(
   return resolved.filter((entry) => entry !== undefined)
 }
 
+/**
+ * Once: the repositories this device knows, and each integration account's
+ * web host. For a reader that is not live (the shadow report).
+ */
+export async function loadKnownRepositories(): Promise<{
+  repositories: KnownRepository[]
+  accountHosts: ReadonlyMap<string, string>
+}> {
+  const stored = await readStoredSources()
+  const [accountHosts, teamRepositories] = await Promise.all([
+    resolveAccountHosts(stored.accounts).catch(() => new Map<string, string>()),
+    resolveTeamRepositories(stored.teamPaths).catch(
+      () => [] as KnownRepositorySources["teamRepositories"]
+    ),
+  ])
+  return {
+    repositories: knownRepositoriesOf({
+      subscriptions: stored.subscriptions,
+      installations: stored.installations,
+      jobs: stored.jobs,
+      teamRepositories,
+      accountHosts,
+    }),
+    accountHosts,
+  }
+}
+
 /** Live: the repositories this device knows, optionally through one account. */
 export function useKnownRepositories(accountId?: string): KnownRepository[] {
   const stored = useLiveQuery(readStoredSources, [])

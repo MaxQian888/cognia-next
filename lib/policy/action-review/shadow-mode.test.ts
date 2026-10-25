@@ -22,6 +22,11 @@ import {
 } from "./outbound-targets"
 import { buildActionReviewPlanContext } from "./plan-context"
 import { planDelivery, type DeliveryPlanInput, type PlanDeliveryDeps } from "./plan-delivery"
+import {
+  planIntegrationWrite,
+  type IntegrationAuthorization,
+  type PlanIntegrationDeps,
+} from "./plan-integration"
 import { outboundToolDecision, planOutboundToolCall } from "./plan-tool-call"
 import { planActionReview, readOutboundAuthorizationMode } from "./policy"
 import { __clearRequestOriginCacheForTesting } from "./resolve-request-origin"
@@ -175,6 +180,92 @@ describe("shadow mode changes no send result (ADR-0239)", () => {
       expect(observed && outboundToolDecision(observed, call.toolName)).toEqual({
         kind: "unchanged",
       })
+    }
+  })
+})
+
+describe("shadow mode changes no GitHub write (ADR-0239 phase 2)", () => {
+  const GITHUB_ENFORCE = {
+    agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } },
+  }
+  // GitHub observes whatever messaging does, and on anything but exactly `enforce`.
+  const GITHUB_SHADOW = [
+    ...SHADOW_SETTINGS,
+    ENFORCE,
+    { agentPermissions: { outboundAuthorizationByCategory: { github: "shadow" } } },
+    { agentPermissions: { outboundAuthorizationByCategory: { github: "on" } } },
+  ]
+  const UNLISTED = repositoryTarget("acme/other")!
+
+  function planDeps(settings: object): PlanIntegrationDeps {
+    return {
+      settings: () => settings,
+      listAuthKeys: async () => [],
+      resolveSessionOrigin: async () => ({ rootSessionId: "root-1", instructionEpoch: "epoch-1" }),
+      botRunEvent: async () => undefined,
+      workflowRunTrigger: async () => undefined,
+      githubGrants: async () => [],
+      now: () => 1,
+    }
+  }
+
+  const WRITES: [string, IntegrationAuthorization][] = [
+    ["a plugin's broker write", { kind: "plugin", pluginId: "p1" }],
+    ["a workflow step's broker write", { kind: "workflow", workflowId: "wf_1", runId: "wr_1" }],
+    [
+      "a Bot's automatic broker write",
+      {
+        kind: "bot",
+        installation: { id: "boti_1", humanRevision: 1 },
+        runId: "run_1",
+        decidedBy: "policy",
+      },
+    ],
+    ["a raw request inside a job", { kind: "job", jobId: "job_1", covers: [] }],
+    [
+      "a Squad stack publish",
+      { kind: "team-delivery", teamId: "team_1", runId: "run_1", decidedBy: "run" },
+    ],
+  ]
+
+  it.each(WRITES)("lets %s through", async (_name, authorization) => {
+    const input = { targets: [UNLISTED], operation: "github.commentPr", authorization }
+    // The write is one enforcement holds...
+    const enforced = await planIntegrationWrite(input, planDeps(GITHUB_ENFORCE))
+    expect(enforced.action).not.toBe("proceed")
+    // ...and shadow mode lets it through, recording what it would have done.
+    for (const settings of GITHUB_SHADOW) {
+      const observed = await planIntegrationWrite(input, planDeps(settings))
+      expect(observed.action).toBe("proceed")
+      expect(observed.receipt?.request.plan).toMatchObject({ enforced: false })
+    }
+  })
+
+  it("leaves a gh write command to the permission flow it had", async () => {
+    const call = {
+      sessionId: "chat",
+      requestId: "gh-1",
+      toolName: "Bash",
+      input: { command: "gh pr create -R acme/other --fill" },
+    }
+    const options = (settings: object) => ({
+      unattended: true,
+      settings: () => settings,
+      origin: { rootSessionId: "chat", instructionEpoch: "msg:u1" },
+      github: {
+        accountHost: async () => "github.com",
+        localRepository: async () => "git@github.com:acme/web.git",
+      },
+      githubGrants: async () => [],
+    })
+    const enforced = await planOutboundToolCall(call, options(GITHUB_ENFORCE))
+    expect(enforced && outboundToolDecision(enforced, "Bash").kind).not.toBe("unchanged")
+    for (const settings of GITHUB_SHADOW) {
+      const observed = await planOutboundToolCall(
+        { ...call, requestId: `gh-${JSON.stringify(settings)}` },
+        options(settings)
+      )
+      expect(observed && outboundToolDecision(observed, "Bash")).toEqual({ kind: "unchanged" })
     }
   })
 })

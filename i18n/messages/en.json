@@ -55789,9 +55789,30 @@
         "allow": "Allow",
         "allowFailed": "Could not allow the recipient: {reason}",
         "allowNamed": "Allow {name}",
+        "allowNamedInto": "Allow {name} on {list}",
         "allowed": "{name} added to the list",
+        "categories": {
+          "github": {
+            "confirmBehaviour": "Unattended writes to a repository nobody allowed will wait for approval instead of going out, writes from a chat to another repository will ask, and a person's refusal holds for the rest of that request. Messages and email keep their own setting.",
+            "confirmTitle": "Enforce outbound authorization for GitHub writes?",
+            "enforceHelp": "On: an unattended write to a repository nobody allowed waits for approval, a chat's write to a repository other than the one it came from asks, and a repository a person refused stays refused for that request.",
+            "label": "Enforce for GitHub writes",
+            "reportDescription": "GitHub writes observed in the last {days} days to a repository nothing allowed. Writes you made yourself are not listed. Allow the repositories you meant before turning enforcement on.",
+            "reportEmpty": "Nothing would change: every observed GitHub write went to a repository someone allowed.",
+            "shadowHelp": "Off: every GitHub write by a run, a workflow, a plugin, a Bot or a gh command is checked and recorded, and none is changed. This is separate from messages and email."
+          },
+          "messaging": {
+            "confirmBehaviour": "Unattended sends to a recipient nobody allowed will be drafted or wait for approval instead of going out, and a person's refusal holds for the rest of that request.",
+            "confirmTitle": "Enforce outbound authorization for messages and email?",
+            "enforceHelp": "On: an unattended send to a recipient nobody allowed is drafted or waits for approval, and a recipient a person refused stays refused for that request.",
+            "label": "Enforce for messages and email",
+            "reportDescription": "Sends observed in the last {days} days whose recipient nothing allowed. Allow the ones you meant before turning enforcement on.",
+            "reportEmpty": "Nothing would change: every observed send had a recipient someone allowed.",
+            "shadowHelp": "Off: every send is checked and recorded, and none is changed. Turn on to hold the sends nothing authorized."
+          }
+        },
+        "chooseAccount": "The write named no account. Add to:",
         "confirm": {
-          "behaviour": "Unattended sends to a recipient nobody allowed will be drafted or wait for approval instead of going out, and a person's refusal holds for the rest of that request.",
           "cancel": "Keep observing",
           "enable": "Enforce",
           "impact": "{count, plural, one {# observed send} other {# observed sends}} would have been changed:",
@@ -55801,15 +55822,10 @@
             "deny": "{count} refused",
             "draft": "{count} drafted",
             "park": "{count} held for approval"
-          },
-          "title": "Enforce outbound authorization?"
+          }
         },
-        "description": "Who an unattended run may message or email without asking. Shadow mode only observes.",
-        "enforce": {
-          "enforceHelp": "On: an unattended send to a recipient nobody allowed is drafted or waits for approval, and a recipient a person refused stays refused for that request.",
-          "label": "Enforce outbound authorization",
-          "shadowHelp": "Off: every send is checked and recorded, and none is changed. Turn on to hold the sends nothing authorized."
-        },
+        "description": "Who an unattended run may message, email or write to on GitHub without asking. Each kind starts in shadow mode, which only observes.",
+        "intoAccount": "Adds to the {name} account's list",
         "intoAdapter": "Adds to {name}'s list",
         "intoBot": "Adds to {name}'s list",
         "kind": {
@@ -55831,8 +55847,6 @@
         },
         "remoteHost": "This device is driving a paired Host, where the runs and their records are. Change this setting on the Host.",
         "report": {
-          "description": "Sends observed in the last {days} days whose recipient nothing allowed. Allow the ones you meant before turning enforcement on.",
-          "empty": "Nothing would change: every observed send had a recipient someone allowed.",
           "sends": "{count, plural, one {# send} other {# sends}}",
           "title": "What enforcement would change"
         },
@@ -55843,10 +55857,12 @@
           "other": "Other: {id}",
           "plugin": "Plugin: {id}",
           "task": "Scheduled task: {name}",
+          "team": "Agent Team: {name}",
           "workflow": "Workflow: {id}"
         },
         "title": "Outbound authorization",
         "unrecognized": "{count, plural, one {# recipient} other {# recipients}} via {account} this device cannot name ({sends, plural, one {# send} other {# sends}}). Add them in the Bot's or the connection's settings.",
+        "unrecognizedRepositories": "{count, plural, one {# repository} other {# repositories}} this device cannot name ({sends, plural, one {# write} other {# writes}}). Add them to a GitHub account's list in Integrations.",
         "via": "via {account}"
       },
       "policyChangeBlocked": "Protection was not changed. {reason}",

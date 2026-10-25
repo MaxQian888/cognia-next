@@ -4793,6 +4793,10 @@ export interface AppSettings {
      * by `lib/policy/action-review/shadow-mode.test.ts` like the messaging
      * mode. Read only through `readOutboundAuthorizationMode(settings,
      * category)`, which treats any other value as `"shadow"`.
+     *
+     * `browser` is dormant until its chokepoint lands (phase 2b): no path
+     * plans a browser submission yet, so the Security card offers no switch
+     * for it (pinned by `outbound-authorization-card.test.tsx`).
      */
     outboundAuthorizationByCategory?: {
       github?: "shadow" | "enforce"

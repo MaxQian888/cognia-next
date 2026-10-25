@@ -9,6 +9,7 @@ import { repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
 
 import {
   knownRepositoriesOf,
+  loadKnownRepositories,
   useKnownRepositories,
   type KnownRepositorySources,
 } from "./use-known-repositories"
@@ -177,5 +178,39 @@ describe("useKnownRepositories", () => {
     await waitFor(() =>
       expect(narrowed.current.map((entry) => entry.name)).toEqual(["ghe.corp.io/acme/web"])
     )
+  })
+
+  it("reads the same once, with each account's host", async () => {
+    const now = "2026-10-25T00:00:00.000Z"
+    await getDb().integrationAccounts.put({
+      id: "acct_ghe",
+      pluginId: "github-delivery",
+      integrationId: "github",
+      providerId: "github-pat",
+      authSessionId: "ghe",
+      remoteAccountId: "octo",
+      label: "GHE",
+      enabled: true,
+      health: "unknown",
+      createdAt: now,
+      updatedAt: now,
+    })
+    await getDb().integrationSubscriptions.put({
+      id: "sub_1",
+      pluginId: "github-delivery",
+      integrationId: "github",
+      accountId: "acct_ghe",
+      resourceKind: "repository",
+      resourceId: "acme/web",
+      eventTypes: [],
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    const known = await loadKnownRepositories()
+    expect(known.repositories.map((entry) => entry.target)).toEqual([
+      repositoryTarget("ghe.corp.io/acme/web"),
+    ])
+    expect(known.accountHosts.get("acct_ghe")).toBe("ghe.corp.io")
   })
 })

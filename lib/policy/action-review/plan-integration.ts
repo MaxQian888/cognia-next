@@ -318,6 +318,8 @@ export function integrationReceipt(
     enforced: boolean
     now: number
     requestId?: string
+    /** The integration account the write goes through, for the shadow report's list. */
+    account?: IntegrationWritePlanInput["account"]
   }
 ): IntegrationReceipt {
   const requestId = args.requestId ?? `integration:${crypto.randomUUID()}`
@@ -350,6 +352,17 @@ export function integrationReceipt(
         ref: args.outbound.ownerRef,
         title: args.operation,
         targets: args.targets.map(toReviewTarget),
+        // Ids only, no write input: which account's list would hold these.
+        ...(args.account
+          ? {
+              input: {
+                integrationAccount: {
+                  pluginId: args.account.pluginId,
+                  accountId: args.account.accountId,
+                },
+              },
+            }
+          : {}),
       },
       verdict: "ask",
       verdictExplicit: false,
@@ -379,6 +392,7 @@ function receiptFor(env: PlanningEnv, args: ReceiptArgs): IntegrationReceipt {
     enforced: env.mode === "enforce",
     now: env.now,
     requestId: `integration:${env.deps.newRequestId?.() ?? crypto.randomUUID()}`,
+    ...(env.input.account ? { account: env.input.account } : {}),
   })
 }
 

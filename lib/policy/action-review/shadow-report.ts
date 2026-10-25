@@ -13,9 +13,17 @@
  * from here.
  *
  * "Allow this recipient" writes the sender's own list when the sender is a Bot
- * and the recipient is a conversation or a mail address, and the bot
- * account's list otherwise (members are named within an account). A row whose
- * recipient a list now holds is dropped: enforcement would let it through.
+ * and the recipient is a conversation, a mail address or a repository, and
+ * otherwise the bot account's list (members are named within an account) or,
+ * for a repository, the list of the GitHub integration account the write went
+ * through. A receipt names that account when the write had one; a `gh`
+ * command or a stack publish has none, so the person picks among the accounts
+ * on the repository's host (`allowChoices`). A row whose recipient a list now
+ * holds is dropped: enforcement would let it through.
+ *
+ * Each category (messaging, GitHub, the browser) has its own mode, so the
+ * report is split by category and each is read on its own. A person's own
+ * write (a human receipt) plans `allow` and is never in it.
  *
  * Pure: reads only its arguments.
  */
@@ -26,14 +34,20 @@ import type {
   OutboundRecipientGrant,
 } from "@cognia/agent-config-types/action-review"
 
-import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
+import {
+  OUTBOUND_CATEGORIES,
+  outboundCategoryOf,
+  outboundFingerprint,
+  type OutboundCategory,
+  type OutboundTarget,
+} from "./outbound-targets"
 
 export type ShadowSenderKind =
-  "bot" | "task" | "workflow" | "notification" | "plugin" | "chat" | "other"
+  "bot" | "task" | "workflow" | "notification" | "plugin" | "team" | "chat" | "other"
 
 export interface ShadowSender {
   kind: ShadowSenderKind
-  /** The installation, task, workflow, plugin or session id; the raw ref for `other`. */
+  /** The installation, task, workflow, plugin, team or session id; the raw ref for `other`. */
   id: string
 }
 
@@ -41,7 +55,9 @@ export interface ShadowSender {
 export type ShadowHeldOutcome = Exclude<ActionReviewPlanOutcome, "allow">
 
 export type ShadowAllowInto =
-  { kind: "bot"; installationId: string } | { kind: "adapter"; adapterId: string }
+  | { kind: "bot"; installationId: string }
+  | { kind: "adapter"; adapterId: string }
+  | { kind: "integration-account"; pluginId: string; accountId: string }
 
 export interface ShadowRecipientRow {
   channel: string
@@ -52,6 +68,11 @@ export interface ShadowRecipientRow {
   outcomes: Partial<Record<ShadowHeldOutcome, number>>
   /** The list "allow this recipient" writes; absent when no list may hold it. */
   allowInto?: ShadowAllowInto
+  /**
+   * When the write named no account and several GitHub accounts could hold
+   * the repository: the lists a person picks from. Absent with `allowInto`.
+   */
+  allowChoices?: ShadowAllowInto[]
 }
 
 /** Recipients nothing on this device can name, per channel. */
@@ -70,11 +91,25 @@ export interface ShadowSenderGroup {
   lastAt: number
 }
 
-export interface ShadowReport {
+export interface ShadowCategoryReport {
   groups: ShadowSenderGroup[]
   /** Sends enforcement would change, by what it would do instead. */
   totals: Partial<Record<ShadowHeldOutcome, number>>
   sends: number
+}
+
+/**
+ * One report per category, since each is enforced on its own. A receipt with
+ * targets in two categories (a `gh api` call, rarely) counts in both.
+ */
+export type ShadowReport = Record<OutboundCategory, ShadowCategoryReport>
+
+/** A GitHub integration account and the repositories its list holds. */
+export interface ShadowGithubAccount {
+  pluginId: string
+  /** Its web host (`githubWebHost`); absent is github.com. */
+  host?: string
+  list: readonly OutboundRecipientGrant[]
 }
 
 export interface ShadowReportInput {
@@ -85,6 +120,8 @@ export interface ShadowReportInput {
   botLists: ReadonlyMap<string, readonly OutboundRecipientGrant[]>
   /** Every connector instance's list, keyed by adapter id (empty when it has none). */
   adapterLists: ReadonlyMap<string, readonly OutboundRecipientGrant[]>
+  /** Every GitHub integration account, keyed by account id. Absent: none. */
+  githubAccounts?: ReadonlyMap<string, ShadowGithubAccount>
 }
 
 /** Who sent what a receipt reviewed: the run's root, else the delivery's owner. */
@@ -121,6 +158,8 @@ function prefixed(ref: string): ShadowSender {
       return { kind: "notification", id }
     case "plugin":
       return { kind: "plugin", id }
+    case "agent-team":
+      return { kind: "team", id }
     default:
       return { kind: "other", id: ref }
   }
@@ -140,25 +179,71 @@ function fingerprints(grants: readonly OutboundRecipientGrant[] | undefined): Se
   return new Set((grants ?? []).map((grant) => outboundFingerprint(grant.recipient)))
 }
 
+function categoryOfChannel(channel: string): OutboundCategory {
+  return outboundCategoryOf({ kind: "unknown", channel })
+}
+
+/** The GitHub account the receipt's write went through, when it names a known one. */
+export function shadowReceiptAccount(
+  receipt: ActionReviewReceipt,
+  accounts: ReadonlyMap<string, ShadowGithubAccount> | undefined
+): string | undefined {
+  const named = receipt.request.subject.input?.integrationAccount
+  if (!named || typeof named !== "object") return undefined
+  const accountId = (named as { accountId?: unknown }).accountId
+  return typeof accountId === "string" && accounts?.has(accountId) ? accountId : undefined
+}
+
+/** `github:<host>/<owner>/<repo>` → its host. */
+function repositoryHost(target: OutboundTarget): string | undefined {
+  if (target.kind !== "repository") return undefined
+  const rest = target.recipient.slice("github:".length)
+  const slash = rest.indexOf("/")
+  return slash > 0 ? rest.slice(0, slash) : undefined
+}
+
+function accountInto(accountId: string, account: ShadowGithubAccount): ShadowAllowInto {
+  return { kind: "integration-account", pluginId: account.pluginId, accountId }
+}
+
+interface AllowLists {
+  allowInto?: ShadowAllowInto
+  allowChoices?: ShadowAllowInto[]
+}
+
 function allowIntoFor(
   sender: ShadowSender,
   target: OutboundTarget,
-  input: ShadowReportInput
-): ShadowAllowInto | undefined {
+  input: ShadowReportInput,
+  accountId: string | undefined
+): AllowLists {
   if (
     sender.kind === "bot" &&
     input.botLists.has(sender.id) &&
-    (target.kind === "conversation" || target.kind === "mail")
+    (target.kind === "conversation" || target.kind === "mail" || target.kind === "repository")
   ) {
-    return { kind: "bot", installationId: sender.id }
+    return { allowInto: { kind: "bot", installationId: sender.id } }
+  }
+  if (target.kind === "repository") {
+    const accounts = input.githubAccounts ?? new Map<string, ShadowGithubAccount>()
+    const named = accountId ? accounts.get(accountId) : undefined
+    if (accountId && named) return { allowInto: accountInto(accountId, named) }
+    // No account named: every account on the repository's host could hold it.
+    const host = repositoryHost(target)
+    const onHost = [...accounts].filter(([, account]) => (account.host ?? "github.com") === host)
+    if (onHost.length === 1) return { allowInto: accountInto(onHost[0][0], onHost[0][1]) }
+    if (onHost.length > 1) {
+      return { allowChoices: onHost.map(([id, account]) => accountInto(id, account)) }
+    }
+    return {}
   }
   if (
     (target.kind === "conversation" || target.kind === "person") &&
     input.adapterLists.has(target.channel)
   ) {
-    return { kind: "adapter", adapterId: target.channel }
+    return { allowInto: { kind: "adapter", adapterId: target.channel } }
   }
-  return undefined
+  return {}
 }
 
 /** Whether a list that applies to this send already holds the recipient. */
@@ -166,10 +251,20 @@ function coveredNow(
   sender: ShadowSender,
   fingerprint: string,
   channel: string,
+  accountId: string | undefined,
   input: ShadowReportInput
 ): boolean {
   if (sender.kind === "bot" && fingerprints(input.botLists.get(sender.id)).has(fingerprint)) {
     return true
+  }
+  if (categoryOfChannel(channel) === "github") {
+    // A write through an account reads that account's list; one with no
+    // account (`gh`, a stack publish) reads every GitHub account's.
+    const accounts = input.githubAccounts ?? new Map<string, ShadowGithubAccount>()
+    const lists = accountId
+      ? [accounts.get(accountId)?.list]
+      : [...accounts.values()].map((account) => account.list)
+    return lists.some((list) => fingerprints(list).has(fingerprint))
   }
   return fingerprints(input.adapterLists.get(channel)).has(fingerprint)
 }
@@ -192,9 +287,14 @@ export function buildShadowReport(input: ShadowReportInput): ShadowReport {
     sends: number
     lastAt: number
   }
-  const groups = new Map<string, Pending>()
-  const totals: Partial<Record<ShadowHeldOutcome, number>> = {}
-  let sends = 0
+  interface PendingCategory {
+    groups: Map<string, Pending>
+    totals: Partial<Record<ShadowHeldOutcome, number>>
+    sends: number
+  }
+  const categories = new Map<OutboundCategory, PendingCategory>(
+    OUTBOUND_CATEGORIES.map((category) => [category, { groups: new Map(), totals: {}, sends: 0 }])
+  )
   const coverage = new Map<string, boolean>()
 
   for (const receipt of input.receipts) {
@@ -202,77 +302,92 @@ export function buildShadowReport(input: ShadowReportInput): ShadowReport {
     const targets = receipt.request.subject.targets
     if (!outcome || !targets?.length) continue
     const sender = shadowSenderOf(receipt)
+    const accountId = shadowReceiptAccount(receipt, input.githubAccounts)
     const at = receipt.decision.decidedAt
     const held = targets.filter((target) => {
-      const key = `${senderKey(sender)}\u0000${target.fingerprint}`
+      const key = `${senderKey(sender)}\u0000${accountId ?? ""}\u0000${target.fingerprint}`
       if (!coverage.has(key)) {
-        coverage.set(key, coveredNow(sender, target.fingerprint, target.channel, input))
+        coverage.set(key, coveredNow(sender, target.fingerprint, target.channel, accountId, input))
       }
       return !coverage.get(key)
     })
-    if (held.length === 0) continue
 
-    const key = senderKey(sender)
-    let group = groups.get(key)
-    if (!group) {
-      group = { sender, rows: new Map(), unrecognized: new Map(), sends: 0, lastAt: 0 }
-      groups.set(key, group)
-    }
-    group.sends += 1
-    group.lastAt = Math.max(group.lastAt, at)
-    bump(totals, outcome)
-    sends += 1
+    for (const [category, pending] of categories) {
+      const inCategory = held.filter((ref) => categoryOfChannel(ref.channel) === category)
+      if (inCategory.length === 0) continue
 
-    for (const ref of held) {
-      const target = named.get(ref.fingerprint)
-      if (target) {
-        let row = group.rows.get(ref.fingerprint)
-        if (!row) {
-          const allowInto = allowIntoFor(sender, target, input)
-          row = {
-            channel: ref.channel,
-            fingerprint: ref.fingerprint,
-            target,
-            sends: 0,
-            lastAt: 0,
-            outcomes: {},
-            ...(allowInto ? { allowInto } : {}),
+      const key = senderKey(sender)
+      let group = pending.groups.get(key)
+      if (!group) {
+        group = { sender, rows: new Map(), unrecognized: new Map(), sends: 0, lastAt: 0 }
+        pending.groups.set(key, group)
+      }
+      group.sends += 1
+      group.lastAt = Math.max(group.lastAt, at)
+      bump(pending.totals, outcome)
+      pending.sends += 1
+
+      for (const ref of inCategory) {
+        const target = named.get(ref.fingerprint)
+        if (target) {
+          let row = group.rows.get(ref.fingerprint)
+          if (!row) {
+            row = {
+              channel: ref.channel,
+              fingerprint: ref.fingerprint,
+              target,
+              sends: 0,
+              lastAt: 0,
+              outcomes: {},
+              ...allowIntoFor(sender, target, input, accountId),
+            }
+            group.rows.set(ref.fingerprint, row)
+          } else if (!row.allowInto && accountId) {
+            // A later write named the account the earlier ones did not.
+            const lists = allowIntoFor(sender, target, input, accountId)
+            if (lists.allowInto) {
+              row.allowInto = lists.allowInto
+              delete row.allowChoices
+            }
           }
-          group.rows.set(ref.fingerprint, row)
+          row.sends += 1
+          row.lastAt = Math.max(row.lastAt, at)
+          bump(row.outcomes, outcome)
+        } else {
+          let bucket = group.unrecognized.get(ref.channel)
+          if (!bucket) {
+            bucket = { channel: ref.channel, recipients: 0, sends: 0, lastAt: 0, seen: new Set() }
+            group.unrecognized.set(ref.channel, bucket)
+          }
+          if (!bucket.seen.has(ref.fingerprint)) {
+            bucket.seen.add(ref.fingerprint)
+            bucket.recipients += 1
+          }
+          bucket.sends += 1
+          bucket.lastAt = Math.max(bucket.lastAt, at)
         }
-        row.sends += 1
-        row.lastAt = Math.max(row.lastAt, at)
-        bump(row.outcomes, outcome)
-      } else {
-        let bucket = group.unrecognized.get(ref.channel)
-        if (!bucket) {
-          bucket = { channel: ref.channel, recipients: 0, sends: 0, lastAt: 0, seen: new Set() }
-          group.unrecognized.set(ref.channel, bucket)
-        }
-        if (!bucket.seen.has(ref.fingerprint)) {
-          bucket.seen.add(ref.fingerprint)
-          bucket.recipients += 1
-        }
-        bucket.sends += 1
-        bucket.lastAt = Math.max(bucket.lastAt, at)
       }
     }
   }
 
   const byRecent = (a: { lastAt: number }, b: { lastAt: number }) => b.lastAt - a.lastAt
-  return {
-    groups: [...groups.values()]
-      .map((group) => ({
-        sender: group.sender,
-        rows: [...group.rows.values()].sort(byRecent),
-        unrecognized: [...group.unrecognized.values()]
-          .map(({ seen: _seen, ...bucket }) => bucket)
-          .sort(byRecent),
-        sends: group.sends,
-        lastAt: group.lastAt,
-      }))
-      .sort(byRecent),
-    totals,
-    sends,
+  const report = {} as ShadowReport
+  for (const [category, pending] of categories) {
+    report[category] = {
+      groups: [...pending.groups.values()]
+        .map((group) => ({
+          sender: group.sender,
+          rows: [...group.rows.values()].sort(byRecent),
+          unrecognized: [...group.unrecognized.values()]
+            .map(({ seen: _seen, ...bucket }) => bucket)
+            .sort(byRecent),
+          sends: group.sends,
+          lastAt: group.lastAt,
+        }))
+        .sort(byRecent),
+      totals: pending.totals,
+      sends: pending.sends,
+    }
   }
+  return report
 }

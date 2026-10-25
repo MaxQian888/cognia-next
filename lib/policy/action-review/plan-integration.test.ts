@@ -469,6 +469,23 @@ describe("planIntegrationWrite", () => {
       })
     })
 
+    it("names the account on the receipt, so the shadow report can offer its list", async () => {
+      const decision = await planIntegrationWrite(
+        {
+          ...write([OTHER_REPO], { kind: "workflow", workflowId: "wf_1", runId: "wr_1" }),
+          account,
+        },
+        deps(shadow, {}, { githubGrants: async () => [] })
+      )
+      expect(decision.receipt?.request.subject.input).toEqual({ integrationAccount: account })
+      // Without an account the receipt names none.
+      const bare = await planIntegrationWrite(
+        write([OTHER_REPO], { kind: "workflow", workflowId: "wf_1", runId: "wr_1" }),
+        deps(shadow, {}, { githubGrants: async () => [] })
+      )
+      expect(bare.receipt?.request.subject.input).toBeUndefined()
+    })
+
     it("passes a tool call's session, and no operation for a raw request", async () => {
       const githubGrants = jest.fn(async () => [])
       await planIntegrationWrite(
