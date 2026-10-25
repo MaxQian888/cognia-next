@@ -256,6 +256,7 @@ describe("planDeviceSections", () => {
       featureManifest: buildLocalHostFeatureManifest({
         platform: "headless",
         personPartition: true,
+        deviceGrants: ["host.observe", "secret.manage", "host.admin", "performance.observe"],
       }),
     }
     const sections = ids(planDeviceSections(org).sections)
@@ -269,6 +270,92 @@ describe("planDeviceSections", () => {
     // A `/pair` Host this app is not routed to cannot be reached at all.
     const unreachable = { ...org, ref: "companion:org", hostId: undefined }
     expect(ids(planDeviceSections(unreachable).sections)).not.toContain("org-models")
+  })
+
+  it("says why a device the Host withheld a management grant from has no such section", () => {
+    const host = row({ ref: "companion:org", kind: "remote-host", hostId: undefined })
+    const routed = { ...host, runtime: { ...host.runtime, isRoutingTarget: true } }
+    // An org member's browser, as the P6f rig's Host answers it.
+    const member = {
+      ...routed,
+      featureManifest: buildLocalHostFeatureManifest({
+        platform: "headless",
+        personPartition: true,
+        deviceGrants: [
+          "agent.run",
+          "client.read",
+          "client.write",
+          "host.observe",
+          "workspace.read",
+        ],
+      }),
+    }
+    const plan = planDeviceSections(member)
+    for (const id of ["host-secrets", "host-updates", "host-runtimes", "host-system"]) {
+      expect(ids(plan.sections)).not.toContain(id)
+    }
+    // Organization models follow the org role, not a device grant.
+    expect(ids(plan.sections)).toContain("org-models")
+    // Stated first in the shared record, in page order, each in its own words.
+    expect(plan.notApplicable.slice(0, 4)).toEqual([
+      {
+        id: "host-secrets",
+        labelKey: "hostSecrets.title",
+        reasonKey: "notApplicable.missingGrant.secretManage",
+      },
+      {
+        id: "host-updates",
+        labelKey: "hostUpdates.title",
+        reasonKey: "notApplicable.missingGrant.hostAdmin",
+      },
+      {
+        id: "host-runtimes",
+        labelKey: "hostRuntimes.title",
+        reasonKey: "notApplicable.missingGrant.hostAdmin",
+      },
+      {
+        id: "host-system",
+        labelKey: "hostSystem.title",
+        reasonKey: "notApplicable.missingGrant.performanceObserve",
+      },
+    ])
+
+    // One grant held, the others not: only the missing ones move.
+    const observer = {
+      ...member,
+      featureManifest: buildLocalHostFeatureManifest({
+        platform: "headless",
+        deviceGrants: ["host.observe", "performance.observe"],
+      }),
+    }
+    expect(ids(planDeviceSections(observer).sections)).toContain("host-system")
+    expect(planDeviceSections(observer).notApplicable.map((entry) => entry.id)).not.toContain(
+      "host-system"
+    )
+
+    // Unknown grants (no manifest, or a Host that listed none) keep every section:
+    // the Host's own refusal stays the answer.
+    for (const unknown of [
+      routed,
+      {
+        ...routed,
+        featureManifest: buildLocalHostFeatureManifest({ platform: "headless", deviceGrants: [] }),
+      },
+    ]) {
+      const sections = ids(planDeviceSections(unknown).sections)
+      expect(sections).toEqual(
+        expect.arrayContaining(["host-secrets", "host-updates", "host-runtimes", "host-system"])
+      )
+      expect(planDeviceSections(unknown).notApplicable.map((entry) => entry.id)).not.toContain(
+        "host-secrets"
+      )
+    }
+
+    // A Host this app cannot reach says nothing about management at all.
+    const unreachable = { ...member, runtime: { ...member.runtime, isRoutingTarget: false } }
+    expect(planDeviceSections(unreachable).notApplicable.map((entry) => entry.id)).not.toContain(
+      "host-secrets"
+    )
   })
 
   it("manages the /pair Host this app is connected to over the app's own connection", () => {

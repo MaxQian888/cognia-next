@@ -115,6 +115,7 @@
     "error": "Worker 操作失败：{detail}",
     "expires": "注册凭据将在 {time} 过期。",
     "notConnected": "注册 worker 前请先连接 Companion。",
+    "notAdmin": "管理此 Host 上的执行节点需要 Host 管理权限，而此设备配对时没有获得。拥有该权限的设备可以列出、登记和撤销执行节点。",
     "offline": "离线",
     "online": "在线",
     "placementReason": "无法调度：{reason}",

@@ -40,7 +40,7 @@ import type {
   WorkerInput,
 } from "@/lib/devices/types"
 import { devicePresence } from "@/lib/companion/device-presence-registry"
-import { listExecutionWorkers } from "@/lib/fleet/execution-workers"
+import { executionWorkersReachable, listExecutionWorkers } from "@/lib/fleet/execution-workers"
 import { listUsers } from "@/lib/db/identity"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { subscribeCompanionHostLabels } from "@/lib/companion/host-orchestration"
@@ -151,7 +151,10 @@ async function readHostPersonId(): Promise<string | undefined> {
   }
 }
 
-async function readWorkers(): Promise<WorkerInput[]> {
+async function readWorkers(reachable: boolean): Promise<WorkerInput[]> {
+  // A device the Host refuses the worker list (no `host.admin`) has none to
+  // show, and asking every poll only collects the same final 403.
+  if (!reachable) return []
   try {
     return await listExecutionWorkers()
   } catch {
@@ -230,6 +233,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const runtimeAvailability = useSandboxRuntimeAvailability()
   const snapshot = useRuntimeSnapshot()
   const companionTargetId = snapshot.target?.kind === "companion" ? snapshot.target.id : null
+  const workersReachable = executionWorkersReachable(snapshot.host)
   const [companionHost, setCompanionHost] = useState<RemoteHostInput | null>(null)
   const refreshGeneration = useRef(0)
 
@@ -306,7 +310,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     const generation = ++refreshGeneration.current
     const [devices, workerRows, hostPerson, companion] = await Promise.all([
       readHostDevices(),
-      readWorkers(),
+      readWorkers(workersReachable),
       readHostPersonId(),
       companionTargetId && !activeHostId
         ? readCompanionHost(companionTargetId, snapshot.connectionState).catch(() => null)
@@ -331,7 +335,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     setOwnerNames(await readOwnerNames(devices))
     setLoading(false)
     setNow(Date.now())
-  }, [activeHostId, companionTargetId, snapshot.connectionState])
+  }, [activeHostId, companionTargetId, snapshot.connectionState, workersReachable])
 
   useEffect(() => {
     let cancelled = false

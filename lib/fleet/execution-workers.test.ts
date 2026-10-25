@@ -1,6 +1,7 @@
 import { isTauri, transport } from "@/lib/tauri"
 import {
   createWorkerEnrollment,
+  executionWorkersReachable,
   listExecutionWorkers,
   revokeExecutionWorker,
   workerEnrollmentCommand,
@@ -64,5 +65,24 @@ describe("execution worker management", () => {
       ["fleet_worker_list"],
       ["fleet_worker_set", { deviceId: "worker-a", allowed: false }],
     ])
+  })
+})
+
+describe("executionWorkersReachable", () => {
+  const host = (grants: string[]) => ({ compatible: true, operations: [], grants })
+
+  it("asks unless the Host has said this device lacks host.admin", () => {
+    tauri.mockReturnValue(false)
+    expect(executionWorkersReachable(host(["host.observe", "agent.run"]))).toBe(false)
+    expect(executionWorkersReachable(host(["host.observe", "host.admin"]))).toBe(true)
+    // Unknown grants still ask; the Host's refusal decides.
+    expect(executionWorkersReachable(host([]))).toBe(true)
+    expect(executionWorkersReachable(undefined)).toBe(true)
+    expect(executionWorkersReachable({ compatible: false, operations: [], grants: [] })).toBe(true)
+  })
+
+  it("always asks on the desktop, which answers from its own process", () => {
+    tauri.mockReturnValue(true)
+    expect(executionWorkersReachable(host(["host.observe"]))).toBe(true)
   })
 })

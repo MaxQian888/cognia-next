@@ -1,5 +1,25 @@
+import { deviceLacksCapability } from "@/lib/devices/grant-capabilities"
+import type { HostRuntimeSnapshot } from "@/lib/runtime/operation-availability"
 import { isTauri, transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+
+/** What every `fleet_worker_*` command needs (`protocol/companion-commands.json`). */
+export const EXECUTION_WORKERS_CAPABILITY = "host.admin"
+
+/**
+ * Whether this client may ask its Host about execution workers at all.
+ *
+ * The desktop asks its own process. A paired client asks the Host, which
+ * refuses a device without `host.admin` (`missing_capability`, final), and the
+ * device console used to ask again every five seconds. So a client the Host
+ * has said lacks the grant does not ask; one whose grants are unknown still
+ * does, and the Host's answer decides.
+ */
+export function executionWorkersReachable(host: HostRuntimeSnapshot | null | undefined): boolean {
+  if (isTauri()) return true
+  if (!host?.compatible) return true
+  return !deviceLacksCapability(host.grants, EXECUTION_WORKERS_CAPABILITY)
+}
 
 export interface WorkerEnrollmentIssue {
   enrollment: string

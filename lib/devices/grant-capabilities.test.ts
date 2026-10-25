@@ -7,6 +7,7 @@ import {
   LOCKED_USE_AVAILABLE,
   ROUTER_FUSION_COMPANION_CAPABILITY,
   buildGrantRows,
+  deviceLacksCapability,
   grantForCapability,
   isGrantEnabled,
   ownerPermits,
@@ -322,5 +323,17 @@ describe("buildGrantRows under a suspended owner", () => {
       evidence({ hostCapabilities: [...CONTROL], ownerSuspended: false })
     )
     expect(after).toEqual(before)
+  })
+})
+
+describe("deviceLacksCapability", () => {
+  it("answers yes only when the Host listed this device's grants without it", () => {
+    const member = ["agent.run", "client.read", "host.observe"]
+    expect(deviceLacksCapability(member, "host.admin")).toBe(true)
+    expect(deviceLacksCapability(member, "host.observe")).toBe(false)
+    // Unknown is not "lacks": no list, or a Host that could not read its store.
+    expect(deviceLacksCapability(undefined, "host.admin")).toBe(false)
+    expect(deviceLacksCapability(null, "host.admin")).toBe(false)
+    expect(deviceLacksCapability([], "host.admin")).toBe(false)
   })
 })

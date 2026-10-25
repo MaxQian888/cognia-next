@@ -15512,6 +15512,11 @@
         "ssh-host": "本控制台会向每台机器提出的问题，以及一台 SSH 主机为什么给不出答案。",
         "worker": "本控制台会向每台机器提出的问题，以及 Worker 为什么给不出答案。"
       },
+      "missingGrant": {
+        "hostAdmin": "这部分需要 Host 管理权限，而此设备配对时没有获得。拥有该权限的设备可以在它自己的页面上管理。",
+        "performanceObserve": "此设备配对时没有获得查看 Host 性能的权限，Host 不会在这里提供系统详情。",
+        "secretManage": "此设备配对时没有获得管理 Host 密钥的权限，Host 不会在这里列出它们。"
+      },
       "nav": "不适用",
       "runtime": "沙箱与工作区",
       "title": "此处不适用"
@@ -51529,6 +51534,7 @@
         "enroll": "注册 worker",
         "error": "Worker 操作失败：{detail}",
         "expires": "注册凭据将在 {time} 过期。",
+        "notAdmin": "管理此 Host 上的执行节点需要 Host 管理权限，而此设备配对时没有获得。拥有该权限的设备可以列出、登记和撤销执行节点。",
         "notConnected": "注册 worker 前请先连接 Companion。",
         "offline": "离线",
         "online": "在线",

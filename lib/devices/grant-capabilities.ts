@@ -91,6 +91,28 @@ export function grantForCapability(capability: string): DeviceGrantId | undefine
  */
 export const ROUTER_FUSION_COMPANION_CAPABILITY = "agent.run" as const
 
+/**
+ * Whether a Host has said this device does NOT hold `capability`.
+ *
+ * `declared` is the `deviceGrants` a Host put in its feature manifest for the
+ * caller: the SecurityStore capability snapshot the Host's own
+ * `missing_capability` refusal checks (`inject_caller_device_grants`), so a
+ * surface can stop asking for what it will be refused. Only a positive answer
+ * counts. No list (a v1 manifest, no manifest yet) and an empty list (the Host
+ * could not read its store) are "unknown", and an unknown device keeps asking:
+ * the Host's 403 stays the authority.
+ *
+ * Not for `org.policy.manage`. The Host grants that from the caller's live org
+ * role, not the device's grants (P6b), so an org admin's manifest never lists
+ * it.
+ */
+export function deviceLacksCapability(
+  declared: readonly string[] | null | undefined,
+  capability: string
+): boolean {
+  return Array.isArray(declared) && declared.length > 0 && !declared.includes(capability)
+}
+
 export const DEVICE_GRANT_IDS: readonly DeviceGrantId[] = Object.freeze([
   "control",
   "agentControl",

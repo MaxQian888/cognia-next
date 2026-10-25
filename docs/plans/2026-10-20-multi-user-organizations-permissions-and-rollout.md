@@ -541,6 +541,18 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - Client: `OrgUsageReport.membersIncomplete` (only a literal `true` counts). The panel shows the note above the rows.
       - Smoke: the owner's report lists both people with no `membersIncomplete`. With `COGNIA_SMOKE_PERSONS_UNUSED_MEMBER` set, it also lists that member, named, at 0 tokens.
 
+14. **Device page follows the device's grants (P6 follow-up, 2026-10-26).**
+    - **Decisions:**
+      - An org member's browser, the owner's included, holds no `host.admin`, `secret.manage` or `performance.observe` on a multi-tenant Host. The device page asked anyway: the worker list every 5 s and each management section on every visit and focus, each refused `missing_capability` (`retryable: false`).
+      - The client now reads the grants the Host names for this device (the manifest's `deviceGrants`, the same SecurityStore snapshot the refusal checks) and does not ask for what it lacks. It says why in the page's "does not apply" record.
+      - Only a positive answer counts. No manifest, a v1 manifest or an empty list is unknown, and an unknown device still asks; the Host's refusal stays the authority. Organization models are not gated this way, because the Host admits them by org role, not by device grant.
+    - **Surface:**
+      - `lib/devices/grant-capabilities.ts`: `deviceLacksCapability(declared, capability)`.
+      - `lib/devices/section-plan.ts`: `MANAGED_HOST_SECTION_GRANT` (secrets `secret.manage`, updates and runtimes `host.admin`, system `performance.observe`). A section the device lacks the grant for leaves the plan and leads the not-applicable record with `devices.notApplicable.missingGrant.*`.
+      - `lib/fleet/execution-workers.ts`: `executionWorkersReachable(host)`. The device rows poll skips the worker list, and the settings workers card says why (`settings.fleet.workers.notAdmin`) with enrolling disabled.
+    - **Verified (2026-10-26, P6f rig, owner Ada's browser):** the page shows the four rows in the record. Over 50 s nothing is refused, where `fleet_worker_list` had been refused every 5 s.
+    - **Known gaps:** at page load, before the Host's manifest lands, each section and the worker list still ask once and are refused once.
+
 **Intentional dormancy (Rule 7).**
 
 - Tool turns need a conforming sandbox pool. Without one they keep `execution_isolation_unavailable`.

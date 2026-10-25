@@ -18,6 +18,7 @@ import {
 } from "@/lib/ai/agent/team/workers/remote-worker-runtime"
 import {
   createWorkerEnrollment,
+  executionWorkersReachable,
   listExecutionWorkers,
   revokeExecutionWorker,
   workerEnrollmentCommand,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/fleet/execution-workers"
 import type { FleetHost } from "@/lib/fleet/types"
 import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { setAgentExecutionFlag } from "@/lib/ai/agent/execution/feature-flags"
 
 export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] }) {
@@ -34,12 +36,16 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
   const [issue, setIssue] = useState<WorkerEnrollmentIssue | null>(null)
   const [busy, setBusy] = useState(false)
   const remoteDispatchEnabled = useAgentExecutionFlag("agentTeamRemoteDispatch")
+  // Listing, enrolling and revoking workers all need `host.admin`; a device
+  // the Host says lacks it is told so once instead of refused on each action.
+  const reachable = executionWorkersReachable(useRuntimeSnapshot().host)
 
   const refresh = useCallback(async () => {
     setDevices(await listExecutionWorkers())
   }, [])
 
   useEffect(() => {
+    if (!reachable) return
     let active = true
     void listExecutionWorkers()
       .then((workers) => {
@@ -49,7 +55,7 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
     return () => {
       active = false
     }
-  }, [])
+  }, [reachable])
 
   const command = useMemo(() => (issue ? workerEnrollmentCommand(issue) : ""), [issue])
   const onlineByHost = new Map(hosts.map((host) => [host.hostRef, host]))
@@ -86,7 +92,7 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
       description={t("description")}
       testid="execution-workers-card"
       action={
-        <Button size="sm" disabled={busy} onClick={() => void create()}>
+        <Button size="sm" disabled={busy || !reachable} onClick={() => void create()}>
           {t("enroll")}
         </Button>
       }
@@ -125,11 +131,15 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
         </div>
       ) : null}
 
-      {!canDispatch && devices.length > 0 ? (
+      {reachable && !canDispatch && devices.length > 0 ? (
         <SettingsAlert variant="destructive">{t("dispatchUnavailable")}</SettingsAlert>
       ) : null}
 
-      {devices.length === 0 ? (
+      {!reachable ? (
+        <div data-testid="execution-workers-not-admin">
+          <SettingsAlert>{t("notAdmin")}</SettingsAlert>
+        </div>
+      ) : devices.length === 0 ? (
         <SettingsEmptyState title={t("empty")} className="py-4" />
       ) : (
         <div className="space-y-2">

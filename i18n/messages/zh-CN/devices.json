@@ -240,6 +240,11 @@
     "title": "此处不适用",
     "nav": "不适用",
     "runtime": "沙箱与工作区",
+    "missingGrant": {
+      "hostAdmin": "这部分需要 Host 管理权限，而此设备配对时没有获得。拥有该权限的设备可以在它自己的页面上管理。",
+      "secretManage": "此设备配对时没有获得管理 Host 密钥的权限，Host 不会在这里列出它们。",
+      "performanceObserve": "此设备配对时没有获得查看 Host 性能的权限，Host 不会在这里提供系统详情。"
+    },
     "description": {
       "local": "本控制台会向每台机器提出的问题，以及本机为什么给不出答案。",
       "paired-device": "本控制台会向每台机器提出的问题，以及配对设备为什么给不出答案。",

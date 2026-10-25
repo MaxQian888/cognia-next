@@ -240,6 +240,11 @@
     "title": "Does not apply here",
     "nav": "Not applicable",
     "runtime": "Sandbox and workspaces",
+    "missingGrant": {
+      "hostAdmin": "This takes Host admin rights, and this device was paired without them. A device that has them can manage it from its own page.",
+      "secretManage": "This device was paired without permission to manage the Host's secrets, so the Host won't list them here.",
+      "performanceObserve": "This device was paired without permission to observe the Host's performance, so the Host won't share its system details here."
+    },
     "description": {
       "local": "What this console asks of every machine, and why this one has no answer.",
       "paired-device": "What this console asks of every machine, and why a paired device has no answer.",

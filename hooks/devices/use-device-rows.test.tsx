@@ -55,6 +55,7 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 jest.mock("@/lib/fleet/execution-workers", () => ({
+  ...jest.requireActual("@/lib/fleet/execution-workers"),
   listExecutionWorkers: () => listWorkersImpl(),
 }))
 
@@ -326,6 +327,28 @@ describe("useDeviceRows", () => {
     const { result } = renderHook(() => useDeviceRows())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.rows.every((row) => row.kind !== "ssh-host")).toBe(true)
+  })
+
+  it("does not ask a Host for workers it has said this device may not list", async () => {
+    tauri = false
+    const listed = jest.fn(async () => [])
+    listWorkersImpl = listed
+    runtimeSnapshot = {
+      ...runtimeSnapshot,
+      host: { compatible: true, operations: [], grants: ["host.observe", "agent.run"] },
+    }
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(listed).not.toHaveBeenCalled()
+
+    // A device holding host.admin, or one whose grants are unknown, still asks.
+    runtimeSnapshot = {
+      ...runtimeSnapshot,
+      host: { compatible: true, operations: [], grants: ["host.observe", "host.admin"] },
+    }
+    const admin = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(admin.result.current.loading).toBe(false))
+    expect(listed).toHaveBeenCalled()
   })
 
   it("includes enrolled workers when the host has them", async () => {

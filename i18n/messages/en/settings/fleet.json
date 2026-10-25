@@ -115,6 +115,7 @@
     "error": "Worker action failed: {detail}",
     "expires": "Enrollment expires at {time}.",
     "notConnected": "Connect Companion before enrolling a worker.",
+    "notAdmin": "Execution workers on this Host take Host admin rights, and this device was paired without them. A device that has them can list, enroll and revoke workers.",
     "offline": "Offline",
     "online": "Online",
     "placementReason": "Placement unavailable: {reason}",

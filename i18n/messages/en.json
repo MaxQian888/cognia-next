@@ -15512,6 +15512,11 @@
         "ssh-host": "What this console asks of every machine, and why an SSH host has no answer.",
         "worker": "What this console asks of every machine, and why a worker has no answer."
       },
+      "missingGrant": {
+        "hostAdmin": "This takes Host admin rights, and this device was paired without them. A device that has them can manage it from its own page.",
+        "performanceObserve": "This device was paired without permission to observe the Host's performance, so the Host won't share its system details here.",
+        "secretManage": "This device was paired without permission to manage the Host's secrets, so the Host won't list them here."
+      },
       "nav": "Not applicable",
       "runtime": "Sandbox and workspaces",
       "title": "Does not apply here"
@@ -51529,6 +51534,7 @@
         "enroll": "Enroll worker",
         "error": "Worker action failed: {detail}",
         "expires": "Enrollment expires at {time}.",
+        "notAdmin": "Execution workers on this Host take Host admin rights, and this device was paired without them. A device that has them can list, enroll and revoke workers.",
         "notConnected": "Connect Companion before enrolling a worker.",
         "offline": "Offline",
         "online": "Online",

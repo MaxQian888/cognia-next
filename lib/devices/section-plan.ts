@@ -24,6 +24,7 @@
 import type { RemoteDesktopHostRef } from "@/lib/remote-desktop/types"
 
 import { dispatchTargetRef } from "./build-device-rows"
+import { deviceLacksCapability } from "./grant-capabilities"
 import type { DeviceKind, DeviceRow } from "./types"
 
 export type DeviceSectionId =
@@ -58,6 +59,7 @@ export interface DevicePlannedSection {
 
 /** What a card would have said had it rendered, as one row of a shared record. */
 export type DeviceNotApplicableId =
+  | ManagedHostSectionId
   | "capabilities"
   | "access"
   | "sandbox"
@@ -85,6 +87,43 @@ export interface DeviceSectionPlan {
    */
   notApplicableWide: boolean
 }
+
+/**
+ * The Host-management sections whose every read needs a device grant, and the
+ * grant: the capability of the commands each one calls
+ * (`protocol/companion-commands.json`). A device the Host says lacks it would
+ * only be refused (`missing_capability`), on every visit and every focus, so
+ * the section says why instead of rendering an error. Organization models are
+ * absent on purpose: the Host admits those by org role, not by device grant.
+ */
+export const MANAGED_HOST_SECTION_GRANT = Object.freeze({
+  "host-secrets": "secret.manage",
+  "host-updates": "host.admin",
+  "host-runtimes": "host.admin",
+  "host-system": "performance.observe",
+} as const)
+
+export type ManagedHostSectionId = keyof typeof MANAGED_HOST_SECTION_GRANT
+
+/** The sentence a section the device lacks the grant for says, per grant. */
+const MISSING_GRANT_REASON: Record<
+  (typeof MANAGED_HOST_SECTION_GRANT)[ManagedHostSectionId],
+  string
+> = {
+  "secret.manage": "notApplicable.missingGrant.secretManage",
+  "host.admin": "notApplicable.missingGrant.hostAdmin",
+  "performance.observe": "notApplicable.missingGrant.performanceObserve",
+}
+
+/** The label each managed section carries in the record: its own title. */
+const MANAGED_HOST_SECTION_LABEL: Record<ManagedHostSectionId, string> = {
+  "host-secrets": "hostSecrets.title",
+  "host-updates": "hostUpdates.title",
+  "host-runtimes": "hostRuntimes.title",
+  "host-system": "hostSystem.title",
+}
+
+const MANAGED_HOST_SECTIONS = Object.keys(MANAGED_HOST_SECTION_GRANT) as ManagedHostSectionId[]
 
 /** The anchor the not-applicable record carries, for the jump navigation. */
 export const NOT_APPLICABLE_SECTION_ID = "not-applicable"
@@ -202,6 +241,17 @@ function servesPersonPartition(row: DeviceRow): boolean {
   return manifest?.schemaVersion === 2 && manifest.personPartition === true
 }
 
+/**
+ * Whether the Host told this device it lacks the grant a managed section
+ * needs. Only a v2 manifest names the grants; anything else is unknown, and an
+ * unknown device still sees the section (the Host's refusal stays the answer).
+ */
+function lacksManagedGrant(row: DeviceRow, id: ManagedHostSectionId): boolean {
+  const manifest = row.featureManifest
+  if (manifest?.schemaVersion !== 2) return false
+  return deviceLacksCapability(manifest.deviceGrants, MANAGED_HOST_SECTION_GRANT[id])
+}
+
 export function canOwnTiming(row: DeviceRow): boolean {
   return row.kind === "local" || (row.kind === "remote-host" && Boolean(row.hostId))
 }
@@ -221,7 +271,9 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     case "host-runtimes":
     // The Host's own system details travel the same channel.
     case "host-system":
-      return Boolean(managementRefOf(row))
+      // Each needs its own device grant; a device the Host says lacks it is
+      // told why in the shared record instead.
+      return Boolean(managementRefOf(row)) && !lacksManagedGrant(row, id)
     // An organization's model keys and agents live on a multi-tenant Host
     // (plan §9b, P6), which declares itself through the person brain that
     // serves this device's manifest.
@@ -283,6 +335,18 @@ export function remoteDesktopHostOf(row: DeviceRow): RemoteDesktopHostRef | null
  */
 function notApplicableFor(row: DeviceRow): DeviceNotApplicable[] {
   const entries: DeviceNotApplicable[] = []
+  // First: they lead a remote host's page, and they are the rows a reader came
+  // to do something with.
+  if (managementRefOf(row)) {
+    for (const id of MANAGED_HOST_SECTIONS) {
+      if (!lacksManagedGrant(row, id)) continue
+      entries.push({
+        id,
+        labelKey: MANAGED_HOST_SECTION_LABEL[id],
+        reasonKey: MISSING_GRANT_REASON[MANAGED_HOST_SECTION_GRANT[id]],
+      })
+    }
+  }
   if (!isApplicable(row, "capabilities")) {
     entries.push({
       id: "capabilities",

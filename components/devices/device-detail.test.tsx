@@ -2,6 +2,7 @@ import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { DeviceCapabilityCell, DeviceRow } from "@/lib/devices/types"
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 
 import { DeviceDetail } from "./device-detail"
@@ -183,6 +184,32 @@ describe("DeviceDetail", () => {
     )
     expect(within(record).getByTestId("not-applicable-workspaces")).toBeInTheDocument()
     expect(screen.queryByTestId("card-sandbox")).not.toBeInTheDocument()
+  })
+
+  it("says why a Host's management sections are missing for a device without the grant", () => {
+    render(
+      <DeviceDetail
+        row={row({
+          ref: "host:org",
+          kind: "remote-host",
+          hostId: "org",
+          featureManifest: buildLocalHostFeatureManifest({
+            platform: "headless",
+            deviceGrants: ["agent.run", "client.read", "host.observe"],
+          }),
+        })}
+        actions={actions}
+      />
+    )
+    const record = screen.getByTestId("device-section-not-applicable")
+    expect(within(record).getByTestId("not-applicable-host-runtimes")).toHaveTextContent(
+      "This takes Host admin rights, and this device was paired without them."
+    )
+    expect(within(record).getByTestId("not-applicable-host-secrets")).toBeInTheDocument()
+    expect(within(record).getByTestId("not-applicable-host-system")).toBeInTheDocument()
+    expect(within(record).getByText("Runtimes")).toBeInTheDocument()
+    expect(screen.queryByTestId("card-host-runtimes")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("card-host-secrets")).not.toBeInTheDocument()
   })
 
   it("lists every rendered card in the jump strip, in grid order", () => {
