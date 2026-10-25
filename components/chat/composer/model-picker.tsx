@@ -70,6 +70,10 @@ import {
   type CogniaGatewayModelsReason,
 } from "@/hooks/agent/use-cognia-gateway-models"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { usePersonAgents } from "@/hooks/chat/use-person-agents"
+import { personDefaultModel, personServedModels } from "@/lib/chat/person-agent-choice"
+import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
+import { getProviderDisplayName } from "@/lib/ai/icons"
 
 // The reserved group id moved next to the model vocabulary it belongs to, so
 // the send path can recognise a session row this picker stamped. Re-exported
@@ -142,6 +146,29 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
     agentId && s.agents[agentId] ? (s.agents[agentId].cogniaModel ?? null) : undefined
   )
   const cogniaModels = useCogniaGatewayModels(session?.id)
+  /**
+   * An org member on a shared Host (P6g). Their turns run on what the org
+   * serves, never on this device's own providers, so those are the only
+   * choice offered: the org's models for this conversation's agent, or for
+   * tool-less chat every model the org holds a key for. Auto routing goes
+   * too, because it picks among this device's providers.
+   */
+  const personAgents = usePersonAgents().agents
+  const memberServed = useMemo(
+    () => (personAgents && !externalLane ? personServedModels(personAgents, session ?? {}) : null),
+    [personAgents, externalLane, session]
+  )
+  const memberLane = memberServed !== null
+  const memberGroups = useMemo<ModelProviderGroup[]>(() => {
+    if (!memberServed) return []
+    const section = { id: "person-models", label: t("memberSection") }
+    return memberServed.map(({ provider, models }) => ({
+      providerId: provider,
+      providerName: getProviderDisplayName(provider),
+      section,
+      models: models.map((id) => ({ id, name: id })),
+    }))
+  }, [memberServed, t])
 
   // --- What this conversation runs the agent on -----------------------------
   //
@@ -375,6 +402,15 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   // showing a Kimi model while the provider default ran.
   const rowIsAgentPick = isExternalAgentProviderId(session?.providerOverride)
   const appDefault = resolveAppDefaultModel({ defaultModel, defaultProvider })
+  // Before a member's conversation exists, name what it will start on: the
+  // same pick `startNewSession` seeds it with.
+  const memberDefault =
+    personAgents && memberLane && !session
+      ? personDefaultModel(personAgents, {
+          providerOverride: appDefault.provider,
+          model: appDefault.model,
+        })
+      : null
   const selectedModel = optimisticModel ?? (rowIsAgentPick ? undefined : session?.model)
   const effectiveModel =
     selectedModel === "auto" && !autoEnabled && !autoEnablePending ? undefined : selectedModel
@@ -382,13 +418,17 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   const activeModel = externalLane
     ? (cogniaBinding?.modelId ??
       (agentActiveModel || (hasNativeList ? agentActiveModel : AGENT_DEFAULT_MODEL_ID)))
-    : (effectiveModel ?? (inheritAuto ? "auto" : appDefault.model) ?? ANTHROPIC_DEFAULT_MODEL)
+    : (effectiveModel ??
+      memberDefault?.model ??
+      (inheritAuto ? "auto" : appDefault.model) ??
+      ANTHROPIC_DEFAULT_MODEL)
   const activeProvider = externalLane
     ? cogniaBinding
       ? cogniaGatewayGroupId(cogniaBinding.providerId)
       : agentProviderMarker
     : (optimisticProvider ??
       (rowIsAgentPick ? undefined : session?.providerOverride) ??
+      memberDefault?.providerOverride ??
       appDefault.provider ??
       "anthropic")
 
@@ -491,6 +531,17 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
             ? { autoRouting: { ...currentAuto, defaultSelection: "manual" } }
             : {}),
         })
+        return
+      }
+      // A conversation the paired Host runs takes the pick there, for its
+      // next turn: written here, the Host would never see it and the turn
+      // would run on (or be refused for) the old model.
+      const routed = await enqueueHostStateIntentIfAvailable({
+        sessionId: session.id,
+        action: { kind: "session.model", provider: providerId, model: modelId },
+      })
+      if (routed) {
+        if (selectionSaveRef.current === save) setSelectionPersisted(true)
         return
       }
       await updateSession(session.id, { model: modelId, providerOverride: providerId })
@@ -627,8 +678,8 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
       model={activeModel}
       provider={activeProvider}
       onSelect={handleSelect}
-      onSelectAuto={externalLane ? undefined : handleSelectAuto}
-      hideProviderGroups={externalLane}
+      onSelectAuto={externalLane || memberLane ? undefined : handleSelectAuto}
+      hideProviderGroups={externalLane || memberLane}
       triggerLabel={externalLane ? agentTriggerLabel : undefined}
       triggerIcon={
         externalLane && cogniaBinding ? (
@@ -642,12 +693,15 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
           ...(refreshAgentModelsButton ? { headingAction: refreshAgentModelsButton } : {}),
         })),
         ...cogniaGroups,
+        ...memberGroups,
       ]}
       leadingNotice={
         externalLane && agentNotice ? (
           <span className="flex flex-col gap-1" aria-live="polite">
             <span>{agentNotice}</span>
           </span>
+        ) : memberServed?.length === 0 ? (
+          <span aria-live="polite">{t("memberNoModels")}</span>
         ) : null
       }
       // The agent opens its session on the first turn, and nothing in any store

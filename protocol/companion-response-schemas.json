@@ -16465,7 +16465,7 @@
           "enum": ["sandboxed", "none"]
         },
         "models": {
-          "description": "P6g: for each provider an allowed agent can use, the model ids the Host's deployment serves; no other provider appears.",
+          "description": "P6g: per provider, the model ids the Host's deployment serves. Every provider an allowed agent can use, then every other provider the org holds a key for (tool-less chat); never a provider without an org key.",
           "type": "object",
           "additionalProperties": { "type": "array", "items": { "type": "string" } }
         },

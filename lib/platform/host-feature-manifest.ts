@@ -25,7 +25,11 @@ export interface PersonAgentsManifest {
   defaultAgent: string | null
   /** `none`: this Host cannot run member agents at all. */
   execution: "sandboxed" | "none"
-  /** Per provider in `allowedAgents`, the model ids its deployment serves. */
+  /**
+   * Per provider, the model ids its deployment serves: every provider in
+   * `allowedAgents`, then every other provider the org holds a key for, which
+   * tool-less chat can run on. A Host older than that names only the first.
+   */
   models: Record<string, string[]>
   /** The member's own UTC month; `monthlyTokens: null` means no cap. */
   usage: {

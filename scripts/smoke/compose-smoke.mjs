@@ -1700,7 +1700,12 @@ function personsReplyText(turn) {
 }
 
 /** Enqueue one message on a fresh chat session and wait for its turn to settle. */
-async function personsTurn(person, seed, text, waitSeconds = 30) {
+/**
+ * One member turn in a fresh conversation. `modelPick`, when given, is sent
+ * as a `session.model` intent between the create and the message, the way a
+ * member's model menu switches a conversation on the Host.
+ */
+async function personsTurn(person, seed, text, waitSeconds = 30, modelPick) {
   const startedAt = Date.now()
   const sessionId = `smoke-chat-${person.subject}-${randomUUID()}`
   const [created] = await submitPartition(person, person.state, [
@@ -1714,11 +1719,23 @@ async function personsTurn(person, seed, text, waitSeconds = 30) {
     created?.outcome === "applied",
     `${person.subject}: chat session created (got ${JSON.stringify(created)})`
   )
+  if (modelPick) {
+    const [picked] = await submitPartition(person, person.state, [
+      hostStateAction(person.state.scope, person.state.status, sessionId, 2, {
+        kind: "session.model",
+        ...modelPick,
+      }),
+    ])
+    check(
+      picked?.outcome === "applied",
+      `${person.subject}: session.model is applied (got ${JSON.stringify(picked)})`
+    )
+  }
   const enqueue = hostStateAction(
     person.state.scope,
     person.state.status,
     sessionId,
-    2,
+    modelPick ? 3 : 2,
     { kind: "message.enqueue", messageId: randomUUID(), text, attachments: [] },
     1
   )
@@ -1806,6 +1823,24 @@ async function personsChat(person, owner) {
   check(
     spent(after.body) > spent(before.body),
     `${person.subject}'s usage grows with the reply (${spent(before.body)} → ${spent(after.body)})`
+  )
+  // A model the org's deployment does not serve is no model access, not a
+  // malformed request; picking a served one on the Host (`session.model`)
+  // makes the same conversation's next turn run.
+  const unserved = { provider: PERSONS_MODEL.provider, model: "smoke-unserved-model" }
+  const refusedModel = await personsTurn(person, unserved, "hello on a model the org lacks")
+  check(
+    refusedModel.operation?.status === "failed" &&
+      refusedModel.operation.errorCode === "model_access_unavailable",
+    `${person.subject}: an unserved model fails model_access_unavailable (got ${JSON.stringify(refusedModel.operation)})`
+  )
+  const switched = await personsTurn(person, unserved, "hello after picking a served model", 30, {
+    provider: PERSONS_MODEL.provider,
+    model: PERSONS_MODEL.model,
+  })
+  check(
+    personsReplied(switched) && switched.turn === "completed",
+    `${person.subject}'s turn runs on the model picked through session.model (got ${switched.turn}, ${JSON.stringify(switched.operation)})`
   )
   const capped = await rpc(
     "org_member_usage_cap_set",
@@ -2012,12 +2047,16 @@ async function personsAgent(person, owner, other) {
       (personAgents.usage?.spentTokens ?? 0) >= spent(after.body),
     `${person.subject}'s manifest lists their agent, its org model and their month (got ${JSON.stringify(personAgents)})`
   )
+  // Every provider the org holds a key for may appear (tool-less chat runs on
+  // any of them); one without an org key never does.
+  const keyed = ((await rpc("org_model_credential_list", {}, owner.auth)).body ?? []).map(
+    (entry) => entry.provider
+  )
   check(
     !JSON.stringify(personAgents ?? {}).includes("usr_") &&
-      !Object.keys(personAgents?.models ?? {}).some(
-        (provider) => !(claude?.providers ?? []).includes(provider)
-      ),
-    `${person.subject}'s manifest names nobody else and no provider outside the allowlist`
+      (claude?.providers ?? []).every((provider) => provider in (personAgents?.models ?? {})) &&
+      !Object.keys(personAgents?.models ?? {}).some((provider) => !keyed.includes(provider)),
+    `${person.subject}'s manifest names nobody else and no provider the org holds no key for`
   )
   const withDefault = await rpc(
     "org_agent_policy_set",

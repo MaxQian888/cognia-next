@@ -15,6 +15,9 @@ import type {
 import { createDiagnostic } from "@cognia/diagnostics"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { personDefaultModel } from "@/lib/chat/person-agent-choice"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import {
   defaultEnsureDefaultWorkspaceDeps,
   ensureDefaultWorkspace,
@@ -105,6 +108,36 @@ export interface NewSessionInput extends SessionSeed {
 }
 
 /**
+ * An org member's new conversation starts on a model the org serves (P6g):
+ * the app default when the org serves it, else the first one it does. This
+ * device's own default names a provider the member's Host does not hold a key
+ * for, and the first turn was refused `model_access_unavailable`. A caller
+ * that chose the model or the agent (the member's agent picker) keeps its
+ * choice; anywhere else nothing changes.
+ */
+function memberModelSeed(
+  seed: SessionSeed,
+  created: ChatSession
+): { model: string; providerOverride: string } | null {
+  if (seed.model || seed.providerOverride || seed.agentRuntimeId) return null
+  const host = getRuntimeSnapshot().host
+  if (!host?.personPartition || !host.personAgents) return null
+  const settings = useSettingsStore.getState().settings
+  const appDefault = resolveAppDefaultModel({
+    defaultModel: settings?.defaultModel,
+    defaultProvider: settings?.defaultProvider,
+  })
+  const pick = personDefaultModel(host.personAgents, {
+    providerOverride: created.providerOverride ?? appDefault.provider,
+    model: created.model ?? appDefault.model,
+  })
+  return pick &&
+    (pick.model !== created.model || pick.providerOverride !== created.providerOverride)
+    ? pick
+    : null
+}
+
+/**
  * The single path that starts a conversation. Every entry point — welcome CTA,
  * starter cards, channel-list "+", command palette, native menu / Cmd+N, tray,
  * CLI `--new-chat` — funnels through here so "new chat" means one thing.
@@ -154,6 +187,13 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
     ...(seededProjectId ? { projectId: seededProjectId } : {}),
     ...(defaultAgentId ? { characterId: defaultAgentId } : {}),
   })
+  // After creation, not into it: a model in the create input would skip the
+  // default preset `createSession` applies to a quick start.
+  const memberModel = memberModelSeed(sessionSeed, session)
+  if (memberModel) {
+    await updateSession(session.id, memberModel)
+    session = { ...session, ...memberModel }
+  }
 
   // Never null: with no active workspace `createSession` adopts (or creates)
   // Default, so the row is always attributed. Everything below binds to THAT

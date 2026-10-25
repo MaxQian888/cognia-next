@@ -72,7 +72,7 @@ export function PersonAgentChip({
 
   const name = current.kind === "agent" ? agentName(current.runtimeId) : t("chat")
   const usedUp = allowance.kind === "used-up"
-  const problem = current.kind === "agent" ? current.problem : undefined
+  const problem = current.problem
   const warn = usedUp || !!problem
 
   const allowanceLine =

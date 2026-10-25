@@ -40,7 +40,9 @@ pub fn person_mint(mode: DeploymentMode, person: &PersonPartition, request: Pers
     gateway.with_snapshot(|snapshot| {
         let snapshot = snapshot.ok_or_else(person_unavailable)?;
         let mut provider = snapshot.provider(&request.provider).cloned().ok_or_else(person_unavailable)?;
-        if !provider.models.contains(&request.model) { return Err(RpcError::malformed("invalid model".into())); }
+        // An unserved model reads as no model access, the code a member's
+        // device explains, not a bare 400.
+        if !provider.models.contains(&request.model) { return Err(person_unavailable()); }
         provider.api_key = Some(key);
         provider.api_keys.clear();
         provider.rotation_enabled = false;
@@ -265,7 +267,7 @@ mod tests {
         assert_error(person_mint(MultiTenant, &a, missing, &gateway, 19384), StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable");
         OrgCredentials::set(&a.org_id, "p6c-provider", "org-key", "operator", 1).unwrap();
         let mut unknown = request("s"); unknown.model = "unknown-model".into();
-        assert_error(person_mint(MultiTenant, &a, unknown, &gateway, 19384), StatusCode::BAD_REQUEST, "malformed_request");
+        assert_error(person_mint(MultiTenant, &a, unknown, &gateway, 19384), StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable");
         let host = crate::headless::HeadlessServices::stub_for_tests();
         let state = crate::rpc::tests::test_state();
         for scope in [None, Some("service"), Some("device"), Some("owner")] {

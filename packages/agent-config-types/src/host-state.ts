@@ -206,6 +206,17 @@ export type AllowedHostStateIntent =
    */
   | { kind: "session.workspace"; projectId: string }
   /**
+   * The provider and model the conversation's NEXT turn runs on, as the
+   * composer's model picker chose them. Written to the Host's `sessions` row
+   * (`model`, `providerOverride`), never into a turn in flight, and like the
+   * list-organization intents it commits with no channel mutation: every
+   * replica learns the row through `sessions` table sync. An agent session
+   * picks the change up by starting its next process on the new model; on an
+   * org member's partition the Host's org policy still decides at every turn.
+   * Each value is bounded like a session seed pick.
+   */
+  | { kind: "session.model"; provider: string; model: string }
+  /**
    * Delete the conversation on the Host, with the same cascade and teardown a
    * desktop delete runs. Confirmed as `session.tombstoned`.
    */
@@ -305,6 +316,7 @@ const INTENT_KINDS: readonly HostStateIntentKind[] = [
   "session.folder",
   "session.order",
   "session.workspace",
+  "session.model",
   "session.delete",
   "folder.create",
   "folder.rename",
@@ -347,6 +359,7 @@ export function intentRequiresRuntimeDispatch(kind: HostStateIntentKind): boolea
     case "session.folder":
     case "session.order":
     case "session.workspace":
+    case "session.model":
     case "session.delete":
     case "folder.create":
     case "folder.rename":
@@ -388,6 +401,7 @@ export function hostStateIntentTargetsSessionIndex(kind: HostStateIntentKind): b
     case "session.folder":
     case "session.order":
     case "session.workspace":
+    case "session.model":
     case "session.delete":
     case "draft.replace":
     case "message.enqueue":
@@ -472,6 +486,9 @@ export function hostStateIntentKindCapability(
     // refused), and the owner can move it back. Remote Control can already
     // send that next turn, so the move costs no more than sending it does.
     case "session.workspace":
+    // A model pick is the same: it re-points the next turn, the turn in flight
+    // keeps its model, and the owner can pick the old one back.
+    case "session.model":
     // Folders are the same organization one level up. Deleting one unfiles its
     // conversations and deletes none of them, so it stays Remote Control too.
     case "folder.create":
@@ -553,6 +570,10 @@ export function personPartitionIntentDecision(
     case "transcript.edit":
     case "transcript.truncate":
     case "session.import":
+    // Recording the pick is the member's own bookkeeping. Whether the org
+    // serves that model is decided at the turn, by the same policy read that
+    // decides the agent, so a pick never widens what the member may run.
+    case "session.model":
       return { allowed: true }
     case "message.enqueue":
     case "turn.abort":
@@ -607,6 +628,7 @@ export function hostStateIntentRequiresLiveControl(kind: HostStateIntentKind): b
     case "session.folder":
     case "session.order":
     case "session.workspace":
+    case "session.model":
     case "session.delete":
     case "folder.create":
     case "folder.rename":
@@ -1608,6 +1630,7 @@ export function reduceHostStateIntent<TState extends HostStateChannelState>(
     case "session.folder":
     case "session.order":
     case "session.workspace":
+    case "session.model":
     case "session.delete":
     // Folder intents address the session index, which this reducer leaves to
     // the Host (see the early return above); listed for exhaustiveness.
@@ -2044,6 +2067,16 @@ function isAllowedIntent(value: unknown): value is AllowedHostStateIntent {
       // Required: a conversation always belongs to a workspace once moved, and
       // detaching it from every workspace is not something a move does.
       return hasOnlyKeys(value, ["kind", "projectId"]) && nonEmptyString(value.projectId)
+    case "session.model":
+      // Both required: a provider without a model (or the reverse) is half a
+      // pick the next turn cannot run on.
+      return (
+        hasOnlyKeys(value, ["kind", "provider", "model"]) &&
+        value.provider !== undefined &&
+        value.model !== undefined &&
+        isSeedValue(value.provider) &&
+        isSeedValue(value.model)
+      )
     case "session.delete":
       return hasOnlyKeys(value, ["kind"])
     case "folder.create":

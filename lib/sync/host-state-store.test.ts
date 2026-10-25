@@ -883,6 +883,30 @@ describe("HostState durable store", () => {
     expect((await getDb().sessions.get("session-1"))?.folderId).toBe("f-new")
   })
 
+  it("records a model pick on the sessions row with no channel mutation", async () => {
+    await acquireWritableLease()
+    const picked = await commitHostStateAction({
+      action: draftAction({
+        baseRevision: undefined,
+        action: { kind: "session.model", provider: "deepseek", model: "ds-flash" },
+      }),
+      now: 900,
+    })
+
+    // The next turn reads the row; replicas learn it through table sync.
+    expect(picked.event).toMatchObject({ outcome: "applied", hostSeq: 1 })
+    expect(picked.event.mutation).toBeUndefined()
+    await expect(getHostStateSnapshot(channel)).resolves.toMatchObject({ state: { revision: 0 } })
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "not-required",
+    })
+    expect(await getDb().sessions.get("session-1")).toMatchObject({
+      model: "ds-flash",
+      providerOverride: "deepseek",
+      updatedAt: 900,
+    })
+  })
+
   describe("session.workspace", () => {
     const moveAction = (projectId: string, overrides: Partial<HostStateAction> = {}) =>
       draftAction({
@@ -1047,6 +1071,7 @@ describe("HostState durable store", () => {
       { kind: "session.folder", folderId: "f1" },
       { kind: "session.order", manualOrder: 0, sectionKey: "recent" },
       { kind: "session.workspace", projectId: "p-b" },
+      { kind: "session.model", provider: "deepseek", model: "ds-flash" },
       { kind: "session.delete" },
     ] as const) {
       await expect(

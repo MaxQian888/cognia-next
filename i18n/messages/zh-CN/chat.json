@@ -694,7 +694,9 @@
       "cogniaModelNoStreaming": "不支持流式输出",
       "cogniaChipTitle": "{agent} → {provider}/{model}（经由 Cognia）",
       "cogniaGlyph": "Cognia 模型",
-      "cogniaModelSwitchFailed": "无法保存模型选择：{reason}"
+      "cogniaModelSwitchFailed": "无法保存模型选择：{reason}",
+      "memberSection": "组织的模型",
+      "memberNoModels": "组织在这台 Host 上没有为此对话提供模型。请让管理员添加模型密钥。"
     },
     "paramForm": {
       "cancel": "取消",

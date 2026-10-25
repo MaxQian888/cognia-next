@@ -54823,7 +54823,7 @@
             ]
           },
           "models": {
-            "description": "P6g: for each provider an allowed agent can use, the model ids the Host's deployment serves; no other provider appears.",
+            "description": "P6g: per provider, the model ids the Host's deployment serves. Every provider an allowed agent can use, then every other provider the org holds a key for (tool-less chat); never a provider without an org key.",
             "type": "object",
             "additionalProperties": {
               "type": "array",
@@ -102513,5 +102513,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "c90d52dadd5f32c551c95f69ff6f41a2b8f317be58341c0d31656a12038157cc"
+  "catalogHash": "4ce51f949585b8d47216fe3caee220ecf0410341edc34c781a0afcffd4c4c821"
 }

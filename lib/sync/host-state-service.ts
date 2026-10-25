@@ -2372,8 +2372,10 @@ function mutationForAction(
     case "session.folder":
     case "session.order":
     // A workspace move lands on the `sessions` row too (`projectId`,
-    // `executionContext`, `folderId`); the channel carries none of them.
+    // `executionContext`, `folderId`); the channel carries none of them. So
+    // does a model pick (`model`, `providerOverride`).
     case "session.workspace":
+    case "session.model":
       return {}
     // Folder intents address the session index, which returns above before
     // this switch; listed so a new intent cannot fall through unpriced.

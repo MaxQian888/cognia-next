@@ -286,12 +286,14 @@ describe("HostStateService", () => {
       { kind: "elicitation.respond", requestId: "e", response: null },
       { kind: "session.workspace", projectId: "operator-project" },
       { kind: "session.archive", archived: true },
+      // The member's own pick; the org policy decides at the turn.
+      { kind: "session.model", provider: "deepseek", model: "ds-flash" },
     ]
     const actions = intents.map((intent, index) =>
       action(intent, {
         sessionId,
         channel: sessionStateChannel(scope.runtimeTargetId, sessionId),
-        baseRevision: index === 2 ? 1 : index === 9 ? 2 : 0,
+        baseRevision: index === 2 ? 1 : index === 9 ? 2 : index === 10 ? 3 : 0,
         actionId: `p5d-${index}`,
         clientSeq: index + 1,
       })
@@ -308,6 +310,7 @@ describe("HostStateService", () => {
       "rejected",
       "rejected",
       "applied",
+      "applied",
     ])
     for (let i = 0; i < actions.length; i++) {
       const decision = personPartitionIntentDecision(actions[i].action.kind, { chat: "none" })
@@ -322,6 +325,8 @@ describe("HostStateService", () => {
       title: "Renamed",
       archivedAt: 100,
       characterId: "p5d-owned-character",
+      model: "ds-flash",
+      providerOverride: "deepseek",
     })
     expect((await getDb().sessions.get(sessionId))?.projectId).toBeUndefined()
     const status = await service.status()

@@ -1,6 +1,12 @@
 import type { PersonAgentsManifest } from "@/lib/platform/host-feature-manifest"
 
-import { personAgentSeed, personAllowance, personConversationAgent } from "./person-agent-choice"
+import {
+  personAgentSeed,
+  personAllowance,
+  personConversationAgent,
+  personDefaultModel,
+  personServedModels,
+} from "./person-agent-choice"
 
 const agents: PersonAgentsManifest = {
   allowedAgents: [
@@ -45,6 +51,52 @@ describe("personConversationAgent", () => {
     expect(problem({ providerOverride: "deepseek", model: "x" }, { ...agents, models: {} })).toBe(
       undefined
     )
+  })
+
+  it("p6g says when tool-less chat would be refused its model", () => {
+    const chat = { ...agents, defaultAgent: null, models: { ...agents.models, openai: ["gpt"] } }
+    expect(personConversationAgent({ providerOverride: "openai", model: "gpt" }, chat)).toEqual({
+      kind: "chat",
+    })
+    expect(personConversationAgent({ providerOverride: "anthropic", model: "c" }, chat)).toEqual({
+      kind: "chat",
+      problem: "chat-model-not-served",
+    })
+    expect(personConversationAgent({}, chat)).toMatchObject({ problem: "chat-model-not-served" })
+    // An older Host names no chat providers: nothing is known, nothing is said.
+    expect(personConversationAgent({}, { ...chat, models: {} })).toEqual({ kind: "chat" })
+  })
+})
+
+describe("personServedModels", () => {
+  const withChat = { ...agents, models: { ...agents.models, openai: ["gpt"] } }
+
+  it("p6g offers an agent conversation only its agent's providers", () => {
+    expect(personServedModels(withChat, {})).toEqual([
+      { provider: "deepseek", models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"] },
+    ])
+    expect(personServedModels(withChat, { agentRuntimeId: "codex-acp" })).toEqual([])
+    expect(personServedModels(withChat, { agentRuntimeId: "pi" })).toEqual([])
+  })
+
+  it("p6g offers tool-less chat every provider the org serves", () => {
+    expect(personServedModels({ ...withChat, defaultAgent: null }, {})).toEqual([
+      { provider: "deepseek", models: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"] },
+      { provider: "openai", models: ["gpt"] },
+    ])
+  })
+})
+
+describe("personDefaultModel", () => {
+  it("p6g keeps a served pick, else takes the first served model", () => {
+    expect(
+      personDefaultModel(agents, { providerOverride: "deepseek", model: "ark-deepseek-pro" })
+    ).toEqual({ providerOverride: "deepseek", model: "ark-deepseek-pro" })
+    expect(
+      personDefaultModel(agents, { providerOverride: "anthropic", model: "claude-sonnet-4-5" })
+    ).toEqual(served)
+    expect(personDefaultModel(agents)).toEqual(served)
+    expect(personDefaultModel({ ...agents, models: {} })).toBeNull()
   })
 })
 

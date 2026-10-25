@@ -8299,6 +8299,8 @@
         "contextWindowLabel": "Context window",
         "liveSwitchFailed": "Couldn't switch the live model",
         "liveSwitched": "Switched to {model}",
+        "memberNoModels": "Your organization serves no models for this conversation on this Host. Ask an admin to add a model key.",
+        "memberSection": "Your organization's models",
         "noProviders": "No providers configured",
         "refreshAgentModels": "Refresh models",
         "routingGroup": "Routing",
@@ -32164,8 +32166,9 @@
     "noExecution": "Agents aren't available to members on this Host yet.",
     "noneAllowed": "Your organization hasn't allowed any agents yet.",
     "problem": {
+      "chat-model-not-served": "Your organization doesn't serve this conversation's model. Pick one it serves from the model menu.",
       "execution-unavailable": "This Host can't run agents for members right now.",
-      "model-not-served": "Your organization doesn't serve this conversation's model to this agent. Start a new conversation to use one it serves.",
+      "model-not-served": "Your organization doesn't serve this conversation's model to this agent. Pick one it serves from the model menu.",
       "no-key": "Your organization has no model key that can run this agent. Ask an admin to add one.",
       "not-allowed": "Your organization no longer allows this agent. Start a new conversation with one it allows."
     },

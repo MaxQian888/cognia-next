@@ -13,7 +13,8 @@
     "not-allowed": "Your organization no longer allows this agent. Start a new conversation with one it allows.",
     "execution-unavailable": "This Host can't run agents for members right now.",
     "no-key": "Your organization has no model key that can run this agent. Ask an admin to add one.",
-    "model-not-served": "Your organization doesn't serve this conversation's model to this agent. Start a new conversation to use one it serves."
+    "model-not-served": "Your organization doesn't serve this conversation's model to this agent. Pick one it serves from the model menu.",
+    "chat-model-not-served": "Your organization doesn't serve this conversation's model. Pick one it serves from the model menu."
   },
   "allowance": {
     "left": "{left} of {cap} tokens left this month",

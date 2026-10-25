@@ -838,6 +838,7 @@ function sessionWriteOperationFor(
     case "session.folder":
     case "session.order":
     case "session.workspace":
+    case "session.model":
       return "metadata"
     case "session.delete":
       return "delete"
@@ -1232,6 +1233,20 @@ async function persistBusinessProjection(
         executionContext: plan.executionContext,
         // A folder of the old workspace cannot hold it any more.
         ...(plan.clearFolder ? { folderId: undefined } : {}),
+        updatedAt: now,
+      })
+      return
+    }
+    // The write the desktop picker makes through `updateSession`
+    // (`components/chat/composer/model-picker.tsx`), field for field. The
+    // next turn reads it: `buildSendOptions` for a built-in session, the org
+    // policy resolution for a member's, which also restarts an agent process
+    // whose model changed.
+    case "session.model": {
+      assertSessionWritable(session, "metadata")
+      await db.sessions.update(action.sessionId, {
+        model: action.action.model,
+        providerOverride: action.action.provider,
         updatedAt: now,
       })
       return

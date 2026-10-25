@@ -42,7 +42,9 @@ export interface PersonAgentPolicy {
   execution: "sandboxed" | "none"
   /**
    * P6g: per provider an allowed agent can use, the models the Host's
-   * deployment serves. Empty from a Host older than P6g.
+   * deployment serves; then every other provider the org holds a key for, so
+   * a member's tool-less chat can start on one. Empty from a Host older than
+   * P6g.
    */
   models: Record<string, string[]>
   /** P6g: null when the Host keeps no usage ledger, or is older than P6g. */

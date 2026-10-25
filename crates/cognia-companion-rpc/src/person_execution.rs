@@ -74,14 +74,22 @@ fn person_policy_request(args: &Value) -> PersonResult<()> {
     Ok(())
 }
 fn person_policy_view(policy: cognia_companion::org_agent_policy::PolicyView, available: bool, usage: Option<Value>,
-    models: &dyn Fn(&str) -> Vec<String>) -> Value {
+    keyed: &[String], models: &dyn Fn(&str) -> Vec<String>) -> Value {
     // P6g: per provider an allowed agent can use, the models its deployment
-    // serves, so a member's device can seed a conversation the lease accepts;
-    // never a provider outside the allowlist. And the member's own month, so
-    // it can show what is left before a turn is refused `member_usage_cap_reached`.
+    // serves, so a member's device can seed a conversation the lease accepts.
+    // Then every other provider the org holds a key for and this Host serves:
+    // tool-less chat mints on any of them (`person_mint`), so a member's chat
+    // can start on one. Never a provider the org has no key for. And the
+    // member's own month, so it can show what is left before a turn is refused
+    // `member_usage_cap_reached`.
     let mut served = serde_json::Map::new();
     for provider in policy.allowed_agents.iter().flat_map(|agent| agent.providers.iter()) {
         if !served.contains_key(provider) { served.insert(provider.clone(), json!(models(provider))); }
+    }
+    for provider in keyed {
+        if served.contains_key(provider) { continue; }
+        let ids = models(provider);
+        if !ids.is_empty() { served.insert(provider.clone(), json!(ids)); }
     }
     json!({"allowedAgents": policy.allowed_agents, "defaultAgent": policy.default_agent,
         "execution": if available { "sandboxed" } else { "none" }, "models": served, "usage": usage})
@@ -95,14 +103,18 @@ pub(crate) async fn person_agent_policy_get(args: Value, scope: Option<&str>, te
     cognia_companion::host_surface_gate::person_execution_standing(&person).await
         .map_err(|p| (p.status_code(), Json(RpcError::new(p.code, p.detail))))?;
     let available = cognia_companion::host_surface_gate::person_execution_available().await;
-    let (policy, usage) = tokio::task::spawn_blocking(move || (cognia_companion::org_agent_policy::get(&person.org_id),
-        cognia_companion::org_policy::person_own_usage(&person.org_id, &person.user_id))).await
+    let (policy, usage, keyed) = tokio::task::spawn_blocking(move || (cognia_companion::org_agent_policy::get(&person.org_id),
+        cognia_companion::org_policy::person_own_usage(&person.org_id, &person.user_id),
+        cognia_companion::org_credentials::OrgCredentials::list(&person.org_id))).await
         .map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?;
     let policy = policy.map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?;
+    // Metadata only, never a value. An unreadable index offers chat nothing
+    // extra rather than failing the agents the policy already answers.
+    let keyed: Vec<String> = keyed.map(|entries| entries.into_iter().map(|entry| entry.provider).collect()).unwrap_or_default();
     let shared = host.to_shared();
     let models = |provider: &str| shared.gateway().and_then(|gateway| gateway.with_snapshot(|snapshot|
         snapshot.and_then(|snapshot| snapshot.provider(provider)).map(|provider| provider.models.clone()))).unwrap_or_default();
-    Ok(person_policy_view(policy, available, usage, &models))
+    Ok(person_policy_view(policy, available, usage, &keyed, &models))
 }
 
 #[derive(Deserialize)]
@@ -119,7 +131,9 @@ pub(crate) fn person_lease_mint(person: &PersonPartition, request: PersonAgentLe
     let key = cognia_companion::org_credentials::OrgCredentials::org_provider_key(&person.org_id, &request.provider)
         .map_err(|_| unavailable())?.ok_or_else(unavailable)?;
     let mut provider = gateway.with_snapshot(|snapshot| snapshot.and_then(|snapshot| snapshot.provider(&request.provider)).cloned()).ok_or_else(unavailable)?;
-    if !provider.models.contains(&request.model) { return Err(RpcError::malformed("invalid model".into())); }
+    // An unserved model is the same refusal as a missing key: the org cannot
+    // run it here, and the member's device says so instead of a bare 400.
+    if !provider.models.contains(&request.model) { return Err(unavailable()); }
     provider.api_key = Some(key); provider.api_keys.clear(); provider.rotation_enabled = false; provider.rotation_strategy = None;
     let task = request.session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let lease = gateway.person_mint_task_lease(&person.account_id, person_member(person), &request.runtime_id, &task,
@@ -336,9 +350,13 @@ mod tests {
             runtime_id: "pi".into(), available: true, providers: vec!["provider".into()] }],
             bundled_agents: vec![], default_agent: Some("pi".into()), updated_at: Some(1), updated_by: Some("admin".into()) }, true,
             Some(json!({"month":"2026-10","spentTokens":5,"reservedTokens":1,"monthlyTokens":100})),
-            &|provider| if provider == "provider" { vec!["model".into()] } else { vec!["leak".into()] });
+            &["provider".into(), "chat-only".into(), "unserved".into()],
+            &|provider| match provider { "provider" => vec!["model".into()], "chat-only" => vec!["chat-model".into()],
+                "unserved" => vec![], _ => vec!["leak".into()] });
+        // A keyed provider no agent uses is offered for chat; one this Host
+        // does not serve is left out; one with no org key never appears.
         assert_eq!(view, json!({"allowedAgents":[{"runtimeId":"pi","available":true,"providers":["provider"]}],"defaultAgent":"pi","execution":"sandboxed",
-            "models":{"provider":["model"]},
+            "models":{"provider":["model"],"chat-only":["chat-model"]},
             "usage":{"month":"2026-10","spentTokens":5,"reservedTokens":1,"monthlyTokens":100}}));
         assert!(person_policy_request(&json!({})).is_ok());
         for request in [json!({"orgId":"foreign"}), json!(null), json!([])] {
@@ -521,7 +539,8 @@ mod tests {
         cognia_companion::org_credentials::OrgCredentials::set(&a.org_id,"p6d-provider","key","operator",1).unwrap();
         cognia_companion::org_agent_policy::set(&a.org_id,vec!["pi".into()],None,"operator",1).unwrap();
         let mut unknown = request("pi"); unknown.model = "unknown".into();
-        assert_eq!(person_lease_mint(&a,unknown,&gateway).unwrap_err().0,StatusCode::BAD_REQUEST);
+        let refused = person_lease_mint(&a,unknown,&gateway).unwrap_err();
+        assert_eq!((refused.0, refused.1.code.as_str()), (StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"));
         let error = person_workspace_error(cognia_external_agent::person_workspace::PersonWorkspaceError::Quota { used_bytes:123,max_bytes:100 });
         assert_eq!(error.0,StatusCode::INSUFFICIENT_STORAGE);
         assert_eq!(error.1.details,Some(json!({"usedBytes":123,"maxBytes":100})));

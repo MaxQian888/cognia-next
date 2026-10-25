@@ -6,6 +6,12 @@ import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
+import type { PersonAgentsManifest } from "@/lib/platform/host-feature-manifest"
+import { useSettingsStore } from "@/stores/settings"
 
 jest.mock("@/lib/plugin/messaging/message-bus", () => ({
   emitSystemBusEvent: jest.fn(),
@@ -67,6 +73,7 @@ beforeEach(async () => {
     .mockResolvedValue({ kind: "unavailable", reason: "no-local-filesystem" })
   useChatStore.getState().clear()
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+  __resetRuntimeSnapshotForTesting()
 })
 
 afterAll(dbFixture.dispose)
@@ -122,6 +129,73 @@ describe("startNewSession", () => {
     expect(mockDispatchDiagnostic).not.toHaveBeenCalledWith(
       expect.objectContaining({ code: "hostSessionRefused" })
     )
+  })
+
+  describe("on an org member's shared Host", () => {
+    const personAgents: PersonAgentsManifest = {
+      allowedAgents: [{ runtimeId: "claude-agent-acp", available: true, providers: ["deepseek"] }],
+      defaultAgent: null,
+      execution: "sandboxed",
+      models: { deepseek: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"] },
+      usage: null,
+    }
+    const member = (agents: PersonAgentsManifest = personAgents) =>
+      setRuntimeSnapshot({
+        target: null,
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: {
+          compatible: true,
+          operations: ["host_state_submit"],
+          grants: [],
+          personPartition: true,
+          personAgents: agents,
+        },
+      })
+    const settings = (defaultModel: string, defaultProvider: string) =>
+      useSettingsStore.setState((state) => ({
+        settings: { ...state.settings!, defaultModel, defaultProvider },
+      }))
+
+    it("p6g starts a conversation on a model the org serves, seeded onto the Host", async () => {
+      member()
+      settings("claude-sonnet-4-5", "anthropic")
+      const session = await startNewSession()
+
+      await expect(getSession(session.id)).resolves.toMatchObject({
+        model: "ark-deepseek-v4.1-flash",
+        providerOverride: "deepseek",
+      })
+      expect(mockCreateOnHost).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "ark-deepseek-v4.1-flash", providerOverride: "deepseek" }),
+        expect.anything()
+      )
+    })
+
+    it("p6g keeps the app default when the org serves it", async () => {
+      member()
+      settings("ark-deepseek-pro", "deepseek")
+      const session = await startNewSession()
+      await expect(getSession(session.id)).resolves.toMatchObject({
+        model: "ark-deepseek-pro",
+        providerOverride: "deepseek",
+      })
+    })
+
+    it("p6g leaves an explicit pick and a Host serving nothing alone", async () => {
+      member()
+      settings("claude-sonnet-4-5", "anthropic")
+      const picked = await startNewSession({
+        agentRuntimeId: "claude-agent-acp",
+        providerOverride: "deepseek",
+        model: "ark-deepseek-pro",
+      })
+      await expect(getSession(picked.id)).resolves.toMatchObject({ model: "ark-deepseek-pro" })
+
+      member({ ...personAgents, models: {} })
+      const unserved = await startNewSession()
+      expect((await getSession(unserved.id))?.providerOverride).toBeUndefined()
+    })
   })
 
   it("announces the new session on the plugin bus", async () => {

@@ -694,7 +694,9 @@
       "cogniaModelNoStreaming": "No streaming",
       "cogniaChipTitle": "{agent} → {provider}/{model} via Cognia",
       "cogniaGlyph": "Cognia model",
-      "cogniaModelSwitchFailed": "Couldn't save the model choice: {reason}"
+      "cogniaModelSwitchFailed": "Couldn't save the model choice: {reason}",
+      "memberSection": "Your organization's models",
+      "memberNoModels": "Your organization serves no models for this conversation on this Host. Ask an admin to add a model key."
     },
     "paramForm": {
       "cancel": "Cancel",

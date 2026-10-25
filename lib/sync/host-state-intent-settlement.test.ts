@@ -16,6 +16,7 @@ const sessions = {
   bulkSetSessionsPinned: jest.fn(async () => undefined),
   assignSessionToFolder: jest.fn(async () => undefined),
   setSessionRanks: jest.fn(async () => undefined),
+  updateSession: jest.fn(async () => undefined),
 }
 jest.mock("@/lib/db/sessions", () => sessions)
 
@@ -91,6 +92,10 @@ describe("a Host too old to know the intent", () => {
       HOST_STATE_UNSUPPORTED_SUBMIT_CODE
     )
     await settleRejectedHostStateIntent(
+      action({ kind: "session.model", provider: "deepseek", model: "ds-flash" }, "s1"),
+      HOST_STATE_UNSUPPORTED_SUBMIT_CODE
+    )
+    await settleRejectedHostStateIntent(
       action({ kind: "session.delete" }, "s1"),
       HOST_STATE_UNSUPPORTED_SUBMIT_CODE
     )
@@ -101,6 +106,10 @@ describe("a Host too old to know the intent", () => {
     expect(sessions.bulkSetSessionsPinned).toHaveBeenCalledWith(["s1"], true)
     expect(sessions.assignSessionToFolder).toHaveBeenCalledWith("s1", null)
     expect(sessions.setSessionRanks).toHaveBeenCalledWith([{ id: "s1", manualOrder: 3 }], "pinned")
+    expect(sessions.updateSession).toHaveBeenCalledWith("s1", {
+      model: "ds-flash",
+      providerOverride: "deepseek",
+    })
     expect(deleteSessionsWithTeardown).toHaveBeenCalledWith(["s1"])
   })
 
@@ -163,6 +172,10 @@ describe("a Host that understood and refused", () => {
     await settleRejectedHostStateIntent(
       action({ kind: "session.workspace", projectId: "p2" }, "s1"),
       "host_state_move_session_running"
+    )
+    await settleRejectedHostStateIntent(
+      action({ kind: "session.model", provider: "deepseek", model: "ds-flash" }, "s1"),
+      "host_state_forbidden"
     )
     for (const mock of [...Object.values(folders), ...Object.values(sessions)]) {
       expect(mock).not.toHaveBeenCalled()

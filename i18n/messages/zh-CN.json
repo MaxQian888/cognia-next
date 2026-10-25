@@ -8299,6 +8299,8 @@
         "contextWindowLabel": "上下文窗口",
         "liveSwitchFailed": "无法实时切换模型",
         "liveSwitched": "已切换到 {model}",
+        "memberNoModels": "组织在这台 Host 上没有为此对话提供模型。请让管理员添加模型密钥。",
+        "memberSection": "组织的模型",
         "noProviders": "尚未配置任何模型提供商",
         "refreshAgentModels": "刷新模型",
         "routingGroup": "路由",
@@ -32164,8 +32166,9 @@
     "noExecution": "这台 Host 暂未向成员开放智能体。",
     "noneAllowed": "组织还没有允许任何智能体。",
     "problem": {
+      "chat-model-not-served": "组织没有提供此对话的模型。请在模型菜单里选择组织提供的模型。",
       "execution-unavailable": "这台 Host 目前无法为成员运行智能体。",
-      "model-not-served": "组织没有为这个智能体提供此对话的模型。请新建对话以使用组织提供的模型。",
+      "model-not-served": "组织没有为这个智能体提供此对话的模型。请在模型菜单里选择组织提供的模型。",
       "no-key": "组织没有能运行这个智能体的模型密钥，请让管理员添加。",
       "not-allowed": "组织已不再允许这个智能体。请用组织允许的智能体新建对话。"
     },

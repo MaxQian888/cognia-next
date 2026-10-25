@@ -56,6 +56,18 @@ jest.mock("@/lib/claude/ipc", () => {
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 import { toast } from "sonner"
 
+// HostState routing. Default: no paired Host took the intent, so every
+// existing test sees the local write it saw before.
+const mockEnqueueHostStateIntent = jest.fn(async (..._a: unknown[]): Promise<unknown> => null)
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueueHostStateIntentIfAvailable: (...a: unknown[]) => mockEnqueueHostStateIntent(...a),
+}))
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
+import type { PersonAgentsManifest } from "@/lib/platform/host-feature-manifest"
+
 // The agent's own models. Default: a built-in lane, so every existing test in
 // this file sees exactly the picker it saw before.
 const mockAgentModels: {
@@ -429,7 +441,7 @@ describe("friendly name rendering", () => {
     expect(trigger.querySelector("span.truncate")?.textContent).not.toBe(defaultModel)
   })
 
-  it("opens the list showing model names with the id as secondary, and selects by id", () => {
+  it("opens the list showing model names with the id as secondary, and selects by id", async () => {
     renderPicker(session)
     fireEvent.click(screen.getByRole("button"))
     // The friendly name renders as a selectable row…
@@ -441,9 +453,11 @@ describe("friendly name rendering", () => {
     expect(idCell.length).toBeGreaterThan(0)
     // Clicking the row persists the id (not the display name) on the session.
     fireEvent.click(idCell[0])
-    expect(mockedUpdateSession).toHaveBeenCalledWith(
-      "ses_1",
-      expect.objectContaining({ model: defaultModel, providerOverride: "anthropic" })
+    await waitFor(() =>
+      expect(mockedUpdateSession).toHaveBeenCalledWith(
+        "ses_1",
+        expect.objectContaining({ model: defaultModel, providerOverride: "anthropic" })
+      )
     )
   })
 
@@ -1245,9 +1259,11 @@ describe("live model switch", () => {
     renderPicker(anthropicSession)
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getAllByText(target)[0])
-    expect(mockedUpdateSession).toHaveBeenCalledWith(
-      "ses_live",
-      expect.objectContaining({ model: target, providerOverride: "anthropic" })
+    await waitFor(() =>
+      expect(mockedUpdateSession).toHaveBeenCalledWith(
+        "ses_live",
+        expect.objectContaining({ model: target, providerOverride: "anthropic" })
+      )
     )
     await waitFor(() => expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target))
     expect(mockCloseSession).not.toHaveBeenCalled()
@@ -1277,9 +1293,11 @@ describe("live model switch", () => {
     renderPicker(anthropicSession)
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getAllByText(openaiModel)[0])
-    expect(mockedUpdateSession).toHaveBeenCalledWith(
-      "ses_live",
-      expect.objectContaining({ providerOverride: "openai" })
+    await waitFor(() =>
+      expect(mockedUpdateSession).toHaveBeenCalledWith(
+        "ses_live",
+        expect.objectContaining({ providerOverride: "openai" })
+      )
     )
     // Provider change → the live session is on the wrong dispatch path, so we
     // close it (next send re-dispatches on openai) rather than an in-place swap.
@@ -1298,9 +1316,11 @@ describe("live model switch", () => {
     renderPicker(openaiSession)
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getAllByText(target)[0])
-    expect(mockedUpdateSession).toHaveBeenCalledWith(
-      "ses_live",
-      expect.objectContaining({ model: target, providerOverride: "openai" })
+    await waitFor(() =>
+      expect(mockedUpdateSession).toHaveBeenCalledWith(
+        "ses_live",
+        expect.objectContaining({ model: target, providerOverride: "openai" })
+      )
     )
     // Same provider → in-place live switch on the ai-sdk loop, session kept.
     await waitFor(() => expect(mockSetSessionModel).toHaveBeenCalledWith("ses_live", target))
@@ -1929,5 +1949,132 @@ afterEach(async () => {
     await Promise.all(
       [null, "ses_1", "ses_live"].map((id) => waitForModelSelection(id).catch(() => undefined))
     )
+  })
+})
+
+describe("an org member's shared Host (P6g)", () => {
+  const personAgents: PersonAgentsManifest = {
+    allowedAgents: [{ runtimeId: "claude-agent-acp", available: true, providers: ["deepseek"] }],
+    defaultAgent: "claude-agent-acp",
+    execution: "sandboxed",
+    models: { deepseek: ["ark-deepseek-v4.1-flash", "ark-deepseek-pro"], moonshot: ["kimi-k3"] },
+    usage: null,
+  }
+  const member = (agents: PersonAgentsManifest = personAgents) =>
+    act(() =>
+      setRuntimeSnapshot({
+        target: null,
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: {
+          compatible: true,
+          operations: ["host_state_submit"],
+          grants: [],
+          personPartition: true,
+          personAgents: agents,
+        },
+      })
+    )
+  const memberSession: ChatSession = {
+    id: "ses_member",
+    title: "t",
+    kind: "direct",
+    model: "ark-deepseek-v4.1-flash",
+    providerOverride: "deepseek",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const renderPicker = (session: ChatSession | null) =>
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+
+  beforeEach(() => {
+    mockedUpdateSession.mockClear()
+    mockSetSessionModel.mockClear()
+    mockCloseSession.mockClear()
+    mockEnqueueHostStateIntent.mockReset().mockResolvedValue({ id: 1 })
+    mockHostProfile.mockReturnValue("desktop")
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          defaultProvider: "anthropic",
+          defaultModel: PROVIDERS.anthropic.defaultModel,
+          autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true },
+          providerSettings: { anthropic: { enabled: true }, openai: { enabled: true } },
+        } as never,
+        save: jest.fn(async () => undefined),
+      })
+    })
+  })
+
+  afterEach(() => {
+    mockEnqueueHostStateIntent.mockReset().mockResolvedValue(null)
+    mockHostProfile.mockReturnValue("web-standalone")
+    act(() => {
+      __resetRuntimeSnapshotForTesting()
+      useSettingsStore.setState({ settings: undefined as never })
+    })
+  })
+
+  it("offers only what the org serves this conversation's agent, with no Auto row", () => {
+    member()
+    renderPicker(memberSession)
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.getByText("Your organization's models")).toBeInTheDocument()
+    expect(screen.getAllByText("ark-deepseek-pro").length).toBeGreaterThan(0)
+    // Chat-only providers are not the agent's, and this device's own are not
+    // the org's.
+    expect(screen.queryByText("kimi-k3")).toBeNull()
+    expect(screen.queryByText(PROVIDERS.openai.defaultModel)).toBeNull()
+    expect(screen.queryByText("Auto")).toBeNull()
+  })
+
+  it("offers tool-less chat every model the org serves", () => {
+    member({ ...personAgents, defaultAgent: null })
+    renderPicker(memberSession)
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.getAllByText("kimi-k3").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("ark-deepseek-pro").length).toBeGreaterThan(0)
+  })
+
+  it("sends a pick to the Host as the conversation's next model, not to this device", async () => {
+    member()
+    renderPicker(memberSession)
+    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getAllByText("ark-deepseek-pro")[0])
+    await waitFor(() =>
+      expect(mockEnqueueHostStateIntent).toHaveBeenCalledWith({
+        sessionId: "ses_member",
+        action: { kind: "session.model", provider: "deepseek", model: "ark-deepseek-pro" },
+      })
+    )
+    await waitForModelSelection("ses_member")
+    expect(mockedUpdateSession).not.toHaveBeenCalled()
+    expect(mockSetSessionModel).not.toHaveBeenCalled()
+    expect(mockCloseSession).not.toHaveBeenCalled()
+    // The pick shows until the Host's row arrives with it.
+    expect(screen.getByRole("button")).toHaveTextContent("ark-deepseek-pro")
+  })
+
+  it("names the org model a new conversation will start on", () => {
+    member()
+    renderPicker(null)
+    expect(screen.getByRole("button")).toHaveTextContent("ark-deepseek-v4.1-flash")
+  })
+
+  it("says so when the org serves nothing for this conversation", () => {
+    member({ ...personAgents, models: {} })
+    renderPicker(memberSession)
+    fireEvent.click(screen.getByRole("button"))
+    expect(
+      screen.getByText(
+        "Your organization serves no models for this conversation on this Host. Ask an admin to add a model key."
+      )
+    ).toBeInTheDocument()
   })
 })

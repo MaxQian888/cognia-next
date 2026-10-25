@@ -5,7 +5,8 @@ import type { HostStateAction } from "@cognia/agent-config-types/host-state"
  * What a paired client does when the Host refuses one of its list intents.
  *
  * The conversation-list intents (`session.pin` / `folder` / `order` /
- * `workspace` / `delete` and the four `folder.*` ones) are routed to the Host instead of being written
+ * `workspace` / `delete` and the four `folder.*` ones) and a model pick
+ * (`session.model`) are routed to the Host instead of being written
  * locally, so a refusal has two very different meanings:
  *
  * - **The Host does not know the intent at all.** A Host from before these
@@ -119,6 +120,15 @@ async function applyLocally(action: HostStateAction): Promise<void> {
           reason: result.reason,
         })
       }
+      return
+    }
+    case "session.model": {
+      if (!action.sessionId) return
+      const { updateSession } = await import("@/lib/db/sessions")
+      await updateSession(action.sessionId, {
+        model: intent.model,
+        providerOverride: intent.provider,
+      })
       return
     }
     case "session.delete": {

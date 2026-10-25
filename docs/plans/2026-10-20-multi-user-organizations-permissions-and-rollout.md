@@ -438,8 +438,8 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
    - **Known gaps:**
      - Members are listed by organization user id; the Host has no display names to give.
      - A Host older than P6g sends no `models`, so the picker labels every agent "no model" and cannot seed one.
-     - A default new conversation is not corrected to an org-served provider and model; the chip warns and offers a new conversation with a served one instead.
-     - The composer's model picker lists the browser's own providers, not the models the org serves, so a member picks an org model only through the chip's seed.
+     - ~~A default new conversation is not corrected to an org-served provider and model.~~ Fixed by item 10.
+     - ~~The composer's model picker lists the browser's own providers, not the models the org serves.~~ Fixed by item 10.
 7. **E2E lane (P6f).**
    - **Compose:** fix `cognia-server-cloud` in `docker-compose.web-headless-e2e.yml`: master key, collab service credential, `COGNIA_EXECUTION=disabled`, and the brain fleet.
    - **Smoke tier:** a `persons` tier in `scripts/smoke/compose-smoke.mjs`. Two OIDC persons of one org pair into one Host, using the fixture's `/e2e/token`, device registration and signed RPC. It checks:
@@ -477,6 +477,25 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
      - Client: `persistConfirmedState` shows the failure once per failure id (a dismissal sticks) and clears only its own banner; `member_usage_unavailable` maps to `serviceUnavailable`.
    - **Verified (2026-10-25, P6f rig, `ark-deepseek-v4.1-flash`):** persons tier green with new checks. Over the cap the tool-less turn fails in 1.2 s (was 20.5 s of retries) and the agent turn in 1.9 s, both `member_usage_cap_reached`, nothing spent, no raw "API Error" reply kept; the keyed message settles `acknowledged` with an empty queue. In the browser as ada: a send in a chat whose model has no org key shows "No model access on this shared Host" live, and a send in a DeepSeek chat with a 1-token cap shows "Monthly allowance used up" live, with the chat marked in the sidebar.
    - **Known gaps:** a refused message leaves the queue, and the Host never wrote it, so the member's text is gone once the transcript syncs (the banner says why; the text is not given back to the composer). A Host restart re-shows a failure banner once per client.
+
+10. **Members default to org models (P6g follow-up, 2026-10-25).**
+    - **Decisions:** a member's new conversation starts on a model the org serves, and the model menu offers only those. A conversation's model can change: the pick is a HostState intent, so the Host records it and its next turn runs on it. The agent stays fixed at creation.
+    - **Surface:**
+      - Host: `person_agent_policy_get`'s `models` also names every other provider the org holds a key for and this Host serves, because tool-less chat mints on any of them. It never names a provider without an org key. The tool-less mint and the agent lease refuse an unserved model as `model_access_unavailable` (503); before, it was a bare `malformed_request` (400).
+      - HostState: `session.model { provider, model }`, bounded like a session seed pick. It is priced `workspace.write`, since it re-points only the next turn, the same as `session.workspace`. It is allowed on a person partition, because the org policy still decides at the turn, and it does not need live control. The Host writes `model` and `providerOverride` on its `sessions` row with no channel mutation; replicas learn the row through table sync. A Host that does not know the intent gets the local write the client made before (`host-state-intent-settlement.ts`).
+      - Client:
+        - `lib/chat/person-agent-choice.ts` adds `personServedModels` (the agent's providers for an agent conversation, every served provider for chat) and `personDefaultModel`. Chat now reports `chat-model-not-served`.
+        - `startNewSession` re-points a member's new conversation to an org-served model after creation, keeping the default preset.
+        - `components/chat/composer/model-picker.tsx` on a member partition lists only `personServedModels` under "Your organization's models", hides Auto and this device's providers, names the model a new conversation will start on, and sends a pick in an existing conversation as `session.model`. Any HostState-routed conversation sends it, not only a member's; the local write and live switch stay for the rest.
+    - **Verified (2026-10-25, P6f rig, `ark-deepseek-v4.1-flash`):**
+      - The persons tier is green with new checks: a tool-less turn on `smoke-unserved-model` fails `model_access_unavailable`; a `session.model` pick to the served model makes the same conversation's next turn complete with a reply; the member manifest names no provider the org holds no key for.
+      - In the browser as ada, the welcome composer's model chip reads `ark-deepseek-v4.1-flash` and its menu lists only that model, with no Auto row. The first send creates a conversation on that model and gets a DeepSeek reply.
+      - A conversation on Claude Sonnet 5.5 shows the chat warning. Picking the DeepSeek model clears the warning once the Host's row syncs back (nothing is written locally), and the next send replies.
+      - The agent chip renders on member partitions as the dense glyph at the right of the toolbar. The earlier report of a missing chip did not reproduce.
+    - **Known gaps:**
+      - The menu names models by id; the gateway snapshot has no display names to give.
+      - An agent conversation offers only its agent's providers, so a chat-only provider cannot be picked there.
+      - The member browser polls `bot_console_read` (403) and `claude_session_context` (503) on a partition. This is pre-existing noise.
 
 **Intentional dormancy (Rule 7).**
 

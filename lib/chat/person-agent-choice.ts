@@ -8,7 +8,9 @@
  * say up front what a turn would be refused for instead of failing it.
  *
  * A conversation's agent is fixed when it is created (`agentRuntimeId` on the
- * HostState seed); choosing another agent starts a new conversation.
+ * HostState seed); choosing another agent starts a new conversation. Its model
+ * is not: a pick from {@link personServedModels} reaches the Host as a
+ * `session.model` intent and the next turn runs on it.
  */
 
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -18,7 +20,12 @@ type SessionChoice = Pick<ChatSession, "agentRuntimeId" | "providerOverride" | "
 
 /** Why a turn on this conversation would be refused, as the brain decides it. */
 export type PersonAgentProblem =
-  "not-allowed" | "execution-unavailable" | "no-key" | "model-not-served"
+  | "not-allowed"
+  | "execution-unavailable"
+  | "no-key"
+  | "model-not-served"
+  /** Tool-less chat on a model the org serves no key or deployment for. */
+  | "chat-model-not-served"
 
 export type PersonConversationAgent =
   | {
@@ -29,7 +36,7 @@ export type PersonConversationAgent =
       problem?: PersonAgentProblem
     }
   /** No agent named and no org default: tool-less chat. */
-  | { kind: "chat" }
+  | { kind: "chat"; problem?: "chat-model-not-served" }
 
 export function personConversationAgent(
   session: SessionChoice,
@@ -37,7 +44,16 @@ export function personConversationAgent(
 ): PersonConversationAgent {
   const explicit = !!session.agentRuntimeId
   const runtimeId = session.agentRuntimeId ?? agents.defaultAgent ?? undefined
-  if (!runtimeId) return { kind: "chat" }
+  if (!runtimeId) {
+    // The ticket mint refuses a provider or model the org does not serve. An
+    // older Host names no chat providers at all, and then nothing is known.
+    const known = Object.keys(agents.models).length > 0
+    const served =
+      !!session.providerOverride &&
+      !!session.model &&
+      (agents.models[session.providerOverride]?.includes(session.model) ?? false)
+    return known && !served ? { kind: "chat", problem: "chat-model-not-served" } : { kind: "chat" }
+  }
   const problem = personAgentProblem(agents, runtimeId, session)
   return { kind: "agent", runtimeId, explicit, ...(problem ? { problem } : {}) }
 }
@@ -93,6 +109,59 @@ export function personAgentSeed(
     if (model) return { agentRuntimeId: runtimeId, providerOverride: provider, model }
   }
   return null
+}
+
+/** One provider the org serves a member's conversation with, and its models. */
+export interface PersonServedProvider {
+  provider: string
+  models: string[]
+}
+
+/**
+ * The models the org serves this conversation with, by provider, in the
+ * Host's order: the agent's own providers for an agent conversation (the
+ * lease admits no other), every provider the org holds a key for for
+ * tool-less chat (the ticket mint admits any of them). `session` empty means
+ * a conversation not yet created, which takes the org default.
+ */
+export function personServedModels(
+  agents: PersonAgentsManifest,
+  session: SessionChoice
+): PersonServedProvider[] {
+  const current = personConversationAgent(session, agents)
+  const providers =
+    current.kind === "agent"
+      ? (agents.allowedAgents.find((entry) => entry.runtimeId === current.runtimeId)?.providers ??
+        [])
+      : Object.keys(agents.models)
+  return providers.flatMap((provider) => {
+    const models = agents.models[provider] ?? []
+    return models.length > 0 ? [{ provider, models: [...models] }] : []
+  })
+}
+
+/**
+ * The provider and model a member's new conversation starts on: the current
+ * pick when the org serves it, else the first model the org serves. `null`
+ * when the org serves nothing here, so the caller keeps its own default and
+ * the composer says why a turn would be refused.
+ */
+export function personDefaultModel(
+  agents: PersonAgentsManifest,
+  current: Pick<ChatSession, "providerOverride" | "model"> = {}
+): { providerOverride: string; model: string } | null {
+  const served = personServedModels(agents, {})
+  if (
+    current.providerOverride &&
+    current.model &&
+    served.some(
+      (entry) =>
+        entry.provider === current.providerOverride && entry.models.includes(current.model!)
+    )
+  )
+    return { providerOverride: current.providerOverride, model: current.model }
+  const first = served[0]
+  return first ? { providerOverride: first.provider, model: first.models[0] } : null
 }
 
 export type PersonAllowance =
