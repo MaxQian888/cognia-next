@@ -13,9 +13,19 @@ jest.mock("@/lib/scheduler/event-integration", () => ({
   emitSchedulerEvent: (...args: unknown[]) => emitSchedulerEvent(...args),
 }))
 const prepareAndPublishGithubStack = jest.fn(async (..._args: unknown[]) => undefined)
-jest.mock("../delivery/github-delivery-adapter", () => ({
-  prepareAndPublishGithubStack: (...args: unknown[]) => prepareAndPublishGithubStack(...args),
-}))
+jest.mock("../delivery/github-delivery-adapter", () => {
+  class StackPublishHeldError extends Error {
+    constructor(readonly reason: "held" | "refused") {
+      super(reason)
+    }
+  }
+  return {
+    prepareAndPublishGithubStack: (...args: unknown[]) => prepareAndPublishGithubStack(...args),
+    StackPublishHeldError,
+    STACK_PUBLISH_HELD_REASON: "delivery_awaiting_approval",
+    STACK_PUBLISH_REFUSED_REASON: "delivery_refused",
+  }
+})
 const autoPublishTaskResult = jest.fn()
 jest.mock("../memory/shared-memory-orchestrator", () => ({
   autoPublishTaskResult: (...args: unknown[]) => autoPublishTaskResult(...args),
@@ -479,6 +489,61 @@ describe("runSquadLifecycle", () => {
     expect(emitSchedulerEvent).not.toHaveBeenCalled()
     warn.mockRestore()
   })
+
+  it.each([
+    ["held", "delivery_awaiting_approval"],
+    ["refused", "delivery_refused"],
+  ] as const)(
+    "parks the run on %s when the outbound policy stops the publish (ADR-0239)",
+    async (reason, code) => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      useAgentTeamStore.getState().upsertTeam(
+        makeTeam({
+          config: {
+            maxTeammates: 5,
+            maxConcurrentTeammates: 1,
+            executionMode: "coordinated",
+            displayMode: "compact",
+            githubDeliveryPolicy: {
+              enabled: true,
+              stackedPullRequests: true,
+              minLayers: 1,
+              maxLayers: 3,
+              mergeMode: "approved-bottom-up",
+            },
+          },
+        })
+      )
+      configureAgentTeamRuntime({ runLeadPlanning: jest.fn(), notifierDeps: {} })
+      const { StackPublishHeldError } = jest.requireMock("../delivery/github-delivery-adapter")
+      prepareAndPublishGithubStack.mockRejectedValueOnce(new StackPublishHeldError(reason))
+      getAgentTeamRun.mockResolvedValue({
+        id: "run-1",
+        teamId: "t1",
+        status: "running",
+        executionConstraints: {
+          version: 1,
+          teamConfig: {
+            githubDeliveryPolicy: useAgentTeamStore.getState().teams.t1.config.githubDeliveryPolicy,
+          },
+        },
+      })
+      const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
+      await runSquadLifecycle({ teamId: "t1", runId: "run-1" }, { run })
+      expect(updateAgentTeamRun).toHaveBeenCalledWith(
+        "run-1",
+        expect.objectContaining({ status: "needs_input", recoveryReason: code })
+      )
+      expect(useAgentTeamStore.getState().teams.t1?.status).toBe("paused")
+      expect(emitSchedulerEvent).not.toHaveBeenCalled()
+      // A policy hold is not a delivery failure.
+      expect(warn).not.toHaveBeenCalledWith(
+        "[agent-team] GitHub delivery failed",
+        expect.anything()
+      )
+      warn.mockRestore()
+    }
+  )
 })
 
 describe("guardSquadResume", () => {

@@ -3798,8 +3798,12 @@
       },
       "delivery": {
         "approveMerge": "批准并合并交付栈",
+        "approvePublish": "批准并发布",
         "empty": "尚未准备交付栈。",
         "merged": "交付栈已合并。",
+        "publishHeld": "堆叠 PR 已就绪但尚未打开：没有授权允许在无人值守时发布到这些仓库。批准后即打开。",
+        "publishRefused": "有人在本次请求中拒绝了发布到这些仓库。仍可批准，打开这些堆叠 PR。",
+        "published": "堆叠 PR 已发布",
         "title": "交付图"
       },
       "deliveryNodeStatus": {
@@ -4132,6 +4136,10 @@
       "sectionExecution": "执行",
       "stackedDelivery": {
         "caveat": "仅桌面端，且仅适用于能解析出默认分支的 GitHub 远端。无法分栈的运行会按现有方式发布。",
+        "consent": {
+          "covers": "无人值守时直接发布到：{repositories}。之后再绑定的仓库，每次发布都等人批准。",
+          "none": "每次发布都等人批准：当前绑定的仓库还没有人在这里开启过。关掉再打开一次，团队即可无人值守地发布到这些仓库。"
+        },
         "description": "当一次运行在同一个仓库里产出多个分支时，把它们发成一条 PR 链而不是一堆平铺的 PR——每一层基于下面一层，于是每个 PR 的评审只看到它自己的改动。",
         "enabled": {
           "hint": "默认关闭。打开后会改变运行结束时提交到 GitHub 的方式。",

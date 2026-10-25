@@ -229,6 +229,10 @@
   "sectionExecution": "Execution",
   "stackedDelivery": {
     "caveat": "Desktop app only, and only for a GitHub remote whose default branch can be resolved. A run that cannot be stacked is published as it is today.",
+    "consent": {
+      "covers": "Published to these with nobody watching: {repositories}. A repository bound later waits for a person to approve each publish.",
+      "none": "Each publish waits for a person to approve it, because nobody turned this on here for the repositories bound now. Turn it off and on again to let the team publish to them unattended."
+    },
     "description": "When a completed run produced several branches in one repository, open them as a chain of pull requests instead of a flat set — each based on the one below it, so every review shows only its own change.",
     "enabled": {
       "hint": "Off by default. Turning it on changes how a finished run reaches GitHub.",

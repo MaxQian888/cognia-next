@@ -12,6 +12,7 @@
 export const RUN_APPROVAL_HREFS = {
   bots: "/bots",
   scheduler: "/scheduler",
+  agentRuns: "/agent-runs",
 } as const
 
 const ALLOWED: ReadonlySet<string> = new Set(Object.values(RUN_APPROVAL_HREFS))

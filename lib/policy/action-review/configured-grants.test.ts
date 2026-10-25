@@ -305,41 +305,43 @@ describe("botScopeGrants", () => {
 })
 
 describe("teamDeliveryGrants", () => {
-  const stacked = { ...STACKED_DELIVERY_DEFAULTS }
+  const consent = { by: "local-user" as const, at: 1, repositoryPaths: ["/work/web", "/work/api"] }
+  const consented = { ...STACKED_DELIVERY_DEFAULTS, consent }
+  const bound = [
+    { path: "/work/web", fullName: "acme/web" },
+    { path: "/work/api", fullName: "acme/api", host: "ghe.corp.io" },
+    { path: "/work/new", fullName: "acme/new" },
+  ]
 
-  it("is the team's bound repositories when stacked delivery is on", () => {
+  it("is the bound repositories a person consented to, on their host", () => {
     expect(
-      teamDeliveryGrants({ id: "team_1", config: { githubDeliveryPolicy: stacked } }, [
-        "acme/web",
-        "acme/api",
-        "",
-      ])
+      teamDeliveryGrants({ id: "team_1", config: { githubDeliveryPolicy: consented } }, bound)
     ).toEqual([
       {
         policyRef: "team-delivery:team_1",
         fingerprints: [
           outboundFingerprint(repositoryTarget("acme/web")!),
-          outboundFingerprint(repositoryTarget("acme/api")!),
+          outboundFingerprint(repositoryTarget("ghe.corp.io/acme/api")!),
         ],
       },
     ])
   })
 
-  it("is nothing when stacked delivery is off, or nothing is bound", () => {
+  it("is nothing without a person's consent, or with stacked delivery off", () => {
     expect(
       teamDeliveryGrants(
-        {
-          id: "team_1",
-          config: {
-            githubDeliveryPolicy: { ...STACKED_DELIVERY_DEFAULTS, stackedPullRequests: false },
-          },
-        },
-        ["acme/web"]
+        { id: "team_1", config: { githubDeliveryPolicy: { ...STACKED_DELIVERY_DEFAULTS } } },
+        bound
       )
     ).toEqual([])
-    expect(teamDeliveryGrants({ id: "team_1", config: {} }, ["acme/web"])).toEqual([])
     expect(
-      teamDeliveryGrants({ id: "team_1", config: { githubDeliveryPolicy: stacked } }, [])
+      teamDeliveryGrants(
+        { id: "team_1", config: { githubDeliveryPolicy: { ...consented, enabled: false } } },
+        bound
+      )
+    ).toEqual([])
+    expect(
+      teamDeliveryGrants({ id: "team_1", config: { githubDeliveryPolicy: consented } }, [bound[2]!])
     ).toEqual([])
   })
 })

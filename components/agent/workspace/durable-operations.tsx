@@ -5,7 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 
 import { getProjectEnvironmentVersion } from "@/lib/db/project-environments"
-import { GitMergeIcon, HandIcon, SendIcon } from "lucide-react"
+import { GitMergeIcon, GitPullRequestArrowIcon, HandIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -20,7 +20,12 @@ import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import { getDb } from "@/lib/db/schema"
 import { createDecisionLedger } from "@cognia/agent-orchestration/decision-ledger"
 import { getDurableTeamCoordinator } from "@/lib/ai/agent/team/durable/durable-runtime"
-import { approveAndMergeGithubStack } from "@/lib/ai/agent/team/delivery/github-delivery-adapter"
+import {
+  approveAndMergeGithubStack,
+  approveAndPublishGithubStack,
+  STACK_PUBLISH_HELD_REASON,
+  STACK_PUBLISH_REFUSED_REASON,
+} from "@/lib/ai/agent/team/delivery/github-delivery-adapter"
 import { createLocalTauriExecutionEnvironment } from "@/lib/ai/agent/execution/local-tauri-environment"
 import { getRunRetrospectiveBundle } from "@/lib/db/run-retrospectives"
 import { generateConfiguredRunRetrospective } from "@/lib/execution/run-retrospective"
@@ -142,6 +147,14 @@ export function DurableOperations({
   }
 
   if (!data) return <Card className="p-6 text-sm text-muted-foreground">{t("empty")}</Card>
+
+  // A stack publish the outbound policy held or a person refused (ADR-0239
+  // phase 2) waits on its draft graph for a person's "approve and publish".
+  const publishHeld =
+    data.graph?.status === "draft" &&
+    data.run.status === "needs_input" &&
+    (data.run.recoveryReason === STACK_PUBLISH_HELD_REASON ||
+      data.run.recoveryReason === STACK_PUBLISH_REFUSED_REASON)
 
   const environmentCheck = data.environment
     ? createLocalTauriExecutionEnvironment().preflight(data.environment)
@@ -441,6 +454,20 @@ export function DurableOperations({
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-semibold">{t("delivery.title")}</h3>
+          {publishHeld ? (
+            <Button
+              size="sm"
+              onClick={() =>
+                void invoke(
+                  () => approveAndPublishGithubStack(team, data.run.id),
+                  t("delivery.published")
+                )
+              }
+            >
+              <GitPullRequestArrowIcon className="mr-1 size-3.5" />
+              {t("delivery.approvePublish")}
+            </Button>
+          ) : null}
           {data.graph?.status === "awaiting_approval" || data.graph?.status === "running" ? (
             <Button
               size="sm"
@@ -456,6 +483,13 @@ export function DurableOperations({
             </Button>
           ) : null}
         </div>
+        {publishHeld ? (
+          <p className="text-sm text-muted-foreground" data-testid="delivery-publish-held">
+            {data.run.recoveryReason === STACK_PUBLISH_REFUSED_REASON
+              ? t("delivery.publishRefused")
+              : t("delivery.publishHeld")}
+          </p>
+        ) : null}
         {data.deliveryNodes.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("delivery.empty")}</p>
         ) : (

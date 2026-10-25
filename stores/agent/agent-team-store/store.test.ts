@@ -340,3 +340,65 @@ describe("agent-team onRehydrateStorage stale-status reset", () => {
     expect(useAgentTeamStore.getState().teams).toEqual({})
   })
 })
+
+describe("stacked delivery consent (ADR-0239 phase 2)", () => {
+  const on = {
+    enabled: true,
+    stackedPullRequests: true,
+    minLayers: 2,
+    maxLayers: 10,
+    mergeMode: "approved-bottom-up" as const,
+  }
+  const forged = {
+    ...on,
+    consent: { by: "local-user" as const, at: 1, repositoryPaths: ["/forged"] },
+  }
+  const store = () => useAgentTeamStore.getState()
+
+  function team(config: Record<string, unknown>) {
+    return store().createTeam({ name: "T", task: "t", config: config as never })
+  }
+
+  it("never takes consent from a created team's config", () => {
+    const created = team({ workingDir: "/work", githubDeliveryPolicy: forged })
+    expect(store().teams[created.id]!.config.githubDeliveryPolicy).toEqual(on)
+  })
+
+  it("records a person's consent for the paths bound now, and keeps it through edits", () => {
+    const created = team({ workingDir: "/work", githubDeliveryPolicy: on })
+    store().consentToStackedDelivery(created.id)
+    const consent = store().teams[created.id]!.config.githubDeliveryPolicy?.consent
+    expect(consent).toMatchObject({ by: "local-user", repositoryPaths: ["/work"] })
+
+    // An edit carrying another consent keeps the stored one.
+    const config = store().teams[created.id]!.config
+    store().updateTeamConfig(created.id, { ...config, githubDeliveryPolicy: forged })
+    expect(store().teams[created.id]!.config.githubDeliveryPolicy?.consent).toEqual(consent)
+    store().updateTeam(created.id, { config: { ...config, maxRetries: 3 } })
+    expect(store().teams[created.id]!.config.githubDeliveryPolicy?.consent).toEqual(consent)
+    store().upsertTeam({ ...store().teams[created.id]!, name: "Renamed" })
+    expect(store().teams[created.id]!.config.githubDeliveryPolicy?.consent).toEqual(consent)
+
+    // Turning it off drops it; a copy starts without it.
+    const copy = store().duplicateSquad(created.id, { name: "Copy" })
+    expect(copy?.config.githubDeliveryPolicy?.consent).toBeUndefined()
+    store().updateTeamConfig(created.id, {
+      ...config,
+      githubDeliveryPolicy: { ...on, enabled: false },
+    })
+    expect(store().teams[created.id]!.config.githubDeliveryPolicy?.consent).toBeUndefined()
+  })
+
+  it("records nothing while stacked delivery is off, or for a team it does not hold", () => {
+    const created = team({ workingDir: "/work" })
+    store().consentToStackedDelivery(created.id)
+    expect(store().teams[created.id]!.config.githubDeliveryPolicy).toBeUndefined()
+    expect(() => store().consentToStackedDelivery("missing")).not.toThrow()
+    store().upsertTeam({
+      ...store().teams[created.id]!,
+      id: "fresh",
+      config: { ...store().teams[created.id]!.config, githubDeliveryPolicy: forged },
+    })
+    expect(store().teams.fresh!.config.githubDeliveryPolicy?.consent).toBeUndefined()
+  })
+})

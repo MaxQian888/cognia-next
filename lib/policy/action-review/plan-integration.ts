@@ -17,6 +17,8 @@
  * |               | origin, with the event's PR or issue as the origin thread            |
  * | `workflow`    | the engine, in the workflow run's origin                             |
  * | `job`         | a request a running job makes to the repository it was planned for   |
+ * | `team-delivery` | a person's "approve and publish"; else the engine, in the request  |
+ * |               | of the session that created the team, with its consented repositories |
  *
  * A claim that does not hold is planned as unattended in the asker's origin,
  * so a reply on the PR or issue the request came from still goes; anything
@@ -150,6 +152,23 @@ export type IntegrationAuthorization =
       jobId: string
       outbound?: IntegrationActionOutbound
       covers: readonly OutboundTarget[]
+    }
+  /**
+   * An Agent Team publishing its stacked pull requests (`prepareAndPublishGithubStack`).
+   * `run`: the team's completed run, nobody watching; `person`: a person's
+   * "approve and publish", for this publish or (`forRequest`) the rest of the
+   * request. `policyGrants` is the team's consented repositories
+   * (`teamDeliveryGrants`). `sessionId` is the session that created the team,
+   * whose request the publish belongs to.
+   */
+  | {
+      kind: "team-delivery"
+      teamId: string
+      runId: string
+      sessionId?: string
+      decidedBy: "run" | "person"
+      forRequest?: boolean
+      policyGrants?: readonly OutboundPolicyGrantList[]
     }
 
 export interface IntegrationWritePlanInput {
@@ -680,6 +699,41 @@ export async function planIntegrationWrite(
         }),
       })
     }
+    case "team-delivery": {
+      const ownerRef = `agent-team:${auth.teamId}`
+      if (auth.decidedBy === "person") {
+        const origin = await teamDeliveryOrigin(auth, deps)
+        const outbound = outboundOf(ownerRef, origin)
+        const receipt = heldJobAnswerReceipt({
+          outbound,
+          targets: input.targets,
+          operation: input.operation,
+          answer: "approved",
+          ...(auth.forRequest ? { forRequest: true } : {}),
+          now: env.now,
+        })
+        return {
+          action: "proceed",
+          outbound,
+          authorizedBy: {
+            receiptId: receipt.request.requestId,
+            authority: "human",
+            ...(receipt.decision.grant ? { grantScope: receipt.decision.grant.scope } : {}),
+          },
+          receipt,
+        }
+      }
+      // The publisher names no integration account, so every GitHub
+      // account's list counts, as for a `gh` command.
+      const accountLists = await (deps.githubGrants ?? configuredGithubGrants)(
+        input.host ? { host: input.host } : {}
+      ).catch(() => [] as OutboundPolicyGrantList[])
+      return planUnattended(env, {
+        ownerRef,
+        origin: await teamDeliveryOrigin(auth, deps),
+        policyGrants: [...(auth.policyGrants ?? []), ...accountLists],
+      })
+    }
     case "job": {
       const ownerRef = auth.outbound?.ownerRef ?? `integration-job:${auth.jobId}`
       const covered = auth.covers.map((target) => outboundFingerprint(target))
@@ -701,6 +755,39 @@ export async function planIntegrationWrite(
       })
     }
   }
+}
+
+/**
+ * The request an Agent Team's publish belongs to: that of the session that
+ * created the team, else one of its own per run.
+ */
+export async function teamDeliveryOrigin(
+  team: { runId: string; sessionId?: string },
+  deps: Pick<PlanIntegrationDeps, "resolveSessionOrigin"> = {}
+): Promise<ActionReviewPlanOrigin> {
+  const own = {
+    rootSessionId: `agent-team-run:${team.runId}`,
+    instructionEpoch: `agent-team-run:${team.runId}`,
+  }
+  if (!team.sessionId) return own
+  try {
+    const origin = await (deps.resolveSessionOrigin ?? sessionPlanOrigin)(team.sessionId)
+    // The team's publish answers the request; the chat it came from is not
+    // where the pull requests go.
+    return origin.rootSessionId && origin.instructionEpoch
+      ? { rootSessionId: origin.rootSessionId, instructionEpoch: origin.instructionEpoch }
+      : own
+  } catch {
+    return own
+  }
+}
+
+/** The outbound record of an Agent Team's publish, for a person's answer to it. */
+export async function teamDeliveryOutbound(
+  team: { teamId: string; runId: string; sessionId?: string },
+  deps: Pick<PlanIntegrationDeps, "resolveSessionOrigin"> = {}
+): Promise<IntegrationActionOutbound> {
+  return outboundOf(`agent-team:${team.teamId}`, await teamDeliveryOrigin(team, deps))
 }
 
 /**

@@ -20,6 +20,11 @@ import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/gate
 import { assignAgentTeamAvatarId, resolveAgentTeamAvatarId } from "@/lib/agent-team/avatar"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
+import {
+  carryDeliveryConsent,
+  withDeliveryConsent,
+  withoutDeliveryConsent,
+} from "@/lib/stack/team-policy"
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
@@ -145,6 +150,19 @@ function cleanUpTeam(
 /** Team statuses under which a run may still be in flight or resumable. */
 const LEAD_LOCKED_STATUSES: ReadonlySet<string> = new Set(["planning", "executing", "paused"])
 
+/**
+ * A team's config as a write leaves it (ADR-0239 phase 2): the stacked
+ * delivery consent the stored team held, never one the write carries. Only
+ * `consentToStackedDelivery`, a person's switch, records consent; a plugin,
+ * a template or an automatic team writes config through the other actions.
+ */
+function guardDeliveryConsent<T extends AgentTeamConfig>(
+  previous: AgentTeamConfig | undefined,
+  next: T
+): T {
+  return previous ? carryDeliveryConsent(previous, next) : withoutDeliveryConsent(next)
+}
+
 export const createAgentTeamActionsSlice = (
   set: AgentTeamStoreSet,
   get: AgentTeamStoreGet
@@ -154,12 +172,14 @@ export const createAgentTeamActionsSlice = (
   // ====================================================================
 
   createTeam: (input) => {
-    const config: AgentTeamConfig = normalizeAgentTeamConfig({
-      ...get().defaultConfig,
-      ...input.config,
-      preferredExecutionPattern: input.config?.preferredExecutionPattern,
-      governancePolicy: input.config?.governancePolicy,
-    })
+    const config: AgentTeamConfig = withoutDeliveryConsent(
+      normalizeAgentTeamConfig({
+        ...get().defaultConfig,
+        ...input.config,
+        preferredExecutionPattern: input.config?.preferredExecutionPattern,
+        governancePolicy: input.config?.governancePolicy,
+      })
+    )
 
     const teamId = nanoid()
 
@@ -275,6 +295,8 @@ export const createAgentTeamActionsSlice = (
 
     const team: AgentTeam = {
       ...source,
+      // A person consented to publishing for the original, not for its copy.
+      config: withoutDeliveryConsent(source.config),
       id: nextTeamId,
       name: input.name,
       projectId: input.projectId ?? source.projectId,
@@ -309,7 +331,13 @@ export const createAgentTeamActionsSlice = (
 
   upsertTeam: (team) => {
     set((state) => ({
-      teams: { ...state.teams, [team.id]: team },
+      teams: {
+        ...state.teams,
+        [team.id]: {
+          ...team,
+          config: guardDeliveryConsent(state.teams[team.id]?.config, team.config),
+        },
+      },
     }))
   },
 
@@ -317,7 +345,11 @@ export const createAgentTeamActionsSlice = (
     set((state) => {
       const team = state.teams[teamId]
       if (!team) return state
-      const next = { ...team, ...updates }
+      const next = {
+        ...team,
+        ...updates,
+        config: guardDeliveryConsent(team.config, updates.config ?? team.config),
+      }
       // Every team belongs to a workspace (persist v7). A row that somehow
       // still lacks one is stamped on its next save rather than left to leak
       // across workspaces.
@@ -354,18 +386,21 @@ export const createAgentTeamActionsSlice = (
       const legacyGovernanceChanged =
         config.requirePlanApproval !== team.config.requirePlanApproval ||
         config.tokenBudget !== team.config.tokenBudget
-      const normalizedConfig = normalizeAgentTeamConfig({
-        ...config,
-        preferredExecutionPattern:
-          executionModeChanged &&
-          config.preferredExecutionPattern === team.config.preferredExecutionPattern
-            ? undefined
-            : config.preferredExecutionPattern,
-        governancePolicy:
-          legacyGovernanceChanged && config.governancePolicy === team.config.governancePolicy
-            ? undefined
-            : config.governancePolicy,
-      })
+      const normalizedConfig = guardDeliveryConsent(
+        team.config,
+        normalizeAgentTeamConfig({
+          ...config,
+          preferredExecutionPattern:
+            executionModeChanged &&
+            config.preferredExecutionPattern === team.config.preferredExecutionPattern
+              ? undefined
+              : config.preferredExecutionPattern,
+          governancePolicy:
+            legacyGovernanceChanged && config.governancePolicy === team.config.governancePolicy
+              ? undefined
+              : config.governancePolicy,
+        })
+      )
       return {
         teams: {
           ...state.teams,
@@ -374,6 +409,19 @@ export const createAgentTeamActionsSlice = (
             config: normalizedConfig,
             selectedExecutionPattern: normalizedConfig.preferredExecutionPattern,
           },
+        },
+      }
+    })
+  },
+
+  consentToStackedDelivery: (teamId) => {
+    set((state) => {
+      const team = state.teams[teamId]
+      if (!team) return state
+      return {
+        teams: {
+          ...state.teams,
+          [teamId]: { ...team, config: withDeliveryConsent(team.config, Date.now()) },
         },
       }
     })

@@ -45,6 +45,21 @@ export interface AgentTeamGithubDeliveryPolicy {
   minLayers: number
   maxLayers: number
   mergeMode: "approved-bottom-up"
+  /**
+   * A person turned stacked delivery on, for the repositories bound then
+   * (ADR-0239 phase 2): the team may publish its stack to those with nobody
+   * watching. Written only by the host when a person flips the switch; a team
+   * created or reconfigured any other way (a plugin, a template, an automatic
+   * team) carries none, so its stack waits for a person to approve the publish.
+   */
+  consent?: AgentTeamGithubDeliveryConsent
+}
+
+export interface AgentTeamGithubDeliveryConsent {
+  by: "local-user"
+  at: number
+  /** The repository bindings' paths (or the working directory) when consent was given. */
+  repositoryPaths: string[]
 }
 
 export type AgentTeamRunStatus =

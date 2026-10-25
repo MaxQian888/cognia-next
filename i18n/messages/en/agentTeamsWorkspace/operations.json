@@ -48,8 +48,12 @@
   },
   "delivery": {
     "approveMerge": "Approve and merge stack",
+    "approvePublish": "Approve and publish",
     "empty": "No delivery stack prepared.",
     "merged": "Delivery stack merged.",
+    "publishHeld": "The stacked pull requests are ready but not opened: nothing authorized publishing to these repositories with nobody watching. Approve to open them.",
+    "publishRefused": "A person refused publishing to these repositories for this request. Approve to open the stacked pull requests anyway.",
+    "published": "Stack published",
     "title": "Delivery graph"
   },
   "deliveryNodeStatus": {

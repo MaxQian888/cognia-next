@@ -94,6 +94,20 @@ describe("pushHeldIntegrationJob", () => {
     expect(isHeldIntegrationJobPushed("job_1")).toBe(false)
   })
 
+  it("files a stack publish under the session it names", async () => {
+    const { input, calls } = push({ decision: "allow" })
+    await pushHeldIntegrationJob({
+      ...input,
+      jobId: "team-delivery:run_1",
+      sessionId: "agent-team-run:run_1",
+      origin: "agent-team",
+    })
+    expect(calls.awaited).toEqual([
+      ["agent-team-run:run_1", "integration-hold:team-delivery:run_1"],
+    ])
+    expect(calls.announced[0]).toEqual({ origin: "agent-team", permissionClass: "outbound" })
+  })
+
   it("passes on an approval for the rest of the request", async () => {
     const { input, onAnswer } = push({ decision: "allow", forRequest: true })
     await pushHeldIntegrationJob(input)

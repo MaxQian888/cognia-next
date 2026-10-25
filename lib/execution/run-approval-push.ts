@@ -34,10 +34,14 @@ export function isRunApprovalType(type: string): type is RunApprovalType {
 }
 
 /** Where the phone opens the approvals card for each origin. */
-export type RunApprovalOrigin = "bot" | "scheduler" | "plugin"
+export type RunApprovalOrigin = "bot" | "scheduler" | "plugin" | "agent-team"
 
 export function runApprovalHref(origin: RunApprovalOrigin): string {
-  return origin === "scheduler" ? RUN_APPROVAL_HREFS.scheduler : RUN_APPROVAL_HREFS.bots
+  return origin === "scheduler"
+    ? RUN_APPROVAL_HREFS.scheduler
+    : origin === "agent-team"
+      ? RUN_APPROVAL_HREFS.agentRuns
+      : RUN_APPROVAL_HREFS.bots
 }
 
 export interface RunApprovalPendingPayload {

@@ -501,7 +501,12 @@ async function settleSquadRun(
     result.status === "completed" &&
     stackedDeliveryOn(team.config.githubDeliveryPolicy)
   ) {
-    const { prepareAndPublishGithubStack } = await import("../delivery/github-delivery-adapter")
+    const {
+      prepareAndPublishGithubStack,
+      STACK_PUBLISH_HELD_REASON,
+      STACK_PUBLISH_REFUSED_REASON,
+      StackPublishHeldError,
+    } = await import("../delivery/github-delivery-adapter")
     try {
       await prepareAndPublishGithubStack(team, runId, {
         resolveTeamRepo: runtimeDeps.resolveTeamRepo,
@@ -509,14 +514,21 @@ async function settleSquadRun(
       })
     } catch (error) {
       // A reason CODE on the run. The message stays out of the record: it is
-      // provider text, and the row is projected onto every surface.
+      // provider text, and the row is projected onto every surface. A publish
+      // the outbound policy stopped (ADR-0239 phase 2) waits for a person's
+      // "approve and publish"; its draft graph is kept.
+      const held = error instanceof StackPublishHeldError
       await updateAgentTeamRun(runId, {
         status: "needs_input",
-        recoveryReason: "delivery_failed",
+        recoveryReason: held
+          ? error.reason === "held"
+            ? STACK_PUBLISH_HELD_REASON
+            : STACK_PUBLISH_REFUSED_REASON
+          : "delivery_failed",
         updatedAt: Date.now(),
       }).catch(() => undefined)
       useAgentTeamStore.getState().setTeamStatus(teamId, "paused")
-      console.warn("[agent-team] GitHub delivery failed", { runId, error })
+      if (!held) console.warn("[agent-team] GitHub delivery failed", { runId, error })
       return
     }
   }

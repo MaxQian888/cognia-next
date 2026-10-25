@@ -48,8 +48,12 @@
   },
   "delivery": {
     "approveMerge": "批准并合并交付栈",
+    "approvePublish": "批准并发布",
     "empty": "尚未准备交付栈。",
     "merged": "交付栈已合并。",
+    "publishHeld": "堆叠 PR 已就绪但尚未打开：没有授权允许在无人值守时发布到这些仓库。批准后即打开。",
+    "publishRefused": "有人在本次请求中拒绝了发布到这些仓库。仍可批准，打开这些堆叠 PR。",
+    "published": "堆叠 PR 已发布",
     "title": "交付图"
   },
   "deliveryNodeStatus": {

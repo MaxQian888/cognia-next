@@ -86,6 +86,13 @@ export interface AgentTeamState {
   updateTeam: (teamId: string, updates: Partial<AgentTeam>) => void
   updateTeamConfig: (teamId: string, config: AgentTeamConfig) => void
   /**
+   * Record that a person turned stacked delivery on, for the repositories
+   * bound now (ADR-0239 phase 2): the team's completed runs may publish their
+   * stack to them unattended. Only a person's switch calls this; every other
+   * config write keeps the stored consent and never takes one it carries.
+   */
+  consentToStackedDelivery: (teamId: string) => void
+  /**
    * Patch the team-level plugin-capability default pool. Pass an empty
    * bundle (`{}`) to clear the team default. Capability fields not in
    * the patch are preserved.

@@ -33,6 +33,10 @@ describe("run approval push", () => {
     expect(runApprovalHref("plugin")).toBe("/bots")
   })
 
+  it("links an Agent Team's held publish to its runs", () => {
+    expect(runApprovalHref("agent-team")).toBe("/agent-runs")
+  })
+
   it("ignores interrupt kinds the approvals card does not answer", async () => {
     const publish = jest.fn().mockResolvedValue(undefined)
     await announceRunApproval(

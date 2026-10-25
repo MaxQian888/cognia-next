@@ -4,7 +4,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key} ${JSON.stringify(values)}` : key,
 }))
 
 const markSavedMock = jest.fn()
@@ -13,9 +14,11 @@ jest.mock("./settings-save-indicator", () => ({
 }))
 
 const updateTeamConfigMock = jest.fn()
+const consentMock = jest.fn()
 jest.mock("@/stores/agent/agent-team-store", () => ({
-  useAgentTeamStore: (sel: (s: { updateTeamConfig: jest.Mock }) => unknown) =>
-    sel({ updateTeamConfig: updateTeamConfigMock }),
+  useAgentTeamStore: (
+    sel: (s: { updateTeamConfig: jest.Mock; consentToStackedDelivery: jest.Mock }) => unknown
+  ) => sel({ updateTeamConfig: updateTeamConfigMock, consentToStackedDelivery: consentMock }),
 }))
 
 import {
@@ -48,6 +51,7 @@ function policy(over: Partial<AgentTeamGithubDeliveryPolicy> = {}): AgentTeamGit
 
 beforeEach(() => {
   updateTeamConfigMock.mockReset()
+  consentMock.mockReset()
   markSavedMock.mockReset()
 })
 
@@ -81,6 +85,38 @@ describe("StackedDeliverySection", () => {
       })
     )
     expect(markSavedMock).toHaveBeenCalled()
+  })
+
+  it("records a person's consent when turned on, not when turned off (ADR-0239)", () => {
+    const { unmount } = render(<StackedDeliverySection team={makeTeam()} />)
+    fireEvent.click(screen.getByRole("switch"))
+    expect(consentMock).toHaveBeenCalledWith("team1")
+    unmount()
+    consentMock.mockReset()
+    render(<StackedDeliverySection team={makeTeam(policy())} />)
+    fireEvent.click(screen.getByRole("switch"))
+    expect(consentMock).not.toHaveBeenCalled()
+  })
+
+  it("says which repositories publish unattended, or that each publish waits", () => {
+    const { unmount } = render(<StackedDeliverySection team={makeTeam(policy())} />)
+    expect(screen.getByTestId("stacked-delivery-consent")).toHaveTextContent("consent.none")
+    unmount()
+    render(
+      <StackedDeliverySection
+        team={makeTeam(
+          policy({ consent: { by: "local-user", at: 1, repositoryPaths: ["/work/web"] } })
+        )}
+      />
+    )
+    expect(screen.getByTestId("stacked-delivery-consent")).toHaveTextContent(
+      'consent.covers {"repositories":"/work/web"}'
+    )
+  })
+
+  it("says nothing about consent while off", () => {
+    render(<StackedDeliverySection team={makeTeam()} />)
+    expect(screen.queryByTestId("stacked-delivery-consent")).not.toBeInTheDocument()
   })
 
   it("turning it off clears both flags rather than leaving stacking armed", () => {

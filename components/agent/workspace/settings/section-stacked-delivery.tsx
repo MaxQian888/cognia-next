@@ -10,6 +10,12 @@
  *
  * Renders everywhere; the behaviour behind it is desktop + GitHub remote only,
  * which the caveat says rather than the card pretending otherwise.
+ *
+ * Turning it on is also a person's consent to publish the team's stacks to
+ * the repositories bound now with nobody watching (ADR-0239 phase 2,
+ * `consentToStackedDelivery`). A repository bound later, or a team a plugin or
+ * template turned on, waits for a person to approve each publish; the card
+ * says which repositories the consent covers.
  */
 
 import { useCallback } from "react"
@@ -28,7 +34,11 @@ import {
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { AgentTeamGithubDeliveryPolicy } from "@/types/agent/agent-team-runtime"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { STACKED_DELIVERY_DEFAULTS, stackedDeliveryOn } from "@/lib/stack/team-policy"
+import {
+  consentedRepositoryPaths,
+  STACKED_DELIVERY_DEFAULTS,
+  stackedDeliveryOn,
+} from "@/lib/stack/team-policy"
 import { markSettingsSaved } from "./settings-save-indicator"
 
 export interface StackedDeliverySectionProps {
@@ -43,10 +53,12 @@ export const MAX_LAYER_CHOICES = [5, 10, 20, 50] as const
 export function StackedDeliverySection({ team }: StackedDeliverySectionProps) {
   const t = useTranslations("agentTeamsWorkspace.settings.stackedDelivery")
   const updateTeamConfig = useAgentTeamStore((s) => s.updateTeamConfig)
+  const consentToStackedDelivery = useAgentTeamStore((s) => s.consentToStackedDelivery)
 
   const policy = team.config.githubDeliveryPolicy
   const on = stackedDeliveryOn(policy)
   const current = policy ?? STACKED_DELIVERY_DEFAULTS
+  const consented = [...consentedRepositoryPaths(team.config)]
 
   const patch = useCallback(
     (next: Partial<AgentTeamGithubDeliveryPolicy>) => {
@@ -75,7 +87,10 @@ export function StackedDeliverySection({ team }: StackedDeliverySectionProps) {
         </div>
         <Switch
           checked={on}
-          onCheckedChange={(value) => patch({ enabled: value, stackedPullRequests: value })}
+          onCheckedChange={(value) => {
+            patch({ enabled: value, stackedPullRequests: value })
+            if (value) consentToStackedDelivery(team.id)
+          }}
           aria-label={t("enabled.label")}
         />
       </div>
@@ -132,6 +147,14 @@ export function StackedDeliverySection({ team }: StackedDeliverySectionProps) {
         <Label className="text-xs">{t("mergeMode.label")}</Label>
         <p className="text-[11px] text-muted-foreground">{t("mergeMode.approvedBottomUp")}</p>
       </div>
+
+      {on ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="stacked-delivery-consent">
+          {consented.length > 0
+            ? t("consent.covers", { repositories: consented.join(", ") })
+            : t("consent.none")}
+        </p>
+      ) : null}
 
       <p className="text-[11px] text-muted-foreground">{t("caveat")}</p>
     </Card>

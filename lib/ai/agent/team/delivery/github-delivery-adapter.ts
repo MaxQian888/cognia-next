@@ -250,7 +250,9 @@ export async function assertPublishableStack(
  */
 export type ResolvedTeamRepoLike = {
   fullName: string
-} & Partial<Pick<ResolvedTeamRepo, "defaultBranch" | "defaultBranchSource" | "defaultBranchExists">>
+} & Partial<
+  Pick<ResolvedTeamRepo, "host" | "defaultBranch" | "defaultBranchSource" | "defaultBranchExists">
+>
 
 /** Resolve real GitHub bindings, persist the single stack approval, then merge fail-stop. */
 export async function approveAndMergeGithubStack(
@@ -325,10 +327,233 @@ export function stackRootBase(
   return trunk
 }
 
+/** The run reasons a stack publish the outbound policy stopped leaves on the run. */
+export const STACK_PUBLISH_HELD_REASON = "delivery_awaiting_approval"
+export const STACK_PUBLISH_REFUSED_REASON = "delivery_refused"
+
+/**
+ * The outbound policy stopped a stack publish (ADR-0239 phase 2): nothing
+ * authorized a repository (`held`, waiting for a person to approve the
+ * publish), or a person refused one for the current request (`refused`). The
+ * draft graph stays, so approving publishes it as it was checked.
+ */
+export class StackPublishHeldError extends Error {
+  constructor(readonly reason: "held" | "refused") {
+    super(
+      reason === "held"
+        ? "outbound_held: the stack publish waits for a person to approve it"
+        : "outbound_fenced: a person refused a repository of this stack for the current request"
+    )
+  }
+}
+
+export interface PrepareAndPublishGithubStackOptions extends ApproveAndMergeGithubStackOptions {
+  /**
+   * Who publishes: the team's completed run, nobody watching (default), or a
+   * person's "approve and publish", for this publish or (`forRequest`) the
+   * rest of the request.
+   */
+  publishedBy?: { by: "run" } | { by: "person"; forRequest?: boolean }
+  /** Test seams for the outbound plan and the hold's push. */
+  planDeps?: import("@/lib/policy/action-review/plan-integration").PlanIntegrationDeps
+  pushHold?: (
+    push: import("@/lib/integrations/outbound-hold").HeldIntegrationJobPush
+  ) => Promise<void>
+}
+
+/** What a held publish is pushed as, and withdrawn by. */
+function stackHoldId(runId: string): string {
+  return `team-delivery:${runId}`
+}
+
+async function recordStackReceipt(
+  receipt: import("@/lib/policy/action-review/plan-integration").IntegrationReceipt | undefined
+): Promise<void> {
+  if (!receipt) return
+  try {
+    const { projectActionReviewSettled } = await import("@/lib/policy/action-review/projection")
+    await projectActionReviewSettled(receipt.request, receipt.decision)
+  } catch {
+    // Audit is best-effort, as at the delivery gateway.
+  }
+}
+
+/**
+ * Plan a stack publish (ADR-0239 phase 2): every repository the stack opens
+ * pull requests on, as the team's, in the request of the session that created
+ * the team. The team's consented repositories (`teamDeliveryGrants`) and the
+ * GitHub accounts' lists grant them; a person's approval is recorded as
+ * theirs. Returns when the publish may go ahead (shadow mode always), and
+ * throws {@link StackPublishHeldError} when it may not, after pushing a held
+ * publish to a person.
+ */
+async function planStackPublish(args: {
+  team: AgentTeam
+  runId: string
+  bindings: ReadonlyArray<{ path: string; fullName: string; host?: string }>
+  options: PrepareAndPublishGithubStackOptions
+}): Promise<void> {
+  const { team, runId, bindings, options } = args
+  const [
+    { planIntegrationWrite },
+    { teamDeliveryGrants },
+    { repositoryOnHost, unknownGithubTarget },
+  ] = await Promise.all([
+    import("@/lib/policy/action-review/plan-integration"),
+    import("@/lib/policy/action-review/configured-grants"),
+    import("@/lib/policy/action-review/outbound-targets"),
+  ])
+  // A name that does not parse is never granted, so it reaches a person.
+  const targets = bindings.map(
+    (binding) => repositoryOnHost(binding.fullName, binding.host) ?? unknownGithubTarget()
+  )
+  const publishedBy = options.publishedBy ?? { by: "run" }
+  const host = bindings.find((binding) => binding.host)?.host
+  const decision = await planIntegrationWrite(
+    {
+      targets,
+      operation: "github.publishStack",
+      ...(host ? { host } : {}),
+      authorization: {
+        kind: "team-delivery",
+        teamId: team.id,
+        runId,
+        ...(team.sessionId ? { sessionId: team.sessionId } : {}),
+        decidedBy: publishedBy.by,
+        ...(publishedBy.by === "person" && publishedBy.forRequest ? { forRequest: true } : {}),
+        policyGrants: teamDeliveryGrants(team, bindings),
+      },
+    },
+    options.planDeps
+  )
+  await recordStackReceipt(decision.receipt)
+  if (decision.action === "proceed") return
+  if (decision.action === "deny") throw new StackPublishHeldError("refused")
+
+  const push =
+    options.pushHold ??
+    (async (hold: import("@/lib/integrations/outbound-hold").HeldIntegrationJobPush) => {
+      const { pushHeldIntegrationJob } = await import("@/lib/integrations/outbound-hold")
+      await pushHeldIntegrationJob(hold)
+    })
+  void push({
+    jobId: stackHoldId(runId),
+    sessionId: `agent-team-run:${runId}`,
+    toolName: "agent_team__publish_stack",
+    label: `${team.name}: publish stacked pull requests`,
+    origin: "agent-team",
+    review: decision.review,
+    onAnswer: async (answer) => {
+      const current = await currentTeam(team)
+      if (answer.kind === "approved") {
+        await approveAndPublishGithubStack(current, runId, {
+          ...(answer.forRequest ? { forRequest: true } : {}),
+        })
+      } else {
+        await declineGithubStackPublish(current, runId, targets)
+      }
+    },
+  }).catch(() => undefined)
+  throw new StackPublishHeldError("held")
+}
+
+/** The team as the store holds it now, else as it was handed in. */
+async function currentTeam(team: AgentTeam): Promise<AgentTeam> {
+  try {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    return useAgentTeamStore.getState().teams[team.id] ?? team
+  } catch {
+    return team
+  }
+}
+
+/**
+ * A person approved a held stack publish (the run's "approve and publish", or
+ * the pushed card): publish the draft graph the run left, as theirs, and
+ * finish the run it held. Nothing else releases a held publish.
+ */
+export async function approveAndPublishGithubStack(
+  team: AgentTeam,
+  runId: string,
+  options: Omit<PrepareAndPublishGithubStackOptions, "publishedBy"> & { forRequest?: boolean } = {}
+): Promise<string | undefined> {
+  const { forRequest, ...rest } = options
+  const { withdrawHeldIntegrationJob } = await import("@/lib/integrations/outbound-hold")
+  withdrawHeldIntegrationJob(stackHoldId(runId))
+  const graphId = await prepareAndPublishGithubStack(team, runId, {
+    ...rest,
+    publishedBy: { by: "person", ...(forRequest ? { forRequest: true } : {}) },
+  })
+  await settleHeldRun(team.id, runId, "completed")
+  return graphId
+}
+
+/**
+ * A person refused a held stack publish on its pushed card: the repositories
+ * are fenced for the rest of the request, the draft stays unpublished, and the
+ * run says so. The run's "approve and publish" still publishes it.
+ */
+export async function declineGithubStackPublish(
+  team: AgentTeam,
+  runId: string,
+  targets: readonly import("@/lib/policy/action-review/outbound-targets").OutboundTarget[],
+  deps: Pick<
+    import("@/lib/policy/action-review/plan-integration").PlanIntegrationDeps,
+    "resolveSessionOrigin"
+  > = {}
+): Promise<void> {
+  const { heldJobAnswerReceipt, teamDeliveryOutbound } =
+    await import("@/lib/policy/action-review/plan-integration")
+  const outbound = await teamDeliveryOutbound(
+    { teamId: team.id, runId, ...(team.sessionId ? { sessionId: team.sessionId } : {}) },
+    deps
+  )
+  await recordStackReceipt(
+    heldJobAnswerReceipt({ outbound, targets, operation: "github.publishStack", answer: "denied" })
+  )
+  await settleHeldRun(team.id, runId, "refused")
+}
+
+/** Move a run a held publish parked: finished, or refused by a person. */
+async function settleHeldRun(
+  teamId: string,
+  runId: string,
+  outcome: "completed" | "refused"
+): Promise<void> {
+  const { getAgentTeamRun, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+  const run = await getAgentTeamRun(runId).catch(() => undefined)
+  if (
+    !run ||
+    run.status !== "needs_input" ||
+    (run.recoveryReason !== STACK_PUBLISH_HELD_REASON &&
+      run.recoveryReason !== STACK_PUBLISH_REFUSED_REASON)
+  ) {
+    return
+  }
+  if (outcome === "refused") {
+    await updateAgentTeamRun(runId, {
+      recoveryReason: STACK_PUBLISH_REFUSED_REASON,
+      updatedAt: Date.now(),
+    })
+    return
+  }
+  await updateAgentTeamRun(runId, {
+    status: "completed",
+    recoveryReason: undefined,
+    updatedAt: Date.now(),
+  })
+  const [{ useAgentTeamStore }, { emitTeamCompletedSchedulerEvent }] = await Promise.all([
+    import("@/stores/agent/agent-team-store"),
+    import("../squad/squad-lifecycle-runner"),
+  ])
+  useAgentTeamStore.getState().setTeamStatus(teamId, "completed")
+  await emitTeamCompletedSchedulerEvent(teamId, "completed")
+}
+
 export async function prepareAndPublishGithubStack(
   team: AgentTeam,
   runId: string,
-  options: ApproveAndMergeGithubStackOptions = {}
+  options: PrepareAndPublishGithubStackOptions = {}
 ): Promise<string | undefined> {
   const policy = team.config.githubDeliveryPolicy
   if (!stackedDeliveryOn(policy) || !policy) return undefined
@@ -381,11 +606,13 @@ export async function prepareAndPublishGithubStack(
   }
   if (!resolveTeamRepo || !resolveOctokit) throw new Error("GitHub delivery is unavailable")
   const repositories: Record<string, string> = {}
+  const hosts: Record<string, string | undefined> = {}
   const defaults: Record<string, string> = {}
   for (const binding of stackBindings) {
     const resolved = await resolveTeamRepo(binding.path)
     if (!resolved) throw new Error(`Repository ${binding.id} has no GitHub remote`)
     repositories[binding.id] = resolved.fullName
+    hosts[binding.id] = resolved.host?.id
     const persistedBase = persistedNodes?.find(
       (node) => node.repositoryId === binding.id && node.order === 0
     )?.baseBranch
@@ -471,6 +698,17 @@ export async function prepareAndPublishGithubStack(
         layers: layersByBinding.get(binding.id) ?? [],
       })),
     })
+  // The draft is kept either way, so a held publish is approved as checked.
+  await planStackPublish({
+    team,
+    runId,
+    bindings: stackBindings.map((binding) => ({
+      path: binding.path,
+      fullName: repositories[binding.id]!,
+      ...(hosts[binding.id] ? { host: hosts[binding.id] } : {}),
+    })),
+    options,
+  })
   await service.publish(graphId)
   return graphId
 }

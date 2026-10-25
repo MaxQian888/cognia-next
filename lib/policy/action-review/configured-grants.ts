@@ -22,8 +22,9 @@
  *   (`capability-grant:<id>`), for a broker action through its account.
  * - A Bot installation's repository scope when its writes publish without a
  *   person (`bot-scope:<id>`, {@link botScopeGrants}).
- * - An Agent Team's repository bindings with stacked delivery on
- *   (`team-delivery:<teamId>`, {@link teamDeliveryGrants}).
+ * - An Agent Team's repository bindings a person consented to publish to when
+ *   turning stacked delivery on (`team-delivery:<teamId>`,
+ *   {@link teamDeliveryGrants}).
  *
  * A lookup that fails grants nothing: the plan then asks, drafts or parks,
  * never sends on a failure.
@@ -33,7 +34,7 @@ import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-r
 import type { CapabilityGrant, ServiceConnection } from "@/types/external-service"
 import type { IntegrationActionRisk } from "@/types/plugin/plugin-integration"
 import type { AgentTeamGithubDeliveryPolicy } from "@/types/agent/agent-team-runtime"
-import { stackedDeliveryOn } from "@/lib/stack/team-policy"
+import { consentedRepositoryPaths } from "@/lib/stack/team-policy"
 
 import type { OutboundPolicyGrantList } from "./plan-context"
 import { outboundFingerprint, repositoryOnHost, type OutboundTarget } from "./outbound-targets"
@@ -348,19 +349,29 @@ export function botScopeGrants(
 }
 
 /**
- * An Agent Team's bound repositories, when a person turned stacked delivery
- * on: the team publishes its stack to them with nobody watching. `repositories`
- * are the bindings' resolved `owner/repo` names (`resolveTeamRepo`). Read by
- * the stack publisher's plan.
+ * An Agent Team's bound repositories that a person consented to publish to:
+ * they turned stacked delivery on in the team's settings while those were
+ * bound (`githubDeliveryPolicy.consent`). A team a plugin, a template or an
+ * automatic team turned on carries no consent, and a repository bound after
+ * the consent is not in it; their stacks wait for a person. `repositories`
+ * are the bindings' paths with their resolved GitHub repository
+ * (`resolveTeamRepo`). Read by the stack publisher's plan.
  */
 export function teamDeliveryGrants(
-  team: { id: string; config: { githubDeliveryPolicy?: AgentTeamGithubDeliveryPolicy } },
-  repositories: readonly string[],
-  host?: string
+  team: {
+    id: string
+    config: {
+      githubDeliveryPolicy?: AgentTeamGithubDeliveryPolicy
+      repositories?: ReadonlyArray<{ path: string }>
+      workingDir?: string
+    }
+  },
+  repositories: ReadonlyArray<{ path: string; fullName: string; host?: string }>
 ): OutboundPolicyGrantList[] {
-  if (!stackedDeliveryOn(team.config.githubDeliveryPolicy)) return []
+  const consented = consentedRepositoryPaths(team.config)
   const fingerprints = repositories.flatMap((repository) => {
-    const target = repositoryOnHost(repository, host)
+    if (!consented.has(repository.path)) return []
+    const target = repositoryOnHost(repository.fullName, repository.host)
     return target ? [outboundFingerprint(target)] : []
   })
   return fingerprints.length > 0 ? [{ policyRef: `team-delivery:${team.id}`, fingerprints }] : []

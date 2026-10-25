@@ -3,6 +3,9 @@ import { RUN_APPROVAL_HREFS, runApprovalTapHref } from "./run-approval-tap"
 describe("runApprovalTapHref", () => {
   it("opens the page the push names when it is an approvals page", () => {
     expect(runApprovalTapHref({ interruptId: "i", href: "/bots" })).toBe(RUN_APPROVAL_HREFS.bots)
+    expect(runApprovalTapHref({ interruptId: "i", href: "/agent-runs" })).toBe(
+      RUN_APPROVAL_HREFS.agentRuns
+    )
     expect(runApprovalTapHref({ interruptId: "i", href: "/scheduler" })).toBe("/scheduler")
   })
 

@@ -502,6 +502,96 @@ describe("planIntegrationWrite", () => {
     })
   })
 
+  describe("team-delivery", () => {
+    const team = (
+      extra: Partial<Extract<IntegrationAuthorization, { kind: "team-delivery" }>> = {}
+    ) =>
+      ({
+        kind: "team-delivery",
+        teamId: "team_1",
+        runId: "run_1",
+        decidedBy: "run",
+        ...extra,
+      }) as const
+
+    it("parks an unconsented publish in the team run's own request, reading every account's list", async () => {
+      const githubGrants = jest.fn(async () => [])
+      const decision = await planIntegrationWrite(
+        { ...write([REPO], team()), host: "github.com" },
+        deps(enforce, {}, { githubGrants })
+      )
+      expect(decision).toMatchObject({
+        action: "park",
+        outbound: {
+          ownerRef: "agent-team:team_1",
+          rootSessionId: "agent-team-run:run_1",
+          instructionEpoch: "agent-team-run:run_1",
+        },
+      })
+      expect(githubGrants).toHaveBeenCalledWith({ host: "github.com" })
+    })
+
+    it("publishes to the team's consented repositories, in the creating session's request", async () => {
+      const decision = await planIntegrationWrite(
+        write(
+          [REPO],
+          team({
+            sessionId: "chat-1",
+            policyGrants: [
+              { policyRef: "team-delivery:team_1", fingerprints: [outboundFingerprint(REPO)] },
+            ],
+          })
+        ),
+        deps(enforce, {}, { githubGrants: async () => [] })
+      )
+      expect(decision).toMatchObject({
+        action: "proceed",
+        outbound: { rootSessionId: "root-1", instructionEpoch: "epoch-1" },
+        authorizedBy: { grantScope: "policy", policyRef: "team-delivery:team_1" },
+      })
+      // The chat's PR is not where the publish goes, so it is no origin thread.
+      expect(
+        await planIntegrationWrite(
+          write([PR_12], team({ sessionId: "chat-1" })),
+          deps(enforce, {}, { githubGrants: async () => [] })
+        )
+      ).toMatchObject({ action: "park" })
+    })
+
+    it("records a person's approval as theirs, for the publish or the request", async () => {
+      await expect(
+        planIntegrationWrite(write([REPO], team({ decidedBy: "person" })), deps(enforce))
+      ).resolves.toMatchObject({
+        action: "proceed",
+        authorizedBy: { authority: "human", grantScope: "once" },
+        receipt: { decision: { outcome: "allow", authority: "human" } },
+      })
+      await expect(
+        planIntegrationWrite(
+          write([REPO], team({ decidedBy: "person", forRequest: true })),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ authorizedBy: { grantScope: "instruction" } })
+    })
+
+    it("refuses a repository a person refused for the request", async () => {
+      const prefix = actionReviewAuthKeyPrefix(
+        "deny",
+        "agent-team-run:run_1",
+        "agent-team-run:run_1"
+      )
+      const decision = await planIntegrationWrite(
+        write([REPO], team()),
+        deps(
+          enforce,
+          { [prefix]: [`${prefix}${outboundFingerprint(REPO)}`] },
+          { githubGrants: async () => [] }
+        )
+      )
+      expect(decision.action).toBe("deny")
+    })
+  })
+
   describe("modes", () => {
     const plugin = { kind: "plugin", pluginId: "p1" } as const
 

@@ -13,6 +13,9 @@
  * Nobody answering before the park's TTL leaves the job held in the hub; it
  * is not a refusal. A person answering in the hub first withdraws the push
  * ({@link withdrawHeldIntegrationJob}).
+ *
+ * An Agent Team's held stack publish is pushed the same way, under its own
+ * id and session (`sessionId`).
  */
 
 import type { PendingOutboundReview } from "@cognia/agent-config-types"
@@ -21,7 +24,10 @@ import type { RunApprovalOrigin } from "@/lib/execution/run-approval-push"
 import type { UnattendedParkOptions } from "@/lib/claude/unattended-park"
 
 export interface HeldIntegrationJobPush {
+  /** What is held: a job's id, or `team-delivery:<runId>` for a stack publish. */
   jobId: string
+  /** The session the run is filed under. Default: {@link heldIntegrationJobSessionId}. */
+  sessionId?: string
   /** The tool name the card shows, e.g. `integration__github-delivery__github__openPr`. */
   toolName: string
   /** The run's title, e.g. "GitHub: Open pull request". */
@@ -50,7 +56,7 @@ export async function pushHeldIntegrationJob(push: HeldIntegrationJobPush): Prom
   const controller = new AbortController()
   pushes.set(push.jobId, controller)
   const { createUnattendedPark } = await import("@/lib/claude/unattended-park")
-  const sessionId = heldIntegrationJobSessionId(push.jobId)
+  const sessionId = push.sessionId ?? heldIntegrationJobSessionId(push.jobId)
   const park = createUnattendedPark({
     origin: push.origin,
     sessionId,
