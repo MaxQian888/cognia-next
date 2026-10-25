@@ -6,10 +6,11 @@
  *
  * Only a person edits this, so the editor stores what they picked in the
  * engine's normalized form (`conversationTarget` / `personTarget` /
- * `mailTarget`) and nothing a model said. Conversations are offered from the
- * chats this device knows, by name; a key can still be pasted for a chat that
- * never reached this device. Every add and remove saves the whole list, so
- * what is shown is what is stored.
+ * `mailTarget` / `repositoryTarget`) and nothing a model said. Conversations
+ * are offered from the chats this device knows, by name, and repositories from
+ * the ones it works with (ADR-0239 phase 2); a key or an `owner/repo` can
+ * still be typed for one that never reached this device. Every add and remove
+ * saves the whole list, so what is shown is what is stored.
  */
 
 import { useMemo, useState } from "react"
@@ -20,13 +21,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { KnownConversation } from "@/hooks/outbound/use-known-conversations"
+import type { KnownRepository } from "@/hooks/outbound/use-known-repositories"
 import { listsRecipient, recipientGrant } from "@/lib/policy/action-review/configured-grants"
 import {
   conversationTarget,
   mailTarget,
   outboundRecipientId,
   personTarget,
-  repositoryTarget,
+  repositoryOnHost,
   siteTarget,
   type OutboundTarget,
 } from "@/lib/policy/action-review/outbound-targets"
@@ -36,7 +38,7 @@ import type {
   OutboundRecipientKind,
 } from "@cognia/agent-config-types/action-review"
 
-/** How many known conversations to offer at once. */
+/** How many known conversations or repositories to offer at once. */
 const SUGGESTION_LIMIT = 8
 
 export interface OutboundRecipientsEditorProps {
@@ -52,6 +54,13 @@ export interface OutboundRecipientsEditorProps {
   adapterId?: string
   /** The chats this device knows, for picking by name. */
   knownConversations: readonly KnownConversation[]
+  /** The repositories this device knows, for picking. */
+  knownRepositories?: readonly KnownRepository[]
+  /**
+   * The web host a typed `owner/repo` is on: the account's, for an
+   * integration account's list. Default github.com.
+   */
+  repositoryHost?: string
   disabled?: boolean
   testId?: string
 }
@@ -64,6 +73,8 @@ export function OutboundRecipientsEditor({
   kinds,
   adapterId,
   knownConversations,
+  knownRepositories = [],
+  repositoryHost,
   disabled = false,
   testId = "outbound-recipients",
 }: OutboundRecipientsEditorProps) {
@@ -79,15 +90,21 @@ export function OutboundRecipientsEditor({
     [knownConversations]
   )
 
-  const suggestions = useMemo(() => {
-    if (kind !== "conversation") return []
+  const suggestions = useMemo((): { target: OutboundTarget; title: string }[] => {
     const query = text.trim().toLowerCase()
-    return knownConversations
-      .filter((known) => !adapterId || known.target.channel === adapterId)
+    const candidates =
+      kind === "conversation"
+        ? knownConversations
+            .filter((known) => !adapterId || known.target.channel === adapterId)
+            .map((known) => ({ target: known.target, title: known.title }))
+        : kind === "repository"
+          ? knownRepositories.map((known) => ({ target: known.target, title: known.name }))
+          : []
+    return candidates
       .filter((known) => !listsRecipient(value, known.target))
       .filter((known) => !query || known.title.toLowerCase().includes(query))
       .slice(0, SUGGESTION_LIMIT)
-  }, [adapterId, kind, knownConversations, text, value])
+  }, [adapterId, kind, knownConversations, knownRepositories, text, value])
 
   async function save(next: OutboundRecipientGrant[]): Promise<boolean> {
     setSaving(true)
@@ -108,7 +125,7 @@ export function OutboundRecipientsEditor({
       case "mail":
         return mailTarget(raw)
       case "repository":
-        return repositoryTarget(raw)
+        return repositoryOnHost(raw, repositoryHost)
       case "site":
         return siteTarget(raw)
     }
@@ -224,10 +241,12 @@ export function OutboundRecipientsEditor({
         </Button>
       </form>
 
-      {kind === "conversation" ? (
+      {kind === "conversation" || kind === "repository" ? (
         suggestions.length > 0 ? (
           <div className="flex flex-col gap-1">
-            <p className="text-xs text-muted-foreground">{t("known")}</p>
+            <p className="text-xs text-muted-foreground">
+              {kind === "repository" ? t("knownRepository") : t("known")}
+            </p>
             <div className="flex flex-wrap gap-1.5">
               {suggestions.map((known) => (
                 <Button
@@ -247,7 +266,9 @@ export function OutboundRecipientsEditor({
             </div>
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">{t("noneKnown")}</p>
+          <p className="text-xs text-muted-foreground">
+            {kind === "repository" ? t("noneKnownRepository") : t("noneKnown")}
+          </p>
         )
       ) : null}
     </div>

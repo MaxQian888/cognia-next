@@ -356,6 +356,19 @@ describe("planIntegrationWrite", () => {
         })
       })
 
+      it("reaches its installation's repository scope, which a person-approved write does not need", async () => {
+        const scoped = { ...bot, scopeRepository: "acme/web" }
+        await expect(
+          planIntegrationWrite(write([PR_13], scoped), deps(enforce))
+        ).resolves.toMatchObject({
+          action: "proceed",
+          authorizedBy: { grantScope: "policy", policyRef: "bot-scope:boti_1" },
+        })
+        await expect(
+          planIntegrationWrite(write([OTHER_REPO], scoped), deps(enforce))
+        ).resolves.toMatchObject({ action: "park" })
+      })
+
       it("has no origin thread when its event was about no PR or issue", async () => {
         await expect(
           planIntegrationWrite(
@@ -420,6 +433,72 @@ describe("planIntegrationWrite", () => {
       await expect(
         planIntegrationWrite(write([unknownGithubTarget()], job([REPO])), deps(enforce))
       ).resolves.toMatchObject({ action: "park" })
+    })
+  })
+
+  describe("lists a person wrote for the account", () => {
+    const account = { pluginId: "github-delivery", accountId: "acct_1" }
+    const action = {
+      actionId: "commentPr",
+      operationId: "github.commentPr",
+      risk: "write",
+    } as const
+    const accountList = async () => [
+      { policyRef: "integration-account:acct_1", fingerprints: [outboundFingerprint(REPO)] },
+    ]
+
+    it("grants an unattended write, asking with the account, the action and the run", async () => {
+      const githubGrants = jest.fn(accountList)
+      const decision = await planIntegrationWrite(
+        {
+          ...write([PR_13], { kind: "workflow", workflowId: "wf_1", runId: "wr_1" }),
+          host: "github.com",
+          account,
+          action,
+        },
+        deps(enforce, {}, { githubGrants })
+      )
+      expect(decision).toMatchObject({
+        action: "proceed",
+        authorizedBy: { grantScope: "policy", policyRef: "integration-account:acct_1" },
+      })
+      expect(githubGrants).toHaveBeenCalledWith({
+        account,
+        operation: { ...action, workflowId: "wf_1" },
+        host: "github.com",
+      })
+    })
+
+    it("passes a tool call's session, and no operation for a raw request", async () => {
+      const githubGrants = jest.fn(async () => [])
+      await planIntegrationWrite(
+        { ...write([OTHER_REPO], { kind: "tool-call", pluginId: "p", sessionId: "s1" }), account },
+        deps(enforce, {}, { githubGrants })
+      )
+      expect(githubGrants).toHaveBeenLastCalledWith({ account })
+      await planIntegrationWrite(
+        {
+          ...write([OTHER_REPO], { kind: "tool-call", pluginId: "p", sessionId: "s1" }),
+          account,
+          action,
+        },
+        deps(enforce, {}, { githubGrants })
+      )
+      expect(githubGrants).toHaveBeenLastCalledWith({
+        account,
+        operation: { ...action, sessionId: "s1" },
+      })
+    })
+
+    it("reads no list without an account", async () => {
+      const githubGrants = jest.fn(accountList)
+      await expect(
+        planIntegrationWrite(write([PR_13], { kind: "plugin", pluginId: "p" }), {
+          ...deps(enforce),
+          githubGrants,
+        })
+      ).resolves.toMatchObject({ action: "park" })
+      expect(githubGrants).not.toHaveBeenCalled()
     })
   })
 

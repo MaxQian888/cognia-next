@@ -31233,6 +31233,10 @@
     "addNamed": "Add {name}",
     "duplicate": "Already on the list.",
     "empty": "No one is listed. A send with nobody watching asks first.",
+    "integrationAccount": {
+      "description": "Any GitHub write through this account with nobody watching, from a workflow, a plugin or a scheduled run, may reach these repositories. A write to any other repository waits for a person to approve it.",
+      "title": "Repositories writable unattended"
+    },
     "invalid": {
       "conversation": "That is not a conversation key. It looks like platform:bot:chat.",
       "mail": "That is not an email address.",
@@ -31249,7 +31253,9 @@
     },
     "kindLabel": "Recipient kind",
     "known": "Conversations on this device",
+    "knownRepository": "Repositories on this device",
     "noneKnown": "No conversation of this account has reached this device yet. Paste a conversation key instead.",
+    "noneKnownRepository": "No repository has reached this device yet. Type owner/repo instead.",
     "otherAccount": "That conversation goes through another bot account.",
     "placeholder": {
       "conversation": "Search, or paste a conversation key",

@@ -215,6 +215,22 @@ export function repositoryTarget(
 }
 
 /**
+ * A bare `owner/repo` on `host` (an account's web host, `githubWebHost`); a
+ * value that already names its host, or a URL, is read as is.
+ */
+export function repositoryOnHost(
+  value: string,
+  host: string | undefined,
+  thread?: string | number
+): OutboundTarget | undefined {
+  const bare = /^[^/:@\s]+\/[^/:@\s]+$/.test(value.trim())
+  return repositoryTarget(
+    bare && host && host !== "github.com" ? `https://${host}/${value.trim()}` : value,
+    thread
+  )
+}
+
+/**
  * A GitHub write whose repository could not be named (a `gh` command outside
  * any checkout, `gh api graphql`, a gist). It is never granted, so it always
  * reaches a person, and it is held to the GitHub category's mode.

@@ -11,15 +11,32 @@
  * - A Bot installation's `outboundRecipients` (`bot:<id>`): only that Bot's
  *   runs. An agent-turn Bot passes it with its turn ({@link botRecipientGrants});
  *   a handler Bot's own plugin code is covered while its run is live
- *   ({@link beginBotOutboundRun}).
+ *   ({@link beginBotOutboundRun}). It may hold repositories.
+ *
+ * GitHub writes (ADR-0239 phase 2) have four more, each a repository grant a
+ * person already wrote somewhere else, or wrote for this:
+ *
+ * - An integration account's `outboundRecipients` (`integration-account:<id>`):
+ *   any unattended write through that account ({@link configuredGithubGrants}).
+ * - A CapabilityGrant scoped to repositories that covers the write's operation
+ *   (`capability-grant:<id>`), for a broker action through its account.
+ * - A Bot installation's repository scope when its writes publish without a
+ *   person (`bot-scope:<id>`, {@link botScopeGrants}).
+ * - An Agent Team's repository bindings with stacked delivery on
+ *   (`team-delivery:<teamId>`, {@link teamDeliveryGrants}).
  *
  * A lookup that fails grants nothing: the plan then asks, drafts or parks,
  * never sends on a failure.
  */
 
 import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
+import type { CapabilityGrant, ServiceConnection } from "@/types/external-service"
+import type { IntegrationActionRisk } from "@/types/plugin/plugin-integration"
+import type { AgentTeamGithubDeliveryPolicy } from "@/types/agent/agent-team-runtime"
+import { stackedDeliveryOn } from "@/lib/stack/team-policy"
+
 import type { OutboundPolicyGrantList } from "./plan-context"
-import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
+import { outboundFingerprint, repositoryOnHost, type OutboundTarget } from "./outbound-targets"
 
 export interface ConfiguredGrantDeps {
   /** A connector instance's recipient list. Default: the `adapterInstances` row. */
@@ -140,6 +157,213 @@ export async function configuredPolicyGrants(
     }
   }
   return lists
+}
+
+// ── GitHub repositories (ADR-0239 phase 2) ─────────────────────────────────
+
+/** What a GitHub write goes through, for the lists that could grant it. */
+export interface GithubGrantContext {
+  /**
+   * The integration account the write goes through. Omitted for a `gh`
+   * command, which names no account: every GitHub account's list counts then,
+   * since each says a person accepts unattended writes to those repositories.
+   */
+  account?: { pluginId: string; accountId: string }
+  /**
+   * The broker action the write runs, for a CapabilityGrant. A raw request
+   * and a `gh` command run none, so no CapabilityGrant covers them.
+   */
+  operation?: {
+    actionId: string
+    operationId?: string
+    risk: IntegrationActionRisk
+    workflowId?: string
+    sessionId?: string
+  }
+  /** The account's web host (`githubWebHost`), for a bare `owner/repo`. */
+  host?: string
+}
+
+/** An account's connection and the CapabilityGrants on it. */
+export interface AccountCapabilityGrants {
+  connection: Pick<ServiceConnection, "id" | "providerFingerprint">
+  grants: readonly CapabilityGrant[]
+}
+
+export interface GithubGrantDeps {
+  /** An account's list. Default: its `integrationAccounts` row. */
+  accountRecipients?: (
+    pluginId: string,
+    accountId: string
+  ) => Promise<readonly OutboundRecipientGrant[] | undefined>
+  /** Every GitHub account's list, for a `gh` command. Default: the GitHub rows. */
+  githubAccountRecipients?: () => Promise<
+    ReadonlyArray<{ id: string; outboundRecipients?: readonly OutboundRecipientGrant[] }>
+  >
+  /** The CapabilityGrants on an account's connections. Default: the stored ones. */
+  capabilityGrants?: (pluginId: string, accountId: string) => Promise<AccountCapabilityGrants[]>
+  now?: number
+}
+
+async function defaultAccountRecipients(
+  pluginId: string,
+  accountId: string
+): Promise<readonly OutboundRecipientGrant[] | undefined> {
+  const { getIntegrationAccount } = await import("@/lib/db/integrations")
+  return (await getIntegrationAccount(pluginId, accountId))?.outboundRecipients
+}
+
+async function defaultGithubAccountRecipients(): Promise<
+  ReadonlyArray<{ id: string; outboundRecipients?: readonly OutboundRecipientGrant[] }>
+> {
+  const [{ listAllIntegrationAccounts }, { getRegisteredIntegration }, { isGithubIntegration }] =
+    await Promise.all([
+      import("@/lib/db/integrations"),
+      import("@/lib/integrations/registry"),
+      import("./github-targets"),
+    ])
+  return (await listAllIntegrationAccounts()).filter((account) => {
+    if (!account.outboundRecipients?.length) return false
+    const registered = getRegisteredIntegration(account.pluginId, account.integrationId)
+    return registered ? isGithubIntegration(registered.definition) : false
+  })
+}
+
+async function defaultCapabilityGrants(
+  pluginId: string,
+  accountId: string
+): Promise<AccountCapabilityGrants[]> {
+  const { listServiceConnections, listCapabilityGrants } =
+    await import("@/lib/db/external-services")
+  const connections = (await listServiceConnections({ pluginId })).filter(
+    (connection) =>
+      connection.providerRef.kind === "integration" &&
+      connection.providerRef.accountId === accountId
+  )
+  return Promise.all(
+    connections.map(async (connection) => ({
+      connection,
+      grants: await listCapabilityGrants(connection.id),
+    }))
+  )
+}
+
+/** The repositories a grant's `repository` scopes name, on `host`. */
+function scopedRepositories(grant: CapabilityGrant, host: string | undefined): string[] {
+  const fingerprints: string[] = []
+  for (const scope of grant.resourceScopes ?? []) {
+    if (scope.kind !== "repository") continue
+    for (const value of scope.values) {
+      const target = repositoryOnHost(value, host)
+      if (target) fingerprints.push(outboundFingerprint(target))
+    }
+  }
+  return fingerprints
+}
+
+/**
+ * The lists that could grant a GitHub write: the account's repository list
+ * (or every GitHub account's, for a `gh` command), and each CapabilityGrant
+ * on the account that covers the write's operation and is scoped to
+ * repositories. A CapabilityGrant with no repository scope covers every
+ * repository, which is not a list a person reviewed, so it grants nothing
+ * here; the write then asks or waits as before.
+ */
+export async function configuredGithubGrants(
+  context: GithubGrantContext,
+  deps: GithubGrantDeps = {}
+): Promise<OutboundPolicyGrantList[]> {
+  const lists: OutboundPolicyGrantList[] = []
+  const account = context.account
+
+  try {
+    if (account) {
+      const list = recipientGrantList(
+        `integration-account:${account.accountId}`,
+        await (deps.accountRecipients ?? defaultAccountRecipients)(
+          account.pluginId,
+          account.accountId
+        )
+      )
+      if (list) lists.push(list)
+    } else {
+      for (const row of await (deps.githubAccountRecipients ?? defaultGithubAccountRecipients)()) {
+        const list = recipientGrantList(`integration-account:${row.id}`, row.outboundRecipients)
+        if (list) lists.push(list)
+      }
+    }
+  } catch {
+    // Grants nothing; the plan asks instead.
+  }
+
+  const operation = context.operation
+  if (account && operation && operation.risk !== "read") {
+    try {
+      const now = new Date(deps.now ?? Date.now()).toISOString()
+      const { grantCoversOperation } = await import("@/lib/external-services/grants")
+      const capability = {
+        capabilityId: operation.actionId,
+        ...(operation.operationId ? { operationId: operation.operationId } : {}),
+        risk: operation.risk,
+      }
+      for (const { connection, grants } of await (deps.capabilityGrants ?? defaultCapabilityGrants)(
+        account.pluginId,
+        account.accountId
+      )) {
+        for (const grant of grants) {
+          const covered = grantCoversOperation(grant, capability, connection, {
+            accountId: account.accountId,
+            ...(operation.workflowId ? { workflowId: operation.workflowId } : {}),
+            ...(operation.sessionId ? { sessionId: operation.sessionId } : {}),
+            now,
+          })
+          const fingerprints = covered ? scopedRepositories(grant, context.host) : []
+          if (fingerprints.length > 0) {
+            lists.push({ policyRef: `capability-grant:${grant.id}`, fingerprints })
+          }
+        }
+      }
+    } catch {
+      // Grants nothing; the plan asks instead.
+    }
+  }
+  return lists
+}
+
+/**
+ * A Bot installation's repository scope, for a write it publishes without a
+ * person: its `publicationMode` is `automatic`, or a person relaxed its run
+ * permission to approval-free writes (the broker's `decidedBy: "policy"`).
+ * A person set both the scope and the mode in the Bot console.
+ */
+export function botScopeGrants(
+  installation: { id: string },
+  repository: string | undefined,
+  host?: string
+): OutboundPolicyGrantList[] {
+  const target = repository ? repositoryOnHost(repository, host) : undefined
+  return target
+    ? [{ policyRef: `bot-scope:${installation.id}`, fingerprints: [outboundFingerprint(target)] }]
+    : []
+}
+
+/**
+ * An Agent Team's bound repositories, when a person turned stacked delivery
+ * on: the team publishes its stack to them with nobody watching. `repositories`
+ * are the bindings' resolved `owner/repo` names (`resolveTeamRepo`). Read by
+ * the stack publisher's plan.
+ */
+export function teamDeliveryGrants(
+  team: { id: string; config: { githubDeliveryPolicy?: AgentTeamGithubDeliveryPolicy } },
+  repositories: readonly string[],
+  host?: string
+): OutboundPolicyGrantList[] {
+  if (!stackedDeliveryOn(team.config.githubDeliveryPolicy)) return []
+  const fingerprints = repositories.flatMap((repository) => {
+    const target = repositoryOnHost(repository, host)
+    return target ? [outboundFingerprint(target)] : []
+  })
+  return fingerprints.length > 0 ? [{ policyRef: `team-delivery:${team.id}`, fingerprints }] : []
 }
 
 // ── Handler Bots: the run's plugin code ─────────────────────────────────────

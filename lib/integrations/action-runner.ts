@@ -117,6 +117,7 @@ async function planGithubRequest(
     operation: method,
     host,
     authorization,
+    account: { pluginId, accountId: account.id },
   })
   await recordIntegrationReceipt(decision.receipt)
   if (decision.action === "deny") throw new OutboundPolicyError(OUTBOUND_FENCED_ERROR)
@@ -407,6 +408,7 @@ export async function executeIntegrationAction(
       installation: binding.installation,
       runId: input.binding!.runId,
       decidedBy: await botApprovalDecidedBy(input.approval?.interruptId),
+      ...(binding.repository ? { scopeRepository: binding.repository } : {}),
     }
   }
   const registered = getRegisteredIntegration(pluginId, input.integrationId)
@@ -450,6 +452,12 @@ export async function executeIntegrationAction(
       operation: `${input.integrationId}.${input.actionId}`,
       host,
       authorization,
+      account: { pluginId, accountId: input.accountId },
+      action: {
+        actionId: action.id,
+        ...(action.operationId ? { operationId: action.operationId } : {}),
+        risk: action.risk,
+      },
     })
     await recordIntegrationReceipt(planned.receipt)
   }

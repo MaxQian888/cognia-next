@@ -58,6 +58,11 @@ jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   detectPlatform: () => mockPlatform,
 }))
+jest.mock("./account-outbound-recipients", () => ({
+  IntegrationAccountOutboundRecipients: ({ account }: { account: { id: string } }) => (
+    <div data-testid={`account-recipients-${account.id}`} />
+  ),
+}))
 jest.mock("@/lib/integrations/registry", () => ({
   getIntegrationRegistryRevision: () => 1,
   subscribeIntegrationRegistry: () => () => undefined,
@@ -193,6 +198,19 @@ function githubAccount(over: Record<string, unknown> = {}) {
     ...over,
   }
 }
+
+describe("unattended repository list (ADR-0239 phase 2)", () => {
+  it("is offered on each GitHub account and on no other", () => {
+    mockEntries = [GITHUB_ENTRY, ...MOCK_ENTRIES]
+    mockAccounts = [
+      githubAccount(),
+      { ...githubAccount({ id: "acc-demo" }), pluginId: "demo-delivery", integrationId: "demo" },
+    ]
+    render(<IntegrationsHub />)
+    expect(screen.getByTestId("account-recipients-acc-gh")).toBeInTheDocument()
+    expect(screen.queryByTestId("account-recipients-acc-demo")).not.toBeInTheDocument()
+  })
+})
 
 describe("IntegrationsHub webhook delivery", () => {
   it("says the listener is local-only until a public URL is configured", async () => {

@@ -165,6 +165,41 @@ describe("OutboundRecipientsEditor", () => {
     expect(onSave.mock.calls[1][0][0].recipient).toEqual(siteTarget("https://forms.example.com"))
   })
 
+  it("offers the repositories this device knows, filtered by what is typed and not yet listed", async () => {
+    const WEB = repositoryTarget("acme/web")!
+    const API = repositoryTarget("acme/api")!
+    const ENTERPRISE = repositoryTarget("ghe.corp.io/acme/tools")!
+    const onSave = setup({
+      kinds: ["repository"],
+      value: [grant(API)],
+      knownRepositories: [
+        { target: WEB, name: "acme/web", lastSeenAt: 3 },
+        { target: API, name: "acme/api", lastSeenAt: 2 },
+        { target: ENTERPRISE, name: "ghe.corp.io/acme/tools", lastSeenAt: 1 },
+      ],
+    })
+    expect(screen.getByText("Repositories on this device")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add acme/api" })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("owner/repo or a repository URL"), {
+      target: { value: "TOOLS" },
+    })
+    expect(screen.queryByRole("button", { name: "Add acme/web" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Add ghe.corp.io/acme/tools" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0][1].recipient).toEqual(ENTERPRISE)
+  })
+
+  it("puts a typed owner/repo on the list's host, and says when none is known", async () => {
+    const onSave = setup({ kinds: ["repository"], repositoryHost: "ghe.corp.io" })
+    expect(screen.getByText(/No repository has reached this device yet/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("owner/repo or a repository URL"), {
+      target: { value: "acme/web" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0][0].recipient).toEqual(repositoryTarget("ghe.corp.io/acme/web"))
+  })
+
   it("shows a listed repository by name, with no bot account", () => {
     setup({ kinds: ["repository"], value: [grant(repositoryTarget("acme/web")!)] })
     expect(screen.getByText("acme/web")).toBeInTheDocument()

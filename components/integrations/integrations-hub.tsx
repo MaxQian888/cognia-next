@@ -59,6 +59,8 @@ import {
   GithubRepoWebhookError,
 } from "@/lib/integrations/github-repo-webhook"
 import { normalizePublicBaseUrl, toPublicWebhookUrl } from "@/lib/integrations/webhook-url"
+import { isGithubIntegration } from "@/lib/policy/action-review/github-targets"
+import { IntegrationAccountOutboundRecipients } from "./account-outbound-recipients"
 import type {
   IntegrationIngressDeadLetter,
   IntegrationResourceRef,
@@ -722,6 +724,11 @@ export function IntegrationsHub() {
                       (permission) =>
                         !(account.status?.grantedPermissions ?? []).includes(permission)
                     )
+                    const accountDefinition = entries.find(
+                      (entry) =>
+                        entry.pluginId === account.pluginId &&
+                        entry.definition.id === account.integrationId
+                    )?.definition
                     const githubStatusTranslation =
                       account.pluginId === "github-delivery" && account.status?.code
                         ? GITHUB_STATUS_TRANSLATIONS[
@@ -822,6 +829,9 @@ export function IntegrationsHub() {
                             <p>{account.status.message}</p>
                           ) : null}
                         </div>
+                        {accountDefinition && isGithubIntegration(accountDefinition) ? (
+                          <IntegrationAccountOutboundRecipients account={account} />
+                        ) : null}
                       </div>
                     )
                   })}

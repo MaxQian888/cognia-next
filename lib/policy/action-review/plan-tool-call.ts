@@ -64,7 +64,11 @@ import {
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
-import { configuredPolicyGrants } from "./configured-grants"
+import {
+  configuredGithubGrants,
+  configuredPolicyGrants,
+  type GithubGrantContext,
+} from "./configured-grants"
 import {
   buildActionReviewPlanContext,
   readAppSettings,
@@ -120,6 +124,11 @@ export interface OutboundToolPlannerOptions {
    * conversations. Default: {@link configuredPolicyGrants}.
    */
   configuredGrants?: (targets: readonly OutboundTarget[]) => Promise<OutboundPolicyGrantList[]>
+  /**
+   * The lists a person wrote for a GitHub write's integration account (every
+   * GitHub account's, for a `gh` command). Default: {@link configuredGithubGrants}.
+   */
+  githubGrants?: (context: GithubGrantContext) => Promise<OutboundPolicyGrantList[]>
   /** App settings, for the mode. Default: the settings store. */
   settings?: () => SettingsLike | Promise<SettingsLike>
   now?: () => number
@@ -193,30 +202,52 @@ async function quietly<T>(read: () => Promise<T>): Promise<T | undefined> {
   }
 }
 
-/** Where a GitHub write lands: the action's repository, or the command's `gh` writes. */
+/**
+ * Where a GitHub write lands: the action's repository, or the command's `gh`
+ * writes; and what it goes through, for the lists that could grant it. A `gh`
+ * command names no integration account.
+ */
 async function githubCallTargets(
   request: OutboundToolCallRequest,
   context: GithubCallContext = {}
-): Promise<OutboundTarget[]> {
+): Promise<{ targets: OutboundTarget[]; grantContext?: GithubGrantContext }> {
   const action = githubWriteActionOf(request.toolName)
   if (action) {
     const args =
       request.input && typeof request.input === "object"
         ? (request.input as Record<string, unknown>)
         : {}
-    const host =
-      typeof args.accountId === "string" && args.accountId
-        ? await quietly(() =>
-            (context.accountHost ?? defaultAccountHost)(action.pluginId, args.accountId as string)
-          )
-        : undefined
-    return githubActionTargets(action.action, request.input, host ? { host } : {})
+    const accountId = typeof args.accountId === "string" && args.accountId ? args.accountId : ""
+    const host = accountId
+      ? await quietly(() => (context.accountHost ?? defaultAccountHost)(action.pluginId, accountId))
+      : undefined
+    return {
+      targets: githubActionTargets(action.action, request.input, host ? { host } : {}),
+      // A call with no account cannot run, so it reads no account's list.
+      ...(accountId
+        ? {
+            grantContext: {
+              account: { pluginId: action.pluginId, accountId },
+              operation: {
+                actionId: action.action.id,
+                ...(action.action.operationId ? { operationId: action.action.operationId } : {}),
+                risk: action.action.risk,
+                sessionId: request.sessionId,
+              },
+              ...(host ? { host } : {}),
+            },
+          }
+        : {}),
+    }
   }
   const command = shellCommandOf(request.toolName, request.input) ?? ""
   const localRepository = await quietly(() =>
     (context.localRepository ?? defaultLocalRepository)(request.sessionId)
   )
-  return ghWriteTargets(command, localRepository ? { localRepository } : {})
+  return {
+    targets: ghWriteTargets(command, localRepository ? { localRepository } : {}),
+    grantContext: {},
+  }
 }
 
 export type OutboundToolPlanner = (
@@ -281,16 +312,21 @@ async function planCall(
   const { origin, rootSessionId, instructionEpoch } = await originOf(request, options.origin)
   // A tool that names no bot (an `im_create_chat` with no `adapterId`) sends
   // through the bot of the conversation the run is bound to.
-  const targets = messaging
-    ? extractOutboundTargets(request.toolName, request.input, {
+  const github = messaging ? undefined : await githubCallTargets(request, options.github)
+  const targets = github
+    ? github.targets
+    : extractOutboundTargets(request.toolName, request.input, {
         ...(origin.originThread ? { defaultAdapterId: origin.originThread.channel } : {}),
       })
-    : await githubCallTargets(request, options.github)
   // The run's own lists (a Bot's), and the ones a person configured on the
-  // bots and conversations these targets go through.
+  // bots and conversations these targets go through, or on the GitHub account.
   const policyGrants = [
     ...(options.policyGrants ?? []),
-    ...(await (options.configuredGrants ?? configuredPolicyGrants)(targets)),
+    ...(!github
+      ? await (options.configuredGrants ?? configuredPolicyGrants)(targets)
+      : github.grantContext
+        ? await (options.githubGrants ?? configuredGithubGrants)(github.grantContext)
+        : []),
   ]
   const context = await buildActionReviewPlanContext({
     origin: { ...origin, rootSessionId, instructionEpoch },

@@ -7,6 +7,10 @@
   "addNamed": "添加 {name}",
   "duplicate": "已在名单中。",
   "empty": "名单为空。无人值守时的发送会先征求同意。",
+  "integrationAccount": {
+    "description": "经此账号的无人值守 GitHub 写入（workflow、插件或定时运行）可直接写入这些仓库。写入其他仓库会等待人批准。",
+    "title": "无人值守时可写的仓库"
+  },
   "invalid": {
     "conversation": "这不是会话键，格式应为 平台:机器人:会话。",
     "mail": "这不是邮箱地址。",
@@ -23,7 +27,9 @@
   },
   "kindLabel": "收件人类型",
   "known": "本设备上的会话",
+  "knownRepository": "本设备上的仓库",
   "noneKnown": "此账号还没有会话到过本设备，可直接粘贴会话键。",
+  "noneKnownRepository": "本设备还没有用过任何仓库，可直接输入 owner/repo。",
   "otherAccount": "该会话经由另一个机器人账号。",
   "placeholder": {
     "conversation": "搜索，或粘贴会话键",

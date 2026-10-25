@@ -19,6 +19,7 @@ import {
   listIntegrationSubscriptions,
   updateIntegrationAccount,
 } from "@/lib/db/integrations"
+import type { IntegrationAccountRow } from "@/lib/db/integration-types"
 import {
   authenticatedIntegrationRequest,
   cancelIntegrationActionJob,
@@ -42,6 +43,15 @@ import { resolveBotIntegrationBinding } from "./bot-integration-binding"
 type IntegrationPermission =
   "integrations:read" | "integrations:events" | "integrations:execute" | "integrations:manage"
 
+/**
+ * An account as a plugin sees it: without the host-only recipient list
+ * (ADR-0239 phase 2), which a plugin may neither read nor widen.
+ */
+export function toPluginAccount(row: IntegrationAccountRow): IntegrationAccount {
+  const { outboundRecipients: _hidden, ...account } = row
+  return account
+}
+
 function requirePermission(
   hasPermission: (permission: string) => boolean,
   permission: IntegrationPermission,
@@ -63,18 +73,18 @@ export function createIntegrationsAPI(
     },
     async listAccounts(integrationId?: string) {
       requirePermission(hasPermission, "integrations:read", "ctx.integrations.listAccounts")
-      return listIntegrationAccounts(pluginId, integrationId)
+      return (await listIntegrationAccounts(pluginId, integrationId)).map(toPluginAccount)
     },
     async createAccount(input: IntegrationAccountInput): Promise<IntegrationAccount> {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.createAccount")
       if (!getRegisteredIntegration(pluginId, input.integrationId)) {
         throw new Error(`Integration "${input.integrationId}" is not registered`)
       }
-      return createIntegrationAccount(pluginId, input)
+      return toPluginAccount(await createIntegrationAccount(pluginId, input))
     },
     async updateAccount(connectorAccountId, patch) {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.updateAccount")
-      return updateIntegrationAccount(pluginId, connectorAccountId, patch)
+      return toPluginAccount(await updateIntegrationAccount(pluginId, connectorAccountId, patch))
     },
     async removeAccount(connectorAccountId) {
       requirePermission(hasPermission, "integrations:manage", "ctx.integrations.removeAccount")

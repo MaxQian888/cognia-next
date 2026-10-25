@@ -29,7 +29,7 @@ import {
   shellCommandOf,
   type GhTargetContext,
 } from "./gh-targets"
-import { repositoryTarget, unknownGithubTarget, type OutboundTarget } from "./outbound-targets"
+import { repositoryOnHost, unknownGithubTarget, type OutboundTarget } from "./outbound-targets"
 
 function isGithubOperation(definition: { id: string }, action: IntegrationActionDef): boolean {
   return (
@@ -103,15 +103,6 @@ export function githubWebHost(apiBaseUrl?: string): string {
   }
 }
 
-/** `owner/repo` on `host`; a value that already names its host or a URL is read as is. */
-function repositoryOn(value: string, thread: string | undefined, host: string | undefined) {
-  const bare = /^[^/:@\s]+\/[^/:@\s]+$/.test(value.trim())
-  return repositoryTarget(
-    bare && host && host !== "github.com" ? `https://${host}/${value.trim()}` : value,
-    thread
-  )
-}
-
 /**
  * Where an integration action's call writes: the repository at each of its
  * `repository` scope selectors (GitHub actions use `/repoFullName`), with the
@@ -136,7 +127,7 @@ export function githubActionTargets(
   const targets = pointers.map((pointer) => {
     const value = readJsonPointer(args, pointer)
     return (
-      (typeof value === "string" && repositoryOn(value, thread, options.host)) ||
+      (typeof value === "string" && repositoryOnHost(value, options.host, thread)) ||
       unknownGithubTarget()
     )
   })
@@ -174,7 +165,7 @@ export function githubRequestTargets(url: string, apiBaseUrl?: string): Outbound
   }
   const match = REPO_REQUEST_PATH.exec(parsed.pathname.slice(root.length))
   const target = match
-    ? repositoryOn(`${match[1]}/${match[2]}`, match[3], githubWebHost(base.toString()))
+    ? repositoryOnHost(`${match[1]}/${match[2]}`, githubWebHost(base.toString()), match[3])
     : undefined
   return [target ?? unknownGithubTarget()]
 }

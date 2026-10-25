@@ -1,3 +1,4 @@
+import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 import type {
   IntegrationAccount,
   IntegrationActionJob,
@@ -6,7 +7,19 @@ import type {
   IntegrationSubscription,
 } from "@/types/plugin/plugin-integration"
 
-export type IntegrationAccountRow = IntegrationAccount
+/**
+ * An integration account as the host stores it: the public account, plus what
+ * only the host reads.
+ *
+ * `outboundRecipients` is the repositories any unattended write through this
+ * account may reach (ADR-0239 phase 2, `integration-account:<id>`). A person
+ * writes it in the integration hub (`setIntegrationAccountOutboundRecipients`);
+ * an account patch cannot carry it, and the plugin API strips it from every
+ * account it returns, so no plugin can read or widen it.
+ */
+export type IntegrationAccountRow = IntegrationAccount & {
+  outboundRecipients?: OutboundRecipientGrant[]
+}
 export type IntegrationSubscriptionRow = IntegrationSubscription
 export type IntegrationActionJobRow = IntegrationActionJob
 export type IntegrationAuditRow = IntegrationAuditEntry

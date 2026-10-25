@@ -18,6 +18,15 @@ jest.mock("@/hooks/bots/use-bot-lifecycle-actions", () => ({
 jest.mock("@/hooks/outbound/use-known-conversations", () => ({
   useKnownConversations: () => [],
 }))
+jest.mock("@/hooks/outbound/use-known-repositories", () => ({
+  useKnownRepositories: () => [
+    {
+      target: { kind: "repository", channel: "github", recipient: "github:github.com/acme/web" },
+      name: "acme/web",
+      lastSeenAt: 1,
+    },
+  ],
+}))
 
 import { BotOutboundRecipientsSection } from "./outbound-recipients-section"
 
@@ -43,6 +52,23 @@ describe("BotOutboundRecipientsSection", () => {
     expect(saveOutboundRecipients.mock.calls[0][0]).toBe("boti_1")
     // Members are named within a bot account, so a Bot's list does not offer them.
     expect(screen.queryByRole("button", { name: "Person" })).not.toBeInTheDocument()
+  })
+
+  it("lists a repository the device knows, for the Bot's GitHub writes", async () => {
+    render(<BotOutboundRecipientsSection row={row()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Repository" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add acme/web" }))
+    await waitFor(() => expect(saveOutboundRecipients).toHaveBeenCalledTimes(1))
+    expect(saveOutboundRecipients.mock.calls[0][1]).toEqual([
+      expect.objectContaining({
+        recipient: {
+          kind: "repository",
+          channel: "github",
+          recipient: "github:github.com/acme/web",
+        },
+        addedBy: "local-user",
+      }),
+    ])
   })
 
   it("is read-only where the write cannot land, saying why", () => {

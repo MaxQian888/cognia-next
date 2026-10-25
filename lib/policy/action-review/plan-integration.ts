@@ -20,7 +20,12 @@
  *
  * A claim that does not hold is planned as unattended in the asker's origin,
  * so a reply on the PR or issue the request came from still goes; anything
- * else needs a grant or a person.
+ * else needs a grant or a person. The grants are the asker's own lists (a
+ * Bot's, a running handler Bot's) and the ones a person wrote for the
+ * account the write goes through (`configuredGithubGrants`): its repository
+ * list, and a repository-scoped CapabilityGrant covering the action. A Bot
+ * whose writes publish without a person (`decidedBy: "policy"`) may also
+ * reach its installation's repository scope (`bot-scope:<id>`).
  *
  * The plan's outcome, as the caller acts on it:
  *
@@ -60,16 +65,25 @@ import type { OutboundJobAuthorization } from "@cognia/plugin-contract/lib/db/co
 import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 
 import { classifyRisk } from "@/lib/policy/risk/classify-risk"
-import type { IntegrationActionOutbound } from "@/types/plugin/plugin-integration"
+import type {
+  IntegrationActionOutbound,
+  IntegrationActionRisk,
+} from "@/types/plugin/plugin-integration"
 
 import {
   runningAuthorizedToolCallsOf,
   type AuthorizedOutboundToolCall,
 } from "./authorized-tool-calls"
-import { botRecipientGrants, runningBotGrantsOf } from "./configured-grants"
+import {
+  botRecipientGrants,
+  botScopeGrants,
+  configuredGithubGrants,
+  runningBotGrantsOf,
+  type GithubGrantContext,
+} from "./configured-grants"
 import {
   outboundFingerprint,
-  repositoryTarget,
+  repositoryOnHost,
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
@@ -123,6 +137,8 @@ export type IntegrationAuthorization =
       installation: IntegrationBotInstallation
       runId: string
       decidedBy: "person" | "policy"
+      /** The installation's repository scope (`owner/repo`), when it has one. */
+      scopeRepository?: string
     }
   /**
    * A request a running job makes (`context.authenticatedRequest`): the
@@ -144,6 +160,10 @@ export interface IntegrationWritePlanInput {
   /** The account's GitHub web host (`githubWebHost`), for a Bot event's thread. */
   host?: string
   authorization: IntegrationAuthorization
+  /** The integration account the write goes through, for its lists. */
+  account?: { pluginId: string; accountId: string }
+  /** The broker action the write runs, for a CapabilityGrant. Absent for a raw request. */
+  action?: { actionId: string; operationId?: string; risk: IntegrationActionRisk }
 }
 
 /** An `integration-action` receipt, for the caller to write. */
@@ -177,6 +197,8 @@ export interface PlanIntegrationDeps {
   botRunEvent?: (runId: string) => Promise<IntegrationBotEvent | undefined>
   /** What triggered a workflow run. Default: its `workflowRuns` row. */
   workflowRunTrigger?: (runId: string) => Promise<{ conversationKey?: string } | undefined>
+  /** The lists a person wrote for the account. Default: `configuredGithubGrants`. */
+  githubGrants?: (context: GithubGrantContext) => Promise<OutboundPolicyGrantList[]>
   /** Test seam for the fence and grant query. */
   listAuthKeys?: (prefix: string, now: number) => Promise<string[]>
   now?: () => number
@@ -223,11 +245,7 @@ export function botEventOriginThread(
   }
   const thread = numberOf("pull_request") ?? numberOf("issue")
   if (!thread) return undefined
-  const bare = /^[^/:@\s]+\/[^/:@\s]+$/.test(resource.id)
-  return repositoryTarget(
-    bare && host && host !== "github.com" ? `https://${host}/${resource.id}` : resource.id,
-    thread
-  )
+  return repositoryOnHost(resource.id, host, thread)
 }
 
 /** The recipients an approval card shows for a held write. */
@@ -421,12 +439,35 @@ function withheld(
   }
 }
 
+/** The lists a person wrote for the write's account, or none without an account. */
+async function accountGrants(
+  env: PlanningEnv,
+  scope: { workflowId?: string; sessionId?: string }
+): Promise<OutboundPolicyGrantList[]> {
+  const { account, action, host } = env.input
+  if (!account) return []
+  return (env.deps.githubGrants ?? configuredGithubGrants)({
+    account,
+    ...(action
+      ? {
+          operation: {
+            ...action,
+            ...(scope.workflowId ? { workflowId: scope.workflowId } : {}),
+            ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
+          },
+        }
+      : {}),
+    ...(host ? { host } : {}),
+  })
+}
+
 async function planUnattended(
   env: PlanningEnv,
   unattended: {
     ownerRef: string
     origin?: ActionReviewPlanOrigin
     sessionId?: string
+    workflowId?: string
     policyGrants?: readonly OutboundPolicyGrantList[]
   }
 ): Promise<IntegrationWriteDecision> {
@@ -436,12 +477,16 @@ async function planUnattended(
     if (!unattended.origin && unattended.sessionId) {
       origin = await (env.deps.resolveSessionOrigin ?? sessionPlanOrigin)(unattended.sessionId)
     }
+    const policyGrants = [
+      ...(unattended.policyGrants ?? []),
+      ...(await accountGrants(env, unattended)),
+    ]
     const context = await buildActionReviewPlanContext({
       origin,
       unattended: true,
       via: "tool",
       settings: env.settings,
-      ...(unattended.policyGrants?.length ? { policyGrants: unattended.policyGrants } : {}),
+      ...(policyGrants.length > 0 ? { policyGrants } : {}),
       now: env.now,
       ...(env.deps.listAuthKeys ? { listAuthKeys: env.deps.listAuthKeys } : {}),
     })
@@ -616,7 +661,10 @@ export async function planIntegrationWrite(
       return planUnattended(env, {
         ownerRef,
         origin,
-        policyGrants: botRecipientGrants(auth.installation),
+        policyGrants: [
+          ...botRecipientGrants(auth.installation),
+          ...botScopeGrants(auth.installation, auth.scopeRepository, input.host),
+        ],
       })
     }
     case "workflow": {
@@ -625,6 +673,7 @@ export async function planIntegrationWrite(
       ).catch(() => undefined)
       return planUnattended(env, {
         ownerRef: `workflow:${auth.workflowId}`,
+        workflowId: auth.workflowId,
         origin: workflowRunPlanOrigin({
           id: auth.runId,
           ...(trigger ? { triggeredBy: trigger } : {}),

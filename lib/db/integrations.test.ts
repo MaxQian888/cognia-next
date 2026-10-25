@@ -20,6 +20,8 @@ import {
   listAllIntegrationAccounts,
   listIntegrationAccounts,
   listIntegrationSubscriptions,
+  setIntegrationAccountOutboundRecipients,
+  updateIntegrationAccount,
   updateIntegrationSubscription,
   updateIntegrationActionJob,
 } from "./integrations"
@@ -94,6 +96,61 @@ describe("Integration persistence", () => {
     } finally {
       unregisterExternalServicesByPlugin("github-delivery")
     }
+  })
+
+  it("stores an account's unattended repository list only through its own writer", async () => {
+    const account = await createIntegrationAccount("github-delivery", {
+      integrationId: "github",
+      providerId: "github-oauth",
+      authSessionId: "opaque-gh",
+      remoteAccountId: "octocat",
+      label: "Octocat",
+    })
+    const repo = {
+      recipient: {
+        kind: "repository" as const,
+        channel: "github",
+        recipient: "github:github.com/acme/web",
+      },
+      addedAt: 1,
+      addedBy: "local-user" as const,
+    }
+    await expect(
+      setIntegrationAccountOutboundRecipients("github-delivery", account.id, [repo])
+    ).resolves.toMatchObject({ outboundRecipients: [repo] })
+
+    // A generic patch cannot replace it.
+    await updateIntegrationAccount("github-delivery", account.id, {
+      label: "Renamed",
+      outboundRecipients: [],
+    } as Parameters<typeof updateIntegrationAccount>[2])
+    await expect(getIntegrationAccount("github-delivery", account.id)).resolves.toMatchObject({
+      label: "Renamed",
+      outboundRecipients: [repo],
+    })
+
+    // Only GitHub repositories, in the engine's form, for an account of this plugin.
+    await expect(
+      setIntegrationAccountOutboundRecipients("github-delivery", account.id, [
+        {
+          ...repo,
+          recipient: { kind: "conversation", channel: "lark", recipient: "conv:lark:bot:oc_1" },
+        },
+      ])
+    ).rejects.toThrow(/not a GitHub repository/)
+    await expect(
+      setIntegrationAccountOutboundRecipients("github-delivery", account.id, [
+        { ...repo, addedBy: "plugin" } as unknown as typeof repo,
+      ])
+    ).rejects.toThrow(/Invalid outbound recipients/)
+    await expect(
+      setIntegrationAccountOutboundRecipients("other-plugin", account.id, [repo])
+    ).rejects.toThrow(/was not found/)
+
+    await setIntegrationAccountOutboundRecipients("github-delivery", account.id, [])
+    await expect(getIntegrationAccount("github-delivery", account.id)).resolves.toMatchObject({
+      outboundRecipients: [],
+    })
   })
 
   it("lists accounts across plugins, narrowed by integration", async () => {

@@ -4,7 +4,11 @@ import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import * as botBinding from "@/lib/plugin/api/bot-integration-binding"
-import { createIntegrationAccount } from "@/lib/db/integrations"
+import {
+  createIntegrationAccount,
+  setIntegrationAccountOutboundRecipients,
+} from "@/lib/db/integrations"
+import { putCapabilityGrant, putServiceConnection } from "@/lib/db/external-services"
 import { registerAuthenticationProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import { __resetIntegrationRegistryForTesting, registerIntegrationDefinitions } from "./registry"
 import { pushHeldIntegrationJob, withdrawHeldIntegrationJob } from "./outbound-hold"
@@ -765,6 +769,105 @@ describe("Integration action runner", () => {
         expect.objectContaining({ origin: "bot" })
       )
       expect(handler).not.toHaveBeenCalled()
+    })
+
+    const repoGrant = (repository: string) => ({
+      recipient: {
+        kind: "repository" as const,
+        channel: "github",
+        recipient: `github:github.com/${repository}`,
+      },
+      addedAt: 1,
+      addedBy: "local-user" as const,
+    })
+
+    it("lets a write go to a repository on the account's list, and its raw requests", async () => {
+      outboundSettings = enforceGithub
+      const handler = jest.fn(async () => ({ commented: true }))
+      const account = await setupGithub(handler)
+      await setIntegrationAccountOutboundRecipients("github-delivery", account.id, [
+        repoGrant("acme/web"),
+      ])
+      const job = await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+      expect(job.outbound?.held).toBeUndefined()
+      expect(job.authorizedBy).toMatchObject({
+        authority: "policy-rule",
+        policyRef: `integration-account:${account.id}`,
+      })
+      expect(pushHeldIntegrationJob).not.toHaveBeenCalled()
+      await expect(
+        authenticatedIntegrationRequest(
+          "github-delivery",
+          account.id,
+          "https://api.github.com/repos/acme/web/issues/3/comments",
+          { method: "POST", body: "{}" }
+        )
+      ).resolves.toMatchObject({ status: 200 })
+      // Another repository is still held.
+      await expect(
+        authenticatedIntegrationRequest(
+          "github-delivery",
+          account.id,
+          "https://api.github.com/repos/acme/api/issues/3/comments",
+          { method: "POST", body: "{}" }
+        )
+      ).rejects.toThrow(/^outbound_held/)
+    })
+
+    it("lets a repository-scoped capability grant cover the action, not a raw request", async () => {
+      outboundSettings = enforceGithub
+      const account = await setupGithub()
+      const now = new Date().toISOString()
+      await putServiceConnection({
+        id: "conn_1",
+        pluginId: "github-delivery",
+        serviceId: "github",
+        providerId: "github",
+        runtimeTargetId: "local",
+        status: "connected",
+        providerFingerprint: "fp",
+        providerRef: { kind: "integration", accountId: account.id },
+        enabledSurfaces: ["chat"],
+        createdAt: now,
+        updatedAt: now,
+      } as Parameters<typeof putServiceConnection>[0])
+      await putCapabilityGrant({
+        id: "grant_1",
+        connectionId: "conn_1",
+        providerFingerprint: "fp",
+        operationPatterns: ["commentPr"],
+        resourceScopes: [{ kind: "repository", values: ["acme/web"] }],
+        createdAt: now,
+        updatedAt: now,
+      })
+      const job = await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+      expect(job.outbound?.held).toBeUndefined()
+      expect(job.authorizedBy).toMatchObject({ policyRef: "capability-grant:grant_1" })
+      await expect(
+        authenticatedIntegrationRequest(
+          "github-delivery",
+          account.id,
+          "https://api.github.com/repos/acme/web/issues/3/comments",
+          { method: "POST", body: "{}" }
+        )
+      ).rejects.toThrow(/^outbound_held/)
+    })
+
+    it("lets a Bot that publishes without a person write to its installation's repository", async () => {
+      outboundSettings = enforceGithub
+      const account = await setupGithub()
+      jest.mocked(botBinding.assertBotIntegrationAction).mockResolvedValue({
+        account,
+        installation: { id: "boti_1" },
+        repository: "acme/web",
+      } as Awaited<ReturnType<typeof botBinding.assertBotIntegrationAction>>)
+      const job = await executeIntegrationAction("comment-bot", {
+        ...comment("", "k1"),
+        binding: { runId: "run_bot_1", slotId: "github" },
+      })
+      expect(job.outbound?.held).toBeUndefined()
+      expect(job.status).toBe("succeeded")
+      expect(job.authorizedBy).toMatchObject({ policyRef: "bot-scope:boti_1" })
     })
 
     it("fences the recipients a person refused for the rest of the request", async () => {

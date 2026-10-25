@@ -11,7 +11,8 @@ import * as botBinding from "./bot-integration-binding"
 import * as actionRunner from "@/lib/integrations/action-runner"
 import * as githubAuth from "@/lib/integrations/github-auth"
 import { setIntegrationAuthenticatedRequestExecutorForTesting } from "@/lib/integrations/action-runner"
-import { createIntegrationsAPI } from "./integrations-api"
+import { setIntegrationAccountOutboundRecipients } from "@/lib/db/integrations"
+import { createIntegrationsAPI, toPluginAccount } from "./integrations-api"
 
 // Mutable namespace seams retain the real implementations unless a boundary test spies on one.
 jest.mock("@/lib/db/integrations", () => ({
@@ -132,6 +133,57 @@ describe("ctx.integrations", () => {
     await expect(api.listAccounts()).resolves.toEqual([account])
     await expect(api.listSubscriptions()).resolves.toEqual([subscription])
     expect(api.listDefinitions().map((definition) => definition.id)).toEqual(["example"])
+  })
+
+  it("never shows or takes the account's unattended repository list (ADR-0239)", async () => {
+    const api = createIntegrationsAPI("example-delivery", () => true)
+    const account = await api.createAccount({
+      integrationId: "example",
+      providerId: "oauth",
+      authSessionId: "opaque-session-id",
+      remoteAccountId: "one",
+      label: "One",
+    })
+    const listed = [
+      {
+        recipient: {
+          kind: "repository" as const,
+          channel: "github",
+          recipient: "github:github.com/acme/web",
+        },
+        addedAt: 1,
+        addedBy: "local-user" as const,
+      },
+    ]
+    await setIntegrationAccountOutboundRecipients("example-delivery", account.id, listed)
+
+    const [seen] = await api.listAccounts()
+    expect(seen).not.toHaveProperty("outboundRecipients")
+    // A patch that casts the list in is dropped, and the result hides it too.
+    const updated = await api.updateAccount(account.id, {
+      label: "Renamed",
+      outboundRecipients: [],
+    } as Parameters<typeof api.updateAccount>[1])
+    expect(updated).toMatchObject({ label: "Renamed" })
+    expect(updated).not.toHaveProperty("outboundRecipients")
+    expect((await getDb().integrationAccounts.get(account.id))?.outboundRecipients).toEqual(listed)
+  })
+
+  it("strips only the host-only field from an account", () => {
+    const row = {
+      id: "a",
+      pluginId: "p",
+      integrationId: "i",
+      providerId: "o",
+      authSessionId: "s",
+      remoteAccountId: "r",
+      label: "L",
+      enabled: true,
+      health: "unknown" as const,
+      createdAt: "t",
+      updatedAt: "t",
+    }
+    expect(toPluginAccount({ ...row, outboundRecipients: [] })).toEqual(row)
   })
 
   it("discovers resources and persists normalized account health", async () => {

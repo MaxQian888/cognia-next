@@ -525,6 +525,7 @@ describe("GitHub writes (ADR-0239 phase 2)", () => {
         accountHost: async () => "github.com",
         localRepository: async () => "git@github.com:acme/web.git",
       },
+      githubGrants: async () => [],
       ...extra,
     }
   }
@@ -576,6 +577,44 @@ describe("GitHub writes (ADR-0239 phase 2)", () => {
     )
     // The widest grant is the rest of the request, for the whole repository.
     expect(answer).toEqual({ decision: "allow", grant: { scope: "instruction" } })
+  })
+
+  it("lets an unattended write reach a repository a person listed for the account", async () => {
+    const REPO = repositoryTarget("acme/web")!
+    const githubGrants = jest.fn(async () => [
+      { policyRef: "integration-account:acct", fingerprints: [outboundFingerprint(REPO)] },
+    ])
+    const plan = await planOutboundToolCall(
+      commentOn(13),
+      github({
+        unattended: true,
+        origin: { rootSessionId: "task", instructionEpoch: "t1" },
+        githubGrants,
+      })
+    )
+    expect(plan?.result.plan.outcome).toBe("allow")
+    expect(plan?.result.grant).toMatchObject({
+      scope: "policy",
+      policyRef: "integration-account:acct",
+    })
+    expect(githubGrants).toHaveBeenCalledWith({
+      account: { pluginId: "github-delivery", accountId: "acct" },
+      operation: { actionId: "commentPr", risk: "write", sessionId: "chat" },
+      host: "github.com",
+    })
+
+    // A gh command names no account; a call without an account reads no list.
+    await planOutboundToolCall(
+      call("Bash", { command: "gh pr comment 12 -b thanks" }, "r2"),
+      github({ githubGrants })
+    )
+    expect(githubGrants).toHaveBeenLastCalledWith({})
+    githubGrants.mockClear()
+    await planOutboundToolCall(
+      call(comment, { repoFullName: "acme/web", prNumber: 3 }, "r3"),
+      github({ githubGrants })
+    )
+    expect(githubGrants).not.toHaveBeenCalled()
   })
 
   it("names the account's GitHub Enterprise host", async () => {

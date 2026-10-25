@@ -39,11 +39,18 @@ function operationMatches(pattern: string, operationId: string): boolean {
   return pattern === operationId
 }
 
-function grantMatches(
+/**
+ * Whether a grant covers this operation on this connection, leaving its
+ * resource scopes aside: the connection and provider, expiry, an operation
+ * pattern, the account, workflow and session it is bound to, and
+ * `allowDestructive` for a destructive operation. The outbound policy reads a
+ * grant's repository scopes itself (ADR-0239 phase 2).
+ */
+export function grantCoversOperation(
   grant: CapabilityGrant,
-  capability: ExternalCapability,
-  connection: ServiceConnection,
-  context: CapabilityAuthorizationContext
+  capability: Pick<ExternalCapability, "capabilityId" | "operationId" | "risk">,
+  connection: Pick<ServiceConnection, "id" | "providerFingerprint">,
+  context: Pick<CapabilityAuthorizationContext, "accountId" | "workflowId" | "sessionId" | "now">
 ): boolean {
   if (grant.connectionId !== connection.id) return false
   if (grant.providerFingerprint !== connection.providerFingerprint) return false
@@ -57,6 +64,16 @@ function grantMatches(
   if (grant.workflowId && grant.workflowId !== context.workflowId) return false
   if (grant.sessionId && grant.sessionId !== context.sessionId) return false
   if (capability.risk === "destructive" && grant.allowDestructive !== true) return false
+  return true
+}
+
+function grantMatches(
+  grant: CapabilityGrant,
+  capability: ExternalCapability,
+  connection: ServiceConnection,
+  context: CapabilityAuthorizationContext
+): boolean {
+  if (!grantCoversOperation(grant, capability, connection, context)) return false
 
   const requestedScopes = context.resourceScopes ?? []
   if ((grant.resourceScopes?.length ?? 0) > 0 && requestedScopes.length === 0) return false

@@ -4,7 +4,11 @@ import type {
   ServiceConnection,
 } from "@/types/external-service"
 
-import { authorizeExternalCapability, extractCapabilityResourceScopes } from "./grants"
+import {
+  authorizeExternalCapability,
+  extractCapabilityResourceScopes,
+  grantCoversOperation,
+} from "./grants"
 
 const connection: ServiceConnection = {
   id: "connection-1",
@@ -124,5 +128,48 @@ describe("external capability grants", () => {
       ok: false,
       reason: 'Missing required resource scope "repository"',
     })
+  })
+})
+
+describe("grantCoversOperation", () => {
+  const context = { accountId: "account-1", workflowId: "workflow-1" }
+
+  it("matches the operation, connection and binding, whatever the resource scopes", () => {
+    expect(grantCoversOperation(grant(), capability("write"), connection, context)).toBe(true)
+    expect(
+      grantCoversOperation(
+        grant({ resourceScopes: [{ kind: "repository", values: ["other/repo"] }] }),
+        capability("write"),
+        connection,
+        context
+      )
+    ).toBe(true)
+  })
+
+  it.each([
+    ["another operation", grant({ operationPatterns: ["pull.*"] }), context],
+    ["another account", grant(), { ...context, accountId: "account-2" }],
+    ["another workflow", grant(), { accountId: "account-1" }],
+    ["another session", grant({ sessionId: "s1" }), context],
+    ["an expired grant", grant({ expiresAt: "2000-01-01T00:00:00.000Z" }), context],
+    ["another fingerprint", grant({ providerFingerprint: "fingerprint-2" }), context],
+  ])("does not match %s", (_label, candidate, candidateContext) => {
+    expect(grantCoversOperation(candidate, capability("write"), connection, candidateContext)).toBe(
+      false
+    )
+  })
+
+  it("needs allowDestructive for a destructive operation", () => {
+    expect(grantCoversOperation(grant(), capability("destructive"), connection, context)).toBe(
+      false
+    )
+    expect(
+      grantCoversOperation(
+        grant({ allowDestructive: true }),
+        capability("destructive"),
+        connection,
+        context
+      )
+    ).toBe(true)
   })
 })

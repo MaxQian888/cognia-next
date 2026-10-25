@@ -12,6 +12,7 @@ import {
   outboundRecipientId,
   personTarget,
   publicTarget,
+  repositoryOnHost,
   repositoryTarget,
   siteTarget,
   toReviewTarget,
@@ -381,5 +382,22 @@ describe("outboundFingerprint", () => {
       fingerprint: sha256Hex("outbound|mail|mail:ada@example.com"),
     })
     expect(JSON.stringify(review)).not.toContain("ada")
+  })
+})
+
+describe("repositoryOnHost", () => {
+  it("puts a bare owner/repo on the account's host", () => {
+    expect(repositoryOnHost("Acme/Web", "ghe.example.com", 4)).toEqual(
+      repositoryTarget("ghe.example.com/acme/web", 4)
+    )
+    expect(repositoryOnHost("acme/web", "github.com")).toEqual(repositoryTarget("acme/web"))
+    expect(repositoryOnHost("acme/web", undefined)).toEqual(repositoryTarget("acme/web"))
+  })
+
+  it("reads a value that names its host as is", () => {
+    expect(repositoryOnHost("https://github.com/acme/web", "ghe.example.com")).toEqual(
+      repositoryTarget("acme/web")
+    )
+    expect(repositoryOnHost("not a repository", "ghe.example.com")).toBeUndefined()
   })
 })

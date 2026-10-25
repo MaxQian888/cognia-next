@@ -8,10 +8,15 @@ import type {
   IntegrationSubscription,
   IntegrationSubscriptionInput,
 } from "@/types/plugin/plugin-integration"
+import {
+  validateOutboundRecipientGrants,
+  type OutboundRecipientGrant,
+} from "@cognia/agent-config-types/action-review"
 import Dexie from "dexie"
 import { getDb } from "./schema"
 import {
   INTEGRATION_PROJECTION_STEPS,
+  type IntegrationAccountRow,
   type IntegrationEventProjectionV1,
   type IntegrationEventRow,
 } from "./integration-types"
@@ -129,7 +134,7 @@ export async function createIntegrationAccount(
 export async function listIntegrationAccounts(
   pluginId: string,
   integrationId?: string
-): Promise<IntegrationAccount[]> {
+): Promise<IntegrationAccountRow[]> {
   const rows = integrationId
     ? await getDb()
         .integrationAccounts.where("[pluginId+integrationId]")
@@ -154,7 +159,7 @@ export async function listIntegrationAccounts(
  */
 export async function listAllIntegrationAccounts(
   filter: { integrationId?: string } = {}
-): Promise<IntegrationAccount[]> {
+): Promise<IntegrationAccountRow[]> {
   const rows = await getDb().integrationAccounts.toArray()
   const visible = filter.integrationId
     ? rows.filter((row) => row.integrationId === filter.integrationId)
@@ -165,7 +170,7 @@ export async function listAllIntegrationAccounts(
 export async function getIntegrationAccount(
   pluginId: string,
   accountId: string
-): Promise<IntegrationAccount | undefined> {
+): Promise<IntegrationAccountRow | undefined> {
   const row = await getDb().integrationAccounts.get(accountId)
   return row?.pluginId === pluginId ? row : undefined
 }
@@ -179,13 +184,62 @@ export async function updateIntegrationAccount(
       "label" | "enabled" | "health" | "status" | "ingressEndpoint" | "dedicatedAppConfirmed"
     >
   >
-): Promise<IntegrationAccount> {
+): Promise<IntegrationAccountRow> {
   const existing = await getIntegrationAccount(pluginId, accountId)
   if (!existing) throw new Error(`Integration account "${accountId}" was not found`)
-  const row = { ...existing, ...patch, updatedAt: nowIso() }
+  const row = { ...existing, ...withoutRecipientList(patch), updatedAt: nowIso() }
   await getDb().integrationAccounts.put(row)
   await projectIntegrationAccount(row)
   return row
+}
+
+/**
+ * The recipient list has its own writer
+ * ({@link setIntegrationAccountOutboundRecipients}). The type keeps it out of a
+ * patch; a caller that casts past it (a plugin's `updateAccount` passes
+ * whatever it is handed) is not a person either.
+ */
+function withoutRecipientList<T extends object>(patch: T): T {
+  if (!("outboundRecipients" in patch)) return patch
+  const { outboundRecipients: _dropped, ...rest } = patch as T & { outboundRecipients?: unknown }
+  return rest as T
+}
+
+/**
+ * Replace the repositories any unattended write through this account may reach
+ * (ADR-0239 phase 2): the account's `policy` grant, `integration-account:<id>`.
+ * Called only from a person's edit in the integration hub. Every entry is a
+ * GitHub repository; an empty list grants nothing.
+ */
+export async function setIntegrationAccountOutboundRecipients(
+  pluginId: string,
+  accountId: string,
+  recipients: readonly OutboundRecipientGrant[]
+): Promise<IntegrationAccountRow> {
+  const errors = validateOutboundRecipientGrants(recipients)
+  if (errors.length > 0) throw new Error(`Invalid outbound recipients: ${errors.join("; ")}`)
+  for (const grant of recipients) {
+    if (grant.recipient.kind !== "repository" || grant.recipient.channel !== "github") {
+      throw new Error(
+        `Invalid outbound recipients: ${grant.recipient.recipient} is not a GitHub repository`
+      )
+    }
+  }
+  const db = getDb()
+  return db.transaction("rw", db.integrationAccounts, async () => {
+    const existing = await getIntegrationAccount(pluginId, accountId)
+    if (!existing) throw new Error(`Integration account "${accountId}" was not found`)
+    const row: IntegrationAccountRow = {
+      ...existing,
+      outboundRecipients: recipients.map((grant) => ({
+        ...grant,
+        recipient: { ...grant.recipient },
+      })),
+      updatedAt: nowIso(),
+    }
+    await db.integrationAccounts.put(row)
+    return row
+  })
 }
 
 export async function removeIntegrationAccount(pluginId: string, accountId: string): Promise<void> {
