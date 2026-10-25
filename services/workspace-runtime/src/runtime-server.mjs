@@ -103,6 +103,10 @@ function browserAuditMetadata(type, payload = {}) {
     if (Array.isArray(payload.extensionPaths))
       metadata.extensionCount = payload.extensionPaths.length
     if (typeof payload.allowFileUrls === "boolean") metadata.allowFileUrls = payload.allowFileUrls
+  } else if (type === "browser.submission.configure" && typeof payload.mode === "string") {
+    metadata.submissionMode = payload.mode
+  } else if (type === "browser.submission.resolve" && typeof payload.decision === "string") {
+    metadata.submissionDecision = payload.decision
   } else if (type === "browser.navigate" && typeof payload.url === "string") {
     try {
       metadata.navigationDomain = new URL(payload.url).hostname
@@ -167,6 +171,7 @@ function browserAuditMetadata(type, payload = {}) {
  * in front (ADR-0214: tabs owned by tasks in one shared session).
  */
 const PAGE_ADDRESSABLE_OPS = new Set([
+  "browser.submission.drain",
   "browser.navigate",
   "browser.snapshot",
   "browser.act",
@@ -312,6 +317,12 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.screencast.ack": ({ sessionId, sequence }) =>
       browser.ackScreencastFrame(sessionId, sequence),
     "browser.input": ({ sessionId, input }) => browser.dispatchInput(sessionId, input),
+    "browser.submission.configure": ({ sessionId, mode }) =>
+      browser.configureSubmissionGuard(sessionId, mode),
+    "browser.submission.drain": ({ sessionId, waitMs }) =>
+      browser.drainSubmissions(sessionId, { waitMs }),
+    "browser.submission.resolve": ({ sessionId, holdId, decision }) =>
+      browser.resolveSubmission(sessionId, holdId, decision),
     "browser.cancel": ({ sessionId }) => browser.cancelAction(sessionId),
     ...(supervisor
       ? {
@@ -329,8 +340,13 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     if (!operation)
       throw Object.assign(new Error("unknown control operation"), { code: "unknown_operation" })
     const safePayload = payload ?? {}
+    // A submission drain runs after every agent action and long-polls in the
+    // background: it would flood the journal, and it changes nothing.
     const shouldAudit =
-      type.startsWith("browser.") && type !== "browser.input" && type !== "browser.screencast.ack"
+      type.startsWith("browser.") &&
+      type !== "browser.input" &&
+      type !== "browser.screencast.ack" &&
+      type !== "browser.submission.drain"
     const startedAt = Date.now()
     try {
       const addressed =

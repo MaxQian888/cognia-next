@@ -22,6 +22,10 @@ import {
   credentialFilledEvaluateRefusal,
   redactNetworkHeaders,
   type BrowserActionResult,
+  type BrowserSubmissionDecision,
+  type BrowserSubmissionDrain,
+  type BrowserSubmissionGuardMode,
+  type SubmissionGuardedEngine,
   type BrowserSnapshot,
   type ConsoleEntry,
   type EvaluateResult,
@@ -163,7 +167,7 @@ export interface LocalEngineOptions {
   pageId?: string
 }
 
-export class LocalChromiumEngine implements BrowserEngine {
+export class LocalChromiumEngine implements BrowserEngine, SubmissionGuardedEngine {
   /** The addressed tab, if any — see {@link LocalEngineOptions.pageId}. */
   public readonly pageId: string | null
 
@@ -191,6 +195,20 @@ export class LocalChromiumEngine implements BrowserEngine {
   navigate(url: string): Promise<void | BrowserMutationResult> {
     emitAgentActivity(`navigate ${url}`)
     return this.op("browser.navigate", { url })
+  }
+  /** ADR-0239 phase 2b: see {@link SubmissionGuardedEngine}. */
+  configureSubmissionGuard(mode: BrowserSubmissionGuardMode): Promise<{ mode: string }> {
+    return this.op("browser.submission.configure", { mode })
+  }
+  /** This engine's tab's submissions; the runtime addresses the drain by `pageId`. */
+  drainSubmissions(waitMs = 0): Promise<BrowserSubmissionDrain> {
+    return this.op("browser.submission.drain", { waitMs })
+  }
+  resolveSubmission(
+    holdId: string,
+    decision: BrowserSubmissionDecision
+  ): Promise<{ id: string; decision: string }> {
+    return this.op("browser.submission.resolve", { holdId, decision })
   }
   recordingControl(action: "start" | "resume" | "stop" | "drain"): Promise<unknown> {
     return this.op("browser.recording.control", { action })

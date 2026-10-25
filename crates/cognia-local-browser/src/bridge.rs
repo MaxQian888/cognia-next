@@ -103,6 +103,13 @@ pub const RENDERER_OPS: &[&str] = &[
     "browser.storage.set",
     "browser.storage.clear",
     "browser.tabs.finalize",
+    // The outbound policy's submission guard (ADR-0239 phase 2b): the host's
+    // gate sets the mode from the browser category's setting, drains what an
+    // agent action submitted and answers each hold. No value leaves the host
+    // beyond a mode, a hold id and an allow/refuse decision.
+    "browser.submission.configure",
+    "browser.submission.drain",
+    "browser.submission.resolve",
 ];
 
 /// Whether the renderer may issue `op`.
@@ -750,6 +757,9 @@ mod tests {
             "browser.selection.clear",
             "browser.selection.for-ref",
             "browser.adjust",
+            "browser.submission.configure",
+            "browser.submission.drain",
+            "browser.submission.resolve",
         ] {
             assert!(is_renderer_op(op), "{op}");
         }

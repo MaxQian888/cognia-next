@@ -1471,3 +1471,123 @@ test("closing a tab dismisses the dialog it was holding", async (t) => {
   assert.equal(dialog.dismissed, true)
   assert.equal((await service.listPages("session-1")).length, 1)
 })
+
+test("cloud sessions hold submissions in the context route, after the domain policy", async (t) => {
+  const { service, chromium } = await fixture(t)
+  t.after(() => service.closeAll())
+  await service.createSession({ id: "cloud-submit" })
+  const session = service.sessions.get("cloud-submit")
+  const context = chromium.launches[0].context
+  const page = context.pages[0]
+  const pageId = session.pageIds.get(page)
+  const fakeRoute = (method, url, { navigation = false, onPage = page } = {}) => {
+    const calls = []
+    const request = {
+      url: () => url,
+      method: () => method,
+      resourceType: () => (navigation ? "document" : "fetch"),
+      isNavigationRequest: () => navigation,
+      frame: () => {
+        if (!onPage) throw new Error("Service Worker requests do not have an associated frame")
+        return { page: () => onPage }
+      },
+    }
+    return {
+      calls,
+      route: {
+        request: () => request,
+        continue: async () => calls.push("continue"),
+        abort: async (reason) => calls.push(`abort:${reason}`),
+        fulfill: async (response) => calls.push(`fulfill:${response.status}`),
+      },
+    }
+  }
+
+  // Off by default: a post goes straight out.
+  let routed = fakeRoute("POST", "https://app.example.com/submit", { navigation: true })
+  await context.routeHandler(routed.route)
+  assert.deepEqual(routed.calls, ["continue"])
+
+  await service.configureSubmissionGuard("cloud-submit", "hold")
+  const end = session.submissions.beginAction(pageId)
+  const navigation = fakeRoute("POST", "https://app.example.com/submit", { navigation: true })
+  const posting = context.routeHandler(navigation.route)
+  const fetching = fakeRoute("PUT", "https://api.example.com/x")
+  const putting = context.routeHandler(fetching.route)
+  const worker = fakeRoute("POST", "https://app.example.com/worker", { onPage: null })
+  const fromWorker = context.routeHandler(worker.route)
+  const reading = fakeRoute("GET", "https://app.example.com/data")
+  await context.routeHandler(reading.route)
+  assert.deepEqual(reading.calls, ["continue"], "a GET is never held")
+  end()
+
+  const { reports } = await service.drainSubmissions("cloud-submit")
+  assert.deepEqual(
+    reports.map(({ url, navigation, held }) => ({ url, navigation, held })),
+    [
+      { url: "https://app.example.com/submit", navigation: true, held: true },
+      { url: "https://api.example.com/x", navigation: false, held: true },
+      { url: "https://app.example.com/worker", navigation: false, held: true },
+    ]
+  )
+  assert.deepEqual(navigation.calls, [], "held until the host answers")
+  service.resolveSubmission("cloud-submit", reports[0].id, "refuse")
+  service.resolveSubmission("cloud-submit", reports[1].id, "refuse")
+  service.resolveSubmission("cloud-submit", reports[2].id, "allow")
+  await Promise.all([posting, putting, fromWorker])
+  assert.deepEqual(navigation.calls, ["fulfill:204"], "a refused navigation keeps the page")
+  assert.deepEqual(fetching.calls, ["abort:blockedbyclient"])
+  assert.deepEqual(worker.calls, ["continue"])
+
+  // The domain policy still decides first: a blocked site is never held.
+  service.networkPolicyFactory = undefined
+  session.policy = {
+    authorize: async () => {
+      throw Object.assign(new Error("blocked"), { hostname: "evil.example" })
+    },
+  }
+  session.submissions.beginAction(pageId)
+  routed = fakeRoute("POST", "https://evil.example/x")
+  await context.routeHandler(routed.route)
+  assert.deepEqual(routed.calls, ["abort:blockedbyclient"])
+  assert.deepEqual((await service.drainSubmissions("cloud-submit")).reports, [])
+  assert(session.blockedDomains.has("evil.example"))
+})
+
+test("a Playwright timeout caused by a held submission does not fail the action", async (t) => {
+  const { service, chromium } = await fixture(t)
+  t.after(() => service.closeAll())
+  await service.createSession({ id: "timeouts" })
+  const session = service.sessions.get("timeouts")
+  const pageId = session.pageIds.get(chromium.launches[0].context.pages[0])
+  const timeout = () =>
+    Object.assign(new Error("Timeout 30000ms exceeded"), { name: "TimeoutError" })
+  await service.configureSubmissionGuard("timeouts", "hold")
+
+  // The click happened; only the held navigation kept Playwright waiting.
+  const result = await service.inSubmissionWindow(
+    session,
+    pageId,
+    async () => {
+      void session.submissions.submit(pageId, {
+        url: "https://app.example.com/submit",
+        method: "POST",
+        navigation: true,
+      })
+      throw timeout()
+    },
+    { generation: 3 }
+  )
+  assert.deepEqual(result, { ok: true, error: null, generation: 3 })
+  const { reports } = await service.drainSubmissions("timeouts")
+  assert.equal(reports.length, 1, "still held for the host to answer")
+
+  // A timeout with nothing held is the action's own failure.
+  await assert.rejects(
+    () =>
+      service.inSubmissionWindow(session, pageId, async () => {
+        throw timeout()
+      }),
+    { name: "TimeoutError" }
+  )
+})

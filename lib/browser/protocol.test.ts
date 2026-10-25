@@ -15,6 +15,8 @@ import {
   isRedactedNetworkHeader,
   redactNetworkHeaders,
   REDACTED_NETWORK_HEADERS,
+  BROWSER_SUBMISSION_GUARD_MODES,
+  isSubmissionGuardedEngine,
 } from "./protocol"
 
 describe("browser action dialog contract", () => {
@@ -383,5 +385,24 @@ describe("network header redaction (single source)", () => {
       "x-goog-api-key": "[REDACTED]",
       "content-type": "application/json",
     })
+  })
+})
+
+describe("isSubmissionGuardedEngine (ADR-0239 phase 2b)", () => {
+  it("recognizes an engine with all three submission ops", () => {
+    const ops = {
+      configureSubmissionGuard: async () => ({ mode: "hold" }),
+      drainSubmissions: async () => ({ pageId: "p", reports: [], windowOpen: false }),
+      resolveSubmission: async () => ({ id: "h", decision: "allow" }),
+    }
+    expect(isSubmissionGuardedEngine(ops)).toBe(true)
+    expect(isSubmissionGuardedEngine({ ...ops, resolveSubmission: undefined })).toBe(false)
+    expect(isSubmissionGuardedEngine({ act: async () => undefined })).toBe(false)
+    expect(isSubmissionGuardedEngine(null)).toBe(false)
+    expect(isSubmissionGuardedEngine("engine")).toBe(false)
+  })
+
+  it("lists the runtime's three modes", () => {
+    expect(BROWSER_SUBMISSION_GUARD_MODES).toEqual(["off", "observe", "hold"])
   })
 })

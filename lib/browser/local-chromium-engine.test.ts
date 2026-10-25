@@ -28,6 +28,7 @@ import {
   isLocalSessionCredentialFilled,
   toLocalBrowserError,
 } from "./local-chromium-engine"
+import { isSubmissionGuardedEngine } from "./protocol"
 import { BrowserSessionError } from "./session-types"
 
 beforeEach(() => {
@@ -407,6 +408,35 @@ describe("LocalChromiumEngine addressing a tab", () => {
       ["browser.page.create", { sessionId: "s1", url: "https://b.test", activate: false }],
       ["browser.page.create", { sessionId: "s1" }],
     ])
+  })
+})
+
+describe("LocalChromiumEngine submission guard (ADR-0239 phase 2b)", () => {
+  it("maps configure, drain and resolve onto the runtime ops, drain on its own tab", async () => {
+    const e = new LocalChromiumEngine("s1", "local-chromium", { pageId: "p1" })
+    expect(isSubmissionGuardedEngine(e)).toBe(true)
+    await e.configureSubmissionGuard("hold")
+    await e.drainSubmissions(200)
+    await e.drainSubmissions()
+    await e.resolveSubmission("h1", "refuse")
+    expect(mockRpc.mock.calls).toEqual([
+      ["browser.submission.configure", { sessionId: "s1", pageId: "p1", mode: "hold" }],
+      ["browser.submission.drain", { sessionId: "s1", pageId: "p1", waitMs: 200 }],
+      ["browser.submission.drain", { sessionId: "s1", pageId: "p1", waitMs: 0 }],
+      [
+        "browser.submission.resolve",
+        { sessionId: "s1", pageId: "p1", holdId: "h1", decision: "refuse" },
+      ],
+    ])
+  })
+
+  it("surfaces a runtime refusal as a coded error", async () => {
+    mockRpc.mockRejectedValueOnce(
+      "browser_submission_not_found: No held submission has this id; it may have timed out"
+    )
+    await expect(engine().resolveSubmission("gone", "allow")).rejects.toMatchObject({
+      code: "browser_submission_not_found",
+    })
   })
 })
 

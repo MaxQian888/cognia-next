@@ -830,3 +830,64 @@ test("a failed capture start invalidates its publisher without releasing a repla
   newPublisher(Buffer.from("late replacement"))
   assert.equal((await fetch(`${baseUrl}/v1/media/reused`, { headers })).status, 204)
 })
+
+test("submission ops reach the service; a drain addresses its tab and is not audited", async (t) => {
+  const calls = []
+  const browser = serviceStub()
+  browser.withPageTarget = async (sessionId, pageId, operation) => {
+    calls.push(["target", sessionId, pageId])
+    return operation()
+  }
+  browser.configureSubmissionGuard = async (...args) => {
+    calls.push(["configure", ...args])
+    return { mode: args[1] }
+  }
+  browser.drainSubmissions = async (...args) => {
+    calls.push(["drain", ...args])
+    return { pageId: "p2", reports: [], windowOpen: false }
+  }
+  browser.resolveSubmission = (...args) => {
+    calls.push(["resolve", ...args])
+    return { id: args[1], decision: args[2] }
+  }
+  const baseUrl = await fixture(t, browser)
+  const headers = {
+    authorization: `Bearer ${"x".repeat(32)}`,
+    "content-type": "application/json",
+  }
+  const control = (type, payload) =>
+    fetch(`${baseUrl}/v1/control`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ version: 1, type, payload }),
+    }).then((response) => response.json())
+  await control("browser.submission.configure", { sessionId: "s", mode: "hold" })
+  const drained = await control("browser.submission.drain", {
+    sessionId: "s",
+    pageId: "p2",
+    waitMs: 200,
+  })
+  await control("browser.submission.resolve", { sessionId: "s", holdId: "h1", decision: "refuse" })
+  assert.deepEqual(calls, [
+    ["configure", "s", "hold"],
+    ["target", "s", "p2"],
+    ["drain", "s", { waitMs: 200 }],
+    ["resolve", "s", "h1", "refuse"],
+  ])
+  assert.deepEqual(drained.payload, { pageId: "p2", reports: [], windowOpen: false })
+
+  const events = await fetch(`${baseUrl}/v1/events?after=0`, { headers }).then((response) =>
+    response.json()
+  )
+  const operations = events.payload
+    .filter((event) => event.kind === "runtime.operation")
+    .map(({ operation, submissionMode, submissionDecision }) => ({
+      operation,
+      ...(submissionMode ? { submissionMode } : {}),
+      ...(submissionDecision ? { submissionDecision } : {}),
+    }))
+  assert.deepEqual(operations, [
+    { operation: "browser.submission.configure", submissionMode: "hold" },
+    { operation: "browser.submission.resolve", submissionDecision: "refuse" },
+  ])
+})

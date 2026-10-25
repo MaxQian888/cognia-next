@@ -500,3 +500,69 @@ export function redactNetworkHeaders(
   }
   return out
 }
+
+// ── Submission guard (ADR-0239 phase 2b) ──────────────────────────────────
+
+/**
+ * What a Chromium runtime does with what an agent action submits (see
+ * `services/workspace-runtime/src/submission-guard.mjs`): nothing (`off`),
+ * report and send (`observe`, the browser category in shadow mode), or report
+ * and wait for the host's answer (`hold`, enforce).
+ */
+export type BrowserSubmissionGuardMode = "off" | "observe" | "hold"
+
+export const BROWSER_SUBMISSION_GUARD_MODES: readonly BrowserSubmissionGuardMode[] = [
+  "off",
+  "observe",
+  "hold",
+]
+
+/** One submission an agent action caused: a request that carries data, or a WebSocket frame. */
+export interface BrowserSubmissionReport {
+  id: string
+  /** The request URL (`ws:`/`wss:` for a frame). */
+  url: string
+  /** The HTTP method, or `WS` for a frame. */
+  method: string
+  /** Chromium's resource type: `document`, `fetch`, `xhr`, `ping`, `websocket`, … */
+  resourceType: string
+  /** A document load: refused with an empty 204 so the page stays where it was. */
+  navigation: boolean
+  /** Waiting for {@link SubmissionGuardedEngine.resolveSubmission}. */
+  held: boolean
+  at: number
+}
+
+export interface BrowserSubmissionDrain {
+  pageId: string
+  reports: BrowserSubmissionReport[]
+  /** The page's action window is still open: more may come. */
+  windowOpen: boolean
+}
+
+export type BrowserSubmissionDecision = "allow" | "refuse"
+
+/**
+ * An engine whose runtime watches what its agent actions submit: local
+ * Chromium, the user's Chrome and the cloud browser. Host-only: the
+ * outbound gate drives it, and no engine handed to a plugin exposes it.
+ */
+export interface SubmissionGuardedEngine {
+  configureSubmissionGuard(mode: BrowserSubmissionGuardMode): Promise<{ mode: string }>
+  /** The engine's page's reports since the last drain, waiting up to `waitMs` for one. */
+  drainSubmissions(waitMs?: number): Promise<BrowserSubmissionDrain>
+  resolveSubmission(
+    holdId: string,
+    decision: BrowserSubmissionDecision
+  ): Promise<{ id: string; decision: string }>
+}
+
+export function isSubmissionGuardedEngine(engine: unknown): engine is SubmissionGuardedEngine {
+  if (!engine || typeof engine !== "object") return false
+  const candidate = engine as Partial<Record<keyof SubmissionGuardedEngine, unknown>>
+  return (
+    typeof candidate.configureSubmissionGuard === "function" &&
+    typeof candidate.drainSubmissions === "function" &&
+    typeof candidate.resolveSubmission === "function"
+  )
+}

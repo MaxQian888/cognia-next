@@ -32,6 +32,11 @@ import {
   normalizeSelectionForRef,
 } from "./element-selection.mjs"
 import { encodeMediaFrame } from "./protocol.mjs"
+import {
+  SubmissionGuard,
+  assertSubmissionGuardMode,
+  isSubmissionRequest,
+} from "./submission-guard.mjs"
 
 const SECRET_FIELD =
   /password|passcode|one[\s-]?time|otp|token|secret|verification[\s-]?code|密码|口令|验证码/i
@@ -57,6 +62,8 @@ const FIT_CHECK_INTERVAL_MS = 150
 
 const MAX_TRACKED_REQUESTS = 200
 const CREDENTIAL_DEDUPE_MS = 10_000
+/** How long a held action waits for a navigation it caused to reach the route. */
+const SUBMISSION_SETTLE_MS = 150
 const MAX_EXTENSIONS = 64
 const EXTENSION_ID = /^[a-p]{32}$/
 
@@ -530,6 +537,13 @@ export class RemoteChromiumService {
       pageTargetIds: new WeakMap(),
       recentCredentials: new Map(),
       uploadRoots: null,
+      // ADR-0239 phase 2b: what agent actions submit, observed or held until
+      // the host decides (`browser.submission.*`). Off until the host
+      // configures it. Local sessions route each of their pages once it is
+      // on; a cloud session's context route already sees every request.
+      submissions: new SubmissionGuard({ now: this.now, createId: this.createId }),
+      submissionRoutes: false,
+      submissionSockets: false,
       createdAt,
       lastActivityAt: createdAt,
       ...fields,
@@ -1084,12 +1098,196 @@ export class RemoteChromiumService {
 
   async authorizeRoute(session, route) {
     const request = route.request()
+    let verdict = "allow"
     try {
       await this.authorizeUrl(session, request.url())
-      await route.continue()
+      verdict = await this.submissionVerdict(session, request)
+      if (verdict === "allow") await route.continue()
     } catch (error) {
       session.lastBlockedError = error
       await route.abort("blockedbyclient")
+      return
+    }
+    if (verdict === "refuse") await this.refuseSubmission(route, request).catch(() => undefined)
+  }
+
+  // ── Submission guard (ADR-0239 phase 2b) ─────────────────────────────────
+
+  /**
+   * Set what the session's agent actions do with a submission: `off`,
+   * `observe` (report and send) or `hold` (report and wait for
+   * `resolveSubmission`). The host sets it from the browser category's mode
+   * before it acts. Holding WebSockets needs Playwright's in-page relay, so it
+   * is installed only for `hold`: shadow mode must not change how a page
+   * talks to its server.
+   */
+  async configureSubmissionGuard(sessionId, mode) {
+    const session = this.requireSession(sessionId)
+    assertSubmissionGuardMode(mode)
+    session.submissions.configure(mode)
+    if (mode !== "off") await this.installSubmissionRoutes(session)
+    if (mode === "hold") await this.installSubmissionSockets(session)
+    return { mode }
+  }
+
+  /**
+   * The addressed page's submissions since the last drain; `waitMs` waits for
+   * one while the page's window is open (see `SubmissionGuard.drain`).
+   */
+  async drainSubmissions(sessionId, { waitMs = 0 } = {}) {
+    const session = this.requireSession(sessionId)
+    const { pageId } = this.activeRecord(session)
+    return { pageId, ...(await session.submissions.drain(pageId, waitMs)) }
+  }
+
+  resolveSubmission(sessionId, holdId, decision) {
+    const session = this.requireSession(sessionId)
+    return session.submissions.resolve(String(holdId ?? ""), decision)
+  }
+
+  async installSubmissionRoutes(session) {
+    // A cloud session's context route (`authorizeRoute`) already sees every request.
+    if (session.kind === "cloud" || session.submissionRoutes) return
+    session.submissionRoutes = true
+    await Promise.all(
+      [...session.pages.entries()].map(([pageId, record]) =>
+        this.routePageSubmissions(session, pageId, record.page)
+      )
+    )
+  }
+
+  async installSubmissionSockets(session) {
+    if (session.submissionSockets) return
+    session.submissionSockets = true
+    await Promise.all(
+      [...session.pages.entries()].map(([pageId, record]) =>
+        this.routePageSockets(session, pageId, record.page)
+      )
+    )
+  }
+
+  /**
+   * Route one of a local session's pages: per page rather than per context,
+   * so attaching to the user's own Chrome never intercepts their other tabs.
+   * An allowed request falls back to any other route.
+   */
+  async routePageSubmissions(session, _pageId, page) {
+    await page
+      .route("**/*", async (route) => {
+        const request = route.request()
+        try {
+          if ((await this.submissionVerdict(session, request)) === "refuse") {
+            await this.refuseSubmission(route, request)
+          } else {
+            await route.fallback()
+          }
+        } catch {
+          // The page or the request went away while it was decided.
+        }
+      })
+      .catch(() => undefined)
+  }
+
+  /**
+   * Relay a page's WebSockets so each frame it sends in an action's window
+   * waits for the host. Frames keep their order; a refused frame closes the
+   * socket (1008), since dropping it silently would let the page believe it
+   * was delivered. Sockets the page opened before this was installed are not
+   * relayed.
+   */
+  async routePageSockets(session, pageId, page) {
+    if (typeof page.routeWebSocket !== "function") return
+    await page
+      .routeWebSocket(/.*/, (socket) => {
+        const server = socket.connectToServer()
+        let queue = Promise.resolve()
+        socket.onMessage((message) => {
+          queue = queue
+            .then(async () => {
+              const verdict = await this.submitFrame(session, pageId, socket.url())
+              if (verdict === "allow") {
+                server.send(message)
+              } else {
+                socket.close({ code: 1008, reason: "Blocked by the outbound policy" })
+                server.close()
+              }
+            })
+            .catch(() => undefined)
+        })
+      })
+      .catch(() => undefined)
+  }
+
+  submitFrame(session, pageId, url) {
+    const record = session.pages.get(pageId)
+    const charged = session.submissions.attribute(pageId, record?.openerPageId ?? null)
+    return session.submissions.submit(charged, {
+      url,
+      method: "WS",
+      resourceType: "websocket",
+      navigation: false,
+    })
+  }
+
+  /** `"allow"` or `"refuse"` for one request, holding it if the guard holds. */
+  async submissionVerdict(session, request) {
+    if (session.submissions.mode === "off") return "allow"
+    if (!isSubmissionRequest(request.method(), request.url())) return "allow"
+    let page = null
+    try {
+      page = request.frame().page()
+    } catch {
+      // A worker's request names no frame.
+    }
+    const pageId = page ? (session.pageIds.get(page) ?? null) : null
+    const record = pageId ? session.pages.get(pageId) : null
+    const charged = session.submissions.attribute(pageId, record?.openerPageId ?? null)
+    return session.submissions.submit(charged, {
+      url: request.url(),
+      method: request.method(),
+      resourceType: request.resourceType(),
+      navigation: request.isNavigationRequest(),
+    })
+  }
+
+  /**
+   * Refuse a held submission without stranding the agent: a navigation gets
+   * an empty 204, which keeps the page where it was (an abort would show
+   * Chromium's error page); any other request fails as a network error.
+   */
+  async refuseSubmission(route, request) {
+    if (request.isNavigationRequest()) await route.fulfill({ status: 204, body: "" })
+    else await route.abort("blockedbyclient")
+  }
+
+  /**
+   * Run an agent action with its page's submission window open.
+   *
+   * Under `hold` the host drains and answers while the action runs. A held
+   * navigation keeps Playwright waiting for it, so an answer that comes
+   * quickly lets the action finish on the new document as before; one slower
+   * than Playwright's own timeout must not fail an action that already
+   * happened, so that timeout is not an error here, and the host waits for
+   * the person and then for the page itself. Nothing here waits for a
+   * person: a control request has a transport deadline, an answer does not.
+   */
+  async inSubmissionWindow(session, pageId, operation, { generation } = {}) {
+    const guard = session.submissions
+    const end = guard.beginAction(pageId)
+    const heldBefore = guard.heldCount(pageId)
+    try {
+      let result
+      try {
+        result = await operation()
+      } catch (error) {
+        if (error?.name !== "TimeoutError" || guard.heldCount(pageId) === heldBefore) throw error
+        result = { ok: true, error: null, generation }
+      }
+      // A submission the action caused may reach the route a moment after it returns.
+      if (guard.mode === "hold") await delay(SUBMISSION_SETTLE_MS)
+      return result
+    } finally {
+      end()
     }
   }
 
@@ -1148,7 +1346,18 @@ export class RemoteChromiumService {
     // watching.
     if (session.activePageId === null) session.activePageId = pageId
     this.schedulePagesChanged(session)
+    if (session.submissionRoutes) void this.routePageSubmissions(session, pageId, page)
+    if (session.submissionSockets) void this.routePageSockets(session, pageId, page)
+    // Shadow mode watches WebSocket frames without relaying them; a relayed
+    // socket (`routePageSockets`) reports through its own route.
+    page.on("websocket", (socket) => {
+      socket.on("framesent", () => {
+        if (session.submissions.mode !== "observe" || session.submissionSockets) return
+        void this.submitFrame(session, pageId, socket.url())
+      })
+    })
     page.on("close", () => {
+      session.submissions.forgetPage(pageId)
       void record.recordingCdp?.detach().catch(() => undefined)
       void this.dismissPendingDialog(session, pageId).catch(() => undefined)
       if (session.pendingFileChooser?.pageId === pageId) session.pendingFileChooser = null
@@ -1444,7 +1653,16 @@ export class RemoteChromiumService {
 
   async act(sessionId, reference, action, args) {
     const session = this.requireSession(sessionId)
-    const generation = this.activeRecord(session).record.generation
+    const { pageId, record: acting } = this.activeRecord(session)
+    return this.inSubmissionWindow(
+      session,
+      pageId,
+      () => this.actInWindow(session, acting.generation, reference, action, args),
+      { generation: acting.generation }
+    )
+  }
+
+  async actInWindow(session, generation, reference, action, args) {
     const modifiers = Array.isArray(args?.modifiers)
       ? args.modifiers.map((modifier) => {
           const value = String(modifier).toLowerCase()
@@ -1498,7 +1716,17 @@ export class RemoteChromiumService {
 
   async drag(sessionId, sourceRef, targetRef) {
     const session = this.requireSession(sessionId)
-    const generation = this.activeRecord(session).record.generation
+    const { pageId, record: acting } = this.activeRecord(session)
+    const generation = acting.generation
+    return this.inSubmissionWindow(
+      session,
+      pageId,
+      () => this.dragInWindow(session, generation, sourceRef, targetRef),
+      { generation }
+    )
+  }
+
+  async dragInWindow(session, generation, sourceRef, targetRef) {
     return this.runActionWithDialog(session, generation, async () => {
       const source = await this.resolveTarget(session, sourceRef)
       const target = await this.resolveTarget(session, targetRef)
@@ -1528,6 +1756,10 @@ export class RemoteChromiumService {
     const holder = session.pages.get(pending.pageId)
     const lane = pending.lane
     const action = lane?.pendingAction ?? null
+    // Accepting a "submit this?" confirm lets the action's submission go out.
+    const guard = session.submissions
+    const endWindow = guard.beginAction(pending.pageId)
+    const heldBefore = guard.heldCount(pending.pageId)
     try {
       if (accept) await pending.dialog.accept(promptText)
       else await pending.dialog.dismiss()
@@ -1536,15 +1768,20 @@ export class RemoteChromiumService {
         try {
           await action
         } catch (error) {
-          actionError = error instanceof Error ? error.message : String(error)
+          // A held submission outlasting Playwright's timeout is not a failure.
+          if (error?.name !== "TimeoutError" || guard.heldCount(pending.pageId) === heldBefore) {
+            actionError = error instanceof Error ? error.message : String(error)
+          }
         }
       }
+      if (guard.mode === "hold") await delay(SUBMISSION_SETTLE_MS)
       return {
         ok: actionError === null,
         error: actionError,
         generation: holder?.generation ?? 0,
       }
     } finally {
+      endWindow()
       if (holder?.pendingDialog === pending) holder.pendingDialog = null
       if (lane) {
         lane.pendingAction = null
@@ -1569,7 +1806,16 @@ export class RemoteChromiumService {
   async pressKey(sessionId, key, reference = "") {
     if (reference) return this.act(sessionId, reference, "key", { key })
     const session = this.requireSession(sessionId)
-    const { page, record } = this.activeRecord(session)
+    const { pageId, page, record } = this.activeRecord(session)
+    return this.inSubmissionWindow(
+      session,
+      pageId,
+      () => this.pressKeyInWindow(session, page, record, key),
+      { generation: record.generation }
+    )
+  }
+
+  async pressKeyInWindow(session, page, record, key) {
     return this.runActionWithDialog(session, record.generation, async () => {
       const sensitive = await page.evaluate(() => {
         const element = document.activeElement
@@ -1631,11 +1877,17 @@ export class RemoteChromiumService {
         "browser_evaluate is disabled after human input or a credential fill in this session"
       )
     }
-    const { page, record } = this.activeRecord(session)
+    const { pageId, page, record } = this.activeRecord(session)
     const hostname = new URL(page.url()).hostname
     if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
       return { ok: false, error: "browser_evaluate is disabled on public origins" }
     }
+    return this.inSubmissionWindow(session, pageId, () =>
+      this.evaluateInWindow(session, page, record, expression)
+    )
+  }
+
+  async evaluateInWindow(session, page, record, expression) {
     return this.runActionWithDialog(session, record.generation, async () => {
       try {
         return {
@@ -2066,6 +2318,16 @@ export class RemoteChromiumService {
   async history(sessionId, operation) {
     const session = this.requireSession(sessionId)
     const { pageId, page, record } = this.activeRecord(session)
+    // A reload or a step back may send a form again.
+    return this.inSubmissionWindow(
+      session,
+      pageId,
+      () => this.historyInWindow(session, sessionId, pageId, page, record, operation),
+      { generation: record.generation }
+    )
+  }
+
+  async historyInWindow(session, sessionId, pageId, page, record, operation) {
     return this.runActionWithDialog(session, record.generation, async () => {
       await page[operation]({ waitUntil: "domcontentloaded" })
       this.invalidatePage(sessionId, pageId)
@@ -2461,6 +2723,7 @@ export class RemoteChromiumService {
     const session = this.requireSession(sessionId)
     session.closing = true
     clearTimeout(session.pagesChangedTimer)
+    session.submissions.close()
     await this.stopScreencast(sessionId).catch(() => undefined)
     await this.dismissPendingDialog(session)
     this.invalidateSession(sessionId)
@@ -2512,6 +2775,7 @@ export class RemoteChromiumService {
     if (session.closing || session.restarting || this.sessions.get(session.id) !== session) return
     session.closing = true
     clearTimeout(session.pagesChangedTimer)
+    session.submissions.close()
     await this.stopScreencast(session.id).catch(() => undefined)
     try {
       await this.dismissPendingDialog(session)
