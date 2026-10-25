@@ -429,6 +429,10 @@
       "label": "Conversation not created on the host",
       "hint": "The paired host refused this new chat — usually this device doesn't have Agent Control on that host. Ask the host's owner to grant it, then start the chat again."
     },
+    "hostStateIntentRefused": {
+      "label": "Change not applied on the host",
+      "hint": "The paired host refused this change, so nothing changed there. The reason is below; trying again gets the same answer until it changes."
+    },
     "workspaceUnavailable": {
       "label": "Workspace unavailable",
       "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel."

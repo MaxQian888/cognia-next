@@ -130,6 +130,7 @@ import {
   withdrawUnsentHostStateMessages,
   type WithdrawnHostStateMessage,
 } from "@/lib/db/mobile-outbound-queue"
+import { hostStateActionOfferedHere } from "@/lib/sync/host-state-offered-actions"
 import { restoreWithdrawnToComposer } from "@/lib/chat/restore-withdrawn"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
@@ -1905,7 +1906,15 @@ export function useClaudeChat() {
         // same tree and then run with a transcript that predates the first
         // turn's reply.
         const turnQueued = isChatTurnQueued(sessionId)
-        if (st === "streaming" || st === "awaiting_approval" || turnQueued) {
+        // A Host that takes no steering from this caller (an org member's
+        // partition, P6) queues a message sent mid-turn itself and runs it
+        // when the turn settles. Steered, it was refused; queued here, it
+        // waited on a drain this client never sees for a turn it does not run.
+        const hostQueuesFollowUps = !hostStateActionOfferedHere("turn.steer")
+        if (
+          !hostQueuesFollowUps &&
+          (st === "streaming" || st === "awaiting_approval" || turnQueued)
+        ) {
           if (turnRoute) {
             // A live follow-up can only reach the runtime already answering, and
             // queued follow-ups merge into one payload — neither can move a turn

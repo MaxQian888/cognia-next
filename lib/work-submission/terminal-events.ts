@@ -48,7 +48,7 @@ async function settleSidecarExit(
   deps: WorkSubmissionTerminalEventDeps,
   mirrors: Map<string, UIMessage[]>,
   load: typeof listMessages,
-  persist: typeof persistMessages
+  persist: (sessionId: string, messages: UIMessage[]) => Promise<void>
 ): Promise<void> {
   const rows = await (deps.listDispatched?.() ??
     listWorkSubmissions({ dispatchStates: ["dispatched"], limit: 1000 }))
@@ -92,6 +92,25 @@ export function startWorkSubmissionTerminalEvents(
   const load = deps.loadMessages ?? listMessages
   const persist = deps.persistMessages ?? persistMessages
   const project = deps.applyEvent ?? applySdkEvent
+  // The rows each mirror was loaded from. A row written after that is not the
+  // mirror's to delete: the Host writes a message sent mid-turn when it
+  // accepts it, while the running turn's mirror is already loaded, and the
+  // turn's settlement replaces the transcript with that mirror.
+  const bases = new Map<string, Set<string>>()
+  const persistMirror = async (sessionId: string, messages: UIMessage[]) => {
+    const base = bases.get(sessionId)
+    if (!base) return persist(sessionId, messages)
+    const held = new Set(messages.map((message) => message.id))
+    const arrived = (await load(sessionId)).filter(
+      (message) => !base.has(message.id) && !held.has(message.id)
+    )
+    return persist(sessionId, arrived.length > 0 ? [...messages, ...arrived] : messages)
+  }
+  const loadMirror = async (sessionId: string) => {
+    const messages = await load(sessionId)
+    bases.set(sessionId, new Set(messages.map((message) => message.id)))
+    return messages
+  }
   const hasOpenSubmission =
     deps.hasOpenSubmission ??
     (async (sessionId: string) => {
@@ -122,31 +141,47 @@ export function startWorkSubmissionTerminalEvents(
           if (!(await hasOpenSubmission(event.sessionId))) return
           activeSessions.add(event.sessionId)
         }
-        const current = mirrors.get(event.sessionId) ?? (await load(event.sessionId))
+        const current = mirrors.get(event.sessionId) ?? (await loadMirror(event.sessionId))
         const projected = project(current, event.event).messages
         mirrors.set(event.sessionId, projected)
       })
     } else if (event.type === "session_ended") {
       enqueue(event.sessionId, async () => {
-        const terminal =
+        const personChat =
           personChatCapability().chat === "tool-less"
-            ? await (await import("@/lib/claude/person-chat-turn")).personChatTerminalEvent(event)
-            : event
+            ? await import("@/lib/claude/person-chat-turn")
+            : null
+        const terminal = personChat ? await personChat.personChatTerminalEvent(event) : event
         if (!terminal) return
-        const messages = mirrors.get(event.sessionId)
-        await settleSession(event.sessionId, {
-          outcome: terminal.error ? "failed" : "completed",
-          ...(terminal.error ? { errorCode: terminal.code ?? "turn_error" } : {}),
-          ...(terminal.resetAt !== undefined ? { resetAt: terminal.resetAt } : {}),
-          ...(messages ? { writeTranscript: () => persist(event.sessionId, messages) } : {}),
-        })
-        mirrors.delete(event.sessionId)
-        activeSessions.delete(event.sessionId)
+        try {
+          const messages = mirrors.get(event.sessionId)
+          await settleSession(event.sessionId, {
+            outcome: terminal.error ? "failed" : "completed",
+            ...(terminal.error ? { errorCode: terminal.code ?? "turn_error" } : {}),
+            ...(terminal.resetAt !== undefined ? { resetAt: terminal.resetAt } : {}),
+            ...(messages
+              ? { writeTranscript: () => persistMirror(event.sessionId, messages) }
+              : {}),
+          })
+          mirrors.delete(event.sessionId)
+          bases.delete(event.sessionId)
+          activeSessions.delete(event.sessionId)
+        } finally {
+          // Only now is the reply in the history the next queued turn reads.
+          personChat?.endPersonChatTurn(event.sessionId)
+        }
       })
     } else if (event.type === "sidecar_exited") {
       void Promise.all([...queues.values()].map((queue) => queue.catch(() => undefined)))
-        .then(() => settleSidecarExit(deps, mirrors, load, persist))
+        .then(() => settleSidecarExit(deps, mirrors, load, persistMirror))
         .catch((error) => deps.onError?.(error))
+        .finally(() => {
+          // No turn the runtime held will report its end now.
+          if (personChatCapability().chat !== "tool-less") return
+          void import("@/lib/claude/person-chat-turn")
+            .then((personChat) => personChat.endAllPersonChatTurns())
+            .catch((error) => deps.onError?.(error))
+        })
     }
   }
 

@@ -323,6 +323,13 @@ export type DiagnosticCode =
    */
   | "hostSessionRefused"
   /**
+   * The paired Host refused a change this client sent it as a HostState
+   * intent: a rename, archive, pin, filing, rank, workspace move, model pick
+   * or delete. Nothing was applied, and the Host's copy of the conversation
+   * list stays as it was. The log names the Host's refusal code.
+   */
+  | "hostStateIntentRefused"
+  /**
    * A new conversation with an agent whose default runtime (ADR-0220) is not
    * resolvable here: the external agent was removed or disabled on this
    * device, or the host no longer has the configuration. The conversation was

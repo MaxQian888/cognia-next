@@ -208,6 +208,13 @@ jest.mock("@/lib/work-submission/lease-heartbeat", () => ({
     startLeaseHeartbeatMock(submissionId, leaseOwner),
 }))
 
+// What the paired Host offers this caller; everything unless a test restricts it.
+const hostStateActionOfferedMock = jest.fn((_kind: string) => true)
+jest.mock("@/lib/sync/host-state-offered-actions", () => ({
+  ...jest.requireActual("@/lib/sync/host-state-offered-actions"),
+  hostStateActionOfferedHere: (kind: string) => hostStateActionOfferedMock(kind),
+}))
+
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueueHostStateIntentIfAvailable: (...args: unknown[]) => enqueueHostStateIntentMock(...args),
   hostStateSessionIntentAvailable: (...args: unknown[]) =>
@@ -1098,6 +1105,7 @@ beforeEach(() => {
   stopLeaseHeartbeatMock.mockClear()
   enqueueHostStateIntentMock.mockReset().mockResolvedValue(null)
   hostStateSessionIntentAvailableMock.mockReset().mockResolvedValue(false)
+  hostStateActionOfferedMock.mockReset().mockReturnValue(true)
   withdrawUnsentHostStateMessagesMock.mockReset().mockResolvedValue([])
   interruptSessionMock.mockReset().mockResolvedValue(undefined)
   beginSharedSessionRunMock.mockReset().mockResolvedValue({ kind: "private" })
@@ -6764,6 +6772,30 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
       metadata?: { steer?: { state: string } }
     }>
     expect(appended.at(-1)?.metadata?.steer?.state).toBe("accepted")
+  })
+
+  it("sends a mid-turn message as the next turn where the Host offers no steering", async () => {
+    // An org member's partition: the Host refuses turn.steer and queues a
+    // message.enqueue behind the running turn itself.
+    chatState.status = "streaming"
+    hostStateActionOfferedMock.mockImplementation((kind) => kind !== "turn.steer")
+    enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "action-1", status: "pending" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("one more thing")
+    })
+
+    expect(enqueueHostStateIntentMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      action: expect.objectContaining({ kind: "message.enqueue", text: "one more thing" }),
+    })
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: expect.objectContaining({ kind: "turn.steer" }) })
+    )
+    expect(steerSessionMock).not.toHaveBeenCalled()
+    expect(chatState.enqueueSteer).not.toHaveBeenCalled()
   })
 
   it("falls back to the queue when the live steer is refused", async () => {

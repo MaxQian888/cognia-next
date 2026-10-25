@@ -224,3 +224,32 @@ it("clears remote data and stops polling when a desktop returns to its local hos
   expect(remoteCall).toHaveBeenCalledTimes(1)
   expect(mockCall).not.toHaveBeenCalled()
 })
+
+it("stops asking once the Host refuses for good, and keeps retrying a transient failure", async () => {
+  jest.useFakeTimers()
+  try {
+    mockProfile = "cloud-companion"
+    // An org member's partition: the operator's console is refused every time.
+    mockCall.mockRejectedValue(
+      Object.assign(new Error("forbidden"), { code: "host_surface_forbidden", retryable: false })
+    )
+    const refused = renderHook(() => useBotHostRead("installations"))
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(9000)
+    })
+    expect(mockCall).toHaveBeenCalledTimes(1)
+    expect(refused.result.current).toMatchObject({ remote: true, loading: false, failed: true })
+    refused.unmount()
+
+    mockCall
+      .mockReset()
+      .mockRejectedValue(Object.assign(new Error("offline"), { code: "network", retryable: true }))
+    renderHook(() => useBotHostRead("installations"))
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(6500)
+    })
+    expect(mockCall).toHaveBeenCalledTimes(3)
+  } finally {
+    jest.useRealTimers()
+  }
+})

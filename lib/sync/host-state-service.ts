@@ -38,6 +38,11 @@ import {
   reduceHostStateMutation,
 } from "@cognia/agent-config-types/host-state"
 import { effectiveController } from "@/lib/companion/device-presence-registry"
+import {
+  publishOfferedHostStateActions,
+  refreshOfferedHostStateActions,
+  retractOfferedHostStateActions,
+} from "@/lib/sync/host-state-offered-actions"
 import { sessionIndexChannel, sessionStateChannel } from "@cognia/agent-config-types/host-state"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { loggers } from "@cognia/logging"
@@ -185,6 +190,30 @@ interface AgentRpcHostStateDispatcherDependencies {
     actionId: string
   ) => Promise<void>
   resolveElicitation?: (sessionId: string, requestId: string, response: unknown) => Promise<void>
+  /** Where a queued member turn's `queue` events go; the brain's projection by default. */
+  projectRuntimeEnvelope?: (envelope: AgentEventEnvelope) => Promise<void>
+}
+
+/** A `queue` event the Host raises for a member's tool-less turn it holds back. */
+function personChatQueueEnvelope(
+  sessionId: string,
+  actionId: string,
+  sequence: number,
+  event: AgentEventEnvelope["event"]
+): AgentEventEnvelope {
+  return {
+    schemaVersion: 1,
+    eventId: `person-chat:${actionId}:${sequence}`,
+    sequence,
+    sessionId,
+    runId: actionId,
+    turnId: actionId,
+    attemptId: actionId,
+    hostRef: "person-chat",
+    runtime: "ai-sdk",
+    timestamp: new Date().toISOString(),
+    event,
+  }
 }
 
 /**
@@ -317,6 +346,23 @@ export function createAgentRpcHostStateDispatcher(
           }
         }
         let handedOff = false
+        // Set when the turn waits behind a running one (tool-less member chat).
+        let deferred: Promise<void> | null = null
+        let project: (envelope: AgentEventEnvelope) => Promise<void> = async () => {}
+        const queueEvent = (
+          sequence: number,
+          phase: "accepted" | "delivered" | "dropped",
+          reason?: string
+        ) =>
+          project(
+            personChatQueueEnvelope(sessionId, action.actionId, sequence, {
+              kind: "queue",
+              phase,
+              queueId: action.actionId,
+              delivery: "after-settle",
+              ...(reason ? { reason } : {}),
+            })
+          )
         try {
           if (durableLeaseLost) return
           if (dependencies.sendMessage) {
@@ -437,17 +483,72 @@ export function createAgentRpcHostStateDispatcher(
                 messageId: action.action.messageId,
               })
             } else if (partitionChat) {
-              const { sendPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
-              await sendPersonChatTurn(session, dispatch)
+              const personChat = await import("@/lib/claude/person-chat-turn")
+              project =
+                dependencies.projectRuntimeEnvelope ??
+                (await import("@/lib/companion/desktop-write-source")).projectBrainRuntimeEnvelope
+              let queued = false
+              const admission = personChat.admitPersonChatTurn(sessionId, async () => {
+                if (queued) {
+                  // Another owner took the submission over while it waited.
+                  if (durableLeaseLost) throw new HostStateDispatchAbandonedError("lease_lost")
+                  await queueEvent(1, "delivered")
+                }
+                await personChat.sendPersonChatTurn(session, dispatch)
+              })
+              queued = admission.queued
+              if (queued) {
+                // A turn of this conversation is running. The member's message
+                // waits for it on the Host, as an owner's waits in the sidecar,
+                // and the dispatcher is free again: the rest happens when it
+                // starts.
+                await queueEvent(0, "accepted")
+                deferred = admission.started
+              } else {
+                await admission.started
+              }
             } else {
               await dispatch(options!)
             }
             // Only now: the runtime has the file, so the staging copy is dead
             // weight and the per-session staging slot should be freed. Before
             // the send it is the only copy that exists.
-            await consumeAttachmentRefs(action.action.attachments)
+            if (!deferred) await consumeAttachmentRefs(action.action.attachments)
           }
           if (durableLeaseLost) return
+          if (deferred) {
+            const { attachments } = action.action
+            const started = async () => {
+              await consumeAttachmentRefs(attachments)
+              if (receipt && !durableLeaseLost) {
+                await workSubmissionAdapter.markHostStateChatTurnStarted(action.actionId)
+              }
+            }
+            const failed = async (error: unknown) => {
+              stopAssemblyHeartbeat()
+              if (durableLeaseLost) return
+              const [{ personChatFailure }, { settleChatTurn }] = await Promise.all([
+                import("@/lib/gateway/person-model-ticket"),
+                import("@/lib/work-submission/chat-adapter"),
+              ])
+              const failure = personChatFailure(error)
+              await settleChatTurn({
+                runId: workSubmissionAdapter.hostStateRunId(action.actionId),
+                outcome: "failed",
+                errorCode: failure.code,
+                resetAt: failure.resetAt,
+              })
+              await queueEvent(2, "dropped", failure.code)
+            }
+            void deferred.then(started, failed).catch((error) =>
+              loggers.sync.warn("[host-state] queued member turn did not settle cleanly", {
+                actionId: action.actionId,
+                error: error instanceof Error ? error.message : String(error),
+              })
+            )
+            handedOff = true
+            break
+          }
           if (receipt) {
             await workSubmissionAdapter.markHostStateChatTurnStarted(action.actionId)
           }
@@ -809,27 +910,50 @@ export async function installHostStateSync(options: {
     throw error
   }
 
-  let status: HostStateStatus
-  try {
+  const readStatus = async (): Promise<HostStateStatus> => {
     const value = await options.transport.call<unknown>("host_state_status", {
       accountId: options.accountId,
       runtimeTargetId: options.runtimeTargetId,
     })
     if (!isHostStateStatus(value)) throw new Error("host_state_status_malformed")
-    status = value
+    return value
+  }
+
+  let status: HostStateStatus
+  try {
+    status = await readStatus()
   } catch (error) {
     stopped = true
     unsubscribe()
     throw error
   }
+  // What this caller may submit here, for the composer and menus to offer
+  // only that. Read again on every resync: a Host restarted with member
+  // execution switched on or off answers differently.
+  publishOfferedHostStateActions(options.runtimeTargetId, status.supportedActions)
 
   return {
-    status,
+    get status() {
+      return status
+    },
     resync() {
       if (stopped) return Promise.resolve()
       // Serialize explicit recovery with both live events and on-demand reads.
       const result = applying.then(resyncNow)
       applying = result.catch(recoverFromApplyFailure)
+      void result
+        .then(readStatus)
+        .then((fresh) => {
+          if (stopped) return
+          status = fresh
+          refreshOfferedHostStateActions(options.runtimeTargetId, fresh.supportedActions)
+        })
+        .catch((error: unknown) => {
+          // The last answer stands; the Host still refuses what it refuses.
+          loggers.sync.warn("[host-state] status re-read after resync failed", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
       return result
     },
     hydrateSession(sessionId) {
@@ -846,6 +970,7 @@ export async function installHostStateSync(options: {
       if (stopped) return
       stopped = true
       unsubscribe()
+      retractOfferedHostStateActions(options.runtimeTargetId)
     },
   }
 }
@@ -902,7 +1027,12 @@ export async function installHostStateSyncForTarget(options: {
     await hydrateOpenSessions()
     const sync = installed
     return {
-      ...sync,
+      // A getter, not a spread: a resync replaces the status it re-read.
+      get status() {
+        return sync.status
+      },
+      resync: () => sync.resync(),
+      hydrateSession: (sessionId) => sync.hydrateSession(sessionId),
       stop() {
         unsubscribe()
         sync.stop()

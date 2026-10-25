@@ -1552,6 +1552,7 @@
         "hint": "The conversation is re-bound to the new workspace. Anything it left in the old worktree stays on disk.",
         "label": "Workspace",
         "moved": "Conversation moved",
+        "notOffered": "This shared Host doesn't let members move conversations between workspaces.",
         "placeholder": "Choose a workspace",
         "sentToHost": "Sent to your Host, which will move the conversation",
         "refused": {

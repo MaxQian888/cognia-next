@@ -495,7 +495,32 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
     - **Known gaps:**
       - The menu names models by id; the gateway snapshot has no display names to give.
       - An agent conversation offers only its agent's providers, so a chat-only provider cannot be picked there.
-      - The member browser polls `bot_console_read` (403) and `claude_session_context` (503) on a partition. This is pre-existing noise.
+      - ~~The member browser polls `bot_console_read` (403) and `claude_session_context` (503) on a partition.~~ Fixed in item 11.
+
+11. **Member actions follow what the Host offers (P6 follow-up, 2026-10-25).**
+    - **Decisions:** a client reads the `supportedActions` the Host answers `host_state_status` with and hides or disables what it leaves out, saying why. A refused intent no longer fails silently. A message a member sends while their turn runs is queued on the Host and runs as the next turn, because members cannot steer.
+    - **Surface:**
+      - Client:
+        - `lib/sync/host-state-offered-actions.ts` records the answer per Host scope. Every installed sync publishes it, re-reads it on resync and retracts it on stop; installs are counted per target. No answer means "not restricted".
+        - `enqueueHostStateIntentIfAvailable` throws `HostStateActionNotOfferedError` for a kind the Host leaves out and queues nothing. It does not fall back to a local write behind the Host's back.
+        - `useHostStateActionOffered` gates "Move to workspace": the row menus drop it, and session settings disables the picker with the reason. The chat controller sends a mid-turn message as `message.enqueue` where `turn.steer` is not offered.
+        - A rejected change is announced with the `hostStateIntentRefused` diagnostic: rename, archive, pin, folder, order, workspace, model, delete and the folder intents. Conflicts, sends, drafts and the old-Host fallback are not announced.
+        - `useBotHostRead` stops polling after a refusal the Host marks final. `useSdkContextUsage` asks only a Host that offers `claude_send`.
+      - Brain:
+        - Tool-less member chat had no queue. A second send rehydrated the history (`replacesHistory`), which closed the running turn, and the message sat in `dispatching` with no turn. `lib/claude/person-chat-turn.ts` now keeps one line per conversation (`admitPersonChatTurn`).
+        - The dispatcher projects `queue accepted`/`delivered` (or `dropped` with the failure code) for a held message, like the person-agent runner, and frees itself while the message waits.
+        - The line is released only after the turn's settlement has written its reply (`lib/work-submission/terminal-events.ts`), or when the sidecar exits.
+        - Settlement replaces the transcript with the turn's mirror. It now keeps rows written after that mirror was loaded. Before, it deleted the user row of a message the Host accepted mid-turn.
+    - **Verified (2026-10-25, P6f rig, `ark-deepseek-v4.1-flash`):**
+      - The persons tier is green with a new check: two messages sent back to back both reach `acknowledged`, both user rows stay in the transcript, and both get a reply. Before the fix the second stayed `dispatching` forever and its user row was deleted.
+      - In the browser as ada:
+        - Two sends 400 ms apart both ran, in order.
+        - The row menu has no "Move to workspace". Session settings shows the picker disabled with "This shared Host doesn't let members move conversations between workspaces."
+        - `bot_console_read` is asked once per page, and `claude_session_context` is not asked.
+    - **Known gaps:**
+      - A member's browser still repeats some refused reads: `background_job_list` and `background_monitor_list` (403 on each turn), `session_mark_read` (403), and `socket-ticket` (503).
+      - The refusal toast is pinned by unit tests only. With the offered gate, the browser has no path to a refused change.
+      - Stopping a running tool-less turn lets the next held message start, as the sidecar queue does for an owner.
 
 **Intentional dormancy (Rule 7).**
 

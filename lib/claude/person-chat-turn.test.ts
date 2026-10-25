@@ -21,6 +21,9 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { mintPersonModelTicket } from "@/lib/gateway/person-model-ticket"
 import { resolveSendOptions } from "./build-options"
 import {
+  admitPersonChatTurn,
+  endAllPersonChatTurns,
+  endPersonChatTurn,
   forgetPersonChatTurn,
   personChatTerminalEvent,
   sendPersonChatTurn,
@@ -44,7 +47,12 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(ticket as never)
 })
-afterEach(() => forgetPersonChatTurn(session.id))
+afterEach(() => {
+  forgetPersonChatTurn(session.id)
+  endAllPersonChatTurns()
+})
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 it("resolves only a ticket and a deny-all capability grant", async () => {
   const dispatch = jest.fn(
@@ -157,3 +165,82 @@ it.each(["model_access_unavailable", "member_usage_cap_reached", "host_surface_f
     expect(dispatch).not.toHaveBeenCalled()
   }
 )
+
+describe("one line per conversation", () => {
+  it("holds a turn admitted mid-turn until the running one ends, in admission order", async () => {
+    const order: string[] = []
+    const first = admitPersonChatTurn(session.id, async () => {
+      order.push("first")
+    })
+    const second = admitPersonChatTurn(session.id, async () => {
+      order.push("second")
+    })
+    const third = admitPersonChatTurn(session.id, async () => {
+      order.push("third")
+    })
+    expect([first.queued, second.queued, third.queued]).toEqual([false, true, true])
+    await first.started
+    await flush()
+    expect(order).toEqual(["first"])
+
+    endPersonChatTurn(session.id)
+    await second.started
+    await flush()
+    expect(order).toEqual(["first", "second"])
+    endPersonChatTurn(session.id)
+    await third.started
+    expect(order).toEqual(["first", "second", "third"])
+    endPersonChatTurn(session.id)
+    await flush()
+    // The line is empty again: the next turn starts at once.
+    expect(admitPersonChatTurn(session.id, async () => {}).queued).toBe(false)
+  })
+
+  it("keeps conversations apart", async () => {
+    admitPersonChatTurn(session.id, async () => {})
+    expect(admitPersonChatTurn("other-session", async () => {}).queued).toBe(false)
+  })
+
+  it("lets the next turn start when one never reached the runtime", async () => {
+    const failing = admitPersonChatTurn(session.id, async () => {
+      throw new Error("send refused")
+    })
+    const next = jest.fn(async () => {})
+    const queued = admitPersonChatTurn(session.id, next)
+    expect(queued.queued).toBe(true)
+    await expect(failing.started).rejects.toThrow("send refused")
+    await queued.started
+    expect(next).toHaveBeenCalledTimes(1)
+  })
+
+  it("ends a turn stopped before its send, which no runtime end will report", async () => {
+    let releaseMint!: () => void
+    jest.mocked(mintPersonModelTicket).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseMint = () => resolve(ticket as never)
+        })
+    )
+    const dispatch = jest.fn(async () => {})
+    const stopped = admitPersonChatTurn(session.id, () => sendPersonChatTurn(session, dispatch))
+    const next = jest.fn(async () => {})
+    const queued = admitPersonChatTurn(session.id, next)
+    await flush()
+    forgetPersonChatTurn(session.id)
+    releaseMint()
+    await stopped.started
+    await queued.started
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledTimes(1)
+  })
+
+  it("frees every line when the runtime goes away", async () => {
+    admitPersonChatTurn(session.id, async () => {})
+    const next = jest.fn(async () => {})
+    const queued = admitPersonChatTurn(session.id, next)
+    await flush()
+    endAllPersonChatTurns()
+    await queued.started
+    expect(next).toHaveBeenCalledTimes(1)
+  })
+})

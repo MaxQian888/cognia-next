@@ -26,6 +26,8 @@ jest.mock("@/lib/task-workspace/managed-workspace", () => ({
 }))
 
 import { __resetSearchIndexerForTesting } from "@/lib/chat/search/indexer"
+import { hostStateActionOffered } from "@/lib/sync/host-state-offered-actions"
+import type { HostStateIntentKind } from "@cognia/agent-config-types/host-state"
 import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
 import {
@@ -87,6 +89,12 @@ jest.mock("@/lib/work-submission/host-adapter", () => ({
   claimHostStateChatTurnForDispatch: (...args: unknown[]) =>
     claimHostStateChatTurnForDispatchMock(...args),
   markHostStateChatTurnStarted: (...args: unknown[]) => markHostStateChatTurnStartedMock(...args),
+  hostStateRunId: (actionId: string) => `hoststate:${actionId}`,
+}))
+const settleChatTurnMock = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/work-submission/chat-adapter", () => ({
+  ...jest.requireActual("@/lib/work-submission/chat-adapter"),
+  settleChatTurn: (...args: unknown[]) => settleChatTurnMock(...args),
 }))
 
 const stopLeaseHeartbeatMock = jest.fn()
@@ -2374,6 +2382,50 @@ describe("HostStateService", () => {
     sync.stop()
   })
 
+  it("records what the Host offers this caller, re-reads it on resync and forgets it on stop", async () => {
+    const indexChannel = sessionIndexChannel(scope.runtimeTargetId)
+    let supportedActions: HostStateIntentKind[] | undefined = ["session.rename", "turn.steer"]
+    const transport: Transport = {
+      subscribe: () => () => undefined,
+      call: async (command, payload) => {
+        if (command === "host_state_status") return { ...writableStatus, supportedActions } as never
+        const state = {
+          kind: "session-index" as const,
+          channel: payload!.channel as string,
+          revision: 0,
+          sessions: [],
+        }
+        return {
+          channel: payload!.channel,
+          hostId,
+          hostGeneration: 4,
+          cutHostSeq: 8,
+          revision: 0,
+          digest: hostStateDigest(state),
+          state,
+        } as never
+      },
+    }
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [indexChannel],
+    })
+    expect(hostStateActionOffered("turn.steer", scope.runtimeTargetId)).toBe(true)
+    expect(hostStateActionOffered("session.workspace", scope.runtimeTargetId)).toBe(false)
+    // Another target is not this Host's answer.
+    expect(hostStateActionOffered("session.workspace", "other-target")).toBe(true)
+
+    supportedActions = ["session.rename"]
+    await sync.resync()
+    await flush()
+    expect(hostStateActionOffered("turn.steer", scope.runtimeTargetId)).toBe(false)
+    expect(sync.status.supportedActions).toEqual(["session.rename"])
+
+    sync.stop()
+    expect(hostStateActionOffered("turn.steer", scope.runtimeTargetId)).toBe(true)
+  })
+
   it.each(["stop", "target switch"])(
     "does not persist a hydration response after %s",
     async (reason) => {
@@ -3131,6 +3183,9 @@ describe("HostState Agent RPC dispatcher", () => {
   }, 30_000)
 
   afterEach(async () => {
+    const personChat = await import("@/lib/claude/person-chat-turn")
+    personChat.forgetPersonChatTurn("session-1")
+    personChat.endAllPersonChatTurns()
     await getDb().delete()
     __resetDbForTesting()
   })
@@ -3395,6 +3450,117 @@ describe("HostState Agent RPC dispatcher", () => {
       mint.mockReset()
       resolve.mockReset()
     }
+  })
+  describe("a member's message sent while its tool-less turn runs", () => {
+    const enqueue = (actionId: string, messageId: string, text: string) =>
+      action({ kind: "message.enqueue", messageId, text, attachments: [] }, { actionId })
+    let projected: AgentEventEnvelope[]
+    let dispatcher: ReturnType<typeof createAgentRpcHostStateDispatcher>
+    beforeEach(async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      const gateway = await import("@/lib/gateway/person-model-ticket")
+      const resolver = await import("@/lib/claude/build-options")
+      jest.mocked(gateway.mintPersonModelTicket).mockResolvedValue({
+        secret: "ticket",
+        endpoint: "http://127.0.0.1:9000/v1",
+        expiresAt: Number.MAX_SAFE_INTEGER,
+      } as never)
+      jest.mocked(resolver.resolveSendOptions).mockResolvedValue({ toolSurface: "none" } as never)
+      await getDb().sessions.update("session-1", {
+        providerOverride: "anthropic",
+        model: "org-model",
+      })
+      initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+      acceptHostStateChatTurnMock.mockImplementation(async (queued: HostStateAction) => ({
+        submissionId: `work:hoststate:${queued.actionId}`,
+      }))
+      claimHostStateChatTurnForDispatchMock.mockResolvedValue("claimed")
+      settleChatTurnMock.mockClear()
+      projected = []
+      dispatcher = createAgentRpcHostStateDispatcher({
+        projectRuntimeEnvelope: async (envelope) => {
+          projected.push(envelope)
+        },
+      })
+    })
+    afterEach(async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      const gateway = await import("@/lib/gateway/person-model-ticket")
+      const resolver = await import("@/lib/claude/build-options")
+      initializePersonChat("brain", {})
+      jest.mocked(gateway.mintPersonModelTicket).mockReset()
+      jest.mocked(resolver.resolveSendOptions).mockReset()
+      acceptHostStateChatTurnMock.mockReset().mockResolvedValue(null)
+    })
+    const queueEvents = () =>
+      projected.map((envelope) =>
+        envelope.event.kind === "queue"
+          ? [envelope.event.queueId, envelope.event.phase]
+          : [envelope.eventId, envelope.event.kind]
+      )
+
+    it("waits on the Host for the running turn to settle, then runs as the next turn", async () => {
+      await dispatcher(enqueue("action-1", "m-1", "first"))
+      expect(sendPromptMock).toHaveBeenCalledTimes(1)
+      expect(projected).toEqual([])
+
+      // Sending it now would rehydrate the history and close the running turn.
+      await dispatcher(enqueue("action-2", "m-2", "second"))
+      await flush()
+      expect(sendPromptMock).toHaveBeenCalledTimes(1)
+      expect(queueEvents()).toEqual([["action-2", "accepted"]])
+      expect(markHostStateChatTurnStartedMock).toHaveBeenCalledTimes(1)
+      expect(markHostStateChatTurnStartedMock).toHaveBeenLastCalledWith("action-1")
+      expect(projected[0]).toMatchObject({
+        sessionId: "session-1",
+        turnId: "action-2",
+        event: { delivery: "after-settle" },
+      })
+
+      const { endPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
+      endPersonChatTurn("session-1")
+      await flush()
+      expect(queueEvents()).toEqual([
+        ["action-2", "accepted"],
+        ["action-2", "delivered"],
+      ])
+      expect(sendPromptMock).toHaveBeenCalledTimes(2)
+      expect(sendPromptMock).toHaveBeenLastCalledWith(
+        "session-1",
+        "second",
+        expect.objectContaining({ toolSurface: "none" }),
+        expect.objectContaining({ commandId: "action-2" })
+      )
+      expect(markHostStateChatTurnStartedMock).toHaveBeenLastCalledWith("action-2")
+      expect(settleChatTurnMock).not.toHaveBeenCalled()
+    })
+
+    it("drops a queued message whose send fails, with the reason, and settles its turn", async () => {
+      const gateway = await import("@/lib/gateway/person-model-ticket")
+      await dispatcher(enqueue("action-1", "m-1", "first"))
+      await dispatcher(enqueue("action-2", "m-2", "second"))
+      jest
+        .mocked(gateway.mintPersonModelTicket)
+        .mockRejectedValue({ code: "member_usage_cap_reached", resetAt: 123 })
+      const { endPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
+      endPersonChatTurn("session-1")
+      await flush()
+      expect(queueEvents()).toEqual([
+        ["action-2", "accepted"],
+        ["action-2", "delivered"],
+        ["action-2", "dropped"],
+      ])
+      expect(projected[2]?.event).toMatchObject({ reason: "member_usage_cap_reached" })
+      expect(settleChatTurnMock).toHaveBeenCalledWith({
+        runId: "hoststate:action-2",
+        outcome: "failed",
+        errorCode: "member_usage_cap_reached",
+        resetAt: 123,
+      })
+      expect(stopLeaseHeartbeatMock).toHaveBeenCalled()
+      expect(sendPromptMock).toHaveBeenCalledTimes(1)
+      expect(markHostStateChatTurnStartedMock).not.toHaveBeenCalledWith("action-2")
+    })
   })
   describe("p6e sandboxed member agents", () => {
     const policy = {

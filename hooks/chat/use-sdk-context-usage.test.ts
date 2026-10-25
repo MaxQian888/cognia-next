@@ -31,6 +31,10 @@ jest.mock("@/lib/claude/ipc", () => ({
 }))
 
 import { act, renderHook, waitFor } from "@testing-library/react"
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
 import { useSdkContextUsage } from "./use-sdk-context-usage"
 
 const SNAP = { totalTokens: 10, maxTokens: 100, percentage: 0.1 }
@@ -41,6 +45,7 @@ beforeEach(() => {
   mockSessionStatus = "idle"
   mockRuntime = "claude-agent-sdk"
   mockHostProfile.mockReturnValue("desktop")
+  __resetRuntimeSnapshotForTesting()
 })
 
 describe("useSdkContextUsage", () => {
@@ -94,6 +99,30 @@ describe("useSdkContextUsage", () => {
       expect(getSessionContextUsage).toHaveBeenCalledWith("s1")
     }
   )
+
+  it("does not ask a paired Host whose Claude host tools are off for this caller", async () => {
+    // An org member's partition: the control is refused there every time.
+    mockHostProfile.mockReturnValue("cloud-companion")
+    const negotiate = (operations: string[]) =>
+      setRuntimeSnapshot({
+        target: null,
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: { compatible: true, operations, grants: [] },
+      })
+    negotiate(["host_state_submit", "agent_send"])
+    renderHook(() => useSdkContextUsage("s1", "anthropic"))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(getSessionContextUsage).not.toHaveBeenCalled()
+
+    // An operator's paired Host offers them, and is asked.
+    getSessionContextUsage.mockResolvedValue(SNAP)
+    act(() => negotiate(["host_state_submit", "claude_send"]))
+    const { result } = renderHook(() => useSdkContextUsage("s1", "anthropic"))
+    await waitFor(() => expect(result.current.snapshot).toEqual(SNAP))
+  })
 
   it("clears the snapshot when the control call rejects", async () => {
     getSessionContextUsage.mockRejectedValue(new Error("no_active_session"))

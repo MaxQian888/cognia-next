@@ -512,7 +512,8 @@ describe("createOutboundRunner", () => {
           actionId: "old-host",
           action: expect.objectContaining({ kind: "folder.create" }),
         }),
-        "host_state_invalid_submit_request"
+        "host_state_invalid_submit_request",
+        "rejected"
       )
       await runner.stop()
     })
@@ -543,7 +544,8 @@ describe("createOutboundRunner", () => {
       expect(settleRejectedHostStateIntentMock).toHaveBeenCalledTimes(1)
       expect(settleRejectedHostStateIntentMock).toHaveBeenCalledWith(
         expect.objectContaining({ actionId: "refused" }),
-        "host_state_forbidden"
+        "host_state_forbidden",
+        "rejected"
       )
       await runner.stop()
     })

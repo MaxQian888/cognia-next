@@ -34,6 +34,7 @@ export function useBotHostRead<T>(view: "catalog" | "installations" | "credentia
   useEffect(() => {
     if (!remote) return
     let stopped = false
+    let refused = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const read = async () => {
       try {
@@ -48,11 +49,17 @@ export function useBotHostRead<T>(view: "catalog" | "installations" | "credentia
           throw new Error("Invalid Bot host read response")
         if (!stopped && pairing === getCompanionConfigGeneration())
           setReceived({ target, pairing, view, data })
-      } catch {
+      } catch (error) {
+        // A refusal the Host marks final (an org member asking for the
+        // operator's console: 403 `host_surface_forbidden`) is the same answer
+        // on every poll; asked every 3 s, it was a 403 per poll for as long as
+        // a page with a Bot badge stayed open. Stop asking until the pairing
+        // or the view changes. A transient failure is retried as before.
+        if ((error as { retryable?: unknown } | null)?.retryable === false) refused = true
         if (!stopped && pairing === getCompanionConfigGeneration())
           setReceived({ target, pairing, view, failed: true })
       } finally {
-        if (!stopped) timer = setTimeout(read, 3000)
+        if (!stopped && !refused) timer = setTimeout(read, 3000)
       }
     }
     void read()

@@ -32,6 +32,11 @@ import {
   withdrawQueuedAction,
   withdrawUnsentHostStateMessages,
 } from "./mobile-outbound-queue"
+import {
+  HostStateActionNotOfferedError,
+  publishOfferedHostStateActions,
+  retractOfferedHostStateActions,
+} from "@/lib/sync/host-state-offered-actions"
 import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
 import {
@@ -1499,6 +1504,24 @@ describe("Stop: turn fence, priority and withdrawal", () => {
     expect(intentOf(abort)).toEqual({ kind: "turn.abort", expectedTurnId: "turn-1" })
     expect(intentOf(steer)).toMatchObject({ expectedTurnId: "turn-1" })
     expect(intentOf(message)).not.toHaveProperty("expectedTurnId")
+  })
+
+  it("refuses up front an intent the Host's supportedActions leaves out, queueing nothing", async () => {
+    negotiate(["host_state_submit"])
+    publishOfferedHostStateActions(scope.targetId, ["message.enqueue", "turn.abort"])
+    try {
+      await expect(
+        enqueueHostStateIntentIfAvailable({
+          sessionId: "s-stop",
+          action: { kind: "turn.steer", text: "also" },
+        })
+      ).rejects.toBeInstanceOf(HostStateActionNotOfferedError)
+      expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+      // What it does offer still goes through.
+      expect(await send("m1", 10)).not.toBeNull()
+    } finally {
+      retractOfferedHostStateActions(scope.targetId)
+    }
   })
 
   it("leaves controls unstamped for a Host that did not advertise the fence", async () => {

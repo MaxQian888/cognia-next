@@ -22,6 +22,7 @@ import {
 import { getSessionContextUsage } from "@/lib/claude/ipc"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 import { useChatStore, useSessionStatus } from "@/stores/chat"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 
 /** Statuses during which a turn is in flight (no fresh context to read yet). */
 function isBusy(status: string | undefined): boolean {
@@ -40,7 +41,13 @@ export function useSdkContextUsage(
   const [snapshot, setSnapshot] = useState<SdkContextUsage | null>(null)
 
   // A local or paired host can report which controls the selected runtime supports.
-  const enabled = agentHostAvailable(resolveAgentExecutionEnvironment()) && !!sessionId
+  // A negotiated Host whose Claude host tools are off for this caller (an org
+  // member's partition runs no Claude SDK session of theirs) refuses the
+  // control, so it is not asked: each refusal was a 503 per completed turn.
+  const host = useRuntimeSnapshot().host
+  const hostSessionControls = !host?.compatible || host.operations.includes("claude_send")
+  const enabled =
+    hostSessionControls && agentHostAvailable(resolveAgentExecutionEnvironment()) && !!sessionId
 
   // The live host owns runtime selection; a custom provider may also run the
   // Claude SDK. Unsupported runtimes are probed once per scope, not each turn.

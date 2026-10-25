@@ -33,6 +33,10 @@ import {
 } from "@/lib/runtime/runtime-target-context"
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
+import {
+  HostStateActionNotOfferedError,
+  hostStateActionOffered,
+} from "@/lib/sync/host-state-offered-actions"
 
 export interface EnqueueInput {
   command: MobileOutboundCommand
@@ -129,6 +133,10 @@ export async function hostStateSessionIntentAvailable(sessionId: string): Promis
  * legacy path. Once eligible, queue capacity, client sequence allocation and
  * row insertion happen in one transaction so two tabs cannot allocate the
  * same sequence or show optimism before durable storage succeeds.
+ *
+ * Throws {@link HostStateActionNotOfferedError} for an intent the Host's
+ * `supportedActions` leaves out: it would only be refused after the fact, and
+ * falling back to the legacy path would do it locally behind the Host's back.
  */
 export async function enqueueHostStateIntentIfAvailable(
   input: EnqueueHostStateIntentInput
@@ -157,6 +165,9 @@ export async function enqueueHostStateIntentIfAvailable(
     targetId: local.targetId,
   }
   assertActive()
+  if (!hostStateActionOffered(input.action.kind, scope.targetId)) {
+    throw new HostStateActionNotOfferedError(input.action.kind)
+  }
   const targetsIndex = hostStateIntentTargetsSessionIndex(input.action.kind)
   if (targetsIndex && input.sessionId !== undefined) {
     throw new Error("host_state_index_intent_names_session")

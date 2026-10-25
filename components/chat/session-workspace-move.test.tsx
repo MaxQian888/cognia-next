@@ -14,6 +14,13 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// Whether the paired Host offers the move; true everywhere but an org
+// member's partition.
+const mockMoveOffered = jest.fn(() => true)
+jest.mock("@/hooks/data/use-host-state-action-offered", () => ({
+  useHostStateActionOffered: () => mockMoveOffered(),
+}))
+
 import { useProjectStore } from "@/stores/project/project-store"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { SessionWorkspaceMove } from "./session-workspace-move"
@@ -52,6 +59,7 @@ function seed(running = false) {
 }
 
 beforeEach(() => {
+  mockMoveOffered.mockReturnValue(true)
   updateSession.mockClear()
   toastError.mockClear()
   toastSuccess.mockClear()
@@ -83,6 +91,16 @@ describe("SessionWorkspaceMove", () => {
       expect(byId["project-a"]).not.toContain("s1")
       expect(byId["project-b"]).toContain("s1")
     })
+  })
+
+  it("names the workspace read-only, with the reason, where the Host refuses members the move", () => {
+    seed()
+    mockMoveOffered.mockReturnValue(false)
+    render(<SessionWorkspaceMove session={session} />)
+    expect(screen.getByLabelText("label")).toHaveTextContent("Alpha")
+    expect(screen.getByLabelText("label")).toBeDisabled()
+    expect(screen.getByText("notOffered")).toBeInTheDocument()
+    expect(screen.queryByText("hint")).toBeNull()
   })
 
   it("refuses while a turn is in flight and writes nothing", async () => {

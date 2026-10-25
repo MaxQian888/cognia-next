@@ -76,6 +76,14 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "view-logs" }],
     icon: "settings",
   },
+  // Sending the same change again meets the same refusal; the code says why.
+  hostStateIntentRefused: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "view-logs" }],
+    icon: "settings",
+  },
   // The chat exists and works, just not where the agent asked to run. The fix
   // is either the agent's runtime field or the external agent itself.
   agentRuntimeUnavailable: {

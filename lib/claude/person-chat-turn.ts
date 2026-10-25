@@ -9,6 +9,61 @@ export function forgetPersonChatTurn(sessionId: string): void {
   turns.delete(sessionId)
 }
 
+// One line per conversation. The sidecar queues an owner's message sent while
+// a turn runs; a member's tool-less turn instead reaches it as a fresh send
+// that rehydrates the history (`replacesHistory`), which closes the running
+// runtime. So a message the Host admits mid-turn waits here for that turn to
+// settle, and starts only once its reply is in the history it reads.
+const lines = new Map<string, Promise<void>>()
+// The admitted turn currently holding its conversation's line.
+const holders = new Map<string, () => void>()
+
+/**
+ * Admit a member's tool-less turn. With nothing ahead of it, `start` runs now;
+ * otherwise it runs once every turn admitted before it has settled, in the
+ * order they were admitted, and `queued` says so.
+ */
+export function admitPersonChatTurn(
+  sessionId: string,
+  start: () => Promise<void>
+): { queued: boolean; started: Promise<void> } {
+  const ahead = lines.get(sessionId)
+  let release!: () => void
+  const ended = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const started = (ahead ?? Promise.resolve()).then(() => {
+    holders.set(sessionId, release)
+    return start()
+  })
+  // A send that failed never reached the runtime, so no end will come for it.
+  started.catch(() => endPersonChatTurn(sessionId, release))
+  lines.set(sessionId, ended)
+  void ended.then(() => {
+    if (lines.get(sessionId) === ended) lines.delete(sessionId)
+  })
+  return { queued: ahead !== undefined, started }
+}
+
+/**
+ * The conversation's running turn has settled, its reply persisted: the next
+ * admitted turn may start. `release` names the turn when the caller knows it.
+ */
+export function endPersonChatTurn(sessionId: string, release?: () => void): void {
+  const holder = holders.get(sessionId)
+  if (release && holder !== release) {
+    release()
+    return
+  }
+  holders.delete(sessionId)
+  holder?.()
+}
+
+/** The runtime is gone: no running turn will report its end. */
+export function endAllPersonChatTurns(): void {
+  for (const sessionId of [...holders.keys()]) endPersonChatTurn(sessionId)
+}
+
 export async function sendPersonChatTurn(
   session: ChatSession,
   dispatch: (options: SendOptions, refreshed: boolean) => Promise<void>
@@ -66,6 +121,8 @@ export async function sendPersonChatTurn(
       state.refreshed = true
       await state.retry()
     }
+    // Stopped before the send: nothing reached the runtime to end later.
+    if (state.stage !== "send") endPersonChatTurn(session.id)
   } catch (error) {
     turns.delete(session.id)
     throw error

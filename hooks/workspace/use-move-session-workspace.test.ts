@@ -34,6 +34,13 @@ jest.mock("@/lib/db/schema", () => {
   }
 })
 
+// Whether the paired Host offers the move; true everywhere but an org
+// member's partition.
+const mockMoveOffered = jest.fn(() => true)
+jest.mock("@/hooks/data/use-host-state-action-offered", () => ({
+  useHostStateActionOffered: () => mockMoveOffered(),
+}))
+
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { useProjectStore } from "@/stores/project/project-store"
 import {
@@ -261,6 +268,13 @@ describe("useSessionWorkspaceMoveMenu", () => {
   it("has nowhere to move a conversation when its workspace is the only one", () => {
     seed()
     useProjectStore.setState((state) => ({ projects: state.projects.slice(0, 1) }))
+    const { result } = renderHook(() => useSessionWorkspaceMoveMenu(session))
+    expect(result.current.canMoveWorkspace).toBe(false)
+  })
+
+  it("offers no move where the paired Host refuses it to this caller", () => {
+    seed()
+    mockMoveOffered.mockReturnValueOnce(false)
     const { result } = renderHook(() => useSessionWorkspaceMoveMenu(session))
     expect(result.current.canMoveWorkspace).toBe(false)
   })

@@ -567,7 +567,7 @@ async function settleRefusedHostStateRow(
   const action = Array.isArray(actions) && actions.length === 1 ? actions[0] : undefined
   if (!isHostStateAction(action)) return
   const { settleRejectedHostStateIntent } = await import("@/lib/sync/host-state-intent-settlement")
-  await settleRejectedHostStateIntent(action, rejectionCode)
+  await settleRejectedHostStateIntent(action, rejectionCode, outcome)
 }
 
 async function reconcileTerminalHostState(

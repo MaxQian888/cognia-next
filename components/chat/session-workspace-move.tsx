@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useMoveSessionWorkspace } from "@/hooks/workspace/use-move-session-workspace"
+import { useHostStateActionOffered } from "@/hooks/data/use-host-state-action-offered"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -31,6 +32,9 @@ export function SessionWorkspaceMove({ session }: SessionWorkspaceMoveProps) {
   const projects = useProjectStore((s) => s.projects)
   // The same move the conversation list's row menu makes.
   const { move, busy } = useMoveSessionWorkspace()
+  // The paired Host refuses this caller the move (an org member's partition):
+  // the workspace is still named, read-only, with the reason.
+  const offered = useHostStateActionOffered("session.workspace")
 
   // Archived workspaces are not destinations, but the one this conversation is
   // in still has to name itself: Radix renders an EMPTY trigger for a value
@@ -47,7 +51,7 @@ export function SessionWorkspaceMove({ session }: SessionWorkspaceMoveProps) {
     <div className="flex flex-col gap-1" data-testid="session-workspace-move">
       <Select
         value={session.projectId ?? ""}
-        disabled={busy}
+        disabled={busy || !offered}
         onValueChange={(next) => void move(session, next)}
       >
         <SelectTrigger aria-label={t("label")} size="sm">
@@ -63,7 +67,7 @@ export function SessionWorkspaceMove({ session }: SessionWorkspaceMoveProps) {
       </Select>
       {/* The old managed worktree is left on disk rather than removed: it may
           hold work that was never applied. */}
-      <p className="text-xs text-muted-foreground">{t("hint")}</p>
+      <p className="text-xs text-muted-foreground">{t(offered ? "hint" : "notOffered")}</p>
     </div>
   )
 }

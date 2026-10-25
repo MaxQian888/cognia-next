@@ -26,6 +26,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { useProjectStore } from "@/stores/project/project-store"
+import { useHostStateActionOffered } from "@/hooks/data/use-host-state-action-offered"
 import type { MovableSession } from "@/lib/chat/session-workspace-move-writes"
 
 export type { MovableSession }
@@ -99,10 +100,14 @@ export function useSessionWorkspaceMoveMenu(session: MovableSession): SessionWor
     [projects]
   )
   const { move, busy } = useMoveSessionWorkspace()
+  // A Host that refuses the move for this caller (an org member's partition)
+  // gets no submenu: the move would only come back refused.
+  const offered = useHostStateActionOffered("session.workspace")
   return {
     workspaceTargets,
     // An archived row is frozen in place (ADR-0213), workspace included.
     canMoveWorkspace:
+      offered &&
       session.archivedAt == null &&
       workspaceTargets.some((workspace) => workspace.id !== session.projectId),
     movingWorkspace: busy,

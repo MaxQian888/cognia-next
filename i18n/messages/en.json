@@ -9162,6 +9162,7 @@
           "hint": "The conversation is re-bound to the new workspace. Anything it left in the old worktree stays on disk.",
           "label": "Workspace",
           "moved": "Conversation moved",
+          "notOffered": "This shared Host doesn't let members move conversations between workspaces.",
           "placeholder": "Choose a workspace",
           "refused": {
             "same-workspace": "The conversation is already in that workspace.",
@@ -16034,6 +16035,10 @@
       "hostSessionRefused": {
         "hint": "The paired host refused this new chat — usually this device doesn't have Agent Control on that host. Ask the host's owner to grant it, then start the chat again.",
         "label": "Conversation not created on the host"
+      },
+      "hostStateIntentRefused": {
+        "hint": "The paired host refused this change, so nothing changed there. The reason is below; trying again gets the same answer until it changes.",
+        "label": "Change not applied on the host"
       },
       "hostUnavailable": {
         "hint": "The remote host that should run this turn isn't reachable — retry, or check its configuration.",

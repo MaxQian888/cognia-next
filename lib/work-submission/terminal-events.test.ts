@@ -72,7 +72,7 @@ describe("work submission terminal events", () => {
       event: { type: "assistant" } as never,
     })
     handler?.({ type: "session_ended", sessionId: "session-1" })
-    for (let attempt = 0; attempt < 10 && settleSession.mock.calls.length === 0; attempt += 1) {
+    for (let attempt = 0; attempt < 20 && persistMessages.mock.calls.length === 0; attempt += 1) {
       await Promise.resolve()
     }
 
@@ -81,6 +81,43 @@ describe("work submission terminal events", () => {
       "session-1",
       expect.objectContaining({ outcome: "completed", writeTranscript: expect.any(Function) })
     )
+    stop()
+  })
+
+  it("keeps a message the Host accepted after the turn's mirror was loaded", async () => {
+    let handler: ((event: ClaudeEvent) => void) | undefined
+    const first = { id: "user-1", role: "user", parts: [] }
+    const reply = { id: "assistant-1", role: "assistant", parts: [{ type: "text", text: "done" }] }
+    // Sent mid-turn: written on acceptance, after this turn's first frame.
+    const queued = { id: "user-2", role: "user", parts: [{ type: "text", text: "next" }] }
+    let rows: unknown[] = [first]
+    const persistMessages = jest.fn(async () => {})
+    let settled!: () => void
+    const done = new Promise<void>((resolve) => {
+      settled = resolve
+    })
+    const stop = startWorkSubmissionTerminalEvents({
+      subscribe: async (next) => {
+        handler = next
+        return () => {}
+      },
+      loadMessages: async () => rows as never,
+      applyEvent: (messages) => ({ messages: [...messages, reply] as never }),
+      persistMessages,
+      settleSession: async (_sessionId, input) => {
+        await input.writeTranscript?.()
+        settled()
+        return true
+      },
+      hasOpenSubmission: async () => true,
+    })
+    await Promise.resolve()
+    handler?.({ type: "event", sessionId: "session-1", event: { type: "assistant" } as never })
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
+    rows = [first, queued]
+    handler?.({ type: "session_ended", sessionId: "session-1" })
+    await done
+    expect(persistMessages).toHaveBeenCalledWith("session-1", [first, reply, queued])
     stop()
   })
 
@@ -348,3 +385,74 @@ it("writes a real reply and terminal settlement only into the person account dat
     initializePersonChat("brain", {})
   }
 }, 30_000)
+
+it("starts a member's queued tool-less turn only once the running turn has settled", async () => {
+  const { initializePersonChat } = await import("@/lib/headless/person-chat")
+  const personChat = await import("@/lib/claude/person-chat-turn")
+  initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+  let handler: ((event: ClaudeEvent) => void) | undefined
+  let settled!: () => void
+  const settleSession = jest.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        settled = () => resolve(true)
+      })
+  )
+  const stop = startWorkSubmissionTerminalEvents({
+    subscribe: async (next) => {
+      handler = next
+      return () => {}
+    },
+    settleSession,
+  })
+  try {
+    await Promise.resolve()
+    const running = personChat.admitPersonChatTurn("queued-session", async () => {})
+    const next = jest.fn(async () => {})
+    const queued = personChat.admitPersonChatTurn("queued-session", next)
+    await running.started
+    handler?.({ type: "session_ended", sessionId: "queued-session" })
+    for (let tick = 0; tick < 30 && settleSession.mock.calls.length === 0; tick += 1)
+      await Promise.resolve()
+    expect(settleSession).toHaveBeenCalledTimes(1)
+    // The reply is not in the history yet: the next turn would read without it.
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve()
+    expect(next).not.toHaveBeenCalled()
+    settled()
+    await queued.started
+    expect(next).toHaveBeenCalledTimes(1)
+  } finally {
+    stop()
+    personChat.endAllPersonChatTurns()
+    initializePersonChat("brain", {})
+  }
+})
+
+it("frees a member's queued tool-less turns when the sidecar exits", async () => {
+  const { initializePersonChat } = await import("@/lib/headless/person-chat")
+  const personChat = await import("@/lib/claude/person-chat-turn")
+  initializePersonChat("person-brain", { COGNIA_PERSON_CHAT: "tool-less" })
+  let handler: ((event: ClaudeEvent) => void) | undefined
+  const stop = startWorkSubmissionTerminalEvents({
+    subscribe: async (next) => {
+      handler = next
+      return () => {}
+    },
+    listDispatched: async () => [],
+    loadMessages: async () => [],
+    settleSubmission: async () => true,
+  })
+  try {
+    await Promise.resolve()
+    personChat.admitPersonChatTurn("exited-session", async () => {})
+    const next = jest.fn(async () => {})
+    const queued = personChat.admitPersonChatTurn("exited-session", next)
+    await Promise.resolve()
+    handler?.({ type: "sidecar_exited" })
+    await queued.started
+    expect(next).toHaveBeenCalledTimes(1)
+  } finally {
+    stop()
+    initializePersonChat("brain", {})
+  }
+})

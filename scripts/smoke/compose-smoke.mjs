@@ -1768,6 +1768,68 @@ async function personsTurn(person, seed, text, waitSeconds = 30, modelPick) {
   }
 }
 
+/**
+ * Two messages sent back to back into one conversation, the second while the
+ * first turn runs: what a member's device does now that the Host offers it no
+ * steering. The Host queues the second and runs it when the first settles.
+ */
+async function personsFollowUp(person, seed, waitSeconds = 60) {
+  const sessionId = `smoke-follow-${person.subject}-${randomUUID()}`
+  const [created] = await submitPartition(person, person.state, [
+    hostStateAction(person.state.scope, person.state.status, sessionId, 1, {
+      kind: "session.create",
+      title: "Smoke follow-up",
+      seed,
+    }),
+  ])
+  check(
+    created?.outcome === "applied",
+    `${person.subject}: follow-up session created (got ${JSON.stringify(created)})`
+  )
+  const send = (clientSeq, text, baseRevision) =>
+    hostStateAction(
+      person.state.scope,
+      person.state.status,
+      sessionId,
+      clientSeq,
+      { kind: "message.enqueue", messageId: randomUUID(), text, attachments: [] },
+      baseRevision
+    )
+  const first = send(2, "first message: reply with one short sentence", 1)
+  const [firstReceipt] = await submitPartition(person, person.state, [first])
+  const snapshot = await rpc(
+    "host_state_snapshot",
+    {
+      accountId: person.state.scope.accountId,
+      runtimeTargetId: person.state.scope.runtimeTargetId,
+      channel: first.channel,
+    },
+    person.auth
+  )
+  const second = send(
+    3,
+    "second message, sent while the first runs: reply with one short sentence",
+    snapshot.body?.state?.revision
+  )
+  const [secondReceipt] = await submitPartition(person, person.state, [second])
+  check(
+    firstReceipt?.outcome !== "rejected" && secondReceipt?.outcome !== "rejected",
+    `${person.subject}: both messages are accepted (got ${JSON.stringify([firstReceipt, secondReceipt])})`
+  )
+  let messages = []
+  let fates = []
+  for (let attempt = 0; attempt < waitSeconds; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    fates = [await personsTurnFate(person, first), await personsTurnFate(person, second)]
+    if (fates.some((fate) => fate.operation?.status === "failed")) break
+    const page = await rpc("message_get_by_session", { session_id: sessionId }, person.auth)
+    messages = page.body?.items ?? page.body ?? []
+    const replies = messages.filter((message) => message?.role === "assistant").length
+    if (replies >= 2 && fates.every((fate) => fate.operation?.status === "acknowledged")) break
+  }
+  return { messages, fates }
+}
+
 /** The enqueue's fate and the turn's end state, as a partition client sees them. */
 async function personsTurnFate(person, action) {
   const snapshot = await rpc(
@@ -1841,6 +1903,15 @@ async function personsChat(person, owner) {
   check(
     personsReplied(switched) && switched.turn === "completed",
     `${person.subject}'s turn runs on the model picked through session.model (got ${switched.turn}, ${JSON.stringify(switched.operation)})`
+  )
+  const followUp = await personsFollowUp(person, seed)
+  const replies = followUp.messages.filter((message) => message?.role === "assistant")
+  const sent = followUp.messages.filter((message) => message?.role === "user")
+  check(
+    replies.length >= 2 &&
+      sent.length >= 2 &&
+      followUp.fates.every((fate) => fate.operation?.status === "acknowledged"),
+    `${person.subject}: a message sent mid-turn runs as the next turn and both stay in the transcript (sent ${sent.length}, replies ${replies.length}, ${JSON.stringify(followUp.fates)})`
   )
   const capped = await rpc(
     "org_member_usage_cap_set",
