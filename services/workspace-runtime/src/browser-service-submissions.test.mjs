@@ -41,6 +41,11 @@ async function fixtureServers(t, pages) {
         )
         return
       }
+      if (SCRIPTS[url.pathname]) {
+        response.writeHead(200, { "content-type": "text/javascript" })
+        response.end(SCRIPTS[url.pathname])
+        return
+      }
       if (url.pathname === "/favicon.ico") {
         response.writeHead(404)
         response.end()
@@ -94,7 +99,21 @@ async function fixtureServers(t, pages) {
   return servers
 }
 
+/** A service worker that posts on a message and answers the page's own posts from the network. */
+const SCRIPTS = {
+  "/sw.js":
+    "self.addEventListener('install',function(){self.skipWaiting()});" +
+    "self.addEventListener('activate',function(e){e.waitUntil(clients.claim())});" +
+    "self.addEventListener('message',function(){fetch('/sw-api',{method:'POST',body:'sw'})});" +
+    "self.addEventListener('fetch',function(e){if(e.request.method!=='GET')e.respondWith(fetch(e.request))});",
+}
+
 const PAGES = {
+  serviceWorker: () =>
+    `<button type="button" id="m">Relay</button><button type="button" id="f">Post</button>` +
+    `<script>navigator.serviceWorker.register('/sw.js');` +
+    `document.getElementById('m').onclick=function(){navigator.serviceWorker.controller.postMessage(1)};` +
+    `document.getElementById('f').onclick=function(){fetch('/page-api',{method:'POST',body:'p'})}</script>`,
   form: () =>
     `<form method="post" action="/submit"><input name="q" value="hello"><button>Send</button></form>`,
   search: () =>
@@ -379,4 +398,59 @@ test("closing the session refuses what it held", async (t) => {
   await service.closeSession("s")
   await acting.catch(() => undefined)
   assert.equal(arrivals(servers, "/api").length, 0)
+})
+
+/** Open the service-worker page and wait until the worker controls it. */
+async function openControlled(service, servers) {
+  const page = await open(service, `${servers.a}/page?p=serviceWorker`)
+  await page.evaluate(() => navigator.serviceWorker.ready)
+  await page.reload()
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller))
+  await page.waitForFunction(() => typeof window.__cogniaSnapshot === "function")
+  return page
+}
+
+test("hold: what a service worker sends, and the page posts it answers, are held", async (t) => {
+  const service = await localService(t)
+  if (!service) return
+  const servers = await fixtureServers(t, PAGES)
+  await service.configureSubmissionGuard("s", "hold")
+  await openControlled(service, servers)
+  // A page route sees neither; the local session's context route sees both.
+  for (const [button, pathname] of [
+    ["Relay", "/sw-api"],
+    ["Post", "/page-api"],
+  ]) {
+    const acting = service.act("s", await refFor(service, button), "click", {})
+    const { reports, unguarded } = await service.drainSubmissions("s", { waitMs: 2000 })
+    assert.equal(unguarded, false, "a local session's own context is routed")
+    assert.equal(reports.length, 1, button)
+    assert.equal(reports[0].url, `${servers.a}${pathname}`)
+    assert.equal(reports[0].held, true)
+    service.resolveSubmission("s", reports[0].id, "refuse")
+    await acting
+  }
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.equal(arrivals(servers, "/sw-api").length, 0)
+  assert.equal(arrivals(servers, "/page-api").length, 0)
+})
+
+test("a user-chrome page a service worker controls is reported unguarded", async (t) => {
+  const service = await localService(t)
+  if (!service) return
+  const servers = await fixtureServers(t, PAGES)
+  const session = service.sessions.get("s")
+  // Attaching needs the person's own Chrome; which routes the guard installs,
+  // and so whether a service worker's traffic is seen, depends on the kind.
+  session.kind = "user-chrome"
+  try {
+    assert.equal((await service.drainSubmissions("s")).unguarded, false, "off: nothing to say")
+    await service.configureSubmissionGuard("s", "observe")
+    await open(service, `${servers.a}/page?p=form`)
+    assert.equal((await service.drainSubmissions("s")).unguarded, false)
+    await openControlled(service, servers)
+    assert.equal((await service.drainSubmissions("s")).unguarded, true)
+  } finally {
+    session.kind = "local"
+  }
 })

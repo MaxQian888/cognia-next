@@ -94,8 +94,8 @@ describe("RemoteChromiumEngine", () => {
   it("drives the submission guard through companion RPC (ADR-0239 phase 2b)", async () => {
     call
       .mockResolvedValueOnce({ mode: "hold" })
-      .mockResolvedValueOnce({ pageId: "page-1", reports: [], windowOpen: false })
-      .mockResolvedValueOnce({ pageId: "page-2", reports: [], windowOpen: true })
+      .mockResolvedValueOnce({ pageId: "page-1", reports: [], windowOpen: false, unguarded: false })
+      .mockResolvedValueOnce({ pageId: "page-2", reports: [], windowOpen: true, unguarded: false })
       .mockResolvedValueOnce({ id: "h1", decision: "allow" })
     const engine = new RemoteChromiumEngine("session-1")
     expect(isSubmissionGuardedEngine(engine)).toBe(true)

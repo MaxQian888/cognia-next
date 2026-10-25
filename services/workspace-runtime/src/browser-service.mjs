@@ -64,6 +64,8 @@ const MAX_TRACKED_REQUESTS = 200
 const CREDENTIAL_DEDUPE_MS = 10_000
 /** How long a held action waits for a navigation it caused to reach the route. */
 const SUBMISSION_SETTLE_MS = 150
+/** How long `drainSubmissions` waits for a user-chrome page to say whether a service worker controls it. */
+const SUBMISSION_PROBE_TIMEOUT_MS = 500
 const MAX_EXTENSIONS = 64
 const EXTENSION_ID = /^[a-p]{32}$/
 
@@ -539,8 +541,9 @@ export class RemoteChromiumService {
       uploadRoots: null,
       // ADR-0239 phase 2b: what agent actions submit, observed or held until
       // the host decides (`browser.submission.*`). Off until the host
-      // configures it. Local sessions route each of their pages once it is
-      // on; a cloud session's context route already sees every request.
+      // configures it. A cloud session's context route already sees every
+      // request; a local session routes its own context once it is on, and a
+      // user-chrome session each of its own pages.
       submissions: new SubmissionGuard({ now: this.now, createId: this.createId }),
       submissionRoutes: false,
       submissionSockets: false,
@@ -870,6 +873,8 @@ export class RemoteChromiumService {
       downloadPath: this.stagingRoot,
       eventsEnabled: true,
     })
+    // A relaunched context starts without the submission route.
+    if (session.submissionRoutes) await this.routeContextSubmissions(session, context)
     const existing = typeof context.pages === "function" ? context.pages() : []
     for (const page of existing) this.registerPage(session, page)
     if (session.pages.size === 0) this.registerPage(session, await context.newPage())
@@ -1133,11 +1138,31 @@ export class RemoteChromiumService {
   /**
    * The addressed page's submissions since the last drain; `waitMs` waits for
    * one while the page's window is open (see `SubmissionGuard.drain`).
+   *
+   * `unguarded` says the guard may not see what the page sends: a service
+   * worker controls a page of the person's own Chrome, whose traffic only a
+   * context route sees, and a user-chrome session routes its own pages, never
+   * the person's whole browser. The host then decides before the action, as
+   * for an engine with no submission signal.
    */
   async drainSubmissions(sessionId, { waitMs = 0 } = {}) {
     const session = this.requireSession(sessionId)
-    const { pageId } = this.activeRecord(session)
-    return { pageId, ...(await session.submissions.drain(pageId, waitMs)) }
+    const { pageId, page } = this.activeRecord(session)
+    const drained = await session.submissions.drain(pageId, waitMs)
+    return { pageId, ...drained, unguarded: await this.submissionUnguarded(session, page) }
+  }
+
+  async submissionUnguarded(session, page) {
+    if (session.kind !== "user-chrome" || session.submissions.mode === "off") return false
+    const controlled = page
+      .evaluate(() => Boolean(globalThis.navigator?.serviceWorker?.controller))
+      .catch(() => false)
+    // A page mid-navigation may not answer; it counts as unguarded, which
+    // only makes the host decide earlier.
+    const timeout = new Promise((resolve) =>
+      setTimeout(() => resolve(true), SUBMISSION_PROBE_TIMEOUT_MS).unref?.()
+    )
+    return Promise.race([controlled, timeout])
   }
 
   resolveSubmission(sessionId, holdId, decision) {
@@ -1149,6 +1174,10 @@ export class RemoteChromiumService {
     // A cloud session's context route (`authorizeRoute`) already sees every request.
     if (session.kind === "cloud" || session.submissionRoutes) return
     session.submissionRoutes = true
+    if (session.kind === "local") {
+      await this.routeContextSubmissions(session, session.context)
+      return
+    }
     await Promise.all(
       [...session.pages.entries()].map(([pageId, record]) =>
         this.routePageSubmissions(session, pageId, record.page)
@@ -1167,25 +1196,39 @@ export class RemoteChromiumService {
   }
 
   /**
-   * Route one of a local session's pages: per page rather than per context,
-   * so attaching to the user's own Chrome never intercepts their other tabs.
-   * An allowed request falls back to any other route.
+   * Route a local session's own context: only a context route sees what a
+   * service worker sends, both its own requests and the page requests it
+   * answers (a page route sees neither; measured in
+   * `browser-service-submissions.test.mjs`).
+   */
+  async routeContextSubmissions(session, context) {
+    await context
+      ?.route("**/*", (route) => this.routeSubmission(session, route))
+      .catch(() => undefined)
+  }
+
+  /**
+   * Route one of a user-chrome session's pages: per page rather than per
+   * context, so attaching to the person's own Chrome never intercepts their
+   * other tabs. What a service worker sends is not seen; `drainSubmissions`
+   * reports such a page as `unguarded`.
    */
   async routePageSubmissions(session, _pageId, page) {
-    await page
-      .route("**/*", async (route) => {
-        const request = route.request()
-        try {
-          if ((await this.submissionVerdict(session, request)) === "refuse") {
-            await this.refuseSubmission(route, request)
-          } else {
-            await route.fallback()
-          }
-        } catch {
-          // The page or the request went away while it was decided.
-        }
-      })
-      .catch(() => undefined)
+    await page.route("**/*", (route) => this.routeSubmission(session, route)).catch(() => undefined)
+  }
+
+  /** One request through the guard. An allowed request falls back to any other route. */
+  async routeSubmission(session, route) {
+    const request = route.request()
+    try {
+      if ((await this.submissionVerdict(session, request)) === "refuse") {
+        await this.refuseSubmission(route, request)
+      } else {
+        await route.fallback()
+      }
+    } catch {
+      // The page or the request went away while it was decided.
+    }
   }
 
   /**
@@ -1346,7 +1389,9 @@ export class RemoteChromiumService {
     // watching.
     if (session.activePageId === null) session.activePageId = pageId
     this.schedulePagesChanged(session)
-    if (session.submissionRoutes) void this.routePageSubmissions(session, pageId, page)
+    if (session.submissionRoutes && session.kind === "user-chrome") {
+      void this.routePageSubmissions(session, pageId, page)
+    }
     if (session.submissionSockets) void this.routePageSockets(session, pageId, page)
     // Shadow mode watches WebSocket frames without relaying them; a relayed
     // socket (`routePageSockets`) reports through its own route.

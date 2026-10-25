@@ -392,7 +392,12 @@ describe("isSubmissionGuardedEngine (ADR-0239 phase 2b)", () => {
   it("recognizes an engine with all three submission ops", () => {
     const ops = {
       configureSubmissionGuard: async () => ({ mode: "hold" }),
-      drainSubmissions: async () => ({ pageId: "p", reports: [], windowOpen: false }),
+      drainSubmissions: async () => ({
+        pageId: "p",
+        reports: [],
+        windowOpen: false,
+        unguarded: false,
+      }),
       resolveSubmission: async () => ({ id: "h", decision: "allow" }),
     }
     expect(isSubmissionGuardedEngine(ops)).toBe(true)

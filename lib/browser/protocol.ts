@@ -538,6 +538,12 @@ export interface BrowserSubmissionDrain {
   reports: BrowserSubmissionReport[]
   /** The page's action window is still open: more may come. */
   windowOpen: boolean
+  /**
+   * The guard may not see what this page sends (a service worker controls a
+   * page of the person's own Chrome): decide before acting, as for an engine
+   * with no submission signal.
+   */
+  unguarded: boolean
 }
 
 export type BrowserSubmissionDecision = "allow" | "refuse"
