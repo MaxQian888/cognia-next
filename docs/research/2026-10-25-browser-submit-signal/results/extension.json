@@ -1,0 +1,354 @@
+{
+  "blocking": "accepted",
+  "results": [
+    {
+      "id": "s1",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /submit +415ms"],
+      "log": ["webRequest POST main_frame /submit?s=s1", "HELD POST Document /submit?s=s1"]
+    },
+    {
+      "id": "s2",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A GET /search +59ms"],
+      "log": ["webRequest GET main_frame /search?s=s2", "paused GET Document /search?s=s2"]
+    },
+    {
+      "id": "s3",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /api +352ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s3", "HELD POST XHR /api?s=s3"]
+    },
+    {
+      "id": "s4",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /api +349ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s4", "HELD POST XHR /api?s=s4"]
+    },
+    {
+      "id": "s5",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /submit +336ms"],
+      "log": ["webRequest POST main_frame /submit?s=s5", "HELD POST Document /submit?s=s5"]
+    },
+    {
+      "id": "s6",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": [],
+      "log": []
+    },
+    {
+      "id": "s7",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /submit +334ms"],
+      "log": ["webRequest POST main_frame /submit?s=s7", "HELD POST Document /submit?s=s7"]
+    },
+    {
+      "id": "s8",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /beacon +339ms"],
+      "log": ["webRequest POST ping /beacon?s=s8", "HELD POST Ping /beacon?s=s8"]
+    },
+    {
+      "id": "s9",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A WS /ws +40ms"],
+      "log": []
+    },
+    {
+      "id": "s10",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["B POST /api +354ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s10", "HELD POST XHR /api?s=s10"]
+    },
+    {
+      "id": "s11",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /api +315ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s11", "HELD POST XHR /api?s=s11"]
+    },
+    {
+      "id": "s11b",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /api +329ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s11b", "HELD POST XHR /api?s=s11b"]
+    },
+    {
+      "id": "s12",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A GET /api +50ms"],
+      "log": ["webRequest GET xmlhttprequest /api?s=s12", "paused GET XHR /api?s=s12"]
+    },
+    {
+      "id": "s13",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /beacon +362ms"],
+      "log": ["webRequest POST ping /beacon?s=s13", "HELD POST Ping /beacon?s=s13"]
+    },
+    {
+      "id": "s14",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /submit +1853ms"],
+      "log": ["webRequest POST main_frame /submit?s=s14", "HELD POST Document /submit?s=s14"]
+    },
+    {
+      "id": "s15",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /api +340ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s15", "HELD POST XHR /api?s=s15"]
+    },
+    {
+      "id": "s16",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["B POST /submit +68ms"],
+      "log": ["webRequest POST sub_frame /submit?s=s16"]
+    },
+    {
+      "id": "s17",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A GET /pixel +41ms"],
+      "log": ["webRequest GET image /pixel?s=s17", "paused GET Image /pixel?s=s17"]
+    },
+    {
+      "id": "s18",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A GET /search +46ms"],
+      "log": ["webRequest GET main_frame /search?s=s18", "paused GET Document /search?s=s18"]
+    },
+    {
+      "id": "s19",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /ping +346ms"],
+      "log": [
+        "webRequest GET main_frame /landing?s=s19nav",
+        "webRequest POST ping /ping?s=s19",
+        "paused GET Document /landing?s=s19nav",
+        "HELD POST Ping /ping?s=s19"
+      ]
+    },
+    {
+      "id": "s20",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /submit +329ms"],
+      "log": ["webRequest POST main_frame /submit?s=s20", "HELD POST Document /submit?s=s20"]
+    },
+    {
+      "id": "s21",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": ["A POST /api +325ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s21", "HELD POST XHR /api?s=s21"]
+    },
+    {
+      "id": "s22",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": [],
+      "log": []
+    },
+    {
+      "id": "s23",
+      "autoAttach": false,
+      "attached": "attached",
+      "truth": [],
+      "log": []
+    },
+    {
+      "id": "s1",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /submit +358ms"],
+      "log": ["webRequest POST main_frame /submit?s=s1", "HELD POST Document /submit?s=s1"]
+    },
+    {
+      "id": "s2",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A GET /search +60ms"],
+      "log": ["webRequest GET main_frame /search?s=s2", "paused GET Document /search?s=s2"]
+    },
+    {
+      "id": "s3",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /api +346ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s3", "HELD POST XHR /api?s=s3"]
+    },
+    {
+      "id": "s4",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /api +350ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s4", "HELD POST XHR /api?s=s4"]
+    },
+    {
+      "id": "s5",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /submit +332ms"],
+      "log": ["webRequest POST main_frame /submit?s=s5", "HELD POST Document /submit?s=s5"]
+    },
+    {
+      "id": "s6",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": [],
+      "log": []
+    },
+    {
+      "id": "s7",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /submit +333ms"],
+      "log": ["webRequest POST main_frame /submit?s=s7", "HELD POST Document /submit?s=s7"]
+    },
+    {
+      "id": "s8",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /beacon +349ms"],
+      "log": ["webRequest POST ping /beacon?s=s8", "HELD POST Ping /beacon?s=s8"]
+    },
+    {
+      "id": "s9",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A WS /ws +33ms"],
+      "log": []
+    },
+    {
+      "id": "s10",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["B POST /api +350ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s10", "HELD POST XHR /api?s=s10"]
+    },
+    {
+      "id": "s11",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /api +314ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s11", "HELD POST XHR /api?s=s11"]
+    },
+    {
+      "id": "s11b",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /api +333ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s11b", "HELD POST XHR /api?s=s11b"]
+    },
+    {
+      "id": "s12",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A GET /api +47ms"],
+      "log": ["webRequest GET xmlhttprequest /api?s=s12", "paused GET XHR /api?s=s12"]
+    },
+    {
+      "id": "s13",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /beacon +356ms"],
+      "log": ["webRequest POST ping /beacon?s=s13", "HELD POST Ping /beacon?s=s13"]
+    },
+    {
+      "id": "s14",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /submit +1852ms"],
+      "log": ["webRequest POST main_frame /submit?s=s14", "HELD POST Document /submit?s=s14"]
+    },
+    {
+      "id": "s15",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /api +346ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s15", "HELD POST XHR /api?s=s15"]
+    },
+    {
+      "id": "s16",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["B POST /submit +381ms"],
+      "log": [
+        "webRequest POST sub_frame /submit?s=s16",
+        "HELD POST Document /submit?s=s16 child-session"
+      ]
+    },
+    {
+      "id": "s17",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A GET /pixel +41ms"],
+      "log": ["webRequest GET image /pixel?s=s17", "paused GET Image /pixel?s=s17"]
+    },
+    {
+      "id": "s18",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A GET /search +44ms"],
+      "log": ["webRequest GET main_frame /search?s=s18", "paused GET Document /search?s=s18"]
+    },
+    {
+      "id": "s19",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /ping +343ms"],
+      "log": [
+        "webRequest GET main_frame /landing?s=s19nav",
+        "webRequest POST ping /ping?s=s19",
+        "paused GET Document /landing?s=s19nav",
+        "HELD POST Ping /ping?s=s19"
+      ]
+    },
+    {
+      "id": "s20",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /submit +329ms"],
+      "log": ["webRequest POST main_frame /submit?s=s20", "HELD POST Document /submit?s=s20"]
+    },
+    {
+      "id": "s21",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": ["A POST /api +324ms"],
+      "log": ["webRequest POST xmlhttprequest /api?s=s21", "HELD POST XHR /api?s=s21"]
+    },
+    {
+      "id": "s22",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": [],
+      "log": []
+    },
+    {
+      "id": "s23",
+      "autoAttach": true,
+      "attached": "attached",
+      "truth": [],
+      "log": []
+    }
+  ]
+}

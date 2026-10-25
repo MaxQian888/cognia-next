@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "blocking-probe",
+  "version": "0.0.1",
+  "permissions": ["webRequest", "webRequestBlocking"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" }
+}

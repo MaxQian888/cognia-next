@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "submit-signal-spike",
+  "version": "0.0.1",
+  "permissions": ["debugger", "tabs", "webRequest", "declarativeNetRequest", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "sw.js" }
+}

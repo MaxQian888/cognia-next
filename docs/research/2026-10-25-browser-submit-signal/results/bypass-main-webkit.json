@@ -1,0 +1,36 @@
+{
+  "engine": "webkit",
+  "version": "26.6",
+  "results": [
+    {
+      "id": "b1",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "b2",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["navigate push form cancelable /submit?s=b2"]
+    },
+    {
+      "id": "b3",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=b3"]
+    },
+    {
+      "id": "b5",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "b4",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=b4", "navigate push form cancelable /submit?s=b4"]
+    }
+  ]
+}

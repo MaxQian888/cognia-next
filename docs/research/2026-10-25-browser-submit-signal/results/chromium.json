@@ -1,0 +1,1147 @@
+{
+  "engine": "chromium",
+  "version": "153.0.8010.12",
+  "results": [
+    {
+      "id": "s1",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": true,
+        "reason": "button type submit"
+      }
+    },
+    {
+      "id": "s1",
+      "mode": "route",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 370,
+      "seen": ["HELD POST document nav /submit"]
+    },
+    {
+      "id": "s1",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s1", "navigate push form cancelable /submit?s=s1"]
+    },
+    {
+      "id": "s1",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s1", "navigate push form cancelable /submit?s=s1"]
+    },
+    {
+      "id": "s1",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s1", "navigate push form cancelable /submit?s=s1"]
+    },
+    {
+      "id": "s1",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 358,
+      "intercepted": ["submit-event /submit?s=s1", "navigate push form cancelable /submit?s=s1"]
+    },
+    {
+      "id": "s2",
+      "mode": "truth",
+      "truth": ["A GET /search"],
+      "classified": {
+        "submit": true,
+        "reason": "button type submit"
+      }
+    },
+    {
+      "id": "s2",
+      "mode": "route",
+      "truth": ["A GET /search"],
+      "firstArrivalMs": 66,
+      "seen": ["seen GET document nav /search"]
+    },
+    {
+      "id": "s2",
+      "mode": "inject-early",
+      "truth": ["A GET /search"],
+      "intercepted": ["submit-event /search", "navigate push cancelable /search?s=s2&q=secret"]
+    },
+    {
+      "id": "s2",
+      "mode": "inject-early-main",
+      "truth": ["A GET /search"],
+      "intercepted": ["submit-event /search", "navigate push cancelable /search?s=s2&q=secret"]
+    },
+    {
+      "id": "s2",
+      "mode": "inject-late",
+      "truth": ["A GET /search"],
+      "intercepted": ["submit-event /search", "navigate push cancelable /search?s=s2&q=secret"]
+    },
+    {
+      "id": "s2",
+      "mode": "inject-hold",
+      "truth": ["A GET /search"],
+      "firstArrivalMs": 657,
+      "intercepted": ["submit-event /search", "navigate push cancelable /search?s=s2&q=secret"]
+    },
+    {
+      "id": "s3",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s3",
+      "mode": "route",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 359,
+      "seen": ["HELD POST fetch /api"]
+    },
+    {
+      "id": "s3",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s3"]
+    },
+    {
+      "id": "s3",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s3"]
+    },
+    {
+      "id": "s3",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s3"]
+    },
+    {
+      "id": "s3",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 340,
+      "intercepted": ["fetch POST /api?s=s3"]
+    },
+    {
+      "id": "s4",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "not a submit control"
+      }
+    },
+    {
+      "id": "s4",
+      "mode": "route",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 358,
+      "seen": ["HELD POST xhr /api"]
+    },
+    {
+      "id": "s4",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["xhr POST /api?s=s4"]
+    },
+    {
+      "id": "s4",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": ["xhr POST /api?s=s4"]
+    },
+    {
+      "id": "s4",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": ["xhr POST /api?s=s4"]
+    },
+    {
+      "id": "s4",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 340,
+      "intercepted": ["xhr POST /api?s=s4"]
+    },
+    {
+      "id": "s5",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": true,
+        "reason": "implicit submission"
+      }
+    },
+    {
+      "id": "s5",
+      "mode": "route",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 336,
+      "seen": ["HELD POST document nav /submit"]
+    },
+    {
+      "id": "s5",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s5", "navigate push form cancelable /submit?s=s5"]
+    },
+    {
+      "id": "s5",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s5", "navigate push form cancelable /submit?s=s5"]
+    },
+    {
+      "id": "s5",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s5", "navigate push form cancelable /submit?s=s5"]
+    },
+    {
+      "id": "s5",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 326,
+      "intercepted": ["submit-event /submit?s=s5", "navigate push form cancelable /submit?s=s5"]
+    },
+    {
+      "id": "s6",
+      "mode": "truth",
+      "truth": [],
+      "classified": {
+        "submit": true,
+        "reason": "implicit submission"
+      }
+    },
+    {
+      "id": "s6",
+      "mode": "route",
+      "truth": [],
+      "firstArrivalMs": null,
+      "seen": []
+    },
+    {
+      "id": "s6",
+      "mode": "inject-early",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s6",
+      "mode": "inject-early-main",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s6",
+      "mode": "inject-late",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s6",
+      "mode": "inject-hold",
+      "truth": [],
+      "firstArrivalMs": null,
+      "intercepted": []
+    },
+    {
+      "id": "s7",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": true,
+        "reason": "button type submit"
+      }
+    },
+    {
+      "id": "s7",
+      "mode": "route",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 328,
+      "seen": ["HELD POST document nav /submit"]
+    },
+    {
+      "id": "s7",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s7", "navigate push form cancelable /submit?s=s7"]
+    },
+    {
+      "id": "s7",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s7", "navigate push form cancelable /submit?s=s7"]
+    },
+    {
+      "id": "s7",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=s7", "navigate push form cancelable /submit?s=s7"]
+    },
+    {
+      "id": "s7",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 325,
+      "intercepted": ["submit-event /submit?s=s7", "navigate push form cancelable /submit?s=s7"]
+    },
+    {
+      "id": "s8",
+      "mode": "truth",
+      "truth": ["A POST /beacon"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s8",
+      "mode": "route",
+      "truth": ["A POST /beacon"],
+      "firstArrivalMs": 338,
+      "seen": ["HELD POST ping /beacon"]
+    },
+    {
+      "id": "s8",
+      "mode": "inject-early",
+      "truth": ["A POST /beacon"],
+      "intercepted": ["beacon /beacon?s=s8"]
+    },
+    {
+      "id": "s8",
+      "mode": "inject-early-main",
+      "truth": ["A POST /beacon"],
+      "intercepted": ["beacon /beacon?s=s8"]
+    },
+    {
+      "id": "s8",
+      "mode": "inject-late",
+      "truth": ["A POST /beacon"],
+      "intercepted": ["beacon /beacon?s=s8"]
+    },
+    {
+      "id": "s8",
+      "mode": "inject-hold",
+      "truth": ["A POST /beacon"],
+      "firstArrivalMs": 357,
+      "intercepted": ["beacon /beacon?s=s8"]
+    },
+    {
+      "id": "s9",
+      "mode": "truth",
+      "truth": ["A WS /ws"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s9",
+      "mode": "route",
+      "truth": ["A WS /ws"],
+      "firstArrivalMs": 352,
+      "seen": ["HELD WS message"]
+    },
+    {
+      "id": "s9",
+      "mode": "inject-early",
+      "truth": ["A WS /ws"],
+      "intercepted": ["ws.send ws://127.0.0.1:4811/ws?s=s9"]
+    },
+    {
+      "id": "s9",
+      "mode": "inject-early-main",
+      "truth": ["A WS /ws"],
+      "intercepted": ["ws.send ws://127.0.0.1:4811/ws?s=s9"]
+    },
+    {
+      "id": "s9",
+      "mode": "inject-late",
+      "truth": ["A WS /ws"],
+      "intercepted": ["ws.send ws://127.0.0.1:4811/ws?s=s9"]
+    },
+    {
+      "id": "s9",
+      "mode": "inject-hold",
+      "truth": ["A WS /ws"],
+      "firstArrivalMs": 333,
+      "intercepted": ["ws.send ws://127.0.0.1:4811/ws?s=s9"]
+    },
+    {
+      "id": "s10",
+      "mode": "truth",
+      "truth": ["B POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s10",
+      "mode": "route",
+      "truth": ["B POST /api"],
+      "firstArrivalMs": 359,
+      "seen": ["HELD POST fetch /api"]
+    },
+    {
+      "id": "s10",
+      "mode": "inject-early",
+      "truth": ["B POST /api"],
+      "intercepted": ["fetch POST http://localhost:4812/api?s=s10"]
+    },
+    {
+      "id": "s10",
+      "mode": "inject-early-main",
+      "truth": ["B POST /api"],
+      "intercepted": ["fetch POST http://localhost:4812/api?s=s10"]
+    },
+    {
+      "id": "s10",
+      "mode": "inject-late",
+      "truth": ["B POST /api"],
+      "intercepted": ["fetch POST http://localhost:4812/api?s=s10"]
+    },
+    {
+      "id": "s10",
+      "mode": "inject-hold",
+      "truth": ["B POST /api"],
+      "firstArrivalMs": 338,
+      "intercepted": ["fetch POST http://localhost:4812/api?s=s10"]
+    },
+    {
+      "id": "s11",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": "maybe",
+        "reason": "Enter in contenteditable"
+      }
+    },
+    {
+      "id": "s11",
+      "mode": "route",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 320,
+      "seen": ["HELD POST fetch /api"]
+    },
+    {
+      "id": "s11",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s11"]
+    },
+    {
+      "id": "s11",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s11"]
+    },
+    {
+      "id": "s11",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s11"]
+    },
+    {
+      "id": "s11",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 324,
+      "intercepted": ["fetch POST /api?s=s11"]
+    },
+    {
+      "id": "s11b",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": "maybe",
+        "reason": "Enter in contenteditable"
+      }
+    },
+    {
+      "id": "s11b",
+      "mode": "route",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 334,
+      "seen": ["HELD POST fetch /api"]
+    },
+    {
+      "id": "s11b",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s11b"]
+    },
+    {
+      "id": "s11b",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s11b"]
+    },
+    {
+      "id": "s11b",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s11b"]
+    },
+    {
+      "id": "s11b",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 336,
+      "intercepted": ["fetch POST /api?s=s11b"]
+    },
+    {
+      "id": "s12",
+      "mode": "truth",
+      "truth": ["A GET /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s12",
+      "mode": "route",
+      "truth": ["A GET /api"],
+      "firstArrivalMs": 53,
+      "seen": ["seen GET fetch /api"]
+    },
+    {
+      "id": "s12",
+      "mode": "inject-early",
+      "truth": ["A GET /api"],
+      "intercepted": ["fetch GET /api?s=s12&q=secret"]
+    },
+    {
+      "id": "s12",
+      "mode": "inject-early-main",
+      "truth": ["A GET /api"],
+      "intercepted": ["fetch GET /api?s=s12&q=secret"]
+    },
+    {
+      "id": "s12",
+      "mode": "inject-late",
+      "truth": ["A GET /api"],
+      "intercepted": ["fetch GET /api?s=s12&q=secret"]
+    },
+    {
+      "id": "s12",
+      "mode": "inject-hold",
+      "truth": ["A GET /api"],
+      "firstArrivalMs": 357,
+      "intercepted": ["fetch GET /api?s=s12&q=secret"]
+    },
+    {
+      "id": "s13",
+      "mode": "truth",
+      "truth": ["A POST /beacon"],
+      "classified": {
+        "submit": false,
+        "reason": "not a submit control"
+      }
+    },
+    {
+      "id": "s13",
+      "mode": "route",
+      "truth": ["A POST /beacon"],
+      "firstArrivalMs": 358,
+      "seen": ["HELD POST ping /beacon"]
+    },
+    {
+      "id": "s13",
+      "mode": "inject-early",
+      "truth": ["A POST /beacon"],
+      "intercepted": ["beacon /beacon?s=s13", "navigate push cancelable hash /fixture?s=s13#next"]
+    },
+    {
+      "id": "s13",
+      "mode": "inject-early-main",
+      "truth": ["A POST /beacon"],
+      "intercepted": ["beacon /beacon?s=s13", "navigate push cancelable hash /fixture?s=s13#next"]
+    },
+    {
+      "id": "s13",
+      "mode": "inject-late",
+      "truth": ["A POST /beacon"],
+      "intercepted": ["beacon /beacon?s=s13", "navigate push cancelable hash /fixture?s=s13#next"]
+    },
+    {
+      "id": "s13",
+      "mode": "inject-hold",
+      "truth": ["A POST /beacon"],
+      "firstArrivalMs": 353,
+      "intercepted": ["beacon /beacon?s=s13", "navigate push cancelable hash /fixture?s=s13#next"]
+    },
+    {
+      "id": "s14",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s14",
+      "mode": "route",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 1854,
+      "seen": ["HELD POST document nav /submit"]
+    },
+    {
+      "id": "s14",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=s14", "navigate push form cancelable /submit?s=s14"]
+    },
+    {
+      "id": "s14",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=s14", "navigate push form cancelable /submit?s=s14"]
+    },
+    {
+      "id": "s14",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=s14", "navigate push form cancelable /submit?s=s14"]
+    },
+    {
+      "id": "s14",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 1836,
+      "intercepted": ["form.submit /submit?s=s14", "navigate push form cancelable /submit?s=s14"]
+    },
+    {
+      "id": "s15",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s15",
+      "mode": "route",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 348,
+      "seen": ["HELD POST fetch /api"]
+    },
+    {
+      "id": "s15",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "s15",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "s15",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "s15",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 54,
+      "intercepted": []
+    },
+    {
+      "id": "s16",
+      "mode": "truth",
+      "truth": ["B POST /submit"]
+    },
+    {
+      "id": "s16",
+      "mode": "route",
+      "truth": ["B POST /submit"],
+      "firstArrivalMs": 361,
+      "seen": ["HELD POST document nav /submit"]
+    },
+    {
+      "id": "s16",
+      "mode": "inject-early",
+      "truth": ["B POST /submit"],
+      "intercepted": ["submit-event /submit?s=s16", "navigate push form cancelable /submit?s=s16"]
+    },
+    {
+      "id": "s16",
+      "mode": "inject-early-main",
+      "truth": ["B POST /submit"],
+      "intercepted": []
+    },
+    {
+      "id": "s16",
+      "mode": "inject-late",
+      "truth": ["B POST /submit"],
+      "intercepted": ["submit-event /submit?s=s16", "navigate push form cancelable /submit?s=s16"]
+    },
+    {
+      "id": "s16",
+      "mode": "inject-hold",
+      "truth": ["B POST /submit"],
+      "firstArrivalMs": 359,
+      "intercepted": ["submit-event /submit?s=s16", "navigate push form cancelable /submit?s=s16"]
+    },
+    {
+      "id": "s17",
+      "mode": "truth",
+      "truth": ["A GET /pixel"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s17",
+      "mode": "route",
+      "truth": ["A GET /pixel"],
+      "firstArrivalMs": 35,
+      "seen": ["seen GET image /pixel"]
+    },
+    {
+      "id": "s17",
+      "mode": "inject-early",
+      "truth": ["A GET /pixel"],
+      "intercepted": []
+    },
+    {
+      "id": "s17",
+      "mode": "inject-early-main",
+      "truth": ["A GET /pixel"],
+      "intercepted": []
+    },
+    {
+      "id": "s17",
+      "mode": "inject-late",
+      "truth": ["A GET /pixel"],
+      "intercepted": []
+    },
+    {
+      "id": "s17",
+      "mode": "inject-hold",
+      "truth": ["A GET /pixel"],
+      "firstArrivalMs": 36,
+      "intercepted": []
+    },
+    {
+      "id": "s18",
+      "mode": "truth",
+      "truth": ["A GET /search"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s18",
+      "mode": "route",
+      "truth": ["A GET /search"],
+      "firstArrivalMs": 38,
+      "seen": ["seen GET document nav /search"]
+    },
+    {
+      "id": "s18",
+      "mode": "inject-early",
+      "truth": ["A GET /search"],
+      "intercepted": ["navigate push cancelable /search?s=s18&q=secret"]
+    },
+    {
+      "id": "s18",
+      "mode": "inject-early-main",
+      "truth": ["A GET /search"],
+      "intercepted": ["navigate push cancelable /search?s=s18&q=secret"]
+    },
+    {
+      "id": "s18",
+      "mode": "inject-late",
+      "truth": ["A GET /search"],
+      "intercepted": ["navigate push cancelable /search?s=s18&q=secret"]
+    },
+    {
+      "id": "s18",
+      "mode": "inject-hold",
+      "truth": ["A GET /search"],
+      "firstArrivalMs": 338,
+      "intercepted": ["navigate push cancelable /search?s=s18&q=secret"]
+    },
+    {
+      "id": "s19",
+      "mode": "truth",
+      "truth": ["A POST /ping", "A GET /landing"],
+      "classified": {
+        "submit": false,
+        "reason": "not a submit control"
+      }
+    },
+    {
+      "id": "s19",
+      "mode": "route",
+      "truth": ["A GET /landing", "A POST /ping"],
+      "firstArrivalMs": 339,
+      "seen": ["HELD POST ping /ping", "seen GET document nav /landing"]
+    },
+    {
+      "id": "s19",
+      "mode": "inject-early",
+      "truth": ["A POST /ping", "A GET /landing"],
+      "intercepted": ["navigate push cancelable /landing?s=s19nav"]
+    },
+    {
+      "id": "s19",
+      "mode": "inject-early-main",
+      "truth": ["A POST /ping", "A GET /landing"],
+      "intercepted": ["navigate push cancelable /landing?s=s19nav"]
+    },
+    {
+      "id": "s19",
+      "mode": "inject-late",
+      "truth": ["A POST /ping", "A GET /landing"],
+      "intercepted": ["navigate push cancelable /landing?s=s19nav"]
+    },
+    {
+      "id": "s19",
+      "mode": "inject-hold",
+      "truth": ["A POST /ping", "A GET /landing"],
+      "firstArrivalMs": 36,
+      "intercepted": ["navigate push cancelable /landing?s=s19nav"]
+    },
+    {
+      "id": "s20",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": false,
+        "reason": "value change"
+      }
+    },
+    {
+      "id": "s20",
+      "mode": "route",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 329,
+      "seen": ["HELD POST document nav /submit"]
+    },
+    {
+      "id": "s20",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=s20", "navigate push form cancelable /submit?s=s20"]
+    },
+    {
+      "id": "s20",
+      "mode": "inject-early-main",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=s20", "navigate push form cancelable /submit?s=s20"]
+    },
+    {
+      "id": "s20",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=s20", "navigate push form cancelable /submit?s=s20"]
+    },
+    {
+      "id": "s20",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 331,
+      "intercepted": ["form.submit /submit?s=s20", "navigate push form cancelable /submit?s=s20"]
+    },
+    {
+      "id": "s21",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "value change"
+      }
+    },
+    {
+      "id": "s21",
+      "mode": "route",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 326,
+      "seen": ["HELD POST fetch /api"]
+    },
+    {
+      "id": "s21",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s21"]
+    },
+    {
+      "id": "s21",
+      "mode": "inject-early-main",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s21"]
+    },
+    {
+      "id": "s21",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=s21"]
+    },
+    {
+      "id": "s21",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 331,
+      "intercepted": ["fetch POST /api?s=s21"]
+    },
+    {
+      "id": "s22",
+      "mode": "truth",
+      "truth": [],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "s22",
+      "mode": "route",
+      "truth": [],
+      "firstArrivalMs": null,
+      "seen": []
+    },
+    {
+      "id": "s22",
+      "mode": "inject-early",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s22",
+      "mode": "inject-early-main",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s22",
+      "mode": "inject-late",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s22",
+      "mode": "inject-hold",
+      "truth": [],
+      "firstArrivalMs": null,
+      "intercepted": []
+    },
+    {
+      "id": "s23",
+      "mode": "truth",
+      "truth": [],
+      "classified": {
+        "submit": false,
+        "reason": "button type submit (no form)"
+      }
+    },
+    {
+      "id": "s23",
+      "mode": "route",
+      "truth": [],
+      "firstArrivalMs": null,
+      "seen": []
+    },
+    {
+      "id": "s23",
+      "mode": "inject-early",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s23",
+      "mode": "inject-early-main",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s23",
+      "mode": "inject-late",
+      "truth": [],
+      "intercepted": []
+    },
+    {
+      "id": "s23",
+      "mode": "inject-hold",
+      "truth": [],
+      "firstArrivalMs": null,
+      "intercepted": []
+    },
+    {
+      "id": "s1",
+      "mode": "route-abort",
+      "truth": [],
+      "seen": ["HELD POST document nav /submit"],
+      "pageUrl": "chrome-error://chromewebdata/"
+    },
+    {
+      "id": "s3",
+      "mode": "route-abort",
+      "truth": [],
+      "seen": ["HELD POST fetch /api"],
+      "pageUrl": "/fixture?s=s3"
+    },
+    {
+      "id": "s8",
+      "mode": "route-abort",
+      "truth": [],
+      "seen": ["HELD POST ping /beacon"],
+      "pageUrl": "/fixture?s=s8"
+    },
+    {
+      "id": "b1",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "b1",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST http://127.0.0.1:4811/api?s=b1"]
+    },
+    {
+      "id": "b1",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST http://127.0.0.1:4811/api?s=b1"]
+    },
+    {
+      "id": "b1",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 352,
+      "intercepted": ["fetch POST http://127.0.0.1:4811/api?s=b1"]
+    },
+    {
+      "id": "b2",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "b2",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=b2", "navigate push form cancelable /submit?s=b2"]
+    },
+    {
+      "id": "b2",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["form.submit /submit?s=b2", "navigate push form cancelable /submit?s=b2"]
+    },
+    {
+      "id": "b2",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 351,
+      "intercepted": ["form.submit /submit?s=b2", "navigate push form cancelable /submit?s=b2"]
+    },
+    {
+      "id": "b3",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "b3",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST /api?s=b3"]
+    },
+    {
+      "id": "b3",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "b3",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 355,
+      "intercepted": ["fetch POST /api?s=b3"]
+    },
+    {
+      "id": "b5",
+      "mode": "truth",
+      "truth": ["A POST /api"],
+      "classified": {
+        "submit": false,
+        "reason": "button type button (no form)"
+      }
+    },
+    {
+      "id": "b5",
+      "mode": "inject-early",
+      "truth": ["A POST /api"],
+      "intercepted": ["fetch POST http://127.0.0.1:4811/api?s=b5"]
+    },
+    {
+      "id": "b5",
+      "mode": "inject-late",
+      "truth": ["A POST /api"],
+      "intercepted": []
+    },
+    {
+      "id": "b5",
+      "mode": "inject-hold",
+      "truth": ["A POST /api"],
+      "firstArrivalMs": 342,
+      "intercepted": ["fetch POST http://127.0.0.1:4811/api?s=b5"]
+    },
+    {
+      "id": "b4",
+      "mode": "truth",
+      "truth": ["A POST /submit"],
+      "classified": {
+        "submit": true,
+        "reason": "button type submit"
+      }
+    },
+    {
+      "id": "b4",
+      "mode": "inject-early",
+      "truth": ["A POST /submit"],
+      "intercepted": ["submit-event /submit?s=b4", "navigate push form cancelable /submit?s=b4"]
+    },
+    {
+      "id": "b4",
+      "mode": "inject-late",
+      "truth": ["A POST /submit"],
+      "intercepted": ["navigate push form cancelable /submit?s=b4"]
+    },
+    {
+      "id": "b4",
+      "mode": "inject-hold",
+      "truth": ["A POST /submit"],
+      "firstArrivalMs": 358,
+      "intercepted": ["submit-event /submit?s=b4", "navigate push form cancelable /submit?s=b4"]
+    }
+  ]
+}
