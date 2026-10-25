@@ -52,12 +52,24 @@ function sse(response, model) {
 }
 
 const server = createServer((request, response) => {
-  if (request.method === "GET" && request.url === "/healthz") {
+  // Claude Code (a member's sandboxed agent, P6e) adds `?beta=true` and asks
+  // for token counts and the model list; the built-in chat sends neither.
+  const path = (request.url ?? "").split("?")[0]
+  if (request.method === "GET" && path === "/healthz") {
     response.writeHead(204)
     response.end()
     return
   }
-  if (request.method !== "POST" || request.url !== "/v1/messages") {
+  if (request.method === "GET" && path === "/v1/models") {
+    json(response, 200, { data: [{ id: "claude-e2e", type: "model", display_name: "claude-e2e" }] })
+    return
+  }
+  if (request.method === "POST" && path === "/v1/messages/count_tokens") {
+    request.resume()
+    request.on("end", () => json(response, 200, { input_tokens: 1 }))
+    return
+  }
+  if (request.method !== "POST" || path !== "/v1/messages") {
     json(response, 404, { error: { type: "not_found", message: "not found" } })
     return
   }

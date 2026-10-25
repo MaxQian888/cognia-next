@@ -67,11 +67,12 @@ export const MAX_MEDIA_RESPONSE_BYTES = 10 * 1024 * 1024
  *
  * - `brain` — the Host's own brain: every runtime that names it.
  * - `person-brain` — one member's data partition on a multi-tenant Host
- *   (plan §9a, `COGNIA_BRAIN_PROFILE=person`). Intentionally data-only: it
- *   answers the member's data commands and nothing else, so it starts no
+ *   (plan §9a, `COGNIA_BRAIN_PROFILE=person`). It answers the member's data
+ *   commands and runs the member's own conversations, and nothing else: no
  *   scheduler, connector, bot, plugin, account sync, orchestration proxy or
- *   agent worker. `PERSON_BRAIN_RUNTIMES` in `./runtimes/index.ts` pins the
- *   roster.
+ *   agent worker. Its one agent runtime (`person-agent`, P6e) starts only the
+ *   member's agents, which the Host places in its sandbox pool.
+ *   `PERSON_BRAIN_RUNTIMES` in `./runtimes/index.ts` pins the roster.
  */
 export type HeadlessHost = "brain" | "person-brain"
 

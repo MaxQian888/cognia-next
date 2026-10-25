@@ -57,7 +57,7 @@ jest.mock("@/lib/headless/bootstrap", () => {
       if (context.host === "person-brain") {
         expect(context.collab).toBeUndefined()
         const { personChatCapability } = await import("@/lib/headless/person-chat")
-        expect(personChatCapability()).toEqual({ chat: "none" })
+        expect(personChatCapability()).toEqual({ chat: "none", execution: "none" })
         const { getActiveRuntimeTargetContext } =
           await import("@/lib/runtime/runtime-target-context")
         expect(getActiveRuntimeTargetContext()).toMatchObject({
@@ -301,6 +301,11 @@ describe("serveCommand", () => {
       .mockImplementation(async () => new Response("{}", { status: 403 }))
     const out = sink()
     let verified = false
+    // The CLI entry installs its own process table before `serve` runs.
+    const { installCliExternalAgentHost } = await import("../runtime/external/host-branch")
+    const { getInstalledExternalAgentHost } =
+      await import("@/lib/ai/agent/external/host/installed-host")
+    installCliExternalAgentHost()
     try {
       expect(
         await serveCommand(parseArgv(["serve", "--home", home]), {
@@ -314,6 +319,8 @@ describe("serveCommand", () => {
           wsFactory: (url) => new FakeServerSocket(url),
           shutdown: Promise.resolve(),
           onStarted: async () => {
+            // p6e: a person brain never keeps the CLI's local process table.
+            expect(getInstalledExternalAgentHost()).toBeNull()
             const { getActiveRuntimeTargetContext } =
               await import("@/lib/runtime/runtime-target-context")
             expect(getActiveRuntimeTargetContext()).toMatchObject({

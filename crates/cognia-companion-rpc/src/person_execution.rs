@@ -33,6 +33,64 @@ pub(crate) fn person_runtime_admit(person: &PersonPartition, runtime: &str, prov
     Ok(())
 }
 
+/// A spawn attempt owns its ticket until committed to the live watchdog.
+/// Drop also covers policy/mount/persistence failures and cancelled requests.
+pub(crate) struct PersonSpawnLease {
+    id: String,
+    binding: cognia_external_agent::spawn_authority::PlacementBinding,
+    committed: bool,
+}
+impl PersonSpawnLease {
+    pub(crate) fn commit(&mut self) { self.committed = true; }
+}
+impl Drop for PersonSpawnLease {
+    fn drop(&mut self) {
+        if !self.committed { cognia_companion::host_surface_gate::person_execution_lease_revoke(&self.id, &self.binding); }
+    }
+}
+pub(crate) fn person_bind_spawn_lease(host: &dyn crate::rpc_host::RpcHost, config: &ExternalAgentSpawnConfig) -> PersonResult<PersonSpawnLease> {
+    let refused = || person_refusal(StatusCode::FORBIDDEN, "credential_delivery_refused");
+    let binding = cognia_external_agent::spawn_authority::execution_admission().ok_or_else(refused)?.binding;
+    let gateway = host.gateway().ok_or_else(refused)?;
+    let secret = config.env.get("COGNIA_GATEWAY_TOKEN").ok_or_else(refused)?;
+    let run = serde_json::to_string(&(&binding.run_id, &config.id)).map_err(|_| refused())?;
+    let ticket = gateway.tickets.person_bind_run(secret, &run, chrono::Utc::now().timestamp_millis()).map_err(|_| refused())?;
+    let keep_registry = gateway.tickets.clone(); let revoke_registry = gateway.tickets.clone();
+    let keep_ticket = ticket.clone(); let failed_ticket = ticket.clone();
+    if cognia_companion::host_surface_gate::person_execution_lease_bind(&config.id, &binding,
+        Arc::new(move || keep_registry.person_extend_run(&keep_ticket, &run, chrono::Utc::now().timestamp_millis(), cognia_gateway::task_lease::TASK_LEASE_TTL_MS)),
+        Arc::new(move || { revoke_registry.revoke(&ticket); })).is_err() {
+        gateway.tickets.revoke(&failed_ticket);
+        return Err(refused());
+    }
+    Ok(PersonSpawnLease { id: config.id.clone(), binding, committed: false })
+}
+fn person_policy_request(args: &Value) -> PersonResult<()> {
+    // Serde's empty-struct visitor also accepts [], but the wire contract is
+    // exactly an empty JSON object.
+    if !args.as_object().is_some_and(|fields| fields.is_empty()) {
+        return Err(RpcError::malformed("invalid person policy request".into()));
+    }
+    Ok(())
+}
+fn person_policy_view(policy: cognia_companion::org_agent_policy::PolicyView, available: bool) -> Value {
+    json!({"allowedAgents": policy.allowed_agents, "defaultAgent": policy.default_agent,
+        "execution": if available { "sandboxed" } else { "none" }})
+}
+pub(crate) async fn person_agent_policy_get(args: Value, scope: Option<&str>, tenant: Option<&str>) -> PersonResult<Value> {
+    let person = person_caller(scope, tenant, "person_agent_policy_get")?;
+    person_policy_request(&args)?;
+    let _lock = cognia_companion::host_surface_gate::person_execution_lock(&person.account_id).lock_owned().await;
+    let person = person_caller(scope, tenant, "person_agent_policy_get")?;
+    cognia_companion::host_surface_gate::person_execution_standing(&person).await
+        .map_err(|p| (p.status_code(), Json(RpcError::new(p.code, p.detail))))?;
+    let available = cognia_companion::host_surface_gate::person_execution_available().await;
+    let policy = tokio::task::spawn_blocking(move || cognia_companion::org_agent_policy::get(&person.org_id)).await
+        .map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?
+        .map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?;
+    Ok(person_policy_view(policy, available))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PersonAgentLeaseRequest {
@@ -66,6 +124,9 @@ pub(crate) async fn person_agent_lease_prepare(args: Value, scope: Option<&str>,
     let person = person_caller(scope, tenant, "person_agent_lease_prepare")?;
     cognia_companion::host_surface_gate::person_execution_standing(&person).await
         .map_err(|p| (p.status_code(), Json(RpcError::new(p.code, p.detail))))?;
+    if !cognia_companion::host_surface_gate::person_execution_available().await {
+        return Err(person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"));
+    }
     let request: PersonAgentLeaseRequest = serde_json::from_value(args).map_err(|_| RpcError::malformed("invalid person task request".into()))?;
     if request.runtime_id.is_empty() || request.provider.is_empty() || request.model.is_empty()
         || request.session_id.as_ref().is_some_and(|id| id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) {
@@ -95,7 +156,7 @@ fn person_workspace_error(error: cognia_external_agent::person_workspace::Person
     (status, Json(body))
 }
 pub(crate) async fn person_prepare_spawn(person: &PersonPartition, runtime: &str, policy: cognia_external_agent::presets::SpawnPolicy,
-    config: &mut ExternalAgentSpawnConfig, host: &dyn crate::rpc_host::RpcHost) -> PersonResult<(std::path::PathBuf, GatewayAuthority)> {
+    config: &mut ExternalAgentSpawnConfig, host: &dyn crate::rpc_host::RpcHost) -> PersonResult<(std::path::PathBuf, GatewayAuthority, PersonSpawnLease)> {
     if !cognia_companion::host_surface_gate::person_execution_available().await {
         return Err(person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"));
     }
@@ -115,20 +176,31 @@ pub(crate) async fn person_prepare_spawn(person: &PersonPartition, runtime: &str
     if config.env.keys().any(|key| !["COGNIA_GATEWAY_TOKEN", "COGNIA_GATEWAY_TASK_CONFIG", "TERM", "LANG", "LC_ALL", "LC_CTYPE"].contains(&key.as_str())) {
         return Err(person_refusal(StatusCode::FORBIDDEN, "credential_delivery_refused"));
     }
-    let placement = config.sandbox.as_ref().ok_or_else(|| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"))?;
-    if placement.binding().is_some() { return Err(person_refusal(StatusCode::FORBIDDEN, "placement_binding_client_supplied")); }
-    if placement.provider() != "local" || placement.workspace().is_some() || !placement.hosted_tool_host_lease_ids().is_empty() {
-        return Err(person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"));
-    }
+    if config.sandbox.is_some() { return Err(person_refusal(StatusCode::FORBIDDEN, "placement_client_supplied")); }
+    let pool = cognia_companion::environment_pool::installed()
+        .ok_or_else(|| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"))?;
+    let account = person.account_id.clone();
+    config.sandbox = Some(tokio::task::spawn_blocking(move || {
+        let spec = cognia_companion::environment_pool::person_environment_spec(&pool.admission)?;
+        let mut spec: cognia_environment::spec::EnvironmentSpec = serde_json::from_value(spec).map_err(|error| error.to_string())?;
+        spec.project_id = format!("person:{account}");
+        spec.spec_digest = spec.compute_digest().map_err(|error| error.to_string())?;
+        serde_json::from_value(json!({"kind":"container","spec":spec,"provider":"local","isolationMandatory":true}))
+            .map_err(|error| error.to_string())
+    }).await.map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"))?
+        .map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable"))?);
     // Validate the partition lease before creating its first workspace.
     let gateway = person_authorize_task_spawn(host, person, runtime, config)?;
+    // Once validated, any failed or cancelled spawn retires this ticket,
+    // including workspace/cwd/quota failures before backend creation.
+    let lease = person_bind_spawn_lease(host, config)?;
     let account = person.account_id.clone(); let cwd = config.cwd.clone();
     let (root, cwd) = tokio::task::spawn_blocking(move || {
         let max = cognia_external_agent::person_workspace::person_workspace_max_bytes().map_err(|_| cognia_external_agent::person_workspace::PersonWorkspaceError::Unavailable)?;
         cognia_external_agent::person_workspace::person_workspace_prepare(&policy, &account, cwd.as_deref(), max)
     }).await.map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "person_workspace_unavailable"))?.map_err(person_workspace_error)?;
     config.cwd = Some(cwd.to_string_lossy().into_owned());
-    Ok((root, gateway))
+    Ok((root, gateway, lease))
 }
 
 pub(crate) fn person_authorize_task_spawn(host: &dyn crate::rpc_host::RpcHost, person: &PersonPartition,
@@ -227,6 +299,13 @@ fn person_broker_configuration(config: &mut ExternalAgentSpawnConfig, payload: &
             for name in ["ANTHROPIC_MODEL","ANTHROPIC_DEFAULT_OPUS_MODEL","ANTHROPIC_DEFAULT_SONNET_MODEL","ANTHROPIC_DEFAULT_HAIKU_MODEL"] {
                 config.env.insert(name.into(),model.into());
             }
+            config.env.insert("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),"1".into());
+            // Same as the operator's gateway task (CLAUDE_GATEWAY_TASK_SETTINGS in
+            // lib/ai/agent/external/config/gateway-task.ts): Claude Code's commit
+            // attribution reminder carries noreply@anthropic.com, which the
+            // gateway's PII gate refuses on the task's first model call.
+            payload["files"]["claude/settings.json"] = json!(json!({"includeCoAuthoredBy":false,
+                "attribution":{"commit":"","pr":""}}).to_string());
         }
         _ => unreachable!("only the reviewed bundled gateway families are admitted"),
     }
@@ -235,6 +314,116 @@ fn person_broker_configuration(config: &mut ExternalAgentSpawnConfig, payload: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc_host::RpcHost;
+    #[test]
+    fn p6e_policy_view_is_member_safe_and_request_is_closed() {
+        use cognia_companion::org_agent_policy::{PolicyView, AgentAvailability};
+        let view = person_policy_view(PolicyView { allowed_agents: vec![AgentAvailability {
+            runtime_id: "pi".into(), available: true, providers: vec!["provider".into()] }],
+            bundled_agents: vec![], default_agent: Some("pi".into()), updated_at: Some(1), updated_by: Some("admin".into()) }, true);
+        assert_eq!(view, json!({"allowedAgents":[{"runtimeId":"pi","available":true,"providers":["provider"]}],"defaultAgent":"pi","execution":"sandboxed"}));
+        assert!(person_policy_request(&json!({})).is_ok());
+        for request in [json!({"orgId":"foreign"}), json!(null), json!([])] {
+            assert!(person_policy_request(&request).is_err());
+        }
+    }
+    #[cfg(feature = "test-support")]
+    #[tokio::test]
+    async fn p6e_workspace_failure_revokes_validated_spawn_ticket() {
+        use cognia_companion::{environment_pool, host_surface_gate::person_standing_test_support};
+        use cognia_external_agent::spawn_authority::{ExecutionAdmission, PlacementBinding, with_execution_admission};
+        let _slot = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        struct Restore(Option<environment_pool::PoolServices>, Option<std::ffi::OsString>);
+        impl Drop for Restore { fn drop(&mut self) {
+            environment_pool::uninstall();
+            if let Some(pool) = self.0.take() { environment_pool::install(pool); }
+            match self.1.take() {
+                Some(value) => unsafe { std::env::set_var("COGNIA_EXECUTION", value) },
+                None => unsafe { std::env::remove_var("COGNIA_EXECUTION") },
+            }
+        } }
+        let _restore = Restore(environment_pool::installed(), std::env::var_os("COGNIA_EXECUTION"));
+        unsafe { std::env::set_var("COGNIA_EXECUTION", "enabled"); }
+        environment_pool::install(environment_pool::person_pool_test_support(vec![cognia_environment::spec::IsolationTier::Gvisor]));
+        let person = PersonPartition::new("org_p6e_workspace_failure".into(), "usr_p6e_workspace_failure".into());
+        let _standing = person_standing_test_support::Installed::new(&person.org_id);
+        cognia_companion::org_credentials::OrgCredentials::set(&person.org_id, "p6d-provider", "private-key", "operator", 1).unwrap();
+        cognia_companion::org_agent_policy::set(&person.org_id, vec!["pi".into()], Some("pi".into()), "operator", 1).unwrap();
+        let gateway = gateway(); gateway.person_test_listener(19385);
+        let minted = person_lease_mint(&person, PersonAgentLeaseRequest { runtime_id: "pi".into(),
+            provider: "p6d-provider".into(), model: "p6d-model".into(), session_id: None }, &gateway).unwrap();
+        let mut host = crate::headless::HeadlessServices::stub_for_tests();
+        Arc::get_mut(&mut host).unwrap().gateway = Arc::new(gateway.clone());
+        let outside = tempfile::tempdir().unwrap();
+        let mut config = serde_json::from_value(json!({"id":"p6e-workspace-failure", "command":"pi", "args":["--mode","rpc"],
+            "cwd":outside.path(), "env":{"COGNIA_GATEWAY_TOKEN":minted["secret"],
+                "COGNIA_GATEWAY_TASK_CONFIG":json!({"taskId":minted["ticketId"],"runtime":"pi"}).to_string()}})).unwrap();
+        let decision = ExecutionAdmission { binding: PlacementBinding { org_id:person.org_id.clone(),
+            workspace_id:format!("person:{}",person.account_id), actor_user_id:person.user_id.clone(), run_id:"p6e-workspace-generation".into() },
+            actions:vec!["execution.request".into(),"workspace.write".into(),"credential.use".into()] };
+        let error = with_execution_admission(Some(decision), person_prepare_spawn(&person, "pi",
+            host.remote_spawn_policy().unwrap(), &mut config, &host)).await.err().unwrap();
+        assert_eq!(error.1.code, "workspace_mount_forbidden");
+        assert!(gateway.tickets.validate(minted["secret"].as_str().unwrap(), chrono::Utc::now().timestamp_millis()).is_err());
+        cognia_companion::org_credentials::OrgCredentials::delete(&person.org_id, "p6d-provider").unwrap();
+    }
+
+    #[tokio::test]
+    async fn p6e_policy_and_mint_require_live_person_and_isolation_before_minting() {
+        use cognia_companion::{person_partition::{PersonPartition, scope, person_test_support::Installed}, host_surface_gate::person_standing_test_support};
+        let _slot = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        struct RestoreMode(Option<std::ffi::OsString>);
+        impl Drop for RestoreMode { fn drop(&mut self) { match self.0.take() {
+            Some(value) => unsafe { std::env::set_var("COGNIA_DEPLOYMENT_MODE",value) },
+            None => unsafe { std::env::remove_var("COGNIA_DEPLOYMENT_MODE") },
+        } } }
+        struct RestoreExecution(Option<std::ffi::OsString>);
+        impl Drop for RestoreExecution { fn drop(&mut self) { match self.0.take() {
+            Some(value) => unsafe { std::env::set_var("COGNIA_EXECUTION",value) },
+            None => unsafe { std::env::remove_var("COGNIA_EXECUTION") },
+        } } }
+        struct RestorePool(Option<cognia_companion::environment_pool::PoolServices>);
+        impl Drop for RestorePool { fn drop(&mut self) { cognia_companion::environment_pool::uninstall();
+            if let Some(pool) = self.0.take() { cognia_companion::environment_pool::install(pool); } } }
+        let _execution = RestoreExecution(std::env::var_os("COGNIA_EXECUTION"));
+        unsafe { std::env::set_var("COGNIA_EXECUTION","enabled"); }
+        let _pool = RestorePool(cognia_companion::environment_pool::installed()); cognia_companion::environment_pool::uninstall();
+        let _mode = RestoreMode(std::env::var_os("COGNIA_DEPLOYMENT_MODE"));
+        unsafe { std::env::set_var("COGNIA_DEPLOYMENT_MODE","multi-tenant"); }
+        let person = PersonPartition::new("org_p6e_policy".into(), "usr_p6e_policy".into());
+        let (_fleet, _) = Installed::new(vec![person.clone()]);
+        let standing = person_standing_test_support::Installed::new(&person.org_id);
+        let state = crate::rpc::tests::test_state(); let host = crate::headless::HeadlessServices::stub_for_tests();
+        for caller in [None, Some("service"), Some("owner"), Some("device")] {
+            assert_eq!(person_agent_policy_get(json!({}), caller, Some(&person.account_id)).await.unwrap_err().0, StatusCode::FORBIDDEN);
+        }
+        let view = scope(Some(person.clone()), person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id))).await.unwrap();
+        assert_eq!(view["execution"], "none");
+        let error = scope(Some(person.clone()), person_agent_lease_prepare(json!({"runtimeId":"pi","provider":"provider","model":"model"}),
+            Some("person-brain"),Some(&person.account_id),&state,&host)).await.unwrap_err();
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE); assert_eq!(error.1.code,"execution_isolation_unavailable");
+        let mut pool = cognia_companion::environment_pool::person_pool_test_support(vec![cognia_environment::spec::IsolationTier::Gvisor]);
+        let mut baseline = pool.admission.baseline().clone(); baseline.default_entry_id = None;
+        pool.admission = Arc::new(cognia_sandbox_pool::admission::EnvironmentSandboxAdmission::new(baseline,
+            cognia_environment::store::EnvironmentStore::open_in_memory().unwrap(), cognia_environment::registry::RegistryCredentials::empty(), false));
+        cognia_companion::environment_pool::install(pool);
+        let error = scope(Some(person.clone()), person_agent_lease_prepare(json!({"runtimeId":"pi","provider":"provider","model":"model"}),
+            Some("person-brain"),Some(&person.account_id),&state,&host)).await.unwrap_err();
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE); assert_eq!(error.1.code,"execution_isolation_unavailable");
+        let mut config = serde_json::from_value(json!({"id":"p6e-no-default","command":"pi"})).unwrap();
+        let error = person_prepare_spawn(&person,"pi",host.remote_spawn_policy().unwrap(),&mut config,&host).await.err().unwrap();
+        assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE); assert_eq!(error.1.code,"execution_isolation_unavailable");
+        cognia_companion::environment_pool::install(cognia_companion::environment_pool::person_pool_test_support(vec![cognia_environment::spec::IsolationTier::Gvisor]));
+        let view = scope(Some(person.clone()), person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id))).await.unwrap();
+        assert_eq!(view["execution"], "sandboxed");
+        assert_eq!(scope(Some(person.clone()), person_agent_policy_get(json!({"orgId":"foreign"}),Some("person-brain"),Some(&person.account_id))).await.unwrap_err().0,StatusCode::BAD_REQUEST);
+        standing.refuse("host_surface_forbidden");
+        assert_eq!(scope(Some(person.clone()),person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id))).await.unwrap_err().0,StatusCode::FORBIDDEN);
+        let error = scope(Some(person.clone()), person_agent_lease_prepare(json!({"runtimeId":"pi","provider":"provider","model":"model"}),
+            Some("person-brain"),Some(&person.account_id),&state,&host)).await.unwrap_err();
+        assert_eq!(error.1.code, "host_surface_forbidden");
+    }
+
     fn person(user: &str) -> PersonPartition { PersonPartition::new("org_p6d_lease".into(), user.into()) }
     fn gateway() -> GatewayState {
         let gateway = GatewayState::new();
@@ -267,6 +456,14 @@ mod tests {
             assert!(std::path::Path::new(&env["HOME"]).starts_with(temp.path().canonicalize().unwrap()));
             for contents in payload["files"].as_object().unwrap().values() {
                 assert!(!contents.as_str().unwrap().contains("p6d-task-secret"));
+            }
+            if family == "claude" {
+                // p6e: Claude Code's attribution reminder would trip the gateway PII gate.
+                let settings: Value = serde_json::from_str(payload["files"]["claude/settings.json"].as_str().unwrap()).unwrap();
+                assert_eq!(settings, json!({"includeCoAuthoredBy":false,"attribution":{"commit":"","pr":""}}));
+                assert_eq!(std::fs::read_to_string(std::path::Path::new(&env["CLAUDE_CONFIG_DIR"]).join("settings.json")).unwrap(),
+                    payload["files"]["claude/settings.json"].as_str().unwrap());
+                assert_eq!(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
             }
         }
     }

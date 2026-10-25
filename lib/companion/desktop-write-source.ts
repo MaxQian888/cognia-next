@@ -236,6 +236,22 @@ let hostStateProjection = Promise.resolve()
 const hostStateOwnerId = `brain-${crypto.randomUUID()}`
 const hostStateRuntimeDispatcher = createAgentRpcHostStateDispatcher()
 
+/**
+ * Project a runtime observation the brain made itself into HostState, on the
+ * same queue as the sidecar's `agent://message` envelopes. A member partition's
+ * sandboxed agent (P6e) has no sidecar: its runner reports turn start, queue
+ * delivery and settle here. Inert until a HostState authority exists.
+ */
+export function projectBrainRuntimeEnvelope(envelope: unknown): Promise<void> {
+  const authority = hostStateAuthority
+  if (!authority || !isAgentEventEnvelope(envelope)) return Promise.resolve()
+  hostStateProjection = hostStateProjection
+    .then(() => authority.service.projectRuntimeEnvelope(envelope))
+    .then(() => undefined)
+    .catch(() => undefined)
+  return hostStateProjection
+}
+
 export interface InstallOptions extends SharedInstallOptions {
   /** Trusted local profile: a person brain never uses operator device grants. */
   partition?: boolean
@@ -264,13 +280,7 @@ export const installDesktopWriteSource = createSharedInstall<InstallOptions>(asy
   const unsubscribeAgentEvents = transport.subscribe<{ envelope?: unknown }>(
     "agent://message",
     (payload) => {
-      const authority = hostStateAuthority
-      const envelope = payload?.envelope
-      if (!authority || !isAgentEventEnvelope(envelope)) return
-      hostStateProjection = hostStateProjection
-        .then(() => authority.service.projectRuntimeEnvelope(envelope))
-        .then(() => undefined)
-        .catch(() => undefined)
+      void projectBrainRuntimeEnvelope(payload?.envelope)
     }
   )
 

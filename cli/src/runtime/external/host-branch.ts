@@ -257,6 +257,7 @@ export function createCliExternalAgentHost(
 }
 
 let defaultExternalAgentHost: InstalledExternalAgentHost | undefined
+let uninstallDefaultExternalAgentHost: (() => void) | undefined
 
 /**
  * Install the CLI's external-agent host over the process-wide Node backend.
@@ -264,5 +265,20 @@ let defaultExternalAgentHost: InstalledExternalAgentHost | undefined
  */
 export function installCliExternalAgentHost(): () => void {
   defaultExternalAgentHost ??= createCliExternalAgentHost(defaultBackend)
-  return installExternalAgentHost(defaultExternalAgentHost)
+  const uninstall = installExternalAgentHost(defaultExternalAgentHost)
+  uninstallDefaultExternalAgentHost = uninstall
+  return uninstall
+}
+
+/**
+ * Remove the CLI's own process table from the shared external-agent code.
+ *
+ * `cognia serve` runs inside the CLI binary, whose entry installs that host
+ * for every role. A member's person brain (plan §9a) must never start a
+ * process in its own process: its agents run only in the Host's sandbox pool
+ * (P6e), through the person plane it installs instead.
+ */
+export function uninstallCliExternalAgentHost(): void {
+  uninstallDefaultExternalAgentHost?.()
+  uninstallDefaultExternalAgentHost = undefined
 }

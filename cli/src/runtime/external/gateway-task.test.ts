@@ -153,6 +153,18 @@ describe("gateway task host state", () => {
     resumed.cleanup()
   })
 
+  it("writes the Claude task settings under CLAUDE_CONFIG_DIR", () => {
+    const input = config()
+    const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)
+    payload.runtime = "claude"
+    payload.files = { "claude/settings.json": '{"includeCoAuthoredBy":false}' }
+    input.env.COGNIA_GATEWAY_TASK_CONFIG = JSON.stringify(payload)
+    const prepared = prepareGatewayTask(input, home)
+    const settings = path.join(prepared.config.env!.CLAUDE_CONFIG_DIR, "settings.json")
+    expect(fs.readFileSync(settings, "utf8")).toBe('{"includeCoAuthoredBy":false}')
+    prepared.cleanup()
+  })
+
   it("admits DSH gateway leases without moving certified DSH state or persisting secrets", () => {
     const input = config()
     const payload = JSON.parse(input.env.COGNIA_GATEWAY_TASK_CONFIG)

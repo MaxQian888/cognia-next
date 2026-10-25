@@ -16065,6 +16065,14 @@
         "hint": "The agent refused an action it wasn't allowed to take — adjust its permission mode.",
         "label": "Permission denied"
       },
+      "personAgentAttachmentUnsupported": {
+        "hint": "Agents on a shared Host can read text and images, but not documents such as PDFs. Remove the document, or paste the parts you need as text.",
+        "label": "The agent can't read this attachment"
+      },
+      "personAgentExited": {
+        "hint": "The agent's sandbox ended before it finished the turn. Send the message again to start a fresh agent. If this keeps happening, ask your organization's admin to check the Host.",
+        "label": "Your agent stopped unexpectedly"
+      },
       "personWorkspaceQuotaExceeded": {
         "hint": "Runs on a shared Host keep their files in your personal workspace, which has a size limit. Delete files you no longer need, then start the run again.",
         "label": "Your personal workspace is full"
@@ -16076,6 +16084,10 @@
       "piPackageUnavailable": {
         "hint": "A plugin Pi package this agent loads couldn't be loaded, so the session didn't start. Prepare the package or enable its plugin, or remove it from the agent's settings.",
         "label": "Pi package unavailable"
+      },
+      "placementClientSupplied": {
+        "hint": "On a shared Host, the Host picks where a member's agent runs: its image, size and network. A run that tries to choose these itself is refused. Start the run again from the app.",
+        "label": "Sandbox placement is chosen by the Host"
       },
       "pluginToolMissing": {
         "hint": "The requested tool isn't available — enable the plugin that provides it.",

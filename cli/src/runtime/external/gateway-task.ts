@@ -23,6 +23,7 @@ const ALLOWED_FILES = new Set([
   "pi/models.json",
   "pi/settings.json",
   "qwen/settings.json",
+  "claude/settings.json",
 ])
 const ESSENTIAL_ENV = new Set([
   "PATH",

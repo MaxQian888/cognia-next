@@ -23,6 +23,7 @@ import {
 } from "@cognia/agent-config-types/host-state"
 
 import { getDb } from "@/lib/db/schema"
+import { findRuntimeById } from "@/lib/ai/agent/external/config/install-catalog"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import {
   isCanonicalSession,
@@ -679,6 +680,12 @@ export async function ownedSessionSeed(
     ...(characterOwned ? { characterId: seed.characterId } : {}),
     ...(seed.model ? { model: seed.model } : {}),
     ...(seed.provider ? { provider: seed.provider } : {}),
+    // Only a partition runs Host-bundled agents (P6e); the org allowlist is
+    // checked at every turn, so a runtime the org later removes is refused
+    // then rather than frozen in here.
+    ...(options.partition && seed.agentRuntimeId && findRuntimeById(seed.agentRuntimeId)
+      ? { agentRuntimeId: seed.agentRuntimeId }
+      : {}),
   }
   return Object.keys(owned).length > 0 ? owned : undefined
 }
@@ -1049,6 +1056,7 @@ async function persistBusinessProjection(
         ...(seed?.characterId ? { characterId: seed.characterId } : {}),
         ...(seed?.model ? { model: seed.model } : {}),
         ...(seed?.provider ? { providerOverride: seed.provider } : {}),
+        ...(seed?.agentRuntimeId ? { agentRuntimeId: seed.agentRuntimeId } : {}),
       })
       return
     }

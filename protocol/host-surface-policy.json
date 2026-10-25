@@ -1084,6 +1084,14 @@
   "personModelCommands": [],
   "personBrainCommands": [
     {
+      "arm": "person_agent_policy_get",
+      "reason": "P6e person-only member-safe org agent coverage and Host execution availability; fresh live org standing."
+    },
+    {
+      "arm": "send_to_external_agent",
+      "reason": "P6e fresh live standing and partition/run lifecycle fences; only the caller partition's bound agent process."
+    },
+    {
       "arm": "person_agent_lease_prepare",
       "reason": "P6d person-only member-billed task lease from the partition's org credential; no key disclosure."
     },

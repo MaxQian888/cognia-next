@@ -390,6 +390,34 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
    - **Dispatch:** HostState `message.enqueue` and the turn intents become allowed when the Host advertises partition execution. They dispatch to the session's external agent.
    - **Agent choice:** the session's agent must be on the org allowlist.
    - **Negotiation:** `session_attach` `supportedActions` follows. Without execution the P5d refusals stand.
+   - **Surface (decided 2026-10-25):**
+     - A session seed may carry `agentRuntimeId` (kept only for a partition and only for a catalogued runtime). Otherwise the org `defaultAgent` runs. With neither, the turn stays tool-less chat.
+     - `person_agent_policy_get` (added to `personBrainCommands`, with `send_to_external_agent`) gives the brain the allowlist, the default and `execution`.
+       - The brain refuses `org_agent_not_allowed`, `execution_isolation_unavailable` or `model_access_unavailable` before any lease.
+       - The Host checks every lease and spawn again.
+     - One long-lived sandboxed agent per session (`lib/headless/person-agent/`), reused while runtime, provider and model match. It is stopped after 15 minutes idle. A fresh agent gets the earlier transcript once.
+     - Tool permissions are granted automatically inside the sandbox. Elicitations and async questions are declined. Approval and steer intents stay refused.
+     - The partition owns a closed process plane:
+       - The spawn is rebuilt to the Host contract: no client sandbox, and only the gateway token, task config and locale env.
+       - Files and terminals are refused.
+       - The Host's stop reason (`person_workspace_quota_exceeded`, `host_authority_unavailable`, …) becomes the turn's error.
+     - A message queued behind a running turn reports `queue accepted` and then `delivered` or `dropped`.
+     - New diagnostics: `person_agent_exited` and `person_agent_attachment_unsupported`; documents are refused.
+     - `cognia serve` removes the CLI's local process table for a person brain, so a member brain cannot spawn on the Host.
+     - Claude Code's commit attribution (`noreply@anthropic.com`) tripped the gateway PII gate. Both the Host broker and the operator gateway task now write `claude/settings.json` with attribution off, and the sandboxd task-file allowlist admits that file.
+   - **Verified (2026-10-25, P6f rig, gVisor, `claude-agent-acp`):** the persons tier is green twice, once against the deterministic fixture and once against a real model (`ark-deepseek-v4.1-flash` through an OpenAI-compatible proxy, set as the org `deepseek` deployment).
+     - Member ada's explicit `claude-agent-acp` session and her org-default session both settle `completed` with a reply, and her usage grows (7120 → 23648 tokens on the real model).
+     - `codex-acp` is refused `org_agent_not_allowed` before any spawn.
+     - The P6c tool-less chat, keyless and cap checks still pass, and so does the purge.
+     - The agents run in `runsc` containers with network `none`, mounting only `/workspace` and the bundle. Claude Code itself reports `Linux 4.19.0-gvisor` with cwd `/workspace`.
+     - The real-model run found two gateway translation refusals for Claude Code against non-Anthropic upstreams, both fixed in `crates/cognia-gateway/src/translate/`:
+       - a mid-conversation `role: "system"` message now joins the IR system prompt, recorded as a merged loss;
+       - `thinking: {"type":"adaptive"}` crosses as the reasoning effort alone, recorded as an approximated loss. Budgets stay refused.
+   - **Known gaps:**
+     - Agent output reaches devices only as persisted message writes, throttled to 1 s and written at settle; there is no token-level streaming yet.
+     - Members cannot pick the agent from a device until P6g.
+     - The manifest's `claude.tool-less-chat` health is unchanged.
+     - The local rig bundle is the p6d image with a rebuilt `cognia-sandboxd` layered on top, not a full bundle build.
 6. **Frontend (P6g).**
    - **Admin page:** org admin settings for model credentials, allowed agents, caps and usage. It reuses the org admin surfaces.
    - **Member UI:** an agent picker limited to the allowlist, plus labels for the cap and for missing credentials.
@@ -407,7 +435,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
 
 - Tool turns need a conforming sandbox pool. Without one they keep `execution_isolation_unavailable`.
 - Model calls need an org credential. Without one they keep `model_access_unavailable`.
-- Member chat stays tool-less until P6e; the Host strips any tool surface a person brain asks for. P6d admits and places a person brain's spawn and advertises `COGNIA_PERSON_EXECUTION=sandboxed` to person brains on a conforming pool, but no person brain reads it or starts a run until P6e (`crates/cognia-server/src/brain.rs`, pinned by `p6d_execution_advertisement_requires_conforming_pool_and_is_person_only`).
+- Member chat stays tool-less unless the Host advertises `COGNIA_PERSON_EXECUTION=sandboxed` (only on a conforming pool, `crates/cognia-server/src/brain.rs`, pinned by `p6d_execution_advertisement_requires_conforming_pool_and_is_person_only`). Only then does the person brain install the `person-agent` runtime, which stays inert otherwise (`lib/headless/runtimes/person-agent.test.ts`). A session with no allowed or default agent stays tool-less chat, and the Host strips any tool surface from it.
 - Single-user and desktop Hosts are unchanged.
 
 ## 10. Frontend (P3)

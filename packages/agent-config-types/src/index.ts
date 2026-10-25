@@ -2734,6 +2734,13 @@ export interface ChatSession {
    */
   providerOverride?: string
   /**
+   * Org member partitions only (P6e): the Host-bundled agent runtime this
+   * conversation runs as (`claude-agent-acp`, ...), seeded at creation. Absent
+   * means the org's default agent; with no default the conversation stays
+   * tool-less chat. The Host's org agent allowlist decides at every turn.
+   */
+  agentRuntimeId?: string
+  /**
    * Per-session account override (ADR-0028). Picks which `ProviderVault::accounts[]`
    * entry supplies the OAuth / API key, `CLAUDE_CONFIG_DIR`, base URL, and proxy
    * for this conversation. Precedence chain: `session.accountId →

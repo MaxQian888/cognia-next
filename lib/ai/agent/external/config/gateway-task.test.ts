@@ -1,6 +1,7 @@
 import {
   buildGatewayTaskConfig,
   canUseCogniaModels,
+  CLAUDE_GATEWAY_TASK_SETTINGS,
   cogniaGatewaySupport,
   COPILOT_NO_GITHUB_AUTH,
   GATEWAY_RUNTIME_TRAITS,
@@ -194,7 +195,7 @@ describe("gateway model plan legacy bytes", () => {
       [
         [
           "claude-code",
-          "8f244de83392092036323ab25c912e5de26cbad05a5ed55346c544a01b45a6ab",
+          "021862989e94c3827b9eabebe140ecb45491061ff2f41b3b23e882702f77e2bc",
         ],
         [
           "codex-app-server",
@@ -769,6 +770,19 @@ describe("gateway model plan projectors", () => {
       prepare(source, compile(source, { "subagent.default": { kind: "inherit-primary" } })).config
         .process!.env!.CLAUDE_CODE_SUBAGENT_MODEL
     ).toBe("model")
+  })
+
+  it("writes Claude settings that turn off the commit attribution the PII gate refuses", () => {
+    const source = config("claude-code")
+    const env = prepare(source).config.process!.env!
+    const payload = JSON.parse(env.COGNIA_GATEWAY_TASK_CONFIG)
+    expect(Object.keys(payload.files)).toEqual(["claude/settings.json"])
+    expect(JSON.parse(payload.files["claude/settings.json"])).toEqual(CLAUDE_GATEWAY_TASK_SETTINGS)
+    expect(CLAUDE_GATEWAY_TASK_SETTINGS).toEqual({
+      includeCoAuthoredBy: false,
+      attribution: { commit: "", pr: "" },
+    })
+    expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe("1")
   })
 
   it.each(["codex-app-server", "codex-acp"])(

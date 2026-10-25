@@ -320,6 +320,8 @@ struct TicketRecord {
     provider_overrides: Vec<crate::snapshot::ProviderSnapshot>,
     task_client: Option<reqwest::Client>,
     task_authority: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
+    /// P6e one-use claim, private to this Host lifetime.
+    person_run: Option<String>,
 }
 
 /// Everything the accounting needs, behind ONE lock.
@@ -352,13 +354,16 @@ impl RouteTicketRegistry {
             .load()
             .unwrap_or_default()
             .into_iter()
-            .map(|ticket| TicketRecord {
+            .map(|mut ticket| {
+                if ticket.route_policy.starts_with("person_p6d:") { ticket.revoked = true; }
+                TicketRecord {
                 ticket,
                 secret: None,
                 provider_overrides: Vec::new(),
                 task_client: None,
                 task_authority: None,
-            })
+                person_run: None,
+            }})
             .collect();
         Self {
             inner: Mutex::new(Inner {
@@ -424,7 +429,8 @@ impl RouteTicketRegistry {
     pub fn attach_store(&self, store: std::sync::Arc<dyn TicketMetaStore>) {
         let loaded = store.load().unwrap_or_default();
         let mut inner = self.inner.lock();
-        for ticket in loaded {
+        for mut ticket in loaded {
+            if ticket.route_policy.starts_with("person_p6d:") { ticket.revoked = true; }
             if !inner
                 .records
                 .iter()
@@ -436,6 +442,7 @@ impl RouteTicketRegistry {
                     provider_overrides: Vec::new(),
                     task_client: None,
                     task_authority: None,
+                person_run: None,
                 });
             }
         }
@@ -717,6 +724,7 @@ impl RouteTicketRegistry {
             provider_overrides: request.provider_overrides,
             task_client: None,
             task_authority: None,
+                person_run: None,
         });
         self.persist(&inner.records)?;
         Ok(MintedTicket { ticket, secret })
@@ -1049,6 +1057,45 @@ impl RouteTicketRegistry {
             .and_then(|r| r.task_client.clone())
     }
 
+    /// P6e atomically consume a validated person ticket for one process.
+    pub fn person_bind_run(&self, secret: &str, run: &str, now_ms: i64) -> Result<String, &'static str> {
+        let mut inner = self.inner.lock();
+        let index = Self::match_secret(&inner.records, secret).ok_or("credential_delivery_refused")?;
+        let record = &mut inner.records[index];
+        if record.ticket.revoked || record.ticket.expires_at_ms <= now_ms
+            || record.ticket.member.is_none() || !record.ticket.route_policy.starts_with("person_p6d:")
+            || record.person_run.is_some() {
+            return Err("credential_delivery_refused");
+        }
+        record.person_run = Some(run.into());
+        // Binding begins the run lifetime, even if most of the unused TTL
+        // elapsed while the brain prepared its spawn request.
+        record.ticket.expires_at_ms = now_ms.saturating_add(crate::task_lease::TASK_LEASE_TTL_MS);
+        let id = record.ticket.ticket_id.clone();
+        inner.dirty = true;
+        Ok(id)
+    }
+
+    /// Only the Host's live-run watchdog calls this. Unlike generic renew,
+    /// the run lifetime is not bounded by the ticket's original issue time.
+    pub fn person_extend_run(&self, ticket: &str, run: &str, now_ms: i64, ttl_ms: i64) -> bool {
+        let mut inner = self.inner.lock();
+        let Some(record) = inner.records.iter_mut().find(|record| record.ticket.ticket_id == ticket
+            && record.person_run.as_deref() == Some(run) && !record.ticket.revoked
+            && record.secret.is_some() && record.ticket.expires_at_ms > now_ms) else { return false; };
+        record.ticket.expires_at_ms = now_ms.saturating_add(ttl_ms);
+        inner.dirty = true;
+        true
+    }
+
+    /// Purge and explicit kill already hold the partition/run fences.
+    pub fn person_revoke_run(&self, owner: &str, run: &str) {
+        let ids: Vec<_> = self.inner.lock().records.iter().filter(|record|
+            record.ticket.owner_account_id.as_deref() == Some(owner)
+                && record.person_run.as_deref() == Some(run)).map(|record| record.ticket.ticket_id.clone()).collect();
+        for id in ids { self.revoke(&id); }
+    }
+
     pub fn renew(&self, ticket_id: &str, now_ms: i64, ttl_ms: i64) -> bool {
         let mut inner = self.inner.lock();
         let Some(record) = inner.records.iter_mut().find(|r| {
@@ -1207,6 +1254,54 @@ fn budget_widened(prior: Option<&TicketBudget>, next: Option<&TicketBudget>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p6e_bound_ticket_survives_original_ttl_and_day_limit_but_is_one_use() {
+        let reg = registry();
+        let mut request = mint_request(); request.ttl_ms = Some(120_000); request.route_policy = "person_p6d:pi".into();
+        let minted = reg.person_mint_owned(request, Some(&snapshot()), 1,
+            Some("pb_p6e".into()), Some(MemberBinding { org_id:"org_p6e".into(), user_id:"usr_p6e".into() })).unwrap();
+        assert_eq!(reg.person_bind_run(&minted.secret, "run:agent", 2).unwrap(), minted.ticket.ticket_id);
+        assert_eq!(reg.person_bind_run(&minted.secret, "second:agent", 3), Err("credential_delivery_refused"));
+        assert!(!reg.person_extend_run(&minted.ticket.ticket_id, "foreign", 3, 120_000));
+        // Simulate Host's 30-second loop for two days without wall-clock waits.
+        for now in (30_001..=172_800_001).step_by(30_000) {
+            assert!(reg.person_extend_run(&minted.ticket.ticket_id, "run:agent", now, 120_000));
+            assert!(reg.validate(&minted.secret, now + 1).is_ok());
+        }
+        reg.person_revoke_run("pb_other", "run:agent");
+        assert!(reg.validate(&minted.secret, 172_800_002).is_ok());
+        reg.person_revoke_run("pb_p6e", "run:agent");
+        assert!(reg.validate(&minted.secret, 172_800_002).is_err());
+        assert!(!reg.person_extend_run(&minted.ticket.ticket_id, "run:agent", 172_800_002, 120_000));
+    }
+
+    #[test]
+    fn p6e_binding_near_expiry_starts_a_full_run_ttl() {
+        let reg = registry();
+        let mut request = mint_request();
+        request.ttl_ms = Some(crate::task_lease::TASK_LEASE_TTL_MS);
+        request.route_policy = "person_p6d:pi".into();
+        let minted = reg.person_mint_owned(request, Some(&snapshot()), 1,
+            Some("pb_p6e_late".into()), Some(MemberBinding { org_id: "org_p6e".into(), user_id: "usr_p6e".into() })).unwrap();
+        reg.person_bind_run(&minted.secret, "late:agent", 120_000).unwrap();
+        assert!(reg.validate(&minted.secret, 150_000).is_ok());
+        assert!(reg.person_extend_run(&minted.ticket.ticket_id, "late:agent", 150_000, 120_000));
+    }
+
+    #[test]
+    fn p6e_unspawned_ticket_expires_and_host_restart_revokes_person_metadata() {
+        let store = std::sync::Arc::new(InMemoryTicketMetaStore::default());
+        let reg = RouteTicketRegistry::new(store.clone());
+        let mut request = mint_request(); request.ttl_ms = Some(120_000); request.route_policy = "person_p6d:pi".into();
+        let minted = reg.person_mint_owned(request, Some(&snapshot()), 1,
+            Some("pb_p6e".into()), Some(MemberBinding { org_id:"org_p6e".into(), user_id:"usr_p6e".into() })).unwrap();
+        assert!(reg.validate(&minted.secret, 120_001).is_err());
+        assert!(reg.person_bind_run(&minted.secret, "late", 120_001).is_err());
+        let restarted = RouteTicketRegistry::new(store);
+        assert!(restarted.inner.lock().records.iter().find(|r| r.ticket.ticket_id == minted.ticket.ticket_id).unwrap().ticket.revoked);
+        assert!(restarted.validate(&minted.secret, 2).is_err());
+    }
 
     fn snapshot() -> RoutingSnapshot {
         serde_json::from_value(serde_json::json!({

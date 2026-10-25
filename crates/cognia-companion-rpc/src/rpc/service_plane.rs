@@ -215,7 +215,7 @@ struct BindingEmitter {
     runtime: tokio::runtime::Handle,
     // P6d capture audience before leaving request task-locals.
     person_bus: Option<std::sync::Arc<cognia_companion::event_bus::EventBus>>,
-    person_reason: std::sync::Arc<parking_lot::RwLock<Option<&'static str>>>,
+    person_reason: std::sync::Arc<parking_lot::RwLock<Option<String>>>,
 }
 
 // Runtime operations still address agent ids. Hold this async lock from
@@ -227,12 +227,13 @@ fn execution_lifecycle_lock(id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> 
 impl cognia_external_agent::exec_backend::AgentEventEmitter for BindingEmitter {
     fn emit(&self, channel: &str, mut payload: Value) {
         if matches!(channel, "external-agent://state-change" | "external-agent://exit") {
-            if let Some(reason) = *self.person_reason.read() { payload["reason"] = serde_json::json!(reason); }
+            if let Some(reason) = self.person_reason.read().as_ref() { payload["reason"] = serde_json::json!(reason); }
         }
         if channel == cognia_external_agent::exec_backend::EXIT_CHANNEL
             && payload.get("agentId").and_then(Value::as_str) == Some(self.agent_id.as_str())
         {
             self.exited.store(true, std::sync::atomic::Ordering::SeqCst);
+            cognia_companion::host_surface_gate::person_execution_lease_revoke(&self.agent_id, &self.binding);
             let directory = self.directory.clone();
             let binding = self.binding.clone();
             let id = self.agent_id.clone();
@@ -262,7 +263,7 @@ fn person_start_watchdog(root: std::path::PathBuf, id: String,
     backend: std::sync::Arc<dyn cognia_external_agent::exec_backend::ExecBackend>,
     emitter: std::sync::Arc<dyn cognia_external_agent::exec_backend::AgentEventEmitter>,
     exited: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    reason: std::sync::Arc<parking_lot::RwLock<Option<&'static str>>>) {
+    reason: std::sync::Arc<parking_lot::RwLock<Option<String>>>) {
     person_watchdog_with_interval(root, id, binding, backend, emitter, exited, reason,
         cognia_external_agent::person_workspace::PERSON_WORKSPACE_INTERVAL);
 }
@@ -272,7 +273,7 @@ fn person_watchdog_with_interval(root: std::path::PathBuf, id: String,
     backend: std::sync::Arc<dyn cognia_external_agent::exec_backend::ExecBackend>,
     emitter: std::sync::Arc<dyn cognia_external_agent::exec_backend::AgentEventEmitter>,
     exited: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    reason: std::sync::Arc<parking_lot::RwLock<Option<&'static str>>>, interval: std::time::Duration) {
+    reason: std::sync::Arc<parking_lot::RwLock<Option<String>>>, interval: std::time::Duration) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(interval).await;
@@ -282,6 +283,8 @@ fn person_watchdog_with_interval(root: std::path::PathBuf, id: String,
             let _run = execution_lifecycle_lock(&id).lock_owned().await;
             let Ok(info) = backend.get_info(&id).await else { break; };
             if !placement_matches_binding(&info, &binding) { break; }
+            use cognia_external_agent::process::ExternalAgentProcessState::{Stopped, Failed};
+            if matches!(backend.status(&id).await, None | Some(Stopped | Failed)) { break; }
             let path = root.clone();
             let measured = tokio::task::spawn_blocking(move || {
                 let max = cognia_external_agent::person_workspace::person_workspace_max_bytes()
@@ -290,12 +293,15 @@ fn person_watchdog_with_interval(root: std::path::PathBuf, id: String,
                     cognia_external_agent::person_workspace::PERSON_WORKSPACE_ENTRY_LIMIT).map_err(|error| error.code())?;
                 Ok::<_, &'static str>((used, max))
             }).await.unwrap_or(Err("person_workspace_unavailable"));
-            let violation = match measured {
-                Ok((used, max)) if used > max => Some("person_workspace_quota_exceeded"),
-                Err(code) => Some(code), _ => None,
-            };
+            let standing = cognia_companion::host_surface_gate::person_execution_standing(&person).await;
+            let violation = reason.read().clone().or_else(|| standing.err().map(|problem| problem.code)).or_else(|| match measured {
+                Ok((used, max)) if used > max => Some("person_workspace_quota_exceeded".to_owned()),
+                Err(code) => Some(code.to_owned()), _ => None,
+            }).or_else(|| (!cognia_companion::host_surface_gate::person_execution_lease_refresh(&id, &binding))
+                .then(|| "credential_delivery_refused".to_owned()));
             if let Some(code) = violation {
-                *reason.write() = Some(code);
+                cognia_companion::host_surface_gate::person_execution_lease_revoke(&id, &binding);
+                *reason.write() = Some(code.clone());
                 emitter.emit(cognia_external_agent::exec_backend::STATE_CHANGE_CHANNEL,
                     serde_json::json!({"agentId":id,"state":"Stopping","reason":code}));
                 match tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -311,6 +317,7 @@ fn person_watchdog_with_interval(root: std::path::PathBuf, id: String,
                 }
             }
         }
+        cognia_companion::host_surface_gate::person_execution_lease_revoke(&id, &binding);
     });
 }
 
@@ -390,18 +397,9 @@ pub(super) async fn dispatch(
             return Err(tenant_execution_refusal("execution_isolation_unavailable"));
         }
     }
-    if matches!(name, "get_external_agent_status" | "kill_external_agent" | "send_to_external_agent") && person.is_none() {
-        let id: String = required_aliased(&args, "agent_id", "agentId")?;
-        if let Ok(info) = host.exec_backend().get_info(&id).await {
-            if info.pointer("/placement/binding").cloned()
-                .and_then(|binding| serde_json::from_value::<cognia_external_agent::spawn_authority::PlacementBinding>(binding).ok())
-                .and_then(|binding| cognia_companion::host_surface_gate::person_execution_owner(&binding)).is_some() {
-                return Err(crate::person_model::person_forbidden());
-            }
-        }
-    }
     let _execution_lifecycle =
-        if cognia_external_agent::spawn_authority::execution_admission().is_some() {
+        if cognia_external_agent::spawn_authority::execution_admission().is_some()
+            || matches!(name, "get_external_agent_status" | "kill_external_agent" | "send_to_external_agent") {
             let id = if name == "spawn_external_agent" {
                 args.pointer("/config/id")
                     .and_then(Value::as_str)
@@ -421,6 +419,22 @@ pub(super) async fn dispatch(
         } else {
             None
         };
+    // Operator controls also take the run fence before checking ownership:
+    // a person spawn may still be installing this id when the request arrives.
+    if matches!(name, "get_external_agent_status" | "kill_external_agent" | "send_to_external_agent") && person.is_none() {
+        let id: String = required_aliased(&args, "agent_id", "agentId")?;
+        if let Ok(info) = host.exec_backend().get_info(&id).await {
+            if info.pointer("/placement/binding").cloned()
+                .and_then(|binding| serde_json::from_value::<cognia_external_agent::spawn_authority::PlacementBinding>(binding).ok())
+                .and_then(|binding| cognia_companion::host_surface_gate::person_execution_owner(&binding)).is_some() {
+                return Err(crate::person_model::person_forbidden());
+            }
+        }
+    }
+    if let Some(person) = &person {
+        cognia_companion::host_surface_gate::person_execution_standing(person).await
+            .map_err(|p| (p.status_code(), Json(RpcError::new(p.code, p.detail))))?;
+    }
     if matches!(
         name,
         "send_to_external_agent" | "kill_external_agent" | "get_external_agent_status"
@@ -451,6 +465,12 @@ pub(super) async fn dispatch(
                 .get_info(&agent_id)
                 .await
                 .map_err(|_| tenant_execution_refusal("placement_binding_required"))?;
+            if let Some(person) = &person {
+                let owner = info.pointer("/placement/binding").cloned()
+                    .and_then(|value| serde_json::from_value::<cognia_external_agent::spawn_authority::PlacementBinding>(value).ok())
+                    .and_then(|binding| cognia_companion::host_surface_gate::person_execution_owner(&binding));
+                if owner.as_ref() != Some(person) { return Err(crate::person_model::person_forbidden()); }
+            }
             if !placement_matches_binding(&info, &decision.binding) {
                 return Err(tenant_execution_refusal("execution_isolation_unavailable"));
             }
@@ -535,16 +555,19 @@ pub(super) async fn dispatch(
         // is written to the audit log. The spawn request must clear the
         // SpawnPolicy preset allowlist before it touches the exec backend.
         "spawn_external_agent" => {
+            if person.is_some() && args.pointer("/config/sandbox").is_some() {
+                return Err(crate::person_execution::person_refusal(StatusCode::FORBIDDEN, "placement_client_supplied"));
+            }
             let policy = host.remote_spawn_policy().map_err(RpcError::internal)?;
             let mut config: cognia_external_agent::process::ExternalAgentSpawnConfig =
                 required(&args, "config")?;
             let person_runtime = if person.is_some() { Some(required::<String>(&args, "runtimeId")?) } else { None };
-            let (person_workspace, person_gateway) = match (&person, &person_runtime) {
+            let (person_workspace, person_gateway, mut person_lease) = match (&person, &person_runtime) {
                 (Some(person), Some(runtime)) => {
-                    let (root, gateway) = crate::person_execution::person_prepare_spawn(person, runtime, policy.clone(), &mut config, host).await?;
-                    (Some(root), Some(gateway))
+                    let (root, gateway, lease) = crate::person_execution::person_prepare_spawn(person, runtime, policy.clone(), &mut config, host).await?;
+                    (Some(root), Some(gateway), Some(lease))
                 }
-                _ => (None, None),
+                _ => (None, None, None),
             };
             if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() {
                 decision
@@ -780,6 +803,7 @@ pub(super) async fn dispatch(
                         person_start_watchdog(root, spawned.clone(), decision.binding,
                             backend, person_emitter, exited, person_reason);
                     }
+                    if let Some(lease) = &mut person_lease { lease.commit(); }
                     Ok(Value::String(spawned))
                 }
             }
@@ -817,6 +841,9 @@ pub(super) async fn dispatch(
                 .kill(&agent_id)
                 .await
                 .map_err(RpcError::internal)?;
+            if let Some(decision) = cognia_external_agent::spawn_authority::execution_admission() {
+                cognia_companion::host_surface_gate::person_execution_lease_revoke(&agent_id, &decision.binding);
+            }
             cognia_companion::host_surface_gate::forget_execution_binding(state, name, &agent_id)
                 .await
                 .map_err(|problem| {
@@ -2573,6 +2600,8 @@ mod tests {
 
     #[tokio::test]
     async fn p6b_usage_commands_refuse_non_server_hosts() {
+        // Single-user by env: wait out a P6e test that runs with multi-tenant set.
+        let _slot = cognia_companion::ws_bridge::test_support::lock_slot().await;
         let temp = tempfile::tempdir().unwrap();
         let state = bound_state(temp.path().into());
         let host = crate::headless::HeadlessServices::stub_for_tests();
@@ -2585,6 +2614,8 @@ mod tests {
 
     #[tokio::test]
     async fn p6a_org_service_arms_preserve_the_single_user_refusal() {
+        // Single-user by env: wait out a P6e test that runs with multi-tenant set.
+        let _slot = cognia_companion::ws_bridge::test_support::lock_slot().await;
         let temp = tempfile::tempdir().unwrap();
         let state = bound_state(temp.path().into());
         let host = crate::headless::HeadlessServices::stub_for_tests();
@@ -2782,6 +2813,7 @@ mod tests {
         use cognia_external_agent::exec_backend::AgentEventEmitter;
         let temp = tempfile::tempdir().unwrap();
         let person = cognia_companion::person_partition::PersonPartition::new("org_p6d_quota".into(),"usr_p6d_quota".into());
+        let _standing = cognia_companion::host_surface_gate::person_standing_test_support::Installed::new(&person.org_id);
         let binding = cognia_external_agent::spawn_authority::PlacementBinding { org_id:person.org_id.clone(),actor_user_id:person.user_id.clone(),
             workspace_id:format!("person:{}",person.account_id),run_id:"p6d-quota-generation".into() };
         let backend = Arc::new(BoundBackend::default());
@@ -2800,7 +2832,7 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(3),async {
             while backend.killed.lock().is_empty() { tokio::time::sleep(std::time::Duration::from_millis(1)).await; }
         }).await.unwrap();
-        assert_eq!(*reason.read(),Some("person_workspace_quota_exceeded"));
+        assert_eq!(reason.read().as_deref(),Some("person_workspace_quota_exceeded"));
         assert_eq!(*backend.killed.lock(),vec!["p6d-quota-agent"]);
         emitter.emit("external-agent://exit",serde_json::json!({"agentId":"p6d-quota-agent","code":0}));
         emitter.emit("external-agent://session-event",serde_json::json!({"agentId":"p6d-quota-agent","data":"event"}));
@@ -2876,6 +2908,134 @@ mod tests {
     // P6d uses the existing fake execution backend, real dispatch and replay bus.
     // Run with --features test-support,cognia-gateway/test-support: the gateway
     // publishes fixture listener facts without attempting a forbidden bind.
+    fn person_p6e_lease(person: &cognia_companion::person_partition::PersonPartition, task: &str)
+        -> (cognia_gateway::GatewayState, cognia_gateway::task_lease::TaskLease) {
+        let gateway = cognia_gateway::GatewayState::new();
+        let provider = serde_json::from_value(serde_json::json!({"id":"p6e-provider","protocol":"openai","enabled":true,
+            "apiKey":"p6e-private-key","baseUrl":"https://fixture.invalid/v1","models":["model"]})).unwrap();
+        let lease = gateway.person_mint_task_lease(&person.account_id,
+            cognia_gateway::route_ticket::MemberBinding { org_id:person.org_id.clone(), user_id:person.user_id.clone() },
+            "pi", task, gateway.status().account_generation, provider, "model".into(), "openai-chat").unwrap();
+        (gateway, lease)
+    }
+
+    #[tokio::test]
+    async fn p6e_operator_send_waits_for_spawn_fence_and_rechecks_person_owner() {
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let state = bound_state(temp.path().join("data"));
+        let backend = Arc::new(BoundBackend::default());
+        let mut host = crate::headless::HeadlessServices::stub_for_tests();
+        Arc::get_mut(&mut host).unwrap().exec = backend.clone();
+        let person = cognia_companion::person_partition::PersonPartition::new("org_p6e_send_race".into(), "usr_p6e_send_race".into());
+        let id = "p6e-send-spawn-race";
+        let run = execution_lifecycle_lock(id).lock_owned().await;
+        let args = serde_json::json!({"agentId":id,"message":"hello"});
+        let mut send = Box::pin(dispatch("send_to_external_agent", args, &state, &host, "operator", None, Some("service")));
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(20), &mut send).await.is_err());
+        backend.agents.lock().insert(id.into(), serde_json::from_value(serde_json::json!({"id":id,"command":"pi",
+            "sandbox":{"kind":"container","spec":{},"isolationMandatory":true,"binding":{
+                "orgId":person.org_id,"workspaceId":format!("person:{}",person.account_id),"actorUserId":person.user_id,"runId":"generation"}}})).unwrap());
+        drop(run);
+        assert_eq!(send.await.unwrap_err().1.code, "host_surface_forbidden");
+    }
+
+    #[tokio::test]
+    async fn p6e_send_is_partition_owned_and_leases_end_at_exit_kill_purge_or_failure() {
+        use cognia_companion::{person_partition::{PersonPartition, scope, person_test_support::Installed}, host_surface_gate as gate};
+        use cognia_external_agent::{spawn_authority::{ExecutionAdmission, PlacementBinding, with_execution_admission}, exec_backend::AgentEventEmitter};
+        use std::sync::{Arc, atomic::AtomicBool};
+        let _slot = cognia_companion::ws_bridge::test_support::lock_slot().await;
+        let a = PersonPartition::new("org_p6e_controls".into(), "usr_p6e_controls_a".into());
+        let b = PersonPartition::new(a.org_id.clone(), "usr_p6e_controls_b".into());
+        let (_fleet, _) = Installed::new(vec![a.clone(), b.clone()]);
+        for ending in ["exit", "kill", "purge", "spawn-failure", "terminal-status"] {
+            let standing = gate::person_standing_test_support::Installed::new(&a.org_id);
+            let temp = tempfile::tempdir().unwrap(); let data = temp.path().join("data");
+            let state = bound_state(data.clone()); let id = format!("p6e-{ending}");
+            let policy = cognia_external_agent::presets::SpawnPolicy::from_env(&data);
+            let (workspace, _) = cognia_external_agent::person_workspace::person_workspace_prepare(&policy, &a.account_id, None, 1024).unwrap();
+            let (gateway, minted) = person_p6e_lease(&a, &id);
+            let backend = Arc::new(BoundBackend::default());
+            let mut host = crate::headless::HeadlessServices::stub_for_tests();
+            let services = Arc::get_mut(&mut host).unwrap(); services.exec = backend.clone(); services.data_dir = data.clone(); services.gateway = Arc::new(gateway.clone());
+            let binding = PlacementBinding { org_id:a.org_id.clone(), workspace_id:format!("person:{}",a.account_id), actor_user_id:a.user_id.clone(), run_id:id.clone() };
+            let decision = ExecutionAdmission { binding:binding.clone(), actions:vec!["execution.request".into(),"workspace.write".into(),"credential.use".into()] };
+            let config = serde_json::from_value(serde_json::json!({"id":id,"command":"pi","env":{"COGNIA_GATEWAY_TOKEN":minted.secret},
+                "sandbox":{"kind":"container","spec":{},"isolationMandatory":true,"binding":binding}})).unwrap();
+            let mut lease = with_execution_admission(Some(decision.clone()), async { crate::person_execution::person_bind_spawn_lease(&host, &config) }).await.unwrap();
+            assert_eq!(with_execution_admission(Some(decision.clone()), async { crate::person_execution::person_bind_spawn_lease(&host, &config).err().unwrap().1.code.clone() }).await,"credential_delivery_refused");
+            if ending == "spawn-failure" {
+                drop(lease);
+            } else {
+                lease.commit(); backend.agents.lock().insert(id.clone(), config);
+                with_execution_admission(Some(decision.clone()), gate::persist_execution_binding(&state,"spawn_external_agent",&serde_json::json!({"config":{"id":id}}),workspace.to_str().unwrap())).await.unwrap();
+                scope(Some(a.clone()), with_execution_admission(Some(decision.clone()), dispatch("send_to_external_agent",
+                    serde_json::json!({"agentId":id,"message":"{\"id\":1,\"method\":\"initialize\"}"}), &state,&host,"brain-a",Some(&a.account_id),Some("person-brain")))).await.unwrap();
+                assert_eq!(dispatch("send_to_external_agent",serde_json::json!({"agentId":id,"message":"hello"}),&state,&host,"operator",None,Some("service")).await.unwrap_err().1.code,"host_surface_forbidden");
+                let foreign = ExecutionAdmission { binding:PlacementBinding { workspace_id:format!("person:{}",b.account_id),actor_user_id:b.user_id.clone(),..binding.clone() },actions:decision.actions.clone() };
+                assert_eq!(scope(Some(b.clone()), with_execution_admission(Some(foreign), dispatch("send_to_external_agent",
+                    serde_json::json!({"agentId":id,"message":"hello"}),&state,&host,"brain-b",Some(&b.account_id),Some("person-brain")))).await.unwrap_err().1.code,"host_surface_forbidden");
+                match ending {
+                    "exit" => {
+                        standing.refuse("host_surface_forbidden");
+                        assert_eq!(scope(Some(a.clone()), with_execution_admission(Some(decision.clone()), dispatch("send_to_external_agent",
+                            serde_json::json!({"agentId":id,"message":"standing lost"}), &state,&host,"brain-a",Some(&a.account_id),Some("person-brain")))).await.unwrap_err().1.code,"host_surface_forbidden");
+                        let emitter = BindingEmitter { inner:host.agent_event_emitter(),directory:data,binding:binding.clone(),agent_id:id.clone(),
+                            exited:Arc::new(AtomicBool::new(false)),runtime:tokio::runtime::Handle::current(),person_bus:Some(state.event_bus.clone()),person_reason:Arc::new(parking_lot::RwLock::new(None)) };
+                        emitter.emit("external-agent://exit",serde_json::json!({"agentId":id,"code":0}));
+                    }
+                    "kill" => { scope(Some(a.clone()),with_execution_admission(Some(decision),dispatch("kill_external_agent",serde_json::json!({"agentId":id}),
+                        &state,&host,"brain-a",Some(&a.account_id),Some("person-brain")))).await.unwrap(); }
+                    "purge" => { gate::person_stop_execution(Some(&data),&a,backend.as_ref(),std::time::Duration::from_secs(1)).await.unwrap(); }
+                    "terminal-status" => {
+                        // A backend can discover terminal state without an exit
+                        // callback (for example after reconciling a dead runner).
+                        backend.agents.lock().remove(&id);
+                        let error = scope(Some(a.clone()), with_execution_admission(Some(decision), dispatch("get_external_agent_status",
+                            serde_json::json!({"agentId":id}), &state,&host,"brain-a",Some(&a.account_id),Some("person-brain")))).await.unwrap_err();
+                        assert_eq!(error.1.code, "workspace_unresolved");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            assert!(gateway.tickets.validate(&minted.secret,chrono::Utc::now().timestamp_millis()).is_err(),"{ending}");
+        }
+    }
+
+    #[tokio::test]
+    async fn p6e_watchdog_standing_loss_stops_run_revokes_ticket_and_preserves_reason() {
+        use cognia_companion::{person_partition::PersonPartition, host_surface_gate as gate};
+        use cognia_external_agent::{spawn_authority::{ExecutionAdmission, PlacementBinding, with_execution_admission}, exec_backend::AgentEventEmitter};
+        use std::sync::{Arc, atomic::AtomicBool};
+        let person = PersonPartition::new("org_p6e_watchdog".into(),"usr_p6e_watchdog".into());
+        let standing = gate::person_standing_test_support::Installed::new(&person.org_id);
+        let temp = tempfile::tempdir().unwrap(); let id = "p6e-standing-run";
+        let binding = PlacementBinding { org_id:person.org_id.clone(), workspace_id:format!("person:{}",person.account_id),actor_user_id:person.user_id.clone(),run_id:id.into() };
+        let decision = ExecutionAdmission { binding:binding.clone(), actions:vec![] };
+        let (gateway,minted) = person_p6e_lease(&person,id);
+        let config = serde_json::from_value(serde_json::json!({"id":id,"command":"pi","env":{"COGNIA_GATEWAY_TOKEN":minted.secret},
+            "sandbox":{"kind":"container","spec":{},"isolationMandatory":true,"binding":binding}})).unwrap();
+        let backend = Arc::new(BoundBackend::default());
+        let mut host = crate::headless::HeadlessServices::stub_for_tests(); Arc::get_mut(&mut host).unwrap().gateway = Arc::new(gateway.clone());
+        let mut lease = with_execution_admission(Some(decision),async { crate::person_execution::person_bind_spawn_lease(&host,&config) }).await.unwrap(); lease.commit();
+        backend.agents.lock().insert(id.into(),config);
+        let bus = cognia_companion::event_bus::EventBus::new(); let exited = Arc::new(AtomicBool::new(false)); let reason = Arc::new(parking_lot::RwLock::new(None));
+        let emitter = Arc::new(BindingEmitter { inner:host.agent_event_emitter(), directory:temp.path().join("data"), binding:binding.clone(),agent_id:id.into(),
+            exited:exited.clone(),runtime:tokio::runtime::Handle::current(),person_bus:Some(bus.clone()),person_reason:reason.clone() });
+        standing.refuse("host_surface_forbidden");
+        person_watchdog_with_interval(temp.path().into(),id.into(),binding,backend.clone(),emitter.clone(),exited,reason.clone(),std::time::Duration::from_millis(1));
+        tokio::time::timeout(std::time::Duration::from_secs(2),async {
+            while backend.killed.lock().is_empty() { tokio::time::sleep(std::time::Duration::from_millis(1)).await; }
+        }).await.unwrap();
+        assert_eq!(reason.read().as_deref(),Some("host_surface_forbidden"));
+        assert!(gateway.tickets.validate(&minted.secret,chrono::Utc::now().timestamp_millis()).is_err());
+        emitter.emit("external-agent://exit",serde_json::json!({"agentId":id,"code":0}));
+        let cognia_companion::event_bus::SubscribeResult::Ok { replay,.. } = bus.subscribe(Some(0),0) else { panic!("replay"); };
+        assert_eq!(replay.len(),2);
+        for event in replay { assert_eq!(event.payload["reason"],"host_surface_forbidden"); assert_eq!(event.partition_account_id.as_deref(),Some(person.account_id.as_str())); }
+    }
+
     #[cfg(feature = "test-support")]
     #[tokio::test]
     async fn p6d_person_spawn_backend_binding_brokerage_isolation_and_events() {
@@ -2891,6 +3051,7 @@ mod tests {
         environment_pool::install(environment_pool::person_pool_test_support(vec![cognia_environment::spec::IsolationTier::Gvisor]));
         let a = PersonPartition::new("org_p6d_spawn".into(), "usr_p6d_spawn_a".into());
         let b = PersonPartition::new(a.org_id.clone(), "usr_p6d_spawn_b".into());
+        let _standing = cognia_companion::host_surface_gate::person_standing_test_support::Installed::new(&a.org_id);
         let (_fleet, _) = Installed::new(vec![a.clone(), b.clone()]);
         cognia_companion::org_credentials::OrgCredentials::set(&a.org_id, "p6d-provider", "p6d-upstream-org-key", "operator", 1).unwrap();
         cognia_companion::org_agent_policy::set(&a.org_id, vec!["pi".into()], Some("pi".into()), "operator", 1).unwrap();
@@ -2913,7 +3074,7 @@ mod tests {
         let args = |id: &str, lease: &Value| serde_json::json!({"runtimeId":"pi","workspaceId":"foreign-ignored","config":{
             "id":id,"command":"pi","args":["--mode","rpc"],"env":{"COGNIA_GATEWAY_TOKEN":lease["secret"],
                 "COGNIA_GATEWAY_TASK_CONFIG":serde_json::json!({"taskId":lease["ticketId"],"runtime":"pi","files":{}}).to_string()},
-            "sandbox":{"kind":"container","spec":{},"isolationMandatory":false}}});
+            }});
         // AC36: isolation refusal happens before the fake backend is called.
         struct RestoreExecution(Option<std::ffi::OsString>);
         impl Drop for RestoreExecution { fn drop(&mut self) { match self.0.take() {
@@ -2932,6 +3093,12 @@ mod tests {
         }
         unsafe { std::env::set_var("COGNIA_EXECUTION","enabled"); }
         environment_pool::install(environment_pool::person_pool_test_support(vec![cognia_environment::spec::IsolationTier::Gvisor]));
+        for supplied in [serde_json::json!(null), serde_json::json!({"kind":"container","spec":{},"isolationMandatory":false})] {
+            let mut supplied_args = args("p6e-client-placement", &minted); supplied_args["config"]["sandbox"] = supplied;
+            let error = person_scope(Some(a.clone()), with_execution_admission(Some(decision.clone()), dispatch("spawn_external_agent",supplied_args,
+                &state,&host,&format!("brain-{}",a.account_id),Some(&a.account_id),Some("person-brain")))).await.unwrap_err();
+            assert_eq!(error.0,StatusCode::FORBIDDEN); assert_eq!(error.1.code,"placement_client_supplied");
+        }
         let mut disallowed = args("p6d-disallowed",&minted); disallowed["runtimeId"] = serde_json::json!("codex-acp");
         let error = person_scope(Some(a.clone()), with_execution_admission(Some(decision.clone()),
             dispatch("spawn_external_agent",disallowed,&state,&host,&format!("brain-{}",a.account_id),Some(&a.account_id),Some("person-brain")))).await.unwrap_err();
@@ -2945,7 +3112,12 @@ mod tests {
             match refused["config"]["id"].as_str().unwrap() {
                 "p6d-injected" => refused["config"]["env"]["OPENAI_API_KEY"] = serde_json::json!("injected"),
                 "p6d-nolease" => refused["config"]["env"] = serde_json::json!({}),
-                "p6d-outside" => refused["config"]["cwd"] = serde_json::json!(temp.path().to_str().unwrap()),
+                "p6d-outside" => {
+                    let outside = crate::person_execution::person_lease_mint(&a, crate::person_execution::PersonAgentLeaseRequest {
+                        runtime_id:"pi".into(),provider:"p6d-provider".into(),model:"p6d-model".into(),session_id:None }, &host.gateway).unwrap();
+                    refused = args("p6d-outside", &outside);
+                    refused["config"]["cwd"] = serde_json::json!(temp.path().to_str().unwrap());
+                }
                 _ => (),
             }
             let error = person_scope(Some(a.clone()), with_execution_admission(Some(decision.clone()),
@@ -2960,6 +3132,10 @@ mod tests {
         let config = backend.agents.lock()["p6d-agent"].clone();
         assert_eq!(config.sandbox.as_ref().unwrap().binding(), Some(&decision.binding));
         assert!(config.sandbox.as_ref().unwrap().isolation_mandatory());
+        let spec: cognia_environment::spec::EnvironmentSpec = serde_json::from_value(config.sandbox.as_ref().unwrap().spec().clone()).unwrap();
+        spec.validate_with_digest().unwrap(); assert_eq!(spec.project_id,format!("person:{}",a.account_id));
+        assert_eq!(spec.egress.tier,cognia_environment::spec::EgressTier::Off);
+
         let root = cognia_external_agent::person_workspace::person_workspace_path(&host.spawn_policy,&a.account_id).unwrap().canonicalize().unwrap();
         assert_eq!(config.cwd.as_deref(), root.to_str());
         assert_eq!(cognia_external_agent::spawn_authority::CredentialDelivery::for_env(config.env.keys().map(String::as_str)), cognia_external_agent::spawn_authority::CredentialDelivery::Brokered);

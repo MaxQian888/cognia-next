@@ -1,0 +1,75 @@
+import { fetchPersonAgentPolicy, resolvePersonAgent, type PersonAgentPolicy } from "./policy"
+
+const policy: PersonAgentPolicy = {
+  allowedAgents: [
+    { runtimeId: "claude-agent-acp", available: true, providers: ["anthropic"] },
+    { runtimeId: "codex-acp", available: false, providers: [] },
+  ],
+  defaultAgent: "claude-agent-acp",
+  execution: "sandboxed",
+}
+
+const session = { providerOverride: "anthropic", model: "claude-sonnet-4-5" }
+
+describe("person agent policy", () => {
+  it("p6e runs the session's agent, else the org default", () => {
+    expect(
+      resolvePersonAgent({ ...session, agentRuntimeId: "claude-agent-acp" }, policy, true)
+    ).toEqual({
+      kind: "agent",
+      runtimeId: "claude-agent-acp",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    })
+    expect(resolvePersonAgent(session, policy, false)).toMatchObject({
+      kind: "agent",
+      runtimeId: "claude-agent-acp",
+    })
+  })
+
+  it("p6e stays tool-less chat with no agent and no default", () => {
+    const noDefault = { ...policy, defaultAgent: null }
+    expect(resolvePersonAgent(session, noDefault, true)).toEqual({ kind: "tool-less" })
+    expect(resolvePersonAgent(session, noDefault, false)).toEqual({
+      kind: "refused",
+      code: "execution_isolation_unavailable",
+    })
+  })
+
+  it("p6e never falls back from an agent the org does not allow", () => {
+    expect(resolvePersonAgent({ ...session, agentRuntimeId: "pi" }, policy, true)).toEqual({
+      kind: "refused",
+      code: "org_agent_not_allowed",
+    })
+  })
+
+  it("p6e refuses without execution or model access", () => {
+    expect(resolvePersonAgent(session, { ...policy, execution: "none" }, true)).toEqual({
+      kind: "refused",
+      code: "execution_isolation_unavailable",
+    })
+    expect(resolvePersonAgent({ ...session, agentRuntimeId: "codex-acp" }, policy, true)).toEqual({
+      kind: "refused",
+      code: "model_access_unavailable",
+    })
+    for (const picks of [
+      { providerOverride: "openai", model: "gpt" },
+      { providerOverride: "anthropic" },
+      { model: "claude-sonnet-4-5" },
+    ]) {
+      expect(resolvePersonAgent(picks, policy, true)).toEqual({
+        kind: "refused",
+        code: "model_access_unavailable",
+      })
+    }
+  })
+
+  it("p6e reads the Host policy and refuses a malformed answer", async () => {
+    const call = jest.fn().mockResolvedValueOnce(policy).mockResolvedValueOnce({ allowedAgents: 1 })
+    await expect(fetchPersonAgentPolicy({ call })).resolves.toEqual(policy)
+    expect(call).toHaveBeenCalledWith("person_agent_policy_get", {})
+    await expect(fetchPersonAgentPolicy({ call })).rejects.toMatchObject({
+      code: "execution_isolation_unavailable",
+    })
+  })
+})

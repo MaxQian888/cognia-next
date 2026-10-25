@@ -67,6 +67,7 @@ fn payload(env: &HashMap<String, String>) -> Result<Option<TaskPayload>, String>
                 "pi/models.json",
                 "pi/settings.json",
                 "qwen/settings.json",
+                "claude/settings.json",
             ]
             .contains(&name.as_str())
                 && !(value.runtime == "pi" && pi_agent_file(name))
@@ -870,6 +871,23 @@ mod tests {
             input[PAYLOAD_ENV].replace("pi/models.json", "../secret"),
         );
         assert!(prepare(&mut input, dir.path()).is_err());
+    }
+
+    #[test]
+    fn writes_claude_settings_under_the_task_config_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut input = env("claude-one");
+        input.insert(
+            PAYLOAD_ENV.into(),
+            input[PAYLOAD_ENV]
+                .replace("\"pi\"", "\"claude\"")
+                .replace("pi/models.json", "claude/settings.json"),
+        );
+        let guard = prepare(&mut input, dir.path()).unwrap();
+        let settings = PathBuf::from(&input["CLAUDE_CONFIG_DIR"]).join("settings.json");
+        assert_eq!(fs::read_to_string(&settings).unwrap(), "{}");
+        drop(guard);
+        assert!(!settings.exists());
     }
 
     #[test]

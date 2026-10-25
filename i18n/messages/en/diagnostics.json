@@ -484,6 +484,18 @@
     "memberUsageCapReached": {
       "label": "Monthly allowance used up",
       "hint": "You've used this month's model allowance from your organization. It resets at the start of next month; an org owner or admin can raise it."
+    },
+    "placementClientSupplied": {
+      "label": "Sandbox placement is chosen by the Host",
+      "hint": "On a shared Host, the Host picks where a member's agent runs: its image, size and network. A run that tries to choose these itself is refused. Start the run again from the app."
+    },
+    "personAgentExited": {
+      "label": "Your agent stopped unexpectedly",
+      "hint": "The agent's sandbox ended before it finished the turn. Send the message again to start a fresh agent. If this keeps happening, ask your organization's admin to check the Host."
+    },
+    "personAgentAttachmentUnsupported": {
+      "label": "The agent can't read this attachment",
+      "hint": "Agents on a shared Host can read text and images, but not documents such as PDFs. Remove the document, or paste the parts you need as text."
     }
   },
   "detail": {

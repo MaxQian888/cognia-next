@@ -948,6 +948,7 @@ describe("wire guards", () => {
       kind: "session.create",
       seed: { projectId: "p1", characterId: "c1", model: "gpt-test", provider: "openai" },
     },
+    { kind: "session.create", seed: { agentRuntimeId: "claude-agent-acp" } },
     { kind: "session.rename", title: "t" },
     { kind: "session.archive", archived: true },
     { kind: "session.pin", pinned: false },
@@ -1044,6 +1045,8 @@ describe("wire guards", () => {
       { kind: "session.create", seed: { projectId: "" } },
       { kind: "session.create", seed: { model: "  " } },
       { kind: "session.create", seed: { projectId: 1 } },
+      { kind: "session.create", seed: { agentRuntimeId: "" } },
+      { kind: "session.create", seed: { agentRuntimeId: 7 } },
       { kind: "session.create", seed: { apiKey: "sk-test" } },
       { kind: "session.create", seed: { model: "m", providerCredentials: { apiKey: "k" } } },
       { kind: "session.create", seed: { model: "x".repeat(MAX_SESSION_SEED_VALUE_LENGTH + 1) } },
@@ -1749,5 +1752,34 @@ it("allows only enqueue and abort beyond data intents for tool-less partition ch
     expect(personPartitionIntentDecision(kind, { chat: "tool-less" })).toEqual(
       kind === "message.enqueue" || kind === "turn.abort" ? { allowed: true } : dormant
     )
+  }
+})
+
+it("p6e sandboxed execution admits enqueue and abort, never steer or decisions", () => {
+  for (const kind of HOST_STATE_INTENT_KINDS) {
+    const dormant = personPartitionIntentDecision(kind, { chat: "none" })
+    const expected =
+      kind === "message.enqueue" || kind === "turn.abort" ? { allowed: true } : dormant
+    expect(personPartitionIntentDecision(kind, { chat: "none", execution: "sandboxed" })).toEqual(
+      expected
+    )
+    expect(
+      personPartitionIntentDecision(kind, { chat: "tool-less", execution: "sandboxed" })
+    ).toEqual(expected)
+    // A pre-P6e Host reads as no execution.
+    expect(personPartitionIntentDecision(kind, { chat: "none", execution: "none" })).toEqual(
+      dormant
+    )
+  }
+  for (const kind of [
+    "turn.steer",
+    "turn.followup",
+    "approval.respond",
+    "elicitation.respond",
+  ] as const) {
+    expect(personPartitionIntentDecision(kind, { chat: "none", execution: "sandboxed" })).toEqual({
+      allowed: false,
+      code: "execution_isolation_unavailable",
+    })
   }
 })

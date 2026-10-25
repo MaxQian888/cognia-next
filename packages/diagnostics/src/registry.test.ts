@@ -14,6 +14,14 @@ const RETRY_KINDS = new Set<DiagnosticAction["kind"]>([
 ])
 
 describe("DIAGNOSTIC_CODES", () => {
+  it("p6e_placement_refusal_is_non_retryable", () => {
+    expect(isDiagnosticCode("placementClientSupplied")).toBe(true)
+    expect(specForCode("placementClientSupplied")).toMatchObject({
+      retryable: false,
+      severity: "warning",
+      actions: [{ kind: "dismiss" }],
+    })
+  })
   it("keeps P6d quota and admission refusals non-retryable", () => {
     for (const code of [
       "orgAgentNotAllowed",

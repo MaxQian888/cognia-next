@@ -40,7 +40,7 @@ describe("headless runtime roster", () => {
             (runtime) => runtime.criticality === "required" || runtime.criticality === "optional"
           )
       ).toBe(true)
-      expect(names).toHaveLength(41)
+      expect(names).toHaveLength(43)
       expect(names[0]).toBe("host-event-publisher")
       // Sealed provider keys are loaded before anything that can start a run.
       expect(names.indexOf("host-provider-keys")).toBeGreaterThan(0)
@@ -72,14 +72,17 @@ describe("headless runtime roster", () => {
         "desktop-message-source",
         "desktop-sync-source",
         "host-event-publisher",
+        "person-agent",
         "work-submission-outbox",
       ])
       expect(personal.sort()).toEqual([...PERSON_BRAIN_RUNTIMES].sort())
       expect(personal).toEqual(expect.arrayContaining(["work-submission-outbox"]))
       expect(personal).not.toEqual(expect.arrayContaining(["host-provider-keys", "plugin-runtime"]))
-      // Each is also a Host-brain runtime: the profile only subtracts.
+      // Each is also a Host-brain runtime: the profile only subtracts, except
+      // the member's own sandboxed agent (P6e), which no operator brain runs.
       for (const runtime of registry.listHeadlessRuntimes()) {
-        expect(runtime.hosts).toContain("brain")
+        if (runtime.name === "person-agent") expect(runtime.hosts).toEqual(["person-brain"])
+        else expect(runtime.hosts).toContain("brain")
       }
     })
   })

@@ -146,15 +146,65 @@ pub async fn person_execution_available() -> bool {
         },
         None => pool.status.clone(),
     };
-    tokio::time::timeout(Duration::from_secs(10), status.available_tiers()).await
-        .is_ok_and(|tiers| tiers.is_ok_and(|tiers| person_execution_tiers(true, Some(&tiers))))
+    let Ok(Ok(tiers)) = tokio::time::timeout(Duration::from_secs(10), status.available_tiers()).await else { return false; };
+    if !person_execution_tiers(true, Some(&tiers)) { return false; }
+    tokio::task::spawn_blocking(move || {
+        use cognia_sandbox_pool::admission::SandboxAdmission;
+        crate::environment_pool::person_environment_spec(&pool.admission).is_ok_and(|spec| pool.admission.recheck(&spec, &tiers).is_ok())
+    }).await.unwrap_or(false)
 }
 pub fn person_execution_tiers(enabled: bool, tiers: Option<&[cognia_environment::spec::IsolationTier]>) -> bool {
-    enabled && tiers.is_some_and(|tiers| tiers.contains(&cognia_environment::spec::IsolationTier::Gvisor))
+    enabled && tiers.is_some_and(|tiers| tiers.iter().any(|tier| *tier >= cognia_environment::spec::IsolationTier::Gvisor))
 }
 pub async fn person_execution_standing(person: &crate::person_partition::PersonPartition) -> Result<(), Problem> {
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(result) = person_standing_test_support::get(&person.org_id) { return result; }
     LIVE.person_execution_actions(&Person { org: person.org_id.clone(), user: person.user_id.clone() }).await
         .map(|_| ()).map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod person_standing_test_support {
+    use super::*;
+    static RESULTS: Lazy<Mutex<HashMap<String, Option<&'static str>>>> = Lazy::new(Default::default);
+    pub struct Installed(String);
+    impl Installed {
+        pub fn new(org: &str) -> Self { RESULTS.lock().insert(org.into(), None); Self(org.into()) }
+        pub fn refuse(&self, code: &'static str) { RESULTS.lock().insert(self.0.clone(), Some(code)); }
+    }
+    impl Drop for Installed { fn drop(&mut self) { RESULTS.lock().remove(&self.0); } }
+    pub(super) fn get(org: &str) -> Option<Result<(), Problem>> {
+        RESULTS.lock().get(org).map(|code| match code {
+            Some(code) => Err(Problem::with_status(StatusCode::FORBIDDEN, *code, *code)), None => Ok(()),
+        })
+    }
+}
+
+/// P6e lifecycle hooks captured at spawn. The exact generation is compared
+/// before renewal/revocation, so delayed exits cannot retire replacements.
+struct PersonExecutionLease {
+    binding: PlacementBinding,
+    keep: Arc<dyn Fn() -> bool + Send + Sync>,
+    revoke: Arc<dyn Fn() + Send + Sync>,
+}
+static PERSON_EXECUTION_LEASES: Lazy<Mutex<HashMap<String, PersonExecutionLease>>> = Lazy::new(Default::default);
+pub fn person_execution_lease_bind(id: &str, binding: &PlacementBinding,
+    keep: Arc<dyn Fn() -> bool + Send + Sync>, revoke: Arc<dyn Fn() + Send + Sync>) -> Result<(), &'static str> {
+    let mut leases = PERSON_EXECUTION_LEASES.lock();
+    if leases.contains_key(id) { return Err("credential_delivery_refused"); }
+    leases.insert(id.into(), PersonExecutionLease { binding: binding.clone(), keep, revoke });
+    Ok(())
+}
+pub fn person_execution_lease_refresh(id: &str, binding: &PlacementBinding) -> bool {
+    let keep = PERSON_EXECUTION_LEASES.lock().get(id).filter(|lease| lease.binding == *binding).map(|lease| lease.keep.clone());
+    keep.is_some_and(|keep| keep())
+}
+pub fn person_execution_lease_revoke(id: &str, binding: &PlacementBinding) {
+    let lease = {
+        let mut leases = PERSON_EXECUTION_LEASES.lock();
+        if leases.get(id).is_some_and(|lease| lease.binding == *binding) { leases.remove(id) } else { None }
+    };
+    if let Some(lease) = lease { (lease.revoke)(); }
 }
 
 /// P6d ownership is derived from a Host binding, never from event/request ids.
@@ -634,6 +684,9 @@ pub async fn persist_execution_binding(state: &crate::SharedState, command: &str
 /// Host lifecycle cleanup uses the exact generation captured at spawn. This
 /// synchronous helper belongs on a blocking worker, including event callbacks.
 pub fn forget_execution_record(directory: &std::path::Path, command: &str, id: &str, expected: &PlacementBinding) -> Result<(), Problem> {
+    // Terminal status/reaping may be observed without an exit callback. Retire
+    // the exact run's ticket even if persistence cleanup subsequently fails.
+    person_execution_lease_revoke(id, expected);
     ExecutionBindings(directory.join("companion/execution-bindings.json")).remove(&record_key(command, id), expected)
         .map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
 }
@@ -665,7 +718,10 @@ pub async fn prune_execution_records(directory: std::path::PathBuf, backend: Arc
     }
     tokio::task::spawn_blocking(move || {
         let store = ExecutionBindings(directory.join("companion/execution-bindings.json"));
-        for (key, binding) in retired { store.remove(&key, &binding)?; }
+        for (key, binding) in retired {
+            if let Some(id) = key.strip_prefix("external-agent:") { person_execution_lease_revoke(id, &binding); }
+            store.remove(&key, &binding)?;
+        }
         Ok(())
     }).await.unwrap_or_else(|_| Err(unavailable("execution_binding_store_unavailable")))
         .map_err(|refusal: Refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
@@ -692,17 +748,21 @@ pub async fn person_stop_execution(directory: Option<&std::path::Path>, person: 
         use cognia_external_agent::process::ExternalAgentProcessState::{Stopped, Failed};
         for id in ids {
             let _run = person_execution_run_lock(&id).lock_owned().await;
+            let mut lease_binding = PERSON_EXECUTION_LEASES.lock().get(&id)
+                .filter(|lease| person_execution_owner(&lease.binding).as_ref() == Some(person)).map(|lease| lease.binding.clone())
+                .or_else(|| records.get(&format!("external-agent:{id}")).cloned());
             if !matches!(backend.status(&id).await, None | Some(Stopped | Failed)) {
                 let info = backend.get_info(&id).await.map_err(|_| "person_brain_busy")?;
-                let owner = info.pointer("/placement/binding").cloned()
-                    .and_then(|value| serde_json::from_value::<PlacementBinding>(value).ok())
-                    .and_then(|binding| person_execution_owner(&binding));
-                if owner.as_ref() != Some(person) { return Err("person_brain_busy"); }
+                let binding = info.pointer("/placement/binding").cloned()
+                    .and_then(|value| serde_json::from_value::<PlacementBinding>(value).ok());
+                if binding.as_ref().and_then(person_execution_owner).as_ref() != Some(person) { return Err("person_brain_busy"); }
+                lease_binding = binding;
                 backend.kill(&id).await.map_err(|_| "person_brain_busy")?;
             }
             while !matches!(backend.status(&id).await, None | Some(Stopped | Failed)) {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
+            if let Some(binding) = lease_binding { person_execution_lease_revoke(&id, &binding); }
         }
         Ok(count)
     }).await.map_err(|_| "person_brain_busy")?
@@ -733,8 +793,11 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
     // P6d execution arms take partition admission; P6c remains tool-less.
     if principal.scope == "person-brain" {
         crate::person_chat::person_caller(principal, command)?;
-        if !matches!(command, "spawn_external_agent" | "get_external_agent_status" | "kill_external_agent") {
+        if !matches!(command, "spawn_external_agent" | "get_external_agent_status" | "kill_external_agent" | "send_to_external_agent") {
             return Ok(None);
+        }
+        if command == "spawn_external_agent" && args.pointer("/config/sandbox").is_some() {
+            return Err(Problem::with_status(StatusCode::FORBIDDEN, "placement_client_supplied", "placement_client_supplied"));
         }
         if command == "spawn_external_agent" && !person_execution_available().await {
             return Err(Problem::with_status(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable", "execution_isolation_unavailable"));
@@ -798,6 +861,43 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[test]
+    fn p6e_run_lease_hooks_compare_generation_and_revoke_once() {
+        let first = PlacementBinding { org_id:"org_p6e_hooks".into(),workspace_id:"person:p6e".into(),actor_user_id:"usr_p6e".into(),run_id:"first".into() };
+        let second = PlacementBinding { run_id:"second".into(),..first.clone() };
+        let revoked = Arc::new(AtomicUsize::new(0)); let hit = revoked.clone();
+        person_execution_lease_bind("p6e-hooks",&first,Arc::new(|| true),Arc::new(move || { hit.fetch_add(1,Ordering::SeqCst); })).unwrap();
+        assert!(person_execution_lease_refresh("p6e-hooks",&first));
+        assert!(!person_execution_lease_refresh("p6e-hooks",&second));
+        person_execution_lease_revoke("p6e-hooks",&second); assert_eq!(revoked.load(Ordering::SeqCst),0);
+        person_execution_lease_revoke("p6e-hooks",&first); person_execution_lease_revoke("p6e-hooks",&first);
+        assert_eq!(revoked.load(Ordering::SeqCst),1);
+        assert!(!person_execution_lease_refresh("p6e-hooks",&first));
+    }
+
+    #[tokio::test]
+    async fn p6e_terminal_record_cleanup_revokes_run_lease_without_exit_callback() {
+        for reaped in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let id = format!("p6e-terminal-{reaped}");
+            let binding = PlacementBinding { org_id:"org_p6e_terminal".into(), workspace_id:"person:p6e".into(),
+                actor_user_id:"usr_p6e_terminal".into(), run_id:id.clone() };
+            let store = ExecutionBindings(root.path().join("companion/execution-bindings.json"));
+            store.insert(&format!("external-agent:{id}"), &binding).unwrap();
+            let revoked = Arc::new(AtomicUsize::new(0));
+            let hit = revoked.clone();
+            person_execution_lease_bind(&id, &binding, Arc::new(|| true), Arc::new(move || { hit.fetch_add(1, Ordering::SeqCst); })).unwrap();
+            if reaped {
+                prune_execution_records(root.path().into(), Arc::new(cognia_external_agent::exec_backend::DisabledExecBackend)).await.unwrap();
+            } else {
+                forget_execution_record(root.path(), "get_external_agent_status", &id, &binding).unwrap();
+            }
+            assert_eq!(revoked.load(Ordering::SeqCst), 1, "reaped={reaped}");
+            assert!(!person_execution_lease_refresh(&id, &binding));
+            assert!(store.read().unwrap().is_empty());
+        }
+    }
+
     #[tokio::test]
     async fn p6d_partition_admission_fences_foreign_runs_and_rechecks_standing() {
         struct PersonStanding(std::sync::atomic::AtomicBool);
@@ -834,11 +934,12 @@ mod tests {
     #[test]
     fn p6d_execution_requires_enabled_local_gvisor_tier() {
         use cognia_environment::spec::IsolationTier::{Container, Gvisor, Vm};
-        for tiers in [None, Some(vec![]), Some(vec![Container]), Some(vec![Vm])] {
+        for tiers in [None, Some(vec![]), Some(vec![Container])] {
             assert!(!person_execution_tiers(true, tiers.as_deref()));
         }
         assert!(!person_execution_tiers(false, Some(&[Gvisor])));
         assert!(person_execution_tiers(true, Some(&[Container, Gvisor])));
+        assert!(person_execution_tiers(true, Some(&[Vm])));
     }
 
     #[test]

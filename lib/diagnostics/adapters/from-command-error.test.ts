@@ -141,11 +141,21 @@ describe("multi-tenant Host refusals", () => {
       ["person_workspace_quota_exceeded", "personWorkspaceQuotaExceeded"],
       ["person_workspace_unavailable", "personWorkspaceUnavailable"],
       ["credential_delivery_refused", "credentialDeliveryRefused"],
+      ["placement_client_supplied", "placementClientSupplied"],
     ] as const) {
       expect(diagnose(code)).toBe(diagnostic)
       expect(isHostRefusalCode(code)).toBe(true)
       expect(DIAGNOSTIC_CODES[diagnostic].retryable).toBe(false)
     }
+  })
+
+  it("p6e maps member agent turn failures to their own diagnostics", () => {
+    expect(diagnose("person_agent_exited")).toBe("personAgentExited")
+    expect(DIAGNOSTIC_CODES.personAgentExited.retryable).toBe(true)
+    expect(diagnose("person_agent_attachment_unsupported")).toBe("personAgentAttachmentUnsupported")
+    expect(DIAGNOSTIC_CODES.personAgentAttachmentUnsupported.retryable).toBe(false)
+    // Turn outcomes, not Host refusals.
+    expect(isHostRefusalCode("person_agent_exited")).toBe(false)
   })
 
   it("maps monthly member allowance exhaustion to its non-retryable diagnostic", () => {

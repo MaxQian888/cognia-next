@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) const COMMANDS: &[&str] = &[
     "person_model_ticket_mint",
+    "person_agent_policy_get",
     "person_agent_lease_prepare",
     // ADR-0090 canonical names. Their deprecated `claude_*` aliases below run
     // the same impl bodies; the canonical four additionally carry the caller's
@@ -57,11 +58,12 @@ pub(super) async fn dispatch(
     scope: Option<&str>,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let _ = (state, host, device_id, tenant_id, scope);
-    if scope != Some("person-brain") && !matches!(name, "person_model_ticket_mint" | "person_agent_lease_prepare") {
+    if scope != Some("person-brain") && !matches!(name, "person_model_ticket_mint" | "person_agent_lease_prepare" | "person_agent_policy_get") {
         cognia_companion::person_chat::person_claim_operator_control_args(&args)
             .map_err(|_| crate::person_model::person_forbidden())?;
     }
     let result = match name {
+        "person_agent_policy_get" => crate::person_execution::person_agent_policy_get(args, scope, tenant_id).await,
         "person_agent_lease_prepare" => crate::person_execution::person_agent_lease_prepare(args, scope, tenant_id, state, host).await,
         "person_model_ticket_mint" => crate::person_model::person_model_ticket_mint(args, scope, tenant_id, state, host).await,
         // ── Chat session ─────────────────────────────────────────────────────

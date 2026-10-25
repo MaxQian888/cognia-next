@@ -127,6 +127,13 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // agent workers, no account sync, no plugins.
   const personBrain = profile.host === "person-brain"
   initializePersonChat(profile.host, env)
+  if (personBrain) {
+    // The CLI entry gave this process its own process table. A member's
+    // partition never spawns locally; its agents run in the Host's sandbox
+    // pool (P6e) through the person plane its `person-agent` runtime installs.
+    const { uninstallCliExternalAgentHost } = await import("../runtime/external/host-branch")
+    uninstallCliExternalAgentHost()
+  }
   const localAccountId =
     stringFlag(args, "account") ?? env.COGNIA_LOCAL_ACCOUNT_ID ?? HEADLESS_LOCAL_ACCOUNT_ID
   const bridgeUrl = env.COGNIA_BRIDGE_URL ?? deriveBridgeUrl(serverUrl)

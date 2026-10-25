@@ -117,6 +117,7 @@ import {
   GOAL_SUBGOALS_GENERATE_ANSWER_WINDOW_MS,
   GOAL_VERIFY_RETRY_ANSWER_WINDOW_MS,
   installDesktopWriteSource,
+  projectBrainRuntimeEnvelope,
 } from "./desktop-write-source"
 import { waitFor } from "@testing-library/react"
 import { isRetryable } from "@/lib/queue/retry-policy"
@@ -632,6 +633,34 @@ describe("dispatchCommand: HostState authority", () => {
       accountId: "local-default",
       runtimeTargetId: "target-a",
     })
+  })
+
+  it("p6e projects a brain-made runtime envelope onto the same authority", async () => {
+    await dispatchCommand("host_state_status", {
+      protocolVersion: 1,
+      accountId: "local-default",
+      callerAccountId: "local-default",
+      runtimeTargetId: "target-a",
+      authoritativeHostId: "host-a",
+    })
+    mockHostStateService.projectRuntimeEnvelope.mockClear()
+    const envelope = {
+      schemaVersion: 1,
+      eventId: "person-agent:a1:2",
+      sequence: 2,
+      sessionId: "s1",
+      runId: "a1",
+      turnId: "a1",
+      attemptId: "a1",
+      hostRef: "person-agent",
+      runtime: "external-agent",
+      timestamp: new Date(0).toISOString(),
+      event: { kind: "lifecycle", phase: "started" },
+    }
+    await projectBrainRuntimeEnvelope(envelope)
+    expect(mockHostStateService.projectRuntimeEnvelope).toHaveBeenCalledWith(envelope)
+    await projectBrainRuntimeEnvelope({ not: "an envelope" })
+    expect(mockHostStateService.projectRuntimeEnvelope).toHaveBeenCalledTimes(1)
   })
 
   it("routes host_state_submit to the authoritative service without the routing fields", async () => {

@@ -155,6 +155,41 @@ pub fn installed() -> Option<PoolServices> {
     SERVICES.read().clone()
 }
 
+/// P6e resolves placement exclusively from Host policy, never member input.
+/// Ephemeral means one container per process; the personal bind mount remains
+/// persistent, and separate sessions never share a persistent pool container.
+pub fn person_environment_spec(admission: &cognia_sandbox_pool::admission::EnvironmentSandboxAdmission) -> Result<Value, String> {
+    use cognia_environment::{catalog::EffectiveCatalog, spec::*};
+    let baseline = admission.baseline();
+    let catalog = admission.with_store(|store| {
+        Ok::<_, String>(EffectiveCatalog::merge(baseline,
+            &store.list_tenant_entries().map_err(|error| error.to_string())?,
+            &store.tenant_policy().map_err(|error| error.to_string())?))
+    })?;
+    // The default comes from the multi-tenant operator baseline. Tenant policy
+    // can raise floors/revoke entries, but cannot select a member's image.
+    let id = baseline.default_entry_id.as_ref().ok_or("execution_isolation_unavailable")?;
+    let entry = catalog.entries.get(id).ok_or("execution_isolation_unavailable")?;
+    let image = entry.entry.image.pinned().ok_or("execution_isolation_unavailable")?;
+    let bundle = &baseline.bundle.as_ref().ok_or("execution_isolation_unavailable")?.current;
+    let mut spec = EnvironmentSpec {
+        version: 1, spec_digest: String::new(), project_id: "person:placement".into(),
+        source: EnvironmentSource::DeploymentDefault { catalog_entry_id: id.clone() },
+        image: RegistrySpecImage { registry: image.registry, repository: image.repository, digest: image.digest,
+            catalog_entry_id: Some(id.clone()), build_key: None }.into(),
+        bundle: SpecBundle { digest: bundle.digest.clone(), release_tag: bundle.release_tag.clone(), pinned: false },
+        isolation: IsolationRequirement { minimum: entry.effective_floor.max(IsolationTier::Gvisor) },
+        size_class_id: entry.entry.size_class_ids.first().ok_or("execution_isolation_unavailable")?.clone(),
+        lifecycle: SandboxLifecycleKind::Ephemeral, user: SpecUser::default(), container_env: Default::default(),
+        remote_env: Default::default(), workspace_folder: None, lifecycle_timeout_ms: None,
+        lifecycle_commands: LifecycleCommands::default(), forward_ports: vec![],
+        egress: EgressSpec { tier: EgressTier::Off, preset_ids: vec![], approved_domains: vec![] },
+        browser_sidecar: false, workspace_config_digest: None, explain: None,
+    };
+    spec.spec_digest = spec.compute_digest().map_err(|error| error.to_string())?;
+    serde_json::to_value(spec).map_err(|error| error.to_string())
+}
+
 /// P6d protocol admission fixtures with no daemon or sockets. The production
 /// path continues to probe the installed driver's available_tiers method.
 #[cfg(any(test, feature = "test-support"))]
@@ -949,6 +984,36 @@ pub fn approval_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p6e_host_placement_uses_baseline_bundle_floor_and_no_egress() {
+        let pool = person_pool_test_support(vec![IsolationTier::Gvisor]);
+        let value = person_environment_spec(&pool.admission).unwrap();
+        let spec: cognia_environment::spec::EnvironmentSpec = serde_json::from_value(value).unwrap();
+        spec.validate_with_digest().unwrap();
+        let baseline = pool.admission.baseline();
+        assert_eq!(spec.image.catalog_entry_id(), baseline.default_entry_id.as_deref());
+        assert_eq!(spec.bundle.digest, baseline.bundle.as_ref().unwrap().current.digest);
+        assert!(!spec.bundle.pinned);
+        assert_eq!(spec.isolation.minimum, IsolationTier::Gvisor);
+        assert_eq!(spec.egress.tier, cognia_environment::spec::EgressTier::Off);
+        assert!(spec.egress.preset_ids.is_empty());
+        assert!(spec.egress.approved_domains.is_empty());
+        assert!(spec.container_env.is_empty() && spec.remote_env.is_empty());
+        assert!(spec.forward_ports.is_empty() && !spec.browser_sidecar);
+        assert_eq!(spec.lifecycle, cognia_environment::spec::SandboxLifecycleKind::Ephemeral);
+        assert_eq!(spec.size_class_id, baseline.entries.iter().find(|entry| Some(&entry.id) == baseline.default_entry_id.as_ref()).unwrap().size_class_ids[0]);
+        let mut stronger = baseline.clone(); stronger.isolation_floor = IsolationTier::Vm;
+        let admission = cognia_sandbox_pool::admission::EnvironmentSandboxAdmission::new(stronger,
+            cognia_environment::store::EnvironmentStore::open_in_memory().unwrap(), RegistryCredentials::empty(), false);
+        let stronger: cognia_environment::spec::EnvironmentSpec = serde_json::from_value(person_environment_spec(&admission).unwrap()).unwrap();
+        assert_eq!(stronger.isolation.minimum, IsolationTier::Vm);
+        stronger.validate_with_digest().unwrap();
+        let mut baseline = baseline.clone(); baseline.default_entry_id = None;
+        let admission = cognia_sandbox_pool::admission::EnvironmentSandboxAdmission::new(baseline,
+            cognia_environment::store::EnvironmentStore::open_in_memory().unwrap(), RegistryCredentials::empty(), false);
+        assert!(person_environment_spec(&admission).is_err());
+    }
 
     #[test]
     fn delivery_history_reads_without_an_installed_pool_or_creating_a_store() {

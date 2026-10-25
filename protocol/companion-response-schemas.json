@@ -16430,6 +16430,42 @@
       },
       "additionalProperties": false
     },
+    "person_agent_policy_get": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedAgents", "defaultAgent", "execution"],
+      "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["runtimeId", "available", "providers"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "defaultAgent": {
+          "type": ["string", "null"]
+        },
+        "execution": {
+          "type": "string",
+          "enum": ["sandboxed", "none"]
+        }
+      }
+    },
     "person_agent_lease_prepare": {
       "type": "object",
       "additionalProperties": false,

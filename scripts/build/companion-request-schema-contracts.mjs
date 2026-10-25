@@ -421,6 +421,7 @@ const schemas = {
     monthlyTokens: z.union([z.number().int().min(0).max(1000000000000), z.null(), z.literal("default")]),
   }),
   // P6d: authority and provider credentials never come from the body.
+  person_agent_policy_get: z.object({}).strict(),
   person_agent_lease_prepare: z.object({
     runtimeId: z.string().min(1),
     provider: z.string().min(1).max(200),

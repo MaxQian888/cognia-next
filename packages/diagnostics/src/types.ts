@@ -423,6 +423,12 @@ export type DiagnosticCode =
   | "personWorkspaceUnavailable"
   /** P6d execution requires a partition-owned brokered lease. */
   | "credentialDeliveryRefused"
+  /** A person brain attempted to choose Host-owned sandbox placement. */
+  | "placementClientSupplied"
+  /** A member's sandboxed agent process ended before its turn did (P6e). */
+  | "personAgentExited"
+  /** A member's agent was sent an attachment it has no prompt slot for (P6e). */
+  | "personAgentAttachmentUnsupported"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

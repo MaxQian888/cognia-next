@@ -59,7 +59,9 @@ pub fn request_from_ir(protocol: &str, ir: &ChatIR) -> Result<Value, NotTranslat
             "Anthropic structured output requires a JSON Schema; json_object has no equivalent",
         ));
     }
-    if protocol != "anthropic" && ir.thinking.is_some() {
+    // Adaptive thinking leaves the depth to `output_config.effort`, which
+    // already maps across, so only budgets and other explicit modes refuse.
+    if protocol != "anthropic" && ir.thinking.as_ref().is_some_and(|t| !ir::is_adaptive_thinking(t)) {
         return Err(NotTranslatable::new("explicit Anthropic thinking modes/token budgets have no equivalent on this upstream; use a supported reasoning effort instead"));
     }
     if let Some(effort) = ir.reasoning_effort.as_deref() {
@@ -170,6 +172,22 @@ mod tests {
             .unwrap_err()
             .reason
             .contains("thinking"));
+        // Adaptive thinking crosses as the effort alone; a budget beside it does not.
+        let adaptive = request_to_ir(
+            InboundFormat::AnthropicMessages,
+            &json!({"model":"m","messages":[{"role":"user","content":"hi"}],
+                "thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}),
+        )
+        .unwrap();
+        for protocol in ["openai", "responses", "anthropic"] {
+            let body = request_from_ir(protocol, &adaptive).unwrap();
+            assert_eq!(body.get("thinking").is_some(), protocol == "anthropic", "{protocol}");
+        }
+        assert_eq!(request_from_ir("openai", &adaptive).unwrap()["reasoning_effort"], "high");
+        let mut budgeted = adaptive.clone();
+        budgeted.thinking = Some(json!({"type":"adaptive","budget_tokens":2048}));
+        assert!(request_from_ir("openai", &budgeted).is_err());
+        assert!(!ir::is_adaptive_thinking(&json!({"type":"disabled"})));
         ir.thinking = None;
         ir.reasoning_effort = Some("max".into());
         assert!(request_from_ir("openai", &ir)

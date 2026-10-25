@@ -146,10 +146,40 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
     let messages = body["messages"]
         .as_array()
         .ok_or_else(|| NotTranslatable::new("messages array is required"))?;
-    for msg in messages {
+    for (index, msg) in messages.iter().enumerate() {
         let role = match s(&msg["role"]).as_deref() {
             Some("user") => IrRole::User,
             Some("assistant") => IrRole::Assistant,
+            // Claude Code sends mid-conversation context (its environment
+            // block) as a system-role message. The IR has one system prompt,
+            // so its text joins it, as OpenAI system/developer messages do.
+            Some("system") => {
+                let text = match &msg["content"] {
+                    Value::String(text) => text.clone(),
+                    Value::Array(blocks) => blocks
+                        .iter()
+                        .map(|block| match s(&block["type"]).as_deref() {
+                            Some("text") => Ok(s(&block["text"]).unwrap_or_default()),
+                            _ => Err(NotTranslatable::new(
+                                "system messages carry only text blocks",
+                            )),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .join("\n\n"),
+                    _ => return Err(NotTranslatable::new("system message content is required")),
+                };
+                if !text.is_empty() {
+                    ir.system = Some(match ir.system.take() {
+                        Some(system) if !system.is_empty() => format!("{system}\n\n{text}"),
+                        _ => text,
+                    });
+                }
+                ir.losses.push(super::ir::TranslationLoss::merged(
+                    format!("messages[{index}]"),
+                    "system-role message moved into the system prompt; its position and cache_control are not represented",
+                ));
+                continue;
+            }
             other => {
                 return Err(NotTranslatable::new(format!(
                     "unsupported role: {}",
@@ -448,6 +478,38 @@ mod tests {
             }
             other => panic!("expected ToolResult, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn to_ir_merges_system_role_messages_into_the_system_prompt() {
+        let ir = to_ir(&json!({
+            "model": "claude-x",
+            "max_tokens": 64,
+            "system": [{ "type": "text", "text": "top" }],
+            "messages": [
+                { "role": "user", "content": "hi" },
+                { "role": "system", "content": [
+                    { "type": "text", "text": "env", "cache_control": { "type": "ephemeral" } },
+                    { "type": "text", "text": "more" }
+                ]},
+                { "role": "system", "content": "tail" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(ir.system.as_deref(), Some("top\n\nenv\n\nmore\n\ntail"));
+        assert_eq!(ir.messages.len(), 1);
+        let paths: Vec<_> = ir.losses.iter().map(|loss| (loss.path.as_str(), loss.kind)).collect();
+        assert_eq!(paths, [("messages[1]", "merged"), ("messages[2]", "merged")]);
+        let only = to_ir(&json!({ "model": "m", "messages": [
+            { "role": "system", "content": "alone" }, { "role": "user", "content": "hi" }
+        ]}))
+        .unwrap();
+        assert_eq!(only.system.as_deref(), Some("alone"));
+        assert!(to_ir(&json!({ "model": "m", "messages": [
+            { "role": "system", "content": [{ "type": "image", "source": { "type": "url", "url": "https://x.test/a.png" } }] }
+        ]}))
+        .is_err());
+        assert!(to_ir(&json!({ "model": "m", "messages": [{ "role": "tool", "content": "x" }] })).is_err());
     }
 
     #[test]

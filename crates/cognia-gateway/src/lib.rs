@@ -872,6 +872,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn p6e_listener_fixture_changes_only_listener_facts() {
+        let gateway = GatewayState::new();
+        let before = gateway.status();
+        assert!(!before.running);
+        gateway.person_test_listener(19385);
+        let after = gateway.status();
+        assert!(after.running);
+        assert_eq!(after.bound_port, Some(19385));
+        assert_eq!(after.account_generation, before.account_generation);
+        assert_eq!(after.owner_account_id, before.owner_account_id);
+        assert!(!after.has_token);
+        assert!(gateway.inner.lock().server.is_none());
+    }
+
+    #[test]
     fn fresh_state_is_off_with_sane_defaults() {
         let state = GatewayState::new();
         let cfg = state.config();

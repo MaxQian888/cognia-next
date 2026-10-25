@@ -81,6 +81,8 @@ const SESSION_FIELDS = {
   lastMessageAt: "sync",
   model: "sync",
   providerOverride: "sync",
+  // A member partition's Host-bundled runtime; meaningless on another device.
+  agentRuntimeId: "local",
   systemPrompt: "sync",
   scratchpad: "sync",
   roomSettings: "sync",

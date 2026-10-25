@@ -54756,6 +54756,77 @@
       "outputTyped": true
     },
     {
+      "name": "person_agent_policy_get",
+      "category": "extensions",
+      "resource": "person",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "forbidden",
+      "summary": "person_agent_policy_get (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "allowedAgents",
+          "defaultAgent",
+          "execution"
+        ],
+        "properties": {
+          "allowedAgents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "runtimeId",
+                "available",
+                "providers"
+              ],
+              "properties": {
+                "runtimeId": {
+                  "type": "string"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "providers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "defaultAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "sandboxed",
+              "none"
+            ]
+          }
+        }
+      },
+      "outputTyped": true
+    },
+    {
       "name": "person_model_ticket_mint",
       "category": "extensions",
       "resource": "person",
@@ -74003,7 +74074,7 @@
                   "object",
                   "null"
                 ],
-                "description": "ADR-0182/0183 — run the agent in the project's runtime environment instead of this host's execution path. Absent (or null) is every caller before runtime environments, and takes today's path unchanged. `spec` is not described here on purpose: the host re-admits it against its own baseline, catalog and approvals and answers with a typed refusal code, which is far more useful than a 422 from a schema that would have to mirror `EnvironmentSpec` field by field.",
+                "description": "P6e person brains must omit this field, including null: the Host resolves and seals the default image, current bundle, effective gvisor-or-stronger floor, first size class, ephemeral lifecycle, personal project and egress off; client placement is refused with 403 placement_client_supplied. For operator/device callers, ADR-0182/0183 placement remains unchanged: the Host re-admits spec against its own baseline, catalog and approvals and returns typed refusal codes.",
                 "required": [
                   "kind",
                   "spec",
@@ -102398,5 +102469,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "edad48cf33362954073c81f45edad2bb9ab6b39a5d633da3e6c0c1b2c8a47722"
+  "catalogHash": "f183b5dde0ea20f8290dc3b5b52da120de59f0a2a80716208ba832874b5685d9"
 }

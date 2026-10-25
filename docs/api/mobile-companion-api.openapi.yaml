@@ -126552,11 +126552,11 @@ paths:
                       type:
                         - object
                         - "null"
-                      description: "ADR-0182/0183 — run the agent in the project's runtime environment instead of this host's execution path.
-                        Absent (or null) is every caller before runtime environments, and takes today's path unchanged.
-                        `spec` is not described here on purpose: the host re-admits it against its own baseline, catalog
-                        and approvals and answers with a typed refusal code, which is far more useful than a 422 from a
-                        schema that would have to mirror `EnvironmentSpec` field by field."
+                      description: "P6e person brains must omit this field, including null: the Host resolves and seals the default image,
+                        current bundle, effective gvisor-or-stronger floor, first size class, ephemeral lifecycle,
+                        personal project and egress off; client placement is refused with 403 placement_client_supplied.
+                        For operator/device callers, ADR-0182/0183 placement remains unchanged: the Host re-admits spec
+                        against its own baseline, catalog and approvals and returns typed refusal codes."
                       required:
                         - kind
                         - spec

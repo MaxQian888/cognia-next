@@ -2,6 +2,23 @@
   "contractVersion": 3,
   "commands": [
     {
+      "name": "person_agent_policy_get",
+      "resource": "person.agent_policy",
+      "verb": "get",
+      "arm": "person_agent_policy_get",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "forbidden",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "person_agent_lease_prepare",
       "resource": "person.agent_lease",
       "verb": "prepare",

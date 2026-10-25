@@ -36,6 +36,9 @@
  * - `bot-delivery-runner` — drains the Bot delivery queue. The brain is
  *   awake when nobody is at a desktop, and integration ingress only exists
  *   there and here.
+ * - `person-agent` — person brains only: a member's sandboxed agent, one
+ *   process per conversation, on a Host that advertised conforming sandboxed
+ *   execution (P6e). The Host places every process; inert otherwise.
  * - `account-sync` — runs the account sync engine on the brain's own database
  *   once the host is enrolled from its terminal (ADR-0215 phase 3a); inert
  *   unless the serve process turned account sync on.
@@ -223,6 +226,7 @@ import "./browser-companion-agent"
 import "./bots"
 import "./router-fusion"
 import "./account-sync"
+import "./person-agent"
 
 /**
  * Every runtime a person brain starts (`HeadlessHost` "person-brain", plan
@@ -236,4 +240,7 @@ export const PERSON_BRAIN_RUNTIMES = [
   // Opt-in terminal write-back only in person brains; no replay runner, workers,
   // plugins or Host keys. The listener persists into the process's account DB.
   "work-submission-outbox",
+  // P6e: the member's own agent, only on a Host whose sandbox pool conforms;
+  // the Host places every process in gVisor with only the personal workspace.
+  "person-agent",
 ] as const

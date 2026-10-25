@@ -638,7 +638,7 @@ const HOST_CATEGORIES = [
     description: "Plugins, skills, MCP servers, provider catalogs, the gateway plane, and diagnostics.",
     skill: "cognia-host-extensions",
     // `person_model_ticket_mint` (P6c) is a person brain's own gateway ticket.
-    pattern: /^(plugin_(?!media_)|skill_|skills_|mcp_|provider_|gateway_|person_model_ticket_mint$|person_agent_lease_prepare$)/,
+    pattern: /^(plugin_(?!media_)|skill_|skills_|mcp_|provider_|gateway_|person_model_ticket_mint$|person_agent_lease_prepare$|person_agent_policy_get$)/,
   },
   {
     id: "knowledge",

@@ -3537,6 +3537,14 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                         "effort preserves relative intensity; Anthropic effort also applies to non-thinking output and is not an exact reasoning-token budget")
                 ]}));
             }
+            if candidate.provider.protocol != "anthropic"
+                && ir.thinking.as_ref().is_some_and(super::translate::ir::is_adaptive_thinking)
+            {
+                let _ = state.host.emit("gateway://translation-loss", json!({"model":model,"losses":[
+                    super::translate::ir::TranslationLoss::approximated("thinking",
+                        "adaptive thinking is carried by the reasoning effort alone on this upstream")
+                ]}));
+            }
             match request_from_ir(&candidate.provider.protocol, &ir) {
                 Ok(body) => body,
                 Err(err) => {

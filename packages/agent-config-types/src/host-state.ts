@@ -160,6 +160,13 @@ export interface HostStateSessionSeed {
   model?: string
   /** Composer provider pick, stored as the session's `providerOverride`. */
   provider?: string
+  /**
+   * Org member partitions (P6e): the bundled agent runtime the conversation
+   * runs as, e.g. `claude-agent-acp`. Absent means the org's default agent.
+   * The Host's org agent allowlist decides at every turn; operator Hosts
+   * ignore it.
+   */
+  agentRuntimeId?: string
 }
 
 /** Longest seed id/pick the wire accepts. */
@@ -504,15 +511,24 @@ export function hostStateIntentKindCapability(
 }
 
 /**
- * Partition authority for its owner. P6c admits chat/cancel only after Host
- * opt-in; older Hosts keep execution dormant with execution_isolation_unavailable.
- * Tools still require isolation, and workspace moves remain refused
+ * Partition authority for its owner. P6c admits chat/cancel after the Host
+ * opts in to tool-less chat; P6e admits them when the Host runs member agents
+ * in its sandbox pool. Older Hosts keep execution dormant with
+ * execution_isolation_unavailable. Steering, approvals and elicitations stay
+ * refused: the sandboxed agent auto-approves inside its boundary and the
+ * partition RPC allowlist admits no steer. Workspace moves remain refused
  * with workspace_unavailable. Use this same exhaustive decision for submit
  * receipts and session-attach negotiation; device operator grants cannot widen it.
  */
 export interface PersonPartitionCapabilities {
   /** Explicit Host opt-in; absent on pre-P6c Hosts. Tools still need isolation. */
   chat: "tool-less" | "none"
+  /**
+   * P6e Host opt-in (`COGNIA_PERSON_EXECUTION=sandboxed`): the Host runs this
+   * member's agents in gVisor inside their personal workspace. Absent on
+   * pre-P6e Hosts, which read as "none".
+   */
+  execution?: "sandboxed" | "none"
 }
 
 export function personPartitionIntentDecision(
@@ -540,7 +556,7 @@ export function personPartitionIntentDecision(
       return { allowed: true }
     case "message.enqueue":
     case "turn.abort":
-      return capabilities.chat === "tool-less"
+      return capabilities.chat === "tool-less" || capabilities.execution === "sandboxed"
         ? { allowed: true }
         : { allowed: false, code: "execution_isolation_unavailable" }
     // Both use agent_steer, which the partition RPC allowlist does not admit.
@@ -2330,11 +2346,12 @@ function isSessionSeed(value: unknown): value is HostStateSessionSeed {
   return (
     isRecord(value) &&
     Object.keys(value).length > 0 &&
-    hasOnlyKeys(value, ["projectId", "characterId", "model", "provider"]) &&
+    hasOnlyKeys(value, ["projectId", "characterId", "model", "provider", "agentRuntimeId"]) &&
     isSeedValue(value.projectId) &&
     isSeedValue(value.characterId) &&
     isSeedValue(value.model) &&
-    isSeedValue(value.provider)
+    isSeedValue(value.provider) &&
+    isSeedValue(value.agentRuntimeId)
   )
 }
 

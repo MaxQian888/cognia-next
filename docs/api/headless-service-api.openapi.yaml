@@ -126109,6 +126109,201 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/person_agent_policy_get:
+    post:
+      operationId: internalRpcPersonAgentPolicyGet
+      tags:
+        - headless-rpc
+      summary: person_agent_policy_get (service.internal)
+      description: "Loopback service-token command. Target: service; risk: low."
+      x-cognia-request-schema-source: zod-contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - allowedAgents
+                  - defaultAgent
+                  - execution
+                properties:
+                  allowedAgents:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - runtimeId
+                        - available
+                        - providers
+                      properties:
+                        runtimeId:
+                          type: string
+                        available:
+                          type: boolean
+                        providers:
+                          type: array
+                          items:
+                            type: string
+                  defaultAgent:
+                    type:
+                      - string
+                      - "null"
+                  execution:
+                    type: string
+                    enum:
+                      - sandboxed
+                      - none
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/person_model_ticket_mint:
     post:
       operationId: internalRpcPersonModelTicketMint
@@ -167017,11 +167212,11 @@ paths:
                       type:
                         - object
                         - "null"
-                      description: "ADR-0182/0183 — run the agent in the project's runtime environment instead of this host's execution path.
-                        Absent (or null) is every caller before runtime environments, and takes today's path unchanged.
-                        `spec` is not described here on purpose: the host re-admits it against its own baseline, catalog
-                        and approvals and answers with a typed refusal code, which is far more useful than a 422 from a
-                        schema that would have to mirror `EnvironmentSpec` field by field."
+                      description: "P6e person brains must omit this field, including null: the Host resolves and seals the default image,
+                        current bundle, effective gvisor-or-stronger floor, first size class, ephemeral lifecycle,
+                        personal project and egress off; client placement is refused with 403 placement_client_supplied.
+                        For operator/device callers, ADR-0182/0183 placement remains unchanged: the Host re-admits spec
+                        against its own baseline, catalog and approvals and returns typed refusal codes."
                       required:
                         - kind
                         - spec
@@ -214208,6 +214403,7 @@ components:
           - perf_trace_open
           - perf_trace_read_chunk
           - person_agent_lease_prepare
+          - person_agent_policy_get
           - person_model_ticket_mint
           - pet_act
           - pet_chat_clear
@@ -214834,10 +215030,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 954
-  generatedRequestSchemaCount: 954
+  internalCommandCount: 955
+  generatedRequestSchemaCount: 955
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 954
+  contractRequestSchemaCount: 955
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 954
+  generatedResponseSchemaCount: 955
   loopbackOnly: true

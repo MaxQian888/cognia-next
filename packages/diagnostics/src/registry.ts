@@ -937,6 +937,27 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "dismiss" }],
     icon: "settings",
   },
+  placementClientSupplied: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "settings",
+  },
+  personAgentExited: {
+    severity: "warning",
+    retryable: true,
+    persistent: false,
+    actions: [{ kind: "retry" }, { kind: "dismiss" }],
+    icon: "settings",
+  },
+  personAgentAttachmentUnsupported: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "settings",
+  },
   credentialDeliveryRefused: {
     severity: "warning",
     retryable: false,

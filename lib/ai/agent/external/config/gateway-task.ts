@@ -25,6 +25,19 @@ export const COPILOT_NO_GITHUB_AUTH = "cognia-gateway-task-no-github-auth"
 export const GATEWAY_TOKEN_ENV = "COGNIA_GATEWAY_TOKEN"
 const SESSION_PREFIX = "cognia-gateway:"
 
+/**
+ * Claude Code's settings for a gateway task (`$CLAUDE_CONFIG_DIR/settings.json`).
+ *
+ * Without them Claude Code adds a commit-attribution reminder to every request,
+ * and its `noreply@anthropic.com` address trips the gateway's PII gate, so the
+ * task's first model call is refused `pii_blocked`. The Host writes the same
+ * file for a member's sandboxed agent (`person_broker_configuration`).
+ */
+export const CLAUDE_GATEWAY_TASK_SETTINGS = Object.freeze({
+  includeCoAuthoredBy: false,
+  attribution: Object.freeze({ commit: "", pr: "" }),
+})
+
 type GatewayRuntimeConfig = Pick<
   ExternalAgentConfig,
   "protocol" | "transport" | "process" | "metadata" | "network"
@@ -1482,6 +1495,7 @@ export function buildGatewayTaskConfig(input: {
     env.ANTHROPIC_DEFAULT_HAIKU_MODEL = modelPlan?.slots["tier.haiku"]?.modelId ?? model
     if (subagent) env.CLAUDE_CODE_SUBAGENT_MODEL = subagent.modelId
     env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+    files["claude/settings.json"] = JSON.stringify(CLAUDE_GATEWAY_TASK_SETTINGS)
     if (meta.maxOutputTokens) env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(meta.maxOutputTokens)
   }
   env[GATEWAY_TASK_ENV] = JSON.stringify({

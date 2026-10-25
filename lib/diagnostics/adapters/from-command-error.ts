@@ -32,6 +32,7 @@ const HOST_REFUSAL_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   credential_use_forbidden: "forbidden",
   workspace_mount_forbidden: "forbidden",
   placement_binding_client_supplied: "forbidden",
+  placement_client_supplied: "placementClientSupplied",
   host_authority_unavailable: "serviceUnavailable",
   // A member's own data partition (plan §9a). Model access is dormant there;
   // the other two are transient, and the Host marks them retryable.
@@ -57,6 +58,9 @@ const COMMAND_CODE_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   spawn_failed: "initializationFailed",
   lsp_host_spawn_failed: "initializationFailed",
   sidecar_error: "sidecarExited",
+  // A member's sandboxed agent turn (P6e, `lib/headless/person-agent/`).
+  person_agent_exited: "personAgentExited",
+  person_agent_attachment_unsupported: "personAgentAttachmentUnsupported",
   host_script_missing: "prerequisiteMissing",
   lsp_host_script_missing: "prerequisiteMissing",
 

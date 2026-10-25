@@ -185,6 +185,19 @@ describe("CLI external-agent host installation", () => {
     expect(getInstalledExternalAgentHost()).toBeNull()
   })
 
+  it("p6e can remove the CLI process table for a person brain", async () => {
+    const { installCliExternalAgentHost, uninstallCliExternalAgentHost } =
+      await import("./host-branch")
+    const { getInstalledExternalAgentHost } =
+      await import("@/lib/ai/agent/external/host/installed-host")
+    installCliExternalAgentHost()
+    expect(getInstalledExternalAgentHost()?.kind).toBe("cli")
+    uninstallCliExternalAgentHost()
+    expect(getInstalledExternalAgentHost()).toBeNull()
+    // Nothing installed: still a no-op.
+    expect(() => uninstallCliExternalAgentHost()).not.toThrow()
+  })
+
   it("only exposes workspace selection to the local host, not agent RPC", async () => {
     const { selectCliAgentWorkspace, installCliExternalAgentHost } = await import("./host-branch")
     const { getInstalledExternalAgentHost } =

@@ -342,10 +342,37 @@ export function createAgentRpcHostStateDispatcher(
             if (runtimeRef.kind !== "builtin") {
               throw new Error(`host_state_runtime_not_builtin:${runtimeRef.kind}`)
             }
-            const partitionChat = personChatCapability().chat === "tool-less"
-            const options = partitionChat
-              ? undefined
-              : await buildSendOptions(session, action.action.text)
+            // A member partition (P6e) runs its conversation as the org's
+            // sandboxed agent when the Host offers execution and an agent
+            // resolves; otherwise as tool-less chat (P6c). The policy is read
+            // fresh, so an admin's change applies from the next turn.
+            const capability = personChatCapability()
+            let personAgent: { runtimeId: string; provider: string; model: string } | null = null
+            if (capability.execution === "sandboxed") {
+              const [{ fetchPersonAgentPolicy, resolvePersonAgent }, { transport }] =
+                await Promise.all([
+                  import("@/lib/headless/person-agent"),
+                  import("@/lib/tauri/transport-instance"),
+                ])
+              const resolution = resolvePersonAgent(
+                session,
+                await fetchPersonAgentPolicy(transport),
+                capability.chat === "tool-less"
+              )
+              if (resolution.kind === "refused")
+                throw Object.assign(new Error(resolution.code), { code: resolution.code })
+              if (resolution.kind === "agent")
+                personAgent = {
+                  runtimeId: resolution.runtimeId,
+                  provider: resolution.provider,
+                  model: resolution.model,
+                }
+            }
+            const partitionChat = !personAgent && capability.chat === "tool-less"
+            const options =
+              partitionChat || personAgent
+                ? undefined
+                : await buildSendOptions(session, action.action.text)
             // Attachments become content here, not in the intent: the intent
             // carries refs so a 10 MB screenshot never rides the action ledger
             // (or the replay stream, or a queue row that gets retried). This is
@@ -392,7 +419,21 @@ export function createAgentRpcHostStateDispatcher(
                   transcriptRuntime: "prepared",
                 })
               })
-            if (partitionChat) {
+            if (personAgent) {
+              const { getPersonAgentRunner } = await import("@/lib/headless/person-agent")
+              const runner = getPersonAgentRunner()
+              if (!runner)
+                throw Object.assign(new Error("execution_isolation_unavailable"), {
+                  code: "execution_isolation_unavailable",
+                })
+              await runner.startTurn({
+                session,
+                ...personAgent,
+                prompt: prompt.content,
+                actionId: action.actionId,
+                messageId: action.action.messageId,
+              })
+            } else if (partitionChat) {
               const { sendPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
               await sendPersonChatTurn(session, dispatch)
             } else {
@@ -409,7 +450,8 @@ export function createAgentRpcHostStateDispatcher(
           }
           handedOff = true
         } catch (error) {
-          if (personChatCapability().chat === "tool-less") {
+          const partition = personChatCapability()
+          if (partition.chat === "tool-less" || partition.execution === "sandboxed") {
             const { personChatFailure } = await import("@/lib/gateway/person-model-ticket")
             const failure = personChatFailure(error)
             const { settleChatTurnForSession } = await import("@/lib/work-submission/chat-adapter")
@@ -441,6 +483,12 @@ export function createAgentRpcHostStateDispatcher(
         break
       }
       case "turn.abort":
+        if (personChatCapability().execution === "sandboxed") {
+          // A member's agent turn stops through its own process; nothing of it
+          // runs in the sidecar.
+          const { getPersonAgentRunner } = await import("@/lib/headless/person-agent")
+          if (await getPersonAgentRunner()?.abort(sessionId)) break
+        }
         if (personChatCapability().chat === "tool-less") {
           const { forgetPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
           forgetPersonChatTurn(sessionId)

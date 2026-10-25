@@ -369,3 +369,10 @@ mod tests {
         assert_eq!(IrStopReason::from_openai("weird").to_openai(), "stop");
     }
 }
+
+/// Anthropic `thinking: {"type":"adaptive"}`: the model decides how much to
+/// think from `output_config.effort`, with no budget of its own.
+pub fn is_adaptive_thinking(thinking: &Value) -> bool {
+    thinking.get("type").and_then(Value::as_str) == Some("adaptive")
+        && thinking.as_object().is_some_and(|fields| fields.len() == 1)
+}

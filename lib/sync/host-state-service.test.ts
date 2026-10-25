@@ -7,6 +7,19 @@ jest.mock("@/lib/gateway/person-model-ticket", () => ({
   mintPersonModelTicket: jest.fn(),
 }))
 jest.mock("@/lib/claude/build-options", () => ({ resolveSendOptions: jest.fn() }))
+const personAgentPolicyMock = jest.fn()
+const personAgentStartMock = jest.fn().mockResolvedValue(undefined)
+const personAgentAbortMock = jest.fn().mockResolvedValue(true)
+let personAgentRunnerInstalled = true
+jest.mock("@/lib/headless/person-agent", () => ({
+  ...jest.requireActual("@/lib/headless/person-agent/policy"),
+  fetchPersonAgentPolicy: (...args: unknown[]) => personAgentPolicyMock(...args),
+  getPersonAgentRunner: () =>
+    personAgentRunnerInstalled
+      ? { startTurn: personAgentStartMock, abort: personAgentAbortMock }
+      : null,
+}))
+jest.mock("@/lib/tauri/transport-instance", () => ({ transport: { id: "brain-transport" } }))
 const archiveScratchMock = jest.fn()
 jest.mock("@/lib/task-workspace/managed-workspace", () => ({
   archiveSessionScratchWorkspace: (sessionOrId: unknown) => archiveScratchMock(sessionOrId),
@@ -3168,6 +3181,131 @@ describe("HostState Agent RPC dispatcher", () => {
       resolve.mockReset()
     }
   })
+  describe("p6e sandboxed member agents", () => {
+    const policy = {
+      allowedAgents: [{ runtimeId: "claude-agent-acp", available: true, providers: ["anthropic"] }],
+      defaultAgent: "claude-agent-acp",
+      execution: "sandboxed",
+    }
+    beforeEach(async () => {
+      await getDb().sessions.update("session-1", {
+        providerOverride: "anthropic",
+        model: "claude-sonnet-4-5",
+      })
+      personAgentPolicyMock.mockReset().mockResolvedValue(policy)
+      personAgentStartMock.mockClear()
+      personAgentAbortMock.mockClear()
+      personAgentRunnerInstalled = true
+    })
+    afterEach(async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      initializePersonChat("brain", {})
+    })
+
+    it("p6e hands a member turn to the org's default agent, never the sidecar", async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      const { mintPersonModelTicket } = await import("@/lib/gateway/person-model-ticket")
+      initializePersonChat("person-brain", {
+        COGNIA_PERSON_CHAT: "tool-less",
+        COGNIA_PERSON_EXECUTION: "sandboxed",
+      })
+      acceptHostStateChatTurnMock.mockResolvedValueOnce({ submissionId: "work:action-1" })
+      claimHostStateChatTurnForDispatchMock.mockResolvedValueOnce("claimed")
+      await createAgentRpcHostStateDispatcher()(
+        action({ kind: "message.enqueue", messageId: "m-agent", text: "build it", attachments: [] })
+      )
+      expect(personAgentPolicyMock).toHaveBeenCalledWith({ id: "brain-transport" })
+      expect(personAgentStartMock).toHaveBeenCalledWith({
+        session: expect.objectContaining({ id: "session-1" }),
+        runtimeId: "claude-agent-acp",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        prompt: "build it",
+        actionId: "action-1",
+        messageId: "m-agent",
+      })
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(buildSendOptionsMock).not.toHaveBeenCalled()
+      expect(mintPersonModelTicket).not.toHaveBeenCalled()
+      expect(markHostStateChatTurnStartedMock).toHaveBeenCalledWith("action-1")
+    })
+
+    it("p6e keeps tool-less chat when the org names no agent", async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      const gateway = await import("@/lib/gateway/person-model-ticket")
+      const resolver = await import("@/lib/claude/build-options")
+      personAgentPolicyMock.mockResolvedValue({ ...policy, defaultAgent: null })
+      const mint = jest.mocked(gateway.mintPersonModelTicket).mockResolvedValue({
+        secret: "ticket",
+        endpoint: "http://127.0.0.1:9000/v1",
+        expiresAt: Number.MAX_SAFE_INTEGER,
+      } as never)
+      jest.mocked(resolver.resolveSendOptions).mockResolvedValue({ toolSurface: "none" } as never)
+      initializePersonChat("person-brain", {
+        COGNIA_PERSON_CHAT: "tool-less",
+        COGNIA_PERSON_EXECUTION: "sandboxed",
+      })
+      try {
+        await createAgentRpcHostStateDispatcher()(
+          action({ kind: "message.enqueue", messageId: "m-chat", text: "hi", attachments: [] })
+        )
+        expect(personAgentStartMock).not.toHaveBeenCalled()
+        expect(mint).toHaveBeenCalledWith("anthropic", "claude-sonnet-4-5", "session-1")
+        expect(sendPromptMock).toHaveBeenCalled()
+      } finally {
+        const { forgetPersonChatTurn } = await import("@/lib/claude/person-chat-turn")
+        forgetPersonChatTurn("session-1")
+        mint.mockReset()
+        jest.mocked(resolver.resolveSendOptions).mockReset()
+      }
+    })
+
+    it.each([
+      ["an agent the org does not allow", { agentRuntimeId: "codex-acp" }, "org_agent_not_allowed"],
+      ["a provider no org key covers", { providerOverride: "openai" }, "model_access_unavailable"],
+    ])("p6e abandons a turn for %s", async (_label, change, code) => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      await getDb().sessions.update("session-1", change)
+      initializePersonChat("person-brain", { COGNIA_PERSON_EXECUTION: "sandboxed" })
+      await expect(
+        createAgentRpcHostStateDispatcher()(
+          action({ kind: "message.enqueue", messageId: "m-refused", text: "hi", attachments: [] })
+        )
+      ).rejects.toMatchObject({ code })
+      expect(personAgentStartMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    })
+
+    it("p6e abandons with the runner's code when the agent cannot start", async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      initializePersonChat("person-brain", { COGNIA_PERSON_EXECUTION: "sandboxed" })
+      personAgentStartMock.mockRejectedValueOnce({ code: "person_workspace_quota_exceeded" })
+      await expect(
+        createAgentRpcHostStateDispatcher()(
+          action({ kind: "message.enqueue", messageId: "m-full", text: "hi", attachments: [] })
+        )
+      ).rejects.toMatchObject({ code: "person_workspace_quota_exceeded" })
+      personAgentRunnerInstalled = false
+      await expect(
+        createAgentRpcHostStateDispatcher()(
+          action({ kind: "message.enqueue", messageId: "m-none", text: "hi", attachments: [] })
+        )
+      ).rejects.toMatchObject({ code: "execution_isolation_unavailable" })
+    })
+
+    it("p6e stops a member agent turn through its runner", async () => {
+      const { initializePersonChat } = await import("@/lib/headless/person-chat")
+      initializePersonChat("person-brain", { COGNIA_PERSON_EXECUTION: "sandboxed" })
+      const abort = jest.fn()
+      await createAgentRpcHostStateDispatcher({ abort })(action({ kind: "turn.abort" }))
+      expect(personAgentAbortMock).toHaveBeenCalledWith("session-1")
+      expect(abort).not.toHaveBeenCalled()
+      personAgentAbortMock.mockResolvedValueOnce(false)
+      await createAgentRpcHostStateDispatcher({ abort })(action({ kind: "turn.abort" }))
+      expect(abort).toHaveBeenCalledWith("session-1", "action-1")
+    })
+  })
+
   it.each(["model_access_unavailable", "member_usage_cap_reached", "host_surface_forbidden"])(
     "abandons refused partition sends with Host code %s",
     async (code) => {

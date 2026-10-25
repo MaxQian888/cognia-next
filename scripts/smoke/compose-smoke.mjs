@@ -26,8 +26,9 @@
  *   --tier persons            two OIDC persons of one org on one multi-tenant
  *                              Host (plan §9a, P6f): partition isolation,
  *                              HostState sessions without a Host admin lease,
- *                              the P5 dormancy codes, the operator's persons
- *                              list and purge. Needs the org and both people
+ *                              the P5 dormancy codes, tool-less member chat,
+ *                              sandboxed member agents (with gVisor), the
+ *                              operator's persons list and purge. Needs the org and both people
  *                              seeded with cognia-collab-bootstrap (Logto org
  *                              id included) and the OIDC fixture. Env: see
  *                              PERSONS_* below.
@@ -1414,6 +1415,13 @@ const PERSONS_PEOPLE =
 const PERSONS_MEMBER = process.env.COGNIA_SMOKE_PERSONS_MEMBER ?? ""
 
 /**
+ * Whether the Host runs member agents in a gVisor sandbox pool (P6e). Only a
+ * Host with `runsc` and a conforming pool can; elsewhere the sandboxed agent
+ * turn is reported as skipped. Set to `1` to run it.
+ */
+const PERSONS_SANDBOX = process.env.COGNIA_SMOKE_PERSONS_SANDBOX === "1"
+
+/**
  * The partition account a Host derives for a person: `pb_` + the first 24 hex
  * of SHA-256(org NUL user) (crates/cognia-companion/src/person_partition.rs).
  */
@@ -1630,8 +1638,36 @@ async function sessionIds(person) {
 
 const FIXTURE_REPLY = "[web-headless-e2e] deterministic assistant reply"
 
+// The org model the persons tier talks to. Unset, it is the repo's Anthropic
+// fixture (deterministic reply). Set, it is a real deployment the Host's
+// provider profiles already carry, and a reply is any non-empty assistant text.
+const PERSONS_MODEL = process.env.COGNIA_SMOKE_PERSONS_PROVIDER
+  ? {
+      provider: process.env.COGNIA_SMOKE_PERSONS_PROVIDER,
+      model: process.env.COGNIA_SMOKE_PERSONS_MODEL ?? "",
+      apiKey: process.env.COGNIA_SMOKE_PERSONS_API_KEY ?? "",
+      real: true,
+    }
+  : { provider: "anthropic", model: "claude-e2e", apiKey: "", real: false }
+
+function personsOrgKey() {
+  return PERSONS_MODEL.apiKey || `smoke-${PERSONS_MODEL.provider}-${randomUUID()}`
+}
+
+/** Whether a turn's persisted messages carry a model reply. */
+function personsReplied(turn) {
+  if (!PERSONS_MODEL.real) return turn.text.includes(FIXTURE_REPLY)
+  return turn.messages.some(
+    (message) =>
+      message?.role === "assistant" &&
+      (message.parts ?? []).some(
+        (part) => part?.type === "text" && typeof part.text === "string" && part.text.trim()
+      )
+  )
+}
+
 /** Enqueue one message on a fresh chat session and wait for its turn to settle. */
-async function personsTurn(person, seed, text) {
+async function personsTurn(person, seed, text, waitSeconds = 30) {
   const sessionId = `smoke-chat-${person.subject}-${randomUUID()}`
   const [created] = await submitPartition(person, person.state, [
     hostStateAction(person.state.scope, person.state.status, sessionId, 1, {
@@ -1658,7 +1694,7 @@ async function personsTurn(person, seed, text) {
     `${person.subject}: message.enqueue is accepted (got ${JSON.stringify(enqueued)})`
   )
   let messages = []
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < waitSeconds; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 1000))
     const page = await rpc("message_get_by_session", { session_id: sessionId }, person.auth)
     messages = page.body?.items ?? page.body ?? []
@@ -1666,6 +1702,7 @@ async function personsTurn(person, seed, text) {
     if (text.includes(FIXTURE_REPLY) || /"(error|failed|errorCode)"/.test(text)) break
     const fate = await personsTurnFate(person, enqueue)
     if (fate.operation?.status === "failed" || fate.turn?.endsWith("-error")) break
+    if (fate.turn === "completed" && personsReplied({ messages, text })) break
   }
   const { operation, turn } = await personsTurnFate(person, enqueue)
   return { sessionId, messages, text: JSON.stringify(messages), operation, turn }
@@ -1690,8 +1727,8 @@ async function personsTurnFate(person, action) {
 }
 
 async function personsChat(person, owner) {
-  const seed = { provider: "anthropic", model: "claude-e2e" }
-  await rpc("org_model_credential_delete", { provider: "anthropic" }, owner.auth)
+  const seed = { provider: PERSONS_MODEL.provider, model: PERSONS_MODEL.model }
+  await rpc("org_model_credential_delete", { provider: PERSONS_MODEL.provider }, owner.auth)
   const keyless = await personsTurn(person, seed, "hello without a key")
   check(
     keyless.operation?.status === "failed" &&
@@ -1700,16 +1737,16 @@ async function personsChat(person, owner) {
   )
   const stored = await rpc(
     "org_model_credential_set",
-    { provider: "anthropic", apiKey: `smoke-anthropic-${randomUUID()}` },
+    { provider: PERSONS_MODEL.provider, apiKey: personsOrgKey() },
     owner.auth
   )
-  check(stored.status === 200, `the owner stores an anthropic org key (got ${stored.status})`)
+  check(
+    stored.status === 200,
+    `the owner stores a ${PERSONS_MODEL.provider} org key (got ${stored.status})`
+  )
   const before = await rpc("org_member_usage_get", {}, owner.auth)
   const reply = await personsTurn(person, seed, "hello with the org key")
-  check(
-    reply.text.includes(FIXTURE_REPLY),
-    `${person.subject} gets a model reply through the org key`
-  )
+  check(personsReplied(reply), `${person.subject} gets a model reply through the org key`)
   check(
     reply.turn === "completed",
     `${person.subject}'s keyed turn settles completed (got ${reply.turn})`
@@ -1732,7 +1769,7 @@ async function personsChat(person, owner) {
   const capAfter = await rpc("org_member_usage_get", {}, owner.auth)
   // AC34: the gateway refuses the reservation (429 member_usage_cap_reached)
   // before any provider call, so nothing is spent and the turn ends in error.
-  check(!overCap.text.includes(FIXTURE_REPLY), `${person.subject} gets no reply over the cap`)
+  check(!personsReplied(overCap), `${person.subject} gets no reply over the cap`)
   check(
     overCap.turn === "fatal-error",
     `${person.subject}'s over-cap turn settles fatal-error (got ${overCap.turn})`
@@ -1744,6 +1781,80 @@ async function personsChat(person, owner) {
   await rpc(
     "org_member_usage_cap_set",
     { userId: person.userId, monthlyTokens: "default" },
+    owner.auth
+  )
+}
+
+/**
+ * A member's sandboxed agent turn (P6e, AC35-AC37): the session names an
+ * allowed bundled agent (or takes the org default), the Host runs it in gVisor
+ * in the member's personal workspace, and its model calls go through the org
+ * key to the fixture (or the real org model). An agent the org does not allow never runs.
+ */
+async function personsAgent(person, owner) {
+  const stored = await rpc(
+    "org_model_credential_set",
+    { provider: PERSONS_MODEL.provider, apiKey: personsOrgKey() },
+    owner.auth
+  )
+  check(
+    stored.status === 200,
+    `the owner stores a ${PERSONS_MODEL.provider} org key (got ${stored.status})`
+  )
+  const allowOnly = await rpc(
+    "org_agent_policy_set",
+    { allowedAgents: ["claude-agent-acp"], defaultAgent: null },
+    owner.auth
+  )
+  check(allowOnly.status === 200, `the owner allows claude-agent-acp (got ${allowOnly.status})`)
+  const seed = { provider: PERSONS_MODEL.provider, model: PERSONS_MODEL.model }
+  const before = await rpc("org_member_usage_get", {}, owner.auth)
+  const named = await personsTurn(
+    person,
+    { ...seed, agentRuntimeId: "claude-agent-acp" },
+    "hello from a member agent",
+    180
+  )
+  check(
+    personsReplied(named) && named.turn === "completed",
+    `${person.subject}'s claude-agent-acp turn replies through the org key (turn ${named.turn}, op ${JSON.stringify(named.operation)})`
+  )
+  const after = await rpc("org_member_usage_get", {}, owner.auth)
+  const spent = (body) =>
+    (body?.members ?? []).find((member) => member.userId === person.userId)?.spentTokens ?? 0
+  check(
+    spent(after.body) > spent(before.body),
+    `${person.subject}'s agent usage is charged to them (${spent(before.body)} → ${spent(after.body)})`
+  )
+  const refused = await personsTurn(
+    person,
+    { ...seed, agentRuntimeId: "codex-acp" },
+    "hello from an agent the org did not allow",
+    30
+  )
+  check(
+    refused.operation?.status === "failed" &&
+      refused.operation.errorCode === "org_agent_not_allowed" &&
+      !personsReplied(refused),
+    `an agent the org does not allow is refused org_agent_not_allowed (got ${JSON.stringify(refused.operation)})`
+  )
+  const withDefault = await rpc(
+    "org_agent_policy_set",
+    { allowedAgents: ["claude-agent-acp"], defaultAgent: "claude-agent-acp" },
+    owner.auth
+  )
+  check(
+    withDefault.status === 200,
+    `the owner makes claude-agent-acp the default (got ${withDefault.status})`
+  )
+  const byDefault = await personsTurn(person, seed, "hello from the default agent", 180)
+  check(
+    personsReplied(byDefault) && byDefault.turn === "completed",
+    `a session without an agent runs the org default (turn ${byDefault.turn}, op ${JSON.stringify(byDefault.operation)})`
+  )
+  await rpc(
+    "org_agent_policy_set",
+    { allowedAgents: ["claude-agent-acp"], defaultAgent: null },
     owner.auth
   )
 }
@@ -1981,8 +2092,18 @@ async function tierPersons() {
   // 4b. Tool-less member chat (P6c, AC33/AC34): a member's turn runs on an
   //     org key through a partition ticket, is charged to that member, and
   //     fails with a clear code without a key or over the cap.
+  //     With no default agent the org's members stay on tool-less chat.
+  await rpc(
+    "org_agent_policy_set",
+    { allowedAgents: ["claude-agent-acp"], defaultAgent: null },
+    owner.auth
+  )
   if (toolLessChat) await personsChat(ada, owner)
   else skip("the Host does not advertise tool-less member chat (pre-P6c)")
+
+  // 4c. Sandboxed member agents (P6e): needs gVisor and a conforming pool.
+  if (PERSONS_SANDBOX) await personsAgent(ada, owner)
+  else skip("COGNIA_SMOKE_PERSONS_SANDBOX unset: sandboxed member agent turn not exercised")
 
   // 5. The operator sees one partition per person, then purges bob (AC27):
   //    his next request starts an empty partition and ada keeps hers.

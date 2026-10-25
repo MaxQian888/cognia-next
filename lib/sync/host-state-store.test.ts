@@ -573,6 +573,36 @@ describe("HostState durable store", () => {
       ).resolves.toBeUndefined()
     })
 
+    it("p6e keeps a catalogued agent runtime only for a partition", async () => {
+      await expect(
+        ownedSessionSeed({ agentRuntimeId: "claude-agent-acp", model: "m" }, { partition: true })
+      ).resolves.toEqual({ agentRuntimeId: "claude-agent-acp", model: "m" })
+      // The operator profile picks runtimes through its own composer, not the seed.
+      await expect(
+        ownedSessionSeed({ agentRuntimeId: "claude-agent-acp", model: "m" })
+      ).resolves.toEqual({ model: "m" })
+      // An id the bundled catalog does not know is never stored.
+      await expect(
+        ownedSessionSeed({ agentRuntimeId: "rogue-agent" }, { partition: true })
+      ).resolves.toBeUndefined()
+    })
+
+    it("p6e writes the seeded agent runtime onto the session row", async () => {
+      await acquireWritableLease()
+      await commitHostStateAction({
+        action: createAction({
+          kind: "session.create",
+          seed: { agentRuntimeId: "claude-agent-acp" },
+        }),
+        sessionSeed: { agentRuntimeId: "claude-agent-acp" },
+        mutation: { kind: "session.renamed", title: "New conversation", revision: 1 },
+        now: 23,
+      })
+      await expect(getDb().sessions.get("session-new")).resolves.toMatchObject({
+        agentRuntimeId: "claude-agent-acp",
+      })
+    })
+
     it("writes the seeded choices onto the Host's session row", async () => {
       await acquireWritableLease()
       await commitHostStateAction({
