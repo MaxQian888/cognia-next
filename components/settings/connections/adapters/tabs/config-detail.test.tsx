@@ -231,6 +231,12 @@ jest.mock("@/components/settings/connections/forms/shared/send-test-message-sect
   ),
 }))
 
+jest.mock("@/components/settings/connections/forms/adapter-outbound-recipients", () => ({
+  AdapterOutboundRecipients: ({ adapterId }: { adapterId: string }) => (
+    <div data-testid="adapter-outbound-recipients" data-adapter-id={adapterId} />
+  ),
+}))
+
 // ---------------------------------------------------------------------------
 // Subject import (after all mocks)
 // ---------------------------------------------------------------------------
@@ -409,6 +415,14 @@ describe("ConfigDetail — shared sub-sections", () => {
     // Sits right after the behavior defaults card in the document.
     const behavior = screen.getByTestId("adapter-behavior-defaults")
     expect(behavior.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("mounts the unattended recipient list after the trigger policy (ADR-0239)", () => {
+    render(withIntl(<ConfigDetail row={makeRow("telegram")} />))
+    const card = screen.getByTestId("adapter-outbound-recipients")
+    expect(card).toHaveAttribute("data-adapter-id", "telegram-1")
+    const trigger = screen.getByTestId("adapter-trigger-policy")
+    expect(trigger.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("mounts the reply-quoting default in the delivery section (ADR-0009 §3A.3)", () => {

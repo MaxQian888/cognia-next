@@ -13,6 +13,10 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { assertRunsHere, isOwnedElsewhere } from "@/lib/placement/ownership"
 import { hostAdapterInstanceWriter as hostWriter } from "./adapter-instance-remote-writer"
 import type { ItemOwner } from "@/types/placement/item-owner"
+import {
+  validateOutboundRecipientGrants,
+  type OutboundRecipientGrant,
+} from "@cognia/agent-config-types/action-review"
 import type {
   AdapterInstanceInput,
   AdapterInstancePatch,
@@ -38,8 +42,13 @@ export async function createAdapterInstance(
   } = {}
 ): Promise<AdapterInstanceRow> {
   const now = Date.now()
-  // A copy made from a placeholder row must not arrive as a placeholder.
-  const { owner: _owner, ...fields } = input as AdapterInstanceInput & { owner?: ItemOwner }
+  // A copy made from a placeholder row must not arrive as a placeholder, and
+  // a recipient list is a person's later edit, never part of a create.
+  const {
+    owner: _owner,
+    outboundRecipients: _recipients,
+    ...fields
+  } = input as AdapterInstanceInput & { owner?: ItemOwner; outboundRecipients?: unknown }
   const row: AdapterInstanceRow = {
     id: options.id ?? newId(),
     ...fields,
@@ -78,10 +87,24 @@ export async function listAdapterInstancesByType(
   return getDb().adapterInstances.where("type").equals(type).toArray()
 }
 
+/**
+ * The recipient list has its own writer ({@link setAdapterOutboundRecipients}).
+ * The type keeps it out of a patch; a caller that casts past it (a plugin's
+ * `updateInstance` writes whatever it is handed) is not a person either.
+ */
+function withoutRecipientList(patch: AdapterInstancePatch): AdapterInstancePatch {
+  if (!("outboundRecipients" in patch)) return patch
+  const { outboundRecipients: _dropped, ...rest } = patch as AdapterInstancePatch & {
+    outboundRecipients?: unknown
+  }
+  return rest
+}
+
 export async function updateAdapterInstance(
   id: string,
-  patch: AdapterInstancePatch
+  rawPatch: AdapterInstancePatch
 ): Promise<void> {
+  const patch = withoutRecipientList(rawPatch)
   const db = getDb()
   const host = hostWriter()
   if (host) {
@@ -144,6 +167,8 @@ export type AdapterConfigSection =
   | "delivery"
   | "platform"
   | "promotion"
+  /** The recipients unattended deliveries may reach (ADR-0239). */
+  | "outboundRecipients"
 
 export type AdapterConfigSource =
   | "settings"
@@ -161,9 +186,11 @@ export type AdapterConfigSource =
 export async function updateAdapterConfigSection(
   id: string,
   section: AdapterConfigSection,
-  patch: AdapterInstancePatch,
+  sectionPatch: AdapterInstancePatch & Pick<Partial<AdapterInstanceRow>, "outboundRecipients">,
   source: AdapterConfigSource = "settings"
 ): Promise<void> {
+  // Only the recipient section carries the recipient list.
+  const patch = section === "outboundRecipients" ? sectionPatch : withoutRecipientList(sectionPatch)
   const db = getDb()
   const changedKeys = Object.keys(patch).sort()
   if (changedKeys.length === 0) return
@@ -186,6 +213,35 @@ export async function updateAdapterConfigSection(
       fields: { scope: "adapter", section, changedKeys, source },
     })
   })
+}
+
+/**
+ * Replace the recipients any unattended delivery through this bot account may
+ * reach (ADR-0239): the instance's `policy` grant. Called from a person's edit
+ * in the connection settings, or from the host applying a paired device's edit
+ * under the admin lease a person minted. An empty list grants nobody.
+ */
+export async function setAdapterOutboundRecipients(
+  id: string,
+  recipients: readonly OutboundRecipientGrant[],
+  source: AdapterConfigSource = "settings"
+): Promise<void> {
+  const errors = validateOutboundRecipientGrants(recipients)
+  if (errors.length > 0) throw new Error(`Invalid outbound recipients: ${errors.join("; ")}`)
+  for (const grant of recipients) {
+    if (grant.recipient.channel !== id)
+      throw new Error(
+        `Invalid outbound recipients: ${grant.recipient.recipient} is not reached through ${id}`
+      )
+  }
+  // An empty list, not a removed field: a paired device's edit reaches the
+  // host as a patch, and a patch cannot carry "remove this key".
+  await updateAdapterConfigSection(
+    id,
+    "outboundRecipients",
+    { outboundRecipients: recipients.map((grant) => ({ ...grant })) },
+    source
+  )
 }
 
 /**

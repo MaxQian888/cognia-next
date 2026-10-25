@@ -72,6 +72,7 @@ import {
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
+import { configuredPolicyGrants, runningBotGrantsOf } from "./configured-grants"
 import {
   buildActionReviewPlanContext,
   readAppSettings,
@@ -178,6 +179,14 @@ export interface PlanDeliveryDeps {
   resolveSessionOrigin?: (sessionId: string) => Promise<ActionReviewPlanOrigin>
   /** Test seam for the fence and grant query. */
   listAuthKeys?: (prefix: string, now: number) => Promise<string[]>
+  /**
+   * The lists configured on the target's connector instance and conversation.
+   * Default: {@link configuredPolicyGrants}.
+   */
+  configuredGrants?: (
+    targets: readonly OutboundTarget[],
+    options: { conversationKeys: readonly string[] }
+  ) => Promise<OutboundPolicyGrantList[]>
   now?: () => number
   newRequestId?: () => string
 }
@@ -384,12 +393,20 @@ async function planUnattended(
     if (!unattended.origin && unattended.sessionId) {
       origin = await (env.deps.resolveSessionOrigin ?? defaultSessionOrigin)(unattended.sessionId)
     }
+    // The sender's own lists (a Bot's), and the ones a person configured on
+    // the bot account and the conversation this delivery goes through.
+    const policyGrants = [
+      ...(unattended.policyGrants ?? []),
+      ...(await (env.deps.configuredGrants ?? configuredPolicyGrants)([env.target], {
+        conversationKeys: [env.input.conversationKey],
+      })),
+    ]
     const context = await buildActionReviewPlanContext({
       origin,
       unattended: true,
       via: "delivery",
       settings: env.settings,
-      ...(unattended.policyGrants ? { policyGrants: unattended.policyGrants } : {}),
+      ...(policyGrants.length > 0 ? { policyGrants } : {}),
       now: env.now,
       ...(env.deps.listAuthKeys ? { listAuthKeys: env.deps.listAuthKeys } : {}),
     })
@@ -535,7 +552,13 @@ export async function planDelivery(
         c.fingerprints.includes(fingerprint)
       )
       if (call) return { action: "send", authorizedBy: fromToolCall(call) }
-      return planUnattended(env, { ownerRef: `plugin:${auth.pluginId}` })
+      // A handler Bot of this plugin that is running may reach its
+      // installation's recipients.
+      const botGrants = runningBotGrantsOf(auth.pluginId)
+      return planUnattended(env, {
+        ownerRef: `plugin:${auth.pluginId}`,
+        ...(botGrants.length > 0 ? { policyGrants: botGrants } : {}),
+      })
     }
     case "unattended":
       return planUnattended(env, auth)

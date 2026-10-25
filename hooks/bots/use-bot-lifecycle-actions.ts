@@ -30,6 +30,7 @@ import {
   resolveBotLifecycleWriteAvailability,
   setBotExecutionRoute,
   setBotInstallationEnabled,
+  setBotOutboundRecipients,
   uninstallBotInstallation,
   updateBotConfig,
   type BotExecutionRouteInput,
@@ -44,6 +45,7 @@ import { subscribeRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import type { BotPolicyGrantInput } from "@/lib/bot/control-writes/lifecycle"
+import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 
 function subscribeRouteInputs(onChange: () => void): () => void {
   const unsubscribeRemote = subscribeActiveRemoteTransport(onChange)
@@ -90,6 +92,11 @@ export interface BotLifecycleActions {
   ) => Promise<boolean>
   /** Choose the model lane of the installation's external agents; `null` clears it. */
   saveRoute: (installationId: string, route: BotExecutionRouteInput | null) => Promise<boolean>
+  /** Replace the recipients the installation's runs may reach unattended (ADR-0239). */
+  saveOutboundRecipients: (
+    installationId: string,
+    recipients: readonly OutboundRecipientGrant[]
+  ) => Promise<boolean>
   bindCredential: (
     installationId: string,
     slotId: string,
@@ -241,6 +248,21 @@ export function useBotLifecycleActions(): BotLifecycleActions {
     [report, t, withPending]
   )
 
+  const saveOutboundRecipients = useCallback(
+    async (installationId: string, recipients: readonly OutboundRecipientGrant[]) =>
+      withPending(`recipients:${installationId}`, async () => {
+        try {
+          await setBotOutboundRecipients(installationId, recipients)
+          toast.success(t("lifecycle.recipientsSaved"))
+          return true
+        } catch (error) {
+          report(error)
+          return false
+        }
+      }),
+    [report, t, withPending]
+  )
+
   const uninstall = useCallback(
     async (installationId: string) =>
       withPending(`uninstall:${installationId}`, async () => {
@@ -257,7 +279,25 @@ export function useBotLifecycleActions(): BotLifecycleActions {
   )
 
   return useMemo(
-    () => ({ pending, install, saveConfig, saveRoute, bindCredential, setEnabled, uninstall }),
-    [pending, install, saveConfig, saveRoute, bindCredential, setEnabled, uninstall]
+    () => ({
+      pending,
+      install,
+      saveConfig,
+      saveRoute,
+      saveOutboundRecipients,
+      bindCredential,
+      setEnabled,
+      uninstall,
+    }),
+    [
+      pending,
+      install,
+      saveConfig,
+      saveRoute,
+      saveOutboundRecipients,
+      bindCredential,
+      setEnabled,
+      uninstall,
+    ]
   )
 }

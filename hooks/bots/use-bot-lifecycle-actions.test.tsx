@@ -15,6 +15,7 @@ const setBotInstallationEnabled = jest.fn(async (_id: string, _enabled: boolean)
 }))
 const uninstallBotInstallation = jest.fn(async (_id: string) => undefined)
 const setBotExecutionRoute = jest.fn(async (_id: string, _route: unknown) => ({}))
+const setBotOutboundRecipients = jest.fn(async (_id: string, _recipients: unknown) => ({}))
 
 let availability = { state: "available", reason: "local-host" }
 
@@ -44,6 +45,8 @@ jest.mock("@/lib/bot/control-writes", () => {
       setBotInstallationEnabled(id, enabled),
     uninstallBotInstallation: (id: string) => uninstallBotInstallation(id),
     setBotExecutionRoute: (id: string, route: unknown) => setBotExecutionRoute(id, route),
+    setBotOutboundRecipients: (id: string, recipients: unknown) =>
+      setBotOutboundRecipients(id, recipients),
     resolveBotLifecycleWriteAvailability: () => availability,
   }
 })
@@ -202,6 +205,29 @@ describe("useBotLifecycleActions", () => {
     setBotExecutionRoute.mockRejectedValueOnce(new Error("refused"))
     await act(async () => {
       saved = await result.current.saveRoute("boti_1", null)
+    })
+    expect(saved).toBe(false)
+  })
+
+  it("saves the recipient list and reports a refusal (ADR-0239)", async () => {
+    const { result } = renderHook(() => useBotLifecycleActions())
+    const recipients = [
+      {
+        recipient: { kind: "mail" as const, channel: "mail", recipient: "mail:ops@example.com" },
+        addedAt: 1,
+        addedBy: "local-user" as const,
+      },
+    ]
+    let saved = false
+    await act(async () => {
+      saved = await result.current.saveOutboundRecipients("boti_1", recipients)
+    })
+    expect(saved).toBe(true)
+    expect(setBotOutboundRecipients).toHaveBeenCalledWith("boti_1", recipients)
+    expect(success).toHaveBeenLastCalledWith("Recipient list saved")
+    setBotOutboundRecipients.mockRejectedValueOnce(new Error("refused"))
+    await act(async () => {
+      saved = await result.current.saveOutboundRecipients("boti_1", [])
     })
     expect(saved).toBe(false)
   })

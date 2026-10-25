@@ -6043,6 +6043,7 @@
       "installed": "{name} installed",
       "notInstallable": "That Bot cannot be installed while its handler is missing.",
       "placeholder": "Runs on {host}. To change it here, take it back from {host}'s device page first.",
+      "recipientsSaved": "Recipient list saved",
       "routeSaved": "Model route saved",
       "status": {
         "disabled": "Bot disabled",
@@ -6143,6 +6144,10 @@
         "body": "This installation pinned {pinned} and the plugin now ships {available}. The Bot keeps running on the version that exists, so nothing has stopped.",
         "title": "Running a different version"
       }
+    },
+    "recipients": {
+      "description": "Who this Bot's runs may message with nobody watching. Anyone else gets a draft or waits for approval.",
+      "title": "Recipients"
     },
     "route": {
       "description": "How this Bot's external agents reach a model.",
@@ -31170,6 +31175,39 @@
       "open": "Open folder…",
       "readyTitle": "Project folder"
     }
+  },
+  "outboundRecipients": {
+    "adapter": {
+      "description": "Any send through this bot account with nobody watching, from a schedule, a Bot or a plugin, may reach these conversations and members. Anyone else gets a draft or waits for approval.",
+      "title": "Recipients reachable unattended"
+    },
+    "add": "Add",
+    "addNamed": "Add {name}",
+    "duplicate": "Already on the list.",
+    "empty": "No one is listed. A send with nobody watching asks first.",
+    "invalid": {
+      "conversation": "That is not a conversation key. It looks like platform:bot:chat.",
+      "mail": "That is not an email address.",
+      "person": "Enter the member's id on this platform."
+    },
+    "kind": {
+      "conversation": "Conversation",
+      "mail": "Email",
+      "person": "Person"
+    },
+    "kindLabel": "Recipient kind",
+    "known": "Conversations on this device",
+    "noneKnown": "No conversation of this account has reached this device yet. Paste a conversation key instead.",
+    "otherAccount": "That conversation goes through another bot account.",
+    "placeholder": {
+      "conversation": "Search, or paste a conversation key",
+      "mail": "name@example.com",
+      "person": "Member id"
+    },
+    "remove": "Remove {name}",
+    "saveFailed": "Could not save the recipient list: {reason}",
+    "saved": "Recipient list saved",
+    "via": "via {account}"
   },
   "page": {
     "deployNow": "Deploy now",

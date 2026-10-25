@@ -34,12 +34,14 @@ import {
   createAdapterInstance,
   deleteAdapterInstance,
   getAdapterInstance,
+  setAdapterOutboundRecipients,
   updateAdapterConfigSection,
   updateAdapterInstance,
   type AdapterInstanceInput,
   type AdapterInstancePatch,
 } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 import { getDb } from "@/lib/db/schema"
 import { connectorsKeyringDelete } from "@/lib/connectors/tauri/commands"
 import { assertRunsHere } from "@/lib/placement/ownership"
@@ -92,6 +94,9 @@ export const PORTABLE_ADAPTER_FIELDS = [
   "mediaModelPolicy",
   "defaultSlaResponseMinutes",
   "defaultEscalation",
+  // A person's recipient list (ADR-0239). It travels with the bot it governs;
+  // the host takes it only under the admin lease a person minted.
+  "outboundRecipients",
 ] as const satisfies readonly (keyof AdapterInstanceRow)[]
 
 /**
@@ -346,11 +351,21 @@ export async function mutateAdapterInstanceOnHost(raw: unknown) {
 
   const existing = await getAdapterInstance(input.id)
   if (!existing) throw new Error(`adapter_instance_missing: no connector with id ${input.id}`)
-  const patch = pickPortable(input.patch) as AdapterInstancePatch
+  const { outboundRecipients, ...patch } = pickPortable(input.patch) as AdapterInstancePatch & {
+    outboundRecipients?: unknown
+  }
   // `updateAdapterConfigSection` refuses a placeholder and writes the audit
   // breadcrumb a settings card writes, so a change from a paired device is as
   // visible as one made at the host.
-  await updateAdapterConfigSection(input.id, "connection", patch, "paired-device")
+  if (Object.keys(patch).length > 0)
+    await updateAdapterConfigSection(input.id, "connection", patch, "paired-device")
+  // The recipient list (ADR-0239) through its own validated writer.
+  if (outboundRecipients !== undefined)
+    await setAdapterOutboundRecipients(
+      input.id,
+      outboundRecipients as OutboundRecipientGrant[],
+      "paired-device"
+    )
   const updated = await getAdapterInstance(input.id)
   if (!updated) throw new Error(`adapter_instance_missing: no connector with id ${input.id}`)
   return projectAdapterInstanceForDevice(updated)

@@ -153,6 +153,27 @@ describe("runPluginAgentTurn", () => {
     )
   })
 
+  // ADR-0239: a Bot's recipient list reaches the turn's outbound planning.
+  it("plans the turn's outbound calls with the caller's recipient lists", async () => {
+    const lists = [{ policyRef: "bot:inst-1", fingerprints: ["fp"] }]
+    await runTurn(base, {
+      grantSource: { kind: "bot", id: "inst-1" },
+      outboundOrigin: { rootSessionId: "bot:inst-1" },
+      outboundPolicyGrants: lists,
+    })
+    const [, , , opts] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
+    expect((opts as { outboundPolicy?: unknown }).outboundPolicy).toEqual({
+      unattended: true,
+      origin: { rootSessionId: "bot:inst-1" },
+      policyGrants: lists,
+    })
+
+    runAndCaptureAssistantReply.mockClear()
+    await runTurn(base, { grantSource: { kind: "bot", id: "inst-1" }, outboundPolicyGrants: [] })
+    const [, , , bare] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
+    expect((bare as { outboundPolicy?: unknown }).outboundPolicy).toEqual({ unattended: true })
+  })
+
   it("closes a parked run as failed when the turn throws", async () => {
     runAndCaptureAssistantReply.mockRejectedValue(new Error("sidecar exited"))
     await expect(runTurn(base)).rejects.toThrow("sidecar exited")

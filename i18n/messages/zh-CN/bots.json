@@ -118,7 +118,8 @@
     },
     "unavailable": "无法从这里进行该更改",
     "unbound": "凭据已解除绑定",
-    "uninstalled": "Bot 已卸载"
+    "uninstalled": "Bot 已卸载",
+    "recipientsSaved": "收件人名单已保存"
   },
   "listPane": {
     "emptyBody": "Bot 随声明它的插件一起到来。安装一个贡献了 Bot 的插件即可开始。",
@@ -351,5 +352,9 @@
     "awaitingSync": "等待首次同步",
     "retryAt": "下次重试"
   },
-  "syncFailed": "无法从主机读取 Bot 配置，请重新连接后重试。"
+  "syncFailed": "无法从主机读取 Bot 配置，请重新连接后重试。",
+  "recipients": {
+    "title": "收件人",
+    "description": "此 Bot 的运行在无人值守时可直接发消息的对象。其他人会得到草稿或等待批准。"
+  }
 }

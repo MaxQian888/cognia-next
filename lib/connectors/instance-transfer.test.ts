@@ -197,6 +197,38 @@ describe("mutateAdapterInstanceOnHost", () => {
     expect(audit.at(-1)?.fields).toMatchObject({ source: "paired-device" })
   })
 
+  // ADR-0239: a paired device's edit of the recipient list, under its lease.
+  it("configures the recipient list through its validated writer", async () => {
+    const row = await createAdapterInstance(
+      portableAdapterInstance(localRow()) as unknown as AdapterInstanceInput
+    )
+    const grant = {
+      recipient: { kind: "person", channel: row.id, recipient: `person:${row.id}:u1` },
+      addedAt: 1,
+      addedBy: "local-user",
+    }
+    const configured = await mutateAdapterInstanceOnHost({
+      operation: "configure",
+      operationId: OPERATION,
+      id: row.id,
+      patch: { outboundRecipients: [grant] },
+    })
+    expect(configured).toMatchObject({ outboundRecipients: [grant] })
+    const audit = await getDb().connectorAudit.where("adapterId").equals(row.id).toArray()
+    expect(audit.at(-1)?.fields).toMatchObject({
+      section: "outboundRecipients",
+      source: "paired-device",
+    })
+    await expect(
+      mutateAdapterInstanceOnHost({
+        operation: "configure",
+        operationId: OPERATION,
+        id: row.id,
+        patch: { outboundRecipients: [{ ...grant, addedBy: "agent" }] },
+      })
+    ).rejects.toThrow("Invalid outbound recipients")
+  })
+
   it("refuses to configure a missing instance or a placeholder", async () => {
     await expect(
       mutateAdapterInstanceOnHost({

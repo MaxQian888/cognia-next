@@ -38,6 +38,7 @@ import { ControlCommands } from "../../forms/control-commands"
 import { AiBindingDefaults } from "../../forms/ai-binding-defaults"
 import { AdapterBehaviorDefaults } from "../../forms/adapter-behavior-defaults"
 import { AdapterTriggerPolicy } from "../../forms/adapter-trigger-policy"
+import { AdapterOutboundRecipients } from "../../forms/adapter-outbound-recipients"
 import { SlaEscalationDefaults } from "../../forms/sla-escalation-defaults"
 import { AdapterPermissions } from "../../forms/adapter-permissions"
 import { DispatchRules } from "../../forms/dispatch-rules"
@@ -131,6 +132,11 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
        * turn runs, that one decides how it runs — and an operator who cannot
        * find this one concludes the bot is broken. */}
       <AdapterTriggerPolicy adapterId={row.id} />
+
+      {/* Who a send through this account may reach with nobody watching
+       * (ADR-0239). Beside the trigger policy: that one decides when the bot
+       * answers, this one whom it may message on its own. */}
+      <AdapterOutboundRecipients adapterId={row.id} />
 
       {/* Bot-wide response SLA + escalation chain defaults (slice 1B). */}
       <h3 className="pt-2 text-sm font-semibold">{t("sections.slaEscalation")}</h3>

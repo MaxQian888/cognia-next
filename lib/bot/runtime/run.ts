@@ -54,6 +54,33 @@ import { BotRunCancelledError, BotRunParkedError, createBotStepApi, type BotStep
 import { appendBotRunLog, appendBotRunProgress } from "./journal"
 import { clearPendingPark } from "./host-step"
 import { bindImPresentationForBotDelivery } from "./im-presentation"
+import { beginBotOutboundRun } from "@/lib/policy/action-review/configured-grants"
+import { parseBotDefinitionId } from "@/lib/plugin/registries/bot-registry"
+
+/**
+ * Run the executor with the installation's recipient list lent to its plugin
+ * (ADR-0239): a handler Bot's own code delivers through `ctx.connectors`, as
+ * its plugin, and may reach the recipients a person listed for this
+ * installation while the run lasts, and no longer.
+ */
+async function runWithOutboundRecipients(
+  runId: string,
+  resolved: InstalledBot,
+  execute: () => Promise<BotHandlerResultV1 | void> | BotHandlerResultV1 | void
+): Promise<BotHandlerResultV1 | undefined> {
+  const pluginId =
+    resolved.definition.source === "plugin"
+      ? parseBotDefinitionId(resolved.definition.id)?.pluginId
+      : undefined
+  const end = pluginId
+    ? beginBotOutboundRun(runId, { pluginId, installation: resolved.installation })
+    : () => undefined
+  try {
+    return (await execute()) ?? undefined
+  } finally {
+    end()
+  }
+}
 
 /** The run a delivery maps to. Derived, so a re-entry finds its own state. */
 export function botRunId(deliveryId: string): string {
@@ -323,7 +350,7 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
 
   try {
     if (controller.signal.aborted) throw new BotRunCancelledError(runId)
-    const result = (await executor(ctx)) ?? undefined
+    const result = await runWithOutboundRecipients(runId, resolved, () => executor(ctx))
     if (controller.signal.aborted || !(await stillOwnsDelivery()))
       throw new BotRunCancelledError(runId)
     const endedAt = now()

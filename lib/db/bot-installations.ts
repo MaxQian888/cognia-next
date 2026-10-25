@@ -23,6 +23,10 @@ import type {
   BotTriggerRuntimeState,
 } from "@/lib/db/bot-types"
 import type { PluginBotCredentialSlot, PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
+import {
+  validateOutboundRecipientGrants,
+  type OutboundRecipientGrant,
+} from "@cognia/agent-config-types/action-review"
 
 export interface InstallBotInput {
   definitionId: string
@@ -161,8 +165,9 @@ export async function installBot(input: InstallBotInput): Promise<BotInstallatio
 export type BotInstallationPatch = Partial<
   Omit<
     BotInstallationRow,
-    // `owner` and `executionRoute` have their own writers; `humanRevision`
-    // moves only with `humanEdit`, so a plugin's patch cannot claim to be a person.
+    // `owner`, `executionRoute` and `outboundRecipients` have their own
+    // writers; `humanRevision` moves only with `humanEdit`, so a plugin's patch
+    // cannot claim to be a person.
     | "id"
     | "createdAt"
     | "updatedAt"
@@ -171,6 +176,7 @@ export type BotInstallationPatch = Partial<
     | "owner"
     | "executionRoute"
     | "humanRevision"
+    | "outboundRecipients"
   >
 > & {
   /** Re-evaluated against the merged row when bindings or status change. */
@@ -203,6 +209,9 @@ export async function updateBotInstallation(
   assertRunsHere("bot-installation", existing.owner)
 
   const { now, requiredCredentials, ...fields } = patch
+  // The type keeps the recipient list out of a patch; a caller that casts
+  // past it is not a person either (ADR-0239).
+  delete (fields as { outboundRecipients?: unknown }).outboundRecipients
   const merged: BotInstallationRow = {
     ...existing,
     ...fields,
@@ -301,6 +310,34 @@ export async function setBotInstallationExecutionRoute(
   }
   if (route) next.executionRoute = route
   else delete next.executionRoute
+  await db.botInstallations.put(next)
+  return next
+}
+
+/**
+ * Replace the recipients an installation may deliver to unattended
+ * (ADR-0239). The one writer of `outboundRecipients`, called only from a
+ * person's edit (`setBotOutboundRecipientsLocally`), so it always advances
+ * `humanRevision`. An empty list clears it.
+ */
+export async function setBotInstallationOutboundRecipients(
+  id: string,
+  recipients: readonly OutboundRecipientGrant[],
+  now = Date.now()
+): Promise<BotInstallationRow | undefined> {
+  const errors = validateOutboundRecipientGrants(recipients)
+  if (errors.length > 0) throw new Error(`Invalid outbound recipients: ${errors.join("; ")}`)
+  const db = getDb()
+  const existing = await db.botInstallations.get(id)
+  if (!existing) return undefined
+  assertRunsHere("bot-installation", existing.owner)
+  const next: BotInstallationRow = {
+    ...existing,
+    ...nextHumanRevision(existing, { humanEdit: true }),
+    updatedAt: now,
+  }
+  if (recipients.length > 0) next.outboundRecipients = recipients.map((grant) => ({ ...grant }))
+  else delete next.outboundRecipients
   await db.botInstallations.put(next)
   return next
 }

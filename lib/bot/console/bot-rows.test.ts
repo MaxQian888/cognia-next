@@ -222,6 +222,24 @@ describe("buildBotRow credentials and policy", () => {
     )
   })
 
+  it("carries the installation's recipient list, and omits an empty one (ADR-0239)", () => {
+    const outboundRecipients = [
+      {
+        recipient: { kind: "mail" as const, channel: "mail", recipient: "mail:ops@example.com" },
+        addedAt: 1,
+        addedBy: "local-user" as const,
+      },
+    ]
+    const listed = installation({ outboundRecipients })
+    expect(
+      buildBotRow({ installation: listed, resolved: resolved(listed) }).outboundRecipients
+    ).toEqual(outboundRecipients)
+    const empty = installation({ outboundRecipients: [] })
+    expect(buildBotRow({ installation: empty, resolved: resolved(empty) })).not.toHaveProperty(
+      "outboundRecipients"
+    )
+  })
+
   it("marks a placeholder for an installation a paired host runs, and nothing else (ADR-0224)", () => {
     const owner = {
       kind: "remote-host" as const,

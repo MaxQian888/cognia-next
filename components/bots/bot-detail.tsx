@@ -33,6 +33,7 @@ import {
   IdCardIcon,
   InboxIcon,
   KeyRoundIcon,
+  SendIcon,
   ShieldIcon,
   RouteIcon,
   SlidersHorizontalIcon,
@@ -58,6 +59,7 @@ import { BotConfigSection } from "./sections/config-section"
 import { BotRouteSection } from "./sections/route-section"
 import { BotCredentialsSection } from "./sections/credentials-section"
 import { BotDeliveriesSection } from "./sections/deliveries-section"
+import { BotOutboundRecipientsSection } from "./sections/outbound-recipients-section"
 import { BotPolicySection } from "./sections/policy-section"
 import { BotRunsSection } from "./sections/runs-section"
 import { BotTriggersSection } from "./sections/triggers-section"
@@ -260,6 +262,18 @@ export function BotDetail({
             description={t("route.description")}
           >
             <BotRouteSection row={row} />
+          </ConsoleSection>
+
+          <ConsoleSection
+            id="recipients"
+            title={t("recipients.title")}
+            icon={SendIcon}
+            description={t("recipients.description")}
+            meta={
+              row.outboundRecipients?.length ? String(row.outboundRecipients.length) : undefined
+            }
+          >
+            <BotOutboundRecipientsSection row={row} />
           </ConsoleSection>
 
           {/* Full width: the cockpit is a list beside a detail pane, and half a

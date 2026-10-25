@@ -30,6 +30,7 @@ import {
   getBotInstallation,
   persistBotInstallation,
   setBotInstallationExecutionRoute,
+  setBotInstallationOutboundRecipients,
   uninstallBot,
   updateBotInstallation,
   type InstallBotInput,
@@ -43,6 +44,7 @@ import type {
 import type { OperationAvailability } from "@/lib/runtime/operation-availability"
 import type { PluginBotCredentialSlot } from "@/types/plugin/plugin-bot"
 import { z } from "zod"
+import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 import { tightenedPermissionClasses } from "@cognia/agent-config-types/unattended-permission"
 
 import type { BotCatalogEntry } from "@/lib/bot/console/catalog"
@@ -97,6 +99,30 @@ export const botExecutionRouteSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("native") }).strict(),
 ])
 export type BotExecutionRouteInput = z.infer<typeof botExecutionRouteSchema>
+
+const recipientText = z.string().trim().min(1).max(512)
+/**
+ * The recipients an installation may deliver to with nobody watching
+ * (ADR-0239). The wire shape of `OutboundRecipientGrant`; the writer
+ * re-validates it with `validateOutboundRecipientGrants`.
+ */
+export const botOutboundRecipientsSchema = z
+  .array(
+    z
+      .object({
+        recipient: z
+          .object({
+            kind: z.enum(["conversation", "person", "mail"]),
+            channel: recipientText,
+            recipient: recipientText,
+          })
+          .strict(),
+        addedAt: z.number().finite(),
+        addedBy: z.literal("local-user"),
+      })
+      .strict()
+  )
+  .max(500)
 
 export class BotLifecycleUnavailableError extends Error {
   readonly code = "bot_lifecycle_unavailable"
@@ -315,6 +341,30 @@ export async function setBotExecutionRouteLocally(
     })
     if (cleared) return cleared
   }
+  return updated
+}
+
+/**
+ * Replace the recipients an installation may deliver to unattended
+ * (ADR-0239), from a person's edit in the Bot console.
+ *
+ * Its own operation, not part of `config` or `policyGrant`: a plugin can shape
+ * its config, and a recipient list is exactly what the plugin must not be able
+ * to widen. Advances `humanRevision`, so the Bot's runs start a new
+ * instruction epoch.
+ */
+export async function setBotOutboundRecipientsLocally(
+  installationId: string,
+  recipients: readonly OutboundRecipientGrant[]
+): Promise<BotInstallationRow> {
+  assertAvailable()
+  const installation = await getBotInstallation(installationId)
+  if (!installation) throw new BotControlTargetMissingError("installation", installationId)
+  if (installation.syncedFromHost)
+    throw new BotLifecycleUnavailableError({ state: "unsupported", reason: "requires-companion" })
+  const parsed = botOutboundRecipientsSchema.parse(recipients)
+  const updated = await setBotInstallationOutboundRecipients(installationId, parsed)
+  if (!updated) throw new BotControlTargetMissingError("installation", installationId)
   return updated
 }
 
@@ -543,6 +593,19 @@ export async function setBotInstallationEnabled(
     operationId: crypto.randomUUID(),
     installationId,
     enabled,
+  })
+}
+export async function setBotOutboundRecipients(
+  installationId: string,
+  recipients: readonly OutboundRecipientGrant[]
+): Promise<BotInstallationRow> {
+  if (resolveBotWriteRoute(BOT_WRITE_COMMANDS.mutateInstallation) === "local")
+    return setBotOutboundRecipientsLocally(installationId, recipients)
+  return relayLifecycle({
+    operation: "outbound_recipients",
+    operationId: crypto.randomUUID(),
+    installationId,
+    recipients: botOutboundRecipientsSchema.parse(recipients),
   })
 }
 export async function uninstallBotInstallation(installationId: string): Promise<void> {

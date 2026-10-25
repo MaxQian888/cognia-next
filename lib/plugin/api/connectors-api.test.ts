@@ -448,6 +448,17 @@ describe("createConnectorsAPI", () => {
       for (const row of list) expect(row).not.toHaveProperty("credentialsRef")
     })
 
+    // ADR-0239: a person's recipient grant is not a plugin's to read.
+    it("never shows a plugin an instance's recipient list", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const [row] = await listAdapterInstances()
+      listAdapterInstances.mockResolvedValueOnce([
+        { ...row, outboundRecipients: [{ recipient: {}, addedAt: 1, addedBy: "local-user" }] },
+      ] as never)
+      const [listed] = await api.listInstances()
+      expect(listed).not.toHaveProperty("outboundRecipients")
+    })
+
     it("getInstance returns one stripped row or null", async () => {
       const api = createConnectorsAPI(PLUGIN)
       const row = await api.getInstance("cai_1")

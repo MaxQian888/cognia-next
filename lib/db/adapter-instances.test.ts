@@ -13,6 +13,7 @@ import {
   patchAdapterInstanceSettings,
   deleteAdapterInstance,
   setAdapterInstanceOwner,
+  setAdapterOutboundRecipients,
 } from "./adapter-instances"
 import {
   completeAdapterInstanceCreate,
@@ -327,6 +328,77 @@ describe("on a shell whose connections live on a Host (ADR-0224)", () => {
     try {
       await expect(createAdapterInstance(baseInput())).rejects.toThrow("refused")
       expect(await listAdapterInstances()).toHaveLength(0)
+    } finally {
+      restore()
+    }
+  })
+})
+
+describe("the recipient list (ADR-0239)", () => {
+  const grant = (adapterId: string) => ({
+    recipient: {
+      kind: "conversation" as const,
+      channel: adapterId,
+      recipient: `conv:telegram:${adapterId}:chat-1`,
+    },
+    addedAt: 1,
+    addedBy: "local-user" as const,
+  })
+
+  it("is written by its own writer, with the section audit", async () => {
+    const row = await createAdapterInstance(baseInput())
+    await setAdapterOutboundRecipients(row.id, [grant(row.id)])
+    expect((await getAdapterInstance(row.id))?.outboundRecipients).toEqual([grant(row.id)])
+    const audit = await getDb().connectorAudit.where("adapterId").equals(row.id).toArray()
+    expect(audit[0].fields).toMatchObject({
+      section: "outboundRecipients",
+      changedKeys: ["outboundRecipients"],
+      source: "settings",
+    })
+    await setAdapterOutboundRecipients(row.id, [])
+    expect((await getAdapterInstance(row.id))?.outboundRecipients).toEqual([])
+  })
+
+  it("refuses a malformed list and a recipient reached through another bot", async () => {
+    const row = await createAdapterInstance(baseInput())
+    await expect(
+      setAdapterOutboundRecipients(row.id, [{ ...grant(row.id), addedBy: "plugin" } as never])
+    ).rejects.toThrow('addedBy must be "local-user"')
+    await expect(setAdapterOutboundRecipients(row.id, [grant("other")])).rejects.toThrow(
+      "is not reached through"
+    )
+  })
+
+  it("cannot be set by a create, a patch or another section", async () => {
+    const created = await createAdapterInstance({
+      ...baseInput(),
+      outboundRecipients: [grant("x")],
+    } as never)
+    expect(created).not.toHaveProperty("outboundRecipients")
+    await setAdapterOutboundRecipients(created.id, [grant(created.id)])
+    await updateAdapterInstance(created.id, { outboundRecipients: [] } as never)
+    await updateAdapterConfigSection(created.id, "trigger", {
+      muted: true,
+      outboundRecipients: [],
+    })
+    const stored = await getAdapterInstance(created.id)
+    expect(stored?.outboundRecipients).toEqual([grant(created.id)])
+    expect(stored?.muted).toBe(true)
+  })
+
+  it("reaches the Host from a paired shell", async () => {
+    const local = await createAdapterInstance(baseInput())
+    const configure = jest.fn(async () => undefined)
+    const restore = setAdapterInstanceRemoteWriter({
+      applies: () => true,
+      create: jest.fn(),
+      configure,
+      remove: jest.fn(),
+      completeCreate: jest.fn(),
+    } as unknown as AdapterInstanceRemoteWriter)
+    try {
+      await setAdapterOutboundRecipients(local.id, [grant(local.id)])
+      expect(configure).toHaveBeenCalledWith(local.id, { outboundRecipients: [grant(local.id)] })
     } finally {
       restore()
     }

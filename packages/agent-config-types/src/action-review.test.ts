@@ -15,6 +15,7 @@ import {
   validateActionReviewDecision,
   validateActionReviewReceipt,
   validateActionReviewRequest,
+  validateOutboundRecipientGrants,
   type ActionReviewDecision,
   type ActionReviewReceipt,
   type ActionReviewRequest,
@@ -489,5 +490,70 @@ describe("permitsExecution", () => {
     expect(
       ACTION_REVIEW_OUTCOMES.filter((o) => permitsExecution(makeDecision({ outcome: o })))
     ).toEqual(["allow", "allow_always"])
+  })
+})
+
+describe("validateOutboundRecipientGrants (ADR-0239)", () => {
+  const grant = (recipient: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    recipient,
+    addedAt: 1,
+    addedBy: "local-user",
+    ...extra,
+  })
+
+  it("accepts conversations, people and mail addresses a person added", () => {
+    expect(
+      validateOutboundRecipientGrants([
+        grant({ kind: "conversation", channel: "lark-1", recipient: "conv:lark:lark-1:oc_1" }),
+        grant({ kind: "person", channel: "lark-1", recipient: "person:lark-1:ou_1" }),
+        grant({ kind: "mail", channel: "mail", recipient: "mail:a@b.c" }),
+      ])
+    ).toEqual([])
+    expect(validateOutboundRecipientGrants([])).toEqual([])
+  })
+
+  it("refuses anything but a list of well-formed entries", () => {
+    expect(validateOutboundRecipientGrants({})).toEqual(["outboundRecipients must be an array"])
+    expect(validateOutboundRecipientGrants(["x"])).toEqual([
+      "outboundRecipients[0] must be an object",
+    ])
+  })
+
+  it("refuses kinds the engine never grants and mismatched prefixes", () => {
+    const errors = validateOutboundRecipientGrants([
+      grant({ kind: "public", channel: "tool:deploy_site", recipient: "public:deploy_site" }),
+      grant({ kind: "conversation", channel: "lark-1", recipient: "person:lark-1:ou_1" }),
+      grant({ kind: "person", channel: "mail", recipient: "person:mail:x" }),
+      grant({ kind: "mail", channel: "mail", recipient: "mail:" }),
+    ])
+    expect(errors).toEqual([
+      "outboundRecipients[0].recipient.kind must be one of conversation, person, mail",
+      'outboundRecipients[1].recipient.recipient must start with "conv:" and name a recipient',
+      'outboundRecipients[2].recipient.channel must be "mail" exactly for a mail recipient',
+      'outboundRecipients[3].recipient.recipient must start with "mail:" and name a recipient',
+    ])
+  })
+
+  it("refuses an entry no person wrote, and extra fields", () => {
+    const conversation = { kind: "conversation", channel: "a", recipient: "conv:x:a:c" }
+    expect(
+      validateOutboundRecipientGrants([
+        grant(conversation, { addedBy: "agent" }),
+        grant({ ...conversation, label: "Team" }),
+        grant(conversation, { addedAt: Number.NaN, note: "x" }),
+      ])
+    ).toEqual([
+      'outboundRecipients[0].addedBy must be "local-user"',
+      "outboundRecipients[1].recipient.label is not a recipient field",
+      "outboundRecipients[2].addedAt must be a finite number",
+      "outboundRecipients[2].note is not a grant field",
+    ])
+  })
+
+  it("bounds the list", () => {
+    const conversation = { kind: "conversation", channel: "a", recipient: "conv:x:a:c" }
+    expect(
+      validateOutboundRecipientGrants(Array.from({ length: 501 }, () => grant(conversation)))
+    ).toEqual(["outboundRecipients holds at most 500 entries"])
   })
 })

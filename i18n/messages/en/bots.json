@@ -118,7 +118,8 @@
     },
     "unavailable": "That change cannot be made from here",
     "unbound": "Credential cleared",
-    "uninstalled": "Bot uninstalled"
+    "uninstalled": "Bot uninstalled",
+    "recipientsSaved": "Recipient list saved"
   },
   "listPane": {
     "emptyBody": "Bots arrive with the plugins that declare them. Install a plugin that contributes one to get started.",
@@ -351,5 +352,9 @@
     "awaitingSync": "Awaiting first sync",
     "retryAt": "Next retry"
   },
-  "syncFailed": "Unable to read Bot setup from the host. Reconnect and try again."
+  "syncFailed": "Unable to read Bot setup from the host. Reconnect and try again.",
+  "recipients": {
+    "title": "Recipients",
+    "description": "Who this Bot's runs may message with nobody watching. Anyone else gets a draft or waits for approval."
+  }
 }

@@ -11,6 +11,7 @@ import {
   beginOutboundToolExecution,
   rememberPlannedOutboundToolCall,
 } from "./authorized-tool-calls"
+import { __resetRunningBotGrantsForTesting, beginBotOutboundRun } from "./configured-grants"
 import { conversationTarget, outboundFingerprint } from "./outbound-targets"
 import {
   planDelivery,
@@ -41,6 +42,7 @@ function deps(
       instructionEpoch: "epoch-1",
       originThread: ORIGIN,
     }),
+    configuredGrants: async () => [],
     now: () => 5_000,
     newRequestId: () => `n${++seq}`,
     ...extra,
@@ -60,7 +62,10 @@ function delivery(
   }
 }
 
-beforeEach(() => __resetAuthorizedToolCallsForTesting())
+beforeEach(() => {
+  __resetAuthorizedToolCallsForTesting()
+  __resetRunningBotGrantsForTesting()
+})
 
 describe("sameChat", () => {
   it("matches a chat through any bot and any thread, on the same platform", () => {
@@ -306,6 +311,63 @@ describe("planDelivery", () => {
           action: "send",
         }
       )
+    })
+  })
+
+  describe("configured recipient lists", () => {
+    it("sends an unattended delivery a person's list covers, naming the list", async () => {
+      const configuredGrants = jest.fn(async () => [
+        { policyRef: "adapter:bot-a", fingerprints: [outboundFingerprint(OTHER)] },
+      ])
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "unattended", ownerRef: "task:t1" }),
+          deps(enforce, {}, { configuredGrants })
+        )
+      ).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: {
+          authority: "policy-rule",
+          grantScope: "policy",
+          policyRef: "adapter:bot-a",
+        },
+        receipt: expect.any(Object),
+      })
+      expect(configuredGrants).toHaveBeenCalledWith([OTHER], { conversationKeys: [OTHER_KEY] })
+    })
+
+    it("covers a handler Bot's own plugin code only while the Bot runs", async () => {
+      const installation = {
+        id: "boti_1",
+        outboundRecipients: [
+          {
+            recipient: {
+              kind: "conversation" as const,
+              channel: OTHER.channel,
+              recipient: OTHER.recipient,
+            },
+            addedAt: 1,
+            addedBy: "local-user" as const,
+          },
+        ],
+      }
+      const end = beginBotOutboundRun("run-1", { pluginId: "p1", installation })
+      const plugin = delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin")
+      await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: { policyRef: "bot:boti_1" },
+      })
+      // Another plugin's code is not this Bot's.
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "plugin", pluginId: "p2" }, "plugin"),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "draft" })
+      end()
+      await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({
+        action: "draft",
+      })
     })
   })
 

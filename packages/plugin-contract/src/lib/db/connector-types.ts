@@ -17,6 +17,7 @@ import type {
 import type {
   ActionReviewAuthority,
   ActionReviewGrantScope,
+  OutboundRecipientGrant,
 } from "@cognia/agent-config-types/action-review"
 import type { EscalationPolicy } from "../../types/connectors/escalation"
 import type { ItemOwner, ItemProvenance } from "../../types/placement/item-owner"
@@ -550,6 +551,15 @@ export interface AdapterInstanceRow {
    * replayed after a dropped connection finds the row it created by this.
    */
   provenance?: ItemProvenance
+  /**
+   * Recipients any unattended delivery through this bot account may reach
+   * (ADR-0239): its `policy` grant, policyRef `adapter:<id>`. Written only by
+   * `setAdapterOutboundRecipients` from a person's edit in the connection's
+   * settings (or a paired device under an admin lease); a plugin's
+   * `createInstance` / `updateInstance` drops it. Non-indexed additive, so no
+   * Dexie bump.
+   */
+  outboundRecipients?: OutboundRecipientGrant[]
   createdAt: number
   updatedAt: number
 }

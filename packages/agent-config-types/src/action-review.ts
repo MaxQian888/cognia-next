@@ -333,6 +333,99 @@ export interface ActionReviewGrant {
   policyRef?: string
 }
 
+/** Who an entry of a configured recipient list is. */
+export type OutboundRecipientKind = "conversation" | "person" | "mail"
+
+export const OUTBOUND_RECIPIENT_KINDS: readonly OutboundRecipientKind[] = [
+  "conversation",
+  "person",
+  "mail",
+]
+
+/**
+ * A recipient a person may configure (ADR-0239), in the engine's own
+ * normalized form: `channel` is the connector adapter id (`mail` for mail) and
+ * `recipient` is the kind-prefixed id (`conv:<platform>:<adapterId>:<chat>`,
+ * `person:<adapterId>:<member>`, `mail:<address>`). The fingerprint the engine
+ * matches is derived from these two, so the list stores the recipient itself:
+ * a person has to be able to read back whom they allowed.
+ */
+export interface OutboundRecipient {
+  kind: OutboundRecipientKind
+  channel: string
+  recipient: string
+}
+
+/**
+ * One entry of a `policy` grant: a recipient a Bot installation or a connector
+ * instance may deliver to with nobody watching. Only a person writes one, from
+ * the settings UI; no plugin, agent or tool path can.
+ */
+export interface OutboundRecipientGrant {
+  recipient: OutboundRecipient
+  addedAt: number
+  addedBy: "local-user"
+}
+
+const MAX_OUTBOUND_RECIPIENT_GRANTS = 500
+
+function recipientErrors(value: unknown, path: string, errors: string[]): void {
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`)
+    return
+  }
+  const kind = value.kind
+  if (!OUTBOUND_RECIPIENT_KINDS.includes(kind as OutboundRecipientKind)) {
+    errors.push(`${path}.kind must be one of ${OUTBOUND_RECIPIENT_KINDS.join(", ")}`)
+    return
+  }
+  if (typeof value.channel !== "string" || !value.channel.trim()) {
+    errors.push(`${path}.channel must be a non-empty string`)
+  } else if ((kind === "mail") !== (value.channel === "mail")) {
+    errors.push(`${path}.channel must be "mail" exactly for a mail recipient`)
+  }
+  const prefix = kind === "conversation" ? "conv:" : kind === "person" ? "person:" : "mail:"
+  if (
+    typeof value.recipient !== "string" ||
+    !value.recipient.startsWith(prefix) ||
+    value.recipient.length === prefix.length
+  ) {
+    errors.push(`${path}.recipient must start with "${prefix}" and name a recipient`)
+  }
+  for (const key of Object.keys(value)) {
+    if (key !== "kind" && key !== "channel" && key !== "recipient") {
+      errors.push(`${path}.${key} is not a recipient field`)
+    }
+  }
+}
+
+/** Validate a configured recipient list. Returns the errors; empty means valid. */
+export function validateOutboundRecipientGrants(value: unknown): string[] {
+  const errors: string[] = []
+  if (!Array.isArray(value)) return ["outboundRecipients must be an array"]
+  if (value.length > MAX_OUTBOUND_RECIPIENT_GRANTS) {
+    errors.push(`outboundRecipients holds at most ${MAX_OUTBOUND_RECIPIENT_GRANTS} entries`)
+  }
+  value.forEach((entry, i) => {
+    const path = `outboundRecipients[${i}]`
+    if (!isPlainObject(entry)) {
+      errors.push(`${path} must be an object`)
+      return
+    }
+    recipientErrors(entry.recipient, `${path}.recipient`, errors)
+    if (!isFiniteNumber(entry.addedAt)) {
+      errors.push(`${path}.addedAt must be a finite number`)
+    }
+    if (entry.addedBy !== "local-user") errors.push(`${path}.addedBy must be "local-user"`)
+    for (const key of Object.keys(entry)) {
+      if (key !== "recipient" && key !== "addedAt" && key !== "addedBy") {
+        errors.push(`${path}.${key} is not a grant field`)
+      }
+    }
+  })
+  return errors
+}
+
 export interface ActionReviewDecision {
   contractVersion: typeof ACTION_REVIEW_CONTRACT_VERSION
   requestId: string

@@ -12,6 +12,7 @@ import {
   readBotTriggerState,
   resolveInstallationStatus,
   setBotInstallationExecutionRoute,
+  setBotInstallationOutboundRecipients,
   setBotInstallationOwner,
   uninstallBot,
   unboundCredentialSlots,
@@ -237,6 +238,55 @@ describe("setBotInstallationExecutionRoute", () => {
     await setBotInstallationExecutionRoute(row.id, { mode: "native" })
     const edited = await updateBotInstallation(row.id, { config: { a: 1 } })
     expect(edited?.executionRoute).toEqual({ mode: "native" })
+  })
+})
+
+describe("setBotInstallationOutboundRecipients (ADR-0239)", () => {
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botInstallations.clear()
+  }, 15_000)
+
+  const grant = {
+    recipient: {
+      kind: "conversation" as const,
+      channel: "lark-1",
+      recipient: "conv:lark:lark-1:oc_1",
+    },
+    addedAt: NOW,
+    addedBy: "local-user" as const,
+  }
+
+  it("sets and clears the list as a person's edit", async () => {
+    const row = await installBot(input())
+    const set = await setBotInstallationOutboundRecipients(row.id, [grant], NOW + 1)
+    expect(set?.outboundRecipients).toEqual([grant])
+    expect(set?.humanRevision).toBe(1)
+    const cleared = await setBotInstallationOutboundRecipients(row.id, [], NOW + 2)
+    expect(cleared).not.toHaveProperty("outboundRecipients")
+    expect(cleared?.humanRevision).toBe(2)
+  })
+
+  it("refuses a malformed list", async () => {
+    const row = await installBot(input())
+    await expect(
+      setBotInstallationOutboundRecipients(row.id, [{ ...grant, addedBy: "agent" } as never])
+    ).rejects.toThrow('addedBy must be "local-user"')
+  })
+
+  it("cannot be written through the patch writer", async () => {
+    const row = await installBot(input())
+    await setBotInstallationOutboundRecipients(row.id, [grant])
+    const replaced = await updateBotInstallation(row.id, {
+      config: { a: 1 },
+      outboundRecipients: [],
+    } as never)
+    expect(replaced?.outboundRecipients).toEqual([grant])
+    const fresh = await installBot(input())
+    const injected = await updateBotInstallation(fresh.id, {
+      outboundRecipients: [grant],
+    } as never)
+    expect(injected).not.toHaveProperty("outboundRecipients")
   })
 })
 

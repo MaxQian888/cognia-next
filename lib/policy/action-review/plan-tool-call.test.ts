@@ -117,6 +117,65 @@ describe("planOutboundToolCall", () => {
   })
 })
 
+describe("configured recipient lists (ADR-0239 policy grants)", () => {
+  const other = conversationTarget(OTHER_KEY)!
+  const listed = {
+    recipient: {
+      kind: "conversation" as const,
+      channel: other.channel,
+      recipient: other.recipient,
+    },
+    addedAt: 1,
+    addedBy: "local-user" as const,
+  }
+
+  it("lets an unattended call reach a recipient the bot account's list names", async () => {
+    await getDb().adapterInstances.put({
+      id: "bot-a",
+      type: "lark",
+      displayName: "Bot A",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "cognia", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      outboundRecipients: [listed],
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const plan = await planOutboundToolCall(send(OTHER_KEY), options({ unattended: true }))
+    expect(plan?.result).toMatchObject({
+      reason: "authorized",
+      authority: "policy-rule",
+      grant: { scope: "policy", policyRef: "adapter:bot-a" },
+    })
+  })
+
+  it("adds the run's own list (a Bot's) to the configured ones", async () => {
+    const configuredGrants = jest.fn(async () => [])
+    const plan = await planOutboundToolCall(
+      send(OTHER_KEY),
+      options({
+        unattended: true,
+        configuredGrants,
+        policyGrants: [{ policyRef: "bot:boti_1", fingerprints: [outboundFingerprint(other)] }],
+      })
+    )
+    expect(configuredGrants).toHaveBeenCalledWith([other])
+    expect(plan?.result.grant).toEqual({ scope: "policy", policyRef: "bot:boti_1" })
+  })
+
+  it("parks an unattended call to a recipient no list names", async () => {
+    const plan = await planOutboundToolCall(
+      send(OTHER_KEY),
+      options({ unattended: true, configuredGrants: async () => [] })
+    )
+    expect(plan?.result.plan).toEqual({ outcome: "park", enforced: true })
+  })
+})
+
 describe("the fence and the instruction grant, end to end", () => {
   it("denies the same recipient after a person's Deny, until a new instruction", async () => {
     await openChatToolReview({ sessionId: "chat", requestId: "r1", toolName: "send" })

@@ -1,4 +1,5 @@
 import type { ItemOwner } from "@/types/placement/item-owner"
+import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 
 /**
  * Row shapes for the Bot control plane.
@@ -217,6 +218,13 @@ export interface BotInstallationRow {
    * `humanEdit` on the two writers below, never through a patch.
    */
   humanRevision?: number
+  /**
+   * Recipients this installation may deliver to with nobody watching
+   * (ADR-0239): its `policy` grant, policyRef `bot:<installationId>`. Written
+   * only by `setBotInstallationOutboundRecipients`, from a person's edit in
+   * the Bot console; plugins, agents and the patch writer cannot set it.
+   */
+  outboundRecipients?: OutboundRecipientGrant[]
   createdAt: number
   updatedAt: number
 }

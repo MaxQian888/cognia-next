@@ -69,7 +69,14 @@ export interface PluginConnectorAdapterInfo {
  * configuration (settings / trigger policy / quiet hours / display name / …)
  * minus the `credentialsRef` keyring pointer.
  */
-export type PluginAdapterInstanceInfo = Omit<AdapterInstanceRow, "credentialsRef">
+/**
+ * An instance as a plugin sees it: no credential names, and no recipient list
+ * (ADR-0239), which is a person's grant a plugin neither reads nor writes.
+ */
+export type PluginAdapterInstanceInfo = Omit<
+  AdapterInstanceRow,
+  "credentialsRef" | "outboundRecipients"
+>
 
 /** Patch shape accepted by `updateInstance` (mirrors the DB whitelist). */
 export type PluginAdapterInstancePatch = AdapterInstancePatch

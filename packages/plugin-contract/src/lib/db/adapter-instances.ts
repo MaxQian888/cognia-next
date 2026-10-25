@@ -10,8 +10,9 @@ import type { AdapterInstanceRow } from "./connector-types"
  */
 export type AdapterInstanceInput = Omit<
   AdapterInstanceRow,
-  // `owner` has its own writer, `setAdapterInstanceOwner`.
-  "id" | "createdAt" | "updatedAt" | "mediaModelPolicy" | "owner"
+  // `owner` has its own writer, `setAdapterInstanceOwner`; `outboundRecipients`
+  // has `setAdapterOutboundRecipients` (ADR-0239).
+  "id" | "createdAt" | "updatedAt" | "mediaModelPolicy" | "owner" | "outboundRecipients"
 > & { mediaModelPolicy?: AdapterInstanceRow["mediaModelPolicy"] }
 
 export type AdapterInstancePatch = Partial<

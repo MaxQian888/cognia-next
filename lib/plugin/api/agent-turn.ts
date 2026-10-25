@@ -141,6 +141,12 @@ export interface RunPluginAgentTurnOptions {
    * installation's (`botPlanOrigin`). Default: the turn's session.
    */
   outboundOrigin?: import("@/lib/policy/action-review/plan-context").ActionReviewPlanOrigin
+  /**
+   * Recipient lists a person configured for the caller, which this turn's
+   * outbound calls may reach unattended: a Bot passes its installation's
+   * (`botRecipientGrants`).
+   */
+  outboundPolicyGrants?: readonly import("@/lib/policy/action-review/plan-context").OutboundPolicyGrantList[]
 }
 
 export interface PluginAgentTurnUsageBooking {
@@ -285,6 +291,9 @@ export async function runPluginAgentTurn(
       outboundPolicy: {
         unattended: true,
         ...(options.outboundOrigin ? { origin: options.outboundOrigin } : {}),
+        ...(options.outboundPolicyGrants?.length
+          ? { policyGrants: options.outboundPolicyGrants }
+          : {}),
       },
       ...(usageTracker ? { onEvent: usageTracker.observe } : {}),
     })

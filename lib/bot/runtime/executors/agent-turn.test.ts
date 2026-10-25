@@ -1,4 +1,5 @@
 jest.mock("@/lib/plugin/api/agent-turn", () => ({ runPluginAgentTurn: jest.fn() }))
+import { outboundFingerprint } from "@/lib/policy/action-review/outbound-targets"
 import { runPluginAgentTurn } from "@/lib/plugin/api/agent-turn"
 
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
@@ -102,6 +103,7 @@ describe("createAgentTurnBotExecutor", () => {
       unattendedLabel: "Bot: Summary",
       // ADR-0239: outbound calls are planned in the installation's origin.
       outboundOrigin: { rootSessionId: "bot:boti_1", instructionEpoch: "bot:boti_1@0" },
+      outboundPolicyGrants: [],
       usage: {
         operationId: "bot:run_1:agent-turn",
         sessionId: "bot:run_1",
@@ -115,6 +117,23 @@ describe("createAgentTurnBotExecutor", () => {
       expect.anything(),
       expect.objectContaining({ sessionKey: "boti_2" })
     )
+  })
+
+  it("lets the turn reach the recipients a person listed for the installation", async () => {
+    const run = jest.mocked(runPluginAgentTurn)
+    run.mockResolvedValue({ sessionId: "bot-session", text: "done", status: "completed" })
+    const recipient = { kind: "mail" as const, channel: "mail", recipient: "mail:ops@example.com" }
+    await createAgentTurnBotExecutor()(
+      ctx({
+        installation: {
+          id: "boti_1",
+          outboundRecipients: [{ recipient, addedAt: 1, addedBy: "local-user" }],
+        } as BotExecutorContext["installation"],
+      })
+    )
+    expect(run.mock.lastCall?.[1]?.outboundPolicyGrants).toEqual([
+      { policyRef: "bot:boti_1", fingerprints: [outboundFingerprint(recipient)] },
+    ])
   })
 
   it("books the turn's usage under its run and the installation's project", async () => {

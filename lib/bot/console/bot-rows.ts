@@ -122,6 +122,8 @@ export interface BotConsoleRow {
   policyGrant?: BotInstallationRow["policyGrant"]
   /** The model lane chosen for the installation's external agents, when one is. */
   executionRoute?: BotInstallationRow["executionRoute"]
+  /** The recipients a person let this Bot's runs reach unattended (ADR-0239). */
+  outboundRecipients?: BotInstallationRow["outboundRecipients"]
   /**
    * The definition's per-installation form, when it ships one. Absent means
    * this Bot has nothing to configure, which the pane states rather than
@@ -248,6 +250,9 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
     ...(resolved ? { policy: resolved.policyResolution } : {}),
     ...(installation.policyGrant ? { policyGrant: installation.policyGrant } : {}),
     ...(installation.executionRoute ? { executionRoute: installation.executionRoute } : {}),
+    ...(installation.outboundRecipients?.length
+      ? { outboundRecipients: installation.outboundRecipients }
+      : {}),
     ...(isOwnedElsewhere(installation.owner) ? { owner: installation.owner } : {}),
     ...(definition?.configSchema ? { configSchema: definition.configSchema } : {}),
     config: installation.config,

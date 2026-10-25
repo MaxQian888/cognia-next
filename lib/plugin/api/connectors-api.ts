@@ -153,6 +153,7 @@ function toInfo(a: PlatformAdapter): PluginConnectorAdapterInfo {
 function toInstanceInfo(row: AdapterInstanceRow): PluginAdapterInstanceInfo {
   const copy: Partial<AdapterInstanceRow> = { ...row }
   delete copy.credentialsRef
+  delete copy.outboundRecipients
   return copy as PluginAdapterInstanceInfo
 }
 

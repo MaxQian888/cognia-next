@@ -9,6 +9,8 @@ import type { BotEventDeliveryRow, BotInstallationRow } from "@/lib/db/bot-types
 import { getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
+import { runningBotGrantsOf } from "@/lib/policy/action-review/configured-grants"
+import { outboundFingerprint } from "@/lib/policy/action-review/outbound-targets"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import { BotExecutorUnavailableError, type BotExecutorContext } from "./executors/types"
@@ -110,6 +112,37 @@ describe("runBotDelivery", () => {
     expect(outcome.status).toBe("cancelled")
     expect(handler).not.toHaveBeenCalled()
     expect((await getDb().botEventDeliveries.get(delivery.id))?.attempts).toBe(0)
+  })
+
+  // ADR-0239: a handler Bot's own plugin code may reach the installation's
+  // recipients while its run lasts, and no longer.
+  it("lends its plugin the installation's recipient list only while it runs", async () => {
+    const { delivery, resolved } = await seed()
+    const recipient = { kind: "mail" as const, channel: "mail", recipient: "mail:ops@example.com" }
+    const listed = {
+      ...resolved,
+      installation: {
+        ...resolved.installation,
+        outboundRecipients: [{ recipient, addedAt: 1, addedBy: "local-user" as const }],
+      },
+    }
+    let during: unknown
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved: listed,
+      now,
+      executors: {
+        handler: jest.fn(async () => {
+          during = runningBotGrantsOf("acme")
+          return undefined
+        }),
+      },
+    })
+    expect(outcome.status).toBe("completed")
+    expect(during).toEqual([
+      { policyRef: "bot:boti_1", fingerprints: [outboundFingerprint(recipient)] },
+    ])
+    expect(runningBotGrantsOf("acme")).toEqual([])
   })
 
   it("cancels execution at the policy deadline and releases its timer", async () => {

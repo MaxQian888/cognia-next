@@ -18,6 +18,7 @@ import {
   installBotFromCatalog,
   setBotExecutionRoute,
   setBotInstallationEnabled,
+  setBotOutboundRecipients,
   uninstallBotInstallation,
   updateBotConfig,
 } from "./lifecycle"
@@ -373,6 +374,79 @@ describe("setBotExecutionRoute", () => {
     await expect(setBotExecutionRoute("boti_missing", { mode: "native" })).rejects.toBeInstanceOf(
       BotControlTargetMissingError
     )
+  })
+})
+
+describe("setBotOutboundRecipients (ADR-0239)", () => {
+  const grant = {
+    recipient: {
+      kind: "conversation" as const,
+      channel: "lark-1",
+      recipient: "conv:lark:lark-1:oc_1",
+    },
+    addedAt: NOW,
+    addedBy: "local-user" as const,
+  }
+
+  async function installed() {
+    register(definition())
+    return installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      now: NOW,
+    })
+  }
+
+  it("stores a person's list as a new instruction epoch", async () => {
+    const row = await installed()
+    const updated = await setBotOutboundRecipients(row.id, [grant])
+    expect(updated.outboundRecipients).toEqual([grant])
+    expect(updated.humanRevision).toBe(1)
+    expect((await setBotOutboundRecipients(row.id, [])).outboundRecipients).toBeUndefined()
+  })
+
+  it("refuses a malformed list, a mirror and a missing installation", async () => {
+    const row = await installed()
+    await expect(
+      setBotOutboundRecipients(row.id, [{ ...grant, addedBy: "plugin" } as never])
+    ).rejects.toThrow()
+    await getDb().botInstallations.update(row.id, { syncedFromHost: true })
+    await expect(setBotOutboundRecipients(row.id, [grant])).rejects.toBeInstanceOf(
+      BotLifecycleUnavailableError
+    )
+    await expect(setBotOutboundRecipients("boti_missing", [grant])).rejects.toBeInstanceOf(
+      BotControlTargetMissingError
+    )
+  })
+
+  it("relays the list to the host that owns the installation", async () => {
+    restoreRoute?.()
+    restoreRoute = __setBotWriteRouteDepsForTests({
+      isRemoteHostActive: () => true,
+      hasLocalDatabase: () => true,
+      activeHostFeatureManifest: () =>
+        ({
+          schemaVersion: 2,
+          features: { "bots.control": { version: 1, operations: ["bot_installation_mutate"] } },
+          operations: [{ name: "bot_installation_mutate", healthy: true }],
+        }) as never,
+    })
+    mockRelay.mockResolvedValue({ id: "host-install" })
+    await setBotOutboundRecipients("host-install", [grant])
+    expect(mockRelay).toHaveBeenLastCalledWith(
+      "bot_installation_mutate",
+      expect.objectContaining({
+        operation: "outbound_recipients",
+        installationId: "host-install",
+        recipients: [grant],
+      }),
+      expect.any(Object)
+    )
+    await expect(
+      setBotOutboundRecipients("host-install", [{ ...grant, note: "x" } as never])
+    ).rejects.toThrow()
   })
 })
 

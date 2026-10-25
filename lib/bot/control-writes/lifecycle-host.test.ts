@@ -464,3 +464,31 @@ it("sets and clears an installation's model route through the host mutation", as
     })
   ).rejects.toThrow()
 })
+
+// ADR-0239: a paired client edits a host Bot's recipient list through the
+// interactive mutation; the host stores only what a person could have written.
+it("sets an installation's outbound recipients through the host mutation", async () => {
+  const installed = await mutateBotInstallationOnHost(input)
+  const grant = {
+    recipient: { kind: "mail", channel: "mail", recipient: "mail:ops@example.com" },
+    addedAt: 1,
+    addedBy: "local-user",
+  }
+  await mutateBotInstallationOnHost({
+    operation: "outbound_recipients",
+    operationId,
+    installationId: installed.id,
+    recipients: [grant],
+  })
+  const stored = await getDb().botInstallations.get(installed.id)
+  expect(stored?.outboundRecipients).toEqual([grant])
+  expect(stored?.humanRevision).toBe(1)
+  await expect(
+    mutateBotInstallationOnHost({
+      operation: "outbound_recipients",
+      operationId,
+      installationId: installed.id,
+      recipients: [{ ...grant, addedBy: "agent" }],
+    })
+  ).rejects.toThrow()
+})

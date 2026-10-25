@@ -49,6 +49,7 @@ import {
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
+import { configuredPolicyGrants } from "./configured-grants"
 import {
   buildActionReviewPlanContext,
   readAppSettings,
@@ -92,8 +93,13 @@ export interface OutboundToolPlannerOptions {
    * through `resolveSessionRequestOrigin`.
    */
   origin?: ActionReviewPlanOrigin | (() => Promise<ActionReviewPlanOrigin>)
-  /** Recipient lists a person configured for this run. */
+  /** Recipient lists a person configured for this run (a Bot installation's). */
   policyGrants?: readonly OutboundPolicyGrantList[]
+  /**
+   * The lists configured on the targets' connector instances and
+   * conversations. Default: {@link configuredPolicyGrants}.
+   */
+  configuredGrants?: (targets: readonly OutboundTarget[]) => Promise<OutboundPolicyGrantList[]>
   /** App settings, for the mode. Default: the settings store. */
   settings?: () => SettingsLike | Promise<SettingsLike>
   now?: () => number
@@ -168,12 +174,18 @@ async function planCall(
   const targets = extractOutboundTargets(request.toolName, request.input, {
     ...(origin.originThread ? { defaultAdapterId: origin.originThread.channel } : {}),
   })
+  // The run's own lists (a Bot's), and the ones a person configured on the
+  // bots and conversations these targets go through.
+  const policyGrants = [
+    ...(options.policyGrants ?? []),
+    ...(await (options.configuredGrants ?? configuredPolicyGrants)(targets)),
+  ]
   const context = await buildActionReviewPlanContext({
     origin: { ...origin, rootSessionId, instructionEpoch },
     unattended: options.unattended,
     via: "tool",
     settings: await (options.settings ?? readAppSettings)(),
-    ...(options.policyGrants ? { policyGrants: options.policyGrants } : {}),
+    ...(policyGrants.length > 0 ? { policyGrants } : {}),
     ...(options.now ? { now: options.now() } : {}),
   })
   const result = planActionReview({ verdict: "ask", targets }, context)

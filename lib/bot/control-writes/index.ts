@@ -121,6 +121,7 @@ export {
   installBotFromCatalog,
   setBotExecutionRoute,
   setBotInstallationEnabled,
+  setBotOutboundRecipients,
   uninstallBotInstallation,
   updateBotConfig,
 } from "./lifecycle"

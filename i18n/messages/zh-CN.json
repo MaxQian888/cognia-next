@@ -6043,6 +6043,7 @@
       "installed": "已安装 {name}",
       "notInstallable": "处理函数缺失期间无法安装这个 Bot。",
       "placeholder": "在 {host} 上运行。要在本设备修改，请先在 {host} 的设备页面将其收回。",
+      "recipientsSaved": "收件人名单已保存",
       "routeSaved": "模型路由已保存",
       "status": {
         "disabled": "Bot 已停用",
@@ -6143,6 +6144,10 @@
         "body": "这条安装记录钉的是 {pinned}，而插件现在提供的是 {available}。Bot 会继续以现存的版本运行，没有中断。",
         "title": "运行的是另一个版本"
       }
+    },
+    "recipients": {
+      "description": "此 Bot 的运行在无人值守时可直接发消息的对象。其他人会得到草稿或等待批准。",
+      "title": "收件人"
     },
     "route": {
       "description": "这个 Bot 的外部 Agent 通过什么方式访问模型。",
@@ -31170,6 +31175,39 @@
       "open": "打开文件夹…",
       "readyTitle": "项目文件夹"
     }
+  },
+  "outboundRecipients": {
+    "adapter": {
+      "description": "经此机器人账号的无人值守发送（定时任务、Bot 或插件）可直接到达这些会话和成员。其他人会得到草稿或等待批准。",
+      "title": "无人值守时可达的收件人"
+    },
+    "add": "添加",
+    "addNamed": "添加 {name}",
+    "duplicate": "已在名单中。",
+    "empty": "名单为空。无人值守时的发送会先征求同意。",
+    "invalid": {
+      "conversation": "这不是会话键，格式应为 平台:机器人:会话。",
+      "mail": "这不是邮箱地址。",
+      "person": "请输入该成员在此平台上的 ID。"
+    },
+    "kind": {
+      "conversation": "会话",
+      "mail": "邮件",
+      "person": "成员"
+    },
+    "kindLabel": "收件人类型",
+    "known": "本设备上的会话",
+    "noneKnown": "此账号还没有会话到过本设备，可直接粘贴会话键。",
+    "otherAccount": "该会话经由另一个机器人账号。",
+    "placeholder": {
+      "conversation": "搜索，或粘贴会话键",
+      "mail": "name@example.com",
+      "person": "成员 ID"
+    },
+    "remove": "移除 {name}",
+    "saveFailed": "无法保存收件人名单：{reason}",
+    "saved": "收件人名单已保存",
+    "via": "经由 {account}"
   },
   "page": {
     "deployNow": "立即部署",
