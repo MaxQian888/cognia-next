@@ -55,7 +55,7 @@ import { classifyProviderError } from "@cognia/provider-routing/error-classifier
 import { createEventAdapter } from "./events.ts"
 import { createToolCallRepair } from "../../tools/adapters/ai-sdk-tool-call-repair.ts"
 import { makeInputStream } from "../../shared/input-stream.ts"
-import { extractHttpErrorMeta } from "../../providers/http-error-meta.ts"
+import { extractHttpErrorMeta, providerForbidsRetry } from "../../providers/http-error-meta.ts"
 import {
   classifyCallError,
   createCallLedgerGate,
@@ -721,6 +721,19 @@ export function dispatchAiSdk({
     // Clear any leftover interrupt from a previous turn so this turn streams.
     cancelled = false
     active = true
+    // Report the turn as running, the way the Agent SDK does. HostState starts
+    // the turn on it (and counts the message that started it as delivered);
+    // without it a turn here went from `queued` straight to its end. No `idle`
+    // to match: `session_ended` closes the turn, and a trailing idle would
+    // overwrite an error turn with `completed`.
+    flushAdapter([
+      {
+        type: "system",
+        subtype: "session_state_changed",
+        state: "running",
+        session_id: sdkSessionId,
+      },
+    ])
     // Router + Fusion call gate for THIS turn. Inactive (and invisible) unless
     // the send carried a ledger stamp.
     const ledgerGate = createCallLedgerGate({
@@ -1278,7 +1291,12 @@ export function dispatchAiSdk({
           const contextOverflow =
             classifyProviderError(errorToMessage(streamError)) === "context-window-exceeded"
           const errorClass = contextOverflow ? "invalid_request" : classifyCallError(streamError)
-          const retryable = !contextOverflow && isRetryableBeforeOutput(errorClass)
+          // A provider that says not to retry (an organization member's cap
+          // refusal) ends the turn on the first answer.
+          const retryable =
+            !contextOverflow &&
+            isRetryableBeforeOutput(errorClass) &&
+            !providerForbidsRetry(streamError)
           if (
             contextOverflow &&
             !turnProducedOutput &&

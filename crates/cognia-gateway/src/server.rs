@@ -1221,7 +1221,7 @@ async fn middleware(
                             let _ = reject(StatusCode::TOO_MANY_REQUESTS, "member_usage_cap_reached", None);
                             return org_usage_refusal(reset_at);
                         },
-                        TicketReject::MemberUsageUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "member usage accounting unavailable"),
+                        TicketReject::MemberUsageUnavailable => (StatusCode::SERVICE_UNAVAILABLE, MEMBER_USAGE_UNAVAILABLE_MESSAGE),
                         TicketReject::Expired => (StatusCode::UNAUTHORIZED, "route ticket expired"),
                         TicketReject::Revoked => (StatusCode::UNAUTHORIZED, "route ticket revoked"),
                         TicketReject::Unknown => (StatusCode::UNAUTHORIZED, "unknown route ticket"),
@@ -2901,12 +2901,24 @@ fn org_usage_request_stream_usage(body: &mut Value, protocol: &str, member: bool
     }
 }
 
+/// `x-should-retry: false` is the header the Anthropic and OpenAI SDKs (and so
+/// Claude Code and Codex inside a member's sandbox) read before retrying a 429;
+/// without it a capped agent retried until its prompt timed out. The message
+/// names the code too: an agent CLI reports only the message, and the member
+/// runner reads the code back out of it.
+const MEMBER_USAGE_CAP_MESSAGE: &str =
+    "member monthly token cap reached (member_usage_cap_reached)";
+const MEMBER_USAGE_UNAVAILABLE_MESSAGE: &str =
+    "member usage accounting unavailable (member_usage_unavailable)";
+
 fn org_usage_refusal(reset_at: i64) -> Response {
-    (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": {
+    let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": {
         "code": "member_usage_cap_reached", "type": "member_usage_cap_reached",
-        "message": "member monthly token cap reached", "retryable": false,
+        "message": MEMBER_USAGE_CAP_MESSAGE, "retryable": false,
         "resetAt": reset_at, "details": { "resetAt": reset_at }
-    }}))).into_response()
+    }}))).into_response();
+    response.headers_mut().insert("x-should-retry", HeaderValue::from_static("false"));
+    response
 }
 
 /// Emit a durable request-log row and return the inbound error response.
@@ -3592,12 +3604,12 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
                 Ok(None) => {}
                 Err(TicketReject::MemberUsageCapReached { reset_at }) => {
                     let _ = logged_error(&state, &ctx, format, StatusCode::TOO_MANY_REQUESTS,
-                        "member_usage_cap_reached", "member monthly token cap reached", Some(&model));
+                        "member_usage_cap_reached", MEMBER_USAGE_CAP_MESSAGE, Some(&model));
                     return org_usage_refusal(reset_at);
                 }
                 Err(TicketReject::MemberUsageUnavailable) => {
                     return logged_error(&state, &ctx, format, StatusCode::SERVICE_UNAVAILABLE,
-                        "member_usage_unavailable", "member usage accounting unavailable", Some(&model));
+                        "member_usage_unavailable", MEMBER_USAGE_UNAVAILABLE_MESSAGE, Some(&model));
                 }
                 Err(_) => {
                     return logged_error(
@@ -4828,11 +4840,14 @@ mod tests {
         let reset = crate::org_usage::reset_at("2026-10");
         let response = org_usage_refusal(reset);
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["x-should-retry"], "false");
         let body = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["error"]["code"], "member_usage_cap_reached");
         assert_eq!(value["error"]["retryable"], false);
         assert_eq!(value["error"]["resetAt"], reset);
+        // An agent CLI shows only the message; the member runner reads the code from it.
+        assert!(value["error"]["message"].as_str().unwrap().contains("(member_usage_cap_reached)"));
     }
 
     #[test]
@@ -5965,6 +5980,7 @@ mod router_fusion_server_tests {
             "model":"p6c-model","messages":[{"role":"user","content":"hello"}],"max_tokens":10
         })))).await;
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["x-should-retry"], "false", "SDK retries must stop at the cap");
         let body: Value = serde_json::from_slice(&bytes_of(response).await).unwrap();
         assert_eq!(body["error"]["code"], "member_usage_cap_reached"); assert_eq!(body["error"]["retryable"], false);
         registry.validate_and_reserve(&other.secret, now, TicketOperation::Chat, "p6c-other-reservation", 10).unwrap();

@@ -94,7 +94,13 @@ export function canonicalEventsFromWireMessage(
       // events on the stream for one turn, so only the lifecycle end is left.
       const reportedByResult = result && (result.subtype !== "success" || result.is_error === true)
       if (msg.error && !reportedByResult) {
-        return [{ kind: "failure", code: "session_error", message: String(msg.error) }]
+        // The turn's own code when it named one (a gateway refusal such as
+        // `member_usage_cap_reached`), so a member's devices can say why.
+        const code =
+          typeof msg.code === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(msg.code)
+            ? msg.code
+            : "session_error"
+        return [{ kind: "failure", code, message: String(msg.error) }]
       }
       return [{ kind: "lifecycle", phase: "ended" }]
     }

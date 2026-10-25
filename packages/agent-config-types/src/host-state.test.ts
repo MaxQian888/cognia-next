@@ -21,6 +21,7 @@ import {
   isHostStateSnapshot,
   isHostStateStatus,
   isHostStateSubmitResponse,
+  isTurnErrorCode,
   permittedHostStateIntentKinds,
   personPartitionIntentDecision,
   reconcileHostStateReplica,
@@ -1782,4 +1783,155 @@ it("p6e sandboxed execution admits enqueue and abort, never steer or decisions",
       code: "execution_isolation_unavailable",
     })
   }
+})
+
+describe("a turn's failure reason and its delivered message", () => {
+  const queued = (actionId: string, revision: number): HostStateMutation => ({
+    kind: "message.queued",
+    message: { actionId, messageId: `m-${actionId}`, text: "hi", attachments: [], clientId: "c" },
+    operation: operation({ actionId, kind: "message.enqueue" }),
+    draftRevision: revision,
+    revision,
+  })
+  const dispatched = (actionId: string, revision: number): HostStateMutation => ({
+    kind: "operation.changed",
+    actionId,
+    status: "dispatching",
+    revision,
+  })
+
+  it("a new turn delivers the oldest message the runtime was handed", () => {
+    const next = apply(session(), queued("a1", 1), dispatched("a1", 2), queued("a2", 3), {
+      kind: "turn.started",
+      turnId: "t1",
+      startedAt: 70,
+      revision: 4,
+    })
+    expect(next.queue.map((item) => item.actionId)).toEqual(["a2"])
+    expect(next.operations.find((item) => item.actionId === "a1")).toMatchObject({
+      status: "acknowledged",
+      updatedAt: 70,
+    })
+    // `a2` is behind it; it waits.
+    expect(next.operations.find((item) => item.actionId === "a2")?.status).toBe("accepted")
+
+    // The same turn reported running again delivers nothing more.
+    const again = apply(next, dispatched("a2", 5), {
+      kind: "turn.started",
+      turnId: "t1",
+      startedAt: 80,
+      revision: 6,
+    })
+    expect(again.queue.map((item) => item.actionId)).toEqual(["a2"])
+    expect(again.operations.find((item) => item.actionId === "a2")?.status).toBe("dispatching")
+  })
+
+  it("a turn that starts before its dispatch call returns still delivers the message", () => {
+    const next = apply(
+      session(),
+      queued("a1", 1),
+      { kind: "turn.started", turnId: "t1", startedAt: 70, revision: 2 },
+      // The Host's bookkeeping, written once the dispatch call returns.
+      dispatched("a1", 3)
+    )
+    expect(next.queue).toEqual([])
+    expect(next.operations[0]).toMatchObject({ status: "acknowledged", updatedAt: 70 })
+  })
+
+  it("a message the runner already reported is left to its own queue events", () => {
+    const next = apply(
+      session(),
+      queued("a1", 1),
+      dispatched("a1", 2),
+      { kind: "operation.changed", actionId: "a1", status: "acknowledged", at: 60, revision: 3 },
+      { kind: "turn.started", turnId: "t1", startedAt: 70, revision: 4 }
+    )
+    expect(next.queue.map((item) => item.actionId)).toEqual(["a1"])
+    expect(next.operations[0]).toMatchObject({ status: "acknowledged", updatedAt: 60 })
+  })
+
+  it("an error turn keeps its code, and the next turn or a clean ending clears it", () => {
+    const failed = apply(
+      session(),
+      { kind: "turn.started", turnId: "t1", startedAt: 1, revision: 1 },
+      {
+        kind: "turn.settled",
+        turn: "fatal-error",
+        errorCode: "member_usage_cap_reached",
+        revision: 2,
+      }
+    )
+    expect(failed).toMatchObject({ turn: "fatal-error", turnErrorCode: "member_usage_cap_reached" })
+    const snapshot = {
+      channel: CHANNEL,
+      hostId: "host-a",
+      hostGeneration: 1,
+      cutHostSeq: 2,
+      revision: failed.revision,
+      digest: hostStateDigest(failed),
+      state: failed,
+    }
+    expect(isHostStateSnapshot(snapshot)).toBe(true)
+
+    const restarted = apply(failed, {
+      kind: "turn.started",
+      turnId: "t2",
+      startedAt: 3,
+      revision: 3,
+    })
+    expect(restarted.turnErrorCode).toBeUndefined()
+    expect("turnErrorCode" in restarted).toBe(false)
+
+    const completed = apply(failed, {
+      kind: "turn.settled",
+      turn: "completed",
+      errorCode: "member_usage_cap_reached",
+      revision: 3,
+    })
+    expect("turnErrorCode" in completed).toBe(false)
+  })
+
+  it("the wire refuses a free-text code and a code on a turn that did not fail", () => {
+    expect(isTurnErrorCode("member_usage_cap_reached")).toBe(true)
+    expect(isTurnErrorCode('API Error: 429 {"error":1}')).toBe(false)
+    expect(isTurnErrorCode("")).toBe(false)
+    expect(isTurnErrorCode("x".repeat(65))).toBe(false)
+    const applied = (mutation: unknown) =>
+      isHostStateAppliedAction({
+        channel: CHANNEL,
+        hostId: "host-a",
+        hostGeneration: 1,
+        hostSeq: 1,
+        outcome: "applied",
+        mutation,
+      })
+    expect(
+      applied({
+        kind: "turn.settled",
+        turn: "fatal-error",
+        errorCode: "org_agent_not_allowed",
+        revision: 1,
+      })
+    ).toBe(true)
+    expect(
+      applied({
+        kind: "turn.settled",
+        turn: "fatal-error",
+        errorCode: "spaces are text",
+        revision: 1,
+      })
+    ).toBe(false)
+    const idleWithCode = { ...session(), turnErrorCode: "member_usage_cap_reached" }
+    expect(
+      isHostStateSnapshot({
+        channel: CHANNEL,
+        hostId: "host-a",
+        hostGeneration: 1,
+        cutHostSeq: 0,
+        revision: 0,
+        digest: hostStateDigest(idleWithCode),
+        state: idleWithCode,
+      })
+    ).toBe(false)
+  })
 })

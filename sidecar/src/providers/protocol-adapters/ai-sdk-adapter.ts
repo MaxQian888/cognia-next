@@ -32,6 +32,8 @@ import {
   type SiwcNativeCall,
 } from "../siwc-fetch.ts"
 import { partitionPrompt } from "../prompt-partition.ts"
+import { providerForbidsRetry } from "../http-error-meta.ts"
+import { APICallError } from "@ai-sdk/provider"
 import { aiSdkTelemetry, withTraceparent } from "../../platform/telemetry/index.ts"
 import {
   EFFORT_TO_BUDGET,
@@ -321,6 +323,49 @@ export function rawAnalysisProvenanceMiddleware(): LanguageModelMiddleware {
   }
 }
 
+/**
+ * The AI SDK retries an APICallError by status alone (408/409/429/5xx), so a
+ * refusal that says it must not be retried (`x-should-retry: false`, or a
+ * `retryable: false` error body: a member's monthly cap on an organization
+ * gateway) was sent twice more before the turn failed. Re-mark such an error
+ * non-retryable; every other error passes through untouched.
+ */
+export function providerRetryVetoMiddleware(): LanguageModelMiddleware {
+  const veto = (error: unknown): unknown => {
+    if (!APICallError.isInstance(error) || !error.isRetryable || !providerForbidsRetry(error)) {
+      return error
+    }
+    return new APICallError({
+      message: error.message,
+      url: error.url,
+      requestBodyValues: error.requestBodyValues,
+      statusCode: error.statusCode,
+      responseHeaders: error.responseHeaders,
+      responseBody: error.responseBody,
+      cause: error.cause,
+      data: error.data,
+      isRetryable: false,
+    })
+  }
+  return {
+    specificationVersion: "v3",
+    wrapGenerate: async ({ doGenerate }) => {
+      try {
+        return await doGenerate()
+      } catch (error) {
+        throw veto(error)
+      }
+    },
+    wrapStream: async ({ doStream }) => {
+      try {
+        return await doStream()
+      } catch (error) {
+        throw veto(error)
+      }
+    },
+  }
+}
+
 export async function withReasoningExtraction(
   model: ProviderModel,
   modelId: string | undefined = model.modelId
@@ -328,7 +373,7 @@ export async function withReasoningExtraction(
   const { wrapLanguageModel, extractReasoningMiddleware } = await import("ai")
   const extracted = wrapLanguageModel({
     model,
-    middleware: extractReasoningMiddleware({ tagName: "think" }),
+    middleware: [providerRetryVetoMiddleware(), extractReasoningMiddleware({ tagName: "think" })],
   })
   if (!/gpt-oss/i.test(modelId ?? "")) return extracted
   return wrapLanguageModel({

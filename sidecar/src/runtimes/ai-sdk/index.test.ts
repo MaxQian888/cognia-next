@@ -4158,3 +4158,77 @@ test("upstream JSON refusal fields reach terminal errors before and after partia
     assert.equal(JSON.stringify(ended).includes("private"), false)
   }
 })
+
+test("a refusal that forbids retries ends the turn on the first attempt", async () => {
+  for (const [label, forbids] of [
+    ["x-should-retry header", { responseHeaders: { "x-should-retry": "false" } }],
+    ["retryable:false body", {}],
+  ] as const) {
+    const { events, emit } = captureEmit()
+    let calls = 0
+    const refuses = () => {
+      calls += 1
+      return makeFakeStream([
+        {
+          type: "error",
+          error: Object.assign(new Error("member monthly token cap reached"), {
+            statusCode: 429,
+            ...forbids,
+            responseBody: JSON.stringify({
+              error: {
+                code: "member_usage_cap_reached",
+                resetAt: 123,
+                ...(label === "retryable:false body" ? { retryable: false } : {}),
+              },
+            }),
+          }),
+        },
+      ])()
+    }
+    dispatchAiSdk({
+      provider: "openai",
+      sessionId: `no-retry-${calls}-${label}`,
+      firstPrompt: "hi",
+      sendOptions: {
+        model: "gpt-x",
+        providerCredentials: { apiKey: "ticket", protocol: "openai" },
+        toolSurface: "none",
+      },
+      emit,
+      log: () => {},
+      streamText: refuses,
+    })
+    await waitForEvent(events, (event) => event.type === "session_ended")
+    const ended = events.find((event) => event.type === "session_ended")!
+    assert.equal(calls, 1, `${label}: no transport retry`)
+    assert.equal(ended.code, "member_usage_cap_reached")
+  }
+})
+
+test("each turn reports itself running before any model output", async () => {
+  const { events, emit } = captureEmit()
+  dispatchAiSdk({
+    provider: "openai",
+    sessionId: "running-state",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "sk", protocol: "openai" },
+      toolSurface: "none",
+    },
+    emit,
+    log: () => {},
+    streamText: makeFakeStream([{ type: "text-delta", id: "t", text: "hello" }]),
+  })
+  await waitForEvent(events, (event) => event.type === "session_ended")
+  const sdkEvents = events.filter((event) => event.type === "event").map((event) => event.event)
+  assert.deepEqual(
+    { type: sdkEvents[0]?.type, subtype: sdkEvents[0]?.subtype, state: sdkEvents[0]?.state },
+    { type: "system", subtype: "session_state_changed", state: "running" }
+  )
+  // Nothing reports the end as `idle`: `session_ended` closes the turn.
+  assert.equal(
+    sdkEvents.some((event) => event?.subtype === "session_state_changed" && event.state === "idle"),
+    false
+  )
+})

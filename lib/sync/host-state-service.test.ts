@@ -37,14 +37,19 @@ import {
   sessionStateChannel,
   type HostStateAction,
   type HostStateAppliedAction,
+  type HostStateChannelState,
+  type HostStateMutation,
+  type HostStateOperation,
   type HostStateSnapshot,
 } from "@cognia/agent-config-types/host-state"
+import { createDiagnostic } from "@cognia/diagnostics"
 import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/schema"
 import {
   createAgentRpcHostStateDispatcher,
   createHostStateService,
   HOST_STATE_DISPATCH_MAX_ATTEMPTS,
   HOST_STATE_DISPATCH_MAX_BACKOFF_MS,
+  HostStateDispatchAbandonedError,
   hostStateDispatchBackoffMs,
   installHostStateSync,
   installHostStateSyncForTarget,
@@ -689,6 +694,47 @@ describe("HostStateService", () => {
     await second.stop()
   })
 
+  it("a failed turn keeps the runtime's code, never its message", async () => {
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: 0, heartbeat: false })
+    await service.projectRuntimeEnvelope(
+      runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start")
+    )
+    await service.projectRuntimeEnvelope(
+      runtimeEnvelope(
+        {
+          kind: "failure",
+          code: "member_usage_cap_reached",
+          message: 'API Error: 429 {"error":{"code":"member_usage_cap_reached"}}',
+        },
+        "evt-failure"
+      )
+    )
+    const failed = (await service.snapshot({ ...scope, channel })).state
+    expect(failed).toMatchObject({ turn: "fatal-error", turnErrorCode: "member_usage_cap_reached" })
+    expect(JSON.stringify(failed)).not.toContain("API Error")
+
+    await service.projectRuntimeEnvelope(
+      runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-start-2")
+    )
+    await service.projectRuntimeEnvelope(
+      runtimeEnvelope(
+        { kind: "failure", code: "not a code", message: "boom", retryable: true },
+        "evt-failure-2"
+      )
+    )
+    const second = (await service.snapshot({ ...scope, channel })).state
+    expect(second).toMatchObject({ turn: "retryable-error" })
+    expect("turnErrorCode" in second).toBe(false)
+    await service.stop()
+  })
+
   it("reports degraded rather than presenting stale state as fresh", async () => {
     // A broadcast that keeps failing is state replicas never received.
     const publish = jest.fn(async () => {
@@ -973,6 +1019,43 @@ describe("HostStateService", () => {
     clock += HOST_STATE_DISPATCH_MAX_BACKOFF_MS
     await service.sweep()
     expect(dispatchRuntime).toHaveBeenCalledTimes(HOST_STATE_DISPATCH_MAX_ATTEMPTS)
+    await service.stop()
+  })
+
+  it("a send the Host refuses for good leaves the queue with its reason", async () => {
+    const dispatchRuntime = jest
+      .fn()
+      .mockRejectedValue(new HostStateDispatchAbandonedError("model_access_unavailable"))
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 1_000,
+      dispatchRuntime,
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: 1_000, heartbeat: false })
+    await service.submit(
+      {
+        ...scope,
+        actions: [
+          action({ kind: "message.enqueue", messageId: "m1", text: "hi", attachments: [] }),
+        ],
+      },
+      owner
+    )
+    await flush()
+    // Left queued, the turn read `queued` behind a message that would never
+    // be delivered, and the member's composer stayed busy.
+    const state = (await service.snapshot({ ...scope, channel })).state as Extract<
+      HostStateChannelState,
+      { kind: "session" }
+    >
+    expect(state).toMatchObject({ queue: [], turn: "idle" })
+    expect(state.operations.find((item) => item.actionId === "action-1")).toMatchObject({
+      status: "failed",
+      errorCode: "model_access_unavailable",
+    })
     await service.stop()
   })
 
@@ -2478,6 +2561,133 @@ describe("HostStateService", () => {
     expect(slice?.runTiming.startedAt).toBe(startedAt)
     sync.stop()
     useChatStore.getState().setSessionStatus("session-1", "idle")
+  })
+
+  describe("a member's failed send shows why", () => {
+    async function install(state: ReturnType<typeof createEmptyHostStateSession>) {
+      let handler: ((event: HostStateAppliedAction) => void) | null = null
+      const snapshot: HostStateSnapshot = {
+        channel,
+        hostId,
+        hostGeneration: 4,
+        cutHostSeq: 8,
+        revision: state.revision,
+        digest: hostStateDigest(state),
+        state,
+      }
+      const transport: Transport = {
+        subscribe: (_topic, next) => {
+          handler = next as (event: HostStateAppliedAction) => void
+          return () => undefined
+        },
+        call: async (command) =>
+          (command === "host_state_status" ? writableStatus : snapshot) as never,
+      }
+      const sync = await installHostStateSync({
+        transport,
+        ...scope,
+        channels: async () => [channel],
+      })
+      let hostSeq = 9
+      const push = async (mutation: HostStateMutation) => {
+        handler!({
+          channel,
+          hostId,
+          hostGeneration: 4,
+          hostSeq: hostSeq++,
+          outcome: "applied",
+          mutation,
+        })
+        await flush()
+      }
+      return { sync, push }
+    }
+    const slice = () => useChatStore.getState().sessions["session-1"]
+    const send = (actionId: string, overrides: Partial<HostStateOperation> = {}) =>
+      ({
+        actionId,
+        kind: "message.enqueue",
+        status: "acknowledged",
+        clientId: "client-a",
+        createdAt: 10,
+        updatedAt: 10,
+        ...overrides,
+      }) as HostStateOperation
+
+    afterEach(() => {
+      useChatStore.getState().setSessionDiagnostic("session-1", null)
+    })
+
+    it("a turn that hit the member's cap shows the allowance banner until the next turn", async () => {
+      const failed = {
+        ...createEmptyHostStateSession(channel, "session-1"),
+        revision: 3,
+        turn: "fatal-error" as const,
+        turnErrorCode: "member_usage_cap_reached",
+        operations: [send("send-1")],
+      }
+      const { sync, push } = await install(failed)
+
+      expect(slice()?.status).toBe("error")
+      expect(slice()?.errorDiagnostic).toMatchObject({
+        code: "memberUsageCapReached",
+        retryable: false,
+        source: "chat",
+      })
+
+      // Dismissed, it stays dismissed through later snapshots of the same failure.
+      useChatStore.getState().setSessionDiagnostic("session-1", null)
+      await push({ kind: "session.renamed", title: "Renamed", revision: 4 })
+      expect(slice()?.errorDiagnostic).toBeNull()
+
+      await push({ kind: "turn.started", turnId: "t2", startedAt: Date.now(), revision: 5 })
+      expect(slice()?.status).toBe("streaming")
+      expect(slice()?.errorDiagnostic).toBeNull()
+      sync.stop()
+      useChatStore.getState().setSessionStatus("session-1", "idle")
+    })
+
+    it("a send the Host refused names its reason, and the next turn clears it", async () => {
+      const refused = {
+        ...createEmptyHostStateSession(channel, "session-1"),
+        revision: 2,
+        turn: "completed" as const,
+        operations: [
+          send("send-ok", { createdAt: 5 }),
+          send("send-refused", {
+            status: "failed",
+            errorCode: "org_agent_not_allowed",
+            createdAt: 9,
+          }),
+        ],
+      }
+      const { sync, push } = await install(refused)
+
+      expect(slice()?.errorDiagnostic?.code).toBe("orgAgentNotAllowed")
+
+      await push({ kind: "turn.started", turnId: "t3", startedAt: Date.now(), revision: 3 })
+      expect(slice()?.errorDiagnostic).toBeNull()
+      expect(slice()?.status).toBe("streaming")
+      sync.stop()
+      useChatStore.getState().setSessionStatus("session-1", "idle")
+    })
+
+    it("a code the catalog does not know keeps the plain error, and leaves other banners alone", async () => {
+      const other = createDiagnostic("timeout", { source: "chat", message: "local" })
+      useChatStore.getState().setSessionDiagnostic("session-1", other)
+      const failed = {
+        ...createEmptyHostStateSession(channel, "session-1"),
+        revision: 3,
+        turn: "fatal-error" as const,
+        turnErrorCode: "upstream_error",
+      }
+      const { sync } = await install(failed)
+
+      expect(slice()?.status).toBe("error")
+      expect(slice()?.errorDiagnostic?.id).toBe(other.id)
+      sync.stop()
+      useChatStore.getState().setSessionStatus("session-1", "idle")
+    })
   })
 
   it("drops a conversation the Host tombstoned instead of re-creating its draft", async () => {

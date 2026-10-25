@@ -112,6 +112,8 @@ export interface PersonAgentRunnerDeps {
   /** Earlier turns of a conversation as text, for a fresh process. */
   history(sessionId: string, excludeMessageIds: readonly string[]): Promise<string>
   writeMessage(sessionId: string, message: UIMessage): Promise<void>
+  /** Delete one message the turn already wrote. */
+  removeMessage(sessionId: string, messageId: string): Promise<void>
   /** Seal the HostState turn's work submission (`hoststate:<actionId>`). */
   settle(
     actionId: string,
@@ -162,6 +164,36 @@ interface LiveAgent {
 interface ActiveTurn {
   actionId: string
   aborted: boolean
+}
+
+/**
+ * What the organization gateway refuses a member's agent with. The agent
+ * reports it as its own error text (Claude Code: `API Error: 429 {"error":
+ * {"code":"member_usage_cap_reached",…}}`), so a turn that failed for this
+ * reason otherwise reads as a bare `turn_error`. Closed: only these codes are
+ * lifted out of agent text, never anything else it printed.
+ */
+const GATEWAY_REFUSAL_CODES = ["member_usage_cap_reached", "member_usage_unavailable"] as const
+
+/** The first gateway refusal code named in any of `texts`. */
+export function gatewayRefusalIn(texts: readonly (string | undefined)[]): string | undefined {
+  for (const text of texts) {
+    if (!text) continue
+    const found = GATEWAY_REFUSAL_CODES.find((code) =>
+      new RegExp(`(^|[^A-Za-z0-9_])${code}([^A-Za-z0-9_]|$)`).test(text)
+    )
+    if (found) return found
+  }
+  return undefined
+}
+
+function textsOf(parts: readonly Part[]): string[] {
+  return parts.flatMap((part) => {
+    const record = part as { type?: unknown; text?: unknown; errorText?: unknown }
+    return [record.text, record.errorText].filter(
+      (value): value is string => typeof value === "string"
+    )
+  })
 }
 
 function codeOf(error: unknown): string | undefined {
@@ -366,6 +398,7 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
     let sequence = 3
     let parts: Part[] = []
     let dirty = false
+    let written = false
     let lastWrite = 0
     let writing: Promise<void> = Promise.resolve()
     const message = (): UIMessage => ({
@@ -376,6 +409,7 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
     const flush = () => {
       if (!dirty) return writing
       dirty = false
+      written = true
       lastWrite = deps.now()
       const snapshot = message()
       writing = writing
@@ -414,6 +448,8 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
     }
     let outcome: PersonAgentSettleOutcome = "failed"
     let errorCode: string | undefined
+    /** Error text the agent reported, kept only to find a gateway refusal in. */
+    const errorTexts: string[] = []
     try {
       let result = await stream.next()
       while (!result.done) {
@@ -447,6 +483,7 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
         } else if (event.type === "error") {
           outcome = "failed"
           errorCode = event.code ?? "turn_error"
+          errorTexts.push(event.error)
         }
         const next = deps.applyEvent(parts, event)
         if (next !== parts) {
@@ -461,7 +498,24 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
     } catch (error) {
       outcome = turn.aborted ? "cancelled" : "failed"
       errorCode = turn.aborted ? undefined : (codeOf(error) ?? "turn_error")
+      errorTexts.push(error instanceof Error ? error.message : String(error))
       deps.log("warn", `person agent turn ${turnId} ended: ${String(error)}`)
+    }
+    if (outcome === "failed" && (errorCode === undefined || errorCode === "turn_error")) {
+      const refusal = gatewayRefusalIn([...errorTexts, ...textsOf(parts)])
+      if (refusal) {
+        errorCode = refusal
+        // The agent printed the refusal as its reply ("API Error: Request
+        // rejected (429) · …"). The member's devices show the code's own
+        // explanation; the raw text is not an answer and is not kept.
+        const kept = parts.filter(
+          (part) => !(part.type === "text" && gatewayRefusalIn([part.text]) === refusal)
+        )
+        if (kept.length !== parts.length) {
+          parts = kept
+          dirty = true
+        }
+      }
     }
     // The Host's own reason wins: a quota or standing stop is what happened,
     // whatever the adapter made of the exit.
@@ -476,6 +530,15 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
     if (liveTimer !== undefined) deps.clearTimer(liveTimer)
     liveTimer = undefined
     await writing
+    // A reply that was only the refusal text, already written while it
+    // streamed, goes again.
+    if (parts.length === 0 && written) {
+      await deps
+        .removeMessage(sessionId, message().id)
+        .catch((error) =>
+          deps.log("warn", `person agent transcript delete failed: ${String(error)}`)
+        )
+    }
     // The final frame goes before the final transcript write and names the
     // revision persisted so far: a device keeps drawing the finished reply
     // until its timeline reads past it, i.e. has the final write.

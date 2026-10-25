@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { extractHttpErrorMeta, parseRetryAfterMs } from "./http-error-meta.ts"
+import { extractHttpErrorMeta, parseRetryAfterMs, providerForbidsRetry } from "./http-error-meta.ts"
 
 test("parseRetryAfterMs: integer delta-seconds → ms", () => {
   assert.equal(parseRetryAfterMs("30"), 30_000)
@@ -84,4 +84,40 @@ test("SDK retry wrappers retain the final structured failure and bound cyclic ca
   const cycle: { cause?: unknown } = {}
   cycle.cause = cycle
   assert.deepEqual(extractHttpErrorMeta(cycle), {})
+})
+
+test("providerForbidsRetry: the x-should-retry header and a retryable:false body both say no", () => {
+  assert.equal(
+    providerForbidsRetry({ statusCode: 429, responseHeaders: { "X-Should-Retry": "false" } }),
+    true
+  )
+  assert.equal(
+    providerForbidsRetry({
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        error: { code: "member_usage_cap_reached", retryable: false },
+      }),
+    }),
+    true
+  )
+  // Through a RetryError's last error, as the AI SDK wraps it.
+  assert.equal(
+    providerForbidsRetry({
+      lastError: { statusCode: 429, responseHeaders: new Headers({ "x-should-retry": "false" }) },
+    }),
+    true
+  )
+})
+
+test("providerForbidsRetry: an ordinary rate limit, or a header saying true, may be retried", () => {
+  assert.equal(
+    providerForbidsRetry({ statusCode: 429, responseHeaders: { "retry-after": "2" } }),
+    false
+  )
+  assert.equal(
+    providerForbidsRetry({ statusCode: 429, responseHeaders: { "x-should-retry": "true" } }),
+    false
+  )
+  assert.equal(providerForbidsRetry({ statusCode: 503, responseBody: "not json" }), false)
+  assert.equal(providerForbidsRetry(undefined), false)
 })

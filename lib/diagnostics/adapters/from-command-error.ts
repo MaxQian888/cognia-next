@@ -61,6 +61,9 @@ const COMMAND_CODE_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   // A member's sandboxed agent turn (P6e, `lib/headless/person-agent/`).
   person_agent_exited: "personAgentExited",
   person_agent_attachment_unsupported: "personAgentAttachmentUnsupported",
+  // The organization gateway could not account a member's usage; it says so
+  // rather than spend unmetered, and it passes.
+  member_usage_unavailable: "serviceUnavailable",
   host_script_missing: "prerequisiteMissing",
   lsp_host_script_missing: "prerequisiteMissing",
 

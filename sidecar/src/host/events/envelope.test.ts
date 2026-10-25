@@ -273,6 +273,28 @@ test("a session_ended with no result still synthesizes the failure", () => {
   )
 })
 
+test("a session_ended keeps the turn's own code, and only a code", () => {
+  assert.deepEqual(
+    canonicalEventsFromWireMessage({
+      type: "session_ended",
+      sessionId: "s1",
+      error: "member_usage_cap_reached",
+      code: "member_usage_cap_reached",
+      httpStatus: 429,
+    }),
+    [{ kind: "failure", code: "member_usage_cap_reached", message: "member_usage_cap_reached" }]
+  )
+  assert.deepEqual(
+    canonicalEventsFromWireMessage({
+      type: "session_ended",
+      sessionId: "s1",
+      error: "boom",
+      code: "free text with spaces",
+    }),
+    [{ kind: "failure", code: "session_error", message: "boom" }]
+  )
+})
+
 test("a session_ended carrying a SUCCESSFUL result ends the turn cleanly", () => {
   assert.deepEqual(
     canonicalEventsFromWireMessage({

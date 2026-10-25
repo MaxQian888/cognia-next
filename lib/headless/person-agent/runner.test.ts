@@ -3,6 +3,7 @@ import type { TranscriptLiveFrame } from "@/lib/chat/transcript/live-frames"
 import { createPersonProcessPlane, type PersonPlaneTransport } from "./process-plane"
 import {
   createPersonAgentRunner,
+  gatewayRefusalIn,
   personAgentPrompt,
   PERSON_AGENT_IDLE_MS,
   PERSON_AGENT_WORKSPACE,
@@ -91,6 +92,9 @@ function harness(options: { holdLast?: boolean } = {}) {
     writeMessage: jest.fn(async (sessionId, message) => {
       writes.push({ sessionId, id: message.id, parts: message.parts })
       order.push(`write:${message.parts.length}`)
+    }),
+    removeMessage: jest.fn(async (sessionId, messageId) => {
+      order.push(`remove:${sessionId}:${messageId}`)
     }),
     settle: jest.fn(async (actionId, input) => {
       settled.push({ actionId, outcome: input.outcome, errorCode: input.errorCode })
@@ -405,6 +409,94 @@ describe("person agent runner", () => {
     expect(h.runner.liveAgent("s1")).toBeUndefined()
     // The partial reply is kept.
     expect(h.writes.at(-1)?.parts).toEqual([{ type: "text", text: "partial" }])
+  })
+
+  it("p6e names the gateway's refusal when the agent reports it as its own error", async () => {
+    const h = harness()
+    // A clock past the first write interval: the streamed part is persisted.
+    h.deps.now = () => 10_000
+    h.turns.push(
+      scripted([
+        event({ type: "session_start", sessionId: "native-1" }),
+        event({
+          type: "message_delta",
+          sessionId: "native-1",
+          delta: {
+            type: "text",
+            text: 'API Error: 429 {"error":{"code":"member_usage_cap_reached","retryable":false}}',
+          },
+        }),
+        event({ type: "done", sessionId: "native-1", success: false, stopReason: "end_turn" }),
+      ])
+    )
+    await h.runner.startTurn(request())
+    await drain()
+    expect(h.settled).toEqual([
+      { actionId: "a1", outcome: "failed", errorCode: "member_usage_cap_reached" },
+    ])
+    expect(h.envelopes.at(-1)?.event).toMatchObject({
+      kind: "failure",
+      code: "member_usage_cap_reached",
+    })
+    // The refusal text was written while it streamed; it is not a reply, so it goes.
+    expect(h.writes.map((write) => write.parts.length)).toEqual([1])
+    expect(h.order).toContain("remove:s1:assistant-a1")
+    expect(h.liveFrames.at(-1)).toMatchObject({ state: "reset", parts: [] })
+  })
+
+  it("p6e keeps a real partial reply when the refusal follows it", async () => {
+    const h = harness()
+    h.turns.push(
+      scripted([
+        event({ type: "session_start", sessionId: "native-1" }),
+        event({
+          type: "message_delta",
+          sessionId: "native-1",
+          delta: { type: "text", text: "Here is the start" },
+        }),
+        event({
+          type: "error",
+          sessionId: "native-1",
+          error:
+            "API Error: Request rejected (429) · member monthly token cap reached (member_usage_cap_reached)",
+        }),
+      ])
+    )
+    await h.runner.startTurn(request())
+    await drain()
+    expect(h.settled[0]?.errorCode).toBe("member_usage_cap_reached")
+    expect(h.writes.at(-1)?.parts).toEqual([{ type: "text", text: "Here is the start" }])
+    expect(h.order.some((entry) => entry.startsWith("remove:"))).toBe(false)
+  })
+
+  it("p6e names the refusal when the agent's prompt rejects with the gateway's message", async () => {
+    const h = harness()
+    h.turns.push({
+      release: () => undefined,
+      held: false,
+      async *run() {
+        yield event({ type: "session_start", sessionId: "native-1" })
+        // What Claude Code over ACP rejects with on the rig.
+        throw new Error(
+          "-32603: Internal error: API Error: Request rejected (429) · member monthly token cap reached (member_usage_cap_reached)"
+        )
+      },
+    })
+    await h.runner.startTurn(request())
+    await drain()
+    expect(h.settled).toEqual([
+      { actionId: "a1", outcome: "failed", errorCode: "member_usage_cap_reached" },
+    ])
+  })
+
+  it("p6e lifts only a closed list of codes out of agent text", () => {
+    expect(gatewayRefusalIn(["429 member_usage_unavailable"])).toBe("member_usage_unavailable")
+    expect(gatewayRefusalIn([undefined, "x", "(member_usage_cap_reached)"])).toBe(
+      "member_usage_cap_reached"
+    )
+    // A longer identifier that merely contains a code is not the code.
+    expect(gatewayRefusalIn(["not_member_usage_cap_reached_yet"])).toBeUndefined()
+    expect(gatewayRefusalIn(["host_surface_forbidden", "rate limited"])).toBeUndefined()
   })
 
   it("p6e watches the Host's stop channels before any spawn", async () => {

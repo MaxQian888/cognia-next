@@ -1650,6 +1650,29 @@ const PERSONS_MODEL = process.env.COGNIA_SMOKE_PERSONS_PROVIDER
     }
   : { provider: "anthropic", model: "claude-e2e", apiKey: "", real: false }
 
+/**
+ * How long a turn the gateway refuses outright may take to fail. Retries of
+ * the refusal (the AI SDK's three attempts, Claude Code's own backoff) blow
+ * through these; a sandboxed agent first has to start, hence the larger one.
+ */
+const PERSONS_REFUSAL_MAX_MS = 5_000
+const PERSONS_AGENT_REFUSAL_MAX_MS = 45_000
+
+/**
+ * The member's usage once nothing of theirs is still in flight. A request the
+ * gateway admitted before a new cap settles its reservation afterwards, so a
+ * "before" read taken earlier counts tokens the capped turn never spent.
+ */
+async function personsSettledUsage(owner, person, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const usage = await rpc("org_member_usage_get", {}, owner.auth)
+    const row = (usage.body?.members ?? []).find((member) => member.userId === person.userId)
+    if (!row || row.reservedTokens === 0 || Date.now() > deadline) return usage
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+}
+
 function personsOrgKey() {
   return PERSONS_MODEL.apiKey || `smoke-${PERSONS_MODEL.provider}-${randomUUID()}`
 }
@@ -1666,8 +1689,19 @@ function personsReplied(turn) {
   )
 }
 
+/** The assistant text a turn left in the transcript. */
+function personsReplyText(turn) {
+  return turn.messages
+    .filter((message) => message?.role === "assistant")
+    .flatMap((message) => message.parts ?? [])
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n")
+}
+
 /** Enqueue one message on a fresh chat session and wait for its turn to settle. */
 async function personsTurn(person, seed, text, waitSeconds = 30) {
+  const startedAt = Date.now()
   const sessionId = `smoke-chat-${person.subject}-${randomUUID()}`
   const [created] = await submitPartition(person, person.state, [
     hostStateAction(person.state.scope, person.state.status, sessionId, 1, {
@@ -1704,8 +1738,17 @@ async function personsTurn(person, seed, text, waitSeconds = 30) {
     if (fate.operation?.status === "failed" || fate.turn?.endsWith("-error")) break
     if (fate.turn === "completed" && personsReplied({ messages, text })) break
   }
-  const { operation, turn } = await personsTurnFate(person, enqueue)
-  return { sessionId, messages, text: JSON.stringify(messages), operation, turn }
+  const { operation, turn, turnErrorCode, queued } = await personsTurnFate(person, enqueue)
+  return {
+    sessionId,
+    queued,
+    messages,
+    text: JSON.stringify(messages),
+    operation,
+    turn,
+    turnErrorCode,
+    elapsedMs: Date.now() - startedAt,
+  }
 }
 
 /** The enqueue's fate and the turn's end state, as a partition client sees them. */
@@ -1723,6 +1766,8 @@ async function personsTurnFate(person, action) {
   return {
     operation: (state?.operations ?? []).find((item) => item.actionId === action.actionId),
     turn: state?.turn,
+    turnErrorCode: state?.turnErrorCode,
+    queued: (state?.queue ?? []).map((item) => item.actionId),
   }
 }
 
@@ -1751,6 +1796,10 @@ async function personsChat(person, owner) {
     reply.turn === "completed",
     `${person.subject}'s keyed turn settles completed (got ${reply.turn})`
   )
+  check(
+    reply.operation?.status === "acknowledged" && reply.queued.length === 0,
+    `${person.subject}'s delivered message settles acknowledged and leaves the queue (got ${JSON.stringify(reply.operation)}, queue ${JSON.stringify(reply.queued)})`
+  )
   const after = await rpc("org_member_usage_get", {}, owner.auth)
   const spent = (body) =>
     (body?.members ?? []).find((member) => member.userId === person.userId)?.spentTokens ?? 0
@@ -1764,15 +1813,25 @@ async function personsChat(person, owner) {
     owner.auth
   )
   check(capped.status === 200, `the owner caps ${person.subject} at 1 token (got ${capped.status})`)
-  const capBefore = await rpc("org_member_usage_get", {}, owner.auth)
+  const capBefore = await personsSettledUsage(owner, person)
   const overCap = await personsTurn(person, seed, "hello over the cap")
-  const capAfter = await rpc("org_member_usage_get", {}, owner.auth)
+  const capAfter = await personsSettledUsage(owner, person)
   // AC34: the gateway refuses the reservation (429 member_usage_cap_reached)
   // before any provider call, so nothing is spent and the turn ends in error.
   check(!personsReplied(overCap), `${person.subject} gets no reply over the cap`)
   check(
     overCap.turn === "fatal-error",
     `${person.subject}'s over-cap turn settles fatal-error (got ${overCap.turn})`
+  )
+  // The member's devices learn why, and the refusal is not retried: the
+  // gateway answers it before any provider call, so it fails at once.
+  check(
+    overCap.turnErrorCode === "member_usage_cap_reached",
+    `${person.subject}'s over-cap turn says member_usage_cap_reached (got ${overCap.turnErrorCode})`
+  )
+  check(
+    overCap.elapsedMs < PERSONS_REFUSAL_MAX_MS,
+    `${person.subject}'s over-cap turn fails without retrying (${overCap.elapsedMs} ms)`
   )
   check(
     spent(capAfter.body) === spent(capBefore.body),
@@ -1886,6 +1945,10 @@ async function personsAgent(person, owner, other) {
     personsReplied(named) && named.turn === "completed",
     `${person.subject}'s claude-agent-acp turn replies through the org key (turn ${named.turn}, op ${JSON.stringify(named.operation)})`
   )
+  check(
+    named.operation?.status === "acknowledged",
+    `${person.subject}'s agent message settles acknowledged (got ${JSON.stringify(named.operation)})`
+  )
   await new Promise((resolve) => setTimeout(resolve, 500))
   live.stop()
   witness?.stop()
@@ -1974,6 +2037,41 @@ async function personsAgent(person, owner, other) {
     "org_agent_policy_set",
     { allowedAgents: ["claude-agent-acp"], defaultAgent: null },
     owner.auth
+  )
+  // Over the cap, the agent's own SDK must not retry the gateway's refusal,
+  // and the member's devices learn why the turn ended.
+  const capped = await rpc(
+    "org_member_usage_cap_set",
+    { userId: person.userId, monthlyTokens: 1 },
+    owner.auth
+  )
+  check(capped.status === 200, `the owner caps ${person.subject} at 1 token (got ${capped.status})`)
+  const capBefore = await personsSettledUsage(owner, person)
+  const overCap = await personsTurn(
+    person,
+    { ...seed, agentRuntimeId: "claude-agent-acp" },
+    "hello from an agent over the cap",
+    180
+  )
+  const capAfter = await personsSettledUsage(owner, person)
+  await rpc(
+    "org_member_usage_cap_set",
+    { userId: person.userId, monthlyTokens: "default" },
+    owner.auth
+  )
+  check(
+    !personsReplied(overCap) &&
+      overCap.turn === "fatal-error" &&
+      overCap.turnErrorCode === "member_usage_cap_reached",
+    `${person.subject}'s agent turn over the cap ends member_usage_cap_reached (turn ${overCap.turn}, code ${overCap.turnErrorCode}, op ${JSON.stringify(overCap.operation)}, reply ${JSON.stringify(personsReplyText(overCap).slice(0, 200))})`
+  )
+  check(
+    overCap.elapsedMs < PERSONS_AGENT_REFUSAL_MAX_MS,
+    `${person.subject}'s agent turn over the cap fails without retrying (${overCap.elapsedMs} ms)`
+  )
+  check(
+    spent(capAfter.body) === spent(capBefore.body),
+    `${person.subject}'s agent spends nothing over the cap (${spent(capBefore.body)} → ${spent(capAfter.body)})`
   )
 }
 

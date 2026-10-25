@@ -9,7 +9,9 @@ import {
   buildReasoningProviderOptions,
   buildCodexResponsesProviderOptions,
   withReasoningExtraction,
+  providerRetryVetoMiddleware,
 } from "./ai-sdk-adapter.ts"
+import { APICallError } from "@ai-sdk/provider"
 import type { ProviderOptionsMap } from "./ai-sdk-adapter.ts"
 import { getPath } from "./json-path-lite.ts"
 import { createEventAdapter } from "../../runtimes/ai-sdk/events.ts"
@@ -1175,4 +1177,79 @@ test("SIWC actual SDK request uses native stream RPC and preserves function name
   assert.equal(body!.store, false)
   assert.equal(getPath(body, "tools.0.type"), "namespace")
   assert.equal(getPath(body, "tools.0.tools.0.name"), "lookup")
+})
+
+/** A model whose every call fails with `error`, counting the attempts. */
+function failingModel(error: unknown) {
+  const calls = { count: 0 }
+  const model = {
+    specificationVersion: "v3",
+    provider: "fixture",
+    modelId: "fixture-model",
+    supportedUrls: {},
+    doGenerate: async () => {
+      calls.count += 1
+      throw error
+    },
+    doStream: async () => {
+      calls.count += 1
+      throw error
+    },
+  }
+  return { calls, model: model as unknown as Parameters<typeof withReasoningExtraction>[0] }
+}
+
+function capRefusal(headers: Record<string, string>) {
+  return new APICallError({
+    message: "member monthly token cap reached",
+    url: "http://gateway.test/v1/chat/completions",
+    requestBodyValues: {},
+    statusCode: 429,
+    responseHeaders: headers,
+    responseBody: JSON.stringify({
+      error: { code: "member_usage_cap_reached", retryable: false, resetAt: 1 },
+    }),
+  })
+}
+
+test("a refusal marked x-should-retry: false is not retried by the AI SDK", async () => {
+  const { generateText } = await import("ai")
+  const refusal = capRefusal({ "x-should-retry": "false" })
+  assert.equal(refusal.isRetryable, true, "the SDK alone would retry a 429")
+  const { calls, model } = failingModel(refusal)
+  const wrapped = await withReasoningExtraction(model, "fixture-model")
+
+  await assert.rejects(generateText({ model: wrapped, prompt: "hi" }), (error: unknown) => {
+    assert.ok(APICallError.isInstance(error), "the refusal reaches the caller unwrapped")
+    assert.equal(error.isRetryable, false)
+    assert.equal(error.statusCode, 429)
+    assert.match(error.responseBody ?? "", /member_usage_cap_reached/)
+    return true
+  })
+  assert.equal(calls.count, 1, "one attempt, no retries")
+})
+
+test("the retry veto leaves an ordinary rate limit and other errors untouched", async () => {
+  const middleware = providerRetryVetoMiddleware()
+  const plain = new APICallError({
+    message: "rate limited",
+    url: "http://provider.test",
+    requestBodyValues: {},
+    statusCode: 429,
+    responseHeaders: { "retry-after": "1" },
+  })
+  const other = new Error("socket hang up")
+  for (const error of [plain, other]) {
+    await assert.rejects(
+      Promise.resolve(
+        middleware.wrapStream!({
+          doStream: async () => {
+            throw error
+          },
+        } as never)
+      ),
+      (thrown: unknown) => thrown === error
+    )
+  }
+  assert.equal(plain.isRetryable, true)
 })

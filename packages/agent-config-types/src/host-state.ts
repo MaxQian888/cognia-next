@@ -825,6 +825,12 @@ export interface HostStateSessionChannel {
   queue: HostStateQueuedMessage[]
   activeTurn: { turnId: string; startedAt: number } | null
   /**
+   * Why the last turn failed, when the runtime said: a closed refusal code
+   * such as `member_usage_cap_reached`, never free text. Set only while
+   * `turn` is `retryable-error` or `fatal-error`; the next turn clears it.
+   */
+  turnErrorCode?: string
+  /**
    * Every open and recently-settled decision, in request order.
    *
    * One ordered array rather than a per-kind bucket: a run can be blocked on
@@ -916,6 +922,8 @@ export type HostStateMutation =
   | {
       kind: "turn.settled"
       turn: "completed" | "aborted" | "retryable-error" | "fatal-error"
+      /** The runtime's failure code. Kept only on an error turn. */
+      errorCode?: string
       revision: number
     }
   // ── decisions ────────────────────────────────────────────────────────────
@@ -1084,6 +1092,27 @@ export function deriveTurnAfterDecisions(state: HostStateSessionChannel): HostSt
  * both from `settleOpenWork`'s expiry and from history trimming, or a queued
  * message loses the operation the UI reads its state from.
  */
+/**
+ * The action id of the oldest queued message no runtime has confirmed yet
+ * (its operation still `accepted` or `dispatching`), if any.
+ *
+ * `accepted` counts too: a runtime can start the turn before the dispatch call
+ * that handed it the message returns, and the `dispatching` written after that
+ * lands on an operation already `acknowledged`, which stays settled.
+ */
+function oldestUnconfirmedMessage(state: HostStateSessionChannel): string | undefined {
+  const unconfirmed = new Set(
+    state.operations
+      .filter(
+        (item) =>
+          item.kind === "message.enqueue" &&
+          (item.status === "accepted" || item.status === "dispatching")
+      )
+      .map((item) => item.actionId)
+  )
+  return state.queue.find((item) => unconfirmed.has(item.actionId))?.actionId
+}
+
 function queuedActionIds(queue: HostStateSessionChannel["queue"]): Set<string> {
   return new Set(queue.map((item) => item.actionId))
 }
@@ -1246,23 +1275,46 @@ export function reduceHostStateMutation<TState extends HostStateChannelState>(
             : session.turn,
       } as TState
     }
-    case "turn.started":
+    case "turn.started": {
+      // A new turn is the delivery of the oldest message the runtime was
+      // handed. Only the person-agent runner reports that itself (`queue`
+      // events); for every other runtime the message stayed queued and its
+      // operation `dispatching` after its turn had long finished.
+      const delivered =
+        session.activeTurn?.turnId === mutation.turnId
+          ? undefined
+          : oldestUnconfirmedMessage(session)
+      const { turnErrorCode: _cleared, ...rest } = session
       return {
-        ...state,
+        ...rest,
         turn: "running",
         revision: mutation.revision,
         activeTurn: { turnId: mutation.turnId, startedAt: mutation.startedAt },
+        ...(delivered
+          ? {
+              queue: session.queue.filter((item) => item.actionId !== delivered),
+              operations: session.operations.map((item) =>
+                item.actionId === delivered
+                  ? { ...item, status: "acknowledged" as const, updatedAt: mutation.startedAt }
+                  : item
+              ),
+            }
+          : {}),
       } as TState
+    }
     case "turn.stopping":
       return { ...state, turn: "stopping", revision: mutation.revision } as TState
     case "turn.settled": {
       const settled = settleOpenWork(session, "interrupted", "host_state_turn_ended")
+      const failed = mutation.turn === "retryable-error" || mutation.turn === "fatal-error"
+      const { turnErrorCode: _previous, ...rest } = session
       return {
-        ...state,
+        ...rest,
         ...settled,
         turn: mutation.turn,
         revision: mutation.revision,
         activeTurn: null,
+        ...(failed && mutation.errorCode ? { turnErrorCode: mutation.errorCode } : {}),
       } as TState
     }
     case "decision.requested":
@@ -1800,6 +1852,7 @@ function isHostStateChannelState(value: unknown): value is HostStateChannelState
       "draft",
       "queue",
       "activeTurn",
+      "turnErrorCode",
       "decisions",
       "operations",
       "tombstone",
@@ -1820,6 +1873,9 @@ function isHostStateChannelState(value: unknown): value is HostStateChannelState
     Array.isArray(value.queue) &&
     value.queue.every(isQueuedMessage) &&
     (value.activeTurn === null || isActiveTurn(value.activeTurn)) &&
+    (value.turnErrorCode === undefined ||
+      (isTurnErrorCode(value.turnErrorCode) &&
+        (value.turn === "retryable-error" || value.turn === "fatal-error"))) &&
     Array.isArray(value.decisions) &&
     value.decisions.every(isDecision) &&
     Array.isArray(value.operations) &&
@@ -1892,7 +1948,8 @@ export function isHostStateMutation(value: unknown): value is HostStateMutation 
       return hasOnlyKeys(value, ["kind", "revision"])
     case "turn.settled":
       return (
-        hasOnlyKeys(value, ["kind", "turn", "revision"]) &&
+        hasOnlyKeys(value, ["kind", "turn", "errorCode", "revision"]) &&
+        (value.errorCode === undefined || isTurnErrorCode(value.errorCode)) &&
         (value.turn === "completed" ||
           value.turn === "aborted" ||
           value.turn === "retryable-error" ||
@@ -2284,6 +2341,14 @@ function isTombstone(value: unknown): value is { deletedAt: number; hostSeq: num
     nonNegativeInteger(value.deletedAt) &&
     nonNegativeInteger(value.hostSeq)
   )
+}
+
+/**
+ * A turn failure code: a short identifier, never a message. Runtime error
+ * text can carry a provider's body or a path; only a code crosses to clients.
+ */
+export function isTurnErrorCode(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,64}$/.test(value)
 }
 
 function isActiveTurn(value: unknown): value is { turnId: string; startedAt: number } {

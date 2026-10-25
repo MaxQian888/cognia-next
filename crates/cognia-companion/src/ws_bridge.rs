@@ -1371,6 +1371,17 @@ fn route_person_respond(state: &SharedState, account_id: &str, bridges: &PersonB
                 state.event_bus.publish_person_to(topic.to_string(), event.clone(), device, account_id.to_string());
             }
         }
+        // The brain's HostState: every confirmed change to its member's
+        // conversations. This arm was missing, so the changes were dropped
+        // and a member's device learned a turn's fate (or why a send was
+        // refused) only by re-reading a snapshot. Always stamped to this
+        // brain's own partition, whatever session the event names.
+        "companion_host_state_publish" => {
+            if payload.get("topic").and_then(Value::as_str) != Some("host-state://action") { return; }
+            let Some(event) = payload.get("event") else { return; };
+            let Some(person) = super::person_partition::fleet().and_then(|fleet| fleet.person(account_id)) else { return; };
+            super::person_chat::person_publish_to(&state.event_bus, "host-state://action", event, &person);
+        }
         _ => {},
     }
 }
@@ -2717,6 +2728,51 @@ mod tests {
 
     /// P6e — a member brain's live reply frame is rebuilt from its own keys
     /// only, and anything inconsistent or over the ceiling is refused.
+    #[test]
+    fn person_brain_host_state_reaches_its_own_partition_only() {
+        // The person fleet is process-wide; hold the same guard as the other
+        // fleet-installing tests.
+        let _guard = crate::security_store::test_guard();
+        let person =
+            crate::person_partition::PersonPartition::new("org".into(), "host-state-member".into());
+        let (_installed, _) =
+            crate::person_partition::person_test_support::Installed::new(vec![person.clone()]);
+        let state = test_state();
+        let bridges = PersonBridges {
+            writes: crate::desktop_writes_bridge::DesktopWritesBridge::new(),
+            messages: crate::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            sync: SyncBridge::new(),
+        };
+        let super::super::event_bus::SubscribeResult::Ok { mut receiver, .. } =
+            state.event_bus.subscribe(None, 0)
+        else {
+            panic!("subscribe");
+        };
+        let event = json!({"channel":"cognia://target/t/sessions/s1","hostSeq":3,
+            "mutation":{"kind":"turn.settled","turn":"fatal-error","errorCode":"member_usage_cap_reached","revision":3}});
+        route_person_respond(
+            &state,
+            &person.account_id,
+            &bridges,
+            "companion_host_state_publish",
+            json!({"topic":"host-state://action","event":event}),
+        );
+        let frame = receiver.try_recv().expect("the member's HostState change");
+        assert_eq!(frame.event_type, "host-state://action");
+        assert_eq!(frame.payload, event);
+        assert_eq!(frame.partition_account_id.as_deref(), Some(person.account_id.as_str()));
+        assert!(!crate::person_chat::person_connection_visible(&frame, "brain-other", Some("other")));
+        assert!(!crate::person_chat::person_connection_visible(&frame, "__service__", Some("operator")));
+        while receiver.try_recv().is_ok() {}
+
+        // Another topic, or a brain the Host does not run, publishes nothing.
+        route_person_respond(&state, &person.account_id, &bridges, "companion_host_state_publish",
+            json!({"topic":"sync://invalidate","event":{"table":"messages"}}));
+        route_person_respond(&state, "pb_not_running", &bridges, "companion_host_state_publish",
+            json!({"topic":"host-state://action","event":event}));
+        assert!(receiver.try_recv().is_err());
+    }
+
     #[test]
     fn p6e_live_reply_frames_keep_only_their_keys_and_refuse_bad_shapes() {
         let mut extra = live_frame();

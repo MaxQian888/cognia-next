@@ -34,12 +34,15 @@ import {
 } from "@cognia/agent-config-types/host-state"
 import {
   hostStateIntentRequiresLiveControl,
+  isTurnErrorCode,
   reduceHostStateMutation,
 } from "@cognia/agent-config-types/host-state"
 import { effectiveController } from "@/lib/companion/device-presence-registry"
 import { sessionIndexChannel, sessionStateChannel } from "@cognia/agent-config-types/host-state"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { loggers } from "@cognia/logging"
+import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
+import { diagnoseCommandError } from "@/lib/diagnostics/adapters/from-command-error"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { isCanonicalSession } from "@cognia/agent-config-types/canonical-session"
 import type { SendContent, StoredMessage } from "@cognia/agent-config-types"
@@ -1031,14 +1034,90 @@ async function persistConfirmedState(
   // its real start: without it the run clock would count from the moment this
   // snapshot landed — on a relaunch, from app launch.
   const activeTurnStartedAt = optimisticState.activeTurn?.startedAt
-  useChatStore
-    .getState()
-    .setSessionStatus(
+  const chat = useChatStore.getState()
+  const failure = turnFailureDiagnostic(optimisticState)
+  const shown = chat.sessions[state.sessionId]?.errorDiagnostic ?? null
+  if (failure) {
+    // Shown once per failure: a member who dismissed it keeps it dismissed
+    // through every later snapshot of the same state.
+    if (!projectedFailureIds.has(failure.id)) {
+      rememberProjectedFailure(failure.id)
+      chat.setSessionDiagnostic(state.sessionId, failure)
+    }
+  } else if (shown?.id.startsWith(HOST_STATE_FAILURE_DIAGNOSTIC_PREFIX)) {
+    // Only the failure this projection put up; a send path's own diagnostic
+    // is that path's to clear.
+    chat.setSessionDiagnostic(state.sessionId, null)
+  }
+  // An error turn already carries its diagnostic, and setting a bare status
+  // would wipe it.
+  if (!failure) {
+    chat.setSessionStatus(
       state.sessionId,
       chatStoreStatusForTurn(optimisticState),
       typeof activeTurnStartedAt === "number" ? { startedAt: activeTurnStartedAt } : undefined
     )
+  }
   return optimisticState
+}
+
+const HOST_STATE_FAILURE_DIAGNOSTIC_PREFIX = "host-state-failure:"
+const MAX_PROJECTED_FAILURES = 256
+const projectedFailureIds = new Set<string>()
+
+function rememberProjectedFailure(id: string): void {
+  projectedFailureIds.add(id)
+  // Insertion order: the oldest goes first.
+  for (const oldest of projectedFailureIds) {
+    if (projectedFailureIds.size <= MAX_PROJECTED_FAILURES) break
+    projectedFailureIds.delete(oldest)
+  }
+}
+
+/**
+ * Why the member's last send went nowhere, as the chat banner shows it: the
+ * code a failed turn settled with, or the code the Host refused the send
+ * itself with (an agent the organization does not allow is refused before any
+ * turn starts). Only a code the diagnostics catalog knows becomes a banner;
+ * anything else keeps the plain error status, as before.
+ *
+ * The id is stable for one failure, so a later snapshot of the same state does
+ * not replace the banner (and lose a dismissal) on every revision.
+ */
+function turnFailureDiagnostic(
+  state: Extract<HostStateChannelState, { kind: "session" }>
+): CogniaDiagnostic | null {
+  const failedTurn = state.turn === "retryable-error" || state.turn === "fatal-error"
+  const lastSend = state.operations
+    .filter((item) => item.kind === "message.enqueue")
+    .reduce<HostStateOperation | undefined>(
+      (latest, item) => (!latest || item.createdAt >= latest.createdAt ? item : latest),
+      undefined
+    )
+  const refusedSend =
+    lastSend?.status === "failed" && lastSend.errorCode && state.turn !== "running"
+      ? lastSend
+      : undefined
+  const [code, key] =
+    failedTurn && state.turnErrorCode
+      ? [state.turnErrorCode, `turn:${lastSend?.actionId ?? state.revision}`]
+      : refusedSend?.errorCode
+        ? [refusedSend.errorCode, `send:${refusedSend.actionId}`]
+        : [undefined, undefined]
+  if (!code) return null
+  const decoded = diagnoseCommandError({
+    code,
+    message: code,
+    retryable: failedTurn ? state.turn === "retryable-error" : false,
+    structured: true,
+  })
+  if (decoded.code === "unknown") return null
+  return createDiagnostic(decoded.code, {
+    source: "chat",
+    message: decoded.message,
+    retryable: decoded.retryable,
+    id: `${HOST_STATE_FAILURE_DIAGNOSTIC_PREFIX}${state.sessionId}:${key}:${code}`,
+  })
 }
 
 async function projectPendingHostStateActions(
@@ -1729,7 +1808,14 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
     })
     row.dispatchState = "abandoned"
     row.lastErrorCode = errorCode
-    await commitOperationStatus(row, { status: "failed", errorCode }).catch(() => undefined)
+    // An abandoned send will never be delivered, so its message leaves the
+    // queue with it. Failing only the operation left the message queued and
+    // the turn `queued` behind it, so the conversation read as busy for good.
+    await commitOperationStatus(row, {
+      status: "failed",
+      errorCode,
+      dropQueued: row.action?.action.kind === "message.enqueue",
+    }).catch(() => undefined)
   }
 
   /**
@@ -1742,11 +1828,21 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
    */
   async function commitOperationStatus(
     row: HostStateActionRow,
-    change: { status: HostStateOperation["status"]; errorCode?: string; correlationId?: string }
+    change: {
+      status: HostStateOperation["status"]
+      errorCode?: string
+      correlationId?: string
+      /** Fail a send for good: its message leaves the queue too. */
+      dropQueued?: boolean
+    }
   ): Promise<void> {
     if (generation === null) throw new Error("host_state_lease_missing")
     if (!row.action || !intentRequiresRuntimeDispatch(row.action.action.kind)) return
-    const envelopeId = `operation:${row.actionId}:${change.status}`
+    const { dropQueued, ...recorded } = change
+    // Its own id: a retried send already recorded `failed` once, and the
+    // ledger would take a second `failed` for that same projection.
+    const dropping = dropQueued === true && change.status === "failed" && !!change.errorCode
+    const envelopeId = `operation:${row.actionId}:${dropping ? "dropped" : change.status}`
     const at = now()
     await commitHostStateRuntimeProjection({
       hostId: options.hostId,
@@ -1754,17 +1850,26 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       ownerId: options.ownerId,
       channel: row.channel,
       envelopeId,
-      envelopeDigest: hostStateDigest({ actionId: row.actionId, ...change }),
-      mutation: (state) => ({
-        kind: "operation.changed",
-        actionId: row.actionId,
-        status: change.status,
-        ...(change.errorCode ? { errorCode: change.errorCode } : {}),
-        ...(change.correlationId ? { correlationId: change.correlationId } : {}),
-        // The reducer has no clock; this is the one it stamps `updatedAt` with.
-        at,
-        revision: state.revision + 1,
-      }),
+      envelopeDigest: hostStateDigest({ actionId: row.actionId, ...recorded }),
+      mutation: (state) =>
+        dropping && change.errorCode
+          ? {
+              kind: "message.dropped",
+              actionId: row.actionId,
+              errorCode: change.errorCode,
+              at,
+              revision: state.revision + 1,
+            }
+          : {
+              kind: "operation.changed",
+              actionId: row.actionId,
+              status: change.status,
+              ...(change.errorCode ? { errorCode: change.errorCode } : {}),
+              ...(change.correlationId ? { correlationId: change.correlationId } : {}),
+              // The reducer has no clock; this is the one it stamps `updatedAt` with.
+              at,
+              revision: state.revision + 1,
+            },
       now: at,
     })
     const operationRow = await getHostStateAction(generation, `runtime:${envelopeId}`)
@@ -2012,9 +2117,14 @@ function mutationForRuntimeEnvelope(
       // The runtime already knows whether trying again could work. Collapsing
       // both into one error state made every failure look permanent, so a
       // client could not honestly offer "retry".
+      //
+      // The code goes with it so a member reads "monthly limit reached"
+      // rather than a bare failure. Only a code: the message can carry a
+      // provider's body.
       return {
         kind: "turn.settled",
         turn: event.retryable === true ? "retryable-error" : "fatal-error",
+        ...(isTurnErrorCode(event.code) ? { errorCode: event.code } : {}),
         revision,
       }
     default:

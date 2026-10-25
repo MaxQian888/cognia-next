@@ -158,6 +158,11 @@ describe("multi-tenant Host refusals", () => {
     expect(isHostRefusalCode("person_agent_exited")).toBe(false)
   })
 
+  it("maps the gateway's usage-accounting outage to a passing service problem", () => {
+    expect(diagnose("member_usage_unavailable")).toBe("serviceUnavailable")
+    expect(isHostRefusalCode("member_usage_unavailable")).toBe(false)
+  })
+
   it("maps monthly member allowance exhaustion to its non-retryable diagnostic", () => {
     expect(
       diagnoseCommandError({

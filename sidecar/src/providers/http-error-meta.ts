@@ -129,3 +129,42 @@ export function extractHttpErrorMeta(
   const nested = e.lastError ?? e.cause
   return nested && depth < 4 ? { ...extractHttpErrorMeta(nested, now, depth + 1), ...meta } : meta
 }
+
+/**
+ * Whether the server said this request must not be retried: the
+ * `x-should-retry: false` header the Anthropic and OpenAI SDKs obey, or a
+ * structured error body with `retryable: false` (the Host gateway's member
+ * cap refusal sends both). Walks the same bounded chain as
+ * {@link extractHttpErrorMeta}, so a RetryError wrapping such a refusal
+ * counts too.
+ */
+export function providerForbidsRetry(err: unknown, depth = 0): boolean {
+  if (!err || typeof err !== "object") return false
+  const e = err as {
+    responseHeaders?: unknown
+    headers?: unknown
+    responseBody?: unknown
+    data?: unknown
+    error?: unknown
+    cause?: unknown
+    lastError?: unknown
+  }
+  if (readHeader(e.responseHeaders ?? e.headers, "x-should-retry")?.trim() === "false") return true
+  let body = e.responseBody ?? e.data ?? e.error
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body)
+    } catch {
+      body = undefined
+    }
+  }
+  if (body && typeof body === "object") {
+    const root = body as Record<string, unknown>
+    const nested = root.error
+    const structured =
+      nested && typeof nested === "object" ? (nested as Record<string, unknown>) : root
+    if (structured.retryable === false) return true
+  }
+  const nested = e.lastError ?? e.cause
+  return nested !== undefined && depth < 4 ? providerForbidsRetry(nested, depth + 1) : false
+}
