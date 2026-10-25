@@ -61,5 +61,67 @@
   "testDescription": "这是一次空操作校验，用于确认你的设备生物识别可用。",
   "testReason": "验证你的生物识别是否可用",
   "testTitle": "测试生物识别提示",
-  "title": "安全与隐私"
+  "title": "安全与隐私",
+  "outboundAuthorization": {
+    "title": "外发授权",
+    "description": "无人值守的运行可在不询问的情况下给谁发消息或邮件。影子模式只观察。",
+    "observeOnly": "仅观察",
+    "remoteHost": "本机正在驱动一台配对的 Host，运行和记录都在 Host 上。请在 Host 上修改此设置。",
+    "modeSaveFailed": "无法保存该设置",
+    "enforce": {
+      "label": "执行外发授权",
+      "shadowHelp": "关闭：每次发送都会被检查并记录，但不做任何改变。打开后会拦下未经授权的发送。",
+      "enforceHelp": "开启：无人值守时发给未经允许的收件人会转为草稿或等待批准；被人拒绝的收件人在该请求内保持拒绝。"
+    },
+    "report": {
+      "title": "执行后会改变的发送",
+      "description": "最近 {days} 天内观察到的、收件人未经任何允许的发送。在开启执行前，先允许你本来就要发的收件人。",
+      "empty": "不会有任何改变：观察到的每次发送都有人允许过收件人。",
+      "sends": "{count} 次发送"
+    },
+    "sender": {
+      "bot": "Bot：{name}",
+      "task": "定时任务：{name}",
+      "workflow": "工作流：{id}",
+      "notification": "通知",
+      "plugin": "插件：{id}",
+      "chat": "聊天回合",
+      "other": "其他：{id}"
+    },
+    "kind": {
+      "conversation": "会话",
+      "person": "成员",
+      "mail": "邮件"
+    },
+    "via": "经由 {account}",
+    "outcome": {
+      "ask": "{count} 次会询问",
+      "draft": "{count} 次会转为草稿",
+      "park": "{count} 次会等待批准",
+      "deny": "{count} 次会被拒绝"
+    },
+    "lastSeen": "最近 {when}",
+    "allow": "允许",
+    "allowNamed": "允许 {name}",
+    "intoBot": "加入 {name} 的名单",
+    "intoAdapter": "加入 {name} 的名单",
+    "noList": "没有名单可以容纳此收件人",
+    "allowed": "已将 {name} 加入名单",
+    "allowFailed": "无法允许该收件人：{reason}",
+    "unrecognized": "经由 {account} 有 {count} 个本机无法识别的收件人（{sends} 次发送）。请在 Bot 或连接的设置里手动添加。",
+    "confirm": {
+      "title": "执行外发授权？",
+      "behaviour": "无人值守时发给未经允许的收件人会转为草稿或等待批准，而不是直接发出；有人拒绝后，在该请求的剩余部分保持拒绝。",
+      "impact": "有 {count} 次观察到的发送会被改变：",
+      "noImpact": "观察到的发送都不会被改变。",
+      "outcome": {
+        "ask": "{count} 次询问",
+        "draft": "{count} 次转为草稿",
+        "park": "{count} 次等待批准",
+        "deny": "{count} 次拒绝"
+      },
+      "cancel": "继续观察",
+      "enable": "执行"
+    }
+  }
 }

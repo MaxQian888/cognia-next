@@ -61,5 +61,67 @@
   "testDescription": "This is a no-op check to confirm your device biometric works.",
   "testReason": "Verify your biometric is working",
   "testTitle": "Test biometric prompt",
-  "title": "Security & Privacy"
+  "title": "Security & Privacy",
+  "outboundAuthorization": {
+    "title": "Outbound authorization",
+    "description": "Who an unattended run may message or email without asking. Shadow mode only observes.",
+    "observeOnly": "Observe only",
+    "remoteHost": "This device is driving a paired Host, where the runs and their records are. Change this setting on the Host.",
+    "modeSaveFailed": "Could not save the setting",
+    "enforce": {
+      "label": "Enforce outbound authorization",
+      "shadowHelp": "Off: every send is checked and recorded, and none is changed. Turn on to hold the sends nothing authorized.",
+      "enforceHelp": "On: an unattended send to a recipient nobody allowed is drafted or waits for approval, and a recipient a person refused stays refused for that request."
+    },
+    "report": {
+      "title": "What enforcement would change",
+      "description": "Sends observed in the last {days} days whose recipient nothing allowed. Allow the ones you meant before turning enforcement on.",
+      "empty": "Nothing would change: every observed send had a recipient someone allowed.",
+      "sends": "{count, plural, one {# send} other {# sends}}"
+    },
+    "sender": {
+      "bot": "Bot: {name}",
+      "task": "Scheduled task: {name}",
+      "workflow": "Workflow: {id}",
+      "notification": "Notifications",
+      "plugin": "Plugin: {id}",
+      "chat": "Chat turns",
+      "other": "Other: {id}"
+    },
+    "kind": {
+      "conversation": "Conversation",
+      "person": "Person",
+      "mail": "Email"
+    },
+    "via": "via {account}",
+    "outcome": {
+      "ask": "{count} would ask",
+      "draft": "{count} would be drafted",
+      "park": "{count} would wait for approval",
+      "deny": "{count} would be refused"
+    },
+    "lastSeen": "last {when}",
+    "allow": "Allow",
+    "allowNamed": "Allow {name}",
+    "intoBot": "Adds to {name}'s list",
+    "intoAdapter": "Adds to {name}'s list",
+    "noList": "No list can hold this recipient",
+    "allowed": "{name} added to the list",
+    "allowFailed": "Could not allow the recipient: {reason}",
+    "unrecognized": "{count, plural, one {# recipient} other {# recipients}} via {account} this device cannot name ({sends, plural, one {# send} other {# sends}}). Add them in the Bot's or the connection's settings.",
+    "confirm": {
+      "title": "Enforce outbound authorization?",
+      "behaviour": "Unattended sends to a recipient nobody allowed will be drafted or wait for approval instead of going out, and a person's refusal holds for the rest of that request.",
+      "impact": "{count, plural, one {# observed send} other {# observed sends}} would have been changed:",
+      "noImpact": "No observed send would have been changed.",
+      "outcome": {
+        "ask": "{count} asked about",
+        "draft": "{count} drafted",
+        "park": "{count} held for approval",
+        "deny": "{count} refused"
+      },
+      "cancel": "Keep observing",
+      "enable": "Enforce"
+    }
+  }
 }

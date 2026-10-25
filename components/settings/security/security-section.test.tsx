@@ -41,6 +41,9 @@ jest.mock("@/hooks/use-biometric-guard", () => ({
 jest.mock("@/components/governance/context-inspector", () => ({
   ContextInspector: () => <div data-testid="context-inspector" />,
 }))
+jest.mock("@/components/settings/security/outbound-authorization-card", () => ({
+  OutboundAuthorizationCard: () => <div data-testid="outbound-authorization" />,
+}))
 
 import { SecuritySection } from "./security-section"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
@@ -64,6 +67,8 @@ describe("SecuritySection", () => {
     expect(screen.getByTestId("biometric-sign-out")).toBeInTheDocument()
     expect(screen.getAllByRole("switch")).toHaveLength(4)
     expect(screen.getByTestId("context-inspector")).toBeInTheDocument()
+    // ADR-0239: the outbound authorization card sits in the same section.
+    expect(screen.getByTestId("outbound-authorization")).toBeInTheDocument()
   })
 
   it("reflects the persisted policy in switch state", () => {

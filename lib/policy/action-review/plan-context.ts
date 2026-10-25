@@ -10,12 +10,13 @@
  *   A run whose origin lacks a root or an epoch has neither, so nothing is
  *   fenced and nothing is granted for the instruction: it can only ask.
  * - **Policy grants**: recipient lists a person configured, passed in by the
- *   caller that knows which Bot installation or connector instance the run
- *   belongs to. No list is stored yet, so callers pass none and every
- *   unattended delivery outside the origin thread drafts.
+ *   caller from the lists in `configured-grants.ts` (a Bot installation's, a
+ *   connector instance's, a conversation's proactive-push opt-in). A delivery
+ *   outside the origin thread that no list grants drafts or parks.
  * - **Mode**: `agentPermissions.outboundAuthorization`, `shadow` unless it is
  *   exactly `enforce` (`readOutboundAuthorizationMode`), read from the app's
- *   settings store by default ({@link readAppSettings}).
+ *   settings store by default ({@link readAppSettings}). Only the Settings →
+ *   Security card writes it.
  */
 
 import {

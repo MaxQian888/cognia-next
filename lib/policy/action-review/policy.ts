@@ -47,8 +47,9 @@ import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
  *   `enforced: false` and callers keep their current behavior.
  * - `enforce`: callers act on the plan.
  *
- * The setting that chooses it (`agentPermissions.outboundAuthorization`) has
- * no writer until its toggle ships, so `shadow` is the only reachable mode.
+ * The setting that chooses it (`agentPermissions.outboundAuthorization`) is
+ * written only by the Settings → Security card, which labels `shadow` "observe
+ * only" and asks before switching to `enforce`.
  */
 export type OutboundAuthorizationMode = "shadow" | "enforce"
 

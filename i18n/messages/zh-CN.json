@@ -55685,6 +55685,68 @@
         "whyTitle": "为何执行此行动"
       },
       "description": "在执行敏感操作前要求生物识别校验。未录入生物识别的设备在导出时会放行（避免你被锁在自己的数据之外），在揭示密钥时会阻止。",
+      "outboundAuthorization": {
+        "allow": "允许",
+        "allowFailed": "无法允许该收件人：{reason}",
+        "allowNamed": "允许 {name}",
+        "allowed": "已将 {name} 加入名单",
+        "confirm": {
+          "behaviour": "无人值守时发给未经允许的收件人会转为草稿或等待批准，而不是直接发出；有人拒绝后，在该请求的剩余部分保持拒绝。",
+          "cancel": "继续观察",
+          "enable": "执行",
+          "impact": "有 {count} 次观察到的发送会被改变：",
+          "noImpact": "观察到的发送都不会被改变。",
+          "outcome": {
+            "ask": "{count} 次询问",
+            "deny": "{count} 次拒绝",
+            "draft": "{count} 次转为草稿",
+            "park": "{count} 次等待批准"
+          },
+          "title": "执行外发授权？"
+        },
+        "description": "无人值守的运行可在不询问的情况下给谁发消息或邮件。影子模式只观察。",
+        "enforce": {
+          "enforceHelp": "开启：无人值守时发给未经允许的收件人会转为草稿或等待批准；被人拒绝的收件人在该请求内保持拒绝。",
+          "label": "执行外发授权",
+          "shadowHelp": "关闭：每次发送都会被检查并记录，但不做任何改变。打开后会拦下未经授权的发送。"
+        },
+        "intoAdapter": "加入 {name} 的名单",
+        "intoBot": "加入 {name} 的名单",
+        "kind": {
+          "conversation": "会话",
+          "mail": "邮件",
+          "person": "成员"
+        },
+        "lastSeen": "最近 {when}",
+        "modeSaveFailed": "无法保存该设置",
+        "noList": "没有名单可以容纳此收件人",
+        "observeOnly": "仅观察",
+        "outcome": {
+          "ask": "{count} 次会询问",
+          "deny": "{count} 次会被拒绝",
+          "draft": "{count} 次会转为草稿",
+          "park": "{count} 次会等待批准"
+        },
+        "remoteHost": "本机正在驱动一台配对的 Host，运行和记录都在 Host 上。请在 Host 上修改此设置。",
+        "report": {
+          "description": "最近 {days} 天内观察到的、收件人未经任何允许的发送。在开启执行前，先允许你本来就要发的收件人。",
+          "empty": "不会有任何改变：观察到的每次发送都有人允许过收件人。",
+          "sends": "{count} 次发送",
+          "title": "执行后会改变的发送"
+        },
+        "sender": {
+          "bot": "Bot：{name}",
+          "chat": "聊天回合",
+          "notification": "通知",
+          "other": "其他：{id}",
+          "plugin": "插件：{id}",
+          "task": "定时任务：{name}",
+          "workflow": "工作流：{id}"
+        },
+        "title": "外发授权",
+        "unrecognized": "经由 {account} 有 {count} 个本机无法识别的收件人（{sends} 次发送）。请在 Bot 或连接的设置里手动添加。",
+        "via": "经由 {account}"
+      },
       "policyChangeBlocked": "未更改保护设置。{reason}",
       "policyChangeContextChanged": "账户或连接的 Host 已更改，请在当前设置中重试。",
       "policyChangeFailed": "无法保存保护设置，请重试。",

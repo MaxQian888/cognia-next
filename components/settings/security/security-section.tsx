@@ -14,7 +14,7 @@
  */
 
 import { useTranslations } from "next-intl"
-import { GitBranchIcon, LockKeyholeIcon, ShieldCheckIcon } from "lucide-react"
+import { GitBranchIcon, LockKeyholeIcon, SendIcon, ShieldCheckIcon } from "lucide-react"
 import { motion } from "motion/react"
 import { useRef, useState } from "react"
 import { toast } from "sonner"
@@ -22,6 +22,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { SettingsCard, SettingsToggle } from "@/components/settings/common/settings-section"
 import { AutoLockControl } from "@/components/settings/security/auto-lock-control"
+import { OutboundAuthorizationCard } from "@/components/settings/security/outbound-authorization-card"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
 import { useBiometricPolicyUpdate } from "@/hooks/use-biometric-policy-update"
@@ -122,6 +123,14 @@ export function SecuritySection() {
         description={t("autoLock.description")}
       >
         <AutoLockControl />
+      </SettingsCard>
+
+      <SettingsCard
+        icon={<SendIcon className="size-4" />}
+        title={t("outboundAuthorization.title")}
+        description={t("outboundAuthorization.description")}
+      >
+        <OutboundAuthorizationCard />
       </SettingsCard>
 
       <SettingsCard

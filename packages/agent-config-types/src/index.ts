@@ -4735,6 +4735,21 @@ export interface AppSettings {
      * treated as `allow` in v1. Default allow when unset.
      */
     subagentRules?: import("@cognia/plugin-contract/lib/claude/permissions/ruleset").ToolRules
+    /**
+     * Outbound action authorization (ADR-0239). Absent means `"shadow"`.
+     *
+     * - `"shadow"` (intentionally inert): every outbound tool call and connector
+     *   delivery is planned and the plan recorded on a receipt, and nothing
+     *   about the send changes. Settings labels it "observe only", and
+     *   `lib/policy/action-review/shadow-mode.test.ts` pins that no send result
+     *   differs from what it was before the engine existed.
+     * - `"enforce"`: callers act on the plan: an unattended send to a
+     *   recipient nothing authorized is drafted or parked, a refused one held.
+     *
+     * Read only through `readOutboundAuthorizationMode`, which treats any
+     * other value as `"shadow"`. Written only by the Settings → Security card.
+     */
+    outboundAuthorization?: "shadow" | "enforce"
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings

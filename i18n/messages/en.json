@@ -55685,6 +55685,68 @@
         "whyTitle": "Why this action"
       },
       "description": "Require a biometric check before sensitive actions. Devices without an enrolled biometric fall through on export (so you are never locked out of your own data) and block on reveal-secrets.",
+      "outboundAuthorization": {
+        "allow": "Allow",
+        "allowFailed": "Could not allow the recipient: {reason}",
+        "allowNamed": "Allow {name}",
+        "allowed": "{name} added to the list",
+        "confirm": {
+          "behaviour": "Unattended sends to a recipient nobody allowed will be drafted or wait for approval instead of going out, and a person's refusal holds for the rest of that request.",
+          "cancel": "Keep observing",
+          "enable": "Enforce",
+          "impact": "{count, plural, one {# observed send} other {# observed sends}} would have been changed:",
+          "noImpact": "No observed send would have been changed.",
+          "outcome": {
+            "ask": "{count} asked about",
+            "deny": "{count} refused",
+            "draft": "{count} drafted",
+            "park": "{count} held for approval"
+          },
+          "title": "Enforce outbound authorization?"
+        },
+        "description": "Who an unattended run may message or email without asking. Shadow mode only observes.",
+        "enforce": {
+          "enforceHelp": "On: an unattended send to a recipient nobody allowed is drafted or waits for approval, and a recipient a person refused stays refused for that request.",
+          "label": "Enforce outbound authorization",
+          "shadowHelp": "Off: every send is checked and recorded, and none is changed. Turn on to hold the sends nothing authorized."
+        },
+        "intoAdapter": "Adds to {name}'s list",
+        "intoBot": "Adds to {name}'s list",
+        "kind": {
+          "conversation": "Conversation",
+          "mail": "Email",
+          "person": "Person"
+        },
+        "lastSeen": "last {when}",
+        "modeSaveFailed": "Could not save the setting",
+        "noList": "No list can hold this recipient",
+        "observeOnly": "Observe only",
+        "outcome": {
+          "ask": "{count} would ask",
+          "deny": "{count} would be refused",
+          "draft": "{count} would be drafted",
+          "park": "{count} would wait for approval"
+        },
+        "remoteHost": "This device is driving a paired Host, where the runs and their records are. Change this setting on the Host.",
+        "report": {
+          "description": "Sends observed in the last {days} days whose recipient nothing allowed. Allow the ones you meant before turning enforcement on.",
+          "empty": "Nothing would change: every observed send had a recipient someone allowed.",
+          "sends": "{count, plural, one {# send} other {# sends}}",
+          "title": "What enforcement would change"
+        },
+        "sender": {
+          "bot": "Bot: {name}",
+          "chat": "Chat turns",
+          "notification": "Notifications",
+          "other": "Other: {id}",
+          "plugin": "Plugin: {id}",
+          "task": "Scheduled task: {name}",
+          "workflow": "Workflow: {id}"
+        },
+        "title": "Outbound authorization",
+        "unrecognized": "{count, plural, one {# recipient} other {# recipients}} via {account} this device cannot name ({sends, plural, one {# send} other {# sends}}). Add them in the Bot's or the connection's settings.",
+        "via": "via {account}"
+      },
       "policyChangeBlocked": "Protection was not changed. {reason}",
       "policyChangeContextChanged": "The account or connected Host changed. Try again from the current settings.",
       "policyChangeFailed": "Could not save the protection setting. Try again.",
