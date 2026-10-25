@@ -214,6 +214,58 @@ fn task_mint_request(
 }
 
 impl GatewayState {
+    /// P6d admission fixtures: publish listener facts without binding a port.
+    /// This exercises lease/spawn validation only, never network acceptance.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn person_test_listener(&self, port: u16) {
+        let mut inner = self.inner.lock();
+        inner.status.running = port != 0;
+        inner.status.bound_port = (port != 0).then_some(port);
+    }
+    /// P6d: a partition-owned task uses the same frozen brokered task shape,
+    /// with member billing. The Host supplies the org override under its
+    /// credential fence. Keep the provider id so credential rotation can
+    /// revoke this lease through the P6c registry path.
+    pub fn person_mint_task_lease(&self, owner: &str, member: MemberBinding, runtime: &str,
+        task: &str, expected_generation: u64, provider: ProviderSnapshot, model: String,
+        ingress: &str) -> Result<TaskLease, String> {
+        let session = scope(owner, "person-brain", task)?;
+        let account = self.account.read();
+        if account.generation != expected_generation { return Err("gateway account changed".into()); }
+        if !provider.enabled || provider.api_key.as_deref().is_none_or(str::is_empty)
+            || !provider.api_keys.is_empty() || provider.rotation_enabled
+            || !provider.models.contains(&model) {
+            return Err("invalid person task provider".into());
+        }
+        let deployment = provider.deployment_id.clone().unwrap_or_else(|| provider.id.clone());
+        let mut request = task_mint_request(session.clone(), session.clone(), deployment,
+            provider, model, ingress, None, None);
+        request.route_policy = format!("person_p6d:{runtime}");
+        self.tickets.revoke_session(&session);
+        let minted = self.tickets.person_mint_owned(request, Some(&empty_snapshot()),
+            chrono::Utc::now().timestamp_millis(), Some(owner.into()), Some(member))
+            .map_err(|e| e.to_string())?;
+        Ok(TaskLease { ticket_id: minted.ticket.ticket_id, secret: minted.secret,
+            account_generation: account.generation, owner_account_id: Some(owner.into()),
+            expires_at_ms: minted.ticket.expires_at_ms })
+    }
+
+    pub fn person_validate_task_secret(&self, owner: &str, member: &MemberBinding,
+        runtime: &str, task: &str, secret: &str) -> Result<(), String> {
+        let session = scope(owner, "person-brain", task)?;
+        let ticket = self.tickets.validate(secret, chrono::Utc::now().timestamp_millis())
+            .map_err(|_| "credential_delivery_refused")?;
+        // A caller omitting sessionId addresses the fresh task by ticketId,
+        // already present in the standard TaskLease response. A named session
+        // may keep its native task home across remints.
+        if ticket.owner_account_id.as_deref() != Some(owner) || ticket.member.as_ref() != Some(member)
+            || (ticket.session_id != session && ticket.ticket_id != task)
+            || ticket.route_policy != format!("person_p6d:{runtime}") {
+            return Err("credential_delivery_refused".into());
+        }
+        Ok(())
+    }
+
     pub fn mint_task_lease(
         &self,
         tenant: &str,
@@ -739,6 +791,24 @@ mod tests {
         atomic::{AtomicBool, Ordering},
         Arc,
     };
+    #[test]
+    fn p6d_task_shape_and_partition_owner_survive_registry_mint() {
+        let gateway = GatewayState::new();
+        let member = MemberBinding { org_id:"org_p6d_gateway".into(),user_id:"usr_p6d_gateway".into() };
+        let provider = serde_json::from_value(serde_json::json!({"id":"p6d-provider","protocol":"openai","enabled":true,
+            "apiKey":"p6d-private-org-key","baseUrl":"https://fixture.invalid/v1","models":["model"]})).unwrap();
+        let lease = gateway.person_mint_task_lease("pb_p6d",member.clone(),"codex-acp","p6d-task",gateway.status().account_generation,
+            provider,"model".into(),"openai-responses").unwrap();
+        let ticket = gateway.tickets.validate(&lease.secret,chrono::Utc::now().timestamp_millis()).unwrap();
+        assert_eq!(ticket.member,Some(member.clone())); assert_eq!(ticket.owner_account_id.as_deref(),Some("pb_p6d"));
+        assert_eq!(ticket.operations,vec![TicketOperation::Responses,TicketOperation::Models,TicketOperation::CountTokens]);
+        assert_eq!(ticket.expires_at_ms-ticket.issued_at_ms,TASK_LEASE_TTL_MS);
+        assert!(!serde_json::to_string(&lease).unwrap().contains("p6d-private-org-key"));
+        assert!(gateway.person_validate_task_secret("pb_foreign",&member,"codex-acp","p6d-task",&lease.secret).is_err());
+        gateway.person_test_listener(19384); assert_eq!(gateway.status().bound_port,Some(19384));
+        gateway.person_test_listener(0); assert!(!gateway.status().running);
+    }
+
     fn request() -> TaskLeaseRequest {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let mut value: TaskLeaseRequest = serde_json::from_value(serde_json::json!({

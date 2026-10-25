@@ -2,6 +2,23 @@
   "contractVersion": 3,
   "commands": [
     {
+      "name": "person_agent_lease_prepare",
+      "resource": "person.agent_lease",
+      "verb": "prepare",
+      "arm": "person_agent_lease_prepare",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "person_model_ticket_mint",
       "resource": "person.model_ticket",
       "verb": "mint",

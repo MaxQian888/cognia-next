@@ -8206,6 +8206,83 @@
               "route"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "operationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "operation": {
+                "type": "string",
+                "const": "outbound_recipients"
+              },
+              "installationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "recipients": {
+                "description": "Recipients the installation may deliver to with nobody watching (ADR-0239), written by a person; an empty list clears it.",
+                "type": "array",
+                "maxItems": 500,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "recipient": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "conversation",
+                            "person",
+                            "mail"
+                          ]
+                        },
+                        "channel": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "recipient": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "channel",
+                        "recipient"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "addedAt": {
+                      "type": "number"
+                    },
+                    "addedBy": {
+                      "type": "string",
+                      "const": "local-user"
+                    }
+                  },
+                  "required": [
+                    "recipient",
+                    "addedAt",
+                    "addedBy"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "operationId",
+              "operation",
+              "installationId",
+              "recipients"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -54593,6 +54670,84 @@
       "outputTyped": true
     },
     {
+      "name": "person_agent_lease_prepare",
+      "category": "extensions",
+      "resource": "person",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "person_agent_lease_prepare (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runtimeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "description": "Stable native task id when supplied; otherwise use the returned ticketId as the spawn taskId.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "runtimeId",
+          "provider",
+          "model"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ticketId",
+          "secret",
+          "accountGeneration",
+          "ownerAccountId",
+          "expiresAtMs",
+          "endpoint"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "accountGeneration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ownerAccountId": {
+            "type": "string"
+          },
+          "expiresAtMs": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          }
+        }
+      },
+      "outputTyped": true
+    },
+    {
       "name": "person_model_ticket_mint",
       "category": "extensions",
       "resource": "person",
@@ -73758,10 +73913,15 @@
           "config"
         ],
         "properties": {
+          "runtimeId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "P6d required for person brains: bundled runtime id. Placement and workspace ownership are Host-derived."
+          },
           "workspaceId": {
             "type": "string",
             "minLength": 1,
-            "description": "Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record."
+            "description": "Required for operator/device multi-tenant creation; ignored for person brains, whose personal workspace is Host-stamped. Later agent commands resolve this scope from the immutable Host record."
           },
           "config": {
             "type": "object",
@@ -102230,5 +102390,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "1b6c845e9b8deb860b8fe947d9b7ecca57f7e7c8e1ace3ce6011ad57bdca0e3b"
+  "catalogHash": "058e482ce816ffaba2c60a0db7dbd3b751c69ed35578dd3e72cb4f665bb9f38c"
 }

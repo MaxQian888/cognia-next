@@ -1084,6 +1084,22 @@
   "personModelCommands": [],
   "personBrainCommands": [
     {
+      "arm": "person_agent_lease_prepare",
+      "reason": "P6d person-only member-billed task lease from the partition's org credential; no key disclosure."
+    },
+    {
+      "arm": "spawn_external_agent",
+      "reason": "P6d fresh live org standing, Host-owned personal workspace binding, brokered partition task lease and mandatory local gVisor sandbox."
+    },
+    {
+      "arm": "get_external_agent_status",
+      "reason": "P6d fresh standing and exact partition-owned execution binding; no foreign or operator runs."
+    },
+    {
+      "arm": "kill_external_agent",
+      "reason": "P6d fresh standing and exact partition-owned execution binding; cleanup needs no enabled sandbox pool."
+    },
+    {
       "arm": "person_model_ticket_mint",
       "reason": "P6c verified loopback person brain mints only its partition's org model ticket."
     },

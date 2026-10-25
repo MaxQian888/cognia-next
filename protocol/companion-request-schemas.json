@@ -1822,6 +1822,83 @@
             "route"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "outbound_recipients"
+            },
+            "installationId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "recipients": {
+              "description": "Recipients the installation may deliver to with nobody watching (ADR-0239), written by a person; an empty list clears it.",
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "recipient": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "conversation",
+                          "person",
+                          "mail"
+                        ]
+                      },
+                      "channel": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "recipient": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "channel",
+                      "recipient"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "addedAt": {
+                    "type": "number"
+                  },
+                  "addedBy": {
+                    "type": "string",
+                    "const": "local-user"
+                  }
+                },
+                "required": [
+                  "recipient",
+                  "addedAt",
+                  "addedBy"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "operationId",
+            "operation",
+            "installationId",
+            "recipients"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -18138,10 +18215,15 @@
         "config"
       ],
       "properties": {
+        "runtimeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "P6d required for person brains: bundled runtime id. Placement and workspace ownership are Host-derived."
+        },
         "workspaceId": {
           "type": "string",
           "minLength": 1,
-          "description": "Required for multi-tenant creation. Later agent commands resolve this scope from the immutable Host record."
+          "description": "Required for operator/device multi-tenant creation; ignored for person brains, whose personal workspace is Host-stamped. Later agent commands resolve this scope from the immutable Host record."
         },
         "config": {
           "type": "object",

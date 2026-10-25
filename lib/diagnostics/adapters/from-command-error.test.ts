@@ -135,6 +135,19 @@ describe("multi-tenant Host refusals", () => {
     expect(DIAGNOSTIC_CODES.partitionWorkspaceUnavailable.retryable).toBe(false)
   })
 
+  it("maps P6d execution refusals to actionable stable diagnostics", () => {
+    for (const [code, diagnostic] of [
+      ["org_agent_not_allowed", "orgAgentNotAllowed"],
+      ["person_workspace_quota_exceeded", "personWorkspaceQuotaExceeded"],
+      ["person_workspace_unavailable", "personWorkspaceUnavailable"],
+      ["credential_delivery_refused", "credentialDeliveryRefused"],
+    ] as const) {
+      expect(diagnose(code)).toBe(diagnostic)
+      expect(isHostRefusalCode(code)).toBe(true)
+      expect(DIAGNOSTIC_CODES[diagnostic].retryable).toBe(false)
+    }
+  })
+
   it("maps monthly member allowance exhaustion to its non-retryable diagnostic", () => {
     expect(
       diagnoseCommandError({

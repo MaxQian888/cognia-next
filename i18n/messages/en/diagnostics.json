@@ -457,6 +457,22 @@
       "label": "No model access on this shared Host",
       "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members."
     },
+    "orgAgentNotAllowed": {
+      "label": "Agent not allowed by your organization",
+      "hint": "Your organization's admins choose which agents members can run on this Host. Pick one of the allowed agents, or ask an admin to allow this one."
+    },
+    "personWorkspaceQuotaExceeded": {
+      "label": "Your personal workspace is full",
+      "hint": "Runs on a shared Host keep their files in your personal workspace, which has a size limit. Delete files you no longer need, then start the run again."
+    },
+    "personWorkspaceUnavailable": {
+      "label": "Personal workspace unavailable",
+      "hint": "The Host couldn't safely open or measure your personal workspace, so nothing was started. If this keeps happening, contact the Host's administrator."
+    },
+    "credentialDeliveryRefused": {
+      "label": "Run needs Host-managed credentials",
+      "hint": "On a shared Host, agents reach the organization's models only through the Host. This run was started with other credentials, so it was refused."
+    },
     "partitionWorkspaceUnavailable": {
       "label": "No workspaces in your personal space",
       "hint": "On a shared Host, your conversations live in your own personal space, which isn't linked to the Host's workspaces, so this one can't be moved into a workspace here."

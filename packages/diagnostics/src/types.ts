@@ -415,6 +415,14 @@ export type DiagnosticCode =
   | "orgScopeUnavailable"
   /** Member monthly token allowance is exhausted until the UTC reset. */
   | "memberUsageCapReached"
+  /** P6d org allowlist refused this bundled agent. */
+  | "orgAgentNotAllowed"
+  /** P6d persistent personal workspace reached its disk cap. */
+  | "personWorkspaceQuotaExceeded"
+  /** P6d workspace cannot be safely measured or opened. */
+  | "personWorkspaceUnavailable"
+  /** P6d execution requires a partition-owned brokered lease. */
+  | "credentialDeliveryRefused"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

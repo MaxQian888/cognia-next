@@ -155,6 +155,63 @@ pub fn installed() -> Option<PoolServices> {
     SERVICES.read().clone()
 }
 
+/// P6d protocol admission fixtures with no daemon or sockets. The production
+/// path continues to probe the installed driver's available_tiers method.
+#[cfg(any(test, feature = "test-support"))]
+pub fn person_pool_test_support(tiers: Vec<IsolationTier>) -> PoolServices {
+    struct PersonDriver(Vec<IsolationTier>);
+    #[async_trait::async_trait]
+    impl cognia_sandbox_pool::status::SandboxDriverStatus for PersonDriver {
+        fn driver(&self) -> &'static str { "p6d-fixture" }
+        fn deployment_id(&self) -> &str { "p6d-deployment" }
+        fn instance_id(&self) -> &str { "p6d-instance" }
+        async fn available_tiers(&self) -> Result<Vec<IsolationTier>, cognia_external_agent::sandbox_routing_backend::SandboxSpawnError> { Ok(self.0.clone()) }
+    }
+    let baseline = cognia_environment::baseline::load_baseline_from(&cognia_environment::baseline::BaselineInputs {
+        sandbox_pool_enabled: Some("1".into()),
+        runner_image: Some(format!("ghcr.io/p6d/runner@sha256:{}", "a".repeat(64))),
+        agent_bundle_image: Some(format!("ghcr.io/p6d/bundle@sha256:{}", "b".repeat(64))),
+        ..Default::default()
+    }).expect("P6d fixture baseline").baseline;
+    PoolServices { runtime: None, providers: None, status: Arc::new(PersonDriver(tiers)),
+        admission: Arc::new(cognia_sandbox_pool::admission::EnvironmentSandboxAdmission::new(baseline,
+            cognia_environment::store::EnvironmentStore::open_in_memory().expect("P6d fixture store"), RegistryCredentials::empty(), false)) }
+}
+
+/// P6d remote-only fixture: its top-level status must never advertise local execution.
+#[cfg(any(test, feature = "test-support"))]
+pub fn person_remote_pool_test_support(tiers: Vec<IsolationTier>) -> PoolServices {
+    use cognia_external_agent::{exec_backend::ExecBackend, process::{ExternalAgentEventSink, ExternalAgentProcessState, ExternalAgentSpawnConfig}, sandbox_routing_backend::{SandboxExecBackend, SandboxSpawnError}};
+    struct PersonUnusedExec;
+    #[async_trait::async_trait]
+    impl ExecBackend for PersonUnusedExec {
+        async fn spawn(&self, _: ExternalAgentSpawnConfig, _: Arc<dyn ExternalAgentEventSink>) -> Result<String, String> { panic!("P6d status fixture cannot spawn") }
+        async fn send(&self, _: &str, _: &str) -> Result<(), String> { panic!("P6d status fixture cannot send") }
+        async fn kill(&self, _: &str) -> Result<(), String> { panic!("P6d status fixture cannot kill") }
+        async fn kill_all(&self) -> Result<(), String> { panic!("P6d status fixture cannot kill") }
+        async fn status(&self, _: &str) -> Option<ExternalAgentProcessState> { panic!("P6d status fixture has no runs") }
+        async fn list(&self) -> Vec<String> { panic!("P6d status fixture has no runs") }
+        async fn is_running(&self, _: &str) -> Result<bool, String> { panic!("P6d status fixture has no runs") }
+        async fn get_info(&self, _: &str) -> Result<Value, String> { panic!("P6d status fixture has no runs") }
+        async fn set_running(&self, _: &str) -> Result<(), String> { panic!("P6d status fixture has no runs") }
+        async fn set_failed(&self, _: &str) -> Result<(), String> { panic!("P6d status fixture has no runs") }
+        fn kind(&self) -> &'static str { "p6d-status-only" }
+    }
+    #[async_trait::async_trait]
+    impl SandboxExecBackend for PersonUnusedExec {
+        async fn spawn_sandboxed(&self, _: ExternalAgentSpawnConfig, _: Arc<dyn ExternalAgentEventSink>) -> Result<String, SandboxSpawnError> { panic!("P6d status fixture cannot spawn") }
+        fn multi_tenant(&self) -> bool { true }
+        fn fault_allows_fallback(&self, _: bool) -> bool { false }
+    }
+    let mut pool = person_pool_test_support(tiers);
+    let providers = cognia_sandbox_pool::providers::ProviderSet::new(vec![cognia_sandbox_pool::providers::ProviderMember {
+        id: "p6d-remote".into(), label: None, exec: Arc::new(PersonUnusedExec), status: pool.status.clone(), runtime: None, limits: None,
+    }], Some("p6d-remote".into())).expect("P6d remote fixture");
+    pool.status = providers.clone();
+    pool.providers = Some(providers);
+    pool
+}
+
 /// Forget the installed services. Tests only: a running Host never
 /// un-installs a pool.
 #[cfg(any(test, feature = "test-support"))]
@@ -1000,6 +1057,16 @@ mod tests {
             status: Arc::new(FakeDriver { tiers }),
             providers: None,
         }
+    }
+
+    #[tokio::test]
+    async fn p6d_pool_fixture_exposes_only_its_advertised_tiers() {
+        let pool = person_pool_test_support(vec![IsolationTier::Gvisor]);
+        assert_eq!(pool.status.available_tiers().await.unwrap(),vec![IsolationTier::Gvisor]);
+        assert_eq!(pool.status.driver(),"p6d-fixture");
+        let remote = person_remote_pool_test_support(vec![IsolationTier::Gvisor]);
+        assert_eq!(remote.status.available_tiers().await.unwrap(),vec![IsolationTier::Gvisor]);
+        assert!(!remote.providers.as_ref().unwrap().has_local());
     }
 
     #[test]

@@ -28,6 +28,8 @@ fn unavailable(code: &'static str) -> Refusal { Refusal { status: StatusCode::SE
 pub trait StandingProvider: Send + Sync {
     fn person(&self, principal: &DeviceContext) -> Result<Person, Refusal>;
     async fn actions(&self, person: &Person, workspace: Option<&str>) -> Result<Vec<String>, Refusal>;
+    /// P6d execution must see departures immediately, without the admission cache.
+    async fn person_execution_actions(&self, person: &Person) -> Result<Vec<String>, Refusal> { self.actions(person, None).await }
 }
 
 type CacheKey = (Person, Option<String>);
@@ -64,6 +66,9 @@ static LIVE: Lazy<Arc<LiveStanding>> = Lazy::new(|| Arc::new(LiveStanding { cach
 
 #[async_trait::async_trait]
 impl StandingProvider for LiveStanding {
+    async fn person_execution_actions(&self, person: &Person) -> Result<Vec<String>, Refusal> {
+        crate::workspace_access::standing_actions(&person.org, None, &person.user).await.map_err(map_authority_error)
+    }
     fn person(&self, principal: &DeviceContext) -> Result<Person, Refusal> {
         let store = crate::security_store::security_store()
             .ok_or_else(|| forbidden("host_principal_unbound"))?;
@@ -128,6 +133,54 @@ pub fn execution_enabled() -> bool {
 
 pub fn execution_available() -> bool {
     availability(deployment_mode(), execution_enabled(), crate::environment_pool::installed().is_some())
+}
+
+/// P6d probes the local driver only; remote providers cannot attest mounts.
+pub async fn person_execution_available() -> bool {
+    if !execution_enabled() { return false; }
+    let Some(pool) = crate::environment_pool::installed() else { return false; };
+    let status = match pool.providers.as_ref() {
+        Some(providers) => match providers.member("local") {
+            Some(local) => local.status.clone(),
+            None => return false,
+        },
+        None => pool.status.clone(),
+    };
+    tokio::time::timeout(Duration::from_secs(10), status.available_tiers()).await
+        .is_ok_and(|tiers| tiers.is_ok_and(|tiers| person_execution_tiers(true, Some(&tiers))))
+}
+pub fn person_execution_tiers(enabled: bool, tiers: Option<&[cognia_environment::spec::IsolationTier]>) -> bool {
+    enabled && tiers.is_some_and(|tiers| tiers.contains(&cognia_environment::spec::IsolationTier::Gvisor))
+}
+pub async fn person_execution_standing(person: &crate::person_partition::PersonPartition) -> Result<(), Problem> {
+    LIVE.person_execution_actions(&Person { org: person.org_id.clone(), user: person.user_id.clone() }).await
+        .map(|_| ()).map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
+}
+
+/// P6d ownership is derived from a Host binding, never from event/request ids.
+pub fn person_execution_owner(binding: &PlacementBinding) -> Option<crate::person_partition::PersonPartition> {
+    let person = crate::person_partition::PersonPartition::new(binding.org_id.clone(), binding.actor_user_id.clone());
+    (binding.workspace_id == format!("person:{}", person.account_id)).then_some(person)
+}
+/// Serializes partition execution with purge. Weak slots do not retain accounts.
+pub fn person_execution_lock(account: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: Lazy<Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>> = Lazy::new(Default::default);
+    let mut locks = LOCKS.lock();
+    locks.retain(|_, lock| lock.strong_count() != 0);
+    let lock = locks.get(account).and_then(std::sync::Weak::upgrade).unwrap_or_else(|| Arc::new(tokio::sync::Mutex::new(())));
+    locks.insert(account.into(), Arc::downgrade(&lock));
+    lock
+}
+
+/// P6d purge and RPC controls share the same agent-id fence. A persisted
+/// record alone cannot authorize killing a replacement owned by someone else.
+pub fn person_execution_run_lock(id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: Lazy<Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>> = Lazy::new(Default::default);
+    let mut locks = LOCKS.lock();
+    locks.retain(|_, lock| lock.strong_count() != 0);
+    let lock = locks.get(id).and_then(std::sync::Weak::upgrade).unwrap_or_else(|| Arc::new(tokio::sync::Mutex::new(())));
+    locks.insert(id.into(), Arc::downgrade(&lock));
+    lock
 }
 
 fn availability(mode: DeploymentMode, enabled: bool, sandboxes: bool) -> bool {
@@ -441,6 +494,18 @@ impl WorkspaceMounts {
         self.authorized_root(decision, cwd).map(|_| ())
     }
     fn authorized_root(&self, decision: &ExecutionAdmission, cwd: &str) -> Result<std::path::PathBuf, Refusal> {
+        if let Some(person) = person_execution_owner(&decision.binding) {
+            let directory = self.path.parent().and_then(std::path::Path::parent).ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
+            let policy = cognia_external_agent::presets::SpawnPolicy::from_env(directory);
+            let root = cognia_external_agent::person_workspace::person_workspace_path(&policy, &person.account_id)
+                .map_err(|_| forbidden("workspace_mount_forbidden"))?;
+            let canonical = root.canonicalize().map_err(|_| forbidden("workspace_mount_forbidden"))?;
+            let base = policy.workspaces_dir().canonicalize().map_err(|_| forbidden("workspace_mount_forbidden"))?;
+            if canonical != base.join("persons").join(&person.account_id) { return Err(forbidden("workspace_mount_forbidden")); }
+            cognia_external_agent::person_workspace::person_workspace_cwd(&canonical, Some(cwd))
+                .map_err(|_| forbidden("workspace_mount_forbidden"))?;
+            return Ok(canonical);
+        }
         let base = self.base.as_ref().ok_or_else(|| forbidden("workspace_root_unconfigured"))?
             .canonicalize().map_err(|_| forbidden("workspace_root_unconfigured"))?;
         if !base.is_dir() { return Err(forbidden("workspace_root_unconfigured")); }
@@ -503,6 +568,10 @@ async fn resolve_execution_admission(provider: &dyn StandingProvider, lookup: &d
     if args.pointer("/config/sandbox/binding").is_some() || args.pointer("/placement/binding").is_some() {
         return Err(forbidden("placement_binding_client_supplied"));
     }
+    if principal.scope == "person-brain" {
+        let person = crate::person_chat::person_caller(principal, command).map_err(|_| forbidden("host_surface_forbidden"))?;
+        return person_resolve_execution(provider, lookup, command, args, &person).await;
+    }
     let workspace = execution_workspace(command, args, lookup)?.ok_or_else(|| forbidden("workspace_unresolved"))?;
     let person = provider.person(principal)?;
     let id = record_id(command, args).filter(|id| !id.is_empty()).ok_or_else(|| forbidden("workspace_unresolved"))?;
@@ -510,6 +579,8 @@ async fn resolve_execution_admission(provider: &dyn StandingProvider, lookup: &d
     let creating = matches!(command, "spawn_external_agent" | "environment_task_shell_exec");
     let binding = match existing {
         Some(binding) => {
+            // A device/operator may never take control of a personal run.
+            if person_execution_owner(&binding).is_some() { return Err(forbidden("host_surface_forbidden")); }
             if binding.org_id != person.org || (creating && (binding.workspace_id != workspace || binding.actor_user_id != person.user)) {
                 return Err(forbidden("execution_binding_exists"));
             }
@@ -523,6 +594,21 @@ async fn resolve_execution_admission(provider: &dyn StandingProvider, lookup: &d
     let admission = ExecutionAdmission { binding, actions };
     admission.workspace_read_only().map_err(forbidden)?;
     Ok(admission)
+}
+
+async fn person_resolve_execution(provider: &dyn StandingProvider, lookup: &dyn ExecutionBindingLookup,
+    command: &str, args: &Value, person: &crate::person_partition::PersonPartition) -> Result<ExecutionAdmission, Refusal> {
+    provider.person_execution_actions(&Person { org: person.org_id.clone(), user: person.user_id.clone() }).await?;
+    let id = record_id(command, args).filter(|id| !id.is_empty()).ok_or_else(|| forbidden("workspace_unresolved"))?;
+    let existing = lookup.binding(&record_key(command, id))?;
+    if existing.as_ref().is_some_and(|binding| person_execution_owner(binding).as_ref() != Some(person)) {
+        return Err(forbidden("host_surface_forbidden"));
+    }
+    let binding = if command == "spawn_external_agent" {
+        PlacementBinding { org_id: person.org_id.clone(), workspace_id: format!("person:{}", person.account_id),
+            actor_user_id: person.user_id.clone(), run_id: uuid::Uuid::new_v4().to_string() }
+    } else { existing.ok_or_else(|| forbidden("host_surface_forbidden"))? };
+    Ok(ExecutionAdmission { binding, actions: vec!["execution.request".into(), "workspace.write".into(), "credential.use".into()] })
 }
 
 /// Called only after sandbox creation succeeds. A failed spawn must not bind
@@ -585,14 +671,82 @@ pub async fn prune_execution_records(directory: std::path::PathBuf, backend: Arc
         .map_err(|refusal: Refusal| Problem::with_status(refusal.status, refusal.code, refusal.code))
 }
 
+/// P6d purge holds person_execution_lock. Kill through the same backend and
+/// wait for terminal state before removing any directory or authority record.
+pub async fn person_stop_execution(directory: Option<&std::path::Path>, person: &crate::person_partition::PersonPartition,
+    backend: &dyn cognia_external_agent::exec_backend::ExecBackend, timeout: Duration) -> Result<usize, &'static str> {
+    tokio::time::timeout(timeout, async {
+        let records = match directory {
+            Some(directory) => ExecutionBindings(directory.join("companion/execution-bindings.json")).read().map_err(|_| "person_brain_unavailable")?,
+            None => HashMap::new(),
+        };
+        let mut ids: std::collections::HashSet<String> = records.iter().filter(|(_, binding)| person_execution_owner(binding).as_ref() == Some(person))
+            .filter_map(|(key, _)| key.strip_prefix("external-agent:").map(str::to_owned)).collect();
+        // Cover an early exit/creation whose persistence was interrupted too.
+        for id in backend.list().await {
+            let info = backend.get_info(&id).await.map_err(|_| "person_brain_busy")?;
+            if info.pointer("/placement/binding").cloned().and_then(|value| serde_json::from_value::<PlacementBinding>(value).ok())
+                .and_then(|binding| person_execution_owner(&binding)).as_ref() == Some(person) { ids.insert(id); }
+        }
+        let count = ids.len();
+        use cognia_external_agent::process::ExternalAgentProcessState::{Stopped, Failed};
+        for id in ids {
+            let _run = person_execution_run_lock(&id).lock_owned().await;
+            if !matches!(backend.status(&id).await, None | Some(Stopped | Failed)) {
+                let info = backend.get_info(&id).await.map_err(|_| "person_brain_busy")?;
+                let owner = info.pointer("/placement/binding").cloned()
+                    .and_then(|value| serde_json::from_value::<PlacementBinding>(value).ok())
+                    .and_then(|binding| person_execution_owner(&binding));
+                if owner.as_ref() != Some(person) { return Err("person_brain_busy"); }
+                backend.kill(&id).await.map_err(|_| "person_brain_busy")?;
+            }
+            while !matches!(backend.status(&id).await, None | Some(Stopped | Failed)) {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
+        Ok(count)
+    }).await.map_err(|_| "person_brain_busy")?
+}
+
+pub fn person_remove_execution_records(directory: &std::path::Path, person: &crate::person_partition::PersonPartition) -> Result<(), &'static str> {
+    let _guard = BINDING_WRITER.lock();
+    let store = ExecutionBindings(directory.join("companion/execution-bindings.json"));
+    let mut records = store.read().map_err(|_| "person_brain_unavailable")?;
+    records.retain(|_, binding| person_execution_owner(binding).as_ref() != Some(person));
+    store.write(&records).map_err(|_| "person_brain_unavailable")?;
+    let mounts = WorkspaceMounts::new(directory.join("companion/workspace-mounts.json"), None);
+    let mut roots = mounts.read().map_err(|_| "person_brain_unavailable")?;
+    roots.remove(&serde_json::to_string(&(&person.org_id, format!("person:{}", person.account_id))).map_err(|_| "person_brain_unavailable")?);
+    let parent = mounts.path.parent().ok_or("person_brain_unavailable")?;
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| "person_brain_unavailable")?;
+    use std::io::Write;
+    file.write_all(&serde_json::to_vec(&roots).map_err(|_| "person_brain_unavailable")?)
+        .and_then(|_| file.as_file().sync_all()).map_err(|_| "person_brain_unavailable")?;
+    file.persist(&mounts.path).map_err(|_| "person_brain_unavailable")?;
+    Ok(())
+}
+
 /// Admission for the two container dispatch paths and their recorded controls.
 /// The typed decision is scoped over dispatch; it never enters request args.
 pub async fn authorize_execution(state: &crate::SharedState, capability: &str, command: &str,
     principal: &DeviceContext, args: &Value) -> Result<Option<ExecutionAdmission>, Problem> {
-    // P6c is a closed tool-less channel, admitted even when execution is disabled.
+    // P6d execution arms take partition admission; P6c remains tool-less.
     if principal.scope == "person-brain" {
         crate::person_chat::person_caller(principal, command)?;
-        return Ok(None);
+        if !matches!(command, "spawn_external_agent" | "get_external_agent_status" | "kill_external_agent") {
+            return Ok(None);
+        }
+        if command == "spawn_external_agent" && !person_execution_available().await {
+            return Err(Problem::with_status(StatusCode::SERVICE_UNAVAILABLE, "execution_isolation_unavailable", "execution_isolation_unavailable"));
+        }
+        let result = async {
+            let directory = state.runtime.execution_binding_root(state).ok_or_else(|| unavailable("execution_binding_store_unavailable"))?;
+            let store = tokio::task::spawn_blocking(move || ExecutionBindings(directory.join("companion/execution-bindings.json")).read())
+                .await.map_err(|_| unavailable("execution_binding_store_unavailable"))??;
+            if command == "spawn_external_agent" && store.len() >= EXECUTION_BINDING_LIMIT { return Err(unavailable("execution_binding_store_full")); }
+            resolve_execution_admission(LIVE.as_ref(), &store, command, args, principal).await.map(Some)
+        }.await;
+        return result.map_err(|refusal| Problem::with_status(refusal.status, refusal.code, refusal.code));
     }
     if deployment_mode() == DeploymentMode::SingleUser {
         authorize(capability, Some(command), principal, command_workspace(command, args)).await?;
@@ -643,6 +797,76 @@ pub async fn authorize_execution(state: &crate::SharedState, capability: &str, c
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn p6d_partition_admission_fences_foreign_runs_and_rechecks_standing() {
+        struct PersonStanding(std::sync::atomic::AtomicBool);
+        #[async_trait::async_trait]
+        impl StandingProvider for PersonStanding {
+            fn person(&self, _: &DeviceContext) -> Result<Person, Refusal> { panic!("must not resolve a device"); }
+            async fn actions(&self, _: &Person, workspace: Option<&str>) -> Result<Vec<String>, Refusal> {
+                assert!(workspace.is_none());
+                if self.0.load(Ordering::SeqCst) { Ok(vec![]) } else { Err(forbidden("host_surface_forbidden")) }
+            }
+        }
+        let provider = PersonStanding(std::sync::atomic::AtomicBool::new(true));
+        let a = crate::person_partition::PersonPartition::new("org_p6d_gate".into(), "usr_p6d_a".into());
+        let b = crate::person_partition::PersonPartition::new(a.org_id.clone(), "usr_p6d_b".into());
+        let mut records = HashMap::new();
+        let args = json!({"config":{"id":"p6d-agent"},"workspaceId":"foreign-workspace"});
+        let decision = person_resolve_execution(&provider, &records, "spawn_external_agent", &args, &a).await.unwrap();
+        assert_eq!(decision.binding.org_id, a.org_id);
+        assert_eq!(decision.binding.actor_user_id, a.user_id);
+        assert_eq!(decision.binding.workspace_id, format!("person:{}", a.account_id));
+        assert!(!decision.binding.run_id.is_empty());
+        assert_eq!(decision.workspace_read_only(), Ok(false));
+        assert!(decision.has("credential.use"));
+        records.insert("external-agent:p6d-agent".into(), decision.binding.clone());
+        for command in ["get_external_agent_status", "kill_external_agent"] {
+            let args = json!({"agentId":"p6d-agent","workspaceId":"forged"});
+            assert_eq!(person_resolve_execution(&provider, &records, command, &args, &a).await.unwrap().binding, decision.binding);
+            assert_eq!(person_resolve_execution(&provider, &records, command, &args, &b).await.unwrap_err().code, "host_surface_forbidden");
+        }
+        provider.0.store(false, Ordering::SeqCst);
+        assert_eq!(person_resolve_execution(&provider, &records, "spawn_external_agent", &args, &a).await.unwrap_err().code, "host_surface_forbidden");
+    }
+
+    #[test]
+    fn p6d_execution_requires_enabled_local_gvisor_tier() {
+        use cognia_environment::spec::IsolationTier::{Container, Gvisor, Vm};
+        for tiers in [None, Some(vec![]), Some(vec![Container]), Some(vec![Vm])] {
+            assert!(!person_execution_tiers(true, tiers.as_deref()));
+        }
+        assert!(!person_execution_tiers(false, Some(&[Gvisor])));
+        assert!(person_execution_tiers(true, Some(&[Container, Gvisor])));
+    }
+
+    #[test]
+    fn p6d_person_mounts_and_record_purge_leave_other_partitions_intact() {
+        let temp = tempfile::tempdir().unwrap();
+        let policy = cognia_external_agent::presets::SpawnPolicy::from_env(temp.path());
+        let mounts = WorkspaceMounts::new(temp.path().join("companion/workspace-mounts.json"), None);
+        let store = ExecutionBindings(temp.path().join("companion/execution-bindings.json"));
+        let a = crate::person_partition::PersonPartition::new("org_p6d_mount".into(), "usr_p6d_mount_a".into());
+        let b = crate::person_partition::PersonPartition::new(a.org_id.clone(), "usr_p6d_mount_b".into());
+        let mut roots = Vec::new();
+        for person in [&a, &b] {
+            let (root, _) = cognia_external_agent::person_workspace::person_workspace_prepare(&policy, &person.account_id, None, 1024).unwrap();
+            let decision = ExecutionAdmission { binding:PlacementBinding { org_id:person.org_id.clone(), actor_user_id:person.user_id.clone(),
+                workspace_id:format!("person:{}",person.account_id),run_id:person.account_id.clone() },actions:vec!["execution.request".into(),"workspace.write".into(),"credential.use".into()] };
+            mounts.persist(&decision, root.to_str().unwrap()).unwrap();
+            store.insert(&format!("external-agent:{}",person.account_id), &decision.binding).unwrap();
+            roots.push((root, decision));
+        }
+        assert_eq!(mounts.authorize(&roots[0].1, roots[1].0.to_str().unwrap()).unwrap_err().code, "workspace_mount_forbidden");
+        let child = roots[0].0.join("child"); std::fs::create_dir(&child).unwrap();
+        mounts.authorize(&roots[0].1, child.to_str().unwrap()).unwrap();
+        person_remove_execution_records(temp.path(), &a).unwrap();
+        let records = store.read().unwrap();
+        assert_eq!(records.len(), 1); assert_eq!(records.values().next().unwrap(), &roots[1].1.binding);
+        let remaining = mounts.read().unwrap();
+        assert_eq!(remaining.len(), 1); assert_eq!(remaining.values().next().unwrap(), roots[1].0.to_str().unwrap());
+    }
 
     #[tokio::test]
     async fn p6c_tool_less_admission_ignores_execution_switch_only_for_closed_person_commands() {

@@ -420,6 +420,13 @@ const schemas = {
     userId: z.string().regex(/^usr_[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/),
     monthlyTokens: z.union([z.number().int().min(0).max(1000000000000), z.null(), z.literal("default")]),
   }),
+  // P6d: authority and provider credentials never come from the body.
+  person_agent_lease_prepare: z.object({
+    runtimeId: z.string().min(1),
+    provider: z.string().min(1).max(200),
+    model: z.string().min(1),
+    sessionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional().describe("Stable native task id when supplied; otherwise use the returned ticketId as the spawn taskId."),
+  }).strict(),
   // P6c accepts authority only from the verified person token.
   person_model_ticket_mint: z.object({
     provider: z.string().min(1).max(200),

@@ -21,6 +21,9 @@ pub struct RpcError {
     /// Each constructor below states the answer instead of leaving it to be
     /// guessed downstream.
     pub retryable: bool,
+    /// P6d structured quota facts; omitted on all legacy error envelopes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl RpcError {
@@ -31,6 +34,7 @@ impl RpcError {
             code: code.into(),
             message: message.into(),
             retryable: false,
+            details: None,
         }
     }
 
@@ -253,6 +257,13 @@ impl RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn p6d_quota_details_are_additive_to_the_legacy_envelope() {
+        let mut error = RpcError::new("person_workspace_quota_exceeded", "person_workspace_quota_exceeded");
+        error.details = Some(serde_json::json!({"usedBytes":100,"maxBytes":100}));
+        assert_eq!(serde_json::to_value(error).unwrap()["details"], serde_json::json!({"usedBytes":100,"maxBytes":100}));
+        the_envelope_serializes_code_message_and_retryable();
+    }
 
     /// The envelope is wire contract: `transport-companion.ts` reads these
     /// three fields.

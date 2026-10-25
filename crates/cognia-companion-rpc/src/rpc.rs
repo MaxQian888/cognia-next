@@ -559,6 +559,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // ADR-0224 A6 — secrets a paired device keeps on this host. The writes
     // are `approval: interactive` in the manifest; the load is service-only.
     "host_secret_list",
+    "person_agent_lease_prepare", // P6d partition-owned brokered task.
     "person_model_ticket_mint", // P6c person-only; service catalog still lists it.
     "org_model_credential_list",
     "org_model_credential_set",
@@ -2633,6 +2634,7 @@ fn inject_caller_device_grants(
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // P6c internal descriptor; dedicated arm permits only person-brain.
     "person_model_ticket_mint",
+    "person_agent_lease_prepare", // P6d person-only task lease.
     "sandbox_preview_context",
     "sandbox_preview_create",
     "sandbox_preview_list",
@@ -3747,6 +3749,9 @@ pub(super) async fn dispatch(
     }
     // The service catalog includes this internal command, but its dedicated
     // arm owns person-only authority and explicitly refuses service callers.
+    if name == "person_agent_lease_prepare" {
+        return chat::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
+    }
     if name == "person_model_ticket_mint" {
         return chat::dispatch(name, args, state, host, device_id, tenant_id, scope).await;
     }

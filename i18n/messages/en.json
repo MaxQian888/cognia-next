@@ -15861,6 +15861,10 @@
         "hint": "The conversation is longer than this model can read — compact it, shorten the input, or pick a model with a bigger context window.",
         "label": "Context window exceeded"
       },
+      "credentialDeliveryRefused": {
+        "hint": "On a shared Host, agents reach the organization's models only through the Host. This run was started with other credentials, so it was refused.",
+        "label": "Run needs Host-managed credentials"
+      },
       "dbUnavailable": {
         "hint": "Cognia couldn't open its local database — reload; if it keeps failing, export a crash log.",
         "label": "Database unavailable"
@@ -16033,6 +16037,10 @@
         "hint": "You appear to be offline — Cognia will retry once you're back online.",
         "label": "Offline"
       },
+      "orgAgentNotAllowed": {
+        "hint": "Your organization's admins choose which agents members can run on this Host. Pick one of the allowed agents, or ask an admin to allow this one.",
+        "label": "Agent not allowed by your organization"
+      },
       "orgScopeUnavailable": {
         "hint": "Organization settings such as shared model keys and allowed agents only exist on a Host that serves an organization. This Host serves one person, so there is nothing to configure here.",
         "label": "Needs an organization Host"
@@ -16048,6 +16056,14 @@
       "permissionDenied": {
         "hint": "The agent refused an action it wasn't allowed to take — adjust its permission mode.",
         "label": "Permission denied"
+      },
+      "personWorkspaceQuotaExceeded": {
+        "hint": "Runs on a shared Host keep their files in your personal workspace, which has a size limit. Delete files you no longer need, then start the run again.",
+        "label": "Your personal workspace is full"
+      },
+      "personWorkspaceUnavailable": {
+        "hint": "The Host couldn't safely open or measure your personal workspace, so nothing was started. If this keeps happening, contact the Host's administrator.",
+        "label": "Personal workspace unavailable"
       },
       "piPackageUnavailable": {
         "hint": "A plugin Pi package this agent loads couldn't be loaded, so the session didn't start. Prepare the package or enable its plugin, or remove it from the agent's settings.",

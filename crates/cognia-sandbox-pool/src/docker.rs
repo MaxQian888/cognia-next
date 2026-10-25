@@ -1173,11 +1173,37 @@ fn credentials_mode(config: &ExternalAgentSpawnConfig, spec: &EnvironmentSpec, m
     if !multi_tenant {
         return json!(if config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG") || config.env.contains_key("COGNIA_GATEWAY_TOKEN") { "gateway-lease" } else { "none" });
     }
+    // P6d: Host-generated runtime aliases/config reference the task lease.
+    // They are brokered uses, not disclosure of an upstream org credential.
+    if config.sandbox.as_ref().and_then(SandboxPlacement::binding)
+        .is_some_and(|binding| binding.workspace_id.starts_with("person:pb_"))
+        && cognia_external_agent::spawn_authority::gateway().is_some_and(|authority| (authority.authorized)()) {
+        return json!(cognia_external_agent::spawn_authority::CredentialDelivery::Brokered);
+    }
     let names = config.env.keys().chain(spec.container_env.keys().chain(spec.remote_env.keys()))
         .map(String::as_str).filter(|name| !AMBIENT_CREDENTIAL_ENV.contains(name));
     json!(cognia_external_agent::spawn_authority::CredentialDelivery::for_inputs(
         names, config.args.iter().map(String::as_str), spec.lifecycle_commands != Default::default(),
     ))
+}
+
+/// P6d always binds the immutable personal root, even for a subdirectory cwd.
+/// A concurrent run may replace a child with a symlink; letting Docker bind
+/// that child would resolve the symlink on the Host instead of in the sandbox.
+fn person_mount_paths(settings: &cognia_external_agent::container_backend::RunnerHostSettings, cwd: &str,
+    binding: Option<&cognia_external_agent::spawn_authority::PlacementBinding>)
+    -> Result<Option<(std::path::PathBuf, String)>, SandboxSpawnError> {
+    let Some(account) = binding.and_then(|binding| binding.workspace_id.strip_prefix("person:")) else { return Ok(None); };
+    let refused = || SandboxSpawnError::refused("workspace_mount_forbidden", "invalid personal workspace mount");
+    let policy = cognia_external_agent::presets::SpawnPolicy::new(settings.workspaces_dir.clone(), false);
+    let root = cognia_external_agent::person_workspace::person_workspace_path(&policy, account).map_err(|_| refused())?
+        .canonicalize().map_err(|_| refused())?;
+    let base = settings.workspaces_dir.canonicalize().map_err(|_| refused())?;
+    if root != base.join("persons").join(account) { return Err(refused()); }
+    let cwd = cognia_external_agent::person_workspace::person_workspace_cwd(&root, Some(cwd)).map_err(|_| refused())?;
+    let relative = cwd.strip_prefix(&root).map_err(|_| refused())?;
+    let container = Path::new(WORKSPACE_TARGET).join(relative).to_string_lossy().into_owned();
+    Ok(Some((root, container)))
 }
 
 /// What the UI shows for an agent that got a sandbox.
@@ -1301,8 +1327,10 @@ impl DockerSandboxBackend {
                 "a local sandbox mounts this Host's checkout; a remote workspace needs a remote provider",
             ));
         }
+        let personal = person_mount_paths(&self.config.host, cwd, placement.binding())?;
+        let mount_source = personal.as_ref().map(|(root, _)| root.to_string_lossy().into_owned()).unwrap_or_else(|| cwd.into());
         let mut mount =
-            self.config.host.resolve_mount(cwd).map_err(|error| {
+            self.config.host.resolve_mount(&mount_source).map_err(|error| {
                 SandboxSpawnError::refused("sandbox_workspace_outside_root", error)
             })?;
         if self.multi_tenant() {
@@ -1313,6 +1341,19 @@ impl DockerSandboxBackend {
 
         let tiers = self.available_tiers().await?;
         let admitted = self.admission.admit(placement.spec(), &tiers)?;
+        if decision.as_ref().is_some_and(|decision| decision.binding.workspace_id.starts_with("person:pb_"))
+            && admitted.admission.actual_tier < IsolationTier::Gvisor {
+            return Err(SandboxSpawnError::refused("execution_isolation_unavailable", "person runs require gVisor or stronger isolation"));
+        }
+        // P6d: lifecycle/env from the caller's environment declaration may
+        // not inject credentials alongside the Host's brokered launch.
+        if decision.as_ref().is_some_and(|decision| decision.binding.workspace_id.starts_with("person:pb_"))
+            && cognia_external_agent::spawn_authority::CredentialDelivery::for_inputs(
+                admitted.spec.container_env.keys().chain(admitted.spec.remote_env.keys()).map(String::as_str),
+                std::iter::empty(), admitted.spec.lifecycle_commands != Default::default(),
+            ) != cognia_external_agent::spawn_authority::CredentialDelivery::None {
+            return Err(SandboxSpawnError::refused("credential_delivery_refused", "person runs require brokered credentials only"));
+        }
         if self.multi_tenant() {
             decision.as_ref().expect("checked admission").authorize_inputs(
                 admitted.spec.container_env.keys().chain(admitted.spec.remote_env.keys()).map(String::as_str),
@@ -1396,7 +1437,10 @@ impl DockerSandboxBackend {
         spec: &mut RunnerSpec,
         host_cwd: &str,
     ) -> Result<(), SandboxSpawnError> {
-        let workspace_env = workspace_port_env(host_cwd).await?;
+        // P6d never imports operator workspace-port environment into a person.
+        let personal = cognia_external_agent::spawn_authority::execution_admission()
+            .is_some_and(|decision| decision.binding.workspace_id.starts_with("person:pb_"));
+        let workspace_env = if personal { BTreeMap::new() } else { workspace_port_env(host_cwd).await? };
         if self.multi_tenant() {
             let decision = cognia_external_agent::spawn_authority::execution_admission()
                 .ok_or_else(|| SandboxSpawnError::refused("placement_binding_required", "Host admission is required"))?;
@@ -1588,6 +1632,11 @@ impl DockerSandboxBackend {
             if config.sandbox.as_ref().and_then(SandboxPlacement::binding) != Some(&decision.binding) {
                 return Err(SandboxSpawnError::refused("placement_binding_required", "placement differs from Host admission"));
             }
+            if decision.binding.workspace_id.starts_with("person:pb_")
+                && (!config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG") || !config.env.contains_key("COGNIA_GATEWAY_TOKEN")
+                    || !cognia_external_agent::spawn_authority::gateway().is_some_and(|authority| (authority.authorized)())) {
+                return Err(SandboxSpawnError::refused("credential_delivery_refused", "person runs require a live brokered task lease"));
+            }
             decision.authorize_inputs(config.env.keys().map(String::as_str), config.args.iter().map(String::as_str), false)
                 .map_err(|code| SandboxSpawnError::refused(code, code))?;
             // Remote provisioners currently expose no mount policy contract.
@@ -1704,7 +1753,22 @@ impl DockerSandboxBackend {
         tail.extend(invocation.args.iter().cloned());
         let env = container_env(&prepared.admitted.spec, &config)?;
         let mut spec = self.local_runner_spec(&id, &prepared, libc_volume, env, tail)?;
+        if let Some((_, cwd)) = person_mount_paths(&self.config.host, &cwd, prepared.binding.as_ref())? {
+            let entries = spec.env.iter().filter_map(|entry| entry.split_once('='))
+                .map(|(key, value)| (key.to_owned(), value.to_owned())).collect();
+            let mut runtime = cognia_sandboxd::env::decode_runtime_config_env(&entries)
+                .map_err(|error| SandboxSpawnError::refused("sandbox_runtime_config_invalid", error.to_string()))?
+                .ok_or_else(|| SandboxSpawnError::refused("sandbox_runtime_config_invalid", "missing runtime configuration"))?;
+            runtime.workspace_folder = cwd.clone();
+            spec.working_dir = cwd;
+            spec.env = encode_runtime_config_env(&runtime).map_err(|error| SandboxSpawnError::refused("sandbox_runtime_config_invalid", error.to_string()))?;
+        }
         self.configure_workspace_ports(&mut spec, &cwd).await?;
+        // P6d image staging may outlive a lease or credential rotation.
+        if prepared.binding.as_ref().is_some_and(|binding| binding.workspace_id.starts_with("person:pb_"))
+            && gateway.as_ref().is_none_or(|authority| !(authority.authorized)()) {
+            return Err(SandboxSpawnError::refused("credential_delivery_refused", "person task lease expired before start"));
+        }
         let auth = prepared.auth.clone();
         let LocalPrepared {
             admitted,
@@ -2769,6 +2833,24 @@ pub(crate) mod tests {
             tokio::time::timeout(Duration::from_secs(2), async {
                 while harness.backend.runners.contains("reused") { tokio::task::yield_now().await; }
             }).await.unwrap();
+        }
+    }
+
+    #[test]
+    fn p6d_person_subdirectory_cwd_still_mounts_only_the_personal_root() {
+        let temp = tempfile::tempdir().unwrap(); let mut settings = host(); settings.workspaces_dir = temp.path().into();
+        let account = "pb_0123456789abcdef01234567";
+        let policy = cognia_external_agent::presets::SpawnPolicy::new(temp.path().into(),false);
+        let (root,_) = cognia_external_agent::person_workspace::person_workspace_prepare(&policy,account,None,1024).unwrap();
+        let child = root.join("child"); std::fs::create_dir(&child).unwrap();
+        let binding = cognia_external_agent::spawn_authority::PlacementBinding { org_id:"org_p6d_mount".into(),actor_user_id:"usr_p6d_mount".into(),
+            workspace_id:format!("person:{account}"),run_id:"p6d-run".into() };
+        let (mount,cwd) = person_mount_paths(&settings,child.to_str().unwrap(),Some(&binding)).unwrap().unwrap();
+        assert_eq!(mount,root); assert_eq!(cwd,format!("{WORKSPACE_TARGET}/child"));
+        assert!(person_mount_paths(&settings,temp.path().to_str().unwrap(),Some(&binding)).is_err());
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(temp.path(),root.join("escape")).unwrap();
+            assert!(person_mount_paths(&settings,root.join("escape").to_str().unwrap(),Some(&binding)).is_err());
         }
     }
 

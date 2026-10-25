@@ -190,6 +190,7 @@ fn scm_command_error(
             code: problem.code,
             message: problem.detail,
             retryable: problem.retryable,
+            details: None,
         }),
     )
 }

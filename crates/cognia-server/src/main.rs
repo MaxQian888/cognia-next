@@ -2695,6 +2695,7 @@ async fn run_serve(
     mdns_requested: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // ADR-0224 A10: before anything starts, settle a pending update.
+    cognia_external_agent::person_workspace::person_workspace_max_bytes()?; // P6d boot validation, even without a brain.
     let execution_setting = match std::env::var("COGNIA_EXECUTION") {
         Ok(value) => Some(value),
         Err(std::env::VarError::NotPresent) => None,
@@ -3373,6 +3374,14 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p6d_person_workspace_quota_is_validated_before_runtime_installation() {
+        assert!(cognia_external_agent::person_workspace::person_workspace_max_bytes_from(Some("invalid")).is_err());
+        let source = include_str!("main.rs");
+        let serve = &source[source.find("async fn run_serve(").unwrap()..];
+        assert!(serve.find("person_workspace_max_bytes()?").unwrap() < serve.find("install_for_deployment").unwrap());
+    }
+
     #[test]
     fn p5_persons_cli_has_explicit_identity_and_port_selection() {
         use super::PersonsCommand;

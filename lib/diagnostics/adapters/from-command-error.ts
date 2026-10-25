@@ -40,6 +40,10 @@ const HOST_REFUSAL_TO_DIAGNOSTIC: Readonly<Record<string, DiagnosticCode>> = {
   workspace_unavailable: "partitionWorkspaceUnavailable",
   org_scope_unavailable: "orgScopeUnavailable",
   member_usage_cap_reached: "memberUsageCapReached",
+  org_agent_not_allowed: "orgAgentNotAllowed",
+  person_workspace_quota_exceeded: "personWorkspaceQuotaExceeded",
+  person_workspace_unavailable: "personWorkspaceUnavailable",
+  credential_delivery_refused: "credentialDeliveryRefused",
   person_brain_capacity: "resourceLimit",
   person_brain_unavailable: "serviceUnavailable",
 }

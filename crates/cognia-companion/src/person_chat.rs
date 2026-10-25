@@ -15,7 +15,7 @@ pub fn person_caller(principal: &DeviceContext, command: &str) -> Result<PersonP
     let denied = || cognia_problem::Problem::with_status(axum::http::StatusCode::FORBIDDEN,
         "host_surface_forbidden", "host_surface_forbidden");
     if principal.scope != "person-brain" || !person_command_allowed(command) {
-        log::warn!("person brain command refused: {command:?} is outside the tool-less chat channel (scope {})", principal.scope);
+        log::warn!("person brain command refused: {command:?} is outside the closed partition channel (scope {})", principal.scope);
         return Err(denied());
     }
     crate::person_partition::fleet().and_then(|fleet| fleet.person(&principal.tenant_id)).ok_or_else(|| {
@@ -139,6 +139,14 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn p6c_live_and_replay_audiences_are_owner_brain_and_current_owner_devices_only() {
+        person_test_audiences(&["claude://message", "agent://event", "a2ui://dispatch", "gateway://request-outcome"]).await;
+    }
+    #[tokio::test]
+    async fn p6d_external_agent_live_and_replay_audiences_include_only_owner_brain_and_devices() {
+        person_test_audiences(&["external-agent://spawn", "external-agent://stdout", "external-agent://stdout-raw", "external-agent://stderr",
+            "external-agent://state-change", "external-agent://exit", "external-agent://placement", "external-agent://session-event", "external-agent://workspace-publish"]).await;
+    }
+    async fn person_test_audiences(channels: &[&str]) {
         use crate::security_store::{SecurityStore, VerifiedDevicePerson};
         use cognia_tenant_auth::{OrgId, UserId};
         let _guard = crate::security_store::test_guard();
@@ -160,11 +168,11 @@ mod tests {
         PERSON_SESSIONS.bind("p6c-audience-session", Some(&person)).unwrap();
         let bus = crate::event_bus::EventBus::new();
         let crate::event_bus::SubscribeResult::Ok { mut receiver, .. } = bus.subscribe(None, 0) else { panic!("live"); };
-        for channel in ["claude://message", "agent://event", "a2ui://dispatch", "gateway://request-outcome"] {
+        for channel in channels {
             person_publish(&bus, channel, &serde_json::json!({"sessionId":"p6c-audience-session","type":"text"}));
         }
         let crate::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
-        assert_eq!(replay.len(), 12);
+        assert_eq!(replay.len(), channels.len() * 3);
         for frame in &replay {
             assert_eq!(receiver.try_recv().unwrap().seq, frame.seq);
             let audience: Vec<_> = [(brain.as_str(), Some(person.account_id.as_str())),

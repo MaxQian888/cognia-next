@@ -16430,6 +16430,26 @@
       },
       "additionalProperties": false
     },
+    "person_agent_lease_prepare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticketId",
+        "secret",
+        "accountGeneration",
+        "ownerAccountId",
+        "expiresAtMs",
+        "endpoint"
+      ],
+      "properties": {
+        "ticketId": { "type": "string" },
+        "secret": { "type": "string" },
+        "accountGeneration": { "type": "integer", "minimum": 0 },
+        "ownerAccountId": { "type": "string" },
+        "expiresAtMs": { "type": "integer" },
+        "endpoint": { "type": "string" }
+      }
+    },
     "person_model_ticket_mint": {
       "type": "object",
       "additionalProperties": false,

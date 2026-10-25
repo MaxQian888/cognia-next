@@ -14,6 +14,18 @@ const RETRY_KINDS = new Set<DiagnosticAction["kind"]>([
 ])
 
 describe("DIAGNOSTIC_CODES", () => {
+  it("keeps P6d quota and admission refusals non-retryable", () => {
+    for (const code of [
+      "orgAgentNotAllowed",
+      "personWorkspaceQuotaExceeded",
+      "personWorkspaceUnavailable",
+      "credentialDeliveryRefused",
+    ] as const) {
+      expect(isDiagnosticCode(code)).toBe(true)
+      expect(DIAGNOSTIC_CODES[code].retryable).toBe(false)
+      expect(DIAGNOSTIC_CODES[code].actions).toEqual([{ kind: "dismiss" }])
+    }
+  })
   it("keeps member monthly caps non-retryable with a dismiss action", () => {
     expect(isDiagnosticCode("memberUsageCapReached")).toBe(true)
     expect(DIAGNOSTIC_CODES.memberUsageCapReached.retryable).toBe(false)

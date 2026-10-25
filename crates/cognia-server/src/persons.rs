@@ -52,6 +52,10 @@ pub struct Fleet {
     idle: Duration,
     maximum: usize,
     stopping: AtomicBool,
+    person_exec: Arc<dyn cognia_external_agent::exec_backend::ExecBackend>,
+    /// Tests stand in for the wired runtime's binding root.
+    #[cfg(test)]
+    records_root: parking_lot::Mutex<Option<std::path::PathBuf>>,
 }
 fn now_ms() -> i64 { chrono::Utc::now().timestamp_millis() }
 fn positive_env(name: &str, default: u64) -> Result<u64, String> {
@@ -65,13 +69,25 @@ fn valid_account(id: &str) -> bool {
     id.len() == 27 && id.starts_with("pb_") && id[3..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 impl Fleet {
+    /// Where the spawn path persisted execution records and workspace mounts:
+    /// the runtime's binding root (`<data>/.cognia` on the server), not the
+    /// brain template's data dir. None means no binding store, so no person
+    /// run was ever admitted and only the backend scan can find one.
+    fn execution_records_root(&self) -> Option<std::path::PathBuf> {
+        #[cfg(test)]
+        if let Some(root) = self.records_root.lock().clone() { return Some(root); }
+        self.state.runtime.execution_binding_root(&self.state)
+    }
     pub fn new(template: BrainConfig, state: SharedState) -> Result<Arc<Self>, String> {
+        cognia_external_agent::person_workspace::person_workspace_max_bytes()?;
         Self::with_limits(template, state, Duration::from_secs(positive_env("COGNIA_PERSON_BRAIN_IDLE_SECS", 900)?),
             usize::try_from(positive_env("COGNIA_PERSON_BRAINS_MAX", 8)?).map_err(|_| "person brain cap is too large")?,
-            cognia_companion::security_store::security_store().ok_or("person receipt ledger unavailable")?)
+            cognia_companion::security_store::security_store().ok_or("person receipt ledger unavailable")?,
+            cognia_companion_rpc::headless::headless_services().ok_or("person execution backend unavailable")?.exec.clone())
     }
     fn with_limits(template: BrainConfig, state: SharedState, idle: Duration, maximum: usize,
-        ledger: Arc<cognia_companion::security_store::SecurityStore>) -> Result<Arc<Self>, String> {
+        ledger: Arc<cognia_companion::security_store::SecurityStore>,
+        person_exec: Arc<dyn cognia_external_agent::exec_backend::ExecBackend>) -> Result<Arc<Self>, String> {
         if valid_account(&template.account_id) { return Err("operator account uses the reserved person namespace".into()); }
         let mut entries = BTreeMap::new();
         let mut data_scopes = BTreeMap::new();
@@ -97,7 +113,8 @@ impl Fleet {
         }
         let people = entries.iter().map(|(account, entry)| (account.clone(), entry.person.clone())).collect();
         let fleet = Arc::new(Self { template, state, ledger, entries: Mutex::new(entries), snapshots: Default::default(),
-            people: parking_lot::RwLock::new(people), active_accounts: Default::default(), data_scopes: parking_lot::RwLock::new(data_scopes), idle, maximum, stopping: AtomicBool::new(false) });
+            people: parking_lot::RwLock::new(people), active_accounts: Default::default(), data_scopes: parking_lot::RwLock::new(data_scopes), idle, maximum, stopping: AtomicBool::new(false), person_exec,
+            #[cfg(test)] records_root: Default::default() });
         Ok(fleet)
     }
     fn entry(person: PersonPartition, last: i64) -> Entry {
@@ -251,11 +268,26 @@ impl PersonBrainFleet for Fleet {
         Ok(serde_json::json!({ "persons": list }))
     }
     async fn purge(&self, person: &PersonPartition) -> Result<(), &'static str> {
+        let _person_execution = cognia_companion::host_surface_gate::person_execution_lock(&person.account_id).lock_owned().await;
         let mut entries = self.entries.lock().await;
         if let Some(entry) = entries.get_mut(&person.account_id) {
             if entry.usage.in_flight.load(Ordering::SeqCst) != 0 { return Err("person_brain_busy"); }
             self.stop_entry(entry).await;
         }
+        let records = self.execution_records_root();
+        let stopped = cognia_companion::host_surface_gate::person_stop_execution(records.as_deref(), person,
+            self.person_exec.as_ref(), Duration::from_secs(10)).await.map_err(|code| {
+                cognia_companion::audit::record("person_execution_purge", "local-operator", "service", "deny",
+                    serde_json::json!({"accountId":person.account_id,"code":code}));
+                code
+            })?;
+        let policy = cognia_external_agent::presets::SpawnPolicy::from_env(&self.template.data_dir);
+        cognia_external_agent::person_workspace::person_workspace_remove(&policy, &person.account_id).map_err(|_| "person_brain_unavailable")?;
+        if let Some(records) = &records {
+            cognia_companion::host_surface_gate::person_remove_execution_records(records, person)?;
+        }
+        cognia_companion::audit::record_async("person_execution_purge", "local-operator", "service", "allow",
+            serde_json::json!({"accountId":person.account_id,"stoppedRuns":stopped})).await;
         self.ledger.purge_person_receipts(&person.account_id).map_err(|_| "person_brain_unavailable")?;
         // Destroy the DEK before removing any data; a partially failed purge
         // remains inaccessible and may be retried idempotently.
@@ -284,9 +316,48 @@ mod tests {
         let mut config = crate::brain::tests::test_config(root.join("missing-brain.mjs"), Duration::from_millis(100));
         config.data_dir = root.into();
         Fleet::with_limits(config, crate::brain::tests::test_state(), Duration::from_secs(1), maximum,
-            cognia_companion::security_store::SecurityStore::in_memory().unwrap()).unwrap()
+            cognia_companion::security_store::SecurityStore::in_memory().unwrap(),
+            cognia_companion_rpc::headless::HeadlessServices::stub_for_tests().exec.clone()).unwrap()
     }
     fn person(user: &str) -> PersonPartition { PersonPartition::new("p5-test-org".into(), user.into()) }
+
+    #[tokio::test]
+    async fn p6d_fleet_purge_removes_workspace_records_and_preserves_other_partition() {
+        let _slot = lock_slot().await;
+        let temp = tempfile::tempdir().unwrap(); let fleet = fixture(temp.path(),2);
+        let a = person("p6d-purge-a"); let b = person("p6d-purge-b");
+        let policy = cognia_external_agent::presets::SpawnPolicy::from_env(temp.path());
+        let mut roots = Vec::new(); let mut bindings = serde_json::Map::new(); let mut mounts = serde_json::Map::new();
+        for person in [&a,&b] {
+            let (root,_) = cognia_external_agent::person_workspace::person_workspace_prepare(&policy,&person.account_id,None,1024).unwrap();
+            std::fs::write(root.join("file"),"personal data").unwrap();
+            std::fs::create_dir_all(temp.path().join("persons").join(&person.account_id)).unwrap();
+            fleet.entries.lock().await.insert(person.account_id.clone(),Fleet::entry(person.clone(),0));
+            fleet.people.write().insert(person.account_id.clone(),person.clone());
+            cognia_companion_rpc::headless::get_or_create_account_content_key(&person.account_id).unwrap();
+            bindings.insert(format!("external-agent:{}",person.account_id),serde_json::json!({"orgId":person.org_id,"workspaceId":format!("person:{}",person.account_id),"actorUserId":person.user_id,"runId":person.account_id}));
+            mounts.insert(serde_json::to_string(&(&person.org_id,format!("person:{}",person.account_id))).unwrap(),serde_json::json!(root.to_str().unwrap()));
+            roots.push(root);
+        }
+        // The spawn path writes under the runtime's binding root, which is not
+        // the brain template's data dir; a purge reading the latter would
+        // leave the records behind.
+        *fleet.records_root.lock() = Some(temp.path().join(".cognia"));
+        let directory = temp.path().join(".cognia/companion"); std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("execution-bindings.json"),serde_json::to_vec(&bindings).unwrap()).unwrap();
+        std::fs::write(directory.join("workspace-mounts.json"),serde_json::to_vec(&mounts).unwrap()).unwrap();
+        fleet.purge(&a).await.unwrap();
+        assert!(!roots[0].exists()); assert!(roots[1].join("file").exists());
+        assert!(!temp.path().join("persons").join(&a.account_id).exists());
+        assert!(cognia_secrets::secret_store::get(CONTENT_KEY_SERVICE,&a.account_id).unwrap().is_none());
+        assert!(cognia_secrets::secret_store::get(CONTENT_KEY_SERVICE,&b.account_id).unwrap().is_some());
+        for file in ["execution-bindings.json","workspace-mounts.json"] {
+            let value: serde_json::Value = serde_json::from_slice(&std::fs::read(directory.join(file)).unwrap()).unwrap();
+            assert_eq!(value.as_object().unwrap().len(),1);
+            assert!(!value.to_string().contains(&a.account_id));
+            assert!(value.to_string().contains(&b.account_id));
+        }
+    }
 
     #[test]
     fn p6b_usage_people_include_parked_members_only_in_their_org() {

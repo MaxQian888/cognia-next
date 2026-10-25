@@ -506,7 +506,7 @@ async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
     // P6c ticket secrets must remain ephemeral: persist only the retry hash,
     // and remint against current credentials on a retry, never store a secret receipt.
     if descriptor.receipt_policy() == CommandReceiptPolicy::HostSemantic
-        || descriptor.arm == "person_model_ticket_mint" {
+        || matches!(descriptor.arm.as_str(), "person_model_ticket_mint" | "person_agent_lease_prepare") {
         return execute_host_semantic_request(
             &store, &request, &request_hash, now, dispatch(state, &request),
         ).await;
@@ -1006,7 +1006,9 @@ async fn dispatch(state: &SharedState, request: &ExecutionRequest) -> Result<Val
             // `RpcError` is the arm-internal shape. This is the plane boundary where
             // it becomes the one document, and the arm's own answer on whether a
             // retry can succeed must not be replaced by a guess from the status.
-            problem(&request.request_id, status, error.code, error.message)
+            let mut mapped = problem(&request.request_id, status, error.code, error.message);
+            if let Some(details) = error.details { mapped.details = details; }
+            mapped
                 .retryable(error.retryable)
         })
 }
@@ -1130,6 +1132,27 @@ mod tests {
         assert!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::SingleUser).is_none());
         org.arm = "host_provider_credential_set".into();
         assert!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::MultiTenant).is_none());
+    }
+
+    #[tokio::test]
+    async fn p6d_task_mint_retry_requires_uuid_and_never_persists_lease_secret() {
+        let descriptor = crate::command_manifest::descriptor("person_agent_lease_prepare").unwrap();
+        assert_eq!(descriptor.idempotency, CommandIdempotency::Required);
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("person-brain", None);
+        request.command = "person_agent_lease_prepare".into();
+        request.idempotency_key = Some(Uuid::new_v4().to_string());
+        for secret in ["p6d-lease-secret-first", "p6d-lease-secret-reminted"] {
+            let result = json!({"ticketId":"rt_p6d","secret":secret,"endpoint":"http://127.0.0.1:19384/v1",
+                "accountGeneration":1,"ownerAccountId":"pb_p6d","expiresAtMs":1});
+            let outcome = execute_host_semantic_request(&store,&request,"p6d-same",unix_time_secs(),async { Ok(result.clone()) }).await.unwrap();
+            let ExecutionOutcome::Completed { result:actual, operation_id, replayed, .. } = outcome else { panic!("completed"); };
+            assert_eq!(actual,result); assert!(operation_id.is_none()); assert!(!replayed);
+        }
+        let conflict = execute_host_semantic_request(&store,&request,"p6d-conflict",unix_time_secs(),async {
+            panic!("changed retry must not mint");
+        }).await.unwrap_err();
+        assert_eq!(conflict.status_code(),StatusCode::CONFLICT);
     }
 
     #[tokio::test]

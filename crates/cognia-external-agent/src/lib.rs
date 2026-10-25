@@ -14,6 +14,7 @@ pub mod exec_backend;
 pub mod gateway_task;
 pub mod kube_backend;
 pub mod presets;
+pub mod person_workspace;
 pub mod proc_group;
 pub mod process;
 pub mod sandbox;

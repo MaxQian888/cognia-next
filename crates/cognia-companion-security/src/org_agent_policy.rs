@@ -28,6 +28,28 @@ const AGENT_PROVIDERS: &[(&str, Option<&str>)] = &[
     ("droid", None),
 ];
 
+/// P6d: reuse the runtime catalog's launch identity and the single bundled
+/// allowlist table above. Absolute/legacy npx commands cannot select a bundle.
+pub fn person_runtime_matches(runtime: &str, command: &str, args: &[String]) -> bool {
+    let catalog: serde_json::Value = match serde_json::from_str(include_str!("../../../protocol/external-agent-runtimes.json")) {
+        Ok(catalog) => catalog, Err(_) => return false,
+    };
+    let Some(rows) = catalog["runtimes"].as_array() else { return false; };
+    rows.iter().filter(|row| AGENT_PROVIDERS.iter().any(|(id, _)| row["runtimeId"] == *id)
+        && row["systemCommand"].as_str() == Some(command))
+        .filter_map(|row| {
+            let prefix = row["launchArgs"].as_array()?;
+            (args.len() >= prefix.len() && prefix.iter().zip(args).all(|(a, b)| a.as_str() == Some(b.as_str())))
+                .then_some((prefix.len(), row))
+        }).max_by_key(|(length, _)| *length)
+        .is_some_and(|(_, row)| row["runtimeId"] == runtime)
+}
+
+/// Returns the already reviewed gateway launch family, not a provider slug.
+pub fn person_runtime_family(runtime: &str) -> Option<&'static str> {
+    AGENT_PROVIDERS.iter().find(|(id, _)| *id == runtime).and_then(|(_, family)| *family)
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentPolicy {
@@ -107,6 +129,25 @@ fn view(org: &str, policy: AgentPolicy) -> Result<PolicyView, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn p6d_runtime_launch_mapping_is_pinned_to_catalog_and_bundle() {
+        let catalog: serde_json::Value = serde_json::from_str(include_str!("../../../protocol/external-agent-runtimes.json")).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(include_str!("../../../deploy/bundle/agent-versions.json")).unwrap();
+        for (runtime, _) in AGENT_PROVIDERS {
+            let row = catalog["runtimes"].as_array().unwrap().iter().find(|row| row["runtimeId"] == *runtime).unwrap();
+            let command = row["systemCommand"].as_str().unwrap();
+            let args: Vec<String> = serde_json::from_value(row["launchArgs"].clone()).unwrap();
+            assert!(person_runtime_matches(runtime, command, &args), "{runtime}");
+            assert!(!person_runtime_matches(runtime, &format!("/tmp/{command}"), &args));
+            let shipped = bundle["runtimes"].as_array().unwrap().iter().find(|row| row["id"] == *runtime).unwrap();
+            assert!(shipped.get("unavailable").is_none());
+            assert!(shipped["commands"].as_array().is_some_and(|commands| commands.iter().any(|entry| entry["name"] == command))
+                || shipped.pointer("/binary/command").and_then(serde_json::Value::as_str) == Some(command)
+                || shipped.pointer("/archive/command").and_then(serde_json::Value::as_str) == Some(command), "{runtime}: {command}");
+        }
+        assert!(!person_runtime_matches("opencode", "opencode", &["acp".into()]));
+        p6a_provider_table_covers_exactly_the_shipped_bundle();
+    }
     #[test]
     fn p6b_bundled_agents_include_disallowed_runtimes_in_table_order() {
         let org = "org_p6b_bundled_agents";

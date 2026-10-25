@@ -384,11 +384,16 @@ impl BrainSupervisor {
         self.person_authority.clone()
     }
 
-    fn child_env(&self, token: &str) -> Vec<(String, String)> {
+    async fn child_env(&self, token: &str) -> Vec<(String, String)> {
         let mut env = build_brain_env(&self.config, token);
         if self.person {
             env.push(("COGNIA_BRAIN_PROFILE".into(), "person".into()));
             env.push(("COGNIA_PERSON_CHAT".into(), "tool-less".into())); // P6c A-D Host contract.
+            // P6d: Host capability advertisement. The TS brain deliberately
+            // does not consume COGNIA_PERSON_EXECUTION until P6e (Rule 7).
+            if cognia_companion::host_surface_gate::person_execution_available().await {
+                env.push(("COGNIA_PERSON_EXECUTION".into(), "sandboxed".into()));
+            }
         }
         env
     }
@@ -519,6 +524,7 @@ impl BrainSupervisor {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         cmd.env_remove("COGNIA_BRAIN_PROFILE");
+        cmd.env_remove("COGNIA_PERSON_EXECUTION"); // P6d never inherit the operator environment.
         cmd.env_remove("COGNIA_PERSON_CHAT"); // P6c is advertised only by this supervisor.
         if withhold_unpaired_collab_url(
             std::env::var("COGNIA_COLLAB_URL").ok().as_deref(),
@@ -526,7 +532,7 @@ impl BrainSupervisor {
         ) {
             cmd.env_remove("COGNIA_COLLAB_URL");
         }
-        for (k, v) in self.child_env(&token) {
+        for (k, v) in self.child_env(&token).await {
             cmd.env(k, v);
         }
         #[cfg(target_os = "windows")]
@@ -741,18 +747,56 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn p6d_execution_advertisement_requires_conforming_pool_and_is_person_only() {
+        use cognia_companion::{environment_pool, host_surface_gate};
+        let _slot = ws_bridge::test_support::lock_slot().await;
+        struct Restore(Option<environment_pool::PoolServices>, Option<std::ffi::OsString>, Option<std::ffi::OsString>);
+        impl Drop for Restore { fn drop(&mut self) {
+            environment_pool::uninstall(); if let Some(pool) = self.0.take() { environment_pool::install(pool); }
+            for (key, value) in [("COGNIA_EXECUTION",self.1.take()),("COGNIA_PERSON_EXECUTION",self.2.take())] {
+                match value { Some(value) => unsafe { std::env::set_var(key,value) }, None => unsafe { std::env::remove_var(key) } }
+            }
+        } }
+        let _restore = Restore(environment_pool::installed(),std::env::var_os("COGNIA_EXECUTION"),std::env::var_os("COGNIA_PERSON_EXECUTION"));
+        unsafe { std::env::set_var("COGNIA_EXECUTION","enabled"); std::env::set_var("COGNIA_PERSON_EXECUTION","forged-parent"); }
+        let config = test_config(PathBuf::from("brain.mjs"), Duration::from_secs(1));
+        let operator = BrainSupervisor::new(config.clone(),test_state());
+        let person = BrainSupervisor::new_person(config,test_state());
+        let advertised = |env: Vec<(String,String)>| env.into_iter().find(|(key,_)| key == "COGNIA_PERSON_EXECUTION").map(|(_,value)| value);
+        environment_pool::uninstall();
+        assert_eq!(advertised(person.child_env("token").await),None);
+        environment_pool::install(environment_pool::person_pool_test_support(vec![serde_json::from_value(serde_json::json!("container")).unwrap()]));
+        assert!(!host_surface_gate::person_execution_available().await);
+        assert_eq!(advertised(person.child_env("token").await),None);
+        // The tier helper pins VM/container as insufficient for this local path.
+        environment_pool::install(environment_pool::person_pool_test_support(vec![
+            serde_json::from_value(serde_json::json!("gvisor")).unwrap()]));
+        assert_eq!(advertised(person.child_env("token").await),Some("sandboxed".into()));
+        assert_eq!(advertised(operator.child_env("token").await),None);
+        environment_pool::install(environment_pool::person_remote_pool_test_support(vec![
+            serde_json::from_value(serde_json::json!("gvisor")).unwrap()]));
+        assert!(!host_surface_gate::person_execution_available().await);
+        assert_eq!(advertised(person.child_env("token").await),None);
+        environment_pool::install(environment_pool::person_pool_test_support(vec![
+            serde_json::from_value(serde_json::json!("gvisor")).unwrap()]));
+        unsafe { std::env::set_var("COGNIA_EXECUTION","disabled"); }
+        assert_eq!(advertised(person.child_env("token").await),None);
+        assert!(include_str!("brain.rs").contains("cmd.env_remove(\"COGNIA_PERSON_EXECUTION\")"));
+    }
+
+    #[tokio::test]
     async fn p6c_person_supervisor_advertises_tool_less_chat_with_distinct_scope_and_profile() {
         let _slot = ws_bridge::test_support::lock_slot().await;
         let config = test_config(PathBuf::from("brain.mjs"), Duration::from_secs(1));
         let state = test_state();
         let operator = BrainSupervisor::new(config.clone(), state.clone());
-        assert_eq!(operator.child_env("token"), build_brain_env(&config, "token"));
+        assert_eq!(operator.child_env("token").await, build_brain_env(&config, "token"));
         let person = BrainSupervisor::new_person(config.clone(), state);
         let _generation = person.person_authority().unwrap().begin_child().unwrap();
         let mut expected = build_brain_env(&config, "token");
         expected.push(("COGNIA_BRAIN_PROFILE".into(), "person".into()));
         expected.push(("COGNIA_PERSON_CHAT".into(), "tool-less".into()));
-        assert_eq!(person.child_env("token"), expected);
+        assert_eq!(person.child_env("token").await, expected);
         let token = person.mint_token().unwrap();
         assert!(cognia_companion::jwt::verify(&person.state.secret.read(), &token, "service").is_err());
         assert_eq!(cognia_companion::jwt::verify(&person.state.secret.read(), &token, "person-brain").unwrap().account_id, Some(config.account_id));

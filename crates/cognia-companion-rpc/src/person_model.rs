@@ -95,7 +95,7 @@ pub async fn person_model_ticket_mint(args: Value, scope: Option<&str>, tenant: 
 /// is needed. Mirrors `ensure_task_listener`: any failure, or an account
 /// switch since the mint, revokes the ticket so the brain never holds one it
 /// cannot use.
-async fn person_ensure_listener(state: &cognia_companion::SharedState, host: &dyn crate::rpc_host::RpcHost,
+pub(crate) async fn person_ensure_listener(state: &cognia_companion::SharedState, host: &dyn crate::rpc_host::RpcHost,
     ticket_id: &str, generation: u64) -> PersonResult<u16> {
     let gateway = host.gateway().ok_or_else(person_unavailable)?;
     let started = if gateway.status().running { Ok(()) } else {

@@ -19,11 +19,12 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "1b6c845e9b8deb860b8fe947d9b7ecca57f7e7c8e1ace3ce6011ad57bdca0e3b";
+pub const CATALOG_HASH: &str = "058e482ce816ffaba2c60a0db7dbd3b751c69ed35578dd3e72cb4f665bb9f38c";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
 pub static WIRE_COMMANDS: &[WireCommand] = &[
+    WireCommand { name: "person_agent_lease_prepare", arm: "person_agent_lease_prepare", resource: "person.agent_lease", verb: "prepare", target: CommandTarget::Service, operation: CommandOperation::SideEffect, capability: "service.internal", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "person_model_ticket_mint", arm: "person_model_ticket_mint", resource: "person.model_ticket", verb: "mint", target: CommandTarget::Service, operation: CommandOperation::SideEffect, capability: "service.internal", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "siwc_list_connections", arm: "siwc_list_connections", resource: "client.siwc", verb: "get", target: CommandTarget::Client, operation: CommandOperation::Read, capability: "client.local", risk: CommandRisk::High, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "siwc_begin_login", arm: "siwc_begin_login", resource: "client.siwc", verb: "execute", target: CommandTarget::Client, operation: CommandOperation::SideEffect, capability: "client.local", risk: CommandRisk::High, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Internal], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },

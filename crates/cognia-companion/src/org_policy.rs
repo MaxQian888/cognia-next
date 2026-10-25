@@ -218,6 +218,26 @@ pub async fn agents_handler(Path(operation): Path<String>, Extension(principal):
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn p6d_credential_mutation_revokes_member_task_leases_under_the_same_fence() {
+        let _audit = crate::audit::test_guard();
+        let gateway = cognia_gateway::GatewayState::new();
+        let previous = ORG_USAGE_REGISTRY.read().clone();
+        struct Restore(Option<std::sync::Arc<cognia_gateway::route_ticket::RouteTicketRegistry>>);
+        impl Drop for Restore { fn drop(&mut self) { *ORG_USAGE_REGISTRY.write() = self.0.take(); } }
+        let _restore = Restore(previous); org_usage_install(gateway.tickets.clone());
+        let org = "org_p6d_rotation";
+        let mint = || gateway.person_mint_task_lease("pb_p6d_rotation",cognia_gateway::route_ticket::MemberBinding { org_id:org.into(),user_id:"usr_p6d_rotation".into() },
+            "pi","p6d-task",gateway.status().account_generation,serde_json::from_value(json!({"id":"p6d-provider","enabled":true,"protocol":"openai",
+                "baseUrl":"https://fixture.invalid/v1","apiKey":"old-org-key","models":["model"]})).unwrap(),"model".into(),"openai-chat").unwrap();
+        let first = mint();
+        dispatch_in_mode(DeploymentMode::MultiTenant,"org_model_credential_set",json!({"orgId":org,"provider":"p6d-provider","apiKey":"new-key"}),"operator",None,Some("service")).await.unwrap();
+        assert!(gateway.tickets.validate(&first.secret,chrono::Utc::now().timestamp_millis()).is_err());
+        let second = mint();
+        dispatch_in_mode(DeploymentMode::MultiTenant,"org_model_credential_delete",json!({"orgId":org,"provider":"p6d-provider"}),"operator",None,Some("service")).await.unwrap();
+        assert!(gateway.tickets.validate(&second.secret,chrono::Utc::now().timestamp_millis()).is_err());
+    }
+
+    #[tokio::test]
     async fn p6c_credential_set_and_delete_revoke_only_matching_org_provider_tickets() {
         use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore, MintRequest, MemberBinding};
         let _audit = crate::audit::test_guard();
