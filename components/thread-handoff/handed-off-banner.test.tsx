@@ -217,7 +217,9 @@ describe("HandedOffBanner", () => {
         title: "Fix login",
         body: "Work from a conversation continued on Studio Mac with Cognia.",
       },
-      { id: "github" }
+      { id: "github" },
+      // The receipt for the person's write is filed under this conversation.
+      { sessionId: "s1" }
     )
     expect(openExternal).toHaveBeenCalledWith("https://github.com/acme/app/pull/7")
     expect(screen.getByTestId("handed-off-pull-request-link")).toHaveTextContent("Pull request #7")

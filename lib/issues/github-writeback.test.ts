@@ -222,6 +222,17 @@ describe("runGithubWriteback", () => {
 
     expect(approve).toHaveBeenCalledWith("job-1")
     expect(result.status).toBe("succeeded")
+    // The confirmed write is the person's under the outbound policy (ADR-0239).
+    expect(execute.mock.calls[0][2]).toEqual({ kind: "person", surface: "issue-writeback" })
+  })
+
+  it("leaves an unconfirmed write to the plugin's outbound plan", async () => {
+    const execute = jest.fn().mockResolvedValue(job())
+    await runGithubWriteback(
+      { target, action: { kind: "close" } },
+      { resolveAccount: async () => account(), execute, approve: jest.fn() }
+    )
+    expect(execute.mock.calls[0]).toHaveLength(2)
   })
 
   it("does not re-approve a job that never needed approval", async () => {
@@ -297,14 +308,19 @@ describe("createGithubIssue", () => {
       htmlUrl: "https://github.com/acme/app/issues/42",
       updatedAt: Date.parse("2026-09-01T00:00:00Z"),
     })
-    expect(execute).toHaveBeenCalledWith(GITHUB_DELIVERY_PLUGIN_ID, {
-      integrationId: GITHUB_INTEGRATION_ID,
-      accountId: "acct-1",
-      actionId: "createIssue",
-      input: { repoFullName: "acme/app", title: "Crash on save", body: "Steps" },
-      source: "manual",
-      idempotencyKey: "issue-publish:i1:acme/app",
-    })
+    expect(execute).toHaveBeenCalledWith(
+      GITHUB_DELIVERY_PLUGIN_ID,
+      {
+        integrationId: GITHUB_INTEGRATION_ID,
+        accountId: "acct-1",
+        actionId: "createIssue",
+        input: { repoFullName: "acme/app", title: "Crash on save", body: "Steps" },
+        source: "manual",
+        idempotencyKey: "issue-publish:i1:acme/app",
+      },
+      // A person confirmed it in the publish dialog (ADR-0239).
+      { kind: "person", surface: "issue-publish" }
+    )
     expect(approve).toHaveBeenCalledWith("j1")
   })
 

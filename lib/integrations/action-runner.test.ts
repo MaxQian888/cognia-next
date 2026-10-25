@@ -870,6 +870,27 @@ describe("Integration action runner", () => {
       expect(job.authorizedBy).toMatchObject({ policyRef: "bot-scope:boti_1" })
     })
 
+    it("lets a write a person confirmed by hand through, as theirs", async () => {
+      outboundSettings = enforceGithub
+      const handler = jest.fn(async () => ({ commented: true }))
+      const account = await setupGithub(handler)
+      const job = await executeIntegrationAction("github-delivery", comment(account.id, "k1"), {
+        kind: "person",
+        surface: "issue-writeback",
+      })
+      expect(job.outbound).toEqual({ ownerRef: "person:issue-writeback" })
+      expect(job.authorizedBy).toMatchObject({ authority: "human", grantScope: "once" })
+      expect(pushHeldIntegrationJob).not.toHaveBeenCalled()
+      // The dialog's own approval runs it.
+      await expect(approveIntegrationActionJob(job.id)).resolves.toMatchObject({
+        status: "succeeded",
+      })
+      expect((await receipts())[0]).toMatchObject({
+        request: { subject: { ref: "person:issue-writeback" }, plan: { outcome: "allow" } },
+        decision: { authority: "human", actor: { kind: "local-user" } },
+      })
+    })
+
     it("fences the recipients a person refused for the rest of the request", async () => {
       outboundSettings = enforceGithub
       const account = await setupGithub()

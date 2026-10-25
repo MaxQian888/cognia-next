@@ -1,7 +1,9 @@
 import type { AgentTeamDeliveryNode } from "@/types/agent/agent-team-runtime"
 import type { GitStackLayerState } from "@/types/git"
 import type { Stack } from "@/lib/stack/model"
+import { repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
 import {
+  approveAndMergeGithubStack,
   approveAndPublishGithubStack,
   assertPublishableStack,
   createGithubDeliveryAdapter,
@@ -495,7 +497,6 @@ describe("outbound authorization of the stack publish (ADR-0239 phase 2)", () =>
 
   it("fences the repositories after a person refuses, until a person approves", async () => {
     const { team, github, options } = await setup(STACKED_DELIVERY_DEFAULTS)
-    const { repositoryTarget } = await import("@/lib/policy/action-review/outbound-targets")
     await declineGithubStackPublish(team, "run-1", [repositoryTarget("acme/repo")!])
     expect(await getDb().agentTeamRuns.get("run-1")).toMatchObject({
       status: "needs_input",
@@ -522,5 +523,63 @@ describe("outbound authorization of the stack publish (ADR-0239 phase 2)", () =>
     expect((await receipts())[0]).toMatchObject({
       request: { plan: { outcome: "park", enforced: false } },
     })
+  })
+})
+
+describe("approveAndMergeGithubStack records the person's merge (ADR-0239 phase 2)", () => {
+  let disable: () => void
+
+  beforeEach(() => {
+    disable = __enableDbRuntimeForTesting()
+  })
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    disable()
+  })
+
+  it("files a human receipt naming every repository before GitHub is written", async () => {
+    const github = jest.fn(async () => {
+      throw new Error("offline")
+    })
+    const recordWrite = jest.fn(async () => {
+      expect(github).not.toHaveBeenCalled()
+    })
+    const team = {
+      id: "team-1",
+      name: "Team",
+      config: {
+        repositories: [
+          { id: "web", path: "/web" },
+          { id: "api", path: "/api" },
+        ],
+      },
+    } as AgentTeam
+    await approveAndMergeGithubStack(team, "graph-m", {
+      resolveTeamRepo: async (path) =>
+        path === "/web"
+          ? { fullName: "acme/web", host: { id: "github.com" } as never }
+          : { fullName: "acme/api", host: { id: "ghe.corp.io" } as never },
+      resolveOctokit: async () => ({ request: github }) as never,
+      recordWrite,
+    }).catch(() => undefined)
+    expect(recordWrite).toHaveBeenCalledWith({
+      targets: [repositoryTarget("acme/web"), repositoryTarget("ghe.corp.io/acme/api")],
+      operation: "github.mergeStack",
+      surface: "agent-team-operations",
+    })
+  })
+
+  it("records nothing when a repository cannot be resolved", async () => {
+    const recordWrite = jest.fn()
+    const team = { id: "t", name: "T", config: { workingDir: "/repo" } } as AgentTeam
+    await expect(
+      approveAndMergeGithubStack(team, "graph-x", {
+        resolveTeamRepo: async () => null,
+        resolveOctokit: async () => ({ request: jest.fn() }) as never,
+        recordWrite,
+      })
+    ).rejects.toThrow("has no GitHub remote")
+    expect(recordWrite).not.toHaveBeenCalled()
   })
 })

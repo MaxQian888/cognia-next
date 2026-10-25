@@ -58,6 +58,12 @@ import { pushHeldIntegrationJob, withdrawHeldIntegrationJob } from "./outbound-h
 export type IntegrationActionCaller =
   | { kind: "tool-call"; sessionId?: string }
   | { kind: "workflow"; workflowId: string; runId: string }
+  /**
+   * A person confirmed this exact write by hand (a writeback or publish
+   * dialog). Its human receipt is the write's authority; the outbound policy
+   * does not hold it.
+   */
+  | { kind: "person"; surface: string; sessionId?: string }
 
 /** Who answers a held job: only a person releases it (ADR-0239 phase 2). */
 export interface IntegrationJobAnswer {
@@ -446,7 +452,13 @@ export async function executeIntegrationAction(
           ? caller.workflowId && caller.runId
             ? { kind: "workflow", workflowId: caller.workflowId, runId: caller.runId }
             : { kind: "plugin", pluginId }
-          : { kind: "plugin", pluginId: callerPluginId })
+          : caller?.kind === "person"
+            ? {
+                kind: "person",
+                surface: caller.surface,
+                ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
+              }
+            : { kind: "plugin", pluginId: callerPluginId })
     planned = await planIntegrationWrite({
       targets,
       operation: `${input.integrationId}.${input.actionId}`,

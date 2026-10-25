@@ -1,3 +1,9 @@
+const recordWrite = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/policy/action-review/human-github-write", () => ({
+  recordHumanGithubWrite: (...args: unknown[]) => recordWrite(...args),
+}))
+
+import { repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
 import {
   publishReviewFeedback,
   retryableLegs,
@@ -94,6 +100,50 @@ describe("publishReviewFeedback", () => {
     expect(prB.repository).toBe("owner/b")
     expect(sliceB.comments.map((c: ReviewComment) => c.anchor.path)).toEqual(["y.ts"])
     expect(delivery.legs.map((l) => l.status)).toEqual(["succeeded", "succeeded"])
+  })
+
+  it("records the person's write for each repository before it sends (ADR-0239)", async () => {
+    recordWrite.mockClear()
+    const publish = jest.fn().mockResolvedValue(undefined)
+    await publishReviewFeedback({
+      provider: makeProvider(publish),
+      bundle: TWO_ROOTS,
+      targets: TARGETS,
+    })
+    expect(recordWrite.mock.calls.map(([write]) => write)).toEqual([
+      {
+        targets: [repositoryTarget("owner/a")],
+        operation: "github.reviewPr",
+        surface: "review-panel",
+      },
+      {
+        targets: [repositoryTarget("owner/b")],
+        operation: "github.reviewPr",
+        surface: "review-panel",
+      },
+    ])
+    expect(recordWrite.mock.invocationCallOrder[0]).toBeLessThan(
+      publish.mock.invocationCallOrder[0]!
+    )
+
+    // A leg carried forward on retry is not sent, so not recorded again.
+    recordWrite.mockClear()
+    const failedB = await publishReviewFeedback({
+      provider: makeProvider(
+        jest.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("boom"))
+      ),
+      bundle: TWO_ROOTS,
+      targets: TARGETS,
+    })
+    recordWrite.mockClear()
+    await publishReviewFeedback({
+      provider: makeProvider(jest.fn().mockResolvedValue(undefined)),
+      bundle: TWO_ROOTS,
+      targets: TARGETS,
+      previous: failedB,
+    })
+    expect(recordWrite).toHaveBeenCalledTimes(1)
+    expect(recordWrite.mock.calls[0]?.[0]).toMatchObject({ targets: [repositoryTarget("owner/b")] })
   })
 
   it("never throws a leg failure — the record of what succeeded is the point", async () => {

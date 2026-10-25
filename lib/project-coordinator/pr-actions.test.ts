@@ -3,6 +3,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 jest.mock("@/lib/git/commands", () => ({ gitPush: jest.fn(async () => undefined) }))
 
 import { gitPush } from "@/lib/git/commands"
+import { repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
 import type { ProjectPrWatch } from "./pr-watch"
 import { availablePrActions, createThreadPr, mergeThreadPr, pushThreadBranch } from "./pr-actions"
 
@@ -43,7 +44,17 @@ function watch(octokit?: unknown): ProjectPrWatch {
 describe("mergeThreadPr", () => {
   it("squash-merges through the stack adapter", async () => {
     const request = jest.fn(async () => ({ status: 200, data: { merged: true }, headers: {} }))
-    await mergeThreadPr(withPr, watch({ request }))
+    const record = jest.fn(async () => {
+      // A person's merge is on record before GitHub sees it.
+      expect(request).not.toHaveBeenCalled()
+    })
+    await mergeThreadPr({ ...withPr, id: "t" }, watch({ request }), record)
+    expect(record).toHaveBeenCalledWith({
+      targets: [repositoryTarget("o/n")],
+      operation: "github.mergePr",
+      surface: "thread-pr",
+      sessionId: "t",
+    })
     expect(request).toHaveBeenCalledWith("PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge", {
       owner: "o",
       repo: "n",
@@ -53,8 +64,15 @@ describe("mergeThreadPr", () => {
   })
 
   it("refuses without a PR or GitHub access", async () => {
-    await expect(mergeThreadPr({} as ChatSession, watch({}))).rejects.toThrow(/no pull request/)
-    await expect(mergeThreadPr(withPr, watch(undefined))).rejects.toThrow(/No GitHub access/)
+    const record = jest.fn()
+    await expect(mergeThreadPr({} as ChatSession, watch({}), record)).rejects.toThrow(
+      /no pull request/
+    )
+    await expect(mergeThreadPr(withPr, watch(undefined), record)).rejects.toThrow(
+      /No GitHub access/
+    )
+    // Nothing was written, so nothing is recorded.
+    expect(record).not.toHaveBeenCalled()
   })
 })
 
@@ -70,14 +88,24 @@ describe("createThreadPr", () => {
           }
     )
     const push = jest.fn(async () => undefined)
+    const record = jest.fn(async () => {
+      expect(push).not.toHaveBeenCalled()
+    })
     const pr = await createThreadPr(
       { id: "t", title: "Fix login", executionContext: withPr.executionContext },
       {
         watch: watch({ request }),
         push,
         resolveBase: async () => ({ fullName: "o/n", defaultBranch: "main" }),
+        record,
       }
     )
+    expect(record).toHaveBeenCalledWith({
+      targets: [repositoryTarget("o/n")],
+      operation: "github.openPr",
+      surface: "thread-pr",
+      sessionId: "t",
+    })
     expect(push).toHaveBeenCalledWith("/wt/x", "thread/x")
     expect(pr).toEqual({ number: 9, url: "https://github.com/o/n/pull/9", created: true })
     expect(request).toHaveBeenCalledWith(
@@ -87,11 +115,17 @@ describe("createThreadPr", () => {
   })
 
   it("refuses without a branch or a github.com repository", async () => {
-    const deps = { watch: watch({}), push: jest.fn(), resolveBase: async () => null }
+    const deps = {
+      watch: watch({}),
+      push: jest.fn(),
+      resolveBase: async () => null,
+      record: jest.fn(),
+    }
     await expect(createThreadPr({ id: "t", title: "x" }, deps)).rejects.toThrow(/no branch/)
     await expect(
       createThreadPr({ id: "t", title: "x", executionContext: withPr.executionContext }, deps)
     ).rejects.toThrow(/github.com/)
+    expect(deps.record).not.toHaveBeenCalled()
   })
 })
 

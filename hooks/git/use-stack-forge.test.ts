@@ -8,6 +8,8 @@ import { mergeStack } from "@/lib/stack/merge"
 import type { Stack } from "@/lib/stack/model"
 import type { GitStackPushOutcome } from "@/types/git"
 
+import { repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
+
 import { useStackForge, type UseStackForgeDeps } from "./use-stack-forge"
 
 const STACK: Stack = {
@@ -32,8 +34,9 @@ function deps(over: Partial<UseStackForgeDeps> = {}) {
   const injected = {
     open: jest.fn(async () => ready(adapter)),
     push: jest.fn(async () => PUSHED),
+    record: jest.fn(async () => undefined),
     ...over,
-  } as Partial<UseStackForgeDeps> & { open: jest.Mock; push: jest.Mock }
+  } as Partial<UseStackForgeDeps> & { open: jest.Mock; push: jest.Mock; record: jest.Mock }
   return { injected, adapter }
 }
 
@@ -58,6 +61,15 @@ describe("useStackForge", () => {
 
     expect(injected.push).toHaveBeenCalledWith("/repos/app", "origin", ["me/a", "me/b"])
     expect(outcome).toMatchObject({ kind: "published" })
+    // A person's publish is recorded as theirs, before anything is pushed (ADR-0239).
+    expect(injected.record).toHaveBeenCalledWith({
+      targets: [repositoryTarget("acme/app")],
+      operation: "github.publishStack",
+      surface: "stack-panel",
+    })
+    expect(injected.record.mock.invocationCallOrder[0]).toBeLessThan(
+      injected.push.mock.invocationCallOrder[0]!
+    )
     // Bottom first, each based on the one below: a pull request whose base does
     // not exist yet is rejected outright.
     const opened = [...adapter.pullRequests.values()]
@@ -142,6 +154,9 @@ describe("useStackForge", () => {
     })
     expect(outcome).toMatchObject({ kind: "merged", result: { status: "merged" } })
     expect(adapter.merged.map((entry) => entry.pullRequest)).toEqual([1, 2])
+    expect(injected.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: "github.mergeStack", surface: "stack-panel" })
+    )
   })
 
   it("says nothing on a pull request when nobody has connected a forge", async () => {
@@ -160,6 +175,7 @@ describe("useStackForge", () => {
     })
     expect(injected.open).not.toHaveBeenCalled()
     expect(adapter.comments).toEqual([])
+    expect(injected.record).not.toHaveBeenCalled()
   })
 
   it("leaves the restack note on each moved layer, naming the tip it kept", async () => {
@@ -179,6 +195,9 @@ describe("useStackForge", () => {
       ])
     })
     expect(adapter.comments).toHaveLength(1)
+    expect(injected.record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: "github.restackNote" })
+    )
     expect(adapter.comments[0]!.body).toContain("refs/cognia/stack-history/me/b/17")
     expect(adapter.comments[0]!.body).toContain("me/b")
   })

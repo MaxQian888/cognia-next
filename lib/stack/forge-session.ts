@@ -37,6 +37,8 @@ export type StackForge =
       repository: string
       /** The git remote the repository was resolved from — push here. */
       remote: string
+      /** The host the repository lives on (`github.com`), for its outbound record. */
+      host?: string
       adapter: ForgeStackAdapter
     }
   /** No remote, or none that names a host. */
@@ -126,6 +128,7 @@ export async function openStackForge(
     status: "ready",
     repository: parsed.fullName,
     remote: remote.name,
+    host: parsed.host.id,
     adapter: resolved.adapter(octokit),
   }
 }

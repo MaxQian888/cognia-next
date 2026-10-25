@@ -107,7 +107,8 @@ function CommittedBanner({
       const opened = await openResultPullRequest(
         brought,
         { title: session.title, body: t("pullRequestBody", { host: hostName }) },
-        provider
+        provider,
+        { sessionId: session.id }
       )
       setPullRequest(opened)
       void openExternal(opened.url)

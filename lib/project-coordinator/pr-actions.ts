@@ -5,6 +5,8 @@ import { publishTeammatePr, type PublishedPr } from "@/lib/ai/agent/team/pr-feed
 import { gitPush } from "@/lib/git/commands"
 import { getProjectPrWatch, type ProjectPrWatch } from "./pr-watch"
 import { createResolveTeamRepo } from "@/lib/ai/agent/team/pr-feedback/resolvers"
+import { recordHumanGithubWrite } from "@/lib/policy/action-review/human-github-write"
+import { repositoryOnHost, repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
 
 /**
  * The pull-request actions a person takes on a thread (ADR-0204). "Fix CI",
@@ -50,27 +52,40 @@ function requireOctokit(watch: ProjectPrWatch, repo: string): OctokitLike {
   return octokit
 }
 
-/** Squash-merge the thread's pull request. */
+/**
+ * Squash-merge the thread's pull request. A person's confirmed button, so it
+ * records a human receipt for the repository first (ADR-0239 phase 2).
+ */
 export async function mergeThreadPr(
-  thread: Pick<ChatSession, "projectThread">,
-  watch: ProjectPrWatch = getProjectPrWatch()
+  thread: Pick<ChatSession, "projectThread"> & { id?: string },
+  watch: ProjectPrWatch = getProjectPrWatch(),
+  record: typeof recordHumanGithubWrite = recordHumanGithubWrite
 ): Promise<void> {
   const pr = thread.projectThread?.prRef
   if (!pr?.number) throw new Error("This thread has no pull request to merge")
-  await createGithubStackAdapter({ octokit: requireOctokit(watch, pr.repo) }).merge(
-    pr.repo,
-    pr.number,
-    "squash"
-  )
+  const octokit = requireOctokit(watch, pr.repo)
+  await record({
+    targets: [repositoryTarget(pr.repo)],
+    operation: "github.mergePr",
+    surface: "thread-pr",
+    ...(thread.id ? { sessionId: thread.id } : {}),
+  })
+  await createGithubStackAdapter({ octokit }).merge(pr.repo, pr.number, "squash")
 }
 
-/** Push the thread's branch and open a pull request for it (idempotent). */
+/**
+ * Push the thread's branch and open a pull request for it (idempotent). A
+ * person's button, so it records a human receipt first (ADR-0239 phase 2).
+ */
 export async function createThreadPr(
   thread: Pick<ChatSession, "id" | "title" | "executionContext">,
   deps: {
     watch: ProjectPrWatch
     push: (worktreePath: string, branch: string) => Promise<void>
-    resolveBase: (workingDir: string) => Promise<{ fullName: string; defaultBranch: string } | null>
+    resolveBase: (
+      workingDir: string
+    ) => Promise<{ fullName: string; defaultBranch: string; host?: { id: string } } | null>
+    record?: typeof recordHumanGithubWrite
   } = {
     watch: getProjectPrWatch(),
     push: pushThreadBranch,
@@ -82,8 +97,15 @@ export async function createThreadPr(
   if (!branch || !worktreePath) throw new Error("This thread has no branch to publish")
   const repo = await deps.resolveBase(worktreePath)
   if (!repo) throw new Error("The thread's repository is not on github.com")
+  const octokit = requireOctokit(deps.watch, repo.fullName)
+  await (deps.record ?? recordHumanGithubWrite)({
+    targets: [repositoryOnHost(repo.fullName, repo.host?.id)],
+    operation: "github.openPr",
+    surface: "thread-pr",
+    sessionId: thread.id,
+  })
   return publishTeammatePr(
-    requireOctokit(deps.watch, repo.fullName),
+    octokit,
     { push: deps.push },
     {
       repo: repo.fullName,

@@ -1,6 +1,7 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ThreadHandoffTicket } from "@cognia/agent-config-types/thread-handoff"
 import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import { repositoryTarget } from "@/lib/policy/action-review/outbound-targets"
 import type { AppliedCodeResult, CodeResult, TransferChunk } from "@/lib/task-workspace/types"
 import type { PullRequestRef } from "@/types/review"
 
@@ -363,11 +364,25 @@ describe("pull requests for work that came back", () => {
 
   it("opens a draft from the pushed branch without pushing again", async () => {
     const forge = provider()
+    const record = jest.fn(async () => {
+      expect(forge.create).not.toHaveBeenCalled()
+    })
     const opened = await openResultPullRequest(
       { result: result(), applied: { ...applied, branch: "cognia/claude-code-444455556666-2" } },
       { title: "Fix login", body: "From the host" },
-      forge
+      forge,
+      {
+        sessionId: "s1",
+        resolveRepository: async () => ({ fullName: "acme/web", host: { id: "github.com" } }),
+        record,
+      }
     )
+    expect(record).toHaveBeenCalledWith({
+      targets: [repositoryTarget("acme/web")],
+      operation: "github.openPr",
+      surface: "handoff",
+      sessionId: "s1",
+    })
     expect(opened).toBe(pr)
     expect(forge.push).not.toHaveBeenCalled()
     expect(forge.create).toHaveBeenCalledWith({
@@ -383,11 +398,22 @@ describe("pull requests for work that came back", () => {
   it("pushes a bundle's local branch first, and reuses an open pull request", async () => {
     const forge = provider()
     forge.findForBranch.mockResolvedValueOnce(pr)
+    const record = jest.fn(async () => {
+      // On record before the push.
+      expect(forge.push).not.toHaveBeenCalled()
+    })
     const opened = await openResultPullRequest(
       { result: bundled, applied },
       { title: "t", body: "b" },
-      forge
+      forge,
+      { resolveRepository: async () => null, record }
     )
+    // A repository that cannot be named is still recorded, as unknown.
+    expect(record).toHaveBeenCalledWith({
+      targets: [undefined],
+      operation: "github.openPr",
+      surface: "handoff",
+    })
     expect(forge.push).toHaveBeenCalledWith(applied.path, applied.branch)
     expect(forge.findForBranch).toHaveBeenCalledWith(applied.path, applied.branch)
     expect(forge.create).not.toHaveBeenCalled()
@@ -395,12 +421,15 @@ describe("pull requests for work that came back", () => {
   })
 
   it("refuses work without a branch to propose", async () => {
+    const record = jest.fn()
     await expect(
       openResultPullRequest(
         { result: result({ kind: "tar" }), applied: { ...applied, branch: null } },
         { title: "t", body: "b" },
-        provider()
+        provider(),
+        { record }
       )
     ).rejects.toThrow("code_result_no_pull_request")
+    expect(record).not.toHaveBeenCalled()
   })
 })

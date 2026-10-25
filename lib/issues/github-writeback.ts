@@ -16,6 +16,10 @@
  * unless the caller passes `approval: "user-confirmed"`, which the UI only does
  * after the confirmation dialog has shown the user the exact payload. An
  * irreversible external write must never happen on a stray click.
+ *
+ * A confirmed write is also the person's under the outbound policy (ADR-0239
+ * phase 2): it reaches the broker as a `person` caller, which records a human
+ * receipt and is never held. An unconfirmed one is the plugin's, as before.
  */
 
 import {
@@ -146,14 +150,20 @@ export async function runGithubWriteback(
 
   let job: IntegrationActionJob
   try {
-    job = await execute(GITHUB_DELIVERY_PLUGIN_ID, {
-      integrationId: GITHUB_INTEGRATION_ID,
-      accountId: account.id,
-      actionId,
-      input: actionInput,
-      source: "manual",
-      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
-    })
+    job = await execute(
+      GITHUB_DELIVERY_PLUGIN_ID,
+      {
+        integrationId: GITHUB_INTEGRATION_ID,
+        accountId: account.id,
+        actionId,
+        input: actionInput,
+        source: "manual",
+        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      },
+      ...(input.approval === "user-confirmed"
+        ? [{ kind: "person" as const, surface: "issue-writeback" }]
+        : [])
+    )
   } catch (cause) {
     // The commonest cause by far is the plugin not being enabled, which reads
     // as an opaque "Integration is not registered" without this translation.
@@ -215,18 +225,23 @@ export async function createGithubIssue(
 
   let job: IntegrationActionJob
   try {
-    job = await execute(GITHUB_DELIVERY_PLUGIN_ID, {
-      integrationId: GITHUB_INTEGRATION_ID,
-      accountId: account.id,
-      actionId: "createIssue",
-      input: {
-        repoFullName: input.repoFullName,
-        title: input.title,
-        ...(input.body ? { body: input.body } : {}),
+    job = await execute(
+      GITHUB_DELIVERY_PLUGIN_ID,
+      {
+        integrationId: GITHUB_INTEGRATION_ID,
+        accountId: account.id,
+        actionId: "createIssue",
+        input: {
+          repoFullName: input.repoFullName,
+          title: input.title,
+          ...(input.body ? { body: input.body } : {}),
+        },
+        source: "manual",
+        idempotencyKey: input.idempotencyKey,
       },
-      source: "manual",
-      idempotencyKey: input.idempotencyKey,
-    })
+      // Only ever called after a person confirmed the issue in a dialog.
+      { kind: "person", surface: "issue-publish" }
+    )
   } catch (cause) {
     throw new GithubWritebackError(
       "plugin-unavailable",

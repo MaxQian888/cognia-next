@@ -23,8 +23,14 @@
  * requests are writes against one API's rate limit, and a failure part-way
  * through is easier to reason about when the remaining legs have not already
  * been fired.
+ *
+ * Publishing is a person's button (the review sheet), so each leg records a
+ * human receipt for its repository before it sends (ADR-0239 phase 2,
+ * `recordHumanGithubWrite`); the outbound policy never holds it.
  */
 
+import { recordHumanGithubWrite } from "@/lib/policy/action-review/human-github-write"
+import { repositoryOnHost } from "@/lib/policy/action-review/outbound-targets"
 import { PullRequestProviderError } from "./github-provider"
 import { anchoredRoots, sliceBundleByRoot } from "./bundle"
 import { normalizeReviewPath } from "./contracts"
@@ -52,6 +58,8 @@ export interface PublishReviewInput {
    */
   previous?: ReviewDelivery
   now?: number
+  /** Test seam: the person's write record. Default: {@link recordHumanGithubWrite}. */
+  recordWrite?: typeof recordHumanGithubWrite
 }
 
 function targetFor(
@@ -124,6 +132,11 @@ export async function publishReviewFeedback(input: PublishReviewInput): Promise<
       continue
     }
 
+    await (input.recordWrite ?? recordHumanGithubWrite)({
+      targets: [repositoryOnHost(pullRequest.repository, pullRequest.host)],
+      operation: "github.reviewPr",
+      surface: "review-panel",
+    })
     try {
       await input.provider.publishFeedback(pullRequest, slice)
       legs.push({ repositoryRoot: rootPath, status: "succeeded", commentCount, pullRequest })

@@ -65,7 +65,12 @@ describe("openStackForge", () => {
       "/repo",
       deps({ remotes: [remote("origin", "git@github.com:acme/app.git")] })
     )
-    expect(forge).toMatchObject({ status: "ready", repository: "acme/app", remote: "origin" })
+    expect(forge).toMatchObject({
+      status: "ready",
+      repository: "acme/app",
+      remote: "origin",
+      host: "github.com",
+    })
   })
 
   it("reports no remote when there is none", async () => {
@@ -101,7 +106,12 @@ describe("openStackForge", () => {
         hosts: [GITHUB_DOT_COM, ghe],
       })
     )
-    expect(forge).toMatchObject({ status: "ready", repository: "acme/app", remote: "origin" })
+    expect(forge).toMatchObject({
+      status: "ready",
+      repository: "acme/app",
+      remote: "origin",
+      host: "github.acme.com",
+    })
   })
 
   it("resolves the credential for the enterprise host the remote matched, not github.com", async () => {

@@ -9,6 +9,8 @@ import { stackedDeliveryOn } from "@/lib/stack/team-policy"
 import { baseBranches, type Stack } from "@/lib/stack/model"
 import { validateStack } from "@/lib/stack/validate"
 import type { GitStackLayerState } from "@/types/git"
+import type { HumanGithubWrite } from "@/lib/policy/action-review/human-github-write"
+import type { OutboundTarget } from "@/lib/policy/action-review/outbound-targets"
 
 export interface GithubDeliveryAdapterOptions {
   octokit: OctokitLike
@@ -187,6 +189,8 @@ export interface ApproveAndMergeGithubStackOptions {
   recordParent?: (repositoryRoot: string, branch: string, parent: string) => Promise<void>
   /** Ask git what is actually true about a chain of branches. */
   validateLayers?: (repositoryRoot: string, branches: string[]) => Promise<GitStackLayerState[]>
+  /** Record the person's merge as a human receipt (ADR-0239 phase 2). */
+  recordWrite?: (write: HumanGithubWrite) => Promise<void>
 }
 
 /**
@@ -254,7 +258,11 @@ export type ResolvedTeamRepoLike = {
   Pick<ResolvedTeamRepo, "host" | "defaultBranch" | "defaultBranchSource" | "defaultBranchExists">
 >
 
-/** Resolve real GitHub bindings, persist the single stack approval, then merge fail-stop. */
+/**
+ * Resolve real GitHub bindings, persist the single stack approval, then merge
+ * fail-stop. Only a person's click calls this, so the merge is recorded as
+ * theirs (a human receipt naming every repository) before anything is written.
+ */
 export async function approveAndMergeGithubStack(
   team: AgentTeam,
   graphId: string,
@@ -277,16 +285,23 @@ export async function approveAndMergeGithubStack(
       : team.config.workingDir
         ? [{ id: "primary", path: team.config.workingDir }]
         : []
+  const { repositoryOnHost } = await import("@/lib/policy/action-review/outbound-targets")
   const repositories: Record<string, string> = {}
+  const targets: (OutboundTarget | undefined)[] = []
   for (const binding of bindings) {
     const resolved = await resolveTeamRepo(binding.path)
     if (!resolved) throw new Error(`Repository ${binding.id} has no GitHub remote`)
     repositories[binding.id] = resolved.fullName
+    targets.push(repositoryOnHost(resolved.fullName, resolved.host?.id))
   }
   const first = Object.values(repositories)[0]
   if (!first) throw new Error("GitHub delivery requires a repository binding")
   const octokit = await resolveOctokit(first)
   if (!octokit) throw new Error("GitHub delivery credentials are unavailable")
+  const record =
+    options.recordWrite ??
+    (await import("@/lib/policy/action-review/human-github-write")).recordHumanGithubWrite
+  await record({ targets, operation: "github.mergeStack", surface: "agent-team-operations" })
   const { createDeliveryGraphService } = await import("./delivery-graph")
   const service = createDeliveryGraphService({
     adapter: createGithubDeliveryAdapter({ octokit, repositories }),

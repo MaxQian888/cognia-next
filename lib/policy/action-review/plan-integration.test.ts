@@ -592,6 +592,40 @@ describe("planIntegrationWrite", () => {
     })
   })
 
+  describe("person", () => {
+    it("lets a person's own write through under enforcement, recorded as theirs", async () => {
+      const githubGrants = jest.fn(async () => [])
+      const decision = await planIntegrationWrite(
+        write([REPO], { kind: "person", surface: "stack-panel" }),
+        deps(enforce, {}, { githubGrants })
+      )
+      expect(decision).toMatchObject({
+        action: "proceed",
+        outbound: { ownerRef: "person:stack-panel" },
+        authorizedBy: { authority: "human", grantScope: "once" },
+      })
+      expect(decision.receipt?.decision).toMatchObject({
+        outcome: "allow",
+        authority: "human",
+        actor: { kind: "local-user" },
+      })
+      // No list is consulted: the click is the authorization.
+      expect(githubGrants).not.toHaveBeenCalled()
+    })
+
+    it("files the receipt under the session the click belongs to", async () => {
+      const decision = await planIntegrationWrite(
+        write([REPO], { kind: "person", surface: "thread-pr", sessionId: "chat-1" }),
+        deps(enforce)
+      )
+      expect(decision).toMatchObject({
+        action: "proceed",
+        outbound: { rootSessionId: "root-1", instructionEpoch: "epoch-1" },
+      })
+      expect(decision.receipt?.request.origin).toMatchObject({ sessionId: "chat-1" })
+    })
+  })
+
   describe("modes", () => {
     const plugin = { kind: "plugin", pluginId: "p1" } as const
 

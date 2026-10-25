@@ -28,6 +28,8 @@ import {
   CODE_RESULT_HOST_OPERATIONS,
   supportsHostFeatureOperation,
 } from "@/lib/platform/host-feature-manifest"
+import type { HumanGithubWrite } from "@/lib/policy/action-review/human-github-write"
+import { repositoryOnHost } from "@/lib/policy/action-review/outbound-targets"
 import type {
   AppliedCodeResult,
   CodeResult,
@@ -312,15 +314,30 @@ export async function resultPullRequestAvailable(
   }
 }
 
+export interface ResultPullRequestDeps {
+  /** The conversation the work came back for, to file the receipt under. */
+  sessionId?: string
+  /** The GitHub repository a checkout pushes to. */
+  resolveRepository?: (
+    workingDir: string
+  ) => Promise<{ fullName: string; host?: { id: string } } | null>
+  record?: (write: HumanGithubWrite) => Promise<void>
+}
+
 /**
  * Open (or find) a draft pull request for work that came back. A pushed
  * result already has its branch on the remote; a bundle's local branch is
  * pushed first, with the user's own git credentials.
+ *
+ * The person asked for it, so it records a human receipt for the repository
+ * before the first write (ADR-0239 phase 2); a repository that cannot be
+ * named is recorded as an unknown GitHub repository.
  */
 export async function openResultPullRequest(
   brought: BringBackResult,
   text: { title: string; body: string },
-  provider: ResultPullRequestProvider
+  provider: ResultPullRequestProvider,
+  deps: ResultPullRequestDeps = {}
 ): Promise<PullRequestRef> {
   const { result, applied } = brought
   const baseRef = result.baseRef
@@ -328,6 +345,7 @@ export async function openResultPullRequest(
   if (result.kind === "tar" || !baseRef || !head || !applied.branch) {
     throw new Error("code_result_no_pull_request: this work has no branch to propose")
   }
+  await recordResultPullRequest(applied.path, deps)
   if (result.kind === "bundle") await provider.push(applied.path, applied.branch)
   const existing = await provider.findForBranch(applied.path, head)
   if (existing) return existing
@@ -340,6 +358,22 @@ export async function openResultPullRequest(
     draft: true,
   }
   return provider.create(input)
+}
+
+async function recordResultPullRequest(root: string, deps: ResultPullRequestDeps): Promise<void> {
+  const resolve =
+    deps.resolveRepository ??
+    (await import("@/lib/ai/agent/team/pr-feedback/resolvers")).createResolveTeamRepo()
+  const repository = await resolve(root).catch(() => null)
+  const record =
+    deps.record ??
+    (await import("@/lib/policy/action-review/human-github-write")).recordHumanGithubWrite
+  await record({
+    targets: [repository ? repositoryOnHost(repository.fullName, repository.host?.id) : undefined],
+    operation: "github.openPr",
+    surface: "handoff",
+    ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
+  })
 }
 
 export function defaultBringBackDeps(): BringBackDeps {

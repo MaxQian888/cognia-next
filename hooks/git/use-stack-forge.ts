@@ -26,6 +26,12 @@
  * {@link restackNoteBody} says so on each pull request. It is never the reason
  * a restack fails: the branches have already moved by the time it runs, and a
  * failed comment must not present itself as a failed restack.
+ *
+ * # A person's write
+ *
+ * Publish and land are a person's buttons, so the outbound policy never holds
+ * them (ADR-0239 phase 2); each records a human receipt for the repository
+ * before it writes (`recordHumanGithubWrite`).
  */
 
 import { useCallback, useRef, useState } from "react"
@@ -36,6 +42,8 @@ import { mergeStack, type MergeStackResult } from "@/lib/stack/merge"
 import { attachPullRequests } from "@/lib/stack/discover"
 import { publishStack, type PublishStackResult } from "@/lib/stack/publish"
 import { restackNoteBody, type RestackAnnouncement } from "@/lib/stack/restack"
+import { recordHumanGithubWrite } from "@/lib/policy/action-review/human-github-write"
+import { repositoryOnHost } from "@/lib/policy/action-review/outbound-targets"
 import type { GitStackPushOutcome } from "@/types/git"
 
 /** A forge that is anything other than usable. */
@@ -52,6 +60,7 @@ export interface UseStackForgeDeps {
   publish: typeof publishStack
   merge: typeof mergeStack
   attach: typeof attachPullRequests
+  record: typeof recordHumanGithubWrite
 }
 
 const DEFAULT_DEPS: UseStackForgeDeps = {
@@ -63,6 +72,7 @@ const DEFAULT_DEPS: UseStackForgeDeps = {
   publish: publishStack,
   merge: mergeStack,
   attach: attachPullRequests,
+  record: recordHumanGithubWrite,
 }
 
 export interface UseStackForgeResult {
@@ -159,6 +169,11 @@ export function useStackForge(
       setBusy(stack.id)
       try {
         const resolved: UseStackForgeDeps = { ...DEFAULT_DEPS, ...deps }
+        await resolved.record({
+          targets: [repositoryOnHost(opened.repository, opened.host)],
+          operation: "github.publishStack",
+          surface: "stack-panel",
+        })
         const pushed = await resolved.push(root, opened.remote, branchesOf(stack))
         const result = await resolved.publish({
           stack,
@@ -199,6 +214,11 @@ export function useStackForge(
               .map((layer) => [layer.branch, layer.pullRequest!])
           )
         )
+        await resolved.record({
+          targets: [repositoryOnHost(opened.repository, opened.host)],
+          operation: "github.mergeStack",
+          surface: "stack-panel",
+        })
         const result = await resolved.merge({
           stack: withPulls,
           repository: opened.repository,
@@ -219,7 +239,15 @@ export function useStackForge(
       if (current?.root !== root) return
       const opened = current.forge
       if (opened.status !== "ready") return
-      for (const update of updates) {
+      const notes = updates.filter((update) => pullRequests[update.branch])
+      if (notes.length === 0) return
+      // The person's restack is what leaves these notes.
+      await { ...DEFAULT_DEPS, ...deps }.record({
+        targets: [repositoryOnHost(opened.repository, opened.host)],
+        operation: "github.restackNote",
+        surface: "stack-panel",
+      })
+      for (const update of notes) {
         const pullRequest = pullRequests[update.branch]
         if (!pullRequest) continue
         // Per pull request, and only its own move: the note opens with "this
@@ -230,7 +258,7 @@ export function useStackForge(
           .catch(() => {})
       }
     },
-    [root, pullRequests]
+    [root, pullRequests, deps]
   )
 
   return { forge, busy, pullRequests, publish, merge, announce }

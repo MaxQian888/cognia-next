@@ -17,6 +17,7 @@
  * |               | origin, with the event's PR or issue as the origin thread            |
  * | `workflow`    | the engine, in the workflow run's origin                             |
  * | `job`         | a request a running job makes to the repository it was planned for   |
+ * | `person`      | a person confirmed the write by hand: proceeds, with a human receipt |
  * | `team-delivery` | a person's "approve and publish"; else the engine, in the request  |
  * |               | of the session that created the team, with its consented repositories |
  *
@@ -153,6 +154,14 @@ export type IntegrationAuthorization =
       outbound?: IntegrationActionOutbound
       covers: readonly OutboundTarget[]
     }
+  /**
+   * A person confirmed this exact write by hand: a dialog that showed the
+   * payload, or a button whose label says what it writes (ADR-0239 phase 2).
+   * Host-only, like every other claim here: a plugin cannot make it. `surface`
+   * names where they clicked (`issue-writeback`, `stack-panel`); it is the
+   * receipt's sender. Proceeds, with a human receipt.
+   */
+  | { kind: "person"; surface: string; sessionId?: string }
   /**
    * An Agent Team publishing its stacked pull requests (`prepareAndPublishGithubStack`).
    * `run`: the team's completed run, nobody watching; `person`: a person's
@@ -698,6 +707,32 @@ export async function planIntegrationWrite(
           ...(trigger ? { triggeredBy: trigger } : {}),
         }),
       })
+    }
+    case "person": {
+      const origin = auth.sessionId
+        ? await (deps.resolveSessionOrigin ?? sessionPlanOrigin)(auth.sessionId).catch(() => ({}))
+        : {}
+      const outbound = outboundOf(`person:${auth.surface}`, origin)
+      const receipt = receiptFor(env, {
+        outbound,
+        ...(auth.sessionId ? { sessionId: auth.sessionId } : {}),
+        plan: "allow",
+        outcome: "allow",
+        authority: "human",
+        grant: { scope: "once" },
+        actor: { kind: "local-user" },
+        reason: "a person confirmed this write by hand",
+      })
+      return {
+        action: "proceed",
+        outbound,
+        authorizedBy: {
+          receiptId: receipt.request.requestId,
+          authority: "human",
+          grantScope: "once",
+        },
+        receipt,
+      }
     }
     case "team-delivery": {
       const ownerRef = `agent-team:${auth.teamId}`
