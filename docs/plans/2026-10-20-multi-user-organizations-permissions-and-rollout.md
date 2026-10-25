@@ -551,7 +551,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - `lib/devices/section-plan.ts`: `MANAGED_HOST_SECTION_GRANT` (secrets `secret.manage`, updates and runtimes `host.admin`, system `performance.observe`). A section the device lacks the grant for leaves the plan and leads the not-applicable record with `devices.notApplicable.missingGrant.*`.
       - `lib/fleet/execution-workers.ts`: `executionWorkersReachable(host)`. The device rows poll skips the worker list, and the settings workers card says why (`settings.fleet.workers.notAdmin`) with enrolling disabled.
     - **Verified (2026-10-26, P6f rig, owner Ada's browser):** the page shows the four rows in the record. Over 50 s nothing is refused, where `fleet_worker_list` had been refused every 5 s.
-    - **Known gaps:** at page load, before the Host's manifest lands, each section and the worker list still ask once and are refused once.
+    - **Known gaps:** ~~at page load, before the Host's manifest lands, each section and the worker list still ask once and are refused once.~~ Fixed by item 17.
 
 15. **A conversation keeps its first-message title (P6 follow-up, 2026-10-26).**
     - **Decisions:**
@@ -580,6 +580,19 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - Smoke: with `COGNIA_SMOKE_PERSONS_MODEL_NAME` set, the member's manifest must name the persons model so, and name nothing it does not serve.
     - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):** the rig's deployment profile gave the model "DeepSeek V4.1 Flash" (`cognia-server profiles import`, profileVersion 3). The persons smoke is green with the new check. In Ada's browser the composer chip and the menu read "DeepSeek V4.1 Flash", with the id beneath in the menu.
     - **Known gaps:** a Host that projects its snapshot from app settings instead of the profile store names only models whose settings carry a name (`resolveModelDisplayName`). The welcome screen's usage stats still name the top model by id.
+
+17. **Grant-bound reads wait for the Host's manifest (P6 follow-up, 2026-10-26; item 14's gap).**
+    - **Decisions:**
+      - A paired client learns its device grants from the manifest it negotiates at boot. Until that lands, its grants are unknown, and "unknown" used to mean "ask": the device page's managed sections, the worker list, the Bot console read and the provider-key follower each sent their read at once and were refused (`missing_capability`, final) a moment before the manifest said the same.
+      - One rule, `hostGrantGate(snapshot, capability)` in `lib/runtime/operation-availability.ts`, answers `ask`, `wait` or `lacks`. A companion target with no manifest yet waits. Known grants that lack the capability skip the read. A manifest that names no grants, or an incompatible one, still asks, and the Host's answer decides. A native host or a standalone client has no manifest to wait for.
+      - A read that waits is retried when the answer changes, not on every snapshot change.
+    - **Surface:**
+      - `executionWorkersAccess(snapshot)` replaces `executionWorkersReachable(host)`. The device console's poll and the settings card ask nothing while waiting, and the card claims neither "no workers" nor "not an admin" then.
+      - The `/pair` Host's device row carries `pairedHostGrants` while it has no manifest of its own: `"pending"` before the boot provider has the manifest, then the snapshot's grants. Managed sections (secrets, updates, runtimes, system) are left out of both the grid and the not-applicable record while pending.
+      - `useBotHostRead` waits on the paired Host's manifest and reads a lacked `workspace.write` as the refusal the Host would answer.
+      - The provider-key follower (`lib/host-secrets/remote-host-keys-follower.ts`) waits for the manifest, keys nothing for a device without `secret.manage`, and no longer asks again on every return to the foreground.
+    - **Verified (2026-10-26, P6f rig, Ada's paired browser):** before the change a reload of the devices page drew `host_secret_list`, `fleet_worker_list` (twice) and `bot_console_read` refusals. After it, a 40 s window after a reload and a deep-linked reload of the Host's page show no refusal of those reads, and the Host's page states the four sections in "Does not apply here".
+    - **Known gaps:** `background_job_list` and `background_monitor_list` are still refused once at load (the member refused-requests work owns them). The Host's page asks `managed_desktop_list` and `managed_desktop_list_configs` and gets `managed_desktop_account_required` (400) on a Host with no managed-desktop account. A v1 manifest's grants are derived from the operations it advertises, so a v1 Host is judged by those.
 
 **Intentional dormancy (Rule 7).**
 

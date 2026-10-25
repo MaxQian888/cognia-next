@@ -1,5 +1,8 @@
-import { deviceLacksCapability } from "@/lib/devices/grant-capabilities"
-import type { HostRuntimeSnapshot } from "@/lib/runtime/operation-availability"
+import {
+  hostGrantGate,
+  type HostGrantGate,
+  type RuntimeSnapshot,
+} from "@/lib/runtime/operation-availability"
 import { isTauri, transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 
@@ -7,18 +10,18 @@ import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 export const EXECUTION_WORKERS_CAPABILITY = "host.admin"
 
 /**
- * Whether this client may ask its Host about execution workers at all.
+ * Whether this client may ask its Host about execution workers now.
  *
  * The desktop asks its own process. A paired client asks the Host, which
  * refuses a device without `host.admin` (`missing_capability`, final), and the
  * device console used to ask again every five seconds. So a client the Host
- * has said lacks the grant does not ask; one whose grants are unknown still
- * does, and the Host's answer decides.
+ * has said lacks the grant does not ask, and one still waiting for the Host's
+ * manifest waits instead of collecting the same refusal at page load. One
+ * whose grants are unknown still asks, and the Host's answer decides.
  */
-export function executionWorkersReachable(host: HostRuntimeSnapshot | null | undefined): boolean {
-  if (isTauri()) return true
-  if (!host?.compatible) return true
-  return !deviceLacksCapability(host.grants, EXECUTION_WORKERS_CAPABILITY)
+export function executionWorkersAccess(snapshot: RuntimeSnapshot): HostGrantGate {
+  if (isTauri()) return "ask"
+  return hostGrantGate(snapshot, EXECUTION_WORKERS_CAPABILITY)
 }
 
 export interface WorkerEnrollmentIssue {

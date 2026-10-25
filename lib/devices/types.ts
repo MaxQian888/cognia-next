@@ -308,6 +308,15 @@ export interface DeviceRow {
    * `/pair` Host has no remote-host store entry to read it from.
    */
   featureManifest?: HostFeatureManifest
+  /**
+   * The `/pair` Host's row only, and only while it has no manifest of its own:
+   * this device's grants there as the runtime snapshot knows them. The row
+   * reads its manifest on the console's poll, a moment after the boot provider
+   * has negotiated one; `"pending"` until either has, so a section that needs
+   * a grant waits instead of asking and being refused.
+   * See {@link pairedHostGrantsFrom}.
+   */
+  pairedHostGrants?: "pending" | readonly string[]
 
   adminState: DeviceAdminState
   /**

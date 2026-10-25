@@ -2,6 +2,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { createElement } from "react"
 import { renderToString } from "react-dom/server"
+import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
 import { useBotHostRead } from "./use-bot-host-read"
 let mockPairing = 0
 jest.mock("@/lib/tauri/transport-companion", () => ({
@@ -21,6 +25,7 @@ beforeEach(() => {
   mockProfile = "desktop"
   mockTarget = null
   mockCall.mockReset()
+  __resetRuntimeSnapshotForTesting()
 })
 it("does not read remotely on a local host", () => {
   const { result } = renderHook(() => useBotHostRead("catalog"))
@@ -252,4 +257,34 @@ it("stops asking once the Host refuses for good, and keeps retrying a transient 
   } finally {
     jest.useRealTimers()
   }
+})
+
+function pairTo(host?: { grants: string[] }) {
+  setRuntimeSnapshot({
+    target: { id: "host-1", kind: "companion", platform: "web", hostKind: "cloud" },
+    vaultState: "unlocked",
+    connectionState: "online",
+    ...(host ? { host: { compatible: true, operations: ["bot_console_read"], ...host } } : {}),
+  })
+}
+
+it("waits for the paired Host's manifest before reading its console", async () => {
+  mockProfile = "cloud-companion"
+  mockCall.mockResolvedValue({ entries: [] })
+  pairTo()
+  const { result } = renderHook(() => useBotHostRead("catalog"))
+  expect(result.current.loading).toBe(true)
+  expect(mockCall).not.toHaveBeenCalled()
+  act(() => pairTo({ grants: ["agent.run", "workspace.write"] }))
+  await waitFor(() => expect(result.current.data).toEqual({ entries: [] }))
+  expect(mockCall).toHaveBeenCalledTimes(1)
+})
+
+it("does not ask a Host that says this device may not read its console", () => {
+  mockProfile = "cloud-companion"
+  pairTo({ grants: ["agent.run", "client.read"] })
+  const { result } = renderHook(() => useBotHostRead("installations"))
+  expect(result.current).toMatchObject({ remote: true, loading: false, failed: true })
+  expect(result.current.data).toBeUndefined()
+  expect(mockCall).not.toHaveBeenCalled()
 })

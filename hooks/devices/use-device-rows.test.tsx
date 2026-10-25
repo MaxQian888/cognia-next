@@ -704,6 +704,27 @@ describe("browser Companion Host inventory", () => {
     expect(call.mock.calls).not.toEqual(expect.arrayContaining([["host_capabilities"]]))
   })
 
+  it("holds a connecting Host's grant-bound reads until its manifest lands", async () => {
+    tauri = false
+    const listed = jest.fn(async () => [])
+    listWorkersImpl = listed
+    runtimeSnapshot = { ...runtimeSnapshot, connectionState: "connecting" }
+    const { result, rerender } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    const host = () => result.current.rows.find((row) => row.kind === "remote-host")!
+    expect(host().pairedHostGrants).toBe("pending")
+    expect(listed).not.toHaveBeenCalled()
+
+    // The boot provider's manifest arrives before the row's own probe.
+    runtimeSnapshot = {
+      ...runtimeSnapshot,
+      host: { compatible: true, operations: [], grants: ["agent.run", "host.admin"] },
+    }
+    rerender()
+    await waitFor(() => expect(listed).toHaveBeenCalled())
+    expect(host().pairedHostGrants).toEqual(["agent.run", "host.admin"])
+  })
+
   it("does not fabricate a Host if its pairing record is unavailable", async () => {
     companionHost = null
     const { result } = renderHook(() => useDeviceRows())

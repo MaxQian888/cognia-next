@@ -1,4 +1,5 @@
 import type { HostFeatureLimits, PersonAgentsManifest } from "@/lib/platform/host-feature-manifest"
+import { deviceLacksCapability } from "@/lib/devices/grant-capabilities"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import type { RuntimeTarget } from "./runtime-target"
 
@@ -167,6 +168,29 @@ export function resolveOperationAvailability(
   }
 
   return { state: "available", reason: "local-host" }
+}
+
+/**
+ * What a paired client should do about a Host read that needs `capability`:
+ * `ask`, `wait` for the Host's manifest, or not ask because the Host `lacks`
+ * it for this device.
+ *
+ * A client paired to a Host learns its device grants from the manifest it
+ * negotiates at boot, and until that lands its grants are unknown. A surface
+ * that read "unknown" as "ask" sent its read at once and the Host refused it
+ * (`missing_capability`, final) a moment before the manifest said the same.
+ * So a companion target with no manifest yet waits. One whose manifest names
+ * no grants, or that is incompatible, still asks, and the Host's answer
+ * decides. A native host (no target) and a standalone client have no manifest
+ * to wait for, so without one they ask.
+ */
+export type HostGrantGate = "ask" | "wait" | "lacks"
+
+export function hostGrantGate(snapshot: RuntimeSnapshot, capability: string): HostGrantGate {
+  const host = snapshot.host
+  if (!host) return snapshot.target?.kind === "companion" ? "wait" : "ask"
+  if (!host.compatible) return "ask"
+  return deviceLacksCapability(host.grants, capability) ? "lacks" : "ask"
 }
 
 function isSafelyQueueable(

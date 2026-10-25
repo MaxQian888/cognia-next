@@ -18,7 +18,7 @@ import {
 } from "@/lib/ai/agent/team/workers/remote-worker-runtime"
 import {
   createWorkerEnrollment,
-  executionWorkersReachable,
+  executionWorkersAccess,
   listExecutionWorkers,
   revokeExecutionWorker,
   workerEnrollmentCommand,
@@ -37,8 +37,10 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
   const [busy, setBusy] = useState(false)
   const remoteDispatchEnabled = useAgentExecutionFlag("agentTeamRemoteDispatch")
   // Listing, enrolling and revoking workers all need `host.admin`; a device
-  // the Host says lacks it is told so once instead of refused on each action.
-  const reachable = executionWorkersReachable(useRuntimeSnapshot().host)
+  // the Host says lacks it is told so once instead of refused on each action,
+  // and one still waiting for the Host's manifest asks nothing yet.
+  const access = executionWorkersAccess(useRuntimeSnapshot())
+  const reachable = access === "ask"
 
   const refresh = useCallback(async () => {
     setDevices(await listExecutionWorkers())
@@ -135,11 +137,11 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
         <SettingsAlert variant="destructive">{t("dispatchUnavailable")}</SettingsAlert>
       ) : null}
 
-      {!reachable ? (
+      {access === "lacks" ? (
         <div data-testid="execution-workers-not-admin">
           <SettingsAlert>{t("notAdmin")}</SettingsAlert>
         </div>
-      ) : devices.length === 0 ? (
+      ) : access === "wait" ? null : devices.length === 0 ? (
         <SettingsEmptyState title={t("empty")} className="py-4" />
       ) : (
         <div className="space-y-2">

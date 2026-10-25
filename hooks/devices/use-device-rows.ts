@@ -32,6 +32,7 @@ import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 import { APP_VERSION } from "@/lib/app-version"
 import { buildDeviceRows, summarizeDeviceRows } from "@/lib/devices/build-device-rows"
+import { pairedHostGrantsFrom } from "@/lib/devices/section-plan"
 import type {
   DevicePresenceSummary,
   DeviceRow,
@@ -40,7 +41,7 @@ import type {
   WorkerInput,
 } from "@/lib/devices/types"
 import { devicePresence } from "@/lib/companion/device-presence-registry"
-import { executionWorkersReachable, listExecutionWorkers } from "@/lib/fleet/execution-workers"
+import { executionWorkersAccess, listExecutionWorkers } from "@/lib/fleet/execution-workers"
 import { listUsers } from "@/lib/db/identity"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { subscribeCompanionHostLabels } from "@/lib/companion/host-orchestration"
@@ -233,7 +234,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const runtimeAvailability = useSandboxRuntimeAvailability()
   const snapshot = useRuntimeSnapshot()
   const companionTargetId = snapshot.target?.kind === "companion" ? snapshot.target.id : null
-  const workersReachable = executionWorkersReachable(snapshot.host)
+  const workersReachable = executionWorkersAccess(snapshot) === "ask"
   const [companionHost, setCompanionHost] = useState<RemoteHostInput | null>(null)
   const refreshGeneration = useRef(0)
 
@@ -456,7 +457,14 @@ export function useDeviceRows(): UseDeviceRowsResult {
     return deviceRows.map((row) => {
       if (pairedHost && row.kind === "remote-host" && row.hostId === pairedHost.id) {
         // /pair owns this Host. Store-only connect/rename/remove actions cannot address it.
-        return { ...row, ref: `companion:${pairedHost.id}`, hostId: undefined }
+        return {
+          ...row,
+          ref: `companion:${pairedHost.id}`,
+          hostId: undefined,
+          // Until the poll reads this Host's manifest, the boot provider's
+          // copy says what this device may ask it.
+          ...(row.featureManifest ? {} : { pairedHostGrants: pairedHostGrantsFrom(snapshot.host) }),
+        }
       }
       if (companionTargetId && !activeHostId && row.isSelf) {
         return {
@@ -475,6 +483,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     companionHost,
     companionTargetId,
     snapshot.connectionState,
+    snapshot.host,
     hostDevices,
     hosts,
     sshHosts,

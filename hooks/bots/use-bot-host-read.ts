@@ -3,7 +3,10 @@
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { getCompanionConfigGeneration } from "@/lib/tauri/transport-companion"
 import { useHostProfile } from "@/hooks/use-host-profile"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { hostGrantGate } from "@/lib/runtime/operation-availability"
 import { transport } from "@/lib/tauri"
+import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import {
   getActiveRemoteTransport,
   subscribeActiveRemoteTransport,
@@ -13,6 +16,9 @@ function subscribePairing(listener: () => void) {
   window.addEventListener("cognia:companion-config-changed", listener)
   return () => window.removeEventListener("cognia:companion-config-changed", listener)
 }
+
+/** What `bot_console_read` needs (`protocol/companion-commands.json`). */
+const BOT_CONSOLE_READ_CAPABILITY = getCommandDescriptor("bot_console_read")?.capability
 
 /** Live host console reads; no mirrored configuration or credential store on the companion. */
 export function useBotHostRead<T>(view: "catalog" | "installations" | "credentials") {
@@ -24,6 +30,14 @@ export function useBotHostRead<T>(view: "catalog" | "installations" | "credentia
     () => null
   )
   const remote = Boolean(target) || profile === "mobile-companion" || profile === "cloud-companion"
+  // The paired Host's manifest says whether this device may read its console
+  // (an org member's device may not). Before it lands the read waits instead
+  // of being refused; a remote host this desktop drives answers for itself.
+  const snapshot = useRuntimeSnapshot()
+  const gate =
+    target || !BOT_CONSOLE_READ_CAPABILITY
+      ? "ask"
+      : hostGrantGate(snapshot, BOT_CONSOLE_READ_CAPABILITY)
   const [received, setReceived] = useState<{
     target: typeof target
     pairing: number
@@ -32,7 +46,7 @@ export function useBotHostRead<T>(view: "catalog" | "installations" | "credentia
     failed?: boolean
   }>()
   useEffect(() => {
-    if (!remote) return
+    if (!remote || gate !== "ask") return
     let stopped = false
     let refused = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -67,15 +81,18 @@ export function useBotHostRead<T>(view: "catalog" | "installations" | "credentia
       stopped = true
       if (timer) clearTimeout(timer)
     }
-  }, [remote, target, pairing, view])
+  }, [remote, gate, target, pairing, view])
   const current =
     received?.target === target && received.pairing === pairing && received.view === view
       ? received
       : undefined
+  // A console the Host has said this device may not read reads as the refusal
+  // it would have answered.
+  const lacks = gate === "lacks"
   return {
     remote,
-    data: remote ? current?.data : undefined,
-    loading: remote && !current,
-    failed: remote && Boolean(current?.failed),
+    data: remote && !lacks ? current?.data : undefined,
+    loading: remote && !lacks && !current,
+    failed: remote && (lacks || Boolean(current?.failed)),
   }
 }

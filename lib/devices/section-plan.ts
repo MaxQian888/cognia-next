@@ -22,6 +22,7 @@
  */
 
 import type { RemoteDesktopHostRef } from "@/lib/remote-desktop/types"
+import type { HostRuntimeSnapshot } from "@/lib/runtime/operation-availability"
 
 import { dispatchTargetRef } from "./build-device-rows"
 import { deviceLacksCapability } from "./grant-capabilities"
@@ -242,14 +243,44 @@ function servesPersonPartition(row: DeviceRow): boolean {
 }
 
 /**
+ * What the runtime snapshot says of this device's grants on the `/pair` Host,
+ * for its row while the row has no manifest of its own
+ * ({@link DeviceRow.pairedHostGrants}): `"pending"` before the boot provider
+ * has negotiated the manifest, the grants once it has, and nothing for a Host
+ * whose manifest was incompatible (unknown: the Host's refusal decides).
+ */
+export function pairedHostGrantsFrom(
+  host: HostRuntimeSnapshot | undefined
+): "pending" | readonly string[] | undefined {
+  if (!host) return "pending"
+  return host.compatible ? host.grants : undefined
+}
+
+/** The grants a managed section is judged against; undefined when unknown. */
+function declaredGrants(row: DeviceRow): readonly string[] | undefined {
+  const manifest = row.featureManifest
+  // Only a v2 manifest names the grants; a v1 one leaves them unknown.
+  if (manifest) return manifest.schemaVersion === 2 ? manifest.deviceGrants : undefined
+  const paired = row.pairedHostGrants
+  return paired === undefined || paired === "pending" ? undefined : paired
+}
+
+/**
+ * Whether this device's grants on the Host are still being read. A managed
+ * section waits rather than asking, since a device without the grant would be
+ * refused the moment before the manifest said so.
+ */
+function grantsPending(row: DeviceRow): boolean {
+  return !row.featureManifest && row.pairedHostGrants === "pending"
+}
+
+/**
  * Whether the Host told this device it lacks the grant a managed section
- * needs. Only a v2 manifest names the grants; anything else is unknown, and an
- * unknown device still sees the section (the Host's refusal stays the answer).
+ * needs. Unknown grants still see the section (the Host's refusal stays the
+ * answer).
  */
 function lacksManagedGrant(row: DeviceRow, id: ManagedHostSectionId): boolean {
-  const manifest = row.featureManifest
-  if (manifest?.schemaVersion !== 2) return false
-  return deviceLacksCapability(manifest.deviceGrants, MANAGED_HOST_SECTION_GRANT[id])
+  return deviceLacksCapability(declaredGrants(row), MANAGED_HOST_SECTION_GRANT[id])
 }
 
 export function canOwnTiming(row: DeviceRow): boolean {
@@ -273,7 +304,8 @@ function isApplicable(row: DeviceRow, id: DeviceSectionId): boolean {
     case "host-system":
       // Each needs its own device grant; a device the Host says lacks it is
       // told why in the shared record instead.
-      return Boolean(managementRefOf(row)) && !lacksManagedGrant(row, id)
+      // A device whose grants are still being read waits for them.
+      return Boolean(managementRefOf(row)) && !grantsPending(row) && !lacksManagedGrant(row, id)
     // An organization's model keys and agents live on a multi-tenant Host
     // (plan §9b, P6), which declares itself through the person brain that
     // serves this device's manifest.

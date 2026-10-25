@@ -1,7 +1,8 @@
+import type { HostRuntimeSnapshot, RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 import { isTauri, transport } from "@/lib/tauri"
 import {
   createWorkerEnrollment,
-  executionWorkersReachable,
+  executionWorkersAccess,
   listExecutionWorkers,
   revokeExecutionWorker,
   workerEnrollmentCommand,
@@ -68,21 +69,34 @@ describe("execution worker management", () => {
   })
 })
 
-describe("executionWorkersReachable", () => {
+describe("executionWorkersAccess", () => {
+  const paired = (host?: HostRuntimeSnapshot): RuntimeSnapshot => ({
+    target: { id: "host-1", kind: "companion", platform: "web", hostKind: "cloud" },
+    vaultState: "unlocked",
+    connectionState: "online",
+    ...(host ? { host } : {}),
+  })
   const host = (grants: string[]) => ({ compatible: true, operations: [], grants })
 
   it("asks unless the Host has said this device lacks host.admin", () => {
     tauri.mockReturnValue(false)
-    expect(executionWorkersReachable(host(["host.observe", "agent.run"]))).toBe(false)
-    expect(executionWorkersReachable(host(["host.observe", "host.admin"]))).toBe(true)
+    expect(executionWorkersAccess(paired(host(["host.observe", "agent.run"])))).toBe("lacks")
+    expect(executionWorkersAccess(paired(host(["host.observe", "host.admin"])))).toBe("ask")
     // Unknown grants still ask; the Host's refusal decides.
-    expect(executionWorkersReachable(host([]))).toBe(true)
-    expect(executionWorkersReachable(undefined)).toBe(true)
-    expect(executionWorkersReachable({ compatible: false, operations: [], grants: [] })).toBe(true)
+    expect(executionWorkersAccess(paired(host([])))).toBe("ask")
+    expect(executionWorkersAccess(paired({ compatible: false, operations: [], grants: [] }))).toBe(
+      "ask"
+    )
+  })
+
+  it("waits for the paired Host's manifest instead of asking at page load", () => {
+    tauri.mockReturnValue(false)
+    expect(executionWorkersAccess(paired())).toBe("wait")
   })
 
   it("always asks on the desktop, which answers from its own process", () => {
     tauri.mockReturnValue(true)
-    expect(executionWorkersReachable(host(["host.observe"]))).toBe(true)
+    expect(executionWorkersAccess(paired(host(["host.observe"])))).toBe("ask")
+    expect(executionWorkersAccess(paired())).toBe("ask")
   })
 })

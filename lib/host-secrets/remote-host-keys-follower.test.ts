@@ -11,6 +11,10 @@ import {
   refreshRemoteHostKeys,
 } from "./remote-host-keys-follower"
 import {
+  __resetRuntimeSnapshotForTesting,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
+import {
   remoteHostKeyedProviders,
   remoteHostKeysHostId,
   resetRemoteHostKeysForTests,
@@ -22,6 +26,7 @@ let mockActive: { accountId: string; targetId: string } | null = null
 
 afterEach(() => {
   resetRemoteHostKeysForTests()
+  __resetRuntimeSnapshotForTesting()
   mockConfig = null
   mockActive = null
 })
@@ -132,6 +137,66 @@ describe("followRemoteHostKeys", () => {
     refreshRemoteHostKeys()
     await settle()
     expect(listProviders).toHaveBeenCalledTimes(2)
+    follower.stop()
+  })
+
+  it("waits for the Host's manifest, then asks only a device it lets list secrets", async () => {
+    let gate: "ask" | "wait" | "lacks" = "wait"
+    const listProviders = jest.fn().mockResolvedValue(["deepseek"])
+    const { subscribe, fire } = controllable()
+    const follower = followRemoteHostKeys({
+      drivenHostId: () => "host-1",
+      listProviders,
+      access: () => gate,
+      subscribe,
+    })
+    await follower.ready
+    expect(listProviders).not.toHaveBeenCalled()
+
+    gate = "ask"
+    fire()
+    await settle()
+    expect([...remoteHostKeyedProviders()]).toEqual(["deepseek"])
+
+    // The Host now says this device lacks the grant: nothing asked, nothing keyed.
+    gate = "lacks"
+    fire()
+    await settle()
+    expect(listProviders).toHaveBeenCalledTimes(1)
+    expect(remoteHostKeyedProviders().size).toBe(0)
+    follower.stop()
+  })
+
+  it("reads once the paired Host's manifest lands, and not on every snapshot change", async () => {
+    const paired = {
+      target: {
+        id: "host-1",
+        kind: "companion" as const,
+        platform: "web" as const,
+        hostKind: "cloud" as const,
+      },
+      vaultState: "unlocked" as const,
+      connectionState: "connecting" as const,
+    }
+    setRuntimeSnapshot(paired)
+    const listProviders = jest.fn().mockResolvedValue(["deepseek"])
+    const follower = followRemoteHostKeys({ drivenHostId: () => "host-1", listProviders })
+    await follower.ready
+    expect(listProviders).not.toHaveBeenCalled()
+
+    setRuntimeSnapshot({
+      ...paired,
+      host: { compatible: true, operations: [], grants: ["host.observe", "secret.manage"] },
+    })
+    await settle()
+    expect(listProviders).toHaveBeenCalledTimes(1)
+    setRuntimeSnapshot({
+      ...paired,
+      connectionState: "online",
+      host: { compatible: true, operations: [], grants: ["host.observe", "secret.manage"] },
+    })
+    await settle()
+    expect(listProviders).toHaveBeenCalledTimes(1)
     follower.stop()
   })
 })

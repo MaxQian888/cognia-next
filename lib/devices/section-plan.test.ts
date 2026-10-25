@@ -4,6 +4,7 @@ import type { DeviceCapabilityCell, DeviceRow } from "./types"
 import {
   canOwnTiming,
   packHalfSections,
+  pairedHostGrantsFrom,
   planDeviceSections,
   type DevicePlannedSection,
   managementRefOf,
@@ -356,6 +357,51 @@ describe("planDeviceSections", () => {
     expect(planDeviceSections(unreachable).notApplicable.map((entry) => entry.id)).not.toContain(
       "host-secrets"
     )
+  })
+
+  it("waits for the paired Host's grants before planning a section that needs one", () => {
+    const host = row({ ref: "companion:org", kind: "remote-host", hostId: undefined })
+    const routed = { ...host, runtime: { ...host.runtime, isRoutingTarget: true } }
+    const managed = ["host-secrets", "host-updates", "host-runtimes", "host-system"]
+
+    // Still being read: neither a section that would ask nor a reason it cannot.
+    const pending = planDeviceSections({ ...routed, pairedHostGrants: "pending" })
+    for (const id of managed) expect(ids(pending.sections)).not.toContain(id)
+    expect(pending.notApplicable.map((entry) => entry.id)).not.toContain("host-secrets")
+
+    // The boot provider's copy stands in until the row reads its own manifest.
+    const member = planDeviceSections({
+      ...routed,
+      pairedHostGrants: ["agent.run", "host.observe", "performance.observe"],
+    })
+    expect(ids(member.sections)).toContain("host-system")
+    expect(ids(member.sections)).not.toContain("host-secrets")
+    expect(member.notApplicable.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(["host-secrets", "host-updates", "host-runtimes"])
+    )
+
+    // The row's own manifest wins over the snapshot's.
+    const own = planDeviceSections({
+      ...routed,
+      pairedHostGrants: "pending",
+      featureManifest: buildLocalHostFeatureManifest({
+        platform: "headless",
+        deviceGrants: ["host.observe", "secret.manage"],
+      }),
+    })
+    expect(ids(own.sections)).toContain("host-secrets")
+    expect(ids(own.sections)).not.toContain("host-updates")
+  })
+
+  it("reads the paired Host's grants off the runtime snapshot", () => {
+    expect(pairedHostGrantsFrom(undefined)).toBe("pending")
+    expect(
+      pairedHostGrantsFrom({ compatible: true, operations: [], grants: ["agent.run"] })
+    ).toEqual(["agent.run"])
+    // An incompatible Host leaves them unknown, so its refusal decides.
+    expect(
+      pairedHostGrantsFrom({ compatible: false, operations: [], grants: ["agent.run"] })
+    ).toBeUndefined()
   })
 
   it("manages the /pair Host this app is connected to over the app's own connection", () => {

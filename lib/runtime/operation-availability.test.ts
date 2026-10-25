@@ -1,5 +1,5 @@
 import type { RuntimeSnapshot } from "./operation-availability"
-import { resolveOperationAvailability } from "./operation-availability"
+import { hostGrantGate, resolveOperationAvailability } from "./operation-availability"
 import type { RuntimeTarget } from "./runtime-target"
 
 const standalone: RuntimeTarget = {
@@ -148,5 +148,40 @@ describe("resolveOperationAvailability", () => {
         command: "keyring_secret_get",
       })
     ).toEqual({ state: "unsupported", reason: "service-only" })
+  })
+})
+
+describe("hostGrantGate", () => {
+  const granted = { compatible: true, operations: [], grants: ["agent.run", "host.observe"] }
+
+  it("waits for a paired Host's manifest before asking", () => {
+    expect(hostGrantGate(snapshot({ host: undefined }), "host.admin")).toBe("wait")
+    expect(
+      hostGrantGate(snapshot({ host: undefined, connectionState: "connecting" }), "host.admin")
+    ).toBe("wait")
+  })
+
+  it("does not ask for what the manifest says this device lacks", () => {
+    expect(hostGrantGate(snapshot({ host: granted }), "host.admin")).toBe("lacks")
+    expect(hostGrantGate(snapshot({ host: granted }), "host.observe")).toBe("ask")
+  })
+
+  it("asks when the grants are unknown and the Host's answer decides", () => {
+    expect(
+      hostGrantGate(snapshot({ host: { compatible: true, operations: [], grants: [] } }), "x")
+    ).toBe("ask")
+    expect(
+      hostGrantGate(
+        snapshot({ host: { compatible: false, operations: [], grants: ["agent.run"] } }),
+        "host.admin"
+      )
+    ).toBe("ask")
+  })
+
+  it("has nothing to wait for off a companion target", () => {
+    expect(hostGrantGate(snapshot({ target: null, host: undefined }), "host.admin")).toBe("ask")
+    expect(hostGrantGate(snapshot({ target: standalone, host: undefined }), "host.admin")).toBe(
+      "ask"
+    )
   })
 })

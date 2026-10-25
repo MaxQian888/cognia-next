@@ -26,11 +26,11 @@ const api = {
   create: jest.fn(),
   list: jest.fn(),
   revoke: jest.fn(),
-  reachable: jest.fn(() => true),
+  access: jest.fn((): "ask" | "wait" | "lacks" => "ask"),
 }
 jest.mock("@/lib/fleet/execution-workers", () => ({
   createWorkerEnrollment: () => api.create(),
-  executionWorkersReachable: () => api.reachable(),
+  executionWorkersAccess: () => api.access(),
   listExecutionWorkers: () => api.list(),
   revokeExecutionWorker: (id: string) => api.revoke(id),
   workerEnrollmentCommand: () => "cognia-agent worker enroll --enrollment once",
@@ -56,15 +56,25 @@ describe("ExecutionWorkersCard", () => {
       },
     ])
     api.revoke.mockResolvedValue(undefined)
-    api.reachable.mockReturnValue(true)
+    api.access.mockReturnValue("ask")
   })
 
   it("says why a device without host.admin has no workers to manage, and asks nothing", async () => {
-    api.reachable.mockReturnValue(false)
+    api.access.mockReturnValue("lacks")
     render(<ExecutionWorkersCard hosts={[]} />)
     expect(await screen.findByTestId("execution-workers-not-admin")).toHaveTextContent("notAdmin")
     expect(api.list).not.toHaveBeenCalled()
     expect(screen.getByRole("button", { name: "enroll" })).toBeDisabled()
+    expect(screen.queryByText("empty")).not.toBeInTheDocument()
+  })
+
+  it("asks nothing and claims nothing while the Host's manifest is still on its way", async () => {
+    api.access.mockReturnValue("wait")
+    render(<ExecutionWorkersCard hosts={[]} />)
+    expect(await screen.findByRole("switch", { name: "remoteDispatchLabel" })).toBeInTheDocument()
+    expect(api.list).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "enroll" })).toBeDisabled()
+    expect(screen.queryByTestId("execution-workers-not-admin")).not.toBeInTheDocument()
     expect(screen.queryByText("empty")).not.toBeInTheDocument()
   })
 
