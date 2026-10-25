@@ -4,23 +4,23 @@
  * Outbound authorization (ADR-0239): one shadow/enforce switch per category,
  * and what enforcing each would change.
  *
- * Two categories have a switch: messaging (messages, mail, shares; phase 1)
- * and GitHub writes (phase 2a). Each starts in shadow mode, the default, where
- * the engine plans every outbound call and changes nothing; the card says so
- * ("observe only") and lists the sends or writes enforcement would have
- * drafted, parked, asked about or refused, by sender and recipient. Enforcing
- * one never enforces the other. Browser submissions get their switch when
- * they have a chokepoint (phase 2b); until then nothing reads their mode, so
- * the card shows none. Their global site list is already editable here
- * ({@link OutboundSiteList}), labeled as not yet in effect.
+ * Each category has a switch: messaging (messages, mail, shares; phase 1),
+ * GitHub writes (phase 2a) and browser submissions (phase 2b). Each starts in
+ * shadow mode, the default, where the engine plans every outbound call and
+ * changes nothing; the card says so ("observe only") and lists the sends,
+ * writes or submissions enforcement would have drafted, parked, asked about or
+ * refused, by sender and recipient. Enforcing one never enforces another. The
+ * browser's switch also says what its check cannot see, and the global site
+ * list ({@link OutboundSiteList}) sits below it.
  *
  * A recipient the device can name can be allowed in place, as the person's
  * own edit: a conversation or address into the sender's Bot list or the bot
  * account's list, a repository into the Bot's list for a Bot's own writes, else
  * into the list of the GitHub integration account the write went through. A
  * write that named no account (a `gh` command, a stack publish) offers each
- * account on the repository's host. A person's own writes (human receipts)
- * are never listed: the click was the authorization.
+ * account on the repository's host. A site goes into the Bot's list for a
+ * Bot's own runs, else into the global site list. A person's own writes
+ * (human receipts) are never listed: the click was the authorization.
  *
  * Turning enforcement on asks first and says how many observed sends of that
  * category it would change; turning it off does not. The settings and the
@@ -67,9 +67,9 @@ import type {
 } from "@/lib/policy/action-review/shadow-report"
 import { useSettingsStore } from "@/stores/settings"
 
-/** The categories with a switch. Browser submissions join in phase 2b. */
-type SwitchedCategory = Extract<OutboundCategory, "messaging" | "github">
-const SWITCHED_CATEGORIES: readonly SwitchedCategory[] = ["messaging", "github"]
+/** Every category has a switch, in this order. */
+type SwitchedCategory = OutboundCategory
+const SWITCHED_CATEGORIES: readonly SwitchedCategory[] = ["messaging", "github", "browser"]
 
 /** The order outcomes are listed in: most disruptive last. */
 const OUTCOME_ORDER: readonly ShadowHeldOutcome[] = ["ask", "draft", "park", "deny"]
@@ -88,7 +88,9 @@ function intoKey(into: ShadowAllowInto, fingerprint: string): string {
       ? into.installationId
       : into.kind === "adapter"
         ? into.adapterId
-        : into.accountId
+        : into.kind === "integration-account"
+          ? into.accountId
+          : ""
   return `${into.kind}:${id}:${fingerprint}`
 }
 
@@ -153,6 +155,8 @@ export function OutboundAuthorizationCard() {
         return t("sender.team", { name: names?.teamNames.get(sender.id) ?? sender.id })
       case "chat":
         return t("sender.chat")
+      case "bridge":
+        return t("sender.bridge", { id: sender.id })
       case "other":
         return t("sender.other", { id: sender.id })
     }
@@ -163,20 +167,30 @@ export function OutboundAuthorizationCard() {
       ? names.conversationTitles.get(row.target.recipient)
       : undefined) ?? outboundRecipientId(row.target)
 
-  const listName = (into: ShadowAllowInto, names: ShadowReportView): string =>
-    into.kind === "bot"
-      ? (botNames.get(into.installationId) ?? into.installationId)
-      : into.kind === "adapter"
-        ? (names.adapterNames.get(into.adapterId) ?? into.adapterId)
-        : (names.accountNames.get(into.accountId) ?? into.accountId)
+  const listName = (into: ShadowAllowInto, names: ShadowReportView): string => {
+    switch (into.kind) {
+      case "bot":
+        return botNames.get(into.installationId) ?? into.installationId
+      case "adapter":
+        return names.adapterNames.get(into.adapterId) ?? into.adapterId
+      case "integration-account":
+        return names.accountNames.get(into.accountId) ?? into.accountId
+      case "sites":
+        return t("sites.title")
+    }
+  }
 
   const listLabel = (into: ShadowAllowInto, names: ShadowReportView): string => {
-    const name = listName(into, names)
-    return into.kind === "bot"
-      ? t("intoBot", { name })
-      : into.kind === "adapter"
-        ? t("intoAdapter", { name })
-        : t("intoAccount", { name })
+    switch (into.kind) {
+      case "bot":
+        return t("intoBot", { name: listName(into, names) })
+      case "adapter":
+        return t("intoAdapter", { name: listName(into, names) })
+      case "integration-account":
+        return t("intoAccount", { name: listName(into, names) })
+      case "sites":
+        return t("intoSites")
+    }
   }
 
   const allow = async (row: ShadowRecipientRow, into: ShadowAllowInto, names: ShadowReportView) => {
@@ -297,6 +311,14 @@ export function OutboundAuthorizationCard() {
               {t("observeOnly")}
             </Badge>
           ) : null}
+          {category === "browser" ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="outbound-authorization-browser-limits"
+            >
+              {t("categories.browser.limits")}
+            </p>
+          ) : null}
         </div>
 
         {!remote ? (
@@ -342,11 +364,16 @@ export function OutboundAuthorizationCard() {
                                 count: bucket.recipients,
                                 sends: bucket.sends,
                               })
-                            : t("unrecognized", {
-                                count: bucket.recipients,
-                                sends: bucket.sends,
-                                account: view.adapterNames.get(bucket.channel) ?? bucket.channel,
-                              })}
+                            : category === "browser"
+                              ? t("unrecognizedSites", {
+                                  count: bucket.recipients,
+                                  sends: bucket.sends,
+                                })
+                              : t("unrecognized", {
+                                  count: bucket.recipients,
+                                  sends: bucket.sends,
+                                  account: view.adapterNames.get(bucket.channel) ?? bucket.channel,
+                                })}
                         </li>
                       ))}
                     </ul>

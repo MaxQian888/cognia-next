@@ -41,11 +41,12 @@ beforeEach(() => {
 })
 
 describe("OutboundSiteList", () => {
-  it("says the list is not yet in effect (dormant until the browser chokepoints land)", () => {
+  it("says what the list does, and starts empty", () => {
     render(<OutboundSiteList />)
-    expect(screen.getByTestId("outbound-site-list-dormant")).toHaveTextContent(
-      "Not yet in effect: browser submissions are not checked yet."
+    expect(screen.getByTestId("outbound-site-list")).toHaveTextContent(
+      "will go ahead without asking"
     )
+    expect(screen.queryByText(/Not yet in effect/)).not.toBeInTheDocument()
     expect(screen.getByTestId("outbound-site-list-editor-empty")).toBeInTheDocument()
   })
 

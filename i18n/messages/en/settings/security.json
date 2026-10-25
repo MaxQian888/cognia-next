@@ -64,7 +64,7 @@
   "title": "Security & Privacy",
   "outboundAuthorization": {
     "title": "Outbound authorization",
-    "description": "Who an unattended run may message, email or write to on GitHub without asking. Each kind starts in shadow mode, which only observes.",
+    "description": "Who an unattended run may message, email, write to on GitHub or submit to in the browser without asking. Each kind starts in shadow mode, which only observes.",
     "observeOnly": "Observe only",
     "remoteHost": "This device is driving a paired Host, where the runs and their records are. Change this setting on the Host.",
     "modeSaveFailed": "Could not save the setting",
@@ -80,7 +80,8 @@
       "plugin": "Plugin: {id}",
       "chat": "Chat turns",
       "other": "Other: {id}",
-      "team": "Agent Team: {name}"
+      "team": "Agent Team: {name}",
+      "bridge": "External Bridge client: {id}"
     },
     "kind": {
       "conversation": "Conversation",
@@ -135,16 +136,27 @@
         "reportEmpty": "Nothing would change: every observed GitHub write went to a repository someone allowed.",
         "confirmTitle": "Enforce outbound authorization for GitHub writes?",
         "confirmBehaviour": "Unattended writes to a repository nobody allowed will wait for approval instead of going out, writes from a chat to another repository will ask, and a person's refusal holds for the rest of that request. Messages and email keep their own setting."
+      },
+      "browser": {
+        "label": "Enforce for browser submissions",
+        "shadowHelp": "Off: every submission an agent's browser actions make (a form, a sign-up, a post) is checked and recorded, and none is changed. This is separate from messages, email and GitHub.",
+        "enforceHelp": "On: a submission to a site nobody listed asks the person at this computer, or waits for approval when nobody is watching; a site a person refused stays refused for that request. The action waits for the answer.",
+        "reportDescription": "Browser submissions observed in the last {days} days to a site nothing allowed. Allow the sites you meant before turning enforcement on.",
+        "reportEmpty": "Nothing would change: every observed browser submission went to a site someone allowed.",
+        "confirmTitle": "Enforce outbound authorization for browser submissions?",
+        "confirmBehaviour": "Submissions to a site nobody listed will ask or wait for approval instead of going out, and a person's refusal holds for the rest of that request. Messages, email and GitHub keep their own settings.",
+        "limits": "Not checked: data a page sends in its address (a search, a GET form), autosave while typing, and connections a page's background workers open. In the built-in preview and the extension browser, a click, a selection or Enter that might submit is checked before it runs."
       }
     },
     "intoAccount": "Adds to the {name} account's list",
+    "intoSites": "Adds to the site list",
     "chooseAccount": "The write named no account. Add to:",
     "allowNamedInto": "Allow {name} on {list}",
     "unrecognizedRepositories": "{count, plural, one {# repository} other {# repositories}} this device cannot name ({sends, plural, one {# write} other {# writes}}). Add them to a GitHub account's list in Integrations.",
+    "unrecognizedSites": "{count, plural, one {# site} other {# sites}} this device cannot name ({sends, plural, one {# submission} other {# submissions}}). Add them to the site list below.",
     "sites": {
       "title": "Sites browser submissions may reach",
-      "description": "An agent's browser submission (a form, a sign-up, a post) to one of these sites, from a chat, a scheduled task or a workflow, will go ahead without asking. A Bot's own list can hold sites for that Bot alone. A typed address is listed as its whole site.",
-      "dormant": "Not yet in effect: browser submissions are not checked yet. Sites listed now take effect when that check ships."
+      "description": "An agent's browser submission (a form, a sign-up, a post) to one of these sites, from a chat, a scheduled task or a workflow, will go ahead without asking. A Bot's own list can hold sites for that Bot alone. A typed address is listed as its whole site."
     }
   }
 }

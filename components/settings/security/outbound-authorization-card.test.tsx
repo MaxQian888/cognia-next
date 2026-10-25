@@ -6,6 +6,7 @@ import {
   conversationTarget,
   mailTarget,
   repositoryTarget,
+  siteTarget,
   toReviewTarget,
 } from "@/lib/policy/action-review/outbound-targets"
 import type { ShadowReportView } from "@/hooks/outbound/use-shadow-report"
@@ -14,6 +15,7 @@ const CHAT = conversationTarget("lark:bot-a:oc_1")!
 const MAIL = mailTarget("ops@example.com")!
 const WEB = repositoryTarget("acme/web")!
 const API = repositoryTarget("acme/api")!
+const FORMS = siteTarget("https://forms.example.com/apply")!
 const EMPTY = { groups: [], totals: {}, sends: 0 }
 
 let mockedSettings: Record<string, unknown> = {}
@@ -53,7 +55,7 @@ function reportView(): ShadowReportView {
     report: {
       messaging: messagingReport(),
       github: githubReport(),
-      browser: EMPTY,
+      browser: browserReport(),
     },
     adapterNames: new Map([["bot-a", "Team bot"]]),
     taskNames: new Map([["t1", "Morning digest"]]),
@@ -114,6 +116,31 @@ function githubReport(): ShadowReportView["report"]["github"] {
   }
 }
 
+function browserReport(): ShadowReportView["report"]["browser"] {
+  return {
+    groups: [
+      {
+        sender: { kind: "bridge", id: "client_9" },
+        rows: [
+          {
+            ...toReviewTarget(FORMS),
+            target: FORMS,
+            sends: 2,
+            lastAt: 30,
+            outcomes: { ask: 2 },
+            allowInto: { kind: "sites" },
+          },
+        ],
+        unrecognized: [{ channel: "browser", recipients: 2, sends: 3, lastAt: 29 }],
+        sends: 5,
+        lastAt: 30,
+      },
+    ],
+    totals: { ask: 5 },
+    sends: 5,
+  }
+}
+
 function messagingReport(): ShadowReportView["report"]["messaging"] {
   return {
     groups: [
@@ -164,6 +191,7 @@ function messagingReport(): ShadowReportView["report"]["messaging"] {
 
 const messaging = () => within(screen.getByTestId("outbound-authorization-messaging"))
 const github = () => within(screen.getByTestId("outbound-authorization-github"))
+const browser = () => within(screen.getByTestId("outbound-authorization-browser"))
 
 beforeEach(() => {
   mockedSettings = { agentPermissions: { subagentAsks: "surface" } }
@@ -265,6 +293,7 @@ describe("OutboundAuthorizationCard", () => {
     render(<OutboundAuthorizationCard />)
     expect(screen.getByTestId("outbound-shadow-report-empty-messaging")).toBeInTheDocument()
     expect(screen.getByTestId("outbound-shadow-report-empty-github")).toBeInTheDocument()
+    expect(screen.getByTestId("outbound-shadow-report-empty-browser")).toBeInTheDocument()
     fireEvent.click(messaging().getByRole("switch"))
     expect(await screen.findByText("No observed send would have been changed.")).toBeInTheDocument()
   })
@@ -276,20 +305,71 @@ describe("OutboundAuthorizationCard", () => {
     for (const toggle of screen.getAllByRole("switch")) expect(toggle).toBeDisabled()
     expect(screen.queryByTestId("outbound-shadow-report-messaging")).not.toBeInTheDocument()
     expect(screen.queryByTestId("outbound-shadow-report-github")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("outbound-shadow-report-browser")).not.toBeInTheDocument()
     expect(useShadowReport).toHaveBeenLastCalledWith(false)
     // The site list lives on the Host too, so it is read-only here as well.
     expect(screen.getByLabelText("https://example.com")).toBeDisabled()
   })
 
-  it("has a switch per category, and none for browser submissions yet", () => {
+  it("has a switch per category, each observing only until enforced", () => {
     render(<OutboundAuthorizationCard />)
-    expect(screen.getAllByRole("switch")).toHaveLength(2)
+    expect(screen.getAllByRole("switch")).toHaveLength(3)
     expect(screen.getByText("Enforce for messages and email")).toBeInTheDocument()
     expect(screen.getByText("Enforce for GitHub writes")).toBeInTheDocument()
-    expect(screen.queryByTestId("outbound-authorization-browser")).not.toBeInTheDocument()
-    // The browser's site list is editable already, labeled as not yet in effect.
-    expect(screen.getByTestId("outbound-site-list-dormant")).toBeInTheDocument()
+    expect(screen.getByText("Enforce for browser submissions")).toBeInTheDocument()
+    for (const category of ["messaging", "github", "browser"]) {
+      expect(
+        screen.getByTestId(`outbound-authorization-observe-only-${category}`)
+      ).toBeInTheDocument()
+    }
+    // The site list is in effect: nothing labels it otherwise.
+    expect(screen.queryByText(/Not yet in effect/)).not.toBeInTheDocument()
     expect(screen.getByLabelText("https://example.com")).toBeEnabled()
+  })
+
+  it("lists browser submissions by asker and site, and says what the check cannot see", () => {
+    render(<OutboundAuthorizationCard />)
+    expect(browser().getByText("External Bridge client: client_9")).toBeInTheDocument()
+    expect(browser().getByText("https://forms.example.com")).toBeInTheDocument()
+    expect(browser().getByText("Adds to the site list")).toBeInTheDocument()
+    expect(browser().getByTestId("outbound-shadow-unrecognized")).toHaveTextContent(
+      "2 sites this device cannot name (3 submissions). Add them to the site list below."
+    )
+    expect(browser().getByTestId("outbound-authorization-browser-limits")).toHaveTextContent(
+      "data a page sends in its address"
+    )
+    expect(messaging().queryByText("https://forms.example.com")).not.toBeInTheDocument()
+  })
+
+  it("allows a site into the global site list", async () => {
+    render(<OutboundAuthorizationCard />)
+    fireEvent.click(browser().getByRole("button", { name: "Allow https://forms.example.com" }))
+    await waitFor(() => expect(allowShadowRecipient).toHaveBeenCalledWith({ kind: "sites" }, FORMS))
+    expect(success).toHaveBeenCalledWith("https://forms.example.com added to the list")
+  })
+
+  it("asks before enforcing browser submissions, counting only those, and leaves the rest alone", async () => {
+    mockedSettings = {
+      agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } },
+    }
+    render(<OutboundAuthorizationCard />)
+    fireEvent.click(browser().getByRole("switch"))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(
+      within(dialog).getByText("Enforce outbound authorization for browser submissions?")
+    ).toBeInTheDocument()
+    expect(within(dialog).getByTestId("outbound-authorization-confirm-impact")).toHaveTextContent(
+      "5 observed sends would have been changed:"
+    )
+    expect(within(dialog).getByText("5 asked about")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByTestId("outbound-authorization-confirm"))
+    await waitFor(() =>
+      expect(saveMock).toHaveBeenCalledWith({
+        agentPermissions: {
+          outboundAuthorizationByCategory: { github: "enforce", browser: "enforce" },
+        },
+      })
+    )
   })
 
   it("lists GitHub writes in their own report, by sender and repository", () => {

@@ -18,7 +18,9 @@
  * for a repository, the list of the GitHub integration account the write went
  * through. A receipt names that account when the write had one; a `gh`
  * command or a stack publish has none, so the person picks among the accounts
- * on the repository's host (`allowChoices`). A row whose recipient a list now
+ * on the repository's host (`allowChoices`). A site goes on the sender's own
+ * list when the sender is a Bot with one, else on the global site list, which
+ * every browser submission's plan reads. A row whose recipient a list now
  * holds is dropped: enforcement would let it through.
  *
  * Each category (messaging, GitHub, the browser) has its own mode, so the
@@ -43,11 +45,14 @@ import {
 } from "./outbound-targets"
 
 export type ShadowSenderKind =
-  "bot" | "task" | "workflow" | "notification" | "plugin" | "team" | "chat" | "other"
+  "bot" | "task" | "workflow" | "notification" | "plugin" | "team" | "chat" | "bridge" | "other"
 
 export interface ShadowSender {
   kind: ShadowSenderKind
-  /** The installation, task, workflow, plugin, team or session id; the raw ref for `other`. */
+  /**
+   * The installation, task, workflow, plugin, team, session or External
+   * Bridge client id; the raw ref for `other`.
+   */
   id: string
 }
 
@@ -58,6 +63,8 @@ export type ShadowAllowInto =
   | { kind: "bot"; installationId: string }
   | { kind: "adapter"; adapterId: string }
   | { kind: "integration-account"; pluginId: string; accountId: string }
+  /** The global site list (`agentPermissions.outboundSites`). */
+  | { kind: "sites" }
 
 export interface ShadowRecipientRow {
   channel: string
@@ -122,6 +129,8 @@ export interface ShadowReportInput {
   adapterLists: ReadonlyMap<string, readonly OutboundRecipientGrant[]>
   /** Every GitHub integration account, keyed by account id. Absent: none. */
   githubAccounts?: ReadonlyMap<string, ShadowGithubAccount>
+  /** The global site list. Absent: empty. */
+  siteList?: readonly OutboundRecipientGrant[]
 }
 
 /** Who sent what a receipt reviewed: the run's root, else the delivery's owner. */
@@ -130,7 +139,11 @@ export function shadowSenderOf(receipt: ActionReviewReceipt): ShadowSender {
   const fromRoot = root ? prefixed(root) : undefined
   if (fromRoot && fromRoot.kind !== "other") return fromRoot
   const kind = receipt.request.subject.kind
-  if (kind === "connector-delivery" || kind === "integration-action") {
+  if (
+    kind === "connector-delivery" ||
+    kind === "integration-action" ||
+    kind === "browser-submission"
+  ) {
     const fromRef = prefixed(receipt.request.subject.ref)
     if (fromRef.kind !== "other") return fromRef
   }
@@ -160,6 +173,11 @@ function prefixed(ref: string): ShadowSender {
       return { kind: "plugin", id }
     case "agent-team":
       return { kind: "team", id }
+    // A browser submission's asker: the chat whose browser tools made it.
+    case "browser":
+      return { kind: "chat", id }
+    case "external-bridge":
+      return { kind: "bridge", id }
     default:
       return { kind: "other", id: ref }
   }
@@ -220,10 +238,14 @@ function allowIntoFor(
   if (
     sender.kind === "bot" &&
     input.botLists.has(sender.id) &&
-    (target.kind === "conversation" || target.kind === "mail" || target.kind === "repository")
+    (target.kind === "conversation" ||
+      target.kind === "mail" ||
+      target.kind === "repository" ||
+      target.kind === "site")
   ) {
     return { allowInto: { kind: "bot", installationId: sender.id } }
   }
+  if (target.kind === "site") return { allowInto: { kind: "sites" } }
   if (target.kind === "repository") {
     const accounts = input.githubAccounts ?? new Map<string, ShadowGithubAccount>()
     const named = accountId ? accounts.get(accountId) : undefined
@@ -266,6 +288,8 @@ function coveredNow(
       : [...accounts.values()].map((account) => account.list)
     return lists.some((list) => fingerprints(list).has(fingerprint))
   }
+  // Every submission's plan reads the global site list.
+  if (categoryOfChannel(channel) === "browser") return fingerprints(input.siteList).has(fingerprint)
   return fingerprints(input.adapterLists.get(channel)).has(fingerprint)
 }
 

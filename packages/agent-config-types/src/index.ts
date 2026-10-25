@@ -4794,9 +4794,10 @@ export interface AppSettings {
      * mode. Read only through `readOutboundAuthorizationMode(settings,
      * category)`, which treats any other value as `"shadow"`.
      *
-     * `browser` is dormant until its chokepoint lands (phase 2b): no path
-     * plans a browser submission yet, so the Security card offers no switch
-     * for it (pinned by `outbound-authorization-card.test.tsx`).
+     * `browser` covers what an agent's browser actions submit to a site
+     * (`lib/browser/submission-gate.ts`): in `"enforce"` a submission to a
+     * site nothing listed is asked about or parked, and one a person refused
+     * is held.
      */
     outboundAuthorizationByCategory?: {
       github?: "shadow" | "enforce"
@@ -4808,12 +4809,8 @@ export interface AppSettings {
      * a scheduled task, a workflow). Each entry is a `site` recipient
      * (`site:<origin>`, channel `browser`). Written only by the Settings →
      * Security card; read only through `readOutboundSiteGrants`, which drops
-     * any entry that is not a valid `site` grant.
-     *
-     * Intentionally dormant until the browser chokepoints land (phase 2b
-     * WP12): nothing plans a browser submission yet, so nothing reads it. The
-     * card labels the list "not yet in effect", pinned by
-     * `components/settings/security/outbound-site-list.test.tsx`.
+     * any entry that is not a valid `site` grant. Every browser submission's
+     * plan reads it (`planBrowserSubmission`, through `configuredSiteGrants`).
      */
     outboundSites?: import("./action-review").OutboundRecipientGrant[]
   }

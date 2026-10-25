@@ -41,7 +41,7 @@
   "remove": "Remove {name}",
   "saveFailed": "Could not save the recipient list: {reason}",
   "saved": "Recipient list saved",
-  "siteNotYetChecked": "Sites take effect once browser submissions are checked (coming in a later update). Until then a site listed here changes nothing.",
+  "siteNote": "A listed site takes this Bot's browser submissions (a form, a post) with nobody asking. Data a page sends in its address is not checked.",
   "siteOrigin": "Adds {origin}, every page of that site.",
   "via": "via {account}"
 }

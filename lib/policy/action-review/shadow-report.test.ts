@@ -10,6 +10,7 @@ import {
   outboundFingerprint,
   personTarget,
   repositoryTarget,
+  siteTarget,
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
@@ -24,7 +25,7 @@ const STRANGER = conversationTarget("lark:bot-a:oc_unknown")!
 function receipt(
   over: {
     root?: string
-    kind?: "tool-call" | "connector-delivery" | "integration-action"
+    kind?: "tool-call" | "connector-delivery" | "integration-action" | "browser-submission"
     ref?: string
     targets?: OutboundTarget[]
     outcome?: ActionReviewPlanOutcome
@@ -332,5 +333,87 @@ describe("buildShadowReport for GitHub writes (ADR-0239 phase 2)", () => {
       receipts: [write({ ref: "person:stack-panel", targets: [WEB], outcome: "allow" })],
     })
     expect(report.github.sends).toBe(0)
+  })
+})
+
+describe("buildShadowReport for browser submissions (ADR-0239 phase 2b)", () => {
+  const FORMS = siteTarget("https://forms.example.com/apply")!
+  const SHOP = siteTarget("https://shop.example.com")!
+  const UNNAMED = siteTarget("https://elsewhere.example.org")!
+  const base = {
+    candidates: [CHAT, FORMS, SHOP],
+    botLists: new Map<string, OutboundRecipientGrant[]>([["boti_1", []]]),
+    adapterLists: new Map([["bot-a", []]]),
+  }
+  const submission = (over: Parameters<typeof receipt>[0]) =>
+    receipt({ kind: "browser-submission", outcome: "ask", ...over })
+
+  it("names who asked: the chat, a workflow, a bridge client, a plugin, a run's root", () => {
+    const report = buildShadowReport({
+      ...base,
+      receipts: [
+        submission({ ref: "browser:chat-1", targets: [FORMS], at: 5 }),
+        submission({ ref: "workflow:wf_1", targets: [FORMS], outcome: "park", at: 4 }),
+        submission({ ref: "external-bridge:client_9", targets: [FORMS], at: 3 }),
+        submission({ ref: "plugin:acme-scraper", targets: [FORMS], outcome: "park", at: 2 }),
+        // A scheduled task's turn: its root names the task.
+        submission({ root: "task:t1", ref: "browser:run-7", targets: [SHOP], outcome: "park" }),
+      ],
+    })
+    expect(report.browser.sends).toBe(5)
+    expect(report.messaging.sends).toBe(0)
+    expect(report.browser.groups.map((group) => group.sender)).toEqual([
+      { kind: "chat", id: "chat-1" },
+      { kind: "workflow", id: "wf_1" },
+      { kind: "bridge", id: "client_9" },
+      { kind: "plugin", id: "acme-scraper" },
+      { kind: "task", id: "t1" },
+    ])
+  })
+
+  it("allows a site into the global site list, or a Bot's own list for its runs", () => {
+    const report = buildShadowReport({
+      ...base,
+      receipts: [
+        submission({ ref: "browser:chat-1", targets: [FORMS], at: 2 }),
+        submission({ root: "bot:boti_1", ref: "browser:run-1", targets: [SHOP], outcome: "park" }),
+      ],
+    })
+    const into = Object.fromEntries(
+      report.browser.groups.map((group) => [group.sender.kind, group.rows[0].allowInto])
+    )
+    expect(into).toEqual({
+      chat: { kind: "sites" },
+      bot: { kind: "bot", installationId: "boti_1" },
+    })
+  })
+
+  it("drops a site the global list or the Bot's list now holds", () => {
+    const report = buildShadowReport({
+      ...base,
+      botLists: new Map([["boti_1", [grant(SHOP)]]]),
+      siteList: [grant(FORMS)],
+      receipts: [
+        submission({ ref: "browser:chat-1", targets: [FORMS] }),
+        submission({ root: "bot:boti_1", ref: "browser:run-1", targets: [SHOP] }),
+        // The Bot's list is the Bot's alone: a chat's submission to it is still held.
+        submission({ ref: "browser:chat-1", targets: [SHOP] }),
+      ],
+    })
+    expect(report.browser.sends).toBe(1)
+    expect(report.browser.groups[0].rows.map((row) => row.target.recipient)).toEqual([
+      SHOP.recipient,
+    ])
+  })
+
+  it("counts a site this device cannot name, without a way to allow it", () => {
+    const report = buildShadowReport({
+      ...base,
+      receipts: [submission({ ref: "browser:chat-1", targets: [UNNAMED] })],
+    })
+    expect(report.browser.groups[0].rows).toEqual([])
+    expect(report.browser.groups[0].unrecognized).toEqual([
+      { channel: "browser", recipients: 1, sends: 1, lastAt: 1 },
+    ])
   })
 })

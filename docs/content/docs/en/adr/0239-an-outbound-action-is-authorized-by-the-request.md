@@ -5,7 +5,7 @@ description: "Agents can send to third parties through about ten paths, each wit
 
 # ADR 0239 — An outbound action is authorized by the request, not by the tool
 
-**Status:** Accepted (phase 1 and phase 2a implemented, each in shadow mode by default. Phase 2b decided, not yet built)
+**Status:** Accepted (phases 1, 2a and 2b implemented, each in shadow mode by default)
 **Date:** 2026-10-24
 **Related:** [ADR-0070](./0070-risk-ceremony-policy-layer) (risk → ceremony; the origin-thread precedent), [ADR-0169](./0169-one-runtime-one-review-one-control-machine) (one review contract), [ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched) (per-run capability grants), [ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings) (unattended runs on a Host)
 **Corrects:** the Action Review contract header, which cites ADR-0102 (an observability decision) and a policy engine that was never built
@@ -203,7 +203,7 @@ Phase 2a, GitHub writes, shipped in ten work packages (plan: `docs/plans/2026-10
 - **A team's stacked delivery needs a person's consent.** Team configuration is not written only by people: plugins with `team:write`, the Agent SDK and automatic orchestration write it too. Turning stacked delivery on in the settings card records `githubDeliveryPolicy.consent` with the repositories bound at that moment, and only those are granted. Every other writer keeps the stored consent at most, and drops it when delivery is turned off.
 - **A person's click is recorded, never planned.** The `person` authorization proceeds with a `human` receipt. Without it, a confirmed issue write-back would have been planned as a plugin write and held under enforcement.
 - **A receipt names the integration account by id**, in `subject.input.integrationAccount`, so the shadow report can offer the list that would have let the write through. A write with no account (`gh`, a stack publish) offers the accounts on the repository's host.
-- **No browser switch yet.** Nothing plans a browser submission before phase 2b, so the card shows no switch for it; `outboundAuthorizationByCategory.browser` says so, and a card test pins it.
+- **No browser switch in 2a.** Nothing planned a browser submission before phase 2b, so the card showed no switch for it until 2b added one.
 - **The shadow report boots the plugin runtime.** Which accounts are GitHub accounts comes from the integration registry, which a plugin fills when it loads, and Settings does not start the plugin runtime on its own.
 
 ### Known gaps
@@ -212,6 +212,37 @@ Phase 2a, GitHub writes, shipped in ten work packages (plan: `docs/plans/2026-10
 - Issue sync and the Issue Loop adapter call the broker without a caller, so their writes are planned as plugin writes and wait under enforcement unless an account's list holds the repository.
 - The GitHub MCP server's tools stay on the ordinary ladder, as decided.
 - Enforcement of GitHub writes has unit and integration coverage but no run on a real desktop and phone yet (a Comment Bot answering the PR it was mentioned on, an unattended write to an unlisted repository approved on the phone, a cross-repository `gh` command in chat).
+
+## Implementation (phase 2b)
+
+Phase 2b, browser submissions, shipped in four work packages after a spike (plan: `docs/plans/2026-10-25-adr-0239-phase-2.md`; spike: `docs/research/2026-10-25-browser-submit-signal.md`). It has its own switch and starts in **shadow mode**: every submission is planned and recorded, and none changes, until a person turns it on in Settings → Security (`agentPermissions.outboundAuthorizationByCategory.browser: "enforce"`).
+
+### Where it lives
+
+- **Signal (spike)**: on local and remote Chromium a `context.route` holds every non-GET request a page sends, and `routeWebSocket` holds WebSocket frames. The embedded webview and the extension engine have no reliable signal: an injected script misses workers, `<a ping>` and cross-origin frames, and only `chrome.debugger` would hold requests in the extension, which ADR-0228 §6 rules out.
+- **Runtime hold**: `services/workspace-runtime/src/submission-guard.mjs` (modes `off` / `observe` / `hold`, the action window plus a 3 s grace period) and the ops `browser.submission.configure/drain/resolve`. The runtime never waits for a person: the host drains the held submissions while the action runs and answers each. A refused navigation is fulfilled with `204`, so the page stays as it was; other requests are aborted. Local sessions route their whole context, so service-worker traffic is held too. A session driving the person's own Chrome routes per page, and the drain reports a page a service worker controls as `unguarded`.
+- **Remote path**: companion commands `browser_submission_configure` / `_drain` / `_resolve` (configure and resolve are interactive writes, drain a read). The gateway takes no agent lease for them, so the host can still answer while a person has taken over the page.
+- **Planner**: `lib/policy/action-review/plan-browser.ts` (`planBrowserSubmission`). The recipient is the request's origin, a WebSocket counting as its http(s) site; a page with no site is an unknown target. The global site list (`configuredSiteGrants`, policy ref `browser-sites`) and the asker's own lists (a running Bot's, a handler Bot's) allow it. A site a person refused within the request is refused; anything else asks. Receipts are `browser-submission` subjects on their own append-only channel, naming the asker (`browser:<session>`, `workflow:<id>`, `external-bridge:<client>`, `plugin:<id>`).
+- **Chokepoint**: `lib/browser/submission-gate.ts` (`gateBrowserEngine`) wraps every engine `createBrowserAPI` hands out and the workflow browser node's engine (`resolveRunBrowserEngine`). On Chromium engines one drainer per page decides each site once per window; the action returns only after the questions it raised are answered, a refused site comes back as `outbound_refused`, and an allowed navigation waits for the page to load. On engines with no signal, and on `unguarded` pages, a click, double click, selection, drag or Enter / Space (with any modifier) on the page's site is planned before it runs. Typing, filling, hovering, focusing and scrolling are not.
+- **Who is asked**: `lib/browser/submission-ask.ts`. A captured turn (`captured-turns.ts`, registered by `run-and-capture`) asks through its own responder, an IM card or a parked approval, with its wall clock held. A desktop chat or an External Bridge client asks on `components/outbound/outbound-ask-dialog.tsx` (allow once, allow for this request, refuse). Anything else, or an attended ask with no dialog mounted (a headless Host), parks for the cockpit and the phone. An ask ends after 9 minutes, the dialog after 5, and the fourteen submitting tools declare a 10-minute budget (`BROWSER_SUBMITTING_TOOL_TIMEOUT_MS`).
+- **Lists, switch and report**: the global site list (`agentPermissions.outboundSites`, `components/settings/security/outbound-site-list.tsx`) and a Bot's list can hold sites. The Security card has a browser switch that says what the check cannot see. `shadow-report.ts` lists site rows, which can be allowed into the Bot's list for a Bot's own runs or into the global site list. Sites are named from the built-in browser's history, the origins passwords are saved for, the profiles' domain grants and the lists.
+
+### Decisions made while implementing
+
+- **The runtime does not wait for a person; the host does.** The control channel has a 180 s ceiling, and a person may take minutes. The runtime holds the request, and the host drains and answers it while the action is still running.
+- **The browser tools wait for an answer.** A timeout refuses only that submission and fences nothing. A refusal fences the site for the rest of the request.
+- **An External Bridge client has no request to attach a grant to**, so it can only allow once or refuse.
+- **Service workers stay enabled.** A context route sees their traffic; blocking them would break sites.
+- **No injected interception, no `debugger` permission.** Injection is not reliable enough to count as a signal, and the extension stays within ADR-0228 §6.
+
+### Known gaps
+
+- Data a page sends in a GET (a search, a GET form, a tracking pixel) is never held, on any engine.
+- WebSockets a dedicated worker opens are invisible to `routeWebSocket` at both page and context level.
+- Autosave while typing is not a submission on the no-signal engines, and a submission page script sends on its own there is missed.
+- On a page a service worker controls in the person's own Chrome, the submission is decided before the action, not held.
+- An ask cannot outlast 9 minutes.
+- Enforcement of browser submissions has unit, jsdom and real-Chromium runtime coverage but no run on a real desktop yet (a held form submission on each reliable engine, approved).
 
 ## Consequences
 
@@ -222,6 +253,7 @@ Phase 2a, GitHub writes, shipped in ten work packages (plan: `docs/plans/2026-10
 - Every outbound decision has a receipt that names the authority, the grant and the instruction it served.
 - The Dexie schema version is bumped once for the new index.
 - **Phase 2a behaviour change**: a `gh` command that writes to GitHub asks in chat (it was treated as safe), and auto mode no longer approves one by itself. Once GitHub writes are enforced, an unattended write to a repository nobody allowed waits for approval, a Squad stack publish waits for "approve and publish", and `gh` writes ask even under bypass.
+- **Phase 2b behaviour change**: the fourteen browser action tools may take up to 10 minutes. Once browser submissions are enforced, a submission to a site nobody listed asks the person at this computer or waits for approval, and the action waits for the answer.
 
 ## Rejected alternatives
 
@@ -241,7 +273,7 @@ Phase 2a, GitHub writes, shipped in ten work packages (plan: `docs/plans/2026-10
 - A timeout does not fence: the next attempt asks again.
 - Every outcome above writes a receipt with authority, grant scope and epoch, and every connector job carries `authorizedBy`.
 - The digest turn's approval parks and is pushed instead of going unanswered.
-- Phase 2: a Bot mentioned on a PR answers on that PR without asking, and the same run writing to another repository waits for approval under enforcement. Automation a person configured for a repository keeps working after enforcement is turned on. `gh pr create -R other/repo` in chat asks and names the repository, and under GitHub enforcement also under bypass. In shadow mode no GitHub or browser result changes.
+- Phase 2: a Bot mentioned on a PR answers on that PR without asking, and the same run writing to another repository waits for approval under enforcement. Automation a person configured for a repository keeps working after enforcement is turned on. `gh pr create -R other/repo` in chat asks and names the repository, and under GitHub enforcement also under bypass. In shadow mode no GitHub or browser result changes. A form submission on a reliable engine to an unlisted site is held until a person answers, and on an engine with no signal a click that might submit is asked about before it runs.
 
 ## Glossary
 

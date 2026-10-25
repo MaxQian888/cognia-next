@@ -31307,7 +31307,7 @@
     "remove": "移除 {name}",
     "saveFailed": "无法保存收件人名单：{reason}",
     "saved": "收件人名单已保存",
-    "siteNotYetChecked": "站点要等浏览器提交检查上线后才生效（后续更新）。在此之前，这里列出的站点不起任何作用。",
+    "siteNote": "列入的站点会直接接受这个 Bot 在浏览器里的提交（表单、发帖），不再询问。页面放在地址里发出的数据不在检查范围内。",
     "siteOrigin": "将添加 {origin}，即该站点的所有页面。",
     "via": "经由 {account}"
   },
@@ -55827,6 +55827,16 @@
         "allowNamedInto": "在 {list} 上允许 {name}",
         "allowed": "已将 {name} 加入名单",
         "categories": {
+          "browser": {
+            "confirmBehaviour": "提交到未列入名单的站点时会询问或等待批准，而不是直接发出；某人的拒绝在该请求剩余部分内持续有效。消息、邮件和 GitHub 保留各自的设置。",
+            "confirmTitle": "对浏览器提交执行外发授权？",
+            "enforceHelp": "开启：提交到未列入名单的站点时，会询问这台电脑前的人，无人值守时等待批准；被人拒绝过的站点，在该请求内一直被拒绝。动作会等到有答复。",
+            "label": "对浏览器提交执行",
+            "limits": "不在检查范围内：页面放在地址里发出的数据（搜索、GET 表单）、输入时的自动保存，以及页面后台 worker 打开的连接。在内置预览与扩展浏览器里，可能触发提交的点击、选择或 Enter 会在执行前检查。",
+            "reportDescription": "最近 {days} 天内观察到的、提交到未被任何授权允许的站点的浏览器提交。开启执行前，先允许你本意要提交的站点。",
+            "reportEmpty": "不会有任何变化：观察到的每次浏览器提交，站点都已被允许。",
+            "shadowHelp": "关闭：agent 的浏览器动作发出的每次提交（表单、注册、发帖）都会检查并记录，但不改变任何结果。与消息、邮件和 GitHub 的设置相互独立。"
+          },
           "github": {
             "confirmBehaviour": "无人值守地写入未被允许的仓库时会等待批准，而不是直接写入；聊天写入其他仓库时会询问；某人的拒绝在该请求剩余部分内持续有效。消息与邮件保留各自的设置。",
             "confirmTitle": "对 GitHub 写入执行外发授权？",
@@ -55859,10 +55869,11 @@
             "park": "{count} 次等待批准"
           }
         },
-        "description": "无人值守的运行在不询问的情况下可以给谁发消息、发邮件或写入哪些 GitHub 仓库。每一类都从影子模式开始，只观察。",
+        "description": "无人值守的运行可以不经询问就发消息、发邮件、写入 GitHub 或在浏览器里提交给谁。每一类都从只观察的影子模式开始。",
         "intoAccount": "加入 {name} 账号的名单",
         "intoAdapter": "加入 {name} 的名单",
         "intoBot": "加入 {name} 的名单",
+        "intoSites": "加入站点名单",
         "kind": {
           "conversation": "会话",
           "mail": "邮件",
@@ -55887,6 +55898,7 @@
         },
         "sender": {
           "bot": "Bot：{name}",
+          "bridge": "外部桥接客户端：{id}",
           "chat": "聊天回合",
           "notification": "通知",
           "other": "其他：{id}",
@@ -55897,12 +55909,12 @@
         },
         "sites": {
           "description": "agent 在浏览器里向这些站点提交（表单、注册、发帖）时，无论来自聊天、定时任务还是 workflow，都不再询问。Bot 自己的名单也可以列站点，只对该 Bot 生效。输入的地址按整个站点列入。",
-          "dormant": "尚未生效：浏览器提交还没有接入检查。现在列入的站点在检查上线后生效。",
           "title": "浏览器提交可到达的站点"
         },
         "title": "外发授权",
         "unrecognized": "经由 {account} 有 {count} 个本机无法识别的收件人（{sends} 次发送）。请在 Bot 或连接的设置里手动添加。",
         "unrecognizedRepositories": "本设备无法识别 {count} 个仓库（{sends} 次写入）。请在集成中把它们加入某个 GitHub 账号的名单。",
+        "unrecognizedSites": "{count, plural, other {# 个站点}}本机无法识别（{sends, plural, other {# 次提交}}）。请在下方的站点名单中添加。",
         "via": "经由 {account}"
       },
       "policyChangeBlocked": "未更改保护设置。{reason}",

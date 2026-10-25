@@ -64,7 +64,7 @@
   "title": "安全与隐私",
   "outboundAuthorization": {
     "title": "外发授权",
-    "description": "无人值守的运行在不询问的情况下可以给谁发消息、发邮件或写入哪些 GitHub 仓库。每一类都从影子模式开始，只观察。",
+    "description": "无人值守的运行可以不经询问就发消息、发邮件、写入 GitHub 或在浏览器里提交给谁。每一类都从只观察的影子模式开始。",
     "observeOnly": "仅观察",
     "remoteHost": "本机正在驱动一台配对的 Host，运行和记录都在 Host 上。请在 Host 上修改此设置。",
     "modeSaveFailed": "无法保存该设置",
@@ -80,7 +80,8 @@
       "plugin": "插件：{id}",
       "chat": "聊天回合",
       "other": "其他：{id}",
-      "team": "Agent Team：{name}"
+      "team": "Agent Team：{name}",
+      "bridge": "外部桥接客户端：{id}"
     },
     "kind": {
       "conversation": "会话",
@@ -135,16 +136,27 @@
         "reportEmpty": "不会有任何变化：观察到的每次 GitHub 写入，仓库都已被允许。",
         "confirmTitle": "对 GitHub 写入执行外发授权？",
         "confirmBehaviour": "无人值守地写入未被允许的仓库时会等待批准，而不是直接写入；聊天写入其他仓库时会询问；某人的拒绝在该请求剩余部分内持续有效。消息与邮件保留各自的设置。"
+      },
+      "browser": {
+        "label": "对浏览器提交执行",
+        "shadowHelp": "关闭：agent 的浏览器动作发出的每次提交（表单、注册、发帖）都会检查并记录，但不改变任何结果。与消息、邮件和 GitHub 的设置相互独立。",
+        "enforceHelp": "开启：提交到未列入名单的站点时，会询问这台电脑前的人，无人值守时等待批准；被人拒绝过的站点，在该请求内一直被拒绝。动作会等到有答复。",
+        "reportDescription": "最近 {days} 天内观察到的、提交到未被任何授权允许的站点的浏览器提交。开启执行前，先允许你本意要提交的站点。",
+        "reportEmpty": "不会有任何变化：观察到的每次浏览器提交，站点都已被允许。",
+        "confirmTitle": "对浏览器提交执行外发授权？",
+        "confirmBehaviour": "提交到未列入名单的站点时会询问或等待批准，而不是直接发出；某人的拒绝在该请求剩余部分内持续有效。消息、邮件和 GitHub 保留各自的设置。",
+        "limits": "不在检查范围内：页面放在地址里发出的数据（搜索、GET 表单）、输入时的自动保存，以及页面后台 worker 打开的连接。在内置预览与扩展浏览器里，可能触发提交的点击、选择或 Enter 会在执行前检查。"
       }
     },
     "intoAccount": "加入 {name} 账号的名单",
+    "intoSites": "加入站点名单",
     "chooseAccount": "这次写入没有指明账号。加入：",
     "allowNamedInto": "在 {list} 上允许 {name}",
     "unrecognizedRepositories": "本设备无法识别 {count} 个仓库（{sends} 次写入）。请在集成中把它们加入某个 GitHub 账号的名单。",
+    "unrecognizedSites": "{count, plural, other {# 个站点}}本机无法识别（{sends, plural, other {# 次提交}}）。请在下方的站点名单中添加。",
     "sites": {
       "title": "浏览器提交可到达的站点",
-      "description": "agent 在浏览器里向这些站点提交（表单、注册、发帖）时，无论来自聊天、定时任务还是 workflow，都不再询问。Bot 自己的名单也可以列站点，只对该 Bot 生效。输入的地址按整个站点列入。",
-      "dormant": "尚未生效：浏览器提交还没有接入检查。现在列入的站点在检查上线后生效。"
+      "description": "agent 在浏览器里向这些站点提交（表单、注册、发帖）时，无论来自聊天、定时任务还是 workflow，都不再询问。Bot 自己的名单也可以列站点，只对该 Bot 生效。输入的地址按整个站点列入。"
     }
   }
 }

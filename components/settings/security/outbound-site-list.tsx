@@ -7,13 +7,10 @@
  * Stored as `agentPermissions.outboundSites` and written only here, as the
  * person's own edit, through the same editor as the other recipient lists, so
  * a typed URL is listed as its origin. A Bot installation's own list may hold
- * sites too; this one covers every run.
- *
- * Intentionally dormant until the browser chokepoints land (phase 2b WP12):
- * nothing plans a browser submission yet, so the list changes nothing. The
- * section says so, pinned by `outbound-site-list.test.tsx`. Like the rest of
- * the Security card, it edits nothing while this shell drives a paired Host,
- * where the list that counts lives.
+ * sites too; this one covers every run, and every browser submission's plan
+ * reads it (`planBrowserSubmission`). Like the rest of the Security card, it
+ * edits nothing while this shell drives a paired Host, where the list that
+ * counts lives.
  */
 
 import { useTranslations } from "next-intl"
@@ -59,9 +56,6 @@ export function OutboundSiteList({ disabled = false }: { disabled?: boolean }) {
       <div className="space-y-1">
         <h4 className="text-sm font-medium">{t("title")}</h4>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
-        <p className="text-xs text-muted-foreground" data-testid="outbound-site-list-dormant">
-          {t("dormant")}
-        </p>
       </div>
       <OutboundRecipientsEditor
         value={readOutboundSiteGrants(settings)}

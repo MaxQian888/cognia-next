@@ -7,12 +7,14 @@
  * recipient already on the list is not added twice.
  *
  * A repository goes on a Bot's list (for the Bot's own writes) or on a GitHub
- * integration account's list (ADR-0239 phase 2), the one the hub edits.
+ * integration account's list (ADR-0239 phase 2), the one the hub edits. A
+ * site goes on a Bot's list or the global site list (phase 2b), the one the
+ * Security card edits.
  */
 
 import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 
-import { listsRecipient, recipientGrant } from "./configured-grants"
+import { listsRecipient, readOutboundSiteGrants, recipientGrant } from "./configured-grants"
 import type { OutboundTarget } from "./outbound-targets"
 import type { ShadowAllowInto } from "./shadow-report"
 
@@ -30,6 +32,8 @@ export interface AllowRecipientDeps {
     accountId: string,
     next: OutboundRecipientGrant[]
   ) => Promise<unknown>
+  readSiteList?: () => Promise<readonly OutboundRecipientGrant[]>
+  writeSiteList?: (next: OutboundRecipientGrant[]) => Promise<unknown>
   now?: () => number
 }
 
@@ -40,7 +44,9 @@ export class AllowRecipientTargetMissingError extends Error {
         ? `Bot installation ${into.installationId} no longer exists`
         : into.kind === "adapter"
           ? `Connection ${into.adapterId} no longer exists`
-          : `Integration account ${into.accountId} no longer exists`
+          : into.kind === "integration-account"
+            ? `Integration account ${into.accountId} no longer exists`
+            : "The site list is not available"
     )
     this.name = "AllowRecipientTargetMissingError"
   }
@@ -73,6 +79,13 @@ export async function allowShadowRecipient(
       ...current,
       grant,
     ])
+    return true
+  }
+
+  if (into.kind === "sites") {
+    const current = await (deps.readSiteList ?? defaultReadSiteList)()
+    if (listsRecipient(current, target)) return false
+    await (deps.writeSiteList ?? defaultWriteSiteList)([...current, grant])
     return true
   }
 
@@ -132,4 +145,17 @@ async function defaultWriteAccountList(
 ): Promise<unknown> {
   const { setIntegrationAccountOutboundRecipients } = await import("@/lib/db/integrations")
   return setIntegrationAccountOutboundRecipients(pluginId, accountId, next)
+}
+
+async function defaultReadSiteList(): Promise<readonly OutboundRecipientGrant[]> {
+  const { useSettingsStore } = await import("@/stores/settings")
+  return readOutboundSiteGrants(useSettingsStore.getState().settings)
+}
+
+async function defaultWriteSiteList(next: OutboundRecipientGrant[]): Promise<unknown> {
+  const { useSettingsStore } = await import("@/stores/settings")
+  const store = useSettingsStore.getState()
+  // The latest permissions, so a mode switch saved meanwhile is kept.
+  const permissions = store.settings?.agentPermissions ?? {}
+  return store.save({ agentPermissions: { ...permissions, outboundSites: next } })
 }

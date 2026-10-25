@@ -31307,7 +31307,7 @@
     "remove": "Remove {name}",
     "saveFailed": "Could not save the recipient list: {reason}",
     "saved": "Recipient list saved",
-    "siteNotYetChecked": "Sites take effect once browser submissions are checked (coming in a later update). Until then a site listed here changes nothing.",
+    "siteNote": "A listed site takes this Bot's browser submissions (a form, a post) with nobody asking. Data a page sends in its address is not checked.",
     "siteOrigin": "Adds {origin}, every page of that site.",
     "via": "via {account}"
   },
@@ -55827,6 +55827,16 @@
         "allowNamedInto": "Allow {name} on {list}",
         "allowed": "{name} added to the list",
         "categories": {
+          "browser": {
+            "confirmBehaviour": "Submissions to a site nobody listed will ask or wait for approval instead of going out, and a person's refusal holds for the rest of that request. Messages, email and GitHub keep their own settings.",
+            "confirmTitle": "Enforce outbound authorization for browser submissions?",
+            "enforceHelp": "On: a submission to a site nobody listed asks the person at this computer, or waits for approval when nobody is watching; a site a person refused stays refused for that request. The action waits for the answer.",
+            "label": "Enforce for browser submissions",
+            "limits": "Not checked: data a page sends in its address (a search, a GET form), autosave while typing, and connections a page's background workers open. In the built-in preview and the extension browser, a click, a selection or Enter that might submit is checked before it runs.",
+            "reportDescription": "Browser submissions observed in the last {days} days to a site nothing allowed. Allow the sites you meant before turning enforcement on.",
+            "reportEmpty": "Nothing would change: every observed browser submission went to a site someone allowed.",
+            "shadowHelp": "Off: every submission an agent's browser actions make (a form, a sign-up, a post) is checked and recorded, and none is changed. This is separate from messages, email and GitHub."
+          },
           "github": {
             "confirmBehaviour": "Unattended writes to a repository nobody allowed will wait for approval instead of going out, writes from a chat to another repository will ask, and a person's refusal holds for the rest of that request. Messages and email keep their own setting.",
             "confirmTitle": "Enforce outbound authorization for GitHub writes?",
@@ -55859,10 +55869,11 @@
             "park": "{count} held for approval"
           }
         },
-        "description": "Who an unattended run may message, email or write to on GitHub without asking. Each kind starts in shadow mode, which only observes.",
+        "description": "Who an unattended run may message, email, write to on GitHub or submit to in the browser without asking. Each kind starts in shadow mode, which only observes.",
         "intoAccount": "Adds to the {name} account's list",
         "intoAdapter": "Adds to {name}'s list",
         "intoBot": "Adds to {name}'s list",
+        "intoSites": "Adds to the site list",
         "kind": {
           "conversation": "Conversation",
           "mail": "Email",
@@ -55887,6 +55898,7 @@
         },
         "sender": {
           "bot": "Bot: {name}",
+          "bridge": "External Bridge client: {id}",
           "chat": "Chat turns",
           "notification": "Notifications",
           "other": "Other: {id}",
@@ -55897,12 +55909,12 @@
         },
         "sites": {
           "description": "An agent's browser submission (a form, a sign-up, a post) to one of these sites, from a chat, a scheduled task or a workflow, will go ahead without asking. A Bot's own list can hold sites for that Bot alone. A typed address is listed as its whole site.",
-          "dormant": "Not yet in effect: browser submissions are not checked yet. Sites listed now take effect when that check ships.",
           "title": "Sites browser submissions may reach"
         },
         "title": "Outbound authorization",
         "unrecognized": "{count, plural, one {# recipient} other {# recipients}} via {account} this device cannot name ({sends, plural, one {# send} other {# sends}}). Add them in the Bot's or the connection's settings.",
         "unrecognizedRepositories": "{count, plural, one {# repository} other {# repositories}} this device cannot name ({sends, plural, one {# write} other {# writes}}). Add them to a GitHub account's list in Integrations.",
+        "unrecognizedSites": "{count, plural, one {# site} other {# sites}} this device cannot name ({sends, plural, one {# submission} other {# submissions}}). Add them to the site list below.",
         "via": "via {account}"
       },
       "policyChangeBlocked": "Protection was not changed. {reason}",

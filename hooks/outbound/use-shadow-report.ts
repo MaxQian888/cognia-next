@@ -7,14 +7,20 @@
  * Recipients are named from what the device already holds: every conversation
  * a connector has a delivery target for, every bound session, every
  * repository the device works with (`loadKnownRepositories`), and every entry
- * on a list a person wrote. Nothing is fetched from a platform.
+ * on a list a person wrote. Sites are named from the built-in browser's
+ * history, the sites passwords are saved for, the browser profiles' domain
+ * grants, and the lists. Nothing is fetched from a platform.
  *
  * The GitHub integration accounts are read with their lists and web hosts, so
  * a repository row can be allowed into the account its write went through, or
  * into one the person picks.
+ *
+ * The global site list lives in the settings, not the database, so the hook
+ * reads it from the settings store and builds the report again when it
+ * changes: a site allowed from the report drops out of it.
  */
 
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import type {
@@ -30,8 +36,10 @@ import {
   getRegisteredIntegration,
   subscribeIntegrationRegistry,
 } from "@/lib/integrations/registry"
+import { readOutboundSiteGrants } from "@/lib/policy/action-review/configured-grants"
 import {
   conversationTarget,
+  siteTarget,
   type OutboundTarget,
 } from "@/lib/policy/action-review/outbound-targets"
 import {
@@ -39,6 +47,7 @@ import {
   type ShadowGithubAccount,
   type ShadowReport,
 } from "@/lib/policy/action-review/shadow-report"
+import { useSettingsStore } from "@/stores/settings"
 
 export interface ShadowReportView {
   report: ShadowReport
@@ -55,9 +64,11 @@ export interface ShadowReportView {
 }
 
 /** Read everything the report needs, once. Exported for its test. */
-export async function loadShadowReport(): Promise<ShadowReportView> {
+export async function loadShadowReport(
+  siteList: readonly OutboundRecipientGrant[] = []
+): Promise<ShadowReportView> {
   const db = getDb()
-  const [receipts, states, sessions, adapters, bots, tasks, accounts, teams, known] =
+  const [receipts, states, sessions, adapters, bots, tasks, accounts, teams, known, sites] =
     await Promise.all([
       db.actionReviewReceipts
         .filter((row) => {
@@ -76,6 +87,7 @@ export async function loadShadowReport(): Promise<ShadowReportView> {
         repositories: [],
         accountHosts: new Map<string, string>(),
       })),
+      loadKnownSites(),
     ])
 
   const candidates: OutboundTarget[] = []
@@ -122,6 +134,9 @@ export async function loadShadowReport(): Promise<ShadowReportView> {
     for (const grant of account.outboundRecipients ?? []) candidates.push(grant.recipient)
   }
 
+  candidates.push(...sites)
+  for (const grant of siteList) candidates.push(grant.recipient)
+
   return {
     report: buildShadowReport({
       receipts: receipts as ActionReviewReceipt[],
@@ -129,6 +144,7 @@ export async function loadShadowReport(): Promise<ShadowReportView> {
       botLists,
       adapterLists,
       githubAccounts,
+      siteList,
     }),
     adapterNames,
     taskNames: tasks,
@@ -147,6 +163,27 @@ async function githubAccountsOf(
     const registered = getRegisteredIntegration(account.pluginId, account.integrationId)
     return registered ? isGithubIntegration(registered.definition) : false
   })
+}
+
+/** The sites this device has been to or holds something for. */
+async function loadKnownSites(): Promise<OutboundTarget[]> {
+  const db = getDb()
+  // A table the account's database does not have yet names nothing.
+  const read = <T>(rows: Promise<T[]>): Promise<T[]> => rows.catch(() => [])
+  const [history, credentials, domains] = await Promise.all([
+    read(db.browserHistory.toArray()),
+    read(db.browserCredentialMeta.toArray()),
+    read(db.browserDomainGrants.toArray()),
+  ])
+  const urls = [
+    ...history.map((row) => row.url),
+    ...credentials.map((row) => row.origin),
+    // A domain grant names a host; a wildcard names no one site.
+    ...domains
+      .filter((row) => !row.domain.includes("*"))
+      .flatMap((row) => [`https://${row.domain}`, `http://${row.domain}`]),
+  ]
+  return urls.flatMap((url) => siteTarget(url) ?? [])
 }
 
 async function loadTaskNames(): Promise<Map<string, string>> {
@@ -169,6 +206,12 @@ async function loadTaskNames(): Promise<Map<string, string>> {
  * whenever the registry changes: the first read may come before the plugin.
  */
 export function useShadowReport(enabled = true): ShadowReportView | undefined {
+  const settings = useSettingsStore((s) => s.settings)
+  const siteList = useMemo(() => readOutboundSiteGrants(settings), [settings])
+  const siteKey = useMemo(
+    () => siteList.map((grant) => grant.recipient.recipient).join("\n"),
+    [siteList]
+  )
   useEffect(() => {
     if (!enabled) return
     // A runtime that fails to boot leaves the GitHub accounts unnamed, no more.
@@ -180,7 +223,8 @@ export function useShadowReport(enabled = true): ShadowReportView | undefined {
     () => 0
   )
   return useLiveQuery(
-    async () => (enabled && typeof window !== "undefined" ? loadShadowReport() : undefined),
-    [enabled, registryRevision]
+    async () => (enabled && typeof window !== "undefined" ? loadShadowReport(siteList) : undefined),
+    // `siteKey` stands for `siteList`: a new settings object with the same sites reads nothing.
+    [enabled, registryRevision, siteKey]
   )
 }

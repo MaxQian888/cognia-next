@@ -5,7 +5,7 @@ description: "智能体有约十条路径可以向第三方发送内容，每条
 
 # ADR 0239 — 外发动作由请求授权，而不是由工具授权
 
-**状态：** 已接受（第一期与第二期 2a 已实现，各自默认影子模式；第二期 2b 已决定，尚未实现）
+**状态：** 已接受（第一期、第二期 2a 与 2b 已实现，各自默认影子模式）
 **日期：** 2026-10-24
 **相关：** [ADR-0070](./0070-risk-ceremony-policy-layer)（风险 → 仪式；“回复到发起线程”的先例）、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)（统一审核契约）、[ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched)（按次运行的能力授予）、[ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings)（在 Host 上的无人值守运行）
 **更正：** Action Review 契约文件头引用了 ADR-0102（一份可观测性决策）和一个从未实现的策略引擎
@@ -203,7 +203,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - **团队的堆叠交付需要人的同意。** 团队配置并非只由人写：持有 `team:write` 的插件、Agent SDK 和自动编排都会写。在设置卡片中开启堆叠交付会记下 `githubDeliveryPolicy.consent` 及当时绑定的仓库，只有这些仓库被授予。其它写入方最多沿用已存的同意，关闭交付即丢弃。
 - **人的点击只记录，不规划。** `person` 授权直接放行并记 `human` receipt。否则已确认的 issue 回写会被当作插件写入规划，在执行模式下被停下。
 - **receipt 以 id 记下集成账号**，放在 `subject.input.integrationAccount`，影子报告据此提供能放行这次写入的名单。没有账号的写入（`gh`、堆叠发布）列出仓库所在 host 上的账号供人选择。
-- **暂不提供浏览器开关。** 2b 之前没有任何路径规划浏览器提交，所以卡片不显示它的开关；`outboundAuthorizationByCategory.browser` 的类型注释写明这一点，卡片测试固定它。
+- **2a 不提供浏览器开关。** 2b 之前没有任何路径规划浏览器提交，所以卡片在 2b 加上开关之前不显示它。
 - **影子报告会启动插件运行时。** 哪些账号是 GitHub 账号来自集成注册表，注册表在插件加载时才填入，而设置页本身不启动插件运行时。
 
 ### 已知缺口
@@ -212,6 +212,37 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - issue 同步与 Issue Loop 适配器调用 broker 时不带调用方，其写入按插件写入规划；执行模式下，仓库不在某个账号名单上即等待批准。
 - 按决定，GitHub MCP 服务器的工具仍走普通权限阶梯。
 - GitHub 写入的执行模式已有单元与集成测试，但还没有在真实桌面和手机上跑过（Comment Bot 回复其被提及的 PR、在手机上批准一次写到未列出仓库的无人值守写入、聊天里一次跨仓库的 `gh` 命令）。
+
+## 实现（第二期 2b）
+
+第二期 2b（浏览器提交）先做一次 spike，再分四个工作包实现（计划：`docs/plans/2026-10-25-adr-0239-phase-2.md`；spike：`docs/research/2026-10-25-browser-submit-signal.md`）。它有自己的开关，从**影子模式**起步：每次提交都会规划并记录，结果不变，直到有人在“设置 → 安全”里开启（`agentPermissions.outboundAuthorizationByCategory.browser: "enforce"`）。
+
+### 代码位置
+
+- **信号（spike）**：本地与远程 Chromium 上，`context.route` 能挂起页面发出的每个非 GET 请求，`routeWebSocket` 能挂起 WebSocket 帧。内嵌 webview 与扩展引擎没有可靠信号：注入脚本看不见 worker、`<a ping>` 与跨源框架；扩展里只有 `chrome.debugger` 能挂起请求，而 ADR-0228 §6 不允许。
+- **运行时挂起**：`services/workspace-runtime/src/submission-guard.mjs`（模式 `off` / `observe` / `hold`，动作窗口加 3 s 宽限期）与操作 `browser.submission.configure/drain/resolve`。运行时从不等人：宿主在动作进行中取出被挂起的提交并逐个答复。被拒绝的导航以 `204` 应答，页面保持原样；其他请求中止。本地会话按整个 context 路由，service worker 的流量也会被挂起。接管用户自己 Chrome 的会话按页路由，drain 把被 service worker 控制的页面报为 `unguarded`。
+- **远程路径**：companion 命令 `browser_submission_configure` / `_drain` / `_resolve`（configure 与 resolve 是交互写，drain 是读）。网关不为它们取 agent 租约，所以有人接管页面时宿主仍能答复。
+- **规划**：`lib/policy/action-review/plan-browser.ts`（`planBrowserSubmission`）。收件人是请求的 origin，WebSocket 按其 http(s) 站点计；没有站点的页面是未知目标。全局站点名单（`configuredSiteGrants`，policy ref `browser-sites`）与发起方自己的名单（运行中的 Bot、handler Bot 的名单）放行；同一请求内被人拒绝的站点直接拒绝；其余询问。回执是 `browser-submission` 主体，走它自己的只追加通道，写明发起方（`browser:<会话>`、`workflow:<id>`、`external-bridge:<客户端>`、`plugin:<id>`）。
+- **咽喉点**：`lib/browser/submission-gate.ts`（`gateBrowserEngine`）包住 `createBrowserAPI` 交出的每个引擎与 workflow 浏览器节点的引擎（`resolveRunBrowserEngine`）。Chromium 引擎上每页一个 drainer，每个站点在一个窗口内只决定一次；动作在它提出的问题都答完后才返回，被拒绝的站点以 `outbound_refused` 返回，允许的导航之后等页面加载。没有信号的引擎与 `unguarded` 页面上，对页面所在站点的点击、双击、选择、拖动与 Enter / 空格（含修饰键）先规划再执行；输入、填写、悬停、聚焦与滚动不算。
+- **问谁**：`lib/browser/submission-ask.ts`。被捕获的轮次（`captured-turns.ts`，由 `run-and-capture` 登记）通过它自己的 responder 询问（IM 卡片或停泊审批），期间停住它的墙钟。桌面聊天与外部桥接客户端在 `components/outbound/outbound-ask-dialog.tsx` 上询问（允许一次、本次请求内允许、拒绝）。其余情况，或没有挂载对话框的交互询问（无头 Host），停泊到驾驶舱与手机。询问最长 9 分钟，对话框 5 分钟；14 个可能提交的工具声明 10 分钟预算（`BROWSER_SUBMITTING_TOOL_TIMEOUT_MS`）。
+- **名单、开关与报告**：全局站点名单（`agentPermissions.outboundSites`，`components/settings/security/outbound-site-list.tsx`）与 Bot 的名单可以包含站点。安全卡片有浏览器开关，并写明检查看不见什么。`shadow-report.ts` 列出站点行：Bot 自己的运行可加入 Bot 名单，其余加入全局站点名单。站点名称来自内置浏览器的历史、保存了密码的 origin、浏览器配置的域名授予以及各名单。
+
+### 实施中的决定
+
+- **运行时不等人，宿主等。** 控制通道上限 180 s，而人可能要几分钟。运行时挂起请求，宿主在动作进行中取出并答复。
+- **浏览器工具等到有答复才返回。** 超时只拒绝这一次提交，不形成屏障；拒绝在请求剩余部分内屏蔽该站点。
+- **外部桥接客户端没有可挂靠授予的请求**，只能允许一次或拒绝。
+- **不禁用 service worker。** context 级路由看得见它们的流量；禁用会让站点失效。
+- **不做注入式拦截，不加 `debugger` 权限。** 注入不够可靠，不算信号；扩展保持在 ADR-0228 §6 之内。
+
+### 已知缺口
+
+- 页面用 GET 发出的数据（搜索、GET 表单、跟踪像素）在任何引擎上都不挂起。
+- 专用 worker 打开的 WebSocket 在页面级与 context 级 `routeWebSocket` 下都看不见。
+- 没有信号的引擎上，输入时的自动保存不算提交，页面脚本自行发出的提交会漏掉。
+- 用户自己 Chrome 中被 service worker 控制的页面，提交在动作前判定，而不是被挂起。
+- 一次询问最长 9 分钟。
+- 浏览器提交的执行模式有单元、jsdom 与真 Chromium 运行时测试，但还没有在真实桌面上跑过（每个可靠引擎上一次表单提交被挂起后批准）。
 
 ## 影响
 
@@ -222,6 +253,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - 每个外发决定都有 receipt，写明 authority、授予以及它服务的那条指令。
 - 为新索引升级一次 Dexie schema 版本。
 - **第二期 2a 行为变化**：写入 GitHub 的 `gh` 命令在聊天里会询问（此前视为安全），auto 模式不再自行放行。对 GitHub 写入开启执行后，无人值守写到无人允许的仓库会等待批准，Squad 堆叠发布等待“批准并发布”，`gh` 写入在 bypass 下也会询问。
+- **第二期 2b 行为变化**：14 个浏览器动作工具最长可能需要 10 分钟。对浏览器提交开启执行后，提交到未列入名单的站点会询问这台电脑前的人或等待批准，动作等到有答复。
 
 ## 被否决的方案
 
@@ -241,7 +273,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - 超时不形成屏障：下一次尝试会重新询问。
 - 以上每个结果都写入一条带有 authority、授予范围和纪元的 receipt，每个 connector job 都带有 `authorizedBy`。
 - digest turn 的审批会停泊并推送，而不是无人应答。
-- 第二期：Bot 在 PR 上被提及后回复该 PR，不询问；同一运行写到另一个仓库时，执行模式下等待批准。人为某个仓库配置的自动化在开启执行后照常工作。聊天里的 `gh pr create -R other/repo` 会询问并写明仓库，GitHub 执行模式下 bypass 也是如此。影子模式下 GitHub 与浏览器的结果都不改变。
+- 第二期：Bot 在 PR 上被提及后回复该 PR，不询问；同一运行写到另一个仓库时，执行模式下等待批准。人为某个仓库配置的自动化在开启执行后照常工作。聊天里的 `gh pr create -R other/repo` 会询问并写明仓库，GitHub 执行模式下 bypass 也是如此。影子模式下 GitHub 与浏览器的结果都不改变。可靠引擎上提交到未列入名单站点的表单会被挂起，直到有人答复；没有信号的引擎上，可能触发提交的点击会在执行前询问。
 
 ## 术语
 

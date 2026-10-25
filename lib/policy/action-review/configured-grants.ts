@@ -413,14 +413,7 @@ export function readOutboundSiteGrants(
   )
 }
 
-/**
- * The global site list as a `policy` grant, for a browser submission's plan.
- *
- * Intentionally dormant until the browser chokepoints land (ADR-0239 phase 2b
- * WP12): nothing plans a browser submission yet, so nothing calls this. The
- * Security card labels the list "not yet in effect", and
- * `outbound-site-list.test.tsx` pins that label.
- */
+/** The global site list as a `policy` grant, for a browser submission's plan. */
 export function configuredSiteGrants(
   settings: { agentPermissions?: unknown } | null | undefined
 ): OutboundPolicyGrantList[] {

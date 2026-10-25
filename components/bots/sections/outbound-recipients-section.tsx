@@ -10,11 +10,8 @@
  * repositories (ADR-0239 phase 2: a Bot's GitHub writes outside the PR or
  * issue its event is about) and sites (phase 2b: the origins its browser
  * submissions may reach); a member is named within one bot account, so that
- * list is where members go.
- *
- * Sites are intentionally dormant until the browser chokepoints land (phase
- * 2b WP12): nothing plans a browser submission yet. The editor says so while
- * the Site kind is picked, pinned by this section's test.
+ * list is where members go. While the Site kind is picked, the editor says
+ * what a listed site lets through and what the check cannot see.
  *
  * A paired client relays the write to its Host like the other lifecycle
  * writes, and a placeholder of a Bot the Host runs cannot be edited here.
@@ -50,7 +47,7 @@ export function BotOutboundRecipientsSection({ row }: { row: BotConsoleRow }) {
         kinds={BOT_KINDS}
         knownConversations={known}
         knownRepositories={repositories}
-        kindNotes={{ site: tRecipients("siteNotYetChecked") }}
+        kindNotes={{ site: tRecipients("siteNote") }}
         disabled={!readiness.can || busy || row.owner !== undefined}
         testId="bot-outbound-recipients-editor"
       />

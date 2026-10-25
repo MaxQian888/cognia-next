@@ -8,6 +8,7 @@ import {
   conversationTarget,
   mailTarget,
   repositoryTarget,
+  siteTarget,
   toReviewTarget,
   type OutboundTarget,
 } from "@/lib/policy/action-review/outbound-targets"
@@ -47,6 +48,8 @@ jest.mock("@/lib/integrations/registry", () => ({
 }))
 
 import { act, renderHook, waitFor } from "@testing-library/react"
+
+import { useSettingsStore } from "@/stores/settings"
 
 import { loadShadowReport, useShadowReport } from "./use-shadow-report"
 
@@ -232,6 +235,85 @@ describe("loadShadowReport", () => {
       for (const listener of mockListeners) listener()
     })
     await waitFor(() => expect(result.current?.accountNames.get("acct_ghe")).toBe("Work"))
+  })
+
+  it("names sites the device has been to or holds something for, and drops listed ones", async () => {
+    const db = getDb()
+    const visited = siteTarget("https://forms.example.com")!
+    const saved = siteTarget("https://login.example.com")!
+    const granted = siteTarget("https://docs.example.com")!
+    const listed = siteTarget("https://shop.example.com")!
+    const unknown = siteTarget("https://elsewhere.example.org")!
+    const submission = (target: OutboundTarget) =>
+      receipt("chat-1", target, false, { kind: "browser-submission", ref: "browser:chat-1" })
+    await db.actionReviewReceipts.bulkPut(
+      [visited, saved, granted, listed, unknown].map(submission).map(toReceiptRow)
+    )
+    await db.browserHistory.put({
+      id: "https://forms.example.com/apply?step=2",
+      url: "https://forms.example.com/apply?step=2",
+      visitedAt: 1,
+      visits: 1,
+    })
+    await db.browserCredentialMeta.put({
+      id: "cred_1",
+      origin: "https://login.example.com",
+      username: "me",
+      source: "vault",
+      createdAt: 1,
+      sourceUpdatedAt: 1,
+      updatedAt: 1,
+    })
+    await db.browserDomainGrants.bulkPut([
+      { id: "g1", workspaceId: "w1", domain: "docs.example.com", createdAt: 1, updatedAt: 1 },
+      { id: "g2", workspaceId: "w1", domain: "*.example.net", createdAt: 1, updatedAt: 1 },
+    ])
+
+    const view = await loadShadowReport([
+      { recipient: listed as never, addedAt: 1, addedBy: "local-user" },
+    ])
+    const [chat] = view.report.browser.groups
+    expect(chat.sender).toEqual({ kind: "chat", id: "chat-1" })
+    expect(chat.rows.map((row) => row.target.recipient).sort()).toEqual(
+      [visited.recipient, saved.recipient, granted.recipient].sort()
+    )
+    expect(chat.rows.every((row) => row.allowInto?.kind === "sites")).toBe(true)
+    expect(chat.unrecognized).toEqual([
+      expect.objectContaining({ channel: "browser", recipients: 1, sends: 1 }),
+    ])
+  })
+
+  it("reads again when a site is added to the global site list", async () => {
+    const forms = siteTarget("https://forms.example.com")!
+    await getDb().actionReviewReceipts.put(
+      toReceiptRow(
+        receipt("chat-1", forms, false, { kind: "browser-submission", ref: "browser:chat-1" })
+      )
+    )
+    await getDb().browserHistory.put({
+      id: "https://forms.example.com/",
+      url: "https://forms.example.com/",
+      visitedAt: 1,
+      visits: 1,
+    })
+    const before = useSettingsStore.getState().settings
+    const { result } = renderHook(() => useShadowReport())
+    await waitFor(() => expect(result.current?.report.browser.sends).toBe(1))
+    try {
+      act(() => {
+        useSettingsStore.setState({
+          settings: {
+            ...(before ?? {}),
+            agentPermissions: {
+              outboundSites: [{ recipient: forms as never, addedAt: 1, addedBy: "local-user" }],
+            },
+          } as never,
+        })
+      })
+      await waitFor(() => expect(result.current?.report.browser.sends).toBe(0))
+    } finally {
+      act(() => useSettingsStore.setState({ settings: before }))
+    }
   })
 
   it("boots nothing while disabled (a paired Host's settings)", async () => {
