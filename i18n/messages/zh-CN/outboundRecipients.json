@@ -10,12 +10,16 @@
   "invalid": {
     "conversation": "这不是会话键，格式应为 平台:机器人:会话。",
     "mail": "这不是邮箱地址。",
-    "person": "请输入该成员在此平台上的 ID。"
+    "person": "请输入该成员在此平台上的 ID。",
+    "repository": "这不是仓库。请使用 owner/repo、host/owner/repo 或仓库地址。",
+    "site": "这不是网址。请使用以 https:// 或 http:// 开头的地址。"
   },
   "kind": {
     "conversation": "会话",
     "mail": "邮件",
-    "person": "成员"
+    "person": "成员",
+    "repository": "仓库",
+    "site": "站点"
   },
   "kindLabel": "收件人类型",
   "known": "本设备上的会话",
@@ -24,7 +28,9 @@
   "placeholder": {
     "conversation": "搜索，或粘贴会话键",
     "mail": "name@example.com",
-    "person": "成员 ID"
+    "person": "成员 ID",
+    "repository": "owner/repo 或仓库地址",
+    "site": "https://example.com"
   },
   "remove": "移除 {name}",
   "saveFailed": "无法保存收件人名单：{reason}",

@@ -6,10 +6,14 @@ import {
   conversationTarget,
   extractOutboundTargets,
   mailTarget,
+  originMatchFingerprint,
+  outboundCategoryOf,
   outboundFingerprint,
   outboundRecipientId,
   personTarget,
   publicTarget,
+  repositoryTarget,
+  siteTarget,
   toReviewTarget,
 } from "./outbound-targets"
 
@@ -199,12 +203,132 @@ describe("extractOutboundTargets", () => {
   })
 })
 
+describe("repositoryTarget (ADR-0239 phase 2)", () => {
+  const ACME = "github:github.com/acme/web"
+
+  it.each([
+    "acme/web",
+    "Acme/Web",
+    "github.com/acme/web",
+    "https://github.com/acme/web",
+    "https://www.github.com/Acme/Web.git",
+    "https://github.com/acme/web/pull/12",
+    "git@github.com:acme/web.git",
+    "ssh://git@github.com/acme/web.git",
+  ])("names %s as the repository", (input) => {
+    expect(repositoryTarget(input)).toEqual({
+      kind: "repository",
+      channel: "github",
+      recipient: ACME,
+    })
+  })
+
+  it("keeps another host", () => {
+    expect(repositoryTarget("ghe.corp.example/team/svc")?.recipient).toBe(
+      "github:ghe.corp.example/team/svc"
+    )
+    expect(repositoryTarget("https://ghe.corp.example:8443/team/svc")?.recipient).toBe(
+      "github:ghe.corp.example:8443/team/svc"
+    )
+  })
+
+  it("carries a thread, which a write's fingerprint ignores", () => {
+    const onPr = repositoryTarget("acme/web", 12)!
+    expect(onPr.thread).toBe("12")
+    expect(repositoryTarget("acme/web", "#12")!.thread).toBe("12")
+    expect(outboundFingerprint(onPr)).toBe(outboundFingerprint(repositoryTarget("acme/web")!))
+    expect(toReviewTarget(onPr)).toEqual(toReviewTarget(repositoryTarget("acme/web")!))
+  })
+
+  it.each([
+    "",
+    "acme",
+    "acme/web/extra",
+    "-acme/web",
+    "acme/..",
+    "acme/we b",
+    "ftp://github.com/acme/web",
+    "https://github.com/acme",
+  ])("refuses %j", (input) => {
+    expect(repositoryTarget(input)).toBeUndefined()
+  })
+
+  it("refuses a thread that is not a number", () => {
+    expect(repositoryTarget("acme/web", "abc")).toBeUndefined()
+    expect(repositoryTarget("acme/web", 0)).toBeUndefined()
+  })
+})
+
+describe("siteTarget (ADR-0239 phase 2)", () => {
+  it("names the origin a submission sends to", () => {
+    expect(siteTarget("https://Forms.Example.com:443/submit?x=1")).toEqual({
+      kind: "site",
+      channel: "browser",
+      recipient: "site:https://forms.example.com",
+    })
+    expect(siteTarget("http://localhost:3000/a")?.recipient).toBe("site:http://localhost:3000")
+    expect(siteTarget("https://bücher.example/")?.recipient).toBe(
+      "site:https://xn--bcher-kva.example"
+    )
+  })
+
+  it("tells http and https apart", () => {
+    expect(siteTarget("http://example.com")?.recipient).not.toBe(
+      siteTarget("https://example.com")?.recipient
+    )
+  })
+
+  it.each(["", "not a url", "file:///etc/passwd", "data:text/html,x", "javascript:alert(1)"])(
+    "refuses %j",
+    (input) => {
+      expect(siteTarget(input)).toBeUndefined()
+    }
+  )
+})
+
+describe("outboundCategoryOf", () => {
+  it("sorts targets into the three modes", () => {
+    expect(outboundCategoryOf(conversationTarget(GROUP)!)).toBe("messaging")
+    expect(outboundCategoryOf(mailTarget("a@b.co")!)).toBe("messaging")
+    expect(outboundCategoryOf(publicTarget("deploy_site"))).toBe("messaging")
+    expect(outboundCategoryOf(repositoryTarget("acme/web")!)).toBe("github")
+    expect(outboundCategoryOf(siteTarget("https://example.com")!)).toBe("browser")
+    // A GitHub write whose repository could not be named is still a GitHub write.
+    expect(outboundCategoryOf({ kind: "unknown", channel: "github" })).toBe("github")
+    expect(outboundCategoryOf({ kind: "unknown", channel: "browser" })).toBe("browser")
+  })
+})
+
+describe("originMatchFingerprint", () => {
+  it("matches a conversation as itself", () => {
+    const chat = conversationTarget(GROUP)!
+    expect(originMatchFingerprint(chat)).toBe(outboundFingerprint(chat))
+  })
+
+  it("matches a repository only through its thread", () => {
+    const pr12 = repositoryTarget("acme/web", 12)!
+    expect(originMatchFingerprint(pr12)).toBe(
+      sha256Hex("outbound|github|github-thread:github.com/acme/web#12")
+    )
+    expect(originMatchFingerprint(pr12)).not.toBe(
+      originMatchFingerprint(repositoryTarget("acme/web", 13)!)
+    )
+    expect(originMatchFingerprint(repositoryTarget("acme/web")!)).toBeUndefined()
+    expect(originMatchFingerprint(mailTarget("a@b.co")!)).toBeUndefined()
+  })
+})
+
 describe("outboundRecipientId", () => {
   it("strips the prefixes a recipient is keyed by", () => {
     expect(outboundRecipientId(conversationTarget("lark:bot-a:oc_1:om_2")!)).toBe("oc_1")
     expect(outboundRecipientId(personTarget("bot-a", "ou_7")!)).toBe("ou_7")
     expect(outboundRecipientId(mailTarget("Ann <A@B.co>")!)).toBe("a@b.co")
     expect(outboundRecipientId(publicTarget("deploy_site"))).toBe("deploy_site")
+    expect(outboundRecipientId(repositoryTarget("acme/web")!)).toBe("acme/web")
+    expect(outboundRecipientId(repositoryTarget("ghe.corp.example/team/svc")!)).toBe(
+      "ghe.corp.example/team/svc"
+    )
+    expect(outboundRecipientId(siteTarget("https://example.com/x")!)).toBe("https://example.com")
     expect(outboundRecipientId({ kind: "unknown", recipient: "*" })).toBe("*")
   })
 

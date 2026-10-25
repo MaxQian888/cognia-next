@@ -36,18 +36,50 @@ import { parseConversationKey } from "@/types/connectors/event"
  * - `conversation`: an existing chat, by conversation key without its thread.
  * - `person`: a platform member, as when a new chat is created around them.
  * - `mail`: an email address.
+ * - `repository`: a GitHub repository (phase 2). The PR or issue a write goes
+ *   to is its `thread`, which only matches the origin thread.
+ * - `site`: the origin a browser submission sends its request to (phase 2).
  * - `public`: anyone who gets the link (a published Site, a public share).
  *   There is no recipient to authorize, so it is granted per call.
  * - `unknown`: the call's recipient could not be named.
  */
-export type OutboundTargetKind = "conversation" | "person" | "mail" | "public" | "unknown"
+export type OutboundTargetKind =
+  "conversation" | "person" | "mail" | "repository" | "site" | "public" | "unknown"
 
 export interface OutboundTarget {
   kind: OutboundTargetKind
-  /** The connector adapter id, `mail`, or `tool:<name>` for tool-level targets. */
+  /**
+   * The connector adapter id; `mail`, `github` or `browser`; or `tool:<name>`
+   * for tool-level targets.
+   */
   channel: string
-  /** Normalized recipient, prefixed by kind (`conv:`, `person:`, `mail:`, …). */
+  /** Normalized recipient, prefixed by kind (`conv:`, `person:`, `mail:`, `github:`, `site:`, …). */
   recipient: string
+  /**
+   * For a `repository`: the PR or issue number a write goes to. It never
+   * widens a grant or a fence, which cover the whole repository; it only lets
+   * a write back into the thread the request came from count as a reply to
+   * the origin thread ({@link originMatchFingerprint}). Never persisted.
+   */
+  thread?: string
+}
+
+/**
+ * The three kinds of outbound action, each with its own shadow or enforce
+ * mode: messaging (phase 1: connector deliveries, messages, mail, shares),
+ * GitHub writes and browser submissions (phase 2).
+ */
+export type OutboundCategory = "messaging" | "github" | "browser"
+
+export const OUTBOUND_CATEGORIES: readonly OutboundCategory[] = ["messaging", "github", "browser"]
+
+/** The category a target's mode is read from: by kind, else by channel. */
+export function outboundCategoryOf(
+  target: Pick<OutboundTarget, "kind" | "channel">
+): OutboundCategory {
+  if (target.kind === "repository" || target.channel === "github") return "github"
+  if (target.kind === "site" || target.channel === "browser") return "browser"
+  return "messaging"
 }
 
 export interface OutboundTargetContext {
@@ -122,6 +154,98 @@ export function mailTarget(address: string): OutboundTarget | undefined {
   if (at <= 0 || at !== candidate.lastIndexOf("@") || at === candidate.length - 1) return undefined
   if (/\s/.test(candidate)) return undefined
   return { kind: "mail", channel: "mail", recipient: `mail:${candidate}` }
+}
+
+const GITHUB_OWNER = /^[a-z0-9](?:[a-z0-9-]{0,38})$/
+const GITHUB_REPO = /^[a-z0-9._-]{1,100}$/
+const HOST = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/
+
+/**
+ * A GitHub repository, lowercased (GitHub names are case-insensitive), host
+ * `github.com` unless another is named. Accepts `owner/repo`,
+ * `host/owner/repo`, `https://host/owner/repo[.git][/…]` and
+ * `git@host:owner/repo[.git]`. `thread` is a PR or issue number. Returns
+ * `undefined` for anything else.
+ */
+export function repositoryTarget(
+  repository: string,
+  thread?: string | number
+): OutboundTarget | undefined {
+  const input = repository.trim().toLowerCase()
+  if (!input) return undefined
+  let host = "github.com"
+  let path = input
+  let fromUrl = false
+  const ssh = /^[a-z0-9._-]+@([^:/]+):(.+)$/.exec(input)
+  if (ssh) {
+    host = ssh[1]
+    path = ssh[2]
+  } else if (/^[a-z][a-z0-9+.-]*:\/\//.test(input)) {
+    let url: URL
+    try {
+      url = new URL(input)
+    } catch {
+      return undefined
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:" && url.protocol !== "ssh:") {
+      return undefined
+    }
+    host = url.host
+    path = url.pathname
+    fromUrl = true
+  }
+  const parts = path.split("/").filter(Boolean)
+  // `host/owner/repo` names its host; `owner/repo` cannot start with a dotted name.
+  if (!ssh && !fromUrl && parts.length === 3 && parts[0].includes(".")) host = parts.shift()!
+  // A URL may continue into the repository (`/pull/12`); a bare name may not.
+  if (parts.length < 2 || (parts.length > 2 && !fromUrl)) return undefined
+  const owner = parts[0]
+  const repo = parts[1].replace(/\.git$/, "")
+  host = host.replace(/^www\./, "")
+  if (!HOST.test(host) || !GITHUB_OWNER.test(owner) || !GITHUB_REPO.test(repo)) return undefined
+  if (repo === "." || repo === "..") return undefined
+  const number = thread === undefined ? undefined : String(thread).trim().replace(/^#/, "")
+  if (number !== undefined && !/^[1-9]\d{0,9}$/.test(number)) return undefined
+  return {
+    kind: "repository",
+    channel: "github",
+    recipient: `github:${host}/${owner}/${repo}`,
+    ...(number ? { thread: number } : {}),
+  }
+}
+
+/**
+ * The origin a browser submission sends to: `scheme://host[:port]` of an
+ * `http(s)` URL, as `URL` normalizes it (lowercased host, punycode, default
+ * port dropped). Returns `undefined` for any other scheme or an opaque origin.
+ */
+export function siteTarget(url: string): OutboundTarget | undefined {
+  let parsed: URL
+  try {
+    parsed = new URL(url.trim())
+  } catch {
+    return undefined
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined
+  if (!parsed.host || parsed.origin === "null") return undefined
+  return { kind: "site", channel: "browser", recipient: `site:${parsed.origin}` }
+}
+
+/**
+ * The fingerprint an origin thread is matched on. A conversation matches as
+ * itself. A repository matches only through its thread: answering on the PR
+ * the request came from is a reply, while another PR of the same repository
+ * is not. Anything else, or a repository with no thread, matches nothing.
+ */
+export function originMatchFingerprint(target: OutboundTarget): string | undefined {
+  if (target.kind === "conversation") return outboundFingerprint(target)
+  if (target.kind === "repository" && target.thread) {
+    return outboundFingerprint({
+      channel: target.channel,
+      recipient: `${target.recipient.replace(/^github:/, "github-thread:")}#${target.thread}`,
+    })
+  }
+  return undefined
 }
 
 /** A public link published by a tool. */
@@ -238,6 +362,10 @@ export function outboundRecipientId(target: Pick<OutboundTarget, "kind" | "recip
       return target.recipient.replace(/^person:[^:]+:/, "")
     case "mail":
       return target.recipient.replace(/^mail:/, "")
+    case "repository":
+      return target.recipient.replace(/^github:(?:github\.com\/)?/, "")
+    case "site":
+      return target.recipient.replace(/^site:/, "")
     case "public":
       return target.recipient.replace(/^public:/, "")
     case "unknown":

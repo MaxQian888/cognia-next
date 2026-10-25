@@ -193,6 +193,17 @@ describe("buildToolApprovalSurface — outbound asks (ADR-0239)", () => {
     expect(imRecipientLine({ kind: "mail", channel: "mail", recipient: "mail:a@b.co" })).toBe(
       "邮箱 / Email a@b.co"
     )
+    expect(
+      imRecipientLine({
+        kind: "repository",
+        channel: "github",
+        recipient: "github:github.com/acme/web",
+        thread: "12",
+      })
+    ).toBe("仓库 / Repository acme/web #12")
+    expect(
+      imRecipientLine({ kind: "site", channel: "browser", recipient: "site:https://a.example" })
+    ).toBe("网站 / Site https://a.example")
     expect(imRecipientLine({ kind: "unknown", channel: "tool:x", recipient: "*" })).toMatch(
       /could not name/
     )

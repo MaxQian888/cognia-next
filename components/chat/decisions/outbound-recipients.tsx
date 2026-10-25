@@ -38,6 +38,12 @@ export function OutboundRecipients({ targets, fenceNotice, className }: Outbound
         return t("recipientPerson", { id, channel: target.channel })
       case "mail":
         return t("recipientMail", { address: id })
+      case "repository":
+        return target.thread
+          ? t("recipientRepositoryThread", { id, thread: target.thread })
+          : t("recipientRepository", { id })
+      case "site":
+        return t("recipientSite", { origin: id })
       case "public":
         return t("recipientPublic", { tool: id })
       case "unknown":

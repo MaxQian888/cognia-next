@@ -17759,13 +17759,25 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "enum": ["conversation", "person", "mail", "public", "unknown"]
+                          "enum": [
+                            "conversation",
+                            "person",
+                            "mail",
+                            "repository",
+                            "site",
+                            "public",
+                            "unknown"
+                          ]
                         },
                         "channel": {
                           "type": "string"
                         },
                         "recipient": {
                           "type": "string"
+                        },
+                        "thread": {
+                          "type": "string",
+                          "description": "For a repository, the PR or issue number the write lands on."
                         }
                       },
                       "additionalProperties": false

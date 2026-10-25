@@ -4750,6 +4750,20 @@ export interface AppSettings {
      * other value as `"shadow"`. Written only by the Settings → Security card.
      */
     outboundAuthorization?: "shadow" | "enforce"
+    /**
+     * The same switch for the ADR-0239 phase 2 categories: GitHub writes and
+     * browser submissions. Each is absent, so `"shadow"`, until a person
+     * confirms it in Settings → Security; enforcing messaging above never
+     * enforces these, so turning it on earlier does not start holding GitHub
+     * or browser writes on upgrade. `"shadow"` is intentionally inert, pinned
+     * by `lib/policy/action-review/shadow-mode.test.ts` like the messaging
+     * mode. Read only through `readOutboundAuthorizationMode(settings,
+     * category)`, which treats any other value as `"shadow"`.
+     */
+    outboundAuthorizationByCategory?: {
+      github?: "shadow" | "enforce"
+      browser?: "shadow" | "enforce"
+    }
   }
   /** Right-edge conversation-timeline minimap preferences. */
   conversationTimeline?: ConversationTimelineSettings
@@ -6894,11 +6908,19 @@ export interface McpRuntimeStatusSnapshot {
 
 /** A recipient as an approval card shows it (ADR-0239). Never written to a receipt. */
 export interface PendingOutboundTarget {
-  kind: "conversation" | "person" | "mail" | "public" | "unknown"
-  /** The connector adapter id, `mail`, or `tool:<name>`. */
+  kind: "conversation" | "person" | "mail" | "repository" | "site" | "public" | "unknown"
+  /** The connector adapter id, `mail`, `github`, `browser`, or `tool:<name>`. */
   channel: string
-  /** Normalized recipient (`conv:…`, `person:…`, `mail:…`, `public:…`, `*`). */
+  /**
+   * Normalized recipient (`conv:…`, `person:…`, `mail:…`, `github:<host>/<owner>/<repo>`,
+   * `site:<origin>`, `public:…`, `*`).
+   */
   recipient: string
+  /**
+   * For a repository, the PR or issue number the write lands on, shown on the
+   * card. Only ever matches the origin thread; a grant names the repository.
+   */
+  thread?: string
 }
 
 /**

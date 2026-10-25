@@ -7,6 +7,8 @@ import {
   conversationTarget,
   mailTarget,
   personTarget,
+  repositoryTarget,
+  siteTarget,
 } from "@/lib/policy/action-review/outbound-targets"
 import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 
@@ -141,6 +143,32 @@ describe("OutboundRecipientsEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     expect(onSave.mock.calls[0][0][0].recipient).toEqual(personTarget("bot-a", "ou_1"))
+  })
+
+  it("lists a repository and a site in the engine's form (ADR-0239 phase 2)", async () => {
+    const onSave = setup({ kinds: ["repository", "site"] })
+    const repo = screen.getByLabelText("owner/repo or a repository URL")
+    fireEvent.change(repo, { target: { value: "not a repo" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("That is not a repository.")
+    fireEvent.change(repo, { target: { value: "https://github.com/Acme/Web.git" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0][0].recipient).toEqual(repositoryTarget("acme/web"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Site" }))
+    fireEvent.change(screen.getByLabelText("https://example.com"), {
+      target: { value: "https://Forms.Example.com/submit" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+    expect(onSave.mock.calls[1][0][0].recipient).toEqual(siteTarget("https://forms.example.com"))
+  })
+
+  it("shows a listed repository by name, with no bot account", () => {
+    setup({ kinds: ["repository"], value: [grant(repositoryTarget("acme/web")!)] })
+    expect(screen.getByText("acme/web")).toBeInTheDocument()
+    expect(screen.queryByText(/^via /)).not.toBeInTheDocument()
   })
 
   it("says when no chat of the account is known", () => {

@@ -15,6 +15,8 @@ import {
   mailTarget,
   outboundFingerprint,
   personTarget,
+  repositoryTarget,
+  siteTarget,
 } from "./outbound-targets"
 
 const CHAT = conversationTarget("lark:bot-a:oc_1")!
@@ -64,6 +66,19 @@ describe("recipientGrant", () => {
       kind: "mail",
       channel: "mail",
       recipient: "mail:ops@example.com",
+    })
+  })
+
+  it("lists a repository whole, and a site by its origin (ADR-0239 phase 2)", () => {
+    expect(recipientGrant(repositoryTarget("acme/web", 12)!, 7)?.recipient).toEqual({
+      kind: "repository",
+      channel: "github",
+      recipient: "github:github.com/acme/web",
+    })
+    expect(recipientGrant(siteTarget("https://forms.example.com/a")!, 7)?.recipient).toEqual({
+      kind: "site",
+      channel: "browser",
+      recipient: "site:https://forms.example.com",
     })
   })
 

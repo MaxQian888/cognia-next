@@ -202,12 +202,14 @@ export function OutboundAuthorizationCard() {
                           className="flex flex-wrap items-center gap-2 text-sm"
                         >
                           <Badge variant="outline" className="font-normal">
-                            {t(`kind.${row.target.kind as "conversation" | "person" | "mail"}`)}
+                            {t(
+                              `kind.${row.target.kind as "conversation" | "person" | "mail" | "repository" | "site"}`
+                            )}
                           </Badge>
                           <span className="min-w-0 truncate" title={row.target.recipient}>
                             {name}
                           </span>
-                          {row.target.kind !== "mail" ? (
+                          {row.target.kind === "conversation" || row.target.kind === "person" ? (
                             <span className="text-xs text-muted-foreground">
                               {t("via", {
                                 account: view.adapterNames.get(row.channel) ?? row.channel,

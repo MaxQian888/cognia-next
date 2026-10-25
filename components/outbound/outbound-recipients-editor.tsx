@@ -26,6 +26,8 @@ import {
   mailTarget,
   outboundRecipientId,
   personTarget,
+  repositoryTarget,
+  siteTarget,
   type OutboundTarget,
 } from "@/lib/policy/action-review/outbound-targets"
 import { cn } from "@/lib/utils"
@@ -98,9 +100,18 @@ export function OutboundRecipientsEditor({
 
   function targetFromText(): OutboundTarget | undefined {
     const raw = text.trim()
-    if (kind === "conversation") return conversationTarget(raw)
-    if (kind === "person") return adapterId ? personTarget(adapterId, raw) : undefined
-    return mailTarget(raw)
+    switch (kind) {
+      case "conversation":
+        return conversationTarget(raw)
+      case "person":
+        return adapterId ? personTarget(adapterId, raw) : undefined
+      case "mail":
+        return mailTarget(raw)
+      case "repository":
+        return repositoryTarget(raw)
+      case "site":
+        return siteTarget(raw)
+    }
   }
 
   async function add(target: OutboundTarget | undefined) {
@@ -138,7 +149,8 @@ export function OutboundRecipientsEditor({
                 <span className="min-w-0 flex-1 truncate" title={entry.recipient.recipient}>
                   {name}
                 </span>
-                {entry.recipient.kind !== "mail" && !adapterId ? (
+                {(entry.recipient.kind === "conversation" || entry.recipient.kind === "person") &&
+                !adapterId ? (
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {t("via", { account: entry.recipient.channel })}
                   </span>

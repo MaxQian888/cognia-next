@@ -2823,6 +2823,9 @@
     "recipientConversation": "会话 {id}（经 {channel}）",
     "recipientMail": "邮箱 {address}",
     "recipientPerson": "成员 {id}（经 {channel}）",
+    "recipientRepository": "仓库 {id}",
+    "recipientRepositoryThread": "仓库 {id} #{thread}",
+    "recipientSite": "网站 {origin}",
     "recipientPublic": "公开链接（{tool}）",
     "recipientUnknown": "无法识别的收件人",
     "recipientsLabel": "发送给"

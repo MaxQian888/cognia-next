@@ -333,20 +333,47 @@ export interface ActionReviewGrant {
   policyRef?: string
 }
 
-/** Who an entry of a configured recipient list is. */
-export type OutboundRecipientKind = "conversation" | "person" | "mail"
+/**
+ * Who an entry of a configured recipient list is. `repository` (a GitHub
+ * repository) and `site` (the origin a browser submission sends to) are the
+ * ADR-0239 phase 2 recipients.
+ */
+export type OutboundRecipientKind = "conversation" | "person" | "mail" | "repository" | "site"
 
 export const OUTBOUND_RECIPIENT_KINDS: readonly OutboundRecipientKind[] = [
   "conversation",
   "person",
   "mail",
+  "repository",
+  "site",
 ]
 
 /**
+ * The channel a kind is reached through when it is not a connector adapter:
+ * mail through `mail`, a repository through `github`, a site through
+ * `browser`. A conversation or a person is reached through its adapter id,
+ * which may not be one of these.
+ */
+const FIXED_RECIPIENT_CHANNELS: Partial<Record<OutboundRecipientKind, string>> = {
+  mail: "mail",
+  repository: "github",
+  site: "browser",
+}
+
+const RECIPIENT_PREFIXES: Record<OutboundRecipientKind, string> = {
+  conversation: "conv:",
+  person: "person:",
+  mail: "mail:",
+  repository: "github:",
+  site: "site:",
+}
+
+/**
  * A recipient a person may configure (ADR-0239), in the engine's own
- * normalized form: `channel` is the connector adapter id (`mail` for mail) and
- * `recipient` is the kind-prefixed id (`conv:<platform>:<adapterId>:<chat>`,
- * `person:<adapterId>:<member>`, `mail:<address>`). The fingerprint the engine
+ * normalized form: `channel` is the connector adapter id (`mail`, `github` or
+ * `browser` for the other kinds) and `recipient` is the kind-prefixed id
+ * (`conv:<platform>:<adapterId>:<chat>`, `person:<adapterId>:<member>`,
+ * `mail:<address>`, `github:<host>/<owner>/<repo>`, `site:<origin>`). The fingerprint the engine
  * matches is derived from these two, so the list stores the recipient itself:
  * a person has to be able to read back whom they allowed.
  */
@@ -379,12 +406,19 @@ function recipientErrors(value: unknown, path: string, errors: string[]): void {
     errors.push(`${path}.kind must be one of ${OUTBOUND_RECIPIENT_KINDS.join(", ")}`)
     return
   }
+  const recipientKind = kind as OutboundRecipientKind
+  const fixed = FIXED_RECIPIENT_CHANNELS[recipientKind]
   if (typeof value.channel !== "string" || !value.channel.trim()) {
     errors.push(`${path}.channel must be a non-empty string`)
-  } else if ((kind === "mail") !== (value.channel === "mail")) {
-    errors.push(`${path}.channel must be "mail" exactly for a mail recipient`)
+  } else if (fixed !== undefined && value.channel !== fixed) {
+    errors.push(`${path}.channel must be "${fixed}" for a ${recipientKind} recipient`)
+  } else if (
+    fixed === undefined &&
+    Object.values(FIXED_RECIPIENT_CHANNELS).includes(value.channel)
+  ) {
+    errors.push(`${path}.channel "${value.channel}" is not a connector adapter id`)
   }
-  const prefix = kind === "conversation" ? "conv:" : kind === "person" ? "person:" : "mail:"
+  const prefix = RECIPIENT_PREFIXES[recipientKind]
   if (
     typeof value.recipient !== "string" ||
     !value.recipient.startsWith(prefix) ||

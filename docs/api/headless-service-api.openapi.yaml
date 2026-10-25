@@ -13010,6 +13010,8 @@ paths:
                                   - conversation
                                   - person
                                   - mail
+                                  - repository
+                                  - site
                               channel:
                                 type: string
                                 minLength: 1
@@ -56021,12 +56023,17 @@ paths:
                                       - conversation
                                       - person
                                       - mail
+                                      - repository
+                                      - site
                                       - public
                                       - unknown
                                   channel:
                                     type: string
                                   recipient:
                                     type: string
+                                  thread:
+                                    type: string
+                                    description: For a repository, the PR or issue number the write lands on.
                                 additionalProperties: false
                             allowForRequest:
                               type: boolean

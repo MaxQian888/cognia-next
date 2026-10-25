@@ -507,6 +507,8 @@ describe("validateOutboundRecipientGrants (ADR-0239)", () => {
         grant({ kind: "conversation", channel: "lark-1", recipient: "conv:lark:lark-1:oc_1" }),
         grant({ kind: "person", channel: "lark-1", recipient: "person:lark-1:ou_1" }),
         grant({ kind: "mail", channel: "mail", recipient: "mail:a@b.c" }),
+        grant({ kind: "repository", channel: "github", recipient: "github:github.com/acme/web" }),
+        grant({ kind: "site", channel: "browser", recipient: "site:https://forms.example.com" }),
       ])
     ).toEqual([])
     expect(validateOutboundRecipientGrants([])).toEqual([])
@@ -527,10 +529,27 @@ describe("validateOutboundRecipientGrants (ADR-0239)", () => {
       grant({ kind: "mail", channel: "mail", recipient: "mail:" }),
     ])
     expect(errors).toEqual([
-      "outboundRecipients[0].recipient.kind must be one of conversation, person, mail",
+      "outboundRecipients[0].recipient.kind must be one of conversation, person, mail, repository, site",
       'outboundRecipients[1].recipient.recipient must start with "conv:" and name a recipient',
-      'outboundRecipients[2].recipient.channel must be "mail" exactly for a mail recipient',
+      'outboundRecipients[2].recipient.channel "mail" is not a connector adapter id',
       'outboundRecipients[3].recipient.recipient must start with "mail:" and name a recipient',
+    ])
+  })
+
+  it("holds each phase 2 kind to its own channel and prefix", () => {
+    expect(
+      validateOutboundRecipientGrants([
+        grant({ kind: "repository", channel: "lark-1", recipient: "github:github.com/a/b" }),
+        grant({ kind: "site", channel: "browser", recipient: "https://example.com" }),
+        grant({ kind: "mail", channel: "github", recipient: "mail:a@b.c" }),
+        // A connector adapter cannot claim a fixed channel.
+        grant({ kind: "conversation", channel: "github", recipient: "conv:x:github:c" }),
+      ])
+    ).toEqual([
+      'outboundRecipients[0].recipient.channel must be "github" for a repository recipient',
+      'outboundRecipients[1].recipient.recipient must start with "site:" and name a recipient',
+      'outboundRecipients[2].recipient.channel must be "mail" for a mail recipient',
+      'outboundRecipients[3].recipient.channel "github" is not a connector adapter id',
     ])
   })
 

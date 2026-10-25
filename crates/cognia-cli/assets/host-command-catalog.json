@@ -8238,7 +8238,9 @@
                           "enum": [
                             "conversation",
                             "person",
-                            "mail"
+                            "mail",
+                            "repository",
+                            "site"
                           ]
                         },
                         "channel": {
@@ -25128,6 +25130,8 @@
                               "conversation",
                               "person",
                               "mail",
+                              "repository",
+                              "site",
                               "public",
                               "unknown"
                             ]
@@ -25137,6 +25141,10 @@
                           },
                           "recipient": {
                             "type": "string"
+                          },
+                          "thread": {
+                            "type": "string",
+                            "description": "For a repository, the PR or issue number the write lands on."
                           }
                         },
                         "additionalProperties": false
@@ -102390,5 +102398,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "058e482ce816ffaba2c60a0db7dbd3b751c69ed35578dd3e72cb4f665bb9f38c"
+  "catalogHash": "edad48cf33362954073c81f45edad2bb9ab6b39a5d633da3e6c0c1b2c8a47722"
 }

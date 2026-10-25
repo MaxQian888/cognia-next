@@ -14,10 +14,16 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 
 import { __resetAuthorizedToolCallsForTesting } from "./authorized-tool-calls"
 import { __resetRunningBotGrantsForTesting } from "./configured-grants"
-import { conversationTarget, outboundFingerprint } from "./outbound-targets"
+import {
+  conversationTarget,
+  outboundFingerprint,
+  repositoryTarget,
+  siteTarget,
+} from "./outbound-targets"
+import { buildActionReviewPlanContext } from "./plan-context"
 import { planDelivery, type DeliveryPlanInput, type PlanDeliveryDeps } from "./plan-delivery"
 import { outboundToolDecision, planOutboundToolCall } from "./plan-tool-call"
-import { readOutboundAuthorizationMode } from "./policy"
+import { planActionReview, readOutboundAuthorizationMode } from "./policy"
 import { __clearRequestOriginCacheForTesting } from "./resolve-request-origin"
 
 jest.mock("@/lib/collab/shared-run-coordinator", () => ({
@@ -119,6 +125,27 @@ describe("shadow mode changes no send result (ADR-0239)", () => {
     for (const settings of SHADOW_SETTINGS) {
       const observed = await planDelivery(input, deps(settings))
       expect(observed.action).toBe("send")
+    }
+  })
+
+  it("keeps GitHub and browser writes observed until their own category is enforced", async () => {
+    // Phase 2 categories start in shadow even where messaging is enforced, so
+    // an upgrade never starts holding GitHub or browser writes on its own.
+    for (const settings of [...SHADOW_SETTINGS, ENFORCE]) {
+      expect(readOutboundAuthorizationMode(settings, "github")).toBe("shadow")
+      expect(readOutboundAuthorizationMode(settings, "browser")).toBe("shadow")
+      const context = await buildActionReviewPlanContext({
+        origin: {},
+        unattended: true,
+        via: "tool",
+        settings,
+      })
+      for (const target of [repositoryTarget("acme/web")!, siteTarget("https://a.example")!]) {
+        expect(planActionReview({ verdict: "ask", targets: [target] }, context).plan).toEqual({
+          outcome: "park",
+          enforced: false,
+        })
+      }
     }
   })
 

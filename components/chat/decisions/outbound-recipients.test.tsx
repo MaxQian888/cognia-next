@@ -43,6 +43,28 @@ describe("<OutboundRecipients />", () => {
     ])
   })
 
+  it("names a repository with its thread, and a site by its origin (ADR-0239 phase 2)", () => {
+    render(
+      <OutboundRecipients
+        targets={[
+          { kind: "repository", channel: "github", recipient: "github:github.com/acme/web" },
+          {
+            kind: "repository",
+            channel: "github",
+            recipient: "github:ghe.corp.io/acme/web",
+            thread: "12",
+          },
+          { kind: "site", channel: "browser", recipient: "site:https://forms.example.com" },
+        ]}
+      />
+    )
+    expect(screen.getAllByTestId("outbound-recipient").map((li) => li.textContent)).toEqual([
+      'recipientRepository:{"id":"acme/web"}',
+      'recipientRepositoryThread:{"id":"ghe.corp.io/acme/web","thread":"12"}',
+      'recipientSite:{"origin":"https://forms.example.com"}',
+    ])
+  })
+
   it("says a deny fences the recipients only when asked to", () => {
     const { rerender } = render(<OutboundRecipients targets={[chat]} />)
     expect(screen.queryByTestId("outbound-deny-fences")).not.toBeInTheDocument()

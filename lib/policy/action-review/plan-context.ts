@@ -26,15 +26,19 @@ import {
 } from "@/lib/db/action-review-receipts"
 import type { ScheduledTaskPayload } from "@/types/scheduler"
 
-import { conversationTarget, outboundFingerprint, type OutboundTarget } from "./outbound-targets"
+import { conversationTarget, originMatchFingerprint, type OutboundTarget } from "./outbound-targets"
 import {
   readOutboundAuthorizationMode,
+  readOutboundCategoryModes,
   type ActionReviewPlanContext,
   type OutboundReviewVia,
 } from "./policy"
 import { botInstructionEpoch, taskInstructionEpoch, taskOriginThread } from "./request-origin"
 
-/** App settings as the engine reads them: only `agentPermissions.outboundAuthorization`. */
+/**
+ * App settings as the engine reads them: only `agentPermissions.outboundAuthorization`
+ * and `agentPermissions.outboundAuthorizationByCategory`.
+ */
 export type OutboundSettingsLike = { agentPermissions?: unknown } | null | undefined
 
 /** The settings store's current settings; `null`, so shadow mode, in a shell without one. */
@@ -51,6 +55,10 @@ export async function readAppSettings(): Promise<OutboundSettingsLike> {
 export interface ActionReviewPlanOrigin {
   rootSessionId?: string
   instructionEpoch?: string
+  /**
+   * The thread the request came from: a conversation, or a GitHub repository
+   * target carrying the PR or issue as its `thread`.
+   */
   originThread?: OutboundTarget
 }
 
@@ -149,11 +157,13 @@ export async function buildActionReviewPlanContext(
   }
 
   const thread = args.origin.originThread
+  const origin = thread ? originMatchFingerprint(thread) : undefined
   return {
     mode: readOutboundAuthorizationMode(args.settings),
+    modes: readOutboundCategoryModes(args.settings),
     unattended: args.unattended,
     via: args.via,
-    originFingerprints: new Set(thread ? [outboundFingerprint(thread)] : []),
+    originFingerprints: new Set(origin ? [origin] : []),
     fencedFingerprints,
     instructionGrants,
     policyGrants,

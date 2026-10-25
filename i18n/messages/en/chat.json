@@ -2823,6 +2823,9 @@
     "recipientConversation": "Chat {id} via {channel}",
     "recipientMail": "Email {address}",
     "recipientPerson": "Person {id} via {channel}",
+    "recipientRepository": "Repository {id}",
+    "recipientRepositoryThread": "Repository {id} #{thread}",
+    "recipientSite": "Site {origin}",
     "recipientPublic": "A public link ({tool})",
     "recipientUnknown": "A recipient it could not name",
     "recipientsLabel": "Sends to"

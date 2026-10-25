@@ -407,6 +407,25 @@ describe("setBotOutboundRecipients (ADR-0239)", () => {
     expect((await setBotOutboundRecipients(row.id, [])).outboundRecipients).toBeUndefined()
   })
 
+  it("stores repositories and sites, each on its own channel (ADR-0239 phase 2)", async () => {
+    const row = await installed()
+    const repo = {
+      ...grant,
+      recipient: { kind: "repository", channel: "github", recipient: "github:github.com/acme/web" },
+    } as const
+    const site = {
+      ...grant,
+      recipient: { kind: "site", channel: "browser", recipient: "site:https://forms.example.com" },
+    } as const
+    const updated = await setBotOutboundRecipients(row.id, [repo, site])
+    expect(updated.outboundRecipients).toEqual([repo, site])
+    await expect(
+      setBotOutboundRecipients(row.id, [
+        { ...repo, recipient: { ...repo.recipient, channel: "lark-1" } } as never,
+      ])
+    ).rejects.toThrow()
+  })
+
   it("refuses a malformed list, a mirror and a missing installation", async () => {
     const row = await installed()
     await expect(

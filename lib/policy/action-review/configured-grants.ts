@@ -49,16 +49,15 @@ export function botRecipientGrants(installation: {
 /**
  * A list entry for a target a person picked, or `undefined` for one no list
  * may hold (a public link, an unnamed recipient). Build the target with
- * `conversationTarget` / `personTarget` / `mailTarget` so the entry is in the
- * engine's normalized form.
+ * `conversationTarget` / `personTarget` / `mailTarget` / `repositoryTarget` /
+ * `siteTarget` so the entry is in the engine's normalized form.
  */
 export function recipientGrant(
   target: OutboundTarget,
   now: number = Date.now()
 ): OutboundRecipientGrant | undefined {
-  if (target.kind !== "conversation" && target.kind !== "person" && target.kind !== "mail") {
-    return undefined
-  }
+  if (target.kind === "public" || target.kind === "unknown") return undefined
+  // A repository is listed whole; the thread a write went to is not kept.
   return {
     recipient: { kind: target.kind, channel: target.channel, recipient: target.recipient },
     addedAt: now,

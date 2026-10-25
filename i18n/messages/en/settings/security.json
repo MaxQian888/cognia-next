@@ -91,7 +91,9 @@
     "kind": {
       "conversation": "Conversation",
       "person": "Person",
-      "mail": "Email"
+      "mail": "Email",
+      "repository": "Repository",
+      "site": "Site"
     },
     "via": "via {account}",
     "outcome": {

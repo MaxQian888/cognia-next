@@ -14,7 +14,13 @@ import { recordActionReviewReceipt } from "@/lib/db/action-review-receipts"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 
-import { conversationTarget, outboundFingerprint, toReviewTarget } from "./outbound-targets"
+import {
+  conversationTarget,
+  originMatchFingerprint,
+  outboundFingerprint,
+  repositoryTarget,
+  toReviewTarget,
+} from "./outbound-targets"
 import {
   botPlanOrigin,
   buildActionReviewPlanContext,
@@ -198,6 +204,48 @@ describe("buildActionReviewPlanContext", () => {
     expect(context).toMatchObject({ mode: "enforce", unattended: true, via: "delivery" })
     expect(context.originFingerprints).toEqual(new Set([outboundFingerprint(THREAD)]))
     expect(context.policyGrants).toEqual(new Map([[outboundFingerprint(GROUP), "bot:b1"]]))
+  })
+
+  it("reads the GitHub and browser modes on their own (ADR-0239 phase 2)", async () => {
+    const build = (agentPermissions: object) =>
+      buildActionReviewPlanContext({
+        origin: {},
+        unattended: false,
+        via: "tool",
+        settings: { agentPermissions },
+      })
+    expect((await build({ outboundAuthorization: "enforce" })).modes).toEqual({
+      github: "shadow",
+      browser: "shadow",
+    })
+    expect((await build({ outboundAuthorizationByCategory: { github: "enforce" } })).modes).toEqual(
+      { github: "enforce", browser: "shadow" }
+    )
+  })
+
+  it("keys a GitHub origin by its thread, so only that PR answers without asking", async () => {
+    const pr = repositoryTarget("acme/web", 12)!
+    const context = await buildActionReviewPlanContext({
+      origin: { originThread: pr },
+      unattended: true,
+      via: "tool",
+      settings: { agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } } },
+    })
+    expect(context.originFingerprints).toEqual(new Set([originMatchFingerprint(pr)]))
+    expect(planActionReview({ verdict: "ask", targets: [pr] }, context).plan.outcome).toBe("allow")
+    expect(
+      planActionReview({ verdict: "ask", targets: [repositoryTarget("acme/web", 13)!] }, context)
+        .plan.outcome
+    ).toBe("park")
+  })
+
+  it("has no origin for a repository named without a thread", async () => {
+    const context = await buildActionReviewPlanContext({
+      origin: { originThread: repositoryTarget("acme/web")! },
+      unattended: false,
+      via: "tool",
+    })
+    expect(context.originFingerprints.size).toBe(0)
   })
 })
 

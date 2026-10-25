@@ -4,13 +4,19 @@ import {
   conversationTarget,
   extractOutboundTargets,
   mailTarget,
+  originMatchFingerprint,
   outboundFingerprint,
   publicTarget,
+  repositoryTarget,
+  siteTarget,
   type OutboundTarget,
 } from "./outbound-targets"
 import {
+  categoryMode,
   outboundGrantableForRequest,
   planActionReview,
+  readOutboundAuthorizationMode,
+  readOutboundCategoryModes,
   type ActionReviewPlanContext,
   type ActionReviewPlanInput,
 } from "./policy"
@@ -240,7 +246,7 @@ describe("planActionReview: what never authorizes", () => {
     ).toBe("deny")
   })
 
-  it("treats only a conversation as the origin thread", () => {
+  it("never treats a person as the origin thread", () => {
     const person: OutboundTarget = {
       kind: "person",
       channel: "bot-a",
@@ -290,6 +296,112 @@ describe("planActionReview: shadow mode", () => {
       planActionReview(input([MAIL_A]), { ...shadow, fencedFingerprints: new Set([fp(MAIL_A)]) })
         .plan
     ).toEqual({ outcome: "deny", enforced: false })
+  })
+})
+
+describe("planActionReview: phase 2 recipients (ADR-0239)", () => {
+  const PR_12 = must(repositoryTarget("acme/web", 12))
+  const PR_13 = must(repositoryTarget("acme/web", 13))
+  const OTHER_REPO = must(repositoryTarget("acme/api", 12))
+  const SITE = must(siteTarget("https://forms.example.com/submit"))
+  const github = (overrides: Partial<ActionReviewPlanContext> = {}) =>
+    ctx({
+      modes: { github: "enforce", browser: "enforce" },
+      originFingerprints: new Set([originMatchFingerprint(PR_12)!]),
+      ...overrides,
+    })
+
+  it("answers on the PR the request came from without asking", () => {
+    expect(planActionReview(input([PR_12]), github())).toMatchObject({
+      plan: { outcome: "allow", enforced: true },
+      authority: "policy-default",
+    })
+  })
+
+  it("asks for another PR of the same repository, and for another repository", () => {
+    for (const target of [PR_13, must(repositoryTarget("acme/web")), OTHER_REPO]) {
+      expect(planActionReview(input([target]), github()).plan.outcome).toBe("ask")
+    }
+  })
+
+  it("grants and fences a whole repository, whatever thread a write goes to", () => {
+    const repo = fp(PR_13)
+    expect(
+      planActionReview(input([PR_13]), github({ instructionGrants: new Set([repo]) })).grant
+    ).toEqual({ scope: "instruction" })
+    expect(
+      planActionReview(input([PR_12]), github({ fencedFingerprints: new Set([repo]) })).reason
+    ).toBe("fenced")
+    expect(
+      planActionReview(input([SITE]), github({ policyGrants: new Map([[fp(SITE), "sites"]]) }))
+        .grant
+    ).toEqual({ scope: "policy", policyRef: "sites" })
+  })
+
+  it("parks an unattended write nothing authorized", () => {
+    expect(planActionReview(input([OTHER_REPO]), github({ unattended: true })).plan.outcome).toBe(
+      "park"
+    )
+  })
+})
+
+describe("planActionReview: a mode per category", () => {
+  it("observes GitHub and browser targets unless their own category is enforced", () => {
+    const messagingOnly = ctx({ mode: "enforce" })
+    for (const target of [
+      must(repositoryTarget("acme/web")),
+      must(siteTarget("https://a.example")),
+    ]) {
+      expect(planActionReview(input([target]), messagingOnly).plan).toEqual({
+        outcome: "ask",
+        enforced: false,
+      })
+    }
+    expect(planActionReview(input([OTHER_GROUP]), messagingOnly).plan.enforced).toBe(true)
+  })
+
+  it("enforces a category without enforcing messaging", () => {
+    const githubOnly = ctx({ mode: "shadow", modes: { github: "enforce" } })
+    expect(
+      planActionReview(input([must(repositoryTarget("acme/web"))]), githubOnly).plan.enforced
+    ).toBe(true)
+    expect(planActionReview(input([OTHER_GROUP]), githubOnly).plan.enforced).toBe(false)
+  })
+
+  it("holds an action that touches several categories to the strictest", () => {
+    const githubOnly = ctx({ mode: "shadow", modes: { github: "enforce" } })
+    expect(
+      planActionReview(input([OTHER_GROUP, must(repositoryTarget("acme/web"))]), githubOnly).plan
+        .enforced
+    ).toBe(true)
+  })
+
+  it("reads an action with no target in the category it names", () => {
+    const githubOnly = ctx({ mode: "shadow", modes: { github: "enforce" } })
+    expect(planActionReview(input([]), githubOnly).plan.enforced).toBe(false)
+    expect(
+      planActionReview({ verdict: "ask", targets: [], category: "github" }, githubOnly).plan
+        .enforced
+    ).toBe(true)
+  })
+
+  it("reads each category's setting on its own, absent meaning shadow", () => {
+    const settings = {
+      agentPermissions: {
+        outboundAuthorization: "enforce",
+        outboundAuthorizationByCategory: { github: "enforce", browser: "on" },
+      },
+    }
+    expect(readOutboundAuthorizationMode(settings)).toBe("enforce")
+    expect(readOutboundAuthorizationMode(settings, "github")).toBe("enforce")
+    expect(readOutboundAuthorizationMode(settings, "browser")).toBe("shadow")
+    expect(
+      readOutboundCategoryModes({ agentPermissions: { outboundAuthorization: "enforce" } })
+    ).toEqual({ github: "shadow", browser: "shadow" })
+    expect(
+      readOutboundCategoryModes({ agentPermissions: { outboundAuthorizationByCategory: 3 } })
+    ).toEqual({ github: "shadow", browser: "shadow" })
+    expect(categoryMode({ mode: "enforce" }, "github")).toBe("shadow")
   })
 })
 

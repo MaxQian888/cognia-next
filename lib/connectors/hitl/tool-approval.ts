@@ -90,6 +90,10 @@ export function imRecipientLine(target: PendingOutboundTarget): string {
       return `成员 / Person ${id}（${target.channel}）`
     case "mail":
       return `邮箱 / Email ${id}`
+    case "repository":
+      return `仓库 / Repository ${id}${target.thread ? ` #${target.thread}` : ""}`
+    case "site":
+      return `网站 / Site ${id}`
     case "public":
       return `公开链接 / Public link（${id}）`
     case "unknown":

@@ -1854,7 +1854,9 @@
                         "enum": [
                           "conversation",
                           "person",
-                          "mail"
+                          "mail",
+                          "repository",
+                          "site"
                         ]
                       },
                       "channel": {

@@ -24,8 +24,16 @@
  * - A ruleset `allow` or bypass mode. For an outbound tool they only mean the
  *   tool may be used; `verdict` is read for `deny` alone.
  * - A `public` or `unknown` target, for anything but a per-call answer: there
- *   is no recipient a grant could name, and an origin thread is always a
- *   conversation.
+ *   is no recipient a grant could name, and nothing it could be an origin of.
+ *
+ * The origin thread is a conversation, or a GitHub PR or issue: a repository
+ * target counts as the origin only through its `thread`
+ * ({@link originMatchFingerprint}), while grants and the fence match the
+ * whole repository.
+ *
+ * Each category (messaging, GitHub, browser) has its own mode. A plan is
+ * enforced when any of its targets is in an enforced category: one action is
+ * one send, so it is held to the strictest of the modes it touches.
  * - The model. `ActionReviewRequest.recommendation` is never read here.
  *
  * Pure: every input is passed in. `plan-context.ts` gathers the context.
@@ -40,42 +48,84 @@ import type {
   ActionReviewRequest,
 } from "@cognia/agent-config-types/action-review"
 
-import { outboundFingerprint, type OutboundTarget } from "./outbound-targets"
+import {
+  originMatchFingerprint,
+  outboundCategoryOf,
+  outboundFingerprint,
+  type OutboundCategory,
+  type OutboundTarget,
+} from "./outbound-targets"
 
 /**
  * - `shadow`: plan and record, change nothing. Every plan carries
  *   `enforced: false` and callers keep their current behavior.
  * - `enforce`: callers act on the plan.
  *
- * The setting that chooses it (`agentPermissions.outboundAuthorization`) is
- * written only by the Settings → Security card, which labels `shadow` "observe
- * only" and asks before switching to `enforce`.
+ * The settings that choose it, `agentPermissions.outboundAuthorization` for
+ * messaging and `agentPermissions.outboundAuthorizationByCategory` for GitHub
+ * and the browser, are written only by the Settings → Security card, which
+ * labels `shadow` "observe only" and asks before switching to `enforce`.
  */
 export type OutboundAuthorizationMode = "shadow" | "enforce"
 
 /**
- * The mode `agentPermissions.outboundAuthorization` selects: `enforce` only
- * when it says exactly that, anything else observes. Read structurally so a
- * settings object from any source (the app store, the CLI) can be passed.
+ * The mode a category runs in: `enforce` only when its setting says exactly
+ * that, anything else observes. Messaging reads
+ * `agentPermissions.outboundAuthorization` (phase 1); GitHub and the browser
+ * read `agentPermissions.outboundAuthorizationByCategory.<category>`, so
+ * enforcing messaging never enforces them. Read structurally so a settings
+ * object from any source (the app store, the CLI) can be passed.
  */
 export function readOutboundAuthorizationMode(
-  settings: { agentPermissions?: unknown } | null | undefined
+  settings: { agentPermissions?: unknown } | null | undefined,
+  category: OutboundCategory = "messaging"
 ): OutboundAuthorizationMode {
   const permissions = settings?.agentPermissions
   if (!permissions || typeof permissions !== "object") return "shadow"
-  const mode = (permissions as { outboundAuthorization?: unknown }).outboundAuthorization
+  const mode =
+    category === "messaging"
+      ? (permissions as { outboundAuthorization?: unknown }).outboundAuthorization
+      : readCategoryMode(
+          (permissions as { outboundAuthorizationByCategory?: unknown })
+            .outboundAuthorizationByCategory,
+          category
+        )
   return mode === "enforce" ? "enforce" : "shadow"
+}
+
+function readCategoryMode(byCategory: unknown, category: OutboundCategory): unknown {
+  if (!byCategory || typeof byCategory !== "object") return undefined
+  return (byCategory as Record<string, unknown>)[category]
+}
+
+/** The GitHub and browser modes, for {@link ActionReviewPlanContext.modes}. */
+export function readOutboundCategoryModes(
+  settings: { agentPermissions?: unknown } | null | undefined
+): Partial<Record<OutboundCategory, OutboundAuthorizationMode>> {
+  return {
+    github: readOutboundAuthorizationMode(settings, "github"),
+    browser: readOutboundAuthorizationMode(settings, "browser"),
+  }
 }
 
 /** The chokepoint asking: a tool call, or a connector delivery. */
 export type OutboundReviewVia = "tool" | "delivery"
 
 export interface ActionReviewPlanContext {
+  /** The messaging mode (phase 1). */
   mode: OutboundAuthorizationMode
+  /**
+   * The other categories' modes. A category absent here observes: a context
+   * built without them never enforces GitHub or browser writes.
+   */
+  modes?: Partial<Record<Exclude<OutboundCategory, "messaging">, OutboundAuthorizationMode>>
   /** No person is watching the run (a schedule, a Bot, a background turn). */
   unattended: boolean
   via: OutboundReviewVia
-  /** Fingerprints of the conversation the request came from. */
+  /**
+   * The origin thread the request came from, as {@link originMatchFingerprint}
+   * computes it: a conversation's fingerprint, or a GitHub thread's.
+   */
   originFingerprints: ReadonlySet<string>
   /** Fingerprints a person refused in this root session's epoch. */
   fencedFingerprints: ReadonlySet<string>
@@ -89,6 +139,11 @@ export interface ActionReviewPlanContext {
 export type ActionReviewPlanInput = Pick<ActionReviewRequest, "verdict"> & {
   /** The action's targets with their kind; the request stores only fingerprints. */
   targets: readonly OutboundTarget[]
+  /**
+   * The category of an action that could not name any target, for its mode.
+   * Default `messaging`; a target's own category always wins.
+   */
+  category?: OutboundCategory
 }
 
 /** Why a target counts as authorized. */
@@ -126,10 +181,28 @@ function basisOf(
   ctx: ActionReviewPlanContext
 ): OutboundTargetBasis | null {
   if (!isGrantable(target)) return null
-  if (target.kind === "conversation" && ctx.originFingerprints.has(fingerprint)) return "origin"
+  const origin = originMatchFingerprint(target)
+  if (origin !== undefined && ctx.originFingerprints.has(origin)) return "origin"
   if (ctx.instructionGrants.has(fingerprint)) return "instruction"
   if (ctx.policyGrants.has(fingerprint)) return "policy"
   return null
+}
+
+/** The mode one category runs in under this context. */
+export function categoryMode(
+  ctx: Pick<ActionReviewPlanContext, "mode" | "modes">,
+  category: OutboundCategory
+): OutboundAuthorizationMode {
+  return category === "messaging" ? ctx.mode : (ctx.modes?.[category] ?? "shadow")
+}
+
+/** Whether a plan for these targets is enforced: any target in an enforced category. */
+function isEnforced(input: ActionReviewPlanInput, ctx: ActionReviewPlanContext): boolean {
+  const categories =
+    input.targets.length > 0
+      ? input.targets.map((target) => outboundCategoryOf(target))
+      : [input.category ?? "messaging"]
+  return categories.some((category) => categoryMode(ctx, category) === "enforce")
 }
 
 function pendingOutcome(ctx: ActionReviewPlanContext): ActionReviewPlanOutcome {
@@ -142,7 +215,7 @@ export function planActionReview(
   input: ActionReviewPlanInput,
   ctx: ActionReviewPlanContext
 ): ActionReviewPlanResult {
-  const enforced = ctx.mode === "enforce"
+  const enforced = isEnforced(input, ctx)
   const result = (
     outcome: ActionReviewPlanOutcome,
     rest: Omit<ActionReviewPlanResult, "plan">

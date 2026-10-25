@@ -10510,6 +10510,9 @@
       "recipientMail": "Email {address}",
       "recipientPerson": "Person {id} via {channel}",
       "recipientPublic": "A public link ({tool})",
+      "recipientRepository": "Repository {id}",
+      "recipientRepositoryThread": "Repository {id} #{thread}",
+      "recipientSite": "Site {origin}",
       "recipientUnknown": "A recipient it could not name",
       "recipientsLabel": "Sends to",
       "supersededNotice": "Superseded by a new instruction — the tool was already denied.",
@@ -31188,12 +31191,16 @@
     "invalid": {
       "conversation": "That is not a conversation key. It looks like platform:bot:chat.",
       "mail": "That is not an email address.",
-      "person": "Enter the member's id on this platform."
+      "person": "Enter the member's id on this platform.",
+      "repository": "That is not a repository. Use owner/repo, host/owner/repo or its URL.",
+      "site": "That is not a web address. Use one starting with https:// or http://."
     },
     "kind": {
       "conversation": "Conversation",
       "mail": "Email",
-      "person": "Person"
+      "person": "Person",
+      "repository": "Repository",
+      "site": "Site"
     },
     "kindLabel": "Recipient kind",
     "known": "Conversations on this device",
@@ -31202,7 +31209,9 @@
     "placeholder": {
       "conversation": "Search, or paste a conversation key",
       "mail": "name@example.com",
-      "person": "Member id"
+      "person": "Member id",
+      "repository": "owner/repo or a repository URL",
+      "site": "https://example.com"
     },
     "remove": "Remove {name}",
     "saveFailed": "Could not save the recipient list: {reason}",
@@ -55715,7 +55724,9 @@
         "kind": {
           "conversation": "Conversation",
           "mail": "Email",
-          "person": "Person"
+          "person": "Person",
+          "repository": "Repository",
+          "site": "Site"
         },
         "lastSeen": "last {when}",
         "modeSaveFailed": "Could not save the setting",

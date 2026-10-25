@@ -112,7 +112,7 @@ export const botOutboundRecipientsSchema = z
       .object({
         recipient: z
           .object({
-            kind: z.enum(["conversation", "person", "mail"]),
+            kind: z.enum(["conversation", "person", "mail", "repository", "site"]),
             channel: recipientText,
             recipient: recipientText,
           })

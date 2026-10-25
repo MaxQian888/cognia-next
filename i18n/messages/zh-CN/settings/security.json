@@ -91,7 +91,9 @@
     "kind": {
       "conversation": "会话",
       "person": "成员",
-      "mail": "邮件"
+      "mail": "邮件",
+      "repository": "仓库",
+      "site": "站点"
     },
     "via": "经由 {account}",
     "outcome": {
