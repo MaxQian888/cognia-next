@@ -15551,7 +15551,39 @@
       "notOrgHost": "{host} 不服务于组织，因此没有组织模型。",
       "removed": "已从 {host} 移除 {provider} 密钥",
       "saved": "已在 {host} 上保存 {provider} 密钥",
-      "title": "组织模型"
+      "title": "组织模型",
+      "usage": {
+        "cancel": "取消",
+        "capMode": "上限",
+        "capReached": "已达上限",
+        "capTokens": "每月 token 数",
+        "defaultHint": "适用于没有单独上限的所有人。",
+        "defaultLabel": "默认每月上限",
+        "defaultSaved": "已在 {host} 保存默认上限",
+        "edit": "修改上限",
+        "empty": "组织里还没有人用过这台 Host。",
+        "hint": "{month}（UTC）每个人通过组织密钥用掉的 token。会超出上限的回合会在到达模型前被拒绝。",
+        "hintNoMonth": "本月（UTC）每个人通过组织密钥用掉的 token。",
+        "loading": "正在向 {host} 读取本月用量…",
+        "memberSaved": "已保存 {user} 的上限",
+        "mode": {
+          "default": "组织默认",
+          "limit": "限定 token 数",
+          "unlimited": "不限量"
+        },
+        "noLimit": "不限量",
+        "reserved": "运行中的回合占用 {count}",
+        "save": "保存",
+        "saving": "正在保存…",
+        "source": {
+          "default": "默认上限",
+          "override": "单独上限"
+        },
+        "spent": "已用 {spent}，上限 {cap}",
+        "spentAria": "{user} 本月上限的已用比例",
+        "title": "每月用量",
+        "tokens": "{count} 个 token"
+      }
     },
     "overview": {
       "added": "添加于",
@@ -32091,6 +32123,38 @@
       },
       "title": "Web Vitals"
     }
+  },
+  "personAgents": {
+    "allowance": {
+      "left": "本月还剩 {left} / {cap} 个 token",
+      "unlimited": "本月不限量 · 已用 {spent} 个 token",
+      "usedUp": "本月 {cap} 个 token 已用完"
+    },
+    "ariaLabel": "对话智能体",
+    "badge": {
+      "default": "默认",
+      "noKey": "无密钥",
+      "noModel": "无模型"
+    },
+    "chat": "对话",
+    "current": {
+      "chat": "此对话是不带智能体的对话",
+      "default": "此对话以组织默认的 {agent} 运行",
+      "locked": "对话会一直使用开始时的智能体。",
+      "named": "此对话以 {agent} 运行"
+    },
+    "description": "这里的对话会以组织允许的智能体运行，在你在这台 Host 上的个人沙箱中。",
+    "noExecution": "这台 Host 暂未向成员开放智能体。",
+    "noneAllowed": "组织还没有允许任何智能体。",
+    "problem": {
+      "execution-unavailable": "这台 Host 目前无法为成员运行智能体。",
+      "model-not-served": "组织没有为这个智能体提供此对话的模型。请新建对话以使用组织提供的模型。",
+      "no-key": "组织没有能运行这个智能体的模型密钥，请让管理员添加。",
+      "not-allowed": "组织已不再允许这个智能体。请用组织允许的智能体新建对话。"
+    },
+    "startHeading": "用以下智能体新建对话",
+    "starting": "正在启动 {agent}…",
+    "title": "组织的智能体"
   },
   "pet": {
     "achievements": {

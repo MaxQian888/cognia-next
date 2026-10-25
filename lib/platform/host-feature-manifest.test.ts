@@ -11,6 +11,7 @@ import {
   PET_REMOTE_CARE_HOST_OPERATIONS,
   ROUTER_FUSION_COMPANION_HOST_OPERATIONS,
   buildLocalHostFeatureManifest,
+  isPersonAgentsManifest,
   parseHostFeatureManifest,
   supportsHostFeatureOperation,
   type HostFeatureManifest,
@@ -887,6 +888,46 @@ describe("personPartition", () => {
     ) as Record<string, unknown>
     wire.personPartition = value
     expect(parseHostFeatureManifest(wire)).toBeNull()
+  })
+})
+
+describe("personAgents", () => {
+  const personAgents = {
+    allowedAgents: [{ runtimeId: "claude-agent-acp", available: true, providers: ["deepseek"] }],
+    defaultAgent: "claude-agent-acp",
+    execution: "sandboxed" as const,
+    models: { deepseek: ["ark-deepseek-v4.1-flash"] },
+    usage: { month: "2026-10", spentTokens: 5, reservedTokens: 1, monthlyTokens: null },
+  }
+  const wire = (extra: Record<string, unknown>) =>
+    JSON.parse(
+      JSON.stringify(
+        buildLocalHostFeatureManifest({ platform: "headless", personPartition: true, personAgents })
+      )
+    ) as Record<string, unknown> & typeof extra
+
+  it("p6g travels only with a person partition and survives the wire", () => {
+    expect(
+      "personAgents" in buildLocalHostFeatureManifest({ platform: "headless", personAgents })
+    ).toBe(false)
+    const parsed = parseHostFeatureManifest(wire({}))
+    expect(parsed?.schemaVersion === 2 ? parsed.personAgents : undefined).toEqual(personAgents)
+    expect(isPersonAgentsManifest({ ...personAgents, usage: null, models: {} })).toBe(true)
+  })
+
+  it.each([
+    ["no partition", { personPartition: undefined }],
+    ["agents not a list", { personAgents: { ...personAgents, allowedAgents: {} } }],
+    ["unknown execution", { personAgents: { ...personAgents, execution: "maybe" } }],
+    ["models not a map", { personAgents: { ...personAgents, models: ["x"] } }],
+    [
+      "negative spend",
+      { personAgents: { ...personAgents, usage: { ...personAgents.usage, spentTokens: -1 } } },
+    ],
+    ["usage missing", { personAgents: { ...personAgents, usage: undefined } }],
+  ])("p6g rejects a manifest whose personAgents has %s", (_label, change) => {
+    const manifest = { ...wire({}), ...change }
+    expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(manifest)))).toBeNull()
   })
 })
 

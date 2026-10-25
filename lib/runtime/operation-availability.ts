@@ -1,4 +1,4 @@
-import type { HostFeatureLimits } from "@/lib/platform/host-feature-manifest"
+import type { HostFeatureLimits, PersonAgentsManifest } from "@/lib/platform/host-feature-manifest"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import type { RuntimeTarget } from "./runtime-target"
 
@@ -35,6 +35,8 @@ export interface HostRuntimeSnapshot {
   hostStateScope?: { accountId: string; runtimeTargetId: string }
   /** The Host is the caller's own person brain (P5d); see the manifest field. */
   personPartition?: true
+  /** P6g: the agents this member may start; see the manifest field. */
+  personAgents?: PersonAgentsManifest
 }
 
 export interface RuntimeSnapshot {

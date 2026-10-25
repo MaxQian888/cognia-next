@@ -1,0 +1,32 @@
+{
+  "title": "Your organization's agents",
+  "description": "Conversations here run as an agent your organization allows, in your own sandbox on this Host.",
+  "ariaLabel": "Conversation agent",
+  "chat": "Chat",
+  "current": {
+    "named": "This conversation runs as {agent}",
+    "default": "This conversation runs as {agent}, your organization's default",
+    "chat": "This conversation is chat without an agent",
+    "locked": "A conversation keeps the agent it started with."
+  },
+  "problem": {
+    "not-allowed": "Your organization no longer allows this agent. Start a new conversation with one it allows.",
+    "execution-unavailable": "This Host can't run agents for members right now.",
+    "no-key": "Your organization has no model key that can run this agent. Ask an admin to add one.",
+    "model-not-served": "Your organization doesn't serve this conversation's model to this agent. Start a new conversation to use one it serves."
+  },
+  "allowance": {
+    "left": "{left} of {cap} tokens left this month",
+    "usedUp": "This month's {cap} tokens are used up",
+    "unlimited": "No monthly limit · {spent} tokens used"
+  },
+  "startHeading": "Start a new conversation with",
+  "starting": "Starting {agent}…",
+  "noExecution": "Agents aren't available to members on this Host yet.",
+  "noneAllowed": "Your organization hasn't allowed any agents yet.",
+  "badge": {
+    "default": "Default",
+    "noKey": "No key",
+    "noModel": "No model"
+  }
+}

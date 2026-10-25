@@ -727,6 +727,38 @@
       "saved": "Saved the agents for {host}",
       "updated": "Updated {when}"
     },
+    "usage": {
+      "title": "Monthly usage",
+      "hint": "Tokens each person spent through the organization's keys in {month} (UTC). A turn that would pass a cap is refused before it reaches the model.",
+      "hintNoMonth": "Tokens each person spent through the organization's keys this month (UTC).",
+      "loading": "Asking {host} for this month's usage…",
+      "defaultLabel": "Default monthly cap",
+      "defaultHint": "Applies to everyone without their own cap.",
+      "defaultSaved": "Saved the default cap on {host}",
+      "memberSaved": "Saved the cap for {user}",
+      "capMode": "Cap",
+      "capTokens": "Monthly tokens",
+      "mode": {
+        "default": "Organization default",
+        "limit": "Token limit",
+        "unlimited": "No limit"
+      },
+      "noLimit": "no limit",
+      "tokens": "{count} tokens",
+      "spent": "{spent} used of {cap}",
+      "reserved": "{count} held by running turns",
+      "spentAria": "Share of {user}'s monthly cap used",
+      "source": {
+        "default": "Default cap",
+        "override": "Own cap"
+      },
+      "capReached": "Cap reached",
+      "edit": "Change cap",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "empty": "No one in your organization has used this Host yet."
+    },
     "confirm": {
       "title": "Remove the {provider} key?",
       "body": "Members' agents that use it stop working on {host} until someone adds a new key.",

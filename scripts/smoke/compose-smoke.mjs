@@ -1838,6 +1838,27 @@ async function personsAgent(person, owner) {
       !personsReplied(refused),
     `an agent the org does not allow is refused org_agent_not_allowed (got ${JSON.stringify(refused.operation)})`
   )
+  // P6g: the member's own device learns the same facts from their manifest:
+  // the allowed agent, the model the org serves it with, and their own month.
+  const manifest = await rpc("host_feature_manifest", {}, person.auth)
+  const personAgents = manifest.body?.personAgents
+  const claude = personAgents?.allowedAgents?.find(
+    (agent) => agent.runtimeId === "claude-agent-acp"
+  )
+  check(
+    claude?.available === true &&
+      personAgents.execution === "sandboxed" &&
+      (personAgents.models?.[seed.provider] ?? []).includes(seed.model) &&
+      (personAgents.usage?.spentTokens ?? 0) >= spent(after.body),
+    `${person.subject}'s manifest lists their agent, its org model and their month (got ${JSON.stringify(personAgents)})`
+  )
+  check(
+    !JSON.stringify(personAgents ?? {}).includes("usr_") &&
+      !Object.keys(personAgents?.models ?? {}).some(
+        (provider) => !(claude?.providers ?? []).includes(provider)
+      ),
+    `${person.subject}'s manifest names nobody else and no provider outside the allowlist`
+  )
   const withDefault = await rpc(
     "org_agent_policy_set",
     { allowedAgents: ["claude-agent-acp"], defaultAgent: "claude-agent-acp" },

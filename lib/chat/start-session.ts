@@ -45,6 +45,8 @@ type SessionSeed = Partial<
     ChatSession,
     | "title"
     | "model"
+    | "providerOverride"
+    | "agentRuntimeId"
     | "systemPrompt"
     | "workingDir"
     | "kind"

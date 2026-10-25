@@ -46,6 +46,14 @@ describe("hostSessionSeed", () => {
     ).toEqual({ projectId: "p1", characterId: "agent-1", model: "gpt-test", provider: "openai" })
   })
 
+  it("p6g carries an org member's chosen agent", () => {
+    expect(
+      hostSessionSeed(
+        session({ agentRuntimeId: "claude-agent-acp", model: "m", providerOverride: "deepseek" })
+      )
+    ).toEqual({ agentRuntimeId: "claude-agent-acp", model: "m", provider: "deepseek" })
+  })
+
   it("is omitted when the session has no choices to seed", () => {
     expect(hostSessionSeed(session())).toBeUndefined()
   })

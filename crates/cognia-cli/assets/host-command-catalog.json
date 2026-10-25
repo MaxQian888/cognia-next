@@ -54821,6 +54821,50 @@
               "sandboxed",
               "none"
             ]
+          },
+          "models": {
+            "description": "P6g: for each provider an allowed agent can use, the model ids the Host's deployment serves; no other provider appears.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "usage": {
+            "description": "P6g: the calling member's own spend and cap for the current UTC month; null when the Host keeps no usage ledger. Never another person's row.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "month",
+              "spentTokens",
+              "reservedTokens",
+              "monthlyTokens"
+            ],
+            "properties": {
+              "month": {
+                "type": "string"
+              },
+              "spentTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reservedTokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "monthlyTokens": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
           }
         }
       },
@@ -102469,5 +102513,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "f183b5dde0ea20f8290dc3b5b52da120de59f0a2a80716208ba832874b5685d9"
+  "catalogHash": "c90d52dadd5f32c551c95f69ff6f41a2b8f317be58341c0d31656a12038157cc"
 }

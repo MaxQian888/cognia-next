@@ -63,7 +63,7 @@ pub(super) async fn dispatch(
             .map_err(|_| crate::person_model::person_forbidden())?;
     }
     let result = match name {
-        "person_agent_policy_get" => crate::person_execution::person_agent_policy_get(args, scope, tenant_id).await,
+        "person_agent_policy_get" => crate::person_execution::person_agent_policy_get(args, scope, tenant_id, host).await,
         "person_agent_lease_prepare" => crate::person_execution::person_agent_lease_prepare(args, scope, tenant_id, state, host).await,
         "person_model_ticket_mint" => crate::person_model::person_model_ticket_mint(args, scope, tenant_id, state, host).await,
         // ── Chat session ─────────────────────────────────────────────────────

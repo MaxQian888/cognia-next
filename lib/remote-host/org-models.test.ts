@@ -5,10 +5,13 @@ import type { RemoteHostTarget } from "@/lib/remote-host/target-transport"
 import {
   deleteOrgCredential,
   getOrgAgentPolicy,
+  getOrgUsage,
   listOrgCredentials,
   orgModelsRefusal,
   setOrgAgentPolicy,
   setOrgCredential,
+  setOrgDefaultCap,
+  setOrgMemberCap,
   type OrgModelsDeps,
 } from "./org-models"
 
@@ -69,6 +72,44 @@ describe("organization models over the management channel", () => {
       allowedAgents: ["pi"],
       defaultAgent: "pi",
     })
+  })
+
+  it("reads the month's usage and tolerates a partial answer", async () => {
+    const member = {
+      userId: "usr_bob",
+      spentTokens: 10,
+      reservedTokens: 2,
+      monthlyTokens: null,
+      capSource: "override",
+    }
+    call.mockResolvedValueOnce({ month: "2026-10", defaultMonthlyTokens: 1000, members: [member] })
+    await expect(getOrgUsage(HOST, deps())).resolves.toEqual({
+      month: "2026-10",
+      defaultMonthlyTokens: 1000,
+      members: [member],
+    })
+    expect(call).toHaveBeenLastCalledWith("org_member_usage_get", {})
+    call.mockResolvedValueOnce(null)
+    await expect(getOrgUsage(HOST, deps())).resolves.toEqual({
+      month: "",
+      defaultMonthlyTokens: null,
+      members: [],
+    })
+  })
+
+  it("sets the default and a person's cap, including no cap and back to the default", async () => {
+    call.mockResolvedValue(null)
+    await setOrgDefaultCap(HOST, 5000, deps())
+    expect(call).toHaveBeenLastCalledWith("org_usage_cap_set", { defaultMonthlyTokens: 5000 })
+    await setOrgDefaultCap(HOST, null, deps())
+    expect(call).toHaveBeenLastCalledWith("org_usage_cap_set", { defaultMonthlyTokens: null })
+    for (const cap of [42, null, "default"] as const) {
+      await setOrgMemberCap(HOST, "usr_bob", cap, deps())
+      expect(call).toHaveBeenLastCalledWith("org_member_usage_cap_set", {
+        userId: "usr_bob",
+        monthlyTokens: cap,
+      })
+    }
   })
 })
 

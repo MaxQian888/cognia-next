@@ -65,6 +65,9 @@ import { EffortChip } from "./effort-chip"
 import { FusionModeChip } from "./fusion-mode-chip"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
+import { usePersonAgents } from "@/hooks/chat/use-person-agents"
+import { startNewSession } from "@/lib/chat/start-session"
+import { PersonAgentChip } from "./person-agent-chip"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
@@ -160,6 +163,7 @@ function GenericBottomToolbar({
   // the caller's business.
   const executor = useChatExecutor(session?.id)
   const tComposition = useTranslations("agentComposition.executor")
+  const personAgents = usePersonAgents()
 
   // Disable toolbar controls while a turn is in flight so mid-stream
   // configuration changes (model, runtime, mode, etc.) can't race the send.
@@ -244,17 +248,32 @@ function GenericBottomToolbar({
   //
   // `dense` glyphs the name away on every lane; inside the "⋯" popover there
   // is always room for the word, so the menu form is never dense.
-  const runtimeChip = (dense: boolean) => (
-    <AgentRuntimeSelector
-      disabled={isStreaming}
-      className={TOOLBAR_CHIP}
-      dense={dense}
-      // The chip names the sidecar runtime that will really serve the turn, and
-      // that is derived from the provider, so it has to be told which one.
-      providerId={providerId}
-      sessionId={session?.id}
-    />
-  )
+  //
+  // On an org member's shared Host the conversation runs as one of the org's
+  // allowed agents, fixed when it was created (P6g), so the member's agent chip
+  // takes this slot: the local runtime lanes do not run there.
+  const runtimeChip = (dense: boolean) =>
+    personAgents.agents ? (
+      <PersonAgentChip
+        agents={personAgents.agents}
+        refresh={personAgents.refresh}
+        disabled={isStreaming}
+        className={TOOLBAR_CHIP}
+        dense={dense}
+        session={session ?? undefined}
+        onStartConversation={(seed) => startNewSession(seed)}
+      />
+    ) : (
+      <AgentRuntimeSelector
+        disabled={isStreaming}
+        className={TOOLBAR_CHIP}
+        dense={dense}
+        // The chip names the sidecar runtime that will really serve the turn, and
+        // that is derived from the provider, so it has to be told which one.
+        providerId={providerId}
+        sessionId={session?.id}
+      />
+    )
 
   // Agent Mode composes the preset the Claude SDK runtime runs under; it is
   // meaningless for an external CLI agent, which brings its own.

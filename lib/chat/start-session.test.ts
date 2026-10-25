@@ -176,6 +176,24 @@ describe("startNewSession", () => {
     })
   })
 
+  it("p6g hands an org member's agent, provider and model to the paired Host", async () => {
+    mockCreateOnHost.mockResolvedValue("host")
+    const session = await startNewSession({
+      agentRuntimeId: "claude-agent-acp",
+      providerOverride: "deepseek",
+      model: "ark-deepseek-v4.1-flash",
+    })
+    expect(session).toMatchObject({
+      agentRuntimeId: "claude-agent-acp",
+      providerOverride: "deepseek",
+      model: "ark-deepseek-v4.1-flash",
+    })
+    expect(mockCreateOnHost).toHaveBeenCalledWith(
+      expect.objectContaining({ id: session.id, agentRuntimeId: "claude-agent-acp" }),
+      expect.anything()
+    )
+  })
+
   it("seeds all three identity columns, executor included", async () => {
     // `squadId` is the executor axis (ADR-0140) and was absent from the seed,
     // so "start a conversation configured like that one" could name the persona

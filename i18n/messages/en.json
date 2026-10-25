@@ -15551,7 +15551,39 @@
       "notOrgHost": "{host} doesn't serve an organization, so it has no organization models.",
       "removed": "Removed the {provider} key from {host}",
       "saved": "Saved the {provider} key on {host}",
-      "title": "Organization models"
+      "title": "Organization models",
+      "usage": {
+        "cancel": "Cancel",
+        "capMode": "Cap",
+        "capReached": "Cap reached",
+        "capTokens": "Monthly tokens",
+        "defaultHint": "Applies to everyone without their own cap.",
+        "defaultLabel": "Default monthly cap",
+        "defaultSaved": "Saved the default cap on {host}",
+        "edit": "Change cap",
+        "empty": "No one in your organization has used this Host yet.",
+        "hint": "Tokens each person spent through the organization's keys in {month} (UTC). A turn that would pass a cap is refused before it reaches the model.",
+        "hintNoMonth": "Tokens each person spent through the organization's keys this month (UTC).",
+        "loading": "Asking {host} for this month's usage…",
+        "memberSaved": "Saved the cap for {user}",
+        "mode": {
+          "default": "Organization default",
+          "limit": "Token limit",
+          "unlimited": "No limit"
+        },
+        "noLimit": "no limit",
+        "reserved": "{count} held by running turns",
+        "save": "Save",
+        "saving": "Saving…",
+        "source": {
+          "default": "Default cap",
+          "override": "Own cap"
+        },
+        "spent": "{spent} used of {cap}",
+        "spentAria": "Share of {user}'s monthly cap used",
+        "title": "Monthly usage",
+        "tokens": "{count} tokens"
+      }
     },
     "overview": {
       "added": "Added",
@@ -32091,6 +32123,38 @@
       },
       "title": "Web Vitals"
     }
+  },
+  "personAgents": {
+    "allowance": {
+      "left": "{left} of {cap} tokens left this month",
+      "unlimited": "No monthly limit · {spent} tokens used",
+      "usedUp": "This month's {cap} tokens are used up"
+    },
+    "ariaLabel": "Conversation agent",
+    "badge": {
+      "default": "Default",
+      "noKey": "No key",
+      "noModel": "No model"
+    },
+    "chat": "Chat",
+    "current": {
+      "chat": "This conversation is chat without an agent",
+      "default": "This conversation runs as {agent}, your organization's default",
+      "locked": "A conversation keeps the agent it started with.",
+      "named": "This conversation runs as {agent}"
+    },
+    "description": "Conversations here run as an agent your organization allows, in your own sandbox on this Host.",
+    "noExecution": "Agents aren't available to members on this Host yet.",
+    "noneAllowed": "Your organization hasn't allowed any agents yet.",
+    "problem": {
+      "execution-unavailable": "This Host can't run agents for members right now.",
+      "model-not-served": "Your organization doesn't serve this conversation's model to this agent. Start a new conversation to use one it serves.",
+      "no-key": "Your organization has no model key that can run this agent. Ask an admin to add one.",
+      "not-allowed": "Your organization no longer allows this agent. Start a new conversation with one it allows."
+    },
+    "startHeading": "Start a new conversation with",
+    "starting": "Starting {agent}…",
+    "title": "Your organization's agents"
   },
   "pet": {
     "achievements": {

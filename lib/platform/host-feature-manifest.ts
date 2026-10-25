@@ -10,6 +10,70 @@ import { GLANCE_REMOTE_COMMAND_NAMES } from "@/lib/glance/remote/commands"
 import { getCommandManifest } from "@/lib/tauri/command-descriptors"
 import type { Platform } from "./detect"
 
+/** One allowed agent as a member sees it (P6g). */
+export interface PersonAgentOption {
+  runtimeId: string
+  /** Whether an org credential covers the agent's model family. */
+  available: boolean
+  /** Provider ids whose org credential can run this agent. */
+  providers: string[]
+}
+
+/** See `HostFeatureManifestV2.personAgents`. */
+export interface PersonAgentsManifest {
+  allowedAgents: PersonAgentOption[]
+  defaultAgent: string | null
+  /** `none`: this Host cannot run member agents at all. */
+  execution: "sandboxed" | "none"
+  /** Per provider in `allowedAgents`, the model ids its deployment serves. */
+  models: Record<string, string[]>
+  /** The member's own UTC month; `monthlyTokens: null` means no cap. */
+  usage: {
+    month: string
+    spentTokens: number
+    reservedTokens: number
+    monthlyTokens: number | null
+  } | null
+}
+
+function isTokenCount(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+/** Strict: a malformed declaration fails the manifest like any other field. */
+export function isPersonAgentsManifest(value: unknown): value is PersonAgentsManifest {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Record<string, unknown>
+  const strings = (list: unknown) =>
+    Array.isArray(list) && list.every((item) => typeof item === "string" && item.length > 0)
+  const usage = candidate.usage as Record<string, unknown> | null | undefined
+  return (
+    Array.isArray(candidate.allowedAgents) &&
+    candidate.allowedAgents.every((agent) => {
+      const entry = agent as Record<string, unknown> | null
+      return (
+        !!entry &&
+        typeof entry.runtimeId === "string" &&
+        entry.runtimeId.length > 0 &&
+        typeof entry.available === "boolean" &&
+        strings(entry.providers)
+      )
+    }) &&
+    (candidate.defaultAgent === null || typeof candidate.defaultAgent === "string") &&
+    (candidate.execution === "sandboxed" || candidate.execution === "none") &&
+    !!candidate.models &&
+    typeof candidate.models === "object" &&
+    !Array.isArray(candidate.models) &&
+    Object.values(candidate.models).every(strings) &&
+    (usage === null ||
+      (!!usage &&
+        typeof usage === "object" &&
+        typeof usage.month === "string" &&
+        isTokenCount(usage.spentTokens) &&
+        isTokenCount(usage.reservedTokens) &&
+        (usage.monthlyTokens === null || isTokenCount(usage.monthlyTokens))))
+  )
+}
 export const HOST_FEATURE_MANIFEST_SCHEMA_VERSION = 2 as const
 export const DEFAULT_COMPANION_DEVICE_GRANTS = ["host.observe"] as const
 export const HOST_PROTOCOL_MIN_VERSION = 1
@@ -219,6 +283,14 @@ export interface HostFeatureManifestV2 extends HostFeatureManifestBase {
    * caller's own data, and the Host exempts them from interactive approval.
    */
   personPartition?: true
+  /**
+   * P6g, person partitions only: the agents this member may start, which
+   * models the org serves them with, and the member's own month. Built by the
+   * member's person brain from the Host's `person_agent_policy_get`, the same
+   * facts it resolves turns from, so a device never offers what a turn would
+   * refuse. Absent when the brain could not read the policy.
+   */
+  personAgents?: PersonAgentsManifest
   protocol: {
     min: number
     max: number
@@ -482,6 +554,7 @@ export function buildLocalHostFeatureManifest({
   hostStateScope,
   personPartition,
   personChat = "none",
+  personAgents,
   deviceGrants = [...DEFAULT_COMPANION_DEVICE_GRANTS],
   operationHealth = {},
 }: {
@@ -491,6 +564,8 @@ export function buildLocalHostFeatureManifest({
   hostStateScope?: { accountId: string; runtimeTargetId: string }
   personPartition?: true
   personChat?: "tool-less" | "none"
+  /** Declared only alongside `personPartition`. */
+  personAgents?: PersonAgentsManifest
   deviceGrants?: string[]
   operationHealth?: Readonly<Record<string, HostOperationHealth>>
 }): HostFeatureManifestV2 {
@@ -973,6 +1048,7 @@ export function buildLocalHostFeatureManifest({
     },
     ...(hostStateScope ? { hostStateScope } : {}),
     ...(personPartition ? { personPartition } : {}),
+    ...(personPartition && personAgents ? { personAgents } : {}),
     protocol: {
       min: HOST_PROTOCOL_MIN_VERSION,
       max: HOST_PROTOCOL_MAX_VERSION,
@@ -1108,6 +1184,8 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
           typeof v2.hostStateScope.runtimeTargetId !== "string" ||
           v2.hostStateScope.runtimeTargetId.length === 0)) ||
       (v2.personPartition !== undefined && v2.personPartition !== true) ||
+      (v2.personAgents !== undefined &&
+        (v2.personPartition !== true || !isPersonAgentsManifest(v2.personAgents))) ||
       typeof protocolMin !== "number" ||
       typeof protocolMax !== "number" ||
       !Number.isSafeInteger(protocolMin) ||

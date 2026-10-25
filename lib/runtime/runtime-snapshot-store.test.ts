@@ -77,6 +77,27 @@ it("carries a person partition declaration only when the Host makes one", () => 
   expect(snapshot.personPartition).toBe(true)
 })
 
+it("p6g carries the member's agents only from a person partition", () => {
+  const personAgents = {
+    allowedAgents: [{ runtimeId: "claude-agent-acp", available: true, providers: ["deepseek"] }],
+    defaultAgent: null,
+    execution: "sandboxed" as const,
+    models: { deepseek: ["m"] },
+    usage: null,
+  }
+  expect(
+    runtimeHostSnapshotFromManifest(
+      buildLocalHostFeatureManifest({ platform: "headless", personPartition: true, personAgents })
+    ).personAgents
+  ).toEqual(personAgents)
+  expect(
+    "personAgents" in
+      runtimeHostSnapshotFromManifest(
+        buildLocalHostFeatureManifest({ platform: "headless", personAgents })
+      )
+  ).toBe(false)
+})
+
 it("reaches subscribers when only the ceilings changed", () => {
   const base = runtimeHostSnapshotFromManifest(buildLocalHostFeatureManifest({ platform: "tauri" }))
   const listener = jest.fn()
@@ -146,6 +167,27 @@ it("reaches subscribers when only the HostState scope changed", () => {
   })
   expect(listener).toHaveBeenCalledTimes(1)
   expect(getRuntimeSnapshot().host?.personPartition).toBe(true)
+
+  // P6g: the member's month moving on (a turn spent tokens) reaches them too.
+  const personAgents = {
+    allowedAgents: [],
+    defaultAgent: null,
+    execution: "sandboxed" as const,
+    models: {},
+    usage: { month: "2026-10", spentTokens: 1, reservedTokens: 0, monthlyTokens: 10 },
+  }
+  const hostWith = (spentTokens: number) => ({
+    ...base,
+    hostStateScope: { accountId: "acct-b", runtimeTargetId: "target-b" },
+    personPartition: true as const,
+    personAgents: { ...personAgents, usage: { ...personAgents.usage, spentTokens } },
+  })
+  const online = { target: null, vaultState: "unlocked", connectionState: "online" } as const
+  setRuntimeSnapshot({ ...online, host: hostWith(1) })
+  setRuntimeSnapshot({ ...online, host: hostWith(1) })
+  setRuntimeSnapshot({ ...online, host: hostWith(2) })
+  expect(listener).toHaveBeenCalledTimes(3)
+  expect(getRuntimeSnapshot().host?.personAgents?.usage?.spentTokens).toBe(2)
   unsubscribe()
 })
 

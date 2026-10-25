@@ -102,6 +102,9 @@ export function runtimeHostSnapshotFromManifest(
     ...(manifest.schemaVersion === 2 && manifest.personPartition === true
       ? { personPartition: true as const }
       : {}),
+    ...(manifest.schemaVersion === 2 && manifest.personPartition === true && manifest.personAgents
+      ? { personAgents: manifest.personAgents }
+      : {}),
   }
 }
 
@@ -142,6 +145,9 @@ function runtimeSnapshotsEqual(left: RuntimeSnapshot, right: RuntimeSnapshot): b
     left.host?.hostStateScope?.accountId === right.host?.hostStateScope?.accountId &&
     left.host?.hostStateScope?.runtimeTargetId === right.host?.hostStateScope?.runtimeTargetId &&
     left.host?.personPartition === right.host?.personPartition &&
+    // Small and scalar-only, like the limits: the member's agents and month.
+    JSON.stringify(left.host?.personAgents ?? null) ===
+      JSON.stringify(right.host?.personAgents ?? null) &&
     // Cheap and exact: the limits object is a flat record of scalars plus one
     // string array, and a host that republishes different ceilings has to
     // reach every subscriber.

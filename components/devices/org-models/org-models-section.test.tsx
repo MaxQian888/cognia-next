@@ -46,6 +46,15 @@ function deps(overrides: OrgModelsSectionDeps = {}): Required<OrgModelsSectionDe
     })),
     deleteCredential: jest.fn(async () => undefined),
     setPolicy: jest.fn(async () => policy),
+    usage: {
+      getUsage: jest.fn(async () => ({
+        month: "2026-10",
+        defaultMonthlyTokens: null,
+        members: [],
+      })),
+      setDefaultCap: jest.fn(async () => undefined),
+      setMemberCap: jest.fn(async () => undefined),
+    },
     ...overrides,
   } as Required<OrgModelsSectionDeps>
 }
@@ -171,6 +180,14 @@ describe("OrgModelsSection", () => {
       "Only an owner or admin"
     )
     expect(screen.queryByTestId("org-models-add")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("org-usage")).not.toBeInTheDocument()
+  })
+
+  it("p6g shows the month's usage under the agents for an admin", async () => {
+    const all = deps()
+    render(<OrgModelsSection row={row} deps={all} />)
+    expect(await screen.findByTestId("org-usage")).toBeInTheDocument()
+    expect(all.usage.getUsage).toHaveBeenCalledWith("org")
   })
 
   it("says a single-user Host has no organization models", async () => {

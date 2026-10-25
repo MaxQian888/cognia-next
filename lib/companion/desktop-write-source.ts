@@ -214,6 +214,7 @@ import type {
 } from "@cognia/agent-config-types/host-state"
 import { canonicalHostStateJson, sessionStateChannel } from "@cognia/agent-config-types/host-state"
 import type { CanonicalSession } from "@cognia/agent-config-types/canonical-session"
+import type { PersonAgentsManifest } from "@/lib/platform/host-feature-manifest"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
 const REQUEST_EVENT = "companion://desktop-write-request"
@@ -2182,6 +2183,33 @@ async function hostCapabilities(): Promise<unknown> {
   return { platform: detectPlatform(), capabilities: detectLocalCapabilities() }
 }
 
+/**
+ * The member's agent choices for their device (P6g), read from the Host the
+ * same way turns resolve them. A Host that cannot answer leaves the field out,
+ * and the device keeps showing what it showed before rather than a guess.
+ */
+const PERSON_AGENTS_READ_MS = 5_000
+
+async function readPersonAgents(): Promise<PersonAgentsManifest | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const [{ fetchPersonAgentPolicy }, { transport }] = await Promise.all([
+      import("@/lib/headless/person-agent/policy"),
+      import("@/lib/tauri/transport-instance"),
+    ])
+    // The manifest is how a device learns what it may do at all; a slow
+    // policy read must not hold it up.
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), PERSON_AGENTS_READ_MS)
+    })
+    return await Promise.race([fetchPersonAgentPolicy(transport), timeout])
+  } catch {
+    return undefined
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 async function hostFeatureManifest(
   payload: Record<string, unknown>,
   partition = false
@@ -2211,6 +2239,7 @@ async function hostFeatureManifest(
       hostStateScope: { accountId: active.accountId, runtimeTargetId: active.targetId },
       personPartition: true,
       personChat: personChatCapability().chat,
+      personAgents: await readPersonAgents(),
       deviceGrants,
     })
     // These are execution surfaces, unavailable in a data-only person brain.

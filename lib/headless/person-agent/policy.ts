@@ -28,10 +28,25 @@ export interface PersonAllowedAgent {
   providers: string[]
 }
 
+/** The member's own month (P6g). `monthlyTokens: null` means no cap. */
+export interface PersonOwnUsage {
+  month: string
+  spentTokens: number
+  reservedTokens: number
+  monthlyTokens: number | null
+}
+
 export interface PersonAgentPolicy {
   allowedAgents: PersonAllowedAgent[]
   defaultAgent: string | null
   execution: "sandboxed" | "none"
+  /**
+   * P6g: per provider an allowed agent can use, the models the Host's
+   * deployment serves. Empty from a Host older than P6g.
+   */
+  models: Record<string, string[]>
+  /** P6g: null when the Host keeps no usage ledger, or is older than P6g. */
+  usage: PersonOwnUsage | null
 }
 
 export type PersonAgentResolution =
@@ -43,7 +58,41 @@ interface PolicyTransport {
   call<T>(command: string, args: Record<string, unknown>): Promise<T>
 }
 
-function isPolicy(value: unknown): value is PersonAgentPolicy {
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function readModels(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const models: Record<string, string[]> = {}
+  for (const [provider, ids] of Object.entries(value)) {
+    if (Array.isArray(ids) && ids.every((id) => typeof id === "string" && id.length > 0))
+      models[provider] = [...ids]
+  }
+  return models
+}
+
+function readUsage(value: unknown): PersonOwnUsage | null {
+  if (!value || typeof value !== "object") return null
+  const usage = value as Record<string, unknown>
+  if (
+    typeof usage.month !== "string" ||
+    !isCount(usage.spentTokens) ||
+    !isCount(usage.reservedTokens) ||
+    !(usage.monthlyTokens === null || isCount(usage.monthlyTokens))
+  )
+    return null
+  return {
+    month: usage.month,
+    spentTokens: usage.spentTokens,
+    reservedTokens: usage.reservedTokens,
+    monthlyTokens: usage.monthlyTokens,
+  }
+}
+
+function isPolicy(
+  value: unknown
+): value is Omit<PersonAgentPolicy, "models" | "usage"> & Record<string, unknown> {
   if (!value || typeof value !== "object") return false
   const candidate = value as Record<string, unknown>
   return (
@@ -70,7 +119,18 @@ export async function fetchPersonAgentPolicy(
     throw Object.assign(new Error("person_agent_policy_invalid"), {
       code: "execution_isolation_unavailable",
     })
-  return policy
+  // The optional P6g facts degrade to "unknown", never to a refused turn.
+  return {
+    allowedAgents: policy.allowedAgents.map((agent) => ({
+      runtimeId: agent.runtimeId,
+      available: agent.available,
+      providers: [...agent.providers],
+    })),
+    defaultAgent: policy.defaultAgent,
+    execution: policy.execution,
+    models: readModels(policy.models),
+    usage: readUsage(policy.usage),
+  }
 }
 
 export function resolvePersonAgent(

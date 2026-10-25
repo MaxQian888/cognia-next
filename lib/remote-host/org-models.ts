@@ -115,6 +115,61 @@ export function setOrgAgentPolicy(
   )
 }
 
+/** One person's model spend for a month (P6b). `null` tokens mean no cap. */
+export interface OrgMemberUsage {
+  userId: string
+  spentTokens: number
+  /** Held by turns still running; released or charged when they settle. */
+  reservedTokens: number
+  monthlyTokens: number | null
+  /** `override` when the person has their own cap, else the org default. */
+  capSource: "default" | "override"
+}
+
+export interface OrgUsageReport {
+  /** `YYYY-MM` in UTC, the Host's billing month. */
+  month: string
+  defaultMonthlyTokens: number | null
+  members: OrgMemberUsage[]
+}
+
+/** The Host refuses larger caps (`MAX_MONTHLY_TOKENS` in cognia-gateway). */
+export const MAX_ORG_MONTHLY_TOKENS = 1_000_000_000_000
+
+export async function getOrgUsage(
+  hostRef: string,
+  deps: OrgModelsDeps = {}
+): Promise<OrgUsageReport> {
+  const report = await call<OrgUsageReport | null>(hostRef, "org_member_usage_get", {}, deps)
+  return {
+    month: report?.month ?? "",
+    defaultMonthlyTokens: report?.defaultMonthlyTokens ?? null,
+    members: Array.isArray(report?.members) ? report.members : [],
+  }
+}
+
+/** The org-wide default cap; `null` lifts it. */
+export function setOrgDefaultCap(
+  hostRef: string,
+  monthlyTokens: number | null,
+  deps: OrgModelsDeps = {}
+): Promise<void> {
+  return call<void>(hostRef, "org_usage_cap_set", { defaultMonthlyTokens: monthlyTokens }, deps)
+}
+
+/**
+ * One person's cap: a number, `null` for no cap, or `"default"` to drop the
+ * override so the org default applies again.
+ */
+export function setOrgMemberCap(
+  hostRef: string,
+  userId: string,
+  monthlyTokens: number | null | "default",
+  deps: OrgModelsDeps = {}
+): Promise<void> {
+  return call<void>(hostRef, "org_member_usage_cap_set", { userId, monthlyTokens }, deps)
+}
+
 /**
  * Why the Host would not answer, as the section shows it. `not-org-host` is a
  * single-user Host (`org_scope_unavailable`): the section has nothing to say

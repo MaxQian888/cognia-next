@@ -62,6 +62,7 @@ import {
 } from "@/lib/remote-host/org-models"
 
 import { DeviceSection } from "../device-section"
+import { OrgUsagePanel, type OrgUsagePanelDeps } from "./org-usage-panel"
 import { useProviderOptions } from "../host-secrets/host-secrets-section"
 
 export interface OrgModelsSectionDeps {
@@ -76,6 +77,7 @@ export interface OrgModelsSectionDeps {
     hostRef: string,
     policy: { allowedAgents: string[]; defaultAgent: string | null }
   ) => Promise<OrgAgentPolicy>
+  usage?: OrgUsagePanelDeps
 }
 
 interface Loaded {
@@ -436,6 +438,8 @@ export function OrgModelsSection({
                 ) : null}
               </div>
             </div>
+
+            <OrgUsagePanel hostRef={hostRef} host={host} deps={deps.usage} />
           </>
         ) : null}
       </div>

@@ -7,6 +7,8 @@ const policy: PersonAgentPolicy = {
   ],
   defaultAgent: "claude-agent-acp",
   execution: "sandboxed",
+  models: { anthropic: ["claude-sonnet-4-5"] },
+  usage: { month: "2026-10", spentTokens: 10, reservedTokens: 0, monthlyTokens: 100 },
 }
 
 const session = { providerOverride: "anthropic", model: "claude-sonnet-4-5" }
@@ -70,6 +72,32 @@ describe("person agent policy", () => {
     expect(call).toHaveBeenCalledWith("person_agent_policy_get", {})
     await expect(fetchPersonAgentPolicy({ call })).rejects.toMatchObject({
       code: "execution_isolation_unavailable",
+    })
+  })
+
+  it("p6g degrades a missing or malformed models map and usage to unknown", async () => {
+    const { models: _models, usage: _usage, ...older } = policy
+    const call = jest
+      .fn()
+      .mockResolvedValueOnce(older)
+      .mockResolvedValueOnce({
+        ...older,
+        models: { anthropic: ["ok"], openai: "gpt", broken: [1] },
+        usage: { month: "2026-10", spentTokens: -1, reservedTokens: 0, monthlyTokens: null },
+      })
+      .mockResolvedValueOnce({ ...policy, usage: { ...policy.usage, monthlyTokens: null } })
+    await expect(fetchPersonAgentPolicy({ call })).resolves.toEqual({
+      ...older,
+      models: {},
+      usage: null,
+    })
+    await expect(fetchPersonAgentPolicy({ call })).resolves.toEqual({
+      ...older,
+      models: { anthropic: ["ok"] },
+      usage: null,
+    })
+    await expect(fetchPersonAgentPolicy({ call })).resolves.toMatchObject({
+      usage: { monthlyTokens: null },
     })
   })
 })

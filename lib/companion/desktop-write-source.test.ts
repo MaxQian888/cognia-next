@@ -1,6 +1,14 @@
 /**
  * @jest-environment jsdom
  */
+const personAgentPolicyRead = jest.fn(async (): Promise<unknown> => {
+  throw new Error("no Host policy in this test")
+})
+jest.mock("@/lib/headless/person-agent/policy", () => ({
+  ...jest.requireActual("@/lib/headless/person-agent/policy"),
+  fetchPersonAgentPolicy: () => personAgentPolicyRead(),
+}))
+
 jest.mock("@/lib/db/session-state", () => ({
   markSessionReadOnHost: jest.fn(),
   markSessionUnreadOnHost: jest.fn(),
@@ -3599,4 +3607,39 @@ it("partition manifest and session negotiation share Host chat opt-in", async ()
     initializePersonChat("brain", {})
     __resetRemoteAttachForTests()
   }
+})
+
+it("p6g a partition manifest carries the member's agents, and leaves them out when unread", async () => {
+  const payload = {
+    callerAccountId: "local-default",
+    authoritativeHostId: "host-person-p6g",
+    runtimeTargetId: "target-a",
+    callerDeviceId: "member-p6g",
+    callerDeviceGrants: ["client.write"],
+    callerPartition: true,
+  }
+  const personAgents = {
+    allowedAgents: [{ runtimeId: "claude-agent-acp", available: true, providers: ["deepseek"] }],
+    defaultAgent: "claude-agent-acp",
+    execution: "sandboxed",
+    models: { deepseek: ["ark-deepseek-v4.1-flash"] },
+    usage: { month: "2026-10", spentTokens: 120, reservedTokens: 0, monthlyTokens: 1000 },
+  }
+  personAgentPolicyRead.mockResolvedValueOnce(personAgents)
+  const manifest = (await dispatchCommand("host_feature_manifest", payload, undefined, true)) as {
+    personAgents?: unknown
+  }
+  expect(manifest.personAgents).toEqual(personAgents)
+  const { parseHostFeatureManifest } = await import("@/lib/platform/host-feature-manifest")
+  expect(parseHostFeatureManifest(manifest)).not.toBeNull()
+  // The default mock refuses: the field is simply absent.
+  const unread = (await dispatchCommand("host_feature_manifest", payload, undefined, true)) as {
+    personAgents?: unknown
+  }
+  expect(unread).not.toHaveProperty("personAgents")
+  // An operator's own manifest never asks.
+  personAgentPolicyRead.mockClear()
+  const operator = (await dispatchCommand("host_feature_manifest", {})) as Record<string, unknown>
+  expect(operator).not.toHaveProperty("personAgents")
+  expect(personAgentPolicyRead).not.toHaveBeenCalled()
 })

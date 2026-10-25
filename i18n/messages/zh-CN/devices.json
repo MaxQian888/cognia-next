@@ -727,6 +727,38 @@
       "saved": "已保存 {host} 的智能体设置",
       "updated": "{when}更新"
     },
+    "usage": {
+      "title": "每月用量",
+      "hint": "{month}（UTC）每个人通过组织密钥用掉的 token。会超出上限的回合会在到达模型前被拒绝。",
+      "hintNoMonth": "本月（UTC）每个人通过组织密钥用掉的 token。",
+      "loading": "正在向 {host} 读取本月用量…",
+      "defaultLabel": "默认每月上限",
+      "defaultHint": "适用于没有单独上限的所有人。",
+      "defaultSaved": "已在 {host} 保存默认上限",
+      "memberSaved": "已保存 {user} 的上限",
+      "capMode": "上限",
+      "capTokens": "每月 token 数",
+      "mode": {
+        "default": "组织默认",
+        "limit": "限定 token 数",
+        "unlimited": "不限量"
+      },
+      "noLimit": "不限量",
+      "tokens": "{count} 个 token",
+      "spent": "已用 {spent}，上限 {cap}",
+      "reserved": "运行中的回合占用 {count}",
+      "spentAria": "{user} 本月上限的已用比例",
+      "source": {
+        "default": "默认上限",
+        "override": "单独上限"
+      },
+      "capReached": "已达上限",
+      "edit": "修改上限",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "正在保存…",
+      "empty": "组织里还没有人用过这台 Host。"
+    },
     "confirm": {
       "title": "移除 {provider} 密钥？",
       "body": "使用该密钥的成员智能体将在 {host} 上停止工作，直到有人添加新密钥。",

@@ -415,12 +415,27 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
        - `thinking: {"type":"adaptive"}` crosses as the reasoning effort alone, recorded as an approximated loss. Budgets stay refused.
    - **Known gaps:**
      - Agent output reaches devices only as persisted message writes, throttled to 1 s and written at settle; there is no token-level streaming yet.
-     - Members cannot pick the agent from a device until P6g.
+     - Members could not pick the agent from a device before P6g (now done, see item 6).
      - The manifest's `claude.tool-less-chat` health is unchanged.
      - The local rig bundle is the p6d image with a rebuilt `cognia-sandboxd` layered on top, not a full bundle build.
 6. **Frontend (P6g).**
    - **Admin page:** org admin settings for model credentials, allowed agents, caps and usage. It reuses the org admin surfaces.
    - **Member UI:** an agent picker limited to the allowlist, plus labels for the cap and for missing credentials.
+   - **Decisions (2026-10-25):**
+     - The person brain writes the member's agents into its own `host_feature_manifest`, as `personAgents`, beside `personPartition`. No `org_*` command is opened to members.
+     - The agent is chosen only when a conversation is created (seeded `agentRuntimeId`). An existing conversation shows its agent, locked.
+     - The picker shows what is left of the member's month before a turn is refused.
+   - **Surface:**
+     - Host: `person_agent_policy_get` gains `models` (the org-served model ids per allowed provider, from the gateway snapshot) and `usage` (the caller's own month: spent, reserved, cap; `null` without a ledger). `org_policy::person_own_usage` reads only the caller's row.
+     - Brain: `lib/companion/desktop-write-source.ts` adds `personAgents` (allowlist, default, execution, models, usage) to the partition manifest, bounded at 5 s and left out when the read fails. `lib/platform/host-feature-manifest.ts` validates it strictly and refuses it without `personPartition`.
+     - Client: the runtime snapshot carries `host.personAgents`. `hooks/chat/use-person-agents.ts` re-reads it on demand. `components/chat/composer/person-agent-chip.tsx` replaces the runtime selector on a member partition: it names the conversation's agent (locked), warns about an agent the org no longer allows, a Host without member execution, a missing org key, a model the org does not serve, or a used-up month, and starts a new conversation with an allowed agent seeded with an org-served provider and model (`lib/chat/person-agent-choice.ts`, `startNewSession` → `hostSessionSeed`).
+     - Admin: `components/devices/org-models/org-usage-panel.tsx` in the org models section shows each member's month against their cap and edits the default cap and per-member caps (limit, unlimited, back to the default) through `org_member_usage_get`, `org_usage_cap_set` and `org_member_usage_cap_set`.
+   - **Verified (2026-10-25, P6f rig, real `ark-deepseek-v4.1-flash`):** the persons tier is green, including a new check that member ada's own manifest lists `claude-agent-acp`, the served `deepseek` model and a month that covers her charged turns, and names no other person or provider outside the allowlist. Jest covers the manifest round trip and refusals, the snapshot patch, the seed, the chip's labels and the usage panel's edits.
+   - **Not verified:** no browser check. Both surfaces need a client paired to the multi-tenant Host (a member session for the chip, an owner's managed Host for the panel), and the rig has no browser pairing path yet.
+   - **Known gaps:**
+     - Members are listed by organization user id; the Host has no display names to give.
+     - A Host older than P6g sends no `models`, so the picker labels every agent "no model" and cannot seed one.
+     - A default new conversation is not corrected to an org-served provider and model; the chip warns and offers a new conversation with a served one instead.
 7. **E2E lane (P6f).**
    - **Compose:** fix `cognia-server-cloud` in `docker-compose.web-headless-e2e.yml`: master key, collab service credential, `COGNIA_EXECUTION=disabled`, and the brain fleet.
    - **Smoke tier:** a `persons` tier in `scripts/smoke/compose-smoke.mjs`. Two OIDC persons of one org pair into one Host, using the fixture's `/e2e/token`, device registration and signed RPC. It checks:

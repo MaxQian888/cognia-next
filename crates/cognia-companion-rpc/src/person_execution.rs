@@ -73,11 +73,21 @@ fn person_policy_request(args: &Value) -> PersonResult<()> {
     }
     Ok(())
 }
-fn person_policy_view(policy: cognia_companion::org_agent_policy::PolicyView, available: bool) -> Value {
+fn person_policy_view(policy: cognia_companion::org_agent_policy::PolicyView, available: bool, usage: Option<Value>,
+    models: &dyn Fn(&str) -> Vec<String>) -> Value {
+    // P6g: per provider an allowed agent can use, the models its deployment
+    // serves, so a member's device can seed a conversation the lease accepts;
+    // never a provider outside the allowlist. And the member's own month, so
+    // it can show what is left before a turn is refused `member_usage_cap_reached`.
+    let mut served = serde_json::Map::new();
+    for provider in policy.allowed_agents.iter().flat_map(|agent| agent.providers.iter()) {
+        if !served.contains_key(provider) { served.insert(provider.clone(), json!(models(provider))); }
+    }
     json!({"allowedAgents": policy.allowed_agents, "defaultAgent": policy.default_agent,
-        "execution": if available { "sandboxed" } else { "none" }})
+        "execution": if available { "sandboxed" } else { "none" }, "models": served, "usage": usage})
 }
-pub(crate) async fn person_agent_policy_get(args: Value, scope: Option<&str>, tenant: Option<&str>) -> PersonResult<Value> {
+pub(crate) async fn person_agent_policy_get(args: Value, scope: Option<&str>, tenant: Option<&str>,
+    host: &dyn crate::rpc_host::RpcHost) -> PersonResult<Value> {
     let person = person_caller(scope, tenant, "person_agent_policy_get")?;
     person_policy_request(&args)?;
     let _lock = cognia_companion::host_surface_gate::person_execution_lock(&person.account_id).lock_owned().await;
@@ -85,10 +95,14 @@ pub(crate) async fn person_agent_policy_get(args: Value, scope: Option<&str>, te
     cognia_companion::host_surface_gate::person_execution_standing(&person).await
         .map_err(|p| (p.status_code(), Json(RpcError::new(p.code, p.detail))))?;
     let available = cognia_companion::host_surface_gate::person_execution_available().await;
-    let policy = tokio::task::spawn_blocking(move || cognia_companion::org_agent_policy::get(&person.org_id)).await
-        .map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?
+    let (policy, usage) = tokio::task::spawn_blocking(move || (cognia_companion::org_agent_policy::get(&person.org_id),
+        cognia_companion::org_policy::person_own_usage(&person.org_id, &person.user_id))).await
         .map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?;
-    Ok(person_policy_view(policy, available))
+    let policy = policy.map_err(|_| person_refusal(StatusCode::SERVICE_UNAVAILABLE, "model_access_unavailable"))?;
+    let shared = host.to_shared();
+    let models = |provider: &str| shared.gateway().and_then(|gateway| gateway.with_snapshot(|snapshot|
+        snapshot.and_then(|snapshot| snapshot.provider(provider)).map(|provider| provider.models.clone()))).unwrap_or_default();
+    Ok(person_policy_view(policy, available, usage, &models))
 }
 
 #[derive(Deserialize)]
@@ -320,8 +334,12 @@ mod tests {
         use cognia_companion::org_agent_policy::{PolicyView, AgentAvailability};
         let view = person_policy_view(PolicyView { allowed_agents: vec![AgentAvailability {
             runtime_id: "pi".into(), available: true, providers: vec!["provider".into()] }],
-            bundled_agents: vec![], default_agent: Some("pi".into()), updated_at: Some(1), updated_by: Some("admin".into()) }, true);
-        assert_eq!(view, json!({"allowedAgents":[{"runtimeId":"pi","available":true,"providers":["provider"]}],"defaultAgent":"pi","execution":"sandboxed"}));
+            bundled_agents: vec![], default_agent: Some("pi".into()), updated_at: Some(1), updated_by: Some("admin".into()) }, true,
+            Some(json!({"month":"2026-10","spentTokens":5,"reservedTokens":1,"monthlyTokens":100})),
+            &|provider| if provider == "provider" { vec!["model".into()] } else { vec!["leak".into()] });
+        assert_eq!(view, json!({"allowedAgents":[{"runtimeId":"pi","available":true,"providers":["provider"]}],"defaultAgent":"pi","execution":"sandboxed",
+            "models":{"provider":["model"]},
+            "usage":{"month":"2026-10","spentTokens":5,"reservedTokens":1,"monthlyTokens":100}}));
         assert!(person_policy_request(&json!({})).is_ok());
         for request in [json!({"orgId":"foreign"}), json!(null), json!([])] {
             assert!(person_policy_request(&request).is_err());
@@ -395,9 +413,9 @@ mod tests {
         let standing = person_standing_test_support::Installed::new(&person.org_id);
         let state = crate::rpc::tests::test_state(); let host = crate::headless::HeadlessServices::stub_for_tests();
         for caller in [None, Some("service"), Some("owner"), Some("device")] {
-            assert_eq!(person_agent_policy_get(json!({}), caller, Some(&person.account_id)).await.unwrap_err().0, StatusCode::FORBIDDEN);
+            assert_eq!(person_agent_policy_get(json!({}),caller,Some(&person.account_id),&host).await.unwrap_err().0, StatusCode::FORBIDDEN);
         }
-        let view = scope(Some(person.clone()), person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id))).await.unwrap();
+        let view = scope(Some(person.clone()), person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id),&host)).await.unwrap();
         assert_eq!(view["execution"], "none");
         let error = scope(Some(person.clone()), person_agent_lease_prepare(json!({"runtimeId":"pi","provider":"provider","model":"model"}),
             Some("person-brain"),Some(&person.account_id),&state,&host)).await.unwrap_err();
@@ -414,11 +432,13 @@ mod tests {
         let error = person_prepare_spawn(&person,"pi",host.remote_spawn_policy().unwrap(),&mut config,&host).await.err().unwrap();
         assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE); assert_eq!(error.1.code,"execution_isolation_unavailable");
         cognia_companion::environment_pool::install(cognia_companion::environment_pool::person_pool_test_support(vec![cognia_environment::spec::IsolationTier::Gvisor]));
-        let view = scope(Some(person.clone()), person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id))).await.unwrap();
+        let view = scope(Some(person.clone()), person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id),&host)).await.unwrap();
         assert_eq!(view["execution"], "sandboxed");
-        assert_eq!(scope(Some(person.clone()), person_agent_policy_get(json!({"orgId":"foreign"}),Some("person-brain"),Some(&person.account_id))).await.unwrap_err().0,StatusCode::BAD_REQUEST);
+        // P6g: the member's own month rides along (null without a usage ledger).
+        assert!(view.get("usage").is_some_and(|usage| usage.is_null() || usage["month"].is_string()));
+        assert_eq!(scope(Some(person.clone()), person_agent_policy_get(json!({"orgId":"foreign"}),Some("person-brain"),Some(&person.account_id),&host)).await.unwrap_err().0,StatusCode::BAD_REQUEST);
         standing.refuse("host_surface_forbidden");
-        assert_eq!(scope(Some(person.clone()),person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id))).await.unwrap_err().0,StatusCode::FORBIDDEN);
+        assert_eq!(scope(Some(person.clone()),person_agent_policy_get(json!({}),Some("person-brain"),Some(&person.account_id),&host)).await.unwrap_err().0,StatusCode::FORBIDDEN);
         let error = scope(Some(person.clone()), person_agent_lease_prepare(json!({"runtimeId":"pi","provider":"provider","model":"model"}),
             Some("person-brain"),Some(&person.account_id),&state,&host)).await.unwrap_err();
         assert_eq!(error.1.code, "host_surface_forbidden");

@@ -61,6 +61,9 @@ export function hostSessionSeed(session: ChatSession): HostStateSessionSeed | un
     ...(session.characterId ? { characterId: session.characterId } : {}),
     ...(session.model ? { model: session.model } : {}),
     ...(session.providerOverride ? { provider: session.providerOverride } : {}),
+    // P6g: an org member's pick of an allowed agent; the Host keeps it only
+    // for a partition, and the member's brain checks the allowlist every turn.
+    ...(session.agentRuntimeId ? { agentRuntimeId: session.agentRuntimeId } : {}),
   }
   return Object.keys(seed).length > 0 ? seed : undefined
 }

@@ -84,6 +84,19 @@ jest.mock("@/components/agent/mode/runtime-selector", () => ({
 // The sandbox indicator now renders inline on the wide row, so it mounts in
 // every render here. It reads the character record through Dexie — stub the
 // live query rather than standing up a database for a status glyph.
+const personAgentsMock = jest.fn((): { agents: unknown; refresh: () => Promise<void> } => ({
+  agents: null,
+  refresh: async () => undefined,
+}))
+jest.mock("@/hooks/chat/use-person-agents", () => ({
+  usePersonAgents: () => personAgentsMock(),
+}))
+jest.mock("./person-agent-chip", () => ({
+  PersonAgentChip: (props: { dense?: boolean }) => (
+    <div data-testid="person-agent-chip" data-dense={props.dense ? "true" : undefined} />
+  ),
+}))
+
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => undefined,
 }))
@@ -361,6 +374,27 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.getByTestId("sandbox-shield")).toBeInTheDocument()
     expect(screen.queryByTestId("web-search-toggle")).toBeNull()
     expect(screen.queryByTestId("enhance-button")).toBeNull()
+  })
+
+  it("p6g swaps the runtime lanes for the member's agent chip on their shared Host", () => {
+    const member = {
+      agents: {
+        allowedAgents: [],
+        defaultAgent: null,
+        execution: "sandboxed",
+        models: {},
+        usage: null,
+      },
+      refresh: async () => undefined,
+    }
+    personAgentsMock.mockReturnValue(member)
+    try {
+      render(<BottomToolbar session={session} />)
+      expect(screen.getByTestId("person-agent-chip")).toBeInTheDocument()
+      expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    } finally {
+      personAgentsMock.mockReturnValue({ agents: null, refresh: async () => undefined })
+    }
   })
 
   // The "\u22ef" is a packing device for narrow composers. On a row with the space

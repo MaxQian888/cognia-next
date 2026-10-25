@@ -20,6 +20,19 @@ pub fn person_revoke_provider(org: &str, provider: &str) {
     if let Some(registry) = ORG_USAGE_REGISTRY.read().clone() { registry.person_revoke_provider(org, provider); }
 }
 
+/// One member's own spend and cap for the current month (P6g), for that
+/// member's person brain only. `None` when no usage ledger is installed or it
+/// cannot be read; never another person's row.
+pub fn person_own_usage(org: &str, user: &str) -> Option<Value> {
+    let registry = ORG_USAGE_REGISTRY.read().clone()?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+    let month = cognia_gateway::org_usage::month_at(now);
+    let report = registry.org_member_usage_get(org, &month, &[user.to_string()]).ok()?;
+    let row = report["members"].as_array()?.iter().find(|row| row["userId"] == user)?;
+    Some(json!({"month": month, "spentTokens": row["spentTokens"], "reservedTokens": row["reservedTokens"],
+        "monthlyTokens": row["monthlyTokens"]}))
+}
+
 pub const CAPABILITY: &str = "org.policy.manage";
 pub const COMMANDS: &[&str] = &["org_model_credential_list", "org_model_credential_set", "org_model_credential_delete", "org_agent_policy_get", "org_agent_policy_set", "org_member_usage_get", "org_usage_cap_set", "org_member_usage_cap_set"];
 tokio::task_local! { static AUTHORITY: Option<(String, String)>; }
@@ -217,6 +230,30 @@ pub async fn agents_handler(Path(operation): Path<String>, Extension(principal):
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn p6g_person_own_usage_reports_only_the_callers_month_and_cap() {
+        use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore};
+        // The same guard the registry-swapping tests below hold.
+        let _audit = crate::audit::test_guard();
+        let previous = ORG_USAGE_REGISTRY.read().clone();
+        struct Restore(Option<std::sync::Arc<RouteTicketRegistry>>);
+        impl Drop for Restore { fn drop(&mut self) { *ORG_USAGE_REGISTRY.write() = self.0.take(); } }
+        let _restore = Restore(previous);
+        *ORG_USAGE_REGISTRY.write() = None;
+        assert_eq!(person_own_usage("org_p6g_usage", "usr_p6g_a"), None);
+        let registry = std::sync::Arc::new(RouteTicketRegistry::new(std::sync::Arc::new(InMemoryTicketMetaStore::default())));
+        org_usage_install(registry.clone());
+        registry.org_usage_cap_set("org_p6g_usage", None, Some(Some(100))).unwrap();
+        registry.org_usage_cap_set("org_p6g_usage", Some("usr_p6g_b"), Some(Some(7))).unwrap();
+        let own = person_own_usage("org_p6g_usage", "usr_p6g_a").unwrap();
+        let month = cognia_gateway::org_usage::month_at(chrono::Utc::now().timestamp_millis());
+        assert_eq!(own, json!({"month":month,"spentTokens":0,"reservedTokens":0,"monthlyTokens":100}));
+        assert_eq!(person_own_usage("org_p6g_usage", "usr_p6g_b").unwrap()["monthlyTokens"], 7);
+        registry.org_usage_cap_set("org_p6g_usage", Some("usr_p6g_b"), Some(None)).unwrap();
+        assert_eq!(person_own_usage("org_p6g_usage", "usr_p6g_b").unwrap()["monthlyTokens"], Value::Null);
+        // Nothing about anyone else rides along.
+        assert!(!own.to_string().contains("usr_p6g_b"));
+    }
     #[tokio::test]
     async fn p6d_credential_mutation_revokes_member_task_leases_under_the_same_fence() {
         let _audit = crate::audit::test_guard();
@@ -279,11 +316,12 @@ mod tests {
     #[tokio::test]
     async fn p6b_org_usage_admin_validation_approval_audit_and_mode() {
         use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore};
+        // Guard first: the other tests swap the process-wide usage registry under it.
+        let _guard = crate::audit::test_guard();
         let registry = std::sync::Arc::new(RouteTicketRegistry::new(std::sync::Arc::new(InMemoryTicketMetaStore::default())));
         org_usage_install(registry.clone());
         let org = "org_p6b_admin";
         let user = "usr_p6b_member";
-        let _guard = crate::audit::test_guard();
         let temp = tempfile::tempdir().unwrap(); let path = temp.path().join("audit.log");
         crate::audit::install_at_for_testing(Some(path.clone()));
         for (command, args) in [

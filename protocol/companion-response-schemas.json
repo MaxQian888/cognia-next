@@ -16463,6 +16463,23 @@
         "execution": {
           "type": "string",
           "enum": ["sandboxed", "none"]
+        },
+        "models": {
+          "description": "P6g: for each provider an allowed agent can use, the model ids the Host's deployment serves; no other provider appears.",
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "usage": {
+          "description": "P6g: the calling member's own spend and cap for the current UTC month; null when the Host keeps no usage ledger. Never another person's row.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["month", "spentTokens", "reservedTokens", "monthlyTokens"],
+          "properties": {
+            "month": { "type": "string" },
+            "spentTokens": { "type": "integer", "minimum": 0 },
+            "reservedTokens": { "type": "integer", "minimum": 0 },
+            "monthlyTokens": { "type": ["integer", "null"], "minimum": 0 }
+          }
         }
       }
     },
