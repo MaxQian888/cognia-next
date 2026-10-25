@@ -6,6 +6,9 @@ let mockPlatform = "tauri"
 let mockHasEntries = true
 let mockAccounts: unknown[] = []
 let mockEntries: unknown[] | undefined
+let mockJobs: unknown[] = []
+const mockApproveJob = jest.fn()
+const mockCancelJob = jest.fn()
 
 const mockConfigureRepoWebhook = jest.fn()
 const mockRotateAppWebhook = jest.fn()
@@ -44,7 +47,12 @@ jest.mock("@/lib/db/integrations", () => ({
 }))
 
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => [mockAccounts, [], [], []],
+  useLiveQuery: () => [mockAccounts, [], mockJobs, []],
+}))
+jest.mock("@/lib/integrations/action-runner", () => ({
+  ...jest.requireActual("@/lib/integrations/action-runner"),
+  approveIntegrationActionJob: (...args: unknown[]) => mockApproveJob(...args),
+  cancelIntegrationActionJob: (...args: unknown[]) => mockCancelJob(...args),
 }))
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
@@ -106,7 +114,43 @@ beforeEach(() => {
   mockHasEntries = true
   mockAccounts = []
   mockEntries = undefined
+  mockJobs = []
   jest.clearAllMocks()
+})
+
+describe("approvals and jobs", () => {
+  const job = (over: Record<string, unknown> = {}) => ({
+    id: "job-1",
+    pluginId: "github-delivery",
+    integrationId: "github",
+    accountId: "acc-gh",
+    actionId: "commentPr",
+    input: {},
+    status: "awaiting_approval",
+    risk: "write",
+    attempts: 0,
+    maxAttempts: 5,
+    source: "chat",
+    createdAt: "2026-10-25T00:00:00.000Z",
+    updatedAt: "2026-10-25T00:00:00.000Z",
+    ...over,
+  })
+
+  it("approves and cancels a job as a person (ADR-0239)", () => {
+    mockJobs = [job()]
+    render(<IntegrationsHub />)
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }))
+    expect(mockApproveJob).toHaveBeenCalledWith("job-1", { actor: "person" })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(mockCancelJob).toHaveBeenCalledWith("job-1", { actor: "person" })
+    expect(screen.queryByText(/Held by outbound authorization/)).not.toBeInTheDocument()
+  })
+
+  it("says when outbound authorization holds a job", () => {
+    mockJobs = [job({ outbound: { ownerRef: "bot:b1", held: { receiptId: "r1", heldAt: "now" } } })]
+    render(<IntegrationsHub />)
+    expect(screen.getByText(/Held by outbound authorization/)).toBeInTheDocument()
+  })
 })
 
 const GITHUB_ENTRY = {

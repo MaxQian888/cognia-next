@@ -457,14 +457,25 @@ export async function listDueIntegrationEventProjections(
 
 export type NewIntegrationActionJob = Omit<IntegrationActionJob, "id" | "createdAt" | "updatedAt">
 
+/** The job an account already has for this idempotency key, if any. */
+export async function findIntegrationActionJobByIdempotencyKey(
+  accountId: string,
+  idempotencyKey: string
+): Promise<IntegrationActionJob | undefined> {
+  return getDb()
+    .integrationActionJobs.where("[accountId+idempotencyKey]")
+    .equals([accountId, idempotencyKey])
+    .first()
+}
+
 export async function enqueueIntegrationActionJob(
   input: NewIntegrationActionJob
 ): Promise<IntegrationActionJob> {
   if (input.idempotencyKey) {
-    const existing = await getDb()
-      .integrationActionJobs.where("[accountId+idempotencyKey]")
-      .equals([input.accountId, input.idempotencyKey])
-      .first()
+    const existing = await findIntegrationActionJobByIdempotencyKey(
+      input.accountId,
+      input.idempotencyKey
+    )
     if (existing) return existing
   }
   const now = nowIso()

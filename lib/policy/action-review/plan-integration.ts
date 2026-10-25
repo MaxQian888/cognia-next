@@ -1,0 +1,692 @@
+/**
+ * The integration chokepoint of the outbound policy (ADR-0239 phase 2).
+ *
+ * Every GitHub write that goes through the host's integration broker is planned
+ * here before it happens: an action job (`executeIntegrationAction`) before it
+ * is queued, and a raw authenticated request (`authenticatedIntegrationRequest`)
+ * that is not a read before it is sent. The caller says who is asking, as an
+ * {@link IntegrationAuthorization}; this module checks that claim and, where it
+ * does not settle it, asks the engine (`planActionReview`, `via: "tool"`,
+ * unattended: an unauthorized write parks for a person rather than drafting).
+ *
+ * | authorization | checked how                                                          |
+ * | ------------- | -------------------------------------------------------------------- |
+ * | `tool-call`   | a running, authorized call of the plugin in that session covers it   |
+ * | `plugin`      | one of the plugin's running, authorized calls covers it              |
+ * | `bot`         | a person approved the Bot's action; else the engine, in the Bot's    |
+ * |               | origin, with the event's PR or issue as the origin thread            |
+ * | `workflow`    | the engine, in the workflow run's origin                             |
+ * | `job`         | a request a running job makes to the repository it was planned for   |
+ *
+ * A claim that does not hold is planned as unattended in the asker's origin,
+ * so a reply on the PR or issue the request came from still goes; anything
+ * else needs a grant or a person.
+ *
+ * The plan's outcome, as the caller acts on it:
+ *
+ * - `proceed`: the write goes ahead as it would have without the policy.
+ * - `park`: the write waits for a person. A job is held `awaiting_approval`
+ *   and pushed to the phone; a synchronous request cannot wait, so it fails.
+ * - `deny`: a person refused one of the recipients for the current request
+ *   (the fence). The write fails with `outbound_fenced`.
+ *
+ * Only GitHub writes are planned, in the GitHub category's mode
+ * (`agentPermissions.outboundAuthorizationByCategory.github`). Shadow mode
+ * changes nothing: a write enforcement would have held or refused proceeds
+ * with a receipt saying so.
+ *
+ * ## Receipts
+ *
+ * `github-delivery` channel, subject kind `integration-action`, its `ref` the
+ * asker (`bot:<id>`, `workflow:<id>`, `plugin:<id>`, `tool-call:<session>`).
+ * Enforce mode records every hold and refusal, and every write a grant or a
+ * person allowed; shadow mode records only what enforcement would have
+ * changed. The recipient itself is never stored: only its fingerprint, and
+ * the title names the operation, not the repository.
+ */
+
+import {
+  ACTION_REVIEW_CONTRACT_VERSION,
+  type ActionReviewActorKind,
+  type ActionReviewAuthority,
+  type ActionReviewDecision,
+  type ActionReviewGrant,
+  type ActionReviewOutcome,
+  type ActionReviewPlanOutcome,
+  type ActionReviewRequest,
+} from "@cognia/agent-config-types/action-review"
+import type { PendingOutboundReview } from "@cognia/agent-config-types"
+import type { OutboundJobAuthorization } from "@cognia/plugin-contract/lib/db/connector-types"
+import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
+
+import { classifyRisk } from "@/lib/policy/risk/classify-risk"
+import type { IntegrationActionOutbound } from "@/types/plugin/plugin-integration"
+
+import {
+  runningAuthorizedToolCallsOf,
+  type AuthorizedOutboundToolCall,
+} from "./authorized-tool-calls"
+import { botRecipientGrants, runningBotGrantsOf } from "./configured-grants"
+import {
+  outboundFingerprint,
+  repositoryTarget,
+  toReviewTarget,
+  type OutboundTarget,
+} from "./outbound-targets"
+import {
+  botPlanOrigin,
+  buildActionReviewPlanContext,
+  readAppSettings,
+  workflowRunPlanOrigin,
+  type ActionReviewPlanOrigin,
+  type OutboundPolicyGrantList,
+  type OutboundSettingsLike,
+} from "./plan-context"
+import { sessionPlanOrigin } from "./plan-delivery"
+import {
+  humanOutboundGrant,
+  planActionReview,
+  readOutboundAuthorizationMode,
+  type OutboundAuthorizationMode,
+} from "./policy"
+
+/** The Bot installation fields the plan reads. */
+export interface IntegrationBotInstallation {
+  id: string
+  humanRevision?: number
+  outboundRecipients?: readonly OutboundRecipientGrant[]
+}
+
+/** The part of a Bot event the origin thread is read from. */
+export interface IntegrationBotEvent {
+  resource?: { kind: string; id: string }
+  payload?: unknown
+}
+
+/** Who asks for one integration write (ADR-0239 phase 2). */
+export type IntegrationAuthorization =
+  /**
+   * A chat tool of the plugin (`integration__<plugin>__…`), running in
+   * `sessionId`. The host's record of the call decides, not the claim.
+   */
+  | { kind: "tool-call"; pluginId: string; sessionId?: string }
+  /** A workflow step: nobody watches it. */
+  | { kind: "workflow"; workflowId: string; runId: string }
+  /** Plugin code (`ctx.integrations.executeAction` / `authenticatedRequest`). */
+  | { kind: "plugin"; pluginId: string }
+  /**
+   * A Bot's brokered action. `decidedBy` is who approved it: a person on the
+   * Bot's approval card, or the installation's policy (automatic publication).
+   */
+  | {
+      kind: "bot"
+      installation: IntegrationBotInstallation
+      runId: string
+      decidedBy: "person" | "policy"
+    }
+  /**
+   * A request a running job makes (`context.authenticatedRequest`): the
+   * GitHub Issue Loop opening its pull request, a handler's own calls.
+   * `covers` is what the job itself was planned for.
+   */
+  | {
+      kind: "job"
+      jobId: string
+      outbound?: IntegrationActionOutbound
+      covers: readonly OutboundTarget[]
+    }
+
+export interface IntegrationWritePlanInput {
+  /** Where the write lands (`githubActionTargets`, `githubRequestTargets`). */
+  targets: readonly OutboundTarget[]
+  /** What is written, for the receipt: `github.openPr`, or a request's `POST`. */
+  operation: string
+  /** The account's GitHub web host (`githubWebHost`), for a Bot event's thread. */
+  host?: string
+  authorization: IntegrationAuthorization
+}
+
+/** An `integration-action` receipt, for the caller to write. */
+export interface IntegrationReceipt {
+  request: ActionReviewRequest
+  decision: ActionReviewDecision
+}
+
+export type IntegrationWriteDecision =
+  | {
+      action: "proceed"
+      outbound: IntegrationActionOutbound
+      authorizedBy?: OutboundJobAuthorization
+      receipt?: IntegrationReceipt
+    }
+  | {
+      action: "park"
+      outbound: IntegrationActionOutbound
+      /** What the card shows: every recipient, and the ones nothing authorized. */
+      review: PendingOutboundReview
+      receipt: IntegrationReceipt
+    }
+  | { action: "deny"; outbound: IntegrationActionOutbound; receipt: IntegrationReceipt }
+
+export interface PlanIntegrationDeps {
+  /** App settings, for the mode. Default: the settings store. */
+  settings?: () => OutboundSettingsLike | Promise<OutboundSettingsLike>
+  /** A session's origin. Default: `sessionPlanOrigin`. */
+  resolveSessionOrigin?: (sessionId: string) => Promise<ActionReviewPlanOrigin>
+  /** The event a Bot run started from. Default: its delivery's envelope. */
+  botRunEvent?: (runId: string) => Promise<IntegrationBotEvent | undefined>
+  /** What triggered a workflow run. Default: its `workflowRuns` row. */
+  workflowRunTrigger?: (runId: string) => Promise<{ conversationKey?: string } | undefined>
+  /** Test seam for the fence and grant query. */
+  listAuthKeys?: (prefix: string, now: number) => Promise<string[]>
+  now?: () => number
+  newRequestId?: () => string
+}
+
+/** The message a fenced write fails with. */
+export const OUTBOUND_FENCED_ERROR =
+  "outbound_fenced: a person refused this recipient for the current request"
+
+/** The message a synchronous request held by the policy fails with. */
+export const OUTBOUND_HELD_REQUEST_ERROR =
+  "outbound_held: nothing authorized this recipient, and a direct request cannot wait for a person; use an action so it can be approved"
+
+function positiveInteger(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return String(value)
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) return value.trim()
+  return undefined
+}
+
+/**
+ * The PR or issue a GitHub event is about, as an origin thread: the event's
+ * repository with the payload's `pull_request.number` (else `issue.number`).
+ * Undefined for an event about no single PR or issue (a push, a release), or
+ * not about a repository at all.
+ */
+export function botEventOriginThread(
+  event: IntegrationBotEvent | undefined,
+  host?: string
+): OutboundTarget | undefined {
+  const resource = event?.resource
+  if (!resource || resource.kind !== "repository" || typeof resource.id !== "string") {
+    return undefined
+  }
+  const payload =
+    event.payload && typeof event.payload === "object"
+      ? (event.payload as Record<string, unknown>)
+      : {}
+  const numberOf = (key: string) => {
+    const value = payload[key]
+    return value && typeof value === "object"
+      ? positiveInteger((value as Record<string, unknown>).number)
+      : undefined
+  }
+  const thread = numberOf("pull_request") ?? numberOf("issue")
+  if (!thread) return undefined
+  const bare = /^[^/:@\s]+\/[^/:@\s]+$/.test(resource.id)
+  return repositoryTarget(
+    bare && host && host !== "github.com" ? `https://${host}/${resource.id}` : resource.id,
+    thread
+  )
+}
+
+/** The recipients an approval card shows for a held write. */
+export function integrationOutboundReview(
+  targets: readonly OutboundTarget[],
+  unauthorized: readonly OutboundTarget[],
+  enforced: boolean
+): PendingOutboundReview {
+  const view = (target: OutboundTarget) => ({
+    kind: target.kind,
+    channel: target.channel,
+    recipient: target.recipient,
+    ...(target.thread ? { thread: target.thread } : {}),
+  })
+  return { targets: targets.map(view), unauthorized: unauthorized.map(view), enforced }
+}
+
+interface PlanningEnv {
+  input: IntegrationWritePlanInput
+  mode: OutboundAuthorizationMode
+  settings: OutboundSettingsLike
+  now: number
+  deps: PlanIntegrationDeps
+}
+
+interface ReceiptArgs {
+  outbound: IntegrationActionOutbound
+  sessionId?: string
+  plan: ActionReviewPlanOutcome
+  outcome: ActionReviewOutcome
+  authority: ActionReviewAuthority
+  grant?: ActionReviewGrant
+  actor?: { kind: ActionReviewActorKind }
+  reason: string
+}
+
+/** One `integration-action` receipt. */
+export function integrationReceipt(
+  args: ReceiptArgs & {
+    targets: readonly OutboundTarget[]
+    operation: string
+    enforced: boolean
+    now: number
+    requestId?: string
+  }
+): IntegrationReceipt {
+  const requestId = args.requestId ?? `integration:${crypto.randomUUID()}`
+  const risk = classifyRisk({
+    objective: "",
+    taskDescriptions: [],
+    toolIds: ["connector_send"],
+    capabilityIds: [],
+    sandboxEnabled: false,
+  })
+  const permits = args.outcome === "allow" || args.outcome === "allow_always"
+  return {
+    request: {
+      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
+      requestId,
+      origin: {
+        channel: "github-delivery",
+        scope: "github",
+        id: requestId,
+        ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+        // Nobody is asked at the broker; a held job is answered elsewhere.
+        headless: true,
+        ...(args.outbound.rootSessionId ? { rootSessionId: args.outbound.rootSessionId } : {}),
+        ...(args.outbound.instructionEpoch
+          ? { instructionEpoch: args.outbound.instructionEpoch }
+          : {}),
+      },
+      subject: {
+        kind: "integration-action",
+        ref: args.outbound.ownerRef,
+        title: args.operation,
+        targets: args.targets.map(toReviewTarget),
+      },
+      verdict: "ask",
+      verdictExplicit: false,
+      tier: risk.tier,
+      surfaces: risk.surfaces,
+      plan: { outcome: args.plan, enforced: args.enforced },
+      requestedAt: args.now,
+    },
+    decision: {
+      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
+      requestId,
+      outcome: args.outcome,
+      authority: args.authority,
+      reason: args.reason,
+      ...(args.grant && permits ? { grant: args.grant } : {}),
+      ...(args.actor ? { actor: args.actor } : {}),
+      decidedAt: args.now,
+    },
+  }
+}
+
+function receiptFor(env: PlanningEnv, args: ReceiptArgs): IntegrationReceipt {
+  return integrationReceipt({
+    ...args,
+    targets: env.input.targets,
+    operation: env.input.operation,
+    enforced: env.mode === "enforce",
+    now: env.now,
+    requestId: `integration:${env.deps.newRequestId?.() ?? crypto.randomUUID()}`,
+  })
+}
+
+function fromToolCall(call: AuthorizedOutboundToolCall): OutboundJobAuthorization {
+  return {
+    receiptId: call.requestId,
+    authority: call.authority,
+    ...(call.grant ? { grantScope: call.grant.scope } : {}),
+    ...(call.grant?.policyRef ? { policyRef: call.grant.policyRef } : {}),
+  }
+}
+
+function coversAll(fingerprints: readonly string[], targets: readonly OutboundTarget[]): boolean {
+  return (
+    targets.length > 0 &&
+    targets.every(
+      (target) => target.kind !== "unknown" && fingerprints.includes(outboundFingerprint(target))
+    )
+  )
+}
+
+function outboundOf(ownerRef: string, origin: ActionReviewPlanOrigin): IntegrationActionOutbound {
+  return {
+    ownerRef,
+    ...(origin.rootSessionId ? { rootSessionId: origin.rootSessionId } : {}),
+    ...(origin.instructionEpoch ? { instructionEpoch: origin.instructionEpoch } : {}),
+  }
+}
+
+/**
+ * The plan's hold or refusal as the write sees it: held or refused under
+ * enforcement, let through and recorded under shadow mode.
+ */
+function withheld(
+  env: PlanningEnv,
+  outcome: "park" | "deny",
+  args: { outbound: IntegrationActionOutbound; sessionId?: string; unauthorized: OutboundTarget[] }
+): IntegrationWriteDecision {
+  const what =
+    outcome === "park"
+      ? "nothing authorized its recipient"
+      : "a person refused its recipient for the current request"
+  const base = {
+    outbound: args.outbound,
+    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+  }
+  if (env.mode === "shadow") {
+    return {
+      action: "proceed",
+      outbound: args.outbound,
+      receipt: receiptFor(env, {
+        ...base,
+        plan: outcome,
+        outcome: "allow",
+        authority: "policy-default",
+        reason: `written: GitHub outbound authorization is in shadow mode; enforcement would have ${
+          outcome === "park" ? "held it for a person" : "refused it"
+        } (${what})`,
+      }),
+    }
+  }
+  if (outcome === "park") {
+    return {
+      action: "park",
+      outbound: args.outbound,
+      review: integrationOutboundReview(env.input.targets, args.unauthorized, true),
+      receipt: receiptFor(env, {
+        ...base,
+        plan: "park",
+        outcome: "deny",
+        authority: "policy-default",
+        reason: `held for a person to approve: ${what}`,
+      }),
+    }
+  }
+  return {
+    action: "deny",
+    outbound: args.outbound,
+    receipt: receiptFor(env, {
+      ...base,
+      plan: "deny",
+      outcome: "deny",
+      authority: "policy-deny",
+      reason: `refused: ${what}`,
+    }),
+  }
+}
+
+async function planUnattended(
+  env: PlanningEnv,
+  unattended: {
+    ownerRef: string
+    origin?: ActionReviewPlanOrigin
+    sessionId?: string
+    policyGrants?: readonly OutboundPolicyGrantList[]
+  }
+): Promise<IntegrationWriteDecision> {
+  let origin: ActionReviewPlanOrigin = unattended.origin ?? {}
+  let result: ReturnType<typeof planActionReview>
+  try {
+    if (!unattended.origin && unattended.sessionId) {
+      origin = await (env.deps.resolveSessionOrigin ?? sessionPlanOrigin)(unattended.sessionId)
+    }
+    const context = await buildActionReviewPlanContext({
+      origin,
+      unattended: true,
+      via: "tool",
+      settings: env.settings,
+      ...(unattended.policyGrants?.length ? { policyGrants: unattended.policyGrants } : {}),
+      now: env.now,
+      ...(env.deps.listAuthKeys ? { listAuthKeys: env.deps.listAuthKeys } : {}),
+    })
+    result = planActionReview(
+      { verdict: "ask", targets: env.input.targets, category: "github" },
+      context
+    )
+  } catch (error) {
+    // Shadow mode changes nothing, so a planning failure must not either.
+    // Under enforcement nothing was shown to authorize the recipient, so the
+    // write waits for a person rather than going out on a failure.
+    console.warn("[outbound] integration planning failed", error)
+    const outbound = outboundOf(unattended.ownerRef, origin)
+    if (env.mode === "shadow") return { action: "proceed", outbound }
+    return withheld(env, "park", {
+      outbound,
+      ...(unattended.sessionId ? { sessionId: unattended.sessionId } : {}),
+      unauthorized: [...env.input.targets],
+    })
+  }
+  const outbound = outboundOf(unattended.ownerRef, origin)
+  const session = unattended.sessionId ? { sessionId: unattended.sessionId } : {}
+
+  switch (result.plan.outcome) {
+    case "allow": {
+      const authority = result.authority ?? "policy-default"
+      // The origin thread: needs no grant and no receipt.
+      if (!result.grant) return { action: "proceed", outbound, authorizedBy: { authority } }
+      const receipt =
+        env.mode === "enforce"
+          ? receiptFor(env, {
+              outbound,
+              ...session,
+              plan: "allow",
+              outcome: "allow",
+              authority,
+              grant: result.grant,
+              reason: `allowed by a ${result.grant.scope} grant`,
+            })
+          : undefined
+      return {
+        action: "proceed",
+        outbound,
+        authorizedBy: {
+          ...(receipt ? { receiptId: receipt.request.requestId } : {}),
+          authority,
+          grantScope: result.grant.scope,
+          ...(result.grant.policyRef ? { policyRef: result.grant.policyRef } : {}),
+        },
+        ...(receipt ? { receipt } : {}),
+      }
+    }
+    case "deny":
+      return withheld(env, "deny", { outbound, ...session, unauthorized: [] })
+    case "ask":
+    case "draft":
+    case "park":
+      return withheld(env, "park", {
+        outbound,
+        ...session,
+        unauthorized: result.unauthorized.length > 0 ? result.unauthorized : [...env.input.targets],
+      })
+  }
+}
+
+async function defaultBotRunEvent(runId: string): Promise<IntegrationBotEvent | undefined> {
+  const { getDb } = await import("@/lib/db/schema")
+  const delivery = await getDb().botEventDeliveries.where("runId").equals(runId).first()
+  return delivery?.envelope
+}
+
+async function defaultWorkflowRunTrigger(
+  runId: string
+): Promise<{ conversationKey?: string } | undefined> {
+  const { getDb } = await import("@/lib/db/schema")
+  return (await getDb().workflowRuns.get(runId))?.triggeredBy
+}
+
+/** Plan one GitHub write. See the module comment for what each authorization means. */
+export async function planIntegrationWrite(
+  input: IntegrationWritePlanInput,
+  deps: PlanIntegrationDeps = {}
+): Promise<IntegrationWriteDecision> {
+  const settings = await (deps.settings ?? readAppSettings)()
+  const env: PlanningEnv = {
+    input,
+    mode: readOutboundAuthorizationMode(settings, "github"),
+    settings,
+    now: deps.now?.() ?? Date.now(),
+    deps,
+  }
+  const auth = input.authorization
+
+  switch (auth.kind) {
+    case "tool-call": {
+      const ownerRef = `tool-call:${auth.sessionId ?? auth.pluginId}`
+      const calls = runningAuthorizedToolCallsOf(`plugin:${auth.pluginId}`, env.now).filter(
+        (call) => !auth.sessionId || call.sessionId === auth.sessionId
+      )
+      const call = calls.find((c) => coversAll(c.fingerprints, input.targets))
+      if (call) {
+        const origin = auth.sessionId
+          ? await (deps.resolveSessionOrigin ?? sessionPlanOrigin)(auth.sessionId).catch(() => ({}))
+          : {}
+        return {
+          action: "proceed",
+          outbound: outboundOf(ownerRef, origin),
+          authorizedBy: fromToolCall(call),
+        }
+      }
+      // In shadow mode a permission shortcut can answer the call without
+      // asking, so a missing record says nothing about what enforcement does.
+      if (calls.length === 0 && env.mode === "shadow") {
+        return { action: "proceed", outbound: { ownerRef } }
+      }
+      return planUnattended(env, {
+        ownerRef,
+        ...(auth.sessionId ? { sessionId: auth.sessionId } : {}),
+      })
+    }
+    case "plugin": {
+      const call = runningAuthorizedToolCallsOf(`plugin:${auth.pluginId}`, env.now).find((c) =>
+        coversAll(c.fingerprints, input.targets)
+      )
+      const ownerRef = `plugin:${auth.pluginId}`
+      if (call) {
+        return { action: "proceed", outbound: { ownerRef }, authorizedBy: fromToolCall(call) }
+      }
+      // A handler Bot of this plugin that is running may reach its
+      // installation's recipients.
+      const botGrants = runningBotGrantsOf(auth.pluginId)
+      return planUnattended(env, {
+        ownerRef,
+        ...(botGrants.length > 0 ? { policyGrants: botGrants } : {}),
+      })
+    }
+    case "bot": {
+      const ownerRef = `bot:${auth.installation.id}`
+      const event = await (deps.botRunEvent ?? defaultBotRunEvent)(auth.runId).catch(
+        () => undefined
+      )
+      const originThread = botEventOriginThread(event, input.host)
+      const origin: ActionReviewPlanOrigin = {
+        ...botPlanOrigin(auth.installation),
+        ...(originThread ? { originThread } : {}),
+      }
+      if (auth.decidedBy === "person") {
+        const outbound = outboundOf(ownerRef, origin)
+        const receipt =
+          env.mode === "enforce"
+            ? receiptFor(env, {
+                outbound,
+                plan: "allow",
+                outcome: "allow",
+                authority: "human",
+                grant: { scope: "once" },
+                actor: { kind: "local-user" },
+                reason: "a person approved this Bot action",
+              })
+            : undefined
+        return {
+          action: "proceed",
+          outbound,
+          authorizedBy: {
+            ...(receipt ? { receiptId: receipt.request.requestId } : {}),
+            authority: "human",
+            grantScope: "once",
+          },
+          ...(receipt ? { receipt } : {}),
+        }
+      }
+      return planUnattended(env, {
+        ownerRef,
+        origin,
+        policyGrants: botRecipientGrants(auth.installation),
+      })
+    }
+    case "workflow": {
+      const trigger = await (deps.workflowRunTrigger ?? defaultWorkflowRunTrigger)(
+        auth.runId
+      ).catch(() => undefined)
+      return planUnattended(env, {
+        ownerRef: `workflow:${auth.workflowId}`,
+        origin: workflowRunPlanOrigin({
+          id: auth.runId,
+          ...(trigger ? { triggeredBy: trigger } : {}),
+        }),
+      })
+    }
+    case "job": {
+      const ownerRef = auth.outbound?.ownerRef ?? `integration-job:${auth.jobId}`
+      const covered = auth.covers.map((target) => outboundFingerprint(target))
+      if (coversAll(covered, input.targets)) {
+        return { action: "proceed", outbound: auth.outbound ?? { ownerRef } }
+      }
+      // Anything else is planned in the job's own origin, with the PR or issue
+      // it works on as the origin thread (the Issue Loop's issue).
+      const originThread = auth.covers.find((target) => target.thread)
+      return planUnattended(env, {
+        ownerRef,
+        origin: {
+          ...(auth.outbound?.rootSessionId ? { rootSessionId: auth.outbound.rootSessionId } : {}),
+          ...(auth.outbound?.instructionEpoch
+            ? { instructionEpoch: auth.outbound.instructionEpoch }
+            : {}),
+          ...(originThread ? { originThread } : {}),
+        },
+      })
+    }
+  }
+}
+
+/**
+ * The receipt of a person's answer to a held job: an approval (for this one
+ * write, or for the rest of the request when `forRequest` and every
+ * recipient can be granted that long), or a refusal, which fences the
+ * recipients for the rest of the request.
+ */
+export function heldJobAnswerReceipt(args: {
+  outbound: IntegrationActionOutbound
+  targets: readonly OutboundTarget[]
+  operation: string
+  answer: "approved" | "denied"
+  forRequest?: boolean
+  actor?: ActionReviewActorKind
+  now?: number
+}): IntegrationReceipt {
+  const approved = args.answer === "approved"
+  return integrationReceipt({
+    outbound: args.outbound,
+    targets: args.targets,
+    operation: args.operation,
+    enforced: true,
+    now: args.now ?? Date.now(),
+    plan: "park",
+    outcome: approved ? "allow" : "deny",
+    authority: "human",
+    ...(approved
+      ? {
+          grant: humanOutboundGrant(args.forRequest, {
+            targets: integrationOutboundReview(args.targets, [], true).targets,
+          }),
+        }
+      : {}),
+    actor: { kind: args.actor ?? "local-user" },
+    reason: approved ? "a person approved the held write" : "a person refused the held write",
+  })
+}

@@ -23,7 +23,7 @@ const STRANGER = conversationTarget("lark:bot-a:oc_unknown")!
 function receipt(
   over: {
     root?: string
-    kind?: "tool-call" | "connector-delivery"
+    kind?: "tool-call" | "connector-delivery" | "integration-action"
     ref?: string
     targets?: OutboundTarget[]
     outcome?: ActionReviewPlanOutcome
@@ -77,6 +77,15 @@ describe("shadowSenderOf", () => {
     expect(shadowSenderOf(receipt({ kind: "connector-delivery", ref: "plugin:acme" }))).toEqual({
       kind: "plugin",
       id: "acme",
+    })
+    // A GitHub write through the integration broker names its asker the same way.
+    expect(shadowSenderOf(receipt({ kind: "integration-action", ref: "plugin:gh" }))).toEqual({
+      kind: "plugin",
+      id: "gh",
+    })
+    expect(shadowSenderOf(receipt({ kind: "integration-action", ref: "bot:boti_2" }))).toEqual({
+      kind: "bot",
+      id: "boti_2",
     })
     expect(shadowSenderOf(receipt({ kind: "connector-delivery", ref: "digest:t9" }))).toEqual({
       kind: "task",

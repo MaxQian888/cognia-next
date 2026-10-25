@@ -140,6 +140,11 @@ export type ActionReviewSubjectKind =
   | "handoff-commit"
   /** A connector delivery planned at the delivery gateway (ADR-0239). */
   | "connector-delivery"
+  /**
+   * A write through an integration (ADR-0239 phase 2): a brokered action job,
+   * or a raw authenticated request, planned before it reaches GitHub.
+   */
+  | "integration-action"
 
 /**
  * A party an outbound action delivers to (ADR-0239), as a receipt records it.
@@ -558,6 +563,7 @@ function validateSubject(subject: unknown, errors: string[]): void {
     "run-continue",
     "handoff-commit",
     "connector-delivery",
+    "integration-action",
   ]
   if (!memberOf(subject.kind, kinds)) {
     errors.push("subject.kind must be a known ActionReviewSubjectKind")

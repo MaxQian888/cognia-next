@@ -30,11 +30,34 @@ import {
 } from "./gh-targets"
 import { repositoryTarget, unknownGithubTarget, type OutboundTarget } from "./outbound-targets"
 
-function isGithubWriteAction({ definition, action }: RegisteredIntegrationAction): boolean {
-  const github =
+function isGithubOperation(definition: { id: string }, action: IntegrationActionDef): boolean {
+  return (
     definition.id.toLowerCase() === "github" ||
     (action.operationId?.toLowerCase().startsWith("github.") ?? false)
-  return github && action.risk !== "read"
+  )
+}
+
+/** True when this action of this integration writes to GitHub. */
+export function isGithubWriteAction({
+  definition,
+  action,
+}: Pick<RegisteredIntegrationAction, "definition" | "action">): boolean {
+  return isGithubOperation(definition, action) && action.risk !== "read"
+}
+
+/**
+ * True when an integration talks to GitHub: its id is `github`, or one of its
+ * actions is a GitHub operation. A raw request through one of its accounts
+ * that is not a read is a GitHub write.
+ */
+export function isGithubIntegration(definition: {
+  id: string
+  actions: readonly IntegrationActionDef[]
+}): boolean {
+  return (
+    definition.id.toLowerCase() === "github" ||
+    definition.actions.some((action) => isGithubOperation(definition, action))
+  )
 }
 
 /** The GitHub write action a chat tool calls, or undefined for any other tool. */
@@ -54,15 +77,42 @@ function positiveInteger(value: unknown): string | undefined {
 }
 
 /**
+ * The web host of a GitHub API root: `github.com` for `api.github.com` (and
+ * when there is no root), else the root's own host, which is where a GitHub
+ * Enterprise server serves both its pages and `/api/v3`. Repository targets
+ * are named by this host, the same one `gh` and a clone URL use.
+ */
+export function githubWebHost(apiBaseUrl?: string): string {
+  if (!apiBaseUrl) return "github.com"
+  try {
+    const host = new URL(apiBaseUrl).host.toLowerCase()
+    return host === "api.github.com" ? "github.com" : host
+  } catch {
+    return "github.com"
+  }
+}
+
+/** `owner/repo` on `host`; a value that already names its host or a URL is read as is. */
+function repositoryOn(value: string, thread: string | undefined, host: string | undefined) {
+  const bare = /^[^/:@\s]+\/[^/:@\s]+$/.test(value.trim())
+  return repositoryTarget(
+    bare && host && host !== "github.com" ? `https://${host}/${value.trim()}` : value,
+    thread
+  )
+}
+
+/**
  * Where an integration action's call writes: the repository at each of its
  * `repository` scope selectors (GitHub actions use `/repoFullName`), with the
  * call's `prNumber` (else `issueNumber`) as the thread. A call that names a
  * comment only (`updateComment`) has no thread; one that names no valid
- * repository is {@link unknownGithubTarget}.
+ * repository is {@link unknownGithubTarget}. `host` is the account's web host
+ * ({@link githubWebHost}); a bare `owner/repo` is on `github.com` without it.
  */
 export function githubActionTargets(
   action: IntegrationActionDef,
-  input: unknown
+  input: unknown,
+  options: { host?: string } = {}
 ): OutboundTarget[] {
   const args =
     input && typeof input === "object" && !Array.isArray(input)
@@ -74,9 +124,48 @@ export function githubActionTargets(
     .map((selector) => selector.jsonPointer)
   const targets = pointers.map((pointer) => {
     const value = readJsonPointer(args, pointer)
-    return (typeof value === "string" && repositoryTarget(value, thread)) || unknownGithubTarget()
+    return (
+      (typeof value === "string" && repositoryOn(value, thread, options.host)) ||
+      unknownGithubTarget()
+    )
   })
   return dedupeGithubTargets(targets.length > 0 ? targets : [unknownGithubTarget()])
+}
+
+/** `/repos/<owner>/<repo>[/issues|pulls/<n>]…`, relative to the API root. */
+const REPO_REQUEST_PATH = /^\/repos\/([^/]+)\/([^/]+)(?:\/(?:issues|pulls)\/(\d+)(?:\/|$))?/i
+
+/**
+ * Where a raw authenticated GitHub request writes. The path is read relative
+ * to the account's API root (`https://api.github.com`, or a GitHub Enterprise
+ * `https://host/api/v3`): `/repos/<owner>/<repo>/…` is that repository, with
+ * the PR or issue number as the thread when the path names one. Anything else
+ * (`/graphql`, `/gists`, `/user/repos`, an encoded or foreign path) is
+ * {@link unknownGithubTarget}: it cannot be granted, so it always reaches a
+ * person under enforcement.
+ */
+export function githubRequestTargets(url: string, apiBaseUrl?: string): OutboundTarget[] {
+  let parsed: URL
+  let base: URL
+  try {
+    parsed = new URL(url)
+    base = new URL(apiBaseUrl ?? "https://api.github.com")
+  } catch {
+    return [unknownGithubTarget()]
+  }
+  const root = base.pathname.replace(/\/$/, "")
+  if (
+    parsed.origin !== base.origin ||
+    /%2f|%5c|%2e|\\/i.test(parsed.pathname) ||
+    (root && !parsed.pathname.toLowerCase().startsWith(`${root.toLowerCase()}/`))
+  ) {
+    return [unknownGithubTarget()]
+  }
+  const match = REPO_REQUEST_PATH.exec(parsed.pathname.slice(root.length))
+  const target = match
+    ? repositoryOn(`${match[1]}/${match[2]}`, match[3], githubWebHost(base.toString()))
+    : undefined
+  return [target ?? unknownGithubTarget()]
 }
 
 /**

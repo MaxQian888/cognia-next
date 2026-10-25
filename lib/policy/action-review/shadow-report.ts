@@ -92,7 +92,8 @@ export function shadowSenderOf(receipt: ActionReviewReceipt): ShadowSender {
   const root = receipt.request.origin.rootSessionId
   const fromRoot = root ? prefixed(root) : undefined
   if (fromRoot && fromRoot.kind !== "other") return fromRoot
-  if (receipt.request.subject.kind === "connector-delivery") {
+  const kind = receipt.request.subject.kind
+  if (kind === "connector-delivery" || kind === "integration-action") {
     const fromRef = prefixed(receipt.request.subject.ref)
     if (fromRef.kind !== "other") return fromRef
   }

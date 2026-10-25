@@ -39,6 +39,12 @@ jest.mock("@/lib/integrations/migration", () => ({
   ...jest.requireActual("@/lib/integrations/migration"),
 }))
 
+let outboundSettings: object = { agentPermissions: {} }
+jest.mock("@/lib/policy/action-review/plan-context", () => ({
+  ...jest.requireActual("@/lib/policy/action-review/plan-context"),
+  readAppSettings: jest.fn(async () => outboundSettings),
+}))
+
 jest.mock("./bot-integration-binding", () => ({
   ...jest.requireActual("./bot-integration-binding"),
   resolveBotIntegrationBinding: jest.fn(),
@@ -239,6 +245,62 @@ describe("ctx.integrations", () => {
       api.authenticatedRequest(account.id, "https://api.github.com/repos/owner/repo/issues")
     ).rejects.toThrow("not found")
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it("plans a plugin's own GitHub write before it is sent (ADR-0239 phase 2)", async () => {
+    registerIntegrationDefinitions({
+      pluginId: "github-delivery",
+      definitions: [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [],
+          resourceKinds: ["repository"],
+          eventTypes: [],
+          actions: [],
+        },
+      ],
+      handlers: {},
+    })
+    const api = createIntegrationsAPI("github-delivery", () => true)
+    const account = await api.createAccount({
+      integrationId: "github",
+      providerId: "oauth",
+      authSessionId: "opaque",
+      remoteAccountId: "octocat",
+      label: "GitHub",
+    })
+    const request = jest.fn().mockResolvedValue({ status: 201, headers: {}, data: {} })
+    setIntegrationAuthenticatedRequestExecutorForTesting(request)
+    const url = "https://api.github.com/repos/acme/web/issues/3/comments"
+    try {
+      // Shadow mode: sent, and recorded.
+      await expect(
+        api.authenticatedRequest(account.id, url, { method: "POST", body: "{}" })
+      ).resolves.toMatchObject({ status: 201 })
+      const [observed] = await getDb().actionReviewReceipts.toArray()
+      expect(observed).toMatchObject({
+        request: {
+          subject: { kind: "integration-action", ref: "plugin:github-delivery", title: "POST" },
+          plan: { outcome: "park", enforced: false },
+        },
+      })
+
+      // Enforced: a write nothing authorized cannot be sent; a read still can.
+      outboundSettings = {
+        agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } },
+      }
+      await expect(
+        api.authenticatedRequest(account.id, url, { method: "POST", body: "{}" })
+      ).rejects.toThrow(/^outbound_held/)
+      await expect(api.authenticatedRequest(account.id, url)).resolves.toMatchObject({
+        status: 201,
+      })
+      expect(request).toHaveBeenCalledTimes(2)
+    } finally {
+      outboundSettings = { agentPermissions: {} }
+      setIntegrationAuthenticatedRequestExecutorForTesting()
+    }
   })
 
   it("does not expose unrelated subscriptions or resource discovery through a binding", async () => {

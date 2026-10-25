@@ -391,7 +391,7 @@ async function planUnattended(
   let result: ReturnType<typeof planActionReview>
   try {
     if (!unattended.origin && unattended.sessionId) {
-      origin = await (env.deps.resolveSessionOrigin ?? defaultSessionOrigin)(unattended.sessionId)
+      origin = await (env.deps.resolveSessionOrigin ?? sessionPlanOrigin)(unattended.sessionId)
     }
     // The sender's own lists (a Bot's), and the ones a person configured on
     // the bot account and the conversation this delivery goes through.
@@ -471,7 +471,8 @@ async function planUnattended(
   }
 }
 
-async function defaultSessionOrigin(sessionId: string): Promise<ActionReviewPlanOrigin> {
+/** A session's origin, as the engine keys its fence and grants. */
+export async function sessionPlanOrigin(sessionId: string): Promise<ActionReviewPlanOrigin> {
   const resolved = await resolveSessionRequestOrigin(sessionId)
   return {
     rootSessionId: resolved.rootSessionId,

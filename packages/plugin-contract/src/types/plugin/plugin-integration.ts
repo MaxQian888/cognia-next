@@ -6,6 +6,8 @@
  * to IM conversation semantics.
  */
 
+import type { OutboundJobAuthorization } from "../../lib/db/connector-types"
+
 export type IntegrationActionRisk = "read" | "write" | "destructive"
 export type IntegrationActionIdempotency = "required" | "supported" | "none"
 export type IntegrationAuthKind = "oauth2" | "api-key" | "personal-access-token" | "app"
@@ -426,8 +428,37 @@ export interface IntegrationActionJob {
   /** Host-stamped requester for cross-plugin Bot actions. */
   botBinding?: IntegrationBotBindingRef & { pluginId: string; approvalId?: string }
   source: "manual" | "workflow" | "inbox" | "chat"
+  /**
+   * Host-stamped: who asked for this write and where the request came from,
+   * as the outbound policy planned it (ADR-0239 phase 2). Present on GitHub
+   * write jobs only; requests the job makes while it runs are planned in the
+   * same origin.
+   */
+  outbound?: IntegrationActionOutbound
+  /**
+   * Host-stamped: what authorized the write (ADR-0239): a person, a grant, or
+   * the thread the request came from. Absent while the job is held, and for
+   * a write the policy observed in shadow mode without deciding it.
+   */
+  authorizedBy?: OutboundJobAuthorization
   createdAt: string
   updatedAt: string
+}
+
+/** Where a GitHub write job's request came from (ADR-0239 phase 2). */
+export interface IntegrationActionOutbound {
+  /** Who asked: `tool-call:<sessionId>`, `workflow:<id>`, `bot:<id>`, `plugin:<id>`. */
+  ownerRef: string
+  /** The root of the run that asked, and its instruction epoch. */
+  rootSessionId?: string
+  instructionEpoch?: string
+  /**
+   * Set while the job waits for a person because nothing authorized one of
+   * its recipients: the receipt that recorded the hold. The job stays
+   * `awaiting_approval` until a person approves or cancels it; an automatic
+   * approval does not release it.
+   */
+  held?: { receiptId: string; heldAt: string }
 }
 
 export interface ExecuteIntegrationActionInput {

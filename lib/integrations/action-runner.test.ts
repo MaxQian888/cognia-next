@@ -7,6 +7,7 @@ import * as botBinding from "@/lib/plugin/api/bot-integration-binding"
 import { createIntegrationAccount } from "@/lib/db/integrations"
 import { registerAuthenticationProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import { __resetIntegrationRegistryForTesting, registerIntegrationDefinitions } from "./registry"
+import { pushHeldIntegrationJob, withdrawHeldIntegrationJob } from "./outbound-hold"
 import {
   approveIntegrationActionJob,
   authenticatedIntegrationRequest,
@@ -23,8 +24,22 @@ jest.mock("@/lib/plugin/api/bot-integration-binding", () => ({
   assertBotIntegrationAction: jest.fn(),
 }))
 
+let outboundSettings: object = { agentPermissions: {} }
+jest.mock("@/lib/policy/action-review/plan-context", () => ({
+  ...jest.requireActual("@/lib/policy/action-review/plan-context"),
+  readAppSettings: jest.fn(async () => outboundSettings),
+}))
+
+jest.mock("./outbound-hold", () => ({
+  pushHeldIntegrationJob: jest.fn(async () => undefined),
+  withdrawHeldIntegrationJob: jest.fn(),
+}))
+
 describe("Integration action runner", () => {
   beforeEach(async () => {
+    outboundSettings = { agentPermissions: {} }
+    jest.mocked(pushHeldIntegrationJob).mockClear()
+    jest.mocked(withdrawHeldIntegrationJob).mockClear()
     jest.mocked(botBinding.assertBotIntegrationAction).mockReset()
     await getDb().delete()
     __resetDbForTesting()
@@ -594,5 +609,391 @@ describe("Integration action runner", () => {
     })
     expect(result.error).toContain("Approval expired during preparation")
     expect(request).not.toHaveBeenCalled()
+  })
+
+  describe("outbound authorization of GitHub writes (ADR-0239 phase 2)", () => {
+    const enforceGithub = {
+      agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } },
+    }
+
+    async function setupGithub(
+      comment: (
+        input: Record<string, unknown>,
+        context: Parameters<
+          Parameters<typeof registerIntegrationDefinitions>[0]["handlers"][string]
+        >[1]
+      ) => Promise<unknown> = async () => ({ commented: true })
+    ) {
+      registerIntegrationDefinitions({
+        pluginId: "github-delivery",
+        definitions: [
+          {
+            id: "github",
+            label: "GitHub",
+            authStrategies: [
+              { id: "oauth", type: "oauth2", label: "OAuth", providerId: "github-oauth" },
+            ],
+            resourceKinds: ["repository"],
+            eventTypes: [],
+            actions: [
+              {
+                id: "commentPr",
+                label: "Comment on pull request",
+                handler: "commentPr",
+                inputSchema: { type: "object" },
+                risk: "write",
+                idempotency: "required",
+                scopeSelectors: [{ kind: "repository", jsonPointer: "/repoFullName" }],
+              },
+            ],
+          },
+        ],
+        handlers: { "github:commentPr": comment },
+      })
+      return createIntegrationAccount("github-delivery", {
+        integrationId: "github",
+        providerId: "github-oauth",
+        authSessionId: "opaque",
+        remoteAccountId: "octocat",
+        label: "GitHub",
+      })
+    }
+
+    const comment = (accountId: string, key: string, prNumber = 12) => ({
+      integrationId: "github",
+      accountId,
+      actionId: "commentPr",
+      input: { repoFullName: "acme/web", prNumber, body: "hi" },
+      idempotencyKey: key,
+    })
+
+    const receipts = () => getDb().actionReviewReceipts.toArray()
+
+    it("holds a write nothing authorized, pushes it, and lets only a person release it", async () => {
+      outboundSettings = enforceGithub
+      const handler = jest.fn(async () => ({ commented: true }))
+      const account = await setupGithub(handler)
+      const held = await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+      expect(held).toMatchObject({
+        status: "awaiting_approval",
+        outbound: { ownerRef: "plugin:github-delivery", held: { receiptId: expect.any(String) } },
+      })
+      expect(held.authorizedBy).toBeUndefined()
+      expect(pushHeldIntegrationJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobId: held.id,
+          origin: "plugin",
+          toolName: "integration__github-delivery__github__commentpr",
+          label: "GitHub: Comment on pull request",
+          review: expect.objectContaining({
+            enforced: true,
+            targets: [
+              expect.objectContaining({
+                kind: "repository",
+                recipient: "github:github.com/acme/web",
+                thread: "12",
+              }),
+            ],
+          }),
+        })
+      )
+      const [hold] = await receipts()
+      expect(hold).toMatchObject({
+        id: held.outbound!.held!.receiptId,
+        request: {
+          origin: { channel: "github-delivery" },
+          subject: { kind: "integration-action", ref: "plugin:github-delivery" },
+          plan: { outcome: "park", enforced: true },
+        },
+      })
+
+      // An automatic approval (a bridge with a capability grant) leaves it held.
+      await expect(approveIntegrationActionJob(held.id)).resolves.toMatchObject({
+        status: "awaiting_approval",
+      })
+      expect(handler).not.toHaveBeenCalled()
+
+      const released = await approveIntegrationActionJob(held.id, { actor: "person" })
+      expect(released).toMatchObject({
+        status: "succeeded",
+        outbound: { ownerRef: "plugin:github-delivery" },
+        authorizedBy: { authority: "human", grantScope: "once" },
+      })
+      expect(released.outbound?.held).toBeUndefined()
+      expect(withdrawHeldIntegrationJob).toHaveBeenCalledWith(held.id)
+      expect(handler).toHaveBeenCalledTimes(1)
+      const answer = (await receipts()).find((r) => r.id === released.authorizedBy?.receiptId)
+      expect(answer?.decision).toMatchObject({ outcome: "allow", authority: "human" })
+
+      // A replay keeps the job's plan: no second hold, no second push.
+      await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+      expect(pushHeldIntegrationJob).toHaveBeenCalledTimes(1)
+    })
+
+    it("holds a chat call's write even after its capability grant approves it", async () => {
+      outboundSettings = enforceGithub
+      const account = await setupGithub()
+      const held = await executeIntegrationAction(
+        "github-delivery",
+        { ...comment(account.id, "k1", 13), source: "chat" },
+        { kind: "tool-call", sessionId: "s1" }
+      )
+      expect(held.outbound?.ownerRef).toBe("tool-call:s1")
+      await expect(approveIntegrationActionJob(held.id)).resolves.toMatchObject({
+        status: "awaiting_approval",
+      })
+    })
+
+    it("holds a Bot's policy-approved write that leaves the event's thread instead of queueing it", async () => {
+      outboundSettings = enforceGithub
+      const handler = jest.fn(async () => ({ commented: true }))
+      const account = await setupGithub(handler)
+      jest.mocked(botBinding.assertBotIntegrationAction).mockResolvedValue({
+        account,
+        installation: { id: "boti_1" },
+      } as Awaited<ReturnType<typeof botBinding.assertBotIntegrationAction>>)
+      const job = await executeIntegrationAction("comment-bot", {
+        ...comment("", "k1"),
+        binding: { runId: "run_bot_1", slotId: "github" },
+        approval: { interruptId: "approval" },
+      })
+      expect(job).toMatchObject({
+        status: "awaiting_approval",
+        outbound: { ownerRef: "bot:boti_1", rootSessionId: "bot:boti_1", held: expect.any(Object) },
+      })
+      expect(pushHeldIntegrationJob).toHaveBeenCalledWith(
+        expect.objectContaining({ origin: "bot" })
+      )
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it("fences the recipients a person refused for the rest of the request", async () => {
+      outboundSettings = enforceGithub
+      const account = await setupGithub()
+      const workflow = { kind: "workflow", workflowId: "wf_1", runId: "wr_1" } as const
+      const held = await executeIntegrationAction(
+        "github-delivery",
+        comment(account.id, "k1"),
+        workflow
+      )
+      expect(held.outbound).toMatchObject({ rootSessionId: "workflow-run:wr_1" })
+      const cancelled = await cancelIntegrationActionJob(held.id, { actor: "person" })
+      expect(cancelled.status).toBe("cancelled")
+      expect(withdrawHeldIntegrationJob).toHaveBeenCalledWith(held.id)
+      expect(
+        (await receipts()).map((r) => [r.decision.outcome, r.decision.authority])
+      ).toContainEqual(["deny", "human"])
+
+      // Another write to the same repository in the same run is refused, not asked.
+      const fenced = await executeIntegrationAction(
+        "github-delivery",
+        comment(account.id, "k2", 40),
+        workflow
+      )
+      expect(fenced).toMatchObject({
+        status: "failed",
+        error: expect.stringMatching(/^outbound_fenced/),
+      })
+      expect(pushHeldIntegrationJob).toHaveBeenCalledTimes(1)
+      expect(
+        (await getDb().integrationAudit.toArray()).some(
+          (entry) => entry.kind === "action.commentPr.fenced"
+        )
+      ).toBe(true)
+      // A new run is a new request.
+      await expect(
+        executeIntegrationAction("github-delivery", comment(account.id, "k3", 40), {
+          ...workflow,
+          runId: "wr_2",
+        })
+      ).resolves.toMatchObject({ status: "awaiting_approval" })
+    })
+
+    it("withdraws a held job's push when its plugin cancels it, without a person's refusal", async () => {
+      outboundSettings = enforceGithub
+      const account = await setupGithub()
+      const held = await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+      const cancelled = await cancelIntegrationActionJob(held.id)
+      expect(cancelled).toMatchObject({ status: "cancelled" })
+      expect(cancelled.outbound?.held).toBeUndefined()
+      expect(withdrawHeldIntegrationJob).toHaveBeenCalledWith(held.id)
+      expect((await receipts()).some((r) => r.decision.authority === "human")).toBe(false)
+    })
+
+    it("changes nothing in shadow mode but records what enforcement would have held", async () => {
+      const account = await setupGithub()
+      const job = await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+      expect(job.status).toBe("awaiting_approval")
+      expect(job.outbound).toEqual({ ownerRef: "plugin:github-delivery" })
+      expect(pushHeldIntegrationJob).not.toHaveBeenCalled()
+      await expect(approveIntegrationActionJob(job.id)).resolves.toMatchObject({
+        status: "succeeded",
+      })
+      const [observed] = await receipts()
+      expect(observed).toMatchObject({
+        request: { plan: { outcome: "park", enforced: false } },
+        decision: { outcome: "allow", authority: "policy-default" },
+      })
+    })
+
+    it("leaves writes through other integrations unplanned", async () => {
+      outboundSettings = enforceGithub
+      const account = await setup()
+      const job = await executeIntegrationAction("example-delivery", {
+        integrationId: "example",
+        accountId: account.id,
+        actionId: "issue.update",
+        input: { issueId: "1" },
+        idempotencyKey: "x",
+      })
+      expect(job.status).toBe("awaiting_approval")
+      expect(job.outbound).toBeUndefined()
+      await expect(
+        authenticatedIntegrationRequest(
+          "example-delivery",
+          account.id,
+          "https://api.example.test/x",
+          {
+            method: "POST",
+          }
+        )
+      ).resolves.toMatchObject({ status: 200 })
+      expect(await receipts()).toEqual([])
+    })
+
+    describe("raw requests", () => {
+      it("refuses a write the policy holds, since a request cannot wait", async () => {
+        outboundSettings = enforceGithub
+        const account = await setupGithub()
+        await expect(
+          authenticatedIntegrationRequest(
+            "github-delivery",
+            account.id,
+            "https://api.github.com/repos/acme/web/issues/3/comments",
+            { method: "POST", body: "{}" }
+          )
+        ).rejects.toThrow(/^outbound_held/)
+        await expect(
+          authenticatedIntegrationRequest(
+            "github-delivery",
+            account.id,
+            "https://api.github.com/graphql",
+            { method: "post", body: "{}" }
+          )
+        ).rejects.toThrow(/^outbound_held/)
+        await expect(
+          authenticatedIntegrationRequest(
+            "github-delivery",
+            account.id,
+            "https://api.github.com/repos/acme/web/pulls"
+          )
+        ).resolves.toMatchObject({ status: 200 })
+        expect((await receipts()).map((r) => r.request.subject.title)).toEqual(["POST", "POST"])
+      })
+
+      it("only records in shadow mode", async () => {
+        const account = await setupGithub()
+        await expect(
+          authenticatedIntegrationRequest(
+            "github-delivery",
+            account.id,
+            "https://api.github.com/repos/acme/web/pulls",
+            { method: "POST", body: "{}" }
+          )
+        ).resolves.toMatchObject({ status: 200 })
+        expect((await receipts())[0]).toMatchObject({
+          request: { plan: { outcome: "park", enforced: false } },
+        })
+      })
+    })
+
+    describe("requests a running job makes", () => {
+      it("lets the Issue Loop open its pull request in the repository it was approved for", async () => {
+        outboundSettings = enforceGithub
+        setGithubIssueLoopDesktopHostAvailableForTesting(true)
+        const request = jest.fn().mockResolvedValue({ status: 201, headers: {}, data: {} })
+        setIntegrationAuthenticatedRequestExecutorForTesting(request)
+        setGithubIssueLoopExecutorForTesting(async (input, context) =>
+          context.authenticatedRequest(
+            `https://api.github.com/repos/${String(input.repoFullName)}/pulls`,
+            { method: "POST", body: "{}" }
+          )
+        )
+        registerIntegrationDefinitions({
+          pluginId: "github-delivery",
+          definitions: [
+            {
+              id: "github",
+              label: "GitHub",
+              authStrategies: [
+                { id: "oauth", type: "oauth2", label: "OAuth", providerId: "github-oauth" },
+              ],
+              resourceKinds: ["repository"],
+              eventTypes: [],
+              actions: [
+                {
+                  id: "runIssueLoop",
+                  label: "Issue Loop",
+                  handler: "runIssueLoop",
+                  inputSchema: { type: "object" },
+                  risk: "write",
+                  idempotency: "required",
+                  scopeSelectors: [{ kind: "repository", jsonPointer: "/repoFullName" }],
+                },
+              ],
+            },
+          ],
+          handlers: { "github:runIssueLoop": async () => ({}) },
+        })
+        const account = await createIntegrationAccount("github-delivery", {
+          integrationId: "github",
+          providerId: "github-oauth",
+          authSessionId: "opaque",
+          remoteAccountId: "octocat",
+          label: "GitHub",
+        })
+        const held = await executeIntegrationAction("github-delivery", {
+          integrationId: "github",
+          accountId: account.id,
+          actionId: "runIssueLoop",
+          input: { repoFullName: "acme/web", issueNumber: 7, head: "fix", base: "main" },
+          idempotencyKey: "loop-1",
+        })
+        expect(held.outbound?.held).toBeDefined()
+        await expect(
+          approveIntegrationActionJob(held.id, { actor: "person" })
+        ).resolves.toMatchObject({ status: "succeeded" })
+        expect(request).toHaveBeenCalledWith(
+          "github-delivery",
+          account.id,
+          "https://api.github.com/repos/acme/web/pulls",
+          expect.objectContaining({ method: "POST" })
+        )
+      })
+
+      it("covers the job's own repository and refuses another without retrying", async () => {
+        outboundSettings = enforceGithub
+        let target = "https://api.github.com/repos/acme/web/pulls"
+        const request = jest.fn().mockResolvedValue({ status: 201, headers: {}, data: {} })
+        setIntegrationAuthenticatedRequestExecutorForTesting(request)
+        const account = await setupGithub(async (_input, context) =>
+          context.authenticatedRequest(target, { method: "POST", body: "{}" })
+        )
+        const first = await executeIntegrationAction("github-delivery", comment(account.id, "k1"))
+        await expect(
+          approveIntegrationActionJob(first.id, { actor: "person" })
+        ).resolves.toMatchObject({ status: "succeeded" })
+        expect(request).toHaveBeenCalledTimes(1)
+
+        target = "https://api.github.com/repos/acme/other/pulls"
+        const second = await executeIntegrationAction("github-delivery", comment(account.id, "k2"))
+        const failed = await approveIntegrationActionJob(second.id, { actor: "person" })
+        expect(failed).toMatchObject({
+          status: "failed",
+          error: expect.stringMatching(/^outbound_held/),
+        })
+        expect(request).toHaveBeenCalledTimes(1)
+      })
+    })
   })
 })

@@ -8,6 +8,7 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   appendIntegrationAudit,
   enqueueIntegrationActionJob,
+  findIntegrationActionJobByIdempotencyKey,
   getIntegrationAccount,
   getIntegrationActionJob,
   listRunnableIntegrationActionJobs,
@@ -17,13 +18,110 @@ import {
 import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
-import { getIntegrationActionHandler, getRegisteredIntegration } from "@/lib/integrations/registry"
+import {
+  getIntegrationActionHandler,
+  getRegisteredIntegration,
+  integrationToolName,
+} from "@/lib/integrations/registry"
 import { runGithubIssueLoop } from "@/lib/integrations/github-issue-loop"
 import { isTauri } from "@/lib/tauri"
 import {
   assertBotIntegrationAction,
   canonicalIntegrationValue,
 } from "@/lib/plugin/api/bot-integration-binding"
+import {
+  githubActionTargets,
+  githubRequestTargets,
+  githubWebHost,
+  isGithubIntegration,
+  isGithubWriteAction,
+} from "@/lib/policy/action-review/github-targets"
+import type { OutboundTarget } from "@/lib/policy/action-review/outbound-targets"
+import {
+  heldJobAnswerReceipt,
+  OUTBOUND_FENCED_ERROR,
+  OUTBOUND_HELD_REQUEST_ERROR,
+  planIntegrationWrite,
+  type IntegrationAuthorization,
+  type IntegrationReceipt,
+  type IntegrationWriteDecision,
+} from "@/lib/policy/action-review/plan-integration"
+import { pushHeldIntegrationJob, withdrawHeldIntegrationJob } from "./outbound-hold"
+
+/**
+ * Who asks for an integration write, as the host knows it (ADR-0239 phase 2).
+ * Host-only: never part of the plugin-facing `ExecuteIntegrationActionInput`,
+ * so a plugin cannot claim to be a chat tool call or a workflow step. A Bot
+ * binding is resolved by the host itself; anything else is the plugin's own
+ * code.
+ */
+export type IntegrationActionCaller =
+  | { kind: "tool-call"; sessionId?: string }
+  | { kind: "workflow"; workflowId: string; runId: string }
+
+/** Who answers a held job: only a person releases it (ADR-0239 phase 2). */
+export interface IntegrationJobAnswer {
+  actor?: "person"
+  /** A person allowed the recipients for the rest of the request. */
+  forRequest?: boolean
+}
+
+const READ_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "OPTIONS"])
+
+/** An error the outbound policy raised: retrying cannot change it. */
+class OutboundPolicyError extends Error {
+  readonly outboundPolicy = true
+}
+
+async function recordIntegrationReceipt(receipt: IntegrationReceipt | undefined): Promise<void> {
+  if (!receipt) return
+  try {
+    const { projectActionReviewSettled } = await import("@/lib/policy/action-review/projection")
+    await projectActionReviewSettled(receipt.request, receipt.decision)
+  } catch {
+    // Audit is best-effort, as at the delivery gateway.
+  }
+}
+
+/** The GitHub repositories a job writes to, or `[]` for any other job. */
+async function githubJobTargets(job: IntegrationActionJob): Promise<OutboundTarget[]> {
+  const registered = getRegisteredIntegration(job.pluginId, job.integrationId)
+  const action = registered?.definition.actions.find((candidate) => candidate.id === job.actionId)
+  if (!registered || !action || !isGithubWriteAction({ definition: registered.definition, action }))
+    return []
+  const account = await getIntegrationAccount(job.pluginId, job.accountId)
+  const host = account ? githubWebHost(await integrationApiBaseUrl(account)) : undefined
+  return githubActionTargets(action, job.input, host ? { host } : {})
+}
+
+/**
+ * Plan a raw request that is not a read, through a GitHub integration's
+ * account, and act on the plan: record its receipt, and throw when the policy
+ * holds or refuses it. A synchronous request cannot wait for a person.
+ */
+async function planGithubRequest(
+  pluginId: string,
+  connectorAccountId: string,
+  input: string,
+  method: string,
+  authorization: IntegrationAuthorization
+): Promise<void> {
+  if (READ_METHODS.has(method)) return
+  const account = await getIntegrationAccount(pluginId, connectorAccountId)
+  const registered = account ? getRegisteredIntegration(pluginId, account.integrationId) : undefined
+  if (!account || !registered || !isGithubIntegration(registered.definition)) return
+  const apiBaseUrl = await integrationApiBaseUrl(account)
+  const host = githubWebHost(apiBaseUrl)
+  const decision = await planIntegrationWrite({
+    targets: githubRequestTargets(input, apiBaseUrl),
+    operation: method,
+    host,
+    authorization,
+  })
+  await recordIntegrationReceipt(decision.receipt)
+  if (decision.action === "deny") throw new OutboundPolicyError(OUTBOUND_FENCED_ERROR)
+  if (decision.action === "park") throw new OutboundPolicyError(OUTBOUND_HELD_REQUEST_ERROR)
+}
 
 type AuthenticatedRequestExecutor = <T>(
   pluginId: string,
@@ -209,7 +307,14 @@ async function authenticatedRequest<T>(
   )
 }
 
-/** Host-owned authenticated fetch boundary used by `ctx.integrations`. */
+/**
+ * Host-owned authenticated fetch boundary used by `ctx.integrations`.
+ *
+ * A request through a GitHub integration's account that is not a read is a
+ * GitHub write the plugin's own code makes, and is planned first (ADR-0239
+ * phase 2): its repository comes from the `/repos/<owner>/<repo>/…` path, and
+ * a write the policy holds or refuses fails here.
+ */
 export async function authenticatedIntegrationRequest<T>(
   pluginId: string,
   connectorAccountId: string,
@@ -220,6 +325,13 @@ export async function authenticatedIntegrationRequest<T>(
     body?: string
   }
 ): Promise<{ status: number; headers: Record<string, string>; data: T }> {
+  await planGithubRequest(
+    pluginId,
+    connectorAccountId,
+    input,
+    (init?.method ?? "GET").toUpperCase(),
+    { kind: "plugin", pluginId }
+  )
   return authenticatedRequest<T>(pluginId, connectorAccountId, input, init)
 }
 
@@ -239,12 +351,34 @@ async function assertApprovedPublicationHead(
   }
 }
 
+/** Who approved a Bot's action: its installation's policy, or a person. */
+async function botApprovalDecidedBy(interruptId: string | undefined): Promise<"person" | "policy"> {
+  if (!interruptId) return "policy"
+  const { getDb } = await import("@/lib/db/schema")
+  const approval = await getDb().executionRunInterrupts.get(interruptId)
+  return approval?.approvalDecisionMode === "policy" || !approval ? "policy" : "person"
+}
+
+/**
+ * Execute an integration action through the broker.
+ *
+ * A GitHub write is planned by the outbound policy before it is queued
+ * (ADR-0239 phase 2, `plan-integration.ts`), for `caller`, else as the Bot
+ * its binding names, else as the plugin's own code. A write the policy holds
+ * is queued `awaiting_approval` with `outbound.held` set, whatever it would
+ * otherwise have been (a capability grant's automatic approval, a Bot's
+ * approved action), and pushed to a person; only a person's answer releases
+ * it. A write a person refused for the current request fails
+ * `outbound_fenced`.
+ */
 export async function executeIntegrationAction(
   pluginId: string,
-  input: ExecuteIntegrationActionInput
+  input: ExecuteIntegrationActionInput,
+  caller?: IntegrationActionCaller
 ): Promise<IntegrationActionJob> {
   const callerPluginId = pluginId
   let botBinding: IntegrationActionJob["botBinding"]
+  let botAuthorization: Extract<IntegrationAuthorization, { kind: "bot" }> | undefined
   if (input.binding) {
     const binding = await assertBotIntegrationAction(
       pluginId,
@@ -268,6 +402,12 @@ export async function executeIntegrationAction(
       pluginId: callerPluginId,
       approvalId: input.approval?.interruptId,
     }
+    botAuthorization = {
+      kind: "bot",
+      installation: binding.installation,
+      runId: input.binding!.runId,
+      decidedBy: await botApprovalDecidedBy(input.approval?.interruptId),
+    }
   }
   const registered = getRegisteredIntegration(pluginId, input.integrationId)
   if (!registered) throw new Error(`Integration "${input.integrationId}" is not registered`)
@@ -283,14 +423,70 @@ export async function executeIntegrationAction(
   }
   assertActionInput(action.inputSchema, input.input)
 
+  // A replay of an existing job keeps that job's plan.
+  const existing = input.idempotencyKey
+    ? await findIntegrationActionJobByIdempotencyKey(input.accountId, input.idempotencyKey)
+    : undefined
+  let planned: IntegrationWriteDecision | undefined
+  let targets: OutboundTarget[] = []
+  if (!existing && isGithubWriteAction({ definition: registered.definition, action })) {
+    const host = githubWebHost(await integrationApiBaseUrl(account))
+    targets = githubActionTargets(action, input.input, { host })
+    const authorization: IntegrationAuthorization =
+      botAuthorization ??
+      (caller?.kind === "tool-call"
+        ? {
+            kind: "tool-call",
+            pluginId,
+            ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
+          }
+        : caller?.kind === "workflow"
+          ? caller.workflowId && caller.runId
+            ? { kind: "workflow", workflowId: caller.workflowId, runId: caller.runId }
+            : { kind: "plugin", pluginId }
+          : { kind: "plugin", pluginId: callerPluginId })
+    planned = await planIntegrationWrite({
+      targets,
+      operation: `${input.integrationId}.${input.actionId}`,
+      host,
+      authorization,
+    })
+    await recordIntegrationReceipt(planned.receipt)
+  }
+  const unplannedStatus = action.risk === "read" || botBinding ? "queued" : "awaiting_approval"
+
   const job = await enqueueIntegrationActionJob({
     pluginId,
     integrationId: input.integrationId,
     accountId: input.accountId,
     actionId: input.actionId,
     input: input.input,
-    status: action.risk === "read" || botBinding ? "queued" : "awaiting_approval",
+    status:
+      planned?.action === "park"
+        ? "awaiting_approval"
+        : planned?.action === "deny"
+          ? "failed"
+          : unplannedStatus,
+    ...(planned?.action === "deny" ? { error: OUTBOUND_FENCED_ERROR } : {}),
     ...(botBinding ? { botBinding } : {}),
+    ...(planned
+      ? {
+          outbound: {
+            ...planned.outbound,
+            ...(planned.action === "park"
+              ? {
+                  held: {
+                    receiptId: planned.receipt.request.requestId,
+                    heldAt: new Date().toISOString(),
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+    ...(planned?.action === "proceed" && planned.authorizedBy
+      ? { authorizedBy: planned.authorizedBy }
+      : {}),
     risk: action.risk,
     idempotencyKey: input.idempotencyKey,
     attempts: 0,
@@ -305,6 +501,35 @@ export async function executeIntegrationAction(
   ) {
     throw new Error("Bot integration idempotency key belongs to different approved content")
   }
+  if (planned?.action === "deny" && !existing) {
+    await appendIntegrationAudit({
+      pluginId,
+      integrationId: input.integrationId,
+      accountId: input.accountId,
+      kind: `action.${input.actionId}.fenced`,
+      outcome: "denied",
+      detail: { jobId: job.id },
+    })
+  }
+  if (
+    planned?.action === "park" &&
+    job.outbound?.held?.receiptId === planned.receipt.request.requestId
+  ) {
+    void pushHeldIntegrationJob({
+      jobId: job.id,
+      toolName: integrationToolName(pluginId, input.integrationId, input.actionId),
+      label: `${registered.definition.label}: ${action.label}`,
+      origin: botBinding ? "bot" : "plugin",
+      review: planned.review,
+      onAnswer: (answer) =>
+        answer.kind === "approved"
+          ? approveIntegrationActionJob(job.id, {
+              actor: "person",
+              ...(answer.forRequest ? { forRequest: true } : {}),
+            })
+          : cancelIntegrationActionJob(job.id, { actor: "person" }),
+    })
+  }
   if (job.status !== "queued") return job
   await appendIntegrationAudit({
     pluginId,
@@ -316,10 +541,56 @@ export async function executeIntegrationAction(
   return runIntegrationActionJob(job.id)
 }
 
-export async function approveIntegrationActionJob(jobId: string): Promise<IntegrationActionJob> {
+/**
+ * The receipt of a person's answer to a held job, and the job's outbound
+ * record without the hold. A refusal fences the recipients for the rest of
+ * the request (ADR-0239).
+ */
+async function answerHold(
+  job: IntegrationActionJob,
+  answer: "approved" | "denied",
+  forRequest: boolean | undefined
+): Promise<Pick<IntegrationActionJob, "outbound" | "authorizedBy">> {
+  const { held: _held, ...outbound } = job.outbound!
+  const receipt = heldJobAnswerReceipt({
+    outbound,
+    targets: await githubJobTargets(job),
+    operation: `${job.integrationId}.${job.actionId}`,
+    answer,
+    ...(forRequest ? { forRequest: true } : {}),
+  })
+  await recordIntegrationReceipt(receipt)
+  return {
+    outbound,
+    ...(answer === "approved"
+      ? {
+          authorizedBy: {
+            receiptId: receipt.request.requestId,
+            authority: "human" as const,
+            grantScope: receipt.decision.grant?.scope ?? "once",
+          },
+        }
+      : {}),
+  }
+}
+
+/**
+ * Approve a job waiting for approval and run it. A job the outbound policy
+ * held is released only by a person (`answer.actor: "person"`): an automatic
+ * approval (a capability grant, a workflow) leaves it held.
+ */
+export async function approveIntegrationActionJob(
+  jobId: string,
+  answer: IntegrationJobAnswer = {}
+): Promise<IntegrationActionJob> {
   const job = await getIntegrationActionJob(jobId)
   if (!job) throw new Error(`Integration action job "${jobId}" was not found`)
   if (job.status !== "awaiting_approval") return job
+  if (job.outbound?.held) {
+    if (answer.actor !== "person") return job
+    withdrawHeldIntegrationJob(jobId)
+    await updateIntegrationActionJob(jobId, await answerHold(job, "approved", answer.forRequest))
+  }
   await appendIntegrationAudit({
     pluginId: job.pluginId,
     integrationId: job.integrationId,
@@ -415,6 +686,19 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
           await assertApprovedPublicationHead(binding)
           if (controller.signal.aborted) throw new Error("Action cancelled or timed out")
         }
+        // A write the job makes on its own (the Issue Loop's pull request):
+        // covered when it goes to a repository the job was planned for, else
+        // planned in the job's origin (ADR-0239 phase 2).
+        const method = (init?.method ?? "GET").toUpperCase()
+        if (!READ_METHODS.has(method)) {
+          await planGithubRequest(job.pluginId, job.accountId, input, method, {
+            kind: "job",
+            jobId,
+            ...(job.outbound ? { outbound: job.outbound } : {}),
+            covers: await githubJobTargets(job),
+          })
+        }
+        if (controller.signal.aborted) throw new Error("Action cancelled or timed out")
         return authenticatedRequest(job.pluginId, job.accountId, input, init)
       },
       ...(jobAccount ? { apiBaseUrl: await integrationApiBaseUrl(jobAccount) } : {}),
@@ -453,7 +737,10 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
       })
     }
     const message = error instanceof Error ? error.message : String(error)
-    const retryable = action.idempotency !== "none" && attempts < job.maxAttempts
+    const retryable =
+      !(error instanceof OutboundPolicyError) &&
+      action.idempotency !== "none" &&
+      attempts < job.maxAttempts
     const nextAttemptAt = retryable
       ? new Date(Date.now() + retryDelayMs(error, attempts)).toISOString()
       : undefined
@@ -493,12 +780,29 @@ export async function drainIntegrationActionJobs(): Promise<IntegrationActionJob
   return Promise.all(jobs.map((job) => runIntegrationActionJob(job.id)))
 }
 
-export async function cancelIntegrationActionJob(jobId: string): Promise<IntegrationActionJob> {
+/**
+ * Cancel a job. A person cancelling a job the outbound policy held refuses
+ * its recipients for the rest of the request (ADR-0239): the next write to
+ * them in that request fails `outbound_fenced` instead of asking again.
+ */
+export async function cancelIntegrationActionJob(
+  jobId: string,
+  answer: Pick<IntegrationJobAnswer, "actor"> = {}
+): Promise<IntegrationActionJob> {
   const job = await getIntegrationActionJob(jobId)
   if (!job) throw new Error(`Integration action job "${jobId}" was not found`)
   if (["succeeded", "failed", "deadlettered", "cancelled"].includes(job.status)) return job
   runningControllers.get(jobId)?.abort()
+  let hold: Partial<IntegrationActionJob> = {}
+  if (job.outbound?.held) {
+    withdrawHeldIntegrationJob(jobId)
+    hold =
+      answer.actor === "person"
+        ? await answerHold(job, "denied", false)
+        : { outbound: { ...job.outbound, held: undefined } }
+  }
   const cancelled = await updateIntegrationActionJob(jobId, {
+    ...hold,
     status: "cancelled",
     error: "Cancelled by user",
     nextAttemptAt: undefined,

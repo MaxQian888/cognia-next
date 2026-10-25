@@ -1082,10 +1082,16 @@ export function IntegrationsHub() {
                     <p className="text-muted-foreground">
                       {t(`status.${job.status}`)} · {t(`risk.${job.risk}`)}
                     </p>
+                    {job.status === "awaiting_approval" && job.outbound?.held && (
+                      <p className="text-muted-foreground">{t("approvals.heldByOutbound")}</p>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     {job.status === "awaiting_approval" && (
-                      <Button size="sm" onClick={() => approveIntegrationActionJob(job.id)}>
+                      <Button
+                        size="sm"
+                        onClick={() => approveIntegrationActionJob(job.id, { actor: "person" })}
+                      >
                         {t("approvals.approve")}
                       </Button>
                     )}
@@ -1093,7 +1099,7 @@ export function IntegrationsHub() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => cancelIntegrationActionJob(job.id)}
+                        onClick={() => cancelIntegrationActionJob(job.id, { actor: "person" })}
                       >
                         {t("approvals.cancel")}
                       </Button>

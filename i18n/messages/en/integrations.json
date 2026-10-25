@@ -49,6 +49,7 @@
     "approve": "Approve",
     "cancel": "Cancel",
     "empty": "No action jobs yet.",
+    "heldByOutbound": "Held by outbound authorization: nothing authorized this write's recipient. Approving it here also counts as a person's approval; cancelling refuses the recipient for the rest of the request.",
     "title": "Approvals and jobs"
   },
   "audit": {

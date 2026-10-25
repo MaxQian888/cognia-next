@@ -158,6 +158,14 @@ describe("validateActionReviewRequest", () => {
     expect(errors).toContain("subject.ref is required")
   })
 
+  it("accepts an integration write as its own subject kind (ADR-0239 phase 2)", () => {
+    const req = makeRequest({
+      origin: { channel: "github-delivery", scope: "github", id: "integration:1" },
+      subject: { kind: "integration-action", ref: "plugin:github-delivery" },
+    })
+    expect(validateActionReviewRequest(req)).toEqual([])
+  })
+
   it("rejects a non-object subject input", () => {
     const req = makeRequest({ subject: { kind: "tool-call", ref: "Bash", input: [] as never } })
     expect(validateActionReviewRequest(req)).toContain("subject.input must be an object")

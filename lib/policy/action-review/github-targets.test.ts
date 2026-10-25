@@ -7,7 +7,9 @@ import type { IntegrationActionDef, PluginIntegrationDef } from "@/types/plugin/
 
 import {
   githubActionTargets,
+  githubRequestTargets,
   githubToolCallTargets,
+  githubWebHost,
   githubWriteActionOf,
   isGithubWriteTool,
 } from "./github-targets"
@@ -114,6 +116,78 @@ describe("githubActionTargets", () => {
     expect(githubActionTargets(commentPr, { repoFullName: "acme/web", prNumber: -1 })).toEqual([
       repositoryTarget("acme/web"),
     ])
+  })
+
+  it("names a bare repository on the account's host", () => {
+    expect(
+      githubActionTargets(
+        commentPr,
+        { repoFullName: "acme/web", prNumber: 4 },
+        { host: "ghe.corp.io" }
+      )
+    ).toEqual([repositoryTarget("ghe.corp.io/acme/web", 4)])
+    expect(
+      githubActionTargets(commentPr, { repoFullName: "acme/web" }, { host: "github.com" })
+    ).toEqual([repositoryTarget("acme/web")])
+    expect(
+      githubActionTargets(
+        commentPr,
+        { repoFullName: "https://github.com/acme/web" },
+        { host: "ghe.corp.io" }
+      )
+    ).toEqual([repositoryTarget("acme/web")])
+  })
+})
+
+describe("githubWebHost", () => {
+  it("is github.com for the public API and the server's own host for GitHub Enterprise", () => {
+    expect(githubWebHost()).toBe("github.com")
+    expect(githubWebHost("https://api.github.com")).toBe("github.com")
+    expect(githubWebHost("https://GHE.corp.io/api/v3")).toBe("ghe.corp.io")
+    expect(githubWebHost("not a url")).toBe("github.com")
+  })
+})
+
+describe("githubRequestTargets", () => {
+  it("reads the repository and thread from a /repos path", () => {
+    expect(githubRequestTargets("https://api.github.com/repos/Acme/Web/pulls")).toEqual([
+      repositoryTarget("acme/web"),
+    ])
+    expect(
+      githubRequestTargets("https://api.github.com/repos/acme/web/issues/12/comments")
+    ).toEqual([repositoryTarget("acme/web", 12)])
+    expect(githubRequestTargets("https://api.github.com/repos/acme/web/pulls/9/merge")).toEqual([
+      repositoryTarget("acme/web", 9),
+    ])
+    expect(
+      githubRequestTargets("https://api.github.com/repos/acme/web/issues/comments/55")
+    ).toEqual([repositoryTarget("acme/web")])
+  })
+
+  it("reads a GitHub Enterprise path relative to its API root", () => {
+    expect(
+      githubRequestTargets(
+        "https://ghe.corp.io/api/v3/repos/acme/web/pulls",
+        "https://ghe.corp.io/api/v3"
+      )
+    ).toEqual([repositoryTarget("ghe.corp.io/acme/web")])
+    expect(
+      githubRequestTargets("https://ghe.corp.io/repos/acme/web/pulls", "https://ghe.corp.io/api/v3")
+    ).toEqual([unknownGithubTarget()])
+  })
+
+  it("is unknown for anything that is not one repository's", () => {
+    for (const url of [
+      "https://api.github.com/graphql",
+      "https://api.github.com/gists",
+      "https://api.github.com/user/repos",
+      "https://api.github.com/repos/acme",
+      "https://api.github.com/repos/acme%2Fweb/x/pulls",
+      "https://evil.example/repos/acme/web/pulls",
+      "not a url",
+    ]) {
+      expect(githubRequestTargets(url)).toEqual([unknownGithubTarget()])
+    }
   })
 })
 

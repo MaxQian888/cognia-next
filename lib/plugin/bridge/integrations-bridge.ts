@@ -208,19 +208,26 @@ export async function registerIntegrationsForPlugin(
               if (authorization.decision === "deny") {
                 throw new Error(`Integration action denied: ${authorization.reason}`)
               }
-              const job = await executeIntegrationAction(pluginId, {
-                integrationId: definition.id,
-                accountId,
-                actionId: action.id,
-                input: actionInput,
-                idempotencyKey:
-                  typeof idempotencyKey === "string" && idempotencyKey.length > 0
-                    ? idempotencyKey
-                    : action.idempotency === "none"
-                      ? undefined
-                      : `${context.sessionId ?? "chat"}:${action.id}`,
-                source: "chat",
-              })
+              const job = await executeIntegrationAction(
+                pluginId,
+                {
+                  integrationId: definition.id,
+                  accountId,
+                  actionId: action.id,
+                  input: actionInput,
+                  idempotencyKey:
+                    typeof idempotencyKey === "string" && idempotencyKey.length > 0
+                      ? idempotencyKey
+                      : action.idempotency === "none"
+                        ? undefined
+                        : `${context.sessionId ?? "chat"}:${action.id}`,
+                  source: "chat",
+                },
+                {
+                  kind: "tool-call",
+                  ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+                }
+              )
               return authorization.decision === "allow" && job.status === "awaiting_approval"
                 ? approveIntegrationActionJob(job.id)
                 : job
@@ -258,19 +265,23 @@ export async function registerIntegrationsForPlugin(
             if (authorization.decision !== "allow") {
               throw new Error(`Integration workflow action denied: ${authorization.reason}`)
             }
-            const job = await executeIntegrationAction(pluginId, {
-              integrationId: definition.id,
-              accountId,
-              actionId: action.id,
-              input: actionInput,
-              idempotencyKey:
-                typeof idempotencyKey === "string" && idempotencyKey.length > 0
-                  ? idempotencyKey
-                  : action.idempotency === "none"
-                    ? undefined
-                    : `${context.runId}:${context.stepId}`,
-              source: "workflow",
-            })
+            const job = await executeIntegrationAction(
+              pluginId,
+              {
+                integrationId: definition.id,
+                accountId,
+                actionId: action.id,
+                input: actionInput,
+                idempotencyKey:
+                  typeof idempotencyKey === "string" && idempotencyKey.length > 0
+                    ? idempotencyKey
+                    : action.idempotency === "none"
+                      ? undefined
+                      : `${context.runId}:${context.stepId}`,
+                source: "workflow",
+              },
+              { kind: "workflow", workflowId: context.workflowId, runId: context.runId }
+            )
             return {
               output:
                 job.status === "awaiting_approval"

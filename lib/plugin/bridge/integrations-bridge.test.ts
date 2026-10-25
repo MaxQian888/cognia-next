@@ -16,6 +16,41 @@ import {
   unregisterIntegrationsForPlugin,
 } from "./integrations-bridge"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  approveIntegrationActionJob,
+  executeIntegrationAction,
+} from "@/lib/integrations/action-runner"
+
+jest.mock("@/lib/integrations/action-runner", () => ({
+  executeIntegrationAction: jest.fn(),
+  approveIntegrationActionJob: jest.fn(),
+}))
+jest.mock("@/lib/db/external-services", () => ({
+  listServiceConnections: jest.fn(async () => [
+    {
+      id: "conn-1",
+      serviceId: "svc",
+      providerId: "prov",
+      providerRef: { kind: "integration", accountId: "acct-1" },
+    },
+  ]),
+  listCapabilityGrants: jest.fn(async () => []),
+}))
+jest.mock("@/lib/external-services/catalog", () => ({
+  listExternalServices: () => [
+    {
+      definition: {
+        id: "svc",
+        providers: [{ id: "prov", kind: "integration", contributionId: "example" }],
+      },
+    },
+  ],
+  listExternalCapabilities: () => [],
+}))
+jest.mock("@/lib/external-services/grants", () => ({
+  authorizeExternalCapability: jest.fn(async () => ({ decision: "allow" })),
+  extractCapabilityResourceScopes: () => ({ ok: true, scopes: [] }),
+}))
 
 describe("Integration manifest bridge", () => {
   beforeEach(() => {
@@ -105,5 +140,70 @@ describe("Integration manifest bridge", () => {
 
     await unregisterIntegrationsForPlugin("example-delivery")
     expect(listRegisteredIntegrations("example-delivery")).toHaveLength(0)
+  })
+
+  it("tells the broker which chat session or workflow run asks (ADR-0239 phase 2)", async () => {
+    const manifest = {
+      id: "example-delivery",
+      name: "Example",
+      version: "1.0.0",
+      description: "Example",
+      type: "frontend",
+      capabilities: ["integrations"],
+      integrations: [
+        {
+          id: "example",
+          label: "Example",
+          authStrategies: [],
+          resourceKinds: ["issue"],
+          eventTypes: [],
+          actions: [
+            {
+              id: "issue.comment",
+              label: "Comment on issue",
+              handler: "commentIssue",
+              inputSchema: { type: "object" },
+              risk: "write",
+              idempotency: "required",
+            },
+          ],
+        },
+      ],
+    } as PluginManifest
+    const job = { id: "job-1", status: "awaiting_approval" }
+    jest.mocked(executeIntegrationAction).mockResolvedValue(job as never)
+    jest.mocked(approveIntegrationActionJob).mockResolvedValue(job as never)
+    const tools: Array<{ execute: (args: unknown, context: unknown) => Promise<unknown> }> = []
+    await registerIntegrationsForPlugin(
+      "example-delivery",
+      manifest,
+      { commentIssue: jest.fn() },
+      (tool) => {
+        tools.push(tool as never)
+        return () => undefined
+      }
+    )
+
+    await tools[0].execute({ accountId: "acct-1", issueId: "1" }, { sessionId: "s1" })
+    expect(executeIntegrationAction).toHaveBeenLastCalledWith(
+      "example-delivery",
+      expect.objectContaining({ source: "chat", idempotencyKey: "s1:issue.comment" }),
+      { kind: "tool-call", sessionId: "s1" }
+    )
+    // The bridge's own automatic approval; a held job ignores it.
+    expect(approveIntegrationActionJob).toHaveBeenLastCalledWith("job-1")
+
+    await getExecutor("example-delivery.action.issue.comment" as never, 1)!.execute({
+      params: { accountId: "acct-1", issueId: "1" },
+      workflowId: "wf-1",
+      runId: "wr-1",
+      stepId: "step-1",
+    } as never)
+    expect(executeIntegrationAction).toHaveBeenLastCalledWith(
+      "example-delivery",
+      expect.objectContaining({ source: "workflow", idempotencyKey: "wr-1:step-1" }),
+      { kind: "workflow", workflowId: "wf-1", runId: "wr-1" }
+    )
+    await unregisterIntegrationsForPlugin("example-delivery")
   })
 })

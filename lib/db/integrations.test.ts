@@ -12,6 +12,7 @@ import {
   createIntegrationAccount,
   createIntegrationSubscription,
   enqueueIntegrationActionJob,
+  findIntegrationActionJobByIdempotencyKey,
   getIntegrationAccount,
   getIntegrationIngressEndpoint,
   getIntegrationActionJob,
@@ -271,5 +272,29 @@ describe("Integration persistence", () => {
       output: { ok: true },
     })
     await expect(getDb().integrationAudit.count()).resolves.toBe(1)
+  })
+
+  it("finds a job by its account and idempotency key", async () => {
+    const job = await enqueueIntegrationActionJob({
+      pluginId: "github-delivery",
+      integrationId: "github",
+      accountId: "acct-gh",
+      actionId: "commentPr",
+      input: { repoFullName: "acme/web", prNumber: 1, body: "hi" },
+      status: "awaiting_approval",
+      risk: "write",
+      idempotencyKey: "key-1",
+      attempts: 0,
+      maxAttempts: 5,
+      source: "chat",
+      outbound: { ownerRef: "tool-call:s1", held: { receiptId: "r1", heldAt: "now" } },
+    })
+    await expect(findIntegrationActionJobByIdempotencyKey("acct-gh", "key-1")).resolves.toEqual(job)
+    await expect(
+      findIntegrationActionJobByIdempotencyKey("acct-other", "key-1")
+    ).resolves.toBeUndefined()
+    await expect(
+      findIntegrationActionJobByIdempotencyKey("acct-gh", "key-2")
+    ).resolves.toBeUndefined()
   })
 })
