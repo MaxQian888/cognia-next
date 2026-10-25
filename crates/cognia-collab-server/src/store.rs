@@ -117,6 +117,14 @@ pub struct WorkspaceMember {
     pub org_member: bool,
 }
 
+/// One org member's name, as a Host asks for it to label its own records.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgMemberName {
+    pub user_id: String,
+    pub display_name: String,
+}
+
 /// One workspace membership, as `GET …/memberships/me` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -825,6 +833,15 @@ pub trait Store: Send + Sync {
         workspace_id: &str,
     ) -> Result<Vec<WorkspaceMember>, StoreError>;
 
+    /// The names of those of `user_ids` who are members of `org_id`, ordered
+    /// by id. Anyone else is left out, so the answer never confirms that an id
+    /// outside the org exists.
+    async fn org_member_names(
+        &self,
+        org_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<OrgMemberName>, StoreError>;
+
     /// Human assignees must be real users recruited into the target workspace.
     async fn human_is_workspace_member(
         &self,
@@ -1502,6 +1519,26 @@ impl Store for InMemoryStore {
                 org_member: tables
                     .org_memberships
                     .contains_key(&(org_id.to_owned(), user.clone())),
+            })
+            .collect();
+        rows.sort_by(|left, right| left.user_id.cmp(&right.user_id));
+        Ok(rows)
+    }
+
+    async fn org_member_names(
+        &self,
+        org_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<OrgMemberName>, StoreError> {
+        let tables = self.tables.read();
+        let mut rows: Vec<OrgMemberName> = user_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .filter(|user| tables.org_memberships.contains_key(&(org_id.to_owned(), (*user).clone())))
+            .map(|user| OrgMemberName {
+                user_id: user.clone(),
+                display_name: tables.users.get(user).cloned().unwrap_or_default(),
             })
             .collect();
         rows.sort_by(|left, right| left.user_id.cmp(&right.user_id));
@@ -3715,6 +3752,36 @@ impl Store for PgStore {
                 })
             })
             .collect()
+    }
+
+    async fn org_member_names(
+        &self,
+        org_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<OrgMemberName>, StoreError> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let rows = transaction
+            .query(
+                "SELECT o.user_id, u.display_name \
+                 FROM org_memberships o \
+                 JOIN users u ON u.id = o.user_id \
+                 WHERE o.org_id = $1 AND o.user_id = ANY($2) \
+                 ORDER BY o.user_id",
+                &[&org_id, &user_ids],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(rows
+            .iter()
+            .map(|row| OrgMemberName {
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+            })
+            .collect())
     }
 
     async fn human_is_workspace_member(

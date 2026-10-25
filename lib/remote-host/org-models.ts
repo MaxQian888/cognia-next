@@ -118,6 +118,11 @@ export function setOrgAgentPolicy(
 /** One person's model spend for a month (P6b). `null` tokens mean no cap. */
 export interface OrgMemberUsage {
   userId: string
+  /**
+   * The person's name as the org's collaboration plane knows it. Absent when
+   * the Host could not ask (or the Host predates it); the panel shows the id.
+   */
+  displayName?: string
   spentTokens: number
   /** Held by turns still running; released or charged when they settle. */
   reservedTokens: number

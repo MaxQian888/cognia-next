@@ -250,6 +250,10 @@ pub fn router(state: AppState) -> Router {
             axum::routing::post(internal_device_person),
         )
         .route(
+            "/internal/v1/orgs/{org_id}/people",
+            axum::routing::post(internal_org_people),
+        )
+        .route(
             "/internal/v1/orgs/{org_id}/workspaces/{workspace_id}/access/{user_id}",
             get(internal_workspace_access),
         )
@@ -444,6 +448,47 @@ async fn internal_org_access(
         actions: crate::capabilities_api::scoped_actions(&membership, false),
         org_role: membership.org_role, org_id, user_id,
     }))
+}
+
+/// The most ids one `/people` request may name: a Host asks for the people it
+/// holds records for, which is bounded by its person-brain fleet.
+pub(crate) const MAX_ORG_PEOPLE: usize = 500;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OrgPeopleRequest {
+    user_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OrgPeopleResponse {
+    people: Vec<crate::store::OrgMemberName>,
+}
+
+/// The names of the org members a Host holds records for (P6: the org's
+/// usage panel labels members by name, not by id).
+///
+/// The Host names the ids; members of the org come back with their name,
+/// anyone else is left out. Under `/internal` for the same reason as the
+/// access routes: only the configured Host, scoped to this org, may ask.
+async fn internal_org_people(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(org_id): Path<String>,
+    Json(body): Json<OrgPeopleRequest>,
+) -> Result<Json<OrgPeopleResponse>, Failure> {
+    require_service_credential(&state, &headers, Some(&org_id))?;
+    if body.user_ids.len() > MAX_ORG_PEOPLE {
+        return Err(Failure::BadRequest(format!(
+            "at most {MAX_ORG_PEOPLE} userIds per request"
+        )));
+    }
+    for user in &body.user_ids {
+        UserId::parse(user.as_str()).map_err(|error| Failure::BadRequest(error.to_string()))?;
+    }
+    let people = state.store.org_member_names(&org_id, &body.user_ids).await?;
+    Ok(Json(OrgPeopleResponse { people }))
 }
 
 // No Debug: the token proves the person, and must never appear in logs.
@@ -5736,6 +5781,58 @@ mod tests {
     /// gets one answer, including a perfectly valid person's grant: the route
     /// answers about third parties, so holding a grant for yourself is not
     /// permission to ask about somebody else.
+    #[tokio::test]
+    async fn the_internal_people_route_names_only_this_orgs_members() {
+        let store = seeded();
+        let outsider = "usr_cccccccccccccccccccccccc";
+        store.add_user(outsider, "Cy");
+        let path = format!("/internal/v1/orgs/{ORG}/people");
+        let ids = serde_json::json!({ "userIds": [bob().as_str(), outsider, ada().as_str(), ada().as_str()] });
+        let (status, body) =
+            call(host_app(store.clone()), json_post(&path, &service_credential(), ids.clone())).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        // Ordered by id, each once; the user outside the org is not confirmed.
+        assert_eq!(
+            body,
+            serde_json::json!({ "people": [
+                { "userId": ada().as_str(), "displayName": "Ada" },
+                { "userId": bob().as_str(), "displayName": "Bob" },
+            ] })
+        );
+
+        // Only the configured Host may ask, and only within its scope.
+        let (status, _) = call(app(store.clone()), json_post(&path, &service_credential(), ids.clone())).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = call(host_app(store.clone()), json_post(&path, &token_for(&ada()), ids.clone())).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let scoped = router(
+            AppState::new(Arc::new(store.clone()), signer(), Arc::new(cognia_tenant_auth::oidc::TestAuthenticator))
+                .with_internal_service_credential(Some(sha256_hex(SERVICE_CREDENTIAL)))
+                .with_internal_service_credential_scopes(Some(std::collections::HashMap::from([(
+                    sha256_hex(SERVICE_CREDENTIAL),
+                    vec!["org_other".to_owned()],
+                )]))),
+        );
+        let (status, body) = call(scoped, json_post(&path, &service_credential(), ids)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body, serde_json::json!({"error":"credential_scope"}));
+
+        // Malformed ids and oversized batches are refused, not looked up.
+        let (status, _) = call(
+            host_app(store.clone()),
+            json_post(&path, &service_credential(), serde_json::json!({ "userIds": ["not-a-user"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let many: Vec<String> = (0..=MAX_ORG_PEOPLE).map(|n| format!("usr_{n:024}")).collect();
+        let (status, _) = call(
+            host_app(store),
+            json_post(&path, &service_credential(), serde_json::json!({ "userIds": many })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
     #[tokio::test]
     async fn the_internal_access_route_answers_only_the_configured_host() {
         let unconfigured = call(

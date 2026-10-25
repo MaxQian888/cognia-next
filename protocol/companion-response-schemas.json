@@ -16606,7 +16606,8 @@
                 "minimum": 0,
                 "maximum": 1000000000000
               },
-              "capSource": { "type": "string", "enum": ["default", "override"] }
+              "capSource": { "type": "string", "enum": ["default", "override"] },
+              "displayName": { "type": "string", "minLength": 1, "maxLength": 200 }
             },
             "additionalProperties": false
           }

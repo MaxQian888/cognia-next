@@ -1913,6 +1913,15 @@ async function personsChat(person, owner) {
       followUp.fates.every((fate) => fate.operation?.status === "acknowledged"),
     `${person.subject}: a message sent mid-turn runs as the next turn and both stay in the transcript (sent ${sent.length}, replies ${replies.length}, ${JSON.stringify(followUp.fates)})`
   )
+  // The usage panel names people: the Host asks the org's collaboration plane.
+  const named = await rpc("org_member_usage_get", {}, owner.auth)
+  const namedRow = (named.body?.members ?? []).find((member) => member.userId === person.userId)
+  check(
+    named.status === 200 &&
+      typeof namedRow?.displayName === "string" &&
+      namedRow.displayName.trim().length > 0,
+    `${owner.subject} (owner): the usage report names ${person.subject} (got ${named.status}: ${JSON.stringify(namedRow)})`
+  )
   const capped = await rpc(
     "org_member_usage_cap_set",
     { userId: person.userId, monthlyTokens: 1 },

@@ -436,7 +436,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
      - The usage panel lists both members against the default cap, and removing the Anthropic key through the org models section seeds the next new conversation with the only served model, `ark-deepseek-v4.1-flash`.
      - The check found the member composer had never worked; item 8 fixes it.
    - **Known gaps:**
-     - Members are listed by organization user id; the Host has no display names to give.
+     - ~~Members are listed by organization user id; the Host has no display names to give.~~ Fixed by item 12.
      - A Host older than P6g sends no `models`, so the picker labels every agent "no model" and cannot seed one.
      - ~~A default new conversation is not corrected to an org-served provider and model.~~ Fixed by item 10.
      - ~~The composer's model picker lists the browser's own providers, not the models the org serves.~~ Fixed by item 10.
@@ -521,6 +521,14 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - A member's browser still repeats some refused reads: `background_job_list` and `background_monitor_list` (403 on each turn), `session_mark_read` (403), and `socket-ticket` (503).
       - The refusal toast is pinned by unit tests only. With the offered gate, the browser has no path to a refused change.
       - Stopping a running tool-less turn lets the next held message start, as the sidecar queue does for an owner.
+
+12. **Members named in the usage panel (P6g follow-up, 2026-10-25).**
+    - **Decisions:** the Host names each member of its usage report as the org's collaboration plane knows them. The name is a label only: when the plane cannot be asked, the report goes out with ids, as before.
+    - **Surface:**
+      - Collaboration server: `POST /internal/v1/orgs/{org_id}/people { userIds }` answers `{ people: [{ userId, displayName }] }` for those ids that are members of the org, ordered by id. Anyone else is left out, so an id outside the org is never confirmed. It takes the Host service credential and its org scope, like the access routes, and at most 500 well-formed ids. `Store::org_member_names` implements it in memory and on Postgres under the org's RLS scope.
+      - Host: `workspace_access::org_member_names` asks with the collab service credential (same client, timeout, proxy and no-redirect policy, 256 KiB cap) and keeps only the ids it asked about. `org_member_usage_get` adds `displayName` (trimmed, at most 200 characters) to each member it got a name for. A failure is logged and omitted. The response schema gains the optional field.
+      - Client: `OrgMemberUsage.displayName`. The usage panel shows the name with the id beneath, falls back to the id, and names the person in the saved-cap toast.
+    - **Known gaps:** the report still lists only people the Host has records for (its person brains and the usage ledger), not every org member, so a cap cannot be set before someone's first use.
 
 **Intentional dormancy (Rule 7).**
 

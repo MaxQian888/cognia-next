@@ -123005,6 +123005,10 @@ paths:
                           enum:
                             - default
                             - override
+                        displayName:
+                          type: string
+                          minLength: 1
+                          maxLength: 200
                       additionalProperties: false
                 additionalProperties: false
         "202":

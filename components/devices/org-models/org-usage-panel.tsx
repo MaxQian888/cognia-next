@@ -85,7 +85,11 @@ export function OrgUsagePanel({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [defaultDraft, setDefaultDraft] = useState<CapDraft | null>(null)
-  const [editing, setEditing] = useState<{ userId: string; draft: CapDraft } | null>(null)
+  const [editing, setEditing] = useState<{
+    userId: string
+    name: string
+    draft: CapDraft
+  } | null>(null)
   const generation = useRef(0)
 
   const reload = useCallback(async () => {
@@ -142,11 +146,11 @@ export function OrgUsagePanel({
     if (!editing) return
     const cap = draftCap(editing.draft)
     if (cap === undefined) return
-    const { userId } = editing
+    const { userId, name } = editing
     return act(`member:${userId}`, async () => {
       await writeMember(hostRef, userId, cap)
       setEditing(null)
-      toast.success(t("memberSaved", { user: userId }))
+      toast.success(t("memberSaved", { user: name }))
     })
   }
 
@@ -201,7 +205,21 @@ export function OrgUsagePanel({
         data-testid={`org-usage-member-${member.userId}`}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <code className="min-w-0 flex-1 font-mono text-xs break-all">{member.userId}</code>
+          {member.displayName ? (
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span
+                className="truncate font-medium"
+                data-testid={`org-usage-name-${member.userId}`}
+              >
+                {member.displayName}
+              </span>
+              <code className="text-muted-foreground font-mono text-xs break-all">
+                {member.userId}
+              </code>
+            </span>
+          ) : (
+            <code className="min-w-0 flex-1 font-mono text-xs break-all">{member.userId}</code>
+          )}
           <Badge variant="outline" className="text-xs">
             {member.capSource === "override" ? t("source.override") : t("source.default")}
           </Badge>
@@ -224,6 +242,7 @@ export function OrgUsagePanel({
                   ? null
                   : {
                       userId: member.userId,
+                      name: member.displayName ?? member.userId,
                       draft: {
                         mode:
                           member.capSource === "default"
@@ -259,7 +278,7 @@ export function OrgUsagePanel({
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {editor(
               editing.draft,
-              (draft) => setEditing({ userId: member.userId, draft }),
+              (draft) => setEditing((current) => current && { ...current, draft }),
               true,
               `org-usage-member-cap-${member.userId}`
             )}

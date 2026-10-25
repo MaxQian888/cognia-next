@@ -198,17 +198,49 @@ async fn org_usage_dispatch(command: &str, args: Value, org: &str, user: &str, d
     for key in ["defaultMonthlyTokens", "monthlyTokens"] {
         if let Some(tokens) = args.get(key).and_then(Value::as_u64).filter(|n| *n <= cognia_gateway::org_usage::MAX_MONTHLY_TOKENS) { audit[key] = tokens.into(); }
     }
-    let operation = command.to_string(); let org = org.to_string();
+    let operation = command.to_string(); let usage_org = org.to_string();
     let result = tokio::task::spawn_blocking(move || {
         let registry = registry.ok_or("organization usage store unavailable")?;
-        org_usage_apply(&registry, &operation, &args, &org, &people)
+        org_usage_apply(&registry, &operation, &args, &usage_org, &people)
     }).await
         .map_err(|_| RpcError::internal("organization usage worker failed".into()))?;
     if is_write(command) {
         crate::audit::record_async(command, device, scope.unwrap_or_default(), if result.is_ok() { "allow" } else { "deny" }, audit).await;
     }
-    result.map_err(|error| if error.contains("unavailable") { RpcError::service_unavailable("organization usage store unavailable".into()) }
-        else { RpcError::malformed("invalid organization command arguments".into()) })
+    let mut report = result.map_err(|error| if error.contains("unavailable") { RpcError::service_unavailable("organization usage store unavailable".into()) }
+        else { RpcError::malformed("invalid organization command arguments".into()) })?;
+    if command == "org_member_usage_get" {
+        label_members(&mut report, |ids| async move { crate::workspace_access::org_member_names(org, &ids).await }).await;
+    }
+    Ok(report)
+}
+
+/// Name each member of a usage report as the collaboration plane knows them.
+///
+/// A label, not part of the answer's truth: when the plane cannot be asked
+/// (unconfigured, down, refusing this Host) the report goes out with ids
+/// alone, as it did before, and the panel falls back to the id.
+async fn label_members<F, Fut>(report: &mut Value, names: F)
+where
+    F: FnOnce(Vec<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<std::collections::BTreeMap<String, String>, crate::workspace_access::WorkspaceAccessError>>,
+{
+    let Some(members) = report.get_mut("members").and_then(Value::as_array_mut) else { return };
+    let ids: Vec<String> = members.iter().filter_map(|row| row["userId"].as_str().map(str::to_string)).collect();
+    if ids.is_empty() { return; }
+    let names = match names(ids).await {
+        Ok(names) => names,
+        Err(error) => {
+            tracing::warn!(code = error.code(), "organization member names unavailable: {error}");
+            return;
+        }
+    };
+    for row in members.iter_mut() {
+        let name = row["userId"].as_str().and_then(|id| names.get(id)).map(|name| name.trim()).filter(|name| !name.is_empty());
+        if let (Some(name), Some(object)) = (name, row.as_object_mut()) {
+            object.insert("displayName".into(), name.chars().take(200).collect::<String>().into());
+        }
+    }
 }
 
 pub async fn org_usage_handler(Path(operation): Path<String>, Extension(principal): Extension<DeviceContext>, headers: HeaderMap, State(state): State<SharedState>, body: Result<Json<Value>, JsonRejection>) -> Response {
@@ -230,6 +262,37 @@ pub async fn agents_handler(Path(operation): Path<String>, Extension(principal):
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn p6_usage_report_members_carry_the_planes_names_or_stay_ids() {
+        let report = || json!({"month": "2026-10", "defaultMonthlyTokens": null, "members": [
+            {"userId": "usr_ada", "spentTokens": 1, "reservedTokens": 0, "monthlyTokens": null, "capSource": "default"},
+            {"userId": "usr_bob", "spentTokens": 0, "reservedTokens": 0, "monthlyTokens": 5, "capSource": "override"},
+            {"userId": "usr_cy", "spentTokens": 0, "reservedTokens": 0, "monthlyTokens": null, "capSource": "default"},
+        ]});
+        let mut named = report();
+        label_members(&mut named, |ids| async move {
+            assert_eq!(ids, ["usr_ada", "usr_bob", "usr_cy"]);
+            // Bob's name is blank, Cy left the org: both stay ids.
+            Ok(std::collections::BTreeMap::from([
+                ("usr_ada".to_string(), "  Ada Lovelace ".to_string()),
+                ("usr_bob".to_string(), "   ".to_string()),
+            ]))
+        }).await;
+        assert_eq!(named["members"][0]["displayName"], "Ada Lovelace");
+        assert!(named["members"][1].get("displayName").is_none());
+        assert!(named["members"][2].get("displayName").is_none());
+        assert_eq!(named["members"][0]["spentTokens"], 1);
+
+        // The plane cannot be asked: the report goes out exactly as before.
+        let mut unnamed = report();
+        label_members(&mut unnamed, |_| async { Err(crate::workspace_access::WorkspaceAccessError::NotConfigured) }).await;
+        assert_eq!(unnamed, report());
+
+        // No members: nobody is asked.
+        let mut empty = json!({"month": "2026-10", "defaultMonthlyTokens": null, "members": []});
+        label_members(&mut empty, |_| async { panic!("asked for no one") }).await;
+    }
     #[test]
     fn p6g_person_own_usage_reports_only_the_callers_month_and_cap() {
         use cognia_gateway::route_ticket::{RouteTicketRegistry, InMemoryTicketMetaStore};

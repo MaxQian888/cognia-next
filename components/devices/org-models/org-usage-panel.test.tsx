@@ -74,6 +74,29 @@ describe("OrgUsagePanel", () => {
     expect(screen.getByTestId("org-usage-default-cap-tokens")).toHaveValue("1000")
   })
 
+  it("names each person as the org knows them, keeps the id beside it, and falls back to the id", async () => {
+    const named: OrgUsageReport = {
+      ...report,
+      members: [report.members[0]!, { ...report.members[1]!, displayName: "Bob Builder" }],
+    }
+    const d = deps({ getUsage: jest.fn(async () => named) })
+    render(<OrgUsagePanel hostRef="org" host="Org box" deps={d} />)
+    expect(await screen.findByTestId("org-usage-name-usr_bob")).toHaveTextContent("Bob Builder")
+    expect(screen.getByTestId("org-usage-member-usr_bob")).toHaveTextContent("usr_bob")
+    // No name for Ada: the id is the label.
+    expect(screen.queryByTestId("org-usage-name-usr_ada")).toBeNull()
+    expect(screen.getByTestId("org-usage-member-usr_ada")).toHaveTextContent("usr_ada")
+
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("org-usage-edit-usr_bob"))
+    fireEvent.change(screen.getByTestId("org-usage-member-cap-usr_bob-tokens"), {
+      target: { value: "900" },
+    })
+    await user.click(screen.getByTestId("org-usage-member-save-usr_bob"))
+    await waitFor(() => expect(d.setMemberCap).toHaveBeenCalledWith("org", "usr_bob", 900))
+    expect(toastSuccess).toHaveBeenCalledWith("Saved the cap for Bob Builder")
+  })
+
   it("p6g saves a new default cap and reads the month again", async () => {
     const d = deps()
     render(<OrgUsagePanel hostRef="org" host="Org box" deps={d} />)

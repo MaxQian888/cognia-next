@@ -77,6 +77,8 @@ describe("organization models over the management channel", () => {
   it("reads the month's usage and tolerates a partial answer", async () => {
     const member = {
       userId: "usr_bob",
+      // Carried through: the Host names members the org plane knows.
+      displayName: "Bob",
       spentTokens: 10,
       reservedTokens: 2,
       monthlyTokens: null,
