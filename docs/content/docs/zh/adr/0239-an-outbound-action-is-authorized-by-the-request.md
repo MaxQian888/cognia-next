@@ -5,7 +5,7 @@ description: "智能体有约十条路径可以向第三方发送内容，每条
 
 # ADR 0239 — 外发动作由请求授权，而不是由工具授权
 
-**状态：** 已接受（第一期已实现，默认影子模式；第二期已决定，尚未实现）
+**状态：** 已接受（第一期与第二期 2a 已实现，各自默认影子模式；第二期 2b 已决定，尚未实现）
 **日期：** 2026-10-24
 **相关：** [ADR-0070](./0070-risk-ceremony-policy-layer)（风险 → 仪式；“回复到发起线程”的先例）、[ADR-0169](./0169-one-runtime-one-review-one-control-machine)（统一审核契约）、[ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched)（按次运行的能力授予）、[ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings)（在 Host 上的无人值守运行）
 **更正：** Action Review 契约文件头引用了 ADR-0102（一份可观测性决策）和一个从未实现的策略引擎
@@ -182,6 +182,37 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - 本机驱动配对 Host 时，开关和报告只显示说明：设置和 receipt 都在 Host 上，尚无远程读取。
 - 执行模式已有单元与集成测试，但还没有在真实桌面和手机上跑过（一次发起线程回复、一次跨群发送、一次在手机上批准的停泊审批、一次 Bot 定时投递从草稿到批准发送）。
 
+## 实现（第二期 2a）
+
+第二期 2a（GitHub 写入）分十个工作包落地（计划：`docs/plans/2026-10-25-adr-0239-phase-2.md`）。它有自己的开关，从**影子模式**开始：每次 GitHub 写入都会规划并记录，但不改变任何结果，直到用户在“设置 → 安全”中开启（`agentPermissions.outboundAuthorizationByCategory.github: "enforce"`）。对消息开启执行不会对 GitHub 开启执行。
+
+### 代码位置
+
+- **目标与类别**：`outbound-targets.ts` 新增 `repositoryTarget`（`github:<host>/<owner>/<repo>`，host 缺省 `github.com`；PR 或 issue 是只在内存中的 `thread`，只用于匹配发起线程）、供 2b 使用的 `siteTarget`，以及 `outboundCategoryOf`。`readOutboundAuthorizationMode(settings, category)` 读取各类别的模式；一次计划只要有一个目标所在类别为执行，即按执行处理。
+- **什么算 GitHub 写入**：`github-targets.ts` 读集成注册表（集成 `github` 或操作 `github.*`，且不是 `read`），仓库取自动作的 `scopeSelectors`。`gh` 命令由 `packages/plugin-contract/src/lib/claude/permissions/gh-command.ts` 分类（读、写、本机；未知命令按写处理），仓库由 `gh-targets.ts` 提取（`-R`、`GH_REPO`、PR 或 issue URL、API 路径，否则取会话检出的 `origin` remote，再取不到为 `unknown`）。`command-safety.ts` 把 `gh` 移出安全命令：写入会询问并算作外发，auto 模式的模型裁判不能放行。
+- **broker 咽喉点**：`plan-integration.ts`（`planIntegrationWrite`），由 `executeIntegrationAction` 在写入 job 入队前调用，并由 `authenticatedIntegrationRequest` 对每个非 GET 请求调用（含 Issue Loop 的 `POST /pulls`）。其 receipt 为 `github-delivery` 渠道上的 `integration-action`，写明请求方（`plugin:<id>`、`bot:<id>`、`workflow:<id>`、`tool-call:<会话>`、`agent-team:<id>`、`person:<界面>`）与所经集成账号。被停下的写入以 `awaiting_approval` 入队并带 `outbound.held`，经 `lib/integrations/outbound-hold.ts` 推送；只有人的批准能放行，人取消即对该仓库形成屏障。
+- **工具咽喉点**：`plan-tool-call.ts` 把 GitHub 写工具和含 `gh` 写段的 shell 调用作为外发、按 GitHub 类别规划。sidecar、Agent SDK hooks 与 CLI 工具宿主经 `SendOptions.alwaysExplicitGithubWritesMode` 与 `alwaysExplicitGithubTools` 对它们执行 always-explicit 规则，由 `resolveSendOptions` 每轮按 GitHub 模式设置。
+- **Squad**：`prepareAndPublishGithubStack` 规划堆叠发布（`team-delivery`）。被停下的发布让运行进入 `needs_input`（`delivery_awaiting_approval`，被拒后为 `delivery_refused`），推送到手机，由运行的持久操作里的“批准并发布”放行。
+- **policy 授予**：`configured-grants.ts` 新增集成账号的仓库名单（`integration-account:<id>`，仅宿主可写，在集成中心编辑）、按仓库限定的能力授予（`capability-grant:<id>`）、自动发布的 Bot 的仓库范围，以及团队已同意的仓库。`gh` 命令不指明账号，因此所有 GitHub 账号的名单都对它生效。
+- **人自己的写入**：`human-github-write.ts` 在堆叠发布与合并、restack 说明、评审发布、线程 PR 创建与合并、交接后开 PR、团队“批准并合并”之前记一条 `human` receipt。发布 issue 与 issue 回写向 broker 传入 `person` 调用方。
+- **开关与报告**：安全卡片每个类别一个开关；`shadow-report.ts` 每个类别一份报告，对仓库提供 Bot 名单或 GitHub 账号名单。
+
+### 实施中的决定
+
+- **`gh` 写入跟随 GitHub 的模式，而不是外发权限类。** 归入外发权限类会在 GitHub 仍处于影子模式时就让无人值守的 `gh` 写入停下。影子模式下，`gh` 写入经普通权限阶梯询问，bypass 模式与 allow 规则仍可跳过；GitHub 执行模式下每次都询问。
+- **团队的堆叠交付需要人的同意。** 团队配置并非只由人写：持有 `team:write` 的插件、Agent SDK 和自动编排都会写。在设置卡片中开启堆叠交付会记下 `githubDeliveryPolicy.consent` 及当时绑定的仓库，只有这些仓库被授予。其它写入方最多沿用已存的同意，关闭交付即丢弃。
+- **人的点击只记录，不规划。** `person` 授权直接放行并记 `human` receipt。否则已确认的 issue 回写会被当作插件写入规划，在执行模式下被停下。
+- **receipt 以 id 记下集成账号**，放在 `subject.input.integrationAccount`，影子报告据此提供能放行这次写入的名单。没有账号的写入（`gh`、堆叠发布）列出仓库所在 host 上的账号供人选择。
+- **暂不提供浏览器开关。** 2b 之前没有任何路径规划浏览器提交，所以卡片不显示它的开关；`outboundAuthorizationByCategory.browser` 的类型注释写明这一点，卡片测试固定它。
+- **影子报告会启动插件运行时。** 哪些账号是 GitHub 账号来自集成注册表，注册表在插件加载时才填入，而设置页本身不启动插件运行时。
+
+### 已知缺口
+
+- 应用里还没有任何地方写入能力授予，因此 `capability-grant:<id>` 来源在有写入方之前只读。
+- issue 同步与 Issue Loop 适配器调用 broker 时不带调用方，其写入按插件写入规划；执行模式下，仓库不在某个账号名单上即等待批准。
+- 按决定，GitHub MCP 服务器的工具仍走普通权限阶梯。
+- GitHub 写入的执行模式已有单元与集成测试，但还没有在真实桌面和手机上跑过（Comment Bot 回复其被提及的 PR、在手机上批准一次写到未列出仓库的无人值守写入、聊天里一次跨仓库的 `gh` 命令）。
+
 ## 影响
 
 - 交互聊天中，发给请求人所在线程以外的任何人，第一次会询问，之后只在没有授予覆盖时询问。回复到提问的地方依然静默。
@@ -190,6 +221,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - 一次拒绝在重载、换工具、换措辞和子运行之间都保持有效，直到提出请求的人说了新的话。
 - 每个外发决定都有 receipt，写明 authority、授予以及它服务的那条指令。
 - 为新索引升级一次 Dexie schema 版本。
+- **第二期 2a 行为变化**：写入 GitHub 的 `gh` 命令在聊天里会询问（此前视为安全），auto 模式不再自行放行。对 GitHub 写入开启执行后，无人值守写到无人允许的仓库会等待批准，Squad 堆叠发布等待“批准并发布”，`gh` 写入在 bypass 下也会询问。
 
 ## 被否决的方案
 
@@ -209,7 +241,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - 超时不形成屏障：下一次尝试会重新询问。
 - 以上每个结果都写入一条带有 authority、授予范围和纪元的 receipt，每个 connector job 都带有 `authorizedBy`。
 - digest turn 的审批会停泊并推送，而不是无人应答。
-- 第二期：Bot 在 PR 上被提及后回复该 PR，不询问；同一运行写到另一个仓库时，执行模式下等待批准。人为某个仓库配置的自动化在开启执行后照常工作。聊天里的 `gh pr create -R other/repo` 会询问并写明仓库，bypass 下也是如此。影子模式下 GitHub 与浏览器的结果都不改变。
+- 第二期：Bot 在 PR 上被提及后回复该 PR，不询问；同一运行写到另一个仓库时，执行模式下等待批准。人为某个仓库配置的自动化在开启执行后照常工作。聊天里的 `gh pr create -R other/repo` 会询问并写明仓库，GitHub 执行模式下 bypass 也是如此。影子模式下 GitHub 与浏览器的结果都不改变。
 
 ## 术语
 

@@ -5,7 +5,7 @@ description: "Agents can send to third parties through about ten paths, each wit
 
 # ADR 0239 — An outbound action is authorized by the request, not by the tool
 
-**Status:** Accepted (phase 1 implemented; shadow mode by default. Phase 2 decided, not yet built)
+**Status:** Accepted (phase 1 and phase 2a implemented, each in shadow mode by default. Phase 2b decided, not yet built)
 **Date:** 2026-10-24
 **Related:** [ADR-0070](./0070-risk-ceremony-policy-layer) (risk → ceremony; the origin-thread precedent), [ADR-0169](./0169-one-runtime-one-review-one-control-machine) (one review contract), [ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched) (per-run capability grants), [ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings) (unattended runs on a Host)
 **Corrects:** the Action Review contract header, which cites ADR-0102 (an observability decision) and a policy engine that was never built
@@ -182,6 +182,37 @@ Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-p
 - On a shell driving a paired Host, the switch and the report are read-only notices: the setting and the receipts live on the Host, with no remote reader yet.
 - Enforce mode has unit and integration coverage but no run on a real desktop and phone yet (an origin reply, a cross-group send, a parked approval answered on the phone, a Bot's scheduled delivery from draft to approved send).
 
+## Implementation (phase 2a)
+
+Phase 2a, GitHub writes, shipped in ten work packages (plan: `docs/plans/2026-10-25-adr-0239-phase-2.md`). It has its own switch and starts in **shadow mode**: every GitHub write is planned and recorded, and none changes, until a person turns it on in Settings → Security (`agentPermissions.outboundAuthorizationByCategory.github: "enforce"`). Enforcing messages does not enforce GitHub.
+
+### Where it lives
+
+- **Targets and categories**: `outbound-targets.ts` adds `repositoryTarget` (`github:<host>/<owner>/<repo>`, host defaulting to `github.com`; the PR or issue is an in-memory `thread` used only to match the origin thread), `siteTarget` for phase 2b, and `outboundCategoryOf`. `readOutboundAuthorizationMode(settings, category)` reads each category's mode; a plan is enforced when any of its targets' categories is.
+- **What is a GitHub write**: `github-targets.ts` reads the integration registry (an integration `github`, or an operation `github.*`, that is not `read`) and takes the repository from the action's `scopeSelectors`. `gh` commands are classified by `packages/plugin-contract/src/lib/claude/permissions/gh-command.ts` (read, write or local; an unknown command is a write) and their repositories extracted by `gh-targets.ts` (`-R`, `GH_REPO`, a PR or issue URL, an API path, else the session checkout's `origin` remote, else `unknown`). `command-safety.ts` moved `gh` out of the safe heads: a write asks and is outbound, and auto mode's model judge cannot allow it.
+- **Broker chokepoint**: `plan-integration.ts` (`planIntegrationWrite`) is called by `executeIntegrationAction` before a write job is queued and by `authenticatedIntegrationRequest` for every non-GET request (Issue Loop's `POST /pulls` included). Its receipts are `integration-action` subjects on the `github-delivery` channel, naming the requester (`plugin:<id>`, `bot:<id>`, `workflow:<id>`, `tool-call:<session>`, `agent-team:<id>`, `person:<surface>`) and the integration account. A held write is queued `awaiting_approval` with `outbound.held` and pushed through `lib/integrations/outbound-hold.ts`; only a person's approval releases it, and a person's cancel fences the repository.
+- **Tool chokepoint**: `plan-tool-call.ts` plans GitHub write tools and shell calls with a `gh` write as outbound, in the GitHub category. The sidecar, the Agent SDK hooks and the CLI tool host apply the always-explicit rule to them through `SendOptions.alwaysExplicitGithubWritesMode` and `alwaysExplicitGithubTools`, which `resolveSendOptions` sets from the GitHub mode every turn.
+- **Squad**: `prepareAndPublishGithubStack` plans the stack publish (`team-delivery`). A held publish leaves the run `needs_input` (`delivery_awaiting_approval`, or `delivery_refused` after a refusal), is pushed to the phone, and is released by "approve and publish" in the run's durable operations.
+- **Policy grants**: `configured-grants.ts` adds an integration account's repository list (`integration-account:<id>`, host-only, edited in the Integrations hub), repository-scoped capability grants (`capability-grant:<id>`), a Bot's repository scope when it publishes automatically, and a team's consented repositories. A `gh` command names no account, so every GitHub account's list counts for it.
+- **A person's own writes**: `human-github-write.ts` records a `human` receipt before stack publish and land, the restack note, review delivery, thread PR create and merge, the handed-off PR and the team's approve-and-merge. Issue publish and write-back pass a `person` caller to the broker.
+- **Switch and report**: the Security card has one switch per category; `shadow-report.ts` returns one report per category and offers, for a repository, the Bot's list or the GitHub account's.
+
+### Decisions made while implementing
+
+- **`gh` writes follow the GitHub mode, not the outbound permission class.** Putting them in the outbound class would park unattended `gh` writes while GitHub is still in shadow mode. In shadow mode a `gh` write asks through the ordinary ladder, which bypass mode and allow rules can still skip; under GitHub enforcement it asks on every call.
+- **A team's stacked delivery needs a person's consent.** Team configuration is not written only by people: plugins with `team:write`, the Agent SDK and automatic orchestration write it too. Turning stacked delivery on in the settings card records `githubDeliveryPolicy.consent` with the repositories bound at that moment, and only those are granted. Every other writer keeps the stored consent at most, and drops it when delivery is turned off.
+- **A person's click is recorded, never planned.** The `person` authorization proceeds with a `human` receipt. Without it, a confirmed issue write-back would have been planned as a plugin write and held under enforcement.
+- **A receipt names the integration account by id**, in `subject.input.integrationAccount`, so the shadow report can offer the list that would have let the write through. A write with no account (`gh`, a stack publish) offers the accounts on the repository's host.
+- **No browser switch yet.** Nothing plans a browser submission before phase 2b, so the card shows no switch for it; `outboundAuthorizationByCategory.browser` says so, and a card test pins it.
+- **The shadow report boots the plugin runtime.** Which accounts are GitHub accounts comes from the integration registry, which a plugin fills when it loads, and Settings does not start the plugin runtime on its own.
+
+### Known gaps
+
+- Nothing in the app writes a capability grant yet, so the `capability-grant:<id>` source is read-only until something does.
+- Issue sync and the Issue Loop adapter call the broker without a caller, so their writes are planned as plugin writes and wait under enforcement unless an account's list holds the repository.
+- The GitHub MCP server's tools stay on the ordinary ladder, as decided.
+- Enforcement of GitHub writes has unit and integration coverage but no run on a real desktop and phone yet (a Comment Bot answering the PR it was mentioned on, an unattended write to an unlisted repository approved on the phone, a cross-repository `gh` command in chat).
+
 ## Consequences
 
 - Sending to anyone other than the requester's own thread asks the first time in interactive chat, and later only when no grant covers it. Replying where you were asked stays silent.
@@ -190,6 +221,7 @@ Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-p
 - A refusal holds across a reload, another tool, a reworded message and child runs, until the person who asked says something new.
 - Every outbound decision has a receipt that names the authority, the grant and the instruction it served.
 - The Dexie schema version is bumped once for the new index.
+- **Phase 2a behaviour change**: a `gh` command that writes to GitHub asks in chat (it was treated as safe), and auto mode no longer approves one by itself. Once GitHub writes are enforced, an unattended write to a repository nobody allowed waits for approval, a Squad stack publish waits for "approve and publish", and `gh` writes ask even under bypass.
 
 ## Rejected alternatives
 
@@ -209,7 +241,7 @@ Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-p
 - A timeout does not fence: the next attempt asks again.
 - Every outcome above writes a receipt with authority, grant scope and epoch, and every connector job carries `authorizedBy`.
 - The digest turn's approval parks and is pushed instead of going unanswered.
-- Phase 2: a Bot mentioned on a PR answers on that PR without asking, and the same run writing to another repository waits for approval under enforcement. Automation a person configured for a repository keeps working after enforcement is turned on. `gh pr create -R other/repo` in chat asks and names the repository, also under bypass. In shadow mode no GitHub or browser result changes.
+- Phase 2: a Bot mentioned on a PR answers on that PR without asking, and the same run writing to another repository waits for approval under enforcement. Automation a person configured for a repository keeps working after enforcement is turned on. `gh pr create -R other/repo` in chat asks and names the repository, and under GitHub enforcement also under bypass. In shadow mode no GitHub or browser result changes.
 
 ## Glossary
 
