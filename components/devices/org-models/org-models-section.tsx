@@ -18,7 +18,7 @@
  */
 
 import { BuildingIcon, Trash2Icon } from "lucide-react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -107,6 +107,7 @@ export function OrgModelsSection({
 }) {
   const t = useTranslations("devices.orgModels")
   const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const hostRef = managementRefOf(row)
   const host = row.label
   const listCredentials = deps.listCredentials ?? listOrgCredentials
@@ -228,7 +229,7 @@ export function OrgModelsSection({
   if (!hostRef) return null
 
   const provenance = (entry: OrgCredentialEntry): string => {
-    const when = format.relativeTime(entry.setAt)
+    const when = format.relativeTime(entry.setAt, now)
     return entry.setBy === "operator"
       ? t("keys.setByOperator", { when })
       : t("keys.setBy", { when })
@@ -433,7 +434,9 @@ export function OrgModelsSection({
                 </Button>
                 {loaded.policy.updatedAt ? (
                   <span className="text-xs text-muted-foreground">
-                    {t("agents.updated", { when: format.relativeTime(loaded.policy.updatedAt) })}
+                    {t("agents.updated", {
+                      when: format.relativeTime(loaded.policy.updatedAt, now),
+                    })}
                   </span>
                 ) : null}
               </div>
