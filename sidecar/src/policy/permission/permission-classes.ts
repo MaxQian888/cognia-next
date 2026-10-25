@@ -231,18 +231,23 @@ export function readApprovalTtlMs(raw: unknown): number | undefined {
  * Phase 1 lists outbound tools only, so a listed call is labelled
  * `permissionClass: "outbound"` when the run's profile names no class for it.
  *
- * Phase 2 adds shell `gh` writes (`SendOptions.alwaysExplicitShellWritesMode`):
- * a shell tool call whose command has a `gh` invocation that writes to GitHub
- * is treated as listed, in that mode of its own, because it follows the
- * GitHub category's mode rather than messaging's. Absent, shell commands are
- * not inspected for it.
+ * Phase 2 adds GitHub writes, in a mode of their own
+ * (`SendOptions.alwaysExplicitGithubWritesMode`) because they follow the
+ * GitHub category's mode rather than messaging's: a shell tool call whose
+ * command has a `gh` invocation that writes to GitHub, and a call to one of
+ * `SendOptions.alwaysExplicitGithubTools` (the integration actions that write
+ * to GitHub). Those are matched on their full registered name, not the last
+ * `__` segment: `commentpr` from another plugin or an MCP server is not the
+ * GitHub action. Absent the mode, neither is inspected.
  */
 export interface ExplicitToolPolicy {
   /** Normalized names: see {@link explicitToolName}. */
   tools: ReadonlySet<string>
   mode: "observe" | "enforce"
-  /** The mode for shell calls with a `gh` write; absent when they are not listed. */
-  shellWrites?: "observe" | "enforce"
+  /** The mode for GitHub writes; absent when they are not listed. */
+  githubWrites?: "observe" | "enforce"
+  /** Full registered names of GitHub write tools, lowercased. */
+  githubTools?: ReadonlySet<string>
 }
 
 /**
@@ -258,15 +263,17 @@ export function explicitToolName(toolName: string): string {
 }
 
 /**
- * Read the list, its mode and the shell-writes mode. No list (or an empty one)
- * and no shell-writes mode is no policy. Any present mode other than exactly
- * `observe` enforces: a malformed value must not quietly turn the always-ask
- * off. The shell-writes mode is absent only when the field is.
+ * Read the list, its mode and the GitHub writes mode and tools. No list (or an
+ * empty one) and no GitHub writes is no policy. Any present mode other than
+ * exactly `observe` enforces: a malformed value must not quietly turn the
+ * always-ask off. GitHub tools listed without a mode enforce for the same
+ * reason; the mode alone still inspects shell commands.
  */
 export function readExplicitToolPolicy(
   rawTools: unknown,
   rawMode: unknown,
-  rawShellWrites?: unknown
+  rawGithubWrites?: unknown,
+  rawGithubTools?: unknown
 ): ExplicitToolPolicy | null {
   const tools = new Set<string>()
   for (const entry of Array.isArray(rawTools) ? (rawTools as unknown[]) : []) {
@@ -274,18 +281,43 @@ export function readExplicitToolPolicy(
     const name = explicitToolName(entry)
     if (name) tools.add(name)
   }
-  const shellWrites =
-    rawShellWrites === undefined || rawShellWrites === null
-      ? undefined
-      : rawShellWrites === "observe"
+  const githubTools = new Set<string>()
+  for (const entry of Array.isArray(rawGithubTools) ? (rawGithubTools as unknown[]) : []) {
+    if (typeof entry !== "string") continue
+    const name = entry.trim().toLowerCase()
+    if (name) githubTools.add(name)
+  }
+  const githubWrites =
+    rawGithubWrites === undefined || rawGithubWrites === null
+      ? githubTools.size > 0
+        ? "enforce"
+        : undefined
+      : rawGithubWrites === "observe"
         ? "observe"
         : "enforce"
-  if (tools.size === 0 && !shellWrites) return null
+  if (tools.size === 0 && !githubWrites) return null
   return {
     tools,
     mode: rawMode === "observe" ? "observe" : "enforce",
-    ...(shellWrites ? { shellWrites } : {}),
+    ...(githubWrites ? { githubWrites } : {}),
+    ...(githubTools.size > 0 ? { githubTools } : {}),
   }
+}
+
+/**
+ * Whether a call is one of the listed GitHub write tools: its name is the
+ * entry, or ends with `__<entry>` (the MCP server prefix the model sees).
+ */
+export function isListedGithubTool(
+  toolName: string,
+  githubTools: ReadonlySet<string> | undefined
+): boolean {
+  if (!githubTools || githubTools.size === 0) return false
+  const name = toolName.trim().toLowerCase()
+  for (const entry of githubTools) {
+    if (name === entry || name.endsWith(`__${entry}`)) return true
+  }
+  return false
 }
 
 /** Whether a shell tool call's command has a `gh` invocation that writes to GitHub. */
@@ -306,10 +338,13 @@ export function explicitToolMode(
 ): "observe" | "enforce" | undefined {
   if (!policy) return undefined
   const listed = policy.tools.has(explicitToolName(toolName)) ? policy.mode : undefined
-  const shell =
-    policy.shellWrites && isShellGhWrite(toolName, input) ? policy.shellWrites : undefined
-  if (listed === "enforce" || shell === "enforce") return "enforce"
-  return listed ?? shell
+  const github =
+    policy.githubWrites &&
+    (isListedGithubTool(toolName, policy.githubTools) || isShellGhWrite(toolName, input))
+      ? policy.githubWrites
+      : undefined
+  if (listed === "enforce" || github === "enforce") return "enforce"
+  return listed ?? github
 }
 
 /** Whether the call is listed, in either mode. */
@@ -342,7 +377,7 @@ export function explicitToolObserved(
 /** Whether the policy can observe anything: a gate reporting allows needs this. */
 export function explicitPolicyObserves(policy: ExplicitToolPolicy | null | undefined): boolean {
   if (!policy) return false
-  return (policy.tools.size > 0 && policy.mode === "observe") || policy.shellWrites === "observe"
+  return (policy.tools.size > 0 && policy.mode === "observe") || policy.githubWrites === "observe"
 }
 
 /**

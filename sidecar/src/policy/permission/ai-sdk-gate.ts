@@ -194,7 +194,8 @@ export function createToolPermissionGate({
   const explicitTools = readExplicitToolPolicy(
     sendOptions?.alwaysExplicitTools,
     sendOptions?.alwaysExplicitToolsMode,
-    sendOptions?.alwaysExplicitShellWritesMode
+    sendOptions?.alwaysExplicitGithubWritesMode,
+    sendOptions?.alwaysExplicitGithubTools
   )
 
   return async function gate(toolName, input, signal) {

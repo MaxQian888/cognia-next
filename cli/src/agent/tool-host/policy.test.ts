@@ -230,17 +230,37 @@ describe("explicitToolMode (ADR-0239)", () => {
     const bash = namespaced("bash")
     const write = { command: "gh pr create --fill" }
     expect(explicitToolMode(options(listed), bash, write)).toBeNull()
-    const observe = options({ ...listed, alwaysExplicitShellWritesMode: "observe" })
+    const observe = options({ ...listed, alwaysExplicitGithubWritesMode: "observe" })
     expect(explicitToolMode(observe, bash, write)).toBe("observe")
     expect(explicitToolMode(observe, "Bash", { command: "gh pr view 1" })).toBeNull()
     expect(explicitToolMode(observe, bash)).toBeNull()
     expect(explicitToolMode(observe, "send_email")).toBe("enforce")
     const enforce = options({
-      alwaysExplicitShellWritesMode: "shadow" as never,
+      alwaysExplicitGithubWritesMode: "shadow" as never,
       permissionMode: "bypassPermissions",
     })
     expect(explicitToolMode(enforce, "Bash", write)).toBe("enforce")
     expect(needsApproval(enforce, "Bash", write)).toBe(true)
     expect(needsApproval(enforce, "Bash", { command: "gh pr view 1" })).toBe(false)
+  })
+
+  it("lists GitHub write tools by full name in the GitHub writes mode", () => {
+    const tool = "integration__github-delivery__github__commentpr"
+    const observe = options({
+      alwaysExplicitTools: ["send_email"],
+      alwaysExplicitGithubWritesMode: "observe",
+      alwaysExplicitGithubTools: [tool],
+    })
+    expect(explicitToolMode(observe, `mcp__cognia-plugin-tools__${tool}`)).toBe("observe")
+    expect(explicitToolMode(observe, tool)).toBe("observe")
+    // Not by the short name.
+    expect(explicitToolMode(observe, "mcp__other__commentpr")).toBeNull()
+    expect(explicitToolMode(observe, "send_email")).toBe("enforce")
+    const unmoded = options({
+      alwaysExplicitGithubTools: [tool],
+      permissionMode: "bypassPermissions",
+    })
+    expect(explicitToolMode(unmoded, tool)).toBe("enforce")
+    expect(needsApproval(unmoded, tool)).toBe(true)
   })
 })

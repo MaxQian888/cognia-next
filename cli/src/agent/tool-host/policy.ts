@@ -373,14 +373,19 @@ export function isExplicitlyDenied(options: SendOptions, name: string, input: un
  * listed. Matched on the registered name, as the sidecar gates match it; any
  * mode other than exactly `observe` enforces.
  *
- * A shell call whose command has a `gh` write is listed in
- * `alwaysExplicitShellWritesMode` when that is set (phase 2), as in the
- * sidecar's `explicitToolMode`. Either source enforcing enforces.
+ * GitHub writes (phase 2) are listed in `alwaysExplicitGithubWritesMode`: a
+ * shell call whose command has a `gh` write, and a call to one of
+ * `alwaysExplicitGithubTools`, matched on the full name (or a `__<name>`
+ * suffix), as in the sidecar's `explicitToolMode`. Either source enforcing
+ * enforces; GitHub tools listed without a mode enforce.
  */
 export function explicitToolMode(
   options: Pick<
     SendOptions,
-    "alwaysExplicitTools" | "alwaysExplicitToolsMode" | "alwaysExplicitShellWritesMode"
+    | "alwaysExplicitTools"
+    | "alwaysExplicitToolsMode"
+    | "alwaysExplicitGithubWritesMode"
+    | "alwaysExplicitGithubTools"
   >,
   namespacedName: string,
   input?: unknown
@@ -394,13 +399,30 @@ export function explicitToolMode(
       ? "observe"
       : "enforce"
     : null
-  const shellMode = options.alwaysExplicitShellWritesMode as unknown
-  const command =
-    shellMode === undefined || shellMode === null ? null : shellCommandOf(namespacedName, input)
-  const shell =
-    command && commandHasGhWrite(command) ? (shellMode === "observe" ? "observe" : "enforce") : null
-  if (listed === "enforce" || shell === "enforce") return "enforce"
-  return listed ?? shell
+  const githubTools = (
+    Array.isArray(options.alwaysExplicitGithubTools) ? options.alwaysExplicitGithubTools : []
+  )
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean)
+  const rawMode = options.alwaysExplicitGithubWritesMode as unknown
+  const githubMode =
+    rawMode === undefined || rawMode === null
+      ? githubTools.length > 0
+        ? "enforce"
+        : null
+      : rawMode === "observe"
+        ? "observe"
+        : "enforce"
+  const lower = namespacedName.trim().toLowerCase()
+  const listedGithubTool = githubTools.some(
+    (entry) => lower === entry || lower.endsWith(`__${entry}`)
+  )
+  const command = githubMode ? shellCommandOf(namespacedName, input) : null
+  const github =
+    githubMode && (listedGithubTool || (command && commandHasGhWrite(command))) ? githubMode : null
+  if (listed === "enforce" || github === "enforce") return "enforce"
+  return listed ?? github
 }
 
 export function needsApproval(

@@ -349,6 +349,21 @@ describe("run approvals", () => {
       await park.finish("cancelled")
     })
 
+    it("offers the request for a GitHub repository, and only this call for an unnamed one (ADR-0239 phase 2)", async () => {
+      const repository = {
+        kind: "repository" as const,
+        channel: "github",
+        recipient: "github:github.com/acme/web",
+        thread: "12",
+      }
+      const first = parkOutbound([repository])
+      expect((await firstApproval()).outbound).toEqual({
+        recipients: [repository],
+        allowForRequest: true,
+      })
+      await first.park.finish("cancelled")
+    })
+
     it("refuses a malformed forRequest, and never sends it with a deny", async () => {
       const { park, parked } = parkOutbound([named])
       const approval = await firstApproval()

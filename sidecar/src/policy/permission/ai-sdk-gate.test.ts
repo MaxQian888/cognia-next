@@ -831,7 +831,7 @@ test("an enforced shell gh write asks per call under bypass; a read does not", a
       permissionMode: "bypassPermissions",
       alwaysExplicitTools: ["im_broadcast"],
       alwaysExplicitToolsMode: "observe",
-      alwaysExplicitShellWritesMode: "enforce",
+      alwaysExplicitGithubWritesMode: "enforce",
     },
   })
   await gate("Bash", GH_WRITE)
@@ -843,13 +843,39 @@ test("an enforced shell gh write asks per call under bypass; a read does not", a
   assert.equal(frames.length, 1)
 })
 
+test("an enforced GitHub write tool asks even in bypass mode; another plugin's same short name does not", async () => {
+  const pending = new Map()
+  const frames: Array<Record<string, unknown>> = []
+  const tool = "mcp__cognia-plugin-tools__integration__github-delivery__github__commentpr"
+  const gate = createToolPermissionGate({
+    emit: (frame) => {
+      frames.push(frame)
+      queueMicrotask(() => pending.get(frame.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysExplicitGithubWritesMode: "enforce",
+      alwaysExplicitGithubTools: ["integration__github-delivery__github__commentpr"],
+    },
+  })
+  await gate(tool, { repoFullName: "acme/web", prNumber: 1 })
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.type, "permission_request")
+  assert.equal(frames[0]!.requiresPerCallApproval, true)
+  const other = { body: "x" }
+  assert.equal(await gate("mcp__other__commentpr", other), other)
+  assert.equal(frames.length, 1)
+})
+
 test("an observed shell gh write runs as before and is reported; unset, nothing is", async () => {
   const frames: Array<Record<string, unknown>> = []
   const gate = createToolPermissionGate({
     emit: (frame) => frames.push(frame),
     sessionId: "s",
     pendingApprovals: new Map(),
-    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitShellWritesMode: "observe" },
+    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitGithubWritesMode: "observe" },
   })
   assert.equal(await gate("Bash", GH_WRITE), GH_WRITE)
   assert.deepEqual(frames, [

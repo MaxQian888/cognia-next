@@ -157,6 +157,56 @@ describe("outbound permission requests on the desktop", () => {
     )
   })
 
+  it("plans GitHub writes too, and keeps an enforced one's card per call with its repository (ADR-0239 phase 2)", async () => {
+    const github: PendingOutboundReview = {
+      enforced: true,
+      targets: [
+        {
+          kind: "repository",
+          channel: "github",
+          recipient: "github:github.com/acme/web",
+          thread: "12",
+        },
+      ],
+      unauthorized: [
+        {
+          kind: "repository",
+          channel: "github",
+          recipient: "github:github.com/acme/web",
+          thread: "12",
+        },
+      ],
+    }
+    mockPlanOutboundAsk.mockResolvedValue({ answered: false, personOnly: true, review: github })
+    const tool = "mcp__cognia-plugin-tools__integration__github-delivery__github__commentpr"
+    await deliver(request("s1", tool), [tool])
+    expect(mockPlanOutboundAsk).toHaveBeenCalledTimes(1)
+    expect(mockApproveTool).not.toHaveBeenCalled()
+    expect(pending()).toEqual([
+      expect.objectContaining({
+        outbound: github,
+        suppressAlwaysAllowRule: true,
+        requiresPerCallApproval: true,
+      }),
+    ])
+  })
+
+  it("hands a shell call to the plan, which tells a gh write apart by its command", async () => {
+    // A `gh` read: the plan finds nothing to review and the allow list answers.
+    mockPlanOutboundAsk.mockResolvedValue(null)
+    await deliver({ ...request("s1", "Bash"), input: { command: "gh pr view 3" } }, ["Bash"])
+    expect(mockPlanOutboundAsk).toHaveBeenCalledTimes(1)
+    expect(mockApproveTool).toHaveBeenCalledWith(
+      "s1",
+      "req-1",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      { authority: "policy-rule" }
+    )
+  })
+
   it("records a shadow observation the sidecar reports", async () => {
     const event = {
       type: "explicit_tool_allowed",

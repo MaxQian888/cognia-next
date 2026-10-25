@@ -155,6 +155,26 @@ describe("<RunApprovalsCard />", () => {
       })
     })
 
+    it("names a GitHub write's repository and PR (ADR-0239 phase 2)", async () => {
+      const repository = {
+        kind: "repository",
+        channel: "github",
+        recipient: "github:github.com/acme/web",
+        thread: "12",
+      }
+      listReturns([
+        { ...toolApproval, outbound: { recipients: [repository], allowForRequest: true } },
+      ])
+      render(<RunApprovalsCard />)
+      const row = await screen.findByTestId("run-approval-tool-interrupt:r1:q1")
+      const recipient = row.querySelector('[data-testid="outbound-recipient"]')
+      // This suite renders translation keys: the PR form of a repository line.
+      expect(recipient).toHaveTextContent("recipientRepositoryThread")
+      expect(
+        screen.getByTestId("run-approval-allow-request-tool-interrupt:r1:q1")
+      ).toBeInTheDocument()
+    })
+
     it("offers only this call when the host says a recipient cannot be named", async () => {
       listReturns([{ ...toolApproval, outbound: { recipients: [chat], allowForRequest: false } }])
       render(<RunApprovalsCard />)

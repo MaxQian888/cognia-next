@@ -83,3 +83,42 @@ export const OUTBOUND_TOOL_IDS: ReadonlySet<string> = new Set([
 export function isOutboundToolId(id: string): boolean {
   return OUTBOUND_TOOL_IDS.has(normalizeToolId(id))
 }
+
+/**
+ * Shell tools by registered name: a call runs a command line, which may hold
+ * a `gh` write (ADR-0239 phase 2, `lib/policy/action-review/gh-targets.ts`).
+ */
+export const SHELL_TOOL_IDS: ReadonlySet<string> = new Set([
+  "bash",
+  "sandbox_bash",
+  "shell_execute_advanced",
+  "start_process",
+])
+
+/**
+ * True when a call might write to GitHub (ADR-0239 phase 2): an integration
+ * action (`integration__<plugin>__<integration>__<action>`), or a shell tool
+ * whose arguments mention `gh` (without `input`, any shell tool). Cheap, for
+ * hot paths deciding whether to load the outbound planner at all; the planner
+ * decides exactly from the parsed command and the integration registry.
+ */
+export function mayWriteToGithub(toolName: string, input?: unknown): boolean {
+  if (/(^|__)integration__[^_]/.test(toolName.trim().toLowerCase())) return true
+  if (!SHELL_TOOL_IDS.has(normalizeToolId(toolName))) return false
+  if (input === undefined) return true
+  let text: string
+  try {
+    text = typeof input === "string" ? input : (JSON.stringify(input) ?? "")
+  } catch {
+    return true
+  }
+  return /\bgh\b/.test(text)
+}
+
+/**
+ * True when the outbound policy may review this call: {@link isOutboundToolId}
+ * or {@link mayWriteToGithub}.
+ */
+export function mayBeOutboundCall(toolName: string, input?: unknown): boolean {
+  return isOutboundToolId(toolName) || mayWriteToGithub(toolName, input)
+}

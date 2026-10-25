@@ -91,8 +91,10 @@ export interface PermissionSendOptions {
   alwaysExplicitTools?: unknown
   /** `observe` reports shortcut allows instead of disarming them. */
   alwaysExplicitToolsMode?: unknown
-  /** The same for shell calls with a `gh` write (ADR-0239 phase 2); absent, not inspected. */
-  alwaysExplicitShellWritesMode?: unknown
+  /** The same for GitHub writes (ADR-0239 phase 2): shell `gh` writes and the tools below. */
+  alwaysExplicitGithubWritesMode?: unknown
+  /** GitHub write tools by full registered name, in that mode. */
+  alwaysExplicitGithubTools?: unknown
 }
 
 /**

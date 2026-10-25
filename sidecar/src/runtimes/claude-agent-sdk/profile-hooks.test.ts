@@ -253,7 +253,7 @@ function shellWriteHooks(mode: "observe" | "enforce") {
   const asked: string[] = []
   const frames: Array<Record<string, unknown>> = []
   const hooks = buildProfileToolHooks({
-    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitShellWritesMode: mode },
+    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitGithubWritesMode: mode },
     pluginToolNameAliases: new Map(),
     profileApprovals: new Set(),
     explicitSeen: new Set(),

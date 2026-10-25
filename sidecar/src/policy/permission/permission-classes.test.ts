@@ -200,18 +200,18 @@ test("a listed request is labelled outbound unless the profile names its class",
   )
 })
 
-test("shell gh writes are listed only when their own mode is set (ADR-0239 phase 2)", () => {
+test("shell gh writes are listed only when the GitHub writes mode is set (ADR-0239 phase 2)", () => {
   const write = { command: "cd web && gh pr create --fill" }
   const read = { command: "gh pr view 3" }
   // Absent: shell commands are not inspected, whatever the outbound list says.
   const listOnly = readExplicitToolPolicy(["send_email"], "enforce")
-  assert.equal(listOnly?.shellWrites, undefined)
+  assert.equal(listOnly?.githubWrites, undefined)
   assert.equal(isExplicitTool("Bash", listOnly, write), false)
   assert.equal(readExplicitToolPolicy(undefined, undefined, undefined), null)
   assert.equal(readExplicitToolPolicy(undefined, undefined, null), null)
 
   const observe = readExplicitToolPolicy(undefined, undefined, "observe")
-  assert.equal(observe?.shellWrites, "observe")
+  assert.equal(observe?.githubWrites, "observe")
   assert.equal(explicitToolObserved("Bash", observe, write), true)
   assert.equal(explicitToolMustAsk("Bash", observe, write), false)
   assert.equal(isExplicitTool("Bash", observe, read), false)
@@ -219,7 +219,7 @@ test("shell gh writes are listed only when their own mode is set (ADR-0239 phase
 
   for (const mode of ["enforce", "Observe", "shadow", 1]) {
     const policy = readExplicitToolPolicy(["send_email"], "observe", mode)
-    assert.equal(policy?.shellWrites, "enforce", String(mode))
+    assert.equal(policy?.githubWrites, "enforce", String(mode))
     assert.equal(explicitToolMustAsk("mcp__cognia-tools__bash", policy, write), true)
     // The messaging list keeps its own mode.
     assert.equal(explicitToolMode("send_email", policy, {}), "observe")
@@ -230,6 +230,32 @@ test("shell gh writes are listed only when their own mode is set (ADR-0239 phase
   assert.equal(explicitToolMode("send_email", enforce, write), undefined)
   assert.equal(explicitPolicyObserves(enforce), false)
   assert.equal(explicitPolicyObserves(null), false)
+})
+
+test("GitHub write tools are listed by full name in the GitHub writes mode (ADR-0239 phase 2)", () => {
+  const tool = "integration__github-delivery__github__commentpr"
+  const policy = readExplicitToolPolicy(["send_email"], "enforce", "observe", [
+    tool.toUpperCase(),
+    "",
+    7,
+  ])
+  assert.deepEqual([...(policy?.githubTools ?? [])], [tool])
+  assert.equal(explicitToolMode(tool, policy), "observe")
+  assert.equal(explicitToolMode(`mcp__cognia-plugin-tools__${tool}`, policy), "observe")
+  // Never by the short name: another plugin's or MCP server's commentpr is not it.
+  assert.equal(explicitToolMode("mcp__other__commentpr", policy), undefined)
+  assert.equal(explicitToolMode("integration__tracker__issues__commentpr", policy), undefined)
+  assert.equal(explicitToolMode(`x${tool}`, policy), undefined)
+  // The messaging list keeps its own mode.
+  assert.equal(explicitToolMode("send_email", policy), "enforce")
+
+  const enforce = readExplicitToolPolicy(undefined, undefined, "enforce", [tool])
+  assert.equal(explicitToolMustAsk(tool, enforce, {}), true)
+  // Listed without a mode, they still enforce.
+  const unmoded = readExplicitToolPolicy(undefined, undefined, undefined, [tool])
+  assert.equal(unmoded?.githubWrites, "enforce")
+  assert.equal(explicitToolMustAsk(tool, unmoded, {}), true)
+  assert.equal(readExplicitToolPolicy(undefined, undefined, undefined, []), null)
 })
 
 test("every shell tool spelling is inspected for gh writes", () => {

@@ -65,7 +65,7 @@ import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
-import { isOutboundToolId } from "@/lib/policy/risk/outbound-tools"
+import { mayBeOutboundCall } from "@/lib/policy/risk/outbound-tools"
 import { deepMerge } from "@/lib/a2ui/data-model"
 import { resolveStreamedRootId } from "@/lib/a2ui/component-tree"
 import {
@@ -1173,7 +1173,7 @@ async function captureAssistantReplyCore(
               const ask = { ...req, ...(rewritten ? { input: rewritten } : {}) }
               // ADR-0239: the outbound policy answers an outbound call first,
               // on the input it would actually send.
-              outcome = isOutboundToolId(ask.toolName)
+              outcome = mayBeOutboundCall(ask.toolName, ask.input)
                 ? await (
                     await import("@/lib/policy/action-review/plan-tool-call")
                   ).answerWithOutboundPolicy(ask, cap.outboundPolicy ?? { unattended: true }, (r) =>

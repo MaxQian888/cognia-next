@@ -841,21 +841,31 @@ export type SendOptions = {
   alwaysExplicitToolsMode?: "observe" | "enforce"
 
   /**
-   * The always-explicit rule for shell `gh` writes (ADR-0239 phase 2). A
-   * `Bash`, `sandbox_bash`, `shell_execute_advanced` or `start_process` call
-   * whose command has a `gh` invocation that writes to GitHub (`gh pr
-   * create`, `gh api -X POST …`, an unknown `gh` command) is treated like a
-   * tool in {@link alwaysExplicitTools}, in this mode: `observe` reports the
-   * calls a shortcut let through, anything else present asks on every call.
+   * The always-explicit rule for GitHub writes (ADR-0239 phase 2), treated
+   * like a tool in {@link alwaysExplicitTools} in this mode: `observe` reports
+   * the calls a shortcut let through, anything else present asks on every
+   * call. It covers
+   *
+   * - a `Bash`, `sandbox_bash`, `shell_execute_advanced` or `start_process`
+   *   call whose command has a `gh` invocation that writes to GitHub (`gh pr
+   *   create`, `gh api -X POST …`, an unknown `gh` command), and
+   * - a call to one of {@link alwaysExplicitGithubTools}.
    *
    * It has its own mode because it follows the GitHub category
    * (`agentPermissions.outboundAuthorizationByCategory.github`), not
-   * messaging. Absent, the gates do not inspect shell commands for it, and
-   * until the host reviews these calls (`resolveSendOptions`, phase 2 WP4) it
-   * is never set: the sidecar, Agent SDK hooks and CLI tool host carry the
-   * rule, pinned by their tests, but nothing turns it on.
+   * messaging: `resolveSendOptions` sets it on every turn, `observe` until a
+   * person enforces GitHub writes. Absent, the gates inspect neither.
    */
-  alwaysExplicitShellWritesMode?: "observe" | "enforce"
+  alwaysExplicitGithubWritesMode?: "observe" | "enforce"
+
+  /**
+   * The integration actions of this turn that write to GitHub, by full
+   * registered name (`integration__<plugin>__<integration>__<action>`,
+   * lowercased), in {@link alwaysExplicitGithubWritesMode}. Matched on the
+   * full name, never the last `__` segment, so another plugin's or MCP
+   * server's tool of the same short name is not listed.
+   */
+  alwaysExplicitGithubTools?: string[]
 
   /**
    * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar

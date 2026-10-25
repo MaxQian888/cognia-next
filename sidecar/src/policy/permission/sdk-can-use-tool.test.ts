@@ -345,7 +345,7 @@ test("an enforced shell gh write asks per call past an always-allow grant", asyn
   const pending = new Map<string, PendingApproval>()
   const frames: Array<Record<string, unknown>> = []
   const gate = mkGate(
-    { alwaysAllowTools: ["Bash"], alwaysExplicitShellWritesMode: "enforce" },
+    { alwaysAllowTools: ["Bash"], alwaysExplicitGithubWritesMode: "enforce" },
     {
       pendingApprovals: pending,
       emit: (frame) => {
@@ -365,7 +365,7 @@ test("an observed shell gh write a grant allows is reported once and marked seen
   const frames: Array<Record<string, unknown>> = []
   const seen = new Set<string>()
   const gate = createAnthropicCanUseTool({
-    sendOptions: { alwaysAllowTools: ["Bash"], alwaysExplicitShellWritesMode: "observe" },
+    sendOptions: { alwaysAllowTools: ["Bash"], alwaysExplicitGithubWritesMode: "observe" },
     sessionId: "s1",
     emit: (frame) => frames.push(frame),
     log: () => {},

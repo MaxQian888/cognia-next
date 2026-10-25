@@ -6378,6 +6378,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const plugins = usePluginStore.getState().plugins
     applyAlwaysExplicitTools(opts, {
       mode: readOutboundAuthorizationMode(appSettings),
+      githubMode: readOutboundAuthorizationMode(appSettings, "github"),
       pluginPermissions: (pluginId) => plugins[pluginId]?.manifest.permissions ?? [],
     })
   }

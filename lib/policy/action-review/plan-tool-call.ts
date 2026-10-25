@@ -27,6 +27,14 @@
  * A call a shortcut allowed inside the sidecar never asks at all; in shadow
  * mode the sidecar reports it (`explicit_tool_allowed`) and
  * {@link recordOutboundShadowObservation} writes its receipt.
+ *
+ * Phase 2 adds GitHub writes ({@link isOutboundToolCall}): a GitHub write
+ * action's tool, whose repository is on the account's host, and a shell call
+ * whose command has a `gh` write, whose write that names no repository lands
+ * on the session's checkout (its `origin` remote). They are planned in the
+ * GitHub category's mode, and a person's allow is recorded for the broker
+ * (`plan-integration.ts`), which then lets the call's job through without
+ * asking again.
  */
 
 import type { ExplicitToolAllowedEvent, PendingOutboundReview } from "@cognia/agent-config-types"
@@ -42,6 +50,13 @@ import { classifyRisk } from "@/lib/policy/risk/classify-risk"
 import { isOutboundToolId, normalizeToolId } from "@/lib/policy/risk/outbound-tools"
 
 import { authorizeOutboundToolCall, rememberPlannedOutboundToolCall } from "./authorized-tool-calls"
+import { ghWriteTargets, shellCommandOf } from "./gh-targets"
+import {
+  githubActionTargets,
+  githubWebHost,
+  githubWriteActionOf,
+  isGithubWriteCall,
+} from "./github-targets"
 import { annotateChatToolReview } from "./chat-tool-channel"
 import {
   extractOutboundTargets,
@@ -57,7 +72,12 @@ import {
   type OutboundPolicyGrantList,
   type OutboundSettingsLike,
 } from "./plan-context"
-import { humanOutboundGrant, planActionReview, type ActionReviewPlanResult } from "./policy"
+import {
+  humanOutboundGrant,
+  planActionReview,
+  readOutboundAuthorizationMode,
+  type ActionReviewPlanResult,
+} from "./policy"
 import { projectActionReviewSettled } from "./projection"
 import { resolveSessionRequestOrigin } from "./resolve-request-origin"
 
@@ -108,6 +128,95 @@ export interface OutboundToolPlannerOptions {
    * whose calls open no review (the CLI tool host) passes false.
    */
   annotateReview?: boolean
+  /** Where GitHub writes land. Defaults read the account and the checkout. */
+  github?: GithubCallContext
+}
+
+/** What a GitHub write's targets depend on outside the call (ADR-0239 phase 2). */
+export interface GithubCallContext {
+  /** The web host of an integration account (`githubWebHost`), or undefined. */
+  accountHost?: (pluginId: string, accountId: string) => Promise<string | undefined>
+  /** The `origin` remote of the session's checkout, or undefined. */
+  localRepository?: (sessionId: string) => Promise<string | undefined>
+}
+
+/**
+ * True when the outbound policy reviews this call: a phase 1 outbound tool,
+ * or a GitHub write (phase 2), which depends on the call's arguments for a
+ * shell command.
+ */
+export function isOutboundToolCall(toolName: string, input: unknown): boolean {
+  return isOutboundToolId(toolName) || isGithubWriteCall(toolName, input)
+}
+
+/** The mode a call's planning failure falls back to: its category's. */
+async function fallbackMode(
+  request: Pick<OutboundToolCallRequest, "toolName">,
+  options: OutboundToolPlannerOptions
+) {
+  const settings = await (options.settings ?? readAppSettings)()
+  return readOutboundAuthorizationMode(
+    settings,
+    isOutboundToolId(request.toolName) ? "messaging" : "github"
+  )
+}
+
+async function defaultAccountHost(
+  pluginId: string,
+  accountId: string
+): Promise<string | undefined> {
+  const [{ getIntegrationAccount }, { integrationApiBaseUrl }] = await Promise.all([
+    import("@/lib/db/integrations"),
+    import("@/lib/integrations/action-runner"),
+  ])
+  const account = await getIntegrationAccount(pluginId, accountId)
+  return account ? githubWebHost(await integrationApiBaseUrl(account)) : undefined
+}
+
+async function defaultLocalRepository(sessionId: string): Promise<string | undefined> {
+  const [{ resolveSessionCwd }, { gitRemotes }] = await Promise.all([
+    import("@/lib/workspace/session-cwd"),
+    import("@/lib/git/commands"),
+  ])
+  const cwd = await resolveSessionCwd(sessionId)
+  if (!cwd) return undefined
+  const remotes = await gitRemotes(cwd)
+  const origin = remotes.find((remote) => remote.name === "origin") ?? remotes[0]
+  return origin ? origin.pushUrl || origin.fetchUrl || undefined : undefined
+}
+
+async function quietly<T>(read: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await read()
+  } catch {
+    return undefined
+  }
+}
+
+/** Where a GitHub write lands: the action's repository, or the command's `gh` writes. */
+async function githubCallTargets(
+  request: OutboundToolCallRequest,
+  context: GithubCallContext = {}
+): Promise<OutboundTarget[]> {
+  const action = githubWriteActionOf(request.toolName)
+  if (action) {
+    const args =
+      request.input && typeof request.input === "object"
+        ? (request.input as Record<string, unknown>)
+        : {}
+    const host =
+      typeof args.accountId === "string" && args.accountId
+        ? await quietly(() =>
+            (context.accountHost ?? defaultAccountHost)(action.pluginId, args.accountId as string)
+          )
+        : undefined
+    return githubActionTargets(action.action, request.input, host ? { host } : {})
+  }
+  const command = shellCommandOf(request.toolName, request.input) ?? ""
+  const localRepository = await quietly(() =>
+    (context.localRepository ?? defaultLocalRepository)(request.sessionId)
+  )
+  return ghWriteTargets(command, localRepository ? { localRepository } : {})
 }
 
 export type OutboundToolPlanner = (
@@ -167,13 +276,16 @@ async function planCall(
   options: OutboundToolPlannerOptions,
   annotate: boolean
 ): Promise<OutboundToolCallPlan | null> {
-  if (!isOutboundToolId(request.toolName)) return null
+  const messaging = isOutboundToolId(request.toolName)
+  if (!messaging && !isGithubWriteCall(request.toolName, request.input)) return null
   const { origin, rootSessionId, instructionEpoch } = await originOf(request, options.origin)
   // A tool that names no bot (an `im_create_chat` with no `adapterId`) sends
   // through the bot of the conversation the run is bound to.
-  const targets = extractOutboundTargets(request.toolName, request.input, {
-    ...(origin.originThread ? { defaultAdapterId: origin.originThread.channel } : {}),
-  })
+  const targets = messaging
+    ? extractOutboundTargets(request.toolName, request.input, {
+        ...(origin.originThread ? { defaultAdapterId: origin.originThread.channel } : {}),
+      })
+    : await githubCallTargets(request, options.github)
   // The run's own lists (a Bot's), and the ones a person configured on the
   // bots and conversations these targets go through.
   const policyGrants = [
@@ -188,7 +300,10 @@ async function planCall(
     ...(policyGrants.length > 0 ? { policyGrants } : {}),
     ...(options.now ? { now: options.now() } : {}),
   })
-  const result = planActionReview({ verdict: "ask", targets }, context)
+  const result = planActionReview(
+    { verdict: "ask", targets, category: messaging ? "messaging" : "github" },
+    context
+  )
   if (request.toolUseID) {
     rememberPlannedOutboundToolCall({
       sessionId: request.sessionId,
@@ -254,12 +369,16 @@ export function outboundToolDecision(
   }
 }
 
-/** The recipients an approval card shows (ADR-0239 WP7 renders them). */
+/**
+ * The recipients an approval card shows (ADR-0239 WP7 renders them), with the
+ * PR or issue a GitHub write goes to (phase 2).
+ */
 export function pendingOutboundReview(plan: OutboundToolCallPlan): PendingOutboundReview {
   const view = (target: OutboundTarget) => ({
     kind: target.kind,
     channel: target.channel,
     recipient: target.recipient,
+    ...(target.thread ? { thread: target.thread } : {}),
   })
   return {
     targets: plan.targets.map(view),
@@ -379,7 +498,7 @@ export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
   options: OutboundToolPlannerOptions,
   respond: (request: R) => OutboundAwareDecision | Promise<OutboundAwareDecision>
 ): Promise<OutboundAwareDecision> {
-  if (!isOutboundToolId(request.toolName)) return respond(request)
+  if (!isOutboundToolCall(request.toolName, request.input)) return respond(request)
   let decision: OutboundToolDecision
   let review: PendingOutboundReview | undefined
   try {
@@ -388,8 +507,7 @@ export async function answerWithOutboundPolicy<R extends PermissionRequestLike>(
     if (plan) review = pendingOutboundReview(plan)
   } catch (error) {
     console.warn("[outbound] planning failed; leaving the call to a person", error)
-    const { readOutboundAuthorizationMode } = await import("./policy")
-    const mode = readOutboundAuthorizationMode(await (options.settings ?? readAppSettings)())
+    const mode = await fallbackMode(request, options)
     decision = mode === "enforce" ? { kind: "ask" } : { kind: "unchanged" }
   }
   switch (decision.kind) {
@@ -445,14 +563,13 @@ export async function planOutboundAsk(
     attribution: OutboundAttribution
   ) => Promise<void>
 ): Promise<OutboundAsk | null> {
-  if (!isOutboundToolId(request.toolName)) return null
+  if (!isOutboundToolCall(request.toolName, request.input)) return null
   let plan: OutboundToolCallPlan | null
   try {
     plan = await planOutboundToolCall(request, options)
   } catch (error) {
     console.error("[outbound] planning failed", error)
-    const { readOutboundAuthorizationMode } = await import("./policy")
-    const mode = readOutboundAuthorizationMode(await (options.settings ?? readAppSettings)())
+    const mode = await fallbackMode(request, options)
     return { answered: false, personOnly: mode === "enforce" }
   }
   if (!plan) return null

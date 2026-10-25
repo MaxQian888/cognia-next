@@ -1,6 +1,6 @@
 // Which `gh` (GitHub CLI) invocations in a shell command write to GitHub
 // (ADR-0239 phase 2), for the always-ask on shell `gh` writes
-// (`SendOptions.alwaysExplicitShellWritesMode`, ../permission/permission-classes.ts).
+// (`SendOptions.alwaysExplicitGithubWritesMode`, ../permission/permission-classes.ts).
 //
 // The sidecar's copy of the kind tables in
 // `packages/plugin-contract/src/lib/claude/permissions/gh-command.ts`: it

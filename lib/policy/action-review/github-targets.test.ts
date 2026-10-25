@@ -11,6 +11,8 @@ import {
   githubToolCallTargets,
   githubWebHost,
   githubWriteActionOf,
+  isGithubIntegration,
+  isGithubWriteCall,
   isGithubWriteTool,
 } from "./github-targets"
 import { repositoryTarget, unknownGithubTarget } from "./outbound-targets"
@@ -205,5 +207,27 @@ describe("githubToolCallTargets", () => {
     expect(githubToolCallTargets("Bash", { command: "gh pr view 5" })).toEqual([])
     expect(githubToolCallTargets(tool("github-delivery", "github", "getIssue"), {})).toEqual([])
     expect(githubToolCallTargets("send_email", { to: "a@b.co" })).toEqual([])
+  })
+})
+
+describe("isGithubWriteCall", () => {
+  it("is a GitHub write tool, or a shell call with a gh write", () => {
+    expect(isGithubWriteCall(tool("github-delivery", "github", "commentPr"), {})).toBe(true)
+    expect(isGithubWriteCall(tool("github-delivery", "github", "getIssue"), {})).toBe(false)
+    expect(isGithubWriteCall("Bash", { command: "gh issue close 3" })).toBe(true)
+    expect(isGithubWriteCall("Bash", { command: "gh issue view 3" })).toBe(false)
+    expect(isGithubWriteCall("Read", { command: "gh issue close 3" })).toBe(false)
+  })
+})
+
+describe("isGithubIntegration", () => {
+  it("is the github integration, or one with a GitHub operation", () => {
+    expect(isGithubIntegration(definition("github", []))).toBe(true)
+    expect(
+      isGithubIntegration(
+        definition("forge", [{ ...action("c", "write"), operationId: "github.commentPr" }])
+      )
+    ).toBe(true)
+    expect(isGithubIntegration(definition("issues", [action("c", "write")]))).toBe(false)
   })
 })

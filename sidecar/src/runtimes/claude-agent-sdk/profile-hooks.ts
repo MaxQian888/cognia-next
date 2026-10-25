@@ -85,7 +85,8 @@ export function buildProfileToolHooks({
   const explicitTools = readExplicitToolPolicy(
     sendOptions.alwaysExplicitTools,
     sendOptions.alwaysExplicitToolsMode,
-    sendOptions.alwaysExplicitShellWritesMode
+    sendOptions.alwaysExplicitGithubWritesMode,
+    sendOptions.alwaysExplicitGithubTools
   )
   if (
     !profile &&

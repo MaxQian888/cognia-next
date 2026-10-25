@@ -18,11 +18,18 @@
  * put them in an unattended profile's `outbound` class, which asks on every
  * call even in shadow mode and would park every unattended IM team run. They
  * are listed here by name instead.
+ *
+ * GitHub writes (phase 2) follow the GitHub category's mode instead, stamped
+ * as `alwaysExplicitGithubWritesMode`: shell `gh` writes, which the gates find
+ * in the command, and the turn's GitHub write actions
+ * (`alwaysExplicitGithubTools`), listed by their full registered name because
+ * their short names (`commentpr`) are shared with other plugins' tools.
  */
 
 import type { SendOptions } from "@cognia/agent-config-types"
 
 import type { OutboundAuthorizationMode } from "@/lib/policy/action-review/policy"
+import { isGithubWriteTool } from "@/lib/policy/action-review/github-targets"
 import { normalizeToolId, OUTBOUND_TOOL_IDS } from "@/lib/policy/risk/outbound-tools"
 
 import { classesForPluginTool } from "./unattended-permission-options"
@@ -30,7 +37,10 @@ import { classesForPluginTool } from "./unattended-permission-options"
 type PluginTool = NonNullable<SendOptions["pluginTools"]>[number]
 
 export interface AlwaysExplicitToolsDeps {
+  /** The messaging mode. */
   mode: OutboundAuthorizationMode
+  /** The GitHub category's mode, for GitHub writes. */
+  githubMode: OutboundAuthorizationMode
   /** The declaring plugin's manifest permissions, or empty when it has none. */
   pluginPermissions: (pluginId: string) => readonly string[]
 }
@@ -49,12 +59,27 @@ export function alwaysExplicitToolNames(
   return [...names].sort()
 }
 
-/** Stamp the list and its mode. Shadow mode observes; only `enforce` enforces. */
+/** The turn's GitHub write actions, by full registered name, lowercased and sorted. */
+export function alwaysExplicitGithubToolNames(
+  pluginTools: readonly PluginTool[] | undefined
+): string[] {
+  const names = new Set<string>()
+  for (const tool of pluginTools ?? []) {
+    if (isGithubWriteTool(tool.name)) names.add(tool.name.trim().toLowerCase())
+  }
+  return [...names].sort()
+}
+
+/** Stamp the lists and their modes. Shadow mode observes; only `enforce` enforces. */
 export function applyAlwaysExplicitTools(
   opts: SendOptions,
   deps: AlwaysExplicitToolsDeps
 ): SendOptions {
   opts.alwaysExplicitTools = alwaysExplicitToolNames(opts.pluginTools, deps.pluginPermissions)
   opts.alwaysExplicitToolsMode = deps.mode === "enforce" ? "enforce" : "observe"
+  opts.alwaysExplicitGithubWritesMode = deps.githubMode === "enforce" ? "enforce" : "observe"
+  const githubTools = alwaysExplicitGithubToolNames(opts.pluginTools)
+  if (githubTools.length > 0) opts.alwaysExplicitGithubTools = githubTools
+  else delete opts.alwaysExplicitGithubTools
   return opts
 }

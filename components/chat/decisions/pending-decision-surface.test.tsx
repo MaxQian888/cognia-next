@@ -451,6 +451,26 @@ describe("<PendingDecisionSurface /> — outbound ask (ADR-0239)", () => {
     expect(onRespond).toHaveBeenCalledWith("allow", { forRequest: true })
   })
 
+  it("names a GitHub write's repository and PR, and offers it for the request (ADR-0239 phase 2)", () => {
+    const repository: PendingOutboundTarget = {
+      kind: "repository",
+      channel: "github",
+      recipient: "github:github.com/acme/web",
+      thread: "12",
+    }
+    render(
+      <PendingDecisionSurface
+        decision={{ kind: "tool-approval", approval: outboundAsk([repository]) }}
+        onApprovalRespond={jest.fn()}
+      />
+    )
+    const [recipient] = screen.getAllByTestId("outbound-recipient")
+    expect(recipient).toHaveTextContent(/acme\/web/)
+    expect(recipient).toHaveTextContent(/12/)
+    expect(screen.getByTestId("decision-allow-for-request")).toBeInTheDocument()
+    expect(screen.queryByTestId("decision-allow-always")).not.toBeInTheDocument()
+  })
+
   it("changes nothing in shadow mode, and shows an observer no recipients", () => {
     const { rerender } = render(
       <PendingDecisionSurface

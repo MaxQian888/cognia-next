@@ -11,14 +11,28 @@ import {
   settleChatToolReview,
 } from "./chat-tool-channel"
 import {
+  __resetIntegrationRegistryForTesting,
+  integrationToolName,
+  registerIntegrationDefinitions,
+} from "@/lib/integrations/registry"
+
+import {
   __resetAuthorizedToolCallsForTesting,
   authorizedOutboundToolCall,
+  beginOutboundToolExecution,
 } from "./authorized-tool-calls"
-import { conversationTarget, outboundFingerprint } from "./outbound-targets"
+import {
+  conversationTarget,
+  outboundFingerprint,
+  repositoryTarget,
+  unknownGithubTarget,
+} from "./outbound-targets"
+import { planIntegrationWrite } from "./plan-integration"
 import { taskPlanOrigin } from "./plan-context"
 import {
   answerWithOutboundPolicy,
   humanOutboundGrant,
+  isOutboundToolCall,
   outboundFenceMessage,
   outboundToolDecision,
   planOutboundAsk,
@@ -463,5 +477,212 @@ describe("the authorized call, for the delivery it makes (ADR-0239)", () => {
   it("remembers nothing for a request that names no tool use", async () => {
     await answerWithOutboundPolicy(send(THREAD_KEY), options(), jest.fn())
     expect(authorizedOutboundToolCall("chat", "r1")).toBeUndefined()
+  })
+})
+
+describe("GitHub writes (ADR-0239 phase 2)", () => {
+  const GITHUB_ENFORCE = {
+    agentPermissions: { outboundAuthorizationByCategory: { github: "enforce" } },
+  }
+  const PR_12 = repositoryTarget("acme/web", 12)!
+  const comment = `mcp__cognia-plugin-tools__${integrationToolName("github-delivery", "github", "commentPr")}`
+  const read = integrationToolName("github-delivery", "github", "getIssue")
+
+  beforeEach(() => {
+    __resetIntegrationRegistryForTesting()
+    const action = (id: string, risk: "read" | "write") => ({
+      id,
+      label: id,
+      handler: id,
+      inputSchema: {},
+      risk,
+      idempotency: "required" as const,
+      scopeSelectors: [{ kind: "repository", jsonPointer: "/repoFullName" }],
+    })
+    registerIntegrationDefinitions({
+      pluginId: "github-delivery",
+      definitions: [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [],
+          resourceKinds: [],
+          eventTypes: [],
+          actions: [action("commentPr", "write"), action("getIssue", "read")],
+        },
+      ],
+      handlers: { "github:commentPr": async () => ({}), "github:getIssue": async () => ({}) },
+    })
+  })
+  afterEach(() => __resetIntegrationRegistryForTesting())
+
+  function github(extra: Partial<OutboundToolPlannerOptions> = {}): OutboundToolPlannerOptions {
+    return {
+      unattended: false,
+      settings: () => GITHUB_ENFORCE,
+      origin: { rootSessionId: "chat", instructionEpoch: "msg:u1", originThread: PR_12 },
+      github: {
+        accountHost: async () => "github.com",
+        localRepository: async () => "git@github.com:acme/web.git",
+      },
+      ...extra,
+    }
+  }
+  const call = (toolName: string, input: Record<string, unknown>, requestId = "r1") => ({
+    sessionId: "chat",
+    requestId,
+    toolName,
+    input,
+  })
+  const commentOn = (prNumber: number, requestId = "r1") =>
+    call(comment, { accountId: "acct", repoFullName: "acme/web", prNumber, body: "hi" }, requestId)
+
+  it("reviews GitHub write tools and shell gh writes, and nothing else new", () => {
+    expect(isOutboundToolCall(comment, {})).toBe(true)
+    expect(isOutboundToolCall(read, {})).toBe(false)
+    expect(isOutboundToolCall("Bash", { command: "gh pr merge 3 -R acme/web" })).toBe(true)
+    expect(isOutboundToolCall("Bash", { command: "gh pr view 3" })).toBe(false)
+    expect(isOutboundToolCall("Bash", { command: "ls" })).toBe(false)
+    expect(isOutboundToolCall("mcp__other__commentpr", {})).toBe(false)
+    expect(isOutboundToolCall("send_message", {})).toBe(true)
+  })
+
+  it("answers a reply on the PR the request came from, and asks for another with its thread", async () => {
+    const respond = jest.fn(async () => ({ decision: "allow" as const, forRequest: true }))
+    await expect(answerWithOutboundPolicy(commentOn(12), github(), respond)).resolves.toEqual({
+      decision: "allow",
+      attribution: { authority: "policy-default" },
+    })
+    expect(respond).not.toHaveBeenCalled()
+
+    const answer = await answerWithOutboundPolicy(commentOn(13, "r2"), github(), respond)
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requiresPerCallApproval: true,
+        suppressAlwaysAllowRule: true,
+        outbound: {
+          enforced: true,
+          targets: [
+            {
+              kind: "repository",
+              channel: "github",
+              recipient: "github:github.com/acme/web",
+              thread: "13",
+            },
+          ],
+          unauthorized: [expect.objectContaining({ thread: "13" })],
+        },
+      })
+    )
+    // The widest grant is the rest of the request, for the whole repository.
+    expect(answer).toEqual({ decision: "allow", grant: { scope: "instruction" } })
+  })
+
+  it("names the account's GitHub Enterprise host", async () => {
+    const plan = await planOutboundToolCall(
+      commentOn(4),
+      github({ github: { accountHost: async () => "ghe.corp.io" } })
+    )
+    expect(plan?.targets).toEqual([repositoryTarget("ghe.corp.io/acme/web", 4)])
+  })
+
+  it("puts a gh write that names no repository on the session's checkout", async () => {
+    const plan = await planOutboundToolCall(
+      call("Bash", { command: "gh pr comment 12 -b thanks" }),
+      github()
+    )
+    expect(plan?.targets).toEqual([PR_12])
+    expect(plan && outboundToolDecision(plan, "Bash")).toMatchObject({ kind: "allow" })
+
+    // After a `cd`, the checkout is not known: never granted, always asked.
+    const moved = await planOutboundToolCall(
+      call("Bash", { command: "cd ../api && gh pr comment 12 -b thanks" }, "r2"),
+      github()
+    )
+    expect(moved?.targets).toEqual([unknownGithubTarget()])
+    expect(moved && outboundToolDecision(moved, "Bash")).toEqual({ kind: "ask" })
+    const outsideCheckout = await planOutboundToolCall(
+      call("Bash", { command: "gh pr create --fill" }, "r3"),
+      github({ github: { localRepository: async () => undefined } })
+    )
+    expect(outsideCheckout?.targets).toEqual([unknownGithubTarget()])
+  })
+
+  it("is enforced by the GitHub category, not by messaging", async () => {
+    const messagingOnly = github({ settings: () => ENFORCE })
+    const plan = await planOutboundToolCall(commentOn(13), messagingOnly)
+    expect(plan?.result.plan.enforced).toBe(false)
+    const ask = await planOutboundAsk(commentOn(13, "r2"), messagingOnly, jest.fn())
+    expect(ask).toMatchObject({ answered: false, personOnly: false })
+  })
+
+  it("leaves the call to a person when planning fails under GitHub enforcement", async () => {
+    const error = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    const failing = github({
+      origin: async () => {
+        throw new Error("db closed")
+      },
+    })
+    await expect(planOutboundAsk(commentOn(13), failing, jest.fn())).resolves.toEqual({
+      answered: false,
+      personOnly: true,
+    })
+    await expect(
+      planOutboundAsk(commentOn(13), { ...failing, settings: () => ENFORCE }, jest.fn())
+    ).resolves.toEqual({ answered: false, personOnly: false })
+    error.mockRestore()
+  })
+
+  it("fences the repository after a person's Deny on its card, on any PR", async () => {
+    await openChatToolReview({ sessionId: "chat", requestId: "r1", toolName: comment })
+    await planOutboundToolCall(commentOn(13, "r1"), github())
+    await recordChatToolApprovalDecision({ sessionId: "chat", requestId: "r1" }, "deny")
+    const again = await planOutboundToolCall(commentOn(12, "r2"), github())
+    expect(again?.result.plan.outcome).toBe("deny")
+  })
+
+  it("records a shell gh write a shortcut let through in shadow mode", async () => {
+    await recordOutboundShadowObservation(
+      {
+        sessionId: "chat",
+        toolUseID: "tu-gh",
+        toolName: "Bash",
+        input: { command: "gh pr merge 13 --squash -R acme/web" },
+      },
+      github({ settings: () => ({}) })
+    )
+    const [row] = await receipts()
+    expect(row).toMatchObject({
+      id: "explicit:tu-gh",
+      request: {
+        plan: { outcome: "ask", enforced: false },
+        subject: {
+          targets: [{ channel: "github", fingerprint: outboundFingerprint(PR_12) }],
+        },
+      },
+    })
+  })
+
+  it("lets the broker run the job of a call a person allowed, without asking again", async () => {
+    const request = { ...commentOn(13), toolUseID: "toolu_gh" }
+    await answerWithOutboundPolicy(request, github(), async () => ({ decision: "allow" as const }))
+    beginOutboundToolExecution("chat", "toolu_gh", "plugin:github-delivery")
+    await expect(
+      planIntegrationWrite(
+        {
+          targets: [repositoryTarget("acme/web", 13)!],
+          operation: "github.commentPr",
+          authorization: { kind: "tool-call", pluginId: "github-delivery", sessionId: "chat" },
+        },
+        {
+          settings: () => GITHUB_ENFORCE,
+          resolveSessionOrigin: async () => ({ rootSessionId: "chat", instructionEpoch: "msg:u1" }),
+          listAuthKeys: async () => [],
+        }
+      )
+    ).resolves.toMatchObject({
+      action: "proceed",
+      authorizedBy: { receiptId: "r1", authority: "human", grantScope: "once" },
+    })
   })
 })

@@ -112,7 +112,7 @@ import type {
   PermissionRequestEvent,
   SDKEventEnvelope,
 } from "@cognia/agent-config-types"
-import { isOutboundToolId } from "@/lib/policy/risk/outbound-tools"
+import { mayBeOutboundCall } from "@/lib/policy/risk/outbound-tools"
 import { isSubSessionId } from "@/lib/claude/team-session-id"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
@@ -374,7 +374,8 @@ function denyTimedOutApproval(approval: PendingApproval, ownerSessionId: string)
  * sees it (ADR-0239); see `planOutboundAsk` for what each answer means.
  */
 async function planOutboundAsk(evt: PermissionRequestEvent, unattended: boolean) {
-  if (!isOutboundToolId(evt.toolName)) return null
+  // A GitHub write (ADR-0239 phase 2) is told apart by its arguments there.
+  if (!mayBeOutboundCall(evt.toolName, evt.input)) return null
   const { planOutboundAsk: plan } = await import("@/lib/policy/action-review/plan-tool-call")
   return plan(
     evt,

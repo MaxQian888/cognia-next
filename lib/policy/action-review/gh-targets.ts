@@ -19,7 +19,7 @@
 import { splitCommandSegments } from "@/lib/claude/permissions/command-parse"
 import { extractCommand } from "@/lib/claude/permissions/command-from-tool"
 import { peelCommandWrappers } from "@/lib/claude/permissions/command-safety"
-import { normalizeToolId } from "@/lib/policy/risk/outbound-tools"
+import { normalizeToolId, SHELL_TOOL_IDS } from "@/lib/policy/risk/outbound-tools"
 import {
   classifyGhArgs,
   type GhEnvironment,
@@ -66,8 +66,22 @@ export function commandHasGhWrite(command: string): boolean {
 }
 
 export interface GhTargetContext {
-  /** The checkout's `origin` remote, for a write that names no repository. */
+  /**
+   * The checkout's `origin` remote, for a write that names no repository.
+   * Ignored for a command that changes directory (`cd`, `pushd`): its `gh`
+   * may run in another checkout, so such a write names no repository.
+   */
   localRepository?: string
+}
+
+const DIRECTORY_CHANGERS: ReadonlySet<string> = new Set(["cd", "pushd", "popd"])
+
+/** True when some segment of the command changes the working directory. */
+export function commandChangesDirectory(command: string): boolean {
+  return splitCommandSegments(command).some((segment) => {
+    const peeled = peelCommandWrappers(segment.head, segment.args)
+    return DIRECTORY_CHANGERS.has((peeled?.head ?? segment.head).toLowerCase())
+  })
 }
 
 /** Each target once, a repository with different threads kept apart. */
@@ -96,10 +110,11 @@ function invocationTargets(invocation: GhInvocation, context: GhTargetContext): 
 
 /** Where a command's `gh` writes land, deduplicated. `[]` when it writes nothing. */
 export function ghWriteTargets(command: string, context: GhTargetContext = {}): OutboundTarget[] {
+  const writes = ghInvocations(command).filter((invocation) => invocation.kind === "write")
+  if (writes.length === 0) return []
+  const effective = commandChangesDirectory(command) ? {} : context
   return dedupeGithubTargets(
-    ghInvocations(command)
-      .filter((invocation) => invocation.kind === "write")
-      .flatMap((invocation) => invocationTargets(invocation, context))
+    writes.flatMap((invocation) => invocationTargets(invocation, effective))
   )
 }
 
@@ -111,8 +126,11 @@ const SHELL_TOOLS: Readonly<Record<string, string>> = {
   start_process: "start_process",
 }
 
-/** The tool names whose calls run a shell command, by registered name. */
-export const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(SHELL_TOOLS))
+/**
+ * The tool names whose calls run a shell command, by registered name: the
+ * shared list in `outbound-tools.ts`, each with its input shape above.
+ */
+export const SHELL_TOOL_NAMES: ReadonlySet<string> = SHELL_TOOL_IDS
 
 /** The command line a shell tool call runs, or null for any other tool. */
 export function shellCommandOf(toolName: string, input: unknown): string | null {

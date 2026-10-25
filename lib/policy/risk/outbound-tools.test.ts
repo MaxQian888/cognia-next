@@ -4,6 +4,9 @@ import {
   OUTBOUND_TOOL_IDS,
   OUTBOUND_TOOLS_OUTSIDE_RISK,
   RISK_EXTERNAL_SEND_TOOL_IDS,
+  mayBeOutboundCall,
+  mayWriteToGithub,
+  SHELL_TOOL_IDS,
 } from "./outbound-tools"
 
 describe("normalizeToolId", () => {
@@ -70,5 +73,41 @@ describe("outbound tool lists", () => {
   it("matches MCP wire names", () => {
     expect(isOutboundToolId("mcp__cognia-skills__im_broadcast")).toBe(true)
     expect(isOutboundToolId("mcp__cognia-team__team_post_to_chat")).toBe(true)
+  })
+})
+
+describe("mayWriteToGithub (ADR-0239 phase 2)", () => {
+  it("is true for shell tools and integration actions, by name only", () => {
+    for (const name of [
+      "Bash",
+      "mcp__cognia-tools__sandbox_bash",
+      "shell_execute_advanced",
+      "start_process",
+      "integration__github-delivery__github__commentpr",
+      "mcp__cognia-plugin-tools__integration__github-delivery__github__mergepr",
+    ]) {
+      expect(mayWriteToGithub(name)).toBe(true)
+    }
+    for (const name of ["Read", "send_email", "mcp__github__create_issue", "my_integration_tool"]) {
+      expect(mayWriteToGithub(name)).toBe(false)
+    }
+    expect([...SHELL_TOOL_IDS].sort()).toEqual(
+      ["bash", "sandbox_bash", "shell_execute_advanced", "start_process"].sort()
+    )
+  })
+
+  it("passes a shell call on only when its arguments mention gh", () => {
+    expect(mayWriteToGithub("Bash", { command: "gh pr create" })).toBe(true)
+    expect(mayWriteToGithub("Bash", { command: "cd x && gh api -X POST y" })).toBe(true)
+    expect(mayWriteToGithub("start_process", { program: "gh", args: ["pr", "merge"] })).toBe(true)
+    expect(mayWriteToGithub("Bash", { command: "ls -la" })).toBe(false)
+    expect(mayWriteToGithub("Bash", { command: "echo ghost" })).toBe(false)
+    expect(mayWriteToGithub("integration__p__github__mergepr", {})).toBe(true)
+  })
+
+  it("adds GitHub candidates to the outbound tools for a cheap gate", () => {
+    expect(mayBeOutboundCall("im_broadcast")).toBe(true)
+    expect(mayBeOutboundCall("Bash")).toBe(true)
+    expect(mayBeOutboundCall("Read")).toBe(false)
   })
 })

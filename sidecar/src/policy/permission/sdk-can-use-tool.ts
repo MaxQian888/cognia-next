@@ -116,7 +116,8 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     explicitTools: readExplicitToolPolicy(
       sendOptions.alwaysExplicitTools,
       sendOptions.alwaysExplicitToolsMode,
-      sendOptions.alwaysExplicitShellWritesMode
+      sendOptions.alwaysExplicitGithubWritesMode,
+      sendOptions.alwaysExplicitGithubTools
     ),
   }
 }

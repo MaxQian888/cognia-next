@@ -1,4 +1,5 @@
 import {
+  commandChangesDirectory,
   commandHasGhWrite,
   dedupeGithubTargets,
   ghInvocations,
@@ -88,5 +89,29 @@ describe("dedupeGithubTargets", () => {
     expect(dedupeGithubTargets([a, a, repositoryTarget("a/b", 2)!, unknownGithubTarget()])).toEqual(
       [a, repositoryTarget("a/b", 2), unknownGithubTarget()]
     )
+  })
+})
+
+describe("a command that changes directory", () => {
+  it("is recognised in any segment, behind wrappers too", () => {
+    expect(commandChangesDirectory("cd web && gh pr create")).toBe(true)
+    expect(commandChangesDirectory("(cd web; gh pr create)")).toBe(true)
+    expect(commandChangesDirectory("pushd web && gh pr create && popd")).toBe(true)
+    expect(commandChangesDirectory("gh pr create --fill")).toBe(false)
+    expect(commandChangesDirectory("echo cd && gh pr create")).toBe(false)
+  })
+
+  it("does not put a gh write that names no repository on the checkout", () => {
+    const context = { localRepository: "git@github.com:acme/web.git" }
+    expect(ghWriteTargets("gh pr comment 3 -b x", context)).toEqual([
+      repositoryTarget("acme/web", 3),
+    ])
+    expect(ghWriteTargets("cd ../api && gh pr comment 3 -b x", context)).toEqual([
+      unknownGithubTarget(),
+    ])
+    // A write that names its repository still does.
+    expect(ghWriteTargets("cd ../api && gh pr comment 3 -R acme/api -b x", context)).toEqual([
+      repositoryTarget("acme/api", 3),
+    ])
   })
 })

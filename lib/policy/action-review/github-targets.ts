@@ -23,6 +23,7 @@ import {
 import type { IntegrationActionDef } from "@/types/plugin/plugin-integration"
 
 import {
+  commandHasGhWrite,
   dedupeGithubTargets,
   ghWriteTargets,
   shellCommandOf,
@@ -68,6 +69,16 @@ export function githubWriteActionOf(toolName: string): RegisteredIntegrationActi
 /** True when calling `toolName` performs a GitHub write through an integration. */
 export function isGithubWriteTool(toolName: string): boolean {
   return githubWriteActionOf(toolName) !== undefined
+}
+
+/**
+ * True when this call writes to GitHub: a GitHub write action's tool, or a
+ * shell call whose command has a `gh` write.
+ */
+export function isGithubWriteCall(toolName: string, input: unknown): boolean {
+  if (isGithubWriteTool(toolName)) return true
+  const command = shellCommandOf(toolName, input)
+  return command !== null && commandHasGhWrite(command)
 }
 
 function positiveInteger(value: unknown): string | undefined {
