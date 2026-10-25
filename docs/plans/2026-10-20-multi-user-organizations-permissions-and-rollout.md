@@ -465,7 +465,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
    - **Known gaps:**
      - A reply whose frame passes 200 KiB stops live delivery for that turn; the timeline catches it up at settle.
      - Agent stdout reaches the brain over the Host's event bus, which closes a lagging subscriber; a burst that lags the brain's socket can corrupt a turn. Per-device fan-out of purge invalidations (`publish_person_to`) is one such burst.
-     - The Host's title replaces the browser's optimistic title after the first turn, which briefly re-mounts the transcript.
+     - ~~The Host's title replaces the browser's optimistic title after the first turn, which briefly re-mounts the transcript.~~ Fixed by item 15.
 
 9. **Readable member turn failures (P6c follow-up, 2026-10-25).**
    - **Decisions:** a failed turn carries the runtime's failure code into HostState, and a member's devices show the diagnostics catalog's explanation for it (or for the code a refused send failed with) as the chat banner. Only a short identifier crosses: never the provider's message or body.
@@ -552,6 +552,21 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - `lib/fleet/execution-workers.ts`: `executionWorkersReachable(host)`. The device rows poll skips the worker list, and the settings workers card says why (`settings.fleet.workers.notAdmin`) with enrolling disabled.
     - **Verified (2026-10-26, P6f rig, owner Ada's browser):** the page shows the four rows in the record. Over 50 s nothing is refused, where `fleet_worker_list` had been refused every 5 s.
     - **Known gaps:** at page load, before the Host's manifest lands, each section and the worker list still ask once and are refused once.
+
+15. **A conversation keeps its first-message title (P6 follow-up, 2026-10-26).**
+    - **Decisions:**
+      - The bug was two writers. The Host gave its `sessions` row the first message's opening words, while the conversation's HostState channel kept the "New conversation" from `session.create`. Every replica writes the channel's title over its own row on each confirmed update, so a paired browser's title flipped to the preview and back to "New conversation" for good, sidebar included.
+      - The Host now names the channel too. A `session.renamed` of its own, committed just before the first message is queued, keeps the row and the channel in step, and every client already reads the mutation. Nothing new crosses the wire.
+      - Only a placeholder is replaced, read inside the commit, so a rename that lands first wins. The id is the message's action id, so a redelivered send names nothing twice.
+    - **Surface:**
+      - `lib/chat/placeholder-title.ts`: `instantSessionTitle(text)`, the one rule (whitespace folded, at most 40 characters), used by the row write and the channel.
+      - `lib/sync/host-state-service.ts`: `nameFromFirstMessage`, through `commitHostStateRuntimeProjection`, whose mutation callback may now return `null` to commit nothing.
+      - `lib/sync/host-state-store.ts`: a HostState `session.rename` now also sets `titleAuto: false` on the Host's row, as a local rename does.
+      - Smoke: the persons tier creates an untitled conversation and checks that the Host's channel carries its first message's title.
+    - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):**
+      - The persons smoke is green with the new check.
+      - In the browser, Ada's new conversation went from "New conversation" to its first message's title and kept it, header and sidebar both. The transcript did not remount after the title change: the only swap is the welcome screen giving way to the chat on send.
+    - **Known gaps:** the browser does not generate a model-written title for a HostState conversation; it keeps the 40-character preview. One smoke run in two missed the agent reply's settled live frame on a turn that finished in about a second; the rerun was green.
 
 **Intentional dormancy (Rule 7).**
 

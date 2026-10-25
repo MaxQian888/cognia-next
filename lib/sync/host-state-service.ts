@@ -77,6 +77,7 @@ import {
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
+import { instantSessionTitle, isPlaceholderTitle } from "@/lib/chat/placeholder-title"
 import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 
 export const HOST_STATE_ACTION_TOPIC = "host-state://action"
@@ -1504,6 +1505,9 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
                 partition: options.authorization === "person-partition",
               })
             : undefined
+        if (action.action.kind === "message.enqueue" && decision.mutation) {
+          await nameFromFirstMessage(action)
+        }
         // The workspace the conversation is leaving, read before the commit
         // rewrites the row, for the roster relink below.
         const movedFrom =
@@ -1611,6 +1615,44 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       await processRow(row)
       return committed.event
     },
+  }
+
+  /**
+   * Give a conversation still on its placeholder its first message's opening
+   * words as its title, in the channel.
+   *
+   * The `sessions` row takes them when the message is committed
+   * (`host-state-store.ts`), but the channel kept the title `session.create`
+   * gave it, and every replica writes the channel's title over its own row on
+   * each confirmed update. So a paired browser's conversation flipped to the
+   * preview and back to "New conversation" for good. A `session.renamed` of the
+   * Host's own, committed just before the message is queued, keeps the two in
+   * step, and every client already knows the mutation.
+   *
+   * Read inside the commit, so a rename that landed meanwhile wins. Its id is
+   * the message's action id, so a redelivered send names nothing twice.
+   */
+  async function nameFromFirstMessage(action: HostStateAction): Promise<void> {
+    if (generation === null || action.action.kind !== "message.enqueue") return
+    const title = instantSessionTitle(action.action.text)
+    if (!title) return
+    const envelopeId = `instant-title:${action.actionId}`
+    const committed = await commitHostStateRuntimeProjection({
+      hostId: options.hostId,
+      hostGeneration: generation,
+      ownerId: options.ownerId,
+      channel: action.channel,
+      envelopeId,
+      envelopeDigest: hostStateDigest({ actionId: action.actionId, title }),
+      mutation: (state) =>
+        state.kind === "session" && isPlaceholderTitle(state.title)
+          ? { kind: "session.renamed", title, revision: state.revision + 1 }
+          : null,
+      now: now(),
+    })
+    if (!committed.event || committed.duplicate) return
+    const row = await getHostStateAction(generation, `runtime:${envelopeId}`)
+    if (row) await processRow(row)
   }
 
   /**

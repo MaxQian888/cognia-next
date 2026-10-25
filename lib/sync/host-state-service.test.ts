@@ -547,6 +547,113 @@ describe("HostStateService", () => {
     })
   })
 
+  it("names a placeholder conversation from its first message in the channel, before queueing it", async () => {
+    await getDb().sessions.update("session-1", { title: "New conversation" })
+    const publish = jest.fn(async (_topic: string, _event: unknown) => undefined)
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime: jest.fn(async () => ({ correlationId: "turn-1" })),
+      publish,
+    })
+    await service.start({ now: 0, heartbeat: false })
+    const send = (actionId: string, messageId: string, text: string) =>
+      service.submit(
+        {
+          ...scope,
+          actions: [
+            action(
+              { kind: "message.enqueue", messageId, text, attachments: [] },
+              { actionId, clientSeq: Number(messageId.slice(1)) }
+            ),
+          ],
+        },
+        owner
+      )
+
+    await send("action-1", "m1", "  Say hello\n in   five words, then tell me more about it  ")
+    const title = "Say hello in five words, then tell me mo"
+    const snapshot = await service.snapshot({ ...scope, channel })
+    expect((snapshot.state as { title: string }).title).toBe(title)
+    // The row and the channel agree, so a replica's confirmed write keeps it.
+    await expect(getDb().sessions.get("session-1")).resolves.toMatchObject({
+      title,
+      titleAuto: true,
+    })
+    // Renamed first: no confirmed state carries the queued message under the
+    // old title.
+    const kinds = publish.mock.calls
+      .filter(([topic]) => topic === "host-state://action")
+      .map(([, event]) => event as { channel: string; mutation?: { kind: string } })
+      .filter((event) => event.channel === channel)
+      .map((event) => event.mutation?.kind)
+    expect(kinds.indexOf("session.renamed")).toBeGreaterThanOrEqual(0)
+    expect(kinds.indexOf("session.renamed")).toBeLessThan(kinds.indexOf("message.queued"))
+    // The index names it too.
+    await expect(
+      service.snapshot({ ...scope, channel: sessionIndexChannel(scope.runtimeTargetId) })
+    ).resolves.toMatchObject({
+      state: { sessions: [expect.objectContaining({ sessionId: "session-1", title })] },
+    })
+
+    // A later message, or the same send redelivered, names nothing again.
+    const renames = () =>
+      publish.mock.calls.filter(
+        ([topic, event]) =>
+          topic === "host-state://action" &&
+          (event as { channel: string; mutation?: { kind: string } }).channel === channel &&
+          (event as { mutation?: { kind: string } }).mutation?.kind === "session.renamed"
+      ).length
+    expect(renames()).toBe(1)
+    await send("action-1", "m1", "  Say hello\n in   five words, then tell me more about it  ")
+    await send("action-2", "m2", "Something else entirely")
+    expect(renames()).toBe(1)
+    expect(((await service.snapshot({ ...scope, channel })).state as { title: string }).title).toBe(
+      title
+    )
+    await service.stop()
+  })
+
+  it("leaves a conversation's chosen title alone when its first message is queued", async () => {
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime: jest.fn(async () => ({ correlationId: "turn-1" })),
+      publish: jest.fn(async () => undefined),
+    })
+    await service.start({ now: 0, heartbeat: false })
+    // Renamed through HostState first: a title someone chose.
+    await service.submit(
+      { ...scope, actions: [action({ kind: "session.rename", title: "My plan" })] },
+      owner
+    )
+    await expect(getDb().sessions.get("session-1")).resolves.toMatchObject({
+      title: "My plan",
+      titleAuto: false,
+    })
+    await service.submit(
+      {
+        ...scope,
+        actions: [
+          action(
+            { kind: "message.enqueue", messageId: "m1", text: "first words", attachments: [] },
+            { actionId: "action-2", clientSeq: 2, baseRevision: 1 }
+          ),
+        ],
+      },
+      owner
+    )
+    expect(((await service.snapshot({ ...scope, channel })).state as { title: string }).title).toBe(
+      "My plan"
+    )
+    await expect(getDb().sessions.get("session-1")).resolves.toMatchObject({ title: "My plan" })
+    await service.stop()
+  })
+
   it("recovers runtime dispatch without executing the semantic action twice", async () => {
     const dispatchRuntime = jest
       .fn()

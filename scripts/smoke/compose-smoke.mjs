@@ -1775,6 +1775,55 @@ async function personsTurn(person, seed, text, waitSeconds = 30, modelPick) {
 }
 
 /**
+ * A conversation created with no title takes its first message's opening words
+ * in the Host's channel, not only on its `sessions` row (plan §9b item 15).
+ * Before, every replica wrote the channel's "New conversation" back over the
+ * preview on each confirmed update.
+ */
+async function personsFirstMessageTitle(person, seed) {
+  const sessionId = `smoke-title-${person.subject}-${randomUUID()}`
+  const [created] = await submitPartition(person, person.state, [
+    hostStateAction(person.state.scope, person.state.status, sessionId, 1, {
+      kind: "session.create",
+      seed,
+    }),
+  ])
+  check(
+    created?.outcome === "applied",
+    `${person.subject}: untitled session created (got ${JSON.stringify(created)})`
+  )
+  const text = "Smoke names this   conversation from its first words, please"
+  const enqueue = hostStateAction(
+    person.state.scope,
+    person.state.status,
+    sessionId,
+    2,
+    { kind: "message.enqueue", messageId: randomUUID(), text, attachments: [] },
+    1
+  )
+  const [enqueued] = await submitPartition(person, person.state, [enqueue])
+  check(
+    enqueued && enqueued.outcome !== "rejected",
+    `${person.subject}: first message of the untitled session is accepted (got ${JSON.stringify(enqueued)})`
+  )
+  const snapshot = await rpc(
+    "host_state_snapshot",
+    {
+      accountId: person.state.scope.accountId,
+      runtimeTargetId: person.state.scope.runtimeTargetId,
+      channel: enqueue.channel,
+    },
+    person.auth
+  )
+  // `instantSessionTitle` in lib/chat/placeholder-title.ts.
+  const expected = text.replace(/\s+/g, " ").trim().slice(0, 40)
+  check(
+    snapshot.body?.state?.title === expected,
+    `${person.subject}: the Host names an untitled conversation from its first message (got ${JSON.stringify(snapshot.body?.state?.title)})`
+  )
+}
+
+/**
  * Two messages sent back to back into one conversation, the second while the
  * first turn runs: what a member's device does now that the Host offers it no
  * steering. The Host queues the second and runs it when the first settles.
@@ -1910,6 +1959,7 @@ async function personsChat(person, owner) {
     personsReplied(switched) && switched.turn === "completed",
     `${person.subject}'s turn runs on the model picked through session.model (got ${switched.turn}, ${JSON.stringify(switched.operation)})`
   )
+  await personsFirstMessageTitle(person, seed)
   const followUp = await personsFollowUp(person, seed)
   const replies = followUp.messages.filter((message) => message?.role === "assistant")
   const sent = followUp.messages.filter((message) => message?.role === "user")

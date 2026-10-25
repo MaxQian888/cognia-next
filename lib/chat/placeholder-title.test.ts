@@ -1,4 +1,9 @@
-import { PLACEHOLDER_TITLES, isPlaceholderTitle, sessionDisplayTitle } from "./placeholder-title"
+import {
+  PLACEHOLDER_TITLES,
+  instantSessionTitle,
+  isPlaceholderTitle,
+  sessionDisplayTitle,
+} from "./placeholder-title"
 
 const labels = { untitled: "(untitled)", placeholder: "新对话" }
 
@@ -34,5 +39,13 @@ describe("sessionDisplayTitle", () => {
   it("localizes a stored machine placeholder", () => {
     expect(sessionDisplayTitle("New chat", labels)).toBe("新对话")
     expect(sessionDisplayTitle("New conversation", labels)).toBe("新对话")
+  })
+})
+
+describe("instantSessionTitle", () => {
+  it("takes a message's opening words, whitespace folded, at most 40 characters", () => {
+    expect(instantSessionTitle("  Say hello\n\tin   five words  ")).toBe("Say hello in five words")
+    expect(instantSessionTitle("x".repeat(60))).toBe("x".repeat(40))
+    expect(instantSessionTitle(" \n ")).toBe("")
   })
 })

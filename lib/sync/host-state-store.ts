@@ -30,6 +30,7 @@ import {
   type CanonicalSession,
 } from "@cognia/agent-config-types/canonical-session"
 import { isPlaceholderTitle } from "@/lib/ai/generation/run-title-task"
+import { instantSessionTitle } from "@/lib/chat/placeholder-title"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 import { stampOrganizationalWrite } from "@/lib/db/session-row-stamps"
@@ -328,14 +329,19 @@ export interface CommitHostStateRuntimeProjectionInput {
   channel: string
   envelopeId: string
   envelopeDigest: string
-  mutation: (state: HostStateChannelState) => HostStateMutation
+  /**
+   * The mutation to commit, read from the channel inside the transaction.
+   * `null` commits nothing: the projection no longer applies to the state it
+   * found (a conversation someone renamed meanwhile keeps its title).
+   */
+  mutation: (state: HostStateChannelState) => HostStateMutation | null
   now?: number
 }
 
 /** Commit a canonical runtime-event projection into the same ordered ledger. */
 export async function commitHostStateRuntimeProjection(
   input: CommitHostStateRuntimeProjectionInput
-): Promise<{ event: HostStateAppliedAction; duplicate: boolean }> {
+): Promise<{ event: HostStateAppliedAction | null; duplicate: boolean }> {
   const db = getDb()
   const now = input.now ?? Date.now()
   const actionId = `runtime:${input.envelopeId}`
@@ -363,6 +369,7 @@ export async function commitHostStateRuntimeProjection(
       const current = await getOrCreateChannel(input.channel, meta, db, now)
       const hostSeq = meta.hostSeq + 1
       const mutation = input.mutation(current.state)
+      if (!mutation) return { event: null, duplicate: false }
       const state = reduceHostStateMutation(current.state, mutation)
       const event: HostStateAppliedAction = {
         channel: input.channel,
@@ -1151,7 +1158,13 @@ async function persistBusinessProjection(
     // between the two must still refuse the write (and roll the ledger back).
     case "session.rename":
       assertSessionWritable(session, "title")
-      await db.sessions.update(action.sessionId, { title: action.action.title, updatedAt: now })
+      // A title someone chose: auto-titling leaves it alone from now on, as
+      // a local rename does (`hooks/chat/use-sessions.ts`).
+      await db.sessions.update(action.sessionId, {
+        title: action.action.title,
+        titleAuto: false,
+        updatedAt: now,
+      })
       return
     case "session.archive":
       assertSessionWritable(session, "metadata")
@@ -1271,7 +1284,7 @@ async function persistBusinessProjection(
       return
     }
     case "message.enqueue": {
-      const instantTitle = action.action.text.replace(/\s+/g, " ").trim().slice(0, 40)
+      const instantTitle = instantSessionTitle(action.action.text)
       const message: StoredMessage = {
         id: action.action.messageId,
         sessionId: action.sessionId,

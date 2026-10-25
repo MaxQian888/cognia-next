@@ -25,6 +25,7 @@ import {
   commitHostStateAction,
   commitHostStateRuntimeProjection,
   getHostStateAction,
+  getHostStateMeta,
   getHostStateSnapshot,
   markHostStateBroadcast,
   markHostStateDispatch,
@@ -383,6 +384,35 @@ describe("HostState durable store", () => {
         now: 51_001,
       })
     ).rejects.toThrow("stale_host_generation")
+  })
+
+  it("commits nothing for a projection that no longer applies to the state it finds", async () => {
+    await acquireWritableLease()
+    const before = await getHostStateSnapshot(channel)
+    const seqBefore = (await getHostStateMeta()).hostSeq
+    const seen: unknown[] = []
+    const committed = await commitHostStateRuntimeProjection({
+      hostId: scope.hostId,
+      hostGeneration: 1,
+      ownerId: "brain-a",
+      channel,
+      envelopeId: "instant-title:never",
+      envelopeDigest: "never",
+      mutation: (state) => {
+        seen.push(state)
+        return null
+      },
+      now: 2,
+    })
+    expect(committed).toEqual({ event: null, duplicate: false })
+    expect(seen).toHaveLength(1)
+    // No ledger row, no sequence, no revision: as if never asked.
+    await expect(getHostStateAction(1, "runtime:instant-title:never")).resolves.toBeUndefined()
+    expect(await getHostStateSnapshot(channel)).toMatchObject({
+      revision: before.revision,
+      state: before.state,
+    })
+    expect((await getHostStateMeta()).hostSeq).toBe(seqBefore)
   })
 
   it("refreshes restarted projections from session rows while retaining live channel state", async () => {

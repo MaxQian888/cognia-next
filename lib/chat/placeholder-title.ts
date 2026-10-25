@@ -47,6 +47,16 @@ export function isPlaceholderTitle(title: string | undefined | null): boolean {
 }
 
 /**
+ * The title a first message gives a conversation still on its placeholder:
+ * its opening words, whitespace folded, at most 40 characters. One rule for
+ * every writer, so the Host's `sessions` row and its HostState channel name a
+ * conversation the same way (plan §9b item 15).
+ */
+export function instantSessionTitle(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 40)
+}
+
+/**
  * The title a conversation list prints: the stored one, unless it is empty
  * (`labels.untitled`) or a machine placeholder (`labels.placeholder`, the
  * reader's own words for "a new chat").
