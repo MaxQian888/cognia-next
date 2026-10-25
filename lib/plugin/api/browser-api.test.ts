@@ -30,9 +30,11 @@ import {
 import { requestBrowserDownloadAttach } from "@/lib/browser/downloads-client"
 import { isBrowserSurfaceVisible, requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { saveBrowserAnnotation } from "@/lib/db/browser-annotations"
+import { SUBMISSION_GUARD_METHODS, gateBrowserEngine } from "@/lib/browser/submission-gate"
 import {
   createBrowserAPI,
   createPluginBrowserEngineFacade,
+  FIRST_PARTY_BROWSER_PLUGIN_ID,
   isFirstPartyBrowserPlugin,
   PRIVILEGED_BROWSER_ENGINE_METHODS,
 } from "./browser-api"
@@ -159,8 +161,45 @@ describe("plugin engine facade (ADR-0201)", () => {
     expect(routed.engine.fillCredential).toBeUndefined()
     expect((await thirdParty.ensureLocalEngine("local-chromium")).getStorage).toBeUndefined()
 
+    // The first-party plugin keeps the full engine, behind the submission gate.
     const firstParty = createBrowserAPI({ firstParty: true })
-    expect(firstParty.routeEngine("https://a.test").engine).toBe(engine)
-    await expect(firstParty.ensureLocalEngine("local-chromium")).resolves.toBe(engine)
+    const full = firstParty.routeEngine("https://a.test").engine
+    expect(full).toBe(
+      gateBrowserEngine(engine, { kind: "plugin", pluginId: FIRST_PARTY_BROWSER_PLUGIN_ID })
+    )
+    expect(typeof full.fillCredential).toBe("function")
+    await expect(firstParty.ensureLocalEngine("local-chromium")).resolves.toBe(full)
+  })
+
+  it("gates every engine for the asker the outbound policy names (ADR-0239 phase 2b)", async () => {
+    const engine = fakeEngine()
+    ;(routeEngine as jest.Mock).mockReturnValue({ engine, backend: "local-chromium" })
+    ;(ensureAgentLocalEngine as jest.Mock).mockResolvedValue(engine)
+
+    // The built-in tools act for the chat, or the bridge client, that called them.
+    const firstParty = createBrowserAPI({
+      firstParty: true,
+      pluginId: FIRST_PARTY_BROWSER_PLUGIN_ID,
+    })
+    expect(firstParty.routeEngine("https://a.test", { chatSessionId: "chat-1" }).engine).toBe(
+      gateBrowserEngine(engine, { kind: "chat", sessionId: "chat-1" })
+    )
+    await expect(
+      firstParty.ensureLocalEngine("local-chromium", {
+        chatSessionId: "external-bridge:browser:claude",
+      })
+    ).resolves.toBe(gateBrowserEngine(engine, { kind: "external-bridge", clientId: "claude" }))
+
+    // Any other plugin acts for itself, whatever session it names.
+    const thirdParty = createBrowserAPI({ pluginId: "acme" })
+    const routed = thirdParty.routeEngine("https://a.test", { chatSessionId: "chat-1" }).engine
+    expect(routed).toBe(
+      createPluginBrowserEngineFacade(
+        gateBrowserEngine(engine, { kind: "plugin", pluginId: "acme" })
+      )
+    )
+    for (const method of SUBMISSION_GUARD_METHODS) {
+      expect((routed as unknown as Record<string, unknown>)[method]).toBeUndefined()
+    }
   })
 })

@@ -42,6 +42,7 @@ import {
   resolveRunBrowserEngine,
 } from "./engine"
 import { __resetRunBrowserSessionsForTesting, getRunBrowserSession } from "./session-registry"
+import { gateBrowserEngine } from "@/lib/browser/submission-gate"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
 function ctx(runId = "run1"): StepExecutionContext {
@@ -122,6 +123,23 @@ describe("resolveRunBrowserEngine", () => {
       unknown
     >
     expect(args.domainGrants).toEqual([])
+  })
+
+  it("hands the step its run's engine behind the submission gate (ADR-0239 phase 2b)", async () => {
+    const step = { ...ctx(), workflowId: "wf1", signal: new AbortController().signal }
+    const { engine } = await resolveRunBrowserEngine(step, "http://localhost/", "k")
+    const raw = getRunBrowserSession("run1")!.engine
+    expect(engine).not.toBe(raw)
+    expect(engine).toBe(
+      gateBrowserEngine(raw, { kind: "workflow", workflowId: "wf1", runId: "run1" })
+    )
+    expect((engine as unknown as Record<string, unknown>).browserSessionId).toBe(
+      (raw as unknown as Record<string, unknown>).browserSessionId
+    )
+    // The same run's next step drives the same gated engine.
+    await expect(resolveRunBrowserEngine(step, "http://localhost/", "k")).resolves.toMatchObject({
+      engine,
+    })
   })
 
   it("denies rather than permits when priming the grants fails", async () => {

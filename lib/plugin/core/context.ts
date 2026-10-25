@@ -1419,7 +1419,7 @@ export function createGuardedBrowserAPI(
 ): PluginBrowserAPI {
   return createGuardedAPI(
     pluginId,
-    createBrowserAPI({ firstParty: isFirstPartyBrowserPlugin(pluginId, source) }),
+    createBrowserAPI({ firstParty: isFirstPartyBrowserPlugin(pluginId, source), pluginId }),
     BROWSER_GUARD_MAP,
     { consentExempt: BROWSER_SYNC_METHODS }
   )

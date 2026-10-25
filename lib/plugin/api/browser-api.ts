@@ -11,6 +11,7 @@ import {
 import { requestBrowserDownloadAttach } from "@/lib/browser/downloads-client"
 import { isBrowserSurfaceVisible, requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { saveBrowserAnnotation } from "@/lib/db/browser-annotations"
+import { browserToolsAsker, gateBrowserEngine } from "@/lib/browser/submission-gate"
 import type { PluginSource } from "@/types/plugin"
 import type {
   PluginBrowserAPI,
@@ -127,23 +128,44 @@ export interface CreateBrowserAPIOptions {
    * plugin receives {@link createPluginBrowserEngineFacade}.
    */
   firstParty?: boolean
+  /** The calling plugin, which the outbound policy names for a submission it makes. */
+  pluginId?: string
 }
 
-/** Host-owned browser router, consent snapshot, pane requests and annotation persistence. */
+/**
+ * Host-owned browser router, consent snapshot, pane requests and annotation persistence.
+ *
+ * Every engine handed out goes through the submission gate (ADR-0239 phase
+ * 2b, `lib/browser/submission-gate.ts`), so what its actions send to a site
+ * is planned by the outbound policy. The built-in Browser Tools act for the
+ * chat (or External Bridge client) that called them; any other plugin's
+ * engine acts for the plugin itself, whatever session it names.
+ */
 export function createBrowserAPI(options: CreateBrowserAPIOptions = {}): PluginBrowserAPI {
-  const expose = (engine: BrowserEngine): PluginBrowserEngine =>
-    options.firstParty === true ? engine : createPluginBrowserEngineFacade(engine)
+  const pluginId =
+    options.pluginId ?? (options.firstParty ? FIRST_PARTY_BROWSER_PLUGIN_ID : "unknown-plugin")
+  const expose = (
+    engine: BrowserEngine,
+    chatSessionId: string | undefined
+  ): PluginBrowserEngine => {
+    const asker =
+      options.firstParty === true
+        ? browserToolsAsker(pluginId, chatSessionId)
+        : ({ kind: "plugin", pluginId } as const)
+    const gated = gateBrowserEngine(engine, asker)
+    return options.firstParty === true ? gated : createPluginBrowserEngineFacade(gated)
+  }
   return {
     routeEngine: (url, context) => {
       const route = routeEngine(url, context)
-      return { ...route, engine: expose(route.engine) }
+      return { ...route, engine: expose(route.engine, context?.chatSessionId) }
     },
     isDomainAuthorized: isBrowserDomainAuthorized,
     primeDomainGrants: primeBrowserDomainGrants,
     saveAnnotation: saveBrowserAnnotation,
     primeLocalRouting: primeLocalBrowserRouting,
     ensureLocalEngine: async (backend, localOptions) =>
-      expose(await ensureAgentLocalEngine(backend, localOptions)),
+      expose(await ensureAgentLocalEngine(backend, localOptions), localOptions?.chatSessionId),
     openPane: (url, paneOptions = {}) =>
       requestBrowserUrl(url, {
         ...(paneOptions.backend ? { backend: paneOptions.backend } : {}),

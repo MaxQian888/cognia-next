@@ -31239,6 +31239,30 @@
       "readyTitle": "项目文件夹"
     }
   },
+  "outboundAsk": {
+    "allowOnce": "允许一次",
+    "allowRequest": "本次请求内允许",
+    "askerBridge": "来自经外部桥接连接的应用",
+    "askerChat": "来自一个对话",
+    "expires": "若到 {time} 仍无人答复，将拒绝发送。",
+    "fenceNote": "拒绝后，本次请求剩余部分不再向该站点发送。",
+    "fenceNoteOnce": "拒绝只针对这一次提交。",
+    "noSite": "一个没有网址的页面",
+    "pending": "{count, plural, other {另有 # 个问题在等待}}",
+    "possibleActions": {
+      "click": "点击",
+      "double_click": "双击",
+      "drag": "拖动",
+      "press": "按下 {key}",
+      "select": "选择一个选项"
+    },
+    "possibleBody": "agent 要在 {site} 的页面上{action}，这可能把页面上的内容发送给该站点。",
+    "refuse": "拒绝",
+    "requestBody": "一个 agent 操作正在向 {site} 发送{what}，正在等你答复。",
+    "requestMethod": "数据（{method}）",
+    "requestSocket": "一条 WebSocket 消息",
+    "title": "允许向这个站点发送吗？"
+  },
   "outboundRecipients": {
     "adapter": {
       "description": "经此机器人账号的无人值守发送（定时任务、Bot 或插件）可直接到达这些会话和成员。其他人会得到草稿或等待批准。",

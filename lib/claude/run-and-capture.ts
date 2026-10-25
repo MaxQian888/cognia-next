@@ -63,6 +63,7 @@ import {
 } from "@/lib/ai/agent/external/session/session-models"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { beginCapturedTurn } from "@/lib/policy/action-review/captured-turns"
 import { getImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
 import { mayBeOutboundCall } from "@/lib/policy/risk/outbound-tools"
@@ -958,6 +959,23 @@ async function captureAssistantReplyCore(
       turnId,
       Boolean(cap?.onPermissionRequest)
     )
+    // ADR-0239 phase 2b: what this turn does that is not a sidecar request
+    // (a browser submission) is planned and asked the way its calls are.
+    const respond = cap?.onPermissionRequest
+    const endCapturedTurn = beginCapturedTurn(sessionId, {
+      turnId,
+      outboundPolicy: cap?.outboundPolicy ?? { unattended: true },
+      ...(respond ? { respond: (request) => respond(request) } : {}),
+      holdWallClock: () => {
+        pauseWallClock()
+        let held = true
+        return () => {
+          if (!held) return
+          held = false
+          resumeWallClock()
+        }
+      },
+    })
     const answeredPermissions = new Set<string>()
     let abortRequested = false
 
@@ -1283,6 +1301,7 @@ async function captureAssistantReplyCore(
       if (settled) return
       settled = true
       releaseResponder()
+      endCapturedTurn()
       try {
         unlisten?.()
       } catch {

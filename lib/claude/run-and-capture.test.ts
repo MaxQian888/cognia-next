@@ -14,11 +14,15 @@ import {
   type CaptureStreamEvent,
 } from "./run-and-capture"
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import {
+  __resetCapturedTurnsForTesting,
+  capturedTurnOf,
+} from "@/lib/policy/action-review/captured-turns"
 import { registerImElicitationContext } from "@/lib/connectors/hitl/im-elicitation-context"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { approveTool } from "./ipc"
-import type { AppSettings, ClaudeEvent } from "@cognia/agent-config-types"
+import type { AppSettings, ClaudeEvent, PermissionRequestEvent } from "@cognia/agent-config-types"
 import { __resetFusionScopesForTesting } from "@/lib/router-fusion/gate/explicit-run"
 import {
   registerChatMiddleware,
@@ -1070,6 +1074,33 @@ describe("runAndCaptureAssistantReply", () => {
         undefined
       )
       // The clock resumes with what was left (600ms), not a fresh budget.
+      const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
+      jest.advanceTimersByTime(650)
+      await rejection
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("stops the wall clock while a browser submission's person decides (ADR-0239 phase 2b)", async () => {
+    __resetCapturedTurnsForTesting()
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+        timeoutMs: 1_000,
+        pauseTimeoutWhileAwaitingPermission: true,
+        onPermissionRequest: () => ({ decision: "deny" }),
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("thinking"))
+      jest.advanceTimersByTime(400)
+      const resume = capturedTurnOf(SESSION)!.holdWallClock!()
+      jest.advanceTimersByTime(10_000)
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      resume()
+      resume()
+      // The clock resumes with what was left (600ms), once.
       const rejection = expect(promise).rejects.toMatchObject({ code: "session_error" })
       jest.advanceTimersByTime(650)
       await rejection
@@ -2717,6 +2748,64 @@ describe("runAndCaptureAssistantReply", () => {
     fire(sessionEnded())
     await promise
     expect(hasCaptureResponder(request)).toBe(false)
+  })
+
+  it("records the turn's outbound planning and responder for its session while it runs", async () => {
+    // An earlier test may leave its own capture unsettled.
+    __resetCapturedTurnsForTesting()
+    const responder = jest.fn(() => ({ decision: "deny" as const }))
+    const origin = { rootSessionId: "task:t1", instructionEpoch: "task-epoch" }
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { turnId: "captured-turn" },
+      {
+        timeoutMs: 1_000,
+        onPermissionRequest: responder,
+        outboundPolicy: { unattended: true, origin },
+      }
+    )
+    await flushUntilSubscribed()
+    const turn = capturedTurnOf(SESSION)
+    expect(turn).toMatchObject({
+      turnId: "captured-turn",
+      outboundPolicy: { unattended: true, origin },
+    })
+    // A browser submission inside the turn asks the turn's own person.
+    await expect(
+      Promise.resolve(
+        turn?.respond?.(
+          permissionRequest("browser-1", "browser_submit", {}) as unknown as PermissionRequestEvent
+        )
+      )
+    ).resolves.toEqual({ decision: "deny" })
+    expect(responder).toHaveBeenCalledTimes(1)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(capturedTurnOf(SESSION)).toBeUndefined()
+  })
+
+  it("records a turn with no responder as unattended, with nobody to ask", async () => {
+    __resetCapturedTurnsForTesting()
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { turnId: "quiet-turn" },
+      {
+        timeoutMs: 1_000,
+      }
+    )
+    await flushUntilSubscribed()
+    expect(capturedTurnOf(SESSION)).toEqual({
+      turnId: "quiet-turn",
+      outboundPolicy: { unattended: true },
+      holdWallClock: expect.any(Function),
+    })
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(capturedTurnOf(SESSION)).toBeUndefined()
   })
 
   it("releases response ownership after a failed send", async () => {

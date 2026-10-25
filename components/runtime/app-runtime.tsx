@@ -77,6 +77,7 @@ import { SettingsLoadFailedBanner } from "@/components/error/settings-load-faile
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
+import { OutboundAskDialog } from "@/components/outbound/outbound-ask-dialog"
 import { AccountSyncHost } from "@/components/account/sync/account-sync-host"
 import { ComposerReferenceHost } from "@/components/chat/composer-reference-host"
 import { HostConsentPrompt } from "@/components/host-consent/host-consent-prompt"
@@ -436,6 +437,12 @@ export function AppRuntime({ children }: { children: React.ReactNode }) {
                              * "Report issue" and `/report` open the unified
                              * "Report a problem" dialog through here. */}
                             <ReportProblemHost />
+                            {/* ADR-0239 phase 2b — what an agent is about to
+                             * send that the person at this computer decides
+                             * (a browser submission to an unlisted site).
+                             * Mounted at the root so a question raised during
+                             * any chat is seen wherever the person is. */}
+                            <OutboundAskDialog />
                             {/* ADR-0215 phase 2 — the account sync poller,
                              * the "new device wants to sync" notification action
                              * and the approval dialog. Renders null unless the

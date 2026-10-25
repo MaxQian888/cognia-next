@@ -15,6 +15,15 @@
 /** Upper bound for `browser_wait_for.timeoutMs` — keeps a call inside its tool budget. */
 export const WAIT_FOR_MAX_TIMEOUT_MS = 60_000
 
+/**
+ * The budget of a tool whose action may wait for a person: under the outbound
+ * policy's enforcement (ADR-0239 phase 2b) what an action sends to a site
+ * nothing authorized is held until a person answers, and the call returns
+ * once they did. The most a plugin tool may declare (`MAX_TOOL_TIMEOUT_MS`);
+ * the host bounds every ask below it.
+ */
+export const BROWSER_SUBMITTING_TOOL_TIMEOUT_MS = 600_000
+
 export const ANNOTATION_INTENTS = ["fix", "change", "question", "approve"] as const
 export const ANNOTATION_SEVERITIES = ["blocking", "important", "suggestion"] as const
 
@@ -52,6 +61,11 @@ const EMPTY = { type: "object", properties: {} } as const
 
 function def(definition: BrowserToolDefinition): BrowserToolDefinition {
   return definition
+}
+
+/** A tool whose action may submit to a site, and so may wait for a person. */
+function submitting(definition: BrowserToolDefinition): BrowserToolDefinition {
+  return { ...definition, timeoutMs: BROWSER_SUBMITTING_TOOL_TIMEOUT_MS }
 }
 
 const refTool = (name: string, description: string, extra: Record<string, unknown> = {}) =>
@@ -118,7 +132,7 @@ export const BROWSER_TOOL_DEFINITIONS = {
       additionalProperties: false,
     },
   }),
-  browser_press_key: def({
+  browser_press_key: submitting({
     name: "browser_press_key",
     description:
       "Press a key chord on the page: a named key (Enter, Tab, Escape, Backspace, Delete, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, F1–F24) or a chord (ctrl+a, shift+Tab, alt+ArrowLeft). Optionally target a ref; default is the focused element. For typing text use browser_type, not this.",
@@ -141,7 +155,7 @@ export const BROWSER_TOOL_DEFINITIONS = {
       },
     },
   }),
-  browser_evaluate: def({
+  browser_evaluate: submitting({
     name: "browser_evaluate",
     description:
       'Evaluate a JavaScript EXPRESSION in the page and return its JSON value (e.g. "document.title" or "[...document.querySelectorAll(\'a\')].map(a=>a.href)"). Single expression only — no statements. Enabled only on trusted (localhost) pages; blocked on public origins. After browser_fill_credential filled a password in this browser session, the user approves every expression separately.',
@@ -154,19 +168,22 @@ export const BROWSER_TOOL_DEFINITIONS = {
       required: ["expression"],
     },
   }),
-  browser_click: refTool(
-    "browser_click",
-    'Click the element with the given ref. Optional `modifiers` (e.g. ["ctrl"], ["shift"]) for modifier-clicks.',
-    { modifiers: { type: "array", items: { type: "string" } } }
+  browser_click: submitting(
+    refTool(
+      "browser_click",
+      'Click the element with the given ref. Optional `modifiers` (e.g. ["ctrl"], ["shift"]) for modifier-clicks.',
+      { modifiers: { type: "array", items: { type: "string" } } }
+    )
   ),
-  browser_double_click: refTool(
-    "browser_double_click",
-    "Double-click the element with the given ref."
+  browser_double_click: submitting(
+    refTool("browser_double_click", "Double-click the element with the given ref.")
   ),
-  browser_type: refTool("browser_type", "Type text into the ref'd field.", {
-    text: { type: "string" },
-  }),
-  browser_fill_form: def({
+  browser_type: submitting(
+    refTool("browser_type", "Type text into the ref'd field.", {
+      text: { type: "string" },
+    })
+  ),
+  browser_fill_form: submitting({
     name: "browser_fill_form",
     description:
       "Fill one legacy ref/text field or a validated batch of fill/select fields. Batch execution is ordered and non-transactional. Never use it for passwords — call browser_fill_credential.",
@@ -194,17 +211,22 @@ export const BROWSER_TOOL_DEFINITIONS = {
       additionalProperties: false,
     },
   }),
-  browser_select: refTool("browser_select", "Select an option value on the ref'd control.", {
-    value: { type: "string" },
-  }),
-  browser_hover: refTool("browser_hover", "Hover the ref'd element."),
-  browser_focus: refTool("browser_focus", "Focus the ref'd element."),
-  browser_back: noArgs("browser_back", "Go back in the page's history; returns a fresh snapshot."),
-  browser_forward: noArgs(
-    "browser_forward",
-    "Go forward in the page's history; returns a fresh snapshot."
+  browser_select: submitting(
+    refTool("browser_select", "Select an option value on the ref'd control.", {
+      value: { type: "string" },
+    })
   ),
-  browser_reload: noArgs("browser_reload", "Reload the page; returns a fresh snapshot."),
+  browser_hover: submitting(refTool("browser_hover", "Hover the ref'd element.")),
+  browser_focus: submitting(refTool("browser_focus", "Focus the ref'd element.")),
+  browser_back: submitting(
+    noArgs("browser_back", "Go back in the page's history; returns a fresh snapshot.")
+  ),
+  browser_forward: submitting(
+    noArgs("browser_forward", "Go forward in the page's history; returns a fresh snapshot.")
+  ),
+  browser_reload: submitting(
+    noArgs("browser_reload", "Reload the page; returns a fresh snapshot.")
+  ),
   browser_stop: noArgs("browser_stop", "Stop the page's current load."),
   browser_wait_for: def({
     name: "browser_wait_for",
@@ -268,7 +290,7 @@ export const BROWSER_TOOL_DEFINITIONS = {
       properties: { url: { type: "string" } },
     },
   }),
-  browser_drag: def({
+  browser_drag: submitting({
     name: "browser_drag",
     description: "Drag one ref'd element onto another using native input. Chromium backends only.",
     parametersSchema: {
@@ -277,7 +299,7 @@ export const BROWSER_TOOL_DEFINITIONS = {
       required: ["sourceRef", "targetRef"],
     },
   }),
-  browser_handle_dialog: def({
+  browser_handle_dialog: submitting({
     name: "browser_handle_dialog",
     description: "Accept or dismiss the pending native browser dialog.",
     parametersSchema: {

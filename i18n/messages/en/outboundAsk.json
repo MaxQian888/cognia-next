@@ -1,0 +1,24 @@
+{
+  "allowOnce": "Allow once",
+  "allowRequest": "Allow for this request",
+  "askerBridge": "From an app connected through the External Bridge",
+  "askerChat": "From a conversation",
+  "expires": "If nobody answers by {time}, it is refused.",
+  "fenceNote": "Refusing blocks this site for the rest of the request.",
+  "fenceNoteOnce": "Refusing blocks only this submission.",
+  "noSite": "a page with no web address",
+  "pending": "{count, plural, one {# more question waiting} other {# more questions waiting}}",
+  "possibleActions": {
+    "click": "click",
+    "double_click": "double-click",
+    "drag": "drag",
+    "press": "press {key}",
+    "select": "choose an option"
+  },
+  "possibleBody": "The agent wants to {action} on a page of {site}. This may send what is on the page to the site.",
+  "refuse": "Refuse",
+  "requestBody": "An agent action is sending {what} to {site}. It waits for your answer.",
+  "requestMethod": "data ({method})",
+  "requestSocket": "a WebSocket message",
+  "title": "Allow sending to this site?"
+}

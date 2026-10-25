@@ -24,6 +24,7 @@ import {
 } from "@/lib/browser/domain-authorization"
 import { resolveTrustTier, type TrustTier } from "@/lib/browser/protocol"
 import { RemoteChromiumEngine } from "@/lib/browser/remote-chromium-engine"
+import { gateBrowserEngine } from "@/lib/browser/submission-gate"
 import { transport } from "@/lib/tauri"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 import { nonRetryable } from "../shared/executor-support"
@@ -74,7 +75,29 @@ export function assertBrowserUrlAllowed(url: string, kind: string): TrustTier {
   )
 }
 
+/**
+ * The engine a workflow step drives, behind the submission gate (ADR-0239
+ * phase 2b): what its actions send to a site is planned in the workflow run's
+ * origin, and a person is asked on the cockpit and the phone. The run's
+ * signal withdraws its questions.
+ */
 export async function resolveRunBrowserEngine(
+  ctx: StepExecutionContext,
+  url: string,
+  kind: string
+): Promise<ResolvedBrowserEngine> {
+  const resolved = await resolveRunBrowserEngineUngated(ctx, url, kind)
+  return {
+    ...resolved,
+    engine: gateBrowserEngine(
+      resolved.engine,
+      { kind: "workflow", workflowId: ctx.workflowId, runId: ctx.runId },
+      { signal: ctx.signal }
+    ),
+  }
+}
+
+async function resolveRunBrowserEngineUngated(
   ctx: StepExecutionContext,
   url: string,
   kind: string
