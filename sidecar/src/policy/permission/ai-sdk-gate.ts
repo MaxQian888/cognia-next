@@ -193,7 +193,8 @@ export function createToolPermissionGate({
   // Outbound tools (ADR-0239), fixed for the session like the ruleset.
   const explicitTools = readExplicitToolPolicy(
     sendOptions?.alwaysExplicitTools,
-    sendOptions?.alwaysExplicitToolsMode
+    sendOptions?.alwaysExplicitToolsMode,
+    sendOptions?.alwaysExplicitShellWritesMode
   )
 
   return async function gate(toolName, input, signal) {
@@ -223,7 +224,7 @@ export function createToolPermissionGate({
     })
     if (outcome.kind === "allow") {
       // Shadow mode: the call runs as before, and the host hears about it.
-      if (explicitToolObserved(toolName, explicitTools) && typeof emit === "function") {
+      if (explicitToolObserved(toolName, explicitTools, input) && typeof emit === "function") {
         emit(explicitToolAllowedFrame(sessionId, toolName, input))
       }
       return input
@@ -236,13 +237,14 @@ export function createToolPermissionGate({
     const alwaysAsk =
       verdict.kind === "always-ask" ||
       toolPermissionDecision(toolName, sendOptions?.toolPermissionRules) === "ask" ||
-      explicitToolMustAsk(toolName, explicitTools)
+      explicitToolMustAsk(toolName, explicitTools, input)
     const permissionClass = requestPermissionClass(
       verdict,
       profile,
       toolName,
       pluginClasses,
-      explicitTools
+      explicitTools,
+      input
     )
     emit!({
       type: "permission_request",

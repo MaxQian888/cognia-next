@@ -37,6 +37,7 @@ import type { ResolvedCliSessionContext } from "../session-context"
 import { commandIsAutoApprovable, shellCommandOf } from "../command-approval"
 import { resolvePermissionDetailed, resolveBashPermission } from "@/lib/claude/permissions/ruleset"
 import { normalizeToolId } from "@/lib/policy/risk/outbound-tools"
+import { commandHasGhWrite } from "@/lib/policy/action-review/gh-targets"
 
 /** Bare names of the built-ins that never require approval (read-only). */
 export const READ_ONLY_BUILTIN_TOOLS: ReadonlySet<string> = new Set(
@@ -368,20 +369,38 @@ export function isExplicitlyDenied(options: SendOptions, name: string, input: un
 /**
  * How the session's always-explicit list (ADR-0239) treats a call: `enforce`
  * asks on every call whatever else allows it, `observe` lets the ordinary
- * policy decide and reports what it let through, `null` when the tool is not
+ * policy decide and reports what it let through, `null` when the call is not
  * listed. Matched on the registered name, as the sidecar gates match it; any
  * mode other than exactly `observe` enforces.
+ *
+ * A shell call whose command has a `gh` write is listed in
+ * `alwaysExplicitShellWritesMode` when that is set (phase 2), as in the
+ * sidecar's `explicitToolMode`. Either source enforcing enforces.
  */
 export function explicitToolMode(
-  options: Pick<SendOptions, "alwaysExplicitTools" | "alwaysExplicitToolsMode">,
-  namespacedName: string
+  options: Pick<
+    SendOptions,
+    "alwaysExplicitTools" | "alwaysExplicitToolsMode" | "alwaysExplicitShellWritesMode"
+  >,
+  namespacedName: string,
+  input?: unknown
 ): "enforce" | "observe" | null {
-  const listed = options.alwaysExplicitTools
-  if (!Array.isArray(listed) || listed.length === 0) return null
+  const entries = Array.isArray(options.alwaysExplicitTools) ? options.alwaysExplicitTools : []
   const name = normalizeToolId(namespacedName)
-  if (!listed.some((entry) => typeof entry === "string" && normalizeToolId(entry) === name))
-    return null
-  return options.alwaysExplicitToolsMode === "observe" ? "observe" : "enforce"
+  const listed = entries.some(
+    (entry) => typeof entry === "string" && normalizeToolId(entry) === name
+  )
+    ? options.alwaysExplicitToolsMode === "observe"
+      ? "observe"
+      : "enforce"
+    : null
+  const shellMode = options.alwaysExplicitShellWritesMode as unknown
+  const command =
+    shellMode === undefined || shellMode === null ? null : shellCommandOf(namespacedName, input)
+  const shell =
+    command && commandHasGhWrite(command) ? (shellMode === "observe" ? "observe" : "enforce") : null
+  if (listed === "enforce" || shell === "enforce") return "enforce"
+  return listed ?? shell
 }
 
 export function needsApproval(
@@ -390,7 +409,7 @@ export function needsApproval(
   input?: unknown
 ): boolean {
   // An enforced outbound tool asks even when a grant or a mode would not.
-  if (explicitToolMode(options, namespacedName) === "enforce") return true
+  if (explicitToolMode(options, namespacedName, input) === "enforce") return true
   const suppressed = new Set(options.suppressApprovalForTools ?? [])
   if (suppressed.has(namespacedName)) return false
   if (options.permissionMode === "bypassPermissions") return false

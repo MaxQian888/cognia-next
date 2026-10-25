@@ -15,6 +15,7 @@ import {
   repositoryTarget,
   siteTarget,
   toReviewTarget,
+  unknownGithubTarget,
 } from "./outbound-targets"
 
 const GROUP = "lark:bot-a:oc_123"
@@ -296,6 +297,15 @@ describe("outboundCategoryOf", () => {
     // A GitHub write whose repository could not be named is still a GitHub write.
     expect(outboundCategoryOf({ kind: "unknown", channel: "github" })).toBe("github")
     expect(outboundCategoryOf({ kind: "unknown", channel: "browser" })).toBe("browser")
+    expect(outboundCategoryOf(unknownGithubTarget())).toBe("github")
+  })
+})
+
+describe("unknownGithubTarget", () => {
+  it("is never grantable and matches no origin", () => {
+    const target = unknownGithubTarget()
+    expect(target).toEqual({ kind: "unknown", channel: "github", recipient: "*" })
+    expect(originMatchFingerprint(target)).toBeUndefined()
   })
 })
 

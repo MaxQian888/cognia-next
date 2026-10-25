@@ -23,6 +23,7 @@ import type {
   ResolvedPermissionProfile,
 } from "@cognia/agent-config-types/unattended-permission"
 
+import { commandHasGhWrite, shellCommandOf } from "../shell/gh-writes.ts"
 import { BUILTIN_SERVER_NAME, READ_ONLY_TOOL_NAMES } from "../tool-catalog/catalog.ts"
 import { PLUGIN_TOOLS_SERVER_NAME, splitToolName } from "../tool-catalog/names.ts"
 
@@ -229,11 +230,19 @@ export function readApprovalTtlMs(raw: unknown): number | undefined {
  *
  * Phase 1 lists outbound tools only, so a listed call is labelled
  * `permissionClass: "outbound"` when the run's profile names no class for it.
+ *
+ * Phase 2 adds shell `gh` writes (`SendOptions.alwaysExplicitShellWritesMode`):
+ * a shell tool call whose command has a `gh` invocation that writes to GitHub
+ * is treated as listed, in that mode of its own, because it follows the
+ * GitHub category's mode rather than messaging's. Absent, shell commands are
+ * not inspected for it.
  */
 export interface ExplicitToolPolicy {
   /** Normalized names: see {@link explicitToolName}. */
   tools: ReadonlySet<string>
   mode: "observe" | "enforce"
+  /** The mode for shell calls with a `gh` write; absent when they are not listed. */
+  shellWrites?: "observe" | "enforce"
 }
 
 /**
@@ -249,47 +258,91 @@ export function explicitToolName(toolName: string): string {
 }
 
 /**
- * Read the list and its mode. No list, or an empty one, is no policy. Any mode
- * other than exactly `observe` enforces: a malformed value must not quietly
- * turn the always-ask off.
+ * Read the list, its mode and the shell-writes mode. No list (or an empty one)
+ * and no shell-writes mode is no policy. Any present mode other than exactly
+ * `observe` enforces: a malformed value must not quietly turn the always-ask
+ * off. The shell-writes mode is absent only when the field is.
  */
 export function readExplicitToolPolicy(
   rawTools: unknown,
-  rawMode: unknown
+  rawMode: unknown,
+  rawShellWrites?: unknown
 ): ExplicitToolPolicy | null {
-  if (!Array.isArray(rawTools)) return null
   const tools = new Set<string>()
-  for (const entry of rawTools as unknown[]) {
+  for (const entry of Array.isArray(rawTools) ? (rawTools as unknown[]) : []) {
     if (typeof entry !== "string") continue
     const name = explicitToolName(entry)
     if (name) tools.add(name)
   }
-  if (tools.size === 0) return null
-  return { tools, mode: rawMode === "observe" ? "observe" : "enforce" }
+  const shellWrites =
+    rawShellWrites === undefined || rawShellWrites === null
+      ? undefined
+      : rawShellWrites === "observe"
+        ? "observe"
+        : "enforce"
+  if (tools.size === 0 && !shellWrites) return null
+  return {
+    tools,
+    mode: rawMode === "observe" ? "observe" : "enforce",
+    ...(shellWrites ? { shellWrites } : {}),
+  }
 }
 
-/** Whether `toolName` is listed, in either mode. */
+/** Whether a shell tool call's command has a `gh` invocation that writes to GitHub. */
+export function isShellGhWrite(toolName: string, input: unknown): boolean {
+  const command = shellCommandOf(explicitToolName(toolName), input)
+  return command !== null && commandHasGhWrite(command)
+}
+
+/**
+ * How the policy applies to one call: `enforce`, `observe`, or undefined when
+ * it lists neither the tool nor (for a shell call) a `gh` write in its
+ * command. Either source enforcing enforces.
+ */
+export function explicitToolMode(
+  toolName: string,
+  policy: ExplicitToolPolicy | null | undefined,
+  input?: unknown
+): "observe" | "enforce" | undefined {
+  if (!policy) return undefined
+  const listed = policy.tools.has(explicitToolName(toolName)) ? policy.mode : undefined
+  const shell =
+    policy.shellWrites && isShellGhWrite(toolName, input) ? policy.shellWrites : undefined
+  if (listed === "enforce" || shell === "enforce") return "enforce"
+  return listed ?? shell
+}
+
+/** Whether the call is listed, in either mode. */
 export function isExplicitTool(
   toolName: string,
-  policy: ExplicitToolPolicy | null | undefined
+  policy: ExplicitToolPolicy | null | undefined,
+  input?: unknown
 ): boolean {
-  return Boolean(policy?.tools.has(explicitToolName(toolName)))
+  return explicitToolMode(toolName, policy, input) !== undefined
 }
 
-/** Whether no shortcut may allow `toolName`. */
+/** Whether no shortcut may allow the call. */
 export function explicitToolMustAsk(
   toolName: string,
-  policy: ExplicitToolPolicy | null | undefined
+  policy: ExplicitToolPolicy | null | undefined,
+  input?: unknown
 ): boolean {
-  return policy?.mode === "enforce" && isExplicitTool(toolName, policy)
+  return explicitToolMode(toolName, policy, input) === "enforce"
 }
 
-/** Whether a shortcut allowing `toolName` is to be reported. */
+/** Whether a shortcut allowing the call is to be reported. */
 export function explicitToolObserved(
   toolName: string,
-  policy: ExplicitToolPolicy | null | undefined
+  policy: ExplicitToolPolicy | null | undefined,
+  input?: unknown
 ): boolean {
-  return policy?.mode === "observe" && isExplicitTool(toolName, policy)
+  return explicitToolMode(toolName, policy, input) === "observe"
+}
+
+/** Whether the policy can observe anything: a gate reporting allows needs this. */
+export function explicitPolicyObserves(policy: ExplicitToolPolicy | null | undefined): boolean {
+  if (!policy) return false
+  return (policy.tools.size > 0 && policy.mode === "observe") || policy.shellWrites === "observe"
 }
 
 /**
@@ -301,10 +354,11 @@ export function requestPermissionClass(
   profile: ResolvedPermissionProfile | null | undefined,
   toolName: string,
   index: PluginClassIndex,
-  explicit: ExplicitToolPolicy | null | undefined
+  explicit: ExplicitToolPolicy | null | undefined,
+  input?: unknown
 ): PermissionClass | undefined {
   if (verdict.kind === "always-ask") return verdict.cls
-  if (isExplicitTool(toolName, explicit)) return "outbound"
+  if (isExplicitTool(toolName, explicit, input)) return "outbound"
   return profile ? classesOfTool(toolName, index)[0] : undefined
 }
 

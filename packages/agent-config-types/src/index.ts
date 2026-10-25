@@ -841,6 +841,23 @@ export type SendOptions = {
   alwaysExplicitToolsMode?: "observe" | "enforce"
 
   /**
+   * The always-explicit rule for shell `gh` writes (ADR-0239 phase 2). A
+   * `Bash`, `sandbox_bash`, `shell_execute_advanced` or `start_process` call
+   * whose command has a `gh` invocation that writes to GitHub (`gh pr
+   * create`, `gh api -X POST …`, an unknown `gh` command) is treated like a
+   * tool in {@link alwaysExplicitTools}, in this mode: `observe` reports the
+   * calls a shortcut let through, anything else present asks on every call.
+   *
+   * It has its own mode because it follows the GitHub category
+   * (`agentPermissions.outboundAuthorizationByCategory.github`), not
+   * messaging. Absent, the gates do not inspect shell commands for it, and
+   * until the host reviews these calls (`resolveSendOptions`, phase 2 WP4) it
+   * is never set: the sidecar, Agent SDK hooks and CLI tool host carry the
+   * rule, pinned by their tests, but nothing turns it on.
+   */
+  alwaysExplicitShellWritesMode?: "observe" | "enforce"
+
+  /**
    * Workspace confinement policy (ADR-0028 "lite") consulted by the sidecar
    * `canUseTool` gates. When set, the built-in file/bash tools are confined to
    * `roots`: a mutator call whose target escapes every root escalates to the

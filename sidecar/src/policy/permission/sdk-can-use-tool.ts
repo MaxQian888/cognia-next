@@ -115,7 +115,8 @@ function livePolicy(sendOptions: PermissionSendOptions): LadderPolicy {
     sandboxAttested: readSandboxAttested(sendOptions.sandboxAttestation),
     explicitTools: readExplicitToolPolicy(
       sendOptions.alwaysExplicitTools,
-      sendOptions.alwaysExplicitToolsMode
+      sendOptions.alwaysExplicitToolsMode,
+      sendOptions.alwaysExplicitShellWritesMode
     ),
   }
 }
@@ -260,7 +261,7 @@ export function createAnthropicCanUseTool({
       return Promise.resolve({ behavior: "deny", message: renderDenial(outcome.reason, toolName) })
     }
     if (outcome.kind === "allow") {
-      if (explicitToolObserved(toolName, policy.explicitTools)) {
+      if (explicitToolObserved(toolName, policy.explicitTools, input)) {
         emit(explicitToolAllowedFrame(sessionId, toolName, input, ctx?.toolUseID))
         if (ctx?.toolUseID) explicitSeen?.add(ctx.toolUseID)
       }
@@ -276,13 +277,14 @@ export function createAnthropicCanUseTool({
       requiresPerCallApproval(toolName, buildPerCallApprovalSet(sendOptions.pluginTools)) ||
       toolPermissionDecision(toolName, sendOptions.toolPermissionRules) === "ask" ||
       profile.kind === "always-ask" ||
-      explicitToolMustAsk(toolName, policy.explicitTools)
+      explicitToolMustAsk(toolName, policy.explicitTools, input)
     const permissionClass = requestPermissionClass(
       profile,
       policy.profile,
       toolName,
       pluginClasses,
-      policy.explicitTools
+      policy.explicitTools,
+      input
     )
     // The SDK enforces dontAsk before calling here, so this is defence in
     // depth: an approve-every-call tool is never asked about under dontAsk,
@@ -376,7 +378,7 @@ export function createAnthropicCanUseTool({
           )
           if (reason) return { behavior: "deny", message: reason }
           // A person answered this call; it is no shortcut to report.
-          if (ctx?.toolUseID && isExplicitTool(toolName, policy.explicitTools)) {
+          if (ctx?.toolUseID && isExplicitTool(toolName, policy.explicitTools, input)) {
             explicitSeen?.add(ctx.toolUseID)
           }
         }

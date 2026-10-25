@@ -339,3 +339,47 @@ test("a person's approval of a listed call marks it seen, not reported", async (
   )
   assert.deepEqual([...seen], ["tu-3"])
 })
+
+// ADR-0239 phase 2: shell calls with a `gh` write, in their own mode.
+test("an enforced shell gh write asks per call past an always-allow grant", async () => {
+  const pending = new Map<string, PendingApproval>()
+  const frames: Array<Record<string, unknown>> = []
+  const gate = mkGate(
+    { alwaysAllowTools: ["Bash"], alwaysExplicitShellWritesMode: "enforce" },
+    {
+      pendingApprovals: pending,
+      emit: (frame) => {
+        frames.push(frame)
+        queueMicrotask(() => pending.get(frame.requestId as string)?.resolve({ behavior: "allow" }))
+      },
+    }
+  )
+  const result = await gate("Bash", { command: "gh pr merge 3" }, { toolUseID: "tu-9" })
+  assert.equal(result.behavior, "allow")
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.permissionClass, "outbound")
+  assert.equal(frames[0]!.requiresPerCallApproval, true)
+})
+
+test("an observed shell gh write a grant allows is reported once and marked seen", async () => {
+  const frames: Array<Record<string, unknown>> = []
+  const seen = new Set<string>()
+  const gate = createAnthropicCanUseTool({
+    sendOptions: { alwaysAllowTools: ["Bash"], alwaysExplicitShellWritesMode: "observe" },
+    sessionId: "s1",
+    emit: (frame) => frames.push(frame),
+    log: () => {},
+    pendingApprovals: new Map(),
+    pluginToolNameAliases: new Map(),
+    doomGuard: createDoomLoopGuard(),
+    explicitSeen: seen,
+  })
+  const input = { command: "gh issue close 4" }
+  const result = await gate("Bash", input, { toolUseID: "tu-10" })
+  assert.equal(result.behavior, "allow")
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.type, "explicit_tool_allowed")
+  assert.deepEqual([...seen], ["tu-10"])
+  await gate("Bash", { command: "gh issue view 4" }, { toolUseID: "tu-11" })
+  assert.equal(frames.length, 1)
+})

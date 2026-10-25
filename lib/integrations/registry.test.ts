@@ -7,12 +7,14 @@ import type {
 } from "@/types/plugin/plugin-integration"
 import {
   __resetIntegrationRegistryForTesting,
+  findIntegrationActionsByToolName,
   getIntegrationActionHandler,
   getIntegrationAccountStatusProvider,
   getIntegrationEventNormalizer,
   getIntegrationResourceProvider,
   getIntegrationRegistryRevision,
   getRegisteredIntegration,
+  integrationToolName,
   listRegisteredIntegrationEntries,
   listRegisteredIntegrations,
   registerIntegrationDefinitions,
@@ -197,5 +199,21 @@ describe("integration registry", () => {
     unregisterIntegrationsByPlugin("plugin")
     expect(listener).toHaveBeenCalledTimes(2)
     unsubscribe()
+  })
+
+  it("names an action's chat tool and finds the action from it", () => {
+    registerIntegrationDefinitions({
+      pluginId: "Acme.Plugin",
+      definitions: [definition()],
+      handlers: { "issues:create": handler },
+    })
+    const name = integrationToolName("Acme.Plugin", "issues", "create")
+    expect(name).toBe("integration__acme_plugin__issues__create")
+    const [found] = findIntegrationActionsByToolName(`mcp__cognia-plugin-tools__${name}`)
+    expect(found).toMatchObject({ pluginId: "Acme.Plugin", action: { id: "create" } })
+    expect(findIntegrationActionsByToolName(name.toUpperCase())).toHaveLength(1)
+    expect(findIntegrationActionsByToolName("integration__acme_plugin__issues__other")).toEqual([])
+    expect(findIntegrationActionsByToolName("issues__create")).toEqual([])
+    expect(findIntegrationActionsByToolName("send_email")).toEqual([])
   })
 })

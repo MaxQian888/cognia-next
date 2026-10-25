@@ -5,12 +5,15 @@ import {
   EMPTY_PLUGIN_CLASS_INDEX,
   buildPluginClassIndex,
   classesOfTool,
+  explicitPolicyObserves,
   explicitToolAllowedFrame,
+  explicitToolMode,
   explicitToolMustAsk,
   explicitToolName,
   explicitToolObserved,
   isExplicitTool,
   isSandboxExecuted,
+  isShellGhWrite,
   profileDenialMessage,
   profileVerdict,
   readApprovalTtlMs,
@@ -194,6 +197,74 @@ test("a listed request is labelled outbound unless the profile names its class",
   assert.equal(
     requestPermissionClass({ kind: "none" }, null, "mcp__cognia-tools__write", INDEX, listed),
     undefined
+  )
+})
+
+test("shell gh writes are listed only when their own mode is set (ADR-0239 phase 2)", () => {
+  const write = { command: "cd web && gh pr create --fill" }
+  const read = { command: "gh pr view 3" }
+  // Absent: shell commands are not inspected, whatever the outbound list says.
+  const listOnly = readExplicitToolPolicy(["send_email"], "enforce")
+  assert.equal(listOnly?.shellWrites, undefined)
+  assert.equal(isExplicitTool("Bash", listOnly, write), false)
+  assert.equal(readExplicitToolPolicy(undefined, undefined, undefined), null)
+  assert.equal(readExplicitToolPolicy(undefined, undefined, null), null)
+
+  const observe = readExplicitToolPolicy(undefined, undefined, "observe")
+  assert.equal(observe?.shellWrites, "observe")
+  assert.equal(explicitToolObserved("Bash", observe, write), true)
+  assert.equal(explicitToolMustAsk("Bash", observe, write), false)
+  assert.equal(isExplicitTool("Bash", observe, read), false)
+  assert.equal(explicitPolicyObserves(observe), true)
+
+  for (const mode of ["enforce", "Observe", "shadow", 1]) {
+    const policy = readExplicitToolPolicy(["send_email"], "observe", mode)
+    assert.equal(policy?.shellWrites, "enforce", String(mode))
+    assert.equal(explicitToolMustAsk("mcp__cognia-tools__bash", policy, write), true)
+    // The messaging list keeps its own mode.
+    assert.equal(explicitToolMode("send_email", policy, {}), "observe")
+  }
+  // Without the command, or for a tool that runs none, nothing is listed.
+  const enforce = readExplicitToolPolicy(undefined, undefined, "enforce")
+  assert.equal(explicitToolMode("Bash", enforce), undefined)
+  assert.equal(explicitToolMode("send_email", enforce, write), undefined)
+  assert.equal(explicitPolicyObserves(enforce), false)
+  assert.equal(explicitPolicyObserves(null), false)
+})
+
+test("every shell tool spelling is inspected for gh writes", () => {
+  assert.equal(isShellGhWrite("Bash", { command: "gh issue comment 3 -b x" }), true)
+  assert.equal(
+    isShellGhWrite("mcp__cognia-plugin-tools__sandbox_bash", { command: "sudo gh pr merge 3" }),
+    true
+  )
+  assert.equal(
+    isShellGhWrite("mcp__cognia-tools__shell_execute_advanced", {
+      command: "gh",
+      args: ["api", "-X", "POST", "repos/o/r/issues"],
+    }),
+    true
+  )
+  assert.equal(
+    isShellGhWrite("start_process", { program: "gh", args: ["run", "rerun", "1"] }),
+    true
+  )
+  assert.equal(isShellGhWrite("Bash", { command: "gh pr view 3" }), false)
+  assert.equal(isShellGhWrite("Write", { command: "gh pr create" }), false)
+  assert.equal(isShellGhWrite("Bash", null), false)
+})
+
+test("a shell gh write is labelled outbound", () => {
+  const policy = readExplicitToolPolicy(undefined, undefined, "observe")
+  assert.equal(
+    requestPermissionClass({ kind: "none" }, PROFILE, "Bash", INDEX, policy, {
+      command: "gh pr create",
+    }),
+    "outbound"
+  )
+  assert.equal(
+    requestPermissionClass({ kind: "none" }, PROFILE, "Bash", INDEX, policy, { command: "ls" }),
+    "workspace"
   )
 })
 

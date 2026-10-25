@@ -285,7 +285,7 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     const full = namespacedFor(server, p.name)
     if (isExplicitlyDenied(session.sendOptions, full, p.args))
       return { allow: false, reason: "denied by permission ruleset" }
-    const explicit = explicitToolMode(session.sendOptions, full)
+    const explicit = explicitToolMode(session.sendOptions, full, p.args)
     if (!needsApproval(session.sendOptions, full, p.args)) {
       if (explicit === "observe") {
         params.onExplicitToolAllowed?.({

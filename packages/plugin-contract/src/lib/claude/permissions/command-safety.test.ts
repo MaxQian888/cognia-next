@@ -1,4 +1,4 @@
-import { classifyCommand } from "./command-safety"
+import { classifyCommand, peelCommandWrappers } from "./command-safety"
 
 describe("classifyCommand — allow tier", () => {
   it.each([
@@ -206,5 +206,60 @@ describe("respelt heads classify like the command they run", () => {
     const v = classifyCommand(command)
     expect(v.matched).toBe("rm")
     expect(v.reason).toMatch(/delete/i)
+  })
+})
+
+describe("gh: reads allow, writes to GitHub ask as outbound (ADR-0239)", () => {
+  it.each(["gh pr view 12", "gh pr list --state open", "gh api repos/o/r/pulls", "gh --version"])(
+    "allows %j",
+    (command) => {
+      const result = classifyCommand(command)
+      expect(result.verdict).toBe("allow")
+      expect(result.outbound).toBeUndefined()
+    }
+  )
+
+  it.each([
+    "gh pr create --fill",
+    "gh issue comment 3 --body hi",
+    "gh api -X PATCH repos/o/r/issues/3",
+    "sudo gh release create v1",
+    "git status && gh pr merge 4 --squash",
+    "echo $(gh pr comment 5 -b x)",
+    "gh copilot suggest x",
+  ])("asks for %j and marks it outbound", (command) => {
+    const result = classifyCommand(command)
+    expect(result.verdict).toBe("ask")
+    expect(result.outbound).toBe(true)
+    expect(result.segments.some((seg) => seg.head === "gh" && seg.outbound)).toBe(true)
+  })
+
+  it("asks for a local gh setup change without calling it outbound", () => {
+    const result = classifyCommand("gh auth login --with-token")
+    expect(result.verdict).toBe("ask")
+    expect(result.outbound).toBeUndefined()
+  })
+
+  it("keeps the outbound mark when another segment is worse", () => {
+    const result = classifyCommand("gh pr create --fill; rm -rf /")
+    expect(result.verdict).toBe("deny")
+    expect(result.outbound).toBe(true)
+  })
+})
+
+describe("peelCommandWrappers", () => {
+  it("finds the wrapped command and the assignments the wrappers pass it", () => {
+    expect(peelCommandWrappers("env", ["GH_REPO=o/r", "gh", "pr", "create"])).toEqual({
+      head: "gh",
+      args: ["pr", "create"],
+      assignments: { GH_REPO: "o/r" },
+    })
+    expect(peelCommandWrappers("sudo", ["-E", "env", "A=1", "/usr/bin/gh", "x"])).toEqual({
+      head: "gh",
+      args: ["x"],
+      assignments: { A: "1" },
+    })
+    expect(peelCommandWrappers("gh", ["pr"])).toEqual({ head: "gh", args: ["pr"], assignments: {} })
+    expect(peelCommandWrappers("sudo", [])).toBeNull()
   })
 })

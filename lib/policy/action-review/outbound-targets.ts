@@ -215,6 +215,15 @@ export function repositoryTarget(
 }
 
 /**
+ * A GitHub write whose repository could not be named (a `gh` command outside
+ * any checkout, `gh api graphql`, a gist). It is never granted, so it always
+ * reaches a person, and it is held to the GitHub category's mode.
+ */
+export function unknownGithubTarget(): OutboundTarget {
+  return { kind: "unknown", channel: "github", recipient: "*" }
+}
+
+/**
  * The origin a browser submission sends to: `scheme://host[:port]` of an
  * `http(s)` URL, as `URL` normalizes it (lowercased host, punycode, default
  * port dropped). Returns `undefined` for any other scheme or an opaque origin.

@@ -14,8 +14,9 @@
  *    ambiguous relative path. `cd` inside `$(...)`/`(...)` stays in its own
  *    subshell scope and never moves the outer directory. Ambiguous targets
  *    (`cd -`, `cd $VAR`) leave the directory unknown → fail closed at `ask`;
- *  - subcommand aware for `git` / `npm`-family / `cargo`, so `git status`
- *    is allowed while `git push` asks;
+ *  - subcommand aware for `git` / `gh` / `npm`-family / `cargo`, so
+ *    `git status` is allowed while `git push` asks, and `gh pr view` is
+ *    allowed while `gh pr create` asks and is marked `outbound` (ADR-0239);
  *  - privilege aware — a `sudo`-wrapped safe command escalates to `ask`;
  *  - catastrophe aware — `rm -rf /`, `dd of=/dev/…`, `mkfs`, pipe-to-shell,
  *    and fork bombs are denied outright.
@@ -26,6 +27,7 @@
  */
 
 import { splitCommandSegments, type CommandRedirect } from "./command-parse"
+import { classifyGhArgs } from "./gh-command"
 
 export type CommandVerdict = "allow" | "ask" | "deny"
 
@@ -33,6 +35,12 @@ export interface SegmentClassification {
   head: string
   verdict: CommandVerdict
   reason: string
+  /**
+   * The segment writes to GitHub where other people see it (`gh pr create`,
+   * `gh api -X POST`, ADR-0239). Always with `verdict: "ask"`; Auto-mode's
+   * model judge may not turn it into an allow.
+   */
+  outbound?: true
 }
 
 export interface CommandClassification {
@@ -43,6 +51,8 @@ export interface CommandClassification {
   matched?: string
   /** Per-segment breakdown (for display / debugging). */
   segments: SegmentClassification[]
+  /** Some segment is {@link SegmentClassification.outbound}. */
+  outbound?: true
 }
 
 const RANK: Record<CommandVerdict, number> = { allow: 0, ask: 1, deny: 2 }
@@ -182,9 +192,8 @@ const SAFE_HEADS = new Set([
   "kotlin",
   "flutter",
   "dart",
-  // VCS read paths (git/gh subcommands refined below).
+  // VCS read paths (git subcommands refined below; `gh` has its own classifier).
   "git",
-  "gh",
   "hg",
   "svn",
   // Package runners (subcommand refined below).
@@ -541,6 +550,22 @@ function classifyGit(args: string[]): SegmentClassification {
   return { head: "git", verdict: "allow", reason: ALLOW_REASON }
 }
 
+function classifyGh(args: string[]): SegmentClassification {
+  const gh = classifyGhArgs(args)
+  if (gh.kind === "write") {
+    return {
+      head: "gh",
+      verdict: "ask",
+      reason: `gh ${gh.command || "<command>"} writes to GitHub`,
+      outbound: true,
+    }
+  }
+  if (gh.kind === "local") {
+    return { head: "gh", verdict: "ask", reason: `gh ${gh.command} changes the local gh setup` }
+  }
+  return { head: "gh", verdict: "allow", reason: ALLOW_REASON }
+}
+
 function classifyPackageManager(head: string, args: string[]): SegmentClassification {
   const sub = bareArgs(args)[0]?.toLowerCase()
   if (sub && PM_ASK_SUBS.has(sub)) {
@@ -606,6 +631,7 @@ function classifyHead(
   }
   if (DELETE_HEADS.has(head)) return classifyRm(head, args, workDir, home)
   if (head === "git") return classifyGit(args)
+  if (head === "gh") return classifyGh(args)
   if (head === "npm" || head === "pnpm" || head === "yarn" || head === "bun") {
     return classifyPackageManager(head, args)
   }
@@ -648,6 +674,33 @@ function unwrap(args: string[]): { head: string; args: string[] } | null {
     }
   }
   return null
+}
+
+/**
+ * The command a segment actually runs under `sudo` / `env` / `command`-style
+ * wrappers (the classifier's wrapper set and depth), with the `NAME=value`
+ * assignments those wrappers pass it (`env GH_REPO=o/r gh …`). Null when a
+ * wrapper has nothing to run.
+ */
+export function peelCommandWrappers(
+  head: string,
+  args: string[]
+): { head: string; args: string[]; assignments: Record<string, string> } | null {
+  const assignments: Record<string, string> = {}
+  let current = { head, args }
+  for (let depth = 0; depth < 3 && WRAPPERS.has(current.head); depth++) {
+    const inner = unwrap(current.args)
+    if (!inner) return null
+    const skipped = current.args.slice(0, current.args.length - inner.args.length - 1)
+    for (const token of skipped) {
+      const eq = token.indexOf("=")
+      if (eq > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) {
+        assignments[token.slice(0, eq)] = token.slice(eq + 1)
+      }
+    }
+    current = inner
+  }
+  return { ...current, assignments }
 }
 
 function classifySegmentInner(
@@ -752,6 +805,7 @@ export function classifyCommand(
   })
 
   const catastrophic = matchCatastrophic(command)
+  const outbound = segments.some((seg) => seg.outbound) ? ({ outbound: true } as const) : {}
 
   let worst: SegmentClassification | null = null
   for (const seg of segments) {
@@ -764,10 +818,17 @@ export function classifyCommand(
       reason: catastrophic,
       matched: worst?.head,
       segments,
+      ...outbound,
     }
   }
   if (!worst) {
     return { verdict: "allow", reason: "no executable command", segments: [] }
   }
-  return { verdict: worst.verdict, reason: worst.reason, matched: worst.head, segments }
+  return {
+    verdict: worst.verdict,
+    reason: worst.reason,
+    matched: worst.head,
+    segments,
+    ...outbound,
+  }
 }

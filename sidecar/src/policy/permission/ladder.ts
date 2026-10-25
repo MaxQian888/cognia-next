@@ -91,6 +91,8 @@ export interface PermissionSendOptions {
   alwaysExplicitTools?: unknown
   /** `observe` reports shortcut allows instead of disarming them. */
   alwaysExplicitToolsMode?: unknown
+  /** The same for shell calls with a `gh` write (ADR-0239 phase 2); absent, not inspected. */
+  alwaysExplicitShellWritesMode?: unknown
 }
 
 /**
@@ -281,7 +283,7 @@ class CallState {
       requiresPerCallApproval(toolName, policy.perCallApproval) ||
       toolPermissionDecision(toolName, policy.toolPermissionRules) === "ask" ||
       this.profileVerdict().kind === "always-ask" ||
-      explicitToolMustAsk(toolName, policy.explicitTools)
+      explicitToolMustAsk(toolName, policy.explicitTools, this.call.input)
     )
   }
 

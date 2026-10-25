@@ -9,6 +9,7 @@ import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginTool, PluginToolContext } from "@/types/plugin/plugin"
 import { createWorkflowAPI } from "@/lib/plugin/core/context"
 import {
+  integrationToolName,
   registerIntegrationDefinitions,
   unregisterIntegrationsByPlugin,
 } from "@/lib/integrations/registry"
@@ -28,13 +29,6 @@ import {
 import { listCapabilityGrants, listServiceConnections } from "@/lib/db/external-services"
 
 const workflowDisposers = new Map<string, Array<() => void>>()
-
-function toolNamePart(value: string): string {
-  return value
-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .toLowerCase()
-}
 
 async function authorizeIntegrationAction(input: {
   pluginId: string
@@ -183,9 +177,7 @@ export async function registerIntegrationsForPlugin(
   for (const definition of definitions) {
     for (const action of definition.actions) {
       if (registerAgentTool) {
-        const toolName = ["integration", pluginId, definition.id, action.id]
-          .map(toolNamePart)
-          .join("__")
+        const toolName = integrationToolName(pluginId, definition.id, action.id)
         disposers.push(
           registerAgentTool({
             name: toolName,

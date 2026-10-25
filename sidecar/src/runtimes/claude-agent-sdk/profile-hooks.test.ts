@@ -247,3 +247,50 @@ test("an observed outbound tool the SDK ran without asking is reported after it 
   assert.equal(frames.length, 1)
   assert.equal(seen.size, 0)
 })
+
+// ADR-0239 phase 2: shell calls with a `gh` write, in their own mode.
+function shellWriteHooks(mode: "observe" | "enforce") {
+  const asked: string[] = []
+  const frames: Array<Record<string, unknown>> = []
+  const hooks = buildProfileToolHooks({
+    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitShellWritesMode: mode },
+    pluginToolNameAliases: new Map(),
+    profileApprovals: new Set(),
+    explicitSeen: new Set(),
+    emit: (frame) => frames.push(frame),
+    sessionId: "s1",
+    canUseTool: async (tool) => {
+      asked.push(tool)
+      return { behavior: "allow" }
+    },
+  })
+  assert.ok(hooks, "a shell-writes mode alone gets the hooks")
+  return { hooks, asked, frames }
+}
+
+test("an enforced shell gh write asks before the SDK's bypass can run it", async () => {
+  const { hooks, asked } = shellWriteHooks("enforce")
+  const pre = hooks.PreToolUse[0]!.hooks[0] as unknown as Hook
+  await pre({ tool_name: "Bash", tool_input: { command: "gh pr create --fill" } }, "tu-1", {
+    signal,
+  })
+  assert.deepEqual(asked, ["Bash"])
+  assert.deepEqual(
+    await pre({ tool_name: "Bash", tool_input: { command: "gh pr view 1" } }, "tu-2", { signal }),
+    {}
+  )
+  assert.equal(hooks.PostToolUse, undefined)
+})
+
+test("an observed shell gh write the SDK ran is reported after it ran", async () => {
+  const { hooks, asked, frames } = shellWriteHooks("observe")
+  const pre = hooks.PreToolUse[0]!.hooks[0] as unknown as Hook
+  const input = { command: "gh pr create --fill" }
+  assert.deepEqual(await pre({ tool_name: "Bash", tool_input: input }, "tu-1", { signal }), {})
+  assert.deepEqual(asked, [])
+  const post = hooks.PostToolUse![0]!.hooks[0] as unknown as PostHook
+  await post({ tool_name: "Bash", tool_input: input }, "tu-1")
+  await post({ tool_name: "Bash", tool_input: { command: "ls" } }, "tu-2")
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.toolName, "Bash")
+})

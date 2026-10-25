@@ -225,4 +225,22 @@ describe("explicitToolMode (ADR-0239)", () => {
     expect(needsApproval(enforce, tool)).toBe(true)
     expect(needsApproval({ ...enforce, alwaysExplicitToolsMode: "observe" }, tool)).toBe(false)
   })
+
+  it("lists a shell call with a gh write in its own mode, only when that is set (phase 2)", () => {
+    const bash = namespaced("bash")
+    const write = { command: "gh pr create --fill" }
+    expect(explicitToolMode(options(listed), bash, write)).toBeNull()
+    const observe = options({ ...listed, alwaysExplicitShellWritesMode: "observe" })
+    expect(explicitToolMode(observe, bash, write)).toBe("observe")
+    expect(explicitToolMode(observe, "Bash", { command: "gh pr view 1" })).toBeNull()
+    expect(explicitToolMode(observe, bash)).toBeNull()
+    expect(explicitToolMode(observe, "send_email")).toBe("enforce")
+    const enforce = options({
+      alwaysExplicitShellWritesMode: "shadow" as never,
+      permissionMode: "bypassPermissions",
+    })
+    expect(explicitToolMode(enforce, "Bash", write)).toBe("enforce")
+    expect(needsApproval(enforce, "Bash", write)).toBe(true)
+    expect(needsApproval(enforce, "Bash", { command: "gh pr view 1" })).toBe(false)
+  })
 })

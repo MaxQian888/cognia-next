@@ -109,8 +109,10 @@ export async function evaluateAutoDecision({
     return { decision: cls.verdict, source: "rule", reason: cls.reason, matched: cls.matched }
   }
 
-  // 3. Uncertain (classifier said "ask"). Optionally consult the small model.
-  if (config.mode === "rules+model" && client) {
+  // 3. Uncertain (classifier said "ask"). Optionally consult the small model,
+  // except for a write to GitHub (`gh pr create`, ADR-0239): like an outbound
+  // tool, who it reaches is the person's call, never the judge's.
+  if (config.mode === "rules+model" && client && !cls.outbound) {
     const judged = await judgeCommandSafety(client, command, {
       cwd,
       locale,

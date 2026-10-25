@@ -32,7 +32,7 @@ const MAX_DEPTH = 20
 const ENV_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/
 
 /** Basename + lowercase + strip trailing `.exe`. */
-function normalizeHead(token: string | undefined): string {
+export function normalizeHead(token: string | undefined): string {
   let t = (token ?? "").trim()
   if (!t) return ""
   const parts = t.split(/[\\/]/)
@@ -41,7 +41,7 @@ function normalizeHead(token: string | undefined): string {
 }
 
 /** Quote-aware whitespace tokenizer; quotes consumed, contents kept. */
-function tokenize(segment: string): string[] {
+export function tokenize(segment: string): string[] {
   const tokens: string[] = []
   let cur = ""
   let has = false
@@ -240,7 +240,11 @@ const WRAPPERS: ReadonlySet<string> = new Set([
   "xargs",
 ])
 
-function peelWrappers(head: string, args: string[], depth = 0): { head: string; args: string[] } {
+export function peelWrappers(
+  head: string,
+  args: string[],
+  depth = 0
+): { head: string; args: string[] } {
   if (depth < 3 && WRAPPERS.has(head)) {
     for (let i = 0; i < args.length; i++) {
       const a = args[i] ?? ""

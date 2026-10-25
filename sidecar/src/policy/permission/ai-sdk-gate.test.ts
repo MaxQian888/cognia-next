@@ -813,3 +813,62 @@ test("an observed outbound tool that asks anyway is labelled outbound but not pe
   assert.equal(frames[0]!.permissionClass, "outbound")
   assert.equal(frames[0]!.requiresPerCallApproval, undefined)
 })
+
+// ADR-0239 phase 2: shell calls with a `gh` write, in their own mode.
+const GH_WRITE = { command: "gh pr comment 3 -b hi" }
+
+test("an enforced shell gh write asks per call under bypass; a read does not", async () => {
+  const pending = new Map()
+  const frames: Array<Record<string, unknown>> = []
+  const gate = createToolPermissionGate({
+    emit: (frame) => {
+      frames.push(frame)
+      queueMicrotask(() => pending.get(frame.requestId)?.resolve({ behavior: "allow" }))
+    },
+    sessionId: "s",
+    pendingApprovals: pending,
+    sendOptions: {
+      permissionMode: "bypassPermissions",
+      alwaysExplicitTools: ["im_broadcast"],
+      alwaysExplicitToolsMode: "observe",
+      alwaysExplicitShellWritesMode: "enforce",
+    },
+  })
+  await gate("Bash", GH_WRITE)
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0]!.type, "permission_request")
+  assert.equal(frames[0]!.permissionClass, "outbound")
+  assert.equal(frames[0]!.requiresPerCallApproval, true)
+  await gate("Bash", { command: "gh pr view 3" })
+  assert.equal(frames.length, 1)
+})
+
+test("an observed shell gh write runs as before and is reported; unset, nothing is", async () => {
+  const frames: Array<Record<string, unknown>> = []
+  const gate = createToolPermissionGate({
+    emit: (frame) => frames.push(frame),
+    sessionId: "s",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitShellWritesMode: "observe" },
+  })
+  assert.equal(await gate("Bash", GH_WRITE), GH_WRITE)
+  assert.deepEqual(frames, [
+    {
+      type: "explicit_tool_allowed",
+      sessionId: "s",
+      toolName: "Bash",
+      input: GH_WRITE,
+      permissionClass: "outbound",
+    },
+  ])
+
+  const quiet: Array<Record<string, unknown>> = []
+  const unset = createToolPermissionGate({
+    emit: (frame) => quiet.push(frame),
+    sessionId: "s",
+    pendingApprovals: new Map(),
+    sendOptions: { permissionMode: "bypassPermissions", alwaysExplicitTools: ["im_broadcast"] },
+  })
+  assert.equal(await unset("Bash", GH_WRITE), GH_WRITE)
+  assert.deepEqual(quiet, [])
+})

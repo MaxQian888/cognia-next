@@ -1,5 +1,6 @@
 import type {
   IntegrationAccountStatusProvider,
+  IntegrationActionDef,
   IntegrationActionHandler,
   IntegrationEventNormalizer,
   IntegrationResourceProvider,
@@ -121,6 +122,53 @@ export function listRegisteredIntegrationEntries(): Array<{
     pluginId,
     definition,
   }))
+}
+
+function toolNamePart(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase()
+}
+
+/**
+ * The chat tool an integration action is registered as:
+ * `integration__<plugin>__<integration>__<action>`, each part reduced to
+ * `[a-z0-9_-]`. {@link findIntegrationActionsByToolName} reverses it.
+ */
+export function integrationToolName(
+  pluginId: string,
+  integrationId: string,
+  actionId: string
+): string {
+  return ["integration", pluginId, integrationId, actionId].map(toolNamePart).join("__")
+}
+
+export interface RegisteredIntegrationAction {
+  pluginId: string
+  definition: PluginIntegrationDef
+  action: IntegrationActionDef
+}
+
+/**
+ * The registered actions a chat tool name calls, bare or as the model sees it
+ * (`mcp__<server>__integration__…`). Usually one; reducing names to
+ * `[a-z0-9_-]` can make two actions share a tool name, and then every one of
+ * them is returned so a caller can judge the riskiest.
+ */
+export function findIntegrationActionsByToolName(toolName: string): RegisteredIntegrationAction[] {
+  const parts = toolName.split("__")
+  if (parts.length < 4 || parts[parts.length - 4].toLowerCase() !== "integration") return []
+  const name = parts.slice(-4).join("__").toLowerCase()
+  const found: RegisteredIntegrationAction[] = []
+  for (const { pluginId, definition } of integrations.values()) {
+    for (const action of definition.actions) {
+      if (integrationToolName(pluginId, definition.id, action.id) === name) {
+        found.push({ pluginId, definition, action })
+      }
+    }
+  }
+  return found
 }
 
 export function getIntegrationActionHandler(

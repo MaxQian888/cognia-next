@@ -54,6 +54,17 @@ describe("evaluateAutoDecision", () => {
     expect(c.complete).toHaveBeenCalledTimes(1)
   })
 
+  it("never lets the model allow a write to GitHub (ADR-0239)", async () => {
+    const c = client('{"safe":true,"risk":"low","reason":"just a PR"}')
+    for (const command of ["gh pr create --fill", "cd web && gh api -X POST repos/o/r/issues"]) {
+      const d = await evaluateAutoDecision({ command, config: WITH_MODEL, client: c })
+      expect(d).toMatchObject({ decision: "ask", source: "rule" })
+    }
+    expect(c.complete).not.toHaveBeenCalled()
+    const read = await evaluateAutoDecision({ command: "gh pr view 12", config: WITH_MODEL })
+    expect(read).toMatchObject({ decision: "allow", source: "rule" })
+  })
+
   it("denies on high risk when denyOnHighRisk is set", async () => {
     const c = client('{"safe":false,"risk":"high","reason":"force pushes to main"}')
     const d = await evaluateAutoDecision({

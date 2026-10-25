@@ -31,6 +31,7 @@ import type { PermissionSendOptions } from "../../policy/permission/ladder.ts"
 import { mcpToolAllowlistDenies, toolPermissionDecision } from "../../policy/permission/ladder.ts"
 import {
   buildPluginClassIndex,
+  explicitPolicyObserves,
   explicitToolAllowedFrame,
   explicitToolMustAsk,
   explicitToolObserved,
@@ -83,7 +84,8 @@ export function buildProfileToolHooks({
   const profile = readPermissionProfile(sendOptions.permissionProfile)
   const explicitTools = readExplicitToolPolicy(
     sendOptions.alwaysExplicitTools,
-    sendOptions.alwaysExplicitToolsMode
+    sendOptions.alwaysExplicitToolsMode,
+    sendOptions.alwaysExplicitShellWritesMode
   )
   if (
     !profile &&
@@ -95,7 +97,7 @@ export function buildProfileToolHooks({
   const pluginClasses = buildPluginClassIndex(sendOptions.pluginTools)
   const restore = (modelToolName: string) =>
     restorePluginToolName(pluginToolNameAliases, PLUGIN_TOOLS_SERVER_NAME, modelToolName)
-  const observing = explicitTools?.mode === "observe" && typeof emit === "function"
+  const observing = explicitPolicyObserves(explicitTools) && typeof emit === "function"
   return {
     ...(observing
       ? {
@@ -105,14 +107,14 @@ export function buildProfileToolHooks({
                 async (input, toolUseID) => {
                   if (!("tool_name" in input) || typeof input.tool_name !== "string") return {}
                   const toolName = restore(input.tool_name)
-                  if (!explicitToolObserved(toolName, explicitTools)) return {}
-                  if (toolUseID && explicitSeen?.delete(toolUseID)) return {}
                   const toolInput =
                     "tool_input" in input &&
                     input.tool_input &&
                     typeof input.tool_input === "object"
                       ? input.tool_input
                       : {}
+                  if (!explicitToolObserved(toolName, explicitTools, toolInput)) return {}
+                  if (toolUseID && explicitSeen?.delete(toolUseID)) return {}
                   emit!(explicitToolAllowedFrame(sessionId, toolName, toolInput, toolUseID))
                   return {}
                 },
@@ -129,6 +131,10 @@ export function buildProfileToolHooks({
             const modelToolName = input.tool_name
             const toolName = restore(modelToolName)
             const verdict = profileVerdict(profile, toolName, pluginClasses)
+            const toolInput =
+              "tool_input" in input && input.tool_input && typeof input.tool_input === "object"
+                ? (input.tool_input as Record<string, unknown>)
+                : {}
             const toolPolicy = toolPermissionDecision(toolName, sendOptions.toolPermissionRules)
             // The CLI connects MCP servers itself, so a tool a mode did not
             // pick can only be stopped here, before it runs.
@@ -150,17 +156,13 @@ export function buildProfileToolHooks({
             if (
               verdict.kind !== "always-ask" &&
               toolPolicy !== "ask" &&
-              !explicitToolMustAsk(toolName, explicitTools)
+              !explicitToolMustAsk(toolName, explicitTools, toolInput)
             )
               return {}
             if (!toolUseID)
               return decision("deny", {
                 permissionDecisionReason: "missing tool-use id for per-call approval",
               })
-            const toolInput =
-              "tool_input" in input && input.tool_input && typeof input.tool_input === "object"
-                ? (input.tool_input as Record<string, unknown>)
-                : {}
             const answer = await canUseTool(modelToolName, toolInput, { toolUseID, signal })
             if (answer.behavior !== "allow") {
               return decision("deny", {
