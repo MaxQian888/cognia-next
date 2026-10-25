@@ -5,7 +5,7 @@ description: "Agents can send to third parties through about ten paths, each wit
 
 # ADR 0239 — An outbound action is authorized by the request, not by the tool
 
-**Status:** Accepted (phase 1 implemented; shadow mode by default)
+**Status:** Accepted (phase 1 implemented; shadow mode by default. Phase 2 decided, not yet built)
 **Date:** 2026-10-24
 **Related:** [ADR-0070](./0070-risk-ceremony-policy-layer) (risk → ceremony; the origin-thread precedent), [ADR-0169](./0169-one-runtime-one-review-one-control-machine) (one review contract), [ADR-0198](./0198-a-runs-capabilities-are-granted-not-patched) (per-run capability grants), [ADR-0224](./0224-an-always-on-host-is-a-peer-the-user-brings) (unattended runs on a Host)
 **Corrects:** the Action Review contract header, which cites ADR-0102 (an observability decision) and a policy engine that was never built
@@ -38,7 +38,9 @@ Cognia already has most of the parts of an authorization system:
 | Workflow `action.connector.send` | Node risk gate, only when the workflow sets `riskGating` |
 | Bot delivery | The connector path |
 | Built-in and MCP tools such as `send_email` | The ordinary `ask` ladder; MCP annotations are not trusted |
-| Browser click / fill, GitHub PR create and comment | Ordinary ladder or none |
+| GitHub writes through the integration broker: PR, issue, comment, review (chat tools, workflow nodes, plugins, Bots) | A write needs a repository-scoped capability grant or a person's approval in the integration queue. A Bot write needs an approved `bot_approval` interrupt, which a Bot set to publish automatically passes by policy when its installation allows unapproved writes. Nothing checks the repository against the request |
+| Squad stacked delivery (`POST /pulls` when a run completes); `gh pr create`, `gh api -X POST` and other `gh` writes in a shell | None: `gh` is classified as a safe command |
+| Browser click, key press and form fill | The ordinary ladder. No path knows whether an action submits |
 
 No outbound recipient allowlist exists anywhere: every "allowlist" in the code governs inbound triggers, and the `/schedule` allowlist governs who may schedule, not who receives. An outbound job records a `source` but not the person who asked for it.
 
@@ -129,12 +131,25 @@ An outbound job records `authorizedBy`: the receipt id, the requester actor and 
 - The digest turn in `scheduled-outbound.ts` gets the same unattended responder as other scheduled turns, so its approvals park instead of going unanswered.
 - The contract header cites this ADR instead of ADR-0102, `registry.ts` stops claiming nine channels (there are 15), and the stale `lib/ai/agent/agent-team-runtime.ts` path is corrected.
 
+### Phase 2: GitHub writes and browser submissions
+
+Phase 2 extends the same engine to two more kinds of recipient. It only narrows: when the engine allows a GitHub write, the gates that exist today (the sidecar card, capability grants, the integration approval queue, `bot_approval`) still apply. The engine changes an outcome only to hold an unattended write to an unauthorized recipient, to refuse a fenced one, or to ask in chat before writing somewhere other than the origin thread.
+
+- **A repository is the GitHub recipient.** A write targets `github:<host>/<owner>/<repo>`. The PR or issue it writes to is a thread: a write back into the thread the request came from (a Bot mentioned on PR #12 answering on PR #12) is a reply to the origin thread. A list entry, a grant or a fence covers the whole repository. People mentioned in a body and assignees are not reviewed as recipients.
+- **Covered paths**: every write action of the integration broker (chat tools, workflow nodes, plugin code, Bots), non-GET raw authenticated requests (such as Issue Loop's `POST /pulls`), Squad stacked delivery, and `gh` write subcommands in a shell, whose repository comes from `-R`, the API path or the working directory's remote and is unknown otherwise. `git push` keeps its existing ask: it supplies code, it does not address anyone. The GitHub MCP server's tools stay on the ordinary ladder, because their names and shapes are not ours to trust. Backups written to the user's own repository are not outbound.
+- **Configured automation keeps working.** A repository-scoped capability grant, a Bot installation's repository scope with automatic publishing, and a Squad team's repository binding with stacked delivery on are each a `policy` grant for that repository: a person wrote them, naming it. New lists only a person writes: a Bot installation's list can hold repositories, and each GitHub integration account gets a repository list covering every unattended write through it.
+- **An unauthorized unattended write waits.** Under enforcement it is held in the integration approval queue, even where a grant or a Bot binding would have queued it directly, and pushed to the user like a parked tool approval. A Squad publish waits for an "approve and publish" action.
+- **A person's own click is the authorization.** Stack publish and land, issue publish and write-back, review delivery and thread PR buttons record a `human` receipt and keep their behaviour.
+- **A browser recipient is a site**: the origin of the request a submission sends. The interactive request grants it with "allow for this request"; unattended runs use a global site list in Settings → Security, and a Bot's list can hold sites. Phase 2b starts by measuring, per engine, whether a submission can be detected or held before it leaves. On an engine with no reliable signal, an enforced click, key press or form fill on a site nobody authorized is treated as a possible submission.
+- **Each category has its own switch.** Messaging (phase 1), GitHub and browser each start in shadow mode and are enforced only after a person confirms that category, so turning on enforcement for messages does not start enforcing GitHub or browser writes on upgrade.
+
 ## Phases
 
 | Phase | Scope |
 | --- | --- |
 | 1 | The engine; the outbound list and targets; origin, grant and draft/park order; the instruction epoch; the fence with its receipt fields and index; both chokepoints; `authorizedBy`; the digest responder; hiding "always allow" for outbound tools; the doc corrections |
-| 2 | Browser form submission and GitHub create/comment, once a reliable "this click submits" signal exists |
+| 2a | GitHub writes: the integration broker, raw authenticated requests, Squad stacked delivery and `gh` write commands (plan: `docs/plans/2026-10-25-adr-0239-phase-2.md`) |
+| 2b | Browser form submission, starting with a spike that establishes a submit signal per browser engine |
 | 3 | Model narrowing through `recommendation` |
 
 ## Implementation (phase 1)
@@ -194,6 +209,7 @@ Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-p
 - A timeout does not fence: the next attempt asks again.
 - Every outcome above writes a receipt with authority, grant scope and epoch, and every connector job carries `authorizedBy`.
 - The digest turn's approval parks and is pushed instead of going unanswered.
+- Phase 2: a Bot mentioned on a PR answers on that PR without asking, and the same run writing to another repository waits for approval under enforcement. Automation a person configured for a repository keeps working after enforcement is turned on. `gh pr create -R other/repo` in chat asks and names the repository, also under bypass. In shadow mode no GitHub or browser result changes.
 
 ## Glossary
 
@@ -203,3 +219,5 @@ Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-p
 - **Grant**: an explicit authorization for a target, scoped `once`, `instruction` or `policy`.
 - **Instruction epoch**: the id of the requester's latest message in the root session. Grants scoped `instruction` and fence entries last until it advances.
 - **Fence**: the set of targets a person refused during the current epoch, derived from deny receipts.
+- **Category**: messaging, GitHub or browser. Each has its own shadow or enforce mode.
+- **Site**: the origin a browser submission sends its request to, the browser's recipient.
