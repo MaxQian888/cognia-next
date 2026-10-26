@@ -20,8 +20,12 @@ import {
   resolveGitWorkflowConfig,
   type ResolvedConfig,
 } from "../../config/schema"
+import { CLI_COMMIT_MESSAGE_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import { runGit as defaultRunGit, type ExecResult } from "../../agent/run-git"
 import { generateText } from "../../agent/generate-text"
+import { primeCliPromptContext } from "../../agent/prompt-overrides"
 import { errorMessage } from "./shared"
 import type { TuiAction } from "../state/types"
 
@@ -60,29 +64,27 @@ export interface CommitPromptContext {
   branch: string
 }
 
-/** Build the commit-message prompt. Pure, so its shape is unit-tested. */
-export function buildCommitMessagePrompt(ctx: CommitPromptContext): string {
+/**
+ * Build the commit-message prompt from the `developer.cli.commit-message` slot
+ * (ADR-0236). Pure apart from reading the loaded override snapshot, so its
+ * shape is unit-tested.
+ */
+export function buildCommitMessagePrompt(
+  ctx: CommitPromptContext,
+  context: PromptResolutionContext = {}
+): string {
   const diff =
     ctx.diff.length > MAX_DIFF_CHARS
       ? `${ctx.diff.slice(0, MAX_DIFF_CHARS)}\n…(diff truncated)…`
       : ctx.diff
-  return [
-    "Write a Conventional Commit message for the following staged changes.",
-    "",
-    `Branch: ${ctx.branch}`,
-    "Changed files:",
-    ctx.changedFiles.trim() || "(none)",
-    "",
-    "Staged diff:",
-    "```diff",
-    diff.trim(),
-    "```",
-    "",
-    "Requirements:",
-    "- First line: `type(scope): subject` — type is one of feat, fix, docs, style, refactor, perf, test, build, ci, chore. Scope is optional. The description after the colon must be lowercase and imperative, and the whole first line must be 72 characters or fewer.",
-    "- Then a blank line, then a body that wraps at 100 columns and explains WHAT changed and WHY (not how).",
-    "- Output ONLY the commit message — no code fences, no commentary, and do NOT add a Co-Authored-By trailer (it is appended automatically).",
-  ].join("\n")
+  return resolvePrompt(CLI_COMMIT_MESSAGE_PROMPT, {
+    context,
+    values: {
+      branch: ctx.branch,
+      changedFiles: ctx.changedFiles.trim() || "(none)",
+      diff: diff.trim(),
+    },
+  }).text
 }
 
 /**
@@ -127,14 +129,18 @@ async function generateAndStage(deps: CommitDeps, branch: string): Promise<void>
   ])
 
   deps.dispatch({ type: "NOTICE", message: "Writing a commit message from the staged diff…" })
+  const promptContext = await primeCliPromptContext(deps.cwd, deps.home)
   let raw: string
   try {
     raw = await generateOf(deps)({
-      prompt: buildCommitMessagePrompt({
-        diff: diffRes.stdout,
-        changedFiles: filesRes.stdout,
-        branch,
-      }),
+      prompt: buildCommitMessagePrompt(
+        {
+          diff: diffRes.stdout,
+          changedFiles: filesRes.stdout,
+          branch,
+        },
+        promptContext
+      ),
       config: deps.config,
       cwd: deps.cwd,
       ...(deps.home ? { home: deps.home } : {}),

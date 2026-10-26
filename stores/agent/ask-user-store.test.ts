@@ -39,6 +39,59 @@ describe("useAskUserStore", () => {
 
 describe("runAskUser", () => {
   beforeEach(reset)
+  it("ignores an old signal after a successful answer while a sibling is active", async () => {
+    const controller = new AbortController()
+    const first = runAskUser({ question: "child" }, { signal: controller.signal })
+    const sibling = runAskUser({ question: "sibling" })
+    useAskUserStore.getState().resolveActive({ selected: [], text: "done", cancelled: false })
+    await first
+    controller.abort()
+    expect(useAskUserStore.getState().active?.request.question).toBe("sibling")
+    useAskUserStore
+      .getState()
+      .resolveActive({ selected: [], text: "sibling answer", cancelled: false })
+    await expect(sibling).resolves.toContain("sibling answer")
+  })
+
+  it("cancels only the aborted child's queued question and leaves its sibling active", async () => {
+    const active = runAskUser({ question: "sibling" }, { sessionId: "sibling" })
+    const controller = new AbortController()
+    const child = runAskUser(
+      { question: "child" },
+      { sessionId: "child", signal: controller.signal }
+    )
+    controller.abort()
+    expect(useAskUserStore.getState().queue).toHaveLength(0)
+    expect(useAskUserStore.getState().active?.sessionId).toBe("sibling")
+    await expect(child).resolves.toMatch(/dismissed/)
+    useAskUserStore.getState().resolveActive({ selected: [], text: "done", cancelled: false })
+    await expect(active).resolves.toContain("done")
+  })
+
+  it("removes an active aborted question and promotes the next one", async () => {
+    const controller = new AbortController()
+    const child = runAskUser(
+      { question: "child" },
+      { sessionId: "child", signal: controller.signal }
+    )
+    const next = runAskUser({ question: "next" })
+    controller.abort()
+    expect(useAskUserStore.getState().active?.request.question).toBe("next")
+    await expect(child).resolves.toMatch(/dismissed/)
+    useAskUserStore
+      .getState()
+      .resolveActive({ selected: [], text: "next answer", cancelled: false })
+    await expect(next).resolves.toContain("next answer")
+  })
+
+  it("does not enqueue a pre-cancelled question", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(runAskUser({ question: "late" }, { signal: controller.signal })).resolves.toMatch(
+      /dismissed/
+    )
+    expect(useAskUserStore.getState().active).toBeNull()
+  })
 
   it("parses args, shows the prompt, and formats the resolved answer", async () => {
     const promise = runAskUser({

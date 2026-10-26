@@ -31,22 +31,14 @@ import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
-import {
-  evaluateAdmissionPolicy,
-  type ConversationAdmissionReason,
-} from "@/lib/connectors/conversation-admission"
+import { evaluateAdmissionPolicy } from "@/lib/connectors/conversation-admission"
+import type { AtGateDecision } from "@cognia/plugin-contract/lib/connectors/at-gate"
+export type { AtGateDecision, AtGateReason } from "@cognia/plugin-contract/lib/connectors/at-gate"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
 
 /** Default for fresh adapters: safer than "always" — only respond when @-mentioned in groups. */
 export const DEFAULT_AT_RESPONSE_STRATEGY: AtResponseStrategy = "mention_only"
-
-export type AtGateReason =
-  | "chat_blocklist"
-  | "chat_allowlist"
-  | "at_mention_required"
-  | "at_direct_only"
-  | ConversationAdmissionReason
 
 /**
  * Observe the operator-authorized Lark no-mention probe after the durable
@@ -93,11 +85,6 @@ export async function observeUnmentionedDeliveryProbe(
     reason: "delivery_probe_observed",
   }).catch(() => undefined)
   return true
-}
-
-export interface AtGateDecision {
-  allowed: boolean
-  reason?: AtGateReason
 }
 
 function pickChatId(event: NormalizedInboundEvent): string {

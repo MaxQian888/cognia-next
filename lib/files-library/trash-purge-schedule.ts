@@ -14,6 +14,7 @@
  * the Host purges its own Trash; a client purging would act on a mirror.
  */
 
+import { ensureMaintenanceSchedule } from "@/lib/scheduler/managed-tasks"
 import { loggers } from "@cognia/logging"
 
 import { listTrashedLibraryItemsBefore } from "@/lib/db/files-library-items"
@@ -100,10 +101,6 @@ export function registerFilesTrashPurgeExecutor(): void {
 export async function installFilesTrashPurgeSchedule(): Promise<void> {
   registerFilesTrashPurgeExecutor()
   const scheduler = getTaskScheduler()
-  const existing = (await scheduler.getAllTasks()).filter(
-    (task) => task.type === FILES_TRASH_PURGE_TASK_TYPE
-  )
-  if (existing.length > 0) return
   const task: CreateScheduledTaskInput = {
     name: "Files Trash purge",
     type: FILES_TRASH_PURGE_TASK_TYPE,
@@ -115,12 +112,12 @@ export async function installFilesTrashPurgeSchedule(): Promise<void> {
       dueReminder: false,
       onStart: false,
       onComplete: false,
-      onError: true,
+      onError: false,
       onProgress: false,
       channels: ["none"],
     },
     createdBy: { kind: "user" },
     tags: [FILES_TRASH_PURGE_TASK_TAG],
   }
-  await scheduler.createTask(task)
+  await ensureMaintenanceSchedule(scheduler, task)
 }

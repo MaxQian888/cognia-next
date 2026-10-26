@@ -274,10 +274,10 @@ describe.each(pluginCases)(
         entries.map((entry) => {
           const providerId = pluginId + ":" + entry.id
           expect(getSubscriptionProvider(providerId)).toBeUndefined()
-          return [providerId, { providerId, enabled: true }]
+          return [providerId, { providerId, enabled: true, defaultModel: "" }]
         })
       )
-      for (const entry of entries) subscriptionBridge.registerEntry(entry, { pluginId })
+      for (const entry of entries) subscriptionBridge.registerEntry({ ...entry }, { pluginId })
       const catalog = getAllProviders()
       const options = collectModelOptions(settings, [], new Set())
       for (const entry of entries) {
@@ -329,7 +329,7 @@ describe.each(pluginCases)(
       async (legacyOverride) => {
         const manifest = readActualManifest()
         for (const entry of manifest.subscriptionProviders!)
-          subscriptionBridge.registerEntry(entry, { pluginId })
+          subscriptionBridge.registerEntry({ ...entry }, { pluginId })
         for (const entry of manifest.subscriptionProviders!) {
           const providerId = pluginId + ":" + entry.id
           const account: Account = {

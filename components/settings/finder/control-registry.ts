@@ -95,6 +95,13 @@ export const SETTING_CONTROLS: SettingControl[] = [
   },
   // search
   {
+    id: "web-reader",
+    sectionId: "search",
+    labelKey: "webReader",
+    settingKey: "webReader",
+    keywords: ["reader", "jina", "distill", "web fetch", "reading", "网页阅读", "蒸馏"],
+  },
+  {
     id: "search-enabled",
     sectionId: "search",
     labelKey: "searchEnabled",

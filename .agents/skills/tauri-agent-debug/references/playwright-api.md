@@ -21,6 +21,46 @@ await page.screenshot({ path: ".cache/tauri-agent-debug/chat.png" })
 Run a saved script with `rtk node <script>.mjs`. Start the bridge first with
 `rtk pnpm tauri:debug:agent` and stop it afterward.
 
+## Scoped shared sessions
+
+Use the existing SDK for shared mode; do not reproduce authentication, lease or
+polling logic in a CLI or test. `connectTauriSession` is an **owner attach** call:
+only the orchestrator uses discovery. Give workers `session.toJSON()` through
+private IPC or a mode-0600 descriptor, then construct `TauriClientSession`.
+Descriptors contain only scoped credentials and the exact authenticated run
+identity; workers never load owner discovery or adopt a different run.
+
+```js
+import {connectTauriSession, TauriClientSession} from "./scripts/tauri/agent-debug-client.mjs"
+const ownerAttached = await connectTauriSession({windows:["main"],canWrite:true,idleTimeoutMs:300000})
+const worker = new TauriClientSession(ownerAttached.toJSON())
+await worker.withWriter(async () => {
+  await worker.page().getByLabel("Message").fill("hello")
+  await worker.page().getByRole("button",{name:"Run",exact:true}).click()
+})
+await worker.detach()
+```
+
+`acquireWriter`, `renewWriter`, `releaseWriter` and `status` share the native lease
+core. `status` may return **that session's own lease proof** for crash recovery;
+keep it private. `withWriter` renews every 5 seconds and serial actions must finish
+within its 120-second hard workflow cap. A 15-second lease expires without
+renewal. Unknown execution/held input never becomes safe solely through expiry.
+Calling scoped `page.close()` detaches; owner stop shuts down the app.
+Workflow timeout and AbortSignal apply to child page requests, including nested
+calls. Cleanup uses its own budget so abort does not suppress input release.
+Shared delayed typing and keyboard chords use `atomicInput: 1`: each complete
+input reserves one native operation ID through the existing ledger and locator
+cancellation path. Repeating its ID returns its retained result; changing its
+full arguments conflicts. Older helpers are rejected before input.
+
+The compatibility table below describes the legacy surface. Shared mode supports
+typed locator/query/input/navigation/diagnostic methods but disables arbitrary
+`evaluate`, callback predicates, persistent dialogs and network mocking. Always
+inspect capabilities. Recovery is owner-managed `agent-debug.mjs recover`: it
+reloads all webviews, invalidates every client/ref, verifies cleanup and retains
+the same native process. Reattach after recovery and reconcile uncertain effects.
+
 ## Compatibility contract
 
 | Area | Supported interface | Semantics |
@@ -65,7 +105,7 @@ browser-engine features. The current capability object reports:
   `TauriDebugUnsupportedError` instead of silently producing incomplete data.
 - `nativeScreenshot: true`; captures can include top-level window chrome and
   require OS screen-recording permission.
-- API version 3 revision 4 includes `locatorCompositionVersion: 2` for preserving
+- API version 3 revision 7 includes `locatorCompositionVersion: 2` for preserving
   indexed/filtered parent scopes when chaining locators. The client refuses
   these queries against an older helper before executing an action.
 - `locatorActionControl: 1` is required for locator mutations. Only known

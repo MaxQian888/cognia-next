@@ -214,10 +214,13 @@ async fn ui_automation_state(state: &AutomationState) -> ProbeState {
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
 pub async fn record_start(
+    request: tauri::ipc::Request<'_>,
     app: AppHandle,
     state: State<'_, AutomationState>,
     args: RecordStartArgs,
 ) -> Result<RecordStatus, String> {
+    let _invocation =
+        crate::automation::commands::reserve_local_invocation(state.inner(), &request)?;
     let recording_id = RecordingId::parse(&args.recording_id)
         .map_err(|_| backend_err("the recording id must be a canonical UUID"))?;
     let root = root()?;
@@ -388,19 +391,34 @@ fn audit_session_end(
 
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
-pub async fn record_pause(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
+pub async fn record_pause(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, AutomationState>,
+) -> Result<RecordStatus, String> {
+    let _invocation =
+        crate::automation::commands::reserve_local_invocation(state.inner(), &request)?;
     state.recorder.pause().await.map_err(backend_err)
 }
 
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
-pub async fn record_resume(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
+pub async fn record_resume(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, AutomationState>,
+) -> Result<RecordStatus, String> {
+    let _invocation =
+        crate::automation::commands::reserve_local_invocation(state.inner(), &request)?;
     state.recorder.resume().await.map_err(backend_err)
 }
 
 #[cfg(feature = "tauri-host")]
 #[tauri::command]
-pub async fn record_undo_last(state: State<'_, AutomationState>) -> Result<RecordStatus, String> {
+pub async fn record_undo_last(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, AutomationState>,
+) -> Result<RecordStatus, String> {
+    let _invocation =
+        crate::automation::commands::reserve_local_invocation(state.inner(), &request)?;
     state.recorder.undo_last().await.map_err(backend_err)
 }
 

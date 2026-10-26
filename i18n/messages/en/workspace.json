@@ -379,7 +379,8 @@
       "removed": "Removed from the workspace roster",
       "roleChanged": "Role changed in the workspace roster",
       "orgRoleChanged": "Organization role changed in the workspace roster",
-      "invitationRevoked": "Revoked from the workspace roster"
+      "invitationRevoked": "Revoked from the workspace roster",
+      "ownershipTransferred": "Ownership transferred from the workspace roster"
     },
     "toast": {
       "failed": "The collaboration server refused that change.",
@@ -387,7 +388,8 @@
       "removed": "Removed from the workspace.",
       "roleChanged": "Role updated.",
       "orgRoleChanged": "Organization role updated.",
-      "invitationRevoked": "Invitation revoked."
+      "invitationRevoked": "Invitation revoked.",
+      "ownershipTransferred": "Ownership transferred."
     },
     "inviteDialog": {
       "cancel": "Cancel",
@@ -434,6 +436,13 @@
       "admin": "Org admin",
       "member": "Org member",
       "owner": "Org owner"
+    },
+    "transfer": {
+      "title": "Make {name} the owner?",
+      "body": "They become the organization's owner in one step. You keep your seat with the role you pick below. Only an owner can undo this.",
+      "stepDownLabel": "Your role afterwards",
+      "confirm": "Transfer ownership",
+      "action": "Transfer ownership"
     },
     "invitations": {
       "title": "Invitations",
@@ -582,5 +591,24 @@
     "knowledgeCount": "{count, plural, =0 {No knowledge files} one {# knowledge file} other {# knowledge files}}",
     "knowledgeOff": "(not injected into chat)",
     "tags": "Tags"
+  },
+  "access": {
+    "title": "Your access",
+    "refresh": "Refresh access",
+    "loading": "Checking your access…",
+    "orgRole": "Organization role",
+    "workspaceRole": "Workspace role",
+    "viaOrgAdmin": "through organization admin",
+    "guest": "Guest",
+    "none": "None",
+    "actionsHeading": "What you can do",
+    "noActions": "Nothing in this workspace yet. Ask a maintainer to add you.",
+    "featuresHeading": "Shared features",
+    "unavailable": {
+      "not-signed-in": "Sign in to see your access.",
+      "unsupported": "This collaboration server does not report access yet.",
+      "hidden": "This workspace is not shared with you.",
+      "error": "Access could not be checked: {message}"
+    }
   }
 }

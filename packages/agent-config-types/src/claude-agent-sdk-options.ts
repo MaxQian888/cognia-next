@@ -41,6 +41,8 @@ export interface ClaudeAgentSdkPluginRef {
  */
 export interface ClaudeAgentSdkSandboxV1 {
   enabled?: boolean
+  /** Linux/WSL2 only. A request, never a grant: each invocation requires explicit approval. */
+  allowNestedUserNamespaces?: boolean
   /** Refuse to run rather than silently continuing unsandboxed. */
   failIfUnavailable?: boolean
   autoAllowBashIfSandboxed?: boolean
@@ -68,6 +70,24 @@ export interface ClaudeAgentSdkSandboxV1 {
     allowPlaintextInject?: boolean
   }
   excludedCommands?: string[]
+}
+
+export const CLAUDE_CODE_RETRY_MIN_MS = 60_000
+export const CLAUDE_CODE_RETRY_MAX_MS = 10_800_000
+export const CLAUDE_CODE_RETRY_DEFAULT_MAX_WAIT_MS = 1_800_000
+
+/** SDK watchdog policy; Cognia also bounds the entire invocation by maxWaitMs. */
+export interface ClaudeCodeUnattendedRetry {
+  /** Total invocation elapsed time, including normal work and retries; never reset per API call. */
+  maxWaitMs: number
+  /** Optional early recheck of claude.ai subscription usage limits. */
+  usageLimitRecheckMs?: number
+}
+
+/** Saved preferences request capabilities; they do not carry a Namespace authorization. */
+export interface ClaudeCodeRuntimePreferences {
+  allowNestedUserNamespaces?: boolean
+  unattendedRetry?: Partial<ClaudeCodeUnattendedRetry> & { enabled?: boolean }
 }
 
 /**
@@ -186,6 +206,8 @@ export interface ClaudeAgentSdkOptionsV1 {
   // ---- limits ---------------------------------------------------------------
   taskBudget?: { total: number }
   loadTimeoutMs?: number
+  /** Host-owned watchdog/deadline policy, not an SDK Options field. Opt-in only. */
+  unattendedRetry?: ClaudeCodeUnattendedRetry
 
   // ---- sandbox --------------------------------------------------------------
   sandbox?: ClaudeAgentSdkSandboxV1
@@ -244,10 +266,12 @@ const optionShape: Record<keyof ClaudeAgentSdkOptionsV1, Shape> = {
   promptSuggestions: "boolean",
   taskBudget: { total: "number" },
   loadTimeoutMs: "number",
+  unattendedRetry: { maxWaitMs: "number", usageLimitRecheckMs: "number" },
   betas: stringArray,
   extraArgs: "record",
   sandbox: {
     enabled: "boolean",
+    allowNestedUserNamespaces: "boolean",
     failIfUnavailable: "boolean",
     autoAllowBashIfSandboxed: "boolean",
     allowUnsandboxedCommands: "boolean",
@@ -437,6 +461,30 @@ export function validateClaudeAgentSdkOptions(
 
   const { thinking, systemPrompt, skills, tools, ...plain } = value
   validateShape(plain, optionShape, "claudeAgentSdk", errors)
+  if (isRecord(value.unattendedRetry)) {
+    for (const key of ["maxWaitMs", "usageLimitRecheckMs"] as const) {
+      const interval = value.unattendedRetry[key]
+      if (key === "usageLimitRecheckMs" && interval === undefined) continue
+      if (
+        !Number.isSafeInteger(interval) ||
+        (interval as number) < CLAUDE_CODE_RETRY_MIN_MS ||
+        (interval as number) > CLAUDE_CODE_RETRY_MAX_MS
+      ) {
+        errors.push(
+          `claudeAgentSdk.unattendedRetry.${key} must be an integer from ${CLAUDE_CODE_RETRY_MIN_MS} to ${CLAUDE_CODE_RETRY_MAX_MS}`
+        )
+      }
+    }
+  }
+  if (isRecord(value.sandbox) && value.sandbox.allowNestedUserNamespaces === true) {
+    if (value.sandbox.enabled !== true)
+      errors.push("claudeAgentSdk.sandbox.allowNestedUserNamespaces requires sandbox.enabled")
+    if (
+      value.sandbox.failIfUnavailable === false ||
+      value.sandbox.allowUnsandboxedCommands === true
+    )
+      errors.push("claudeAgentSdk.sandbox.allowNestedUserNamespaces requires a fail-closed sandbox")
+  }
   const oneOf = (v: unknown, choices: unknown[], path: string) => {
     if (v !== undefined && !choices.includes(v))
       errors.push(`${path} must be one of ${choices.join(", ")}`)

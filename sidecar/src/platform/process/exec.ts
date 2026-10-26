@@ -1,7 +1,7 @@
 // Shared child-process exec primitives for built-in tools.
 //
 // Single home for the `promisify(execFile)` wrapper that was previously
-// copy-pasted into git.mjs, process.mjs, and shell-advanced.mjs. Callers that
+// copy-pasted into git.ts, tools/builtin/process/index.ts, and tools/builtin/shell-advanced/index.ts. Callers that
 // need the raw rejection shape (stdout/stderr/code/signal attached on non-zero
 // exit) import `execFileAsync` directly; callers that just want the
 // stringified output of a successful run use `runCapped`.
@@ -125,6 +125,8 @@ export async function resolveProcessPortEnv(cwd?: string | URL): Promise<Record<
       if (value === null) return {}
       if (typeof value !== "object" || value === null || Array.isArray(value))
         throw new Error("workspace.portEnv returned an invalid environment")
+      // Standalone CLI has no allocator and deliberately returns an empty overlay.
+      if (Object.keys(value).length === 0) return {}
       const env: Record<string, string> = {}
       for (const key of ["COGNIA_PORT", "COGNIA_PORT_COUNT", "PORT"]) {
         const entry = (value as Record<string, unknown>)[key]

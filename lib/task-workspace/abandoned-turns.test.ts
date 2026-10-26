@@ -1,5 +1,6 @@
 import {
   __setAbandonedTurnDepsForTests,
+  abortBundleTurnIfUndriven,
   forgetOpenBundleTurn,
   liveBundleTurnIds,
   reclaimAbandonedBundleTurns,
@@ -261,6 +262,48 @@ describe("reclaiming", () => {
     h = harness()
     h.seedRecords({ not: "an array" })
     await expect(reclaimAbandonedBundleTurns("s_1")).resolves.toEqual([])
+  })
+})
+
+describe("aborting one unrecorded turn", () => {
+  function claimingPeer(turnId: string) {
+    const peer = h.bus.open()
+    peer.addEventListener("message", (event) => {
+      const message = event.data as { kind?: string; nonce?: string; bundleTurnIds?: string[] }
+      if (message?.kind !== "cognia.bundle-turn.poll") return
+      if (!(message.bundleTurnIds ?? []).includes(turnId)) return
+      peer.postMessage({
+        kind: "cognia.bundle-turn.claim",
+        nonce: message.nonce,
+        bundleTurnIds: [turnId],
+      })
+    })
+  }
+
+  it("aborts a turn nobody drives", async () => {
+    h = harness()
+    await expect(abortBundleTurnIfUndriven("wbt_1")).resolves.toBe(true)
+    expect(h.aborted).toEqual(["wbt_1"])
+  })
+
+  it("leaves a turn a peer tab drives", async () => {
+    h = harness()
+    claimingPeer("wbt_1")
+    await expect(abortBundleTurnIfUndriven("wbt_1")).resolves.toBe(false)
+    expect(h.aborted).toEqual([])
+  })
+
+  it("leaves a turn this document drives", async () => {
+    h = harness()
+    rememberOpenBundleTurn({ bundleTurnId: "wbt_1", sessionId: "s_1", openedAt: 1 })
+    await expect(abortBundleTurnIfUndriven("wbt_1")).resolves.toBe(false)
+    expect(h.aborted).toEqual([])
+  })
+
+  it("aborts nothing when it cannot poll", async () => {
+    h = harness({ openChannel: () => null })
+    await expect(abortBundleTurnIfUndriven("wbt_1")).resolves.toBe(false)
+    expect(h.aborted).toEqual([])
   })
 })
 

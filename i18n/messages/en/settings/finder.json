@@ -28,7 +28,8 @@
     "ttsEnabled": "Text to speech",
     "ttsProvider": "Speech provider",
     "webTools": "Web tools",
-    "workingDir": "Default working directory"
+    "workingDir": "Default working directory",
+    "webReader": "Web reading and distillation"
   },
   "triggerAria": "Find a setting"
 }

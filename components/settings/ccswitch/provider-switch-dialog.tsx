@@ -28,23 +28,11 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 
-import { applySwitch, planSwitch } from "@/lib/ccswitch/switch"
+import { applySwitch, canSwitchProvider, planSwitch } from "@/lib/ccswitch/switch"
 import type { ApplyResult } from "@/lib/ccswitch/switch"
 import type { CcswitchAgentId, CcswitchProvider, SwitchPlan } from "@/types/ccswitch"
+import { CCSWITCH_PROPAGATION_AGENTS } from "@/lib/ccswitch/provider"
 import { getSettings } from "@/lib/db/settings"
-
-const PROPAGATABLE_AGENTS: ReadonlyArray<{
-  id: CcswitchAgentId
-  labelKey: string
-}> = [
-  { id: "claude-code", labelKey: "claude-code" },
-  { id: "codex", labelKey: "codex" },
-  { id: "gemini", labelKey: "gemini" },
-  { id: "opencode", labelKey: "opencode" },
-  // Listed so the user sees the option, but flagged unsupported in the plan
-  // (no verified config path to write safely).
-  { id: "claude-desktop", labelKey: "claude-desktop" },
-]
 
 export interface ProviderSwitchDialogProps {
   provider: CcswitchProvider | null
@@ -67,6 +55,7 @@ export function ProviderSwitchDialog({
   const [selectedAgents, setSelectedAgents] = useState<CcswitchAgentId[]>([])
   const [plan, setPlan] = useState<SwitchPlan | null>(null)
   const [applying, setApplying] = useState(false)
+  const [applyError, setApplyError] = useState<string | null>(null)
   const [result, setResult] = useState<ApplyResult | null>(null)
 
   // Capture the latest `initialAgents` in a ref so the open-effect below can
@@ -81,10 +70,13 @@ export function ProviderSwitchDialog({
   // Reset state every time the dialog opens for a new provider.
   useEffect(() => {
     if (open) {
-      setSelectedAgents(initialAgentsRef.current)
+      setSelectedAgents(
+        initialAgentsRef.current.filter((id) => CCSWITCH_PROPAGATION_AGENTS.includes(id))
+      )
       setResult(null)
+      setApplyError(null)
     }
-  }, [open, provider?.id])
+  }, [open, provider?.id, provider?.kind])
 
   // Re-plan whenever the user changes the agent selection.
   useEffect(() => {
@@ -103,6 +95,7 @@ export function ProviderSwitchDialog({
           apiKey: s.apiKey,
           apiBaseUrl: s.apiBaseUrl,
           activeProviderId: s.activeProviderId,
+          customHeaders: s.providerSettings?.anthropic?.customHeaders,
         }
       )
       setPlan(next)
@@ -124,10 +117,15 @@ export function ProviderSwitchDialog({
   const onConfirm = async () => {
     if (!plan) return
     setApplying(true)
+    setApplyError(null)
     try {
       const r = await applySwitch(plan)
       setResult(r)
       onApplied?.(r)
+    } catch (error) {
+      setApplyError(
+        t("dialog.applyFailed", { error: error instanceof Error ? error.message : String(error) })
+      )
     } finally {
       setApplying(false)
     }
@@ -184,37 +182,37 @@ export function ProviderSwitchDialog({
                 {t("dialog.agentsSection")}
               </h4>
               <div className="space-y-1">
-                {PROPAGATABLE_AGENTS.map((a) => {
-                  const checked = selectedAgents.includes(a.id)
-                  const patch = plan.agentChanges.find((p) => p.agentId === a.id)
+                {CCSWITCH_PROPAGATION_AGENTS.map((agentId) => {
+                  const checked = selectedAgents.includes(agentId)
+                  const patch = plan.agentChanges.find((p) => p.agentId === agentId)
                   const unsupported = patch?.unsupported ?? false
-                  // Codex agent: we write OPENAI_API_KEY but cannot
+                  // OpenCode propagation only updates Anthropic credentials; it cannot
                   // propagate baseUrl (see lib/ccswitch/switch.ts notes).
                   // Surface that so the user isn't surprised when the
                   // alt-endpoint URL doesn't take effect.
-                  const codexBaseUrlNotPropagated =
-                    a.id === "codex" && checked && !unsupported && !!provider?.baseUrl?.trim()
+                  const baseUrlNotPropagated =
+                    agentId === "opencode" && checked && !unsupported && !!provider?.baseUrl?.trim()
                   return (
                     <label
-                      key={a.id}
+                      key={agentId}
                       className="flex items-start gap-2 px-2 py-1 rounded hover:bg-muted/50"
                     >
                       <Checkbox
                         checked={checked}
-                        onCheckedChange={(v) => toggleAgent(a.id, v === true)}
+                        onCheckedChange={(v) => toggleAgent(agentId, v === true)}
                         className="mt-1"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{t(`agents.${a.labelKey}`)}</span>
+                          <span className="text-sm font-medium">{t(`agents.${agentId}`)}</span>
                           {unsupported && checked && (
                             <Badge variant="outline" className="text-[10px]">
                               {t("dialog.notYetSupported")}
                             </Badge>
                           )}
-                          {codexBaseUrlNotPropagated && (
+                          {baseUrlNotPropagated && (
                             <Badge variant="outline" className="text-[10px]">
-                              {t("dialog.codexBaseUrlNotPropagated")}
+                              {t("dialog.baseUrlNotPropagated")}
                             </Badge>
                           )}
                         </div>
@@ -235,6 +233,11 @@ export function ProviderSwitchDialog({
               )}
             </section>
 
+            {applyError && (
+              <p role="alert" className="text-destructive">
+                {applyError}
+              </p>
+            )}
             {result && <ApplyResultPanel result={result} />}
           </div>
         )}
@@ -244,7 +247,10 @@ export function ProviderSwitchDialog({
             {result ? t("dialog.close") : t("dialog.cancel")}
           </Button>
           {!result && (
-            <Button onClick={onConfirm} disabled={!plan || applying}>
+            <Button
+              onClick={onConfirm}
+              disabled={!plan || !provider || !canSwitchProvider(provider) || applying}
+            >
               {applying && <Loader2Icon className="mr-2 size-4 animate-spin" />}
               {t("dialog.confirm")}
             </Button>
@@ -294,7 +300,7 @@ function ApplyResultPanel({ result }: { result: ApplyResult }) {
         ) : (
           <XCircleIcon className="size-4 text-destructive" />
         )}
-        <span>{t("dialog.cogniaApplied")}</span>
+        <span>{t(result.cogniaApplied ? "dialog.cogniaApplied" : "dialog.cogniaNotApplied")}</span>
       </div>
       {result.subscription && (
         <div className="flex items-start gap-2 text-xs">

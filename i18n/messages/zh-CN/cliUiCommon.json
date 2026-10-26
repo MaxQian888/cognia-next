@@ -1,4 +1,5 @@
 {
+  "manualSubagentUnsupported": "当前后端不支持手动运行 CLI 子 Agent。",
   "trustQuestion": "是否信任 {path} 中的文件？",
   "trustDescription": "Cognia Agent 可以读取和修改此目录中的文件，并运行命令。",
   "trustProceed": "信任并继续",

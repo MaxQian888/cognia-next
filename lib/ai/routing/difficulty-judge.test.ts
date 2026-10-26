@@ -23,10 +23,16 @@ jest.mock("@/lib/router-fusion/routing/llm-classifier", () => {
 import { __resetBreakerForTesting, getBreakerSnapshot } from "@/lib/router-fusion/gate/breaker"
 
 import {
+  DIFFICULTY_JUDGE_PROMPT,
   __resetDifficultyJudgeCache,
   createDifficultyJudge,
   judgeDifficulty,
 } from "./difficulty-judge"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function client(complete: (prompt: string, opts?: unknown) => Promise<string>): LlmClient {
   return { complete } as unknown as LlmClient
@@ -102,6 +108,38 @@ describe("judgeDifficulty", () => {
     await judgeDifficulty(c, { promptText: "repeat me" })
     await judgeDifficulty(c, { promptText: "repeat me" })
     expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("judges with customized guidance and never answers it from an older verdict (ADR-0236)", async () => {
+    const complete = jest.fn(async (_prompt: string, _opts?: unknown) => '{"tier":"fast"}')
+    const c = client(complete)
+    await judgeDifficulty(c, { promptText: "customized" })
+    expect((complete.mock.calls[0][1] as { system: string }).system).toBe(
+      DIFFICULTY_JUDGE_PROMPT.defaultBody
+    )
+    const body =
+      'Prefer "powerful" for anything about databases; otherwise "fast" or "balanced". Reply {"tier": ...} only.'
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-difficulty",
+          promptId: DIFFICULTY_JUDGE_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-difficulty",
+          body,
+          contractVersion: DIFFICULTY_JUDGE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      await judgeDifficulty(c, { promptText: "customized" })
+      expect(complete).toHaveBeenCalledTimes(2)
+      expect((complete.mock.calls[1][1] as { system: string }).system).toBe(body)
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("honours a custom cache TTL instead of the five-minute default", async () => {

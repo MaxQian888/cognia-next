@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -175,6 +175,32 @@ it("compiles each access mode into the right policy shape", async () => {
   await user.click(screen.getByRole("radio", { name: /access.modes.public/ }))
   await user.click(screen.getByTestId("site-apply-access"))
   expect(handlers.onApplyAccess).toHaveBeenLastCalledWith({ mode: "public" }, "")
+})
+
+it("groups access choices and supports keyboard navigation", async () => {
+  const user = userEvent.setup()
+  renderTab()
+  expect(screen.getByRole("radiogroup", { name: "access.mode" })).toBeInTheDocument()
+  await user.click(screen.getByRole("radio", { name: /access.modes.private/ }))
+  // Radix defers roving focus; keep the key pressed until that focus event selects the item.
+  await user.keyboard("{ArrowRight>}")
+  await waitFor(() =>
+    expect(screen.getByRole("radio", { name: /access.modes.identities/ })).toBeChecked()
+  )
+  await user.keyboard("{/ArrowRight}")
+  expect(screen.getByLabelText("access.values")).toBeInTheDocument()
+})
+
+it("activates access cards by label and restores stored values when returning to their mode", async () => {
+  const user = userEvent.setup()
+  renderTab({ site: site({ visitorPolicy: { mode: "identities", emails: ["a@example.com"] } }) })
+  await user.click(screen.getByText("access.modes.domains"))
+  expect(screen.getByRole("radio", { name: /access.modes.domains/ })).toBeChecked()
+  await user.clear(screen.getByLabelText("access.values"))
+  await user.type(screen.getByLabelText("access.values"), "example.com")
+  await user.click(screen.getByText("access.modes.identities"))
+  expect(screen.getByRole("radio", { name: /access.modes.identities/ })).toBeChecked()
+  expect(screen.getByLabelText("access.values")).toHaveValue("a@example.com")
 })
 
 it("hides the value editor for the modes that take no values", async () => {

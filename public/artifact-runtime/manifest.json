@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "reactVersion": "19.3.0",
+  "reactVersion": "19.3.1",
   "babelVersion": "8.0.7",
   "shellSources": {
     "lib/artifacts/runtime/artifact-shell-entry.ts": "b15648d6da60c48396b38c3ffff8e821014c378c5835f03a11f8cbbfcaceab94",
@@ -9,7 +9,7 @@
   "files": {
     "react-runtime.js": {
       "bytes": 222132,
-      "sha256": "f585cec679de7e09f0bea7fee4b734a44e5e015ba737670572d04832322bf4c6"
+      "sha256": "931d7731ce36e683d43b25c9054026029f53be88966f662054d499adb27f5afc"
     },
     "jsx-transform.js": {
       "bytes": 2326593,

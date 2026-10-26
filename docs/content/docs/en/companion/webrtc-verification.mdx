@@ -75,12 +75,13 @@ build passed. The full `pnpm test:coverage` run encountered unrelated
 agent/workflow/UI test failures, then its first shard exited with Node
 `SIGABRT` under the 4 GiB test heap limit; repository-wide coverage is not certified.
 Rust formatting also reports an existing `healthz` signature layout in
-`services/signaling-server/src/server.rs`, outside the edited lines.
+`cognia-services/services/signaling-server/src/server.rs`, outside the edited lines.
 
 Use this checklist after any change that could affect the WebRTC tier
 end-to-end: signaling envelope schema, SDP/ICE handshake, pair-flow
 mints, rendezvous-server upgrades, or the `TransportRtc` state machine.
-The automated `pnpm webrtc:smoke` covers the rendezvous-server side only —
+The automated relay smoke in cognia-services (`node scripts/smoke.mjs` in
+`services/signaling-server/`) covers the rendezvous-server side only —
 this checklist exercises both mobile (Capacitor) ↔ desktop (Tauri) and
 browser (Web Companion) ↔ desktop/cloud paths.
 
@@ -198,7 +199,7 @@ For every PR that touches the WebRTC tier, attach to the PR description:
 - A log of the tier transitions observed during
   [Step 3](#step-3--mid-session-reconnect).
 - The numeric output of [Step 5](#step-5--signaling-rendezvous-health) if you ran against the deployed
-  rendezvous; otherwise note that you ran the local `pnpm webrtc:smoke`
+  rendezvous; otherwise note that you ran the cognia-services relay smoke
   instead.
 
 ## References

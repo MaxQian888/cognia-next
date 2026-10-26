@@ -1,8 +1,15 @@
 import {
+  NUDGE_CONTINUE_PROMPT,
   RateLimitResumeController,
   createRealResumeDeps,
+  renderNudgeContinuePrompt,
   type ResumeDelivery,
 } from "@/lib/ai/agent/team/durable/rate-limit-resume"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 /** Manual scheduler: collects timers so the test fires them deterministically. */
 function makeScheduler() {
@@ -162,5 +169,39 @@ describe("createRealResumeDeps", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("renderNudgeContinuePrompt (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends the shipped nudge with no override", () => {
+    expect(renderNudgeContinuePrompt()).toBe(NUDGE_CONTINUE_PROMPT.defaultBody)
+    expect(renderNudgeContinuePrompt()).toMatch(/cooldown has now passed/)
+  })
+
+  it("sends a workspace override only for that project's teams", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: NUDGE_CONTINUE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-rate-limit-nudge",
+          body: "Cooldown over — continue your task.",
+          contractVersion: NUDGE_CONTINUE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    expect(renderNudgeContinuePrompt({ workspaceId: "ws-1" })).toBe(
+      "Cooldown over — continue your task."
+    )
+    expect(renderNudgeContinuePrompt({ workspaceId: "ws-2" })).toBe(
+      NUDGE_CONTINUE_PROMPT.defaultBody
+    )
   })
 })

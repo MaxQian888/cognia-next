@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { createPluginSystemLogger, loggers } from "./logger"
 import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
+import dynamic from "next/dynamic"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import {
   assertNetworkRequestAllowed,
@@ -156,6 +156,8 @@ import { createToolResultAPI } from "../api/tool-result-api"
 import { createDexieAPI } from "../api/dexie-api"
 import { createOcrAPI } from "../api/ocr-api"
 import { createDecisionsAPI } from "../api/decisions-api"
+import { createPromptsAPI } from "../api/prompts-api"
+import { createAgentConfigAPI } from "../api/agent-config-api"
 import { createWorkspaceAPI } from "../api/workspace-api"
 import { createModalAPI } from "../api/modal-api"
 import { createWebviewAPI } from "../api/webview-api"
@@ -460,6 +462,8 @@ export function createFullPluginContext(
     i18n: enhancedI18n,
     ocr: createOcrAPI(pluginId),
     decisions: createDecisionsAPI(pluginId),
+    prompts: createPromptsAPI(pluginId),
+    agentConfig: createAgentConfigAPI(pluginId),
     workspace: createWorkspaceAPI(pluginId, plugin.manifest),
     modal: createModalAPI(pluginId),
     webview: createWebviewAPI(pluginId, plugin.manifest.networkAccess),
@@ -690,6 +694,12 @@ function createEventEmitter(pluginId: string): PluginEventEmitter {
 // UI API
 // =============================================================================
 
+const PluginDataDialog = dynamic(() =>
+  import("@/components/plugins/dialogs/plugin-data-dialog").then(
+    (module) => module.PluginDataDialog
+  )
+)
+
 function createUIAPI(pluginId: string): PluginUIAPI {
   // Push a data-driven dialog onto the plugin modal stack and resolve when the
   // user acts (or with the dismiss default if they close it). Routes through
@@ -704,17 +714,28 @@ function createUIAPI(pluginId: string): PluginUIAPI {
   ): Promise<T> => {
     return new Promise<T>((resolve) => {
       let settled = false
+      let unsubscribe: (() => void) | undefined
       const settle = (value: unknown): void => {
         if (settled) return
         settled = true
+        unsubscribe?.()
         resolve(value as T)
       }
       try {
-        usePluginModalStore.getState().open({
+        const modalId = usePluginModalStore.getState().open({
           pluginId,
           component: PluginDataDialog,
           args: { ...args, settle },
         })
+        // Closing while the lazy component is still loading must also settle
+        // the API call; its unmount cleanup has not been installed yet.
+        const settleIfClosed = () => {
+          if (!usePluginModalStore.getState().stack.some((entry) => entry.modalId === modalId)) {
+            settle(dismiss)
+          }
+        }
+        unsubscribe = usePluginModalStore.subscribe(settleIfClosed)
+        settleIfClosed()
       } catch (error) {
         recordSilentFailure(
           pluginId,

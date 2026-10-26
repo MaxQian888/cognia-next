@@ -159,3 +159,19 @@ describe("listCredentialProviders", () => {
     expect(listCredentialProviders(HOME, m.fsx)).toEqual([])
   })
 })
+
+it("stores every newly supported search credential without changing the others", () => {
+  const m = memFs()
+  for (const id of ["google-ai", "deepseek", "tinyfish", "searxng"] as const) {
+    setSearchCredential(HOME, id, `${id}-key`, m.fsx)
+  }
+  const parsed = JSON.parse(m.files.get(credentialsPath(HOME))!)
+  expect(Object.keys(parsed.searchProviders).sort()).toEqual([
+    "deepseek",
+    "google-ai",
+    "searxng",
+    "tinyfish",
+  ])
+  expect(parsed.searchProviders.tinyfish.apiKey).toBe("tinyfish-key")
+  expect(m.writes.every((write) => write.mode === CREDENTIALS_MODE)).toBe(true)
+})

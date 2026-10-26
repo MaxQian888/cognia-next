@@ -1,6 +1,9 @@
 /** Portable type surface for the governed `ctx.automation` namespace. */
 
-export type { PluginAutomationAPI, PluginComputerUseOrigin } from "@/lib/plugin/api/automation-api"
+export type {
+  PluginAutomationAPI,
+  PluginComputerUseOrigin,
+} from "@cognia/plugin-contract/lib/plugin/api/automation-api"
 
 export type {
   ActionRequest,
@@ -39,15 +42,18 @@ export type {
   UiTreeNode,
   WindowOp,
   ZoomedRegion,
-} from "@/lib/automation/types"
+} from "@cognia/plugin-contract/lib/automation/types"
 
-export type { FindScreenTextResult, ScreenTextMatch } from "@/lib/automation/ocr-click"
+export type {
+  FindScreenTextResult,
+  ScreenTextMatch,
+} from "@cognia/plugin-contract/lib/automation/ocr-click"
 
 export type {
   UiaEventPayload,
   CallContext,
   Surface as AutomationSurface,
-} from "@/lib/automation/client"
+} from "@cognia/plugin-contract/lib/automation/client"
 
 /**
  * Runtime zod schemas for the Computer Use action contract, plus the renderer
@@ -77,7 +83,7 @@ export {
   toToolSchema,
   uiActionSchema,
   uiTreeProjectionKindSchema,
-} from "@/lib/automation/action-schemas"
+} from "@cognia/plugin-contract/lib/automation/action-schemas"
 
 /**
  * Projection of a capture-bearing result into MCP content blocks.
@@ -92,6 +98,9 @@ export {
   frameToModelContent,
   screenshotMetadata,
   screenshotMimeType,
-} from "@/lib/automation/model-frame"
+} from "@cognia/plugin-contract/lib/automation/model-frame"
 
-export type { ModelContentBlock, ModelFrameResult } from "@/lib/automation/model-frame"
+export type {
+  ModelContentBlock,
+  ModelFrameResult,
+} from "@cognia/plugin-contract/lib/automation/model-frame"

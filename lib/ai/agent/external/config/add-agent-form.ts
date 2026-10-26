@@ -14,8 +14,10 @@
 
 import { shellQuote, tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
+import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-options"
 import { isSupportedExternalAgentProtocol } from "@/lib/ai/agent/external/config/config-normalizer"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { compileEditorModelPlan } from "@/lib/ai/agent/external/config/cognia-model-options"
 import {
   getPresetConfig,
   type ExternalAgentPresetConfig,
@@ -26,6 +28,7 @@ import type {
   ExternalAgentConfig,
 } from "@/types/agent/external-agent"
 import type { AddAgentFormData } from "@/types/agent/component-types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 export const DEFAULT_TIMEOUT_MS = "300000"
 export const DEFAULT_RETRY_MAX_RETRIES = "3"
@@ -131,6 +134,27 @@ export function addAgentFormShape(data: AddAgentFormData, presetId: string): Add
   }
 }
 
+/**
+ * The connection a form describes, as the Cognia model checks read it: the
+ * picker, the sub-task model rows and validation judge the same object.
+ */
+export function addAgentFormGatewayConfig(
+  data: AddAgentFormData,
+  shape: Pick<AddAgentFormShape, "preset">
+): Pick<ExternalAgentConfig, "protocol" | "transport" | "process" | "network" | "metadata"> {
+  return {
+    protocol: data.protocol,
+    transport: data.transport,
+    process: {
+      command: data.command || (data.autoSpawnServer ? "opencode" : ""),
+      args: tokenizeShellCommand(data.args) ?? [],
+    },
+    network:
+      data.transport !== "stdio" && !data.autoSpawnServer ? { endpoint: data.endpoint } : undefined,
+    metadata: { ...shape.preset?.metadata, autoSpawnServer: data.autoSpawnServer },
+  }
+}
+
 /** Why a form cannot be submitted yet. */
 export type AddAgentFormProblem =
   | "unsupportedProtocol"
@@ -138,6 +162,7 @@ export type AddAgentFormProblem =
   | "endpointRequired"
   | "commandRequired"
   | "cogniaModelInvalid"
+  | "modelRolesInvalid"
   | "argumentsInvalid"
   | "environmentInvalid"
 
@@ -150,6 +175,7 @@ export const CONNECTION_PROBLEMS: ReadonlySet<AddAgentFormProblem> = new Set([
   "endpointRequired",
   "commandRequired",
   "cogniaModelInvalid",
+  "modelRolesInvalid",
   "argumentsInvalid",
   "environmentInvalid",
 ])
@@ -164,7 +190,13 @@ export interface AddAgentFormEnvironment {
 export function validateAddAgentForm(
   data: AddAgentFormData,
   presetId: string,
-  environment: AddAgentFormEnvironment
+  environment: AddAgentFormEnvironment,
+  /**
+   * The provider settings sub-task models are judged against (reasoning and
+   * effort support). Without them a chosen effort is refused, as admission
+   * would refuse it for a model whose reasoning support is unknown.
+   */
+  modelSettings?: Pick<AppSettings, "providerSettings" | "customProviders"> | null
 ): AddAgentFormProblem | null {
   // Accept any built-in protocol (acp / codex-app-server / opencode / a2a) OR
   // any plugin-contributed adapter currently registered in the runtime registry
@@ -193,25 +225,27 @@ export function validateAddAgentForm(
     return "endpointRequired"
   }
 
+  const gatewayConfig = addAgentFormGatewayConfig(data, shape)
   if (
     data.cogniaModel &&
     (!data.cogniaModel.providerId ||
       !data.cogniaModel.modelId ||
-      !canUseCogniaModels({
-        protocol: data.protocol,
-        transport: data.transport,
-        process: {
-          command: data.command || (data.autoSpawnServer ? "opencode" : ""),
-          args: tokenizeShellCommand(data.args) ?? [],
-        },
-        network:
-          data.transport !== "stdio" && !data.autoSpawnServer
-            ? { endpoint: data.endpoint }
-            : undefined,
-        metadata: { ...shape.preset?.metadata, autoSpawnServer: data.autoSpawnServer },
-      }))
+      !canUseCogniaModels(gatewayConfig))
   ) {
     return "cogniaModelInvalid"
+  }
+  if (
+    data.cogniaModel &&
+    data.modelRoles &&
+    !compileEditorModelPlan({
+      config: gatewayConfig,
+      primary: data.cogniaModel,
+      layers: [{ source: "config", overrides: data.modelRoles }],
+      providerSettings: modelSettings?.providerSettings ?? {},
+      customProviders: modelSettings?.customProviders,
+    }).ok
+  ) {
+    return "modelRolesInvalid"
   }
   if (
     (shape.isStdio || (shape.isOpenCode && data.autoSpawnServer)) &&
@@ -257,6 +291,10 @@ export function buildCreateExternalAgentInput(
       : {}),
     name: data.name,
     cogniaModel: data.cogniaModel ?? null,
+    ...(isCodexAppServerProtocol(data.protocol) && data.codexStepModelSwitching !== undefined
+      ? { codexOptions: { stepModelSwitching: data.codexStepModelSwitching } }
+      : {}),
+    ...(data.cogniaModel && data.modelRoles ? { modelRoles: data.modelRoles } : {}),
     protocol: data.protocol,
     ...(options.defaultPermissionMode
       ? { defaultPermissionMode: options.defaultPermissionMode }
@@ -402,6 +440,8 @@ export function addAgentFormFromConfig(config: ExternalAgentConfig): AddAgentFor
       protocol: config.protocol,
       transport: config.transport,
       cogniaModel: config.cogniaModel ?? null,
+      modelRoles: config.modelRoles,
+      codexStepModelSwitching: config.codexOptions?.stepModelSwitching,
       command: managedRuntime ? "" : (process?.command ?? ""),
       args: managedRuntime ? "" : (process?.args ?? []).map(shellQuote).join(" "),
       bare: process?.bare === true,
@@ -459,6 +499,10 @@ export function addAgentFormPatch(
     protocol: built.protocol,
     transport: built.transport,
     cogniaModel: built.cogniaModel ?? null,
+    modelRoles: built.modelRoles,
+    ...(built.codexOptions
+      ? { codexOptions: { ...config.codexOptions, ...built.codexOptions } }
+      : {}),
     timeout: built.timeout,
     // `buildCreateExternalAgentInput` fills every retry field from the form.
     retryConfig: built.retryConfig as ExternalAgentConfig["retryConfig"],

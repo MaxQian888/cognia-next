@@ -66,7 +66,7 @@ pub fn router() -> Router<SharedState> {
 
 /// Bumped when a field is ADDED. Nothing is ever removed or reshaped: a
 /// client built against version 1 keeps reading version 2.
-pub const AUTH_CONFIG_VERSION: u32 = 5;
+pub const AUTH_CONFIG_VERSION: u32 = 6;
 
 /// The name this Host reports to the clients that pair with it. Set it on a
 /// headless or containerised Host, whose machine name is meaningless.
@@ -111,6 +111,7 @@ pub const ENV_WEB_ORIGIN: &str = "COGNIA_WEB_ORIGIN";
 struct AuthConfigResponse {
     config_version: u32,
     deployment_mode: &'static str,
+    execution: &'static str,
     host_id: String,
     tenant_id: Option<String>,
     oidc: Option<OidcPublicConfig>,
@@ -323,6 +324,7 @@ fn auth_config_payload(
     });
     Ok(AuthConfigResponse {
         config_version: AUTH_CONFIG_VERSION,
+        execution: if super::host_surface_gate::execution_available() { "available" } else { "unavailable" },
         deployment_mode: match mode {
             DeploymentMode::SingleUser => "single-user",
             DeploymentMode::MultiTenant => "multi-tenant",
@@ -401,7 +403,7 @@ fn non_empty_env(name: &str) -> Option<String> {
 /// from the request, which is a claim that *this* listener serves `/signaling`.
 /// It does not: the companion router mounts `/ws/events`, `/ws/acp`,
 /// `/ws/terminal` and `/ws/worker`, and signaling lives in a separate service
-/// (`services/signaling-server`). A browser on the loopback plane was handed
+/// (`cognia-services/services/signaling-server`). A browser on the loopback plane was handed
 /// `ws://127.0.0.1:27891/signaling` and got a failed handshake every time,
 /// while the Host sat in `wss://signaling.cognia.cn/signaling` waiting for it.
 ///
@@ -642,15 +644,21 @@ pub(crate) async fn replace_device_capabilities_handler(
     body: Result<Json<ReplaceCapabilitiesRequest>, JsonRejection>,
 ) -> ApiResult<ReplaceCapabilitiesResponse> {
     let request = parse_public_json(body)?;
-    let capabilities = store()?
-        .replace_device_capabilities(
-            &context.tenant_id,
-            &context.device_id,
-            &device_id,
-            &request.capabilities,
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
+    let capabilities = super::ws_browser_companion::update_device_authorization(
+        &context.tenant_id,
+        &device_id,
+        || {
+            store()?
+                .replace_device_capabilities(
+                    &context.tenant_id,
+                    &context.device_id,
+                    &device_id,
+                    &request.capabilities,
+                    unix_time_secs(),
+                )
+                .map_err(store_error)
+        },
+    )?;
     Ok(Json(ReplaceCapabilitiesResponse {
         device_id,
         capabilities,
@@ -896,15 +904,52 @@ fn lifecycle_error(error: super::device_lifecycle::LifecycleError) -> Problem {
     }
 }
 
+async fn authorized_operation(
+    ledger: Result<std::sync::Arc<SecurityStore>, Problem>, context: &DeviceContext, operation_id: &str,
+) -> Result<Option<super::security_store::OperationSummary>, Problem> {
+    authorized_operation_with_scope(ledger, context, operation_id, async {
+        let Some(person) = super::host_surface_gate::operation_person(context).await? else { return Ok(None); };
+        Ok(super::person_partition::fleet().and_then(|fleet| fleet.receipt_scope(&person.account_id)))
+    }).await
+}
+
+async fn authorized_operation_with_scope(
+    ledger: Result<std::sync::Arc<SecurityStore>, Problem>, context: &DeviceContext, operation_id: &str,
+    resolve: impl std::future::Future<Output = Result<Option<super::person_partition::PersonReceiptScope>, Problem>>,
+) -> Result<Option<super::security_store::OperationSummary>, Problem> {
+    let ledger = ledger?;
+    if ledger.operation_org_scope(&context.tenant_id, &context.device_id, operation_id).map_err(store_error)?.is_some() {
+        return authorized_org_operation(&ledger, context, operation_id, async {
+            let person = super::host_surface_gate::org_policy_person(context).await?;
+            Ok(super::security_store::OrgReceiptScope::new(&person.org, &person.user))
+        }).await;
+    }
+    let account = ledger.operation_person_account(&context.tenant_id, &context.device_id, operation_id).map_err(store_error)?;
+    let Some(account) = account else {
+        return ledger.operation(&context.tenant_id, &context.device_id, operation_id).map_err(store_error);
+    };
+    let Some(scope) = resolve.await? else { return Ok(None); };
+    if scope.account_id != account { return Ok(None); }
+    ledger.person_operation(&context.tenant_id, &context.device_id, operation_id, &scope).map_err(store_error)
+}
+
+async fn authorized_org_operation(
+    ledger: &SecurityStore, context: &DeviceContext, operation_id: &str,
+    resolve: impl std::future::Future<Output = Result<super::security_store::OrgReceiptScope, Problem>>,
+) -> Result<Option<super::security_store::OperationSummary>, Problem> {
+    // The loopback operator retains its authority. Person brains never match.
+    if super::jwt::is_service_scope(Some(&context.scope)) {
+        return ledger.operation(&context.tenant_id, &context.device_id, operation_id).map_err(store_error);
+    }
+    let scope = resolve.await?;
+    ledger.org_operation(&context.tenant_id, &context.device_id, operation_id, &scope).map_err(store_error)
+}
+
 pub(crate) async fn operation_handler(
     Path(operation_id): Path<String>,
     Extension(context): Extension<DeviceContext>,
 ) -> Response {
-    match store().and_then(|store| {
-        store
-            .operation(&context.tenant_id, &context.device_id, &operation_id)
-            .map_err(store_error)
-    }) {
+    match authorized_operation(store(), &context, &operation_id).await {
         Ok(Some(operation)) => (
             StatusCode::OK,
             Json(super::operations::Operation::from(operation)),
@@ -925,20 +970,16 @@ pub(crate) async fn internal_operation_handler(
     Extension(context): Extension<DeviceContext>,
 ) -> Response {
     let request_id = uuid::Uuid::new_v4().to_string();
-    internal_operation_response(store(), &context, operation_id, request_id)
+    internal_operation_response(store(), &context, operation_id, request_id).await
 }
 
-fn internal_operation_response(
+async fn internal_operation_response(
     store: Result<std::sync::Arc<SecurityStore>, Problem>,
     context: &DeviceContext,
     operation_id: String,
     request_id: String,
 ) -> Response {
-    match store.and_then(|store| {
-        store
-            .operation(&context.tenant_id, &context.device_id, &operation_id)
-            .map_err(store_error)
-    }) {
+    match authorized_operation(store, context, &operation_id).await {
         Ok(Some(operation)) => (
             StatusCode::OK,
             Json(super::operations::Operation::from(operation)),
@@ -1727,6 +1768,19 @@ async fn register_handler(
         }
         (false, None) => None,
     };
+    let person = if authority.requires_invitation {
+        None
+    } else {
+        Some(
+            super::workspace_access::resolve_oidc_device_person(
+                bearer_token(&headers)?,
+                &authority.tenant_id,
+                &authority.actor_id,
+            )
+            .await
+            .map_err(registration_identity_error)?,
+        )
+    };
     let signaling = provision_signaling(&request.device_id, &request.signaling_public_key)?;
     let registration_result = if authority.requires_invitation {
         security.register_owner_device(
@@ -1741,9 +1795,22 @@ async fn register_handler(
             unix_time_secs(),
         )
     } else {
-        security.register_oidc_device(
+        // A multi-tenant Host serves every member's client data plane from
+        // that member's own partition (plan §9a), so the member can write
+        // it. A single-user Host has one data plane, the owner's, and keeps
+        // member writes an explicit elevation.
+        let register = if deployment_mode() == DeploymentMode::MultiTenant {
+            SecurityStore::register_oidc_partition_device
+        } else {
+            SecurityStore::register_oidc_device
+        };
+        register(
+            &security,
             &authority.tenant_id,
             &authority.actor_id,
+            person
+                .as_ref()
+                .expect("OIDC identity resolved before registration"),
             &request.challenge_id,
             &request.challenge_nonce,
             &request.device_id,
@@ -2209,6 +2276,14 @@ impl SocketChannel {
         }
     }
 
+    fn execution(self) -> bool {
+        matches!(self, Self::Terminal | Self::Browser | Self::Acp | Self::Worker | Self::RemoteDesktop)
+    }
+
+    #[cfg(test)]
+    const ALL: [Self; 7] = [Self::Events, Self::Terminal, Self::Browser, Self::Acp,
+        Self::Worker, Self::BrowserCompanion, Self::RemoteDesktop];
+
     fn binding(self, session_id: Option<&str>) -> Result<(String, &'static str), Problem> {
         match (self, session_id) {
             (Self::Events, None) => Ok(("/ws/events".to_string(), "events")),
@@ -2303,6 +2378,13 @@ async fn socket_ticket_handler(
     let security = store()?;
     consume_device_proof(&access.tenant_id, &access.sub, &verified_proof)?;
     let required_capability = request.channel.capability();
+    super::host_surface_gate::authorize_channel(required_capability, request.channel.execution(), &DeviceContext {
+        device_id: access.sub.clone(),
+        tenant_id: access.tenant_id.clone(),
+        scope: "device".into(),
+        granted_scopes: vec![],
+        authorization_capabilities: Some(snapshot.capabilities.clone()),
+    }).await?;
     if !snapshot
         .capabilities
         .iter()
@@ -2511,6 +2593,23 @@ struct RegistrationAuthority {
     requires_invitation: bool,
 }
 
+fn registration_identity_error(error: super::workspace_access::WorkspaceAccessError) -> Problem {
+    use super::workspace_access::WorkspaceAccessError;
+    if matches!(error, WorkspaceAccessError::IdentityUnlinked) {
+        api_error(
+            StatusCode::FORBIDDEN,
+            "oidc_identity_unlinked",
+            "the authenticated person is not linked to this organization",
+        )
+    } else {
+        api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "host_identity_unavailable",
+            "the configured collaboration service could not verify this device's person",
+        )
+    }
+}
+
 async fn registration_authority(
     headers: &HeaderMap,
     requested_tenant: Option<&str>,
@@ -2536,10 +2635,13 @@ async fn registration_authority(
                         "the identity provider could not authenticate this request",
                     )
                 })?;
-            let tenant = claims
-                .organization_id
-                .clone()
-                .unwrap_or_else(|| claims.sub.clone());
+            let tenant = claims.organization_id.clone().ok_or_else(|| {
+                api_error(
+                    StatusCode::FORBIDDEN,
+                    "oidc_organization_required",
+                    "device registration requires an organization-scoped access token",
+                )
+            })?;
             if requested_tenant.is_some_and(|requested| requested != tenant) {
                 return Err(api_error(
                     StatusCode::FORBIDDEN,
@@ -2684,6 +2786,16 @@ mod tests {
     use super::*;
     use parking_lot::RwLock;
     use std::sync::Arc;
+
+    #[test]
+    fn device_registration_distinguishes_unlinked_identity_from_authority_outage() {
+        use super::super::workspace_access::WorkspaceAccessError;
+        let unlinked = registration_identity_error(WorkspaceAccessError::IdentityUnlinked);
+        assert_eq!(unlinked.code, "oidc_identity_unlinked");
+        let unavailable = registration_identity_error(WorkspaceAccessError::NotConfigured);
+        assert_eq!(unavailable.code, "host_identity_unavailable");
+        assert_ne!(unlinked.status, unavailable.status);
+    }
 
     fn test_state() -> SharedState {
         Arc::new(super::super::CompanionState {
@@ -3353,6 +3465,54 @@ mod tests {
         assert!(after > before);
     }
 
+    #[test]
+    fn p5_legacy_operation_document_keeps_its_principal_scope_and_wire() {
+        internal_operation_lookup_is_principal_scoped_and_returns_receipts();
+    }
+
+    #[tokio::test]
+    async fn p5_operation_reads_refuse_reassigned_person_and_old_data_generation() {
+        use crate::person_partition::{PersonPartition, PersonReceiptScope};
+        let ledger = SecurityStore::in_memory().unwrap();
+        let person = PersonPartition::new("org_aaa".into(), "usr_aaa".into());
+        let a = PersonReceiptScope { account_id: person.account_id, data_generation: uuid::Uuid::new_v4().to_string() };
+        let key = a.key("same-key");
+        let super::super::security_store::IdempotencyDecision::Started { operation_id } =
+            ledger.begin_idempotent_operation("tenant", "device", "host", &key, "hash", 100).unwrap() else { panic!("started"); };
+        ledger.mark_operation_running("tenant", &operation_id, 101).unwrap();
+        ledger.complete_idempotent_operation("tenant", "device", &key, "{\"result\":\"private-a\"}", true, 102).unwrap();
+        let context = DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: "device".into(), granted_scopes: vec![], authorization_capabilities: None };
+        assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(a.clone())) }).await.unwrap().is_some());
+        // Same tenant and device, but the authority resolver now binds it to B.
+        let b = PersonPartition::new("org_aaa".into(), "usr_bbb".into());
+        let b_scope = PersonReceiptScope { account_id: b.account_id, data_generation: uuid::Uuid::new_v4().to_string() };
+        assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(b_scope)) }).await.unwrap().is_none());
+        let rejoined = PersonReceiptScope { data_generation: uuid::Uuid::new_v4().to_string(), ..a };
+        assert!(authorized_operation_with_scope(Ok(ledger.clone()), &context, &operation_id, async { Ok(Some(rejoined)) }).await.unwrap().is_none());
+        assert!(authorized_operation_with_scope(Ok(ledger), &context, &operation_id, async { Ok(None) }).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn p6a_org_operation_reads_refuse_rebound_or_downgraded_admins() {
+        use crate::security_store::{OrgReceiptScope, IdempotencyDecision};
+        let ledger = SecurityStore::in_memory().unwrap();
+        let a = OrgReceiptScope::new("org_p6a_aaa", "usr_p6a_aaa");
+        let key = a.key("p6a-key");
+        let IdempotencyDecision::Started { operation_id } = ledger.begin_idempotent_operation("tenant", "device", "host", &key, "hash", 100).unwrap() else { panic!("started"); };
+        ledger.mark_operation_running("tenant", &operation_id, 101).unwrap();
+        ledger.complete_idempotent_operation("tenant", "device", &key, "{\"result\":\"private-org-policy\"}", true, 102).unwrap();
+        let context = DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: "device".into(), granted_scopes: vec![], authorization_capabilities: None };
+        assert!(authorized_org_operation(&ledger, &context, &operation_id, async { Ok(a) }).await.unwrap().is_some());
+        let b = OrgReceiptScope::new("org_p6a_bbb", "usr_p6a_aaa");
+        assert!(authorized_org_operation(&ledger, &context, &operation_id, async { Ok(b) }).await.unwrap().is_none());
+        let denied = authorized_org_operation(&ledger, &context, &operation_id, async {
+            Err(api_error(StatusCode::FORBIDDEN, "host_surface_forbidden", "org management standing revoked"))
+        }).await.unwrap_err();
+        assert_eq!(denied.code, "host_surface_forbidden");
+        // The real wrapper must route org tags before any legacy receipt lookup.
+        assert!(authorized_operation_with_scope(Ok(ledger), &context, &operation_id, async { panic!("org receipt reached person resolver") }).await.is_err());
+    }
+
     #[tokio::test]
     async fn internal_operation_lookup_is_principal_scoped_and_returns_receipts() {
         let store = SecurityStore::in_memory().unwrap();
@@ -3407,7 +3567,7 @@ mod tests {
             &context,
             operation_id.clone(),
             "request-found".into(),
-        );
+        ).await;
         assert_eq!(found.status(), StatusCode::OK);
         let found_body = response_json(found).await;
         // The answer is the one Operation document (ADR-0175 B3): the
@@ -3432,7 +3592,7 @@ mod tests {
             &other_principal,
             operation_id.clone(),
             "request-hidden".into(),
-        );
+        ).await;
         assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
         let hidden_body = response_json(hidden).await;
         assert_eq!(hidden_body["code"], "operation_not_found");
@@ -3638,6 +3798,7 @@ mod tests {
         let response = AuthConfigResponse {
             config_version: AUTH_CONFIG_VERSION,
             deployment_mode: "multi-tenant",
+            execution: "unavailable",
             host_id: "host".into(),
             tenant_id: None,
             oidc: Some(OidcPublicConfig {
@@ -3658,7 +3819,8 @@ mod tests {
             host_name: None,
         };
         let value = serde_json::to_value(&response).unwrap();
-        assert_eq!(value["configVersion"], 5);
+        assert_eq!(value["configVersion"], 6);
+        assert_eq!(value["execution"], "unavailable");
         assert_eq!(value["oidc"]["issuerKind"], "logto");
         assert_eq!(value["deploymentMode"], "multi-tenant");
         assert_eq!(value["oidc"]["webClientId"], "web");
@@ -3682,6 +3844,38 @@ mod tests {
             serde_json::to_value(&named).unwrap()["hostName"],
             "Studio Mac"
         );
+    }
+
+    #[test]
+    fn every_socket_channel_has_a_host_surface_policy_including_workers() {
+        let policy = super::super::host_surface_policy::POLICY.as_ref().unwrap();
+        // A new enum variant must also enter ALL; otherwise adding a channel
+        // could silently evade the policy exhaustiveness test.
+        let variants = include_str!("api.rs").split("enum SocketChannel {").nth(1).unwrap()
+            .split('}').next().unwrap().lines()
+            .filter(|line| {
+                let line = line.trim();
+                line.ends_with(',') && !line.starts_with("//") && !line.starts_with('#')
+            }).count();
+        assert_eq!(variants, SocketChannel::ALL.len());
+        for channel in SocketChannel::ALL {
+            assert!(policy.get(channel.capability()).is_some(), "{channel:?} is unclassified");
+        }
+        assert_eq!(policy.get("agent.worker").unwrap().class,
+            super::super::host_surface_policy::SurfaceClass::OperatorOnly);
+        assert!(SocketChannel::Terminal.execution(), "terminal tickets must respect execution disabled");
+        assert!(SocketChannel::Browser.execution());
+        assert!(SocketChannel::Acp.execution());
+        assert!(SocketChannel::Worker.execution());
+        assert!(policy.executes(SocketChannel::Worker.capability()));
+        assert!(!SocketChannel::Events.execution());
+        assert!(!policy.executes(SocketChannel::Events.capability()));
+        assert!(SocketChannel::RemoteDesktop.execution());
+        assert!(!policy.executes(SocketChannel::BrowserCompanion.capability()));
+        let handler = include_str!("api.rs").split("async fn socket_ticket_handler(").nth(1).unwrap()
+            .split("/// Host-wide switches").next().unwrap();
+        assert!(handler.find("host_surface_gate::authorize_channel(").unwrap()
+            < handler.find(".issue_socket_ticket(").unwrap(), "tickets must be admitted before minting");
     }
 
     #[test]

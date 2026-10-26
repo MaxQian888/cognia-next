@@ -5,6 +5,17 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { DiffViewer } from "@/components/source-control/diff-viewer"
 import { ChangesetDetail } from "@/components/source-control/agent-changes/changeset-detail"
@@ -381,9 +392,45 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
             {t("runChecks")}
           </Button>
         )}
-        <Button disabled={!publishable} onClick={() => setConfirmPublish(publishKey)}>
-          {t("publish")}
-        </Button>
+        {/*
+          Publication is the run's one irreversible step, so it is a modal
+          decision. The open state is the publish key itself: a confirmation
+          raised for one candidate/head/target closes on its own if any of the
+          three moves underneath it, instead of publishing something else.
+          The Trigger is what Radix returns focus to on Cancel or Escape.
+        */}
+        <AlertDialog
+          open={confirmPublish === publishKey && Boolean(publishable)}
+          onOpenChange={(next) => setConfirmPublish(next ? publishKey : null)}
+        >
+          <AlertDialogTrigger asChild>
+            <Button disabled={!publishable}>{t("publish")}</Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent
+            data-testid="best-of-n-publish-confirm"
+            data-publish-key={confirmPublish ?? undefined}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("confirmTitle")}</AlertDialogTitle>
+              {selected ? (
+                <Badge variant="outline" data-testid="best-of-n-publish-candidate">
+                  {t("candidate", { number: selected.index + 1 })}
+                </Badge>
+              ) : null}
+              <AlertDialogDescription className="wrap-anywhere">
+                {t("confirmPublish", { sha: group.selectedHeadSha ?? "", branch: group.targetRef })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("back")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => void mutate(() => publishBestOfNCandidate(groupId))}
+              >
+                {t("confirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {!terminal && (
           <Button
             variant="outline"
@@ -410,23 +457,6 @@ export function BestOfNComparison({ groupId }: { groupId: string }) {
             </Button>
           )}
       </div>
-      {confirmPublish === publishKey && publishable && (
-        <section
-          role="alertdialog"
-          aria-label={t("confirmTitle")}
-          className="space-y-2 rounded border p-3"
-        >
-          <p>
-            {t("confirmPublish", { sha: group.selectedHeadSha ?? "", branch: group.targetRef })}
-          </p>
-          <Button onClick={() => void mutate(() => publishBestOfNCandidate(groupId))}>
-            {t("confirm")}
-          </Button>
-          <Button variant="outline" onClick={() => setConfirmPublish(null)}>
-            {t("back")}
-          </Button>
-        </section>
-      )}
       <p className="text-xs">
         {t("archiveStatus")}: {t(`archivePhase.${group.archiveStatus}`)}
       </p>

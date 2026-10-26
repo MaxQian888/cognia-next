@@ -23,6 +23,7 @@
 import type { FetchGuardReason } from "@cognia/network-guard"
 
 import { evaluateFetchTarget, FetchTargetBlockedError } from "@/lib/web/fetch-guard"
+import { freshInstallWebReader, toReaderPolicy } from "@/lib/web/reader/reader-settings"
 
 export const MAX_EVIDENCE_REDIRECTS = 3
 /** Characters of page text kept as evidence. */
@@ -168,8 +169,13 @@ export function createWebEvidence(deps: WebEvidenceDeps): WebEvidence {
           fetchImpl: fetchImpl as typeof fetch,
           signal,
           allowPrivateHosts: false,
-          jinaFallback: false,
-          alwaysDistill: false,
+          // Evidence must use the guarded transport for every request; no
+          // platform or vendor pre-stage may bypass its redirect audit.
+          readerPolicy: toReaderPolicy({
+            ...freshInstallWebReader(),
+            defaultReader: "direct",
+            readers: { direct: { enabled: true, priority: 0 } },
+          }),
           ...(deps.userAgent ? { userAgent: deps.userAgent } : {}),
         }
       )) as WebFetchOutcome
@@ -203,8 +209,8 @@ export function createWebEvidence(deps: WebEvidenceDeps): WebEvidence {
   if (deps.webSearch && deps.searchExecutor) {
     const webSearch = deps.webSearch
     const searchExecutor = deps.searchExecutor
-    evidence.search = async (query) => {
-      const raw = (await webSearch({ query, maxResults: 5 }, { searchExecutor })) as {
+    evidence.search = async (query, signal) => {
+      const raw = (await webSearch({ query, maxResults: 5 }, { searchExecutor, signal })) as {
         ok?: boolean
         results?: Array<{ title?: unknown; url?: unknown; content?: unknown }>
       }

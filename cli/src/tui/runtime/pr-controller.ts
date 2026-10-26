@@ -16,8 +16,12 @@ import {
   resolveGitWorkflowConfig,
   type ResolvedConfig,
 } from "../../config/schema"
+import { CLI_PR_SUMMARY_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import { runGit as defaultRunGit, runExec, type ExecFn, type ExecResult } from "../../agent/run-git"
 import { generateText } from "../../agent/generate-text"
+import { primeCliPromptContext } from "../../agent/prompt-overrides"
 import { errorMessage, openDocument } from "./shared"
 import type { TuiAction } from "../state/types"
 
@@ -57,27 +61,24 @@ export interface PrPromptContext {
   branch: string
 }
 
-/** Build the PR-summary prompt. Pure, so its shape is unit-tested. */
-export function buildPrSummaryPrompt(ctx: PrPromptContext): string {
-  return [
-    `Summarize this branch (\`${ctx.branch}\`) into a pull request against \`${ctx.base}\`.`,
-    "",
-    "Commits:",
-    ctx.commits.trim() || "(none)",
-    "",
-    "Diffstat:",
-    ctx.diffstat.trim() || "(none)",
-    "",
-    "Produce exactly this format (no code fences, no extra commentary):",
-    "Title: <a Conventional-Commit-style one-line title, 72 chars or fewer>",
-    "Body:",
-    "## Summary",
-    "<1-3 sentences on the intent of the change>",
-    "## Changes",
-    "<bulleted list of the notable changes>",
-    "## Test plan",
-    "<how a reviewer can verify this>",
-  ].join("\n")
+/**
+ * Build the PR-summary prompt from the `developer.cli.pr-summary` slot
+ * (ADR-0236). Pure apart from reading the loaded override snapshot, so its
+ * shape is unit-tested.
+ */
+export function buildPrSummaryPrompt(
+  ctx: PrPromptContext,
+  context: PromptResolutionContext = {}
+): string {
+  return resolvePrompt(CLI_PR_SUMMARY_PROMPT, {
+    context,
+    values: {
+      branch: ctx.branch,
+      base: ctx.base,
+      commits: ctx.commits.trim() || "(none)",
+      diffstat: ctx.diffstat.trim() || "(none)",
+    },
+  }).text
 }
 
 /** Split the model's `Title:` / `Body:` output. Pure. */
@@ -190,15 +191,19 @@ async function runFlow(deps: PrDeps): Promise<void> {
   }
 
   deps.dispatch({ type: "NOTICE", message: `Summarizing ${branch} → ${base} into a PR…` })
+  const promptContext = await primeCliPromptContext(deps.cwd, deps.home)
   let raw: string
   try {
     raw = await generateOf(deps)({
-      prompt: buildPrSummaryPrompt({
-        commits: commitsRes.stdout,
-        diffstat: statRes.stdout,
-        base,
-        branch,
-      }),
+      prompt: buildPrSummaryPrompt(
+        {
+          commits: commitsRes.stdout,
+          diffstat: statRes.stdout,
+          base,
+          branch,
+        },
+        promptContext
+      ),
       config: deps.config,
       cwd: deps.cwd,
       ...(deps.home ? { home: deps.home } : {}),

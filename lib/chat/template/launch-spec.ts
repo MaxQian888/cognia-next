@@ -11,43 +11,12 @@
 // The three additions are the ones a preset has no concept of, and the ones the
 // original ask was actually about: which agent, which team, which repository.
 
-import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
-
-/**
- * Which repository a template expects.
- *
- * Both halves are stored on purpose. `projectId` is how it resolves instantly
- * on the machine that saved it; `gitRemote` is the only half that survives the
- * trip to another machine, because a workspace is identified in this codebase
- * by a LOCAL ABSOLUTE PATH and nothing else — there is no portable repository
- * identity to store. Neither is sufficient alone.
- */
-export interface ChatTemplateWorkspaceRef {
-  projectId?: string
-  /** e.g. `git@github.com:acme/app.git` — the portable half. */
-  gitRemote?: string
-  branch?: string
-}
-
-export interface ChatTemplateLaunchSpec {
-  // ── same shape as SystemPromptPreset ──────────────────────────────────────
-  systemPrompt?: string
-  model?: string
-  permissionMode?: ChatSession["permissionMode"]
-  effort?: SystemPromptPreset["effort"]
-  allowedTools?: string[]
-  disallowedTools?: string[]
-  mcpServerIds?: string[]
-  skillIds?: string[]
-  agentModeId?: string | null
-  workingDir?: string
-  // ── the three a preset cannot express ─────────────────────────────────────
-  /** The persona the conversation runs as. */
-  characterId?: string
-  /** The Squad (executor) the conversation runs on — ADR-0140. */
-  squadId?: string
-  workspace?: ChatTemplateWorkspaceRef
-}
+import type { ChatSession } from "@cognia/agent-config-types"
+import type { ChatTemplateLaunchSpec } from "@cognia/plugin-contract/lib/chat/template/launch-spec"
+export type {
+  ChatTemplateLaunchSpec,
+  ChatTemplateWorkspaceRef,
+} from "@cognia/plugin-contract/lib/chat/template/launch-spec"
 
 /** A field the template would change, and what it would change it from. */
 export interface LaunchSpecDifference {

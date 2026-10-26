@@ -85,7 +85,8 @@ describe("createContextPanelWebviewRenderer", () => {
 
     expect(postSpy).toHaveBeenCalledWith(
       { __cogniaWebview: "host", data: contextPanelWebviewEvent("visibility", { visible: false }) },
-      "*"
+      "*",
+      []
     )
   })
 
@@ -105,7 +106,8 @@ describe("createContextPanelWebviewRenderer", () => {
 
     expect(postSpy).toHaveBeenCalledWith(
       { __cogniaWebview: "host", data: contextPanelWebviewEvent("visibility", { visible: false }) },
-      "*"
+      "*",
+      []
     )
   })
 
@@ -126,7 +128,8 @@ describe("createContextPanelWebviewRenderer", () => {
 
     expect(postSpy).toHaveBeenCalledWith(
       { __cogniaWebview: "host", data: contextPanelWebviewEvent("visibility", { visible: true }) },
-      "*"
+      "*",
+      []
     )
   })
 })

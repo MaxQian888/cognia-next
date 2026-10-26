@@ -70,6 +70,20 @@ function renderGlance(
   return render(<GlanceProvider value={value}>{ui}</GlanceProvider>)
 }
 
+describe("GlanceRow responsive metadata", () => {
+  it("keeps the full secondary label available when space is constrained", () => {
+    const account = "A long disabled account label that previously displaced its enable button"
+    renderGlance(
+      <GlanceRow sub={account} trailing={<button type="button">Enable account</button>}>
+        Claude
+      </GlanceRow>
+    )
+    expect(screen.getByTitle(account)).toHaveTextContent(account)
+    expect(screen.getByText("Claude")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Enable account" })).toBeEnabled()
+  })
+})
+
 describe("GlanceSection", () => {
   it("renders title, meta and aside inside a labelled module section", () => {
     renderGlance(

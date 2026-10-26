@@ -69,7 +69,7 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
         "-C",
-        "services/status-server/worker",
+        ".cache/cognia-services/services/status-server/worker",
         "exec",
         "wrangler",
         "dev",
@@ -88,7 +88,7 @@
     {
       "name": "identity-worker",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "services/identity-server", "dev"],
+      "runtimeArgs": ["--dir", ".cache/cognia-services/services/identity-server", "dev"],
       "port": 8787
     }
   ]

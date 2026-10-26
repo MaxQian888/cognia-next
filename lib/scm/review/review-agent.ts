@@ -191,7 +191,9 @@ export async function reviewChangesetWithAgent(
           hunks,
           config: deps.customInstructions ? { customInstructions: deps.customInstructions } : {},
         },
-        observed
+        observed,
+        // The verdict feeds an approval decision: pin the shipped prompt.
+        { promptPolicy: "shipped" }
       )
     } catch {
       return unavailable("failed")

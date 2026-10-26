@@ -12,8 +12,12 @@ export interface HostSession {
   reloadExtensions?(options?: AgentExtensionReloadOptions): Promise<AgentExtensionReloadResult>
   sdkSessionId?: string
   multiTurn?: boolean
+  /** Resolves after the runtime loop and its owned processes are disposed. */
+  closed?: Promise<void>
   runtimeAdapterId?: string
   turnRef?: { id?: string }
+  /** Prompt admitted but possibly still waiting for the runtime's input consumer. */
+  turnPending?: boolean
   sendOptions?: SendOptions
   modeTransition?: Promise<Outcome>
   q?: {
@@ -21,6 +25,7 @@ export interface HostSession {
     closed?: boolean
     interrupt?(): unknown
     close?(): void
+    setModel?(model: string): unknown
     setPermissionMode?(mode: string): unknown
   }
   pushUserMessage?(prompt: Prompt, priority?: string): unknown
@@ -38,6 +43,7 @@ export interface HostSession {
       input?: unknown
       suggestions?: unknown
       suppressAlwaysAllowRule?: unknown
+      requiresExplicitConsent?: boolean
     }
   >
   pendingPluginToolCalls?: Map<string, { resolve(value: unknown): void }>

@@ -245,3 +245,26 @@ test("a bundled kit's own sources are held to the author boundary", () => {
 test("every listed bundled kit in this checkout is clean", () => {
   assert.deepEqual(checkBundledKits(process.cwd()), [])
 })
+
+test("files at the root of plugins/ need the pragma to reach into the host", () => {
+  const repo = mkdtempSync(join(tmpdir(), "author-root-files-"))
+  const write = (relative, text) => {
+    const file = join(repo, relative)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, text)
+  }
+  try {
+    write("plugins/sweep.test.ts", 'import { x } from "@/lib/private"\n')
+    write(
+      "plugins/declared.test.ts",
+      '/** @cognia-host-integration-test */\nimport { x } from "@/lib/private"\n'
+    )
+    write("plugins/clean.test.ts", 'import { definePlugin } from "@cognia/plugin-sdk"\n')
+    write("plugins/README.md", "@/lib/private\n")
+    assert.deepEqual(checkPluginGovernance(repo).violations, [
+      "plugins/sweep.test.ts imports @/lib/private",
+    ])
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
+})

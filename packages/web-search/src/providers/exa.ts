@@ -4,7 +4,7 @@
  */
 
 import type { SearchOptions, SearchResponse, SearchResult } from "../types"
-import { exaFetch } from "../proxy-search-fetch"
+import { exaFetch, ProviderHttpError, readErrorDetail } from "../proxy-search-fetch"
 import { log } from "../log"
 
 const EXA_API_URL = "https://api.exa.ai/search"
@@ -64,6 +64,7 @@ export async function searchWithExa(
     startPublishedDate,
     endPublishedDate,
     contents,
+    category,
   } = options
 
   if (!apiKey) {
@@ -86,10 +87,12 @@ export async function searchWithExa(
   if (startPublishedDate) requestBody.startPublishedDate = startPublishedDate
   if (endPublishedDate) requestBody.endPublishedDate = endPublishedDate
   if (contents) requestBody.contents = contents
+  if (category) requestBody.category = category
 
   try {
     const response = await exaFetch(EXA_API_URL, {
       method: "POST",
+      signal: options.signal,
       headers: {
         "x-api-key": apiKey,
         "Content-Type": "application/json",
@@ -167,6 +170,7 @@ export async function findSimilarWithExa(
   try {
     const response = await exaFetch("https://api.exa.ai/findSimilar", {
       method: "POST",
+      signal: options.signal,
       headers: {
         "x-api-key": apiKey,
         "Content-Type": "application/json",
@@ -202,6 +206,69 @@ export async function findSimilarWithExa(
         ? `Exa findSimilar failed: ${error.message}`
         : "Exa findSimilar failed: Unknown error"
     )
+  }
+}
+
+interface ExaContentsResponse {
+  results?: Array<{ url: string; title?: string; text?: string; publishedDate?: string }>
+  statuses?: Array<{
+    id: string
+    status: "success" | "error"
+    error?: { tag?: string; httpStatusCode?: number | null } | null
+  }>
+}
+
+export type ExaReadOutcome =
+  | { ok: true; title?: string; text: string; publishedDate?: string }
+  | { ok: false; tag: string; httpStatusCode?: number }
+
+/**
+ * Read exactly one URL through Exa `/contents`. Per-URL failures arrive in
+ * `statuses[]` under HTTP 200 (e.g. `CRAWL_NOT_FOUND`, `CRAWL_HTTP_403`,
+ * `CRAWL_TIMEOUT`) and return `{ ok: false }`; a request-level failure throws
+ * {@link ProviderHttpError}.
+ */
+export async function readWithExa(
+  url: string,
+  apiKey: string,
+  options: { signal?: AbortSignal; maxCharacters?: number; livecrawlTimeoutMs?: number } = {}
+): Promise<ExaReadOutcome> {
+  if (!apiKey) throw new Error("Exa API key is required")
+  const body: Record<string, unknown> = {
+    urls: [url],
+    text: options.maxCharacters ? { maxCharacters: options.maxCharacters } : true,
+  }
+  if (options.livecrawlTimeoutMs) {
+    body.livecrawlTimeout = Math.min(90_000, Math.max(1, Math.floor(options.livecrawlTimeoutMs)))
+  }
+  const response = await exaFetch("https://api.exa.ai/contents", {
+    method: "POST",
+    signal: options.signal,
+    headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const { detail, code } = await readErrorDetail(response)
+    throw new ProviderHttpError("Exa", response.status, detail, code)
+  }
+  const data = (await response.json()) as ExaContentsResponse
+  const status = data.statuses?.find((s) => s.id === url) ?? data.statuses?.[0]
+  if (status?.status === "error") {
+    return {
+      ok: false,
+      tag: status.error?.tag ?? "CRAWL_UNKNOWN_ERROR",
+      ...(typeof status.error?.httpStatusCode === "number"
+        ? { httpStatusCode: status.error.httpStatusCode }
+        : {}),
+    }
+  }
+  const result = data.results?.[0]
+  if (!result?.text?.trim()) return { ok: false, tag: "EMPTY_CONTENT" }
+  return {
+    ok: true,
+    text: result.text,
+    ...(result.title ? { title: result.title } : {}),
+    ...(result.publishedDate ? { publishedDate: result.publishedDate } : {}),
   }
 }
 

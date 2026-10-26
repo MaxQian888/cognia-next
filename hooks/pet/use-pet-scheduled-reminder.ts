@@ -19,6 +19,8 @@
 
 "use client"
 
+import { isMaintenanceTask } from "@/lib/scheduler/maintenance-tasks"
+
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 
@@ -90,10 +92,7 @@ export function usePetScheduledReminder(
         // The task's own `dueReminder` flag mutes the reminder entirely — the
         // flourish and the record both belong to the reminder. Absent means on.
         const dueReminder = task?.notification?.dueReminder
-        const maintenance =
-          task?.type === "provider-diagnostics-refresh" ||
-          task?.type === "connection:presence:refresh" ||
-          task?.tags?.some((tag) => tag.startsWith("system:"))
+        const maintenance = isMaintenanceTask(task)
         if (dueReminder === false || (dueReminder === undefined && maintenance)) return
 
         // Attention flourish alongside the card; the resting state itself

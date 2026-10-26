@@ -4,9 +4,46 @@
  * each other (the synthesizer expects the playbook agent's confidence
  * scoring rubric, etc.).
  *
- * All prompts use simple `{token}` interpolation; the agent file fills the
- * template via `applyTemplate`.
+ * Each is a Prompt Center definition (ADR-0236): the agent resolves it with
+ * its data as `{{chunks}}` / `{{profile}}` / `{{drafts}}` values, which are
+ * inserted once and never re-scanned. The JSON keys each agent parses are
+ * required fragments, so a customized body cannot stop asking for them.
  */
+
+import { definePrompt, type PromptVariableSpec } from "@/lib/prompts/types"
+
+/** Chunk and profile text is bounded by the agents' own caps; this only guards. */
+const DATA_MAX = 1_000_000
+
+function twinDistillPrompt(input: {
+  stage: string
+  consumer: string
+  variables: readonly string[]
+  requiredFragments: readonly string[]
+  defaultBody: string
+}) {
+  return definePrompt({
+    id: `twin.distill.${input.stage}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "twin",
+    operation: "replace-template",
+    scopes: ["account"],
+    activation: "next-operation",
+    // Each stage's reply is parsed as JSON against the schema in its body.
+    risk: "protocol",
+    hosts: ["app"],
+    maxChars: 16_000,
+    variables: input.variables.map((name): PromptVariableSpec => ({
+      name,
+      required: true,
+      maxChars: DATA_MAX,
+    })),
+    requiredFragments: input.requiredFragments,
+    consumers: [input.consumer],
+    defaultBody: input.defaultBody,
+  })
+}
 
 const SHARED_PREAMBLE = `You are part of a multi-agent pipeline that distils a person's
 documents, chat history, and code commits into a faithful "digital twin".
@@ -19,7 +56,12 @@ You MUST respond with strict JSON only — no prose before or after — and
 follow the schema described inside the user prompt verbatim. If a field is
 not derivable from the input, omit it (do not invent).`
 
-export const STYLE_AGENT_PROMPT = `${SHARED_PREAMBLE}
+export const STYLE_AGENT_PROMPT = twinDistillPrompt({
+  stage: "style",
+  consumer: "lib/twin/distill/agents/style-agent.ts",
+  variables: ["chunks"],
+  requiredFragments: ['"samples"'],
+  defaultBody: `${SHARED_PREAMBLE}
 
 Your job is to extract **representative writing samples** from the chunks
 below. Pick samples that show recurring patterns in tone, structure, or
@@ -40,9 +82,15 @@ Schema:
 }
 
 Chunks:
-{chunks}`
+{{chunks}}`,
+})
 
-export const PLAYBOOK_AGENT_PROMPT = `${SHARED_PREAMBLE}
+export const PLAYBOOK_AGENT_PROMPT = twinDistillPrompt({
+  stage: "playbook",
+  consumer: "lib/twin/distill/agents/playbook-agent.ts",
+  variables: ["chunks"],
+  requiredFragments: ['"playbooks"'],
+  defaultBody: `${SHARED_PREAMBLE}
 
 Your job is to detect **repeated work patterns** — the same kind of problem
 solved with a similar sequence of steps in 3+ chunks. Output at most 10
@@ -62,9 +110,15 @@ Schema:
 }
 
 Chunks (each prefixed with its id in square brackets):
-{chunks}`
+{{chunks}}`,
+})
 
-export const KNOWLEDGE_AGENT_PROMPT = `${SHARED_PREAMBLE}
+export const KNOWLEDGE_AGENT_PROMPT = twinDistillPrompt({
+  stage: "knowledge",
+  consumer: "lib/twin/distill/agents/knowledge-agent.ts",
+  variables: ["chunks"],
+  requiredFragments: ['"entities"', '"perChunk"', '"decisions"'],
+  defaultBody: `${SHARED_PREAMBLE}
 
 Your job is to extract **named entities and decisions** mentioned in the chunks.
 Entities include people, teams, projects, systems, and abstract concepts. Merge aliases — if multiple
@@ -97,9 +151,15 @@ Schema:
 }
 
 Chunks (each prefixed with its id in square brackets):
-{chunks}`
+{{chunks}}`,
+})
 
-export const SYNTHESIZER_PROMPT = `${SHARED_PREAMBLE}
+export const SYNTHESIZER_PROMPT = twinDistillPrompt({
+  stage: "synthesizer",
+  consumer: "lib/twin/distill/agents/synthesizer.ts",
+  variables: ["profile", "chunks"],
+  requiredFragments: ['"character"', '"skills"'],
+  defaultBody: `${SHARED_PREAMBLE}
 
 You receive an already-distilled \`profile\` (style samples, playbooks,
 entities, decisions) and a sample of recent chunks for grounding. Produce:
@@ -131,12 +191,18 @@ Schema:
 }
 
 Profile:
-{profile}
+{{profile}}
 
 Recent chunks (sample):
-{chunks}`
+{{chunks}}`,
+})
 
-export const EVALUATOR_PROMPT = `${SHARED_PREAMBLE}
+export const EVALUATOR_PROMPT = twinDistillPrompt({
+  stage: "evaluator",
+  consumer: "lib/twin/distill/agents/evaluator.ts",
+  variables: ["drafts"],
+  requiredFragments: ['"evaluations"'],
+  defaultBody: `${SHARED_PREAMBLE}
 
 You are a critical reviewer. Score each draft below from a "newcomer just
 joining the team" perspective. Flag concerns that would block them from
@@ -155,11 +221,39 @@ Schema:
 }
 
 Drafts:
-{drafts}`
+{{drafts}}`,
+})
 
-/** Trivial token replacement; no logic / loops in the templates. */
-export function applyTemplate(template: string, values: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_match, key: string) =>
-    Object.prototype.hasOwnProperty.call(values, key) ? values[key] : `{${key}}`
-  )
+/**
+ * The cross-batch entity merge (M3). It does not share the preamble: it sees
+ * only entity names, aliases and relations, never chunk text. `{{role}}` is
+ * one of the five entity roles and `{{entries}}` the numbered registry rows.
+ */
+export const ENTITY_MERGE_AGENT_PROMPT = twinDistillPrompt({
+  stage: "entity-merge",
+  consumer: "lib/twin/distill/agents/entity-merge-agent.ts",
+  variables: ["role", "entries"],
+  requiredFragments: ['"clusters"', '"canonical"', '"aliases"'],
+  defaultBody: `You are normalising an entity registry of role "{{role}}" extracted from
+chunked employee documents and chats. Group entries that refer to the
+SAME real-world entity — e.g. "Engineering Infra Team" + "infra-team" +
+"Eng-Infra" all map to one team.
+
+Only merge when you have high confidence the names share a referent. Do
+not merge near-misses (e.g. "Platform Team" vs "Infrastructure Platform")
+unless context strongly suggests they're the same.
+
+Output JSON of the form:
+{
+  "clusters": [
+    { "canonical": "Engineering Infra Team", "aliases": ["infra-team", "Eng-Infra"] },
+    ...
+  ]
 }
+
+Entries with no merge group can be omitted. Names that share a cluster
+must NOT also appear in another cluster.
+
+Entries:
+{{entries}}`,
+})

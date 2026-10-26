@@ -14,10 +14,14 @@ Determine what's being shipped:
 
 - Uncommitted work: `rtk git status` + `rtk git diff --name-only HEAD`
 - A branch: `rtk git diff --name-only <merge-base>` (default merge base:
-  `master`, or `dev` if the branch forked from dev — check with
-  `git merge-base`)
+  `dev`; confirm with `git merge-base`)
 
 Record the file list — it decides which auditors run.
+
+If the change has an evidence ledger (`docs/evidence/*.md`, from the
+`evidence-driven-dev` skill), include its path in every auditor's scope
+statement: its Risks and Verification obligations are claims the auditors
+should check as well as the generic rules.
 
 ## 2. Dispatch auditors IN PARALLEL (one message, multiple Agent calls)
 
@@ -26,10 +30,10 @@ the file list. Skip an auditor only when its trigger set is empty:
 
 | Auditor (subagent_type)  | Run when the diff touches…                                  |
 | ------------------------ | ----------------------------------------------------------- |
-| `test-gap-auditor`       | anything under `components/ hooks/ lib/ stores/ src-tauri/` |
-| `i18n-reviewer`          | any `.tsx` or `i18n/messages/*.json`                        |
+| `test-gap-auditor`       | anything under the paths in CLAUDE.md Working Rule 3        |
+| `i18n-reviewer`          | any `.tsx` or anything under `i18n/messages/`               |
 | `static-export-auditor`  | `app/`, `next.config.ts`, `package.json` deps, or new Node-ish imports in bundled code |
-| `tauri-rust-reviewer`    | anything under `src-tauri/`                                  |
+| `tauri-rust-reviewer`    | anything under `src-tauri/` or `crates/`                     |
 | `pii-gate-auditor`       | `lib/claude/ lib/ai/ lib/connectors/ lib/twin/ lib/memory/ lib/vector/ sidecar/` or any new outbound call |
 | `wiring-auditor`         | any NEW module/component/command/plugin/initializer/setting — verifies it is reachable at runtime |
 
@@ -49,6 +53,12 @@ Merge the reports into one list ordered by severity:
 Deduplicate cross-auditor overlaps (e.g. a new file flagged by both test-gap
 and i18n). Fix blockers before proceeding unless the user says otherwise.
 
+If there is a ledger, finish synthesis by updating it: record auditor
+findings as evidence on the matching obligations, then run
+`node .agents/skills/evidence-driven-dev/scripts/ledger.mjs check <ledger> --final`
+and fix what it reports. Blocked real-environment obligations go to Residual
+risks; don't drop them.
+
 ## 4. Deterministic gates (after fixes, before commit)
 
 Audits don't replace the real gates. Finish with:
@@ -56,7 +66,7 @@ Audits don't replace the real gates. Finish with:
 ```
 rtk tsc && rtk pnpm lint && rtk pnpm lint:i18n && pnpm i18n:sort:check
 rtk pnpm test -- <changed test files>        # narrow first
-pnpm test:coverage                            # full gate when claiming done
+pnpm audit:colocated-tests
 rtk cargo test --manifest-path src-tauri/Cargo.toml   # if src-tauri changed
 ```
 

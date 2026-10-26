@@ -16,9 +16,9 @@ export type {
   BusEvent,
   EventSource,
   EventFilter,
-  EventSubscription,
   PluginEventAPI,
-} from "@/lib/plugin/messaging/message-bus"
+} from "@cognia/plugin-contract/types/plugin/plugin-messaging"
+export type { EventSubscription } from "@cognia/plugin-contract/lib/plugin/messaging/message-bus"
 
 /** Stable host event names available through `ctx.events`. */
 export const SystemEvents = {

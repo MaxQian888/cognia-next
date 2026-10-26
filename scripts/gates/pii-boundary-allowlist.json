@@ -92,12 +92,6 @@
     "protection": "No outbound model payload is emitted here."
   },
   {
-    "file": "lib/ai/vision/caption.ts",
-    "boundaries": ["ai"],
-    "reason": "Image captioning is explicitly initiated by the user.",
-    "protection": "User-selected image content is the intentional provider payload."
-  },
-  {
     "file": "lib/claude/routing-runtime-deps.ts",
     "boundaries": ["@cognia/provider-embedding/embedding"],
     "reason": "Routing uses the shared embedding adapter.",

@@ -1,29 +1,16 @@
 /**
- * Conversation summarization.
+ * Conversation projection and the canonical summary prompt.
  *
- * Two entry points:
- *
- *  • `summarizeConversation` — the real LLM path. Given a `LlmClient` (built by
- *    the caller via `buildUtilityLlmClient`, exactly like title / turn-label
- *    generation) it asks a cheap model for a concise, neutral summary of a
- *    conversation slice. Used by the "summarize-then-branch" flow
- *    (`components/chat/branch-dialog.tsx` → `lib/chat/branch-session.ts`) so a
- *    branch can carry a compact context seed instead of the full transcript.
- *    Falls back to the structural summary when no client is available (web mode
- *    with no key, provider unresolved) or the call fails.
- *
- *  • `generateAICompressionSummary` — legacy structural fallback kept for the
- *    context-window compression path. Never calls a model; produces a
- *    head/tail digest so callers always get usable output. Now shares the
- *    `structuralSummary` core and the canonical `extractPlainText` projector.
- *
- * This module owns only the prompt + text projection so it stays pure and
- * unit-testable with a mock `LlmClient`.
+ * The model call itself lives in `summarize-material.ts` (chunked, PII-gated,
+ * typed outcomes). This module owns the shared prompt text and the pure text
+ * projections both it and the branch dialog read: the role-labelled transcript
+ * segments, and the deterministic head/tail digest shown when no model summary
+ * is available.
  */
 
 import type { UIMessage } from "ai"
-import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { definePrompt } from "@/lib/prompts/types"
 
 const ROLE_LABEL: Record<string, string> = {
   user: "User",
@@ -33,19 +20,37 @@ const ROLE_LABEL: Record<string, string> = {
 
 /**
  * Canonical conversation-summary system prompt. Single source of truth shared
- * by summarize-then-branch (here) and context-window compaction
+ * by summarize-then-branch (`summarize-material.ts`) and context-window compaction
  * (`lib/claude/compact-instructions.ts` composes its summary prompt from this
- * + the active strategy + the user focus). Do not fork the wording.
+ * + the active strategy + the user focus). Do not fork the wording; customize
+ * it through the Prompt Center, which both consumers resolve.
  */
-export const CONVERSATION_SUMMARY_SYSTEM_PROMPT =
-  "You summarize a chat conversation so it can seed a new branch of the same " +
-  "discussion. Write a concise, neutral summary that preserves: the user's " +
-  "goal, key facts and decisions, any constraints, and open / unresolved " +
-  "threads. Use short paragraphs or bullet points. Do not add a preamble like " +
-  "'Here is a summary'. Write in the same language as the conversation."
-
-/** Hard ceiling on transcript characters fed to the model (keeps cost bounded). */
-const MAX_TRANSCRIPT_CHARS = 24_000
+export const CONVERSATION_SUMMARY_PROMPT = definePrompt({
+  id: "generation.summary.conversation",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "generation",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent"],
+  activation: "next-operation",
+  // Compaction keeps working from this summary, so a careless edit loses the
+  // goals and constraints a long session depends on.
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  defaultBody:
+    "You summarize a chat conversation so it can seed a new branch of the same " +
+    "discussion. Write a concise, neutral summary that preserves: the user's " +
+    "goal, key facts and decisions, any constraints, and open / unresolved " +
+    "threads. For code research, preserve completed investigations, inspected " +
+    "file:line ranges and their verified findings, failed searches, remaining " +
+    "questions, and the next action. Clearly separate completed work from work " +
+    "still needed so the next agent does not restart the investigation. " +
+    "Use short paragraphs or bullet points. Do not add a preamble like " +
+    "'Here is a summary'. Write in the same language as the conversation.",
+  outputContract: "Free-text summary; it becomes the authoritative record after compaction.",
+  maxChars: 8_000,
+  consumers: ["lib/ai/generation/summarize-material.ts", "lib/claude/build-options.ts"],
+})
 
 /**
  * Render a conversation slice as a plain-text transcript. Empty turns
@@ -72,8 +77,8 @@ export function renderConversationSegments(messages: readonly UIMessage[]): stri
 
 /**
  * Deterministic, model-free digest: head + tail of the conversation with an
- * elision marker. Always returns usable text. Exported for tests and reused as
- * the fallback for {@link summarizeConversation}.
+ * elision marker. Always returns usable text; the branch dialog shows it when a
+ * model summary is unavailable.
  */
 export function structuralSummary(messages: UIMessage[]): string {
   if (messages.length === 0) return ""
@@ -94,59 +99,4 @@ export function structuralSummary(messages: UIMessage[]): string {
     "Recent:",
     ...tail.map(line),
   ].join("\n")
-}
-
-export interface SummarizeOptions {
-  /** Utility LLM client (from `buildUtilityLlmClient`). When null/omitted, the structural fallback is used. */
-  client?: LlmClient | null
-  /** UI locale so the summary language matches the user. */
-  locale?: string
-  /** Cancellation signal forwarded to the LLM call. */
-  signal?: AbortSignal
-}
-
-/**
- * Summarize a conversation slice. Returns the LLM summary when a client is
- * available and the call succeeds; otherwise the structural digest. Never
- * throws — callers always get usable text.
- */
-export async function summarizeConversation(
-  messages: UIMessage[],
-  opts: SummarizeOptions = {}
-): Promise<string> {
-  if (messages.length === 0) return ""
-  const { client, locale, signal } = opts
-  if (!client) return structuralSummary(messages)
-
-  const transcript = renderConversation(messages)
-  if (!transcript) return structuralSummary(messages)
-
-  const localeHint = locale ? `UI locale: ${locale}\n\n` : ""
-  const prompt = `${localeHint}Conversation to summarize:\n\n${transcript.slice(0, MAX_TRANSCRIPT_CHARS)}`
-
-  try {
-    const text = await client.complete(prompt, {
-      system: CONVERSATION_SUMMARY_SYSTEM_PROMPT,
-      temperature: 0.3,
-      maxTokens: 600,
-      abortSignal: signal,
-    })
-    const trimmed = (text ?? "").trim()
-    return trimmed || structuralSummary(messages)
-  } catch {
-    return structuralSummary(messages)
-  }
-}
-
-/**
- * Legacy structural compression summary (no LLM). Kept for the context-window
- * compression path; signature preserved. Prefer {@link summarizeConversation}
- * for new callers.
- */
-export async function generateAICompressionSummary(
-  messages: UIMessage[],
-  _config: { provider: string; model: string; apiKey: string; baseURL?: string },
-  _targetTokens?: number
-): Promise<string> {
-  return structuralSummary(messages)
 }

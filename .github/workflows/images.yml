@@ -2,23 +2,23 @@ name: Images
 
 # ============================================================================
 # GHCR container images (ADR-0059 P0.2 / W6 / D9):
-#   ghcr.io/<owner>/cognia-signaling      services/signaling-server
-#   ghcr.io/<owner>/cognia-share          services/share-server
 #   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
 #   ghcr.io/<owner>/cognia-agent-bundle  deploy/bundle (ADR-0183: CLIs injected into user images)
 #   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
-#   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
-#   ghcr.io/<owner>/cognia-collab         Dockerfile.collab-server
-#   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
+#   ghcr.io/<owner>/cognia-collab         deploy/docker/Dockerfile.collab-server
+#   ghcr.io/<owner>/cognia-server        deploy/docker/Dockerfile.cognia-server (slim/full)
 #   ghcr.io/<owner>/cognia-web           deploy/compose/Dockerfile.web (static export + Caddy)
-#   ghcr.io/<owner>/cognia-deploy-agent  Dockerfile.deploy-agent
-#   ghcr.io/<owner>/cognia-ops-controller Dockerfile.ops-controller
-#   ghcr.io/<owner>/cognia-docker-proxy  Dockerfile.docker-proxy (ADR-0224 A8)
+#   ghcr.io/<owner>/cognia-deploy-agent  deploy/docker/Dockerfile.deploy-agent
+#   ghcr.io/<owner>/cognia-ops-controller deploy/docker/Dockerfile.ops-controller
+#   ghcr.io/<owner>/cognia-docker-proxy  deploy/docker/Dockerfile.docker-proxy (ADR-0224 A8)
 #   ghcr.io/<owner>/cognia-managed-desktop crates/cognia-automation/src/cua_sandbox/image (ADR-0233)
+#
+# The service images (cognia-signaling, cognia-share, cognia-diagnostics) are
+# built and published by cognia-labs/cognia-services under its own owner.
 #
 # Publish happens on version tags (and manual dispatch with push=true).
 # PRs touching the container inputs get a compile check instead:
-#   - the two service images + runner build without pushing (gha cache)
+#   - the small images + runner build without pushing (gha cache)
 #   - cognia-server builds the `check` stage — cargo check over the cooked
 #     cargo-chef deps layer, no codegen/link — because a full release build of
 #     the whole tauri graph is 45–90 min cold.
@@ -41,31 +41,27 @@ on:
         default: false
   pull_request:
     paths:
-      - "Dockerfile.cognia-server"
-      - "Dockerfile.deploy-agent"
-      - "Dockerfile.ops-controller"
-      - "Dockerfile.collab-server"
-      - "Dockerfile.docker-proxy"
+      - "deploy/docker/Dockerfile.cognia-server"
+      - "deploy/docker/Dockerfile.deploy-agent"
+      - "deploy/docker/Dockerfile.ops-controller"
+      - "deploy/docker/Dockerfile.collab-server"
+      - "deploy/docker/Dockerfile.docker-proxy"
       - ".dockerignore"
       - "deploy/runner/**"
       # The agent bundle: its Dockerfile, pins, npm lock and smoke script, the
       # script that stages it, and the runtime catalog its pins are checked
       # against. cognia-sandboxd itself is under crates/** below.
       - "deploy/bundle/**"
-      - "scripts/build/bundle-agent-versions.mjs"
+      - "scripts/build/bundle-agent-versions*.mjs"
+      - "scripts/build/agent-image-profiles.test.mjs"
       - "scripts/build/managed-desktop-release*.mjs"
       - "scripts/build/managed-desktop-context*.mjs"
       - "protocol/external-agent-runtimes.json"
-      - "services/signaling-server/Dockerfile"
-      - "services/share-server/Dockerfile"
       - "services/workspace-runtime/**"
       # The web image is the static export + Caddyfile; the compose `tls`
       # profile and the production override both pull it from GHCR.
       - "deploy/compose/Dockerfile.web"
       - "deploy/compose/Caddyfile"
-      # The whole crate, not just its Dockerfile: the build context is the
-      # service directory, so a source or migration change is an image change.
-      - "services/diagnostic-server/**"
       - "lib/browser/overlay.injected.js"
       - ".github/workflows/images.yml"
       # cognia-server compile inputs: the `check` stage COPYs these, so a PR
@@ -77,7 +73,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
-      - "services/signaling-server/core/**"
+      # The pinned cognia-services revision supplies cognia-signaling-core.
+      - "integrations/cognia-services.json"
       - "plugins/computer-use/rust/**"
       - "sidecar/package.json"
       - "sidecar/*.mjs"
@@ -122,34 +119,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: cognia-signaling
-            context: services/signaling-server
-            file: services/signaling-server/Dockerfile
-          - name: cognia-share
-            context: services/share-server
-            file: services/share-server/Dockerfile
-          - name: cognia-runner
-            context: deploy/runner
-            file: deploy/runner/Dockerfile
           - name: cognia-workspace-runtime
             context: .
             file: services/workspace-runtime/Dockerfile
-          - name: cognia-diagnostics
-            context: services/diagnostic-server
-            file: services/diagnostic-server/Dockerfile
           - name: cognia-collab
             context: .
-            file: Dockerfile.collab-server
+            file: deploy/docker/Dockerfile.collab-server
           - name: cognia-deploy-agent
             context: .
-            file: Dockerfile.deploy-agent
+            file: deploy/docker/Dockerfile.deploy-agent
           - name: cognia-ops-controller
             context: .
-            file: Dockerfile.ops-controller
+            file: deploy/docker/Dockerfile.ops-controller
           # ADR-0224 A8: the always-on host's body-inspecting Docker API proxy.
           - name: cognia-docker-proxy
             context: .
-            file: Dockerfile.docker-proxy
+            file: deploy/docker/Dockerfile.docker-proxy
           # Same-origin Web front door: Next.js static export served by Caddy.
           # Root context so the export sees the whole workspace; .dockerignore
           # keeps node_modules/out/target off the daemon.
@@ -159,8 +144,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The runner image lands with the Phase 3 artifacts; until its Dockerfile
-      # exists this matrix entry no-ops instead of failing the whole workflow.
       - name: Check context exists
         id: ctx
         run: |
@@ -217,6 +200,81 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope={0},mode=max', matrix.name) || '' }}
+
+  runner-image:
+    name: cognia-runner (${{ matrix.variant }}, amd64)
+    needs: vars
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, codex]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Check pinned Agent selection
+        run: node --test scripts/build/bundle-agent-versions.test.mjs scripts/build/agent-image-profiles.test.mjs deploy/runner/install-selected.test.mjs
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: needs.vars.outputs.should_push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-runner
+          flavor: suffix=${{ matrix.variant == 'codex' && '-codex' || '' }},onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest-full,enable=${{ matrix.variant == 'full' && startsWith(github.ref, 'refs/tags/v') }}
+      - name: Build native Runner once
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/runner/Dockerfile
+          target: ${{ matrix.variant == 'codex' && 'selected' || 'full' }}
+          platforms: linux/amd64
+          outputs: ${{ needs.vars.outputs.should_push == 'true' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
+          tags: ${{ needs.vars.outputs.should_push == 'true' && format('ghcr.io/{0}/cognia-runner', needs.vars.outputs.owner) || 'cognia-runner:smoke' }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: AGENT_RUNTIMES=codex-acp,codex-app-server
+          cache-from: type=gha,scope=cognia-runner-${{ matrix.variant }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope=cognia-runner-{0},mode=max', matrix.variant) || '' }}
+      - name: Smoke exact Runner image
+        env:
+          SHOULD_PUSH: ${{ needs.vars.outputs.should_push }}
+          IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-runner
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          runner=cognia-runner:smoke
+          if [ "$SHOULD_PUSH" = true ]; then
+            docker pull "$IMAGE@$DIGEST"
+            runner="$IMAGE@$DIGEST"
+          fi
+          node deploy/runner/smoke.mjs "$runner" "${{ matrix.variant }}"
+      - name: Publish tested Runner tags
+        if: needs.vars.outputs.should_push == 'true'
+        env:
+          IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-runner
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          tags=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then tags+=(--tag "$tag"); fi
+          done <<< "$TAGS"
+          [ "${#tags[@]}" -gt 0 ]
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@$DIGEST"
 
   # ADR-0233: the same Images publication gate owns the desktop release.
   # This publishes an image, never an E2B template or billed desktop. Provider
@@ -302,13 +360,15 @@ jobs:
   # images. Release tags are assembled only after BOTH native smoke jobs pass.
   # Multi-GB layers use architecture-scoped registry caches; PRs only read.
   agent-bundle:
-    name: cognia-agent-bundle (${{ matrix.arch }})
+    name: cognia-agent-bundle (${{ matrix.variant }}, ${{ matrix.arch }})
     needs: vars
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
+        variant: [full, codex]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             platform: linux/amd64
@@ -324,7 +384,9 @@ jobs:
           node-version: 26
 
       - name: Check bundle pins
-        run: node scripts/build/bundle-agent-versions.mjs check
+        run: |
+          node scripts/build/bundle-agent-versions.mjs check
+          node --test scripts/build/bundle-agent-versions.test.mjs
 
       - uses: docker/setup-buildx-action@v4
 
@@ -357,9 +419,13 @@ jobs:
           outputs: ${{ needs.vars.outputs.should_push == 'true' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
           tags: ${{ needs.vars.outputs.should_push == 'true' && format('ghcr.io/{0}/cognia-agent-bundle', needs.vars.outputs.owner) || 'cognia-agent-bundle:smoke' }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: BUNDLE_RELEASE_TAG=${{ github.ref_name }}
-          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache-${{ matrix.arch }}
-          cache-to: ${{ needs.vars.outputs.should_push == 'true' && format('type=registry,ref=ghcr.io/{0}/cognia-agent-bundle:buildcache-{1},mode=max', needs.vars.outputs.owner, matrix.arch) || '' }}
+          build-args: |
+            BUNDLE_RELEASE_TAG=${{ github.ref_name }}
+            AGENT_RUNTIMES=${{ matrix.variant == 'codex' && 'codex-acp,codex-app-server' || 'full' }}
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache-${{ matrix.arch }}
+            type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle:buildcache-${{ matrix.variant }}-${{ matrix.arch }}
+          cache-to: ${{ needs.vars.outputs.should_push == 'true' && format('type=registry,ref=ghcr.io/{0}/cognia-agent-bundle:buildcache-{1}-{2},mode=max', needs.vars.outputs.owner, matrix.variant, matrix.arch) || '' }}
 
       - name: Smoke against user images
         env:
@@ -379,27 +445,31 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           ARCH: ${{ matrix.arch }}
+          VARIANT: ${{ matrix.variant }}
         run: |
           mkdir -p "$RUNNER_TEMP/agent-bundle-digests"
-          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/agent-bundle-digests/$ARCH.txt"
+          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/agent-bundle-digests/$VARIANT-$ARCH.txt"
 
       - uses: actions/upload-artifact@v7
         if: needs.vars.outputs.should_push == 'true'
         with:
-          name: agent-bundle-digest-${{ matrix.arch }}
-          path: ${{ runner.temp }}/agent-bundle-digests/${{ matrix.arch }}.txt
+          name: agent-bundle-digest-${{ matrix.variant }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/agent-bundle-digests/${{ matrix.variant }}-${{ matrix.arch }}.txt
           if-no-files-found: error
           retention-days: 1
 
   agent-bundle-manifest:
-    name: cognia-agent-bundle (publish manifest)
+    name: cognia-agent-bundle (${{ matrix.variant }}, publish manifest)
     needs: [vars, agent-bundle]
     if: needs.vars.outputs.should_push == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [full, codex]
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: agent-bundle-digest-*
+          pattern: agent-bundle-digest-${{ matrix.variant }}-*
           path: ${{ runner.temp }}/agent-bundle-digests
           merge-multiple: true
 
@@ -415,21 +485,24 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle
+          flavor: suffix=${{ matrix.variant == 'codex' && '-codex' || '' }},onlatest=true
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest-full,enable=${{ matrix.variant == 'full' && startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Assemble tested multi-platform manifest
         env:
           IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle
           TAGS: ${{ steps.meta.outputs.tags }}
           DIGEST_DIR: ${{ runner.temp }}/agent-bundle-digests
+          VARIANT: ${{ matrix.variant }}
         run: |
           digests=()
           for arch in amd64 arm64; do
-            digest=$(cat "$DIGEST_DIR/$arch.txt")
+            digest=$(cat "$DIGEST_DIR/$VARIANT-$arch.txt")
             if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
               echo "::error::Invalid tested digest for $arch"
               exit 1
@@ -470,7 +543,7 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: check
           push: false
           cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
@@ -527,7 +600,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: runtime-full
           push: ${{ needs.vars.outputs.should_push == 'true' }}
           tags: ${{ steps.meta-full.outputs.tags }}
@@ -540,7 +613,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: runtime-slim
           push: ${{ needs.vars.outputs.should_push == 'true' }}
           tags: ${{ steps.meta-slim.outputs.tags }}
@@ -551,7 +624,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: Dockerfile.cognia-server
+          file: deploy/docker/Dockerfile.cognia-server
           target: build-timings
           outputs: type=local,dest=${{ runner.temp }}/server-cargo-timings
 

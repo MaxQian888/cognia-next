@@ -4,6 +4,8 @@
  * the (fiddly) model-output cleanup is unit-testable without a model.
  */
 
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import type { TerminalCompletionContext, TerminalCompletionSuggestion } from "./types"
 
 /** Hard cap on a single suggested command line. */
@@ -11,16 +13,34 @@ export const MAX_SUGGESTION_LEN = 400
 /** How many recent commands to feed the model as context. */
 const RECENT_CONTEXT = 8
 
-const SYSTEM_PROMPT = [
-  "You are a shell command completion engine, like GitHub Copilot for the terminal.",
-  "Given the user's shell, working directory, recent commands, and a partial command line,",
-  "predict the single most likely full command line the user is about to type.",
-  "Respond with ONLY that one command line — no markdown, no code fences, no backticks,",
-  "no explanation, no leading prompt symbol. The output MUST begin with the partial input",
-  "verbatim. If you cannot make a confident, useful completion, repeat the partial input unchanged.",
-].join(" ")
+export const TERMINAL_COMPLETION_PROMPT = definePrompt({
+  id: "completion.terminal",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "completion",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 4_000,
+  outputContract:
+    "The first non-empty line becomes the suggestion; it is kept only when it extends the typed input (a bare continuation is appended to it) and stays under 400 characters.",
+  consumers: ["lib/terminal/completion/prompt.ts"],
+  defaultBody: [
+    "You are a shell command completion engine, like GitHub Copilot for the terminal.",
+    "Given the user's shell, working directory, recent commands, and a partial command line,",
+    "predict the single most likely full command line the user is about to type.",
+    "Respond with ONLY that one command line — no markdown, no code fences, no backticks,",
+    "no explanation, no leading prompt symbol. The output MUST begin with the partial input",
+    "verbatim. If you cannot make a confident, useful completion, repeat the partial input unchanged.",
+  ].join(" "),
+})
 
-/** Build the `{ system, prompt }` pair for `LlmClient.complete`. */
+/**
+ * Build the `{ system, prompt }` pair for `LlmClient.complete`. Synchronous,
+ * on the keystroke path: it reads the loaded override snapshot.
+ */
 export function buildCompletionPrompt(context: TerminalCompletionContext): {
   system: string
   prompt: string
@@ -37,7 +57,10 @@ export function buildCompletionPrompt(context: TerminalCompletionContext): {
   lines.push("")
   lines.push("Partial command line to complete:")
   lines.push(context.input)
-  return { system: SYSTEM_PROMPT, prompt: lines.join("\n") }
+  const system = resolvePrompt(TERMINAL_COMPLETION_PROMPT, {
+    context: context.projectId ? { workspaceId: context.projectId } : {},
+  }).text
+  return { system, prompt: lines.join("\n") }
 }
 
 /** Strip ``` fences, leaving the inner text. */

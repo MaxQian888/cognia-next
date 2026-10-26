@@ -3,7 +3,7 @@
 // AI SDK 7 rejects `{ role: "system" }` entries inside `prompt` / `messages` by
 // default: system content must travel in the top-level instructions option, and
 // anything left inline has to be opted back in with `allowSystemInMessages`.
-// `dispatch/ai-sdk.mjs` builds one flat conversation with the system prompt at
+// `src/runtimes/ai-sdk/index.ts` builds one flat conversation with the system prompt at
 // the head, so the split happens here, at the `streamText` boundary — the
 // compaction / tool-pairing pipeline keeps operating on the combined array and
 // needs no changes.
@@ -12,7 +12,7 @@
 // sidecar is a standalone Node project and cannot import `@/` paths). Both are
 // pinned by the same table of cases — keep them in lockstep.
 //
-// Anthropic prompt caching depends on this being lossless: `ai-sdk.mjs` plants
+// Anthropic prompt caching depends on this being lossless: `runtimes/ai-sdk/index.ts` plants
 // up to three `cacheControl` breakpoints on separate leading system messages and
 // each must arrive with its own `providerOptions` intact.
 

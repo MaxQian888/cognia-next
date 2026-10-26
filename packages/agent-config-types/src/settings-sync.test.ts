@@ -23,6 +23,24 @@ function keysOf(category: SettingsSyncCategory): Key[] {
 }
 
 describe("SETTINGS_SYNC", () => {
+  it("keeps Claude namespace requests and retry budgets on the owning host", () => {
+    expect(
+      (SETTINGS_SYNC as Record<string, { category: string }>).claudeCodeRuntime?.category
+    ).toBe("desktop-only")
+    expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain("claudeCodeRuntime")
+    expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain("claudeCodeRuntime")
+  })
+
+  it("keeps reader recipient policy on its owning desktop", () => {
+    expect(SETTINGS_SYNC.webReader.category).toBe("desktop-only")
+    expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain("webReader")
+    expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain("webReader")
+  })
+  it("keeps subagent execution policy with the host's runtime settings", () => {
+    expect(SETTINGS_SYNC.subagentRuntime.category).toBe("desktop-only")
+    expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain("subagentRuntime")
+    expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain("subagentRuntime")
+  })
   it("keeps settings navigation artwork local to each device", () => {
     expect(SETTINGS_SYNC.settingsIconStyle.category).toBe("device-local")
     expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain("settingsIconStyle")

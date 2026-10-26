@@ -10,7 +10,7 @@ import type {
 } from "@cognia/plugin-sdk"
 
 import manifestJson from "../plugin.json"
-import { publishGithubReview } from "./review"
+import { publishGithubReview } from "@cognia/github-bot-kit"
 
 const API_ORIGIN = "https://api.github.com"
 const API_VERSION = "2022-11-28"
@@ -1335,7 +1335,7 @@ const browserSiteProviders = [
  * only so a one-major rollback to the signed v2 bundle
  * (`packages/plugin-sdk/contract/compat/github-delivery-2.0.0.zip`) finds the
  * rows it wrote. The host boot registry deliberately skips them
- * (`lib/plugin/dexie/builtin-manifests.test.ts` → `KNOWN_UNREGISTERED`), no
+ * (`lib/plugin/dexie/builtin-manifests.ts` → `DORMANT_BUILTIN_DEXIE_DECLARATIONS`), no
  * surface renders them, and `index.test.ts` pins that activation never
  * touches `ctx.dexie`. Drop the block together with the v2 compat bundle.
  */

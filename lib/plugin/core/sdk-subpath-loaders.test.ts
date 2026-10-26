@@ -5,6 +5,8 @@ import packageJson from "@/packages/plugin-sdk/package.json"
 
 import {
   loadEffortSurfaceModule,
+  loadExternalAgentPresetModule,
+  loadHostEnvironmentModule,
   loadPluginI18nModule,
   PLUGIN_SDK_SUBPATH_LOADERS,
 } from "./sdk-subpath-loaders"
@@ -46,6 +48,31 @@ test("host loaders bind runtime ports before publishing only author exports", as
   expect(i18n.usePluginTranslations("fixture")("hello")).toBe("host:hello")
   expect(i18n).not.toHaveProperty("bindPluginTranslationsHost")
   expect(typeof i18n.registerPluginI18n).toBe("function")
+})
+
+jest.mock("@/lib/app-version", () => ({ APP_VERSION: "9.8.7-host" }))
+
+test("the host-environment loader publishes the host's app version, not the SDK's placeholder", async () => {
+  const sdk = await import("@cognia/plugin-sdk/api/host-environment")
+  expect(sdk.APP_VERSION).toBe("0.0.0")
+  const loaded = await loadHostEnvironmentModule()
+  expect(loaded.APP_VERSION).toBe("9.8.7-host")
+  expect(loaded.readHostCapabilities).toBe(sdk.readHostCapabilities)
+  expect(PLUGIN_SDK_SUBPATH_LOADERS["@cognia/plugin-sdk/api/host-environment"]).toBe(
+    loadHostEnvironmentModule
+  )
+})
+
+test("the external-agent-preset loader installs the host's builtin catalog first", async () => {
+  const loaded = await loadExternalAgentPresetModule()
+  const host = await import("@/lib/ai/agent/external/config/presets")
+  expect(loaded.EXTERNAL_AGENT_PRESETS["claude-code"]).toBe(
+    host.EXTERNAL_AGENT_PRESETS["claude-code"]
+  )
+  expect(loaded.listExternalAgentPresetIds()).toContain("claude-code")
+  expect(PLUGIN_SDK_SUBPATH_LOADERS["@cognia/plugin-sdk/api/external-agent-preset"]).toBe(
+    loadExternalAgentPresetModule
+  )
 })
 
 test("loads the pet API against the host contribution registries", async () => {

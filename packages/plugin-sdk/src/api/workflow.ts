@@ -21,7 +21,7 @@ export type {
   PluginManifestNodeDef,
   PluginManifestTriggerDef,
   PluginManifestWorkflowsBlock,
-} from "@/types/plugin/plugin-workflow"
+} from "@cognia/plugin-contract/types/plugin/plugin-workflow"
 
 /**
  * The visual-workflow domain vocabulary a node/trigger implementation speaks:
@@ -38,4 +38,4 @@ export type {
   WorkflowNodeData,
   WorkflowNodeKind,
   WorkflowTriggeredFrom,
-} from "@/types/workflow/visual"
+} from "@cognia/plugin-contract/types/workflow/visual"

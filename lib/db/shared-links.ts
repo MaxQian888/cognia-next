@@ -7,64 +7,17 @@
 // out of the index and is filtered in-memory (the v12 promptPresets precedent).
 
 import { getDb } from "./schema"
-import type { ShareKind } from "@/lib/share/types"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
+import type {
+  SharedLinkRow,
+  SharedLinkSecretRefs,
+} from "@cognia/plugin-contract/lib/db/shared-links"
+export type {
+  SharedLinkFileSummary,
+  SharedLinkRow,
+} from "@cognia/plugin-contract/lib/db/shared-links"
 
 const secretStore = createKeyringStore("share-links")
-
-/**
- * What a share carried, kept beside the link so "what did I share from this
- * conversation" is answerable without decrypting anything (ADR-0222). Paths
- * are FileSpace paths at share time.
- */
-export interface SharedLinkFileSummary {
-  path: string
-  size: number
-  sha256: string
-}
-
-interface SharedLinkSecretRefs {
-  urlFragment?: string
-  ownerToken?: string
-}
-
-export interface SharedLinkRow {
-  /** Local row id. */
-  id: string
-  /** Short code assigned by the worker; unique. */
-  code: string
-  kind: ShareKind
-  /** Human title carried from the payload, for the list view. */
-  title?: string
-  /** Non-secret local namespace used by the creating domain for revocation. */
-  ownerScope?: string
-  /**
-   * Full shareable URL including the `#fragment` decryption key. Persisted so
-   * the owner can re-copy without re-encrypting; never leaves this device.
-   */
-  url: string
-  createdAt: number
-  /** Epoch ms; undefined ⇒ never expires. */
-  expiresAt?: number
-  maxViews?: number
-  burnAfterRead: boolean
-  hasPassphrase: boolean
-  /**
-   * Per-share owner secret returned by the worker at create time. Required to
-   * call stats/delete on a multi-tenant deployment. Stays on this device only
-   * (never in the shareable URL). Undefined for rows created before this field
-   * existed — those fall back to the worker's upload-secret gate.
-   */
-  ownerToken?: string
-  /** References into the encrypted credential store; never sent to callers intentionally. */
-  secretRefs?: SharedLinkSecretRefs
-  /** Owner-side revoke flag; the worker DELETE is authoritative. */
-  revoked: boolean
-  /** Files the share carries; absent for a share without files. */
-  files?: SharedLinkFileSummary[]
-  /** The conversation the share was made from, when it was made from one. */
-  sessionId?: string
-}
 
 function newId(): string {
   return "sl_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)

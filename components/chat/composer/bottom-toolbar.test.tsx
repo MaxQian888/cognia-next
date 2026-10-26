@@ -20,6 +20,7 @@ jest.mock("@/components/desktop/status-bar-zone", () => ({
     items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
 }))
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
 import {
@@ -190,6 +191,44 @@ const session: ChatSession = {
   characterId: "c1",
 }
 
+describe("BottomToolbar — next-send best-of-N", () => {
+  it.each(["detached", "embedded", "rail", "expanded", "folded"] as const)(
+    "offers the selector only in More and keeps the active choice visible in %s",
+    async (variant) => {
+      const user = userEvent.setup()
+      const onChange = jest.fn()
+      const view = render(
+        <BottomToolbar session={session} variant={variant} bestOfN={{ value: null, onChange }} />
+      )
+      expect(screen.queryByRole("combobox", { name: "chip" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "clear" })).not.toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "moreControls" }))
+      await user.click(screen.getByRole("combobox", { name: "chip" }))
+      await user.click(screen.getAllByRole("option", { hidden: true, name: "attempts" })[1])
+      expect(onChange).toHaveBeenCalledWith(3)
+      await user.keyboard("{Escape}")
+      view.rerender(
+        <BottomToolbar session={session} variant={variant} bestOfN={{ value: 3, onChange }} />
+      )
+      expect(screen.getByText(/nextSend/)).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "clear" }))
+      expect(onChange).toHaveBeenLastCalledWith(null)
+    }
+  )
+
+  it.each(["streaming", "awaiting_approval"] as const)("locks the choice during %s", (status) => {
+    render(
+      <BottomToolbar
+        session={session}
+        status={status}
+        bestOfN={{ value: 2, onChange: jest.fn() }}
+      />
+    )
+    expect(screen.getByRole("button", { name: "clear" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "moreControls" })).toBeDisabled()
+  })
+})
+
 beforeEach(() => {
   mockDefaultModel = "claude-sonnet-5"
   ;(useChatExecutor as jest.Mock).mockReturnValue({})
@@ -254,11 +293,14 @@ jest.mock("./fusion-mode-chip", () => ({
 
 // The agent model's window, as the agent's catalog reports it; its own suite
 // covers how it is resolved. The indicator stays real, its props recorded.
-let mockAgentContextWindow: number | undefined
+let mockAgentContextWindow: { maxTokens: number; source: "native" | "cognia" } | undefined
 jest.mock("./hooks/use-agent-context-window", () => ({
   useAgentContextWindow: () => mockAgentContextWindow,
 }))
-const mockContextIndicatorProps: Array<{ maxTokens?: number }> = []
+const mockContextIndicatorProps: Array<{
+  maxTokens?: number
+  selectedModelContextWindow?: number | null
+}> = []
 jest.mock("@/components/chat/context-usage-indicator", () => {
   const actual = jest.requireActual("@/components/chat/context-usage-indicator")
   const { createElement } = jest.requireActual("react")
@@ -1078,10 +1120,16 @@ it("mounts session status in the ambient composer cluster", () => {
 
 describe("BottomToolbar — context ring on an agent's lane", () => {
   it("sizes the ring from the window the agent's catalog reports", () => {
-    mockAgentContextWindow = 1_000_000
+    mockAgentContextWindow = { maxTokens: 1_000_000, source: "native" }
     render(<BottomToolbar session={session} />)
     expect(mockContextIndicatorProps.length).toBeGreaterThan(0)
     expect(mockContextIndicatorProps.at(-1)?.maxTokens).toBe(1_000_000)
+  })
+
+  it("keeps the selected gateway model authoritative over the previous turn's capacity", () => {
+    mockAgentContextWindow = { maxTokens: 1_000_000, source: "cognia" }
+    render(<BottomToolbar session={session} />)
+    expect(mockContextIndicatorProps.at(-1)?.selectedModelContextWindow).toBe(1_000_000)
   })
 
   it("leaves the ring on the built-in catalog when no agent window is known", () => {

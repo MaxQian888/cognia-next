@@ -24,10 +24,19 @@ jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
   ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
   executeAgentTurnFromRenderer: (...a: unknown[]) => mockRendererTurn(...(a as [])),
 }))
-jest.mock("@/lib/plugin/registries/subagent-registry", () => ({
-  __esModule: true,
-  getSubagent: jest.fn(),
-}))
+jest.mock("@/lib/plugin/registries/subagent-registry", () => {
+  const getSubagent = jest.fn()
+  return {
+    __esModule: true,
+    getSubagent,
+    // Dispatch by id reads the entry (for its plugin id); it serves what
+    // `getSubagent` is primed with, untagged.
+    getSubagentEntry: (id: string) => {
+      const entry = getSubagent(id)
+      return entry ? { entry } : undefined
+    },
+  }
+})
 // The System-B hook bridge. cognia-dispatched subagents run as their own
 // top-level session, so the SDK never emits SubagentStart/Stop for them —
 // dispatch synthesizes both, and these tests pin that.
@@ -129,6 +138,64 @@ beforeEach(() => {
 })
 
 describe("dispatchSubagent", () => {
+  it("returns a non-retryable incomplete result and reports hook failure at a budget stop", async () => {
+    mockRendererTurn.mockResolvedValueOnce({
+      text: "entrypoint found",
+      channel: "sidecar",
+      toolsAvailable: true,
+      finishReason: "error_max_turns",
+    })
+    const result = await dispatchSubagent(subagent, "trace callers", { _runId: "limited" })
+    expect(result).toMatchObject({
+      finishReason: "error",
+      errorEnvelope: { code: "budget-exhausted", retryable: false },
+    })
+    expect(result.text).toContain("entrypoint found")
+    expect(result.text).toContain('resume:"limited"')
+    expect(mockFireAgentHook).toHaveBeenCalledWith(
+      "SubagentStop",
+      expect.anything(),
+      expect.objectContaining({ payload: expect.objectContaining({ success: false }) })
+    )
+  })
+
+  it("leaves the unified budget untouched when a definition has no explicit cap", async () => {
+    const { maxTurns: _maxTurns, ...inherited } = subagent
+    await dispatchSubagent(inherited, "trace callers")
+    expect(mockExecute.mock.calls[0][1]).not.toHaveProperty("maxSteps")
+  })
+
+  it("preserves the remaining time of an explicit subtree deadline", async () => {
+    await dispatchSubagent(subagent, "research", { _deadlineMs: Date.now() + 30_000 })
+    const config = mockExecute.mock.calls[0][1]
+    expect(config!.timeoutMs).toBeGreaterThan(0)
+    expect(config!.timeoutMs).toBeLessThanOrEqual(30_000)
+  })
+
+  it("refuses an expired deadline instead of converting it to an unlimited run", async () => {
+    const result = await dispatchSubagent(subagent, "research", { _deadlineMs: Date.now() - 1 })
+    expect(result).toMatchObject({
+      finishReason: "error",
+      errorEnvelope: { code: "budget-exhausted", retryable: false },
+    })
+    expect(result.text).toMatch(/deadline.*expired/i)
+    expect(mockExecute).not.toHaveBeenCalled()
+    expect(mockFireAgentHook).not.toHaveBeenCalled()
+  })
+
+  it("refuses an expired external-agent deadline before readiness or execution", async () => {
+    const result = await dispatchSubagent(
+      { ...subagent, externalPresetId: "claude-code" },
+      "research",
+      { _deadlineMs: Date.now() - 1 }
+    )
+    expect(result).toMatchObject({
+      finishReason: "error",
+      errorEnvelope: { code: "budget-exhausted", retryable: false },
+    })
+    expect(externalEnsureReady).not.toHaveBeenCalled()
+    expect(externalExecute).not.toHaveBeenCalled()
+  })
   it.each([undefined, "claude-code"])(
     "rejects unsupported context policy before dispatch on %s",
     async (externalPresetId) => {
@@ -462,6 +529,42 @@ describe("dispatchSubagent — external backing (A2)", () => {
     )
   })
 
+  it("merges per-call role slots over the definition and suppresses them on native runs", async () => {
+    const cogniaModel = { providerId: "p", modelId: "m" }
+    const modelRoles = {
+      version: 1 as const,
+      slots: {
+        "subagent.default": {
+          kind: "cognia" as const,
+          binding: { providerId: "p", modelId: "child" },
+        },
+        "tier.haiku": { kind: "inherit-primary" as const },
+      },
+    }
+    const callRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
+    externalGetAllAgents.mockReturnValue([{ config: { id: "native-source" } }])
+    externalIsFromPreset.mockReturnValue("claude-code")
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    await dispatchSubagent({ ...externalDef, cogniaModel, modelRoles }, "go", {
+      modelRoles: callRoles,
+    })
+    expect(externalExecute.mock.calls[0][2].modelRoles).toEqual({
+      version: 1,
+      slots: {
+        "subagent.default": { kind: "inherit-primary" },
+        "tier.haiku": { kind: "inherit-primary" },
+      },
+    })
+    await dispatchSubagent({ ...externalDef, cogniaModel, modelRoles }, "native", {
+      cogniaModel: null,
+      modelRoles: callRoles,
+    })
+    expect(externalExecute.mock.calls[1][2]).not.toHaveProperty("modelRoles")
+  })
+
   it("lets a per-dispatch binding override the definition and null explicitly choose native mode", async () => {
     const declared = { providerId: "kimi", modelId: "kimi-for-coding", accountId: "a" }
     const override = { ...declared, accountId: "b" }
@@ -508,6 +611,27 @@ describe("dispatchSubagent — external backing (A2)", () => {
       expect(externalEnsureReady).toHaveBeenCalledWith("strict", { deferConnect: true })
       expect(externalCreatePreset).not.toHaveBeenCalled()
       expect(externalExecute.mock.calls[0][0]).toBe("strict")
+      expect(externalExecute.mock.calls[0][2]).not.toHaveProperty("cogniaModel")
+    })
+
+    it("uses definition role overrides when the pinned configuration supplies the binding", async () => {
+      const modelRoles = {
+        version: 1 as const,
+        slots: { "subagent.default": { kind: "inherit-primary" as const } },
+      }
+      externalGetAllAgents.mockReturnValue([
+        {
+          config: {
+            id: "strict",
+            enabled: true,
+            metadata: { preset: "codex" },
+            cogniaModel: { providerId: "p", modelId: "m" },
+          },
+          connectionStatus: "connected",
+        },
+      ])
+      await dispatchSubagent({ ...pinnedDef, modelRoles }, "go")
+      expect(externalExecute.mock.calls[0][2].modelRoles).toEqual(modelRoles)
       expect(externalExecute.mock.calls[0][2]).not.toHaveProperty("cogniaModel")
     })
 

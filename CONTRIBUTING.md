@@ -274,8 +274,8 @@ describe('Button', () => {
 - `README.md` - Project overview and quick start
 - `README_zh.md` - Chinese documentation
 - `CONTRIBUTING.md` - This file
-- `CI_CD.md` - CI/CD setup guide
-- `TESTING.md` - Testing guide
+- [CI_CD.md](docs/development/CI_CD.md) - CI/CD setup guide
+- [TESTING.md](docs/development/TESTING.md) - Testing guide
 
 ### Code Comments
 

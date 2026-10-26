@@ -162,6 +162,7 @@ export async function searchWithSearchAPI(
   try {
     const response = await searchApiFetch(`${SEARCHAPI_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
       headers: { "Content-Type": "application/json" },
     })
 

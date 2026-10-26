@@ -44,6 +44,18 @@ jest.mock("@/lib/files-library/trash-purge-schedule", () => ({
   }),
 }))
 
+const mockHarnessSweepExecutor = jest.fn(async () => ({
+  success: true,
+  output: { queued: 0, launched: [], expired: [], skipped: "off" },
+}))
+
+jest.mock("@/lib/harness/runtime/background", () => ({
+  registerHarnessEvolutionSweepExecutor: jest.fn(async () => {
+    const { registerTaskExecutor } = jest.requireActual("@/lib/scheduler/task-scheduler")
+    registerTaskExecutor("harness-evolution-sweep", mockHarnessSweepExecutor)
+  }),
+}))
+
 const mockBuiltInExecutor = jest.fn(async (task: ScheduledTask) => ({
   success: true,
   output: { ran: task.type },
@@ -230,6 +242,7 @@ function unregisterEverythingTheOwnersRegister() {
   unregisterTaskExecutor("provider-diagnostics-refresh")
   unregisterTaskExecutor("conversation-auto-archive")
   unregisterTaskExecutor("files-trash-purge")
+  unregisterTaskExecutor("harness-evolution-sweep")
   for (const type of BUILT_IN_EXECUTOR_TASK_TYPES) unregisterTaskExecutor(type)
 }
 
@@ -422,7 +435,7 @@ describe("a scheduler started without initSchedulerSystem", () => {
 })
 
 describe("TASK_EXECUTOR_OWNERS", () => {
-  it("declares the built-ins, provider diagnostics, conversation auto-archive, the Files Trash purge and issue wakeups, and no connector or deprecated type", () => {
+  it("declares the built-ins, provider diagnostics, conversation auto-archive, the Files Trash purge, the harness evolution sweep and issue wakeups, and no connector or deprecated type", () => {
     const owned = Object.keys(TASK_EXECUTOR_OWNERS)
     expect([...owned].sort()).toEqual(
       [
@@ -430,6 +443,7 @@ describe("TASK_EXECUTOR_OWNERS", () => {
         "provider-diagnostics-refresh",
         "conversation-auto-archive",
         "files-trash-purge",
+        "harness-evolution-sweep",
         "issue-wakeup",
       ].sort()
     )
@@ -446,6 +460,7 @@ describe("TASK_EXECUTOR_OWNERS", () => {
     expect(hasTaskExecutorOwner("issue-wakeup")).toBe(true)
     expect(hasTaskExecutorOwner("conversation-auto-archive")).toBe(true)
     expect(hasTaskExecutorOwner("files-trash-purge")).toBe(true)
+    expect(hasTaskExecutorOwner("harness-evolution-sweep")).toBe(true)
     expect(hasTaskExecutorOwner("chat")).toBe(true)
     expect(hasTaskExecutorOwner("plugin")).toBe(true)
     expect(hasTaskExecutorOwner("connection:presence:refresh")).toBe(false)
@@ -463,6 +478,12 @@ describe("TASK_EXECUTOR_OWNERS", () => {
   it("loads the Files Trash purge from its own module", async () => {
     await expect(loadTaskExecutorOwner("files-trash-purge")).resolves.toBe(true)
     expect(hasTaskExecutor("files-trash-purge")).toBe(true)
+    expect(registerBuiltInExecutors).not.toHaveBeenCalled()
+  })
+
+  it("loads the harness evolution sweep from its own module", async () => {
+    await expect(loadTaskExecutorOwner("harness-evolution-sweep")).resolves.toBe(true)
+    expect(hasTaskExecutor("harness-evolution-sweep")).toBe(true)
     expect(registerBuiltInExecutors).not.toHaveBeenCalled()
   })
 

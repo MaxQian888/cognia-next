@@ -15,6 +15,17 @@ import type { AgentSession } from "../agent/session-runner"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
+const mockTuiModeEvents: string[] = []
+jest.mock("../tui/mount", () => {
+  mockTuiModeEvents.push(`load:${process.env.NODE_ENV}`)
+  return {
+    renderTui: async () => {
+      mockTuiModeEvents.push(`render:${process.env.NODE_ENV}`)
+      return 0
+    },
+  }
+})
+
 function cfg(): ResolvedConfig {
   return {
     ...DEFAULT_RESOLVED_CONFIG,
@@ -99,6 +110,27 @@ describe("interpretLine", () => {
 
 describe("chatCommand", () => {
   const baseDeps = () => ({ loadConfig: () => cfg(), confirm: async () => true })
+
+  it("loads the lazy TUI in production and restores the user environment before rendering", async () => {
+    const original = process.env.NODE_ENV
+    Reflect.deleteProperty(process.env, "NODE_ENV")
+    try {
+      expect(
+        await chatCommand(parseArgv(["chat"]), {
+          ...baseDeps(),
+          out: sink().out,
+          createSession: fakeSessionFactory().factory,
+          isTty: () => true,
+          configureLogging: jest.fn(),
+        })
+      ).toBe(0)
+      expect(mockTuiModeEvents).toEqual(["load:production", "render:undefined"])
+      expect(process.env.NODE_ENV).toBeUndefined()
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(process.env, "NODE_ENV")
+      else Reflect.set(process.env, "NODE_ENV", original)
+    }
+  })
 
   it("sends a line as a turn and streams the reply", async () => {
     const s = sink()

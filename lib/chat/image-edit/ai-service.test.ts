@@ -290,7 +290,40 @@ describe("runImageEdit", () => {
       { image, intent: { kind: "remove-background" }, capability: openai },
       { execute }
     )
-    expect((lastRequest?.input as { prompt: string }).prompt).toBe(REMOVE_BACKGROUND_PROMPT)
+    expect((lastRequest?.input as { prompt: string }).prompt).toBe(
+      REMOVE_BACKGROUND_PROMPT.defaultBody
+    )
+  })
+
+  it("sends a published Prompt Center override for background removal", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { __resetPromptVerdictsForTests } = await import("@/lib/prompts/resolve")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: REMOVE_BACKGROUND_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-remove-background-workbench",
+          body: "Cut out the subject onto a transparent background.",
+          contractVersion: REMOVE_BACKGROUND_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      await runImageEdit(
+        { image, intent: { kind: "remove-background" }, capability: openai },
+        { execute }
+      )
+      expect((lastRequest?.input as { prompt: string }).prompt).toBe(
+        "Cut out the subject onto a transparent background."
+      )
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("refuses an empty prompt rather than sending it", async () => {

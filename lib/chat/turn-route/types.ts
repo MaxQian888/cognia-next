@@ -37,7 +37,6 @@ export interface TurnRoute {
  * shows before sending and one the send path records if it gets that far.
  *
  *  - `not-configured` — no agent of that family exists on this device or host.
- *  - `disabled`       — one exists, but the External Agents switch is off.
  *  - `blocked`        — every candidate is blocked for a reason that will not
  *                       clear by itself (a missing binary, a disabled agent).
  *  - `transient`      — every candidate is blocked for a reason that may (a
@@ -47,7 +46,7 @@ export interface TurnRoute {
  *                       available here.
  */
 export type RouteLaneFailure =
-  "not-configured" | "disabled" | "blocked" | "transient" | "member-missing" | "member-runtime"
+  "not-configured" | "blocked" | "transient" | "member-missing" | "member-runtime"
 
 export type RouteLane =
   | {

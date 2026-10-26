@@ -2,7 +2,7 @@
  * Tests for the AI Shell plan executor.
  */
 
-import { executeStep, executePlan } from "./plan-executor"
+import { executeStep, executePlan, INTERRUPT_ACK_TIMEOUT_MS } from "./plan-executor"
 import type { ExecutionStep, ExecutionPlan, AiShellSession, StepStatus } from "./types"
 
 /** Helper: create a mock session that resolves commands synchronously via callbacks. */
@@ -63,6 +63,65 @@ function makePlan(steps: ExecutionStep[]): ExecutionPlan {
 
 describe("ai-shell/plan-executor", () => {
   describe("executeStep", () => {
+    it("interrupts the foreground command before resolving cancellation", async () => {
+      const controller = new AbortController()
+      let finishInterrupt!: () => void
+      let commandEnd!: (code: number | null) => void
+      const session = mockSession(["timeout"])
+      session.onCommandEnd = (cb) => {
+        commandEnd = cb
+        return () => undefined
+      }
+      session.write = jest.fn((data: string) =>
+        data === "\u0003"
+          ? new Promise<void>((resolve) => {
+              finishInterrupt = resolve
+            })
+          : undefined
+      )
+      const pending = executeStep(makeStep(), session, { signal: controller.signal })
+      controller.abort()
+      let resolved = false
+      void pending.then(() => {
+        resolved = true
+      })
+      await Promise.resolve()
+      expect(session.write).toHaveBeenCalledWith("\u0003")
+      expect(resolved).toBe(false)
+      finishInterrupt()
+      commandEnd(130)
+      expect((await pending).status).toBe("cancelled")
+    })
+
+    it("reports transport write failures and does not run subsequent steps", async () => {
+      const session = mockSession(["timeout"])
+      session.write = jest.fn().mockRejectedValue(new Error("controller lease lost"))
+      const result = await executePlan(makePlan([makeStep(), makeStep({ index: 1 })]), session)
+      expect(result.allSucceeded).toBe(false)
+      expect(result.steps[0]).toMatchObject({ status: "failed", exitCode: null })
+      expect(session.write).toHaveBeenCalledTimes(1)
+    })
+
+    it("interrupts on timeout and never reports success without a completion event", async () => {
+      jest.useFakeTimers()
+      try {
+        const session = mockSession(["timeout"])
+        session.write = jest.fn()
+        const pending = executeStep(makeStep(), session, { timeoutMs: 6000 })
+        await jest.advanceTimersByTimeAsync(5000)
+        let resolved = false
+        void pending.then(() => {
+          resolved = true
+        })
+        await Promise.resolve()
+        expect(resolved).toBe(false)
+        await jest.advanceTimersByTimeAsync(1000 + INTERRUPT_ACK_TIMEOUT_MS)
+        expect(await pending).toMatchObject({ status: "failed", exitCode: null })
+        expect(session.write).toHaveBeenLastCalledWith("\u0003")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
     it("succeeds with exit code 0", async () => {
       const session = mockSession([0])
       const step = makeStep()
@@ -98,13 +157,16 @@ describe("ai-shell/plan-executor", () => {
 
     it("cancels mid-execution when signal aborts", async () => {
       const controller = new AbortController()
-      // Session that never fires command_end
+      let commandEnd!: (code: number | null) => void
       const session: AiShellSession = {
-        write() {},
+        write(data) {
+          if (data === "\u0003") commandEnd(130)
+        },
         onNextPrompt() {
           return () => {}
         },
-        onCommandEnd() {
+        onCommandEnd(cb) {
+          commandEnd = cb
           return () => {}
         },
         getRecentOutput() {
@@ -141,12 +203,28 @@ describe("ai-shell/plan-executor", () => {
       const step = makeStep()
 
       const resultPromise = executeStep(step, session, { timeoutMs: 100 })
-      jest.advanceTimersByTime(150)
+      await jest.advanceTimersByTimeAsync(150 + INTERRUPT_ACK_TIMEOUT_MS)
       const result = await resultPromise
 
       expect(result.status).toBe("failed")
       expect(result.exitCode).toBeNull()
       jest.useRealTimers()
+    })
+
+    it("reports an unknown failure when an interrupt is never acknowledged", async () => {
+      jest.useFakeTimers()
+      try {
+        const controller = new AbortController()
+        const session = mockSession(["timeout"])
+        session.write = jest.fn()
+        const pending = executeStep(makeStep(), session, { signal: controller.signal })
+        controller.abort()
+        await jest.advanceTimersByTimeAsync(INTERRUPT_ACK_TIMEOUT_MS)
+        expect(await pending).toMatchObject({ status: "failed", exitCode: null })
+        expect(session.write).toHaveBeenLastCalledWith("\u0003")
+      } finally {
+        jest.useRealTimers()
+      }
     })
   })
 

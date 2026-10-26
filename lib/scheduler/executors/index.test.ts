@@ -174,7 +174,7 @@ jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: () => customModeStoreState },
 }))
 
-jest.mock("@/types/agent/agent-mode", () => ({
+jest.mock("@/lib/agent/modes/built-ins", () => ({
   BUILT_IN_AGENT_MODES: [
     { id: "general", name: "General", systemPrompt: "be helpful", tools: [] },
     { id: "code-gen", name: "Code Generator", systemPrompt: "code", tools: ["Bash"] },

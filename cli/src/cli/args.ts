@@ -83,6 +83,8 @@ export const BOOLEAN_FLAGS = new Set([
   // `eval routing --fake` — run the experiment against generated samples. The
   // counterpart of `--live`, and like it must never swallow the next token.
   "fake",
+  // `prompts list --modified` — only the prompts with an override.
+  "modified",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
@@ -103,6 +105,7 @@ export const GROUPED_COMMANDS = new Set([
   "provider",
   "api",
   "host",
+  "prompts",
 ])
 
 const SHORT_ALIAS: Record<string, string> = {

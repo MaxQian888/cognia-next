@@ -54,8 +54,9 @@ describe("runtime-options", () => {
     expect(runtimeLabelKey("devin")).toBe("devin")
   })
 
-  it("excludes retired OpenCode HTTP runtimes from teammate launch options", () => {
-    expect(RUNTIME_OPTIONS).not.toContain("opencode-server")
+  it("offers local OpenCode V1 and excludes attached servers from teammate launch options", () => {
+    expect(RUNTIME_OPTIONS).toContain("opencode-server")
+    expect(runtimeLabelKey("opencode-server")).toBe("opencodeServer")
     expect(RUNTIME_OPTIONS).not.toContain("opencode-remote")
   })
 

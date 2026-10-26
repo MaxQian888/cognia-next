@@ -609,6 +609,16 @@ pub(crate) enum CrashCommand {
         tenant_id: Option<String>,
         #[arg(long, env = "COGNIA_DIAGNOSTIC_PROJECT", requires = "remote")]
         project_id: Option<String>,
+        /// The one-time credential `crash submit` printed. Deletes without a
+        /// grant, so it works after a reinstall or from another machine;
+        /// needs --tenant-id and --project-id.
+        #[arg(
+            long,
+            env = "COGNIA_DIAGNOSTIC_DELETION_CREDENTIAL",
+            requires_all = ["remote", "tenant_id", "project_id"],
+            conflicts_with = "grant"
+        )]
+        deletion_credential: Option<String>,
         #[arg(long)]
         crash_dir: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
@@ -1356,6 +1366,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn remote_delete_takes_a_deletion_credential_with_its_tenant_and_project() {
+        let cli = Cli::try_parse_from([
+            "cognia",
+            "crash",
+            "delete",
+            "inc-1",
+            "--remote",
+            "--server",
+            "https://diag.test",
+            "--tenant-id",
+            "tenant",
+            "--project-id",
+            "project",
+            "--deletion-credential",
+            "del_0123",
+        ])
+        .expect("a credential deletion parses");
+        let TopCommand::Crash {
+            command:
+                CrashCommand::Delete {
+                    deletion_credential,
+                    grant,
+                    ..
+                },
+        } = cli.command
+        else {
+            panic!("expected crash delete");
+        };
+        assert_eq!(deletion_credential.as_deref(), Some("del_0123"));
+        assert_eq!(grant, None);
+
+        // The credential is scoped to a tenant and project, and is not mixed
+        // with a grant.
+        for args in [
+            vec![
+                "--remote",
+                "--server",
+                "s",
+                "--deletion-credential",
+                "del_0123",
+            ],
+            vec![
+                "--remote",
+                "--server",
+                "s",
+                "--tenant-id",
+                "t",
+                "--project-id",
+                "p",
+                "--grant",
+                "g",
+                "--deletion-credential",
+                "del_0123",
+            ],
+        ] {
+            let mut argv = vec!["cognia", "crash", "delete", "inc-1"];
+            argv.extend(args);
+            assert!(Cli::try_parse_from(argv).is_err());
+        }
+    }
+
+    #[test]
     fn reload_path_alias_maps_to_bundle_input() {
         let cli = Cli::try_parse_from(["cognia", "plugin", "reload", "--path", "plugin-dir"])
             .expect("--path should parse as the reload file-or-directory input");
@@ -1632,11 +1704,39 @@ mod tests {
 
         for argv in [
             vec!["cognia", "open", "--files"],
-            vec!["cognia", "open", "--session", "s1", "--path", "/workspace/a"],
-            vec!["cognia", "open", "--session", "s1", "--files", "--line", "3"],
-            vec!["cognia", "open", "--session", "s1", "--files", "--path", "/a", "--line", "0"],
+            vec![
+                "cognia",
+                "open",
+                "--session",
+                "s1",
+                "--path",
+                "/workspace/a",
+            ],
+            vec![
+                "cognia",
+                "open",
+                "--session",
+                "s1",
+                "--files",
+                "--line",
+                "3",
+            ],
+            vec![
+                "cognia",
+                "open",
+                "--session",
+                "s1",
+                "--files",
+                "--path",
+                "/a",
+                "--line",
+                "0",
+            ],
         ] {
-            assert!(Cli::try_parse_from(argv.clone()).is_err(), "{argv:?} should be rejected");
+            assert!(
+                Cli::try_parse_from(argv.clone()).is_err(),
+                "{argv:?} should be rejected"
+            );
         }
     }
 

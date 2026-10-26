@@ -1,4 +1,4 @@
-import type { PluginLogger } from "@/types/plugin/plugin"
+import type { PluginLogger } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export type PluginHostPlatform = "tauri" | "mobile" | "web" | "headless"
 

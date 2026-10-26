@@ -9,6 +9,10 @@ import {
 } from "./error-advisor"
 import type { ExecutionStep, AiShellContext } from "./types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function makeFailedStep(overrides?: Partial<ExecutionStep>): ExecutionStep {
   return {
@@ -37,6 +41,10 @@ function mockClient(response: string): LlmClient {
 }
 
 describe("ai-shell/error-advisor", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+  })
+
   describe("buildErrorAdvisorSystemPrompt", () => {
     it("includes expected JSON format description", () => {
       const prompt = buildErrorAdvisorSystemPrompt()
@@ -80,6 +88,61 @@ describe("ai-shell/error-advisor", () => {
   })
 
   describe("getErrorAdvisory", () => {
+    it("sends the published error advisor prompt override to the model", async () => {
+      const body = 'Advisor override. "diagnosis" "suggestedFix" "retryAfterFix"'
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("ai-shell-test", [
+          {
+            bindingId: "advisor-override",
+            revisionId: "advisor-revision",
+            promptId: "developer.ai-shell.error-advisor",
+            scope: "account",
+            targetId: "",
+            contractVersion: 1,
+            body,
+          },
+        ])
+      )
+      const client = mockClient(
+        JSON.stringify({
+          diagnosis: "Missing dependency",
+          suggestedFix: null,
+          retryAfterFix: false,
+        })
+      )
+      const send = jest.spyOn(client, "complete")
+
+      const advisory = await getErrorAdvisory(makeFailedStep(), makeMinimalContext(), {
+        getClient: () => client,
+      })
+
+      expect(advisory?.diagnosis).toBe("Missing dependency")
+      expect(send).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ system: body })
+      )
+    })
+
+    it("PII-gates both the resolved system prompt and terminal context before sending", async () => {
+      const client = mockClient("{}")
+      const send = jest.spyOn(client, "complete")
+      const isPiiSafe = jest.fn(
+        (text: string) => !text.includes("terminal error diagnosis assistant")
+      )
+
+      const advisory = await getErrorAdvisory(makeFailedStep(), makeMinimalContext(), {
+        getClient: () => client,
+        isPiiSafe,
+      })
+
+      expect(advisory).toBeNull()
+      expect(isPiiSafe).toHaveBeenCalledWith(expect.stringContaining("npm run build"))
+      expect(isPiiSafe).toHaveBeenCalledWith(
+        expect.stringContaining("terminal error diagnosis assistant")
+      )
+      expect(send).not.toHaveBeenCalled()
+    })
+
     it("returns advisory with fix suggestion", async () => {
       const response = JSON.stringify({
         diagnosis: "The react module is not installed",

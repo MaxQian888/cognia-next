@@ -1,4 +1,9 @@
 "use client"
+import {
+  HOST_CONFIG_CAPABILITIES,
+  hostConfigsAvailability,
+  hostSupportsModelRolesV2,
+} from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 
 import { useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
@@ -49,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   useHostExternalAgentConfigs,
+  useHostSupportsModelRoles,
   type HostExternalAgentConfigsState,
 } from "@/hooks/agent/use-host-external-agent-configs"
 import { useAddAgentForm } from "@/hooks/agent/use-add-agent-form"
@@ -58,6 +64,8 @@ import {
   addAgentFormPatch,
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { compileEditorModelPlan } from "@/lib/ai/agent/external/config/cognia-model-options"
+import { useSettingsStore } from "@/stores/settings"
 import { getReadinessRemedy } from "@/lib/ai/agent/external/readiness-remedy"
 import {
   buildDraftUpdate,
@@ -68,7 +76,11 @@ import {
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
-import type { AcpPermissionMode, ExternalAgentConfig } from "@/types/agent/external-agent"
+import type {
+  AcpPermissionMode,
+  AgentModelRoleOverrides,
+  ExternalAgentConfig,
+} from "@/types/agent/external-agent"
 import type { InstanceDifference } from "@/lib/ai/agent/external/config/instance-family"
 import { HOST_UNAVAILABLE_KEY } from "./host-agent-create-form"
 
@@ -628,6 +640,7 @@ function HostFieldDrawer({
   const seed = addAgentFormFromConfig(configOf(opened) as ExternalAgentConfig)
   const form = useAddAgentForm(seed.presetId, seed)
   const problemMessage = useAddAgentProblemMessage()
+  const supportsModelRoles = useHostSupportsModelRoles()
   const conflict =
     refused && Boolean(host.error && /moved to revision|config_conflict/i.test(host.error))
   const onChange = <K extends keyof ConnectionDraft>(key: K, value: ConnectionDraft[K]) => {
@@ -665,12 +678,38 @@ function HostFieldDrawer({
           .filter(Boolean),
       }
     if (item === "model") {
+      if (
+        form.data.codexStepModelSwitching !== undefined &&
+        form.data.codexStepModelSwitching !== config.codexOptions?.stepModelSwitching
+      )
+        patch.codexOptions = {
+          ...config.codexOptions,
+          stepModelSwitching: form.data.codexStepModelSwitching,
+        }
       const binding = form.data.cogniaModel
       if (binding && (!binding.providerId || !binding.modelId || !canUseCogniaModels(config))) {
         setProblem(problemMessage("cogniaModelInvalid"))
         return false
       }
+      const modelRoles = binding ? form.data.modelRoles : undefined
+      if (
+        binding &&
+        modelRoles &&
+        !compileEditorModelPlan({
+          config,
+          primary: binding,
+          layers: [{ source: "config", overrides: modelRoles }],
+          providerSettings: useSettingsStore.getState().settings?.providerSettings ?? {},
+          customProviders: useSettingsStore.getState().settings?.customProviders,
+        }).ok
+      ) {
+        setProblem(problemMessage("modelRolesInvalid"))
+        return false
+      }
       patch.cogniaModel = binding ?? null
+      // `null` clears the stored overrides; they never outlive the binding.
+      if (supportsModelRoles)
+        (patch as { modelRoles?: AgentModelRoleOverrides | null }).modelRoles = modelRoles ?? null
     }
     if (item === "connection") {
       const prepared = form.prepare()
@@ -745,7 +784,16 @@ function HostFieldDrawer({
       </>
     ),
     connection: <ConnectionFields form={form} planeWarning={null} />,
-    model: <AddAgentCogniaModelField form={form} />,
+    model: (
+      <AddAgentCogniaModelField
+        form={form}
+        roleModelsBlocker={supportsModelRoles ? undefined : "host-outdated"}
+        spawnModelsSupported={hostSupportsModelRolesV2()}
+        nativeModelControlSupported={
+          hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+        }
+      />
+    ),
   }
   return (
     <FieldEditorDrawer

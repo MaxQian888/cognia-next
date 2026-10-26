@@ -26,7 +26,7 @@
 import type {
   PluginInterceptorContribution,
   PluginInterceptorPoint,
-} from "@/types/plugin/plugin-interceptors"
+} from "@cognia/plugin-contract/types/plugin/plugin-interceptors"
 
 export interface PluginInterceptorContributions {
   interceptors: readonly PluginInterceptorContribution[]

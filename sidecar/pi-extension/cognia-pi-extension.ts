@@ -34,6 +34,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
 import { pathToFileURL } from "node:url"
+import { readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import {
+  decodePiSubagentRouting,
+  routePiSubagentCall,
+  PI_SUBAGENT_MODELS_ENV,
+  PI_GUARD_EXTENSION_ENV,
+} from "../../packages/agent-pi/src/subagent-models.ts"
 
 // Pi supplies these at load time; the package is not a Cognia dependency, so
 // the types are declared structurally rather than imported.
@@ -52,6 +60,8 @@ interface PiCtx {
   ui: PiUi
   hasUI?: boolean
   signal?: AbortSignal
+  sessionManager?: { getSessionId(): string }
+  model?: { provider: string; id: string }
 }
 interface PiToolCallEvent {
   toolName: string
@@ -155,6 +165,18 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
   const policy = readPolicy(env.COGNIA_TOOLHOST_PI_POLICY)
   const servers = readMcpServers(env.COGNIA_TOOLHOST_PI_MCP_SERVERS)
   const projection = createMcpProjection(pi, servers)
+  // Only the host's gateway-task projector supplies this configuration.
+  const childModels = decodePiSubagentRouting(env[PI_SUBAGENT_MODELS_ENV])
+  let requiredChildren: { dispose(): void } | undefined
+  const assertAgentSnapshot = () => {
+    if (!childModels) return
+    for (const [path, digest] of Object.entries(childModels.sources)) {
+      const current = `sha256-${createHash("sha256")
+        .update(JSON.stringify(readFileSync(path, "utf8")))
+        .digest("hex")}`
+      if (current !== digest) throw new Error("Pi agent definitions changed; start a new task")
+    }
+  }
 
   // Cognia's system prompt / instruction envelope, already PII-gated on the
   // adapter side. Injected per turn because Pi rebuilds its system prompt for
@@ -168,13 +190,38 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    if (childModels) {
+      assertAgentSnapshot()
+      const manifest = JSON.parse(readFileSync(`${childModels.packageDir}/package.json`, "utf8"))
+      const expectedName = childModels.family === "nico" ? "pi-subagents" : "@gotgenes/pi-subagents"
+      const expectedVersion = childModels.family === "nico" ? "0.80.0" : "19.2.2"
+      if (manifest.name !== expectedName || manifest.version !== expectedVersion)
+        throw new Error("Pi subagent package changed; start a new task")
+      if (childModels.family === "nico") {
+        const guard = env[PI_GUARD_EXTENSION_ENV]
+        const sessionId = ctx.sessionManager?.getSessionId()
+        if (!guard || !sessionId) throw new Error("Pi child interception is unavailable")
+        const api = await import(
+          pathToFileURL(`${childModels.packageDir}/src/shared/required-child-extensions.js`).href
+        )
+        requiredChildren?.dispose()
+        requiredChildren = api.registerRequiredChildExtensions({
+          sessionId,
+          extensions: [{ id: "cognia-guard", path: guard }],
+          requireForAllRunners: true,
+        })
+      }
+    }
     await projection.start(ctx)
     ctx.ui.setStatus(
       "cognia",
       `cognia-ready v${COGNIA_PI_EXTENSION_VERSION} mode=${policy.mode} toolhost=${servers.length ? "on" : "off"}`
     )
   })
-  pi.on("session_shutdown", () => projection.close())
+  pi.on("session_shutdown", () => {
+    requiredChildren?.dispose()
+    return projection.close()
+  })
   pi.on("tool_result", (event: never) => {
     const result = event as unknown as {
       content?: Array<Record<string, unknown>>
@@ -228,6 +275,15 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
     const cancelled = { block: true, reason: "Cognia tool call cancelled" }
     try {
       if (signal?.aborted) return cancelled
+      if (childModels && call.toolName === "subagent") {
+        assertAgentSnapshot()
+        if (!call.input) throw new Error("Missing Pi subagent call input")
+        routePiSubagentCall(
+          call.input,
+          childModels,
+          ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined
+        )
+      }
       const decision = policy.decisions[call.toolName] ?? policy.fallback
 
       if (decision === "allow") {

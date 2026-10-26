@@ -209,6 +209,33 @@ describe("UsageDiagnosticsCard — local spend", () => {
     expect(screen.getByTestId("usage-stat-turns")).toHaveTextContent("2")
   })
 
+  // A shared ToggleGroup: one roving tab stop, arrows move focus, Enter picks,
+  // and the chosen scope cannot be toggled off.
+  it("picks a scope from a keyboard-navigable single-choice group", async () => {
+    const user = userEvent.setup()
+    render(<UsageDiagnosticsCard block={block()} />)
+    const group = screen.getByTestId("usage-scope-tabs")
+    expect(group).toHaveAttribute("role", "radiogroup")
+    expect(group).toHaveAccessibleName()
+    const session = screen.getByTestId("usage-scope-session")
+    const today = screen.getByTestId("usage-scope-today")
+    expect(session).toHaveAttribute("data-state", "on")
+    expect(session).toHaveAttribute("aria-checked", "true")
+    expect(today).toHaveAttribute("aria-checked", "false")
+
+    act(() => session.focus())
+    await user.keyboard("{ArrowRight}")
+    expect(today).toHaveFocus()
+    await user.keyboard("{Enter}")
+    expect(today).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("usage-stat-turns")).toHaveTextContent("2")
+
+    // Clicking the chosen scope again keeps it chosen.
+    await user.click(today)
+    expect(today).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("usage-stat-turns")).toHaveTextContent("2")
+  })
+
   it("hides the session scope when the command ran without an active session", () => {
     render(<UsageDiagnosticsCard block={block({ hasSession: false })} />)
     expect(screen.queryByTestId("usage-scope-session")).not.toBeInTheDocument()
@@ -295,6 +322,25 @@ describe("UsageDiagnosticsCard — attribution", () => {
     await user.click(screen.getByTestId("usage-axis-model"))
     expect(screen.getByTestId("usage-attribution-claude-opus-5")).toBeInTheDocument()
     expect(screen.queryByTestId("usage-attribution-agent-team")).not.toBeInTheDocument()
+  })
+
+  it("switches the axis from the keyboard and never clears it", async () => {
+    const user = userEvent.setup()
+    render(<UsageDiagnosticsCard block={block()} />)
+    await user.click(screen.getByTestId("usage-scope-today"))
+    const surface = screen.getByTestId("usage-axis-surface")
+    const model = screen.getByTestId("usage-axis-model")
+    expect(screen.getByTestId("usage-axis-tabs")).toHaveAttribute("role", "radiogroup")
+
+    await user.click(surface)
+    expect(surface).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("usage-attribution-agent-team")).toBeInTheDocument()
+
+    await user.keyboard("{ArrowRight}")
+    expect(model).toHaveFocus()
+    await user.keyboard(" ")
+    expect(model).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("usage-attribution-claude-opus-5")).toBeInTheDocument()
   })
 
   it("ranks by token share when nothing in the scope has a known price", async () => {

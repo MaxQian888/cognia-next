@@ -90,7 +90,15 @@
       "surfaceWorkflow": "工作流"
     },
     "loading": "正在加载审计日志……",
-    "title": "审计日志"
+    "title": "审计日志",
+    "clearConfirm": {
+      "title": "清空审计日志？",
+      "description": "将删除此设备上的全部自动化审计记录，且无法撤销。",
+      "action": "清空日志"
+    },
+    "loadFailed": "加载审计日志失败",
+    "cleared": "审计日志已清空",
+    "clearFailed": "清空审计日志失败"
   },
   "behavior": {
     "consentTimeout": {

@@ -93,6 +93,36 @@ describe("NavBadgeProbes", () => {
     expect(getNavBadgeSnapshot()).toEqual({})
   })
 
+  it("keeps failed silent maintenance out of badges while retaining user tasks and opt-ins", () => {
+    const maintenance = {
+      ...failingTask,
+      type: "conversation-auto-archive",
+      notification: { onError: false, channels: ["none"], dueReminder: false },
+    }
+    useSchedulerStore.setState({ tasks: [maintenance] as never })
+    render(<NavBadgeProbes />)
+    expect(getNavBadgeSnapshot()).toEqual({})
+    act(() =>
+      useSchedulerStore.setState({ tasks: [maintenance, { ...failingTask, id: "user" }] as never })
+    )
+    expect(getNavBadgeSnapshot()).toEqual({ scheduler: 1 })
+    act(() =>
+      useSchedulerStore.setState({
+        tasks: [
+          {
+            ...maintenance,
+            notification: {
+              onError: true,
+              channels: ["desktop"],
+              dueReminder: false,
+            },
+          },
+        ] as never,
+      })
+    )
+    expect(getNavBadgeSnapshot()).toEqual({ scheduler: 1 })
+  })
+
   it("stops sampling a destination once it is hidden, and its count goes with it", () => {
     botsNeedingAttention = 2
     const { rerender } = render(<NavBadgeProbes />)

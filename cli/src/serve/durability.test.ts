@@ -311,6 +311,76 @@ describe("ledger restore over built-in plugin tables", () => {
   })
 })
 
+describe("plugin tables after the code version catches up", () => {
+  // Code 247 + one plugin lifts the checkpoint to 248; a later build whose own
+  // schema is 248 then opens at the same number without the plugin table, and
+  // the version alone used to say "nothing to lift", dropping the plugin rows.
+  it("re-declares the persisted plugin tables before restoring", async () => {
+    const [{ installFakeIndexedDb }, { __resetDbForTesting, CURRENT_SCHEMA_VERSION }] =
+      await Promise.all([import("@/lib/headless/node-indexeddb"), import("@/lib/db/schema")])
+    const [{ openDurabilityStore }, { restorePluginTables }, { getBrowserBuiltinRegistry }] =
+      await Promise.all([
+        import("./persistence/store"),
+        import("@/lib/plugin/dexie/bridge"),
+        import("@/lib/plugin/core/browser-builtin-registry"),
+      ])
+    const { prepareBuiltinPluginSchema } = await import("../db/bootstrap")
+    await installFakeIndexedDb()
+    __resetCliDbForTesting()
+    __resetDbForTesting()
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-serve-catchup-"))
+    const plugin = getBrowserBuiltinRegistry().find(
+      (entry) => entry.manifest.id === "zhihu-content-pipeline"
+    )!
+    const table = `${plugin.manifest.id}:${plugin.manifest.dexie!.tables[0].name}`
+    const sources = async () => {
+      const db = getDb()
+      return [{ name: db.name, db: db as never }]
+    }
+
+    try {
+      const first = await openDurabilityStore({
+        home,
+        accountId: "acct_catchup",
+        backend: "sqlite-v5",
+        getSources: sources,
+        compactEveryCommits: 0,
+      })
+      await restorePluginTables(
+        () => getDb(),
+        new Map([[plugin.manifest.id, plugin.manifest.dexie!]]),
+        { registerMissing: true }
+      )
+      await getDb().table(table).put({ id: "row-1" })
+      await first.compact()
+      await first.close()
+
+      await getDb().delete()
+      __resetDbForTesting()
+      // The "newer build": its own schema already reaches the persisted number.
+      getDb()
+        .version(CURRENT_SCHEMA_VERSION + 1)
+        .stores({})
+
+      const second = await openDurabilityStore({
+        home,
+        accountId: "acct_catchup",
+        getSources: sources,
+        prepareDynamicSchema: (dbs, versions, tables) =>
+          prepareBuiltinPluginSchema(dbs as never, versions, tables),
+      })
+      expect(await getDb().table(table).get("row-1")).toEqual({ id: "row-1" })
+      await second.close()
+    } finally {
+      await getDb()
+        .delete()
+        .catch(() => {})
+      __resetDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("resolveDurabilityBackend", () => {
   let home: string
   beforeEach(() => {

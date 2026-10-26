@@ -275,7 +275,11 @@ describe("runTitleTask", () => {
     expect(second).toBeNull()
     expect(persist).not.toHaveBeenCalled()
 
-    // Resolve the first — it should succeed.
+    // Resolve the first once its model call is actually in flight (prompt
+    // resolution runs before it) — it should succeed.
+    while ((slowClient.complete as jest.Mock).mock.calls.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
     resolveFirst("Generated title")
     const firstResult = await first
     expect(firstResult).toBe("Generated title")

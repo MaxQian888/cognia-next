@@ -13,6 +13,10 @@ let providerSettings: {
   apiKey: string
   enabled: boolean
   priority: number
+  baseUrl?: string
+  allowPrivateEndpoint?: boolean
+  engine?: string
+  model?: string
   cx?: string
   apiKeys?: string[]
   apiKeyRotationEnabled?: boolean
@@ -365,7 +369,7 @@ describe("SearchProviderCard", () => {
       priority: 1,
     }
     renderCard({ providerId: "serper" })
-    expect(screen.getByText("features.videos")).toBeInTheDocument()
+    expect(screen.getByText("searchTypes.videos")).toBeInTheDocument()
     expect(screen.getByText("features.countryFilter")).toBeInTheDocument()
   })
 
@@ -452,4 +456,111 @@ describe("SearchProviderCard", () => {
       expect(mocks.setSearchProviderPriority).toHaveBeenCalledWith("tavily", 6)
     }
   })
+})
+
+describe("Search provider descriptor controls", () => {
+  it("keeps retired Bing inert without touching its stored key", () => {
+    providerSettings = { providerId: "bing", apiKey: "stored-key", enabled: true, priority: 7 }
+    renderCard({ providerId: "bing" })
+    expect(screen.getByText("states.retired")).toBeInTheDocument()
+    expect(screen.getByText("retiredNotice")).toBeInTheDocument()
+    expect(screen.getByRole("switch")).toBeDisabled()
+    expect(screen.queryByLabelText("apiKey")).not.toBeInTheDocument()
+    expect(screen.queryByText("testConnection")).not.toBeInTheDocument()
+    expect(mocks.setSearchProviderApiKey).not.toHaveBeenCalled()
+  })
+
+  it("shows endpoint auth and a grant only for a private host", () => {
+    providerSettings = {
+      providerId: "searxng",
+      apiKey: "",
+      enabled: false,
+      priority: 13,
+      baseUrl: "http://localhost:8080",
+    }
+    renderCard({ providerId: "searxng" })
+    expect(screen.queryByLabelText("apiKey")).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("endpoint"), {
+      target: { value: "https://search.example.com" },
+    })
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("searxng", {
+      baseUrl: "https://search.example.com",
+    })
+    fireEvent.click(screen.getByLabelText("allowPrivateEndpoint"))
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("searxng", {
+      allowPrivateEndpoint: true,
+    })
+    expect(screen.getByText("endpointGrantRequired")).toBeInTheDocument()
+    expect(screen.getByText("testConnection")).toBeDisabled()
+  })
+
+  it("tests configured public endpoints without an API key", () => {
+    providerSettings = {
+      providerId: "searxng",
+      apiKey: "",
+      enabled: false,
+      priority: 13,
+      baseUrl: "https://search.example.com",
+    }
+    const onTestConnection = jest.fn()
+    renderCard({ providerId: "searxng", onTestConnection })
+    expect(screen.queryByLabelText("allowPrivateEndpoint")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("testConnection"))
+    expect(onTestConnection).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows endpoint validation errors and rejects invalid free-form engines", () => {
+    providerSettings = {
+      providerId: "searxng",
+      apiKey: "",
+      enabled: false,
+      priority: 13,
+      baseUrl: "http://public.example.com",
+      engine: "bad/engine",
+    }
+    renderCard({ providerId: "searxng" })
+    expect(screen.getByText("endpointIssues.insecure-public-endpoint")).toBeInTheDocument()
+    expect(screen.getByText("invalidEngine")).toBeInTheDocument()
+    expect(screen.getByText("testConnection")).toBeDisabled()
+  })
+
+  it("offers declared SERP engines and persists the selected engine", () => {
+    providerSettings = { providerId: "searchapi", apiKey: "key", enabled: false, priority: 4 }
+    renderCard({ providerId: "searchapi" })
+    const select = screen.getByText("engine").parentElement!.querySelector("select")!
+    expect(select).toHaveValue("google")
+    fireEvent.change(select, { target: { value: "bing" } })
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("searchapi", { engine: "bing" })
+  })
+
+  it("offers supported Google grounding models and discloses billing", () => {
+    providerSettings = { providerId: "google-ai", apiKey: "key", enabled: false, priority: 10 }
+    renderCard({ providerId: "google-ai" })
+    const select = screen.getByText("groundingModel").parentElement!.querySelector("select")!
+    expect(select).toHaveValue("gemini-3.8-flash")
+    fireEvent.change(select, { target: { value: "gemini-2.5-pro" } })
+    expect(mocks.setSearchProviderSettings).toHaveBeenCalledWith("google-ai", {
+      model: "gemini-2.5-pro",
+    })
+    expect(screen.getByText("groundingBilling")).toBeInTheDocument()
+  })
+
+  it("announces dated search failure evidence", () => {
+    renderCard({ testState: { testing: false, result: "error", testedAt: "2026-10-19T08:00:00Z" } })
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite")
+    expect(screen.getByText("testedAt")).toBeInTheDocument()
+    expect(screen.getByText("testEvidence")).toBeInTheDocument()
+  })
+})
+
+it("makes provider expansion keyboard focusable with an inert retired label", () => {
+  const { unmount } = renderCard()
+  const trigger = screen.getByRole("button", { name: "configureProvider" })
+  trigger.focus()
+  expect(trigger).toHaveFocus()
+  expect(trigger).not.toBeDisabled()
+  unmount()
+  renderCard({ providerId: "bing" })
+  expect(screen.getByRole("button", { name: "configureProvider" })).toBeDisabled()
+  expect(screen.getByText("retiredNotice")).toBeInTheDocument()
 })

@@ -17,6 +17,7 @@
  */
 
 import type { Message } from "../contracts/schemas"
+import type { RolePromptProfile } from "../prompts/roles"
 import { estimateTokens } from "../routing/features"
 import {
   BudgetRefusedError,
@@ -161,6 +162,8 @@ export interface CompactionInput {
   /** The epoch being closed. */
   epoch: number
   maxOutputTokens: number
+  /** The role text the run pinned; the shipped roles-1 when absent. */
+  rolePrompts?: RolePromptProfile
 }
 
 export interface CompactionResult {
@@ -200,6 +203,7 @@ export async function compactTranscript(
         signal: input.signal,
         request: {
           messages: roleMessages("compactor", {
+            profile: input.rolePrompts,
             contract: authoritativeState(input.taskState),
             material: [
               untrustedBlock(

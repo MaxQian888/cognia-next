@@ -20,6 +20,7 @@
  */
 
 import { nanoid } from "nanoid"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { notifyRemoteHostPairingChanged } from "@/lib/platform/remote-host-pairing"
@@ -604,6 +605,8 @@ export function useActiveHostSupportsFeature(feature: HostFeatureId, operation?:
   )
 }
 
+const hostPersistence = persistLocalStorage()
+
 export const useRemoteHostStore = create<RemoteHostState>()(
   persist(
     (set, get) => ({
@@ -764,13 +767,24 @@ export const useRemoteHostStore = create<RemoteHostState>()(
     }),
     {
       name: "cognia-remote-hosts",
-      storage: persistLocalStorage(),
+      // Overlays read metadata but must not consume a legacy migration before
+      // main can remove its old credentials. Zustand writes migration results
+      // automatically, so enforce read-only persistence at this boundary too.
+      storage: hostPersistence && {
+        getItem: hostPersistence.getItem,
+        setItem: (name, value) => {
+          if (isMainAppWindow()) return hostPersistence.setItem(name, value)
+        },
+        removeItem: (name) => {
+          if (isMainAppWindow()) return hostPersistence.removeItem(name)
+        },
+      },
       version: 3,
       migrate: async (persisted, version) => {
         const state = persisted as Partial<RemoteHostState>
         const priorHosts = Array.isArray(state.hosts) ? state.hosts : []
         const hosts = version < 3 ? [] : priorHosts
-        if (version < 3) {
+        if (version < 3 && isMainAppWindow()) {
           await Promise.all(
             priorHosts.map((host) => clearRemoteHostCredential(host.id).catch(() => undefined))
           )
@@ -805,7 +819,9 @@ export const useRemoteHostStore = create<RemoteHostState>()(
         }
       },
       onRehydrateStorage: () => (state) => {
-        if (!state) return
+        // The module is imported by lightweight overlays too. They may read
+        // public host metadata, but only the main window owns credentials.
+        if (!state || !isMainAppWindow()) return
         // Deferred: with synchronous storage this runs while `create()` is
         // still building the store, so `useRemoteHostStore` is not assigned
         // yet and reading it throws (seen once a host was persisted).

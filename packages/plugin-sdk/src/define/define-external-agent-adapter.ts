@@ -7,7 +7,7 @@
  * path) at authoring time.
  */
 
-import type { PluginExternalAgentAdapterDef } from "@/types/plugin"
+import type { PluginExternalAgentAdapterDef } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineExternalAgentAdapter(
   def: PluginExternalAgentAdapterDef

@@ -17,6 +17,13 @@ import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { TuiAction } from "../state/types"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_INIT_REWRITE_PROMPT } from "@/lib/agent/prompts/cli-prompts"
 
 describe("agentsTemplate", () => {
   it("titles the document with the project name and includes the standard sections", () => {
@@ -474,5 +481,52 @@ describe("gatherProjectContext", () => {
     expect(ctx.deps).toEqual([])
     expect(ctx.readme).toBe("")
     expect(ctx.dirs).toEqual([])
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("rewrite prompt Prompt Center override", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders a published override with the gathered project context", () => {
+    publishOverride(
+      CLI_INIT_REWRITE_PROMPT,
+      "Tighten AGENTS.md for {{projectName}} ({{scripts}}):\n{{current}}",
+      "por-init-1"
+    )
+    expect(
+      buildRewritePrompt({
+        projectName: "demo",
+        current: "# Old\n",
+        scripts: ["build", "test"],
+        deps: [],
+        dirs: [],
+        readme: "",
+      })
+    ).toBe("Tighten AGENTS.md for demo (build, test):\n# Old")
   })
 })

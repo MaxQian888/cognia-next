@@ -23,7 +23,6 @@ import {
   getIssueByIdentifier,
   listIssues,
   type CreateIssueInput,
-  type ListIssuesQuery,
 } from "@/lib/db/issues"
 import { applyIssueBulkAction, type IssueBulkAction, type IssueBulkOutcome } from "./bulk-actions"
 import { toUnifiedIssue } from "./sources/local-source"
@@ -35,11 +34,20 @@ import {
   isIssueStage,
   type Issue,
   type IssueActor,
-  type IssueOrigin,
   type IssuePriority,
   type IssueStatus,
   type IssueTriageState,
 } from "@/types/issues"
+import type {
+  CreateIssueRequest,
+  IssueQuery,
+  IssueWire,
+} from "@cognia/plugin-contract/lib/issues/service"
+export type {
+  CreateIssueRequest,
+  IssueQuery,
+  IssueWire,
+} from "@cognia/plugin-contract/lib/issues/service"
 
 /** The active workspace, or null outside a signed-in shell. */
 export async function activeWorkspaceId(): Promise<string | null> {
@@ -69,32 +77,6 @@ export function isIssueTriageState(value: unknown): value is IssueTriageState {
 }
 
 export { isIssueStage }
-
-export interface CreateIssueRequest {
-  /** Workspace. Defaults to the active one. */
-  projectId?: string
-  /** Container by id, or by key (`MERC`). Defaults to the workspace's first container. */
-  issueProjectId?: string
-  projectKey?: string
-  title: string
-  description?: string
-  status?: IssueStatus
-  priority?: IssuePriority
-  assignee?: IssueActor
-  /** Label NAMES, created when missing. */
-  labels?: readonly string[]
-  labelIds?: readonly string[]
-  parentId?: string
-  cycleId?: string
-  dueDate?: number
-  estimate?: number
-  /** Sub-issue stage (`Issue.stage`), 1 to `ISSUE_STAGE_MAX`. Only meaningful with a parent. */
-  stage?: number
-  /** File it straight into triage (`Issue.triage`), for an intake that proposes work. */
-  triage?: IssueTriageState
-  by: IssueActor
-  origin?: IssueOrigin
-}
 
 /**
  * Resolve the container a caller named, or the workspace's first one. Throws
@@ -180,13 +162,6 @@ export async function applyIssueAction(
   return applyIssueBulkAction([toUnifiedIssue(issue)], action, by, runningUnified)
 }
 
-export interface IssueQuery extends ListIssuesQuery {
-  projectKey?: string
-  /** Case-insensitive substring over identifier, title and description. */
-  text?: string
-  limit?: number
-}
-
 export async function queryIssues(query: IssueQuery = {}): Promise<Issue[]> {
   const projectId = query.projectId ?? (await activeWorkspaceId()) ?? undefined
   let issueProjectId = query.issueProjectId
@@ -212,9 +187,6 @@ export async function queryIssues(query: IssueQuery = {}): Promise<Issue[]> {
   }
   return limit !== undefined ? rows.slice(0, Math.max(0, limit)) : rows
 }
-
-/** The row without its indexed mirror (`externalKeys`) for callers outside the app. */
-export type IssueWire = Omit<Issue, "externalKeys">
 
 export function toIssueWire(issue: Issue): IssueWire {
   const { externalKeys: _keys, ...wire } = issue

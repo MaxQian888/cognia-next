@@ -1,4 +1,17 @@
-import { DocsProviderError } from "./types"
+import { DocsProviderError, type RemoteDocRef } from "./types"
+
+it("retains a provider's source type when several document types share a picker kind", () => {
+  const ref: RemoteDocRef = {
+    providerId: "lark",
+    kind: "doc",
+    id: "opaqueId",
+    sourceType: "docx",
+    title: "Plan",
+  }
+  const restored = JSON.parse(JSON.stringify(ref)) as RemoteDocRef
+  expect(restored.sourceType).toBe("docx")
+  expect(restored.kind).toBe("doc")
+})
 
 describe("DocsProviderError", () => {
   it("keeps the code addressable for the i18n lookup", () => {

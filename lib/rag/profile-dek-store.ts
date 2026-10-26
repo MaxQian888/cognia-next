@@ -4,7 +4,9 @@ import { createKeyringStore, type KeyringStore } from "@/lib/credentials/keyring
 import { isCapacitor, isTauri } from "@/lib/tauri"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { getActiveBrowserVault } from "@/lib/runtime/browser-vault"
-import { createBackupChunkCipher, type BackupChunkEncryptionConfig } from "@/lib/data/crypto"
+import { createBackupChunkCipher } from "@/lib/data/crypto"
+import type { PortableProfileDekEnvelopeV1 } from "@cognia/plugin-contract/lib/rag/profile-dek-store"
+export type { PortableProfileDekEnvelopeV1 } from "@cognia/plugin-contract/lib/rag/profile-dek-store"
 
 const PROFILE_DEK_NAMESPACE = "retrieval-profile-dek/v1"
 const ACTIVE_KEY_PREFIX = "active:"
@@ -21,14 +23,6 @@ export interface ProfileDekPairingExportV1 {
   profileId: string
   keyId: string
   rawKey: Uint8Array
-}
-
-export interface PortableProfileDekEnvelopeV1 {
-  version: 1
-  profileId: string
-  keyId: string
-  encryption: BackupChunkEncryptionConfig
-  ciphertext: string
 }
 
 export class RetrievalVaultLockedError extends Error {

@@ -878,6 +878,52 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     icon: "network",
   },
 
+  // ------------------------------------------------- multi-tenant Host
+  // Intentional dormancy, not faults (Rule 7): retrying cannot help and there
+  // is no setting the member can change, so the only action is to dismiss.
+  hostDataUnavailable: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "database",
+  },
+  executionUnavailable: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "server",
+  },
+  workspaceUnresolved: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "settings",
+  },
+  modelAccessUnavailable: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "key",
+  },
+  partitionWorkspaceUnavailable: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "settings",
+  },
+  orgScopeUnavailable: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "settings",
+  },
+
   // -------------------------------------------------------------- fallback
   unknown: {
     severity: "error",

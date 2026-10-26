@@ -89,7 +89,7 @@ export const DEFAULT_GLANCE_PANEL_SETTINGS: GlancePanelSettings = {
   version: 1,
   preset: "balanced",
   entries: layoutFromPreset("balanced"),
-  width: "standard",
+  width: "wide",
   maxHeight: GLANCE_MAX_HEIGHT_DEFAULT,
   scope: "all",
   showDelegate: true,

@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
@@ -440,7 +441,7 @@ it("renders, uploads, and submits every durable Human Input field type", async (
   fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Reviewed" } })
   fireEvent.change(screen.getByLabelText("Score"), { target: { value: "5" } })
   fireEvent.click(screen.getByLabelText("Verified"))
-  fireEvent.change(screen.getByLabelText("Decision"), { target: { value: "ship" } })
+  await selectOption(screen.getByLabelText("Decision"), "ship")
   fireEvent.click(screen.getByLabelText("Security"))
   const proof = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "proof.png", {
     type: "image/png",

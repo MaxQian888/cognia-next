@@ -6,6 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { EventEmitter } from "node:events"
 import fs from "node:fs"
 import path from "node:path"
+import os from "node:os"
 import readline from "node:readline"
 import { resolveWorkspacePortEnv } from "../workspace-port-env"
 import { deleteGatewayTask, gatewayRuntimeEnvironment, prepareGatewayTask } from "./gateway-task"
@@ -557,6 +558,26 @@ export class NodeExternalAgentBackend {
 
   async invoke<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     switch (name) {
+      case "agent_vendor_roots": {
+        const { vendorRootsFromEnv } = await import("@/lib/agent-roots")
+        return vendorRootsFromEnv(
+          os.homedir(),
+          {
+            CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+            CODEX_HOME: process.env.CODEX_HOME,
+            XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+            XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+            PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+            PI_CODING_AGENT_SESSION_DIR: process.env.PI_CODING_AGENT_SESSION_DIR,
+            APPDATA: process.env.APPDATA,
+          },
+          process.platform === "darwin"
+            ? "macos"
+            : process.platform === "win32"
+              ? "windows"
+              : "linux"
+        ) as T
+      }
       case "external_agent_delete_gateway_task": {
         const taskId = String(args.taskId)
         const prefix = `gateway-task-${taskId}`

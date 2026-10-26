@@ -1,0 +1,46 @@
+{
+  "$comment": "Golden vectors for organization cohort bucketing, hashVersion 1. bucket = u64_be(SHA-256(F('cognia.rollout.v1') || F(cohortKey) || F(cohortSalt) || F(orgId))[0..8]) mod 10000, where F(s) = u32_be(byte_length(utf8(s))) || utf8(s). An org is in the cohort iff bucket < percentageBasisPoints. cohortKey defaults to featureKey; features that must roll out together share one cohortKey. Never convert the u64 to a float or JS Number before the modulo.",
+  "hashVersion": 1,
+  "domain": "cognia.rollout.v1",
+  "bucketCount": 10000,
+  "vectors": [
+    {
+      "cohortKey": "shared-chat",
+      "cohortSalt": "s1",
+      "orgId": "org_01J9ZK8Y2V5QW3E7RT6MNPXA4B",
+      "bucket": 8432
+    },
+    {
+      "cohortKey": "shared-chat",
+      "cohortSalt": "s1",
+      "orgId": "org_01J9ZK8Y2V5QW3E7RT6MNPXA4C",
+      "bucket": 9609
+    },
+    {
+      "cohortKey": "shared-chat",
+      "cohortSalt": "s2",
+      "orgId": "org_01J9ZK8Y2V5QW3E7RT6MNPXA4B",
+      "bucket": 7245
+    },
+    {
+      "cohortKey": "canvas-collaboration",
+      "cohortSalt": "s1",
+      "orgId": "org_01J9ZK8Y2V5QW3E7RT6MNPXA4B",
+      "bucket": 7160
+    },
+    { "cohortKey": "shared-chat", "cohortSalt": "s1", "orgId": "org_组织", "bucket": 9269 },
+    { "cohortKey": "shared-chat", "cohortSalt": "", "orgId": "org_a", "bucket": 7779 },
+    {
+      "cohortKey": "org-governance",
+      "cohortSalt": "2026-10-20",
+      "orgId": "org_alpha",
+      "bucket": 3246
+    },
+    {
+      "cohortKey": "org-governance",
+      "cohortSalt": "2026-10-20",
+      "orgId": "org_beta",
+      "bucket": 2899
+    }
+  ]
+}

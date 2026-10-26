@@ -19,6 +19,8 @@ interface CredentialResolverDeps {
   loadEntry?: typeof mcpOAuthLoadEntry
   refresh?: typeof mcpOAuthRefresh
   refreshSkewMs?: number
+  /** The Registry row as it is now; defaults to `getMcpServer`. */
+  getCurrent?: (id: string) => Promise<McpServer | undefined>
 }
 
 /** Resolve keychain OAuth for every governed runtime without exposing tokens to Agent context. */
@@ -37,17 +39,21 @@ export async function resolveMcpRuntimeCredential(
     entry = (await refresh(server.id, descriptor)) ?? entry
   }
 
-  const project = (token: McpOAuthEntry | undefined, credentialVersion = 0): McpServer => {
-    if (!token?.accessToken) return server
+  const project = (
+    token: McpOAuthEntry | undefined,
+    credentialVersion = 0,
+    base: McpServer = server
+  ): McpServer => {
+    if (!token?.accessToken) return base
     const headers =
-      server.config.headers && typeof server.config.headers === "object"
-        ? (server.config.headers as Record<string, unknown>)
+      base.config.headers && typeof base.config.headers === "object"
+        ? (base.config.headers as Record<string, unknown>)
         : {}
     return {
-      ...server,
-      credentialVersion: (server.credentialVersion ?? 0) + credentialVersion,
+      ...base,
+      credentialVersion: (base.credentialVersion ?? 0) + credentialVersion,
       config: {
-        ...server.config,
+        ...base.config,
         headers: { ...headers, Authorization: `Bearer ${token.accessToken}` },
       },
     }
@@ -55,8 +61,18 @@ export async function resolveMcpRuntimeCredential(
 
   return {
     server: project(entry),
-    refreshAuth: async () => ({
-      server: project(await refresh(server.id, descriptor), 1),
-    }),
+    // The retry runs after a round trip to the token endpoint, during which
+    // the user may have disabled, blocked, edited or deleted the server. Build
+    // the retry from the row as it is then, so the gateway's policy check
+    // judges the current definition rather than the one this call started with.
+    refreshAuth: async () => {
+      const token = await refresh(server.id, descriptor)
+      const getCurrent =
+        deps.getCurrent ??
+        (async (id: string) => (await import("@/lib/db/mcp-servers")).getMcpServer(id))
+      const current = await getCurrent(server.id)
+      if (!current) throw new Error(`MCP server ${server.name} is no longer configured`)
+      return { server: project(token, 1, current) }
+    },
   }
 }

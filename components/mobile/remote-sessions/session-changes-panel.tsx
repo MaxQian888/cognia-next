@@ -13,6 +13,7 @@
  * diff pane is the outcome this whole path is built to avoid.
  */
 
+import { NativeSelect } from "@/components/ui/native-select"
 import { useCallback, useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
@@ -81,7 +82,8 @@ export function SessionChangesPanel({ sessionId }: SessionChangesPanelProps) {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-3" data-testid="session-changes-panel">
       {runs.length > 1 ? (
-        <select
+        <NativeSelect
+          wrapperClassName="w-full"
           className="mb-3 w-full rounded-md border bg-background px-2 py-1.5 text-xs"
           value={selectedRunId ?? ""}
           onChange={(event) => selectRun(event.target.value)}
@@ -97,7 +99,7 @@ export function SessionChangesPanel({ sessionId }: SessionChangesPanelProps) {
               })}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       ) : null}
 
       {loading ? (

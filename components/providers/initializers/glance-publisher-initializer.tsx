@@ -334,8 +334,8 @@ export function GlancePublisherInitializer() {
       },
       quotaRefresh: async (key) =>
         (await remoteSourcesRef.current.quota.refreshOne(key)) ? null : "errors.quotaRefresh",
-      quotaEnable: async (provider, accountId) =>
-        (await remoteSourcesRef.current.quota.enable(provider, accountId))
+      quotaEnable: async (provider, providerAccountId) =>
+        (await remoteSourcesRef.current.quota.enable(provider, providerAccountId))
           ? null
           : "errors.quotaEnable",
     })

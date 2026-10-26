@@ -945,7 +945,7 @@ async fn read_pairing(g: &dyn Github, record: &Record) -> Result<Option<Pairing>
         return Err("pairing archive must contain exactly one file".into());
     }
     let mut file = archive.by_index(0).map_err(error)?;
-    if file.name() != "pairing.json"
+    if file.name().map_err(error)?.as_ref() != "pairing.json"
         || file.is_dir()
         || file.size() > ARTIFACT_LIMIT as u64
         || file.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000)

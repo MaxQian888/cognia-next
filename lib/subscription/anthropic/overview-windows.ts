@@ -24,11 +24,11 @@ import type {
   SubscriptionUsageRow,
   UsageStatus,
 } from "@/types/subscription"
+import type { UsageWindowsSource } from "@cognia/plugin-contract/lib/subscription/anthropic/overview-windows"
+export type { UsageWindowsSource } from "@cognia/plugin-contract/lib/subscription/anthropic/overview-windows"
 
 /** Data considered fresh for this long; past it the UI auto-refreshes. */
 export const USAGE_WINDOWS_STALE_MS = 5 * 60_000
-
-export type UsageWindowsSource = "endpoint" | "headers"
 
 export interface ResolvedUsageWindows {
   /** Which snapshot won, or `null` when both are absent. */

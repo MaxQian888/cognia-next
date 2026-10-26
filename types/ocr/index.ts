@@ -1,5 +1,5 @@
 /**
- * Boundary shim — the OCR type contracts moved into `@cognia/ocr` so the core
- * has zero app imports. Kept so existing `@/types/ocr` importers stay unchanged.
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/ocr` working.
  */
-export * from "@cognia/ocr/types"
+export * from "@cognia/plugin-contract/types/ocr/index"

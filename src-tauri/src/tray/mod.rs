@@ -189,7 +189,12 @@ pub fn install(app: &App) -> tauri::Result<()> {
                     .or_else(|| app.primary_monitor().ok().flatten())
                     .map(|m| m.scale_factor())
                     .unwrap_or(1.0);
-                panel::record_anchor(app, panel::anchor_from_tray_rect(rect, scale));
+                #[cfg(target_os = "macos")]
+                let anchor = panel::macos_tray_rect(tray)
+                    .unwrap_or_else(|| panel::anchor_from_tray_rect(rect, scale));
+                #[cfg(not(target_os = "macos"))]
+                let anchor = panel::anchor_from_tray_rect(rect, scale);
+                panel::record_anchor(app, anchor);
             }
 
             if let TrayIconEvent::Click {

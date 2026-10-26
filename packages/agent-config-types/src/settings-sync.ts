@@ -75,8 +75,11 @@ export const SETTINGS_SYNC = {
   // trees, so the toggle is meaningless there and must not cross the wire.
   sessionImportWatch: { category: "desktop-only" },
   subagentNesting: { category: "desktop-only" },
+  subagentRuntime: { category: "desktop-only" },
   backgroundTasks: { category: "desktop-only" },
   webTools: { category: "desktop-only" },
+  webReader: { category: "desktop-only" },
+  harnessEvolution: { category: "desktop-only" },
   selfInvokeTools: { category: "desktop-only" },
   knowledgeReading: {
     category: "device-local",
@@ -350,6 +353,7 @@ export const SETTINGS_SYNC = {
   petSettings: { category: "desktop-only" },
   installUuid: { category: "desktop-only" },
   sandboxDefaultEnabled: { category: "desktop-only" },
+  claudeCodeRuntime: { category: "desktop-only" },
   workspaceConfinementEnabled: { category: "desktop-only" },
   canvasCodeSandboxEnabled: { category: "desktop-only" },
   sandboxTier: { category: "desktop-only" },

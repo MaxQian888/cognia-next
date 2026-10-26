@@ -220,7 +220,6 @@ const externalStoreState = {
   updateAgent: updateAgentMock,
   removeAgent: removeAgentMock,
   enabled: true,
-  setEnabled: jest.fn(),
   defaultPermissionMode: "default",
   setDefaultPermissionMode: jest.fn(),
   autoConnectOnStartup: false,
@@ -340,13 +339,13 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
   })
 
-  it("disables inspector Connect while the master switch is off", async () => {
+  it("keeps inspector Connect available despite a retired global flag", async () => {
     externalStoreState.enabled = false
     render(<ExternalAgentSettings />)
     await userEvent.click(screen.getByTestId("agent-row-agent-1"))
     expect(
       within(screen.getByTestId("agent-detail-agent-1")).getByRole("button", { name: /^connect$/i })
-    ).toBeDisabled()
+    ).toBeEnabled()
   })
 
   it("limits the agent rail to 240px while retaining its navigation", () => {
@@ -434,13 +433,15 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(
       screen.queryByRole("heading", { name: externalAgentMessages.settings.title })
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("switch", { name: externalAgentMessages.settings.enableExternalAgents })
-    ).not.toBeInTheDocument()
+    expect(document.getElementById("external-agents-enabled")).not.toBeInTheDocument()
   })
 
-  it("keeps the inspector and page header at the split threshold", async () => {
+  it("offers agent management without a global switch at the split threshold", async () => {
     render(<ExternalAgentSettings />)
+    expect(document.getElementById("external-agents-enabled")).toBeNull()
+    expect(
+      screen.getAllByRole("button", { name: externalAgentMessages.settings.addAgent })[0]
+    ).toBeEnabled()
     await userEvent.click(screen.getByTestId("agent-row-agent-1"))
     expect(screen.getByTestId("agent-inspector-frame")).toHaveClass("border", "rounded-lg")
     expect(screen.getByTestId("inspector-description")).toBeInTheDocument()
@@ -1473,7 +1474,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   })
 
   it.each([true, false])(
-    "keeps flat global fields labelled and disabled when master enabled is %s",
+    "keeps shared preferences labelled and available with retired flag %s",
     async (enabled) => {
       externalStoreState.enabled = enabled
       render(<ExternalAgentSettings />)
@@ -1502,8 +1503,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       ]
       for (const field of fields) {
         expect(field).toHaveAccessibleDescription()
-        if (enabled) expect(field).toBeEnabled()
-        else expect(field).toBeDisabled()
+        expect(field).toBeEnabled()
       }
     }
   )
@@ -1780,9 +1780,7 @@ describe("stacked detail focus", () => {
     expect(
       screen.queryByRole("heading", { name: externalAgentMessages.settings.title })
     ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("switch", { name: externalAgentMessages.settings.enableExternalAgents })
-    ).not.toBeInTheDocument()
+    expect(document.getElementById("external-agents-enabled")).not.toBeInTheDocument()
     const detail = screen.getByTestId("agent-detail-slot")
     const heading = detail.querySelector<HTMLElement>("[data-detail-heading]")!
     expect(heading).not.toBeNull()

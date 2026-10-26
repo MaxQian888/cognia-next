@@ -3,8 +3,14 @@ import "fake-indexeddb/auto"
 
 import type { AppSettings } from "@cognia/agent-config-types"
 import {
+  BUILTIN_ACTIONS,
+  builtinExtensions,
+  builtinPolicy,
+  defaultExtension,
   fakeCompiledConfig,
   FakeProvider,
+  materializeCustomRoleProfile,
+  ROLE_PROMPTS,
   fixtureRouteRequest,
   PANEL_MEMBER_STAGE,
   PANEL_TAIL_STAGE,
@@ -530,6 +536,54 @@ describe("executeFusionRun: cascade and panel (B3)", () => {
       ["cascade:cheap:format_repair:1", "SUCCEEDED"],
       ["cascade:strong", "SUCCEEDED"],
     ])
+  })
+
+  it("(Prompt Center A13) reviews with the custom role text the run's snapshot pinned, and a built-in with roles-1", async () => {
+    const { store } = harness()
+    const reviewer =
+      "# Reviewer (edited)\nchecks are passed/failed/inconclusive; executed_by model.\n"
+    const rolePrompts = materializeCustomRoleProfile({ ...ROLE_PROMPTS, reviewer })
+    const customConfig = fakeCompiledConfig({
+      policy: builtinPolicy([
+        ...BUILTIN_ACTIONS,
+        {
+          id: "my_review",
+          mode: "cascade",
+          roles: { cheap: "fast", strong: "powerful" },
+          prompt_version: "roles-1-custom",
+          verifier_profile: "text_review",
+          enabled: true,
+        },
+      ]),
+      extensions: { ...builtinExtensions(), my_review: defaultExtension("cascade") },
+      rolePrompts,
+    })
+    expect(customConfig.actions.my_review.config.prompt_version).toBe(rolePrompts.version)
+    const reviewerSystem = async (runId: string, actionId: string) => {
+      await store.createRun(
+        runInput(runId, {
+          config: customConfig,
+          actionId,
+          roleDeployments: { cheap: "fake-economy", strong: "fake-baseline" },
+          acceptanceProfile: "text_review",
+        })
+      )
+      await storeInput(store, runId, { messages: MESSAGES })
+      const executor = scripted({
+        "cascade:cheap": { kind: "text", text: "a haiku about the sea" },
+        "cascade:cheap:reviewer": { kind: "json", value: { status: "passed", issues: [] } },
+      })
+      const outcome = await executeFusionRun(deps(store, { executor }), { runId })
+      expect(outcome).toMatchObject({ kind: "succeeded" })
+      const review = executor.requests.find((r) => r.logicalStepId === "cascade:cheap:reviewer")
+      return review?.messages[0].content
+    }
+    expect(await reviewerSystem("run-custom-review", "my_review")).toBe(
+      `${ROLE_PROMPTS.common}\n${reviewer}`
+    )
+    expect(await reviewerSystem("run-builtin-review", "cascade_review")).toBe(
+      `${ROLE_PROMPTS.common}\n${ROLE_PROMPTS.reviewer}`
+    )
   })
 
   it("runs a panel through the host's own tools and evidence checks", async () => {

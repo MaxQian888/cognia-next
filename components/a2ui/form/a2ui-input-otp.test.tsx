@@ -37,6 +37,15 @@ describe("A2UIInputOTP", () => {
     renderChild: jest.fn(),
   })
 
+  it("associates its label with the actual OTP input", () => {
+    render(
+      <A2UIInputOTP
+        {...cp({ id: "labelled", component: "InputOTP", value: "", label: "Security code" })}
+      />
+    )
+    expect(screen.getByLabelText("Security code")).toHaveAttribute("id", "labelled")
+  })
+
   it("renders correct number of slots", () => {
     const { container } = render(
       <A2UIInputOTP {...cp({ id: "o1", component: "InputOTP", value: "", maxLength: 4 })} />

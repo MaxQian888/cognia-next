@@ -17,7 +17,7 @@ export interface DiagnosticsOptions {
 // After the agent edits a file, run the language server over it and
 // append any errors/warnings to the turn as additional context so the
 // model self-corrects without an extra orchestration round-trip. Wired
-// into the `query()` options' `hooks.PostToolUse` in `anthropic.mjs`.
+// into the `query()` options' `hooks.PostToolUse` in `runtimes/claude-agent-sdk/index.ts`.
 //
 // The resolver is injected (per-session); when it is null the hook is a
 // no-op, so non-coding sessions and the LSP-host-unavailable case pay

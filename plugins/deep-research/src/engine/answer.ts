@@ -14,18 +14,30 @@ import { unwrapUntrustedContent } from "@cognia/plugin-sdk"
 import type { AiBridge } from "../lib/ai"
 import { completeText } from "../lib/ai"
 import type { Citation } from "../types"
-import { draftAnswerMessages } from "./prompts"
+import { draftAnswerMessages, systemPromptFor, type SystemPromptResolver } from "./prompts"
 import { renderEvidence, type ResearchState } from "./workspace"
 
 export async function draftAnswer(
   state: ResearchState,
   ai: AiBridge,
-  beast: boolean
+  beast: boolean,
+  prompt?: SystemPromptResolver
 ): Promise<{ answer: string; citations: Citation[]; tokens: number }> {
   const evidence = renderEvidence(state)
+  const [instruction, budgetInstruction] = await Promise.all([
+    systemPromptFor("draft-answer", prompt),
+    beast ? systemPromptFor("draft-answer-budget", prompt) : undefined,
+  ])
   const { text, tokens } = await completeText(
     ai,
-    draftAnswerMessages(state.question, evidence, beast, state.config.locale),
+    draftAnswerMessages(
+      state.question,
+      evidence,
+      beast,
+      state.config.locale,
+      instruction,
+      budgetInstruction
+    ),
     { temperature: 0.3, maxTokens: 2_000 }
   )
   const { answer, citations } = alignCitations(stripSourcesTail(text), state)

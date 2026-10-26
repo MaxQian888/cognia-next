@@ -50,6 +50,8 @@ pub const RENDERER_OPS: &[&str] = &[
     "browser.press-key",
     "browser.scroll",
     "browser.evaluate",
+    "browser.recording.control",
+    "browser.recording.ref",
     "browser.console",
     "browser.network",
     "browser.network.request",
@@ -737,6 +739,8 @@ mod tests {
     #[test]
     fn allow_list_excludes_privileged_ops() {
         assert!(is_renderer_op("browser.navigate"));
+        assert!(is_renderer_op("browser.recording.control"));
+        assert!(is_renderer_op("browser.recording.ref"));
         assert!(is_renderer_op("browser.session.create"));
         assert!(is_renderer_op("browser.tabs.finalize"));
         assert!(is_renderer_op("browser.filechooser.set"));

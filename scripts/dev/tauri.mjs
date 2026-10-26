@@ -134,6 +134,18 @@ export function devPrepareScripts(args, root) {
   return cargoPrepareScripts(resolveBeforeDevCommand(args, config, root), scripts ?? {})
 }
 
+/** Clear the frontend listener before Tauri can mistake it for this run's server. */
+export function devPreparePort(args, root) {
+  if (!isDevLaunch(args)) return null
+  const config = JSON.parse(readFileSync(path.join(root, "src-tauri/tauri.conf.json"), "utf8"))
+  const command = resolveBeforeDevCommand(args, config, root)
+  for (const step of command?.split("&&") ?? []) {
+    const match = /^node scripts\/dev\/free-port\.mjs ([1-9]\d*)$/.exec(step.trim())
+    if (match && Number(match[1]) <= 65535) return Number(match[1])
+  }
+  return null
+}
+
 function runPnpmScript(name, { cwd, env }) {
   const isWindows = process.platform === "win32"
   const child = spawn(isWindows ? "pnpm.cmd" : "pnpm", ["run", name], {
@@ -167,6 +179,27 @@ export async function runTauri(args, { env = process.env } = {}) {
     } catch (error) {
       console.warn("[tauri] cognia CLI warm-up failed; predev will retry:", error)
     }
+  }
+
+  const frontendPort = devPreparePort(args, root)
+  if (frontendPort !== null) {
+    // beforeDevCommand repeats this check, but by then the CLI has already
+    // decided whether its devUrl is ready. Clearing it here prevents launching
+    // the webview against a server that the preparation chain is about to stop.
+    const child = spawn(
+      process.execPath,
+      [path.join(root, "scripts/dev/free-port.mjs"), String(frontendPort)],
+      {
+        cwd: root,
+        env,
+        stdio: "inherit",
+      }
+    )
+    const result = await new Promise((resolve, reject) => {
+      child.once("error", reject)
+      child.once("close", (code, signal) => resolve({ code, signal }))
+    })
+    if (result.signal || result.code !== 0) return result
   }
 
   const require = createRequire(import.meta.url)

@@ -1,11 +1,18 @@
 import {
   createLlmRerankScorer,
   identityScorer,
+  LLM_RERANK_REQUEST_PROMPT,
+  LLM_RERANK_SYSTEM_PROMPT,
   lexicalRerankScorer,
   rerank,
   type RerankCandidate,
   type RerankerOptions,
 } from "./reranker"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const c = (id: string, score: number, content = id): RerankCandidate => ({
   id,
@@ -264,5 +271,72 @@ describe("createLlmRerankScorer", () => {
     const client = { complete: jest.fn(async () => "[0.5]") }
     const scorer = createLlmRerankScorer(client)
     await expect(scorer("q", cands)).rejects.toThrow("length mismatch")
+  })
+})
+
+describe("LLM rerank prompts (ADR-0236)", () => {
+  const cands = [c("a", 0.9, "alpha doc"), c("b", 0.5, "beta doc")]
+
+  beforeEach(() => __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", [])))
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends the shipped system prompt and the score-count request", async () => {
+    const client = { complete: jest.fn(async () => "[0.5, 0.5]") }
+    await createLlmRerankScorer(client)("which doc?", cands)
+    const [prompt, options] = client.complete.mock.calls[0] as unknown as [
+      string,
+      { system: string },
+    ]
+    expect(options.system).toBe(LLM_RERANK_SYSTEM_PROMPT.defaultBody)
+    expect(prompt).toBe(
+      "Query: which doc?\n\nDocuments:\n[0] alpha doc\n[1] beta doc\n\n" +
+        "Return a JSON array of exactly 2 relevance scores (0.0–1.0), one per document index, in order."
+    )
+  })
+
+  it("sends a published system override; the request stays inspect-only", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: LLM_RERANK_SYSTEM_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-rerank-system",
+          body: "Score relevance strictly. Reply with a JSON array only.",
+          contractVersion: LLM_RERANK_SYSTEM_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob2",
+          promptId: LLM_RERANK_REQUEST_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-rerank-request",
+          body: "ignored",
+          contractVersion: LLM_RERANK_REQUEST_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const client = { complete: jest.fn(async () => "[0.5, 0.5]") }
+    await createLlmRerankScorer(client)("q", cands)
+    const [prompt, options] = client.complete.mock.calls[0] as unknown as [
+      string,
+      { system: string },
+    ]
+    expect(options.system).toBe("Score relevance strictly. Reply with a JSON array only.")
+    expect(prompt).toContain("Return a JSON array of exactly 2 relevance scores")
+  })
+
+  it("does not dispatch when the caller aborted while the prompt resolved", async () => {
+    const client = { complete: jest.fn(async () => "[0.5, 0.5]") }
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      createLlmRerankScorer(client)("q", cands, { signal: controller.signal })
+    ).rejects.toThrow()
+    expect(client.complete).not.toHaveBeenCalled()
   })
 })

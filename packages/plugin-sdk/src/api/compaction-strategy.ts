@@ -15,6 +15,6 @@ export {
   getCompactionStrategyEntry,
   listCompactionStrategyIds,
   listCompactionStrategyEntries,
-} from "@/lib/plugin/registries/compaction-strategy-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/compaction-strategy-registry"
 
-export type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
+export type { PluginCompactionStrategyDef } from "@cognia/plugin-contract/types/plugin/plugin-compaction-strategy"

@@ -10,7 +10,7 @@
  * plugin can never shadow a native execution path.
  */
 
-import { BUILTIN_PROTOCOL_NAMES } from "../../../../sidecar/src/providers/provider-protocol.ts"
+import { BUILTIN_PROTOCOL_NAMES } from "@cognia/provider-types/provider-protocol"
 
 export interface OpenAiCompatibleVariantResponsePaths {
   textDelta: string

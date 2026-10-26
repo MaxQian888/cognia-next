@@ -252,7 +252,7 @@
       "generatedEventCount": "{count} 个产物事件",
       "generatedFiles": "生成产物",
       "generatedMetadataOnly": "不会保留生成产物正文，仅记录相对路径、类型、大小和生命周期。",
-      "irreversibleApplyConfirm": "本地任务账本容量已满，Cognia 无法保留反向补丁。是否单次不可逆地应用所选改动？现有工作区改动仍受冲突检查保护。",
+      "irreversibleApplyConfirm": "本地任务账本容量已满，Cognia 无法为本次应用保留反向补丁。现有工作区改动仍受冲突检查保护。",
       "lastDay": "最近 24 小时",
       "lastFiveMinutes": "最近 5 分钟",
       "lastHour": "最近 1 小时",
@@ -277,7 +277,7 @@
       "selectHunks": "选择差异区块",
       "selectResource": "选择一个任务资源进行检查。",
       "sensitive": "敏感资源",
-      "sensitiveConfirm": "授权本次敏感资源操作？正文仍保留在实际执行端。",
+      "sensitiveConfirm": "仅授权对此敏感资源的单次操作，正文仍保留在实际执行端。",
       "sensitiveDescription": "此路径可能包含凭据或密钥。每次读取或下载都需要显式授权和远程控制权限。",
       "source": "源码",
       "sourceEventCount": "{count} 个源码事件",
@@ -294,7 +294,10 @@
       "unpin": "取消固定",
       "upload": "上传",
       "user": "用户",
-      "watcher": "文件监听"
+      "watcher": "文件监听",
+      "irreversibleApplyConfirmTitle": "不保留任务撤销直接应用？",
+      "irreversibleApplyConfirmAction": "单次应用",
+      "sensitiveConfirmTitle": "授权一次敏感操作？"
     },
     "unavailable": {
       "description": "工作区编辑需要桌面应用或已配对的 Companion 文件系统。",

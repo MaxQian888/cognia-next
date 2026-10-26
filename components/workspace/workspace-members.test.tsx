@@ -267,6 +267,65 @@ describe("WorkspaceMembers", () => {
     expect(await screen.findByTestId("workspace-invite-dialog")).toBeInTheDocument()
   })
 
+  /**
+   * Ownership moves through the server's one-transaction route, offered only
+   * to an owner, never on their own row, a guest's, or another owner's.
+   */
+  it("lets an owner hand the org over in one step, asking what they become", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "owner", now: 1 })
+    await putOrgMembership({ orgId: ORG, userId: "usr_bo", role: "owner", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_bo", displayName: "Bo", role: "member", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+        { userId: "usr_gus", displayName: "Gus", role: "viewer", orgMember: false },
+      ],
+      now: 1,
+    })
+    const client = { transferOrgOwnership: jest.fn(async () => undefined) }
+    const refresh = jest.fn(async () => null)
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps(client, refresh)} />)
+
+    const transfer = await screen.findByTestId("workspace-member-transfer-usr_cleo")
+    expect(screen.queryByTestId("workspace-member-transfer-usr_ada")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-member-transfer-usr_gus")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-member-transfer-usr_bo")).not.toBeInTheDocument()
+
+    fireEvent.click(transfer)
+    // The test translator returns bare keys, so the dialog reads its own.
+    expect(await screen.findByTestId("workspace-transfer-ownership")).toHaveTextContent("title")
+    expect(client.transferOrgOwnership).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("workspace-transfer-confirm"))
+    await waitFor(() =>
+      expect(client.transferOrgOwnership).toHaveBeenCalledWith(ORG, {
+        toUserId: "usr_cleo",
+        previousOwnerRole: "admin",
+        reason: "reason.ownershipTransferred",
+      })
+    )
+    expect(toast.success).toHaveBeenCalledWith("toast.ownershipTransferred")
+    expect(refresh).toHaveBeenCalled()
+  })
+
+  it("does not offer the handover to an admin who is not an owner", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "admin", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+      ],
+      now: 1,
+    })
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps({})} />)
+    expect(await screen.findByTestId("workspace-member-role-usr_cleo")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-member-transfer-usr_cleo")).not.toBeInTheDocument()
+  })
+
   it("changes a workspace seat and an org role through their selects", async () => {
     await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "owner", now: 1 })
     await putOrgMembership({ orgId: ORG, userId: "usr_cleo", role: "member", now: 1 })

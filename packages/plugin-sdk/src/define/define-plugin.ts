@@ -1,4 +1,4 @@
-import type { PluginDefinition, PluginManifest } from "@/types/plugin/plugin"
+import type { PluginDefinition, PluginManifest } from "@cognia/plugin-contract/types/plugin/plugin"
 
 /** Preserve a plugin definition while giving TypeScript the complete author contract. */
 export function definePlugin(definition: PluginDefinition): PluginDefinition {

@@ -2,6 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ dateTime: (value: number) => new Date(value).toISOString() }),
   useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
     values ? `${namespace}.${key}:${Object.values(values).join(",")}` : `${namespace}.${key}`,
 }))
@@ -36,6 +37,22 @@ beforeEach(() => {
 })
 
 describe("PairedBrowsersList", () => {
+  it("shows the live connection time and negotiated features, clearing them offline", async () => {
+    const connectedAt = 1_700_000_000_000
+    const loadBrowsers = jest.fn(async () => [
+      browser({ connectedAt, features: ["agent", "capture"] }),
+    ])
+    const { rerender } = render(<PairedBrowsersList loadBrowsers={loadBrowsers} />)
+    expect(await screen.findByText(/pairedConnectedAt:2023-11-14/)).toBeVisible()
+    expect(screen.getByText(/pairedFeatures:agent, capture/)).toBeVisible()
+    rerender(
+      <PairedBrowsersList
+        loadBrowsers={async () => [browser({ connected: false, connectedAt, features: ["agent"] })]}
+      />
+    )
+    await waitFor(() => expect(screen.queryByText(/pairedConnectedAt:/)).not.toBeInTheDocument())
+    expect(screen.queryByText(/pairedFeatures:/)).not.toBeInTheDocument()
+  })
   it("shows each browser's connection and version", async () => {
     render(
       <PairedBrowsersList

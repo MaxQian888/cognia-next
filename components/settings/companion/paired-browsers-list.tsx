@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { BotIcon, EraserIcon } from "lucide-react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 
 import {
   AlertDialog,
@@ -28,6 +28,8 @@ export interface PairedBrowser {
   createdAt: number
   connected: boolean
   extensionVersion: string | null
+  connectedAt?: number | null
+  features?: string[]
   driveAllowed: boolean
 }
 
@@ -72,6 +74,7 @@ export function PairedBrowsersList({
   refreshMs = 5_000,
 }: PairedBrowsersListProps) {
   const t = useTranslations("mobile.companion.browserCompanion")
+  const format = useFormatter()
   const [browsers, setBrowsers] = useState<PairedBrowser[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [pending, setPending] = useState<string | null>(null)
@@ -179,6 +182,21 @@ export function PairedBrowsersList({
                   {browser.extensionVersion ? (
                     <p className="font-mono text-[11px] text-muted-foreground">
                       {t("pairedVersion", { version: browser.extensionVersion })}
+                    </p>
+                  ) : null}
+                  {browser.connected && browser.connectedAt ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("pairedConnectedAt", {
+                        time: format.dateTime(browser.connectedAt, {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        }),
+                      })}
+                    </p>
+                  ) : null}
+                  {browser.connected && browser.features?.length ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("pairedFeatures", { features: browser.features.join(", ") })}
                     </p>
                   ) : null}
                 </div>

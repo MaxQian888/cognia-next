@@ -1,4 +1,85 @@
-import { buildLucideSvg, drawBadge, __STATE_NODES_FOR_TESTING } from "./icon-builder"
+/** @jest-environment jsdom */
+import {
+  buildLucideSvg,
+  drawBadge,
+  rasterizeSvgToPng,
+  __STATE_NODES_FOR_TESTING,
+} from "./icon-builder"
+
+jest.mock("@/src-tauri/icons/128x128.png", () => ({ src: "/character.png" }))
+
+it("keeps the character as the full-size base beneath status and usage badges", async () => {
+  const images: Array<{ src: string }> = []
+  const context = {
+    clearRect: jest.fn(),
+    drawImage: jest.fn(),
+    save: jest.fn(),
+    restore: jest.fn(),
+    beginPath: jest.fn(),
+    roundRect: jest.fn(),
+    fill: jest.fn(),
+    fillText: jest.fn(),
+  }
+  const imageSpy = jest.spyOn(globalThis, "Image").mockImplementation(() => {
+    let source = ""
+    const image = {
+      onload: null as (() => void) | null,
+      get src() {
+        return source
+      },
+      set src(value: string) {
+        source = value
+        images.push({ src: value })
+        queueMicrotask(() => image.onload?.())
+      },
+    }
+    return image as unknown as HTMLImageElement
+  })
+  const contextSpy = jest
+    .spyOn(HTMLCanvasElement.prototype, "getContext")
+    .mockReturnValue(context as unknown as ReturnType<HTMLCanvasElement["getContext"]>)
+  const blobSpy = jest
+    .spyOn(HTMLCanvasElement.prototype, "toBlob")
+    .mockImplementation((callback) => {
+      callback({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer } as Blob)
+    })
+  const createUrl = jest.fn(() => "blob:status")
+  const revokeUrl = jest.fn()
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createUrl })
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeUrl })
+  try {
+    await rasterizeSvgToPng(buildLucideSvg(__STATE_NODES_FOR_TESTING.busy, "#000"), 32, {
+      text: "42%",
+      color: "#f59e0b",
+    })
+    expect(images.some((image) => image.src === "/character.png")).toBe(true)
+    expect(context.drawImage.mock.calls[0][0].src).toBe("/character.png")
+    expect(context.drawImage.mock.calls[0].slice(1)).toEqual([0, 0, 32, 32])
+    expect(context.drawImage.mock.calls[1].slice(3)).toEqual([14.4, 14.4])
+    expect(context.fillText).toHaveBeenCalledWith(
+      "42",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number)
+    )
+    expect(revokeUrl).toHaveBeenCalledWith("blob:status")
+    context.drawImage.mockClear()
+    context.fill.mockClear()
+    await rasterizeSvgToPng(
+      buildLucideSvg(__STATE_NODES_FOR_TESTING.idle, "#000"),
+      32,
+      undefined,
+      false
+    )
+    expect(context.drawImage).toHaveBeenCalledTimes(1)
+    expect(context.drawImage.mock.calls[0].slice(1)).toEqual([0, 0, 32, 32])
+    expect(context.fill).not.toHaveBeenCalled()
+  } finally {
+    imageSpy.mockRestore()
+    contextSpy.mockRestore()
+    blobSpy.mockRestore()
+  }
+})
 
 describe("buildLucideSvg", () => {
   const stubNode: Array<[string, Record<string, string | number>]> = [

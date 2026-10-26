@@ -26,7 +26,7 @@ export interface PluginHookDeps {
  * `host_rpc` looks like the natural channel and is NOT: `answer_host_rpc` in
  * `src-tauri/src/claude/sidecar.rs` is deliberately terminal — it is answered in
  * Rust and never forwarded to the renderer, and it only dispatches `jobs.*` plus
- * the agent-session-store methods. That is why `sidecar/dispatch/pre-compact-hook.mjs`
+ * the agent-session-store methods. That is why `sidecar/src/hooks/pre-compact.ts`
  * has always fallen back instead of reaching the plugin's `onPreCompact`.
  *
  * This module therefore mirrors the channel that DOES reach the renderer, the
@@ -81,7 +81,7 @@ export function awaitPluginHookResponse(
 
 /**
  * Map a renderer response onto the shared hook-outcome shape used by every
- * other handler kind in `agent-hooks.mjs`.
+ * other handler kind in `agent-hooks.ts`.
  */
 export function pluginHookOutcome(raw: unknown, label: string): HookOutcome {
   const response = asRecord(raw)

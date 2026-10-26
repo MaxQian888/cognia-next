@@ -171,6 +171,26 @@ describe("A2UI Catalog", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it("enforces a registered component schema", () => {
+      registerComponent("Text", () => null, {
+        catalogId: "schema-catalog",
+        schema: {
+          type: "object",
+          required: ["text"],
+          properties: { text: { type: "string" } },
+        },
+      })
+      expect(
+        validateComponent(
+          { id: "x", component: "Text", text: 42 } as unknown as A2UIComponent,
+          "schema-catalog"
+        ).valid
+      ).toBe(false)
+      expect(
+        validateComponent({ id: "x", component: "Text", text: "valid" }, "schema-catalog")
+      ).toEqual({ valid: true, errors: [] })
+    })
+
     it("should fail for component without id", () => {
       const component = { component: "Text" as const, text: "Hello" }
       const result = validateComponent(component as A2UIComponent)

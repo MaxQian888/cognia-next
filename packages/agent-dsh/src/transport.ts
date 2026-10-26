@@ -8,6 +8,7 @@ import type {
   DshPromptContentBlock,
 } from "./sdk-client"
 import { redactDshOutput } from "./install"
+import { dshNativeReasoningEffort } from "./channel"
 
 export interface DshTransportLaunch {
   command: string
@@ -78,7 +79,12 @@ export function resolveDshLaunchFromConfig(config: ExternalAgentConfig): DshTran
     provider,
     model: env.COGNIA_DSH_MODEL ?? DEFAULT_MODEL,
     ...(env.COGNIA_DSH_REASONING_EFFORT
-      ? { reasoningEffort: env.COGNIA_DSH_REASONING_EFFORT }
+      ? {
+          reasoningEffort:
+            provider === "cognia"
+              ? env.COGNIA_DSH_REASONING_EFFORT
+              : dshNativeReasoningEffort(env.COGNIA_DSH_REASONING_EFFORT),
+        }
       : {}),
     ...(env.COGNIA_DSH_MAX_TOKENS ? { maxTokens: parseMaxTokens(env.COGNIA_DSH_MAX_TOKENS) } : {}),
   }

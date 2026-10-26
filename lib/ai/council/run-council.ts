@@ -15,6 +15,8 @@
  */
 
 import type { RoutedPromptLedger } from "@/lib/workflow/nodes/ai/ai-prompt-routed"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 export type CouncilConfidence = "unanimous" | "majority" | "split" | "unknown"
 
@@ -84,8 +86,30 @@ export interface RunCouncilDeps {
 const DEFAULT_TIMEOUT_MS = 180_000
 const DEFAULT_CONCURRENCY = 4
 
-/** The synthesizer's system prompt — adapted from omo-slim's COUNCIL_AGENT_PROMPT. */
-export const COUNCIL_SYNTHESIS_SYSTEM = `You are the Council synthesizer. Several models ("councillors") \
+/**
+ * The synthesizer's system prompt — adapted from omo-slim's COUNCIL_AGENT_PROMPT.
+ * Editable in the Prompt Center (ADR-0236); the confidence line
+ * `parseConfidence` reads is a required fragment. A caller's
+ * `synthesisInstructions` is its own data and is appended after the resolved
+ * text, never folded into the template.
+ */
+export const COUNCIL_SYNTHESIS_PROMPT = definePrompt({
+  id: "generation.council.synthesis",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "generation",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The confidence rating is parsed out of the report.
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  maxChars: 12_000,
+  requiredFragments: ["Confidence:"],
+  outputContract:
+    'A markdown report; parseConfidence reads a "Confidence: unanimous|majority|split" line, and a missing one rates the council "unknown".',
+  consumers: ["lib/ai/council/run-council.ts"],
+  defaultBody: `You are the Council synthesizer. Several models ("councillors") \
 independently answered the same prompt. Merge their answers into one superior response.
 
 Synthesis process (follow in order):
@@ -104,7 +128,8 @@ The best synthesized answer. Integrate the strongest points, resolve disagreemen
 Each councillor's response separately, under a "### <name>" heading, using the exact names provided. Note any that failed or timed out.
 
 ## Council Summary
-Where councillors agreed, where they disagreed, why you chose the final answer, and remaining uncertainty. End with a consensus confidence rating on its own line: "Confidence: unanimous", "Confidence: majority", or "Confidence: split".`
+Where councillors agreed, where they disagreed, why you chose the final answer, and remaining uncertainty. End with a consensus confidence rating on its own line: "Confidence: unanimous", "Confidence: majority", or "Confidence: split".`,
+})
 
 /** Prepend an optional role prompt to the user's question (omo-slim format). */
 export function formatCouncillorPrompt(userPrompt: string, councillorPrompt?: string): string {
@@ -250,9 +275,10 @@ export async function runCouncil(
 
   const respondedCount = councillors.filter((c) => c.status === "completed").length
 
+  const synthesis = (await resolvePromptAsync(COUNCIL_SYNTHESIS_PROMPT)).text
   const synthSystem = opts.synthesisInstructions
-    ? `${COUNCIL_SYNTHESIS_SYSTEM}\n\nAdditional guidance:\n${opts.synthesisInstructions}`
-    : COUNCIL_SYNTHESIS_SYSTEM
+    ? `${synthesis}\n\nAdditional guidance:\n${opts.synthesisInstructions}`
+    : synthesis
 
   const synth = await deps.runPrompt({
     modelAlias: opts.synthesizerAlias,

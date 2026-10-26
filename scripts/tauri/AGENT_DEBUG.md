@@ -26,6 +26,113 @@ The bridge reuses Cognia's per-launch `cli-endpoint.json` token and rejects
 non-loopback clients. Treat that file as a session credential. Raw renderer
 evaluation and screenshots are intentionally unavailable without the feature.
 
+## CLI ownership and recovery
+
+For multiple agents, launch with `--shared --no-watch`. Owner `attach --output
+<private-file> [--can-write] [--windows main,other] [--idle-timeout 300000]` issues
+one scoped descriptor. Workers pass `--client <private-file>` to snapshot, act,
+inspect, typed page commands, diagnostics, `lease acquire|renew|release`, status
+and detach. Descriptor updates are private/atomic and serialized per file;
+independent files can run concurrently. Owner commands reject `--client` before
+loading discovery. `--value` and positional act values both work.
+
+`lease acquire` persists its proof; renew every 5 seconds for a multi-command
+workflow. Explicit release can recover a grant lost before descriptor publication
+through the session's own native status. Detach removes the descriptor after
+confirmed server cleanup. A killed client never releases an unknown operation by
+merely disappearing.
+
+Owner `sessions` lists metadata without credentials; `revoke <id>` retires only
+that session. Default idle TTL is 300000 ms (allowed 1000–1800000 ms), refreshed by
+requests and lazily reclaimed on later traffic, including renderer refs. Unknown
+execution or held input requires owner `recover` even after lease expiry.
+`recover` retires all clients, reloads every current webview and verifies new
+settled documents and empty input before reopening. Native PID remains unchanged;
+unsaved UI state may be lost and external/persisted effects can survive. A failed
+recovery keeps admission quarantined; retry recovery, then attach fresh clients.
+
+A workspace OS socket mutex serializes launch/stop. Startup intent is persisted
+before spawn; an unresolved registration crash fails closed for both commands.
+The record/log must be inspected before manually resolving that case; neither a
+dead parent nor a timeout proves its native descendants stopped. The mutex port
+is derived from the canonical workspace path; a port collision fails closed.
+
+## Shared clients and exclusive writes
+
+Start one owner-managed app, then attach independent SDK clients:
+
+```bash
+pnpm tauri:debug:agent --shared --no-watch
+```
+
+```js
+import { connectTauriSession } from "./scripts/tauri/agent-debug-client.mjs"
+
+const writer = await connectTauriSession({ windows: ["main"], canWrite: true })
+const observer = await connectTauriSession({ windows: ["main"] })
+try {
+  const [mine, theirs] = await Promise.all([writer.page().snapshot(), observer.page().snapshot()])
+  await writer.withWriter(async () => {
+    await writer.page().getByLabel("Message").fill("hello")
+    await writer.page().getByRole("button", { name: "Send" }).click()
+  })
+} finally {
+  await writer.detach()
+  await observer.detach()
+}
+```
+
+The launcher owner creates sessions; a returned session retains only its scoped
+token and allowed windows. Hand an agent its scoped descriptor (`endpoint`,
+`clientSessionId`, `windows`, `canWrite`) and construct `TauriClientSession` in
+that process. Keep the owner discovery file private to the coordinator. Scoped
+pages never rediscover owner credentials after app restart. Reattach through
+the owner after restart. Shared-mode CLI commands manage launch/status/logs/stop;
+use the SDK for scoped page operations. Launch once before distributing clients.
+
+Each session owns its latest snapshot per window, with a 60-second ref lifetime.
+Another session's snapshot cannot replace those refs. Every mutation advances
+the app revision and invalidates prior action snapshots across all windows.
+Snapshots captured while another client writes are observations with
+`actionable: false`; take another snapshot after acquiring the writer. Concurrent
+snapshot capture and mutation within one session are refused, so use a separate
+observer session for live diagnostics.
+
+Individual SDK mutations acquire/release the app writer automatically. Hold
+`withWriter` around a multi-step workflow or held keyboard/mouse input. The
+existing `ControlLeaseCore` supplies token/fence ownership and a 15-second
+renewable lease, capped at 120 seconds per workflow. Native admission also
+permits only one executing mutation, including within the same lease. Release
+and detach drain input through the existing helpers before admitting a successor.
+
+`operationId` identifies a logical mutation; renderer `requestId` identifies an
+individual locator attempt. The existing `IdempotencyCache` retains completed
+outcomes for up to 10 minutes (bounded capacity 128). Same-ID semantic changes
+are conflicts. Pending/unknown entries never expire or evict into a replay.
+Do not reuse an ID for a different logical mutation, or assume exactly-once
+behavior after a completed entry leaves the bounded cache.
+
+A transport/native timeout can leave queued JavaScript alive. Unknown mutation
+outcomes retain the execution slot and quarantine the app; only a controlled
+owner stop/relaunch resets this state. An uncertain snapshot capture blocks
+that client's next capture/mutation until detach; other clients can continue.
+Inspect effects before deciding what to do after any interrupted mutation.
+
+Shared mode uses typed URL/title/content/health/history and input helpers.
+Arbitrary `evaluate`, locator callbacks, persistent dialog handlers and network
+mock overrides are unavailable; capability flags advertise these limits. Input
+remains synthetic DOM input. This is isolation for cooperating local clients,
+not an OS sandbox against another process running as the same user.
+
+Run the real WKWebView acceptance against an owned shared app:
+
+```bash
+node scripts/tauri/agent-debug-concurrency.mjs
+```
+
+It serves a local fixture, exercises real concurrent bridge requests, and saves
+assertions and a native screenshot under `.cache/tauri-agent-debug/`.
+
 ## Observe, act, then observe again
 
 ```bash
@@ -249,3 +356,21 @@ pnpm tauri:debug:agent:stop
 then asks Cognia to exit cleanly and terminates the tracked dev process group if
 the Tauri supervisor remains alive. It refuses shutdown when ownership cannot
 be proven.
+
+Real native stability acceptance requires an unlocked desktop with advancing animation frames. The harness checks frames before writes and keeps the normal actionability checks. Recovery requires stable old and new helper realm identities; an unresponsive or unreachable page stays fail-closed.
+
+### Adversarial boundary regressions
+
+Shared workflows propagate their timeout and AbortSignal to every child page
+request. Native cleanup remains independent of that cancelled signal. Delayed
+text and keyboard chords require helper revision 7 (`atomicInput: 1`), reuse the
+existing locator cancellation/input path, and reserve one native operation ID
+for the complete arguments. Replays use the existing bounded IdempotencyCache;
+changed text or chord arguments under the same ID conflict before input.
+
+A confirmed terminal snapshot rejection releases its capture reservation so
+held input can be cleaned and a new snapshot taken. Cancelled, timed-out or
+otherwise unknown captures keep their existing fence. Observer reads validate
+the same session authorization before and after awaiting native work;
+diagnostics also use the existing document-pinned evaluation path. Retired
+sessions cannot publish observer results across revoke/recovery.

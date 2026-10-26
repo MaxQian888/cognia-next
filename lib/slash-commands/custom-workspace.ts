@@ -24,21 +24,19 @@
 
 import matter from "gray-matter"
 
-import type { SlashCommand } from "./builtin"
-
-/** The two directories a repository may keep its commands in. */
-export const PROJECT_COMMAND_DIRS = [".cognia/commands", ".claude/commands"] as const
-
-export type ProjectCommandDir = (typeof PROJECT_COMMAND_DIRS)[number]
+import type {
+  ProjectCommandDir,
+  WorkspaceCustomCommand,
+} from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
+import { PROJECT_COMMAND_DIRS } from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
+export { PROJECT_COMMAND_DIRS } from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
+export type {
+  ProjectCommandDir,
+  WorkspaceCustomCommand,
+} from "@cognia/plugin-contract/lib/slash-commands/custom-workspace"
 
 /** The directory a NEW project-scope command is written to. */
 export const DEFAULT_PROJECT_COMMAND_DIR: ProjectCommandDir = ".claude/commands"
-
-/** A custom command plus the directory it came from. */
-export interface WorkspaceCustomCommand extends SlashCommand {
-  /** Repo-relative directory the file was found in. */
-  originDir: ProjectCommandDir
-}
 
 /**
  * A command file is a prompt, not a document. The Rust counterpart has no

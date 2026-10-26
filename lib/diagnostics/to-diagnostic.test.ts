@@ -1,5 +1,6 @@
 import { createDiagnostic } from "@cognia/diagnostics"
 import { CommandInvokeError } from "@/lib/tauri/command-error"
+import { CompanionError } from "@/lib/tauri/transport-companion"
 import { AgentHostUnavailableError } from "@/lib/ai/agent/execution/agent-execution-service"
 
 import { diagnosticFromCode, toDiagnostic } from "./to-diagnostic"
@@ -170,5 +171,42 @@ describe("diagnosticFromCode", () => {
 
   it("degrades an unrecognised code instead of throwing", () => {
     expect(diagnosticFromCode("not-a-code", { source: "chat", now, id: "d1" }).code).toBe("unknown")
+  })
+})
+
+describe("toDiagnostic — multi-tenant Host refusals", () => {
+  it("reads a CompanionError's Host code instead of treating it as a dispatch envelope", () => {
+    const err = new CompanionError({
+      code: "execution_isolation_unavailable",
+      message: "execution_isolation_unavailable",
+      retryable: false,
+    })
+    const out = toDiagnostic(err, ctx)
+    expect(out.code).toBe("executionUnavailable")
+    expect(out.retryable).toBe(false)
+  })
+
+  it("reads a raw problem document, whose text is in detail", () => {
+    const out = toDiagnostic(
+      { code: "host_data_unpartitioned", detail: "host_data_unpartitioned", status: 403 },
+      ctx
+    )
+    expect(out.code).toBe("hostDataUnavailable")
+    expect(out.message).toBe("host_data_unpartitioned")
+  })
+
+  it("reads a command envelope and maps permission refusals to forbidden", () => {
+    expect(
+      toDiagnostic({ code: "workspace_unresolved", message: "no workspace", retryable: false }, ctx)
+        .code
+    ).toBe("workspaceUnresolved")
+    expect(toDiagnostic({ code: "credential_use_forbidden", message: "m" }, ctx).code).toBe(
+      "forbidden"
+    )
+  })
+
+  it("leaves other envelopes to their own adapters", () => {
+    const out = toDiagnostic({ code: "budget-exhausted", message: "spent", retryable: false }, ctx)
+    expect(out.code).toBe("budgetExhausted")
   })
 })

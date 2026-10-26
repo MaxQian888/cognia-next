@@ -292,6 +292,9 @@ const terminalStoreState = {
   setPanelOpen: setTerminalPanelOpen,
   togglePanel: toggleTerminalPanel,
   sessions: {} as Record<string, unknown>,
+  activeSessionIdByProject: {} as Record<string, string>,
+  focusedPaneByAnchor: {} as Record<string, string>,
+  splitPanes: {} as Record<string, string[]>,
   setHostState: jest.fn(),
   markTabActivity: jest.fn(),
   registerSession: jest.fn(),
@@ -363,6 +366,8 @@ beforeAll(() => {
   }
 })
 
+import { registerAppShortcut, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import { useProjectStore } from "@/stores/project/project-store"
 import { TitleBar } from "./title-bar"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import { resetNavHistory } from "@/hooks/desktop/use-nav-history"
@@ -382,6 +387,12 @@ beforeEach(() => {
   toggleTerminalPanel.mockReset()
   setTerminalPanelOpen.mockReset()
   terminalStateRef.panelOpen = false
+  terminalStoreState.sessions = {}
+  terminalStoreState.activeSessionIdByProject = {}
+  terminalStoreState.focusedPaneByAnchor = {}
+  terminalStoreState.splitPanes = {}
+  useProjectStore.setState({ activeProjectId: null })
+  __resetAppRuntimeForTesting()
   logInfo.mockReset()
   logWarn.mockReset()
   logError.mockReset()
@@ -646,6 +657,37 @@ test("Terminal > New Terminal opens the dock and Toggle flips the panel", async 
   await user.click(screen.getByText("desktop.menu.terminal.label"))
   await user.click(await screen.findByText("desktop.menu.terminal.togglePanel"))
   await waitFor(() => expect(toggleTerminalPanel).toHaveBeenCalled())
+})
+
+test("Terminal menu dispatches the focused AI Shell registration", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  terminalStateRef.panelOpen = true
+  terminalStoreState.activeSessionIdByProject = { "": "shell" }
+  terminalStoreState.sessions = { shell: { id: "shell", kind: "pty", projectId: null } }
+  const toggle = jest.fn()
+  registerAppShortcut({ id: "terminal.aiShell.toggle", handler: toggle })
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.terminal.label"))
+  await user.click(
+    await screen.findByRole("menuitem", { name: "desktop.statusBar.terminalAiShellToggle" })
+  )
+  expect(toggle).toHaveBeenCalledTimes(1)
+})
+
+test("Terminal menu disables AI Shell for serial devices", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  terminalStateRef.panelOpen = true
+  terminalStoreState.activeSessionIdByProject = { "": "serial" }
+  terminalStoreState.sessions = { serial: { id: "serial", kind: "serial", projectId: null } }
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.terminal.label"))
+  expect(
+    await screen.findByRole("menuitem", { name: "desktop.statusBar.terminalAiShellToggle" })
+  ).toHaveAttribute("aria-disabled", "true")
 })
 
 test("renders the nav arrows and layout controls", async () => {
@@ -2097,7 +2139,8 @@ describe("column-header projection", () => {
     expect(start).toHaveStyle({ width: "288px" })
   })
 
-  test("with the chat header in the centre, secondary navigation folds without losing actions", async () => {
+  test("on a narrow window secondary navigation folds without losing actions", async () => {
+    narrowState.matches = true
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
     renderProjecting(["center"])
@@ -2121,7 +2164,7 @@ describe("column-header projection", () => {
     expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")
   })
 
-  test("chat title occupies center while compact navigation lives in measured right chrome", async () => {
+  test("a wide chat keeps navigation in the leading center zone and search in right chrome", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")
     renderProjecting(["center"])
@@ -2129,7 +2172,9 @@ describe("column-header projection", () => {
     await waitFor(() => expect(center).toContainElement(screen.getByTestId("projected-center")))
     const rightChrome = screen.getByTestId("title-bar-right-chrome")
     expect(rightChrome).toContainElement(screen.getByTestId("title-bar-search-pill"))
-    expect(rightChrome).toContainElement(screen.getByTestId("title-bar-navigation-menu"))
+    expect(screen.queryByTestId("title-bar-navigation-menu")).not.toBeInTheDocument()
+    expect(center).toContainElement(screen.getByTestId("title-bar-workspace-seg"))
+    expect(center).toContainElement(screen.getByTestId("title-bar-nav-arrows"))
     expect(center.parentElement).not.toContainElement(screen.getByTestId("title-bar-search-pill"))
     expect(screen.queryByTestId("title-bar-center-counterweight")).not.toBeInTheDocument()
   })

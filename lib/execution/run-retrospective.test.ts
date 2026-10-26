@@ -7,7 +7,14 @@ import { createExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import {
   createRunRetrospectiveService,
   generateConfiguredRunRetrospective,
+  RUN_RETROSPECTIVE_PROMPT,
+  RUN_RETROSPECTIVE_REPLY_FORMAT_PROMPT,
 } from "./run-retrospective"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const mockBuildUtilityLlmClient = jest.fn()
 jest.mock("@/lib/ai/generation/utility-client", () => ({
@@ -148,6 +155,74 @@ describe("generateConfiguredRunRetrospective", () => {
     )
     expect(mockBuildUtilityLlmClient).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: null })
+    )
+  })
+})
+
+describe("run retrospective prompts (ADR-0236)", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    mockBuildUtilityLlmClient.mockReset()
+  })
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends the run's workspace override around the safe projection", async () => {
+    await terminalRun("run-override", "completed", "ws-1")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: RUN_RETROSPECTIVE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-run-retro-ws",
+          body: "Review this run for team-config lessons.\n\n{{input}}",
+          contractVersion: RUN_RETROSPECTIVE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const runModel = jest.fn(async (_prompt: string) => ({ issueTimeline: [], proposals: [] }))
+    await createRunRetrospectiveService({ runModel }).generate("run-override")
+    const prompt = runModel.mock.calls[0]?.[0] ?? ""
+    expect(prompt.startsWith("Review this run for team-config lessons.\n\n{")).toBe(true)
+    expect(prompt).toContain("<EMAIL_001>")
+    expect(prompt).not.toContain("password")
+  })
+
+  it("keeps the shipped text for a run in another workspace", async () => {
+    await terminalRun("run-other", "completed", "ws-2")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: RUN_RETROSPECTIVE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-run-retro-other",
+          body: "Review this run.\n\n{{input}}",
+          contractVersion: RUN_RETROSPECTIVE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const runModel = jest.fn(async (_prompt: string) => ({ issueTimeline: [], proposals: [] }))
+    await createRunRetrospectiveService({ runModel }).generate("run-other")
+    expect(runModel.mock.calls[0]?.[0]).toMatch(
+      /^Analyze this terminal Cognia ExecutionRun from safe projections only\.\n\nDo not infer hidden reasoning\./
+    )
+  })
+
+  it("sends the inspect-only reply format as the system prompt", async () => {
+    await terminalRun("run-system")
+    const complete = jest.fn(async () => JSON.stringify({ issueTimeline: [], proposals: [] }))
+    mockBuildUtilityLlmClient.mockReturnValue({ complete })
+    await generateConfiguredRunRetrospective("run-system")
+    expect(complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ system: RUN_RETROSPECTIVE_REPLY_FORMAT_PROMPT.defaultBody })
     )
   })
 })

@@ -2,8 +2,8 @@
 
 /**
  * Activity module: a per-day heatmap with 1M / 3M / 1Y (ADR-0225 §2). Cells
- * fill the panel's width: the cell size is derived from the width step, so a
- * year fits a narrow panel and a month is not lost in a wide one.
+ * fill the panel's actual width. Flexible week columns use the available
+ * space while bounded row heights keep a short range from making the panel tall.
  */
 
 import { useFormatter, useTranslations } from "next-intl"
@@ -134,18 +134,23 @@ export function GlanceActivityModule({ size }: { size: GlanceModuleSize }) {
         data-glance-nav
         aria-label={t("open")}
         onClick={openUsage}
-        className="-mx-1 block rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="block w-full min-w-0 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <span
           className="grid"
-          style={{ gridAutoFlow: "column", gridTemplateRows: `repeat(7, ${cell}px)`, gap: GAP }}
+          style={{
+            gridAutoFlow: "column",
+            gridTemplateColumns: `repeat(${Math.max(1, columns)}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(7, ${cell}px)`,
+            gap: GAP,
+          }}
         >
           {activity.days.map((day) => (
             <i
               key={day.day}
               title={dayTitle(day)}
               className={cn("block rounded-[2px]", LEVEL_CLASS[day.level])}
-              style={{ width: cell, height: cell }}
+              style={{ width: "100%", height: cell }}
             />
           ))}
         </span>

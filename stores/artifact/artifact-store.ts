@@ -1371,7 +1371,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         }))
       },
 
-      getArtifactsForWorkspace: ({ sessionId = null, limit } = {}) => {
+      getArtifactsForWorkspace: ({
+        sessionId = null,
+        limit,
+      }: NonNullable<Parameters<ArtifactActions["getArtifactsForWorkspace"]>[0]> = {}) => {
         const state = get()
         const sorted = Object.values(state.artifacts)
           .map(rehydrateArtifact)
@@ -2308,7 +2311,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         return filterCanvasDocumentsByWorkspace([doc], activeProjectId())[0] ?? null
       },
 
-      getCanvasDocumentsForWorkspace: ({ sessionId = null, limit } = {}) => {
+      getCanvasDocumentsForWorkspace: ({
+        sessionId = null,
+        limit,
+      }: NonNullable<Parameters<ArtifactActions["getCanvasDocumentsForWorkspace"]>[0]> = {}) => {
         const state = get()
         const scoped = filterCanvasDocumentsByWorkspace(
           Object.values(state.canvasDocuments) as CanvasDocument[],

@@ -40,5 +40,4 @@ export const workflowRefactorerAgent: AgentDefinition = {
     "mcp__cognia-plugin-tools__wf_auto_layout",
     "mcp__cognia-plugin-tools__wf_group_nodes",
   ],
-  maxTurns: 15,
 }

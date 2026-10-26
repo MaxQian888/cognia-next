@@ -6,5 +6,6 @@
   "providerB": "Provider B",
   "query": "查询",
   "queryPlaceholder": "输入查询…",
-  "title": "Provider 对比"
+  "title": "Provider 对比",
+  "failed": "对比失败"
 }

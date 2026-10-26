@@ -19,17 +19,14 @@
 
 import { listWorkflows, getWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
-
-export interface WorkflowSummary {
-  id: string
-  name: string
-  description?: string
-}
-
-export type FindWorkflowByNameResult =
-  | { ok: true; workflowId: string; name: string }
-  | { ok: false; reason: "ambiguous"; candidates: WorkflowSummary[] }
-  | { ok: false; reason: "not-found" }
+import type {
+  FindWorkflowByNameResult,
+  WorkflowSummary,
+} from "@cognia/plugin-contract/lib/workflow/library/lookup"
+export type {
+  FindWorkflowByNameResult,
+  WorkflowSummary,
+} from "@cognia/plugin-contract/lib/workflow/library/lookup"
 
 const MAX_CANDIDATES = 5
 

@@ -277,7 +277,21 @@ pub fn spawn(
     state: SharedState,
     device_id: String,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(carrier, inbound_data, state, device_id))
+    tokio::spawn(async move {
+        // Main DataChannel and relay share this admission; no event/media
+        // subscription attaches before it. RPCs remain gated per command.
+        if let Err(error) =
+            super::client::authorize_datachannel(super::peer::DATACHANNEL_LABEL, &device_id).await
+        {
+            log::warn!("signaling::dispatch: device {device_id} refused: {}", error.code);
+            carrier.set_relay_open(false);
+            if let Some(peer) = carrier.detach_peer().await {
+                peer.close().await;
+            }
+            return;
+        }
+        run(carrier, inbound_data, state, device_id).await;
+    })
 }
 
 async fn run(
@@ -409,6 +423,7 @@ async fn run(
                                                 .into_iter()
                                                 .filter(|frame| {
                                                     frame.visible_to(&device_id)
+                                                        && crate::person_partition::event_visible(frame, &device_id, None)
                                                         && subscription.allows(&frame.event_type)
                                                 })
                                                 .collect();
@@ -511,6 +526,7 @@ async fn run(
                 match recv_result {
                     Ok(frame) => {
                         if !frame.visible_to(&device_id)
+                            || !crate::person_partition::event_visible(&frame, &device_id, None)
                             || !subscription.allows(&frame.event_type)
                         {
                             continue;
@@ -611,9 +627,10 @@ async fn handle_inbound(
         return send_outbound(peer, &frame).await.map_err(|e| e.to_string());
     }
 
-    let tenant_id = security_store()
-        .ok_or_else(|| "security store unavailable".to_string())?
-        .active_device_tenant(device_id)
+    let security = security_store().ok_or_else(|| "security store unavailable".to_string())?;
+    let tenant_id = if crate::deployment::deployment_mode() == crate::deployment::DeploymentMode::MultiTenant {
+        security.unambiguous_device_tenant(device_id)
+    } else { security.active_device_tenant(device_id) }
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "registered device principal unavailable".to_string())?;
     let principal = DeviceContext {
@@ -854,6 +871,15 @@ pub(super) fn empty_rpc_for_test(id: &str, method: &str) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn main_and_relay_dispatcher_gate_before_starting_the_event_or_rpc_pump() {
+        let source = include_str!("dispatch.rs");
+        let spawn = source.split("pub fn spawn(").nth(1).unwrap().split("async fn run(").next().unwrap();
+        assert!(spawn.find("authorize_datachannel(").unwrap() < spawn.find("run(carrier,").unwrap());
+        assert!(spawn.contains("carrier.set_relay_open(false)"));
+        assert!(spawn.contains("carrier.detach_peer()"));
+    }
+
     #[tokio::test]
     async fn slow_mutation_does_not_block_reads_and_mutations_keep_order() {
         let mut queue = RpcWorkQueue::default();
@@ -1021,6 +1047,7 @@ mod tests {
             payload: json!({ "seq": seq }),
             ts_ms: 0,
             target_device_id: None,
+            partition_account_id: None,
         };
         assert!(outbound_for_batch(vec![]).is_none());
 

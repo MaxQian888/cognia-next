@@ -1,5 +1,7 @@
 ;(() => {
-  if (window.__cogniaAgentDebug?.version === 3 && window.__cogniaAgentDebug.revision === 4) return
+  const revision = 7
+  if (window.__cogniaAgentDebug?.version === 3 && window.__cogniaAgentDebug.revision === revision)
+    return
   const legacyAgentDebug = window.__cogniaAgentDebug || null
 
   const core = window.__cogniaAutomationCore
@@ -16,6 +18,8 @@
     documentId: newDocumentId(),
     generation: 0,
     refs: new Map(),
+    sessionSnapshots: new Map(),
+    revokedSessions: new Map(),
     console: [],
     network: [],
     consoleSequence: 0,
@@ -32,6 +36,7 @@
   window.addEventListener("pagehide", () => {
     documentActive = false
     state.refs.clear()
+    state.sessionSnapshots.clear()
     for (const request of state.locatorRequests.values()) {
       request.cancelled = true
       request.abortController?.abort()
@@ -42,6 +47,7 @@
     state.documentId = newDocumentId()
     state.generation = 0
     state.refs.clear()
+    state.sessionSnapshots.clear()
     state.locatorRequests.clear()
     documentActive = true
   })
@@ -55,6 +61,7 @@
     stablePositionCheck: true,
     receivesEventsCheck: true,
     semanticLocators: true,
+    sessionScopedRefs: 1,
     atomicLocators: true,
     openShadowDom: true,
     sameOriginFrames: true,
@@ -70,6 +77,7 @@
     locatorCollectionQueries: true,
     dispatchEventInit: true,
     locatorActionControl: 1,
+    atomicInput: 1,
     documentScopedRefs: true,
     networkCapture: "fetch-and-xhr",
     networkMocking: "fetch-only",
@@ -398,7 +406,7 @@
   }
 
   const resolveQuery = (query, root = document, scope = { limitations: [] }) => {
-    if (query?.kind === "ref") return [refElement(query.ref)]
+    if (query?.kind === "ref") return [refElement(query.ref, scope.clientSessionId)]
     if (query?.kind === "filtered")
       return indexed(
         applyFilters(resolveQuery(query.query, root, scope), query.filters, scope),
@@ -517,7 +525,19 @@
 
   const snapshot = (options = {}) => {
     state.generation += 1
-    state.refs.clear()
+    const clientSessionId = options.clientSessionId
+    const refs = clientSessionId ? new Map() : state.refs
+    refs.clear()
+    if (clientSessionId) {
+      for (const [id, at] of state.revokedSessions)
+        if (Date.now() - at > 120_000) state.revokedSessions.delete(id)
+      if (state.revokedSessions.has(clientSessionId)) throw new Error("client session was revoked")
+      for (const [id, record] of state.sessionSnapshots)
+        if (Date.now() - record.createdAt > 60_000) state.sessionSnapshots.delete(id)
+      if (!state.sessionSnapshots.has(clientSessionId) && state.sessionSnapshots.size >= 16)
+        throw new Error("client session snapshot capacity exceeded")
+      state.sessionSnapshots.set(clientSessionId, { refs, createdAt: Date.now() })
+    }
     const generation = state.generation
     const nodes = []
     for (const element of resolveCandidates(options)) {
@@ -533,11 +553,12 @@
       if (role === "listitem" && options.includeText && !core.directText(element)) continue
       if (!role && options.includeText && !core.directText(element)) continue
       const ref = `d${state.documentId}:g${generation}e${nodes.length + 1}`
-      state.refs.set(ref, element)
+      refs.set(ref, element)
       nodes.push(nodeFor(element, ref))
     }
     return {
       generation,
+      clientSessionId,
       documentId: state.documentId,
       url: location.href,
       title: document.title,
@@ -549,8 +570,10 @@
     }
   }
 
-  const refElement = (ref) => {
-    const element = state.refs.get(ref)
+  const refElement = (ref, clientSessionId) => {
+    const record = clientSessionId ? state.sessionSnapshots.get(clientSessionId) : null
+    const refs = clientSessionId ? record?.refs : state.refs
+    const element = (!record || Date.now() - record.createdAt < 60_000) && refs?.get(ref)
     if (!documentActive || !element || !element.isConnected)
       throw new Error(`stale or unknown element ref: ${ref}`)
     return element
@@ -611,7 +634,8 @@
     }
   }
 
-  const inspect = (ref, operation, args = {}) => inspectElement(refElement(ref), operation, args)
+  const inspect = async (ref, operation, args = {}, clientSessionId) =>
+    inspectElement(refElement(ref, clientSessionId), operation, args)
 
   const eventClasses = new Map(
     [
@@ -662,7 +686,55 @@
     )
   }
 
-  const actElement = async (element, action, args = {}) => {
+  const inputGuard = (control) => {
+    control?.guard?.()
+    if (!documentActive || control?.cancelled || control?.signal?.aborted)
+      throw new Error("input cancelled or document replaced")
+  }
+  const inputDelay = (delay, control) =>
+    new Promise((resolve, reject) => {
+      try {
+        inputGuard(control)
+      } catch (error) {
+        reject(error)
+        return
+      }
+      const signal = control?.signal
+      const done = () => {
+        signal?.removeEventListener("abort", abort)
+        resolve()
+      }
+      const timer = setTimeout(done, delay)
+      const abort = () => {
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", abort)
+        reject(new Error("input cancelled"))
+      }
+      signal?.addEventListener("abort", abort, { once: true })
+      if (signal?.aborted) abort()
+    })
+  const typeText = async (element, text, delay = 0, control) => {
+    if (!Number.isFinite(delay) || delay < 0 || delay > 120_000)
+      throw new Error("input delay must be between 0 and 120000")
+    const guard = () => {
+      inputGuard(control)
+      if (!element.isConnected) throw new Error("input target detached after partial dispatch")
+      if (isDisabled(element) || !isEditable(element))
+        throw new Error("input target is no longer editable")
+    }
+    guard()
+    if (!delay) {
+      core.setValue(element, String(text), true)
+      return
+    }
+    for (const character of String(text)) {
+      guard()
+      core.setValue(element, character, true)
+      await inputDelay(delay, control)
+    }
+  }
+
+  const actElement = async (element, action, args = {}, control) => {
     const view = element.ownerDocument.defaultView
     if (
       isDisabled(element) &&
@@ -671,6 +743,9 @@
       throw new Error("element is disabled")
     let value = null
     switch (action) {
+      case "keyboard":
+        await keyboard(args.operation, args.args, control)
+        break
       case "click":
         element.click()
         break
@@ -705,7 +780,7 @@
         break
       case "type":
         element.focus()
-        core.setValue(element, String(args.value ?? ""), true)
+        await typeText(element, args.value ?? "", args.delay, control)
         break
       case "press": {
         const chord = core.parseKeyChord(args.key || "Enter")
@@ -811,11 +886,12 @@
   }
 
   const act = async (ref, action, args = {}, control) => {
-    const element = refElement(ref)
-    if (action === "dragTo") {
+    const element = refElement(ref, control?.clientSessionId)
+    if (action === "dragTo" || control?.clientSessionId) {
       const result = await locator(
         {
           query: { kind: "ref", ref },
+          clientSessionId: control?.clientSessionId,
           operation: "action",
           name: action,
           args,
@@ -889,6 +965,11 @@
       if (request.requestId) state.locatorRequests.set(request.requestId, actionControl)
     }
     const interrupted = () => {
+      try {
+        control?.guard?.()
+      } catch (error) {
+        return locatorError("webview_document_replaced", String(error))
+      }
       if (!documentActive)
         return locatorError(
           "webview_document_replaced",
@@ -905,7 +986,7 @@
     }
     const interruption = interrupted()
     if (interruption) return interruption
-    const scope = { limitations: [] }
+    const scope = { limitations: [], clientSessionId: request.clientSessionId }
     let elements = applyFilters(
       resolveQuery(request.query, document, scope),
       request.filters,
@@ -968,7 +1049,7 @@
       const previousUrl = location.href
       let dispatched = false
       try {
-        const targetScope = { limitations: [] }
+        const targetScope = { limitations: [], clientSessionId: request.clientSessionId }
         let targetQuery = request.args?.targetQuery
         if (request.name === "dragTo" && !targetQuery)
           return locatorError("invalid_drag_target", "dragTo requires a destination query")
@@ -1087,10 +1168,21 @@
           }
         dispatched = true
         actionControl.dispatchState = "dispatched"
-        const result = await actElement(element, request.name, {
-          ...request.args,
-          targetElement: target,
-        })
+        const result = await actElement(
+          element,
+          request.name,
+          {
+            ...request.args,
+            targetElement: target,
+          },
+          {
+            signal: actionControl.abortController.signal,
+            guard: () => {
+              const failure = interrupted()
+              if (failure) throw new Error(failure.error)
+            },
+          }
+        )
         return {
           ok: true,
           value: result.value ?? result,
@@ -1116,8 +1208,29 @@
     return locatorError("unsupported_locator_operation", String(request.operation))
   }
 
-  const keyboard = async (operation, args = {}) => {
+  const keyboard = async (operation, args = {}, control) => {
     const element = document.activeElement || document.body
+    if (operation === "chord") {
+      const parts = String(args.key || "").split("+")
+      const main = parts.pop()
+      const pressed = []
+      const delay = args.delay ?? 0
+      if (!Number.isFinite(delay) || delay < 0 || delay > 120_000)
+        throw new Error("input delay must be between 0 and 120000")
+      try {
+        for (const modifier of parts) {
+          inputGuard(control)
+          await keyboard("down", { key: modifier })
+          pressed.push(modifier)
+        }
+        inputGuard(control)
+        await keyboard("press", { key: main })
+      } finally {
+        for (const modifier of pressed.reverse()) await keyboard("up", { key: modifier })
+      }
+      if (delay) await inputDelay(delay, control)
+      return true
+    }
     const key = String(args.key || "")
     const eventOptions = {
       key,
@@ -1140,7 +1253,8 @@
       element.dispatchEvent(new KeyboardEvent("keyup", eventOptions))
     } else if (["type", "insertText"].includes(operation)) {
       const text = String(args.text ?? "")
-      if ("value" in element || element.isContentEditable) core.setValue(element, text, true)
+      if ("value" in element || element.isContentEditable)
+        await typeText(element, text, args.delay, control)
     } else throw new Error(`unsupported keyboard operation: ${operation}`)
     return true
   }
@@ -1233,12 +1347,60 @@
   const drain = (target) => target.splice(0, target.length)
   window.__cogniaAgentDebug = Object.freeze({
     version: 3,
-    revision: 4,
+    revision,
     capabilities,
     snapshot,
     locator,
     inspect,
     act,
+    helper: async (method, args = [], control) => {
+      control?.guard?.()
+      switch (method) {
+        case "url":
+          return location.href
+        case "title":
+          return document.title
+        case "content":
+          return document.documentElement.outerHTML
+        case "health":
+          return window.__cogniaAgentDebug.health()
+        case "getDialogs":
+          return [...state.dialogs]
+        case "getNetworkRequests":
+          return [...state.network]
+        case "keyboard": {
+          const abort = new AbortController()
+          if (control) control.abort = () => abort.abort()
+          try {
+            return (
+              (await keyboard(args[0], args[1], {
+                signal: abort.signal,
+                guard: () => inputGuard(control),
+              })) ?? null
+            )
+          } finally {
+            if (control) delete control.abort
+          }
+        }
+        case "mouse":
+          return (await mouse(...args)) ?? null
+        case "releaseInput":
+          for (const key of [...state.modifiers]) await keyboard("up", { key })
+          for (const [bit, button] of [
+            [1, "left"],
+            [2, "middle"],
+            [4, "right"],
+          ])
+            if (state.mouse.buttons & bit) await mouse("up", { button })
+          return true
+        default:
+          throw new Error(`unsupported shared helper: ${method}`)
+      }
+    },
+    releaseSession: (id) => {
+      state.revokedSessions.set(id, Date.now())
+      return state.sessionSnapshots.delete(id)
+    },
     keyboard,
     mouse,
     serialize,
@@ -1291,13 +1453,14 @@
     },
     health: () => ({
       version: 3,
-      revision: 4,
+      revision,
       readyState: document.readyState,
       url: location.href,
       documentId: state.documentId,
       generation: state.generation,
       pendingRequests: currentPendingRequests(),
       capabilities,
+      heldInput: state.modifiers.size + (state.mouse.buttons ? 1 : 0),
     }),
   })
 })()

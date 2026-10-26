@@ -28,15 +28,15 @@ description: Phase 2 of account sync — device keys, the sync recovery key, app
 | Part | Lives in |
 | --- | --- |
 | Wire format | [Account Sync Protocol v1](../data/account-sync-protocol) §2–5 |
-| Shared rules and vectors | `packages/sync-protocol/` (`validateAppend`, `foldRegistry`, pin, `fixtures/v1.json`) |
-| Server (Worker + SQLite DO) | `services/sync-server/` (operator guide in its README) |
+| Shared rules and vectors | `cognia-services/packages/sync-protocol/` (installed as `@cognia/sync-protocol`; `validateAppend`, `foldRegistry`, pin, `fixtures/v1.json`) |
+| Server (Worker + SQLite DO) | `cognia-services/services/sync-server/` (operator guide in its README) |
 | Client keys and HPKE | `lib/account-sync/crypto/` |
 | Flows | `lib/account-sync/enrollment/` (first device, join, approve, recover, manage, revoked) |
 | API client, vault, verification | `lib/account-sync/sync-api.ts`, `vault-store.ts`, `registry-sync.ts` |
 | Build flag | `lib/account-sync/feature-flag.ts` (`NEXT_PUBLIC_COGNIA_ACCOUNT_SYNC`) |
 | Poller and notifications | `hooks/account-sync/use-account-sync-poller.ts`, `lib/account-sync/approval-notifications.ts` |
 | UI | `components/account/sync/` (section, approval dialog, host) |
-| Incidents | `docs/runbooks/sync-worker.md` |
+| Incidents | [`docs/runbooks/sync-worker.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/runbooks/sync-worker.md) in cognia-services |
 
 ## The first device
 

@@ -79,7 +79,6 @@ describe("deriveExternalRuntimeConnections", () => {
         { ...pi, ref: { kind: "external", agentId: "pi2" }, key: "external:pi2", name: "Pi 2" },
       ],
       connectionStatus: { pi: "connected", pi2: "reconnecting" },
-      externalEnabled: true,
       configuredCount: 2,
     })
     expect(result.rows.map((row) => [row.key, row.state])).toEqual([
@@ -100,7 +99,6 @@ describe("deriveExternalRuntimeConnections", () => {
     const result = deriveExternalRuntimeConnections({
       runtimes: [pi, codex, pluginAgent],
       connectionStatus: { pi: "error" },
-      externalEnabled: true,
       configuredCount: 3,
     })
     expect(result.rows.map((row) => row.state)).toEqual(["error", "blocked", "checking"])
@@ -112,7 +110,6 @@ describe("deriveExternalRuntimeConnections", () => {
     const result = deriveExternalRuntimeConnections({
       runtimes: [hostOnly, both],
       connectionStatus: {},
-      externalEnabled: true,
       configuredCount: 1,
     })
     expect(result.rows).toEqual([
@@ -136,21 +133,18 @@ describe("deriveExternalRuntimeConnections", () => {
     const result = deriveExternalRuntimeConnections({
       runtimes: [{ ...pi, warning: "Needs sign-in" }],
       connectionStatus: {},
-      externalEnabled: true,
       configuredCount: 1,
     })
     expect(result.rows[0]).toMatchObject({ state: "off", detail: "Needs sign-in" })
   })
 
-  it("carries the master switch and configured count through", () => {
+  it("retains the configured count when no runtime is available", () => {
     const result = deriveExternalRuntimeConnections({
       runtimes: [builtin],
       connectionStatus: {},
-      externalEnabled: false,
       configuredCount: 2,
     })
     expect(result).toEqual({
-      externalEnabled: false,
       configuredCount: 2,
       rows: [],
       workingCount: 0,
@@ -167,13 +161,11 @@ describe("useExternalRuntimeConnections", () => {
     catalogMock.mockReturnValue({
       runtimes: [builtin, pi],
       selected: builtin,
-      externalEnabled: true,
       configuredExternalCount: 1,
     })
     useExternalAgentStore.setState({ connectionStatus: { pi: "connected" } })
     const { result } = renderHook(() => useExternalRuntimeConnections())
     expect(result.current).toMatchObject({
-      externalEnabled: true,
       configuredCount: 1,
       workingCount: 1,
       rows: [expect.objectContaining({ key: "external:pi", state: "connected" })],

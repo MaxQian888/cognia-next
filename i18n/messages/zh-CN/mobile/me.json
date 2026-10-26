@@ -329,5 +329,21 @@
   "workspaceRow": "工作区",
   "chatTemplatesRow": "对话模板",
   "templatesRow": "模板库",
-  "petRow": "宠物"
+  "petRow": "宠物",
+  "searchProviders": {
+    "retired": "已于 {date} 停用；已保存的凭据会保留。",
+    "legacy": "旧版服务：不再接受新客户，将于 {date} 停止服务。",
+    "endpointAria": "{name} 端点 URL",
+    "endpointPlaceholder": "https://search.example.org",
+    "endpointDocs": "端点文档：",
+    "allowPrivateEndpoint": "允许私有 / HTTP 端点",
+    "endpointIssues": {
+      "missing": "请输入 SearXNG 端点 URL，无需 API 密钥。",
+      "invalid-url": "请输入绝对端点 URL。",
+      "unsupported-scheme": "请使用 HTTPS，或为明确授权的私有主机使用 HTTP。",
+      "embedded-credentials": "请移除端点 URL 中嵌入的凭据。",
+      "query-or-fragment": "请移除端点 URL 的查询参数和片段。",
+      "insecure-public-endpoint": "公共端点必须使用 HTTPS。"
+    }
+  }
 }

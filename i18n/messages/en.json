@@ -16,6 +16,7 @@
     "aiEditUnavailable": "AI is unavailable right now — nothing was changed.",
     "aiGenerate": "AI Generate",
     "aiPaperAnalysis": "AI Paper Analysis",
+    "aiPartialFailure": "AI stopped after applying part of the change. Review the current draft before retrying.",
     "aiRegeneratePrompt": "Describe what you want to change...",
     "allApps": "All Apps",
     "allCategories": "All",
@@ -95,6 +96,16 @@
     "componentTree": "Components",
     "componentType": "Component type",
     "continueWorking": "Continue Working",
+    "controls": {
+      "dialogContent": "Dialog content",
+      "noResults": "No results",
+      "pickDate": "Pick a date",
+      "required": "This field is required",
+      "search": "Search...",
+      "select": "Select...",
+      "submit": "Submit",
+      "untitled": "Untitled"
+    },
     "copied": "Copied!",
     "copiedExclamation": "Copied!",
     "copy": "Copy",
@@ -1697,9 +1708,13 @@
       "recoveryUnlockAction": "Unlock and set a new password",
       "recoveryUnlockDescription": "Enter the one-time recovery key you saved when this account was created, then choose a new password. The recovery key keeps working afterwards.",
       "recoveryUnlockForm": "Unlock with a recovery key",
+      "registryFailureTitle": "Your accounts could not be loaded",
+      "registryTimeoutDescription": "Reading your local accounts took too long. Close other Cognia tabs or windows, then try again. Your local data has not been deleted.",
+      "registryUnavailableDescription": "Your local accounts could not be read. Check that this browser allows local storage, then try again.",
       "reloadWindow": "Reload the window",
       "rememberOnDeviceHelp": "Saved in this device’s secure storage, so it opens without asking next time. Your password keeps working.",
       "rememberOnDeviceLabel": "Remember password",
+      "retryRegistry": "Try loading accounts again",
       "revealPassword": "Show password",
       "runtimeBadgeBrowser": "Browser Vault on this device",
       "runtimeBadgeDesktop": "Desktop keychain on this device",
@@ -1714,7 +1729,8 @@
       "stageVerifying": "Checking your password",
       "storageLayoutBody": "The data on this device was written by a different version of the app. Your password is fine — there is nothing to unlock until the local data is reset. Resetting deletes this device's local copy. Anything you have backed up or synced to another device is not affected.",
       "storageLayoutReset": "Reset local data",
-      "storageLayoutResetConfirm": "Delete this device's local data? This cannot be undone. Backups and other devices are not affected.",
+      "storageLayoutResetConfirm": "This cannot be undone. Backups and other devices are not affected.",
+      "storageLayoutResetConfirmTitle": "Delete this device's local data?",
       "storageLayoutResetting": "Resetting…",
       "storageLayoutTitle": "Local data cannot be opened",
       "stuckBody": "Another window of this app may still be holding the database open. Close any other windows or tabs, then reload.",
@@ -2011,12 +2027,16 @@
     "runtimeTarget": {
       "active": "Active",
       "addHost": "Add Host",
+      "fallbackDescription": "{name} is the active Host. Pick the Host this browser should switch to after it is removed.",
+      "fallbackField": "Replacement Host",
       "fallbackInvalid": "Choose one of the saved fallback Hosts.",
-      "fallbackPrompt": "Enter the fallback Host id ({choices}).",
+      "fallbackTitle": "Choose a replacement Host",
       "heading": "Runtime target",
       "legacyMixed": "Legacy mixed (read-only)",
       "loadFailed": "Runtime targets could not be loaded.",
-      "removeConfirm": "Remove {name}? The Host must confirm revocation before local data is deleted.",
+      "removeConfirm": "The Host must confirm revocation before local data is deleted.",
+      "removeConfirmAction": "Remove Host",
+      "removeConfirmTitle": "Remove {name}?",
       "removeFailed": "The Host could not be removed.",
       "removeHost": "Remove {name}",
       "switchFailed": "Runtime target could not be switched.",
@@ -3075,11 +3095,9 @@
     "addExternalAgent": "Add an external agent…",
     "ariaLabel": "Choose agent runtime",
     "cogniaAgent": "Cognia Agent",
-    "enableExternal": "Turn on external agents",
     "engineAiSdk": "AI SDK, running {provider}",
     "engineClaudeAgentSdk": "Anthropic Agent SDK, in the bundled sidecar",
     "externalEmpty": "No external agents configured yet.",
-    "externalTurnedOff": "External agents are turned off.",
     "externalUnconfigured": "External (none selected)",
     "label": "Agent runtime",
     "lastCheckFailed": "Last check failed — it may not start.",
@@ -3480,7 +3498,7 @@
         "minimaxCode": "MiniMax Code",
         "opencodeAcp": "OpenCode (ACP)",
         "opencodeRemote": "OpenCode (Remote)",
-        "opencodeServer": "OpenCode",
+        "opencodeServer": "OpenCode V1",
         "pi": "Pi",
         "piRpc": "Pi (native RPC)",
         "qoder": "Qoder",
@@ -4548,6 +4566,8 @@
       "duplicateToEdit": "Duplicate to edit",
       "edit": "Edit",
       "editing": "Editing {name}",
+      "evolve": "Evolve",
+      "evolveTitle": "{name} · Evolution",
       "noDescription": "No description.",
       "sourceUser": "Created by you",
       "tasksEmpty": "No tasks yet. Use “Assign work” to give it one.",
@@ -5068,7 +5088,9 @@
         "generatedEventCount": "{count} generated events",
         "generatedFiles": "Generated outputs",
         "generatedMetadataOnly": "Generated output content is not retained. Only its path, type, size, and lifecycle are recorded.",
-        "irreversibleApplyConfirm": "The local task ledger is full, so Cognia cannot retain the inverse patch. Apply this selection once without task undo? Existing workspace changes remain protected by conflict checks.",
+        "irreversibleApplyConfirm": "The local task ledger is full, so Cognia cannot keep the inverse patch for this apply. Existing workspace changes stay protected by conflict checks.",
+        "irreversibleApplyConfirmAction": "Apply once",
+        "irreversibleApplyConfirmTitle": "Apply without task undo?",
         "lastDay": "Last 24 hours",
         "lastFiveMinutes": "Last 5 minutes",
         "lastHour": "Last hour",
@@ -5093,7 +5115,8 @@
         "selectHunks": "Select hunks",
         "selectResource": "Select a task resource to inspect it.",
         "sensitive": "Sensitive resource",
-        "sensitiveConfirm": "Authorize this one sensitive resource operation? Its contents remain on the execution host.",
+        "sensitiveConfirm": "This authorizes a single operation on a sensitive resource. Its contents remain on the execution host.",
+        "sensitiveConfirmTitle": "Authorize one sensitive operation?",
         "sensitiveDescription": "This path may contain credentials or secrets. Each read or download requires explicit authorization and remote control.",
         "source": "Source",
         "sourceEventCount": "{count} source events",
@@ -5212,6 +5235,13 @@
     },
     "audit": {
       "clear": "Clear Log",
+      "clearConfirm": {
+        "action": "Clear log",
+        "description": "Every automation audit record on this device will be deleted. This cannot be undone.",
+        "title": "Clear the audit log?"
+      },
+      "clearFailed": "Failed to clear the audit log",
+      "cleared": "Audit log cleared",
       "columns": {
         "command": "Command",
         "decision": "Decision",
@@ -5235,6 +5265,7 @@
         "surfacePlugin": "Plugin",
         "surfaceWorkflow": "Workflow"
       },
+      "loadFailed": "Failed to load the audit log",
       "loading": "Loading audit log…",
       "title": "Audit Log"
     },
@@ -5827,7 +5858,9 @@
     },
     "chip": "Best-of-N for the next send",
     "chooseBranch": "Choose an existing branch",
+    "clear": "Turn off Best-of-N for the next send",
     "committedOnly": "Attempts start from the committed SHA only. Uncommitted changes are never carried over.",
+    "compactAttempts": "×{count}",
     "description": "Run independent attempts from one committed base, then choose a winner manually.",
     "dirty": "This checkout has uncommitted changes. They will not be carried into the attempts.",
     "existingBranch": "Explicitly choose an existing branch",
@@ -5835,6 +5868,7 @@
     "externalCost": "External agents do not report cost, so their cost is shown as unknown. A dollar budget cannot be enforced for them.",
     "failed": "Could not start best-of-N: {error}",
     "invalidPolicy": "The committed acceptance policy is invalid. Fix it before starting best-of-N.",
+    "label": "Best-of-N",
     "manualOnly": "You choose the winner manually. Picking early stops the other attempts. Publishing updates only the chosen local branch; nothing is pushed.",
     "mixedBatch": "/best-of-n must be the whole message. Send it on its own, without other commands.",
     "needsCommit": "Commit the repository before starting best-of-N.",
@@ -6385,6 +6419,7 @@
     "record": {
       "addAssertion": "Expect text…",
       "assertionPlaceholder": "Text that should appear",
+      "captureFailed": "Recording failed: {error}",
       "delete": "Delete flow",
       "deleted": "Flow deleted",
       "downloadJson": "Save flow JSON…",
@@ -6440,6 +6475,12 @@
       "title": "Record actions"
     },
     "remote": {
+      "approval": {
+        "authorize": "Authorize browser access",
+        "failed": "Browser authorization was refused or could not be completed. You can request approval again.",
+        "pending": "Ask the host owner or another paired administrator to approve code {code}, then click Authorize browser access again.",
+        "required": "Browser access needs approval from this host. Authorization lasts up to 10 minutes."
+      },
       "canvas": "Remote browser canvas",
       "closePage": "Close page",
       "connection": {
@@ -6451,6 +6492,16 @@
       },
       "error": "Remote browser unavailable ({code})",
       "find": "Find in page",
+      "grants": {
+        "blocked": "Blocked domains: {domains}",
+        "cancel": "Keep current session",
+        "changed": "Domain permissions changed. Reconnect to apply them to this browser.",
+        "confirm": "Reconnect browser",
+        "ephemeralHint": "Open tabs will close and this page will reload. This temporary session may require you to sign in again. Unsaved changes will be lost.",
+        "manage": "Manage domains",
+        "persistentHint": "Saved site data is retained. Some websites may ask you to sign in again. Open tabs will close and this page will reload. Unsaved changes will be lost.",
+        "reconnect": "Apply permissions and reconnect"
+      },
       "humanControl": "You're controlling",
       "needsRemoteHost": "Connect a Cognia server to use the cloud browser",
       "runtimeUnavailable": "The cloud browser is not available ({reason})",
@@ -7397,17 +7448,19 @@
       "providers": "Providers",
       "skills": "Skills"
     },
-    "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates Cognia's bundled SDK and (optionally) propagates to selected external agents.",
+    "description": "Read providers, MCP servers, prompts and installed skills from CC Switch v4.0.18 (schema 21). Anthropic providers can update Cognia’s bundled SDK; other app protocols and managed logins remain browse-only.",
     "dialog": {
       "agentsSection": "Also write to",
       "apiKey": "API key",
+      "applyFailed": "Could not apply the switch: {error}",
       "baseUrl": "Base URL",
+      "baseUrlNotPropagated": "base URL not applied",
       "body": "Review what the switch will change before confirming.",
       "bodyFor": "Switch to {name}. Review what changes before confirming.",
       "cancel": "Cancel",
       "close": "Close",
-      "codexBaseUrlNotPropagated": "base URL not applied",
       "cogniaApplied": "Cognia-next updated.",
+      "cogniaNotApplied": "Cognia was not updated.",
       "cogniaSection": "Cognia-next",
       "confirm": "Apply switch",
       "driftAbort": "The file changed on disk while switching, so nothing was written. Reopen this dialog and apply again.",
@@ -7482,7 +7535,7 @@
       "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
       "importQuota": "Import quota",
       "model": "Model",
-      "officialEndpoint": "Official Anthropic endpoint",
+      "officialEndpoint": "Default endpoint",
       "quotaImportErrorTitle": "Quota metadata wasn't imported",
       "quotaImportFailed": "Couldn't save the imported quota source: {error}",
       "quotaImportReason": {
@@ -7495,6 +7548,7 @@
       "quotaImportSuccess": "Imported {name} as a disabled custom quota source. Review it under Subscription settings, then enable it explicitly.",
       "quotaImportSuccessTitle": "Quota metadata imported",
       "refresh": "Refresh",
+      "unsupportedProtocol": "Browse only: this app uses another protocol or CC Switch-managed authentication. Switch it in CC Switch.",
       "useHere": "Use here",
       "useHereAndIn": "Use here & in…"
     },
@@ -7503,7 +7557,7 @@
       "emptyTitle": "No skills in CCSwitch",
       "errorTitle": "Could not list skills",
       "externalBadge": "external file",
-      "headerHint": "Skills with inline content become new Cognia skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
+      "headerHint": "Import installed skill bundles, including frontmatter, scripts, references, assets and Codex metadata. Missing or unsafe directories cannot be imported.",
       "importBtn": "Import {count, plural, =0 {nothing} =1 {1 skill} other {# skills}}",
       "importing": "Importing…",
       "listTitle": "Skills in CCSwitch",
@@ -8005,6 +8059,7 @@
         "foldCollapseShort": "Less",
         "foldExpand": "Show {count} more"
       },
+      "contextRegion": "Composer context and notices",
       "draftRestore": {
         "dismiss": "Dismiss",
         "label": "Re-attach:",
@@ -8087,6 +8142,7 @@
         "acceptHint": "Tab or → to edit before sending",
         "configure": "Configure",
         "dismiss": "Dismiss suggestions",
+        "dontShowAgain": "Don't show again",
         "error": "Could not generate a prediction.",
         "label": "Follow-up suggestions",
         "retry": "Retry",
@@ -8379,7 +8435,6 @@
         "blocked": "{runtime} can't run here",
         "blockedDetail": "{runtime} can't run here: {detail}",
         "busy": "Wait for the current reply to finish before addressing @{handle}.",
-        "disabled": "External agents are turned off.",
         "emptyPrompt": "Add a message after @{handle}.",
         "memberMissing": "@{handle} is no longer in a Squad.",
         "memberRuntime": "{name} runs on {runtime}, which isn't available here.",
@@ -11612,6 +11667,7 @@
     "imagesAttached": "{count} attached · /images to manage",
     "language": "Interface language",
     "languageHint": "Language for startup, approvals, errors, help and review panels.",
+    "manualSubagentUnsupported": "This backend cannot host manual CLI subagents.",
     "mcp": {
       "agentInventory": "Agent inventory: {status} (session not confirmed)",
       "all": "(all)",
@@ -12383,6 +12439,76 @@
     "useFolder": "✓ Use this folder",
     "workingDirectory": "Working directory: {path}",
     "workspaceBoundaryHint": "Choose an accessible directory within the configured COGNIA_WORKSPACES_DIR boundary, or restart the CLI in the intended workspace."
+  },
+  "collabCapabilities": {
+    "action": {
+      "credential": {
+        "manage": "Manage workspace credentials",
+        "use": "Use workspace credentials"
+      },
+      "environment": {
+        "manage": "Manage workspace environments",
+        "use": "Use workspace environments"
+      },
+      "execution": {
+        "request": "Run agents in a sandbox"
+      },
+      "host": {
+        "global-surfaces": "Use host-wide terminal, files and plugins",
+        "workspace-surfaces": "Use this workspace's terminal, files and git on the host"
+      },
+      "org": {
+        "admins": {
+          "manage": "Manage organization admins"
+        },
+        "members": {
+          "manage": "Manage organization members"
+        },
+        "ownership": {
+          "transfer": "Transfer organization ownership"
+        },
+        "policy": {
+          "manage": "Manage organization policy"
+        }
+      },
+      "publish": "Publish and share",
+      "workspace": {
+        "members": {
+          "manage": "Manage workspace members"
+        },
+        "read": "Read workspace",
+        "settings": {
+          "manage": "Manage workspace settings"
+        },
+        "write": "Contribute to workspace"
+      }
+    },
+    "feature": {
+      "canvas-collaboration": "Canvas collaboration",
+      "environment-binding": "Workspace environments",
+      "org-governance": "Organization management",
+      "shared-chat": "Shared conversations",
+      "shared-chat-execution": "Shared agent runs"
+    },
+    "reason": {
+      "client_contract_unsupported": "This app is too old for it. Update Cognia to use it.",
+      "deployment_disabled": "This deployment does not offer it.",
+      "execution_isolation_unavailable": "No isolated runtime is available to run it.",
+      "feature_killed": "Stopped by the operator. You can still read, export and leave.",
+      "feature_not_offered": "Not offered to this organization yet.",
+      "feature_paused": "Paused by the operator. Existing work continues.",
+      "org_denied": "Not available to this organization.",
+      "policy_unavailable": "The server could not check availability. Try again shortly.",
+      "prerequisite_unavailable": "Needs another feature that is not available here.",
+      "workspace_denied": "Not available in this workspace."
+    },
+    "refused": "{feature}: {reason}",
+    "state": {
+      "available": "Available",
+      "existing-only": "Existing only",
+      "off": "Off",
+      "read-only": "Read only"
+    }
   },
   "common": {
     "add": "Add",
@@ -14333,6 +14459,14 @@
       "manageAccounts": "Profiles",
       "menuAria": "Account menu for {name}",
       "noProfile": "No profile",
+      "org": {
+        "heading": "Organization",
+        "listFailed": "Other organizations could not be listed",
+        "switchFailed": "Could not switch organization",
+        "switchTo": "Switch to {org}",
+        "switched": "Now working in {org}",
+        "switching": "Switching to {org}…"
+      },
       "petFailed": "The desktop pet could not be opened.",
       "settings": "Settings",
       "showPet": "Desktop pet",
@@ -15723,6 +15857,10 @@
         "hint": "The external agent failed while running this turn — retry, or run it on the built-in agent.",
         "label": "Agent run failed"
       },
+      "executionUnavailable": {
+        "hint": "This Host can't run this here: it is in control-plane-only mode, has no sandbox isolation, or the work would run inside the Host itself, which a shared Host never allows. Ask the Host's administrator if you expected it to work.",
+        "label": "Running work is unavailable on this Host"
+      },
       "extensionHandshakeFailed": {
         "hint": "The Cognia extension that enforces permissions inside this agent never reported ready, so the session was refused instead of running ungated.",
         "label": "Agent extension didn't start"
@@ -15771,6 +15909,10 @@
         "hint": "Cognia couldn't reach the paired device — check that both are on the same network.",
         "label": "Device unreachable"
       },
+      "hostDataUnavailable": {
+        "hint": "This Host is shared by an organization, and it doesn't keep chats, files and other personal data separate per member yet. Use your own device or the shared workspace for this until that ships.",
+        "label": "Not available on this shared Host"
+      },
       "hostSessionRefused": {
         "hint": "The paired host refused this new chat — usually this device doesn't have Agent Control on that host. Ask the host's owner to grant it, then start the chat again.",
         "label": "Conversation not created on the host"
@@ -15795,6 +15937,10 @@
         "hint": "The managed policy disallows this sandbox or approval mode. Choose an allowed mode or contact your administrator.",
         "label": "Managed policy refused"
       },
+      "modelAccessUnavailable": {
+        "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members.",
+        "label": "No model access on this shared Host"
+      },
       "modelOverloaded": {
         "hint": "The provider is overloaded — retry in a moment.",
         "label": "Model overloaded"
@@ -15818,6 +15964,14 @@
       "offline": {
         "hint": "You appear to be offline — Cognia will retry once you're back online.",
         "label": "Offline"
+      },
+      "orgScopeUnavailable": {
+        "hint": "Organization settings such as shared model keys and allowed agents only exist on a Host that serves an organization. This Host serves one person, so there is nothing to configure here.",
+        "label": "Needs an organization Host"
+      },
+      "partitionWorkspaceUnavailable": {
+        "hint": "On a shared Host, your conversations live in your own personal space, which isn't linked to the Host's workspaces, so this one can't be moved into a workspace here.",
+        "label": "No workspaces in your personal space"
       },
       "payloadTooLarge": {
         "hint": "The request exceeds the size limit — shorten the input.",
@@ -16018,6 +16172,10 @@
       "workspaceUnavailable": {
         "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel.",
         "label": "Workspace unavailable"
+      },
+      "workspaceUnresolved": {
+        "hint": "A shared Host only runs work inside a workspace it can verify. Start it from a workspace you belong to; work that wasn't started that way can't be continued here.",
+        "label": "No workspace for this request"
       }
     },
     "detail": {
@@ -16459,6 +16617,7 @@
       "attached": "Attached “{title}”",
       "fetching": "Fetching “{title}”…",
       "hostUnsupported": "Remote documents are available on the desktop app only.",
+      "incomplete": "Some content in “{title}” could not be read. See the attachment for details.",
       "linkOnlyHint": "This provider has no search — paste a document link.",
       "noAccount": "Connect an account in Settings to use this.",
       "noMatches": "No document matches \"{query}\"",
@@ -16493,6 +16652,7 @@
       "description": "Reference Feishu and Google documents with @ in chat.",
       "desktopOnly": "Desktop app only.",
       "disconnect": "Disconnect",
+      "disconnectFailed": "Could not finish disconnecting: {reason}",
       "disconnectNotRevoked": "Disconnected locally, but revoking at Google failed ({reason}). Remove Cognia from your Google account's third-party access to finish.",
       "disconnectRevoked": "Disconnected. The Google authorization has been revoked.",
       "disconnecting": "Disconnecting…",
@@ -17885,13 +18045,17 @@
     },
     "instanceSection": {
       "description": "What sets it apart from the other configurations of the same runtime, and what it shares with them.",
+      "folderCopied": "Folder path copied",
+      "folderCopy": "Copy folder path",
+      "folderCopyFailed": "Couldn't copy the folder path",
       "folderElsewhere": "Its state folder is on the computer that runs it.",
       "folderError": "Couldn't read its state folder: {message}",
+      "folderLabel": "State folder",
       "folderLoading": "Looking up its state folder…",
       "folderNotCreated": "Created on first launch",
       "folderReveal": "Show folder",
       "remoteState": "This agent runs on a server, which keeps its state. There is nothing on this computer to separate.",
-      "sessionLimit": "Open sessions at most",
+      "sessionLimit": "Session limit",
       "sessionLimitHint": "Opening one more closes the least recently used idle session first. Leave empty for no limit.",
       "sessionLimitUnlimited": "Unlimited",
       "sharedWith": "{count, plural, one {Shares its login, settings and session history with {names}. Choose “Own state” to keep them apart.} other {Shares its login, settings and session history with {names}. Choose “Own state” to keep them apart.}}",
@@ -18244,6 +18408,62 @@
         "runnable": "Runnable"
       }
     },
+    "roleModels": {
+      "addSpawnModel": "Add spawn model",
+      "choose": "Choose a model",
+      "clearSpawnModels": "Clear extra spawn models",
+      "description": "Native subagents, model aliases and helper calls of this runtime can run on other models from the primary model's provider and account. Unset slots keep the primary model. A turn moved to another provider or account runs on its primary model alone.",
+      "effort": "Reasoning effort",
+      "effortDefault": "Model default",
+      "efforts": {
+        "high": "High",
+        "low": "Low",
+        "medium": "Medium",
+        "minimal": "Minimal",
+        "xhigh": "Extra high"
+      },
+      "empty": "No other compatible models from this provider.",
+      "hints": {
+        "auxiliary": "Helper calls such as titles and summaries; not a subagent.",
+        "childDefault": "Used when a subagent's own definition and the spawning call name no model.",
+        "tier": "The model this runtime's alias resolves to."
+      },
+      "hostOutdated": "The paired Host must be updated before sub-task models can be set.",
+      "invalid": "Fix the sub-task models before saving.",
+      "modeLabel": "{slot}: model source",
+      "modelLabel": "{slot}: model",
+      "modes": {
+        "inherit": "Inherit from the agent configuration",
+        "model": "Another model",
+        "primary": "Primary model"
+      },
+      "needsPrimary": "Turn on Cognia models and choose a primary model to set sub-task models.",
+      "noSlots": "This runtime runs every call on the primary model.",
+      "refusals": {
+        "crossAccount": "Sub-task models must use the primary model's account.",
+        "crossProvider": "Choose a model from {provider}. Sub-task models must use the primary model's provider.",
+        "defaultSpawnModelNotAllowed": "Include the default child model in the candidate set.",
+        "effortUnsupported": "This model does not accept the selected reasoning effort.",
+        "spawnModelsUnsupported": "This runtime does not support native spawn model candidates.",
+        "tooManyModels": "Too many different models for one task. Use fewer sub-task models.",
+        "unsupportedSlot": "This runtime does not support this sub-task model setting. Remove it to save."
+      },
+      "remove": "Remove",
+      "removeSpawnModel": "Remove {model}",
+      "removeStale": "Remove the unsupported sub-task model setting",
+      "sameAccount": "Uses the primary model's provider account.",
+      "search": "Search {provider} models…",
+      "slots": {
+        "auxSmall": "Small helper model",
+        "subagentDefault": "Default subagent model",
+        "tierHaiku": "Haiku alias",
+        "tierOpus": "Opus alias",
+        "tierSonnet": "Sonnet alias"
+      },
+      "spawnModels": "Native spawn models",
+      "spawnModelsDescription": "Authorize a finite set on this task’s provider account. The task also authorizes its primary and default models. The parent selects the model when spawning; existing V2 children cannot be switched directly.",
+      "title": "Sub-task models"
+    },
     "runCommand": "Run /{name}",
     "runtimes": {
       "activeSessions": "Sessions running now",
@@ -18310,6 +18530,80 @@
       "loadEntries": "Inspect session history",
       "loadTree": "Browse branches",
       "loading": "Loading capabilities…",
+      "nativeBackend": "Backend: {backend} ({confidence}, {evidence}); runtime: {version}",
+      "nativeBackendValues": {
+        "disabled": "Disabled",
+        "unknown": "Unknown"
+      },
+      "nativeCapabilities": "Spawn model override capability: {spawn}. A disabled V2 feature flag does not prove this session uses V1.",
+      "nativeChangeOutcome": "{child} · {scope} · {model} ({effort}): {outcome}",
+      "nativeConfidence": {
+        "inferred": "Inferred",
+        "observed": "Observed",
+        "unknown": "Unknown"
+      },
+      "nativeCurrentTurn": "Apply to next steps of current turn",
+      "nativeDefaultEffort": "Keep native effort setting",
+      "nativeDirectForbidden": "Codex forbids direct input to this child. Existing V2 children cannot be switched directly.",
+      "nativeDirectUnknown": "Direct-input capability is unknown. Refresh thread facts before changing settings.",
+      "nativeEmpty": "No native child thread has been identified for this session.",
+      "nativeEvidence": {
+        "child-thread": "Native child thread",
+        "configuration": "Configuration",
+        "model-metadata": "Model metadata",
+        "unknown": "Unknown source"
+      },
+      "nativeFeatureFlags": "Effective flags: multi_agent_v2={v2}; step_model_switching={step}.",
+      "nativeFlags": {
+        "disabled": "Disabled",
+        "enabled": "Enabled",
+        "unknown": "Unknown"
+      },
+      "nativeFutureTurns": "Set future-turn defaults",
+      "nativeHostUpdateRequired": "Update the Host to configure or control native subagent models.",
+      "nativeIdentity": "Parent: {parent}; root: {root}",
+      "nativeModelEvidence": "Thread models describe settings. Accepted changes await a subsequent sampling step; they are not inference telemetry.",
+      "nativeReasons": {
+        "child-not-owned": "This child does not belong to the current root session.",
+        "child-settings-busy": "A settings change is already pending for this child.",
+        "connection-changed": "The connection changed; the result is unknown.",
+        "direct-input-forbidden": "Codex forbids direct input to this child.",
+        "direct-input-unknown": "Direct-input support is still unknown.",
+        "invalid-operation-id": "The operation identity is invalid.",
+        "invalid-settings-scope": "The requested settings scope is invalid.",
+        "model-change-operation-limit": "The runtime reached its settings operation limit.",
+        "model-not-allowed": "This model is not authorized for the task.",
+        "native-settings-unsupported": "This runtime does not support the requested settings method.",
+        "operation-id-conflict": "This operation identity was already used for another request.",
+        "reasoning-effort-not-supported": "The model does not support this reasoning effort.",
+        "stale-child-turn": "The child turn changed or ended. Refresh the native threads.",
+        "stale-model-plan": "The task model policy changed. Refresh the native threads.",
+        "stale-process-generation": "The runtime connection changed. Refresh the native threads.",
+        "step-model-switching-disabled": "Enable experimental current-turn model switching and reconnect first.",
+        "unknown-settings-response": "The runtime returned an unrecognized settings result."
+      },
+      "nativeRefresh": "Refresh native threads",
+      "nativeRequested": "Spawn request: {model}; effort: {effort}",
+      "nativeResults": {
+        "applied-awaiting-step": "Codex accepted the settings; execution is not yet observed.",
+        "outcome-unknown": "The result is unknown. Reconnect and refresh before submitting another change.",
+        "rejected": "Codex rejected the settings.",
+        "target-unavailable": "The native target is no longer available."
+      },
+      "nativeSelectModel": "Choose a model",
+      "nativeSettings": "Model setting: {model}; effort: {effort}; active turn: {turn}",
+      "nativeStepDisabled": "Current-turn changes require the experimental model-switching option and a known active child turn.",
+      "nativeSupport": {
+        "supported": "Observed support",
+        "unknown": "Not yet observed",
+        "unsupported": "Unsupported"
+      },
+      "nativeTargetEffort": "New reasoning effort",
+      "nativeTargetModel": "New child model",
+      "nativeTitle": "Native subagents",
+      "nativeTruncated": "Thread discovery reached its limit. Unseen threads cannot be controlled.",
+      "nativeUncertain": "This child has a settings change with an unknown outcome. Reconnect the runtime before sending another change.",
+      "nativeUnknown": "Unknown",
       "oneAtATime": "One at a time",
       "queued": "Instruction queued",
       "queuedInput": "Queued instruction",
@@ -18416,6 +18710,8 @@
       "codexSandboxWorkspaceWrite": "Workspace write",
       "codexServerDefault": "Server default",
       "codexSkillRootsBrowse": "Browse…",
+      "codexStepModelSwitching": "Experimental current-turn model switching",
+      "codexStepModelSwitchingDesc": "Allow changing subsequent sampling steps of an active V1 child. Restart the agent after changing this setting. V2 children remain controlled by their parent.",
       "codexSummaryAuto": "Auto",
       "codexSummaryConcise": "Concise",
       "codexSummaryDetailed": "Detailed",
@@ -18578,8 +18874,6 @@
       "duplicateHint": "Make a copy with the same settings and credentials. The copy asks again for any unsandboxed-launch approval.",
       "duplicateName": "{name} (copy)",
       "editAgent": "Edit Agent",
-      "enableExternalAgents": "Enable External Agents",
-      "enableExternalAgentsDesc": "Allow using external agents like Claude Code via ACP protocol",
       "endpoint": "Endpoint URL",
       "endpointInvalid": "Enter a valid HTTP or HTTPS endpoint URL.",
       "endpointRequired": "Endpoint URL is required for HTTP transport",
@@ -18605,9 +18899,9 @@
       "inspectorEnabled": "Enabled",
       "inspectorEnabledAria": "Enable {name}",
       "inspectorKeySaved": "Saved — leave empty to keep",
-      "inspectorMasterDisabled": "Enable external agents to connect.",
       "inspectorNameLabel": "Name",
       "inspectorRename": "Rename {name}",
+      "inspectorRuntimeDetails": "Runtime details",
       "inspectorStatus": "Status",
       "inspectorTabAdvanced": "Advanced",
       "inspectorTabConnection": "Connection",
@@ -20543,7 +20837,7 @@
       "modelHint": "Model that decides whether the goal is done. Leave on the chat model unless you want a cheaper/faster judge.",
       "noModels": "No models available. Configure a provider first.",
       "promptOverride": "Judge prompt override",
-      "promptOverrideHint": "Replaces the built-in judge instructions. Must still ask for a one-line JSON verdict.",
+      "promptOverrideHint": "Copied into each new goal and replaces the judge instructions for that goal. To change the judge for every goal without its own instructions, edit it in Settings → Prompts. Must still ask for a one-line JSON verdict.",
       "searchPlaceholder": "Search models…",
       "temperature": "Judge temperature",
       "temperatureHint": "0 is deterministic (recommended). Higher loosens the verdict.",
@@ -20693,6 +20987,590 @@
       "openAgent": "Open in Agents",
       "permissionMode": "Permission mode: {mode}",
       "systemPrompt": "System prompt"
+    }
+  },
+  "harnessEvolution": {
+    "actions": {
+      "done": {
+        "approve": "Change approved and applied.",
+        "cancel": "Run cancelled.",
+        "reject": "Kept the current harness.",
+        "resume": "Run resumed.",
+        "rollback": "Adoption rolled back."
+      },
+      "errors": {
+        "adoption": {
+          "agent-changed": "The agent was edited after this run started; start a new run.",
+          "agent-not-found": "The agent no longer exists.",
+          "already-rolled-back": "This adoption was already rolled back.",
+          "no-decision": "The run has no adoption decision for this harness.",
+          "no-session": "The conversation the run started from no longer exists.",
+          "no-workspace": "The workspace the run started in no longer exists.",
+          "not-adopted": "This run adopted nothing."
+        },
+        "control": {
+          "busy": "Another action on this run is in progress.",
+          "not-adopted": "This run has no adoption in effect.",
+          "not-awaiting": "This run is not waiting for approval (it may have been decided elsewhere).",
+          "not-found": "The run no longer exists.",
+          "not-resumable": "Only an interrupted or stalled run can be resumed."
+        }
+      },
+      "failed": {
+        "approve": "Could not apply the change.",
+        "cancel": "Could not cancel the run.",
+        "reject": "Could not record the decision.",
+        "resume": "Could not resume the run.",
+        "rollback": "Could not roll back."
+      }
+    },
+    "agentView": {
+      "blocked": {
+        "disabled": "Harness Evolution is off.",
+        "external": "This agent runs on an external runtime, so its harness cannot be probed.",
+        "host-owned": "This device's conversations live on its host; start runs there.",
+        "no-runtime": "Runs need the desktop agent runtime, which is not available here."
+      },
+      "description": "Improve this agent's instructions, skills and tool rules from evidence, one task at a time.",
+      "emptyBody": "Start a run on a task this agent should do better. Every candidate is tried in isolation first.",
+      "emptyTitle": "No runs yet",
+      "openSettings": "Open settings",
+      "start": "New run",
+      "tabs": {
+        "experiences": "Lessons",
+        "runs": "Runs",
+        "versions": "Versions"
+      },
+      "title": "Harness Evolution"
+    },
+    "budget": {
+      "dimension": {
+        "cost": "Cost",
+        "modelCalls": "Model calls",
+        "tokens": "Tokens",
+        "wallTime": "Time"
+      },
+      "lowerBound": "Some calls reported no price, so the cost shown is a lower bound.",
+      "usedOf": "{used} of {limit}",
+      "work": "{rollouts} rollouts and {sessions} editor or judge sessions finished."
+    },
+    "checkKind": {
+      "acceptance-profile": "Acceptance profile",
+      "deliverable-file": "File exists",
+      "max-tool-errors": "Tool errors at most",
+      "output-contains": "Answer contains",
+      "output-json": "Answer is JSON",
+      "output-not-contains": "Answer does not contain"
+    },
+    "checks": {
+      "add": "Add check",
+      "caseSensitive": "Match case",
+      "kind": "Kind of check",
+      "max": "Maximum tool errors",
+      "noProfiles": "This workspace has no approved acceptance profiles.",
+      "none": "No checks: the selection will rely on a judge model. Add a check to decide on evidence.",
+      "path": "File path",
+      "pathPlaceholder": "report.md",
+      "pickProfile": "Pick a profile",
+      "profile": "Acceptance profile",
+      "remove": "Remove check",
+      "requiredKeys": "Required keys",
+      "requiredKeysPlaceholder": "Comma-separated keys (optional)",
+      "text": "Text",
+      "textPlaceholder": "Text to look for"
+    },
+    "compare": {
+      "base": "Current harness",
+      "checks": "Checks",
+      "checksPassed": "{passed} of {total} passed",
+      "chosen": "chosen",
+      "cost": "Cost",
+      "delivered": "Delivered",
+      "left": "Left harness",
+      "loading": "Loading harnesses…",
+      "no": "No",
+      "notRolled": "Not rolled out yet.",
+      "nothingYet": "No candidate harness to compare yet.",
+      "right": "Right harness",
+      "tokens": "Tokens",
+      "toolFailures": "Tool failures",
+      "yes": "Yes"
+    },
+    "component": {
+      "guardrails": "Guardrails",
+      "memory": "Memory",
+      "scripts": "Scripts",
+      "skills": "Skills",
+      "subagents": "Subagents",
+      "systemPrompt": "System prompt",
+      "toolGuidance": "Tool guidance",
+      "toolRules": "Tool rules"
+    },
+    "decision": {
+      "adopt": "Adopt {label}",
+      "adoptedAutomatically": "Adopted ({scope}) automatically as a low-risk change.",
+      "adoptedByPerson": "Adopted ({scope}) with your approval.",
+      "approvalNeeded": "This change needs your approval before it applies.",
+      "approve": "Approve",
+      "keepBase": "Keep the current harness",
+      "pending": "No decision yet.",
+      "reject": "Keep current",
+      "risk": {
+        "high": "High risk",
+        "low": "Low risk",
+        "medium": "Medium risk"
+      },
+      "rolledBack": "The adoption was rolled back.",
+      "scope": {
+        "global": "Everywhere",
+        "session": "This conversation",
+        "task": "This task only",
+        "workspace": "This workspace"
+      },
+      "setWorkspaceDefault": "Also make the evolved agent this workspace's default",
+      "variantCreated": "It was written to an evolved variant, so the original agent is unchanged."
+    },
+    "diff": {
+      "change": {
+        "added": "Added",
+        "modified": "Changed",
+        "removed": "Removed"
+      },
+      "fileLabel": "Changes to {path}",
+      "none": "These two harnesses are identical."
+    },
+    "evidence": {
+      "blocked": "Blocked by the probe policy",
+      "bytes": "{bytes} bytes",
+      "checkStatus": {
+        "failed": "Failed",
+        "inconclusive": "Inconclusive",
+        "passed": "Passed"
+      },
+      "checks": "Checks",
+      "degraded": "Degraded run",
+      "delegations": "Delegated to: {list}",
+      "deliverables": "Files produced ({count})",
+      "delivered": "Delivered",
+      "emptyOutput": "(empty)",
+      "errored": "Errored",
+      "externalReads": "Read from outside the machine (not reused in later runs): {list}",
+      "metric": {
+        "cost": "Cost",
+        "latency": "Duration",
+        "tokens": "Tokens in / out",
+        "tools": "Tools"
+      },
+      "notDelivered": "Not delivered",
+      "output": "Answer",
+      "toolCalls": "{calls} calls, {failures} failed",
+      "trajectory": "Full trajectory",
+      "truncated": "truncated",
+      "unpriced": "Unpriced"
+    },
+    "failureOffer": {
+      "dismiss": "Not now",
+      "improve": "Improve",
+      "offer": "This failure looks like it comes from how {agent} is set up. Try improving its harness on this request?",
+      "runExists": "Harness Evolution is working on this failure.",
+      "viewRun": "View run"
+    },
+    "isolation": {
+      "files": "Scratch directory",
+      "git": "Git worktree",
+      "none": "Text only"
+    },
+    "library": {
+      "all": "All",
+      "applies": "Applies when: {list}",
+      "confidence": {
+        "high": "High confidence",
+        "low": "Low confidence",
+        "medium": "Medium confidence"
+      },
+      "conflicts": "{count, plural, one {# conflict} other {# conflicts}}",
+      "counts": "Retrieved {retrieved} · helped {helped} · hurt {hurt}",
+      "delete": "Delete",
+      "empty": "No lessons yet.",
+      "enabled": "Use in new runs",
+      "evidence": "Evidence",
+      "excludes": "Not when: {list}",
+      "filter": "Filter lessons by status",
+      "intro": "Lessons past runs drew about which harness changes help. They are suggestions for later editors, never applied by themselves, and kept apart from Memory.",
+      "limitations": "Known limits: {list}",
+      "openRun": "Open source run",
+      "reinstate": "Reinstate",
+      "retire": "Retire",
+      "status": {
+        "deprecated": "Retired",
+        "proposed": "Proposed",
+        "rejected": "Rejected",
+        "verified": "Verified"
+      },
+      "support": "{count, plural, one {# more run agreed} other {# more runs agreed}}",
+      "updateFailed": "Could not update the lesson.",
+      "when": "When: {cue}"
+    },
+    "mode": {
+      "parallel": "Parallel",
+      "sequential": "Sequential"
+    },
+    "page": {
+      "backToAgent": "Back to {name}",
+      "backToAgents": "Back to agents",
+      "desktopOnlyBody": "Harness Evolution runs on the desktop app, next to the agents it improves. Open this run there.",
+      "desktopOnlyTitle": "Runs live on the desktop",
+      "noRunBody": "Open a run from an agent's Evolution page.",
+      "noRunTitle": "No run selected",
+      "title": "Harness Evolution run"
+    },
+    "reflection": {
+      "conflicts": "{count, plural, one {It contradicts # existing lesson.} other {It contradicts # existing lessons.}}",
+      "dropped": "No lesson was kept: {reason}",
+      "merged": "The lesson was merged into an existing one.",
+      "noEdits": "The reflection attributed no edits.",
+      "openLesson": "Open lesson",
+      "retrieved": "Lessons the editors were given",
+      "retrievedVerdict": "{verdict}",
+      "stored": "The lesson was added to the library.",
+      "verdict": {
+        "confounded": "Confounded",
+        "helped": "Helped",
+        "hurt": "Hurt",
+        "noEffect": "No observed effect"
+      }
+    },
+    "runList": {
+      "empty": "No runs yet.",
+      "improved": "Improved",
+      "keptCurrent": "Kept current",
+      "open": "Open run {title}"
+    },
+    "selection": {
+      "confidence": {
+        "high": "high",
+        "low": "low",
+        "medium": "medium"
+      },
+      "dominant": "Beat every run of the current harness: {list}",
+      "judge": "The judge preferred {best} ({confidence} confidence).",
+      "method": "Decided by",
+      "methods": {
+        "deterministic": "the task's checks",
+        "judge": "a judge model, on anonymized evidence",
+        "no-candidate": "nothing to choose: no candidate differed from the current harness",
+        "tie-break": "a tie-break (cheaper, then simpler)"
+      },
+      "regressed": "Did worse than the current harness: {list}",
+      "unchanged": "Identical to the current harness: {list}"
+    },
+    "settings": {
+      "agentModel": "The agent's model",
+      "autoAdopt": "Auto-adopt low-risk improvements",
+      "autoAdoptDescription": "Applies only to task and conversation scope. Workspace and global changes always ask.",
+      "backgroundInterval": "Background interval (hours)",
+      "backgroundIntervalDescription": "Least time between background runs being started.",
+      "backgroundRuns": "Runs per sweep",
+      "backgroundRunsDescription": "Most background runs in flight at once.",
+      "budget": {
+        "maxCandidates": {
+          "description": "Candidate harnesses proposed across the run (2k).",
+          "label": "Candidates"
+        },
+        "maxCostUsd": {
+          "description": "Spending across rollouts and model calls.",
+          "label": "Cost (USD)"
+        },
+        "maxIterations": {
+          "description": "The largest k a run may use.",
+          "label": "Iterations"
+        },
+        "maxModelCalls": {
+          "description": "Editor, composer, selection and reflection calls.",
+          "label": "Model calls"
+        },
+        "maxParallelRuns": {
+          "description": "Rollouts and editor sessions running at once.",
+          "label": "Parallel work"
+        },
+        "maxTokens": {
+          "description": "Input plus output tokens across the run.",
+          "label": "Tokens"
+        },
+        "maxTurnsPerRollout": {
+          "description": "Agent turns one attempt may take.",
+          "label": "Turns per rollout"
+        },
+        "maxWallTimeMs": {
+          "description": "Wall-clock time from start to decision.",
+          "label": "Time (minutes)"
+        }
+      },
+      "budgetDescription": "A run stops at the first ceiling it reaches. Each run can lower these.",
+      "budgetTitle": "Budget ceilings",
+      "cooldown": "Failure cooldown (hours)",
+      "cooldownDescription": "After an automatic run or a dismissed offer, wait this long before offering or queuing another for the same agent.",
+      "defaultK": "Breadth (k)",
+      "defaultKDescription": "Candidates per stage. A run does 4k rollouts and 3k editor sessions.",
+      "defaultMode": "Recursion",
+      "defaultModeDescription": "Parallel tries independent edits side by side; sequential builds each round on the last.",
+      "defaultsTitle": "Defaults for new runs",
+      "description": "Let agents improve their own harness (instructions, guardrails, memory, tool guidance, skills, subagents, tool rules) by trying candidates on real tasks in isolation and keeping only what the evidence supports.",
+      "editorChannel": "Editor channel",
+      "editorChannelDescription": {
+        "agentic": "Editors work through the evidence files as an agent session.",
+        "auto": "A single structured proposal when the evidence fits in one prompt; an agent session over the evidence files when it does not.",
+        "structured": "Editors return one structured proposal from the evidence they are given inline."
+      },
+      "editorChannels": {
+        "agentic": "Agentic",
+        "auto": "Automatic",
+        "structured": "Structured"
+      },
+      "enableTitle": "Turn on",
+      "enabled": "Enable Harness Evolution",
+      "enabledDescription": "Off by default. Nothing runs, and no option below applies, until this is on.",
+      "experienceCap": "Lessons kept per agent",
+      "experienceCapDescription": "The weakest lessons are evicted beyond this.",
+      "invalidModel": "No configured provider offers this model.",
+      "modelsDescription": "Which model plays each role. Unset roles use the agent's own model.",
+      "modelsTitle": "Models",
+      "noMcpServers": "No MCP servers configured.",
+      "noModels": "No models configured.",
+      "offHint": "Probes never touch your workspace, side effects are blocked or simulated, and changes beyond one task always wait for your approval.",
+      "pacingTitle": "Pacing",
+      "probeDescription": "MCP servers you trust to be read-only during probes. Calls to any other server are blocked.",
+      "probeTitle": "What probes may reach",
+      "role": {
+        "composer": "Composer",
+        "editor": "Editor",
+        "executor": "Executor",
+        "reflector": "Reflector",
+        "selector": "Selector"
+      },
+      "roleDescription": {
+        "composer": "Combines the best edits into one harness.",
+        "editor": "Proposes harness edits from the evidence.",
+        "executor": "Runs the agent on the task in every rollout.",
+        "reflector": "Attributes what helped and writes the lesson.",
+        "selector": "Judges the finalists when the checks cannot decide."
+      },
+      "searchModels": "Search models",
+      "startMode": "How runs may start",
+      "startModeDescription": {
+        "background": "Also queued automatically after such a failure, and started by an hourly sweep within the limits below.",
+        "disabled": "No runs start, even by hand.",
+        "failure-triggered": "Also offered under a turn that failed through the agent's own conduct.",
+        "manual": "Only when you start one from an agent's Evolution page."
+      },
+      "startModes": {
+        "background": "In the background",
+        "disabled": "Never",
+        "failure-triggered": "Offer after failures",
+        "manual": "Manually"
+      },
+      "title": "Harness Evolution",
+      "useExperiences": "Use the experience library",
+      "useExperiencesDescription": "Give editors the most relevant lessons from earlier runs."
+    },
+    "start": {
+      "addFiles": "Add input files",
+      "baseRef": "Base commit",
+      "budgetDimension": {
+        "maxCandidates": "candidate",
+        "maxCostUsd": "cost",
+        "maxIterations": "iteration",
+        "maxModelCalls": "model call",
+        "maxParallelRuns": "parallel run",
+        "maxTokens": "token",
+        "maxTurnsPerRollout": "turn",
+        "maxWallTimeMs": "time"
+      },
+      "cancel": "Cancel",
+      "checks": "Checks",
+      "confidence": {
+        "based": "Based on {count} comparable runs.",
+        "few": "Based on only {count} comparable runs; treat as rough.",
+        "none": "No comparable history: only the call counts are known.",
+        "rough": "A rough guess: little comparable history."
+      },
+      "deliverables": "Expected files",
+      "deliverablesPlaceholder": "One path per line, e.g. report.md",
+      "description": "Each candidate harness is tried on this task in isolation. Nothing changes until a better harness is chosen, and wider changes wait for your approval.",
+      "domain": "Domain",
+      "domainPlaceholder": "e.g. data/reports (groups lessons in the library)",
+      "duplicate": "An identical run is already in progress; opening it.",
+      "editable": "What the editors may change",
+      "errors": {
+        "agent-not-found": "The agent no longer exists.",
+        "disabled": "Harness Evolution is turned off in Settings.",
+        "external-runtime": "This agent runs on an external runtime whose prompt and tool loop Cognia does not assemble, so its harness cannot be probed here.",
+        "invalid-task": "The task is incomplete or inconsistent.",
+        "model-unavailable": "No model can be called for one of the roles. Set one in the Harness Evolution settings.",
+        "no-commit": "The repository has no commit to start from.",
+        "no-session": "Conversation scope needs the conversation the run starts from.",
+        "no-workspace": "Workspace scope needs a workspace.",
+        "trigger-not-allowed": "The current settings do not allow runs started this way."
+      },
+      "estimate": "Estimate before starting",
+      "estimateSpend": "About {cost} · {tokens} tokens · {time}",
+      "estimateWork": "{rollouts} rollouts, {sessions} editor sessions, {calls} model calls",
+      "estimating": "Estimating…",
+      "exceeds": "Over the {dimension} ceiling",
+      "failed": "Could not start the run.",
+      "invalid": "The task is not ready.",
+      "isolation": "Where each attempt works",
+      "isolationHint": {
+        "files": "Each attempt gets an empty scratch directory with copies of the input files.",
+        "git": "Each attempt gets its own worktree of the repository at a fixed commit. Your working copy is never touched.",
+        "none": "A text-only task: attempts answer without files."
+      },
+      "k": "Breadth (k)",
+      "kCapped": "The budget allows k = {k}.",
+      "launchFailed": "The run could not start.",
+      "maxCost": "Cost ceiling (USD)",
+      "maxWall": "Time ceiling (minutes)",
+      "mode": "Recursion",
+      "networkOff": "Cut network access during probes where the sandbox supports it",
+      "pickRepo": "Choose repository folder",
+      "prompt": "Request",
+      "promptPlaceholder": "The request exactly as the agent receives it",
+      "relativePath": "Path inside the task",
+      "removeFile": "Remove file",
+      "repo": "Repository",
+      "repoPlaceholder": "/path/to/repository",
+      "scope": "Where an improvement applies",
+      "scopeHint": {
+        "global": "Changes the agent everywhere. Needs your approval.",
+        "session": "Switches this conversation to an evolved variant of the agent.",
+        "task": "Only recorded on this run; the agent itself is not changed.",
+        "workspace": "Writes an evolved variant for this workspace. Needs your approval."
+      },
+      "started": "Run started.",
+      "submit": "Start run",
+      "taskTitle": "Title",
+      "title": "Improve {agent}",
+      "useExperiences": "Give the editors relevant lessons from the library"
+    },
+    "status": {
+      "adopting": "Adopting",
+      "awaiting_approval": "Awaiting approval",
+      "budget_exceeded": "Budget exhausted",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "composing": "Composing",
+      "evaluating": "Evaluating",
+      "failed": "Failed",
+      "interrupted": "Interrupted",
+      "probing": "Probing",
+      "proposing": "Proposing",
+      "queued": "Queued",
+      "reference_running": "Running the current harness",
+      "reflecting": "Reflecting",
+      "rejected": "Kept current",
+      "rolled_back": "Rolled back",
+      "snapshotting": "Capturing"
+    },
+    "step": {
+      "kind": {
+        "aggregate": "Combined harness {index}",
+        "base": "Current harness, run {index}",
+        "compose": "Composed harness {index}",
+        "domain": "Task-specific edit {index}",
+        "invariant": "General edit {index}",
+        "reflect": "Reflection",
+        "rollout": "Rollout",
+        "select": "Selection"
+      },
+      "rolloutOf": "Rollout of {of}"
+    },
+    "stepDetail": {
+      "changesFromBase": "Changes from the current harness",
+      "fellBack": "The editor's proposal was invalid twice, so this stage kept its input.",
+      "keptBase": "The editor left the harness unchanged.",
+      "meta": "{attempts} attempts · {tokens} tokens · {cost} · {duration}",
+      "notes": "Editor notes",
+      "reused": "Evidence reused from an identical earlier rollout ({from}).",
+      "snapshotMissing": "This harness version is no longer stored."
+    },
+    "stepStatus": {
+      "failed": "Failed",
+      "interrupted": "Interrupted",
+      "pending": "Pending",
+      "planned": "Not started",
+      "running": "Running",
+      "skipped": "Skipped",
+      "succeeded": "Done"
+    },
+    "timeline": {
+      "fellBack": "Fell back",
+      "keptBase": "No change",
+      "phaseRound": "{phase} · round {round}",
+      "reused": "Reused"
+    },
+    "trigger": {
+      "background": "Background",
+      "failure-triggered": "After a failure",
+      "manual": "Started by you"
+    },
+    "versions": {
+      "close": "Close",
+      "compare": "Compare with current",
+      "dialogBody": "What restoring this version would change, compared with the agent's harness now. The agent's model, permissions and tools stay as they are.",
+      "dialogTitle": "Harness version",
+      "empty": "No harness versions recorded yet. One is captured when a run starts.",
+      "errors": {
+        "agent-changed": "The agent changed after you opened this version. Review the difference again.",
+        "not-found": "That version no longer exists.",
+        "other-agent": "That version belongs to another agent.",
+        "unchanged": "The agent already has this harness."
+      },
+      "inEffect": "In effect",
+      "loading": "Comparing…",
+      "notEditable": "This agent cannot be edited here; duplicate it first.",
+      "openRun": "Open run",
+      "origin": {
+        "adopted": "Adopted",
+        "candidate": "Candidate",
+        "captured": "Captured",
+        "composed": "Composed",
+        "restored": "Restored"
+      },
+      "previewFailed": "Could not compare this version.",
+      "restore": "Restore this version",
+      "restoreFailed": "Could not restore this version.",
+      "restored": "Version restored.",
+      "risk": {
+        "high": "High risk",
+        "low": "Low risk",
+        "medium": "Medium risk"
+      },
+      "sameAsCurrent": "The agent already has exactly this harness."
+    },
+    "viewer": {
+      "cancel": "Cancel run",
+      "confirmCancelBody": "Work in progress stops and the current harness stays. Spending so far is not refunded.",
+      "confirmCancelTitle": "Cancel this run?",
+      "confirmRollbackBody": "The agent goes back to the harness it had before this run. Refused if the agent was edited since.",
+      "confirmRollbackTitle": "Roll back this adoption?",
+      "interruptedHint": "The app stopped while this run worked. Resuming continues from its last finished step and spends again.",
+      "keep": "Keep",
+      "loading": "Loading run…",
+      "missing": "This run no longer exists.",
+      "noReflection": "The run has not reflected yet.",
+      "pickStep": "Pick a step to see its evidence.",
+      "resume": "Resume",
+      "retrieved": "{count, plural, one {# lesson from the library was given to the editors.} other {# lessons from the library were given to the editors.}}",
+      "rollback": "Roll back",
+      "stopped": "Stopped early: {reason}",
+      "subtitle": "{agent} · {trigger} · {mode}, k = {k} · {created}",
+      "tabs": {
+        "compare": "Compare",
+        "decision": "Decision",
+        "reflection": "Reflection",
+        "timeline": "Steps"
+      },
+      "task": "Task"
     }
   },
   "hooks": {
@@ -21324,8 +22202,12 @@
         "pinned": "Pinned",
         "proactivePush": "Proactive IM notifications",
         "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
-        "promoteConfirm": "Promote these explicit conversation values to adapter defaults?\n\n{changes}",
-        "promotePermissionConfirm": "This promotion changes the adapter Built-in Skill ceiling or HITL default and can affect other conversations. Continue?",
+        "promoteConfirm": "These explicit values from this conversation become the adapter defaults. Existing conversation overrides are not rewritten.",
+        "promoteConfirmAction": "Promote",
+        "promoteConfirmTitle": "Promote to adapter defaults?",
+        "promotePermissionAction": "Promote anyway",
+        "promotePermissionConfirm": "The promotion changes the adapter Built-in Skill ceiling or write-skill HITL default, which applies to every conversation that does not override it.",
+        "promotePermissionTitle": "This affects other conversations",
         "promoteToAdapter": "Promote to Adapter default",
         "promoteToAdapterTitle": "Promote supported explicit values without rewriting conversation overrides",
         "promotionFields": {
@@ -21489,15 +22371,20 @@
       "sidebarSection": "Inbox sidebar section"
     },
     "inboundA2UI": {
-      "rawPayload": "Raw payload"
+      "actionUnavailable": "This action can only be used in {platform}",
+      "imageUnavailable": "Image available in {platform}",
+      "rawPayload": "Raw payload",
+      "untitledAction": "Action"
     },
     "inboundRecovery": {
       "continueSafely": "Continue safely",
       "description": "One or more inbound messages could not be processed and need recovery.",
       "dismiss": "Dismiss",
       "message": "Message {id}: {reason}",
+      "retryConfirmAction": "Retry from start",
+      "retryConfirmTitle": "Retry from the start?",
       "retryFromStart": "Retry from start",
-      "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
+      "retryWarning": "The message will be processed again from the beginning, which may repeat external side effects such as sent replies or created records.",
       "title": "Inbound recovery",
       "unknown": "Unknown reason"
     },
@@ -23607,6 +24494,11 @@
     },
     "pageLoading": "Loading…",
     "retryLanguage": "Retry",
+    "startupRecovery": {
+      "description": "The interface has not started yet. Check your connection and reload to try again. Your local data will be kept.",
+      "reload": "Reload app",
+      "title": "The app could not finish starting"
+    },
     "stillWorking": "Still working… ({seconds}s)",
     "thinking": "Claude is thinking…"
   },
@@ -25461,18 +26353,40 @@
   },
   "mcpApps": {
     "approvalRequired": "This MCP App requests capabilities that have not been approved.",
-    "confirmDestructiveToolCall": "This is destructive. Confirm {tool} again?",
-    "confirmDownload": "Place this download in quarantine for review?",
-    "confirmOpenLink": "Open a link to {hostname}?",
-    "confirmToolCall": "Allow {server} to call {tool}? Risk: {risk}.",
+    "deny": "Deny",
+    "destructiveToolCall": {
+      "allow": "Run {tool}",
+      "description": "{tool} is marked destructive and may not be reversible. Allow it to run?",
+      "title": "Confirm a destructive action"
+    },
     "discardDownload": "Discard",
+    "download": {
+      "allow": "Quarantine",
+      "description": "The app wants to save files. They are held in quarantine here until you review and save or discard them.",
+      "title": "Quarantine this download?"
+    },
     "frameTitle": "App from {server}",
+    "openLink": {
+      "allow": "Open link",
+      "description": "The app wants to open a page on {hostname} in your browser.",
+      "title": "Open an external link?"
+    },
     "provenance": "App from {server} · {uri}",
     "quarantinedDownload": "Quarantined download ({count} items)",
     "resourceError": "The MCP App resource could not be loaded safely.",
     "reviewTitle": "Review each requested app capability",
+    "risk": {
+      "destructive": "destructive",
+      "read": "read-only",
+      "write": "can change data"
+    },
     "runtimeError": "The MCP App could not start safely.",
-    "saveDownload": "Review and save"
+    "saveDownload": "Review and save",
+    "toolCall": {
+      "allow": "Allow",
+      "description": "{server} wants to call {tool}. Risk: {risk}.",
+      "title": "Allow the app to run {tool}?"
+    }
   },
   "memory": {
     "add": {
@@ -26246,7 +27160,9 @@
         "listenerFailed": "Could not read browser access status. Reopen this page to try again.",
         "originHint": "After installing the extension, add its chrome-extension:// origin to the allowed origins under Connectivity → Local host → Browser access. The extension shows it on its connection screen.",
         "pairedConnected": "Connected",
+        "pairedConnectedAt": "Connected since {time}",
         "pairedEmpty": "No browser is paired yet.",
+        "pairedFeatures": "Features: {features}",
         "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
         "pairedLoadFailed": "Could not read the paired browsers.",
         "pairedOffline": "Not connected",
@@ -27451,6 +28367,22 @@
       "search": "Search settings",
       "searchAria": "Search settings",
       "searchEmpty": "No matching settings.",
+      "searchProviders": {
+        "allowPrivateEndpoint": "Allow private / HTTP endpoint",
+        "endpointAria": "{name} endpoint URL",
+        "endpointDocs": "Endpoint documentation:",
+        "endpointIssues": {
+          "embedded-credentials": "Remove embedded credentials from the endpoint URL.",
+          "insecure-public-endpoint": "Public endpoints must use HTTPS.",
+          "invalid-url": "Enter an absolute endpoint URL.",
+          "missing": "Enter a SearXNG endpoint URL. No API key is needed.",
+          "query-or-fragment": "Remove query parameters and fragments from the endpoint URL.",
+          "unsupported-scheme": "Use an HTTPS URL, or HTTP for an explicitly allowed private host."
+        },
+        "endpointPlaceholder": "https://search.example.org",
+        "legacy": "Legacy: closed to new customers; service ends {date}.",
+        "retired": "Retired on {date}; stored credentials are preserved."
+      },
       "searchResults": "Results",
       "searchRow": "Ask the web",
       "sectionAbout": "About",
@@ -28085,9 +29017,11 @@
         "cta": "Sign out / re-pair"
       },
       "signOutDescription": "You'll need to scan the QR again to reconnect.",
+      "signOutFallbackConfirm": "Sign out",
+      "signOutFallbackDescription": "This Host is the active one. Pick the saved Host this device should switch to after signing out.",
+      "signOutFallbackField": "Replacement Host",
       "signOutFallbackInvalid": "Choose one of the saved fallback Hosts.",
-      "signOutFallbackPrompt": "Enter the fallback Host id ({choices}).",
-      "signOutFallbackRequired": "A fallback Host is required before removing the active Host.",
+      "signOutFallbackTitle": "Choose a replacement Host",
       "signOutReason": "Confirm sign out",
       "signOutTitle": "Sign out",
       "step": {
@@ -34175,6 +35109,8 @@
       "dangerousAria": "Sensitive permission",
       "dangerousSection": "Sensitive permissions",
       "descriptions": {
+        "agent-config:read": "See your agent configuration — instruction files, Skills, agents, prompts and templates — and a summary of hooks, permission rules and MCP servers (never their secrets)",
+        "agent-config:write": "Change your instruction files, Skills, agents and prompts, after you confirm each change",
         "agent:control": "Control agent execution",
         "agent:dispatch": "Dispatch built-in subagents and agent teams",
         "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
@@ -36460,6 +37396,7 @@
   "providerCompare": {
     "compare": "Compare",
     "description": "Run the same query against two providers side-by-side.",
+    "failed": "Comparison failed",
     "noResult": "No result yet",
     "providerA": "Provider A",
     "providerB": "Provider B",
@@ -37168,6 +38105,28 @@
         "exportJson": "Export sanitized diagnostic history as JSON",
         "title": "History"
       },
+      "maintenance": {
+        "description": "Source attempts, successes and backoff are independent of clock completion. These diagnostics do not send notifications.",
+        "manualRetry": "Waiting for manual credential verification",
+        "never": "No evidence",
+        "outcome": {
+          "blocked": "Blocked",
+          "failed": "Failed",
+          "skipped": "Skipped",
+          "succeeded": "Succeeded"
+        },
+        "status": {
+          "idle": "Idle",
+          "paused-auth": "Authentication paused",
+          "paused-offline": "Offline paused",
+          "paused-vault": "Vault paused",
+          "running": "Running",
+          "scheduled": "Scheduled (including backoff)"
+        },
+        "times": "Last attempt: {attempt}; last success: {success}; next check: {next}; consecutive failures: {failures}",
+        "title": "Background maintenance",
+        "unknown": "No source maintenance evidence is available in this runtime. Remote source state is not projected."
+      },
       "matrix": {
         "cost": "Estimated cost",
         "description": "Raw metrics and confidence remain visible; no opaque composite score is calculated.",
@@ -37255,7 +38214,6 @@
       "manage": "Manage in External Agents",
       "runsOnHost": "Runs on the paired host",
       "summary": "{working} of {total} ready",
-      "switchedOff": "External agents are switched off, so the {count} configured here will not run until you turn them back on.",
       "title": "Agents with their own model access"
     },
     "failed": "failed",
@@ -37413,6 +38371,14 @@
     "localProvidersTitle": "Local Providers",
     "localai": "LocalAI",
     "localaiDescription": "Self-hosted OpenAI alternative",
+    "magpie": {
+      "connected": "Connected to Magpie {version} · {count} models",
+      "description": "Connect to the running Magpie gateway and load the models enabled there. Start Magpie before discovering.",
+      "discover": "Discover local Magpie",
+      "discovering": "Discovering…",
+      "failed": "Could not connect to Magpie",
+      "title": "Magpie gateway"
+    },
     "manageInstalledModels": "Manage installed models for {provider}",
     "manageModels": "Manage Models",
     "managementKey": "Management Key (Optional)",
@@ -39345,6 +40311,7 @@
           "MODE_NOT_EDITABLE": "This mode cannot be used yet.",
           "PANEL_C_REQUIRED": "A panel of three needs the Panel member C role.",
           "PROFILE_NOT_ALLOWED": "This check is not available for this mode.",
+          "PROMPT_VERSION_NOT_ALLOWED": "Choose the shipped role prompts or the Prompt Center's.",
           "ROLE_MISSING": "The {role} role needs a model alias.",
           "ROLE_UNKNOWN": "{role} is not a role of this mode."
         },
@@ -39369,6 +40336,15 @@
           "schema_fixture": "Schema check",
           "text_basic": "Format check",
           "text_review": "Model review"
+        },
+        "promptVersion": "Role prompts",
+        "promptVersionDesc": {
+          "custom": "Runs the Router Fusion role prompts from Settings → Authoring → Prompts. Each run uses the text published when it starts, and every published edit gives this action's runs a new identity.",
+          "shipped": "Runs the role prompts that ship with Cognia. Built-in actions always use these."
+        },
+        "promptVersionValue": {
+          "custom": "Prompt Center",
+          "shipped": "Shipped (roles-1)"
         },
         "reset": "Reset to built-in",
         "resetCustom": "Clear edits",
@@ -41325,6 +42301,7 @@
       "files-trash-purge": "Files Trash Purge",
       "github-issue-sync": "GitHub Issue Sync",
       "goal": "Goal",
+      "harness-evolution-sweep": "Harness Evolution Sweep",
       "im-push": "IM Push",
       "issue-wakeup": "Issue Wakeup",
       "monitor": "Monitor",
@@ -41559,14 +42536,16 @@
     "addCustomSource": "Add",
     "addCustomSourceDesc": "Name the source and enter the website domain to restrict research results.",
     "addCustomSourceTitle": "Add custom source",
+    "allowPrivateEndpoint": "Allow private / HTTP endpoint",
     "apiKey": "API key",
     "backupKeys": "Backup keys",
     "cancel": "Cancel",
+    "configureProvider": "Configure {provider}",
     "configureProviderHint": "Configure at least one provider below",
     "connectionFailed": "Connection failed",
     "connectionSuccess": "Connection successful",
     "defaultProvider": "Default provider",
-    "description": "Configure web search providers and chat integration.",
+    "description": "Configure web search providers, page readers, and chat routing.",
     "disableAll": "Disable all",
     "domainSources": {
       "arxiv": "arXiv",
@@ -41575,8 +42554,23 @@
       "wikipedia": "Wikipedia"
     },
     "enableAll": "Enable all",
+    "enableProvider": "Enable {provider}",
     "enableSearch": "Enable web search",
     "enabled": "enabled",
+    "endpoint": "SearXNG endpoint",
+    "endpointGrantRequired": "Explicit permission is required for this private endpoint.",
+    "endpointHelp": "Use your JSON-enabled SearXNG instance. No API key is required.",
+    "endpointIssues": {
+      "embedded-credentials": "Remove credentials from the URL.",
+      "insecure-public-endpoint": "Public endpoints must use HTTPS.",
+      "invalid-url": "Enter an absolute URL.",
+      "missing": "Enter a SearXNG endpoint.",
+      "query-or-fragment": "Remove the query string and fragment.",
+      "unsupported-scheme": "Use an HTTP or HTTPS URL."
+    },
+    "endpointPlaceholder": "https://search.example.com",
+    "engine": "Search engine",
+    "enginePlaceholder": "Optional engine name",
     "fallbackEnabled": "Auto-fallback",
     "features": {
       "academic": "Academic",
@@ -41595,14 +42589,19 @@
     "googleCx": "Programmable Search Engine ID (cx)",
     "googleCxHelp": "Required for Google Custom Search",
     "googleCxPlaceholder": "e.g. 012345678901234567890:abcdefg1234",
+    "groundingBilling": "Each search generates a model response and is billed to your Google account.",
+    "groundingModel": "Google Search grounding model",
     "hideKeys": "Hide keys",
     "higherPriority": "Higher priority",
+    "invalidEngine": "Enter a supported engine name (1–40 letters, digits, spaces, underscore, dot or hyphen).",
     "invalidKeyFormat": "Invalid key format",
+    "invalidModel": "Select a currently supported grounding model.",
     "invalidSourceDomain": "Enter a valid public domain or HTTP(S) URL.",
     "keyBackup": "Backup key #{n}",
     "keyPoolResults": "Key pool results",
     "keyPoolSize": "{count} keys in rotation",
     "keyPrimary": "Primary key",
+    "legacyNotice": "Legacy: closed to new customers; available to existing accounts until {date}.",
     "lowerPriority": "Lower priority",
     "maxResults": "Max results",
     "maxRetries": "Max retries",
@@ -41617,7 +42616,9 @@
       "performance": "Performance",
       "performanceDesc": "Result caching and provider circuit breaker",
       "providers": "Providers",
-      "providersDesc": "API keys and per-provider configuration",
+      "providersDesc": "Credentials, endpoints, engines, and models",
+      "reading": "Reading",
+      "readingDesc": "Readers, recipients, fallback, and distillation",
       "safety": "Safety",
       "safetyDesc": "Safe search and source verification"
     },
@@ -41636,17 +42637,45 @@
     "pricingPerSearch": "${price}/search",
     "primary": "Primary",
     "priority": "Priority",
+    "providerDescriptions": {
+      "bing": "Microsoft retired this API.",
+      "brave": "Brave web, news, image and video search.",
+      "deepseek": "Search and Reader are configured independently.",
+      "exa": "Semantic search with news and academic results.",
+      "google": "Legacy Google Programmable Search Engine API.",
+      "google-ai": "Model generation grounded in Google Search.",
+      "perplexity": "Search with recency, region and domain filters.",
+      "searchapi": "Search across selectable SERP engines.",
+      "searxng": "Your own JSON-enabled search endpoint; no API key.",
+      "serpapi": "SERP results across selectable engines.",
+      "serper": "Google results with news, images, video and academic search.",
+      "tavily": "AI search with generated answers.",
+      "tinyfish": "Search and Reader are configured independently."
+    },
     "providers": "Search providers",
-    "providersDescription": "Configure API keys for each provider",
+    "providersDescription": "Configure provider credentials and endpoints",
     "removeKey": "Remove key",
     "researchDomains": "Required domains",
     "researchProviders": "Preferred providers",
     "researchSources": "Research sources",
     "researchSourcesDesc": "Preferred providers are tried first; selected domains always restrict deep research results.",
     "reset": "Reset",
+    "retiredNotice": "Retired on {date}. Stored credentials are preserved; this provider cannot be configured or enabled.",
     "rotateKeys": "Rotate API keys",
     "rotateKeysDesc": "Spread requests across a pool of keys; a rate-limited or rejected key is skipped automatically.",
     "rotationStrategy": "Strategy",
+    "safeSearchLevels": {
+      "moderate": "Safe search: moderate",
+      "off": "Safe search: off",
+      "strict": "Safe search: strict"
+    },
+    "searchTypes": {
+      "academic": "Academic",
+      "general": "General",
+      "images": "Images",
+      "news": "News",
+      "videos": "Videos"
+    },
     "selectProvider": "Select provider",
     "selected": "selected",
     "showKeys": "Show keys",
@@ -41656,10 +42685,20 @@
     "sourceName": "Source name",
     "sourceNamePlaceholder": "Source name",
     "sourceNeedsDomain": "Domain required",
+    "states": {
+      "configured": "Configured",
+      "disabled": "Disabled",
+      "missing-config": "Missing configuration",
+      "missing-key": "Missing key",
+      "retired": "Retired"
+    },
     "strategyLeastUsed": "Least used",
     "strategyRandom": "Random",
     "strategyRoundRobin": "Round-robin",
-    "testConnection": "Test",
+    "testConnection": "Test search",
+    "testCost": "Testing sends an explicit Search request and may use vendor credits. No test runs automatically.",
+    "testEvidence": "This dated test is evidence, not a guarantee of current availability.",
+    "testedAt": "Tested at {date}",
     "title": "Web search"
   },
   "searchUsage": {
@@ -42795,7 +43834,7 @@
         "workingDirPlaceholder": "/path/to/project",
         "workingDirTitle": "Default working directory"
       },
-      "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+      "description": "Set defaults for the built-in agent, manage tool permissions and sessions, and check runtime health. Agents and conversations can override these defaults.",
       "nav": {
         "groups": {
           "behaviorGroup": "Behavior",
@@ -43129,7 +44168,7 @@
         "sessions": "Sessions",
         "sidecar": "Sidecar"
       },
-      "title": "Built-in agent runtime",
+      "title": "Agent runtime",
       "toolSearch": {
         "addAria": "Add",
         "description": "Load tools on demand to keep the system prompt small. Pin servers or tools below to keep them always available.",
@@ -45452,7 +46491,7 @@
       },
       "title": "Context compaction",
       "toolResultCap": {
-        "description": "Cap each tool result to this many tokens during compaction.",
+        "description": "Cap each tool result to this many tokens during compaction. Set 0 to preserve complete results.",
         "heading": "Tool-result cap",
         "label": "Max tool-result tokens"
       },
@@ -46992,7 +48031,8 @@
       "permissionsEditor": {
         "builtInSkills": "Built-in Skills ceiling",
         "cancel": "Cancel",
-        "confirmImpact": "Save this permission ceiling? It can block skills and host capabilities across every conversation on this adapter.",
+        "confirmImpact": "It can block skills and host capabilities across every conversation on this adapter.",
+        "confirmImpactTitle": "Save this permission ceiling?",
         "conversationGrantRequired": "The adapter can only cap this capability; each conversation must grant it explicitly.",
         "hitl": "Require HITL for write skills",
         "hitlHelp": "Conversation settings may override this default. Destructive skills always require approval.",
@@ -48084,6 +49124,7 @@
       "tunnel": {
         "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for another feature. Replacing it changes what that public URL points at.",
         "busyCancelled": "Left the existing tunnel running.",
+        "busyKeep": "Keep it",
         "busyReplace": "Replace the tunnel",
         "busyStopBody": "This app runs one cloudflared process, and it is exposing {localUrl} at {publicUrl} for another feature. Stopping it here takes that public URL down too.",
         "busyStopConfirm": "Stop it anyway",
@@ -48939,6 +49980,52 @@
         "unit": "days",
         "zeroHint": "Set to 0 to keep traces forever."
       },
+      "retentionHealth": {
+        "description": "Last sweep in this window and account only. Other windows or a restart have unknown evidence. No notifications are sent. Raw usage keeps 90 days; cost rollups also keep the complete boundary local day.",
+        "lastSweep": "Last completed: {when}",
+        "reasons": {
+          "cleanup-pending": "Waiting for original host cleanup",
+          "configured-off": "Retention disabled",
+          "file-delete-failed": "File deletion incomplete",
+          "file-metadata-unknown": "File age unknown",
+          "prune-failed": "Prune incomplete",
+          "unsupported-host": "Inapplicable on this host",
+          "vault-locked": "Vault locked"
+        },
+        "removed": "{count} removed",
+        "stages": {
+          "files": "Files",
+          "rows": "Job records"
+        },
+        "status": {
+          "blocked": "Blocked",
+          "completed": "Completed",
+          "completed-no-work": "Completed, no work",
+          "failed": "Failed",
+          "off": "Off or inapplicable",
+          "partial": "Partially completed",
+          "unknown": "Unknown"
+        },
+        "targets": {
+          "agentTraces": "Agent traces",
+          "evalArtifacts": "Evaluation artifacts",
+          "evalOnline": "Online evaluation",
+          "managedDesktopDeletion": "Desktop result deletion",
+          "mediaGenerationJobs": "Video jobs and files",
+          "memoryGovernance": "Memory governance",
+          "notificationDelivery": "Notification delivery",
+          "ocrResults": "OCR cache",
+          "retrievalControl": "Retrieval governance",
+          "sessionSideChats": "Session side chats",
+          "siteArtifacts": "Site artifacts",
+          "syncTombstones": "Sync deletion markers",
+          "usageHistory": "Usage and cost history",
+          "workSubmissions": "Work submissions",
+          "workflowAppData": "Workflow app data"
+        },
+        "title": "Background retention diagnostics",
+        "unknown": "No sweep evidence in this window."
+      },
       "schedule": {
         "currentCount": "{count, plural, =1 {1 active schedule} other {# active schedules}}",
         "desc": "Run additional encrypted backups on arbitrary cron expressions through the task scheduler. Tasks survive restarts and surface under Settings → Scheduled Tasks.",
@@ -49256,7 +50343,7 @@
       "about": "Version, build, diagnostics, updates and credits.",
       "account": "Your identity, plan usage, profile, subscription and paired devices in one place.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
-      "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
+      "agentRuntime": "Manage default behavior, tool permissions, sessions, and diagnostics for the built-in agent.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
       "aiConnections": "Configure AI accounts, endpoints, credentials, deployments, verification, health, and import or export.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
@@ -49282,6 +50369,7 @@
       "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
       "goals": "Persistent chat goals. Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in.",
+      "harnessEvolution": "Let agents improve their own instructions, skills and tool rules from evidence: probes, budgets, approval and the experience library.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
       "imageCatalog": "Container images projects may run their agents in",
       "logs": "Log levels, transports (console / IndexedDB / native / remote / Langfuse / OpenTelemetry), retention, redaction and per-module sampling.",
@@ -49298,6 +50386,7 @@
       "presets": "Reusable session configurations — system prompt plus model, tool, MCP, and skill overrides.",
       "proIde": "Embedded VS Code install and disk usage",
       "profile": "Your local display name, avatar and bio — synced to companion devices and included in backups.",
+      "prompts": "Every prompt Cognia sends: edit built-in prompts with scoped overrides, history and reset, and reach agent, preset, Skill, mode and instruction-file prompts through their owners.",
       "providers": "AI provider API keys, models, and connection settings.",
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
       "remoteHosts": "Drive a remote Cognia host — its terminal, files, and git — from this desktop.",
@@ -49346,7 +50435,7 @@
       "hostMode": {
         "closeLocked": "Always-on host mode keeps this on Minimize to tray.",
         "description": "Make this computer the machine your bots, connectors and scheduled tasks run on while you are away.",
-        "details": "Keeps the computer from sleeping, starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
+        "details": "Keeps the computer from sleeping while idle (closing a laptop lid still puts it to sleep), starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
         "disabledToast": "Always-on host mode is off.",
         "enabledToast": "This computer is now an always-on host.",
         "failed": "Could not change always-on host mode: {error}",
@@ -50058,6 +51147,7 @@
         "theme": "Theme",
         "ttsEnabled": "Text to speech",
         "ttsProvider": "Speech provider",
+        "webReader": "Web reading and distillation",
         "webTools": "Web tools",
         "workingDir": "Default working directory"
       },
@@ -52363,6 +53453,1471 @@
       "timezoneLabel": "Timezone",
       "title": "Profile"
     },
+    "promptCenter": {
+      "actions": {
+        "cancel": "Cancel",
+        "discardDraft": "Discard draft",
+        "followBase": "Follow the base prompt again",
+        "loadLatest": "Discard my edits and load the latest",
+        "makeDefault": "Use by default",
+        "publish": "Publish",
+        "reset": "Reset to inherited",
+        "retry": "Retry",
+        "revertEdits": "Revert my edits",
+        "save": "Save",
+        "saveCustom": "Save as my version",
+        "saveDraft": "Save draft",
+        "updateVariant": "Update my variant",
+        "useShipped": "Start from the shipped text"
+      },
+      "activation": {
+        "new-session-required": "Applies to new sessions; a running external agent keeps the instructions it started with.",
+        "next-operation": "Applies to the next call that uses it; nothing needs restarting.",
+        "reload-required": "Applies after its owner reloads.",
+        "unsupported": "This host cannot apply it."
+      },
+      "baseSource": {
+        "app-default": "Default system prompt",
+        "character": "Agent prompt",
+        "none": "No base prompt",
+        "session": "This chat's prompt",
+        "team-member": "Team member override"
+      },
+      "compare": {
+        "against": "Compare with",
+        "diffLabel": "Changes between the two versions",
+        "identical": "No differences.",
+        "published": "Published at this scope",
+        "shipped": "Shipped text"
+      },
+      "conflict": {
+        "body": "The file changed on disk after it was opened. Your text is kept below the changes made on disk; choose which one to keep.",
+        "diffLabel": "Differences between the file on disk and your text",
+        "keepMine": "Save my text over it",
+        "takeDisk": "Discard my text and load the file",
+        "title": "The file changed on disk"
+      },
+      "detail": {
+        "missing": "This prompt is no longer available."
+      },
+      "editor": {
+        "insertVariable": "Insert {name}",
+        "length": "{length} / {max}",
+        "shippedLabel": "Shipped text",
+        "variableOptional": "Optional; clipped to {max} characters",
+        "variableRequired": "Required; clipped to {max} characters",
+        "variables": "Variables"
+      },
+      "facts": {
+        "activation": "When a change applies",
+        "consumers": "Used by",
+        "hosts": "Runs in",
+        "lastUsed": "Last use in this window",
+        "outputContract": "Output contract",
+        "overrides": "Overridden at",
+        "requiredFragments": "Text the reply parser depends on",
+        "risk": "Edit risk"
+      },
+      "fallback": {
+        "contract-incompatible": "the override was written for an older contract",
+        "invalid-body": "the override failed validation",
+        "pii-blocked": "the override contains personal data",
+        "snapshot-unavailable": "the overrides could not be read"
+      },
+      "group": {
+        "agents": "Agents and modes",
+        "chat": "Chat",
+        "completion": "Completion",
+        "developer": "Developer tools",
+        "generation": "Generation",
+        "goals": "Goals",
+        "knowledge": "Knowledge and memory",
+        "permissions": "Permissions",
+        "routing": "Routing",
+        "team": "Agent Team",
+        "twin": "Digital twin"
+      },
+      "history": {
+        "active": "Active",
+        "compareHint": "Changes from this revision to the text in the editor.",
+        "currentDraft": "Draft",
+        "diffLabel": "Changes from the revision to the editor",
+        "empty": "Nothing has been saved at this scope yet.",
+        "kind": {
+          "draft": "Draft",
+          "published": "Published",
+          "reset": "Reset to inherited"
+        },
+        "loadDraft": "Load into the editor",
+        "origin": {
+          "cli": "from the CLI",
+          "editor": "from the editor",
+          "import": "imported",
+          "plugin": "applied by a plugin",
+          "restore": "restored"
+        },
+        "restore": "Restore as a new revision",
+        "restoreInheritance": "Restore inheritance",
+        "title": "Revisions"
+      },
+      "host": {
+        "app": "App",
+        "bootstrap": "Bootstrap agent",
+        "cli": "CLI"
+      },
+      "inspectOnly": {
+        "body": "A parser or a host contract reads this text, so it is shown for reference and cannot be overridden.",
+        "title": "Read-only protocol text"
+      },
+      "instructionSource": {
+        "extra": "Extra instruction path",
+        "global": "Global instruction file",
+        "import": "Imported by another instruction file",
+        "instructions-dir": "Project instructions folder",
+        "project": "Project instruction file"
+      },
+      "issues": {
+        "empty": "The text is empty.",
+        "malformedPlaceholder": "A placeholder is malformed; use '{{'name'}}'.",
+        "missingFragment": "Must keep \"{fragment}\": the reply parser depends on it.",
+        "missingVariable": "Must use the variable {name}.",
+        "notEditable": "This prompt cannot be edited.",
+        "pii": "The text looks like it contains personal data, which prompts must not carry.",
+        "tooLong": "{length} characters; the limit is {limit}.",
+        "unknownVariable": "{name} is not a variable of this prompt."
+      },
+      "kind": {
+        "composer-template": "Composer template",
+        "feature-template": "Feature template",
+        "procedure": "Procedure",
+        "project-rule": "Project rule",
+        "protocol": "Protocol",
+        "role": "Role",
+        "runtime-baseline": "Runtime baseline"
+      },
+      "lastUsed": {
+        "default": "Shipped text, at {time}",
+        "fallback": "Shipped text at {time}, because {reason}",
+        "never": "Not used since this window opened",
+        "override": "Override at the {scope} scope, at {time}"
+      },
+      "omission": {
+        "bare-mode": "skipped: bare mode does not read instruction files",
+        "empty": "nothing set",
+        "load-failed": "the files could not be read; a turn would continue without them",
+        "no-filesystem": "this host has no project files to read"
+      },
+      "operation": {
+        "activate-procedure": "Activates on demand",
+        "append-rules": "Adds rules",
+        "inspect-only": "Read only",
+        "legacy-replace": "Replaces the base",
+        "narrow-only": "Can only narrow",
+        "replace-template": "Replaces the template"
+      },
+      "owner": {
+        "builtIn": "Built in",
+        "customCopyName": "{name} (my version)",
+        "customHint": {
+          "character": "Saving creates a variant of this agent that owns only its prompt and follows the agent for everything else.",
+          "custom-mode": "Saving creates your own copy of this mode.",
+          "preset": "Saving creates your own copy of this preset; choose \"Use by default\" on the copy to make it the default.",
+          "skill": "Saving creates your own copy of this Skill with its resources.",
+          "subagent-template": "Saving creates your own subagent from this template, with its settings.",
+          "team-template": "Saving creates your own copy of the whole template, with only this teammate's prompt changed."
+        },
+        "defaultSystemPrompt": "Default system prompt",
+        "loading": "Loading…",
+        "missing": "This resource no longer exists.",
+        "openCustom": "Open my version",
+        "openIn": {
+          "agent-modes": "Open in Agent modes",
+          "agent-runtime": "Open in Agent runtime",
+          "characters": "Open in Agents",
+          "chatTemplates": "Open in Chat templates",
+          "presets": "Open in Presets",
+          "skills": "Open in Skills",
+          "squads": "Open in Squads",
+          "subagents": "Open in Subagents"
+        },
+        "ownerOnly": {
+          "composer-template": "A chat template is inserted as your own message, not as a system instruction. Edit it in Chat templates, which keeps its parameters and revisions consistent."
+        },
+        "readFailed": "Could not read this resource",
+        "readOnly": {
+          "built-in": "Shipped with Cognia",
+          "host-unsupported": "Not editable on this device",
+          "immutable": "This agent cannot be changed",
+          "plugin": "Owned by a plugin"
+        }
+      },
+      "ownerActivation": {
+        "app-setting": "Used by chats whose agent and session set no prompt of their own, from their next turn.",
+        "character": "Used from the next turn of every chat with this agent.",
+        "composer-template": "Inserted into the composer when you choose it.",
+        "custom-mode": "Used from the next turn of chats in this mode.",
+        "instruction-file": "Read from disk; used from the next turn in this workspace.",
+        "preset": "Applied when the preset is next applied to a chat; chats already using it keep their configuration.",
+        "skill": "Delivered by the Skill runtime the next time the Skill loads.",
+        "subagent-template": "Used the next time this subagent is delegated to.",
+        "team-template": "Copied into teams created from this template from now on; existing teams keep their own copy.",
+        "workspace-instructions": "Used from the next turn of chats in this workspace."
+      },
+      "preview": {
+        "agent": "Agent",
+        "description": "The system prompt a new chat starts from, in the order a turn joins it. Sections only a turn can build are listed below it.",
+        "failed": "Could not build the preview: {message}",
+        "loading": "Building the preview…",
+        "mode": "Mode",
+        "noAgent": "No agent",
+        "noMode": "No mode",
+        "omittedTitle": "Not included",
+        "railHint": "What a new chat starts from",
+        "refresh": "Refresh",
+        "segments": "Sections in send order",
+        "sendTimeBody": "Added by each turn from live state (recall, goals, plans, tools), so they are not previewed here.",
+        "sendTimeTitle": "Assembled at send time",
+        "size": "{chars, plural, one {# character} other {# characters}} · ~{tokens} tokens",
+        "skillsCount": "{count, plural, one {# Skill} other {# Skills}}",
+        "skillsNote": "The Skill runtime delivers these within its own budget; which ones load depends on the turn.",
+        "title": "Effective chat prompt",
+        "total": "{chars, plural, one {# character} other {# characters}} · about {tokens} tokens before send-time sections"
+      },
+      "profile": {
+        "applied": "{count, plural, =0 {Nothing was published.} one {Published # override.} other {Published # overrides.}}",
+        "appliedWithConflicts": "Published {applied}; {conflicted} changed since the preview and were left alone.",
+        "applyAction": "{count, plural, =0 {Publish} one {Publish # override} other {Publish # overrides}}",
+        "chooseFile": "Choose a profile file",
+        "description": "Move published overrides between machines and installations as one JSON file.",
+        "exportAction": "Export",
+        "exportHint": "Every published override in the chosen scopes. Drafts and history stay here.",
+        "exportTab": "Export",
+        "exported": "{count, plural, one {Exported # override.} other {Exported # overrides.}}",
+        "importTab": "Import",
+        "invalidFile": "This is not a prompt profile: {reason}",
+        "mapHint": "These overrides belong to workspaces, agents or chats of the machine they came from. Choose where each applies here, or skip it.",
+        "mapTarget": "Local target for {id}",
+        "mapTitle": "Targets",
+        "nothingToExport": "Nothing is published in the chosen scopes.",
+        "previewTitle": "{count, plural, one {# entry} other {# entries}}",
+        "skipTarget": "Skip",
+        "status": {
+          "contract-mismatch": "Written for another version",
+          "invalid": "Fails validation",
+          "needs-target": "Needs a target",
+          "new": "New",
+          "replace": "Replaces an override",
+          "scope-unsupported": "Scope not supported",
+          "unchanged": "Already published",
+          "unknown-prompt": "Unknown prompt"
+        },
+        "title": "Prompt profiles",
+        "upstreamChanged": "Shipped text changed since"
+      },
+      "rail": {
+        "allGroups": "All groups",
+        "allSources": "All sources",
+        "choose": "Choose a prompt",
+        "count": "{total, plural, one {# prompt} other {# prompts}} · {modified} modified",
+        "failed": "Could not read: {sources}",
+        "groupFilter": "Group",
+        "loadFailed": "Could not load prompts: {message}",
+        "loading": "Loading prompts…",
+        "modified": "Modified",
+        "modifiedOnly": "Modified only",
+        "noMatches": "No prompts match.",
+        "noWorkspace": "No workspace",
+        "profiles": "Profiles",
+        "readOnly": "Read only",
+        "search": "Search prompts",
+        "sourceFilter": "Source",
+        "unavailable": "Unavailable",
+        "workspace": "Workspace for instruction files"
+      },
+      "resetDialog": {
+        "bodyAccount": "The account override is removed and the shipped text below applies again. History is kept and can be restored.",
+        "bodyScoped": "This override is removed. Without it the slot falls back to the text below (an account override, or the shipped text); a conversation may still meet a narrower workspace or agent override. History is kept.",
+        "title": "Reset this override?"
+      },
+      "risk": {
+        "approval-sensitive": "Approval-sensitive",
+        "ordinary": "Ordinary",
+        "protocol": "Protocol"
+      },
+      "riskNote": {
+        "approval-sensitive": "Takes part in an approval decision; a customized version can only make the outcome more conservative.",
+        "ordinary": "Wording only; a weak edit lowers output quality.",
+        "protocol": "Its reply is parsed; the required text must stay."
+      },
+      "scope": {
+        "account": "Account",
+        "agent": "Agent",
+        "session": "Chat",
+        "workspace": "Workspace"
+      },
+      "segment": {
+        "base": "Base prompt",
+        "harness": "Standing rules",
+        "instructions": "Instruction files",
+        "mode": "Mode",
+        "persona": "Persona",
+        "skills": "Skills",
+        "workspace": "Workspace instructions"
+      },
+      "sendTime": {
+        "brief-mode": "Brief mode",
+        "compaction-recovery": "Compaction recovery",
+        "goal": "Active goal",
+        "knowledge": "Knowledge",
+        "memory": "Memory recall",
+        "output-style": "Output style",
+        "plan": "Active plan",
+        "project-continuity": "Project continuity",
+        "sandbox": "Sandbox hints",
+        "team-protocol": "Team protocol",
+        "visual-output": "Visual output"
+      },
+      "source": {
+        "app-setting": "App setting",
+        "character": "Agent",
+        "code": "Built in",
+        "composer-template": "Chat template",
+        "custom-mode": "Mode",
+        "instruction-file": "Instruction file",
+        "preset": "Preset",
+        "skill": "Skill",
+        "subagent-template": "Subagent",
+        "team-template": "Team template",
+        "workspace-instructions": "Workspace"
+      },
+      "sourceGroup": {
+        "app-setting": "Default prompt",
+        "character": "Agents",
+        "code": "Built-in prompts",
+        "composer-template": "Chat templates",
+        "custom-mode": "Custom and plugin modes",
+        "instruction-file": "Instruction files",
+        "preset": "Presets",
+        "skill": "Skills",
+        "subagent-template": "Subagent templates",
+        "team-template": "Agent Team templates",
+        "workspace-instructions": "Workspace instructions"
+      },
+      "status": {
+        "hasDraft": "There is an unpublished draft.",
+        "inherits": "Not overridden at this scope; it inherits.",
+        "published": "Published at this scope on {time}."
+      },
+      "tabs": {
+        "compare": "Compare",
+        "compareBase": "Compare with base",
+        "compareSaved": "Compare with saved",
+        "edit": "Edit",
+        "history": "History ({count})"
+      },
+      "target": {
+        "choose": {
+          "agent": "Choose an agent",
+          "session": "Choose a chat",
+          "workspace": "Choose a workspace"
+        },
+        "none": {
+          "agent": "No agents yet.",
+          "session": "No chats yet.",
+          "workspace": "No workspaces yet."
+        },
+        "scope": "Scope",
+        "target": "Target"
+      },
+      "toast": {
+        "conflict": "This prompt changed elsewhere. Your text is kept; load the latest to continue.",
+        "customSaved": "Saved as your own version.",
+        "draftDiscarded": "Draft discarded.",
+        "draftSaved": "Draft saved. It is not used until you publish it.",
+        "failed": "Failed: {message}",
+        "followsBase": "Now follows the base prompt again.",
+        "madeDefault": "{name} is now the default.",
+        "published": "Published. The next call uses it.",
+        "reset": "Reset. The inherited text applies again.",
+        "restored": "Restored as a new revision.",
+        "saved": "Saved.",
+        "scope": "This prompt cannot be overridden at that scope."
+      },
+      "unavailable": {
+        "confirmBody": "Its published text, draft and history at this scope are deleted for good. Export a profile first to keep a copy.",
+        "confirmTitle": "Remove this override?",
+        "hasDraft": "Has a draft",
+        "noActive": "No published text, only a draft or a reset.",
+        "plugin": "This prompt belongs to the plugin {plugin}, which is not enabled. Your text is kept and included in exports, and applies again when the plugin is enabled with a compatible version.",
+        "remove": "Remove",
+        "removed": "Override removed.",
+        "retired": "This version of Cognia no longer uses this prompt. Your text is kept and included in exports.",
+        "slots": "Saved overrides",
+        "title": "Not available right now"
+      },
+      "warnings": {
+        "contractBody": "The prompt's inputs or output contract changed in this version. The override is kept but not used; edit it against the new contract and publish again.",
+        "contractTitle": "Override not in use",
+        "staleBody": "Someone published or reset this slot while you were editing. Your text is kept.",
+        "staleTitle": "Changed since you started editing",
+        "upstreamBody": "Cognia updated the shipped text after this override was written. Compare with the shipped text to see what changed.",
+        "upstreamTitle": "Shipped text changed"
+      }
+    },
+    "promptEntries": {
+      "agent__browser-companion__context": {
+        "description": "Protocol text read by the host: marks one page captured by the browser extension as untrusted data.",
+        "title": "Captured page context"
+      },
+      "agent__browser-companion__context-multi": {
+        "description": "Protocol text read by the host: marks several pages captured by the browser extension as untrusted data.",
+        "title": "Captured pages context"
+      },
+      "agent__browser-companion__grant": {
+        "description": "Tells the agent it may act in your real, signed-in browser tabs in a chat started from the extension.",
+        "title": "Browser Companion access"
+      },
+      "agent__builtin__Explore__identity": {
+        "description": "Identity of the Explore subagent, a fast read-only scout that finds the relevant code and reports back.",
+        "title": "Explore subagent"
+      },
+      "agent__builtin__Plan__identity": {
+        "description": "Identity of the Plan subagent, which designs an ordered implementation plan without changing anything.",
+        "title": "Plan subagent"
+      },
+      "agent__builtin__code-reviewer__identity": {
+        "description": "Identity of the code reviewer subagent, which reads a change and reports defects without editing.",
+        "title": "Code reviewer subagent"
+      },
+      "agent__builtin__general-purpose__identity": {
+        "description": "Identity of the general-purpose subagent, which finishes one delegated task end to end with full tools.",
+        "title": "General-purpose subagent"
+      },
+      "agent__builtin__workflow-debugger__identity": {
+        "description": "Identity of the subagent that works out why a workflow run failed and explains the likely fix.",
+        "title": "Workflow debugger subagent"
+      },
+      "agent__builtin__workflow-designer__identity": {
+        "description": "Identity of the subagent that builds and edits visual workflows for you in the workflow editor.",
+        "title": "Workflow designer subagent"
+      },
+      "agent__builtin__workflow-doc-writer__identity": {
+        "description": "Identity of the subagent that adds explanatory notes next to groups of nodes in a workflow.",
+        "title": "Workflow doc writer subagent"
+      },
+      "agent__builtin__workflow-refactorer__identity": {
+        "description": "Identity of the subagent that restructures a selected part of a workflow without changing what it does.",
+        "title": "Workflow refactorer subagent"
+      },
+      "agent__cli__plan-refine": {
+        "description": "Sent in the CLI when you ask to refine the plan, asking for an updated plan without making changes.",
+        "title": "CLI plan refinement"
+      },
+      "agent__executor__fallback": {
+        "description": "The minimal system prompt used when an agent run has tools but no agent or prompt of its own.",
+        "title": "Fallback agent identity"
+      },
+      "agent__loop__iteration": {
+        "description": "Protocol text read by the host: runs one /loop iteration and asks for a JSON line choosing the next delay.",
+        "title": "Loop iteration"
+      },
+      "agent__mode__academic": {
+        "description": "In Academic mode, has the agent search scholarly databases and analyze papers with its tools.",
+        "title": "Mode: Academic research"
+      },
+      "agent__mode__code-gen": {
+        "description": "In Code generation mode, has the agent write clean, documented code with error handling.",
+        "title": "Mode: Code generation"
+      },
+      "agent__mode__data-analysis": {
+        "description": "In Data analysis mode, has the agent help clean data, run statistics, and draw insights.",
+        "title": "Mode: Data analysis"
+      },
+      "agent__mode__plan": {
+        "description": "In Plan mode, has the agent investigate and propose a step-by-step plan without making changes.",
+        "title": "Mode: Plan"
+      },
+      "agent__mode__ppt-generation": {
+        "description": "In Presentation mode, has the agent structure and design slides, with speaker notes when useful.",
+        "title": "Mode: Presentation"
+      },
+      "agent__mode__research": {
+        "description": "In Research mode, has the agent find, weigh, and summarize sources, with citations where possible.",
+        "title": "Mode: Research"
+      },
+      "agent__mode__web-design": {
+        "description": "In Web design mode, has the agent write React and Tailwind pages you can preview right away.",
+        "title": "Mode: Web design"
+      },
+      "agent__mode__workflow": {
+        "description": "In Workflow mode, has the agent break down tasks, run multi-step work, and report progress.",
+        "title": "Mode: Workflow"
+      },
+      "agent__mode__writing": {
+        "description": "In Writing mode, has the agent help draft, edit, and adjust the tone of your text.",
+        "title": "Mode: Writing"
+      },
+      "agent__plan-mode": {
+        "description": "Keeps the agent read-only in plan mode: research, delegate exploration, then submit the plan for approval.",
+        "title": "Plan mode rules"
+      },
+      "agent__plan-mode__structured-steps": {
+        "description": "Protocol text read by the plan parser: end the plan with a flat numbered step list for the step editor.",
+        "title": "Plan mode step list format"
+      },
+      "agent__plan__approved": {
+        "description": "Sent after you approve a plan, telling the agent to implement it step by step.",
+        "title": "Plan approved message"
+      },
+      "agent__plan__approved-edited": {
+        "description": "Sent after you approve an adjusted plan, telling the agent your version replaces the one it proposed.",
+        "title": "Edited plan approved message"
+      },
+      "agent__plan__decompose": {
+        "description": "Breaks your objective into 2 to 16 ordered steps, as JSON, when you create an executable plan.",
+        "title": "Plan decomposition"
+      },
+      "agent__plan__decompose-request": {
+        "description": "Protocol text read by the parser: the request that carries your objective to plan decomposition.",
+        "title": "Plan decomposition request"
+      },
+      "agent__plan__refine": {
+        "description": "Revises a plan's steps, as JSON, following your refinement instruction or a failed step.",
+        "title": "Plan refinement"
+      },
+      "agent__plan__refine-request": {
+        "description": "Protocol text read by the parser: the request carrying the current steps and your refinement instruction.",
+        "title": "Plan refinement request"
+      },
+      "agent__plan__step-message": {
+        "description": "Protocol text read by the host: the message that hands the agent one plan step to do and report on.",
+        "title": "Plan step message"
+      },
+      "agent__plan__system-section": {
+        "description": "Shows the running plan and its progress in the system prompt so the agent works on the current step.",
+        "title": "Active plan section"
+      },
+      "agent__run-retrospective": {
+        "description": "Reviews a finished run and proposes improvements that wait for your approval before anything changes.",
+        "title": "Run retrospective"
+      },
+      "agent__run-retrospective__reply-format": {
+        "description": "Protocol text read by the parser: the JSON shape a run retrospective must return.",
+        "title": "Run retrospective JSON shape"
+      },
+      "agent__subagent-frame__contract": {
+        "description": "Protocol text read by the host: tells each dispatched subagent that only its final, complete report is seen.",
+        "title": "Subagent report contract"
+      },
+      "agent__verifier__request": {
+        "description": "Protocol text read by the parser: the request, reply, and diff sent to the independent verifier.",
+        "title": "Fresh verifier request"
+      },
+      "agent__verifier__system": {
+        "description": "Has an independent agent check another agent's reply against your request and return a JSON verdict.",
+        "title": "Fresh verifier"
+      },
+      "chat__a2ui__protocol": {
+        "description": "Protocol text read by the A2UI parser: teaches the model to build interactive UI blocks in chat replies.",
+        "title": "A2UI protocol"
+      },
+      "chat__brief-mode": {
+        "description": "Tells the chat model to answer briefly, without preamble or filler, while brief mode is on.",
+        "title": "Brief mode"
+      },
+      "chat__cli__handoff": {
+        "description": "The first message of a resumed CLI session, carrying the earlier transcript ahead of your new prompt.",
+        "title": "CLI session handoff"
+      },
+      "chat__cli__output-style__concise": {
+        "description": "Makes the CLI agent answer in as few words as possible while the Concise style is on.",
+        "title": "CLI output style: Concise"
+      },
+      "chat__cli__output-style__explanatory": {
+        "description": "Makes the CLI agent explain its reasoning and trade-offs while the Explanatory style is on.",
+        "title": "CLI output style: Explanatory"
+      },
+      "chat__cli__output-style__learning": {
+        "description": "Makes the CLI agent act as a mentor and leave small parts for you while the Learning style is on.",
+        "title": "CLI output style: Learning"
+      },
+      "chat__compaction__handoff": {
+        "description": "Warns the agent that the chat may be compacted, so it restates key facts before long tool runs.",
+        "title": "Compaction readiness"
+      },
+      "chat__compaction__recovery": {
+        "description": "After compaction, tells the agent to trust the summary and continue without asking you to repeat yourself.",
+        "title": "Post-compaction recovery"
+      },
+      "chat__connector-capability__fallback": {
+        "description": "Lists A2UI kinds that fall back to plain text on the platform, so the model avoids them.",
+        "title": "IM channel: plain-text kinds"
+      },
+      "chat__connector-capability__header": {
+        "description": "Tells the model which messaging platform carries the chat and that it supports only part of A2UI.",
+        "title": "IM channel: capability intro"
+      },
+      "chat__connector-capability__native": {
+        "description": "Lists the A2UI kinds that the messaging platform renders natively.",
+        "title": "IM channel: native kinds"
+      },
+      "chat__connector-capability__simulated": {
+        "description": "Lists A2UI kinds the platform handles through a multi-step exchange instead of an immediate reply.",
+        "title": "IM channel: multi-step kinds"
+      },
+      "chat__connector-capability__skills": {
+        "description": "Lists the built-in Skills usable in the channel and notes that write actions need a confirm card.",
+        "title": "IM channel: available Skills"
+      },
+      "chat__connector-capability__unsupported": {
+        "description": "Lists A2UI kinds the platform cannot show at all, so the model never emits them.",
+        "title": "IM channel: unsupported kinds"
+      },
+      "chat__peer-delivery__frame": {
+        "description": "Protocol text read by the host: wraps a message from another session as untrusted, never as your consent.",
+        "title": "Message from another session"
+      },
+      "chat__pet__history": {
+        "description": "Reminds the desktop pet of the lines you recently exchanged so it stays consistent.",
+        "title": "Pet recent history"
+      },
+      "chat__pet__language": {
+        "description": "Tells the desktop pet to reply in your interface language.",
+        "title": "Pet reply language"
+      },
+      "chat__pet__name-soul": {
+        "description": "Sets the model up as a pet-naming helper that answers only in JSON when a new desktop pet hatches.",
+        "title": "Pet naming system prompt"
+      },
+      "chat__pet__name-soul__request": {
+        "description": "The request sent when a pet hatches, asking for a cute name and a one-line personality as JSON.",
+        "title": "Pet naming request"
+      },
+      "chat__pet__persona": {
+        "description": "Makes the desktop pet reply in character with one short, playful line in its speech bubble.",
+        "title": "Pet bubble persona"
+      },
+      "chat__pet__persona__bound-character": {
+        "description": "Tells the desktop pet which Agent persona you are using when one is bound to it.",
+        "title": "Pet: bound Agent persona"
+      },
+      "chat__pet__persona__conversation": {
+        "description": "Makes the desktop pet chat in character, in a few short sentences, in the pet chat panel.",
+        "title": "Pet chat persona"
+      },
+      "chat__pet__state": {
+        "description": "Gives the desktop pet its current mood, energy, bond, and level so its replies reflect them.",
+        "title": "Pet mood and stats"
+      },
+      "chat__reply-copilot__draft": {
+        "description": "Has the reply copilot write three candidate replies for an IM chat, which you review before sending.",
+        "title": "Reply copilot: drafts"
+      },
+      "chat__reply-copilot__draft__request": {
+        "description": "Protocol text read by the parser: the last line of the drafting request, asking for three replies as JSON.",
+        "title": "Reply copilot: draft request"
+      },
+      "chat__reply-copilot__draft__unattributed-note": {
+        "description": "Warns the reply copilot not to guess who wrote the messages marked Unknown.",
+        "title": "Reply copilot: unknown sender note"
+      },
+      "chat__reply-copilot__question__best-action": {
+        "description": "Asks the decision provider which kind of next action fits best, such as checking the history first, for the reply copilot.",
+        "title": "Copilot question: best action"
+      },
+      "chat__reply-copilot__question__best-action__compact": {
+        "description": "A shorter wording of the best action question for decision providers with a small prompt budget.",
+        "title": "Copilot question: best action (compact)"
+      },
+      "chat__reply-copilot__question__best-reply": {
+        "description": "Asks the decision provider which candidate reply is the most fitting next message, for the reply copilot.",
+        "title": "Copilot question: best candidate"
+      },
+      "chat__reply-copilot__question__best-reply__compact": {
+        "description": "A shorter wording of the best candidate question for decision providers with a small prompt budget.",
+        "title": "Copilot question: best candidate (compact)"
+      },
+      "chat__reply-copilot__question__danger-level": {
+        "description": "Asks the decision provider how close the chat is to a fight or to hurting the relationship, for the reply copilot.",
+        "title": "Copilot question: conflict level"
+      },
+      "chat__reply-copilot__question__danger-level__compact": {
+        "description": "A shorter wording of the conflict level question for decision providers with a small prompt budget.",
+        "title": "Copilot question: conflict level (compact)"
+      },
+      "chat__reply-copilot__question__literal-question": {
+        "description": "Asks the decision provider whether the other person's latest message means only what it says, with no subtext, for the reply copilot.",
+        "title": "Copilot question: literal meaning"
+      },
+      "chat__reply-copilot__question__literal-question__compact": {
+        "description": "A shorter wording of the literal meaning question for decision providers with a small prompt budget.",
+        "title": "Copilot question: literal meaning (compact)"
+      },
+      "chat__reply-copilot__question__she-needs": {
+        "description": "Asks the decision provider what the other person needs from you right now, judged from their latest message, for the reply copilot.",
+        "title": "Copilot question: what they need"
+      },
+      "chat__reply-copilot__question__she-needs__compact": {
+        "description": "A shorter wording of the what they need question for decision providers with a small prompt budget.",
+        "title": "Copilot question: what they need (compact)"
+      },
+      "chat__reply-copilot__question__should-reply-now": {
+        "description": "Asks the decision provider whether your next message should carry substance, such as a fact, a plan, or an admission, for the reply copilot.",
+        "title": "Copilot question: substantive reply"
+      },
+      "chat__reply-copilot__question__should-reply-now__compact": {
+        "description": "A shorter wording of the substantive reply question for decision providers with a small prompt budget.",
+        "title": "Copilot question: substantive reply (compact)"
+      },
+      "chat__reply-copilot__question__tension-resolved": {
+        "description": "Asks the decision provider whether the tension in the chat has genuinely been resolved, for the reply copilot.",
+        "title": "Copilot question: tension resolved"
+      },
+      "chat__reply-copilot__question__tension-resolved__compact": {
+        "description": "A shorter wording of the tension resolved question for decision providers with a small prompt budget.",
+        "title": "Copilot question: tension resolved (compact)"
+      },
+      "chat__reply-copilot__question__true-intent": {
+        "description": "Asks the decision provider what the other person really wants with their latest message, judged from tone and context, for the reply copilot.",
+        "title": "Copilot question: true intent"
+      },
+      "chat__reply-copilot__question__true-intent__compact": {
+        "description": "A shorter wording of the true intent question for decision providers with a small prompt budget.",
+        "title": "Copilot question: true intent (compact)"
+      },
+      "chat__selection__explain": {
+        "description": "Explains a passage you selected in a chat, defining jargon and unpacking code, in the selection panel.",
+        "title": "Explain selected text"
+      },
+      "chat__selection__translate": {
+        "description": "Translates a passage you selected in a chat into your chosen language, keeping code and formatting.",
+        "title": "Translate selected text"
+      },
+      "chat__side-chat__contract": {
+        "description": "Keeps a side chat answering only the side question, using the main conversation as reference only.",
+        "title": "Side chat contract"
+      },
+      "chat__side-chat__read-only": {
+        "description": "Tells a read-only side chat to describe changes instead of making them, and how you can enable editing.",
+        "title": "Read-only side chat"
+      },
+      "chat__visual-output__dock": {
+        "description": "Points the model to chart artifacts and Canvas documents in the dock when those tools are available.",
+        "title": "Visual output: dock artifacts"
+      },
+      "chat__visual-output__fenced": {
+        "description": "Tells the model to write charts as fenced JSON blocks that the app lifts into the dock.",
+        "title": "Visual output: fenced payloads"
+      },
+      "chat__visual-output__frame": {
+        "description": "Guides the chat model to pick diagrams, charts, or documents based on what the current channel can render.",
+        "title": "Visual output routing"
+      },
+      "chat__visual-output__inline-chart": {
+        "description": "Lets the model draw a quick chart right inside the reply as a fenced chart block.",
+        "title": "Visual output: inline charts"
+      },
+      "chat__visual-output__interactive": {
+        "description": "Tells the model to use an A2UI surface when you need to choose, confirm, filter, or submit something.",
+        "title": "Visual output: interactive surfaces"
+      },
+      "chat__visual-output__no-canvas": {
+        "description": "When documents cannot be created, tells the model to answer inline instead of producing a Canvas.",
+        "title": "Visual output: no Canvas"
+      },
+      "chat__visual-output__no-dock-a2ui-chart": {
+        "description": "With no dock available, tells the model to show numbers as an A2UI chart or a markdown table.",
+        "title": "Visual output: A2UI chart fallback"
+      },
+      "chat__visual-output__no-dock-table": {
+        "description": "With no chart route available, tells the model to show numbers as a compact markdown table.",
+        "title": "Visual output: table fallback"
+      },
+      "cli__base__identity": {
+        "description": "The base system prompt of the command-line coding agent: its role, tone, and way of working in your project.",
+        "title": "CLI coding agent identity"
+      },
+      "completion__enhance__style__concise": {
+        "description": "The style hint that makes the prompt enhancer cut your draft down to the essential ask.",
+        "title": "Enhance style: Concise"
+      },
+      "completion__enhance__style__detailed": {
+        "description": "The style hint that makes the prompt enhancer add details, constraints, and context to your draft.",
+        "title": "Enhance style: Detailed"
+      },
+      "completion__enhance__style__improve": {
+        "description": "The style hint that makes the prompt enhancer clarify your draft and state its goal explicitly.",
+        "title": "Enhance style: Improve"
+      },
+      "completion__enhance__style__simpler": {
+        "description": "The style hint that makes the prompt enhancer rewrite your draft in plain language.",
+        "title": "Enhance style: Simpler"
+      },
+      "completion__enhance__style__technical": {
+        "description": "The style hint that makes the prompt enhancer use precise technical terms in your draft.",
+        "title": "Enhance style: Technical"
+      },
+      "completion__enhance__system": {
+        "description": "Rewrites your draft in the composer in the chosen style, without answering it.",
+        "title": "Prompt enhancer"
+      },
+      "completion__ghost-text": {
+        "description": "Predicts how you will finish your message, shown as dim text after the cursor in the composer.",
+        "title": "Composer ghost text"
+      },
+      "completion__suggestions__follow-up": {
+        "description": "Suggests short follow-up messages you might send next, based on the last reply.",
+        "title": "Follow-up suggestions"
+      },
+      "completion__suggestions__starter": {
+        "description": "Suggests opening messages you could send to start a new chat.",
+        "title": "Starter suggestions"
+      },
+      "completion__terminal": {
+        "description": "Predicts the full command line you are typing in the integrated terminal.",
+        "title": "Terminal command completion"
+      },
+      "developer__bootstrap__bash": {
+        "description": "System message of the Bash bootstrap agent that prepares a workspace environment before its checks run.",
+        "title": "Environment setup agent (Bash)"
+      },
+      "developer__bootstrap__native": {
+        "description": "System message of the native bootstrap agent that prepares a workspace environment before its checks run.",
+        "title": "Environment setup agent (native)"
+      },
+      "developer__bootstrap__powershell": {
+        "description": "System message of the PowerShell bootstrap agent that prepares a workspace environment before its checks run.",
+        "title": "Environment setup agent (PowerShell)"
+      },
+      "developer__cli__bash-analysis": {
+        "description": "Sent by /analyze to diagnose the last failed shell command and suggest a fix.",
+        "title": "CLI failed command analysis"
+      },
+      "developer__cli__commit-message": {
+        "description": "Writes a Conventional Commit message from staged changes in the CLI, for you to confirm.",
+        "title": "CLI commit message"
+      },
+      "developer__cli__fix-tests": {
+        "description": "Sent in each /fix round with the failing test output, asking for the smallest fix.",
+        "title": "CLI /fix round"
+      },
+      "developer__cli__init-rewrite": {
+        "description": "Rewrites the project's AGENTS.md from its current text and project facts, for you to confirm.",
+        "title": "CLI AGENTS.md rewrite"
+      },
+      "developer__cli__pr-summary": {
+        "description": "Summarizes a branch into a pull request title and body in the CLI.",
+        "title": "CLI pull request summary"
+      },
+      "developer__cli__review": {
+        "description": "Sent by /review so the agent gathers the diff itself and reports findings by severity.",
+        "title": "CLI /review"
+      },
+      "developer__commit__agent-clause": {
+        "description": "Lets an agent read the repository while writing the commit message, without changing anything.",
+        "title": "Commit message: agent mode"
+      },
+      "developer__commit__conventional-format": {
+        "description": "The format rules for commit messages when the Conventional Commits setting is on.",
+        "title": "Commit format: Conventional"
+      },
+      "developer__commit__freeform-format": {
+        "description": "The format rules for commit messages when the Conventional Commits setting is off.",
+        "title": "Commit format: freeform"
+      },
+      "developer__commit__system": {
+        "description": "Writes a commit message from the staged diff in source control.",
+        "title": "Commit message"
+      },
+      "developer__creator__plan": {
+        "description": "Plans the files and capabilities of a new plugin, Skill, or hook scaffold, each with a reason.",
+        "title": "Creator: scaffold plan"
+      },
+      "developer__creator__review": {
+        "description": "Reviews what the creator generated against its requirements and blocks it if wrong or unsafe.",
+        "title": "Creator: generated result review"
+      },
+      "developer__creator__survey": {
+        "description": "Checks the repository for code that already does what a new plugin, Skill, or hook would do.",
+        "title": "Creator: existing code survey"
+      },
+      "developer__diff-explain": {
+        "description": "Explains in plain language what a diff changed and why, in source control.",
+        "title": "Diff explanation"
+      },
+      "developer__diff-review": {
+        "description": "Reviews one file's diff hunk by hunk in source control and flags real problems.",
+        "title": "Diff review"
+      },
+      "developer__issues__draft": {
+        "description": "Writes a full issue body from its title in the issue tracker.",
+        "title": "Issue body draft"
+      },
+      "developer__issues__improve": {
+        "description": "Rewrites an issue draft into a clearer, structured body without inventing facts.",
+        "title": "Issue body rewrite"
+      },
+      "developer__issues__metadata": {
+        "description": "Suggests a priority, labels, and an estimate for an issue, chosen from your existing options.",
+        "title": "Issue priority and labels"
+      },
+      "developer__issues__relations": {
+        "description": "Suggests a parent, blockers, and duplicates for an issue from the existing issues.",
+        "title": "Issue relations"
+      },
+      "developer__issues__title": {
+        "description": "Writes a concise one-line title from an issue's body.",
+        "title": "Issue title"
+      },
+      "developer__issues__wakeup__children-done": {
+        "description": "Sent to the agent when every sub-issue is finished, asking it to continue the parent issue.",
+        "title": "Issue: sub-issues done"
+      },
+      "developer__skills__authoring": {
+        "description": "Rewrites a SKILL.md body in the Skill editor as a suggestion you can review.",
+        "title": "Skill editor rewrite"
+      },
+      "developer__skills__authoring__expand": {
+        "description": "The instruction used when you ask the Skill editor to add examples and edge cases to a Skill.",
+        "title": "Skill rewrite: Expand"
+      },
+      "developer__skills__authoring__fix-errors": {
+        "description": "The instruction used when you ask the Skill editor to resolve a Skill's validation issues.",
+        "title": "Skill rewrite: Fix errors"
+      },
+      "developer__skills__authoring__optimize": {
+        "description": "The instruction used when you ask the Skill editor to tighten a Skill's wording.",
+        "title": "Skill rewrite: Optimize"
+      },
+      "developer__skills__authoring__request": {
+        "description": "The request carrying the Skill's name, your instruction, and its current body to the rewriter.",
+        "title": "Skill rewrite request"
+      },
+      "developer__skills__authoring__simplify": {
+        "description": "The instruction used when you ask the Skill editor to rewrite a Skill for readers new to the topic.",
+        "title": "Skill rewrite: Simplify"
+      },
+      "developer__skills__recording": {
+        "description": "Turns a recorded desktop workflow into a reusable Skill draft that you review before saving.",
+        "title": "Skill from recording"
+      },
+      "developer__workflow__classify__system": {
+        "description": "Has a classify workflow node answer with exactly one of its labels.",
+        "title": "Classify node"
+      },
+      "developer__workflow__copilot": {
+        "description": "The Workflow Copilot's role in the workflow editor chat: read first, propose changes, never edit directly.",
+        "title": "Workflow Copilot"
+      },
+      "developer__workflow__ensemble__synthesizer": {
+        "description": "Merges the attempts of an ensemble workflow node into one best answer.",
+        "title": "Ensemble node synthesizer"
+      },
+      "developer__workflow__ensemble__synthesizer__request": {
+        "description": "The request carrying every attempt to the ensemble node's synthesizer.",
+        "title": "Ensemble node request"
+      },
+      "developer__workflow__extract__system": {
+        "description": "Has an extract workflow node return the requested fields as a JSON object.",
+        "title": "Extract node"
+      },
+      "developer__workflow__json-output": {
+        "description": "Protocol text read by the parser: tells JSON-mode workflow nodes and runs to reply with JSON only.",
+        "title": "JSON-only output"
+      },
+      "developer__workflow__json-output__shape": {
+        "description": "Protocol text read by the parser: the JSON shape a JSON-mode node's reply must match.",
+        "title": "JSON output shape"
+      },
+      "developer__workflow__quick-action__explain": {
+        "description": "The /explain message asking the Copilot to explain the selected workflow nodes.",
+        "title": "Copilot: explain selection"
+      },
+      "developer__workflow__quick-action__explain-empty": {
+        "description": "The /explain message when no nodes are selected, asking you to pick some first.",
+        "title": "Copilot: explain, nothing selected"
+      },
+      "developer__workflow__quick-action__selection-reference": {
+        "description": "Sent when you limit the Copilot chat to the workflow nodes you selected.",
+        "title": "Copilot: work on selection"
+      },
+      "developer__workflow__quick-action__suggest": {
+        "description": "The /suggest-next message asking the Copilot for one node to add after your selection.",
+        "title": "Copilot: suggest next node"
+      },
+      "developer__workflow__quick-action__suggest-unselected": {
+        "description": "The /suggest-next message asking the Copilot for one node to add when nothing is selected.",
+        "title": "Copilot: suggest, no selection"
+      },
+      "developer__workflow__quick-action__validate-clean": {
+        "description": "The /validate message when the validator finds nothing, asking the Copilot for a design review.",
+        "title": "Copilot: validate, no errors"
+      },
+      "developer__workflow__quick-action__validate-issues": {
+        "description": "The /validate message listing the validator's issues and asking the Copilot to fix them.",
+        "title": "Copilot: validate with issues"
+      },
+      "developer__workflow__schema-repair": {
+        "description": "Protocol text read by the parser: asks for corrected JSON after a reply fails the output schema.",
+        "title": "Schema repair retry"
+      },
+      "developer__workflow__slash__debug": {
+        "description": "The /debug message handing a failed workflow to the debugger subagent, without changing it.",
+        "title": "Workflow /debug"
+      },
+      "developer__workflow__slash__delegate": {
+        "description": "The /delegate message passing your task to a named subagent and summarizing its reply.",
+        "title": "Workflow /delegate"
+      },
+      "developer__workflow__slash__refactor": {
+        "description": "The /refactor message handing the change you describe to the refactorer subagent.",
+        "title": "Workflow /refactor"
+      },
+      "developer__workflow__slash__run": {
+        "description": "The /run message asking the Copilot to validate, then run the whole workflow after your approval.",
+        "title": "Workflow /run"
+      },
+      "developer__workflow__slash__run-from-step": {
+        "description": "The /run message asking the Copilot to run the workflow from a given step after your approval.",
+        "title": "Workflow /run from step"
+      },
+      "generation__a2ui__create-app": {
+        "description": "Builds a new interactive A2UI mini-app from your request in the A2UI editor.",
+        "title": "A2UI app generation"
+      },
+      "generation__a2ui__edit-app": {
+        "description": "Applies your requested change to an existing A2UI mini-app, updating only the parts that change.",
+        "title": "A2UI app edit"
+      },
+      "generation__a2ui__enhance-execution": {
+        "description": "Writes a short summary and insights for a workflow run or chat, shown on its interactive page.",
+        "title": "Run summary card"
+      },
+      "generation__canvas-suggestions__assist": {
+        "description": "Proposes a few small edits near your cursor, added to the Canvas Suggestions panel.",
+        "title": "Canvas inline suggestions"
+      },
+      "generation__canvas-suggestions__review": {
+        "description": "Reviews the whole Canvas document and offers findings you accept or reject one at a time.",
+        "title": "Canvas review findings"
+      },
+      "generation__canvas__custom": {
+        "description": "Applies your own instruction to the Canvas document or selection and returns only the new text.",
+        "title": "Canvas: custom instruction"
+      },
+      "generation__canvas__expand": {
+        "description": "Adds detail and examples to the Canvas content and replaces it.",
+        "title": "Canvas: expand"
+      },
+      "generation__canvas__explain": {
+        "description": "Explains what the Canvas content does, step by step, shown beside the document.",
+        "title": "Canvas: explain"
+      },
+      "generation__canvas__fix": {
+        "description": "Fixes bugs, syntax errors, and typos in the Canvas content and replaces it.",
+        "title": "Canvas: fix"
+      },
+      "generation__canvas__format": {
+        "description": "Tidies the indentation, spacing, and structure of the Canvas content and replaces it.",
+        "title": "Canvas: format"
+      },
+      "generation__canvas__improve": {
+        "description": "Improves the readability and structure of the Canvas content and replaces it.",
+        "title": "Canvas: improve"
+      },
+      "generation__canvas__review": {
+        "description": "Reviews the Canvas content for issues and improvements, shown beside the document.",
+        "title": "Canvas: review"
+      },
+      "generation__canvas__run": {
+        "description": "Describes what the Canvas code would output if run, without actually running it.",
+        "title": "Canvas: simulate run"
+      },
+      "generation__canvas__simplify": {
+        "description": "Simplifies the Canvas content while keeping its meaning, and replaces it.",
+        "title": "Canvas: simplify"
+      },
+      "generation__canvas__translate": {
+        "description": "Translates the Canvas content into the chosen language, keeping its formatting.",
+        "title": "Canvas: translate"
+      },
+      "generation__council__synthesis": {
+        "description": "Merges the council members' answers into one response and rates how far they agreed.",
+        "title": "Council synthesis"
+      },
+      "generation__image-edit__remove-background": {
+        "description": "Asks the image model to remove the background, in the chat image workbench and the plugin media tools.",
+        "title": "Remove image background"
+      },
+      "generation__pet__hatch-sprite": {
+        "description": "Drafts a new chat asking an agent to create an animated pet sprite that you can then import.",
+        "title": "Pet sprite hatch draft"
+      },
+      "generation__summary__conversation": {
+        "description": "Summarizes a conversation to seed a new branch or to stand in for older turns after compaction.",
+        "title": "Conversation summary"
+      },
+      "generation__summary__selection": {
+        "description": "Summarizes material you selected in a chat, to show you or to seed a handoff.",
+        "title": "Selection summary"
+      },
+      "generation__template-assist__generate": {
+        "description": "Writes a new message template with fill-in parameters from your description, in the template editor.",
+        "title": "Template draft"
+      },
+      "generation__template-assist__improve": {
+        "description": "Rewrites a message template more clearly while keeping every parameter slot in place.",
+        "title": "Template rewrite"
+      },
+      "generation__template-assist__suggest-params": {
+        "description": "Suggests a label and a short hint for each parameter slot in a message template.",
+        "title": "Template parameter hints"
+      },
+      "generation__title__chat": {
+        "description": "Names a conversation from its first exchange.",
+        "title": "Chat title"
+      },
+      "generation__title__work": {
+        "description": "Names an automated task or workflow run in a few words.",
+        "title": "Task or run title"
+      },
+      "generation__turn-label": {
+        "description": "Labels a single chat turn in five words or fewer for the conversation timeline.",
+        "title": "Turn label"
+      },
+      "goal__continuation": {
+        "description": "Protocol text read by the host: the message asking the agent to take the next step toward the goal.",
+        "title": "Goal continuation turn"
+      },
+      "goal__judge": {
+        "description": "Decides from the agent's latest reply whether the goal is fully done, answering in JSON.",
+        "title": "Goal completion judge"
+      },
+      "goal__objective-updated": {
+        "description": "Protocol text read by the host: tells the agent you revised the goal and the old objective no longer applies.",
+        "title": "Goal objective update"
+      },
+      "goal__promise-verification": {
+        "description": "Protocol text read by the host: asks the agent to confirm completion with an exact token before the goal closes.",
+        "title": "Goal completion check"
+      },
+      "goal__subgoals": {
+        "description": "Breaks a goal into 3 to 8 ordered sub-steps shown as its checklist.",
+        "title": "Goal checklist"
+      },
+      "goal__system-section": {
+        "description": "Shows the active goal and its progress in the system prompt on every turn while a /goal runs.",
+        "title": "Active goal section"
+      },
+      "knowledge__memory__consolidate": {
+        "description": "Decides whether a new memory adds to, updates, removes, or conflicts with similar stored memories.",
+        "title": "Memory consolidation"
+      },
+      "knowledge__memory__episodic-distill": {
+        "description": "After a chat goes idle, picks out decisions and events worth recalling in later sessions.",
+        "title": "Episodic memory distill"
+      },
+      "knowledge__memory__episodic-distill__request": {
+        "description": "The request carrying the conversation, and the JSON shape episodic memory distilling must return.",
+        "title": "Episodic memory request"
+      },
+      "knowledge__memory__extract": {
+        "description": "Picks out lasting facts about you, such as preferences and environment, from each conversation turn.",
+        "title": "User memory extraction"
+      },
+      "knowledge__memory__project-extract": {
+        "description": "Extracts lasting facts about a software project from its own development conversations.",
+        "title": "Project memory extraction"
+      },
+      "knowledge__memory__rerank": {
+        "description": "Scores how relevant each stored memory is to the current query during recall.",
+        "title": "Memory recall reranker"
+      },
+      "knowledge__ocr__vision": {
+        "description": "Extracts all the text from an attached page image as Markdown in the CLI.",
+        "title": "CLI image OCR"
+      },
+      "knowledge__radar": {
+        "description": "Diagnoses your information diet from recently saved items, including blind spots and next actions.",
+        "title": "Knowledge radar"
+      },
+      "knowledge__rag__hyde": {
+        "description": "Writes a short imagined answer passage that is used as an extra search query during retrieval.",
+        "title": "Retrieval: hypothetical answer"
+      },
+      "knowledge__rag__step-back": {
+        "description": "Writes a broader background question that is used as an extra search query during retrieval.",
+        "title": "Retrieval: step-back question"
+      },
+      "knowledge__web-search__answer": {
+        "description": "Answers your question from numbered web sources with citations, shown above the sources.",
+        "title": "Web search answer"
+      },
+      "knowledge__web__fetch-extract": {
+        "description": "Pulls only the parts of a fetched web page that answer the question, keeping facts verbatim.",
+        "title": "Web page extraction"
+      },
+      "knowledge__web__reader-distill": {
+        "description": "The default question the web reader uses to summarize a page's key facts when distilling it.",
+        "title": "Web reader summary"
+      },
+      "knowledge__wiki__voice": {
+        "description": "Sets how the code wiki writes articles and index pages: concise, grounded, and aimed at coding agents.",
+        "title": "Code wiki writing voice"
+      },
+      "permissions__command-judge": {
+        "description": "Decides whether a shell command is safe to run without asking you first.",
+        "title": "Shell command safety judge"
+      },
+      "routing__difficulty-judge": {
+        "description": "Rates how capable a model a request needs, to pick a fast, balanced, or powerful model.",
+        "title": "Request difficulty judge"
+      },
+      "routing__fusion__role__common": {
+        "description": "Rules every Router + Fusion role follows: treat inputs as data, cite real evidence, never fake results.",
+        "title": "Fusion: shared role rules"
+      },
+      "routing__fusion__role__compactor": {
+        "description": "Condenses a long transcript into a handoff that keeps goals, constraints, and open issues.",
+        "title": "Fusion: context compactor"
+      },
+      "routing__fusion__role__judge": {
+        "description": "Has the judge check candidate answers against the task and evidence rather than vote or merge them.",
+        "title": "Fusion: judge"
+      },
+      "routing__fusion__role__lead": {
+        "description": "Has the lead plan subtasks for workers and then review their results.",
+        "title": "Fusion: lead planner"
+      },
+      "routing__fusion__role__panel-member": {
+        "description": "Has a panel member answer the whole task on its own, with its claims backed by evidence.",
+        "title": "Fusion: panel member"
+      },
+      "routing__fusion__role__reviewer": {
+        "description": "Has a reviewer check a result against the rubric, marking each check passed, failed, or unclear.",
+        "title": "Fusion: content reviewer"
+      },
+      "routing__fusion__role__synthesizer": {
+        "description": "Writes the final answer from supported claims and keeps unresolved points marked as uncertain.",
+        "title": "Fusion: synthesizer"
+      },
+      "routing__fusion__role__worker": {
+        "description": "Has a worker carry out one approved subtask in an isolated workspace and report honestly.",
+        "title": "Fusion: worker"
+      },
+      "team__auto__assess-routing": {
+        "description": "Recommends how to orchestrate an objective, from a single agent up to a full team.",
+        "title": "Team: routing assessment"
+      },
+      "team__auto__clarify": {
+        "description": "Decides whether an Agent Team objective needs a few clarifying questions before planning.",
+        "title": "Team: clarifying questions"
+      },
+      "team__auto__compose-roster": {
+        "description": "Proposes a small team of specialists for an objective, with the lead first.",
+        "title": "Team: roster composition"
+      },
+      "team__auto__decompose-tasks": {
+        "description": "Breaks an objective into up to 16 ordered tasks with assignees and dependencies.",
+        "title": "Team: task breakdown"
+      },
+      "team__lead-review": {
+        "description": "Has the team lead approve a teammate's finished work or request changes.",
+        "title": "Team: lead review"
+      },
+      "team__lead__planning": {
+        "description": "Asks the team lead for a plan of 3 to 6 steps assigned to teammates.",
+        "title": "Team: lead plan request"
+      },
+      "team__lead__planning-system": {
+        "description": "The default system prompt for a team lead's planning, requiring a single JSON plan block.",
+        "title": "Team: lead planning system prompt"
+      },
+      "team__ledger__judge": {
+        "description": "Works out why an Agent Team has stalled and recommends one next action.",
+        "title": "Team: stall judge"
+      },
+      "team__ledger__schema-hint": {
+        "description": "Protocol text read by the parser: the JSON shape the stall judge must return.",
+        "title": "Team: stall verdict schema"
+      },
+      "team__pattern__adversarial-verify__lens-correctness": {
+        "description": "Asks a skeptic to check whether the finding is a real logic or behavior defect.",
+        "title": "Skeptic lens: correctness"
+      },
+      "team__pattern__adversarial-verify__lens-perf": {
+        "description": "Asks a skeptic to judge whether the performance impact is real at realistic scale.",
+        "title": "Skeptic lens: performance"
+      },
+      "team__pattern__adversarial-verify__lens-repro": {
+        "description": "Asks a skeptic to actually reproduce the finding before accepting it.",
+        "title": "Skeptic lens: reproduction"
+      },
+      "team__pattern__adversarial-verify__lens-security": {
+        "description": "Asks a skeptic to judge whether the finding is a security issue an attacker can exploit.",
+        "title": "Skeptic lens: security"
+      },
+      "team__pattern__adversarial-verify__skeptic": {
+        "description": "Has a skeptic try to refute one finding during adversarial verification.",
+        "title": "Pattern: skeptic prompt"
+      },
+      "team__pattern__adversarial-verify__verdict-schema": {
+        "description": "Protocol text read by the parser: the JSON shape one skeptic verdict must return.",
+        "title": "Pattern: skeptic verdict schema"
+      },
+      "team__pattern__completeness-critic__critic": {
+        "description": "Names what the work so far has missed, feeding the next search round and the final report.",
+        "title": "Pattern: completeness critic prompt"
+      },
+      "team__pattern__completeness-critic__gaps-schema": {
+        "description": "Protocol text read by the parser: the JSON shape the completeness critic must return.",
+        "title": "Pattern: gaps schema"
+      },
+      "team__pattern__judge-panel__attempt": {
+        "description": "Has an agent attempt the objective from one assigned angle for the judge panel.",
+        "title": "Pattern: judge panel attempt"
+      },
+      "team__pattern__judge-panel__attempt-schema": {
+        "description": "Protocol text read by the parser: the JSON shape one judge panel attempt must return.",
+        "title": "Pattern: attempt schema"
+      },
+      "team__pattern__judge-panel__judge": {
+        "description": "Has a judge score one attempt from 0 to 10 against the objective.",
+        "title": "Pattern: judge panel scoring"
+      },
+      "team__pattern__judge-panel__score-schema": {
+        "description": "Protocol text read by the parser: the JSON shape one judge score must return.",
+        "title": "Pattern: judge score schema"
+      },
+      "team__pattern__loop-until-dry__finder": {
+        "description": "Asks a finder for new findings only, round after round, until rounds come back empty.",
+        "title": "Pattern: loop finder prompt"
+      },
+      "team__pattern__multi-modal-sweep__finder": {
+        "description": "Has each finder in a multi-modal sweep search with only its assigned approach.",
+        "title": "Pattern: sweep finder prompt"
+      },
+      "team__pattern__shared__findings-schema": {
+        "description": "Protocol text read by the parser: the JSON shape finders in the sweep and loop patterns must return.",
+        "title": "Pattern: findings schema"
+      },
+      "team__pattern__synthesize__report": {
+        "description": "Writes the run's final report from verified findings, noting open gaps as limits.",
+        "title": "Pattern: final report prompt"
+      },
+      "team__pattern__synthesize__report-schema": {
+        "description": "Protocol text read by the parser: the JSON shape the final report must return.",
+        "title": "Pattern: final report schema"
+      },
+      "team__pr-feedback__reviewer": {
+        "description": "The internal reviewer's role for an Agent Team: review only the pull request's changes.",
+        "title": "Team: PR reviewer"
+      },
+      "team__pr-feedback__reviewer-task": {
+        "description": "Names the pull request to review and asks the internal reviewer for a JSON verdict.",
+        "title": "Team: PR review request"
+      },
+      "team__rate-limit__nudge": {
+        "description": "Posted to the team after a rate-limit cooldown, telling members to pick up where they stopped.",
+        "title": "Team: rate limit resume"
+      },
+      "team__replan__lead": {
+        "description": "Has the lead decide after each wave whether to continue, add, cancel, or change tasks.",
+        "title": "Team: replan checkpoint"
+      },
+      "team__review__revision-request": {
+        "description": "The request sent back to a teammate with the lead's feedback, asking for a revision.",
+        "title": "Team: revision request"
+      },
+      "team__structured__json-instruction": {
+        "description": "Protocol text read by the parser: tells a teammate to reply with one JSON block matching the schema.",
+        "title": "Team: JSON reply rule"
+      },
+      "team__structured__retry-note": {
+        "description": "Protocol text read by the parser: asks a teammate for corrected JSON after an invalid reply.",
+        "title": "Team: JSON retry note"
+      },
+      "team__teammate__default-identity": {
+        "description": "The teammate system prompt used when nothing else sets one.",
+        "title": "Team: default teammate identity"
+      },
+      "team__teammate__task": {
+        "description": "Hands a teammate its assigned task, its role, and the team goal.",
+        "title": "Team: teammate task"
+      },
+      "team__teammate__upstream-results": {
+        "description": "Introduces the results of tasks a teammate depends on, placed before its own task.",
+        "title": "Team: upstream results"
+      },
+      "team__ultracode__plan-hint": {
+        "description": "Protocol text read by the parser: the JSON shape the ultracode planner must return.",
+        "title": "Ultracode plan schema"
+      },
+      "team__ultracode__planner": {
+        "description": "Chooses which quality patterns an ultracode run combines, and in what order.",
+        "title": "Ultracode planner"
+      },
+      "twin__distill__entity-merge": {
+        "description": "Groups different names for the same team, person, or project found while building the twin.",
+        "title": "Twin distill: entity merging"
+      },
+      "twin__distill__evaluator": {
+        "description": "Scores the twin's Agent and Skill drafts from a newcomer's point of view and suggests fixes.",
+        "title": "Twin distill: reviewer"
+      },
+      "twin__distill__knowledge": {
+        "description": "Extracts the people, teams, projects, and decisions in your material for the digital twin.",
+        "title": "Twin distill: entities and decisions"
+      },
+      "twin__distill__playbook": {
+        "description": "Finds work patterns you repeat across documents and chats, to become the twin's playbooks.",
+        "title": "Twin distill: playbooks"
+      },
+      "twin__distill__style": {
+        "description": "Picks representative samples of your writing so the digital twin can match your tone.",
+        "title": "Twin distill: writing style"
+      },
+      "twin__distill__synthesizer": {
+        "description": "Turns the distilled profile into one Agent draft and several Skill drafts for the digital twin.",
+        "title": "Twin distill: synthesizer"
+      },
+      "twin__runtime__rerank": {
+        "description": "Scores how well each retrieved document answers a question when the twin searches its material.",
+        "title": "Twin search reranker"
+      },
+      "twin__runtime__rerank-request": {
+        "description": "Protocol text read by the parser: the request carrying the query and documents to the twin reranker.",
+        "title": "Twin rerank request"
+      },
+      "twin__runtime__system-template__decisions": {
+        "description": "Adds the decisions the person has made to the digital twin's system prompt.",
+        "title": "Twin prompt: decisions"
+      },
+      "twin__runtime__system-template__entities": {
+        "description": "Adds the people, teams, and projects the twin knows, as background it should not list unprompted.",
+        "title": "Twin prompt: known people"
+      },
+      "twin__runtime__system-template__identity": {
+        "description": "Opens the digital twin's system prompt by telling it whose name it speaks under.",
+        "title": "Twin prompt: identity"
+      },
+      "twin__runtime__system-template__playbooks": {
+        "description": "Adds how the person typically handles situations to the digital twin's system prompt.",
+        "title": "Twin prompt: playbooks"
+      },
+      "twin__runtime__system-template__retrieved": {
+        "description": "Adds the excerpts retrieved for this turn and asks the twin to cite them or admit gaps.",
+        "title": "Twin prompt: retrieved material"
+      },
+      "twin__runtime__system-template__style": {
+        "description": "Adds samples of the person's writing for the twin to match without copying them.",
+        "title": "Twin prompt: style examples"
+      },
+      "twin__runtime__system-template__voice": {
+        "description": "Adds the person's voice and tone summary to the digital twin's system prompt.",
+        "title": "Twin prompt: voice"
+      }
+    },
     "relatedSections": {
       "agentRuntime": "Agent runtime",
       "ariaLabel": "Related Claude Code settings",
@@ -52842,6 +55397,31 @@
         "label": "Sandbox Canvas code execution",
         "note": "On by default. Disabling lets Canvas Python reach your filesystem and network — only turn it off on a machine you trust.",
         "title": "Canvas code sandbox"
+      },
+      "claudeCodeRuntime": {
+        "description": "Sandbox capabilities and bounded unattended retry for the Claude Agent SDK runtime.",
+        "invalidMinutes": "Enter a whole number from 1 to 180.",
+        "maximum": {
+          "description": "Total elapsed time for the whole invocation, including normal work and all retries. The deadline is never reset for individual requests. Enter 1–180 minutes.",
+          "label": "Maximum invocation time (minutes)"
+        },
+        "namespaces": {
+          "description": "Off by default. Available on Linux and WSL2 hosts, including remote hosts. Requests support for tools such as Chromium; Cognia still requires explicit approval for each run.",
+          "label": "Request nested user namespaces",
+          "warning": "Nested user namespaces weaken the sandbox boundary. Commands may run outside the sandbox and access protected and credential files. Enable only for a workload you trust."
+        },
+        "recheck": {
+          "description": "How often to check whether a supported subscription usage limit has cleared. Enter 1–180 minutes.",
+          "label": "Usage-limit recheck interval (minutes)"
+        },
+        "retry": {
+          "availability": "Unavailable when Router + Fusion manages request budgets and retries.",
+          "cancellation": "Cancel stops the active invocation and its retry wait. Reaching the maximum invocation time also cancels it.",
+          "description": "Off by default. Applies only to unattended Claude Agent SDK turns; supported claude.ai subscription usage limits can be rechecked while waiting.",
+          "label": "Enable unattended retry"
+        },
+        "saveError": "Could not save Claude Code runtime preferences. Try again.",
+        "title": "Claude Code runtime"
       },
       "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
       "enable": {
@@ -53723,6 +56303,8 @@
           "research": "Research",
           "writing": "Writing"
         },
+        "cogniaModelHint": "Optional: run this subagent's external task on a Cognia model. Leave it off to follow the agent configuration the dispatch resolves.",
+        "cogniaModelPinnedHint": "The pinned agent configuration already runs on a Cognia model. Set one here only to override it for this subagent.",
         "compactAtTokensInvalid": "Enter a positive whole token count.",
         "compactAtTokensUnsupported": "Context compaction policy is unavailable for provider or external runtime overrides.",
         "configTitle": "Advanced configuration",
@@ -53741,7 +56323,7 @@
         "editorCompactAtTokensHint": "Leave empty to inherit. A positive whole token count can lower the sub-agent context window when supported by the runtime.",
         "editorDescription": "Description",
         "editorExternalRuntime": "External runtime",
-        "editorExternalRuntimeHint": "Run this subagent on an external CLI agent (Claude Code, Codex, …) instead of the built-in engine. Desktop only; the external agent uses its own model and auth.",
+        "editorExternalRuntimeHint": "Run this subagent on an external CLI agent (Claude Code, Codex, …) instead of the built-in engine. Desktop only; the external agent uses its own model and auth unless a Cognia model is set below.",
         "editorIcon": "Icon",
         "editorIconPlaceholder": "Search",
         "editorMaxNestingDepth": "Max nesting depth",
@@ -53778,6 +56360,7 @@
         "mcpLabel": "MCP servers",
         "missingBody": "It may have been deleted in another window.",
         "missingTitle": "Template not found",
+        "modelRolesInvalid": "Fix the sub-task models before saving: they would be refused when this subagent runs.",
         "nameRequired": "Template name is required.",
         "newTemplate": "New template",
         "promptShadowedBody": "A system prompt outranks the task template, so the task template below — and the variables declared for it — will not be used. Clear the system prompt in Advanced configuration to bring them back.",
@@ -53840,7 +56423,7 @@
       "about": "About",
       "account": "Account",
       "agentModes": "Agent modes",
-      "agentRuntime": "Built-in agent runtime",
+      "agentRuntime": "Agent runtime",
       "agents": "Agents",
       "aiConnections": "AI Connections",
       "apiKey": "API key",
@@ -53866,6 +56449,7 @@
       "gateway": "Inbound Gateway",
       "general": "General",
       "goals": "Goals",
+      "harnessEvolution": "Harness Evolution",
       "hooks": "Hooks",
       "imageCatalog": "Image Catalog",
       "logs": "Logs",
@@ -53882,6 +56466,7 @@
       "presets": "Presets",
       "proIde": "Pro IDE",
       "profile": "Profile",
+      "prompts": "Prompts",
       "providers": "Providers",
       "remoteControl": "Remote Control",
       "remoteHosts": "Remote hosts",
@@ -58588,6 +61173,7 @@
         "eval": "Eval",
         "gateway": "Gateway",
         "goal": "Goal",
+        "harnessEvolution": "Harness evolution",
         "imported": "Imported",
         "label": "Surface",
         "memory": "Memory",
@@ -59202,6 +61788,7 @@
         "retryHint": "Re-run the original step after applying the fix.",
         "title": "Error Diagnosis"
       },
+      "close": "Close AI Shell",
       "context": {
         "branch": "Branch",
         "cwd": "CWD",
@@ -59219,12 +61806,22 @@
         "title": "AI Shell history"
       },
       "inputPlaceholder": "Describe what you want to do…",
+      "messages": {
+        "executionFailed": "Command completion could not be confirmed. An interrupt was requested; inspect the terminal before retrying.",
+        "generatedPlan": "Generated a plan with {count, plural, one {# step} other {# steps}}. Review each command before running.",
+        "generationFailed": "Failed to generate a plan.",
+        "noSession": "No active terminal session.",
+        "sensitiveContext": "Terminal context contains sensitive data. Redact it before retrying.",
+        "terminalBusy": "The terminal is busy. Wait for the current command to finish.",
+        "terminalUnavailable": "The terminal session is unavailable."
+      },
       "plan": {
         "cancelled": "Plan cancelled.",
         "completed": "All steps completed.",
         "empty": "No steps generated.",
         "error": "Failed to generate plan.",
         "executing": "Executing…",
+        "failed": "Execution stopped after a failed step.",
         "generating": "Generating plan…",
         "ready": "Plan ready — review and run.",
         "title": "Execution Plan"
@@ -59244,7 +61841,7 @@
         "succeeded": "Done"
       },
       "title": "AI Shell",
-      "toggle": "Toggle AI Shell (Ctrl+Shift+I)"
+      "toggle": "Toggle AI Shell"
     },
     "commandMenu": {
       "copyCommand": "Copy command",
@@ -59479,14 +62076,16 @@
       "participantViewer": "viewing",
       "participantsLabel": "Attached devices",
       "readOnly": "Read-only",
-      "releaseConfirm": "Release control of this session? Another client can then take over.",
+      "releaseConfirm": "Another client can then take over.",
+      "releaseConfirmTitle": "Release control of this session?",
       "releaseControl": "Release control",
       "replayGap": "Output before sequence {firstAvailable} is no longer available.",
       "replayGapMarker": "Earlier terminal output is unavailable because the replay buffer was truncated.",
       "sandboxed": "Sandboxed",
       "shared": "Shared with {count, plural, one {# device} other {# devices}}",
       "takeControl": "Take control",
-      "takeoverConfirm": "Take control of this session? The current controller will become read-only."
+      "takeoverConfirm": "The current controller will become read-only.",
+      "takeoverConfirmTitle": "Take control of this session?"
     },
     "share": {
       "description": "Paired devices with the remote-terminal grant attach to this host session over the companion link and share the same control lease: one controller at a time, everyone else read-only. Nothing is copied and no link is created.",
@@ -59938,7 +62537,13 @@
     "webNativeAnthropicDesc": "On the Anthropic path, use Claude's built-in WebSearch / WebFetch (server-side extraction + citations) instead of the multi-provider tools. Other providers keep the multi-provider tools.",
     "webNativeAnthropicTitle": "Use native Anthropic web tools",
     "webPreferCogniaDesc": "Use Cognia's multi-provider search (Tavily / Brave / Exa …) even when the model's own runtime brings web search. Off means the runtime's native search is used where it exists — it needs no API key and returns citations. Needs a configured search provider.",
+    "webPreferCogniaFetchDesc": "Use Cognia Reader for web fetch even when native fetch is available. No Search provider or API key is needed for direct reading. Configure readers separately in Search → Reading.",
+    "webPreferCogniaFetchTitle": "Prefer Cognia for reading",
+    "webPreferCogniaSearchDesc": "Use Cognia Search even when native search is available. Requires a configured Search provider; otherwise native search remains available when supported.",
+    "webPreferCogniaSearchTitle": "Prefer Cognia for search",
     "webPreferCogniaTitle": "Prefer Cognia's web search",
+    "webPreferenceInheritedOff": "Inherited from the previous shared preference: native preferred when available.",
+    "webPreferenceInheritedOn": "Inherited from the previous shared preference: Cognia preferred.",
     "webclone": "Web page snapshot",
     "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only."
   },
@@ -60652,6 +63257,7 @@
         "larkNoPermission": "The account {account} has no permission to read this document. Ask for access, or complete the user authorization in Settings → Connections.",
         "larkNotAuthorized": "The Feishu account {account} is missing credentials. Re-authorize it in Settings → Connections.",
         "larkNotFound": "Document not found — it may have been deleted, or the link is wrong.",
+        "larkOutputTruncated": "The document exceeded the lark-cli output limit. Partial content was discarded; use the API connection to read it.",
         "larkRateLimited": "Feishu rate limit hit — wait a moment and try again.",
         "larkUnsupportedType": "This link points to a {type} object; only docs and wiki pages are supported for now.",
         "noCommitsFound": "No commits found in the selected repository",
@@ -61204,8 +63810,73 @@
       }
     }
   },
+  "webReaderSettings": {
+    "auto": "Auto",
+    "cancel": "Cancel",
+    "configureSearchKey": "Add a {vendor} key in Search providers",
+    "consequences": {
+      "best-effort": "Best effort: try the utility model; return extracted text if it fails.",
+      "off": "Off: return extracted text; an explicit question may request best-effort distillation.",
+      "required": "Required: fail closed without a utility model or distilled output; raw and non-GET reads are disabled."
+    },
+    "defaultReader": "Default reader",
+    "description": "Configure page reading independently from Search. Enabling Search never enables a Reader.",
+    "directDisclosure": "Fetched directly by Cognia",
+    "distillation": "Distillation",
+    "externalFallback": "External fallback",
+    "fallback": {
+      "configured": "Configured readers only",
+      "off": "Off"
+    },
+    "fallbackDescription": "Auto may try enabled remote readers in priority order after eligible direct-read failures. Only configured recipients are used.",
+    "hostLimitations": "In a plain browser, Jina, FxTwitter and platform reading are unavailable because of CORS. On mobile, cancellation stops waiting; an already-sent native request may still complete.",
+    "httpStatus": "HTTP status: {status}",
+    "missingSearchKey": "Unavailable: add a {vendor} key in Search providers",
+    "modes": {
+      "best-effort": "Best effort",
+      "off": "Off",
+      "required": "Required"
+    },
+    "moveDown": "Move {reader} down",
+    "moveUp": "Move {reader} up",
+    "platformDisclosure": "Read from the original site",
+    "priorityDescription": "Auto tries a matching platform or FxTwitter reader, then Direct. Priority controls order the other remote readers for external fallback.",
+    "priorityOrder": "Reader priority order",
+    "readers": {
+      "deepseek": "DeepSeek",
+      "direct": "Direct",
+      "exa": "Exa",
+      "fxtwitter": "FxTwitter",
+      "jina": "Jina",
+      "platform": "Platform (WeChat / YouTube)",
+      "tavily": "Tavily",
+      "tinyfish": "TinyFish"
+    },
+    "remoteDisclosure": "Pages you read are sent to {vendor}",
+    "replace": "Replace settings",
+    "replaceDescription": "The stored Reader record comes from a newer version. This change replaces it with the supported settings shown here.",
+    "replaceTitle": "Replace newer Reader settings?",
+    "saveFailed": "Reader settings could not be saved. Try again.",
+    "testEvidence": "Tests run only when clicked. A dated result is evidence of that attempt, not a guarantee of future availability.",
+    "testFailed": "Reader test failed",
+    "testOk": "Reader test passed",
+    "testReader": "Test reader",
+    "testReaderNamed": "Test reader: {reader}",
+    "testReason": "Reason: {reason}",
+    "testedAt": "Tested at {date}",
+    "testing": "Testing…",
+    "unsupportedVersion": "This Reader record is from a newer version and is inactive. Compatibility settings are shown. Saving any Reader change will replace the newer record after confirmation.",
+    "usesSearchKey": "Uses your {vendor} search key",
+    "vendorCost": "Reader requests bill your vendor account, independently of Search requests."
+  },
   "webSearchToggle": {
     "goToSettings": "Open settings",
+    "operationRoutes": "Search: {search}; fetch: {fetch}",
+    "route": {
+      "cognia": "Cognia",
+      "native": "Native",
+      "none": "Unavailable"
+    },
     "searchFailed": "Web search failed: {message}",
     "searchedVia": "Searched via {provider} — {count} results",
     "setupNoProvider": "No search provider — set one up in Settings → Web search",
@@ -68574,6 +71245,25 @@
     }
   },
   "workspace": {
+    "access": {
+      "actionsHeading": "What you can do",
+      "featuresHeading": "Shared features",
+      "guest": "Guest",
+      "loading": "Checking your access…",
+      "noActions": "Nothing in this workspace yet. Ask a maintainer to add you.",
+      "none": "None",
+      "orgRole": "Organization role",
+      "refresh": "Refresh access",
+      "title": "Your access",
+      "unavailable": {
+        "error": "Access could not be checked: {message}",
+        "hidden": "This workspace is not shared with you.",
+        "not-signed-in": "Sign in to see your access.",
+        "unsupported": "This collaboration server does not report access yet."
+      },
+      "viaOrgAdmin": "through organization admin",
+      "workspaceRole": "Workspace role"
+    },
     "actionErrors": {
       "consentRequired": "Waiting for approval on the host device. Confirm there with code {code}.",
       "consentRequiredNoCode": "Waiting for approval on the host device. Confirm it there to continue.",
@@ -69086,6 +71776,7 @@
         "invitationRevoked": "Revoked from the workspace roster",
         "offboarded": "Removed from the organization in the workspace roster",
         "orgRoleChanged": "Organization role changed in the workspace roster",
+        "ownershipTransferred": "Ownership transferred from the workspace roster",
         "removed": "Removed from the workspace roster",
         "roleChanged": "Role changed in the workspace roster"
       },
@@ -69105,8 +71796,16 @@
         "invitationRevoked": "Invitation revoked.",
         "offboarded": "Removed from the organization.",
         "orgRoleChanged": "Organization role updated.",
+        "ownershipTransferred": "Ownership transferred.",
         "removed": "Removed from the workspace.",
         "roleChanged": "Role updated."
+      },
+      "transfer": {
+        "action": "Transfer ownership",
+        "body": "They become the organization's owner in one step. You keep your seat with the role you pick below. Only an owner can undo this.",
+        "confirm": "Transfer ownership",
+        "stepDownLabel": "Your role afterwards",
+        "title": "Make {name} the owner?"
       },
       "unavailable": {
         "no-org": "Your sign-in is not scoped to an organization, so there is no roster to manage.",

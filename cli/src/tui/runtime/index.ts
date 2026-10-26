@@ -108,6 +108,10 @@ import { runPr } from "./pr-controller"
 import { runStack } from "./stack-controller"
 
 export interface RuntimeDeps {
+  /** Prepare the owning CLI session's transport before a manual subagent. */
+  awaitSubagentApprovals?: () => Promise<void>
+  prepareForSubagent?: (signal?: AbortSignal) => Promise<void>
+  requestSubagentPermission?: import("../../agent/permission-gate").PermissionResponder
   dispatch: (action: TuiAction) => void
   config: ResolvedConfig
   sessionId: string
@@ -418,6 +422,9 @@ export async function runRuntimeRequest(
         ...(req.action === "run"
           ? {
               dispatchAgent: buildAgentsRunDispatch({
+                prepare: deps.prepareForSubagent,
+                gate: deps.requestSubagentPermission,
+                awaitApprovals: deps.awaitSubagentApprovals,
                 config,
                 home: deps.home,
                 sessionId,
@@ -700,7 +707,17 @@ export async function runRuntimeRequest(
         // subagents over the live sidecar (same seam as `/agents run`).
         return impl.planExplore(arg, {
           dispatch,
-          dispatchAgent: buildAgentsRunDispatch({ config, home: deps.home, sessionId, signal }),
+          home: deps.home,
+          sessionId,
+          dispatchAgent: buildAgentsRunDispatch({
+            config,
+            home: deps.home,
+            sessionId,
+            signal,
+            prepare: deps.prepareForSubagent,
+            gate: deps.requestSubagentPermission,
+            awaitApprovals: deps.awaitSubagentApprovals,
+          }),
           ...(signal ? { signal } : {}),
         })
       }

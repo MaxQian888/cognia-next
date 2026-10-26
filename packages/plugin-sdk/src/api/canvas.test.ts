@@ -7,8 +7,8 @@ import type {
 } from "./canvas"
 
 describe("plugin-sdk api/canvas", () => {
-  it("exposes the canvas runtime API factory", () => {
-    expect(typeof sdk.createCanvasAPI).toBe("function")
+  it("keeps host wiring off the author surface (plugins reach it through ctx.canvas)", () => {
+    expect(sdk).not.toHaveProperty("createCanvasAPI")
   })
 
   it("re-exports canvas runtime API and document types", () => {

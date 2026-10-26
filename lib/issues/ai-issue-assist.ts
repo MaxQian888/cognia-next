@@ -25,6 +25,12 @@
 import { hasNoLeakingPii } from "@cognia/redact"
 import { extractJson, type LlmClient } from "@/lib/twin/distill/llm"
 import { ISSUE_PRIORITIES, type IssuePriority } from "@/types/issues"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  definePrompt,
+  type PromptDefinitionV1,
+  type PromptResolutionContext,
+} from "@/lib/prompts/types"
 
 export interface IssueAssistDeps {
   client: LlmClient
@@ -38,6 +44,8 @@ export interface IssueAssistDeps {
    * when the client has no stream — the final result is identical either way.
    */
   onAccumulated?: (text: string) => void
+  /** The issue tracker's workspace, so its customized wording applies (ADR-0236). */
+  promptContext?: PromptResolutionContext
 }
 
 export type IssueAssistResult =
@@ -75,54 +83,113 @@ const MAX_TITLE_LEN = 120
 const MAX_RELATION_CANDIDATES = 50
 const ESTIMATE_BUCKETS = [1, 2, 3, 5, 8] as const
 
-const DRAFT_SYSTEM = [
-  "You are an assistant that drafts software-engineering issue reports.",
-  "Given an issue title (and optional project name), write a complete",
-  "GitHub-style issue body in markdown.",
-  "Use short sections with ## headings — e.g. ## Summary, ## Steps to",
-  "reproduce, ## Expected, ## Actual — whichever fit the title. End with an",
-  "## Acceptance criteria task list (- [ ] items) when the work is checkable.",
-  "Be concrete but do not invent facts like file paths, versions or people:",
-  "write [fill in] placeholders where the reporter must supply specifics.",
-  "Output ONLY the markdown body: no preamble, no quotes, no code fence",
-  "around the whole reply.",
-].join(" ")
+function issueAssistPrompt(input: {
+  slug: string
+  risk: "ordinary" | "protocol"
+  requiredFragments?: readonly string[]
+  outputContract: string
+  defaultBody: string
+}): PromptDefinitionV1 {
+  return definePrompt({
+    id: `developer.issues.${input.slug}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "developer",
+    operation: "replace-template",
+    scopes: ["account", "workspace"],
+    activation: "next-operation",
+    risk: input.risk,
+    hosts: ["app"],
+    maxChars: 4_000,
+    requiredFragments: input.requiredFragments ?? [],
+    outputContract: input.outputContract,
+    consumers: ["lib/issues/ai-issue-assist.ts"],
+    defaultBody: input.defaultBody,
+  })
+}
 
-const IMPROVE_SYSTEM = [
-  "You are an editor for software-engineering issue reports written in",
-  "markdown. Rewrite the draft into a clearer, well-structured issue body:",
-  "## section headings where they help, tightened prose, acceptance criteria",
-  "as a - [ ] task list when checkable.",
-  "Preserve code blocks, file paths, identifiers, @-mentions and every fact",
-  "verbatim — reorganize and clarify, never invent new specifics.",
-  "Output ONLY the rewritten markdown body: no preamble, no quotes, no",
-  "wrapping code fence.",
-].join(" ")
+async function systemFor(def: PromptDefinitionV1, deps: IssueAssistDeps): Promise<string> {
+  return (await resolvePromptAsync(def, { context: deps.promptContext })).text
+}
 
-const SUGGEST_SYSTEM = [
-  "You classify software-engineering issues. Read the title and body, then",
-  "pick a priority, any matching labels, and a story-point estimate STRICTLY",
-  "from the provided catalogues. Return ONLY a JSON object, no prose:",
-  '{"priority": "<one of the listed values or null>", "labels": ["<exact label name>", ...], "estimate": <one of 1,2,3,5,8 or null>}',
-].join(" ")
+export const ISSUE_DRAFT_PROMPT = issueAssistPrompt({
+  slug: "draft",
+  risk: "ordinary",
+  outputContract:
+    "Markdown issue body; a wrapping code fence or quotes are stripped and it is capped at 8,000 characters.",
+  defaultBody: [
+    "You are an assistant that drafts software-engineering issue reports.",
+    "Given an issue title (and optional project name), write a complete",
+    "GitHub-style issue body in markdown.",
+    "Use short sections with ## headings — e.g. ## Summary, ## Steps to",
+    "reproduce, ## Expected, ## Actual — whichever fit the title. End with an",
+    "## Acceptance criteria task list (- [ ] items) when the work is checkable.",
+    "Be concrete but do not invent facts like file paths, versions or people:",
+    "write [fill in] placeholders where the reporter must supply specifics.",
+    "Output ONLY the markdown body: no preamble, no quotes, no code fence",
+    "around the whole reply.",
+  ].join(" "),
+})
 
-const TITLE_SYSTEM = [
-  "You write concise software-engineering issue titles.",
-  "Given an issue body, return ONE title: a single line under 80 characters,",
-  "descriptive and imperative where it fits, no quotes, no trailing period,",
-  "no type prefix like 'Bug:'. Output ONLY the title text.",
-].join(" ")
+export const ISSUE_IMPROVE_PROMPT = issueAssistPrompt({
+  slug: "improve",
+  risk: "ordinary",
+  outputContract:
+    "The rewritten markdown body replaces the draft (undoable); a wrapping fence or quotes are stripped.",
+  defaultBody: [
+    "You are an editor for software-engineering issue reports written in",
+    "markdown. Rewrite the draft into a clearer, well-structured issue body:",
+    "## section headings where they help, tightened prose, acceptance criteria",
+    "as a - [ ] task list when checkable.",
+    "Preserve code blocks, file paths, identifiers, @-mentions and every fact",
+    "verbatim — reorganize and clarify, never invent new specifics.",
+    "Output ONLY the rewritten markdown body: no preamble, no quotes, no",
+    "wrapping code fence.",
+  ].join(" "),
+})
 
-const RELATIONS_SYSTEM = [
-  "You link software-engineering issues. Given a draft issue (title + body)",
-  "and a list of existing issues (identifier + title), decide:",
-  "- parent: the ONE existing issue this draft is clearly a sub-task of",
-  "- blockedBy: existing issues that must land before this draft can start",
-  "- duplicates: existing issues that already describe the same work",
-  "Prefer empty results over guessing — only link what is clearly implied.",
-  "Return ONLY a JSON object, no prose:",
-  '{"parent": "<identifier or null>", "blockedBy": ["<identifier>", ...], "duplicates": ["<identifier>", ...]}',
-].join(" ")
+export const ISSUE_METADATA_PROMPT = issueAssistPrompt({
+  slug: "metadata",
+  risk: "protocol",
+  requiredFragments: ['"priority"', '"labels"', '"estimate"'],
+  outputContract:
+    "One JSON object; only catalogue priorities, existing label names and 1/2/3/5/8 estimates are kept.",
+  defaultBody: [
+    "You classify software-engineering issues. Read the title and body, then",
+    "pick a priority, any matching labels, and a story-point estimate STRICTLY",
+    "from the provided catalogues. Return ONLY a JSON object, no prose:",
+    '{"priority": "<one of the listed values or null>", "labels": ["<exact label name>", ...], "estimate": <one of 1,2,3,5,8 or null>}',
+  ].join(" "),
+})
+
+export const ISSUE_TITLE_PROMPT = issueAssistPrompt({
+  slug: "title",
+  risk: "ordinary",
+  outputContract: "The first line becomes the title, capped at 120 characters.",
+  defaultBody: [
+    "You write concise software-engineering issue titles.",
+    "Given an issue body, return ONE title: a single line under 80 characters,",
+    "descriptive and imperative where it fits, no quotes, no trailing period,",
+    "no type prefix like 'Bug:'. Output ONLY the title text.",
+  ].join(" "),
+})
+
+export const ISSUE_RELATIONS_PROMPT = issueAssistPrompt({
+  slug: "relations",
+  risk: "protocol",
+  requiredFragments: ['"parent"', '"blockedBy"', '"duplicates"'],
+  outputContract: "One JSON object; only identifiers from the supplied candidate list are kept.",
+  defaultBody: [
+    "You link software-engineering issues. Given a draft issue (title + body)",
+    "and a list of existing issues (identifier + title), decide:",
+    "- parent: the ONE existing issue this draft is clearly a sub-task of",
+    "- blockedBy: existing issues that must land before this draft can start",
+    "- duplicates: existing issues that already describe the same work",
+    "Prefer empty results over guessing — only link what is clearly implied.",
+    "Return ONLY a JSON object, no prose:",
+    '{"parent": "<identifier or null>", "blockedBy": ["<identifier>", ...], "duplicates": ["<identifier>", ...]}',
+  ].join(" "),
+})
 
 /** Strip ``` fences / wrapping quotes a model adds despite instructions. */
 function cleanBody(raw: string): string {
@@ -172,7 +239,7 @@ export async function draftIssueDescription(
     .join("\n")
 
   const callOptions = {
-    system: DRAFT_SYSTEM,
+    system: await systemFor(ISSUE_DRAFT_PROMPT, deps),
     temperature: 0.4,
     maxTokens: 2_048,
     abortSignal: deps.signal,
@@ -207,7 +274,7 @@ export async function improveIssueDescription(
   if (blocked) return blocked
 
   const raw = await deps.client.complete(`Issue body to rewrite:\n\n${draft}`, {
-    system: IMPROVE_SYSTEM,
+    system: await systemFor(ISSUE_IMPROVE_PROMPT, deps),
     temperature: 0.3,
     maxTokens: 2_048,
     abortSignal: deps.signal,
@@ -248,7 +315,7 @@ export async function suggestIssueMetadata(
   let parsed: unknown
   try {
     const raw = await deps.client.complete(prompt, {
-      system: SUGGEST_SYSTEM,
+      system: await systemFor(ISSUE_METADATA_PROMPT, deps),
       temperature: 0,
       maxTokens: 512,
       abortSignal: deps.signal,
@@ -288,7 +355,7 @@ export async function suggestIssueTitle(
   if (blocked) return blocked
 
   const raw = await deps.client.complete(`Issue body:\n\n${description.trim()}`, {
-    system: TITLE_SYSTEM,
+    system: await systemFor(ISSUE_TITLE_PROMPT, deps),
     temperature: 0.3,
     maxTokens: 96,
     abortSignal: deps.signal,
@@ -339,7 +406,7 @@ export async function suggestIssueRelations(
   let parsed: unknown
   try {
     const raw = await deps.client.complete(prompt, {
-      system: RELATIONS_SYSTEM,
+      system: await systemFor(ISSUE_RELATIONS_PROMPT, deps),
       temperature: 0,
       maxTokens: 512,
       abortSignal: deps.signal,

@@ -61,14 +61,84 @@ describe("web-builtin-tools", () => {
     )
   })
 
-  it("routes web_search to the core with the host search executor", async () => {
+  it("routes web_search to the core with only the executor, verification and signal", async () => {
     const searchExecutor = jest.fn()
-    const searchOptions = { recency: "week" } as never
-    await runWebBuiltinTool(WEB_SEARCH_TOOL_NAME, { query: "q" }, { searchExecutor, searchOptions })
+    const signal = new AbortController().signal
+    const sourceVerification = { enabled: true } as never
+    await runWebBuiltinTool(
+      WEB_SEARCH_TOOL_NAME,
+      { query: "q" },
+      { searchExecutor, sourceVerification, signal, userAgent: "UA" }
+    )
+    // Fetch-side deps never leak into the search core.
     expect(mockSearch).toHaveBeenCalledWith(
       { query: "q" },
-      expect.objectContaining({ searchExecutor, searchOptions })
+      { searchExecutor, sourceVerification, signal }
     )
+  })
+
+  it("exposes specialized search controls on the web_search schema", () => {
+    const entry = buildWebBuiltinManifestEntries().find((e) => e.name === WEB_SEARCH_TOOL_NAME)!
+    const props = (entry.jsonSchema as { properties: Record<string, { enum?: string[] }> })
+      .properties
+    expect(props.searchType.enum).toEqual(["general", "news", "academic", "images", "videos"])
+    expect(props.engine).toBeTruthy()
+    expect(props.allowFallback).toBeTruthy()
+    expect(props.excerptChars).toBeTruthy()
+    // "provider" is a preference, not a forced choice.
+    expect(entry.description).not.toMatch(/force/i)
+  })
+
+  it("exposes the reader choice on the web_fetch schema", () => {
+    const entry = buildWebBuiltinManifestEntries().find((e) => e.name === WEB_FETCH_TOOL_NAME)!
+    const props = (entry.jsonSchema as { properties: Record<string, { enum?: string[] }> })
+      .properties
+    expect(props.reader.enum).toEqual([
+      "direct",
+      "platform",
+      "fxtwitter",
+      "jina",
+      "tavily",
+      "exa",
+      "deepseek",
+      "tinyfish",
+    ])
+    expect(props.allowFallback).toBeTruthy()
+  })
+
+  it("can build only the tool the turn routes through Cognia", () => {
+    expect(buildWebBuiltinManifestEntries({ search: false }).map((e) => e.name)).toEqual([
+      WEB_FETCH_TOOL_NAME,
+    ])
+    expect(buildWebBuiltinManifestEntries({ fetch: false }).map((e) => e.name)).toEqual([
+      WEB_SEARCH_TOOL_NAME,
+    ])
+  })
+
+  describe("web_fetch host disclosure (R08)", () => {
+    const describeWith = (host: Parameters<typeof buildWebBuiltinManifestEntries>[1]) =>
+      buildWebBuiltinManifestEntries({ search: false }, host)[0].description
+
+    it("does not promise prompt extraction without a utility model", () => {
+      const text = describeWith({ summarizer: false, distillation: "off", readers: ["direct"] })
+      expect(text).toMatch(/cannot narrow/)
+      expect(text).toContain("Enabled readers: direct.")
+    })
+
+    it("offers prompt extraction when a utility model exists", () => {
+      expect(describeWith({ summarizer: true, distillation: "best-effort", readers: [] })).toMatch(
+        /Pass `prompt`/
+      )
+    })
+
+    it("discloses required distillation and its failure without a model", () => {
+      expect(describeWith({ summarizer: true, distillation: "required", readers: [] })).toMatch(
+        /distilled by a utility model/
+      )
+      expect(describeWith({ summarizer: false, distillation: "required", readers: [] })).toMatch(
+        /reads will fail/
+      )
+    })
   })
 
   it("rejects stale web-tool calls after the master switch is disabled", async () => {

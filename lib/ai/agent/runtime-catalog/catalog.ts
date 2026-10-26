@@ -52,8 +52,6 @@ export function deriveBuiltinAdapter(providerId: string | undefined): AgentRunti
 export interface AgentRuntimeCatalogInput {
   /** Provider the next turn will use. Decides the builtin row's sub-label. */
   providerId?: string
-  /** The External Agents master switch. Off means no local rows at all. */
-  externalEnabled: boolean
   /** Locally configured agents, already hydrated. */
   externalAgents: readonly ExternalAgentConfig[]
   /** Last known contact per agent id, from the manager's validity snapshots. */
@@ -106,7 +104,6 @@ function builtinDescriptor(providerId: string | undefined): AgentRuntimeDescript
  * external rows, which genuinely need a shell that can spawn a process.
  */
 function externalDescriptors(input: AgentRuntimeCatalogInput): AgentRuntimeDescriptor[] {
-  if (!input.externalEnabled) return []
   return [...input.externalAgents]
     .map((agent) => {
       const block = getExternalAgentExecutionBlock(agent, input.runtimeSupportsExternalAgents)

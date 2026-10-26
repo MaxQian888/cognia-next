@@ -198,11 +198,17 @@ export async function dispatchTeamTask(ctx: StepExecutionContext): Promise<StepE
     { buildTeammatePrompt },
     { dispatchTeammate },
     { readDependencyResults, autoPublishTaskResult },
+    { resolvePrompt },
+    { loadPromptOverrideSnapshot },
+    { TEAMMATE_UPSTREAM_RESULTS_PROMPT, teamPromptContext },
   ] = await Promise.all([
     import("@/lib/ai/agent/team/team-run-context"),
     import("@/lib/ai/agent/team/agent-team-runtime-deps"),
     import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
     import("@/lib/ai/agent/team/memory/shared-memory-orchestrator"),
+    import("@/lib/prompts/resolve"),
+    import("@/lib/prompts/snapshot"),
+    import("@/lib/ai/agent/team/team-prompts"),
   ])
   const teamCtx = getTeamRunContext(ctx.runId)
   if (!teamCtx) {
@@ -226,10 +232,18 @@ export async function dispatchTeamTask(ctx: StepExecutionContext): Promise<StepE
     ? params.dependencies.filter((d): d is string => typeof d === "string" && d.length > 0)
     : []
   const upstream = readDependencyResults(teamId, depIds)
+  // One snapshot for the step (ADR-0236): the upstream heading and the
+  // teammate prompt (built later, inside the claim callback) read the same
+  // revision set.
+  const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
+  const promptContext = teamPromptContext(teamCtx.team)
   const upstreamBlock =
     upstream.length > 0
       ? [
-          "Upstream results from teammates whose tasks you depend on — build on these:",
+          resolvePrompt(TEAMMATE_UPSTREAM_RESULTS_PROMPT, {
+            context: promptContext,
+            snapshot: promptSnapshot,
+          }).text,
           ...upstream.map(
             (u) =>
               `### ${u.taskTitle ?? u.taskId}${u.writerName ? ` (by ${u.writerName})` : ""}\n${u.value}`
@@ -246,7 +260,7 @@ export async function dispatchTeamTask(ctx: StepExecutionContext): Promise<StepE
     // Persona-aware prompt built from the teammate the pool actually claims,
     // prefixed with any upstream dependency results.
     prompt: (teammate) => {
-      const base = buildTeammatePrompt(teamCtx.team, teammate, task)
+      const base = buildTeammatePrompt(teamCtx.team, teammate, task, { snapshot: promptSnapshot })
       return upstreamBlock ? `${upstreamBlock}\n${base}` : base
     },
     signal: ctx.signal,
@@ -333,11 +347,15 @@ export async function reviewTeamTask(ctx: StepExecutionContext): Promise<StepExe
     { dispatchTeammate, UnavailableRequiredTeammateError },
     { buildReviewEvidence },
     { DEFAULT_TASK_REVIEW_MAX_REVISIONS },
+    { resolvePromptAsync },
+    { REVIEW_REVISION_REQUEST_PROMPT, teamPromptContext },
   ] = await Promise.all([
     import("@/lib/ai/agent/team/team-run-context"),
     import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
     import("@/lib/ai/agent/team/ledger/review-evidence"),
     import("@/lib/ai/agent/team/gates/task-review-policy"),
+    import("@/lib/prompts/resolve"),
+    import("@/lib/ai/agent/team/team-prompts"),
   ])
 
   const teamCtx = getTeamRunContext(ctx.runId)
@@ -487,16 +505,17 @@ export async function reviewTeamTask(ctx: StepExecutionContext): Promise<StepExe
       return fail("the original worker is unknown, so the lead's changes cannot be applied")
     }
     try {
+      // Resolved once per revision round (ADR-0236), in the team's project.
+      const revisionPrompt = (
+        await resolvePromptAsync(REVIEW_REVISION_REQUEST_PROMPT, {
+          context: teamPromptContext(teamCtx.team),
+          values: { taskTitle: task.title, feedback: verdict.feedback },
+        })
+      ).text
+      ctx.signal?.throwIfAborted()
       const revised = await dispatchTeammate(teamCtx, {
         taskId,
-        prompt: [
-          `Your work on "${task.title}" was reviewed and needs changes.`,
-          "",
-          "Reviewer feedback:",
-          verdict.feedback,
-          "",
-          "Revise your work in the same workspace and report what you changed.",
-        ].join("\n"),
+        prompt: revisionPrompt,
         signal: ctx.signal,
         validateOutput: true,
         recordToStore: true,

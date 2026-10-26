@@ -50,12 +50,12 @@ function send(response: ServerResponse, status: number, body: string, contentTyp
   response.end(body)
 }
 
-function route(request: IncomingMessage, response: ServerResponse): void {
+function route(request: IncomingMessage, response: ServerResponse, persistentLogin: boolean): void {
   const url = new URL(request.url ?? "/", "http://fixture.local")
   if (request.method === "POST" && url.pathname === "/login") {
     response.writeHead(303, {
       location: "/dashboard",
-      "set-cookie": "fixture_session=ok; HttpOnly",
+      "set-cookie": `fixture_session=ok; HttpOnly${persistentLogin ? "; Max-Age=3600" : ""}`,
     })
     response.end()
     return
@@ -87,12 +87,14 @@ function route(request: IncomingMessage, response: ServerResponse): void {
   send(response, 404, "Not found", "text/plain")
 }
 
-export async function startExternalServiceFixture(): Promise<{
+export async function startExternalServiceFixture({
+  persistentLogin = false,
+}: { persistentLogin?: boolean } = {}): Promise<{
   server: Server
   origin: string
   close: () => Promise<void>
 }> {
-  const server = createServer(route)
+  const server = createServer((request, response) => route(request, response, persistentLogin))
   server.listen(0, "127.0.0.1")
   await once(server, "listening")
   const address = server.address()

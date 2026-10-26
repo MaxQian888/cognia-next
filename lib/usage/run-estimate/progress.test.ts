@@ -22,7 +22,7 @@ function row(over: Partial<SessionUsageRow>): SessionUsageRow {
     cacheCreationTokens: 5,
     cacheReadTokens: 20,
     costUsd: 0.25,
-    costSource: "priced",
+    costSource: "derived",
     costKnown: true,
     durationMs: 0,
     ...over,

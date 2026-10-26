@@ -148,9 +148,10 @@ jest.mock("@/hooks/canvas/use-canvas-monaco-setup", () => ({
 // Mutable so individual tests can surface an action error (mock-prefixed to
 // satisfy jest's out-of-scope factory rule).
 const mockActionsState = { running: false, error: null as string | null, runResult: "" }
+const mockRunAction = jest.fn((_req: unknown) => Promise.resolve(mockActionsState.runResult))
 jest.mock("@/hooks/canvas/use-canvas-actions", () => ({
   useCanvasActions: () => ({
-    run: jest.fn(() => Promise.resolve(mockActionsState.runResult)),
+    run: mockRunAction,
     running: mockActionsState.running,
     error: mockActionsState.error,
   }),
@@ -775,6 +776,27 @@ describe("CanvasPanel", () => {
       expect(review.proposedContent).toBe("IMPROVED")
       // The buffer itself is untouched until the review is applied.
       expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("x")
+    })
+
+    it("resolves the action prompt in the document's session and workspace (ADR-0236)", async () => {
+      mockRunAction.mockClear()
+      mockActionsState.runResult = "IMPROVED"
+      const id = seedDoc("javascript")
+      const doc = useArtifactStore.getState().canvasDocuments[id]
+      renderWithProviders(<CanvasPanel />)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent("canvas-action", { detail: { type: "improve" } }))
+        await Promise.resolve()
+      })
+      expect(mockRunAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actionType: "improve",
+          promptContext: { sessionId: doc.sessionId, workspaceId: doc.projectId },
+        })
+      )
     })
 
     it("routes a Workbench selection edit into a proposal instead of mutating Monaco", async () => {

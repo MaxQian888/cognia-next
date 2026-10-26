@@ -7,7 +7,7 @@
 import type { AiBridge } from "../lib/ai"
 import { completeJson } from "../lib/ai"
 import { extractJson } from "../lib/json"
-import { evaluateMessages } from "./prompts"
+import { evaluateMessages, systemPromptFor, type SystemPromptResolver } from "./prompts"
 
 export interface Evaluation {
   pass: boolean
@@ -25,12 +25,14 @@ export async function evaluateAnswer(
   evidence: string,
   ai: AiBridge,
   locale?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  prompt?: SystemPromptResolver
 ): Promise<{ evaluation: Evaluation; tokens: number }> {
+  const instruction = await systemPromptFor("evaluate", prompt)
   try {
     const res = await completeJson<RawEvaluation>(
       ai,
-      evaluateMessages(question, answer, evidence, locale),
+      evaluateMessages(question, answer, evidence, locale, instruction),
       (t) => extractJson<RawEvaluation>(t),
       { temperature: 0, maxTokens: 400 }
     )

@@ -16,12 +16,14 @@ import { extract, type ExtractDeps } from "@/lib/ocr/index"
 import { OcrError } from "@/lib/ocr/errors"
 import { documentConfidence } from "@/lib/ocr/confidence"
 import { type OcrInput, type OcrOutputFormat, type OcrResult } from "@/types/ocr"
-
-/** Where the OCR'd image came from — lets the chat card show a thumbnail. */
-export interface OcrSourceRef {
-  kind: "data-url" | "file-path" | "attachment-id"
-  value: string
-}
+import type {
+  OcrSourceRef,
+  SlashOcrResult,
+} from "@cognia/plugin-contract/lib/slash-commands/actions/ocr"
+export type {
+  OcrSourceRef,
+  SlashOcrResult,
+} from "@cognia/plugin-contract/lib/slash-commands/actions/ocr"
 
 /**
  * gap4 — custom chat message part emitted by `/ocr` (and the `ocr.extract`
@@ -71,19 +73,6 @@ export interface SlashOcrInput {
    * don't have to wire up an entire registry.
    */
   extractImpl?: typeof extract
-}
-
-export interface SlashOcrResult {
-  /** Markdown to push into the chat as a system message. */
-  system: string
-  /** When set, the composer prepends this text to its textarea. */
-  composerText?: string
-  /** Raw result — useful for plugin authors. */
-  result?: OcrResult
-  /** Where the OCR'd image came from — fed into the chat card thumbnail. */
-  sourceRef?: OcrSourceRef
-  /** Error code when the command failed. */
-  errorCode?: OcrError["code"]
 }
 
 interface ParsedArgs {

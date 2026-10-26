@@ -1,3 +1,5 @@
+use crate::admission::{self, Requirement};
+use crate::rollout::FeatureKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -223,6 +225,9 @@ pub struct NewChatRunQueueItem {
 #[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait ChatStore: Send + Sync {
+    async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError>;
+    /// Read/drain delivery bypasses rollout while retaining the pinned contract.
+    async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError>;
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError>;
     async fn list_sessions(
         &self,
@@ -241,6 +246,9 @@ pub trait ChatStore: Send + Sync {
         now: i64,
     ) -> Result<SharedSession, StoreError>;
     async fn delete_session_data(&self, org_id: &str, session_id: &str) -> Result<(), StoreError>;
+    async fn effective_member(
+        &self, org_id: &str, session_id: &str, user_id: &str,
+    ) -> Result<Option<SessionMembership>, StoreError>;
     async fn visible_session(
         &self,
         org_id: &str,
@@ -266,6 +274,7 @@ pub trait ChatStore: Send + Sync {
         role: SessionRole,
         approver: bool,
         guest: bool,
+        actor_user_id: &str,
         now: i64,
     ) -> Result<SessionMembership, StoreError>;
     async fn remove_member(
@@ -273,8 +282,11 @@ pub trait ChatStore: Send + Sync {
         org_id: &str,
         session_id: &str,
         user_id: &str,
+        actor_user_id: &str,
         now: i64,
     ) -> Result<(), StoreError>;
+    /// `created_by_user_id` is the authenticated actor, reauthorized under the
+    /// session lock; callers must not take that field from a client body.
     async fn create_invite(
         &self,
         input: NewChatSessionInvite,
@@ -467,8 +479,8 @@ pub trait ChatStore: Send + Sync {
 }
 
 #[derive(Default)]
-struct MemoryTables {
-    sessions: HashMap<String, SharedSession>,
+pub(crate) struct MemoryTables {
+    pub(crate) sessions: HashMap<String, SharedSession>,
     memberships: HashMap<(String, String), SessionMembership>,
     events: HashMap<String, Vec<SessionEvent>>,
     leases: HashMap<String, (ChatRunLease, String, String, String)>,
@@ -483,13 +495,13 @@ struct MemoryTables {
 /// The part of accepting an invite both lookups share: the invite is still
 /// usable and, if it names someone, names this caller.
 fn accept_stored_invite(
-    tables: &mut MemoryTables,
+    tables: &mut crate::store::Tables,
     invite_id: &str,
     user_id: &str,
     now: i64,
 ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
     let (invite, _, _) = tables
-        .invites
+        .chat.invites
         .get(invite_id)
         .ok_or(StoreError::InvitationUnavailable)?;
     if invite.status != "pending"
@@ -501,9 +513,19 @@ fn accept_stored_invite(
     {
         return Err(StoreError::InvitationUnavailable);
     }
+    let session = tables.chat.sessions.get(&invite.session_id).ok_or(StoreError::InvitationUnavailable)?;
+    if !can_act(memory_member(tables, &session.org_id, &invite.session_id, &invite.created_by_user_id).as_ref(), SessionAction::ManageMembers) {
+        return Err(StoreError::InvitationUnavailable);
+    }
+    if tables.authorization_audit.iter().any(|event| event.org_id == session.org_id
+        && event.action == "org.member.offboarded" && event.target_user_id.as_deref() == Some(user_id)
+        && event.created_at >= invite.created_at) {
+        return Err(StoreError::InvitationUnavailable);
+    }
+    admission::memory_chat(tables, &session.org_id, &invite.session_id, FeatureKey::SharedChat, Requirement::Write)?;
     let invite_snapshot = invite.clone();
     let session = tables
-        .sessions
+        .chat.sessions
         .get_mut(&invite_snapshot.session_id)
         .ok_or(StoreError::InvitationUnavailable)?;
     session.policy_revision += 1;
@@ -519,12 +541,12 @@ fn accept_stored_invite(
         updated_at: now,
     };
     let membership = tables
-        .memberships
+        .chat.memberships
         .entry((invite_snapshot.session_id.clone(), user_id.to_owned()))
         .or_insert(membership)
         .clone();
     let (invite, _, _) = tables
-        .invites
+        .chat.invites
         .get_mut(invite_id)
         .ok_or(StoreError::InvitationUnavailable)?;
     invite.status = "accepted".into();
@@ -535,10 +557,35 @@ fn accept_stored_invite(
 
 #[derive(Clone, Default)]
 pub struct InMemoryChatStore {
-    tables: Arc<RwLock<MemoryTables>>,
+    pub(crate) tables: Arc<RwLock<crate::store::Tables>>,
 }
 
 impl InMemoryChatStore {
+    pub fn from_store(store: &crate::store::InMemoryStore) -> Self {
+        Self { tables: store.tables.clone() }
+    }
+    pub fn audit_standing(&self, apply: bool, batch_size: usize, now: i64) -> Result<crate::standing_audit::StandingAudit, StoreError> {
+        if batch_size == 0 || batch_size > 10_000 {
+            return Err(StoreError::Policy("batch-size must be between 1 and 10000".into()));
+        }
+        let mut keys: Vec<_> = self.tables.read().chat.memberships.keys().cloned().collect();
+        keys.sort();
+        let mut report = crate::standing_audit::StandingAudit::default();
+        for batch in keys.chunks(batch_size) {
+            let mut tables = self.tables.write();
+            for (session_id, user_id) in batch {
+                let Some(member) = tables.chat.memberships.get(&(session_id.clone(), user_id.clone())).filter(|m| !m.guest).cloned() else { continue };
+                let org = tables.chat.sessions.get(session_id).ok_or(StoreError::NotFound)?.org_id.clone();
+                let effective = memory_member(&tables, &org, session_id, user_id);
+                if report.record(&org, &member, effective.as_ref()) && apply
+                    && memory_cleanup_member(&mut tables, &org, session_id, user_id, false, false, now) {
+                    report.applied += 1;
+                }
+            }
+        }
+        Ok(report)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -546,6 +593,21 @@ impl InMemoryChatStore {
 
 fn conflict(value: impl serde::Serialize) -> StoreError {
     StoreError::Conflict(serde_json::to_value(value).unwrap_or_default())
+}
+
+fn event_feature(input: &NewSessionEvent) -> FeatureKey {
+    if input.kind.starts_with("run.") || input.kind.starts_with("approval.") {
+        FeatureKey::SharedChatExecution
+    } else { FeatureKey::SharedChat }
+}
+
+fn event_requirement(input: &NewSessionEvent) -> Requirement {
+    match input.kind.as_str() {
+        "run.completed" | "run.failed" | "run.cancelled" => Requirement::ContractOnly,
+        "approval.resolved" if input.payload.get("status").and_then(|v| v.as_str()) == Some("denied") => Requirement::ContractOnly,
+        "run.started" => Requirement::New,
+        _ => Requirement::Write,
+    }
 }
 
 fn replay_event(
@@ -587,24 +649,79 @@ fn replay_queue(
     Ok(existing)
 }
 
+pub(crate) fn memory_member(
+    tables: &crate::store::Tables, org_id: &str, session_id: &str, user_id: &str,
+) -> Option<SessionMembership> {
+    let session = tables.chat.sessions.get(session_id).filter(|s| s.org_id == org_id)?;
+    let member = tables.chat.memberships.get(&(session_id.to_owned(), user_id.to_owned()))?;
+    crate::chat::cap_session_member(member.clone(), memory_standing(tables, org_id, &session.workspace_id, user_id))
+}
+
+fn authorize_member_change(
+    actor: Option<&SessionMembership>, existing: Option<SessionRole>, requested: SessionRole,
+) -> Result<(), StoreError> {
+    if !can_act(actor, SessionAction::ManageMembers)
+        || !actor.is_some_and(|actor| crate::chat::can_change_member_role(actor.role, existing, requested)) {
+        return Err(StoreError::Policy("session member management revoked".into()));
+    }
+    Ok(())
+}
+
+fn authorize_member_removal(
+    actor: Option<&SessionMembership>, actor_user_id: &str, target_user_id: &str, existing: Option<SessionRole>,
+) -> Result<(), StoreError> {
+    // Leaving one's own session remains a read-level operation. Removing
+    // somebody else requires current management standing under this lock.
+    let action = if actor_user_id == target_user_id { SessionAction::Read } else { SessionAction::ManageMembers };
+    if !can_act(actor, action) || (existing == Some(SessionRole::Owner) && !actor.is_some_and(|m| m.role == SessionRole::Owner)) {
+        return Err(StoreError::Policy("session member management revoked".into()));
+    }
+    Ok(())
+}
+
+fn grant_role_allowed(
+    standing: Option<cognia_tenant_auth::membership::EffectiveWorkspaceAccess>, role: SessionRole, guest: bool,
+) -> bool {
+    if guest { return matches!(role, SessionRole::Viewer | SessionRole::Member); }
+    standing.is_some_and(|standing| crate::chat::session_role_rank(role) <= crate::chat::session_role_rank(crate::chat::session_grant_role_ceiling(standing)))
+}
+
+fn memory_standing(
+    tables: &crate::store::Tables, org_id: &str, workspace_id: &str, user_id: &str,
+) -> Option<cognia_tenant_auth::membership::EffectiveWorkspaceAccess> {
+    let org = tables.org_memberships.get(&(org_id.to_owned(), user_id.to_owned())).copied();
+    let workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), user_id.to_owned())).copied();
+    cognia_tenant_auth::membership::resolve_workspace_access(org, workspace)
+}
+
+async fn pg_grant_allowed(
+    tx: &tokio_postgres::Transaction<'_>, org_id: &str, session_id: &str, user_id: &str, role: SessionRole, guest: bool,
+) -> Result<bool, StoreError> {
+    use cognia_tenant_auth::{OrgRole, WorkspaceRole};
+    if guest { return Ok(grant_role_allowed(None, role, true)); }
+    let row = tx.query_opt("SELECT om.role AS org_role, wm.role AS workspace_role FROM chat_sessions s LEFT JOIN org_memberships om ON om.org_id=s.org_id AND om.user_id=$3 LEFT JOIN workspace_memberships wm ON wm.org_id=s.org_id AND wm.workspace_id=s.workspace_id AND wm.user_id=$3 WHERE s.org_id=$1 AND s.id=$2", &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+    let org = row.get::<_, Option<String>>("org_role").map(|s| OrgRole::parse(&s).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose()?;
+    let workspace = row.get::<_, Option<String>>("workspace_role").map(|s| WorkspaceRole::parse(&s).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose()?;
+    Ok(grant_role_allowed(cognia_tenant_auth::membership::resolve_workspace_access(org, workspace), role, false))
+}
+
 fn can_act(member: Option<&SessionMembership>, action: SessionAction) -> bool {
     authorize_session_action(member, action, 0).allowed
 }
 
 fn revoke_member_work(
-    tables: &mut MemoryTables,
+    tables: &mut crate::store::Tables,
     org_id: &str,
     session_id: &str,
     user_id: &str,
     now: i64,
 ) {
-    let membership = tables
-        .memberships
-        .get(&(session_id.to_owned(), user_id.to_owned()));
-    let can_execute = can_act(membership, SessionAction::StartRun);
-    let can_post = can_act(membership, SessionAction::Post);
+    let membership = memory_member(tables, org_id, session_id, user_id);
+    crate::session_files::memory_revoke_member_files(tables, org_id, session_id, user_id, membership.as_ref(), now);
+    let can_execute = can_act(membership.as_ref(), SessionAction::StartRun);
+    let can_post = can_act(membership.as_ref(), SessionAction::Post);
     if !can_execute {
-        for (lease, org, _, _) in tables.leases.values_mut() {
+        for (lease, org, _, _) in tables.chat.leases.values_mut() {
             if org == org_id
                 && lease.session_id == session_id
                 && lease.holder_user_id == user_id
@@ -616,7 +733,7 @@ fn revoke_member_work(
         }
     }
     if !can_post {
-        for (item, org, _) in tables.queue.values_mut() {
+        for (item, org, _) in tables.chat.queue.values_mut() {
             if org == org_id
                 && item.session_id == session_id
                 && item.requested_by_user_id == user_id
@@ -628,18 +745,127 @@ fn revoke_member_work(
     }
 }
 
-async fn pg_member(
+pub(crate) async fn pg_member(
     tx: &tokio_postgres::Transaction<'_>,
     org_id: &str,
     session_id: &str,
     user_id: &str,
 ) -> Result<Option<SessionMembership>, StoreError> {
-    tx.query_opt(&format!("SELECT {MEMBER_COLUMNS} FROM chat_session_memberships m LEFT JOIN users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3"), &[&org_id, &session_id, &user_id])
-        .await.map_err(|e| StoreError::Database(e.to_string()))?
-        .as_ref().map(member_from_row).transpose()
+    let row = tx.query_opt(&format!("SELECT {MEMBER_COLUMNS}, om.role AS org_role, wm.role AS workspace_role {MEMBER_JOINS} WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3"), &[&org_id, &session_id, &user_id])
+        .await.map_err(|e| StoreError::Database(e.to_string()))?;
+    row.as_ref().map(effective_member_from_row).transpose().map(Option::flatten)
 }
 
-async fn pg_revoke_member_work(
+pub(crate) fn memory_revoke_offboarded_invites(tables: &mut crate::store::Tables, org_id: &str, user_id: &str) {
+    for (invite, org, _) in tables.chat.invites.values_mut() {
+        if org == org_id && invite.status == "pending"
+            && (invite.target_user_id.as_deref() == Some(user_id) || invite.created_by_user_id == user_id) {
+            invite.status = "revoked".into();
+        }
+    }
+}
+
+/// Drain concurrent acceptances before offboarding scans memberships. This
+/// transaction-wide barrier precedes row locks; session remains the first row
+/// locked by acceptance. Later acceptances see the committed audit fence.
+pub(crate) async fn pg_lock_invite_standing(tx: &tokio_postgres::Transaction<'_>, org_id: &str, offboarding: bool) -> Result<(), StoreError> {
+    let function = if offboarding { "pg_advisory_xact_lock" } else { "pg_advisory_xact_lock_shared" };
+    tx.query_one(&format!("SELECT {function}(hashtextextended('cognia.collab.invite-standing:' || $1::text, 0))"), &[&org_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    Ok(())
+}
+
+pub(crate) fn memory_cleanup_standing(
+    tables: &mut crate::store::Tables, org_id: &str, workspace_id: Option<&str>,
+    user_id: &str, remove: bool, now: i64,
+) -> Vec<String> {
+    // Only org offboarding uses remove=true and includes session-only Guests.
+    // Workspace changes and legacy audits preserve Guest memberships.
+    let mut ids: Vec<_> = tables.chat.sessions.values().filter(|s| {
+        s.org_id == org_id && workspace_id.is_none_or(|w| s.workspace_id == w)
+            && tables.chat.memberships.get(&(s.id.clone(), user_id.to_owned())).is_some_and(|m| remove || !m.guest)
+    }).map(|s| s.id.clone()).collect();
+    ids.sort();
+    // Untouched when the standing still yields the same membership: no revision
+    // bump and no ticket revocation for someone who lost nothing.
+    ids.into_iter().filter(|id| memory_cleanup_member(tables, org_id, id, user_id, remove, false, now)).collect()
+}
+
+fn memory_cleanup_member(
+    tables: &mut crate::store::Tables, org_id: &str, session_id: &str,
+    user_id: &str, remove: bool, touch_unchanged: bool, now: i64,
+) -> bool {
+    let key = (session_id.to_owned(), user_id.to_owned());
+    let Some(current) = tables.chat.memberships.get(&key).filter(|m| remove || !m.guest).cloned() else { return false };
+    let effective = if remove { None } else { memory_member(tables, org_id, session_id, user_id) };
+    if !touch_unchanged && effective.as_ref() == Some(&current) { return false; }
+    let removed = effective.is_none();
+    match effective {
+        Some(mut member) => {
+            member.updated_at = now;
+            tables.chat.memberships.insert(key, member);
+        }
+        None => { tables.chat.memberships.remove(&key); }
+    }
+    if let Some(session) = tables.chat.sessions.get_mut(session_id) {
+        session.policy_revision += 1;
+        session.updated_at = now;
+    }
+    revoke_member_work(tables, org_id, session_id, user_id, now);
+    if removed {
+        for (invite, org, _) in tables.chat.invites.values_mut() {
+            if org == org_id && invite.session_id == session_id && invite.created_by_user_id == user_id && invite.status == "pending" {
+                invite.status = "revoked".into();
+            }
+        }
+    }
+    true
+}
+
+pub(crate) async fn pg_cleanup_standing(
+    tx: &tokio_postgres::Transaction<'_>, org_id: &str, workspace_id: Option<&str>,
+    user_id: &str, remove: bool, now: i64,
+) -> Result<Vec<String>, StoreError> {
+    // Lock the entire affected set before deleting any membership, always in
+    // session-id order, matching invite acceptance and queue claim.
+    let rows = tx.query("SELECT s.id FROM chat_sessions s WHERE s.org_id=$1 AND ($2::text IS NULL OR s.workspace_id=$2) AND EXISTS (SELECT 1 FROM chat_session_memberships m WHERE m.org_id=s.org_id AND m.session_id=s.id AND m.user_id=$3 AND ($4 OR NOT m.guest)) ORDER BY s.id FOR UPDATE OF s", &[&org_id,&workspace_id,&user_id,&remove]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    let mut affected = Vec::new();
+    for row in rows {
+        let id: String = row.get(0);
+        // Untouched when the standing still yields the same membership: no
+        // revision bump and no ticket revocation for someone who lost nothing.
+        if pg_cleanup_member(tx, org_id, &id, user_id, remove, false, now).await? {
+            affected.push(id);
+        }
+    }
+    Ok(affected)
+}
+
+pub(crate) async fn pg_cleanup_member(
+    tx: &tokio_postgres::Transaction<'_>, org_id: &str, session_id: &str,
+    user_id: &str, remove: bool, touch_unchanged: bool, now: i64,
+) -> Result<bool, StoreError> {
+    let row = tx.query_opt(&format!("SELECT {MEMBER_COLUMNS}, om.role AS org_role, wm.role AS workspace_role {MEMBER_JOINS} WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3 AND ($4 OR NOT m.guest)"), &[&org_id,&session_id,&user_id,&remove]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    let Some(row) = row else { return Ok(false) };
+    let current = member_from_row(&row)?;
+    let effective = if remove { None } else { effective_member_from_row(&row)? };
+    if !touch_unchanged && effective.as_ref() == Some(&current) { return Ok(false); }
+    match &effective {
+        Some(member) => {
+            tx.execute("UPDATE chat_session_memberships SET role=$4,approver=$5,updated_at=$6 WHERE org_id=$1 AND session_id=$2 AND user_id=$3", &[&org_id,&session_id,&user_id,&member.role.as_str(),&member.approver,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        }
+        None => {
+            tx.execute("DELETE FROM chat_session_memberships WHERE org_id=$1 AND session_id=$2 AND user_id=$3", &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        }
+    }
+    tx.execute("UPDATE chat_sessions SET policy_revision=policy_revision+1,updated_at=$3 WHERE org_id=$1 AND id=$2", &[&org_id,&session_id,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    pg_revoke_member_work(tx, org_id, session_id, user_id, effective.as_ref(), now).await?;
+    if effective.is_none() {
+        tx.execute("UPDATE chat_session_invites SET status='revoked' WHERE org_id=$1 AND session_id=$2 AND created_by_user_id=$3 AND status='pending'", &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    }
+    Ok(true)
+}
+
+pub(crate) async fn pg_revoke_member_work(
     tx: &tokio_postgres::Transaction<'_>,
     org_id: &str,
     session_id: &str,
@@ -647,6 +873,7 @@ async fn pg_revoke_member_work(
     member: Option<&SessionMembership>,
     now: i64,
 ) -> Result<(), StoreError> {
+    crate::session_files::pg_revoke_member_files(tx, org_id, session_id, user_id, member, now).await?;
     if !can_act(member, SessionAction::StartRun) {
         tx.execute("UPDATE chat_run_leases SET status='failed',updated_at=$4 WHERE org_id=$1 AND session_id=$2 AND holder_user_id=$3 AND status IN ('active','paused')", &[&org_id, &session_id, &user_id, &now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
     }
@@ -658,15 +885,29 @@ async fn pg_revoke_member_work(
 
 #[async_trait]
 impl ChatStore for InMemoryChatStore {
+    async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        admission::memory_chat(&self.tables.read(), org, session, FeatureKey::SharedChat, Requirement::ContractOnly)
+    }
+    async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        admission::memory_chat(&self.tables.read(), org, session, FeatureKey::SharedChat, Requirement::Write)
+    }
+    async fn effective_member(
+        &self, org_id: &str, session_id: &str, user_id: &str,
+    ) -> Result<Option<SessionMembership>, StoreError> {
+        Ok(memory_member(&self.tables.read(), org_id, session_id, user_id))
+    }
+
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory(&tables, FeatureKey::SharedChat, &input.org_id, &input.workspace_id, admission::COLLAB_PROTOCOL_VERSION as i32, Requirement::New)?;
         if let Some(id) = tables
-            .operations
+            .chat.operations
             .get(&(input.org_id.clone(), input.operation_id.clone()))
         {
-            return tables.sessions.get(id).cloned().ok_or(StoreError::NotFound);
+            return tables.chat.sessions.get(id).cloned().ok_or(StoreError::NotFound);
         }
         let session = SharedSession {
+            contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: input.id,
             org_id: input.org_id.clone(),
             workspace_id: input.workspace_id,
@@ -689,12 +930,12 @@ impl ChatStore for InMemoryChatStore {
             updated_at: input.now,
         };
         tables
-            .operations
+            .chat.operations
             .insert((input.org_id, input.operation_id), session.id.clone());
         tables
-            .memberships
+            .chat.memberships
             .insert((session.id.clone(), owner.user_id.clone()), owner);
-        tables.sessions.insert(session.id.clone(), session.clone());
+        tables.chat.sessions.insert(session.id.clone(), session.clone());
         Ok(session)
     }
 
@@ -706,15 +947,11 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Vec<SharedSession>, StoreError> {
         let tables = self.tables.read();
         let mut sessions: Vec<_> = tables
-            .sessions
+            .chat.sessions
             .values()
             .filter(|session| session.org_id == org_id)
             .filter(|session| workspace_id.is_none_or(|id| session.workspace_id == id))
-            .filter(|session| {
-                tables
-                    .memberships
-                    .contains_key(&(session.id.clone(), user_id.to_owned()))
-            })
+            .filter(|session| memory_member(&tables, org_id, &session.id, user_id).is_some())
             .cloned()
             .collect();
         sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
@@ -732,14 +969,15 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<SharedSession, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, if status == Some(SessionStatus::Deleting) { Requirement::ContractOnly } else if status == Some(SessionStatus::Active) && tables.chat.sessions.get(session_id).is_some_and(|s| s.status == SessionStatus::Importing) { Requirement::New } else { Requirement::Write })?;
         if let Some(id) = tables
-            .operations
+            .chat.operations
             .get(&(org_id.to_owned(), operation_id.to_owned()))
         {
-            return tables.sessions.get(id).cloned().ok_or(StoreError::NotFound);
+            return tables.chat.sessions.get(id).cloned().ok_or(StoreError::NotFound);
         }
         let session = tables
-            .sessions
+            .chat.sessions
             .get_mut(session_id)
             .filter(|session| session.org_id == org_id)
             .ok_or(StoreError::NotFound)?;
@@ -756,7 +994,7 @@ impl ChatStore for InMemoryChatStore {
         session.policy_revision += 1;
         session.updated_at = now;
         let updated = session.clone();
-        tables.operations.insert(
+        tables.chat.operations.insert(
             (org_id.to_owned(), operation_id.to_owned()),
             session_id.to_owned(),
         );
@@ -765,35 +1003,36 @@ impl ChatStore for InMemoryChatStore {
 
     async fn delete_session_data(&self, org_id: &str, session_id: &str) -> Result<(), StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         if tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .is_none_or(|session| session.org_id != org_id)
         {
             return Err(StoreError::NotFound);
         }
-        tables.sessions.remove(session_id);
+        tables.chat.sessions.remove(session_id);
         tables
-            .memberships
+            .chat.memberships
             .retain(|(stored_session, _), _| stored_session != session_id);
-        tables.events.remove(session_id);
+        tables.chat.events.remove(session_id);
         tables
-            .leases
+            .chat.leases
             .retain(|_, (lease, _, _, _)| lease.session_id != session_id);
         tables
-            .invites
+            .chat.invites
             .retain(|_, (invite, _, _)| invite.session_id != session_id);
         tables
-            .approvals
+            .chat.approvals
             .retain(|_, (approval, _, _)| approval.session_id != session_id);
         tables
-            .attachments
+            .chat.attachments
             .retain(|_, (attachment, _)| attachment.session_id != session_id);
         tables
-            .queue
+            .chat.queue
             .retain(|_, (item, _, _)| item.session_id != session_id);
         tables
-            .break_glass
+            .chat.break_glass
             .retain(|_, (grant, _, _)| grant.session_id != session_id);
         Ok(())
     }
@@ -806,18 +1045,14 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Option<(SharedSession, SessionMembership)>, StoreError> {
         let tables = self.tables.read();
         let Some(session) = tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .filter(|session| session.org_id == org_id)
             .cloned()
         else {
             return Ok(None);
         };
-        Ok(tables
-            .memberships
-            .get(&(session_id.to_owned(), user_id.to_owned()))
-            .cloned()
-            .map(|membership| (session, membership)))
+        Ok(memory_member(&tables, org_id, session_id, user_id).map(|member| (session, member)))
     }
 
     async fn admin_session(
@@ -827,7 +1062,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<SharedSession, StoreError> {
         self.tables
             .read()
-            .sessions
+            .chat.sessions
             .get(session_id)
             .filter(|session| session.org_id == org_id)
             .cloned()
@@ -841,17 +1076,17 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Vec<SessionMembership>, StoreError> {
         let tables = self.tables.read();
         if tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .is_none_or(|session| session.org_id != org_id)
         {
             return Err(StoreError::NotFound);
         }
         let mut members: Vec<_> = tables
-            .memberships
+            .chat.memberships
             .iter()
             .filter(|((session, _), _)| session == session_id)
-            .map(|(_, member)| member.clone())
+            .filter_map(|(_, member)| memory_member(&tables, org_id, session_id, &member.user_id))
             .collect();
         members.sort_by(|left, right| left.user_id.cmp(&right.user_id));
         Ok(members)
@@ -861,11 +1096,12 @@ impl ChatStore for InMemoryChatStore {
         &self,
         org_id: &str,
         session_id: &str,
-        _workspace_id: &str,
+        workspace_id: &str,
         user_id: &str,
         role: SessionRole,
         approver: bool,
         guest: bool,
+        actor_user_id: &str,
         now: i64,
     ) -> Result<SessionMembership, StoreError> {
         if guest && (matches!(role, SessionRole::Owner | SessionRole::Maintainer) || approver) {
@@ -873,17 +1109,23 @@ impl ChatStore for InMemoryChatStore {
         }
         let mut tables = self.tables.write();
         tables
-            .sessions
+            .chat.sessions
             .get(session_id)
-            .filter(|session| session.org_id == org_id)
+            .filter(|session| session.org_id == org_id && session.workspace_id == workspace_id)
             .ok_or(StoreError::NotFound)?;
         let existing = tables
-            .memberships
+            .chat.memberships
             .get(&(session_id.to_owned(), user_id.to_owned()));
+        let actor = memory_member(&tables, org_id, session_id, actor_user_id);
+        authorize_member_change(actor.as_ref(), existing.map(|m| m.role), role)?;
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::Write)?;
+        if !grant_role_allowed(memory_standing(&tables, org_id, workspace_id, user_id), role, guest) {
+            return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
+        }
         if existing.is_some_and(|member| member.role == SessionRole::Owner)
             && role != SessionRole::Owner
             && tables
-                .memberships
+                .chat.memberships
                 .values()
                 .filter(|member| {
                     member.session_id == session_id && member.role == SessionRole::Owner
@@ -904,10 +1146,10 @@ impl ChatStore for InMemoryChatStore {
             updated_at: now,
         };
         tables
-            .memberships
+            .chat.memberships
             .insert((session_id.to_owned(), user_id.to_owned()), member.clone());
         let session = tables
-            .sessions
+            .chat.sessions
             .get_mut(session_id)
             .ok_or(StoreError::NotFound)?;
         session.policy_revision += 1;
@@ -921,23 +1163,27 @@ impl ChatStore for InMemoryChatStore {
         org_id: &str,
         session_id: &str,
         user_id: &str,
+        actor_user_id: &str,
         now: i64,
     ) -> Result<(), StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .filter(|session| session.org_id == org_id)
             .ok_or(StoreError::NotFound)?;
         let key = (session_id.to_owned(), user_id.to_owned());
         let removed = tables
-            .memberships
+            .chat.memberships
             .get(&key)
-            .cloned()
-            .ok_or(StoreError::NotFound)?;
+            .cloned();
+        let actor = memory_member(&tables, org_id, session_id, actor_user_id);
+        authorize_member_removal(actor.as_ref(), actor_user_id, user_id, removed.as_ref().map(|m| m.role))?;
+        let removed = removed.ok_or(StoreError::NotFound)?;
         if removed.role == SessionRole::Owner
             && tables
-                .memberships
+                .chat.memberships
                 .values()
                 .filter(|member| {
                     member.session_id == session_id && member.role == SessionRole::Owner
@@ -947,9 +1193,9 @@ impl ChatStore for InMemoryChatStore {
         {
             return Err(conflict(serde_json::json!({ "reason": "last_owner" })));
         }
-        tables.memberships.remove(&key);
+        tables.chat.memberships.remove(&key);
         let session = tables
-            .sessions
+            .chat.sessions
             .get_mut(session_id)
             .filter(|session| session.org_id == org_id)
             .ok_or(StoreError::NotFound)?;
@@ -970,12 +1216,20 @@ impl ChatStore for InMemoryChatStore {
         }
         let mut tables = self.tables.write();
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
             })
             .ok_or(StoreError::NotFound)?;
+        let actor = memory_member(&tables, &input.org_id, &input.session_id, &input.created_by_user_id);
+        authorize_member_change(actor.as_ref(), None, input.role)?;
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::New)?;
+        if let Some(target) = input.target_user_id.as_deref() {
+            if !grant_role_allowed(memory_standing(&tables, &input.org_id, &input.workspace_id, target), input.role, input.guest) {
+                return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
+            }
+        }
         let invite = ChatSessionInvite {
             id: input.id.clone(),
             session_id: input.session_id,
@@ -991,7 +1245,7 @@ impl ChatStore for InMemoryChatStore {
             created_at: input.now,
         };
         tables
-            .invites
+            .chat.invites
             .insert(input.id, (invite.clone(), input.org_id, input.token_hash));
         Ok(invite)
     }
@@ -1004,7 +1258,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Vec<ChatSessionInvite>, StoreError> {
         let mut tables = self.tables.write();
         let mut invites = Vec::new();
-        for (invite, stored_org, _) in tables.invites.values_mut() {
+        for (invite, stored_org, _) in tables.chat.invites.values_mut() {
             if stored_org == org_id && invite.session_id == session_id {
                 if invite.status == "pending" && invite.expires_at <= now {
                     invite.status = "expired".into();
@@ -1025,7 +1279,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
         let mut tables = self.tables.write();
         let invite_id = tables
-            .invites
+            .chat.invites
             .iter()
             .find(|(_, (_, stored_org, stored_hash))| {
                 stored_org == org_id && stored_hash == token_hash
@@ -1044,7 +1298,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<(ChatSessionInvite, SessionMembership), StoreError> {
         let mut tables = self.tables.write();
         let named = tables
-            .invites
+            .chat.invites
             .get(invite_id)
             .is_some_and(|(invite, stored_org, _)| {
                 stored_org == org_id && invite.target_user_id.as_deref() == Some(user_id)
@@ -1062,8 +1316,9 @@ impl ChatStore for InMemoryChatStore {
         invite_id: &str,
     ) -> Result<ChatSessionInvite, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         let (invite, _, _) = tables
-            .invites
+            .chat.invites
             .get_mut(invite_id)
             .filter(|(invite, stored_org, _)| {
                 stored_org == org_id && invite.session_id == session_id
@@ -1081,14 +1336,15 @@ impl ChatStore for InMemoryChatStore {
         input: NewSessionEvent,
     ) -> Result<SessionEvent, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, event_feature(&input), event_requirement(&input))?;
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
             })
             .ok_or(StoreError::NotFound)?;
-        let events = tables.events.entry(input.session_id.clone()).or_default();
+        let events = tables.chat.events.entry(input.session_id.clone()).or_default();
         if let Some(existing) = events
             .iter()
             .find(|event| event.operation_id == input.operation_id)
@@ -1137,7 +1393,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<SessionEvent, StoreError> {
         let mut tables = self.tables.write();
         let holder = tables
-            .leases
+            .chat.leases
             .values()
             .find(|(lease, org, token, _)| {
                 org == &input.org_id
@@ -1150,26 +1406,19 @@ impl ChatStore for InMemoryChatStore {
             })
             .map(|(lease, _, _, _)| lease.holder_user_id.clone())
             .ok_or(StoreError::NotFound)?;
-        if !tables
-            .memberships
-            .get(&(input.session_id.clone(), holder))
-            .is_some_and(|member| {
-                matches!(
-                    member.role,
-                    SessionRole::Owner | SessionRole::Maintainer | SessionRole::Member
-                )
-            })
-        {
+        if !can_act(memory_member(&tables, &input.org_id, &input.session_id, &holder).as_ref(), SessionAction::StartRun) {
             return Err(StoreError::NotFound);
         }
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, event_requirement(&input))?;
+        if input.kind.starts_with("message.") { admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write)?; }
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
             })
             .ok_or(StoreError::NotFound)?;
-        let events = tables.events.entry(input.session_id.clone()).or_default();
+        let events = tables.chat.events.entry(input.session_id.clone()).or_default();
         if let Some(existing) = events
             .iter()
             .find(|event| event.operation_id == input.operation_id)
@@ -1219,14 +1468,14 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Vec<SessionEvent>, StoreError> {
         let tables = self.tables.read();
         if tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .is_none_or(|session| session.org_id != org_id)
         {
             return Err(StoreError::NotFound);
         }
         Ok(tables
-            .events
+            .chat.events
             .get(session_id)
             .into_iter()
             .flatten()
@@ -1243,14 +1492,14 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Vec<String>, StoreError> {
         let tables = self.tables.read();
         if tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .is_none_or(|session| session.org_id != org_id)
         {
             return Err(StoreError::NotFound);
         }
         Ok(tables
-            .events
+            .chat.events
             .get(session_id)
             .into_iter()
             .flatten()
@@ -1273,14 +1522,14 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<SessionEvent, StoreError> {
         let tables = self.tables.read();
         if tables
-            .sessions
+            .chat.sessions
             .get(session_id)
             .is_none_or(|session| session.org_id != org_id)
         {
             return Err(StoreError::NotFound);
         }
         tables
-            .events
+            .chat.events
             .get(session_id)
             .and_then(|events| {
                 events.iter().find(|event| {
@@ -1298,23 +1547,22 @@ impl ChatStore for InMemoryChatStore {
 
     async fn acquire_run_lease(&self, input: NewChatRunLease) -> Result<ChatRunLease, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New)?;
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
             })
             .ok_or(StoreError::NotFound)?;
         if !can_act(
-            tables
-                .memberships
-                .get(&(input.session_id.clone(), input.holder_user_id.clone())),
+            memory_member(&tables, &input.org_id, &input.session_id, &input.holder_user_id).as_ref(),
             SessionAction::StartRun,
         ) {
             return Err(StoreError::NotFound);
         }
         if let Some((lease, _, token, _)) =
-            tables.leases.values().find(|(lease, org, _, operation)| {
+            tables.chat.leases.values().find(|(lease, org, _, operation)| {
                 org == &input.org_id
                     && lease.session_id == input.session_id
                     && operation == &input.operation_id
@@ -1329,7 +1577,7 @@ impl ChatStore for InMemoryChatStore {
             }
             return Ok(lease.clone());
         }
-        if let Some((lease, _, _, _)) = tables.leases.values_mut().find(|(lease, _, _, _)| {
+        if let Some((lease, _, _, _)) = tables.chat.leases.values_mut().find(|(lease, _, _, _)| {
             lease.session_id == input.session_id
                 && matches!(lease.status.as_str(), "active" | "paused")
         }) {
@@ -1352,7 +1600,7 @@ impl ChatStore for InMemoryChatStore {
             created_at: input.now,
             updated_at: input.now,
         };
-        tables.leases.insert(
+        tables.chat.leases.insert(
             input.id,
             (
                 lease.clone(),
@@ -1372,37 +1620,34 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<(ChatRunLease, ChatRunQueueItem), StoreError> {
         let mut tables = self.tables.write();
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
             })
             .ok_or(StoreError::NotFound)?;
         if !can_act(
-            tables
-                .memberships
-                .get(&(input.session_id.clone(), input.holder_user_id.clone())),
+            memory_member(&tables, &input.org_id, &input.session_id, &input.holder_user_id).as_ref(),
             SessionAction::StartRun,
         ) {
             return Err(StoreError::Policy(
                 "queue executor cannot start runs".into(),
             ));
         }
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New)?;
         let item = tables
-            .queue
+            .chat.queue
             .get(item_id)
             .filter(|(item, org, _)| org == &input.org_id && item.session_id == input.session_id)
             .map(|(item, _, _)| item.clone())
             .ok_or(StoreError::NotFound)?;
         if !can_act(
-            tables
-                .memberships
-                .get(&(input.session_id.clone(), item.requested_by_user_id.clone())),
+            memory_member(&tables, &input.org_id, &input.session_id, &item.requested_by_user_id).as_ref(),
             SessionAction::Post,
         ) {
             if item.status == "queued" {
                 tables
-                    .queue
+                    .chat.queue
                     .get_mut(item_id)
                     .ok_or(StoreError::NotFound)?
                     .0
@@ -1410,7 +1655,7 @@ impl ChatStore for InMemoryChatStore {
             }
             return Err(StoreError::Policy("queue requester cannot post".into()));
         }
-        if let Some((lease, _, token, _)) = tables.leases.values().find(|(lease, org, _, op)| {
+        if let Some((lease, _, token, _)) = tables.chat.leases.values().find(|(lease, org, _, op)| {
             org == &input.org_id
                 && lease.session_id == input.session_id
                 && op == &input.operation_id
@@ -1432,16 +1677,14 @@ impl ChatStore for InMemoryChatStore {
         // Older rows may predate revocation cleanup. Drop them before finding
         // the FIFO head so a revoked requester cannot stall eligible work.
         let invalid: Vec<_> = tables
-            .queue
+            .chat.queue
             .iter()
             .filter(|(_, (item, org, _))| {
                 org == &input.org_id
                     && item.session_id == input.session_id
                     && item.status == "queued"
                     && !can_act(
-                        tables
-                            .memberships
-                            .get(&(input.session_id.clone(), item.requested_by_user_id.clone())),
+                        memory_member(&tables, &input.org_id, &input.session_id, &item.requested_by_user_id).as_ref(),
                         SessionAction::Post,
                     )
             })
@@ -1449,14 +1692,14 @@ impl ChatStore for InMemoryChatStore {
             .collect();
         for id in invalid {
             tables
-                .queue
+                .chat.queue
                 .get_mut(&id)
                 .ok_or(StoreError::NotFound)?
                 .0
                 .status = "cancelled".into();
         }
         let first = tables
-            .queue
+            .chat.queue
             .values()
             .filter(|(item, org, _)| {
                 org == &input.org_id
@@ -1469,7 +1712,7 @@ impl ChatStore for InMemoryChatStore {
                 serde_json::json!({"reason":"not_queue_head"}),
             ));
         }
-        if let Some((lease, _, _, _)) = tables.leases.values().find(|(lease, org, _, _)| {
+        if let Some((lease, _, _, _)) = tables.chat.leases.values().find(|(lease, org, _, _)| {
             org == &input.org_id
                 && lease.session_id == input.session_id
                 && matches!(lease.status.as_str(), "active" | "paused")
@@ -1478,7 +1721,7 @@ impl ChatStore for InMemoryChatStore {
             return Err(conflict(lease.clone()));
         }
         if let Some((last, _, _, _)) = tables
-            .leases
+            .chat.leases
             .values()
             .filter(|(lease, org, _, _)| {
                 org == &input.org_id && lease.session_id == input.session_id
@@ -1500,7 +1743,7 @@ impl ChatStore for InMemoryChatStore {
                 ));
             }
         }
-        for (lease, org, _, _) in tables.leases.values_mut() {
+        for (lease, org, _, _) in tables.chat.leases.values_mut() {
             if org == &input.org_id
                 && lease.session_id == input.session_id
                 && matches!(lease.status.as_str(), "active" | "paused")
@@ -1522,7 +1765,7 @@ impl ChatStore for InMemoryChatStore {
             created_at: input.now,
             updated_at: input.now,
         };
-        tables.leases.insert(
+        tables.chat.leases.insert(
             input.id,
             (
                 lease.clone(),
@@ -1531,7 +1774,7 @@ impl ChatStore for InMemoryChatStore {
                 input.operation_id,
             ),
         );
-        let item = &mut tables.queue.get_mut(item_id).ok_or(StoreError::NotFound)?.0;
+        let item = &mut tables.chat.queue.get_mut(item_id).ok_or(StoreError::NotFound)?.0;
         item.status = "claimed".into();
         Ok((lease, item.clone()))
     }
@@ -1548,8 +1791,10 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<ChatRunLease, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::Write)?;
+        let allowed = can_act(memory_member(&tables, org_id, session_id, holder_user_id).as_ref(), SessionAction::StartRun);
         let (lease, stored_org, stored_token, _) = tables
-            .leases
+            .chat.leases
             .get_mut(lease_id)
             .ok_or(StoreError::NotFound)?;
         if stored_org != org_id
@@ -1557,10 +1802,17 @@ impl ChatStore for InMemoryChatStore {
             || lease.holder_user_id != holder_user_id
             || lease.holder_device_id != holder_device_id
             || stored_token != token_hash
-            || lease.status != "active"
-            || lease.token_expires_at <= now
-            || lease.heartbeat_expires_at <= now
         {
+            return Err(StoreError::NotFound);
+        }
+        if !allowed {
+            if matches!(lease.status.as_str(), "active" | "paused") {
+                lease.status = "failed".into();
+                lease.updated_at = now;
+            }
+            return Err(StoreError::NotFound);
+        }
+        if lease.status != "active" || lease.token_expires_at <= now || lease.heartbeat_expires_at <= now {
             return Err(StoreError::NotFound);
         }
         lease.token_expires_at = heartbeat_expires_at;
@@ -1581,8 +1833,10 @@ impl ChatStore for InMemoryChatStore {
         status: &str,
     ) -> Result<ChatRunLease, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly)?;
+        let allowed = can_act(memory_member(&tables, org_id, session_id, holder_user_id).as_ref(), SessionAction::StartRun);
         let (lease, stored_org, stored_token, _) = tables
-            .leases
+            .chat.leases
             .get_mut(lease_id)
             .ok_or(StoreError::NotFound)?;
         if stored_org != org_id
@@ -1591,6 +1845,16 @@ impl ChatStore for InMemoryChatStore {
             || lease.holder_device_id != holder_device_id
             || stored_token != token_hash
         {
+            return Err(StoreError::NotFound);
+        }
+        if !allowed {
+            if matches!(lease.status.as_str(), "active" | "paused") {
+                lease.status = "failed".into();
+                lease.updated_at = now;
+            }
+            return Err(StoreError::NotFound);
+        }
+        if !matches!(lease.status.as_str(), "active" | "paused") && lease.status != status {
             return Err(StoreError::NotFound);
         }
         lease.status = status.to_owned();
@@ -1606,7 +1870,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Option<ChatRunLease>, StoreError> {
         let mut tables = self.tables.write();
         let Some((lease, stored_org, _, _)) =
-            tables.leases.values_mut().find(|(lease, org, _, _)| {
+            tables.chat.leases.values_mut().find(|(lease, org, _, _)| {
                 org == org_id
                     && lease.session_id == session_id
                     && matches!(lease.status.as_str(), "active" | "paused")
@@ -1635,7 +1899,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<ChatRunLease, StoreError> {
         let tables = self.tables.read();
         tables
-            .leases
+            .chat.leases
             .values()
             .find(|(lease, stored_org, stored_token, _)| {
                 stored_org == org_id
@@ -1646,6 +1910,7 @@ impl ChatStore for InMemoryChatStore {
                     && lease.token_expires_at > now
                     && lease.heartbeat_expires_at > now
             })
+            .filter(|(lease, _, _, _)| can_act(memory_member(&tables, org_id, session_id, &lease.holder_user_id).as_ref(), SessionAction::StartRun))
             .map(|(lease, _, _, _)| lease.clone())
             .ok_or(StoreError::NotFound)
     }
@@ -1655,30 +1920,27 @@ impl ChatStore for InMemoryChatStore {
         mut input: NewChatRunQueueItem,
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New)?;
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
             })
             .ok_or(StoreError::NotFound)?;
-        if let Some((item, _, _)) = tables.queue.values().find(|(item, stored_org, operation)| {
+
+        if let Some((item, _, _)) = tables.chat.queue.values().find(|(item, stored_org, operation)| {
             stored_org == &input.org_id
                 && item.session_id == input.session_id
                 && operation == &input.operation_id
         }) {
             return replay_queue(item.clone(), &input);
         }
-        if !can_act(
-            tables
-                .memberships
-                .get(&(input.session_id.clone(), input.requested_by_user_id.clone())),
-            SessionAction::Post,
-        ) {
-            return Err(StoreError::Policy("queue requester cannot post".into()));
+        if !can_act(memory_member(&tables, &input.org_id, &input.session_id, &input.requested_by_user_id).as_ref(), SessionAction::Post) {
+            return Err(StoreError::NotFound);
         }
         let boundary = tables
-            .events
+            .chat.events
             .get(&input.session_id)
             .and_then(|events| events.last())
             .map_or(0, |event| event.sequence);
@@ -1686,7 +1948,7 @@ impl ChatStore for InMemoryChatStore {
             payload.insert("contextSequence".into(), serde_json::json!(boundary));
         }
         let position = tables
-            .queue
+            .chat.queue
             .values()
             .filter(|(item, org, _)| org == &input.org_id && item.session_id == input.session_id)
             .map(|(item, _, _)| item.position)
@@ -1703,7 +1965,7 @@ impl ChatStore for InMemoryChatStore {
             created_at: input.now,
         };
         tables
-            .queue
+            .chat.queue
             .insert(input.id, (item.clone(), input.org_id, input.operation_id));
         Ok(item)
     }
@@ -1716,7 +1978,7 @@ impl ChatStore for InMemoryChatStore {
         let mut items: Vec<_> = self
             .tables
             .read()
-            .queue
+            .chat.queue
             .values()
             .filter(|(item, stored_org, _)| {
                 stored_org == org_id && item.session_id == session_id && item.status == "queued"
@@ -1736,7 +1998,8 @@ impl ChatStore for InMemoryChatStore {
         elevated: bool,
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut tables = self.tables.write();
-        let (item, stored_org, _) = tables.queue.get_mut(item_id).ok_or(StoreError::NotFound)?;
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly)?;
+        let (item, stored_org, _) = tables.chat.queue.get_mut(item_id).ok_or(StoreError::NotFound)?;
         if stored_org != org_id
             || item.session_id != session_id
             || item.status != "queued"
@@ -1753,15 +2016,16 @@ impl ChatStore for InMemoryChatStore {
         input: NewBreakGlassGrant,
     ) -> Result<BreakGlassGrant, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         if let Some((grant, _, _)) = tables
-            .break_glass
+            .chat.break_glass
             .values()
             .find(|(_, org, operation)| org == &input.org_id && operation == &input.operation_id)
         {
             return Ok(grant.clone());
         }
         if !tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .is_some_and(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
@@ -1780,7 +2044,7 @@ impl ChatStore for InMemoryChatStore {
             created_at: input.created_at,
         };
         tables
-            .break_glass
+            .chat.break_glass
             .insert(input.id, (grant.clone(), input.org_id, input.operation_id));
         Ok(grant)
     }
@@ -1795,7 +2059,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<BreakGlassGrant, StoreError> {
         self.tables
             .read()
-            .break_glass
+            .chat.break_glass
             .get(grant_id)
             .filter(|(grant, stored_org, _)| {
                 stored_org == org_id
@@ -1816,14 +2080,18 @@ impl ChatStore for InMemoryChatStore {
             return Err(StoreError::Policy("invalid_approval_risk".into()));
         }
         let mut tables = self.tables.write();
+        if !can_act(memory_member(&tables, &input.org_id, &input.session_id, &input.requested_by_user_id).as_ref(), SessionAction::StartRun) {
+            return Err(StoreError::NotFound);
+        }
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::Write)?;
         if let Some((approval, _, _)) = tables
-            .approvals
+            .chat.approvals
             .values()
             .find(|(_, org, op)| org == &input.org_id && op == &input.operation_id)
         {
             return Ok(approval.clone());
         }
-        let holds_run = tables.leases.values().any(|(lease, org, _, _)| {
+        let holds_run = tables.chat.leases.values().any(|(lease, org, _, _)| {
             org == &input.org_id
                 && lease.session_id == input.session_id
                 && lease.run_id == input.run_id
@@ -1848,7 +2116,7 @@ impl ChatStore for InMemoryChatStore {
             created_at: input.now,
             revision: 1,
         };
-        tables.approvals.insert(
+        tables.chat.approvals.insert(
             input.id,
             (approval.clone(), input.org_id, input.operation_id),
         );
@@ -1863,7 +2131,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<Vec<ChatApprovalRequest>, StoreError> {
         let mut tables = self.tables.write();
         let mut approvals = Vec::new();
-        for (approval, stored_org, _) in tables.approvals.values_mut() {
+        for (approval, stored_org, _) in tables.chat.approvals.values_mut() {
             if stored_org == org_id && approval.session_id == session_id {
                 if approval.status == "pending" && approval.expires_at <= now {
                     approval.status = "expired".into();
@@ -1884,7 +2152,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<ChatApprovalRequest, StoreError> {
         self.tables
             .read()
-            .approvals
+            .chat.approvals
             .get(approval_id)
             .filter(|(approval, stored_org, _)| {
                 stored_org == org_id && approval.session_id == session_id
@@ -1907,8 +2175,14 @@ impl ChatStore for InMemoryChatStore {
             return Err(StoreError::Policy("invalid_approval_resolution".into()));
         }
         let mut tables = self.tables.write();
+        let risk = &tables.chat.approvals.get(approval_id).ok_or(StoreError::NotFound)?.0.risk;
+        let action = if risk == "high" { SessionAction::ApproveHighRisk } else { SessionAction::ApproveOrdinary };
+        if !can_act(memory_member(&tables, org_id, session_id, resolver_user_id).as_ref(), action) {
+            return Err(StoreError::NotFound);
+        }
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChatExecution, if status == "denied" { Requirement::ContractOnly } else if risk == "high" { Requirement::New } else { Requirement::Write })?;
         let (approval, _, _) = tables
-            .approvals
+            .chat.approvals
             .get_mut(approval_id)
             .filter(|(approval, stored_org, _)| {
                 stored_org == org_id && approval.session_id == session_id
@@ -1937,8 +2211,9 @@ impl ChatStore for InMemoryChatStore {
             return Err(StoreError::Policy("attachment_size_invalid".into()));
         }
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write)?;
         tables
-            .sessions
+            .chat.sessions
             .get(&input.session_id)
             .filter(|session| {
                 session.org_id == input.org_id && session.workspace_id == input.workspace_id
@@ -1959,7 +2234,7 @@ impl ChatStore for InMemoryChatStore {
             updated_at: input.now,
         };
         tables
-            .attachments
+            .chat.attachments
             .insert(input.id, (attachment.clone(), input.org_id));
         Ok(attachment)
     }
@@ -1972,7 +2247,7 @@ impl ChatStore for InMemoryChatStore {
     ) -> Result<ChatAttachment, StoreError> {
         self.tables
             .read()
-            .attachments
+            .chat.attachments
             .get(attachment_id)
             .filter(|(attachment, stored_org)| {
                 stored_org == org_id && attachment.session_id == session_id
@@ -1989,7 +2264,7 @@ impl ChatStore for InMemoryChatStore {
         Ok(self
             .tables
             .read()
-            .attachments
+            .chat.attachments
             .values()
             .filter(|(attachment, stored_org)| {
                 stored_org == org_id && attachment.session_id == session_id
@@ -2007,8 +2282,9 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<ChatAttachment, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::Write)?;
         let (attachment, _) = tables
-            .attachments
+            .chat.attachments
             .get_mut(attachment_id)
             .filter(|(attachment, stored_org)| {
                 stored_org == org_id && attachment.session_id == session_id
@@ -2034,8 +2310,9 @@ impl ChatStore for InMemoryChatStore {
         now: i64,
     ) -> Result<ChatAttachment, StoreError> {
         let mut tables = self.tables.write();
+        admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly)?;
         let (attachment, _) = tables
-            .attachments
+            .chat.attachments
             .get_mut(attachment_id)
             .filter(|(attachment, stored_org)| {
                 stored_org == org_id && attachment.session_id == session_id
@@ -2049,6 +2326,7 @@ impl ChatStore for InMemoryChatStore {
 
 fn session_from_row(row: &Row) -> Result<SharedSession, StoreError> {
     Ok(SharedSession {
+        contract_version: row.get("contract_version"),
         id: row.get("id"),
         org_id: row.get("org_id"),
         workspace_id: row.get("workspace_id"),
@@ -2072,7 +2350,7 @@ fn session_from_row(row: &Row) -> Result<SharedSession, StoreError> {
     })
 }
 
-fn member_from_row(row: &Row) -> Result<SessionMembership, StoreError> {
+pub(crate) fn member_from_row(row: &Row) -> Result<SessionMembership, StoreError> {
     let role_text: String = row.get("role");
     Ok(SessionMembership {
         session_id: row.get("session_id"),
@@ -2126,8 +2404,17 @@ fn qualified_session_columns() -> String {
         .join(", ")
 }
 
-const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision";
-const MEMBER_COLUMNS: &str = "m.session_id, m.user_id, m.role, m.approver, m.guest, u.display_name, m.created_at, m.updated_at";
+const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision, contract_version";
+pub(crate) const MEMBER_JOINS: &str = "FROM chat_session_memberships m JOIN chat_sessions s ON s.org_id=m.org_id AND s.id=m.session_id LEFT JOIN users u ON u.id=m.user_id LEFT JOIN org_memberships om ON om.org_id=s.org_id AND om.user_id=m.user_id LEFT JOIN workspace_memberships wm ON wm.org_id=s.org_id AND wm.workspace_id=s.workspace_id AND wm.user_id=m.user_id";
+
+pub(crate) fn effective_member_from_row(row: &Row) -> Result<Option<SessionMembership>, StoreError> {
+    use cognia_tenant_auth::{OrgRole, WorkspaceRole};
+    let org = row.get::<_, Option<String>>("org_role").map(|s| OrgRole::parse(&s).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose()?;
+    let workspace = row.get::<_, Option<String>>("workspace_role").map(|s| WorkspaceRole::parse(&s).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose()?;
+    Ok(crate::chat::cap_session_member(member_from_row(row)?, cognia_tenant_auth::membership::resolve_workspace_access(org, workspace)))
+}
+
+pub(crate) const MEMBER_COLUMNS: &str = "m.session_id, m.user_id, m.role, m.approver, m.guest, u.display_name, m.created_at, m.updated_at";
 const EVENT_COLUMNS: &str = "id, session_id, sequence, kind, actor_kind, actor_id, actor_label, payload, created_at, operation_id";
 const LEASE_COLUMNS: &str = "id, session_id, queue_item_id, run_id, holder_user_id, holder_device_id, status, token_expires_at, heartbeat_expires_at, created_at, updated_at";
 const INVITE_COLUMNS: &str = "id, session_id, role, approver, guest, target_user_id, status, created_by_user_id, accepted_by_user_id, accepted_at, expires_at, created_at";
@@ -2238,6 +2525,7 @@ impl PgStore {
         };
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        pg_lock_invite_standing(&tx, org_id, false).await?;
         // Use the same session-first lock ordering as membership and queue
         // mutations; invitation acceptance must not race revocation.
         tx.query_opt(&format!("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=(SELECT session_id FROM chat_session_invites WHERE org_id=$1 AND {column}=$2) FOR UPDATE"), &[&org_id, &value]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
@@ -2257,6 +2545,12 @@ impl PgStore {
         {
             return Err(StoreError::InvitationUnavailable);
         }
+        if !can_act(pg_member(&tx, org_id, &current.session_id, &current.created_by_user_id).await?.as_ref(), SessionAction::ManageMembers) {
+            return Err(StoreError::InvitationUnavailable);
+        }
+        let offboarded: bool = tx.query_one("SELECT EXISTS (SELECT 1 FROM authorization_audit_events WHERE org_id=$1 AND target_user_id=$2 AND action='org.member.offboarded' AND created_at >= $3)", &[&org_id, &user_id, &current.created_at]).await.map_err(|e| StoreError::Database(e.to_string()))?.get(0);
+        if offboarded { return Err(StoreError::InvitationUnavailable); }
+        self.admit_chat(&tx, org_id, &current.session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let workspace_id: String = row.get("workspace_id");
         tx.execute("INSERT INTO chat_session_memberships (org_id,workspace_id,session_id,user_id,role,approver,guest,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) ON CONFLICT (session_id,user_id) DO NOTHING", &[&org_id,&workspace_id,&current.session_id,&user_id,&current.role.as_str(),&current.approver,&current.guest,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
         let invite_row = tx.query_one(&format!("UPDATE chat_session_invites SET status='accepted',accepted_by_user_id=$3,accepted_at=$4 WHERE org_id=$1 AND id=$2 RETURNING {INVITE_COLUMNS}"), &[&org_id,&current.id,&user_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
@@ -2271,13 +2565,32 @@ impl PgStore {
 
 #[async_trait]
 impl ChatStore for PgStore {
+    async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org).await?;
+        self.admit_chat(&tx, org, session, FeatureKey::SharedChat, Requirement::ContractOnly).await
+    }
+    async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org).await?;
+        self.admit_chat(&tx, org, session, FeatureKey::SharedChat, Requirement::Write).await
+    }
+    async fn effective_member(
+        &self, org_id: &str, session_id: &str, user_id: &str,
+    ) -> Result<Option<SessionMembership>, StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org_id).await?;
+        pg_member(&tx, org_id, session_id, user_id).await
+    }
+
     async fn create_session(&self, input: NewSharedSession) -> Result<SharedSession, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit(&tx, FeatureKey::SharedChat, &input.org_id, &input.workspace_id, admission::COLLAB_PROTOCOL_VERSION as i32, Requirement::New).await?;
         if let Some(row) = tx.query_opt(&format!("SELECT {SESSION_COLUMNS} FROM chat_sessions WHERE org_id = $1 AND created_operation_id = $2"), &[&input.org_id, &input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? {
             return session_from_row(&row);
         }
-        let row = tx.query_one(&format!("INSERT INTO chat_sessions (id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, created_operation_id, last_operation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8) RETURNING {SESSION_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.title,&format!("{:?}", input.status).to_lowercase(),&input.created_by_user_id,&input.now,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let row = tx.query_one(&format!("INSERT INTO chat_sessions (id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, created_operation_id, last_operation_id, contract_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8,$9) RETURNING {SESSION_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.title,&format!("{:?}", input.status).to_lowercase(),&input.created_by_user_id,&input.now,&input.operation_id,&(admission::COLLAB_PROTOCOL_VERSION as i32)]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         tx.execute("INSERT INTO chat_session_memberships (org_id, workspace_id, session_id, user_id, role, approver, guest, created_at, updated_at) VALUES ($1,$2,$3,$4,'owner',true,false,$5,$5)", &[&input.org_id,&input.workspace_id,&input.id,&input.created_by_user_id,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         tx.commit()
             .await
@@ -2288,6 +2601,7 @@ impl ChatStore for PgStore {
     async fn delete_session_data(&self, org_id: &str, session_id: &str) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let deleted = tx
             .execute(
                 "DELETE FROM chat_sessions WHERE org_id=$1 AND id=$2 AND status='deleting'",
@@ -2312,8 +2626,14 @@ impl ChatStore for PgStore {
     ) -> Result<Vec<SharedSession>, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
-        let rows = tx.query(&format!("SELECT {} FROM chat_sessions s JOIN chat_session_memberships m ON m.session_id=s.id AND m.user_id=$2 WHERE s.org_id=$1 AND ($3::text IS NULL OR s.workspace_id=$3) ORDER BY s.updated_at DESC", qualified_session_columns()), &[&org_id,&user_id,&workspace_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
-        rows.iter().map(session_from_row).collect()
+        let rows = tx.query(&format!("SELECT {}, {MEMBER_COLUMNS}, om.role AS org_role, wm.role AS workspace_role {MEMBER_JOINS} WHERE m.user_id=$2 AND s.org_id=$1 AND ($3::text IS NULL OR s.workspace_id=$3) ORDER BY s.updated_at DESC", qualified_session_columns()), &[&org_id,&user_id,&workspace_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let mut sessions = Vec::new();
+        for row in &rows {
+            if effective_member_from_row(row)?.is_some() {
+                sessions.push(session_from_row(row)?);
+            }
+        }
+        Ok(sessions)
     }
 
     async fn patch_session(
@@ -2336,6 +2656,7 @@ impl ChatStore for PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?
             .ok_or(StoreError::NotFound)?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, if status == Some(SessionStatus::Deleting) { Requirement::ContractOnly } else if status == Some(SessionStatus::Active) && existing.get::<_, String>("status") == "importing" { Requirement::New } else { Requirement::Write }).await?;
         if existing.get::<_, String>("last_operation_id") == operation_id {
             return session_from_row(&existing);
         }
@@ -2375,11 +2696,8 @@ impl ChatStore for PgStore {
         else {
             return Ok(None);
         };
-        let Some(member_row) = tx.query_opt(&format!("SELECT {MEMBER_COLUMNS} FROM chat_session_memberships m LEFT JOIN users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3"), &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))? else { return Ok(None) };
-        Ok(Some((
-            session_from_row(&session_row)?,
-            member_from_row(&member_row)?,
-        )))
+        let Some(member) = pg_member(&tx, org_id, session_id, user_id).await? else { return Ok(None) };
+        Ok(Some((session_from_row(&session_row)?, member)))
     }
 
     async fn admin_session(
@@ -2407,8 +2725,8 @@ impl ChatStore for PgStore {
     ) -> Result<Vec<SessionMembership>, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
-        let rows = tx.query(&format!("SELECT {MEMBER_COLUMNS} FROM chat_session_memberships m LEFT JOIN users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.session_id=$2 ORDER BY m.user_id"), &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
-        rows.iter().map(member_from_row).collect()
+        let rows = tx.query(&format!("SELECT {MEMBER_COLUMNS}, om.role AS org_role, wm.role AS workspace_role {MEMBER_JOINS} WHERE m.org_id=$1 AND m.session_id=$2 ORDER BY m.user_id"), &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        rows.iter().map(effective_member_from_row).collect::<Result<Vec<_>, _>>().map(|members| members.into_iter().flatten().collect())
     }
 
     async fn put_member(
@@ -2420,6 +2738,7 @@ impl ChatStore for PgStore {
         role: SessionRole,
         approver: bool,
         guest: bool,
+        actor_user_id: &str,
         now: i64,
     ) -> Result<SessionMembership, StoreError> {
         if guest && (matches!(role, SessionRole::Owner | SessionRole::Maintainer) || approver) {
@@ -2440,6 +2759,13 @@ impl ChatStore for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let actor = pg_member(&tx, org_id, session_id, actor_user_id).await?;
+        let existing = previous.as_ref().map(|row| SessionRole::parse(&row.get::<_, String>(0)).ok_or_else(|| StoreError::Corrupt("unknown session role".into()))).transpose()?;
+        authorize_member_change(actor.as_ref(), existing, role)?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::Write).await?;
+        if !pg_grant_allowed(&tx, org_id, session_id, user_id, role, guest).await? {
+            return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
+        }
         if previous
             .as_ref()
             .is_some_and(|row| row.get::<_, String>(0) == "owner")
@@ -2461,7 +2787,8 @@ impl ChatStore for PgStore {
         tx.execute("UPDATE chat_sessions SET policy_revision=policy_revision+1,updated_at=$3 WHERE org_id=$1 AND id=$2", &[&org_id,&session_id,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         let row=tx.query_one(&format!("SELECT {MEMBER_COLUMNS} FROM chat_session_memberships m LEFT JOIN users u ON u.id=m.user_id WHERE m.org_id=$1 AND m.session_id=$2 AND m.user_id=$3"), &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         let member = member_from_row(&row)?;
-        pg_revoke_member_work(&tx, org_id, session_id, user_id, Some(&member), now).await?;
+        let effective = pg_member(&tx, org_id, session_id, user_id).await?;
+        pg_revoke_member_work(&tx, org_id, session_id, user_id, effective.as_ref(), now).await?;
         tx.commit()
             .await
             .map_err(|e| StoreError::Database(e.to_string()))?;
@@ -2473,17 +2800,23 @@ impl ChatStore for PgStore {
         org_id: &str,
         session_id: &str,
         user_id: &str,
+        actor_user_id: &str,
         now: i64,
     ) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         tx.query_one(
             "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&org_id, &session_id],
         )
         .await
         .map_err(|error| StoreError::Database(error.to_string()))?;
-        let row=tx.query_opt("SELECT role FROM chat_session_memberships WHERE org_id=$1 AND session_id=$2 AND user_id=$3 FOR UPDATE", &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        let row=tx.query_opt("SELECT role FROM chat_session_memberships WHERE org_id=$1 AND session_id=$2 AND user_id=$3 FOR UPDATE", &[&org_id,&session_id,&user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let actor = pg_member(&tx, org_id, session_id, actor_user_id).await?;
+        let existing = row.as_ref().map(|row| SessionRole::parse(&row.get::<_, String>(0)).ok_or_else(|| StoreError::Corrupt("unknown session role".into()))).transpose()?;
+        authorize_member_removal(actor.as_ref(), actor_user_id, user_id, existing)?;
+        let row = row.ok_or(StoreError::NotFound)?;
         if row.get::<_, String>(0) == "owner" {
             let owners:i64=tx.query_one("SELECT count(*) FROM chat_session_memberships WHERE org_id=$1 AND session_id=$2 AND role='owner'", &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.get(0);
             if owners <= 1 {
@@ -2515,6 +2848,15 @@ impl ChatStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&input.org_id,&input.session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        let actor = pg_member(&tx, &input.org_id, &input.session_id, &input.created_by_user_id).await?;
+        authorize_member_change(actor.as_ref(), None, input.role)?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::New).await?;
+        if let Some(target) = input.target_user_id.as_deref() {
+            if !pg_grant_allowed(&tx, &input.org_id, &input.session_id, target, input.role, input.guest).await? {
+                return Err(StoreError::Policy("session role exceeds grant ceiling".into()));
+            }
+        }
         let row = tx
             .query_one(
                 &format!("INSERT INTO chat_session_invites (id,org_id,workspace_id,session_id,token_hash,target_user_id,role,approver,guest,status,created_by_user_id,expires_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12) RETURNING {INVITE_COLUMNS}"),
@@ -2574,6 +2916,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatSessionInvite, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let row = tx.query_opt(&format!("UPDATE chat_session_invites SET status='revoked' WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status='pending' RETURNING {INVITE_COLUMNS}"), &[&org_id,&session_id,&invite_id]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::InvitationUnavailable)?;
         tx.commit()
             .await
@@ -2587,6 +2930,7 @@ impl ChatStore for PgStore {
     ) -> Result<SessionEvent, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, event_feature(&input), event_requirement(&input)).await?;
         tx.query_opt(
             "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&input.org_id, &input.session_id],
@@ -2629,7 +2973,12 @@ impl ChatStore for PgStore {
         .await
         .map_err(|e| StoreError::Database(e.to_string()))?
         .ok_or(StoreError::NotFound)?;
-        tx.query_opt("SELECT l.id FROM chat_run_leases l JOIN chat_session_memberships m ON m.org_id=l.org_id AND m.session_id=l.session_id AND m.user_id=l.holder_user_id WHERE l.org_id=$1 AND l.session_id=$2 AND l.run_id=$3 AND l.token_hash=$4 AND l.status='active' AND l.token_expires_at>$5 AND l.heartbeat_expires_at>$5 AND m.role IN ('owner','maintainer','member') FOR UPDATE OF l,m", &[&input.org_id,&input.session_id,&run_id,&token_hash,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        let holder: String = tx.query_opt("SELECT holder_user_id FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 AND run_id=$3 AND token_hash=$4 AND status='active' AND token_expires_at>$5 AND heartbeat_expires_at>$5 FOR UPDATE", &[&input.org_id,&input.session_id,&run_id,&token_hash,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?.get(0);
+        if !can_act(pg_member(&tx, &input.org_id, &input.session_id, &holder).await?.as_ref(), SessionAction::StartRun) {
+            return Err(StoreError::NotFound);
+        }
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, event_requirement(&input)).await?;
+        if input.kind.starts_with("message.") { self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write).await?; }
         if let Some(row)=tx.query_opt(&format!("SELECT {EVENT_COLUMNS} FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? { return replay_event(event_from_row(&row), &input); }
         if input.kind == "message.created" {
             if let Some(message_id) = input
@@ -2702,6 +3051,7 @@ impl ChatStore for PgStore {
     async fn acquire_run_lease(&self, input: NewChatRunLease) -> Result<ChatRunLease, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New).await?;
         tx.query_opt(
             "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&input.org_id, &input.session_id],
@@ -2759,6 +3109,7 @@ impl ChatStore for PgStore {
                 "queue executor cannot start runs".into(),
             ));
         }
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New).await?;
         let item = tx.query_opt(&format!("SELECT {QUEUE_COLUMNS} FROM chat_run_queue WHERE org_id=$1 AND session_id=$2 AND id=$3 FOR UPDATE"), &[&input.org_id,&input.session_id,&item_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         let requested = queue_from_row(&item);
         let requester = pg_member(
@@ -2856,6 +3207,13 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunLease, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::Write).await?;
+        tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        if !can_act(pg_member(&tx, org_id, session_id, holder_user_id).await?.as_ref(), SessionAction::StartRun) {
+            tx.execute("UPDATE chat_run_leases SET status='failed',updated_at=$7 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND holder_user_id=$4 AND holder_device_id=$5 AND token_hash=$6 AND status IN ('active','paused')", &[&org_id,&session_id,&lease_id,&holder_user_id,&holder_device_id,&token_hash,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+            tx.commit().await.map_err(|e| StoreError::Database(e.to_string()))?;
+            return Err(StoreError::NotFound);
+        }
         let row=tx.query_opt(&format!("UPDATE chat_run_leases SET token_expires_at=$6,heartbeat_expires_at=$6,updated_at=$7 WHERE org_id=$1 AND id=$2 AND holder_user_id=$3 AND holder_device_id=$4 AND token_hash=$5 AND session_id=$8 AND status='active' AND token_expires_at>$7 AND heartbeat_expires_at>$7 RETURNING {LEASE_COLUMNS}"), &[&org_id,&lease_id,&holder_user_id,&holder_device_id,&token_hash,&heartbeat_expires_at,&now,&session_id]).await.map_err(|e|StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         tx.commit()
             .await
@@ -2875,7 +3233,14 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunLease, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
-        let row=tx.query_opt(&format!("UPDATE chat_run_leases SET status=$4,updated_at=$5 WHERE org_id=$1 AND id=$2 AND holder_user_id=$3 AND session_id=$6 AND holder_device_id=$7 AND token_hash=$8 RETURNING {LEASE_COLUMNS}"), &[&org_id,&lease_id,&holder_user_id,&status,&now,&session_id,&holder_device_id,&token_hash]).await.map_err(|e|StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly).await?;
+        tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        if !can_act(pg_member(&tx, org_id, session_id, holder_user_id).await?.as_ref(), SessionAction::StartRun) {
+            tx.execute("UPDATE chat_run_leases SET status='failed',updated_at=$7 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND holder_user_id=$4 AND holder_device_id=$5 AND token_hash=$6 AND status IN ('active','paused')", &[&org_id,&session_id,&lease_id,&holder_user_id,&holder_device_id,&token_hash,&now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+            tx.commit().await.map_err(|e| StoreError::Database(e.to_string()))?;
+            return Err(StoreError::NotFound);
+        }
+        let row=tx.query_opt(&format!("UPDATE chat_run_leases SET status=$4,updated_at=$5 WHERE org_id=$1 AND id=$2 AND holder_user_id=$3 AND session_id=$6 AND holder_device_id=$7 AND token_hash=$8 AND (status IN ('active','paused') OR status=$4) RETURNING {LEASE_COLUMNS}"), &[&org_id,&lease_id,&holder_user_id,&status,&now,&session_id,&holder_device_id,&token_hash]).await.map_err(|e|StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         tx.commit()
             .await
             .map_err(|e| StoreError::Database(e.to_string()))?;
@@ -2909,6 +3274,10 @@ impl ChatStore for PgStore {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
         let row = tx.query_opt(&format!("SELECT {LEASE_COLUMNS} FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 AND run_id=$3 AND token_hash=$4 AND status='active' AND token_expires_at>$5 AND heartbeat_expires_at>$5"), &[&org_id,&session_id,&run_id,&token_hash,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::NotFound)?;
+        let holder: String = row.get("holder_user_id");
+        if !can_act(pg_member(&tx, org_id, session_id, &holder).await?.as_ref(), SessionAction::StartRun) {
+            return Err(StoreError::NotFound);
+        }
         Ok(lease_from_row(&row))
     }
 
@@ -2918,6 +3287,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::New).await?;
         let boundary: i64 = tx.query_opt(
             "SELECT next_sequence-1 AS context_sequence FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
             &[&input.org_id, &input.session_id],
@@ -2925,18 +3295,12 @@ impl ChatStore for PgStore {
         .await
         .map_err(|e| StoreError::Database(e.to_string()))?
         .ok_or(StoreError::NotFound)?.get("context_sequence");
+
         if let Some(row) = tx.query_opt(&format!("SELECT {QUEUE_COLUMNS} FROM chat_run_queue WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|error| StoreError::Database(error.to_string()))? {
             return replay_queue(queue_from_row(&row), &input);
         }
-        let requester = pg_member(
-            &tx,
-            &input.org_id,
-            &input.session_id,
-            &input.requested_by_user_id,
-        )
-        .await?;
-        if !can_act(requester.as_ref(), SessionAction::Post) {
-            return Err(StoreError::Policy("queue requester cannot post".into()));
+        if !can_act(pg_member(&tx, &input.org_id, &input.session_id, &input.requested_by_user_id).await?.as_ref(), SessionAction::Post) {
+            return Err(StoreError::NotFound);
         }
         if let Some(payload) = input.payload.as_object_mut() {
             payload.insert("contextSequence".into(), serde_json::json!(boundary));
@@ -2970,6 +3334,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, Requirement::ContractOnly).await?;
         let row = tx.query_opt(&format!("UPDATE chat_run_queue SET status='cancelled' WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status='queued' AND ($5 OR requested_by_user_id=$4) RETURNING {QUEUE_COLUMNS}"), &[&org_id,&session_id,&item_id,&actor_user_id,&elevated]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::NotFound)?;
         tx.commit()
             .await
@@ -2983,6 +3348,7 @@ impl ChatStore for PgStore {
     ) -> Result<BreakGlassGrant, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         if let Some(row) = tx
             .query_opt(
                 &format!("SELECT {BREAK_GLASS_COLUMNS} FROM break_glass_grants WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"),
@@ -3036,6 +3402,11 @@ impl ChatStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&input.org_id,&input.session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        if !can_act(pg_member(&tx, &input.org_id, &input.session_id, &input.requested_by_user_id).await?.as_ref(), SessionAction::StartRun) {
+            return Err(StoreError::NotFound);
+        }
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, Requirement::Write).await?;
         if let Some(row) = tx.query_opt(&format!("SELECT {APPROVAL_COLUMNS} FROM chat_approval_requests WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|error| StoreError::Database(error.to_string()))? {
             return Ok(approval_from_row(&row));
         }
@@ -3093,8 +3464,14 @@ impl ChatStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        tx.query_opt("SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE", &[&org_id,&session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         let current_row = tx.query_opt(&format!("SELECT {APPROVAL_COLUMNS} FROM chat_approval_requests WHERE org_id=$1 AND session_id=$2 AND id=$3 FOR UPDATE"), &[&org_id,&session_id,&approval_id]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::NotFound)?;
         let current = approval_from_row(&current_row);
+        let action = if current.risk == "high" { SessionAction::ApproveHighRisk } else { SessionAction::ApproveOrdinary };
+        if !can_act(pg_member(&tx, org_id, session_id, resolver_user_id).await?.as_ref(), action) {
+            return Err(StoreError::NotFound);
+        }
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChatExecution, if status == "denied" { Requirement::ContractOnly } else if current.risk == "high" { Requirement::New } else { Requirement::Write }).await?;
         if current.status == "pending" && current.expires_at <= now {
             tx.execute("UPDATE chat_approval_requests SET status='expired',revision=revision+1 WHERE org_id=$1 AND id=$2", &[&org_id,&approval_id]).await.map_err(|error| StoreError::Database(error.to_string()))?;
             tx.commit()
@@ -3121,6 +3498,7 @@ impl ChatStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let row = tx.query_one(&format!("INSERT INTO chat_attachments (id,org_id,workspace_id,session_id,object_key,file_name,media_type,byte_length,sha256,status,created_by_user_id,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$11) RETURNING {ATTACHMENT_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.session_id,&input.object_key,&input.file_name,&input.media_type,&input.byte_length,&input.sha256,&input.created_by_user_id,&input.now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
         tx.commit()
             .await
@@ -3167,6 +3545,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatAttachment, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::Write).await?;
         let row = tx.query_opt(&format!("UPDATE chat_attachments SET status='available',event_id=$4,updated_at=$5 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status='pending' RETURNING {ATTACHMENT_COLUMNS}"), &[&org_id,&session_id,&attachment_id,&event_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?;
         if let Some(row) = row {
             tx.commit()
@@ -3191,6 +3570,7 @@ impl ChatStore for PgStore {
     ) -> Result<ChatAttachment, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, Requirement::ContractOnly).await?;
         let row = tx.query_opt(&format!("UPDATE chat_attachments SET status='deleted',updated_at=$4 WHERE org_id=$1 AND session_id=$2 AND id=$3 AND status<>'deleted' RETURNING {ATTACHMENT_COLUMNS}"), &[&org_id,&session_id,&attachment_id,&now]).await.map_err(|error| StoreError::Database(error.to_string()))?.ok_or(StoreError::NotFound)?;
         tx.commit()
             .await
@@ -3203,9 +3583,19 @@ impl ChatStore for PgStore {
 mod tests {
     use super::*;
 
+    fn fixture_store() -> InMemoryChatStore {
+        let store = crate::store::InMemoryStore::new();
+        for user in &["member","usr_invited","usr_next","usr_other","usr_outsider","usr_owner","viewer"] {
+            store.add_org_member("org_1", user, cognia_tenant_auth::OrgRole::Member);
+            store.add_workspace_member("org_1", "ws_1", user, cognia_tenant_auth::WorkspaceRole::Maintainer);
+        }
+        InMemoryChatStore::from_store(&store)
+    }
+
+
     #[test]
     fn session_discovery_qualifies_whole_columns_without_corrupting_identifiers() {
-        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision");
+        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision, s.contract_version");
     }
 
     fn session(operation_id: &str) -> NewSharedSession {
@@ -3267,10 +3657,265 @@ mod tests {
         }
     }
 
+    fn standing_fixture() -> (crate::store::InMemoryStore, InMemoryChatStore) {
+        use cognia_tenant_auth::{OrgRole, WorkspaceRole};
+        let store = crate::store::InMemoryStore::new();
+        store.add_workspace("org_1", "ws_1", "Workspace");
+        for user in ["usr_owner", "member", "guest"] {
+            store.add_user(user, user);
+            store.add_org_member("org_1", user, OrgRole::Member);
+            store.add_workspace_member("org_1", "ws_1", user, WorkspaceRole::Maintainer);
+        }
+        store.add_org_member("org_1", "usr_owner", OrgRole::Owner);
+        let chat = InMemoryChatStore::from_store(&store);
+        (store, chat)
+    }
+
+    fn standing_context() -> crate::store::AuthorizationContext {
+        crate::store::AuthorizationContext {
+            actor_user_id: "usr_owner".into(), reason: "standing regression".into(), request_id: "request".into(),
+            grant_id: None, source: serde_json::json!({}), now: 5,
+        }
+    }
+
+    #[tokio::test]
+    async fn offboard_and_workspace_removal_revoke_members_work_and_issued_invites_but_not_guests() {
+        use crate::store::Store;
+        for offboard in [true, false] {
+            let (store, chat) = standing_fixture();
+            chat.create_session(session("create")).await.unwrap();
+            chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Maintainer, true, false, "usr_owner", 2).await.unwrap();
+            chat.put_member("org_1", "ses_1", "ws_1", "guest", SessionRole::Member, false, true, "usr_owner", 2).await.unwrap();
+            chat.enqueue_run_input(replay_queue("member", "queue")).await.unwrap();
+            chat.acquire_run_lease(replay_lease("member")).await.unwrap();
+            chat.create_invite(NewChatSessionInvite {
+                id: "invite".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "ses_1".into(),
+                token_hash: "invite-hash".into(), target_user_id: None, role: SessionRole::Member, approver: false, guest: true,
+                created_by_user_id: "member".into(), expires_at: 100, now: 3,
+            }).await.unwrap();
+            let revision = chat.admin_session("org_1", "ses_1").await.unwrap().policy_revision;
+            let affected = if offboard {
+                store.offboard_org_member("org_1", "member", standing_context()).await.unwrap()
+            } else {
+                store.remove_workspace_member("org_1", "ws_1", "member", standing_context()).await.unwrap()
+            };
+            assert_eq!(affected, ["ses_1"]);
+            assert_eq!(chat.admin_session("org_1", "ses_1").await.unwrap().policy_revision, revision + 1);
+            assert!(chat.visible_session("org_1", "ses_1", "member").await.unwrap().is_none());
+            assert!(chat.claim_run_queue(replay_lease("member"), "queue", false).await.is_err());
+            assert_eq!(chat.tables.read().chat.queue["queue"].0.status, "cancelled");
+            assert_eq!(chat.tables.read().chat.leases["lease"].0.status, "failed");
+            assert_eq!(chat.list_invites("org_1", "ses_1", 6).await.unwrap()[0].status, "revoked");
+            assert!(matches!(chat.accept_invite("org_1", "invite-hash", "new-guest", 6).await, Err(StoreError::InvitationUnavailable)));
+            assert!(chat.visible_session("org_1", "ses_1", "guest").await.unwrap().is_some());
+            store.remove_workspace_member("org_1", "ws_1", "guest", standing_context()).await.unwrap();
+            chat.enqueue_run_input(replay_queue("guest", "guest-queue")).await.unwrap();
+            let mut guest_lease = replay_lease("guest");
+            guest_lease.id = "guest-lease".into();
+            guest_lease.run_id = "guest-run".into();
+            guest_lease.operation_id = "guest-lease-op".into();
+            chat.acquire_run_lease(guest_lease).await.unwrap();
+            store.offboard_org_member("org_1", "guest", standing_context()).await.unwrap();
+            assert_eq!(chat.tables.read().chat.leases["guest-lease"].0.status, "failed");
+            assert_eq!(chat.tables.read().chat.queue["guest-queue"].0.status, "cancelled");
+            assert!(chat.visible_session("org_1", "ses_1", "guest").await.unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_revoked_manager_cannot_mutate_members_or_issue_invites_after_authorization() {
+        use crate::store::Store;
+        let (store, chat) = standing_fixture();
+        chat.create_session(session("create")).await.unwrap();
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Maintainer, true, false, "usr_owner", 2).await.unwrap();
+        chat.put_member("org_1", "ses_1", "ws_1", "guest", SessionRole::Member, false, true, "usr_owner", 2).await.unwrap();
+        let authorized = chat.effective_member("org_1", "ses_1", "member").await.unwrap().unwrap();
+        assert!(can_act(Some(&authorized), SessionAction::ManageMembers));
+        store.offboard_org_member("org_1", "member", standing_context()).await.unwrap();
+        // The API's earlier authorization must not be reusable after commit.
+        assert!(matches!(chat.put_member("org_1", "ses_1", "ws_1", "guest", SessionRole::Member, false, true, "member", 6).await, Err(StoreError::Policy(_))));
+        assert!(matches!(chat.put_member("org_1", "ses_1", "ws_1", "guest", SessionRole::Viewer, false, true, "member", 6).await, Err(StoreError::Policy(_))));
+        assert!(matches!(chat.put_member("org_1", "ses_1", "ws_1", "usr_owner", SessionRole::Owner, false, false, "member", 6).await, Err(StoreError::Policy(_))));
+        assert!(matches!(chat.remove_member("org_1", "ses_1", "guest", "member", 6).await, Err(StoreError::Policy(_))));
+        assert!(matches!(chat.create_invite(NewChatSessionInvite {
+            id: "racing-invite".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "ses_1".into(),
+            token_hash: "racing-hash".into(), target_user_id: None, role: SessionRole::Member, approver: false, guest: true,
+            created_by_user_id: "member".into(), expires_at: 100, now: 6,
+        }).await, Err(StoreError::Policy(_))));
+    }
+
+    #[tokio::test]
+    async fn external_session_guest_cannot_be_offboarded_from_an_org_they_never_joined() {
+        use crate::store::Store;
+        let (store, chat) = standing_fixture();
+        chat.create_session(session("create")).await.unwrap();
+        store.add_user("external", "External guest");
+        chat.put_member("org_1", "ses_1", "ws_1", "external", SessionRole::Member, false, true, "usr_owner", 2).await.unwrap();
+        assert!(matches!(store.offboard_org_member("org_1", "external", standing_context()).await, Err(StoreError::NotFound)));
+        assert!(chat.effective_member("org_1", "ses_1", "external").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn actor_role_changes_are_rechecked_against_the_current_target_under_the_lock() {
+        let (_, chat) = standing_fixture();
+        chat.create_session(session("create")).await.unwrap();
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Owner, true, false, "usr_owner", 2).await.unwrap();
+        let actor_before = chat.effective_member("org_1", "ses_1", "member").await.unwrap().unwrap();
+        assert!(crate::chat::can_change_member_role(actor_before.role, Some(SessionRole::Owner), SessionRole::Owner));
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Maintainer, true, false, "usr_owner", 3).await.unwrap();
+        assert!(matches!(chat.put_member("org_1", "ses_1", "ws_1", "usr_owner", SessionRole::Owner, false, false, "member", 4).await, Err(StoreError::Policy(_))));
+        assert!(matches!(chat.remove_member("org_1", "ses_1", "usr_owner", "member", 4).await, Err(StoreError::Policy(_))));
+        // A member still may leave their own session.
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Member, false, false, "usr_owner", 5).await.unwrap();
+        chat.remove_member("org_1", "ses_1", "member", "member", 6).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn offboarding_blocks_incoming_old_invites_but_not_external_guests_or_new_invites() {
+        use crate::store::Store;
+        let (store, chat) = standing_fixture();
+        chat.create_session(session("create")).await.unwrap();
+        let invite = |id: &str, target: Option<&str>, now| NewChatSessionInvite {
+            id: id.into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "ses_1".into(),
+            token_hash: id.into(), target_user_id: target.map(str::to_owned), role: SessionRole::Member, approver: false, guest: true,
+            created_by_user_id: "usr_owner".into(), expires_at: 100, now,
+        };
+        chat.create_invite(invite("targeted", Some("member"), 3)).await.unwrap();
+        chat.create_invite(invite("token", None, 3)).await.unwrap();
+        chat.create_invite(invite("same-time", None, 5)).await.unwrap();
+        store.offboard_org_member("org_1", "member", standing_context()).await.unwrap();
+        assert_eq!(chat.list_invites("org_1", "ses_1", 6).await.unwrap().into_iter().find(|i| i.id == "targeted").unwrap().status, "revoked");
+        assert!(matches!(chat.accept_targeted_invite("org_1", "targeted", "member", 6).await, Err(StoreError::InvitationUnavailable)));
+        for token in ["targeted", "token", "same-time"] {
+            assert!(matches!(chat.accept_invite("org_1", token, "member", 6).await, Err(StoreError::InvitationUnavailable)), "{token}");
+        }
+        assert!(chat.effective_member("org_1", "ses_1", "member").await.unwrap().is_none());
+        let (_, external) = chat.accept_invite("org_1", "token", "external", 6).await.unwrap();
+        assert!(external.guest);
+        chat.create_invite(invite("new-token", None, 6)).await.unwrap();
+        let (_, readmitted) = chat.accept_invite("org_1", "new-token", "member", 7).await.unwrap();
+        assert!(readmitted.guest);
+    }
+
+    #[tokio::test]
+    async fn losing_a_workspace_seat_keeps_an_org_admins_session_standing() {
+        use crate::store::Store;
+        use cognia_tenant_auth::OrgRole;
+        let (store, chat) = standing_fixture();
+        store.add_org_member("org_1", "member", OrgRole::Admin);
+        chat.create_session(session("create")).await.unwrap();
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Maintainer, true, false, "usr_owner", 2).await.unwrap();
+        let revision = chat.admin_session("org_1", "ses_1").await.unwrap().policy_revision;
+        let affected = store.remove_workspace_member("org_1", "ws_1", "member", standing_context()).await.unwrap();
+        assert!(affected.is_empty(), "an org admin still traverses the workspace");
+        assert_eq!(chat.admin_session("org_1", "ses_1").await.unwrap().policy_revision, revision);
+        let member = chat.effective_member("org_1", "ses_1", "member").await.unwrap().unwrap();
+        assert_eq!(member.role, SessionRole::Maintainer);
+        assert!(member.approver);
+    }
+
+    #[tokio::test]
+    async fn workspace_demotions_cap_roles_and_clear_viewer_approver_atomically() {
+        use crate::store::Store;
+        use cognia_tenant_auth::WorkspaceRole;
+        let (store, chat) = standing_fixture();
+        chat.create_session(session("create")).await.unwrap();
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Maintainer, true, false, "usr_owner", 2).await.unwrap();
+        let before = chat.admin_session("org_1", "ses_1").await.unwrap().policy_revision;
+        assert!(store.set_workspace_member("org_1", "ws_1", "member", WorkspaceRole::Member, standing_context()).await.unwrap().is_empty());
+        let member = chat.effective_member("org_1", "ses_1", "member").await.unwrap().unwrap();
+        assert_eq!(member.role, SessionRole::Maintainer);
+        assert!(member.approver, "writer standing preserves existing session management");
+        store.set_workspace_member("org_1", "ws_1", "member", WorkspaceRole::Viewer, standing_context()).await.unwrap();
+        let member = chat.effective_member("org_1", "ses_1", "member").await.unwrap().unwrap();
+        assert_eq!(member.role, SessionRole::Viewer);
+        assert!(!member.approver);
+        assert_eq!(chat.tables.read().chat.memberships[&("ses_1".into(), "member".into())].role, SessionRole::Viewer);
+        assert_eq!(chat.admin_session("org_1", "ses_1").await.unwrap().policy_revision, before + 1);
+    }
+
+    #[tokio::test]
+    async fn workspace_cleanup_is_scoped_and_org_cleanup_returns_sessions_in_order() {
+        use crate::store::Store;
+        let (store, chat) = standing_fixture();
+        store.add_workspace_member("org_1", "ws_2", "member", cognia_tenant_auth::WorkspaceRole::Member);
+        for (id, workspace, guest) in [("ses_z", "ws_1", false), ("ses_a", "ws_2", false), ("ses_guest", "ws_1", true)] {
+            let mut input = session(id);
+            input.id = id.into();
+            input.workspace_id = workspace.into();
+            chat.create_session(input).await.unwrap();
+            chat.put_member("org_1", id, workspace, "member", SessionRole::Member, false, guest, "usr_owner", 2).await.unwrap();
+        }
+        // The membership is already at or below the new ceiling: nothing the
+        // person may do changed, so no revision bump and no ticket revocation.
+        let before = chat.admin_session("org_1", "ses_z").await.unwrap().policy_revision;
+        assert!(store.set_workspace_member("org_1", "ws_1", "member", cognia_tenant_auth::WorkspaceRole::Member, standing_context()).await.unwrap().is_empty());
+        assert_eq!(chat.admin_session("org_1", "ses_z").await.unwrap().policy_revision, before);
+        assert_eq!(store.offboard_org_member("org_1", "member", standing_context()).await.unwrap(), ["ses_a", "ses_guest", "ses_z"]);
+        assert!(chat.effective_member("org_1", "ses_guest", "member").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn legacy_standing_is_fenced_before_cleanup_and_audit_repairs_it() {
+        let (store, chat) = standing_fixture();
+        chat.create_session(session("create")).await.unwrap();
+        chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Maintainer, true, false, "usr_owner", 2).await.unwrap();
+        chat.acquire_run_lease(replay_lease("member")).await.unwrap();
+        let approval = chat.create_approval(NewChatApprovalRequest {
+            id: "approval".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "ses_1".into(),
+            run_id: "run".into(), action: "delete".into(), risk: "high".into(), requested_by_user_id: "member".into(),
+            expires_at: 90, now: 4, operation_id: "approval-op".into(),
+        }).await.unwrap();
+        chat.create_invite(NewChatSessionInvite {
+            id: "invite".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "ses_1".into(),
+            token_hash: "invite-hash".into(), target_user_id: None, role: SessionRole::Member, approver: false, guest: true,
+            created_by_user_id: "member".into(), expires_at: 100, now: 3,
+        }).await.unwrap();
+        // Simulate an old offboarding that left all session rows intact.
+        store.tables.write().org_memberships.remove(&("org_1".into(), "member".into()));
+        store.tables.write().workspace_memberships.remove(&("org_1".into(), "ws_1".into(), "member".into()));
+        assert!(chat.visible_session("org_1", "ses_1", "member").await.unwrap().is_none());
+        assert!(chat.list_sessions("org_1", "member", None).await.unwrap().is_empty());
+        assert!(!chat.list_members("org_1", "ses_1").await.unwrap().iter().any(|m| m.user_id == "member"));
+        assert!(chat.resolve_approval("org_1", "ses_1", "approval", "member", "approved", approval.revision, 5).await.is_err());
+        assert!(matches!(chat.accept_invite("org_1", "invite-hash", "new-guest", 5).await, Err(StoreError::InvitationUnavailable)));
+        let dry = chat.audit_standing(false, 1, 5).unwrap();
+        assert_eq!(dry.missing_standing, 1);
+        assert_eq!(dry.issues[0].user_id, "member");
+        assert!(chat.tables.read().chat.memberships.contains_key(&("ses_1".into(), "member".into())));
+        let applied = chat.audit_standing(true, 1, 5).unwrap();
+        assert_eq!(applied.applied, 1);
+        assert_eq!(chat.tables.read().chat.leases["lease"].0.status, "failed");
+        assert!(chat.audit_standing(false, 1, 5).unwrap().issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_demotion_fences_heartbeat_completion_and_caps_listing_without_writes() {
+        use cognia_tenant_auth::WorkspaceRole;
+        for heartbeat in [true, false] {
+            let (store, chat) = standing_fixture();
+            chat.create_session(session("create")).await.unwrap();
+            chat.put_member("org_1", "ses_1", "ws_1", "member", SessionRole::Member, true, false, "usr_owner", 2).await.unwrap();
+            chat.acquire_run_lease(replay_lease("member")).await.unwrap();
+            store.add_workspace_member("org_1", "ws_1", "member", WorkspaceRole::Viewer);
+            let member = chat.list_members("org_1", "ses_1").await.unwrap().into_iter().find(|m| m.user_id == "member").unwrap();
+            assert_eq!(member.role, SessionRole::Viewer);
+            assert!(!member.approver);
+            let result = if heartbeat {
+                chat.heartbeat_run_lease("org_1", "ses_1", "lease", "member", "device", "hash", 90, 5).await
+            } else {
+                chat.release_run_lease("org_1", "ses_1", "lease", "member", "device", "hash", 5, "completed").await
+            };
+            assert!(result.is_err());
+            assert_eq!(chat.tables.read().chat.leases["lease"].0.status, "failed");
+            assert_eq!(chat.audit_standing(true, 1, 6).unwrap().applied, 1);
+        }
+    }
+
     #[tokio::test]
     async fn semantic_event_replays_reject_changed_payload_kind_or_actor() {
         for run_event in [false, true] {
-            let store = InMemoryChatStore::new();
+            let store = fixture_store();
             store.create_session(session("create")).await.unwrap();
             store
                 .acquire_run_lease(replay_lease("usr_owner"))
@@ -3315,7 +3960,7 @@ mod tests {
 
     #[tokio::test]
     async fn semantic_queue_replays_preserve_boundary_and_reject_changed_request() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         let input = replay_queue("usr_owner", "queue");
         let first = store.enqueue_run_input(input.clone()).await.unwrap();
@@ -3347,7 +3992,7 @@ mod tests {
     #[tokio::test]
     async fn permission_loss_cancels_queued_requests_and_fails_only_live_leases() {
         for remove in [false, true] {
-            let store = InMemoryChatStore::new();
+            let store = fixture_store();
             store.create_session(session("create")).await.unwrap();
             store
                 .put_member(
@@ -3358,6 +4003,7 @@ mod tests {
                     SessionRole::Member,
                     false,
                     false,
+                    "usr_owner",
                     2,
                 )
                 .await
@@ -3376,7 +4022,7 @@ mod tests {
                 .unwrap();
             if remove {
                 store
-                    .remove_member("org_1", "ses_1", "member", 5)
+                    .remove_member("org_1", "ses_1", "member", "usr_owner", 5)
                     .await
                     .unwrap();
             } else {
@@ -3389,6 +4035,7 @@ mod tests {
                         SessionRole::Viewer,
                         false,
                         false,
+                        "usr_owner",
                         5,
                     )
                     .await
@@ -3419,7 +4066,7 @@ mod tests {
 
     #[tokio::test]
     async fn claim_cancels_legacy_ineligible_heads_without_blocking_the_next_request() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         store
             .enqueue_run_input(replay_queue("usr_owner", "stale"))
@@ -3433,7 +4080,7 @@ mod tests {
         store
             .tables
             .write()
-            .queue
+            .chat.queue
             .get_mut("stale")
             .unwrap()
             .0
@@ -3442,12 +4089,12 @@ mod tests {
             .claim_run_queue(replay_lease("usr_owner"), "next", false)
             .await
             .is_ok());
-        assert_eq!(store.tables.read().queue["stale"].0.status, "cancelled");
+        assert_eq!(store.tables.read().chat.queue["stale"].0.status, "cancelled");
     }
 
     #[tokio::test]
     async fn queue_claim_replay_is_bound_to_the_original_queue_item() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         store
             .enqueue_run_input(replay_queue("usr_owner", "first"))
@@ -3482,7 +4129,7 @@ mod tests {
 
     #[tokio::test]
     async fn queue_claim_rejects_a_legacy_lease_with_no_durable_queue_binding() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         store
             .enqueue_run_input(replay_queue("usr_owner", "queue"))
@@ -3502,7 +4149,7 @@ mod tests {
 
     #[tokio::test]
     async fn membership_updates_preserve_owner_scope_and_terminal_lease_history() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         assert!(store
             .put_member(
@@ -3513,12 +4160,13 @@ mod tests {
                 SessionRole::Viewer,
                 false,
                 false,
+                "usr_owner",
                 2
             )
             .await
             .is_err());
         assert!(store
-            .remove_member("other-org", "ses_1", "usr_owner", 2)
+            .remove_member("other-org", "ses_1", "usr_owner", "usr_owner", 2)
             .await
             .is_err());
         let (session, owner) = store
@@ -3537,6 +4185,7 @@ mod tests {
                 SessionRole::Member,
                 false,
                 false,
+                "usr_owner",
                 2,
             )
             .await
@@ -3552,10 +4201,11 @@ mod tests {
             .await
             .unwrap();
         store
-            .remove_member("org_1", "ses_1", "member", 6)
+            .remove_member("org_1", "ses_1", "member", "usr_owner", 6)
             .await
             .unwrap();
-        assert_eq!(store.tables.read().leases["lease"].0.status, "released");
+        assert!(store.release_run_lease("org_1", "ses_1", "lease", "member", "device", "hash", 7, "completed").await.is_err());
+        assert_eq!(store.tables.read().chat.leases["lease"].0.status, "released");
         assert!(store
             .acquire_run_lease(replay_lease("member"))
             .await
@@ -3568,7 +4218,7 @@ mod tests {
 
     #[tokio::test]
     async fn accepting_an_invite_never_changes_an_existing_members_capabilities() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         store
             .put_member(
@@ -3579,6 +4229,7 @@ mod tests {
                 SessionRole::Viewer,
                 false,
                 true,
+                "usr_owner",
                 2,
             )
             .await
@@ -3618,7 +4269,7 @@ mod tests {
 
     #[tokio::test]
     async fn creation_is_idempotent_and_only_the_owner_can_discover_the_session() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         let first = store.create_session(session("op_1")).await.unwrap();
         let replay = store.create_session(session("op_1")).await.unwrap();
         assert_eq!(first, replay);
@@ -3639,7 +4290,7 @@ mod tests {
 
     #[tokio::test]
     async fn lease_retries_and_mutations_are_bound_to_the_session_run_user_device_and_token() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("create")).await.unwrap();
         let input = NewChatRunLease {
             id: "lease".into(),
@@ -3778,7 +4429,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_patch_is_revision_checked_idempotent_and_advances_policy() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         let active = store
             .patch_session(
@@ -3820,7 +4471,7 @@ mod tests {
 
     #[tokio::test]
     async fn invitation_is_single_use_target_bound_and_guest_capped() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         assert!(matches!(
             store
@@ -3875,7 +4526,7 @@ mod tests {
 
     #[tokio::test]
     async fn approval_resolution_is_compare_and_consume() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         store
             .acquire_run_lease(NewChatRunLease {
@@ -3941,7 +4592,7 @@ mod tests {
 
     #[tokio::test]
     async fn attachment_metadata_requires_pending_before_commit() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         let attachment = store
             .create_attachment(NewChatAttachment {
@@ -3982,7 +4633,7 @@ mod tests {
 
     #[tokio::test]
     async fn queue_claim_is_fifo_idempotent_and_requires_explicit_takeover() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op")).await.unwrap();
         store
             .append_session_event(NewSessionEvent {
@@ -4092,7 +4743,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_token_is_bound_and_concurrent_input_is_ordered() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         store
             .acquire_run_lease(NewChatRunLease {
@@ -4148,10 +4799,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_keeps_an_owner_and_removal_fails_their_active_lease() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         assert!(matches!(
-            store.remove_member("org_1", "ses_1", "usr_owner", 2).await,
+            store.remove_member("org_1", "ses_1", "usr_owner", "usr_owner", 2).await,
             Err(StoreError::Conflict(_))
         ));
         store
@@ -4163,6 +4814,7 @@ mod tests {
                 SessionRole::Owner,
                 true,
                 false,
+                "usr_owner",
                 2,
             )
             .await
@@ -4185,7 +4837,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .remove_member("org_1", "ses_1", "usr_owner", 4)
+            .remove_member("org_1", "ses_1", "usr_owner", "usr_owner", 4)
             .await
             .unwrap();
         assert!(store
@@ -4209,7 +4861,7 @@ mod tests {
 
     #[tokio::test]
     async fn break_glass_is_user_bound_expiring_and_idempotent() {
-        let store = InMemoryChatStore::new();
+        let store = fixture_store();
         store.create_session(session("op_1")).await.unwrap();
         let input = NewBreakGlassGrant {
             id: "grant_1".into(),

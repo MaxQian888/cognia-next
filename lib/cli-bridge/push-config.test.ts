@@ -1,3 +1,5 @@
+import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
+import { cliConfigFileSchema } from "@/cli/src/config/schema"
 import {
   mergeCliConfig,
   projectAppConfigToCli,
@@ -165,4 +167,24 @@ describe("projectAppConfigToCli and the external-agent app default", () => {
     const out = projectAppConfigToCli({ defaultModel: "gpt-4.1", defaultProvider: "openai" })
     expect(out).toMatchObject({ provider: "openai", model: "gpt-4.1" })
   })
+})
+
+it("pushes independent Reader and per-operation preferences through the strict CLI format", () => {
+  const webReader = { ...freshInstallWebReader(), distillation: "required" as const }
+  const out = projectAppConfigToCli({
+    webReader,
+    webTools: { enabled: true, preferCogniaSearch: false, preferCogniaFetch: true },
+  })
+  expect(out).toMatchObject({ webReader, preferCogniaSearch: false, preferCogniaFetch: true })
+  expect(cliConfigFileSchema.parse(out)).toEqual(out)
+  expect(JSON.stringify(out)).not.toMatch(/apiKey|searchProviders/)
+})
+
+it("skips an unsupported Reader record without blocking the rest of the push", () => {
+  const out = projectAppConfigToCli({
+    webReader: { version: 99, future: true },
+    webTools: { enabled: true },
+  })
+  expect(out.webReader).toBeUndefined()
+  expect(out.webTools).toBe(true)
 })

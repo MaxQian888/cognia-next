@@ -10,7 +10,7 @@
  *   }))
  */
 
-import type { PluginUriHandlerDef } from "@/lib/plugin/api/uri-api"
+import type { PluginUriHandlerDef } from "@cognia/plugin-contract/lib/plugin/api/uri-api"
 
 export function defineUriHandler(def: PluginUriHandlerDef): PluginUriHandlerDef {
   return def

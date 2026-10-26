@@ -811,6 +811,7 @@
       "subagent": "子智能体",
       "tts": "语音",
       "twin": "数字分身",
+      "harnessEvolution": "Harness 演化",
       "webSearch": "联网搜索"
     },
     "tableDescription": "最新 200 条。passive 来自真实对话流量；probe 来自可选的主动探测。",

@@ -144,7 +144,6 @@ Both require the **`agent:dispatch`** permission (non-dangerous). They degrade t
 
 Outside a Bot run (no `runId`), `runExternalAgent(presetOrAgentId, prompt, opts)`:
 
-- refuses while the global external-agent master switch is off;
 - for a **configured** agent: refuses a disabled config or one whose `lifecycle.assessReadiness` verdict is not `ready` (the error names the reason code), and registers it through `lifecycle.connect` so the launch carries that config's own keyring credentials;
 - for a **preset**: spawns a transient instance, checks its readiness first, and removes it (`manager.removeAgent`) when the run ends, success or failure;
 - clamps `opts.permissionMode` to the target's own default via `deriveExternalSessionPermission` — the config's `defaultPermissionMode` (or the global default when it names none), or the global default for a transient preset instance. A plugin can ask for less, never more;

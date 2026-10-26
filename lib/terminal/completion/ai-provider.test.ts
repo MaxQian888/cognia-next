@@ -1,6 +1,11 @@
 import { __resetAiCompletionCacheForTesting, createAiCompletionProvider } from "./ai-provider"
 import type { TerminalCompletionContext } from "./types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { TERMINAL_COMPLETION_PROMPT } from "./prompt"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function ctx(
   input: string,
@@ -98,5 +103,33 @@ describe("createAiCompletionProvider", () => {
     t += 60_000 // beyond TTL
     await p.getCompletions(ctx("git "), signal)
     expect(client.complete).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("customized terminal completion prompt (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("sends the workspace override and never answers from a result cached under other text", async () => {
+    const client = fakeClient("git status")
+    const provider = createAiCompletionProvider({ getClient: () => client, isPiiSafe: () => true })
+    await provider.getCompletions(ctx("git s", { projectId: "ws-1" }), signal)
+    expect(client.complete.mock.calls[0][1].system).toBe(TERMINAL_COMPLETION_PROMPT.defaultBody)
+
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: TERMINAL_COMPLETION_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por",
+          body: "Prefer the project's make targets.",
+          contractVersion: TERMINAL_COMPLETION_PROMPT.contractVersion,
+        },
+      ])
+    )
+    await provider.getCompletions(ctx("git s", { projectId: "ws-1" }), signal)
+    expect(client.complete).toHaveBeenCalledTimes(2)
+    expect(client.complete.mock.calls[1][1].system).toBe("Prefer the project's make targets.")
   })
 })

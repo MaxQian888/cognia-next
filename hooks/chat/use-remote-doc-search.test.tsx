@@ -86,6 +86,105 @@ describe("useRemoteDocSearch — host gating", () => {
 })
 
 describe("useRemoteDocSearch — accounts", () => {
+  it("does not revive the first A response after an A-B-A account switch", async () => {
+    let finishA!: (hits: RemoteDocRef[]) => void
+    let finishB!: (hits: RemoteDocRef[]) => void
+    const search = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<RemoteDocRef[]>((resolve) => {
+            finishA = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<RemoteDocRef[]>((resolve) => {
+            finishB = resolve
+          })
+      )
+      .mockResolvedValue([{ ...HIT, id: "fresh-a" }])
+    byPrefixMock.mockReturnValue(
+      provider({
+        search,
+        listAccounts: async () => [
+          { id: "a", label: "A" },
+          { id: "b", label: "B" },
+        ],
+      })
+    )
+    const { result } = renderHook(() => useRemoteDocSearch({ namespace: "lark:", query: "spec" }))
+    await waitFor(() => expect(result.current.accountId).toBe("a"))
+    await flushDebounce()
+    act(() => result.current.setAccountId("b"))
+    await flushDebounce()
+    act(() => result.current.setAccountId("a"))
+    await flushDebounce()
+    await act(async () => {
+      finishA([{ ...HIT, id: "old-a" }])
+      finishB([{ ...HIT, id: "old-b" }])
+    })
+    expect(result.current.items.map((item) => item.id)).toEqual(["fresh-a"])
+    expect(result.current.items[0]?.accountBinding).toEqual({ accountId: "a" })
+  })
+  it("removes account A results before account B's debounce and binds new results to B", async () => {
+    const p = provider({
+      listAccounts: jest.fn(async () => [
+        { id: "a", label: "Same label" },
+        { id: "b", label: "Same label" },
+      ]),
+    })
+    byPrefixMock.mockReturnValue(p)
+    const { result } = renderHook(() => useRemoteDocSearch({ namespace: "lark:", query: "spec" }))
+    await waitFor(() => expect(result.current.accountId).toBe("a"))
+    await flushDebounce()
+    expect(result.current.items[0]?.accountBinding).toEqual({ accountId: "a" })
+    act(() => result.current.setAccountId("b"))
+    expect(result.current.accountId).toBe("b")
+    expect(result.current.items).toEqual([])
+    await flushDebounce()
+    expect(result.current.items[0]?.accountBinding).toEqual({ accountId: "b" })
+  })
+
+  it("does not expose loaded results when the query changes before the next debounce", async () => {
+    byPrefixMock.mockReturnValue(provider())
+    const { result, rerender } = renderHook(
+      ({ query }) => useRemoteDocSearch({ namespace: "lark:", query }),
+      { initialProps: { query: "first" } }
+    )
+    await waitFor(() => expect(result.current.accountId).toBe("cai_1"))
+    await flushDebounce()
+    expect(result.current.items).toHaveLength(1)
+    rerender({ query: "second" })
+    expect(result.current.items).toEqual([])
+  })
+
+  it("reloads and invalidates results on an authorization epoch change", async () => {
+    let changed: () => void = () => undefined
+    let epoch = "first"
+    const p = provider({
+      listAccounts: jest.fn(async () => [
+        { id: "cai_1", label: "Acme", authorizationEpoch: epoch },
+      ]),
+      subscribeAccounts: (listener) => {
+        changed = listener
+        return jest.fn()
+      },
+    })
+    byPrefixMock.mockReturnValue(p)
+    const { result } = renderHook(() => useRemoteDocSearch({ namespace: "lark:", query: "spec" }))
+    await waitFor(() => expect(result.current.accountId).toBe("cai_1"))
+    await flushDebounce()
+    expect(result.current.items[0]?.accountBinding?.authorizationEpoch).toBe("first")
+    await act(async () => {
+      epoch = "second"
+      changed()
+    })
+    expect(result.current.items).toEqual([])
+    await flushDebounce()
+    expect(result.current.items[0]?.accountBinding?.authorizationEpoch).toBe("second")
+  })
+
   it("ignores account responses after the provider is closed", async () => {
     let resolve!: (accounts: { id: string; label: string }[]) => void
     const pending = new Promise<{ id: string; label: string }[]>((done) => {
@@ -254,8 +353,14 @@ describe("useRemoteDocSearch — keyword search", () => {
     await waitFor(() => expect(result.current.accountId).toBe("cai_1"))
     expect(p.search).not.toHaveBeenCalled()
     await flushDebounce()
-    await waitFor(() => expect(result.current.items).toEqual([HIT]))
-    expect(p.search).toHaveBeenCalledWith("spec", { accountId: "cai_1", limit: DOC_SEARCH_LIMIT })
+    await waitFor(() =>
+      expect(result.current.items).toEqual([{ ...HIT, accountBinding: { accountId: "cai_1" } }])
+    )
+    expect(p.search).toHaveBeenCalledWith("spec", {
+      accountId: "cai_1",
+      limit: DOC_SEARCH_LIMIT,
+      signal: expect.any(AbortSignal),
+    })
   })
 
   it("runs nothing for an empty query", async () => {
@@ -288,4 +393,28 @@ describe("useRemoteDocSearch — keyword search", () => {
     expect(result.current.linkOnly).toBe(true)
     expect(result.current.error).toBeNull()
   })
+})
+
+it("aborts an in-flight search when its query changes or the hook unmounts", async () => {
+  const signals: AbortSignal[] = []
+  const p = provider({
+    search: jest.fn(async (_query, options) => {
+      if (options?.signal) signals.push(options.signal)
+      return new Promise<RemoteDocRef[]>(() => undefined)
+    }),
+  })
+  byPrefixMock.mockReturnValue(p)
+  const { result, rerender, unmount } = renderHook(
+    ({ query }) => useRemoteDocSearch({ namespace: "lark:", query }),
+    {
+      initialProps: { query: "first" },
+    }
+  )
+  await waitFor(() => expect(result.current.accountId).toBe("cai_1"))
+  await flushDebounce()
+  rerender({ query: "second" })
+  expect(signals[0]?.aborted).toBe(true)
+  await flushDebounce()
+  unmount()
+  expect(signals[1]?.aborted).toBe(true)
 })

@@ -1,7 +1,7 @@
 import { DIAGNOSTIC_CODES } from "@cognia/diagnostics"
 import { parseInvokeError } from "@/lib/tauri/command-error"
 
-import { diagnoseCommandError } from "./from-command-error"
+import { diagnoseCommandError, isHostRefusalCode } from "./from-command-error"
 
 describe("diagnoseCommandError", () => {
   it("maps the codes the Rust side actually emits", () => {
@@ -86,5 +86,65 @@ describe("diagnoseCommandError", () => {
       message: "boom",
       retryable: false,
     })
+  })
+})
+
+describe("multi-tenant Host refusals", () => {
+  const diagnose = (code: string) =>
+    diagnoseCommandError({ code, message: code, retryable: false, structured: true }).code
+
+  it("labels the three intentionally inert surfaces as themselves, never as a fault", () => {
+    expect(diagnose("host_data_unpartitioned")).toBe("hostDataUnavailable")
+    expect(diagnose("execution_isolation_unavailable")).toBe("executionUnavailable")
+    expect(diagnose("workspace_unresolved")).toBe("workspaceUnresolved")
+    for (const code of [
+      "hostDataUnavailable",
+      "executionUnavailable",
+      "workspaceUnresolved",
+    ] as const) {
+      // Rule 7: inert by design, so nothing to retry and nothing to configure.
+      expect(DIAGNOSTIC_CODES[code].retryable).toBe(false)
+      expect(DIAGNOSTIC_CODES[code].actions).toEqual([{ kind: "dismiss" }])
+    }
+  })
+
+  it("maps standing and binding refusals to forbidden and a dead authority to unavailable", () => {
+    for (const code of [
+      "host_surface_forbidden",
+      "host_principal_unbound",
+      "execution_request_forbidden",
+      "credential_use_forbidden",
+      "workspace_mount_forbidden",
+      "placement_binding_client_supplied",
+    ]) {
+      expect(diagnose(code)).toBe("forbidden")
+    }
+    expect(diagnose("host_authority_unavailable")).toBe("serviceUnavailable")
+  })
+
+  it("labels a member partition's dormant model access and its transient refusals", () => {
+    expect(diagnose("model_access_unavailable")).toBe("modelAccessUnavailable")
+    expect(DIAGNOSTIC_CODES.modelAccessUnavailable.retryable).toBe(false)
+    expect(DIAGNOSTIC_CODES.modelAccessUnavailable.actions).toEqual([{ kind: "dismiss" }])
+    // Capacity is a concurrency ceiling, not a fault; both clear on retry.
+    expect(diagnose("person_brain_capacity")).toBe("resourceLimit")
+    expect(diagnose("person_brain_unavailable")).toBe("serviceUnavailable")
+    expect(isHostRefusalCode("person_brain_capacity")).toBe(true)
+    // P5d: a partition has no workspaces to move a conversation into.
+    expect(diagnose("workspace_unavailable")).toBe("partitionWorkspaceUnavailable")
+    expect(DIAGNOSTIC_CODES.partitionWorkspaceUnavailable.retryable).toBe(false)
+  })
+
+  it("labels org administration as unavailable on a single-user Host", () => {
+    expect(diagnose("org_scope_unavailable")).toBe("orgScopeUnavailable")
+    expect(isHostRefusalCode("org_scope_unavailable")).toBe(true)
+    expect(DIAGNOSTIC_CODES.orgScopeUnavailable.retryable).toBe(false)
+    expect(DIAGNOSTIC_CODES.orgScopeUnavailable.actions).toEqual([{ kind: "dismiss" }])
+  })
+
+  it("recognises only Host refusal codes", () => {
+    expect(isHostRefusalCode("host_data_unpartitioned")).toBe(true)
+    expect(isHostRefusalCode("sidecar_error")).toBe(false)
+    expect(isHostRefusalCode("constructor")).toBe(false)
   })
 })

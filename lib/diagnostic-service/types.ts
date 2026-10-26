@@ -1,7 +1,7 @@
 /**
- * Wire types for the self-hosted diagnostic service (`services/diagnostic-server`).
+ * Wire types for the self-hosted diagnostic service (`cognia-services/services/diagnostic-server`).
  *
- * Hand-written against `services/diagnostic-server/openapi.yaml` rather than
+ * Hand-written against `cognia-services/services/diagnostic-server/openapi.yaml` rather than
  * generated: the service is a separate Cargo project with its own release
  * cadence and no codegen step in this repo's build. Keep the two in step — the
  * service has a drift test (`every_console_route_is_in_the_published_contract`)
@@ -110,7 +110,7 @@ export function isArtifactKind(value: unknown): value is ArtifactKind {
 }
 
 /**
- * Every `audit_events.action` the service writes (`services/diagnostic-server
+ * Every `audit_events.action` the service writes (`cognia-services/services/diagnostic-server
  * /src/db.rs`). Pinned so the console can translate each one; an action a
  * newer service adds renders as its raw code under a generic label rather
  * than as a missing-key placeholder.

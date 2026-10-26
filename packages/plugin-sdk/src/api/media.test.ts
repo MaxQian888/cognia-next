@@ -16,9 +16,9 @@ import type {
 } from "./media"
 
 describe("plugin-sdk api/media", () => {
-  it("exposes the media runtime API factory and registry", () => {
-    expect(typeof sdk.createMediaAPI).toBe("function")
-    expect(typeof sdk.getMediaRegistry).toBe("function")
+  it("keeps host wiring off the author surface (plugins reach it through ctx.media)", () => {
+    expect(sdk).not.toHaveProperty("createMediaAPI")
+    expect(sdk).not.toHaveProperty("getMediaRegistry")
   })
 
   it("re-exports media runtime API and companion types", () => {

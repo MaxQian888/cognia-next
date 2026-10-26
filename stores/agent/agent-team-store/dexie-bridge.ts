@@ -72,6 +72,68 @@ let hydrated = false
  */
 let hydration: Promise<void> = Promise.resolve()
 let resolveCandidates: BindingCandidateResolver | undefined
+let restorePauseCount = 0
+let cancelQueuedProjection: () => void = () => {}
+
+/** Flush local edits, restore atomically, then replace the running projection from authoritative rows. */
+export async function withAgentTeamDefinitionRestore<T>(restore: () => Promise<T>): Promise<T> {
+  if (!started || typeof window === "undefined") return restore()
+  await hydration
+  const db = getDb()
+  cancelQueuedProjection()
+  restorePauseCount++
+  const before = useAgentTeamStore.getState()
+  let committed = false
+  try {
+    await sync({ teams: before.teams, teammates: before.teammates, tasks: before.tasks })
+    const result = await restore()
+    committed = true
+    const stored = await loadAgentTeamDefinitions()
+    if (started && getDb() === db && mirroredDbName === db.name) {
+      const durable: Mirror = {
+        teams: Object.fromEntries(stored.teams.map((row) => [row.id, row])),
+        teammates: Object.fromEntries(stored.teammates.map((row) => [row.id, row])),
+        tasks: Object.fromEntries(stored.tasks.map((row) => [row.id, row])),
+      }
+      mirror = durable
+      hydrated = true
+      useAgentTeamStore.setState((state) => ({
+        teams: mergeAfterRestore(durable.teams, state.teams, before.teams),
+        teammates: mergeAfterRestore(durable.teammates, state.teammates, before.teammates),
+        tasks: mergeAfterRestore(durable.tasks, state.tasks, before.tasks),
+      }))
+    }
+    return result
+  } catch (error) {
+    if (committed && getDb() === db && mirroredDbName === db.name) {
+      // Never project stale memory after the authoritative write succeeded.
+      hydrated = false
+      throw new Error(
+        "Backup data was restored, but Squad refresh failed; restart before editing Squads",
+        { cause: error }
+      )
+    }
+    throw error
+  } finally {
+    restorePauseCount--
+    if (started && getDb() === db && mirroredDbName === db.name) {
+      const current = useAgentTeamStore.getState()
+      await sync({ teams: current.teams, teammates: current.teammates, tasks: current.tasks })
+    }
+  }
+}
+
+function mergeAfterRestore<T extends { id: string }>(
+  durable: Record<string, T>,
+  current: Record<string, T>,
+  before: Record<string, T>
+): Record<string, T> {
+  const merged = { ...current, ...durable }
+  const concurrent = changedIds(current, before)
+  for (const row of concurrent.changed) merged[row.id] = row
+  for (const id of concurrent.removed) delete merged[id]
+  return merged
+}
 
 /**
  * Resolves the binding candidates for a workspace. Injected by the bootstrap
@@ -116,6 +178,8 @@ export function __resetAgentTeamDexieBridgeForTesting(): void {
   hydrated = false
   hydration = Promise.resolve()
   resolveCandidates = undefined
+  restorePauseCount = 0
+  cancelQueuedProjection = () => {}
 }
 
 function changedIds<T extends { id: string }>(
@@ -272,6 +336,11 @@ export function startAgentTeamDexieBridge(): () => void {
       log.warn("agent-team dexie-bridge sync failed", { err: String(err) })
     )
   }
+  cancelQueuedProjection = () => {
+    if (pending) clearTimeout(pending)
+    pending = null
+    queued = null
+  }
 
   hydration = hydrate().catch((err) => {
     log.warn("agent-team dexie-bridge hydration failed", { err: String(err) })
@@ -292,6 +361,7 @@ export function startAgentTeamDexieBridge(): () => void {
       )
 
       unsubscribe = useAgentTeamStore.subscribe((state) => {
+        if (restorePauseCount > 0) return
         // The subscription is unselected, so it fires on every store write
         // including the ones that only touch UI state. Bail on identity before
         // scheduling any work.
@@ -317,7 +387,8 @@ export function startAgentTeamDexieBridge(): () => void {
 
   return () => {
     disposed = true
-    if (pending) clearTimeout(pending)
+    cancelQueuedProjection()
+    cancelQueuedProjection = () => {}
     unsubscribe()
     started = false
   }

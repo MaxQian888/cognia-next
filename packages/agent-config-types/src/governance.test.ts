@@ -71,6 +71,13 @@ describe("governance contract", () => {
     expect(isDecisionCase(decision())).toBe(true)
   })
 
+  it("knows the harness-adoption decision kind and refuses unknown kinds", () => {
+    expect(validateDecisionCase({ ...decision(), kind: "harness-adoption" })).toEqual([])
+    expect(validateDecisionCase({ ...decision(), kind: "made-up" })).toContain(
+      "kind must be a known DecisionKindV1"
+    )
+  })
+
   it("rejects a resolved decision without a resolution or decision timestamp", () => {
     const value = decision()
     delete value.resolution

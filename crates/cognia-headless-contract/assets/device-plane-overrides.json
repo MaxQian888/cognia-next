@@ -1225,6 +1225,64 @@
         "additionalProperties": false
       }
     },
+    "browser_recording_control": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "start",
+              "resume",
+              "stop",
+              "drain"
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "action",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "browser_recording_ref": {
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browserSessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "browserSessionId",
+          "selector",
+          "adminLease"
+        ],
+        "additionalProperties": false
+      }
+    },
     "browser_reload": {
       "inputSchemaSource": "zod-contract",
       "inputSchema": {
@@ -8155,7 +8213,8 @@
                         "radar-report",
                         "provider-diagnostics-refresh",
                         "conversation-auto-archive",
-                        "files-trash-purge"
+                        "files-trash-purge",
+                        "harness-evolution-sweep"
                       ]
                     },
                     "trigger": {

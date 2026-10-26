@@ -106,7 +106,7 @@ export interface TaskExecution {
   terminate(): void
 }
 
-interface TaskProvider {
+export interface TaskProvider {
   provideTasks(
     token: CancellationToken
   ): Task[] | null | undefined | Thenable<Task[] | null | undefined>

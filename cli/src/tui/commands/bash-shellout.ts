@@ -4,6 +4,9 @@
  * output as a cell — no model round-trip. The actual spawn lives in
  * `agent/run-shell.ts` (injectable); this module is the pure parse + format.
  */
+import { CLI_BASH_ANALYSIS_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 import type { ShellResult } from "../../agent/run-shell"
 
 /** Extract the command from a `!command` line, or null when it is not one. */
@@ -27,26 +30,21 @@ export function formatBashResult(result: ShellResult): string {
 /**
  * Build the prompt sent to the agent when the user asks it to debug the last
  * failed `!command` (`/analyze`). Carries the command, exit code, and captured
- * output so the model has the full context without re-running anything.
+ * output so the model has the full context without re-running anything. The
+ * wording is the `developer.cli.bash-analysis` slot (ADR-0236).
  */
-export function buildBashAnalysisPrompt(failure: {
-  command: string
-  output: string
-  exitCode?: number
-}): string {
+export function buildBashAnalysisPrompt(
+  failure: {
+    command: string
+    output: string
+    exitCode?: number
+  },
+  context: PromptResolutionContext = {}
+): string {
   const exit = failure.exitCode !== undefined ? ` (exit code ${failure.exitCode})` : ""
   const output = failure.output.trim() || "[no output]"
-  return [
-    `The following shell command failed${exit}. Diagnose the root cause and suggest a fix.`,
-    "",
-    "Command:",
-    "```sh",
-    failure.command,
-    "```",
-    "",
-    "Output:",
-    "```",
-    output,
-    "```",
-  ].join("\n")
+  return resolvePrompt(CLI_BASH_ANALYSIS_PROMPT, {
+    context,
+    values: { exit, command: failure.command, output },
+  }).text
 }

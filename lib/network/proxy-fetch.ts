@@ -18,6 +18,7 @@ const log = loggers.network
 
 interface ProxiedRequestInput {
   requestId: string
+  admissionToken?: string
   url: string
   method: string
   headers?: Record<string, string>
@@ -25,6 +26,7 @@ interface ProxiedRequestInput {
   timeoutMs?: number
   redirect: RequestRedirect
   blockPrivate?: boolean
+  downloadPolicy?: BinaryDownloadPolicy
 }
 
 interface ProxiedRequestOutput {
@@ -38,6 +40,13 @@ export interface ProxyFetchOptions extends RequestInit {
   timeout?: number
   /** Reject private/loopback/link-local targets in the native boundary. */
   blockPrivateHosts?: boolean
+  /** Native-enforced, HTTPS/public-only, bounded binary download. */
+  downloadPolicy?: BinaryDownloadPolicy
+}
+
+export interface BinaryDownloadPolicy {
+  allowedOrigins: readonly string[]
+  maxBytes: number
 }
 
 function requestId(): string {
@@ -109,22 +118,19 @@ async function tauriProxiedFetch(
   input: RequestInfo | URL,
   init: ProxyFetchOptions = {}
 ): Promise<Response> {
-  const { timeout, blockPrivateHosts, ...requestInit } = init
+  const { timeout, blockPrivateHosts, downloadPolicy, ...requestInit } = init
   const request = new Request(input, requestInit)
   if (request.signal.aborted) throw abortError()
-  const encodedBody = await bodyBase64(request)
-  if (request.signal.aborted) throw abortError()
-
   const id = requestId()
-  const payload: ProxiedRequestInput = {
-    requestId: id,
-    url: request.url,
-    method: request.method,
-    headers: headerRecord(request.headers),
-    bodyBase64: encodedBody,
-    timeoutMs: timeout,
-    redirect: request.redirect,
-    ...(blockPrivateHosts ? { blockPrivate: true } : {}),
+  let admissionToken: string | undefined
+  let legacyDispatched = false
+  let released = false
+  const cancelNative = () => {
+    if (!admissionToken && !legacyDispatched) return
+    void invoke("proxy_http_cancel", {
+      requestId: id,
+      ...(admissionToken ? { admissionToken } : {}),
+    }).catch(() => undefined)
   }
 
   let rejectAborted: ((error: Error) => void) | undefined
@@ -132,14 +138,64 @@ async function tauriProxiedFetch(
     rejectAborted = reject
   })
   const onAbort = () => {
-    void invoke("proxy_http_cancel", { requestId: id }).catch(() => undefined)
+    cancelNative()
     rejectAborted?.(abortError())
   }
   request.signal.addEventListener("abort", onAbort, { once: true })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => {
+        cancelNative()
+        reject(new Error(downloadPolicy ? "download_timed_out" : "request timed out"))
+      },
+      downloadPolicy
+        ? Math.min(Math.max(timeout ?? 60_000, 1), 60_000)
+        : Math.max(timeout ?? 30_000, 1)
+    )
+  })
 
   try {
+    const encodedBody = await Promise.race([bodyBase64(request), aborted, deadline])
+    const payload: ProxiedRequestInput = {
+      requestId: id,
+      url: request.url,
+      method: request.method,
+      headers: headerRecord(request.headers),
+      bodyBase64: encodedBody,
+      timeoutMs: timeout,
+      redirect: request.redirect,
+      ...(blockPrivateHosts ? { blockPrivate: true } : {}),
+      ...(downloadPolicy ? { downloadPolicy } : {}),
+    }
+    const capabilities = await Promise.race([
+      invoke<{ downloadPolicyVersion?: number; requestAdmissionVersion?: number }>(
+        "proxy_get_active"
+      ),
+      aborted,
+      deadline,
+    ])
+    const admitted = capabilities?.requestAdmissionVersion === 1
+    if (capabilities?.requestAdmissionVersion !== undefined && !admitted) {
+      throw new Error("request_admission_unsupported")
+    }
+    if (downloadPolicy && (capabilities?.downloadPolicyVersion !== 2 || !admitted)) {
+      throw new Error("download_policy_unsupported")
+    }
+    if (admitted) {
+      const preparation = invoke<string>("proxy_http_prepare", { requestId: id }).then((token) => {
+        if (typeof token !== "string" || !token || token.length > 128)
+          throw new Error("request_admission_invalid")
+        admissionToken = token
+        if (released || request.signal.aborted) cancelNative()
+        return token
+      })
+      payload.admissionToken = await Promise.race([preparation, aborted, deadline])
+    }
+    if (request.signal.aborted) throw abortError()
+    legacyDispatched = !admitted
     const native = invoke<ProxiedRequestOutput>("proxy_http_request", { input: payload })
-    const result = await Promise.race([native, aborted])
+    const result = await Promise.race([native, aborted, deadline])
     const responseHeaders = new Headers(result.headers)
     return new Response(nullBodyFor(result.status, result.bodyBase64), {
       status: result.status,
@@ -157,6 +213,9 @@ async function tauriProxiedFetch(
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`Proxy request failed: ${message}`, { cause: error })
   } finally {
+    released = true
+    if (admissionToken) cancelNative()
+    if (timer !== undefined) clearTimeout(timer)
     request.signal.removeEventListener("abort", onAbort)
   }
 }
@@ -165,7 +224,8 @@ async function browserFetch(
   input: RequestInfo | URL,
   init: ProxyFetchOptions = {}
 ): Promise<Response> {
-  const { timeout, blockPrivateHosts: _blockPrivateHosts, ...requestInit } = init
+  const { timeout, blockPrivateHosts: _blockPrivateHosts, downloadPolicy, ...requestInit } = init
+  if (downloadPolicy) throw new Error("download_policy_unsupported")
   if (!timeout) return fetch(input, requestInit)
 
   const request = new Request(input, requestInit)

@@ -17,6 +17,21 @@ Provider 系统覆盖五条职责：
 
 OAuth 订阅路径单独有自己的子系统，见 [Claude 订阅 OAuth](./claude-subscription-oauth)；embedding-only 服务商通过 [向量存储](../data/vector-store) 消费。
 
+## Magpie 网关
+
+启动 Magpie，然后进入 **设置 → AI Connections → Magpie → Connect**，点击
+**Discover local Magpie**。桌面端从 `$XDG_CONFIG_HOME/magpie/settings.json` 或
+`~/.config/magpie/settings.json` 读取端口（默认 `3425`），验证 `/api/hello`，再加载
+`/v1/models`。浏览器端使用端口 `3425`；自定义地址可在 Base URL 中填写，再到 Models 刷新。
+
+发现成功后保存 OpenAI 兼容端点和应用标识 `magpie-cognia`，保留 `provider/model`、
+`group/name` 等完整模型 ID、上下文限制和支持的模态。选择默认模型、测试连接，设置为默认
+提供商后即可用于新聊天。Refresh Model List 重新加载实时模型列表；发现失败不会覆盖已有
+配置。Magpie 会向其配置的提供商转发请求，因此继续执行正常的出站隐私检查。Cognia 不读取
+Magpie 中的提供商密钥。
+
+参见 [Magpie 官方接入约定](https://github.com/yetone/magpie/blob/main/docs/integrating.md)。
+
 ## 总览架构
 
 ```mermaid

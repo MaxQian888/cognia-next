@@ -69,9 +69,14 @@ export function markConsentSettled(id: string): void {
   changed()
 }
 
+/** A snapshot or replay must not bring back a prompt already answered here. */
+export function isConsentSettled(id: string): boolean {
+  return settled.includes(id)
+}
+
 /** True when another window answers this prompt, or already has. */
 export function isConsentRoutedElsewhere(event: Pick<ConsentRequestEvent, "id" | "surface">) {
-  return claims.has(event.surface) || settled.includes(event.id)
+  return claims.has(event.surface) || isConsentSettled(event.id)
 }
 
 export function subscribeConsentRouting(listener: () => void): () => void {

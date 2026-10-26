@@ -101,9 +101,11 @@ export function useFlowRecorder(options: UseFlowRecorderOptions = {}): UseFlowRe
   )
 
   const stop = useCallback(async () => {
-    const flow = await recorder.stop()
-    setRecording(false)
-    return flow
+    try {
+      return await recorder.stop()
+    } finally {
+      setRecording(false)
+    }
   }, [recorder])
 
   const addAssertion = useCallback((text: string) => recorder.addAssertion(text), [recorder])

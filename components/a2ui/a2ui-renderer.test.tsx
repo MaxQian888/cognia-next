@@ -417,6 +417,20 @@ describe("withA2UIContext", () => {
   })
 })
 
+it("passes a resolved false disabled binding to the component", () => {
+  registerBuiltInComponent("DisabledProbe", ({ component }: A2UIComponentProps) => (
+    <button disabled={Boolean(component.disabled)}>Bound control</button>
+  ))
+  render(
+    <A2UIRenderer
+      component={
+        { id: "bound", component: "DisabledProbe", disabled: { path: "/locked" } } as never
+      }
+    />
+  )
+  expect(screen.getByRole("button", { name: "Bound control" })).toBeEnabled()
+})
+
 describe("registerBuiltInComponent", () => {
   it("should register a new component", () => {
     const CustomComponent = ({ component }: A2UIComponentProps) => (

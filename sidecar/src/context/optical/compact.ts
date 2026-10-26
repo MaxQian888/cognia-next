@@ -1,7 +1,7 @@
 // Optical compaction orchestration (ADR-0063): turn the compaction `middle`
 // into an optical-archive message, or return null to fall back to text summary.
 //
-// Kept out of `ai-sdk.mjs` so it is testable in isolation — the only I/O is the
+// Kept out of `runtimes/ai-sdk/index.ts` so it is testable in isolation — the only I/O is the
 // injected `transcribe` (a one-shot vision read-back). The decision funnel is
 // conservative: coverage gate → budget/overflow gate → worthwhile gate →
 // round-trip readability gate. Any gate that fails returns null, and the caller

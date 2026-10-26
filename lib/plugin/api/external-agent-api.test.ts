@@ -1009,13 +1009,12 @@ describe("non-Bot admission (ADR-0216 decision 3)", () => {
   }
   beforeEach(() => mockManager.execute.mockResolvedValue(legacyResult))
 
-  it("refuses every non-Bot run while the master switch is off", async () => {
+  it("ignores a retired global flag and admits an enabled configured agent", async () => {
     mockStoreState.enabled = false
-    await expect(runPluginExternalAgent("plugin", "devin", "go")).rejects.toThrow(
-      "turned off in Settings"
-    )
-    expect(mockManager.addAgent).not.toHaveBeenCalled()
-    expect(mockManager.execute).not.toHaveBeenCalled()
+    mockStoreAgents.set("cfg", { id: "cfg", enabled: true })
+    await runPluginExternalAgent("plugin", "cfg", "go")
+    expect(mockLifecycle.assessReadiness).toHaveBeenCalled()
+    expect(mockManager.execute).toHaveBeenCalledWith("cfg", "go", expect.anything())
   })
 
   it("leaves the Bot path to its own installation policy", async () => {

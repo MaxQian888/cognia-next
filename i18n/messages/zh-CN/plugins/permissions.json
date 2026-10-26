@@ -14,6 +14,8 @@
     "agent:external:manage": "创建、修改、复制、删除、启用、连接和路由你的外部编程智能体，并修改它们的全局设置",
     "agent:external:read": "查看你的外部编程智能体的配置、就绪状态、预设、已安装运行时和路由规则（绝不包括凭据）",
     "agent:shared-memory:read": "读取团队共享记忆条目",
+    "agent-config:read": "查看你的 Agent 配置（指令文件、技能、Agent、提示词和模板），以及 Hook、权限规则和 MCP 服务器的摘要（绝不包括其中的密钥）",
+    "agent-config:write": "修改你的指令文件、技能、Agent 和提示词，每次修改前都需你确认",
     "ai:chat": "使用你的账户向语言模型发送提示词（消耗你的额度）",
     "ai:embed": "使用你的账户生成向量嵌入（消耗你的额度）",
     "artifact:read": "读取产物元数据",

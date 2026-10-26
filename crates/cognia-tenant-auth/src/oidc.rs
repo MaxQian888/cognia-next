@@ -6,9 +6,9 @@
 //! that a *third* — `cognia-collab-server` — was about to write a third copy in
 //! order to exchange an OIDC token for a grant.
 //!
-//! `services/diagnostic-server` stays out. It verifies against a static RSA PEM
-//! rather than JWKS, sits on `jsonwebtoken 9` against this crate's 11, and its
-//! image build context cannot see this directory. See the crate root.
+//! The diagnostic server (cognia-services) stays out. It verifies against a
+//! static RSA PEM rather than JWKS, sits on `jsonwebtoken 9` against this
+//! crate's 11, and lives in another repository. See the crate root.
 //!
 //! # What this layer decides, and what it does not
 //!

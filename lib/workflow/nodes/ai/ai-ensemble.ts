@@ -22,6 +22,8 @@ import {
   type EnsembleSampleResult,
   type RunEnsembleDeps,
 } from "@/lib/ai/ensemble/run-ensemble"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 export interface AiEnsembleTarget {
   kind?: "agent.turn" | "subworkflow"
@@ -80,11 +82,50 @@ export interface AiEnsembleDeps {
   }) => Promise<{ completion: string }>
 }
 
-const DEFAULT_SYNTH_SYSTEM = `You are an ensemble synthesizer. The same task was attempted several times \
+/**
+ * The synthesizer's instructions for `synthesize-by-final-agent` (ADR-0236).
+ * A node's `synthesisInstructions` are its own and are appended after this
+ * text; only the shipped base is editable here.
+ */
+export const ENSEMBLE_SYNTHESIZER_PROMPT = definePrompt({
+  id: "developer.workflow.ensemble.synthesizer",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  outputContract:
+    "The system prompt of an ai.ensemble node's synthesizer call; the node's own synthesis instructions follow under \"Additional guidance:\", and the trimmed reply becomes the ensemble result.",
+  consumers: ["lib/workflow/nodes/ai/ai-ensemble.ts"],
+  defaultBody: `You are an ensemble synthesizer. The same task was attempted several times \
 (each attempt is labeled). Merge them into one best answer: integrate the strongest points, resolve \
-disagreements with explicit reasoning, and give a single clear final answer.`
+disagreements with explicit reasoning, and give a single clear final answer.`,
+})
 
-/** Format the samples into a synthesizer user message. */
+/** The synthesizer's request around the labeled attempts (`{{attempts}}`). */
+export const ENSEMBLE_SYNTHESIZER_REQUEST_PROMPT = definePrompt({
+  id: "developer.workflow.ensemble.synthesizer.request",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 2_000,
+  variables: [{ name: "attempts", required: true, maxChars: 10_000_000 }],
+  outputContract:
+    'The user message of the synthesizer call; {{attempts}} is one "### Attempt N" block per sample (its text, its JSON object, or its failure).',
+  consumers: ["lib/workflow/nodes/ai/ai-ensemble.ts"],
+  defaultBody: "Merge the following attempts into one best answer.\n\n{{attempts}}",
+})
+
+/** Format the samples into the labeled attempt blocks of the synthesizer request. */
 function formatSamplesForSynthesis(samples: EnsembleSampleResult[]): string {
   const blocks = samples.map((s) => {
     const label = s.lens ? `Attempt ${s.index + 1} (${s.lens})` : `Attempt ${s.index + 1}`
@@ -95,7 +136,7 @@ function formatSamplesForSynthesis(samples: EnsembleSampleResult[]): string {
         : (s.text ?? "")
     return `### ${label}\n${body}`
   })
-  return `Merge the following attempts into one best answer.\n\n${blocks.join("\n\n")}`
+  return blocks.join("\n\n")
 }
 
 /**
@@ -267,13 +308,19 @@ export async function executeAiEnsemble(
   const synthesize: RunEnsembleDeps["synthesize"] =
     aggregation.kind === "synthesize-by-final-agent"
       ? async (samples, instructions) => {
-          const system = instructions
-            ? `${DEFAULT_SYNTH_SYSTEM}\n\nAdditional guidance:\n${instructions}`
-            : DEFAULT_SYNTH_SYSTEM
+          const context = ctx.projectId ? { workspaceId: ctx.projectId } : {}
+          const base = (await resolvePromptAsync(ENSEMBLE_SYNTHESIZER_PROMPT, { context })).text
+          const userPrompt = (
+            await resolvePromptAsync(ENSEMBLE_SYNTHESIZER_REQUEST_PROMPT, {
+              context,
+              values: { attempts: formatSamplesForSynthesis(samples) },
+            })
+          ).text
+          const system = instructions ? `${base}\n\nAdditional guidance:\n${instructions}` : base
           const out = await deps.runPrompt({
             modelAlias: params.synthesizerAlias!,
             systemPrompt: system,
-            userPrompt: formatSamplesForSynthesis(samples),
+            userPrompt,
             temperature: 0.1,
           })
           return { text: (out.completion ?? "").trim() }

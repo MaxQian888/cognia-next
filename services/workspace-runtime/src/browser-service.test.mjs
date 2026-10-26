@@ -7,6 +7,8 @@ import test from "node:test"
 
 import { RemoteChromiumService } from "./browser-service.mjs"
 import { WorkspaceFileBridge } from "./file-bridge.mjs"
+import { createRuntimeServer } from "./runtime-server.mjs"
+import { DomainBlockedError } from "./network-policy.mjs"
 
 class FakeFrame {
   constructor(url = "http://localhost:3000/") {
@@ -337,6 +339,62 @@ async function fixture(t, options = {}) {
   return { service, chromium }
 }
 
+test("recording controls survive public origins and human input without enabling evaluate", async (t) => {
+  const { service } = await fixture(t)
+  t.after(() => service.closeAll())
+  await service.createSession({ id: "recording" })
+  await service.navigate("recording", "https://app.example.com")
+  const actions = []
+  service.recordingEvaluate = async (_session, _record, action) => {
+    actions.push(action)
+    return action === "drain"
+      ? JSON.stringify([
+          {
+            act: "fill",
+            at: 1,
+            target: { selector: "#password", name: "Password" },
+            value: "hidden",
+            secret: true,
+          },
+        ])
+      : "1"
+  }
+  await service.recordingControl("recording", "start")
+  service.sessions.get("recording").humanKeyboardInputOccurred = true
+  const steps = await service.recordingControl("recording", "drain")
+  assert.equal(steps[0].value, "")
+  assert.equal(steps[0].secret, true)
+  await service.recordingControl("recording", "stop")
+  assert.deepEqual(actions, ["start", "drain", "stop"])
+  await assert.rejects(() => service.evaluate("recording", "document.body.innerText"), {
+    code: "browser_human_input_required",
+  })
+  await assert.rejects(() => service.recordingControl("recording", "globalThis.eval('bad')"), {
+    code: "browser_recording_invalid",
+  })
+})
+
+test("recorded selectors become engine-owned opaque refs and expire with snapshots", async (t) => {
+  const { service } = await fixture(t)
+  t.after(() => service.closeAll())
+  await service.createSession({ id: "replay" })
+  const { page, pageId, record } = service.activeRecord(service.sessions.get("replay"))
+  page.mainFrame.evaluate = async () => "e1"
+  const ref = await service.resolveRecordedTarget("replay", "#submit")
+  assert.notEqual(ref, "e1")
+  assert.deepEqual(service.references.get(ref), {
+    sessionId: "replay",
+    pageId,
+    generation: record.generation,
+    frame: page.mainFrame,
+    nativeRef: "e1",
+  })
+  service.invalidatePage("replay", pageId)
+  await assert.rejects(() => service.act("replay", ref, "click", {}), {
+    code: "browser_stale_ref",
+  })
+})
+
 test("clamps page zoom and re-applies it after navigation", async (t) => {
   const { service } = await fixture(t)
   await service.createSession({ id: "session-1", grants: ["app.example.com"] })
@@ -421,6 +479,157 @@ test("creates one isolated context with pinned DNS and a single active page", as
       "--host-resolver-rules=MAP app.example.com 93.184.216.34,EXCLUDE localhost"
     )
   )
+})
+
+test("an explicit ensure reuses a live profile without changing its grants or context", async (t) => {
+  const { service, chromium } = await fixture(t)
+  t.after(() => service.closeAll())
+  const original = await service.createSession({
+    id: "reuse",
+    profileId: "signed-in",
+    grants: ["app.example.com"],
+  })
+  const session = service.requireSession("reuse")
+  const resumed = await service.createSession({
+    id: "reuse",
+    profileId: "signed-in",
+    grants: ["other.example.com"],
+    reuseExisting: true,
+  })
+  assert.equal(service.requireSession("reuse"), session)
+  assert.equal(chromium.launches.length, 1)
+  assert.equal(resumed.activePageId, original.activePageId)
+  assert.deepEqual(resumed.domainGrants, ["app.example.com"])
+  await assert.rejects(
+    service.createSession({ id: "reuse", profileId: "other", reuseExisting: true }),
+    { code: "browser_session_exists" }
+  )
+})
+
+test("concurrent ensures share one Chromium launch and the first applied policy", async (t) => {
+  let releaseDns
+  const dns = new Promise((resolve) => {
+    releaseDns = resolve
+  })
+  const { service, chromium } = await fixture(t, {
+    networkPolicyFactory: () => ({ resolverRules: () => dns }),
+  })
+  t.after(() => service.closeAll())
+  const first = service.createSession({
+    id: "concurrent",
+    grants: ["first.example.com"],
+    reuseExisting: true,
+  })
+  const second = service.createSession({
+    id: "concurrent",
+    grants: ["second.example.com"],
+    reuseExisting: true,
+  })
+  releaseDns("MAP first.example.com 93.184.216.34")
+  const [created, reused] = await Promise.all([first, second])
+  assert.equal(chromium.launches.length, 1)
+  assert.equal(created.activePageId, reused.activePageId)
+  assert.deepEqual(reused.domainGrants, ["first.example.com"])
+})
+
+test("real Chromium reconnect reuses profile storage and regenerates launch policy", async (t) => {
+  const { chromium } = await import("playwright-core")
+  const executablePath =
+    process.env.COGNIA_TEST_CHROMIUM_EXECUTABLE_PATH || chromium.executablePath()
+  try {
+    await fs.access(executablePath)
+  } catch (error) {
+    if (process.env.COGNIA_TEST_CHROMIUM_EXECUTABLE_PATH) throw error
+    t.skip("Playwright Chromium is not installed")
+    return
+  }
+  const { startExternalServiceFixture } =
+    await import("../../../tests/e2e/fixtures/external-service-site/server.ts")
+  const site = await startExternalServiceFixture()
+  t.after(() => site.close())
+  const launches = []
+  const { service } = await fixture(t, {
+    chromium: {
+      launchPersistentContext: (profile, options) => {
+        launches.push({ profile, options })
+        return chromium.launchPersistentContext(profile, { ...options, executablePath })
+      },
+    },
+    networkPolicyFactory: () => ({
+      resolverRules: async (grants) => `MAP ${grants[0]} 93.184.216.34,EXCLUDE localhost`,
+      authorize: async (url) => ({ url, hostname: new URL(url).hostname }),
+      authorizeRedirect: async (_from, url) => ({ url }),
+    }),
+  })
+  t.after(() => service.closeAll())
+  await service.createSession({
+    id: "before",
+    profileId: "signed-in",
+    grants: ["first.example.com"],
+  })
+  const context = service.requireSession("before").context
+  await context.addCookies([
+    {
+      name: "persistent_login",
+      value: "fixture",
+      url: site.origin,
+      expires: Math.floor(Date.now() / 1000) + 3600,
+      httpOnly: true,
+    },
+  ])
+  await service.navigate("before", site.origin)
+  const page = service.activeRecord(service.requireSession("before")).page
+  await page.evaluate(() => localStorage.setItem("saved-site-data", "retained"))
+  await service.closeSession("before")
+  const reopened = await service.createSession({
+    id: "after",
+    profileId: "signed-in",
+    grants: ["second.example.com"],
+  })
+  await service.navigate("after", site.origin)
+  const restored = service.requireSession("after")
+  assert.equal(
+    (await restored.context.cookies(site.origin)).find(
+      (cookie) => cookie.name === "persistent_login"
+    )?.value,
+    "fixture"
+  )
+  assert.equal(
+    await service
+      .activeRecord(restored)
+      .page.evaluate(() => localStorage.getItem("saved-site-data")),
+    "retained"
+  )
+  assert.equal(launches[0].profile, launches[1].profile)
+  assert.notDeepEqual(launches[0].options.args, launches[1].options.args)
+  assert(
+    launches[1].options.args.includes(
+      "--host-resolver-rules=MAP second.example.com 93.184.216.34,EXCLUDE localhost"
+    )
+  )
+  assert.deepEqual(reopened.domainGrants, ["second.example.com"])
+})
+
+test("manual navigation and new-tab denials use the existing blocked-domain diagnostics", async (t) => {
+  const { service } = await fixture(t, {
+    networkPolicyFactory: () => ({
+      resolverRules: async () => "MAP * ~NOTFOUND,EXCLUDE localhost",
+      authorize: async (url) => {
+        throw new DomainBlockedError("domain_blocked", new URL(url).hostname)
+      },
+    }),
+  })
+  t.after(() => service.closeAll())
+  await service.createSession({ id: "denied", grants: [] })
+  await assert.rejects(() => service.navigate("denied", "https://example.org/"), {
+    code: "domain_blocked",
+  })
+  await assert.rejects(() => service.createPage("denied", "https://example.net/"), {
+    code: "domain_blocked",
+  })
+  const snapshot = await service.snapshot("denied")
+  assert.deepEqual(snapshot.blockedDomains, ["example.org", "example.net"])
+  assert.deepEqual((await service.summary("denied")).domainGrants, [])
 })
 
 test("snapshot emits opaque refs, redacts credential fields, and expires old generations", async (t) => {
@@ -613,6 +822,142 @@ test("real overlay snapshots resolve to native Chromium actions in local and clo
         message: "Overlay failed",
       })
       assert.equal(service.references.size, 0)
+
+      // Exercise the actual private HTTP dispatcher and native Chromium input,
+      // on a fulfilled public-origin fixture with a fresh document/profile.
+      await page.route("https://app.example.com/record", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: '<input id="name" aria-label="Name"><input id="password" type="password" aria-label="Password"><button id="save" onclick="this.dataset.clicked=\'yes\'">Save</button>',
+        })
+      )
+      await page.goto("https://app.example.com/record")
+      const runtime = createRuntimeServer({ secret: "r".repeat(32), browserService: service })
+      const address = await runtime.listen(0, "127.0.0.1")
+      t.after(() => runtime.close())
+      const rpc = async (type, args = {}) => {
+        const response = await fetch(`http://127.0.0.1:${address.port}/v1/control`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${"r".repeat(32)}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            version: 1,
+            type,
+            payload: { sessionId: "real-overlay", ...args },
+          }),
+        })
+        const result = await response.json()
+        return { status: response.status, value: result.payload, error: result }
+      }
+      assert.equal((await rpc("browser.recording.control", { action: "start" })).status, 200)
+      const opaque = await rpc("browser.recording.ref", { selector: "#save" })
+      assert.equal(opaque.status, 200)
+      assert.equal(
+        (await rpc("browser.act", { ref: opaque.value, action: "click", args: {} })).status,
+        200
+      )
+      assert.equal(await page.locator("#save").getAttribute("data-clicked"), "yes")
+      await page.locator("#name").focus()
+      assert.equal(
+        (
+          await rpc("browser.input", {
+            input: {
+              kind: "key",
+              payload: { type: "char", text: "A", key: "A" },
+            },
+          })
+        ).status,
+        200
+      )
+      await page.locator("#name").press("Tab")
+      await page.locator("#password").fill("never-record-this")
+      await page.locator("#password").press("Tab")
+      const denied = await rpc("browser.evaluate", { expression: "document.body.innerText" })
+      assert.equal(denied.error.code, "browser_human_input_required")
+      const drained = await rpc("browser.recording.control", { action: "drain" })
+      assert.equal(drained.status, 200)
+      assert(drained.value.some((step) => step.act === "fill" && step.value === "A"))
+      assert(
+        drained.value.some(
+          (step) => step.act === "fill" && step.secret === true && step.value === ""
+        )
+      )
+      assert(!JSON.stringify(drained.value).includes("never-record-this"))
+      assert.equal((await rpc("browser.recording.control", { action: "stop" })).status, 200)
+
+      // Page-owned globals and same-origin storage cannot impersonate the
+      // isolated recorder or inject values into the host-owned journal.
+      await page.evaluate(() => {
+        const original = Object.getOwnPropertyDescriptor
+        Object.getOwnPropertyDescriptor = (object, key) =>
+          key === "__cogniaRecordingControl"
+            ? {
+                writable: false,
+                configurable: false,
+                value: () =>
+                  JSON.stringify([
+                    {
+                      act: "fill",
+                      at: 1,
+                      target: { selector: "#ordinary" },
+                      value: "forged-fixture",
+                    },
+                  ]),
+              }
+            : original(object, key)
+        sessionStorage.setItem("__cognia_recording", "1")
+        sessionStorage.setItem(
+          "__cognia_record_steps",
+          JSON.stringify([
+            { act: "fill", at: 1, target: { selector: "#ordinary" }, value: "forged-fixture" },
+          ])
+        )
+      })
+      assert.equal((await rpc("browser.recording.control", { action: "start" })).status, 200)
+      await page.reload()
+      assert.equal((await rpc("browser.recording.control", { action: "resume" })).status, 200)
+      await page.evaluate(() => {
+        const field = document.createElement("input")
+        field.id = "field"
+        field.name = "password"
+        document.body.append(field)
+        field.value = "descriptor-fixture"
+        field.dispatchEvent(new Event("change", { bubbles: true }))
+        for (const mode of ["open", "closed"]) {
+          const host = document.createElement("div")
+          document.body.append(host)
+          const root = host.attachShadow({ mode })
+          const secret = document.createElement("input")
+          secret.type = "password"
+          root.append(secret)
+          secret.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "@",
+              ctrlKey: true,
+              altKey: true,
+              bubbles: true,
+              composed: true,
+            })
+          )
+        }
+      })
+      const isolated = await rpc("browser.recording.control", { action: "drain" })
+      assert.equal(isolated.status, 200)
+      assert(
+        isolated.value.some(
+          (step) => step.act === "fill" && step.secret === true && step.value === ""
+        )
+      )
+      assert(!JSON.stringify(isolated.value).includes("forged-fixture"))
+      assert(!JSON.stringify(isolated.value).includes("descriptor-fixture"))
+      assert(!JSON.stringify(isolated.value).includes("ctrl+alt+@"))
+      assert.equal((await rpc("browser.recording.control", { action: "stop" })).status, 200)
+      assert.equal(
+        await page.evaluate(() => Reflect.set(window, "__cogniaRecordingControl", () => "secret")),
+        false
+      )
     })
   }
 })

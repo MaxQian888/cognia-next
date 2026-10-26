@@ -4,8 +4,15 @@ import {
   suggestIssueMetadata,
   suggestIssueRelations,
   suggestIssueTitle,
+  ISSUE_DRAFT_PROMPT,
+  ISSUE_METADATA_PROMPT,
+  ISSUE_RELATIONS_PROMPT,
 } from "./ai-issue-assist"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function stubClient(reply: string | ((prompt: string) => string) | Error): {
   client: LlmClient
@@ -239,5 +246,52 @@ describe("suggestIssueMetadata estimate", () => {
       { client, isPiiSafe: safe }
     )
     expect(res).toEqual({ kind: "skipped", reason: "no-output" })
+  })
+})
+
+describe("customized issue-assist prompts (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("drafts with the workspace's wording and leaves other workspaces on the shipped text", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: ISSUE_DRAFT_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por",
+          body: "Write issue bodies in our RFC template.",
+          contractVersion: ISSUE_DRAFT_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const mine = stubClient("## Summary")
+    await draftIssueDescription("Fix login", {
+      client: mine.client,
+      isPiiSafe: safe,
+      promptContext: { workspaceId: "ws-1" },
+    })
+    expect(mine.calls[0].system).toBe("Write issue bodies in our RFC template.")
+    const other = stubClient("## Summary")
+    await draftIssueDescription("Fix login", {
+      client: other.client,
+      isPiiSafe: safe,
+      promptContext: { workspaceId: "ws-2" },
+    })
+    expect(other.calls[0].system).toBe(ISSUE_DRAFT_PROMPT.defaultBody)
+  })
+
+  it("requires the JSON keys the metadata and relations parsers read", () => {
+    expect(ISSUE_METADATA_PROMPT.requiredFragments).toEqual([
+      '"priority"',
+      '"labels"',
+      '"estimate"',
+    ])
+    expect(ISSUE_RELATIONS_PROMPT.requiredFragments).toEqual([
+      '"parent"',
+      '"blockedBy"',
+      '"duplicates"',
+    ])
   })
 })

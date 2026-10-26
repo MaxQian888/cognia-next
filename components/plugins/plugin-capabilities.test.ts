@@ -1,4 +1,4 @@
-import { CANONICAL_PLUGIN_CAPABILITIES } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { CANONICAL_PLUGIN_CAPABILITIES } from "@cognia/plugin-contract/contracts/catalog"
 import {
   CAPABILITY_META,
   CAPABILITY_IDS,

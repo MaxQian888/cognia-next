@@ -304,7 +304,7 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       - name: Prepare built-in plugins before compiling the host
-        run: node scripts/build/build-browser-builtin-plugins.mjs
+        run: node scripts/build/stage-plugin-artifacts.mjs
       - run: pnpm cli:build:binary -- --target ${{ matrix.target }} --variant all --archive
         env:
           APPLE_SIGNING_IDENTITY: ${{ matrix.target == 'darwin-arm64' && secrets.APPLE_SIGNING_IDENTITY || '' }}
@@ -387,7 +387,7 @@ jobs:
         run: rustup show active-toolchain
       - if: runner.os == 'Linux'
         name: Install the server's system libraries
-        # The same libraries Dockerfile.cognia-server's build stage installs:
+        # The same libraries deploy/docker/Dockerfile.cognia-server's build stage installs:
         # screen capture (PipeWire, GBM, EGL, Wayland), xkbcommon, OpenSSL,
         # and libclang for bindgen.
         run: >-
@@ -433,7 +433,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: xcrun notarytool store-credentials cognia-host --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
       - name: Prepare built-in plugins before compiling the host
-        run: node scripts/build/build-browser-builtin-plugins.mjs
+        run: node scripts/build/stage-plugin-artifacts.mjs
       # webclone, the code-graph grammars, the VS Code extension host and the
       # native helpers the brain layout copies in.
       - run: pnpm cli:release:prepare
@@ -570,7 +570,7 @@ jobs:
       - name: Build missing SDK host prerequisites
         if: steps.release.outputs.publish == 'true' && steps.host-artifact.outputs.id == ''
         run: |
-          node scripts/build/build-browser-builtin-plugins.mjs
+          node scripts/build/stage-plugin-artifacts.mjs
           pnpm cli:build:binary -- --target linux-x64 --variant full
           pnpm cli:smoke:bun -- linux-x64 --variant=full
           pnpm agent:host:package -- linux-x64
@@ -579,7 +579,7 @@ jobs:
         run: |
           node scripts/ci/release-agent-host.mjs env
           pnpm sidecar:webclone:build
-          node scripts/build/build-browser-builtin-plugins.mjs
+          node scripts/build/stage-plugin-artifacts.mjs
       - if: steps.release.outputs.publish == 'true'
         run: pnpm agent:sdk:smoke
       - if: steps.release.outputs.publish == 'true'

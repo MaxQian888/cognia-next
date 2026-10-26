@@ -178,7 +178,7 @@ describe("cognia-pi-latex-workbench manifest", () => {
     expect(manifest).toMatchObject({
       id: "cognia-pi-latex-workbench",
       type: "frontend",
-      version: "0.1.0",
+      version: "0.1.1",
       main: "dist/index.js",
       permissions: ["cli:execute"],
       activationEvents: ["startup"],
@@ -513,16 +513,18 @@ describe("piPackages", () => {
     for (const ext of extensions) expect(existsSync(join(pluginRoot, pkg!.path, ext))).toBe(true)
   })
 
-  it("pins the Pi version the upstream adapter declares as its peer", () => {
-    expect(pkg!.minPiVersion).toBe(
-      adapterPackage.peerDependencies["@earendil-works/pi-coding-agent"]
+  it("declares the verified minimum Pi host and the current development baseline", () => {
+    expect(pkg!.minPiVersion).toBe("1.0.2")
+    expect(adapterPackage.peerDependencies["@earendil-works/pi-coding-agent"]).toBe(
+      `^${pkg!.minPiVersion}`
     )
+    expect(adapterPackage.devDependencies["@earendil-works/pi-coding-agent"]).toBe("1.3.0")
   })
 
   it("prepares dependencies without dev/peer packages or lifecycle scripts", () => {
     expect(pkg!.prepare).toEqual({
       program: "npm",
-      args: ["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund"],
+      args: ["run", "prepare:plugin"],
       marker: "vendor/node_modules/.package-lock.json",
       timeoutMs: 300000,
     })
@@ -530,6 +532,16 @@ describe("piPackages", () => {
     for (const host of ["@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"]) {
       expect(Object.keys(adapterPackage.peerDependencies)).toContain(host)
       expect(Object.keys(adapterPackage.dependencies ?? {})).not.toContain(host)
+    }
+  })
+
+  it("ships the upstream link-free preparation entry and keeps install scripts disabled", () => {
+    const rootPackage = JSON.parse(readFileSync(join(vendorRoot, "package.json"), "utf8"))
+    expect(rootPackage.scripts["prepare:plugin"]).toBe("node prepare-plugin.mjs")
+    expect(manifestJson.bundle_include).toContain("vendor/prepare-plugin.mjs")
+    const source = readFileSync(join(vendorRoot, "prepare-plugin.mjs"), "utf8")
+    for (const flag of ["--omit=dev", "--omit=peer", "--ignore-scripts", "--no-bin-links"]) {
+      expect(source).toContain(JSON.stringify(flag))
     }
   })
 

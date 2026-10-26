@@ -7,7 +7,7 @@
  */
 
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("@/components/ui/dialog", () => ({
@@ -16,10 +16,19 @@ jest.mock("@/components/ui/dialog", () => ({
   DialogContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
     <div {...props}>{children}</div>
   ),
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
+  ),
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogFooter: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
+  ),
+}))
+
+const useIsMobileMock = jest.fn(() => false)
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => useIsMobileMock(),
 }))
 
 jest.mock("nanoid", () => ({ nanoid: () => "test-style-id" }))
@@ -57,6 +66,7 @@ function makeSample(overrides: Partial<StyleSample> = {}): StyleSample {
 }
 
 beforeEach(() => {
+  useIsMobileMock.mockReset().mockReturnValue(false)
   mockAssertFieldsClean.mockReset()
   mockAssertFieldsClean.mockReturnValue(undefined)
 })
@@ -340,5 +350,62 @@ describe("StyleSampleEditorDialog — busy state", () => {
     expect(screen.getByTestId("style-editor-original")).toBeDisabled()
     expect(screen.getByTestId("style-editor-summary")).toBeDisabled()
     expect(screen.getByTestId("style-editor-save")).toBeDisabled()
+  })
+})
+
+describe("StyleSampleEditorDialog — responsive shell", () => {
+  it("renders the desktop dialog shell with the actions in its pinned footer", () => {
+    render(
+      <StyleSampleEditorDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        sample={null}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("style-sample-editor-dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("style-sample-editor-footer")).toContainElement(
+      screen.getByTestId("style-editor-save")
+    )
+    expect(screen.getByTestId("style-sample-editor-body")).toContainElement(
+      screen.getByTestId("style-editor-original")
+    )
+  })
+
+  it("renders a bottom drawer on a phone", () => {
+    useIsMobileMock.mockReturnValue(true)
+    render(
+      <StyleSampleEditorDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        sample={null}
+        onSave={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("style-sample-editor-drawer")).toBeInTheDocument()
+    expect(screen.queryByTestId("style-sample-editor-dialog")).toBeNull()
+  })
+
+  it("keeps the typed draft when the window crosses the phone breakpoint", async () => {
+    const onSave = jest.fn().mockResolvedValue(undefined)
+    const view = render(
+      <StyleSampleEditorDialog open={true} onOpenChange={jest.fn()} sample={null} onSave={onSave} />
+    )
+    await userEvent.type(screen.getByTestId("style-editor-original"), "draft that must survive")
+    await userEvent.type(screen.getByTestId("style-editor-summary"), "kept summary")
+
+    // The shell swaps from Dialog to Drawer, remounting the form body.
+    useIsMobileMock.mockReturnValue(true)
+    view.rerender(
+      <StyleSampleEditorDialog open={true} onOpenChange={jest.fn()} sample={null} onSave={onSave} />
+    )
+    expect(screen.getByTestId("style-sample-editor-drawer")).toBeInTheDocument()
+    expect(screen.getByTestId("style-editor-original")).toHaveValue("draft that must survive")
+    expect(screen.getByTestId("style-editor-summary")).toHaveValue("kept summary")
+
+    // vaul's pointer handlers need a real transform, so click without pointers.
+    fireEvent.click(screen.getByTestId("style-editor-save"))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect((onSave.mock.calls[0][0] as StyleSample).original).toBe("draft that must survive")
   })
 })

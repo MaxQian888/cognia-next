@@ -1,0 +1,231 @@
+{
+  "$comment": "Single source of truth for the organization capability contract (docs/plans/2026-10-20-multi-user-organizations-permissions-and-rollout.md §5–§6). Rust (cognia-tenant-auth, cognia-collab-server) and TypeScript (lib/collab/capabilities.ts) each pin their enums to this file in a test. Additive changes only; a removal or rename is a new schemaVersion.",
+  "schemaVersion": 1,
+  "featureKeys": [
+    "shared-chat",
+    "shared-chat-execution",
+    "canvas-collaboration",
+    "org-governance",
+    "environment-binding"
+  ],
+  "featureStates": {
+    "available": "New resources and new runs are admitted.",
+    "existing-only": "No new resources or runs; existing resources stay readable and writable, admitted runs drain.",
+    "read-only": "Emergency stop: no new resources, runs or content mutations; read, export, leave, cancel and delete remain.",
+    "off": "The deployment master switch is off; the feature's routes are not served."
+  },
+  "reasons": [
+    "deployment_disabled",
+    "feature_not_offered",
+    "feature_paused",
+    "feature_killed",
+    "org_denied",
+    "workspace_denied",
+    "prerequisite_unavailable",
+    "client_contract_unsupported",
+    "policy_unavailable",
+    "execution_isolation_unavailable"
+  ],
+  "actions": [
+    { "action": "org.members.manage", "scope": "org", "orgRoles": ["owner", "admin"] },
+    { "action": "org.admins.manage", "scope": "org", "orgRoles": ["owner"] },
+    { "action": "org.ownership.transfer", "scope": "org", "orgRoles": ["owner"] },
+    { "action": "org.policy.manage", "scope": "org", "orgRoles": ["owner", "admin"] },
+    { "action": "host.global-surfaces", "scope": "org", "orgRoles": ["owner", "admin"] },
+    {
+      "action": "workspace.read",
+      "scope": "workspace",
+      "minimumCapability": "read",
+      "guestAllowed": true
+    },
+    {
+      "action": "workspace.write",
+      "scope": "workspace",
+      "minimumCapability": "write",
+      "guestAllowed": true
+    },
+    {
+      "action": "workspace.members.manage",
+      "scope": "workspace",
+      "minimumCapability": "manage",
+      "guestAllowed": false
+    },
+    {
+      "action": "workspace.settings.manage",
+      "scope": "workspace",
+      "minimumCapability": "manage",
+      "guestAllowed": false
+    },
+    {
+      "action": "execution.request",
+      "scope": "workspace",
+      "minimumCapability": "write",
+      "guestAllowed": true
+    },
+    {
+      "action": "environment.use",
+      "scope": "workspace",
+      "minimumCapability": "write",
+      "guestAllowed": true
+    },
+    {
+      "action": "environment.manage",
+      "scope": "workspace",
+      "minimumCapability": "manage",
+      "guestAllowed": false
+    },
+    {
+      "action": "credential.use",
+      "scope": "workspace",
+      "minimumCapability": "write",
+      "guestAllowed": false
+    },
+    {
+      "action": "credential.manage",
+      "scope": "workspace",
+      "minimumCapability": "manage",
+      "guestAllowed": false
+    },
+    {
+      "action": "publish",
+      "scope": "workspace",
+      "minimumCapability": "write",
+      "guestAllowed": false
+    },
+    {
+      "action": "host.workspace-surfaces",
+      "scope": "workspace",
+      "minimumCapability": "manage",
+      "guestAllowed": false
+    }
+  ],
+  "presetVectors": [
+    {
+      "orgRole": "owner",
+      "workspaceRole": null,
+      "actions": [
+        "org.members.manage",
+        "org.admins.manage",
+        "org.ownership.transfer",
+        "org.policy.manage",
+        "host.global-surfaces",
+        "workspace.read",
+        "workspace.write",
+        "workspace.members.manage",
+        "workspace.settings.manage",
+        "execution.request",
+        "environment.use",
+        "environment.manage",
+        "credential.use",
+        "credential.manage",
+        "publish",
+        "host.workspace-surfaces"
+      ]
+    },
+    {
+      "orgRole": "admin",
+      "workspaceRole": "viewer",
+      "actions": [
+        "org.members.manage",
+        "org.policy.manage",
+        "host.global-surfaces",
+        "workspace.read",
+        "workspace.write",
+        "workspace.members.manage",
+        "workspace.settings.manage",
+        "execution.request",
+        "environment.use",
+        "environment.manage",
+        "credential.use",
+        "credential.manage",
+        "publish",
+        "host.workspace-surfaces"
+      ]
+    },
+    { "orgRole": "member", "workspaceRole": null, "actions": [] },
+    {
+      "orgRole": "member",
+      "workspaceRole": "maintainer",
+      "actions": [
+        "workspace.read",
+        "workspace.write",
+        "workspace.members.manage",
+        "workspace.settings.manage",
+        "execution.request",
+        "environment.use",
+        "environment.manage",
+        "credential.use",
+        "credential.manage",
+        "publish",
+        "host.workspace-surfaces"
+      ]
+    },
+    {
+      "orgRole": "member",
+      "workspaceRole": "member",
+      "actions": [
+        "workspace.read",
+        "workspace.write",
+        "execution.request",
+        "environment.use",
+        "credential.use",
+        "publish"
+      ]
+    },
+    { "orgRole": "member", "workspaceRole": "viewer", "actions": ["workspace.read"] },
+    {
+      "orgRole": null,
+      "workspaceRole": "maintainer",
+      "actions": ["workspace.read", "workspace.write", "execution.request", "environment.use"]
+    },
+    {
+      "orgRole": null,
+      "workspaceRole": "member",
+      "actions": ["workspace.read", "workspace.write", "execution.request", "environment.use"]
+    },
+    { "orgRole": null, "workspaceRole": "viewer", "actions": ["workspace.read"] },
+    { "orgRole": null, "workspaceRole": null, "actions": [] }
+  ],
+  "exampleResponse": {
+    "schemaVersion": 1,
+    "orgId": "org_alpha",
+    "workspaceId": "ws_alpha",
+    "standing": {
+      "orgRole": "member",
+      "workspaceRole": "member",
+      "via": "membership",
+      "guest": false
+    },
+    "actions": [
+      "workspace.read",
+      "workspace.write",
+      "execution.request",
+      "environment.use",
+      "credential.use",
+      "publish"
+    ],
+    "features": [
+      { "key": "shared-chat", "state": "available", "reason": null, "policyRevision": 4 },
+      {
+        "key": "shared-chat-execution",
+        "state": "existing-only",
+        "reason": "feature_paused",
+        "policyRevision": 7
+      },
+      {
+        "key": "canvas-collaboration",
+        "state": "off",
+        "reason": "deployment_disabled",
+        "policyRevision": 0
+      },
+      { "key": "org-governance", "state": "available", "reason": null, "policyRevision": 0 },
+      {
+        "key": "environment-binding",
+        "state": "read-only",
+        "reason": "feature_killed",
+        "policyRevision": 2
+      }
+    ],
+    "evaluatedAt": 1760918400000
+  }
+}

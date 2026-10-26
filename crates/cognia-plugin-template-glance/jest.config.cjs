@@ -5,7 +5,19 @@
  * from the data it publishes), so there is no DOM to test against.
  */
 module.exports = {
-  preset: "ts-jest",
+  transform: {
+    "^.+\\.tsx?$": [
+      "@swc/jest",
+      {
+        jsc: {
+          target: "es2022",
+          parser: { syntax: "typescript", tsx: true },
+          transform: { react: { runtime: "automatic" } },
+        },
+        module: { type: "commonjs" },
+      },
+    ],
+  },
   testEnvironment: "node",
   testMatch: ["<rootDir>/src/**/*.test.ts"],
   // The `@cognia/*` packages are not installed — the host supplies them at

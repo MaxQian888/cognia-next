@@ -7,31 +7,13 @@
  * surfaces feel consistent.
  */
 
-import type React from "react"
 import { createPluginSystemLogger } from "../core/logger"
 import {
   clearMessagePartRenderersForPlugin,
   registerMessagePartRenderer,
-  type MessagePartRendererProps,
 } from "./message-part-renderers"
-
-export interface PluginMessagePartAPI {
-  /**
-   * Register a renderer for a custom `part.type`. Returns an unregister
-   * callback. The plugin host also calls `clearMessagePartRenderersForPlugin`
-   * on plugin disable, so manual cleanup is a belt-and-braces step rather
-   * than a hard requirement.
-   *
-   * Constraint — `type` cannot start with `tool-`, `text`, `reasoning`,
-   * `file`, or be `dynamic-tool`, `a2ui`, `subagent`, `agent-team-dispatch`,
-   * `artifact`, `sources`, or `canvas` (those are owned by the host). The
-   * function returns a noop unregister for invalid types and logs a warning.
-   */
-  registerPartRenderer: (
-    type: string,
-    component: React.ComponentType<MessagePartRendererProps>
-  ) => () => void
-}
+import type { PluginMessagePartAPI } from "@cognia/plugin-contract/lib/plugin/api/message-part-api"
+export type { PluginMessagePartAPI } from "@cognia/plugin-contract/lib/plugin/api/message-part-api"
 
 const RESERVED_PREFIXES = ["tool-", "text", "reasoning", "file"]
 const RESERVED_TYPES = new Set([

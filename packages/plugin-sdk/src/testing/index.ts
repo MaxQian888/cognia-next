@@ -23,7 +23,7 @@
  * stubbed call, so a suite does not need a mocking library to assert on them.
  */
 
-import type { PluginContext } from "@/types/plugin/plugin"
+import type { PluginContext } from "@cognia/plugin-contract/types/plugin/plugin"
 
 import { PLUGIN_API_NAMESPACE_CONTRACTS } from "../contracts/catalog"
 

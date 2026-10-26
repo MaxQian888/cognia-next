@@ -175,26 +175,64 @@ describe("ImageWorkbench", () => {
     expect(onOpenChange).toHaveBeenCalledTimes(1)
   })
 
-  it("asks before discarding unsaved edits", async () => {
+  it("asks in a modal dialog before discarding unsaved edits", async () => {
     const onOpenChange = jest.fn()
     workbenchState.current = api({ isDirty: true })
     render(<ImageWorkbench {...props({ onOpenChange })} />)
 
     await userEvent.click(screen.getByRole("button", { name: "Close" }))
     expect(onOpenChange).not.toHaveBeenCalled()
-    expect(screen.getByTestId("workbench-discard")).toBeInTheDocument()
+    const confirm = screen.getByRole("alertdialog", { name: "Discard edits" })
+    expect(confirm).toHaveAttribute("data-testid", "workbench-discard")
+    expect(confirm).toHaveAccessibleDescription(
+      "Closing now discards the edits you have not saved."
+    )
+    // The destructive choice is not the one that takes focus first.
+    expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus()
 
     await userEvent.click(screen.getByRole("button", { name: "Discard" }))
-    expect(onOpenChange).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(onOpenChange).toHaveBeenCalledTimes(1)
   })
 
-  it("can back out of discarding and keep editing", async () => {
+  it("can back out of discarding and keep editing, with focus back on Close", async () => {
+    const onOpenChange = jest.fn()
+    workbenchState.current = api({ isDirty: true })
+    render(<ImageWorkbench {...props({ onOpenChange })} />)
+    const close = screen.getByRole("button", { name: "Close" })
+    await userEvent.click(close)
+    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }))
+    await waitFor(() => expect(screen.queryByTestId("workbench-discard")).not.toBeInTheDocument())
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(close).toHaveFocus()
+    // The workbench itself is still open underneath.
+    expect(screen.getByTestId("workbench-stage")).toBeInTheDocument()
+  })
+
+  it("keeps the edits when Escape is pressed on the discard question", async () => {
+    // The old inline prompt treated a further Escape as "close anyway", which
+    // dropped unsaved edits on a double press.
     const onOpenChange = jest.fn()
     workbenchState.current = api({ isDirty: true })
     render(<ImageWorkbench {...props({ onOpenChange })} />)
     await userEvent.click(screen.getByRole("button", { name: "Close" }))
-    await userEvent.click(screen.getByRole("button", { name: "Keep editing" }))
-    expect(screen.queryByTestId("workbench-discard")).not.toBeInTheDocument()
+    expect(screen.getByRole("alertdialog", { name: "Discard edits" })).toBeInTheDocument()
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(screen.getByTestId("workbench-stage")).toBeInTheDocument()
+  })
+
+  it("answers an Android back press on the discard question with keep editing", async () => {
+    const onOpenChange = jest.fn()
+    workbenchState.current = api({ isDirty: true })
+    render(<ImageWorkbench {...props({ onOpenChange })} />)
+    await userEvent.click(screen.getByRole("button", { name: "Close" }))
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    act(() => {
+      dismissTopmostOverlayOnBack()
+    })
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(onOpenChange).not.toHaveBeenCalled()
   })
 

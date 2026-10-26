@@ -63,6 +63,10 @@ export function makeWrappedEmit(
       ...(transcriptInvalidationId ? { transcriptInvalidationId } : {}),
     })
     if (msg && msg.type === "session_ended" && msg.sessionId === sessionId) {
+      if (ownsEntry()) {
+        const owner = sessionsMap.get(sessionId!)
+        if (owner) owner.turnPending = false
+      }
       // A multi-turn dispatcher (ai-sdk) keeps ONE live loop across turns and
       // accumulates conversation context in-process. A per-turn `session_ended`
       // must NOT tear it down — doing so dropped history every turn for every
@@ -174,7 +178,7 @@ export function restartReason(existing: HostSession, options?: SendOptions) {
   // ai-sdk (multi-turn) exposes a live `active` getter on its `q`: when true a
   // turn is genuinely in flight (e.g. a timeout's interrupt could not stop a
   // wedged stream before the renderer reused the session).
-  if (typeof existing.q?.active === "boolean" && existing.q.active) {
+  if (existing.turnPending || (typeof existing.q?.active === "boolean" && existing.q.active)) {
     return "turn still active"
   }
   // Single-turn (Anthropic) sessions are retired from the map on EVERY
@@ -186,6 +190,24 @@ export function restartReason(existing: HostSession, options?: SendOptions) {
     return "stale single-turn session"
   }
   return null
+}
+
+/** Serialize admission only; a model's streaming response never holds this queue. */
+export function createSessionSendQueue() {
+  const pending = new Map<string, Promise<void>>()
+  return (sessionId: string, prepare: () => Promise<void>): Promise<void> => {
+    const previous = pending.get(sessionId)
+    const next = previous ? previous.then(prepare) : prepare()
+    const settled = next.then(
+      () => {},
+      () => {}
+    )
+    pending.set(sessionId, settled)
+    void settled.then(() => {
+      if (pending.get(sessionId) === settled) pending.delete(sessionId)
+    })
+    return next
+  }
 }
 
 /**
@@ -207,16 +229,36 @@ export function restartReason(existing: HostSession, options?: SendOptions) {
  * @param {{ turnId?: string, ledger?: unknown } | undefined} options
  * @param {string | unknown[]} prompt
  */
-export function routeSendIntoLiveLoop(
+export async function routeSendIntoLiveLoop(
   existing: HostSession,
   options: SendOptions | undefined,
-  prompt: Prompt
+  prompt: Prompt,
+  isCurrent: () => boolean = () => true
 ) {
+  const current = () => isCurrent() && existing.q?.closed !== true
+  if (!current()) return false
+  // Auto and routing fallback can pick a different model without a picker
+  // control. Apply that send's choice to the retained runtime before it reads
+  // the prompt, and leave the turn untouched if the runtime refuses it.
+  if (options?.model && options.model !== existing.sendOptions?.model) {
+    if (!existing.q?.setModel) throw new Error("live model switch is unavailable")
+    try {
+      await existing.q.setModel(options.model)
+    } catch (error) {
+      if (!current()) return false
+      throw error
+    }
+    if (!current()) return false
+    existing.sendOptions ??= {}
+    existing.sendOptions.model = options.model
+  }
   // Only reached for a session we're pushing into in place; a restarted one
   // got a fresh ref, and the loop it replaced keeps its own.
   if (existing.turnRef) existing.turnRef.id = options?.turnId
   existing.setNextTurnLedger?.(options?.ledger, options?.remoteExecutionContext)
+  existing.turnPending = true
   existing.pushUserMessage!(prompt)
+  return true
 }
 
 // Undo a compaction: restore the pre-compaction message snapshot into the live

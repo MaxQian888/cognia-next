@@ -41,7 +41,7 @@ export interface PreCompactOptions {
  * which is why `onPreCompact` was marked dormant in `types/plugin/plugin-hooks.ts`.
  *
  * It now rides the same renderer round-trip the `{ type: "plugin" }` hook
- * handler uses (`./plugin-hook-exec.mjs`):
+ * handler uses (`./plugin-hook-exec.ts`):
  *   1. sidecar emits { type: "plugin_hook_exec", sessionId, execId,
  *      pluginId: "*", hookId: "onPreCompact", payload }
  *   2. Rust's default branch forwards it on SIDECAR_EVENT (no special case)

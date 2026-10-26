@@ -52,7 +52,7 @@ jest.mock(
 )
 
 const warnMock = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { app: { warn: (...args: unknown[]) => warnMock(...args) } },
 }))
 

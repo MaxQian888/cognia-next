@@ -1,5 +1,8 @@
 import type { McpServer } from "@cognia/agent-config-types"
 
+import { fingerprintMcpDefinition } from "./server-definition"
+import { isToolDenied, normalizeToolPermissionRules } from "./tool-rules"
+
 export type McpExecutionSurface = "chat" | "workflow" | "plan" | "cli" | "settings" | "agent-sync"
 export type McpPolicyDecision = "allow" | "deny" | "ask"
 
@@ -52,6 +55,66 @@ export function evaluateMcpPolicy(input: {
     decision: "deny",
     reason: `pending MCP server cannot execute non-interactively on ${input.surface}`,
   }
+}
+
+/** Why an operation may not proceed, and how far the revocation reaches. */
+export interface GatewayDenial {
+  message: string
+  /** `server`: tear down the server's leases in every scope; `scope`: only this scope's. */
+  revoke?: "server" | "scope"
+}
+
+/**
+ * The policy verdict for one operation on an already-open connection (the
+ * runtime gateway, the MCP-over-ACP bridge). Messages keep the
+ * `MCP execution <decision>:` shape the transport uses, so `classifyError`
+ * reports them as `blocked` and the audit row records a denial.
+ */
+export function gatewayDenial(
+  input: {
+    server: McpServer
+    surface: McpExecutionSurface
+    interactive?: boolean
+    grant?: McpExecutionGrant
+    toolName: string
+  },
+  toolCall: boolean,
+  now: number = Date.now()
+): GatewayDenial | undefined {
+  const { server } = input
+  if (server.enabled === false) {
+    return { message: "MCP execution deny: server is disabled", revoke: "server" }
+  }
+  const policy = evaluateMcpPolicy({
+    server,
+    surface: input.surface,
+    interactive: input.interactive ?? false,
+    toolName: input.toolName,
+    fingerprint: fingerprintMcpDefinition(server),
+    grant: input.grant,
+    now,
+  })
+  if (policy.decision !== "allow") {
+    return {
+      message: `MCP execution ${policy.decision}: ${policy.reason}`,
+      revoke: server.trust?.state === "blocked" ? "server" : "scope",
+    }
+  }
+  if (!toolCall) return undefined
+  if (isToolDenied(input.toolName, server)) {
+    return { message: `MCP execution deny: tool ${input.toolName} is denied by a saved rule` }
+  }
+  const rule = normalizeToolPermissionRules(server.toolPermissionRules).find(
+    (candidate) => candidate.name === input.toolName
+  )
+  // An "ask" rule needs a person. Interactive callers (MCP Apps) confirm
+  // before calling; workflow, plan and other headless surfaces cannot ask.
+  if (rule?.decision === "ask" && !input.interactive) {
+    return {
+      message: `MCP execution deny: tool ${input.toolName} requires approval, which ${input.surface} cannot ask for`,
+    }
+  }
+  return undefined
 }
 
 function parseIpv4(hostname: string): number[] | null {

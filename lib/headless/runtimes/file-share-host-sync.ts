@@ -26,7 +26,7 @@ registerHeadlessRuntime({
       ...defaultMountTableDeps,
       // The brain's transport is its own server's service plane.
       target: {},
-      accountId: () => ctx.localAccountId,
+      localAccountId: () => ctx.localAccountId,
       loadPolicy: defaultLoadPolicy,
       log: (level, message) => ctx.log(level, message),
     })

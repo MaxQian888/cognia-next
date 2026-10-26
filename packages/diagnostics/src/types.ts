@@ -380,6 +380,39 @@ export type DiagnosticCode =
    * paused (ADR-0204): nothing starts a turn there until it is resumed.
    */
   | "projectPaused"
+  // --- Multi-tenant Host (intentionally inert surfaces, CLAUDE.md Rule 7) ---
+  /**
+   * A multi-tenant Host refused per-user data (messages, files library, pet,
+   * issues, …) because its store is not yet partitioned by person. Inert by
+   * design until that partitioning ships; not a fault and not a permission
+   * the member can be granted.
+   */
+  | "hostDataUnavailable"
+  /**
+   * A Host refused to start execution: control-plane-only mode, no sandbox
+   * isolation, or work that would run in the Host's own process on a
+   * multi-tenant Host. Inert by design there; never falls back to the Host.
+   */
+  | "executionUnavailable"
+  /**
+   * A multi-tenant Host could not tie the request to a workspace it resolved
+   * itself (no workspace on creation, or a record the Host never bound).
+   */
+  | "workspaceUnresolved"
+  /**
+   * A member's data partition on a multi-tenant Host has no model access:
+   * it starts with no provider configuration, and brokered credentials are
+   * not available yet (plan §9a, Q11). Inert by design until then.
+   */
+  | "modelAccessUnavailable"
+  /**
+   * A member's data partition on a multi-tenant Host has no Host workspaces,
+   * so a conversation there cannot be moved into one (plan §9a, P5d). Inert
+   * by design: the partition holds the member's own data only.
+   */
+  | "partitionWorkspaceUnavailable"
+  /** Organization administration is unavailable on a single-user Host. */
+  | "orgScopeUnavailable"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

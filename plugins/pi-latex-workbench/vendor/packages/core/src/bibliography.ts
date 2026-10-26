@@ -31,7 +31,7 @@ import {
 import type { BlobStore, Scope, WorkbenchStore } from "@latexwb/storage";
 import { requireCapability } from "./capabilities.ts";
 import type { RequestContext } from "./context.ts";
-import { parseBibTeX, scanCitations, type BibEntry, type CitationUse } from "./bib.ts";
+import { parseBibTeX, scanCitations, workIdentity, type BibEntry, type CitationUse } from "@latexwb/latex-kit";
 import { readSnapshotFile } from "./snapshot.ts";
 import { runServiceJob } from "./service-job.ts";
 import type { EvidenceInput, EvidenceView } from "./evidence.ts";
@@ -100,16 +100,6 @@ function providerItemHasVenue(rawItemJson: string | undefined): boolean {
   } catch {
     return false;
   }
-}
-
-/** Normalized same-work identity: lowercase DOI, else normalized title+year. */
-function workIdentity(entry: BibEntry): string | null {
-  const doi = entry.fields.get("doi")?.trim().toLowerCase().replace(/^https?:\/\/(?:dx\.)?doi\.org\//, "");
-  if (doi !== undefined && doi !== "") return `doi:${doi}`;
-  const title = entry.fields.get("title")?.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() ?? "";
-  const year = entry.fields.get("year")?.trim() ?? "";
-  if (title.length < 8) return null;
-  return `title:${title}|${year}`;
 }
 
 function texSourceFiles(store: WorkbenchStore, scope: Scope, snapshotId: string): string[] {

@@ -128,7 +128,7 @@ test("runChecks reports the two shipped defects it was written to catch", () => 
 // server's graph and needs WebKitGTK to build.
 test("headless Rust stages build named packages only and retain the real brain layout", () => {
   const dockerfile = readFileSync(
-    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    new URL("../../deploy/docker/Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
   for (const stage of ["deps", "builder", "check"]) {
@@ -154,7 +154,7 @@ test("headless Rust stages build named packages only and retain the real brain l
 
 test("all literal server Docker COPY inputs exist in a fresh checkout", () => {
   const dockerfile = readFileSync(
-    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    new URL("../../deploy/docker/Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
   const tracked = execFileSync("git", ["ls-files", "-z"], {
@@ -176,7 +176,7 @@ test("all literal server Docker COPY inputs exist in a fresh checkout", () => {
 
 test("server dependency cooking has the same capture linker prerequisite as final builds", () => {
   const dockerfile = readFileSync(
-    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    new URL("../../deploy/docker/Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
   const chef = dockerfile.split("FROM chef AS planner")[0]
@@ -208,7 +208,7 @@ test("server dependency cooking has the same capture linker prerequisite as fina
 
 test("the server image installs no desktop GUI stack", () => {
   const dockerfile = readFileSync(
-    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    new URL("../../deploy/docker/Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
   assert.doesNotMatch(
@@ -219,7 +219,7 @@ test("the server image installs no desktop GUI stack", () => {
 
 test("server dependency cooking prepares each shipped feature graph without workspace unification", () => {
   const dockerfile = readFileSync(
-    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    new URL("../../deploy/docker/Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
   const plans = (stage, command) =>
@@ -280,7 +280,7 @@ test("server dependency cooking prepares each shipped feature graph without work
 test("both server compile stages carry Rust out-of-tree embedded inputs", () => {
   const root = fileURLToPath(new URL("../../", import.meta.url))
   const dockerfile = readFileSync(
-    new URL("../../Dockerfile.cognia-server", import.meta.url),
+    new URL("../../deploy/docker/Dockerfile.cognia-server", import.meta.url),
     "utf8"
   )
   const rustFiles = execFileSync("git", ["ls-files", "-z", "crates", "src-tauri"], {
@@ -322,7 +322,7 @@ test("both server compile stages carry Rust out-of-tree embedded inputs", () => 
 })
 
 for (const [file, stage] of [
-  ["Dockerfile.cognia-server", "brain-builder"],
+  ["deploy/docker/Dockerfile.cognia-server", "brain-builder"],
   ["deploy/compose/Dockerfile.web", "web-build"],
 ]) {
   test(`${file} exports a source-independent pnpm fetch layer before frozen offline linking`, () => {
@@ -348,7 +348,6 @@ for (const [file, stage] of [
       "docs/package.json",
       "mobile/package.json",
       "cli/package.json",
-      "browser-extension",
       "services/workspace-runtime/package.json",
       "scripts/postinstall.mjs",
     ]) {
@@ -357,6 +356,7 @@ for (const [file, stage] of [
         `${input} must be available for linking/lifecycle scripts`
       )
     }
+    assert.doesNotMatch(linkingInputs, /^COPY browser-extension\b/m)
     assert.doesNotMatch(
       source.slice(fetchAt, installAt + "RUN pnpm install --frozen-lockfile --offline".length),
       /--ignore-scripts|--mount=type=cache/

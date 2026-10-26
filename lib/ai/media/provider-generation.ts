@@ -22,7 +22,7 @@ import {
   type ProviderSettingsSnapshot,
   type ResolvedProvider,
 } from "@/lib/ai/provider-consumption"
-import { resolveImageModel, type ImageProviderId } from "./image-generation-sdk"
+import { resolveImageModel } from "./image-generation-sdk"
 import {
   VIDEO_GENERATION_PROVIDER_IDS,
   isSupportedVideoProvider,
@@ -30,40 +30,20 @@ import {
   type VideoProviderId,
 } from "./video-generation-sdk"
 import { checkVideoJobParams } from "./video-jobs/params"
+import type {
+  ImageGenerationProviderId,
+  ProviderImageGenerationRequest,
+  ProviderImagePrompt,
+} from "@cognia/plugin-contract/lib/ai/media/provider-generation"
+import { IMAGE_GENERATION_PROVIDER_IDS } from "@cognia/plugin-contract/lib/ai/media/provider-generation"
+export { IMAGE_GENERATION_PROVIDER_IDS } from "@cognia/plugin-contract/lib/ai/media/provider-generation"
+export type {
+  ImageGenerationProviderId,
+  ProviderImageGenerationRequest,
+  ProviderImagePrompt,
+} from "@cognia/plugin-contract/lib/ai/media/provider-generation"
 
-export const IMAGE_GENERATION_PROVIDER_IDS = [
-  "openai",
-  "azure",
-  "bedrock",
-  "google",
-  "xai",
-  "togetherai",
-  "fireworks",
-  "deepinfra",
-  "fal",
-  "replicate",
-  "nvidia",
-  "doubao",
-  "volcengine",
-] as const satisfies readonly ImageProviderId[]
-
-export type ImageGenerationProviderId = (typeof IMAGE_GENERATION_PROVIDER_IDS)[number]
-
-export type ProviderImagePrompt = Parameters<typeof generateImage>[0]["prompt"]
 export type ProviderVideoPrompt = GenerateVideoPrompt
-
-export interface ProviderImageGenerationRequest {
-  snapshot: ProviderSettingsSnapshot
-  prompt: ProviderImagePrompt
-  providerId?: ImageGenerationProviderId
-  model?: string
-  n?: number
-  size?: `${number}x${number}`
-  aspectRatio?: `${number}:${number}`
-  seed?: number
-  providerOptions?: Parameters<typeof generateImage>[0]["providerOptions"]
-  abortSignal?: AbortSignal
-}
 
 export type MediaGenerationErrorCode =
   "UNSUPPORTED_PROVIDER" | "NO_PROVIDER" | "PROVIDER_CONFIGURATION" | "PII_BLOCKED"

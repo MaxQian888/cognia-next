@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.a2uiTemplates[]` entries.
  */
 
-import type { A2UITemplateDef } from "@/types/plugin/plugin"
+import type { A2UITemplateDef } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineA2UITemplate(def: A2UITemplateDef): A2UITemplateDef {
   return def

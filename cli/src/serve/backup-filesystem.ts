@@ -7,7 +7,8 @@ import type { BackupFilesystem } from "@/lib/data/backup-scheduler"
 
 export function createNodeBackupFilesystem(): BackupFilesystem {
   return {
-    async writeStream(target, source) {
+    async writeStream(target, source, assertActive = () => undefined) {
+      assertActive()
       await mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
       const temporary = `${target}.${crypto.randomUUID()}.tmp`
       const file = await open(temporary, "wx", 0o600)
@@ -17,6 +18,7 @@ export function createNodeBackupFilesystem(): BackupFilesystem {
           let offset = 0
           while (offset < chunk.byteLength) {
             const result = await file.write(chunk, offset, chunk.byteLength - offset)
+            assertActive()
             if (result.bytesWritten === 0) throw new Error("backup_write_failed")
             offset += result.bytesWritten
           }
@@ -24,6 +26,7 @@ export function createNodeBackupFilesystem(): BackupFilesystem {
         }
         await file.sync()
         await file.close()
+        assertActive()
         await rename(temporary, target)
         return size
       } catch (error) {

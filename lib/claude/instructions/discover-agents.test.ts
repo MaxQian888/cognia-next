@@ -1,4 +1,4 @@
-import { discoverMarkdownAgentFiles } from "./discover-agents"
+import { discoverMarkdownAgentFiles, discoverMarkdownAgentPaths } from "./discover-agents"
 import { buildMarkdownAgents } from "@/lib/claude/agents/markdown-agents"
 import type { InstructionFs } from "./types"
 
@@ -78,5 +78,49 @@ describe("discoverMarkdownAgentFiles", () => {
     }
     const files = await discoverMarkdownAgentFiles({ roots: ["/proj"], fs })
     expect(files).toEqual([{ id: "b", content: A("ok") }])
+  })
+})
+
+describe("discoverMarkdownAgentPaths", () => {
+  it("lists the same files in the same load order without reading them", async () => {
+    const fs = fakeFs({
+      "/home/.cognia/agents/shared.md": A("global"),
+      "/second/.cognia/agents/helper.md": A("second"),
+      "/proj/.cognia/agents/Code Reviewer.md": A("review"),
+      "/proj/.cognia/agents/notes.txt": "ignored",
+    })
+    const readText = jest.spyOn(fs, "readText")
+    const paths = await discoverMarkdownAgentPaths({
+      roots: ["/proj", "/second"],
+      globalAgentsDir: "/home/.cognia/agents",
+      fs,
+    })
+    expect(paths).toEqual([
+      {
+        id: "shared",
+        dir: "/home/.cognia/agents",
+        name: "shared.md",
+        absPath: "/home/.cognia/agents/shared.md",
+      },
+      {
+        id: "helper",
+        dir: "/second/.cognia/agents",
+        name: "helper.md",
+        absPath: "/second/.cognia/agents/helper.md",
+      },
+      {
+        id: "code-reviewer",
+        dir: "/proj/.cognia/agents",
+        name: "Code Reviewer.md",
+        absPath: "/proj/.cognia/agents/Code Reviewer.md",
+      },
+    ])
+    expect(readText).not.toHaveBeenCalled()
+    const files = await discoverMarkdownAgentFiles({
+      roots: ["/proj", "/second"],
+      globalAgentsDir: "/home/.cognia/agents",
+      fs,
+    })
+    expect(files.map((file) => file.id)).toEqual(paths.map((path) => path.id))
   })
 })

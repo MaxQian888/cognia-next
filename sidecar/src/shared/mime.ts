@@ -2,7 +2,7 @@
 //
 // Extracted from file-extras (used by file_info). Broad map covering text,
 // code, image, and archive types; unknown extensions fall back to
-// application/octet-stream. Distinct from core/read-media.mjs's IMAGE_MIME,
+// application/octet-stream. Distinct from core/read-media.ts's IMAGE_MIME,
 // which is an intentional vision-support whitelist (a different concern).
 
 import path from "node:path"

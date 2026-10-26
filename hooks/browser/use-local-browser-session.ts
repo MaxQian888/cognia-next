@@ -159,7 +159,10 @@ export function useLocalBrowserSession({
     const setup = async () => {
       try {
         unlistenEvents = await localBrowser.onEvent(handleEvent)
-        if (disposed) return
+        if (disposed) {
+          unlistenEvents()
+          return
+        }
         if (adopted) {
           createdId = adopted
         } else {
@@ -184,9 +187,9 @@ export function useLocalBrowserSession({
         configureLocalBrowserEngine({ sessionId: createdId, backend })
         setSessionId(createdId)
         setEngine(nextEngine)
-        unsubscribeFrames = await localBrowser.subscribeFrames(createdId, (bytes) =>
-          onFrameRef.current(bytes)
-        )
+        unsubscribeFrames = await localBrowser.subscribeFrames(createdId, (bytes) => {
+          if (!disposed) onFrameRef.current(bytes)
+        })
         if (disposed) {
           unsubscribeFrames()
           return

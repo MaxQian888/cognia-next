@@ -1,47 +1,50 @@
 import {
-  applyTemplate,
   EVALUATOR_PROMPT,
   KNOWLEDGE_AGENT_PROMPT,
   PLAYBOOK_AGENT_PROMPT,
   STYLE_AGENT_PROMPT,
   SYNTHESIZER_PROMPT,
 } from "./prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { validatePromptBody } from "@/lib/prompts/template"
 
-describe("applyTemplate", () => {
-  it("substitutes a single placeholder", () => {
-    expect(applyTemplate("Hello, {name}!", { name: "Alice" })).toBe("Hello, Alice!")
+describe("rendering the distill templates (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("inserts the agent data once, never re-scanning it for placeholders", async () => {
+    const { text } = await resolvePromptAsync(SYNTHESIZER_PROMPT, {
+      values: { profile: "P {{chunks}}", chunks: "[c1]\nfoo" },
+    })
+    expect(text).toContain("Profile:\nP {{chunks}}\n")
+    expect(text.endsWith("Recent chunks (sample):\n[c1]\nfoo")).toBe(true)
   })
 
-  it("substitutes multiple placeholders in one pass", () => {
-    expect(applyTemplate("{greet}, {name}!", { greet: "Hi", name: "Bob" })).toBe("Hi, Bob!")
+  it("keeps the parsed JSON keys required in a customized body", () => {
+    expect(validatePromptBody(STYLE_AGENT_PROMPT, "List samples.\n{{chunks}}")).toEqual([
+      { code: "missing-fragment", fragment: '"samples"' },
+    ])
   })
 
-  it("repeats the same placeholder everywhere it appears", () => {
-    expect(applyTemplate("{x} == {x}", { x: "42" })).toBe("42 == 42")
-  })
-
-  it("leaves unknown placeholders untouched (literal `{key}`)", () => {
-    expect(applyTemplate("a {unknown} b", {})).toBe("a {unknown} b")
-  })
-
-  it("does not infinite-loop when the substitution itself contains brace tokens", () => {
-    expect(applyTemplate("{x}", { x: "{y}" })).toBe("{y}")
-  })
-
-  it("only matches `{<word>}` — single-char keys included, but ignores spaces and punctuation", () => {
-    expect(applyTemplate("{a} {b_1} { space } {dash-key}", { a: "A", b_1: "B" })).toBe(
-      "A B { space } {dash-key}"
+  it("applies an account override with the agent's data", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: EVALUATOR_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por",
+          body: 'Review harshly. Return {"evaluations": []}\n{{drafts}}',
+          contractVersion: EVALUATOR_PROMPT.contractVersion,
+        },
+      ])
     )
-  })
-
-  it("preserves keys whose value is the empty string", () => {
-    expect(applyTemplate("[{x}]", { x: "" })).toBe("[]")
-  })
-
-  it("works with realistic prompt content", () => {
-    const out = applyTemplate("Chunks:\n{chunks}", { chunks: "[c1]\nfoo\n\n---\n\n[c2]\nbar" })
-    expect(out).toContain("[c1]")
-    expect(out).toContain("[c2]")
+    const { text } = await resolvePromptAsync(EVALUATOR_PROMPT, { values: { drafts: "D1" } })
+    expect(text).toBe('Review harshly. Return {"evaluations": []}\nD1')
   })
 })
 
@@ -51,11 +54,11 @@ describe("applyTemplate", () => {
 // prompts — those are tuned manually and snapshots create churn.
 describe("PROMPT contracts — shared preamble", () => {
   const prompts: ReadonlyArray<readonly [string, string]> = [
-    ["STYLE_AGENT_PROMPT", STYLE_AGENT_PROMPT],
-    ["PLAYBOOK_AGENT_PROMPT", PLAYBOOK_AGENT_PROMPT],
-    ["KNOWLEDGE_AGENT_PROMPT", KNOWLEDGE_AGENT_PROMPT],
-    ["SYNTHESIZER_PROMPT", SYNTHESIZER_PROMPT],
-    ["EVALUATOR_PROMPT", EVALUATOR_PROMPT],
+    ["STYLE_AGENT_PROMPT", STYLE_AGENT_PROMPT.defaultBody],
+    ["PLAYBOOK_AGENT_PROMPT", PLAYBOOK_AGENT_PROMPT.defaultBody],
+    ["KNOWLEDGE_AGENT_PROMPT", KNOWLEDGE_AGENT_PROMPT.defaultBody],
+    ["SYNTHESIZER_PROMPT", SYNTHESIZER_PROMPT.defaultBody],
+    ["EVALUATOR_PROMPT", EVALUATOR_PROMPT.defaultBody],
   ]
 
   test.each(prompts)("%s declares the multi-agent pipeline preamble", (_name, prompt) => {
@@ -76,65 +79,65 @@ describe("PROMPT contracts — shared preamble", () => {
 
 describe("STYLE_AGENT_PROMPT schema fields", () => {
   it("declares the four sample fields", () => {
-    expect(STYLE_AGENT_PROMPT).toContain('"contextLabel"')
-    expect(STYLE_AGENT_PROMPT).toContain('"original"')
-    expect(STYLE_AGENT_PROMPT).toContain('"summary"')
-    expect(STYLE_AGENT_PROMPT).toContain('"tone"')
+    expect(STYLE_AGENT_PROMPT.defaultBody).toContain('"contextLabel"')
+    expect(STYLE_AGENT_PROMPT.defaultBody).toContain('"original"')
+    expect(STYLE_AGENT_PROMPT.defaultBody).toContain('"summary"')
+    expect(STYLE_AGENT_PROMPT.defaultBody).toContain('"tone"')
   })
-  it("references {chunks} interpolation", () => {
-    expect(STYLE_AGENT_PROMPT).toContain("{chunks}")
+  it("references {{chunks}} interpolation", () => {
+    expect(STYLE_AGENT_PROMPT.defaultBody).toContain("{{chunks}}")
   })
 })
 
 describe("PLAYBOOK_AGENT_PROMPT schema fields", () => {
   it("declares the playbook structural fields", () => {
     for (const field of ['"title"', '"trigger"', '"steps"', '"examples"', '"confidence"']) {
-      expect(PLAYBOOK_AGENT_PROMPT).toContain(field)
+      expect(PLAYBOOK_AGENT_PROMPT.defaultBody).toContain(field)
     }
   })
-  it("references {chunks} interpolation", () => {
-    expect(PLAYBOOK_AGENT_PROMPT).toContain("{chunks}")
+  it("references {{chunks}} interpolation", () => {
+    expect(PLAYBOOK_AGENT_PROMPT.defaultBody).toContain("{{chunks}}")
   })
 })
 
 describe("KNOWLEDGE_AGENT_PROMPT schema fields", () => {
   it("declares both top-level lists", () => {
-    expect(KNOWLEDGE_AGENT_PROMPT).toContain('"entities"')
-    expect(KNOWLEDGE_AGENT_PROMPT).toContain('"perChunk"')
+    expect(KNOWLEDGE_AGENT_PROMPT.defaultBody).toContain('"entities"')
+    expect(KNOWLEDGE_AGENT_PROMPT.defaultBody).toContain('"perChunk"')
   })
   it("declares all five role types in the role enum hint", () => {
-    expect(KNOWLEDGE_AGENT_PROMPT).toContain("person|team|project|system|concept")
+    expect(KNOWLEDGE_AGENT_PROMPT.defaultBody).toContain("person|team|project|system|concept")
   })
-  it("references {chunks} interpolation", () => {
-    expect(KNOWLEDGE_AGENT_PROMPT).toContain("{chunks}")
+  it("references {{chunks}} interpolation", () => {
+    expect(KNOWLEDGE_AGENT_PROMPT.defaultBody).toContain("{{chunks}}")
   })
 })
 
 describe("SYNTHESIZER_PROMPT schema fields", () => {
   it("declares the character + skills shape", () => {
-    expect(SYNTHESIZER_PROMPT).toContain('"character"')
-    expect(SYNTHESIZER_PROMPT).toContain('"skills"')
-    expect(SYNTHESIZER_PROMPT).toContain('"systemPrompt"')
-    expect(SYNTHESIZER_PROMPT).toContain('"voiceSummary"')
-    expect(SYNTHESIZER_PROMPT).toContain('"sourcePlaybookId"')
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain('"character"')
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain('"skills"')
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain('"systemPrompt"')
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain('"voiceSummary"')
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain('"sourcePlaybookId"')
   })
-  it("references both {profile} and {chunks} interpolation", () => {
-    expect(SYNTHESIZER_PROMPT).toContain("{profile}")
-    expect(SYNTHESIZER_PROMPT).toContain("{chunks}")
+  it("references both {profile} and {{chunks}} interpolation", () => {
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain("{{profile}}")
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain("{{chunks}}")
   })
   it("encodes the confidence ≥ 0.6 floor for skill emission", () => {
-    expect(SYNTHESIZER_PROMPT).toContain("0.6")
+    expect(SYNTHESIZER_PROMPT.defaultBody).toContain("0.6")
   })
 })
 
 describe("EVALUATOR_PROMPT schema fields", () => {
   it("declares evaluation envelope fields", () => {
-    expect(EVALUATOR_PROMPT).toContain('"draftId"')
-    expect(EVALUATOR_PROMPT).toContain('"qualityScore"')
-    expect(EVALUATOR_PROMPT).toContain('"concerns"')
-    expect(EVALUATOR_PROMPT).toContain('"suggestions"')
+    expect(EVALUATOR_PROMPT.defaultBody).toContain('"draftId"')
+    expect(EVALUATOR_PROMPT.defaultBody).toContain('"qualityScore"')
+    expect(EVALUATOR_PROMPT.defaultBody).toContain('"concerns"')
+    expect(EVALUATOR_PROMPT.defaultBody).toContain('"suggestions"')
   })
-  it("references {drafts} interpolation", () => {
-    expect(EVALUATOR_PROMPT).toContain("{drafts}")
+  it("references {{drafts}} interpolation", () => {
+    expect(EVALUATOR_PROMPT.defaultBody).toContain("{{drafts}}")
   })
 })

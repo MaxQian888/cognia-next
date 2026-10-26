@@ -5,9 +5,10 @@
  * Maps to shadcn/ui Calendar with Popover
  */
 
+import { useTranslations } from "next-intl"
 import React, { useCallback, useMemo, memo } from "react"
 import { cn } from "@/lib/utils"
-import { format, parseISO } from "date-fns"
+import { format, parseISO, isValid } from "date-fns"
 import { Calendar as CalendarIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
@@ -21,6 +22,7 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
   component,
   onDataChange,
 }: A2UIComponentProps<A2UIDatePickerComponent>) {
+  const t = useTranslations("a2ui.controls")
   const { resolveString, resolveBoolean } = useA2UIData()
 
   const valueStr = resolveString(component.value, "")
@@ -31,7 +33,8 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
   const date = useMemo(() => {
     if (!valueStr) return undefined
     try {
-      return parseISO(valueStr)
+      const parsed = parseISO(valueStr)
+      return isValid(parsed) ? parsed : undefined
     } catch {
       return undefined
     }
@@ -41,7 +44,8 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
   const minDate = useMemo(() => {
     if (!component.minDate) return undefined
     try {
-      return parseISO(component.minDate)
+      const parsed = parseISO(component.minDate)
+      return isValid(parsed) ? parsed : undefined
     } catch {
       return undefined
     }
@@ -50,7 +54,8 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
   const maxDate = useMemo(() => {
     if (!component.maxDate) return undefined
     try {
-      return parseISO(component.maxDate)
+      const parsed = parseISO(component.maxDate)
+      return isValid(parsed) ? parsed : undefined
     } catch {
       return undefined
     }
@@ -58,11 +63,11 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
 
   const handleSelect = useCallback(
     (newDate: Date | undefined) => {
-      if (bindingPath) {
-        onDataChange(bindingPath, newDate ? newDate.toISOString().split("T")[0] : "")
+      if (!isDisabled && bindingPath) {
+        onDataChange(bindingPath, newDate ? format(newDate, "yyyy-MM-dd") : "")
       }
     },
-    [bindingPath, onDataChange]
+    [bindingPath, isDisabled, onDataChange]
   )
 
   return (
@@ -71,7 +76,7 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
       style={component.style as React.CSSProperties}
     >
       {component.label && (
-        <Label className="text-sm font-medium">
+        <Label htmlFor={component.id} className="text-sm font-medium">
           {component.label}
           {component.required && <span className="text-destructive ml-1">*</span>}
         </Label>
@@ -88,7 +93,7 @@ export const A2UIDatePicker = memo(function A2UIDatePicker({
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
-            {date ? format(date, "PPP") : component.placeholder || "Pick a date"}
+            {date ? format(date, "PPP") : component.placeholder || t("pickDate")}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">

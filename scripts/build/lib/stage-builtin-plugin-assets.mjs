@@ -1,9 +1,8 @@
 // Stage the generated browser built-in plugin chunks into a CLI/brain layout.
 //
-// `build-browser-builtin-plugins.mjs` compiles five built-ins
-// (`cognia-office`, `cognia-pdf`, `cognia-documents`, `cognia-presentations`,
-// `cognia-visualize`) out of the app bundle and into
-// `public/_cognia/builtin-plugins/`, recording each chunk's URL + SHA-256 in
+// `stage-plugin-artifacts.mjs` stages every browser built-in's chunk out of the
+// plugin artifact set into `public/_cognia/builtin-plugins/`, with each chunk's
+// URL + SHA-256 recorded in
 // `lib/plugin/core/browser-builtin-assets.generated.json`. The web and Tauri
 // shells serve that tree; the CLI/brain layouts had no equivalent step, so the
 // loader's `fetch("/_cognia/…")` had nothing to hit even before Node rejected
@@ -22,7 +21,7 @@ import path from "node:path"
 export const BUILTIN_PLUGIN_ASSET_DIR = path.join("_cognia", "builtin-plugins")
 
 const CATALOG_RELATIVE = path.join("lib", "plugin", "core", "browser-builtin-assets.generated.json")
-const GENERATOR_RELATIVE = path.join("scripts", "build", "build-browser-builtin-plugins.mjs")
+const GENERATOR_RELATIVE = path.join("scripts", "build", "stage-plugin-artifacts.mjs")
 
 /**
  * Copy `public/_cognia/builtin-plugins/` into `<outDir>/_cognia/builtin-plugins/`

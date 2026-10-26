@@ -1,8 +1,5 @@
-//! Tray-icon state swap. The four placeholders live next to the tray module
-//! at `src-tauri/icons/tray/{idle,busy,error,muted}.png`. Until those assets
-//! are designed (asset blocker — see ADR-pending plan), the swap function
-//! falls back to the app's default window icon so the IPC path is still
-//! testable end-to-end.
+//! Full-color character tray icons. Renderer rasters add status and usage
+//! badges to the bootstrap character; native swaps must preserve their colors.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,13 +48,12 @@ impl TrayIconStateStore {
 
 /// Apply `state` to the main tray icon. Resolution order:
 ///   1. Renderer-rendered PNG bytes pushed via `tray_register_icon` (the
-///      Lucide-based path — see `lib/tray/icon-builder.ts`).
+///      character + corner badge — see `lib/tray/icon-builder.ts`).
 ///   2. Built-in resource path `icons/tray/<state>.png` if shipped.
 ///   3. Default window icon as a last-resort fallback.
 ///
-/// On macOS the icon is flagged as a template via
-/// `set_icon_as_template(true)` so the OS auto-inverts it for dark menu
-/// bars. Tauri silently no-ops the call on other platforms.
+/// Preserve the character artwork's colors on macOS. A template image uses
+/// only alpha and would turn the full-color character into a silhouette.
 pub fn apply<R: Runtime>(app: &AppHandle<R>, state: TrayIconState) -> Result<(), String> {
     let tray = app
         .tray_by_id("main-tray")
@@ -65,9 +61,7 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, state: TrayIconState) -> Result<(),
     let image = load_image_for(app, state)?;
     tray.set_icon(Some(image))
         .map_err(|e| format!("set_icon failed: {e}"))?;
-    // Re-flag every time we swap: Tauri's `set_icon` resets the template
-    // bit on macOS, so we have to re-apply.
-    let _ = tray.set_icon_as_template(true);
+    let _ = tray.set_icon_as_template(false);
 
     if let Some(store) = app.try_state::<Arc<TrayIconStateStore>>() {
         store.set(state);
@@ -95,7 +89,7 @@ fn load_image_for<R: Runtime>(
     app: &AppHandle<R>,
     state: TrayIconState,
 ) -> Result<Image<'static>, String> {
-    // 1) Renderer-pushed PNG bytes (the Lucide path). Decode via
+    // 1) Renderer-pushed character and badge PNG bytes. Decode via
     //    `Image::from_bytes` which the project already enables through the
     //    `image-png` feature on `tauri`.
     if let Some(store) = app.try_state::<Arc<TrayIconStateStore>>() {
@@ -136,6 +130,15 @@ fn load_image_for<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_character_contains_color_that_must_not_be_templated() {
+        let image = Image::from_bytes(include_bytes!("../../icons/128x128.png")).unwrap();
+        assert!(image
+            .rgba()
+            .chunks_exact(4)
+            .any(|pixel| { pixel[3] > 0 && (pixel[0] != pixel[1] || pixel[1] != pixel[2]) }));
+    }
 
     #[test]
     fn icon_state_store_round_trips_each_variant() {

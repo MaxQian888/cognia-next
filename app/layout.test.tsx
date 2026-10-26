@@ -81,6 +81,16 @@ describe("RootLayout", () => {
     mockAccountGateClosed = false
   })
 
+  it("emits startup recovery as the first native script without a Next runtime queue", async () => {
+    const tree = await RootLayout({ children: <main>content</main> })
+    const head = tree.props.children[0]
+    const recovery = head.props.children[0]
+    expect(recovery.type).toBe("script")
+    expect(recovery.props.id).toBe("cognia-startup-recovery-script")
+    expect(recovery.props.dangerouslySetInnerHTML.__html).toContain("window.setTimeout")
+    expect(recovery.props.dangerouslySetInnerHTML.__html).not.toContain("__next_s")
+  })
+
   it("mounts the native handoff even while the account gate holds the app closed", async () => {
     mockAccountGateClosed = true
     const tree = await RootLayout({ children: <main>content</main> })

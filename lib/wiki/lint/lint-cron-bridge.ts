@@ -6,6 +6,8 @@
  */
 
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import { saveManagedTask } from "@/lib/scheduler/managed-tasks"
 import { validateCronExpression } from "@/lib/scheduler/cron-parser"
 import { resolveCronExpression } from "@/lib/wiki/schedule/cron-bridge"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
@@ -72,7 +74,7 @@ export async function syncWikiLintCronToScheduler(
 
   if (!schedule || schedule.mode === "off") {
     if (existing) {
-      await schedulerDb.deleteTask(WIKI_LINT_TASK_ID)
+      await getTaskScheduler().deleteTask(WIKI_LINT_TASK_ID)
       return { action: "deleted" }
     }
     return { action: "skipped" }
@@ -91,9 +93,9 @@ export async function syncWikiLintCronToScheduler(
 
   const next = buildTask(cronExpression, schedule, existing)
   if (existing) {
-    await schedulerDb.updateTask(next)
+    await saveManagedTask(getTaskScheduler(), next, existing)
     return { action: "updated" }
   }
-  await schedulerDb.createTask(next)
+  await saveManagedTask(getTaskScheduler(), next, null)
   return { action: "created" }
 }

@@ -23,7 +23,7 @@ function fixture(t) {
     ".cache/\ncli/dist/\npublic/\nbuild-count\nplugin-build-count\n"
   )
   fs.writeFileSync(
-    path.join(root, "scripts/build/build-browser-builtin-plugins.mjs"),
+    path.join(root, "scripts/build/stage-plugin-artifacts.mjs"),
     `
     import fs from 'node:fs';
     if (process.env.FIXTURE_PLUGIN_BUILD_FAIL) throw new Error('plugin build failed');
@@ -47,6 +47,10 @@ function fixture(t) {
     fs.writeFileSync(path.join(out, 'cognia-agent.mjs'), 'import { value } from "./chunks/value.mjs"; console.log(value)');
     fs.writeFileSync(path.join(out, 'chunks/value.mjs'), 'export const value = "artifact-ok"');
     fs.writeFileSync(path.join(out, 'sidecar/ast-grep'), '#!/bin/sh\\necho ast-ok\\n', {mode:0o755});
+    const inputsIndex = process.argv.indexOf('--inputs-file');
+    if (inputsIndex >= 0) fs.writeFileSync(process.argv[inputsIndex+1], JSON.stringify([
+      path.resolve('scripts/build/build-cli.mjs'), path.resolve('public/_cognia/builtin-plugins/fixture.cjs')
+    ]));
     fs.appendFileSync('build-count', 'build\\n');
   `
   )
@@ -240,4 +244,25 @@ test("plugin prerequisite failure stops preparation before building or publishin
   assert.equal(fs.existsSync(path.join(f.root, "build-count")), false)
   assert.equal(fs.existsSync(path.join(f.root, manifestPath)), false)
   assert.equal(fs.existsSync(path.join(f.root, ".cache/jest/cli-bundle.tar")), false)
+})
+
+function ensuredPath(result) {
+  succeeds(result)
+  return result.stdout.trim().split("\n").at(-1)
+}
+
+test("local suites reuse current source fingerprints in isolated outputs", (t) => {
+  const f = fixture(t)
+  const first = ensuredPath(f.run(["ensure"]))
+  const second = ensuredPath(f.run(["ensure"]))
+  assert.equal(first, second)
+  assert.equal(execFileSync(process.execPath, [second], { encoding: "utf8" }).trim(), "artifact-ok")
+  assert.equal(fs.existsSync(path.join(f.root, "cli/dist")), false)
+  assert.equal(fs.readFileSync(path.join(f.root, "build-count"), "utf8"), "build\n")
+  fs.appendFileSync(path.join(f.root, "scripts/build/build-cli.mjs"), "\n// current source edit\n")
+  const third = ensuredPath(f.run(["ensure"]))
+  assert.notEqual(third, first)
+  assert.equal(fs.existsSync(first), true, "active readers keep their original chunks")
+  assert.equal(fs.readFileSync(path.join(f.root, "build-count"), "utf8"), "build\nbuild\n")
+  assert.ok(fs.statSync(path.join(path.dirname(third), "sidecar/ast-grep")).mode & 0o111)
 })

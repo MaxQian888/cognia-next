@@ -119,6 +119,7 @@ const SESSION_FIELDS = {
   // runtime (ADR-0220); a builder row without it is not listed as a draft.
   agentBuilder: "local",
   // This device's runtime and machine.
+  runtimeExtensions: "local",
   transcriptRevision: "local",
   executionContext: "local",
   surfaceBinding: "local",
@@ -219,6 +220,8 @@ const CHARACTER_FIELDS = {
   toolFilter: "sync",
   toolSearchRuntimeOverride: "sync",
   variant: "sync",
+  // ADR-0237 harness sections: profile text and declarative rules, like the prompt.
+  harness: "sync",
   a2uiEnabled: "sync",
   a2uiCatalogId: "sync",
   enableComputerUse: "sync",

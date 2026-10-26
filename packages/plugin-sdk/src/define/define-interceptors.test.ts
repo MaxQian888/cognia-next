@@ -1,5 +1,5 @@
 import { defineInterceptor, defineInterceptors } from "./define-interceptors"
-import type { PluginInterceptorContribution } from "@/types/plugin/plugin-interceptors"
+import type { PluginInterceptorContribution } from "@cognia/plugin-contract/types/plugin/plugin-interceptors"
 
 const contribution = (
   overrides: Partial<PluginInterceptorContribution> = {}

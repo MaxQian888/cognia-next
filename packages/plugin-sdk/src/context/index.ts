@@ -13,14 +13,14 @@
  *  - The complete callable API (`PluginContextAPI`)
  */
 
-import type { PluginContext as CtxPluginContext } from "@/types/plugin/plugin"
-export type * from "@/types/plugin/plugin-knowledge"
-export type { PluginProjectWebviewAPI } from "@/types/plugin/plugin"
+import type { PluginContext as CtxPluginContext } from "@cognia/plugin-contract/types/plugin/plugin"
+export type * from "@cognia/plugin-contract/types/plugin/plugin-knowledge"
+export type { PluginProjectWebviewAPI } from "@cognia/plugin-contract/types/plugin/plugin"
 
 declare global {
   interface Window {
     /** Present in a sandboxed webview declaring project read/write permission. */
-    acquireCogniaProjectApi?: () => import("@/types/plugin/plugin").PluginProjectWebviewAPI
+    acquireCogniaProjectApi?: () => import("@cognia/plugin-contract/types/plugin/plugin").PluginProjectWebviewAPI
   }
 }
 
@@ -94,7 +94,7 @@ export type {
   PluginSecretsBackend,
   PluginWorkflowAPI,
   PluginDexieAPI,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 // =============================================================================
 // Agent runtime companion types referenced by PluginAgentAPI.
@@ -107,7 +107,7 @@ export type {
   PluginSubagentDispatchResult,
   PluginRunTeamOptions,
   PluginRunTeamResult,
-} from "@/types/plugin/plugin-agent-sdk"
+} from "@cognia/plugin-contract/types/plugin/plugin-agent-sdk"
 export type {
   PluginGlanceAPI,
   PluginGlanceAction,
@@ -117,41 +117,73 @@ export type {
   PluginGlanceStat,
   PluginGlanceTone,
   PluginGlanceVisibilityEvent,
-} from "@/types/plugin/plugin-glance"
-export type { PluginAgentGuardrailsAPI } from "@/types/plugin/plugin-agent-guardrails"
+} from "@cognia/plugin-contract/types/plugin/plugin-glance"
+export type { PluginAgentGuardrailsAPI } from "@cognia/plugin-contract/types/plugin/plugin-agent-guardrails"
 export type {
   PluginAgentSessionsAPI,
   PluginCreateSessionOptions,
-} from "@/types/plugin/plugin-agent-session"
+} from "@cognia/plugin-contract/types/plugin/plugin-agent-session"
 export type {
   PluginAgentContextAPI,
   PluginContextProvider,
   PluginSharedMemoryReadOptions,
   PluginTwinMemoryQueryOptions,
-} from "@/types/plugin/plugin-context-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-provider"
 
 // =============================================================================
 // Additional runtime APIs mounted on PluginContext by feature-specific host
 // modules. These are part of the public ctx surface even though their owning
 // implementations live under lib/plugin/api.
 // =============================================================================
-export type { PluginOcrAPI } from "@/lib/plugin/api/ocr-api"
-export type { PluginDecisionsAPI } from "@/lib/plugin/api/decisions-api"
-export type { PluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
-export type { PluginModalAPI } from "@/lib/plugin/api/modal-api"
-export type { CreateWebviewInput, PluginWebviewAPI } from "@/lib/plugin/api/webview-api"
+export type { PluginOcrAPI } from "@cognia/plugin-contract/lib/plugin/api/ocr-api"
+export type { PluginDecisionsAPI } from "@cognia/plugin-contract/lib/plugin/api/decisions-api"
+export type { PluginPromptDeclaration } from "@cognia/plugin-contract/lib/prompts/plugin-prompts"
+export type {
+  PluginPromptRegistration,
+  PluginPromptResolveOptions,
+  PluginPromptsAPI,
+  PluginResolvedPrompt,
+} from "@cognia/plugin-contract/lib/plugin/api/prompts-api"
+export type {
+  PluginAgentConfigAPI,
+  PluginAgentConfigScope,
+} from "@cognia/plugin-contract/lib/plugin/api/agent-config-api"
+export type {
+  AgentConfigApplyResult as PluginAgentConfigApplyResult,
+  AgentConfigEdit as PluginAgentConfigEdit,
+  AgentConfigFacts as PluginAgentConfigFacts,
+  AgentConfigHookFact as PluginAgentConfigHookFact,
+  AgentConfigLineProvenance as PluginAgentConfigLineProvenance,
+  AgentConfigMcpServerFact as PluginAgentConfigMcpServerFact,
+  AgentConfigPathStatus as PluginAgentConfigPathStatus,
+  AgentConfigPermissionFact as PluginAgentConfigPermissionFact,
+  AgentConfigReferenceCheck as PluginAgentConfigReferenceCheck,
+  AgentConfigReferenceInput as PluginAgentConfigReferenceInput,
+  AgentConfigSkillFacts as PluginAgentConfigSkillFacts,
+  AgentConfigSurface as PluginAgentConfigSurface,
+  AgentConfigSurfaceDocument as PluginAgentConfigSurfaceDocument,
+  AgentConfigSurfaceListing as PluginAgentConfigSurfaceListing,
+  AgentConfigSurfaceSource as PluginAgentConfigSurfaceSource,
+} from "@cognia/plugin-contract/lib/agent-config/types"
+export type { PluginWorkspaceAPI } from "@cognia/plugin-contract/lib/plugin/api/workspace-api"
+export type { PluginModalAPI } from "@cognia/plugin-contract/lib/plugin/api/modal-api"
+export type {
+  CreateWebviewInput,
+  PluginWebviewAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/webview-api"
 export type {
   CreateAuthAPIOptions,
   PluginAuthAPI,
   PluginAuthProvider,
-} from "@/lib/plugin/api/auth-api"
-export type { PluginUriAPI, PluginUriHandlerDef } from "@/lib/plugin/api/uri-api"
+} from "@cognia/plugin-contract/lib/plugin/api/auth-api"
 export type {
-  PluginRemoteDesktopAPI,
-  RemoteDesktopProviderDefinition,
-} from "@/lib/plugin/api/remote-desktop-api"
-export type { PluginChatAPI } from "@/lib/plugin/api/chat-api"
-export type { PluginCapabilitiesAPI } from "@/lib/plugin/api/capabilities-api"
+  PluginUriAPI,
+  PluginUriHandlerDef,
+} from "@cognia/plugin-contract/lib/plugin/api/uri-api"
+export type { PluginRemoteDesktopAPI } from "@cognia/plugin-contract/lib/plugin/api/remote-desktop-api"
+export type { RemoteDesktopProviderDefinition } from "@cognia/plugin-contract/lib/remote-desktop/provider-registry"
+export type { PluginChatAPI } from "@cognia/plugin-contract/lib/plugin/api/chat-api"
+export type { PluginCapabilitiesAPI } from "@cognia/plugin-contract/lib/plugin/api/capabilities-api"
 export type {
   PluginMediaAPI,
   ImageProcessingOptions,
@@ -171,7 +203,7 @@ export type {
   VideoAnalysisManifest,
   VideoAnalysisMode,
   VideoAnalysisOptions,
-} from "@/lib/plugin/api/media-api"
+} from "@cognia/plugin-contract/lib/plugin/api/media-api"
 export type {
   PluginConnectorsAPI,
   PluginConnectorAdapterInfo,
@@ -179,16 +211,18 @@ export type {
   PluginAdapterInstanceInfo,
   PluginAdapterInstancePatch,
   PluginAdapterInstanceInput,
-  PluginConnectorsA2UIBuilder,
   PluginBoundSessionInfo,
   PluginOutboundJobInfo,
-  SiblingConversation,
-  DispatchRuleHit,
-  AtGateDecision,
+} from "@cognia/plugin-contract/lib/plugin/api/connectors-api"
+export type { PluginConnectorsA2UIBuilder } from "@cognia/plugin-contract/lib/connectors/a2ui-bridge/surface-builder"
+export type { SiblingConversation } from "@cognia/plugin-contract/lib/connectors/session-bindings"
+export type { DispatchRuleHit } from "@cognia/plugin-contract/lib/connectors/dispatch-rules"
+export type { AtGateDecision } from "@cognia/plugin-contract/lib/connectors/at-gate"
+export type {
   BootstrapConversationInput,
   BootstrapConversationResult,
-} from "@/lib/plugin/api/connectors-api"
-export type { PluginIntegrationsAPI } from "@/types/plugin/plugin-integration"
+} from "@cognia/plugin-contract/lib/connectors/conversation-bootstrap"
+export type { PluginIntegrationsAPI } from "@cognia/plugin-contract/types/plugin/plugin-integration"
 export type {
   PluginTeamAPI,
   PluginTeamTaskCreateInput,
@@ -197,7 +231,7 @@ export type {
   PluginTeamTeammatePatch,
   PluginTeamMoveResult,
   PluginTeamRunStatus,
-} from "@/lib/plugin/api/team-api"
+} from "@cognia/plugin-contract/lib/plugin/api/team-api"
 export type {
   PluginGitAPI,
   PluginGitCommitOptions,
@@ -206,16 +240,22 @@ export type {
   PluginGitPushOptions,
   PluginGitStashPushOptions,
   PluginGitConflictResolution,
-} from "@/lib/plugin/api/git-api"
-export type { PluginGoalAPI, PluginGoalCreateInput } from "@/lib/plugin/api/goal-api"
+} from "@cognia/plugin-contract/lib/plugin/api/git-api"
+export type {
+  PluginGoalAPI,
+  PluginGoalCreateInput,
+} from "@cognia/plugin-contract/lib/plugin/api/goal-api"
 export type {
   PluginIssuesAPI,
   PluginIssueCreateInput,
   PluginIssueQuery,
   PluginIssueUpdatePatch,
   PluginIssueEventOptions,
-} from "@/lib/plugin/api/issues-api"
-export type { PluginSubscriptionAPI, PluginUsageSnapshot } from "@/lib/plugin/api/subscription-api"
+} from "@cognia/plugin-contract/lib/plugin/api/issues-api"
+export type {
+  PluginSubscriptionAPI,
+  PluginUsageSnapshot,
+} from "@cognia/plugin-contract/lib/plugin/api/subscription-api"
 export type {
   PluginTerminalAPI,
   PluginCommandRule,
@@ -224,21 +264,21 @@ export type {
   PluginTerminalInfo,
   PluginTerminalCommandRecord,
   PluginRunScriptOptions,
-} from "@/lib/plugin/api/terminal-api"
-export type { PluginPerfAPI } from "@/lib/plugin/api/perf-api"
+} from "@cognia/plugin-contract/lib/plugin/api/terminal-api"
+export type { PluginPerfAPI } from "@cognia/plugin-contract/lib/plugin/api/perf-api"
 export type {
   PluginLogsAPI,
   PluginTraceAPI,
   PluginTraceListOptions,
   PluginTraceStatsOptions,
-} from "@/lib/plugin/api/logs-api"
-export type { PluginShareAPI } from "@/lib/plugin/api/share-api"
+} from "@cognia/plugin-contract/lib/plugin/api/logs-api"
+export type { PluginShareAPI } from "@cognia/plugin-contract/lib/plugin/api/share-api"
 export type {
   PluginBackupAPI,
   PluginBackupCreateOptions,
   PluginBackupRestoreOptions,
-} from "@/lib/plugin/api/backup-api"
-export type { PluginAutomationAPI } from "@/lib/plugin/api/automation-api"
+} from "@cognia/plugin-contract/lib/plugin/api/backup-api"
+export type { PluginAutomationAPI } from "@cognia/plugin-contract/lib/plugin/api/automation-api"
 export type {
   EmitPluginWorkflowWaitEventInput,
   PluginWorkflowAuthorAPI,
@@ -248,23 +288,29 @@ export type {
   PluginWorkflowEditorSnapshot,
   RecordPluginWorkflowCallbackInput,
   StageWorkflowProposalInput,
-} from "@/lib/plugin/api/workflow-author-api"
-export type { PluginBrowserAPI, PluginBrowserRoute } from "@/lib/plugin/api/browser-api"
+} from "@cognia/plugin-contract/lib/plugin/api/workflow-author-api"
+export type {
+  PluginBrowserAPI,
+  PluginBrowserRoute,
+} from "@cognia/plugin-contract/lib/plugin/api/browser-api"
 export type {
   PluginCharacterPackRegistration,
   PluginCharacterPacksAPI,
-} from "@/lib/plugin/api/character-packs-api"
-export type { PluginResourcesAPI } from "@/lib/plugin/api/resources-api"
-export type { PluginSitesAPI, PluginSiteSummary } from "@/lib/plugin/api/sites"
-export type { PluginSandboxAPI } from "@/lib/plugin/api/sandbox-api"
-export type { PluginRecorderAPI } from "@/lib/plugin/api/recorder-api"
-export type { PluginSecurityScansAPI } from "@/lib/plugin/api/security-scans-api"
+} from "@cognia/plugin-contract/lib/plugin/api/character-packs-api"
+export type { PluginResourcesAPI } from "@cognia/plugin-contract/lib/plugin/api/resources-api"
+export type {
+  PluginSitesAPI,
+  PluginSiteSummary,
+} from "@cognia/plugin-contract/lib/plugin/api/sites"
+export type { PluginSandboxAPI } from "@cognia/plugin-contract/lib/plugin/api/sandbox-api"
+export type { PluginRecorderAPI } from "@cognia/plugin-contract/lib/plugin/api/recorder-api"
+export type { PluginSecurityScansAPI } from "@cognia/plugin-contract/lib/plugin/api/security-scans-api"
 export type {
   PluginEvalAPI,
   PluginEvalProjectArgs,
   PluginRunCalibrationArgs,
   PluginRunDatasetArgs,
-} from "@/lib/plugin/api/eval-api"
+} from "@cognia/plugin-contract/lib/plugin/api/eval-api"
 export type {
   PluginSchedulerActor,
   PluginSchedulerExecutionPage,
@@ -272,17 +318,22 @@ export type {
   PluginSchedulerWriteOptions,
   PluginUpcomingRun,
   PluginUserSchedulerAPI,
-} from "@/lib/plugin/api/scheduler-tasks"
-export type { PluginCompanionAPI, CompanionServerStatus } from "@/lib/plugin/api/companion-api"
+} from "@cognia/plugin-contract/lib/plugin/api/scheduler-tasks"
+export type {
+  PluginCompanionAPI,
+  CompanionServerStatus,
+} from "@cognia/plugin-contract/lib/plugin/api/companion-api"
 export type {
   PluginMemoryAPI,
   PluginMemoryListFilter,
   PluginMemorySearchOptions,
   PluginMemoryStoreInput,
-} from "@/lib/plugin/api/memory-api"
+} from "@cognia/plugin-contract/lib/plugin/api/memory-api"
 export type {
-  PluginExternalAgentChangeEvent,
-  PluginExternalAgentChangeType,
+  ExternalAgentChangeEvent as PluginExternalAgentChangeEvent,
+  ExternalAgentChangeType as PluginExternalAgentChangeType,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-changes"
+export type {
   PluginExternalAgentCreateInput,
   PluginExternalAgentDelegationRule,
   PluginExternalAgentDelegationRuleInput,
@@ -301,22 +352,24 @@ export type {
   PluginExternalAgentSummary,
   PluginExternalAgentUpdatePatch,
   PluginExternalAgentsAPI,
-} from "@/lib/plugin/api/external-agents-api"
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-api"
 export type {
   PluginEmittablePetEventKind,
-  PluginPetAPI,
   PluginPetAvailability,
   PluginPetEvent,
+  PluginPetUnavailableReason,
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api-contract"
+export type {
+  PluginPetAPI,
   PluginPetInteractionKind,
   PluginPetSummary,
-  PluginPetUnavailableReason,
-} from "@/lib/plugin/api/pet-api"
-export type { PluginMessagePartAPI } from "@/lib/plugin/api/message-part-api"
+} from "@cognia/plugin-contract/lib/plugin/api/pet-api"
+export type { PluginMessagePartAPI } from "@cognia/plugin-contract/lib/plugin/api/message-part-api"
 export type {
   PluginContextPanelAPI,
   PluginContextPanelRegistration,
   PluginContextWorkbenchState,
-} from "@/lib/plugin/api/context-panel-api"
+} from "@cognia/plugin-contract/lib/plugin/api/context-panel-api"
 export type { PluginTemplatesAPI } from "../templates"
 
 /** @deprecated `PluginContext` is now the complete activated context. */
@@ -330,7 +383,7 @@ export type {
   PluginSchedulerAPI,
   PluginTaskExecutionEvent,
   PluginTaskStatistics,
-} from "@/types/plugin/plugin-scheduler"
+} from "@cognia/plugin-contract/types/plugin/plugin-scheduler"
 
 // =============================================================================
 // Additional callable APIs (from types/plugin/plugin.ts). These are merged
@@ -402,7 +455,7 @@ export type {
   PluginFileHandle,
   PluginSkillsAPI,
   PluginBuiltInSkillSummary,
-} from "@/types/plugin/plugin"
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 /**
  * The result shape `ctx.skills.invokeBuiltIn()` resolves to. It is part of
@@ -410,11 +463,11 @@ export type {
  * it — re-exported here rather than left as an inline `import()` type only the
  * host could name.
  */
-export type { BuiltInSkillResult } from "@/lib/skills/built-in/types"
+export type { BuiltInSkillResult } from "@cognia/plugin-contract/lib/skills/built-in/types"
 export type {
   PluginNodeRuntimeAPI,
   PluginNodeRuntimeStatus,
-} from "@/types/plugin/plugin-node-runtime"
+} from "@cognia/plugin-contract/types/plugin/plugin-node-runtime"
 
 // =============================================================================
 // Author-callable host tools (`ctx.agent.invokeTool`)
@@ -429,11 +482,16 @@ export type {
   PluginWebFetchInput,
   PluginWebFetchResult,
   PluginWebFetchSuccess,
+  PluginWebSearchType,
+  PluginWebSearchDegradedControl,
+  PluginWebSearchImage,
+  PluginWebReaderId,
+  PluginWebFetchReadWindow,
   PluginWebSearchHit,
   PluginWebSearchInput,
   PluginWebSearchResult,
   PluginWebSearchSuccess,
-} from "@/types/plugin/plugin-host-tools"
+} from "@cognia/plugin-contract/types/plugin/plugin-host-tools"
 
 export type {
   PluginLibrarySchema,
@@ -444,4 +502,4 @@ export type {
   PluginLibrariesAPI,
   PluginLibraryModuleInstance,
   PluginLibraryModuleFactory,
-} from "@/types/plugin/plugin-library"
+} from "@cognia/plugin-contract/types/plugin/plugin-library"

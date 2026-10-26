@@ -3,9 +3,7 @@
  *
  * The skills block grows with the user's library and nothing bounded it: both
  * `renderSkillsSection` (full bodies) and `renderSkillsCatalog` (one line per
- * skill) emitted everything they were given, and the one caller that tried to
- * pass a budget — `buildProgressiveSkillsPrompt(skills, 1024)` — had its
- * argument dropped on the floor behind an underscore.
+ * skill) emitted everything they were given.
  *
  * Degradation here is NAMED, not silent. A caller that shrinks the block gets
  * a level back and can say so; a block that shrank without anyone noticing is

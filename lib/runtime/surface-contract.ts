@@ -243,10 +243,10 @@ export const SURFACE_CONTRACTS = [
     id: "browser",
     route: "/browser",
     navigation: true,
-    operation: "browser_session_ensure",
-    standalone: "hidden",
-    companion: "remote",
-    offline: "blocked",
+    // The lightweight preview runs here; only the remote engine needs a host.
+    standalone: "full",
+    companion: "full",
+    offline: "local",
   },
   {
     id: "source-control",

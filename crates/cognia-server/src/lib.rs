@@ -7,3 +7,6 @@
 
 pub mod brain;
 pub mod tenant_lease;
+
+/// P5 server-only person lifecycle; companion owns the dispatch boundary.
+pub mod persons;

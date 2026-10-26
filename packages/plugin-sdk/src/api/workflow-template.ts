@@ -6,10 +6,10 @@ export type {
   PluginWorkflowTemplateDef,
   PluginWorkflowTemplateEdge,
   PluginWorkflowTemplateNode,
-} from "@/types/plugin/plugin-workflow-template"
-export type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+} from "@cognia/plugin-contract/types/plugin/plugin-workflow-template"
+export type { NodeCatalogEntry } from "@cognia/plugin-contract/lib/workflow/nodes/catalog"
 export type {
   PluginWorkflowTemplateWarning,
   PluginWorkflowTemplateWarningCode,
   WorkflowTemplateValidationResult,
-} from "@/lib/plugin/registries/workflow-template-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/workflow-template-registry"

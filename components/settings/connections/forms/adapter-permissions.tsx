@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -75,23 +76,37 @@ function AdapterPermissionsDraft({
     () => row?.mediaModelPolicy ?? "local_extract_only"
   )
 
+  const [saving, setSaving] = useState(false)
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
+
   const save = async () => {
-    if (typeof window !== "undefined" && !window.confirm(t("confirmImpact"))) return
+    const confirmed = await confirm({
+      title: t("confirmImpactTitle"),
+      description: t("confirmImpact"),
+      confirmLabel: t("save"),
+      testid: "adapter-permissions-confirm",
+    })
+    if (!confirmed) return
     const parsed = skills
       .split(/[\s,;]+/)
       .map((item) => item.trim())
       .filter(Boolean)
-    await updateAdapterConfigSection(
-      adapterId,
-      "permissions",
-      {
-        builtInSkillCeiling: skills.trim() ? parsed : undefined,
-        hostCapabilityCeiling: host.length === HOST_CAPABILITIES.length ? undefined : host,
-        requireHitlForWrites: hitl,
-        mediaModelPolicy: mediaPolicy,
-      },
-      "settings.adapter.permissions"
-    )
+    setSaving(true)
+    try {
+      await updateAdapterConfigSection(
+        adapterId,
+        "permissions",
+        {
+          builtInSkillCeiling: skills.trim() ? parsed : undefined,
+          hostCapabilityCeiling: host.length === HOST_CAPABILITIES.length ? undefined : host,
+          requireHitlForWrites: hitl,
+          mediaModelPolicy: mediaPolicy,
+        },
+        "settings.adapter.permissions"
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -171,12 +186,16 @@ function AdapterPermissionsDraft({
               setSkills(selectors(row))
               setHost(row?.hostCapabilityCeiling ?? HOST_CAPABILITIES)
               setHitl(row?.requireHitlForWrites ?? true)
+              setMediaPolicy(row?.mediaModelPolicy ?? "local_extract_only")
             }}
           >
             {t("cancel")}
           </Button>
-          <Button onClick={() => void save()}>{t("save")}</Button>
+          <Button onClick={() => void save()} disabled={saving} aria-busy={saving}>
+            {t("save")}
+          </Button>
         </div>
+        {confirmDialog}
       </CardContent>
     </Card>
   )

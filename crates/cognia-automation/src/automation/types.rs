@@ -39,6 +39,19 @@ pub struct Capabilities {
     /// persisted/round-tripped payloads deserializing.
     #[serde(default)]
     pub monitors: Vec<MonitorInfo>,
+    #[serde(default)]
+    pub operations: OperationCapabilities,
+}
+
+/// Operation-specific support; coarse tree/input flags do not imply these.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationCapabilities {
+    pub app_sessions: bool,
+    pub window_op: bool,
+    pub element_click: bool,
+    pub element_scroll: bool,
+    pub invoke_patterns: Vec<String>,
 }
 
 /// One physical (or virtual) monitor as enumerated by xcap. `x`/`y` are
@@ -194,8 +207,14 @@ pub struct Screenshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ClickTarget {
-    Element { element_ref: ElementRef },
-    Point { x: i32, y: i32 },
+    Element {
+        #[serde(rename = "elementRef", alias = "element_ref")]
+        element_ref: ElementRef,
+    },
+    Point {
+        x: i32,
+        y: i32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -246,8 +265,14 @@ pub struct DragOpts {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScrollTarget {
-    Point { x: i32, y: i32 },
-    Element { element_ref: ElementRef },
+    Point {
+        x: i32,
+        y: i32,
+    },
+    Element {
+        #[serde(rename = "elementRef", alias = "element_ref")]
+        element_ref: ElementRef,
+    },
 }
 
 /// Scroll deltas. Positive `dy` scrolls down; positive `dx` scrolls right.
@@ -725,6 +750,7 @@ mod tests {
     #[test]
     fn capabilities_roundtrip_camel_case() {
         let caps = Capabilities {
+            operations: OperationCapabilities::default(),
             platform: Platform::Windows,
             has_uia: true,
             has_input_sim: true,
@@ -778,6 +804,22 @@ mod tests {
             ClickTarget::Element { element_ref } => assert_eq!(element_ref.0, "abc"),
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn element_target_wire_matches_the_renderer_contract() {
+        let wire = serde_json::json!({ "kind": "element", "elementRef": "native-ref" });
+        let click: ClickTarget = serde_json::from_value(wire.clone()).unwrap();
+        let scroll: ScrollTarget = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(click).unwrap(), wire);
+        assert_eq!(serde_json::to_value(scroll).unwrap(), wire);
+
+        // Existing native callers using the older field remain readable.
+        let legacy = serde_json::json!({ "kind": "element", "element_ref": "native-ref" });
+        let click: ClickTarget = serde_json::from_value(legacy.clone()).unwrap();
+        let scroll: ScrollTarget = serde_json::from_value(legacy).unwrap();
+        assert_eq!(serde_json::to_value(click).unwrap(), wire);
+        assert_eq!(serde_json::to_value(scroll).unwrap(), wire);
     }
 
     #[test]

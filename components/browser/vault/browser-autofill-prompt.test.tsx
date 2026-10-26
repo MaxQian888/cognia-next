@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import en from "@/i18n/messages/en.json"
@@ -111,9 +112,7 @@ it("detects through the local runtime and lets the user choose among several acc
     sessionId: "s1",
     pageId: "p1",
   })
-  fireEvent.change(screen.getByRole("combobox", { name: copy.account }), {
-    target: { value: "c2" },
-  })
+  await selectOption(screen.getByRole("combobox", { name: copy.account }), "c2")
   fireEvent.click(screen.getByRole("button", { name: copy.fill }))
   await advance(0)
   expect(fillCredential).toHaveBeenCalledWith({

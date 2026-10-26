@@ -2,6 +2,13 @@ import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "@/types/memory/memory"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
 import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  EPISODIC_DISTILL_REQUEST_PROMPT,
+  EPISODIC_DISTILL_SYSTEM_PROMPT,
   distillEpisodes,
   runEpisodicDistill,
   type RunEpisodicDistillDeps,
@@ -42,6 +49,63 @@ describe("distillEpisodes", () => {
   it("returns [] for empty transcript or bad JSON", async () => {
     expect(await distillEpisodes([], client("{}"))).toEqual([])
     expect(await distillEpisodes(transcript, client("nope"))).toEqual([])
+  })
+
+  it("sends the shipped system prompt and request around the transcript", async () => {
+    const c = client(JSON.stringify({ episodes: [] }))
+    await distillEpisodes(transcript, c)
+    const [prompt, options] = (c.complete as jest.Mock).mock.calls[0]
+    expect(options.system).toBe(EPISODIC_DISTILL_SYSTEM_PROMPT.defaultBody)
+    expect(prompt).toBe(
+      [
+        "Conversation:\nuser: Should we use Postgres or Mongo?\nassistant: Postgres fits better.",
+        "",
+        'Distill 0–3 episodic memories. Skip anything trivial; return {"episodes":[]}',
+        "if nothing notable. Each: a single self-contained sentence in the user's",
+        "language, importance 1–10.",
+        'Return JSON: {"episodes":[{"text","importance"}]}.',
+      ].join("\n")
+    )
+  })
+
+  describe("Prompt Center overrides", () => {
+    afterEach(() => {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    })
+
+    it("sends a published system and request override", async () => {
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob-sys",
+            promptId: EPISODIC_DISTILL_SYSTEM_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-episodic-system",
+            body: "Distill episodes as JSON.",
+            contractVersion: EPISODIC_DISTILL_SYSTEM_PROMPT.contractVersion,
+          },
+          {
+            bindingId: "pob-req",
+            promptId: EPISODIC_DISTILL_REQUEST_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-episodic-request",
+            body: 'Transcript:\n{{conversation}}\nReply {"episodes":[{"text","importance"}]}',
+            contractVersion: EPISODIC_DISTILL_REQUEST_PROMPT.contractVersion,
+          },
+        ])
+      )
+      const c = client(JSON.stringify({ episodes: [{ text: "Chose Postgres", importance: 6 }] }))
+      const out = await distillEpisodes(transcript, c)
+      const [prompt, options] = (c.complete as jest.Mock).mock.calls[0]
+      expect(options.system).toBe("Distill episodes as JSON.")
+      expect(prompt).toBe(
+        'Transcript:\nuser: Should we use Postgres or Mongo?\nassistant: Postgres fits better.\nReply {"episodes":[{"text","importance"}]}'
+      )
+      expect(out).toEqual([{ type: "episodic", text: "Chose Postgres", importance: 6 }])
+    })
   })
 })
 

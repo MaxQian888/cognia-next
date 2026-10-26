@@ -4099,3 +4099,91 @@ describe("PiRpcClientAdapter — host ports", () => {
     await adapter.disconnect()
   })
 })
+
+describe("managed native Pi subagent packages", () => {
+  const managed = {
+    family: "nico",
+    version: "0.80.0",
+    packageDir: "/plugins/nico",
+    extensions: ["/plugins/nico/index.js"],
+    agents: {},
+  }
+  async function connect(metadata: Record<string, unknown>, env?: Record<string, string>) {
+    const host = createFakeHost()
+    const adapter = new PiRpcClientAdapter(piDeps(host))
+    const connecting = adapter.connect({
+      ...config,
+      metadata,
+      process: { ...config.process!, env },
+    })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    return { host, adapter }
+  }
+  it("loads a detected executor, tools and readable root and stages the verified guard for child SDKs", async () => {
+    const env = {
+      COGNIA_TOOLHOST_PI_SUBAGENT_MODELS: JSON.stringify({
+        ...managed,
+        sources: {},
+        defaultModel: "cognia/main",
+        allowedModels: ["cognia/main"],
+        providerId: "p",
+      }),
+      COGNIA_GATEWAY_TASK_CONFIG: JSON.stringify({
+        runtime: "pi",
+        files: { "pi/settings.json": "{}" },
+      }),
+    }
+    const { host, adapter } = await connect(
+      { cogniaPiSubagents: managed, cogniaGatewayTask: true },
+      env
+    )
+    try {
+      await adapter.createSession({
+        cwd: "/w",
+        permissionMode: "dontAsk",
+        allowedTools: ["subagent"],
+      })
+      const spawn = host.spawns.find((item) => item.args.includes("--session-id"))!
+      expect(spawn.args).toContain(managed.extensions[0])
+      expect(spawn.args.indexOf(managed.extensions[0])).toBeLessThan(
+        spawn.args.indexOf(VERIFIED_EXTENSION.path)
+      )
+      expect(JSON.parse(spawn.env![PI_PACKAGE_ROOTS_ENV])).toContain(managed.packageDir)
+      expect(decodePiToolPolicy(spawn.env![PI_TOOL_POLICY_ENV]).decisions.subagent).toBe("allow")
+      expect(
+        JSON.parse(JSON.parse(spawn.env!.COGNIA_GATEWAY_TASK_CONFIG).files["pi/settings.json"])
+          .extensions
+      ).toEqual([managed.extensions[0], VERIFIED_EXTENSION.path])
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+  it("refuses an unsupported executor version before spawning a session", async () => {
+    const { host, adapter } = await connect({
+      cogniaPiSubagents: { ...managed, version: "999.0.0" },
+      cogniaGatewayTask: true,
+    })
+    try {
+      await expect(adapter.createSession()).rejects.toThrow(/Unsupported Pi/)
+      expect(host.spawns.filter((item) => item.args.includes("--session-id"))).toHaveLength(0)
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+  it.each([{}, { cogniaPiSubagents: managed }])(
+    "keeps native sessions without managed gateway capability unchanged",
+    async (metadata) => {
+      const { host, adapter } = await connect(metadata)
+      try {
+        await adapter.createSession()
+        const spawn = host.spawns.find((item) => item.args.includes("--session-id"))!
+        expect(spawn.args).not.toContain(managed.extensions[0])
+        expect(spawn.env![PI_PACKAGE_ROOTS_ENV]).toBeUndefined()
+      } finally {
+        await adapter.disconnect()
+      }
+    }
+  )
+})

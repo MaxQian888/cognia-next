@@ -271,11 +271,12 @@ describe("sweepConnectorHeartbeats", () => {
     )
   }
 
+  // The production shape is 2 880 expired rows a day against a 1 000-row batch;
+  // the old single-batch sweep left the remainder behind every day. The same
+  // ratio at a tenth of the scale keeps this test fast on fake-indexeddb.
   it("drains an expired backlog larger than one batch in a single sweep", async () => {
     const now = 500_000_000
-    // A day of one adapter's heartbeats (2 880) against a 1 000-row batch:
-    // the old single-batch sweep left 1 880 expired rows behind every day.
-    await seedExpired(2_880, now - 100_000)
+    await seedExpired(288, now - 100_000)
     await getDb().connectorHeartbeats.put({
       id: "hb-fresh",
       adapterId: "lark-0",
@@ -284,8 +285,8 @@ describe("sweepConnectorHeartbeats", () => {
     })
 
     await expect(
-      sweepConnectorHeartbeats({ now, retentionMs: 60_000, batchLimit: 1_000 })
-    ).resolves.toBe(2_880)
+      sweepConnectorHeartbeats({ now, retentionMs: 60_000, batchLimit: 100 })
+    ).resolves.toBe(288)
     expect(await getDb().connectorHeartbeats.count()).toBe(1)
     expect(await getDb().connectorHeartbeats.get("hb-fresh")).toBeDefined()
   })

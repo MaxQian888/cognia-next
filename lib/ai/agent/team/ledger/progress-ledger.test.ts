@@ -5,6 +5,12 @@ import {
   type ProgressLedgerVerdict,
 } from "./progress-ledger"
 import type { TeamRunContext } from "../team-run-context"
+import { PROGRESS_LEDGER_JUDGE_PROMPT } from "../team-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const judgeCtx = {
   teamId: "team-1",
@@ -105,5 +111,58 @@ describe("judgeProgress", () => {
     })
     expect(v.recommendedAction).toBe("replan")
     expect(v.isProgressing).toBe(false)
+  })
+})
+
+describe("judgeProgress — Prompt Center (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends the team project's customized judge prompt", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: PROGRESS_LEDGER_JUDGE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-ledger-judge",
+          body: 'Stalled on {{objective}}.\nDone: {{results}}\nLeft: {{remaining}}\nPick "continue", "replan", "consensus" or "delegate".',
+          contractVersion: PROGRESS_LEDGER_JUDGE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const dispatch = jest.fn().mockResolvedValue(verdict())
+    await judgeProgress({
+      teamCtx: {
+        teamId: "team-1",
+        team: { name: "Squad", task: "ship the feature", projectId: "ws-1" },
+      } as unknown as TeamRunContext,
+      doneTaskIds: [],
+      remaining: [],
+      stallCount: 2,
+      dispatch,
+    })
+    expect(dispatch.mock.calls[0][0].prompt).toBe(
+      'Stalled on ship the feature.\nDone: (no captured output)\nLeft: (none)\nPick "continue", "replan", "consensus" or "delegate".'
+    )
+  })
+
+  it("fails open without dispatching when the signal is already aborted", async () => {
+    const dispatch = jest.fn().mockResolvedValue(verdict({ recommendedAction: "delegate" }))
+    const controller = new AbortController()
+    controller.abort()
+    const v = await judgeProgress({
+      teamCtx: judgeCtx,
+      doneTaskIds: [],
+      remaining: [],
+      stallCount: 2,
+      signal: controller.signal,
+      dispatch,
+    })
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(v.recommendedAction).toBe("replan")
   })
 })

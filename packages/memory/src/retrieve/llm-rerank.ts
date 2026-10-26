@@ -42,7 +42,8 @@ export type MemoryReranker = (
   options?: { signal?: AbortSignal; timeoutMs?: number }
 ) => Promise<Map<string, number> | null>
 
-const RERANK_SYSTEM = [
+/** The memory reranker's shipped system prompt. */
+export const MEMORY_RERANK_SYSTEM_PROMPT = [
   "You score how relevant each stored memory is to a query. Return STRICT JSON only.",
   "Scoring guide: 1.0 directly answers the query; 0.7 is about the same subject;",
   "0.3 is tangential; 0.0 is unrelated.",
@@ -92,7 +93,20 @@ export function mapRerankJudgements(
   return out.size === candidates.length ? out : null
 }
 
-export function createMemoryLlmReranker(client: LlmClient): MemoryReranker {
+export interface MemoryLlmRerankerOptions {
+  /**
+   * Resolve the system prompt for one rerank call; defaults to
+   * {@link MEMORY_RERANK_SYSTEM_PROMPT}. Called per recall, so a host that lets
+   * the user customize the wording applies an edit on the next recall. A
+   * resolver failure keeps the local order, like any other rerank failure.
+   */
+  systemPrompt?: () => string | Promise<string>
+}
+
+export function createMemoryLlmReranker(
+  client: LlmClient,
+  rerankerOptions: MemoryLlmRerankerOptions = {}
+): MemoryReranker {
   return async (query, candidates, options = {}) => {
     if (candidates.length < 2) return null
     const bounded = candidates.slice(0, RERANK_MAX_CANDIDATES)
@@ -112,6 +126,11 @@ export function createMemoryLlmReranker(client: LlmClient): MemoryReranker {
         : RERANK_DEFAULT_TIMEOUT_MS
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
+      const system = rerankerOptions.systemPrompt
+        ? await rerankerOptions.systemPrompt()
+        : MEMORY_RERANK_SYSTEM_PROMPT
+      // The caller may have given up while the prompt resolved.
+      if (controller.signal.aborted) return null
       const payload = JSON.stringify({
         query: safeQuery,
         candidates: bounded.map((candidate, index) => ({
@@ -126,7 +145,7 @@ export function createMemoryLlmReranker(client: LlmClient): MemoryReranker {
         'Return JSON: {"scores":[{"candidate":<number>,"relevance":<0..1>}]}.',
       ].join("\n")
       const call = client.complete(prompt, {
-        system: RERANK_SYSTEM,
+        system,
         temperature: 0,
         maxTokens: 4000,
         abortSignal: controller.signal,

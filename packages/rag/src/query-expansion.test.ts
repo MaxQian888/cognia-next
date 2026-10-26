@@ -14,6 +14,8 @@ import {
   extractKeywords,
   generateHypotheticalAnswer,
   generateStepBackQuery,
+  HYDE_PROMPT_TEMPLATE,
+  STEP_BACK_PROMPT_TEMPLATE,
   decomposeQuery,
   expandQuery,
   generateSynonyms,
@@ -335,5 +337,45 @@ describe("query expansion generation seam", () => {
       generate: seam,
     })
     expect(requests.map((r) => r.stage)).toEqual(["rag.query-variants", "rag.hyde", "rag.rewrite"])
+  })
+})
+
+describe("expansion prompt templates", () => {
+  beforeEach(() => {
+    mockedGenerateText.mockReset()
+    mockedGenerateText.mockResolvedValue({ text: "out" })
+  })
+
+  function sentPrompts(): string[] {
+    return mockedGenerateText.mock.calls.map((call) => (call[0] as { prompt: string }).prompt)
+  }
+
+  it("fills the HyDE template once, without re-scanning the query", async () => {
+    await generateHypotheticalAnswer("what is {{maxLength}}?", seamModel)
+    await generateHypotheticalAnswer("q", seamModel, { domain: "law", maxLength: 120 })
+    const [plain, withDomain] = sentPrompts()
+    expect(plain).toBe(
+      HYDE_PROMPT_TEMPLATE.replace("{{domainContext}}", "")
+        .replace("{{maxLength}}", "300")
+        .replace("{{query}}", "what is {{maxLength}}?")
+    )
+    expect(withDomain.startsWith("Domain: law\nWrite a short passage (120 characters max)")).toBe(
+      true
+    )
+  })
+
+  it("renders through a host renderer with the call's values", async () => {
+    const renderHyde = jest.fn(() => "custom hyde")
+    const renderStepBack = jest.fn(() => "custom step-back")
+    await generateHypotheticalAnswer("q", seamModel, { renderPrompt: renderHyde })
+    await generateStepBackQuery("why", seamModel, { renderPrompt: renderStepBack })
+    expect(renderHyde).toHaveBeenCalledWith({ domainContext: "", maxLength: "300", query: "q" })
+    expect(renderStepBack).toHaveBeenCalledWith({ query: "why" })
+    expect(sentPrompts()).toEqual(["custom hyde", "custom step-back"])
+  })
+
+  it("fills the step-back template by default", async () => {
+    await generateStepBackQuery("why", seamModel)
+    expect(sentPrompts()).toEqual([STEP_BACK_PROMPT_TEMPLATE.replace("{{query}}", "why")])
   })
 })

@@ -17,18 +17,18 @@ export {
   subscribePluginTriggerRegistry,
   subscribeTriggerMuteChanges,
   unregisterPluginTrigger,
-} from "@/lib/workflow/triggers/registry"
+} from "@cognia/plugin-contract/lib/workflow/triggers/registry"
 
 export type {
   TriggerInstanceHandle,
   TriggerRegistration,
   TriggerRegistryEvent,
   TriggerRegistryListener,
-} from "@/lib/workflow/triggers/registry"
+} from "@cognia/plugin-contract/lib/workflow/triggers/registry"
 
 export type {
   PluginTriggerDef,
   PluginTriggerHandle,
   PluginTriggerLogger,
   PluginTriggerStartContext,
-} from "@/types/plugin/plugin-workflow"
+} from "@cognia/plugin-contract/types/plugin/plugin-workflow"

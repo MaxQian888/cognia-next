@@ -3,7 +3,7 @@ import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
 
 import {
   VERIFICATION_DORMANT_PROFILES,
-  VERIFIER_SYSTEM_PROMPT,
+  VERIFIER_PROMPT,
   armVerifiedFreshAgentFollowup,
   buildVerificationPrompt,
   newAssistantReply,
@@ -18,8 +18,18 @@ import {
 import { chatOrchestrationUnavailableReason } from "./chat-orchestrations"
 import type { VerificationVerdictPart } from "@/lib/claude/parts-extensions"
 import type { ChatStatus } from "@/stores/chat/chat-store"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const MAIN_ID = "main-session"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
 
 function text(id: string, role: "user" | "assistant", body: string): UIMessage {
   return { id, role, parts: [{ type: "text", text: body }] }
@@ -120,7 +130,7 @@ describe("runVerifiedFreshAgentTurn", () => {
     expect(calls.createSession).toEqual([
       {
         title: "Verify: Fix the flake",
-        systemPrompt: VERIFIER_SYSTEM_PROMPT,
+        systemPrompt: VERIFIER_PROMPT.defaultBody,
         permissionMode: "plan",
         workingDir: "/repo",
         projectId: "proj-1",
@@ -179,6 +189,29 @@ describe("runVerifiedFreshAgentTurn", () => {
     expect(deps.createSession).toHaveBeenCalledWith(
       expect.not.objectContaining({ workingDir: expect.anything() })
     )
+  })
+
+  it("gives the verifier session the main chat's published override", async () => {
+    const body = `You are a strict verifier.\n{"verdict": "pass" | "fail" | "unsure", "summary": "", "points": []}`
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: VERIFIER_PROMPT.id,
+          scope: "session",
+          targetId: MAIN_ID,
+          revisionId: "por-verifier-session",
+          body,
+          contractVersion: VERIFIER_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const { deps, calls } = turnDeps()
+    await runVerifiedFreshAgentTurn(
+      { mainSessionId: MAIN_ID, request: "r", reply: "a", cwd: null },
+      deps
+    )
+    expect(calls.createSession).toEqual([expect.objectContaining({ systemPrompt: body })])
   })
 
   it("refuses a session factory that hands back the main session", async () => {

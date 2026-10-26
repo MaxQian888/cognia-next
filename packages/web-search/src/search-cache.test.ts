@@ -1,4 +1,5 @@
 import {
+  opaqueDigest,
   generateSearchCacheKey,
   SearchCache,
   getSearchCache,
@@ -299,5 +300,28 @@ describe("getSearchCache singleton", () => {
     resetSearchCache()
     const b = getSearchCache()
     expect(a).not.toBe(b)
+  })
+})
+
+describe("cache identity isolation", () => {
+  it("separates runtime scopes, policy revisions, engines and strict pins", () => {
+    const base = generateSearchCacheKey("q", "tavily", {})
+    expect(generateSearchCacheKey("q", "tavily", { scope: "account-a" })).not.toBe(
+      generateSearchCacheKey("q", "tavily", { scope: "account-b" })
+    )
+    expect(generateSearchCacheKey("q", "tavily", { policyRevision: "v2|a" })).not.toBe(base)
+    expect(generateSearchCacheKey("q", "searchapi", { engine: "bing" })).not.toBe(
+      generateSearchCacheKey("q", "searchapi", { engine: "baidu" })
+    )
+    expect(generateSearchCacheKey("q", "tavily", { allowFallback: false })).not.toBe(base)
+    expect(generateSearchCacheKey("q", "tavily", { safeSearchRequired: true })).not.toBe(base)
+  })
+})
+
+describe("opaqueDigest", () => {
+  it("is stable, changes with the input, and does not contain it", () => {
+    expect(opaqueDigest("tvly-secret")).toBe(opaqueDigest("tvly-secret"))
+    expect(opaqueDigest("tvly-secret")).not.toBe(opaqueDigest("tvly-secres"))
+    expect(opaqueDigest("tvly-secret")).not.toContain("secret")
   })
 })

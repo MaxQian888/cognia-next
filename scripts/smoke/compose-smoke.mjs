@@ -23,6 +23,14 @@
  *                              pre-minted tokens (COGNIA_SMOKE_OWNER_TOKEN,
  *                              COGNIA_SMOKE_MEMBER_TOKEN). Bootstrap needs
  *                              COGNIA_SMOKE_BOOTSTRAP_CREDENTIAL once.
+ *   --tier persons            two OIDC persons of one org on one multi-tenant
+ *                              Host (plan §9a, P6f): partition isolation,
+ *                              HostState sessions without a Host admin lease,
+ *                              the P5 dormancy codes, the operator's persons
+ *                              list and purge. Needs the org and both people
+ *                              seeded with cognia-collab-bootstrap (Logto org
+ *                              id included) and the OIDC fixture. Env: see
+ *                              PERSONS_* below.
  *                               AI turn → outbound action. Added by F6/H8.
  *
  * Env knobs:
@@ -40,7 +48,7 @@
  */
 
 import process from "node:process"
-import { randomBytes, randomUUID, webcrypto } from "node:crypto"
+import { createHash, randomBytes, randomUUID, webcrypto } from "node:crypto"
 import http from "node:http"
 import https from "node:https"
 import { readFileSync } from "node:fs"
@@ -61,7 +69,7 @@ if (typeof globalThis.WebSocket !== "function") {
 // CLI + helpers
 // ---------------------------------------------------------------------------
 
-const TIERS = ["services", "server", "tls", "im", "cloud"]
+const TIERS = ["services", "server", "tls", "im", "cloud", "persons"]
 function parseTier() {
   const i = process.argv.indexOf("--tier")
   const t = i >= 0 ? process.argv[i + 1] : "services"
@@ -364,7 +372,10 @@ async function composeExec(argv, { timeoutMs = 60_000 } = {}) {
   return stdout
 }
 
-/** Canonical DPoP RPC against the published port. */
+/**
+ * Canonical DPoP RPC against the published port (`auth.baseUrl` when the
+ * device belongs to another Host, as in the persons tier).
+ */
 async function rpc(name, args, auth) {
   const path = `/api/_rpc/${name}`
   const descriptor = COMMANDS.get(name)
@@ -374,7 +385,7 @@ async function rpc(name, args, auth) {
     "Content-Type": "application/json",
   }
   if (descriptor?.idempotency === "required") headers["Idempotency-Key"] = randomUUID()
-  const res = await fetch(`${SERVER_URL}${path}`, {
+  const res = await fetch(`${auth.baseUrl ?? SERVER_URL}${path}`, {
     method: "POST",
     headers,
     body: JSON.stringify(args ?? {}),
@@ -1365,10 +1376,439 @@ async function tierCloud() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Tier: persons — two people of one org on one multi-tenant Host (P6f)
+// ---------------------------------------------------------------------------
+
+const PERSONS_SERVER_URL = (process.env.COGNIA_PERSONS_SERVER_URL ?? CLOUD_SERVER_URL).replace(
+  /\/+$/,
+  ""
+)
+const PERSONS_TOKEN_URL =
+  process.env.COGNIA_SMOKE_OIDC_E2E_TOKEN_URL ?? "http://127.0.0.1:4020/e2e/token"
+/** The canonical org every seeded person belongs to (cognia-collab-bootstrap --org-id). */
+const PERSONS_ORG_ID = process.env.COGNIA_SMOKE_PERSONS_ORG_ID ?? "org_smoke-persons"
+/** The Logto organization the fixture tokens name (--logto-organization-id). */
+const PERSONS_LOGTO_ORG = process.env.COGNIA_SMOKE_PERSONS_LOGTO_ORG ?? "logto-smoke-persons"
+/** `subject:userId` for exactly two people, as seeded (--identity-subject, --user-id). */
+const PERSONS_PEOPLE =
+  process.env.COGNIA_SMOKE_PERSONS ?? "smoke-ada:usr_smoke-ada,smoke-bob:usr_smoke-bob"
+/**
+ * Which of the two is a plain org member (the other is an owner), for the
+ * org-administration checks (P6a, AC32). Unset skips the member refusal.
+ */
+const PERSONS_MEMBER = process.env.COGNIA_SMOKE_PERSONS_MEMBER ?? ""
+
+/**
+ * The partition account a Host derives for a person: `pb_` + the first 24 hex
+ * of SHA-256(org NUL user) (crates/cognia-companion/src/person_partition.rs).
+ */
+export function partitionAccountId(orgId, userId) {
+  return `pb_${createHash("sha256")
+    .update(orgId)
+    .update(Buffer.from([0]))
+    .update(userId)
+    .digest("hex")
+    .slice(0, 24)}`
+}
+
+export function parsePersons(spec) {
+  const people = spec
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [subject, userId] = entry.split(":")
+      if (!subject || !userId)
+        throw new Error(`COGNIA_SMOKE_PERSONS entry "${entry}" is not subject:userId`)
+      return { subject, userId }
+    })
+  if (people.length !== 2) throw new Error("COGNIA_SMOKE_PERSONS must name exactly two people")
+  return people
+}
+
+/**
+ * One HostState action envelope, addressed to `sessionId`'s channel.
+ * `baseRevision` is the channel revision the action builds on (1 after
+ * `session.create`); a stale one is answered `host_state_revision_conflict`.
+ */
+export function hostStateAction(scope, status, sessionId, clientSeq, action, baseRevision) {
+  return {
+    // sessionStateChannel() in packages/agent-config-types/src/host-state.ts
+    channel: `cognia://target/${encodeURIComponent(scope.runtimeTargetId)}/sessions/${encodeURIComponent(sessionId)}`,
+    ...scope,
+    hostId: status.hostId,
+    hostGeneration: status.hostGeneration,
+    sessionId,
+    clientId: "compose-smoke-persons",
+    clientSeq,
+    actionId: randomUUID(),
+    ...(baseRevision === undefined ? {} : { baseRevision }),
+    createdAt: Date.now(),
+    action,
+  }
+}
+
+/** The in-container `cognia-server` for the persons Host (operator side). */
+async function personsExec(argv) {
+  const prefix = process.env.COGNIA_SMOKE_PERSONS_EXEC
+    ? process.env.COGNIA_SMOKE_PERSONS_EXEC.split(/\s+/).filter(Boolean)
+    : [
+        "docker",
+        "compose",
+        "-f",
+        path.join(REPO_ROOT, "deploy/compose/docker-compose.yml"),
+        "-f",
+        path.join(REPO_ROOT, "deploy/compose/docker-compose.web-headless-e2e.yml"),
+        "--profile",
+        "web-headless-e2e",
+        "exec",
+        "-T",
+        "cognia-server-cloud",
+      ]
+  const { stdout } = await execFile(prefix[0], [...prefix.slice(1), ...argv], {
+    timeout: 120_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })
+  return stdout
+}
+
+async function personsJson(url, init = {}) {
+  const response = await fetch(url, init)
+  const text = await response.text()
+  try {
+    return { status: response.status, body: text ? JSON.parse(text) : null }
+  } catch {
+    return { status: response.status, body: text }
+  }
+}
+
+async function personsChallenge() {
+  return (
+    await personsJson(`${PERSONS_SERVER_URL}/api/auth/device/challenge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tenantId: PERSONS_LOGTO_ORG }),
+    })
+  ).body
+}
+
+/** Register one OIDC device for `person` and sign it in: a device auth for {@link rpc}. */
+async function pairPerson(person, audience) {
+  const minted = await personsJson(PERSONS_TOKEN_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sub: person.subject,
+      aud: audience,
+      organization_id: PERSONS_LOGTO_ORG,
+      client_id: "native-headless-cloud",
+      scope: "openid",
+    }),
+  })
+  check(
+    minted.status === 200 && minted.body?.access_token,
+    `fixture mints a token for ${person.subject}`
+  )
+  if (!minted.body?.access_token) return null
+  const keys = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ])
+  const signaling = await webcrypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"]
+  )
+  const deviceId = randomUUID()
+  const challenge = await personsChallenge()
+  const registered = await personsJson(`${PERSONS_SERVER_URL}/api/auth/device/register`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${minted.body.access_token}`,
+    },
+    body: JSON.stringify({
+      tenantId: PERSONS_LOGTO_ORG,
+      challengeId: challenge.challengeId,
+      challengeNonce: challenge.nonce,
+      deviceId,
+      displayName: `smoke-${person.subject}`,
+      publicKeyPem: spkiPem(await webcrypto.subtle.exportKey("spki", keys.publicKey)),
+      signalingPublicKey: Buffer.from(
+        await webcrypto.subtle.exportKey("raw", signaling.publicKey)
+      ).toString("base64url"),
+      proof: await deviceProof(
+        keys.privateKey,
+        challenge.nonce,
+        "POST",
+        "/api/auth/device/register"
+      ),
+    }),
+  })
+  check(
+    registered.status === 200,
+    registered.status === 200
+      ? `${person.subject} registers an OIDC device`
+      : `${person.subject} registers an OIDC device (got ${registered.status}: ${JSON.stringify(registered.body)})`
+  )
+  if (registered.status !== 200) return null
+  const tokenChallenge = await personsChallenge()
+  const token = await personsJson(`${PERSONS_SERVER_URL}/api/auth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      tenantId: PERSONS_LOGTO_ORG,
+      deviceId,
+      challengeId: tokenChallenge.challengeId,
+      challengeNonce: tokenChallenge.nonce,
+      proof: await deviceProof(keys.privateKey, tokenChallenge.nonce, "POST", "/api/auth/token"),
+    }),
+  })
+  check(token.status === 200, `${person.subject} signs the device in (got ${token.status})`)
+  if (token.status !== 200) return null
+  const claims = JSON.parse(
+    Buffer.from(token.body.accessToken.split(".")[1], "base64url").toString()
+  )
+  return {
+    baseUrl: PERSONS_SERVER_URL,
+    privateKey: keys.privateKey,
+    accessToken: token.body.accessToken,
+    accessJti: claims.jti,
+  }
+}
+
+/** HostState scope + status for a partition, with the manifest's partition marker. */
+async function partitionHostState(person) {
+  const manifest = await rpc("host_feature_manifest", {}, person.auth)
+  const scope = manifest.body?.hostStateScope
+  check(
+    manifest.status === 200 && manifest.body?.personPartition === true,
+    `${person.subject}: host_feature_manifest declares a person partition (got ${manifest.status}: ${JSON.stringify(manifest.body).slice(0, 200)})`
+  )
+  check(
+    scope?.accountId === person.accountId,
+    `${person.subject}: HostState scope is the person's own partition ${person.accountId} (got ${scope?.accountId})`
+  )
+  const status = await rpc("host_state_status", scope, person.auth)
+  check(
+    status.status === 200 && typeof status.body?.hostId === "string",
+    `${person.subject}: host_state_status → 200 (got ${status.status})`
+  )
+  return scope && status.status === 200 ? { scope, status: status.body } : null
+}
+
+/** Submit actions WITHOUT an admin lease, as a partition client does. */
+async function submitPartition(person, state, actions) {
+  const submit = await rpc("host_state_submit", { ...state.scope, actions }, person.auth)
+  check(
+    submit.status === 200 && Array.isArray(submit.body?.results),
+    `${person.subject}: host_state_submit without a Host admin lease → 200 (got ${submit.status}: ${JSON.stringify(submit.body).slice(0, 300)})`
+  )
+  return submit.body?.results ?? []
+}
+
+async function sessionIds(person) {
+  const listed = await rpc("session_list", {}, person.auth)
+  check(listed.status === 200, `${person.subject}: session_list → 200 (got ${listed.status})`)
+  return new Set((listed.body?.items ?? []).map((row) => row.id))
+}
+
+async function tierPersons() {
+  log("tier: persons")
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+  const config = await personsJson(`${PERSONS_SERVER_URL}/api/auth/config`)
+  check(
+    config.status === 200 && config.body?.deploymentMode === "multi-tenant",
+    `${PERSONS_SERVER_URL} is a multi-tenant Host (got ${config.status}: ${config.body?.deploymentMode})`
+  )
+  const audience = config.body?.oidc?.audience
+  if (typeof audience !== "string") {
+    check(false, "the Host announces its OIDC audience")
+    return
+  }
+  const people = parsePersons(PERSONS_PEOPLE).map((person) => ({
+    ...person,
+    accountId: partitionAccountId(PERSONS_ORG_ID, person.userId),
+  }))
+  for (const person of people) person.auth = await pairPerson(person, audience)
+  if (people.some((person) => !person.auth)) return
+  const [ada, bob] = people
+
+  // 1. Each person's HostState is their own partition, and accepts data
+  //    intents with no Host admin lease (P5d, AC29).
+  for (const person of people) {
+    person.state = await partitionHostState(person)
+    if (!person.state) return
+    person.sessionId = `smoke-${person.subject}-${randomUUID()}`
+    const [created] = await submitPartition(person, person.state, [
+      hostStateAction(person.state.scope, person.state.status, person.sessionId, 1, {
+        kind: "session.create",
+        title: `Smoke ${person.subject}`,
+      }),
+    ])
+    check(
+      created?.outcome === "applied",
+      `${person.subject}: session.create applied (got ${JSON.stringify(created)})`
+    )
+  }
+  const [renamed] = await submitPartition(ada, ada.state, [
+    hostStateAction(
+      ada.state.scope,
+      ada.state.status,
+      ada.sessionId,
+      2,
+      { kind: "session.rename", title: "Smoke Ada renamed" },
+      1
+    ),
+  ])
+  check(
+    renamed?.outcome === "applied",
+    `ada: session.rename applied (got ${JSON.stringify(renamed)})`
+  )
+
+  // 2. Isolation (AC25): neither person sees the other's sessions or rows.
+  const adaSessions = await sessionIds(ada)
+  const bobSessions = await sessionIds(bob)
+  check(adaSessions.has(ada.sessionId), "ada's session_list has her conversation")
+  check(bobSessions.has(bob.sessionId), "bob's session_list has his conversation")
+  check(
+    !adaSessions.has(bob.sessionId) && !bobSessions.has(ada.sessionId),
+    "neither session_list shows the other person's conversation"
+  )
+  const marker = `ADA-SMOKE-${randomUUID().slice(0, 8)}`
+  const upsert = await rpc(
+    "character_upsert",
+    { draft: { name: marker, description: "ada only" } },
+    ada.auth
+  )
+  check(upsert.status === 200, `ada: character_upsert → 200 (got ${upsert.status})`)
+  const characterNames = async (person) =>
+    ((await rpc("sync_pull", { table: "characters", since: 0 }, person.auth)).body?.rows ?? []).map(
+      (row) => row.name ?? row.data?.name
+    )
+  check((await characterNames(ada)).includes(marker), "ada's sync_pull returns her character")
+  check(
+    !(await characterNames(bob)).includes(marker),
+    "bob's sync_pull does not return ada's character"
+  )
+
+  // 3. Intentional dormancy (Rule 7): runtime intents and model calls stay
+  //    refused until P6 lands their sandbox and credential broker.
+  const refused = await submitPartition(ada, ada.state, [
+    hostStateAction(ada.state.scope, ada.state.status, ada.sessionId, 3, {
+      kind: "message.enqueue",
+      messageId: randomUUID(),
+      text: "hello",
+      attachments: [],
+    }),
+    hostStateAction(ada.state.scope, ada.state.status, ada.sessionId, 4, {
+      kind: "session.workspace",
+      projectId: "smoke-project",
+    }),
+  ])
+  check(
+    JSON.stringify(refused[0] ?? null).includes("execution_isolation_unavailable"),
+    `message.enqueue is refused execution_isolation_unavailable (got ${JSON.stringify(refused[0])})`
+  )
+  check(
+    JSON.stringify(refused[1] ?? null).includes("workspace_unavailable"),
+    `session.workspace is refused workspace_unavailable (got ${JSON.stringify(refused[1])})`
+  )
+  const pet = await rpc(
+    "pet_chat_send",
+    { text: "hi", locale: "en", idempotencyKey: randomUUID() },
+    bob.auth
+  )
+  check(
+    pet.status === 503 && JSON.stringify(pet.body).includes("model_access_unavailable"),
+    `pet_chat_send is 503 model_access_unavailable (got ${pet.status}: ${JSON.stringify(pet.body).slice(0, 200)})`
+  )
+
+  // 4. Org administration (P6a, AC32): an owner reads credential metadata
+  //    only and needs Host consent to write; a plain member is refused.
+  const owner = people.find((person) => person.subject !== PERSONS_MEMBER)
+  const listedKeys = await rpc("org_model_credential_list", {}, owner.auth)
+  check(
+    listedKeys.status === 200 && Array.isArray(listedKeys.body),
+    `${owner.subject} (owner): org_model_credential_list → 200 (got ${listedKeys.status}: ${JSON.stringify(listedKeys.body).slice(0, 200)})`
+  )
+  check(
+    (listedKeys.body ?? []).every((row) => !("apiKey" in row) && !("value" in row)),
+    "org credential rows carry metadata only"
+  )
+  const unapproved = await rpc(
+    "org_model_credential_set",
+    { provider: "smoke-provider", apiKey: "smoke-never-stored-without-consent" },
+    owner.auth
+  )
+  check(
+    unapproved.status === 428 && !JSON.stringify(unapproved.body).includes("smoke-never-stored"),
+    `an owner's org credential write waits for Host consent and echoes no key (got ${unapproved.status})`
+  )
+  check(
+    !JSON.stringify((await rpc("org_model_credential_list", {}, owner.auth)).body).includes(
+      "smoke-provider"
+    ),
+    "the unapproved write stored nothing"
+  )
+  const selected = await rpc("org_model_credential_list", { orgId: "org_someone-else" }, owner.auth)
+  check(selected.status === 403, `a device cannot select another org (got ${selected.status})`)
+  if (PERSONS_MEMBER) {
+    const member = people.find((person) => person.subject === PERSONS_MEMBER)
+    const refusedList = await rpc("org_model_credential_list", {}, member.auth)
+    check(
+      refusedList.status === 403,
+      `${member.subject} (member): org_model_credential_list is refused (got ${refusedList.status})`
+    )
+    const refusedPolicy = await rpc(
+      "org_agent_policy_set",
+      { allowedAgents: ["claude-agent-acp"], defaultAgent: "claude-agent-acp" },
+      member.auth
+    )
+    check(
+      refusedPolicy.status === 403,
+      `${member.subject} (member): org_agent_policy_set is refused (got ${refusedPolicy.status})`
+    )
+  } else {
+    skip("COGNIA_SMOKE_PERSONS_MEMBER unset: member refusal not exercised")
+  }
+
+  // 5. The operator sees one partition per person, then purges bob (AC27):
+  //    his next request starts an empty partition and ada keeps hers.
+  let listed = null
+  try {
+    listed = JSON.parse(await personsExec(["cognia-server", "persons", "list"]))
+  } catch (error) {
+    check(false, `cognia-server persons list answers JSON (${error.message})`)
+  }
+  const listedIds = new Set((listed?.persons ?? []).map((row) => row.accountId))
+  check(
+    people.every((person) => listedIds.has(person.accountId)),
+    `persons list shows both partitions (got ${[...listedIds].join(", ")})`
+  )
+  try {
+    await personsExec([
+      "cognia-server",
+      "persons",
+      "purge",
+      "--org",
+      PERSONS_ORG_ID,
+      "--user",
+      bob.userId,
+    ])
+    check(true, "cognia-server persons purge removes bob's partition")
+  } catch (error) {
+    check(false, `cognia-server persons purge removes bob's partition (${error.message})`)
+  }
+  check(!(await sessionIds(bob)).has(bob.sessionId), "after purge bob rejoins an empty partition")
+  check((await sessionIds(ada)).has(ada.sessionId), "after bob's purge ada's partition is intact")
+}
+
 async function main() {
   const tier = parseTier()
-  if (tier === "cloud") {
-    await tierCloud()
+  if (tier === "cloud" || tier === "persons") {
+    await (tier === "cloud" ? tierCloud() : tierPersons())
     if (failures > 0) fatal(`${failures} check(s) failed`)
     log("OK — all checks passed")
     return

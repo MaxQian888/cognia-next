@@ -2,11 +2,9 @@
 import type {
   AcpPermissionMode,
   ExternalAgentConfig,
-  ExternalAgentExecutionOptions,
   ExternalAgentResult,
 } from "@/types/agent/external-agent"
 import type { LifecycleAgentConfig } from "@/lib/ai/agent/external/lifecycle/credentials"
-import type { PluginWorkspaceHandle } from "../workspace/acquire"
 import { assertOwnedBotWorkspace, digestBotArtifact } from "../workspace/bot-run"
 import { getBotRunStep, completeBotRunStep } from "@/lib/db/bot-run-steps"
 import { pluginHasApiPermission } from "./permission-api"
@@ -24,29 +22,16 @@ import {
   remainingBotRunBudgetUsd,
   tokenAllowanceForUsd,
 } from "@/lib/bot/runtime/run-cost"
-
-export type PluginBotExternalAgentPermissionMode = "acceptEdits" | "bypassPermissions"
-export type PluginExternalAgentOptions = Omit<ExternalAgentExecutionOptions, "permissionMode"> & {
-  workspace?: PluginWorkspaceHandle
-  timeoutMs?: number
-  /** Stable step identity; use a new id for a deliberately subsequent turn. */
-  invocationId?: string
-} & (
-    | { runId: string; permissionMode?: PluginBotExternalAgentPermissionMode }
-    | { runId?: undefined; permissionMode?: ExternalAgentExecutionOptions["permissionMode"] }
-  )
-export interface PluginExternalAgentResult extends ExternalAgentResult {
-  agentId: string
-  model?: string
-  status: "completed" | "failed" | "cancelled" | "recovery_required"
-  text: string
-  usage?: ExternalAgentResult["tokenUsage"]
-  /**
-   * What this invocation cost in USD, recorded in the run's cost ledger.
-   * `null` when it could not be priced; absent outside Bot runs.
-   */
-  costUsd?: number | null
-}
+import type {
+  PluginBotExternalAgentPermissionMode,
+  PluginExternalAgentOptions,
+  PluginExternalAgentResult,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agent-api"
+export type {
+  PluginBotExternalAgentPermissionMode,
+  PluginExternalAgentOptions,
+  PluginExternalAgentResult,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agent-api"
 
 const SESSION_STEP = "__host:external-agent"
 const activeBotRuns = new Set<string>()
@@ -68,10 +53,9 @@ type ExternalAgentManagerInstance = ReturnType<
  * Admit one plugin-requested, non-Bot external run (ADR-0216 decision 3).
  *
  * A plugin holding `agent:dispatch-external` used to be able to start any
- * preset or live agent in any permission mode, with the master switch off and
- * past a config the lifecycle service would refuse to connect. Now:
+ * preset or live agent in any permission mode, including a config the
+ * lifecycle service would refuse to connect. Now:
  *
- *  - the global master switch applies, as it does to every other surface;
  *  - a configured agent must be enabled and pass the lifecycle readiness
  *    verdict, and is registered through the lifecycle service so the launch
  *    carries that config's own keyring credentials;
@@ -103,8 +87,6 @@ async function admitPluginExternalRun(
     import("@/lib/ai/agent/external/policy/permission-cascade"),
   ])
   const state = useExternalAgentStore.getState()
-  if (!state.enabled)
-    throw new Error("agent.runExternalAgent: external agents are turned off in Settings")
   const lifecycle = await getExternalAgentLifecycleService()
   const clamp = (ceiling: AcpPermissionMode): AcpPermissionMode =>
     deriveExternalSessionPermission(

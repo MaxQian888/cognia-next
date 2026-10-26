@@ -12,32 +12,18 @@
  */
 
 import { nanoid } from "nanoid"
-import type {
-  PluginWebviewHandle,
-  PluginWebviewMessage,
-  ResolvedPluginWebview,
-} from "@/types/plugin/plugin-webview"
+import type { PluginWebviewMessage, ResolvedPluginWebview } from "@/types/plugin/plugin-webview"
 import { wrapWebviewHtml } from "@/lib/plugin/security/webview-csp"
 import {
   registerWebview,
   postMessageToWebview,
   onWebviewMessage,
 } from "@/lib/plugin/registries/webview-registry"
-
-export interface CreateWebviewInput {
-  /** Local id (namespaced to the plugin). Auto-generated when omitted. */
-  id?: string
-  /** Container (B1) local id this webview mounts into. */
-  containerId: string
-  /** Raw HTML body (wrapped with CSP + polyfill before serving). */
-  html: string
-  title?: string
-  when?: string
-}
-
-export interface PluginWebviewAPI {
-  create(input: CreateWebviewInput): PluginWebviewHandle
-}
+import type { PluginWebviewAPI } from "@cognia/plugin-contract/lib/plugin/api/webview-api"
+export type {
+  CreateWebviewInput,
+  PluginWebviewAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/webview-api"
 
 /** `manifest.networkAccess` subset the CSP builder needs. */
 interface NetworkAccess {

@@ -6,17 +6,17 @@
  * voice contains the no-go list.
  */
 
-import { indexPagePrompt, moduleArticlePrompt, WIKI_SYSTEM_VOICE } from "./prompts"
+import { indexPagePrompt, moduleArticlePrompt, WIKI_SYSTEM_VOICE_PROMPT } from "./prompts"
 import type { CodeChunk, ModuleStat } from "./types"
 
-describe("WIKI_SYSTEM_VOICE", () => {
+describe("WIKI_SYSTEM_VOICE_PROMPT", () => {
   it("identifies the audience as downstream LLM coding agents", () => {
-    expect(WIKI_SYSTEM_VOICE).toMatch(/coding agents/i)
+    expect(WIKI_SYSTEM_VOICE_PROMPT.defaultBody).toMatch(/coding agents/i)
   })
 
   it("forbids meta-commentary and invented APIs", () => {
-    expect(WIKI_SYSTEM_VOICE).toMatch(/no apologies/i)
-    expect(WIKI_SYSTEM_VOICE).toMatch(/do not invent/i)
+    expect(WIKI_SYSTEM_VOICE_PROMPT.defaultBody).toMatch(/no apologies/i)
+    expect(WIKI_SYSTEM_VOICE_PROMPT.defaultBody).toMatch(/do not invent/i)
   })
 })
 

@@ -12,9 +12,8 @@
  *     connected or the user token is unrecoverably invalid.
  *   - `"cli"` — shells to the user's installed lark-cli through the existing
  *     built-in-skill exec path (`lib/skills/built-in/lark/exec-lark-cli`).
- *     Higher structural fidelity (markdown), but only available where Node's
- *     child_process exists (headless/CLI contexts); in the desktop webview it
- *     degrades to `larkCliUnavailable`.
+ *     Requests Markdown through the native desktop process bridge. Other
+ *     hosts fail closed as `larkCliUnavailable`.
  *
  * The fetcher is pure retrieval — content it returns enters the standard
  * ingest pipeline where the PII redaction stage runs BEFORE any embed/LLM
@@ -28,7 +27,7 @@ import {
   withLarkAuthedApi,
   type LarkAuthedApi,
 } from "@/lib/connectors/adapters/lark/authed-api"
-import { parseLarkDocUrl, type LarkDocRef } from "./lark-url"
+import { parseLarkDocUrl, type LarkDocRef, type LarkDocRefKind } from "./lark-url"
 
 export type LarkFetchChannel = "api" | "cli"
 
@@ -43,6 +42,7 @@ export type LarkIngestErrorCode =
   | "larkEmptyDoc"
   | "larkBrowserUnsupported"
   | "larkCliUnavailable"
+  | "larkOutputTruncated"
   | "larkNetwork"
 
 /**
@@ -120,6 +120,8 @@ interface ExecLarkCliLike {
 export interface FetchLarkDocOptions {
   /** Bound Lark adapter instance id (`cai_...`) whose credentials to use. */
   adapterId: string
+  /** Resource kind supplied by search; opaque bare tokens do not encode it. */
+  kind?: LarkDocRefKind
   /** Fetch channel; defaults to the native OpenAPI channel. */
   channel?: LarkFetchChannel
   /** Test seam — overrides the `connectorsHttpRequest` transport. */
@@ -136,7 +138,7 @@ export async function fetchLarkDocAsRawSource(
   urlOrToken: string,
   opts: FetchLarkDocOptions
 ): Promise<LarkFetchedDoc> {
-  const ref = parseLarkDocUrl(urlOrToken)
+  const ref = parseLarkDocUrl(urlOrToken, opts.kind)
   if (!ref) throw new LarkIngestError("larkInvalidUrl")
 
   if ((opts.channel ?? "api") === "cli") {
@@ -293,17 +295,20 @@ async function fetchViaCli(
   let result: Awaited<ReturnType<ExecLarkCliLike>>
   try {
     result = await exec({
-      args: ["docs", "+fetch", "--api-version", "v2", "--doc-token", ref.token],
+      args: ["docs", "+fetch", "--doc", ref.token, "--doc-format", "markdown"],
       adapterId: opts.adapterId,
     })
   } catch (err) {
-    // child_process is stubbed in the webview bundle — exec throws there.
+    // The native process bridge is unavailable on unsupported hosts.
     throw new LarkIngestError("larkCliUnavailable", {
       reason: err instanceof Error ? err.message : String(err),
     })
   }
 
   if (result.status !== "ok") {
+    if (result.reason === "output_truncated") {
+      throw new LarkIngestError("larkOutputTruncated")
+    }
     if (result.reason === "binary_not_found" || result.reason === "auth_unavailable") {
       throw new LarkIngestError("larkCliUnavailable", { reason: result.message })
     }
@@ -339,12 +344,20 @@ export function normalizeCliPayload(data: unknown): { text: string; title: strin
       string,
       unknown
     >
-    const text = firstString(nested.markdown, nested.content, nested.text, nested.raw_content) ?? ""
-    const title =
-      firstString(nested.title, (nested.document as Record<string, unknown> | undefined)?.title) ??
-      ""
-    if (text) return { text, title }
-    return { text: JSON.stringify(data, null, 2), title }
+    const document =
+      nested.document && typeof nested.document === "object"
+        ? (nested.document as Record<string, unknown>)
+        : undefined
+    const text =
+      firstString(
+        document?.content,
+        nested.markdown,
+        nested.content,
+        nested.text,
+        nested.raw_content
+      ) ?? ""
+    const title = firstString(nested.title, document?.title) ?? ""
+    return { text, title }
   }
   return { text: "", title: "" }
 }

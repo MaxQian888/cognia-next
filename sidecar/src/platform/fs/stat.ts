@@ -1,6 +1,6 @@
 // Shared filesystem stat helpers for built-in tools.
 //
-// Extracted from file-extras.mjs so the file-ops tools (and any future file
+// Extracted from tools/builtin/file-extras/index.ts so the file-ops tools (and any future file
 // tool) share one implementation instead of re-rolling try/catch stat logic.
 
 import type { Stats } from "node:fs"

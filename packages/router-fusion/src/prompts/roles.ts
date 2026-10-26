@@ -10,6 +10,8 @@
  * not user-facing strings, so they are not i18n resources.
  */
 
+import { canonicalHash } from "../util/sha256"
+
 export const ROLE_PROMPT_VERSION = "roles-1"
 
 export const ROLE_PROMPT_FILES = {
@@ -47,9 +49,76 @@ export const ROLE_PROMPTS: Record<RolePromptName, string> = {
 }
 
 /**
+ * The version an action of the user's own names to run the role text the user
+ * edited (Prompt Center, ADR-0236) instead of the shipped roles-1. It is a
+ * selector, not an identity: the host materializes it into
+ * `roles-1-custom@<digest>` before the config is compiled, so the action hash,
+ * the route decision and every replay record name the exact text the run used.
+ * The shipped text is never edited in place, and a built-in action always runs
+ * it.
+ */
+export const CUSTOM_ROLE_PROMPT_VERSION = "roles-1-custom"
+
+/** The role prompt versions an action of the user's own may select. */
+export const SELECTABLE_ROLE_PROMPT_VERSIONS: readonly string[] = [
+  ROLE_PROMPT_VERSION,
+  CUSTOM_ROLE_PROMPT_VERSION,
+]
+
+/** One complete set of role texts and the version that names it. */
+export interface RolePromptProfile {
+  version: string
+  prompts: Readonly<Record<RolePromptName, string>>
+}
+
+/** The shipped profile: roles-1, byte-equal to the vendored files. */
+export const BUILTIN_ROLE_PROFILE: RolePromptProfile = Object.freeze({
+  version: ROLE_PROMPT_VERSION,
+  prompts: ROLE_PROMPTS,
+})
+
+const MATERIALIZED_CUSTOM_VERSION = /^roles-1-custom@[0-9a-f]{16}$/
+
+/** The version a set of edited role texts materializes to: the first 16 hex of their canonical hash. */
+export function customRolePromptVersion(prompts: Readonly<Record<RolePromptName, string>>): string {
+  return `${CUSTOM_ROLE_PROMPT_VERSION}@${canonicalHash(prompts).slice(0, 16)}`
+}
+
+/** True for `roles-1-custom@<16 hex>`, the form a compiled custom action carries. */
+export function isMaterializedCustomRoleVersion(version: string): boolean {
+  return MATERIALIZED_CUSTOM_VERSION.test(version)
+}
+
+/**
+ * A frozen profile over edited role texts. Every role must be present: a run
+ * never mixes a partial edit with whatever happens to be shipped.
+ */
+export function materializeCustomRoleProfile(
+  prompts: Readonly<Record<RolePromptName, string>>
+): RolePromptProfile {
+  const copy = Object.fromEntries(
+    (Object.keys(ROLE_PROMPT_FILES) as RolePromptName[]).map((role) => {
+      const text = prompts[role]
+      if (typeof text !== "string" || text.length === 0) {
+        throw new TypeError(`custom role prompts are missing the ${role} role`)
+      }
+      return [role, text]
+    })
+  ) as Record<RolePromptName, string>
+  return Object.freeze({
+    version: customRolePromptVersion(copy),
+    prompts: Object.freeze(copy),
+  })
+}
+
+/**
  * The system prompt of one role: the common constraints first, then the role's
  * own. The order is stable so a provider's prefix cache can reuse it (CACHE-03).
+ * Without a profile it is the shipped roles-1 text.
  */
-export function systemPromptFor(role: Exclude<RolePromptName, "common">): string {
-  return `${ROLE_PROMPTS.common}\n${ROLE_PROMPTS[role]}`
+export function systemPromptFor(
+  role: Exclude<RolePromptName, "common">,
+  profile: RolePromptProfile = BUILTIN_ROLE_PROFILE
+): string {
+  return `${profile.prompts.common}\n${profile.prompts[role]}`
 }

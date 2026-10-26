@@ -126,6 +126,7 @@ async function requestSerper(
 
   const response = await serperFetch(`${SERPER_BASE_URL}${path}`, {
     method: "POST",
+    signal: options.signal,
     headers: {
       "X-API-KEY": apiKey,
       "Content-Type": "application/json",

@@ -102,6 +102,10 @@ pub use cognia_companion_security::oidc;
 /// The one long-running operation document (ADR-0175 B3).
 pub use cognia_companion_security::operations;
 pub mod paired_turn;
+pub mod person_partition;
+pub mod org_policy;
+pub use cognia_companion_security::org_credentials;
+pub use cognia_companion_security::org_agent_policy;
 mod problem_surface;
 pub use cognia_companion_bus::push;
 pub use cognia_companion_bus::push_creds;
@@ -135,6 +139,9 @@ pub mod workflow_app_api;
 pub mod workflow_app_challenge;
 /// Who may approve a repository-declared runtime environment (ADR-0182).
 pub mod workspace_access;
+pub mod host_surface_policy;
+pub mod host_surface_gate;
+pub mod host_routes;
 pub mod ws;
 pub mod ws_bridge;
 /// The Browser Companion's device socket: status hints and, for a browser

@@ -617,6 +617,9 @@ pub(crate) struct LeaseSubject<'a> {
     pub registry_id: Option<&'a str>,
 }
 
+// Production callers already hold the transaction shared with their registry
+// writes. Only fixture setup needs this standalone transaction wrapper.
+#[cfg(test)]
 pub(crate) fn ensure(
     connection: &Connection,
     namespace: &str,

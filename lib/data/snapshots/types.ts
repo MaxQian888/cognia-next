@@ -13,27 +13,10 @@
 // migration matrix to maintain here.
 
 import type { ImportMergeStrategy } from "./../types"
-
-/** Snapshot format version emitted by these modules. Independent of any
- * single store's `persist.version`; bump only when this wrapper shape
- * changes (almost never). */
-export const SNAPSHOT_FORMAT_VERSION = 1 as const
-
-export interface LocalStorageSnapshot<T = unknown> {
-  /** The Zustand persist `name` (e.g. "cognia-external-agents"). */
-  key: string
-  /** The Zustand persist `version` we read from this store. */
-  storeVersion: number
-  /** Wrapper schema version — see {@link SNAPSHOT_FORMAT_VERSION}. */
-  snapshotFormatVersion: typeof SNAPSHOT_FORMAT_VERSION
-  /** Raw envelope from `localStorage.getItem(key)` parsed as JSON. We keep
-   * `state` + `version` together so re-emitting the JSON round-trips with
-   * Zustand's expectations. */
-  raw: { state: T; version: number }
-  /** ISO-8601 timestamp of when the snapshot was captured. Debugging only —
-   * not load-bearing for replay. */
-  capturedAt: string
-}
+import type { LocalStorageSnapshot } from "@cognia/plugin-contract/lib/data/snapshots/types"
+import { SNAPSHOT_FORMAT_VERSION } from "@cognia/plugin-contract/lib/data/snapshots/types"
+export { SNAPSHOT_FORMAT_VERSION } from "@cognia/plugin-contract/lib/data/snapshots/types"
+export type { LocalStorageSnapshot } from "@cognia/plugin-contract/lib/data/snapshots/types"
 
 /** Tiny abstraction over `localStorage` so we can mock it in unit tests and
  * tolerate non-browser execution (Node-only build hosts, SSR, etc.). */

@@ -7,7 +7,7 @@
  * An IM-rate source can BLOCK an inbound-triggered AI reply for a conversation.
  */
 
-import type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
+import type { PluginImRateSourceDef } from "@cognia/plugin-contract/types/plugin/plugin-im-rate-source"
 
 export function defineImRateSource(def: PluginImRateSourceDef): PluginImRateSourceDef {
   return def

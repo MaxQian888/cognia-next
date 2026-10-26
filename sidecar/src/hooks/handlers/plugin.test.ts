@@ -47,7 +47,7 @@ test("emits a plugin_hook_exec frame carrying the parsed payload", async () => {
 
 test("tool_provenance in the payload reaches the plugin handler untouched", async () => {
   // The plugin-handler path parses the same serialized payload the command
-  // handlers read — provenance injected by agent-hooks.mjs rides through.
+  // handlers read — provenance injected by agent-hooks.ts rides through.
   const h = harness({ result: {} })
   await runPluginHookHandler(
     { type: "plugin", pluginId: "p1", hookId: "onPreToolUse" },

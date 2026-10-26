@@ -15,7 +15,35 @@ import {
   summaryVersion,
   makeSummaryMessage,
   makeOpticalMessage,
+  type ConversationMessage,
 } from "./compaction.ts"
+
+test("token-tail selection retains short recent exchanges and keeps tool pairs whole", () => {
+  const conversation: ConversationMessage[] = [
+    { role: "user", content: "original task" },
+    { role: "assistant", content: "old material ".repeat(1000) },
+    ...Array.from({ length: 12 }, (_, i) => ({
+      role: "assistant" as const,
+      content: `recent ${i}`,
+    })),
+    {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "r", toolName: "read", input: {} }],
+    },
+    {
+      role: "tool",
+      content: [
+        { type: "tool-result", toolCallId: "r", output: { type: "text", value: "last finding" } },
+      ],
+    },
+  ]
+  const plan = planCompaction({ conversation, keepRecentTokens: 100 })!
+  assert.ok(plan.middle.length > 0)
+  assert.ok(plan.tail.length > 6)
+  assert.match(JSON.stringify(plan.tail), /recent 0/)
+  assert.match(JSON.stringify(plan.tail), /tool-call/)
+  assert.match(JSON.stringify(plan.tail), /last finding/)
+})
 
 test("AUTO_COMPACT_FRACTION mirrors the renderer constant", () => {
   assert.equal(AUTO_COMPACT_FRACTION, 0.835)

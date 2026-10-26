@@ -141,3 +141,8 @@ test("namespacedA2UIToolNames prefixes every tool", () => {
     TOOL_NAMES.map((n) => `mcp__a2ui-bridge__${n}`)
   )
 })
+
+test("component patches advertise legacy upsert semantics", () => {
+  assert.match(TOOL_DESCRIPTIONS.a2ui_update_components, /Upsert components by id/)
+  assert.match(TOOL_DESCRIPTIONS.a2ui_update_components, /omitted components remain/)
+})

@@ -32,18 +32,9 @@ jest.mock("@/lib/platform/detect", () => ({ isTauri: jest.fn(() => true) }))
 
 import { isTauri } from "@/lib/platform/detect"
 import { SpriteV2ImportError } from "@/lib/pet/sprite-v2/import"
-import { buildHatchPetPrompt, PetSpritePackManager } from "./pet-sprite-pack-manager"
+import { PetSpritePackManager } from "./pet-sprite-pack-manager"
 
 const mockIsTauri = jest.mocked(isTauri)
-
-const promptCopy = {
-  defaultConcept: "a friendly custom pet",
-  instruction: "Use the $hatch-pet skill.",
-  concept: (brief: string) => `Pet concept: ${brief}`,
-  qa: "Complete QA.",
-  outputFiles: "Report output files.",
-  scope: "Do not modify Cognia.",
-}
 
 describe("PetSpritePackManager", () => {
   beforeEach(() => {
@@ -58,12 +49,6 @@ describe("PetSpritePackManager", () => {
       configurable: true,
       value: jest.fn().mockResolvedValue({ width: 1536, height: 2288, close: jest.fn() }),
     })
-  })
-
-  it("builds an explicit hatch-pet task without sending it yet", () => {
-    expect(buildHatchPetPrompt("a tiny clay fox", promptCopy)).toContain("$hatch-pet")
-    expect(buildHatchPetPrompt("a tiny clay fox", promptCopy)).toContain("a tiny clay fox")
-    expect(buildHatchPetPrompt(" ", promptCopy)).toContain("custom pet")
   })
 
   it("validates and installs a selected manifest plus atlas, then activates it", async () => {

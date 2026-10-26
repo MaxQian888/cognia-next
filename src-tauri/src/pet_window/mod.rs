@@ -522,6 +522,14 @@ fn open_pet_window_claimed<R: Runtime>(
 
     let window =
         tauri::WebviewWindowBuilder::new(app, "pet", tauri::WebviewUrl::App("pet-overlay".into()))
+            .on_page_load(move |webview, payload| {
+                if should_arm_pet_reveal(
+                    webview.label(),
+                    payload.event() == tauri::webview::PageLoadEvent::Finished,
+                ) {
+                    arm_pet_reveal_fallback(webview.app_handle(), generation);
+                }
+            })
             // Transparency comes ONLY from `transparent(true)` (Windows: DWM +
             // WebView2 composition; macOS: needs the `macos-private-api` feature,
             // enabled via `macOSPrivateApi`). Never call `.background_color(...)`
@@ -667,6 +675,17 @@ fn open_pet_window_claimed<R: Runtime>(
     // The re-show branch above reveals through the native panel owner because an
     // existing window has already painted, so it can never flash.
 
+    emit_pet_state(app, true, opts.click_through);
+    Ok(())
+}
+
+fn should_arm_pet_reveal(label: &str, document_finished: bool) -> bool {
+    label == "pet" && document_finished
+}
+
+// Cold dev compilation is navigation time, not a missing renderer acknowledgement.
+// Match the main window: start the paint grace only after document load finishes.
+fn arm_pet_reveal_fallback<R: Runtime>(app: &AppHandle<R>, generation: u64) {
     // Safety net (mirrors the main window's net in `lib.rs`). The frontend
     // reveal (`lib/pet/reveal.ts`) is best-effort and error-swallowing — if it
     // throws (JS crash, hung hydrate), the pet would stay invisible forever with
@@ -690,7 +709,7 @@ fn open_pet_window_claimed<R: Runtime>(
             if let Some(window) = handle.get_webview_window("pet") {
                 if !window.is_visible().unwrap_or(true) {
                     log::warn!(
-                        "pet window still hidden 8s after open; force-showing (renderer never signaled first paint)"
+                        "pet window still hidden 8s after document load; force-showing (renderer never signaled first paint)"
                     );
                     if macos_panel::reveal_pet_panel(
                         &window,
@@ -706,9 +725,6 @@ fn open_pet_window_claimed<R: Runtime>(
             }
         });
     }
-
-    emit_pet_state(app, true, opts.click_through);
-    Ok(())
 }
 
 /// Claim the sprite lifecycle and open. When a builder, re-show or
@@ -1166,6 +1182,13 @@ pub async fn show_main_window(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reveal_grace_starts_after_the_pet_document_finishes_loading() {
+        assert!(!should_arm_pet_reveal("pet", false));
+        assert!(!should_arm_pet_reveal("main", true));
+        assert!(should_arm_pet_reveal("pet", true));
+    }
 
     const WORK_AREA: (f64, f64, f64, f64) = (0.0, 0.0, 1920.0, 1080.0);
     const WIN: (f64, f64) = (280.0, 320.0);
@@ -1735,6 +1758,12 @@ mod tests {
         let capability = include_str!("../../capabilities/pet.json");
         let permission = include_str!("../../permissions/pet-app-commands.toml");
         assert!(capability.contains("\"allow-pet-app-commands\""));
+        // The notification plugin queries this on every webview at injection.
+        // Allow the read without granting notification prompts or delivery.
+        assert!(capability.contains("\"notification:allow-is-permission-granted\""));
+        assert!(!capability.contains("\"notification:default\""));
+        assert!(!capability.contains("\"notification:allow-request-permission\""));
+        assert!(!capability.contains("\"notification:allow-notify\""));
         assert!(permission.contains("\"reveal_pet_window\""));
         assert!(!permission.contains("\"destroy_pet_window\""));
     }

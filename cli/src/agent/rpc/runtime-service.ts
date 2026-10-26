@@ -1682,7 +1682,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     const resolvedComposition = definition
       ? await resolveTurnComposition({
           selection: definition.composition as AgentCompositionSelectionV1,
-          systemPrompt: config.systemPrompt,
+          prompt: { systemPrompt: config.systemPrompt },
           tools: definition.toolRefs.map((tool) => ({
             name: tool.name,
             schema: tool.inputSchema,

@@ -42,14 +42,45 @@ const definition: SubscriptionProviderDefinition = {
   },
 }
 
-beforeEach(() => {
-  jest.mocked(useAccounts).mockReturnValue({
-    accounts: [{ id: "acc", label: "Work plan" }],
-    activeAccountId: "acc",
+function accountsResult(
+  overrides: Partial<ReturnType<typeof useAccounts>> = {}
+): ReturnType<typeof useAccounts> {
+  return {
+    accounts: [],
+    activeAccountId: null,
     loading: false,
     error: null,
+    pendingAction: null,
+    pendingAccountId: null,
     reload: jest.fn(async () => {}),
-  } as ReturnType<typeof useAccounts>)
+    setActive: jest.fn(async () => {}),
+    rename: jest.fn(async () => {}),
+    remove: jest.fn(async () => {}),
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  jest.mocked(useAccounts).mockReturnValue(
+    accountsResult({
+      accounts: [
+        {
+          id: "acc",
+          label: "Work plan",
+          provider: definition.id,
+          variant: "api-key",
+          expiresAtMs: 0,
+          createdAtMs: 0,
+          lastUsedAtMs: 0,
+          authMode: "api-key",
+          credentialSource: "managed",
+          health: "ready",
+          isExternal: false,
+        },
+      ],
+      activeAccountId: "acc",
+    })
+  )
   jest.mocked(isTauri).mockReturnValue(true)
 })
 
@@ -103,13 +134,7 @@ it.each([
     "No active account. Add an account or select one in account management.",
   ],
 ])("handles account status (%s)", (state, text) => {
-  jest.mocked(useAccounts).mockReturnValue({
-    accounts: [],
-    activeAccountId: null,
-    loading: false,
-    error: null,
-    ...state,
-  } as ReturnType<typeof useAccounts>)
+  jest.mocked(useAccounts).mockReturnValue(accountsResult(state))
   render(<ManagedProviderPanel provider={definition} onManageAccounts={jest.fn()} />)
   expect(screen.getByText(text)).toBeInTheDocument()
 })

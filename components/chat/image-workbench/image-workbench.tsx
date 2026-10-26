@@ -14,7 +14,6 @@
  * crop rect, the unsent prompt, the brush settings.
  */
 
-import { Surface } from "@/components/surface/surface"
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -47,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { useImageWorkbench, type ImageWorkbenchSource } from "@/hooks/chat/use-image-workbench"
 import type { CropRect, ImageAdjustments, ImageEncodeFormat, MaskStroke } from "@/lib/images"
 import { IMAGE_ENCODE_FORMATS, NEUTRAL_ADJUSTMENTS } from "@/lib/images"
@@ -116,7 +116,11 @@ export function ImageWorkbench({
     hardness: number
     mode: "add" | "subtract"
   }>({ radius: 32, hardness: 0.8, mode: "add" })
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  // Discarding unsaved edits is a blocking decision layered over the
+  // workbench: it takes Escape and the Android back press for itself (so a
+  // second press keeps the edits rather than dropping them) and hands focus
+  // back to whatever asked to close.
+  const { confirm, dialog: discardDialog } = useConfirmDialog()
 
   const stageMode: StageMode = tool === "ai" && regionMode ? "brush" : TOOL_MODE[tool]
 
@@ -169,14 +173,21 @@ export function ImageWorkbench({
     [title, workbench.exportImage]
   )
 
-  const requestClose = useCallback(() => {
-    if (workbench.isDirty && !confirmingDiscard) {
-      setConfirmingDiscard(true)
+  const requestClose = useCallback(async () => {
+    if (!workbench.isDirty) {
+      onOpenChange(false)
       return
     }
-    setConfirmingDiscard(false)
-    onOpenChange(false)
-  }, [confirmingDiscard, onOpenChange, workbench.isDirty])
+    const discard = await confirm({
+      title: t("discard.title"),
+      description: t("discard.body"),
+      confirmLabel: t("discard.confirm"),
+      cancelLabel: t("discard.cancel"),
+      destructive: true,
+      testid: "workbench-discard",
+    })
+    if (discard) onOpenChange(false)
+  }, [confirm, onOpenChange, t, workbench.isDirty])
 
   const saveDisabledReason = useMemo(() => {
     if (saveBlockedReason === "streaming") return t("save.blockedStreaming")
@@ -186,7 +197,7 @@ export function ImageWorkbench({
   }, [saveBlockedReason, t, workbench.blocked])
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : requestClose())}>
+    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : void requestClose())}>
       <DialogContent
         className="h-[min(94dvh,940px)] w-[min(96vw,1500px)] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border-0 bg-black p-0 shadow-(--elevation-3)"
         showCloseButton={false}
@@ -312,7 +323,7 @@ export function ImageWorkbench({
             variant="ghost"
             size="icon"
             className="size-8 shrink-0 text-white hover:bg-white/15 hover:text-white pointer-coarse:size-11"
-            onClick={requestClose}
+            onClick={() => void requestClose()}
             aria-label={t("close")}
             tooltip={t("close")}
           >
@@ -493,27 +504,9 @@ export function ImageWorkbench({
                 {saveDisabledReason}
               </p>
             ) : null}
-
-            {confirmingDiscard ? (
-              <Surface
-                role="alertdialog"
-                aria-label={t("discard.title")}
-                data-testid="workbench-discard"
-                className="flex flex-col gap-2 rounded-lg border border-white/15 bg-white/5 p-3"
-              >
-                <p className="text-xs text-white/80">{t("discard.body")}</p>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="destructive" onClick={() => onOpenChange(false)}>
-                    {t("discard.confirm")}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setConfirmingDiscard(false)}>
-                    {t("discard.cancel")}
-                  </Button>
-                </div>
-              </Surface>
-            ) : null}
           </aside>
         </div>
+        {discardDialog}
       </DialogContent>
     </Dialog>
   )

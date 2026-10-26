@@ -208,7 +208,7 @@
       "file": "packages/companion-client/src/session.ts",
       "kind": "fetch",
       "reason": "companion-pinned",
-      "note": "The default for an injectable fetchImpl in a standalone package the App, CLI and browser extension all share, so it cannot import lib/network. Its one caller, browser-extension/src/lib/client.ts, runs in Chrome, where there is no desktop proxy to honour."
+      "note": "The default for an injectable fetchImpl in a standalone package the App, CLI and browser extension all share, so it cannot import lib/network. Its browser caller is maintained in cognia-labs/cognia-browser-extension and runs in Chrome, where there is no desktop proxy to honour."
     },
     {
       "file": "packages/logging/src/transports/remote-transport.ts",

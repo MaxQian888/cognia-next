@@ -13,7 +13,7 @@
  * onto axis values instead of minting four near-identical presets.
  */
 
-import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import type {
   AgentPresetDefinitionV1,

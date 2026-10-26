@@ -80,6 +80,11 @@ jest.mock("@/components/account/account-manage-dialog", () => ({
 jest.mock("@/components/account/runtime-target-menu-section", () => ({
   RuntimeTargetMenuSection: () => <div data-testid="runtime-targets" />,
 }))
+jest.mock("@/components/shell/sidebar-org-section", () => ({
+  SidebarOrgSection: ({ accountId, open }: { accountId: string; open: boolean }) => (
+    <div data-testid="org-section" data-account={accountId} data-open={String(open)} />
+  ),
+}))
 
 import { SidebarUserCard } from "./sidebar-user-card"
 import { act } from "@testing-library/react"
@@ -131,6 +136,19 @@ describe("SidebarUserCard", () => {
     identity = { displayName: "Ada", email: null, standing: "org", usagePercent: null }
     render(<SidebarUserCard />)
     expect(screen.getByTestId("sidebar-user-standing")).toHaveTextContent("standingOrg")
+  })
+
+  it("offers the organization block only to a profile bound to an org", async () => {
+    await open()
+    expect(screen.queryByTestId("org-section")).toBeNull()
+  })
+
+  it("hands the organization block the active profile while the menu is open", async () => {
+    identity = { displayName: "Ada", email: null, standing: "org", usagePercent: null }
+    await open()
+    const section = screen.getByTestId("org-section")
+    expect(section).toHaveAttribute("data-account", "a-1")
+    expect(section).toHaveAttribute("data-open", "true")
   })
 
   it("reads the identity only while the menu is open", async () => {

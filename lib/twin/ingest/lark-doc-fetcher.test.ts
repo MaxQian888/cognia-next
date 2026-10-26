@@ -83,6 +83,22 @@ async function expectCode(p: Promise<unknown>, code: string) {
 }
 
 describe("fetchLarkDocAsRawSource — api channel", () => {
+  it("fetches opaque document ids with their preserved search-result kind", async () => {
+    const token = "Z1FjAbCdEfGh1234567890"
+    const http = makeHttp([
+      ["/raw_content", ok({ content: "search result body" })],
+      ["/documents/", ok({ document: { title: "Search hit" } })],
+    ])
+    await expect(
+      fetchLarkDocAsRawSource(token, { adapterId: ADAPTER, kind: "docx", httpImpl: http })
+    ).resolves.toMatchObject({ docToken: token, objType: "docx", text: "search result body" })
+    expect(http).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: `https://open.feishu.cn/open-apis/docx/v1/documents/${token}/raw_content`,
+      })
+    )
+  })
+
   it("rejects unparseable input", async () => {
     await expectCode(
       fetchLarkDocAsRawSource("https://example.com/post", { adapterId: ADAPTER }),
@@ -427,7 +443,7 @@ describe("fetchLarkDocAsRawSource — cli channel", () => {
     expect(exec).toHaveBeenCalledWith(
       expect.objectContaining({
         adapterId: ADAPTER,
-        args: expect.arrayContaining(["docs", "+fetch", "--doc-token", "doxcnAbCdEfGh1234567890"]),
+        args: ["docs", "+fetch", "--doc", "doxcnAbCdEfGh1234567890", "--doc-format", "markdown"],
       })
     )
     expect(doc).toMatchObject({ text: "# Title\n\nBody", title: "Doc via CLI", channel: "cli" })
@@ -467,6 +483,33 @@ describe("fetchLarkDocAsRawSource — cli channel", () => {
 })
 
 describe("normalizeCliPayload", () => {
+  it("extracts document content from the CLI JSON envelope", () => {
+    expect(
+      normalizeCliPayload({
+        ok: true,
+        data: {
+          document: {
+            document_id: "doc",
+            title: "Nested title",
+            content: "# Body",
+          },
+        },
+      })
+    ).toEqual({ text: "# Body", title: "Nested title" })
+    expect(normalizeCliPayload({ document: { content: "Body", title: "Title" } })).toEqual({
+      text: "Body",
+      title: "Title",
+    })
+  })
+
+  it("does not turn empty document envelopes or unknown objects into source text", () => {
+    expect(normalizeCliPayload({ data: { document: { content: "", revision_id: 3 } } })).toEqual({
+      text: "",
+      title: "",
+    })
+    expect(normalizeCliPayload({ document: null })).toEqual({ text: "", title: "" })
+  })
+
   it("passes raw strings through", () => {
     expect(normalizeCliPayload("plain md")).toEqual({ text: "plain md", title: "" })
   })
@@ -474,8 +517,8 @@ describe("normalizeCliPayload", () => {
     expect(normalizeCliPayload({ content: "c", title: "t" })).toEqual({ text: "c", title: "t" })
     expect(normalizeCliPayload({ data: { text: "x" } })).toEqual({ text: "x", title: "" })
   })
-  it("stringifies unknown objects and handles null", () => {
-    expect(normalizeCliPayload({ foo: 1 }).text).toContain('"foo": 1')
+  it("ignores unknown objects and handles null", () => {
+    expect(normalizeCliPayload({ foo: 1 }).text).toBe("")
     expect(normalizeCliPayload(null)).toEqual({ text: "", title: "" })
   })
 })
@@ -498,3 +541,48 @@ describe("mapLarkError", () => {
     expect(mapLarkError("weird").code).toBe("larkNetwork")
   })
 })
+
+it("reports CLI output truncation without creating a partial source", async () => {
+  const exec = async () => ({
+    status: "error" as const,
+    reason: "output_truncated",
+    message: "Output exceeded limit",
+  })
+  await expect(
+    fetchLarkDocAsRawSource(DOCX_URL, { adapterId: ADAPTER, channel: "cli", execImpl: exec })
+  ).rejects.toMatchObject({ code: "larkOutputTruncated" })
+})
+
+it.each(["# Partial Markdown", '{"document":{"content":"partial'])(
+  "rejects real executor truncation before ingestion: %s",
+  async (stdout) => {
+    const { execLarkCli, __setLarkCliBinaryForTests } =
+      await import("@/lib/skills/built-in/lark/exec-lark-cli")
+    const { __setLarkCliProcessRunnerForTests } = await import("@/lib/skills/built-in/lark/process")
+    const run = jest.fn(async () => ({ stdout, stderr: "", exitCode: 0, truncated: true }))
+    __setLarkCliBinaryForTests("/fake/lark-cli")
+    __setLarkCliProcessRunnerForTests(run)
+    try {
+      await expect(
+        fetchLarkDocAsRawSource(DOCX_URL, {
+          adapterId: ADAPTER,
+          channel: "cli",
+          execImpl: (input) =>
+            execLarkCli({
+              ...input,
+              __authOverride: {
+                ok: true,
+                adapterId: ADAPTER,
+                identity: "user",
+                env: {},
+              },
+            }),
+        })
+      ).rejects.toMatchObject({ code: "larkOutputTruncated" })
+      expect(run).toHaveBeenCalledTimes(1)
+    } finally {
+      __setLarkCliProcessRunnerForTests(null)
+      __setLarkCliBinaryForTests(null)
+    }
+  }
+)

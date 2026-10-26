@@ -286,6 +286,8 @@ export interface ExternalRunManager extends Partial<
   Pick<
     ExternalAgentManager,
     | "getSession"
+    | "getNativeSubagents"
+    | "changeNativeSubagentModel"
     | "getSessionOperationCapabilities"
     | "refreshSessionCommands"
     | "executeSessionCommand"
@@ -1093,6 +1095,23 @@ const forkTargetSchema = z
 const sessionOperationSchema = z.discriminatedUnion("operation", [
   z
     .object({
+      operation: z.literal("nativeSubagentModel"),
+      change: z
+        .object({
+          operationId: z.string().min(1).max(128),
+          nativeChildThreadId: z.string().min(1).max(256),
+          expectedProcessGeneration: z.number().int().nonnegative(),
+          expectedPlanFingerprint: z.string().max(256).optional(),
+          scope: z.enum(["current-turn", "future-turns"]),
+          expectedTurnId: z.string().min(1).max(256).optional(),
+          modelId: z.string().min(1).max(256),
+          reasoningEffort: z.string().min(1).max(32).optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("watch"),
       watchId: z.string().min(1),
       purpose: z.enum(["transcript", "presentation", "shell"]).optional(),
@@ -1109,6 +1128,7 @@ const sessionOperationSchema = z.discriminatedUnion("operation", [
         "snapshot",
         "commands",
         "runtimeState",
+        "nativeSubagents",
         "entries",
         "tree",
         "exportHtml",
@@ -1191,6 +1211,7 @@ export interface RemoteSessionRequest extends RemoteSessionTarget {
   callerDeviceId?: string
 }
 export const REMOTE_SESSION_READS = new Set<RemoteSessionOperation["operation"]>([
+  "nativeSubagents",
   "capabilities",
   "snapshot",
   "commands",
@@ -1279,6 +1300,12 @@ export async function executeRemoteSessionOperation(
     }
     let value: unknown
     switch (action.operation) {
+      case "nativeSubagents":
+        value = manager.getNativeSubagents ? await call("getNativeSubagents") : undefined
+        break
+      case "nativeSubagentModel":
+        value = await call("changeNativeSubagentModel", action.change)
+        break
       case "capabilities":
         value = await call("getSessionOperationCapabilities")
         break

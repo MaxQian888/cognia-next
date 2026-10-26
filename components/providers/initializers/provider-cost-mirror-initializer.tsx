@@ -8,20 +8,15 @@
 //     in the effect body rather than after an await.
 //  2. Hydrate that mirror from `providerCostDaily` so the routing engine's
 //     dailyCostBudget check survives reloads.
-//  3. Reconcile the projection once per schema generation (ADR-0165), then
-//     prune usage/cost rows older than 90 days.
+//  3. Reconcile the projection once per schema generation (ADR-0165).
+//     Rolling usage/cost retention belongs to the central daily sweep.
 //
 // Best-effort throughout: a failed hydration leaves the mirror at zero and
 // budgets degrade to advisory-from-now. Boot is never blocked.
 
 import { useEffect, useRef } from "react"
 
-import {
-  getTodaysCostByProvider,
-  localDayString,
-  pruneProviderCostOlderThan,
-} from "@/lib/db/provider-cost-daily"
-import { pruneSessionUsageOlderThan } from "@/lib/db/session-usage"
+import { getTodaysCostByProvider, localDayString } from "@/lib/db/provider-cost-daily"
 import {
   rebuildProviderCostDaily,
   setBudgetMirrorSink,
@@ -98,8 +93,6 @@ export function ProviderCostMirrorInitializer() {
       } catch {
         // Mirror stays at zero, so budgets stay advisory until the next commit.
       }
-      void pruneProviderCostOlderThan(COST_RETENTION_DAYS).catch(() => {})
-      void pruneSessionUsageOlderThan(COST_RETENTION_DAYS).catch(() => {})
     })()
 
     return disposeSink

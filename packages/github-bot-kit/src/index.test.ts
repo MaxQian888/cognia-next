@@ -12,6 +12,7 @@ it("exports the kit's public surface from one entry", () => {
     "GithubRequestError",
     "parseRepository",
     "groupReviewThreads",
+    "publishGithubReview",
     "sanitizeControlChars",
   ]) {
     expect(kit).toHaveProperty(name)

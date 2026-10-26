@@ -95,6 +95,12 @@ export interface CompressionSettings {
   compressionRatio: number
   /** Model configuration for summarization */
   compressionModel: CompressionModelConfig
+  /** Optional retained research state limit; absent adapts to the selected windows. */
+  checkpointTokenBudget?: number
+  /** Optional complete input target after compaction, including prompt/tool overhead. */
+  postCompactionTokenBudget?: number
+  /** Optional background preparation override; small contexts default to synchronous compaction. */
+  backgroundSummarization?: boolean
   /** Show notification when compression is triggered */
   showCompressionNotification: boolean
   /** Allow user to undo/restore compressed messages */
@@ -105,7 +111,7 @@ export interface CompressionSettings {
   useAISummarization: boolean
   /** Preserve tool call metadata (name, args, status) when compressing tool results */
   preserveToolCallMetadata: boolean
-  /** Maximum tokens for individual tool call results before truncation */
+  /** Maximum tokens for individual tool call results before truncation; 0 disables clipping. */
   maxToolResultTokens: number
   /** Number of messages per chunk for recursive compression */
   recursiveChunkSize: number
@@ -316,15 +322,14 @@ export const DEFAULT_COMPRESSION_SETTINGS: CompressionSettings = {
   preserveRecentMessages: 6, // mirrors COMPACT_KEEP_RECENT_MESSAGES in the sidecar
   preserveSystemMessages: true,
   compressionRatio: 0.3, // Target 30% of original size
-  compressionModel: {
-    maxSummaryTokens: 500,
-  },
+  // Absence means adaptive. A persisted numeric value remains an explicit limit.
+  compressionModel: {},
   showCompressionNotification: true,
   enableUndo: true,
   importanceThreshold: 0.4,
   useAISummarization: true,
   preserveToolCallMetadata: true,
-  maxToolResultTokens: 500,
+  maxToolResultTokens: 0,
   recursiveChunkSize: 20,
   retainedThreshold: 40, // Compress down to 40% — creates a buffer below the trigger
   prefixStabilityMode: true, // Enable by default for cache-friendly compression

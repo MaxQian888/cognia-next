@@ -64,7 +64,7 @@ it("syncs this machine's host for the unlocked account", () => {
   expect(createFileShareHostSync).toHaveBeenCalledTimes(1)
   const deps = createFileShareHostSync.mock.calls[0]![0]
   expect(deps.target).toEqual({ hostId: "local" })
-  expect(deps.accountId()).toBe("acct-1")
+  expect(deps.localAccountId()).toBe("acct-1")
   expect(sync.start).toHaveBeenCalledTimes(1)
 })
 
@@ -111,7 +111,7 @@ it("stops and unsubscribes on unmount, and restarts for another account", () => 
   rerender(<FileShareHostSyncInitializer />)
   expect(stop).toHaveBeenCalledTimes(1)
   expect(createFileShareHostSync).toHaveBeenCalledTimes(2)
-  expect(createFileShareHostSync.mock.calls[1]![0].accountId()).toBe("acct-2")
+  expect(createFileShareHostSync.mock.calls[1]![0].localAccountId()).toBe("acct-2")
   unmount()
   expect(stop).toHaveBeenCalledTimes(2)
   expect(settingsStore.size()).toBe(0)

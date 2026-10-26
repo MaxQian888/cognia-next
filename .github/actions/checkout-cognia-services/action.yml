@@ -1,0 +1,37 @@
+name: Check out the pinned cognia-services
+description: >
+  Check out cognia-labs/cognia-services at the revision pinned in
+  integrations/cognia-services.json — the same revision the app's Cargo and
+  pnpm dependencies on its contracts resolve to.
+
+inputs:
+  path:
+    description: Where to check it out, relative to the workspace
+    default: .cache/cognia-services
+
+outputs:
+  revision:
+    description: The pinned revision
+    value: ${{ steps.pin.outputs.revision }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the pinned revision
+      id: pin
+      shell: bash
+      run: |
+        node --input-type=module <<'NODE'
+        import { appendFileSync } from "node:fs"
+        import { readPin } from "./scripts/ci/check-cognia-services.mjs"
+        const { revision } = await readPin(process.cwd())
+        appendFileSync(process.env.GITHUB_OUTPUT, `revision=${revision}\n`)
+        NODE
+
+    - name: Checkout cognia-services
+      uses: actions/checkout@v7
+      with:
+        repository: cognia-labs/cognia-services
+        ref: ${{ steps.pin.outputs.revision }}
+        path: ${{ inputs.path }}
+        persist-credentials: false

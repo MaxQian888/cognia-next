@@ -6,5 +6,11 @@
   "setupToolsOff": "Web tools are off — enable them in Settings → Tools",
   "goToSettings": "Open settings",
   "tooltipOff": "Web search off",
-  "tooltipOn": "Web search on — using {provider}"
+  "tooltipOn": "Web search on — using {provider}",
+  "operationRoutes": "Search: {search}; fetch: {fetch}",
+  "route": {
+    "native": "Native",
+    "cognia": "Cognia",
+    "none": "Unavailable"
+  }
 }

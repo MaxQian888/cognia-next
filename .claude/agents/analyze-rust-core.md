@@ -8,9 +8,9 @@ You analyze the Rust/Tauri 2 backend of cognia-next. Focus on:
 
 ## Scope
 
-- `src-tauri/src/` — All Rust modules: axum HTTP server, scheduler, automation (Computer Use), OCR backends, vector store, MCP server, connectors, workflow engine, terminal, tray, plugins, subscription, twin, sandbox, etc.
+- `crates/` — Workspace crates, where backend logic lives (layers in `scripts/gates/rust-architecture.json`, ADR-0196): automation, OCR, vector store, MCP server, connectors, scheduling/workflows, terminal, plugin runtime, sandbox, etc.
+- `src-tauri/src/` — Desktop app assembly only: `lib.rs`, `startup/`, window/tray/webview code, `AppHandle` adapters
 - `src-tauri/Cargo.toml` — Dependency graph, feature flags (ocr-\*), binary targets
-- `crates/` — Workspace crates (sandbox-runner, plugin templates, CLI)
 - `src-tauri/src/lib.rs`, `main.rs`, `commands.rs` — Core entry points
 
 ## Output Format
@@ -34,6 +34,6 @@ For each area, report:
 
 ## Commands
 
-- Count .rs files: `Get-ChildItem -Recurse -Filter "*.rs" | Measure-Object`
+- Count .rs files: `rg --files -g "*.rs" | wc -l`
 - Find pub fns: `rg "pub (async )?fn " --count`
 - Check Cargo features: read Cargo.toml `[features]` section

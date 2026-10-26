@@ -15,6 +15,7 @@ pub mod credential_window;
 // region capture never mix two coordinate spaces.
 pub mod desktop_space;
 pub mod input_monitoring;
+pub mod pointer;
 // ADR-0020 W2 — keymap is consumed by the macOS / Linux backends (and
 // by tests on every platform). Gating it out of the Windows lib build
 // avoids "never used" warnings on the Windows-only target without

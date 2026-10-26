@@ -3,7 +3,7 @@ import {
   getGroundedAnswerWithCitations,
   testGoogleAIConnection,
   supportsGoogleSearchGrounding,
-  shouldUseLegacyRetrieval,
+  GOOGLE_AI_DEFAULT_MODEL,
   addInlineCitations,
 } from "./google-ai"
 
@@ -64,17 +64,21 @@ describe("searchWithGoogleAI", () => {
     expect(r.results[0].source).toBe("wikipedia.org")
   })
 
-  it("uses legacy retrieval when configured", async () => {
-    fetchMock.mockResolvedValueOnce(
-      fakeResp({
-        json: {
-          candidates: [{ content: { parts: [{ text: "ok" }], role: "model" } }],
-        },
-      })
+  it("refuses a shut-down or non-grounding model before any request", async () => {
+    await expect(searchWithGoogleAI("q", "k", { model: "gemini-2.0-flash" })).rejects.toThrow(
+      /not a supported Search-grounding model/
     )
-    await searchWithGoogleAI("q", "k", { useLegacyRetrieval: true })
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
-    expect(body.tools[0].google_search_retrieval).toBeDefined()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("defaults to the current stable grounding model", async () => {
+    fetchMock.mockResolvedValueOnce(
+      fakeResp({ json: { candidates: [{ content: { parts: [{ text: "ok" }], role: "model" } }] } })
+    )
+    await searchWithGoogleAI("q", "k")
+    expect(fetchMock.mock.calls[0][0]).toContain(
+      `/models/${GOOGLE_AI_DEFAULT_MODEL}:generateContent`
+    )
   })
 
   it("uses google_search by default", async () => {
@@ -251,20 +255,16 @@ describe("testGoogleAIConnection", () => {
 })
 
 describe("supportsGoogleSearchGrounding", () => {
-  it("returns true for known model ids", () => {
-    expect(supportsGoogleSearchGrounding("gemini-2.0-flash")).toBe(true)
-    expect(supportsGoogleSearchGrounding("Gemini-1.5-Pro")).toBe(true)
+  it("returns true for served grounding models and dated variants", () => {
+    expect(supportsGoogleSearchGrounding("gemini-3.8-flash")).toBe(true)
+    expect(supportsGoogleSearchGrounding("models/Gemini-2.5-Pro")).toBe(true)
+    expect(supportsGoogleSearchGrounding("gemini-2.5-flash-001")).toBe(true)
   })
 
-  it("returns false for unknown models", () => {
+  it("returns false for shut-down and unknown models", () => {
+    expect(supportsGoogleSearchGrounding("gemini-2.0-flash")).toBe(false)
+    expect(supportsGoogleSearchGrounding("gemini-1.5-pro")).toBe(false)
     expect(supportsGoogleSearchGrounding("claude-opus-4")).toBe(false)
-  })
-})
-
-describe("shouldUseLegacyRetrieval", () => {
-  it("flags 1.5 family", () => {
-    expect(shouldUseLegacyRetrieval("gemini-1.5-pro")).toBe(true)
-    expect(shouldUseLegacyRetrieval("gemini-2.0-flash")).toBe(false)
   })
 })
 
@@ -327,7 +327,7 @@ describe("google-ai generation seam", () => {
 
     expect(response.answer).toBe("grounded answer")
     expect(seen).toEqual([
-      { stage: "web-search.google-ai", modelId: "gemini-2.0-flash", prompt: "q" },
+      { stage: "web-search.google-ai", modelId: GOOGLE_AI_DEFAULT_MODEL, prompt: "q" },
     ])
     expect(bodyOf(0)).toMatchObject({ generationConfig: { maxOutputTokens: 512 } })
     // Inclusive totals, like the AI SDK's: thinking counts as output, cache reads

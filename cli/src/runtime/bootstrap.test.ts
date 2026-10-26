@@ -26,7 +26,7 @@ function fakeChild(opts: { failWrite?: boolean } = {}) {
   const stdout = new PassThrough()
   const stderr = new PassThrough()
   const writes: string[] = []
-  let exitCb: ((code: number | null) => void) | null = null
+  const exitCallbacks: Array<(code: number | null) => void> = []
   let errorCb: ((err: Error) => void) | null = null
   let stdinErrorCb: ((err: Error) => void) | null = null
   const kill = jest.fn()
@@ -44,7 +44,7 @@ function fakeChild(opts: { failWrite?: boolean } = {}) {
     stderr,
     on: (e: "exit" | "error", cb: (arg: never) => void) => {
       if (e === "error") errorCb = cb as (err: Error) => void
-      else exitCb = cb as (code: number | null) => void
+      else exitCallbacks.push(cb as (code: number | null) => void)
       return child
     },
     kill,
@@ -55,7 +55,7 @@ function fakeChild(opts: { failWrite?: boolean } = {}) {
     stderr,
     writes,
     kill,
-    exit: (c = 0) => exitCb?.(c),
+    exit: (c = 0) => exitCallbacks.forEach((cb) => cb(c)),
     emitError: (err = new Error("boom")) => errorCb?.(err),
     emitStdinError: (err = new Error("EPIPE")) => stdinErrorCb?.(err),
   }
@@ -378,6 +378,70 @@ describe("bootstrapSidecar", () => {
     await boot.shutdown()
     await boot.shutdown() // idempotent
     expect(f.kill).toHaveBeenCalledTimes(1)
+  })
+
+  it("closes stdin and waits for natural sidecar cleanup before resolving shutdown", async () => {
+    const f = fakeChild()
+    const end = jest.fn()
+    const child = { ...f.child, stdin: { ...f.child.stdin, end } }
+    const boot = await bootstrapSidecar({
+      spawn: () => {
+        setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+        return child
+      },
+      scriptPath: "/x/claude-host.mjs",
+    })
+    let settled = false
+    const closing = boot.shutdown().then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(end).toHaveBeenCalledTimes(1)
+    expect(f.kill).not.toHaveBeenCalled()
+    expect(settled).toBe(false)
+    f.emitStdinError()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    f.exit()
+    await closing
+    expect(settled).toBe(true)
+    expect(f.kill).not.toHaveBeenCalled()
+  })
+
+  it("reports an unresponsive cleanup instead of treating its fallback kill as success", async () => {
+    const f = fakeChild()
+    const child = { ...f.child, stdin: { ...f.child.stdin, end: jest.fn() } }
+    const booting = bootstrapSidecar({ spawn: () => child, scriptPath: "/x/host.mjs" })
+    f.stdout.write('{"type":"ready"}\n')
+    const boot = await booting
+    jest.useFakeTimers()
+    try {
+      const closing = boot.shutdown().catch((error) => error)
+      await jest.advanceTimersByTimeAsync(5_000)
+      expect(await closing).toEqual(
+        expect.objectContaining({
+          message: "sidecar cleanup did not finish within 5 seconds",
+        })
+      )
+      expect(f.kill).toHaveBeenCalledTimes(1)
+      await expect(boot.shutdown()).rejects.toThrow("sidecar cleanup did not finish")
+      expect(f.kill).toHaveBeenCalledTimes(1)
+      expect(jest.getTimerCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("reports a nonzero sidecar cleanup exit without treating it as success", async () => {
+    const f = fakeChild()
+    const child = { ...f.child, stdin: { ...f.child.stdin, end: jest.fn() } }
+    const booting = bootstrapSidecar({ spawn: () => child, scriptPath: "/x/host.mjs" })
+    f.stdout.write('{"type":"ready"}\n')
+    const boot = await booting
+    const closing = boot.shutdown()
+    f.exit(1)
+    await expect(closing).rejects.toThrow("sidecar exited during cleanup with code 1")
+    expect(f.kill).not.toHaveBeenCalled()
   })
 })
 

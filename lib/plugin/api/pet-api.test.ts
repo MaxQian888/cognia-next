@@ -498,7 +498,7 @@ describe("published contract", () => {
   // audit view; it once said `interact`/`emitEvent` needed no permission while
   // the host required `pet:interact`.
   const catalog = JSON.parse(
-    readFileSync(join(process.cwd(), "packages/plugin-sdk/contract/catalog.json"), "utf8")
+    readFileSync(join(process.cwd(), "packages/plugin-contract/contract/catalog.json"), "utf8")
   ) as {
     apiNamespaces: Array<{
       id: string

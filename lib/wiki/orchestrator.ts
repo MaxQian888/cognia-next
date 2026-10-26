@@ -27,13 +27,12 @@ import { hasNoLeakingPii } from "@cognia/redact"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { prepareChunks } from "@/lib/twin/ingest/chunk"
 import { runIndexPageAgent, type ArticleSummary } from "./agents/index-page-agent"
-import { assembleArticle } from "./agents/module-article-agent"
+import { runModuleArticleAgent } from "./agents/module-article-agent"
 import { applyCrossRefs, buildSlugIndex } from "./agents/cross-ref-agent"
 import { buildModuleStats, chunksWithinBudget } from "./agents/repo-map-agent"
 import { buildImportGraph } from "./agents/import-graph"
 import { bucketByModule, filterIncludedPaths } from "./file-walker"
 import { buildMerkleMap, hashContent } from "./merkle"
-import { moduleArticlePrompt, WIKI_SYSTEM_VOICE } from "./prompts"
 import type { CodeChunk, IndexPageDraft, ModuleArticleDraft, ModuleStat } from "./types"
 import {
   bulkCreateWikiArticles,
@@ -225,12 +224,11 @@ export async function rebuildWiki(
       continue
     }
     try {
-      const llmResponse = await deps.llm.complete(
-        moduleArticlePrompt({ module: modulePath, stat, chunks: inBudget }),
-        { system: WIKI_SYSTEM_VOICE, temperature: 0, maxTokens: 2048 }
-      )
       const fileHashes = pickFileHashes(stat.filePaths, currentHashes)
-      const draft = assembleArticle(stat, inBudget, fileHashes, llmResponse)
+      const draft = await runModuleArticleAgent(
+        { llm: deps.llm },
+        { stat, chunks: inBudget, fileHashes }
+      )
       drafts.push(draft)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

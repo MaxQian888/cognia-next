@@ -10,6 +10,14 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { AgentInstanceSection } from "./agent-instance-section"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 import type { ExternalAgentStateRootInfo } from "@/lib/ai/agent/external/lifecycle/state-root"
+import { writeClipboardText } from "@/lib/tauri/clipboard"
+import { toast } from "@/components/ui/sonner"
+
+jest.mock("@/lib/tauri/clipboard", () => ({ writeClipboardText: jest.fn() }))
+jest.mock("@/components/ui/sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn() },
+}))
+const mockWriteClipboard = jest.mocked(writeClipboardText)
 
 const mockStateRootInfo = jest.fn<Promise<ExternalAgentStateRootInfo | null>, [string]>()
 jest.mock("@/lib/ai/agent/external/lifecycle/state-root", () => ({
@@ -72,6 +80,9 @@ beforeEach(() => {
   mockStateRootInfo.mockReset()
   mockReveal.mockClear()
   mockIsTauri.mockReturnValue(true)
+  mockWriteClipboard.mockReset().mockResolvedValue(undefined)
+  jest.mocked(toast.success).mockClear()
+  jest.mocked(toast.error).mockClear()
 })
 
 describe("AgentInstanceSection", () => {
@@ -109,6 +120,30 @@ describe("AgentInstanceSection", () => {
     renderSection(work, [work])
     expect(await screen.findByTestId("state-folder")).toHaveTextContent("Created on first launch")
     expect(screen.queryByTestId("state-folder-reveal")).not.toBeInTheDocument()
+  })
+
+  it("labels and copies the complete folder path before the folder exists", async () => {
+    const path = "/Users/person/Library/Application Support/cognia/external-agents/work"
+    mockStateRootInfo.mockResolvedValue({ path, exists: false, bytes: 0 })
+    const user = userEvent.setup()
+    const work = codex("work", { stateIsolation: "isolated" })
+    renderSection(work, [work])
+    const folder = await screen.findByRole("group", { name: "State folder" })
+    expect(folder).toHaveTextContent(path)
+    await user.click(screen.getByRole("button", { name: "Copy folder path" }))
+    expect(mockWriteClipboard).toHaveBeenCalledWith(path)
+    expect(toast.success).toHaveBeenCalledWith("Folder path copied")
+  })
+
+  it("reports a clipboard failure without a success confirmation", async () => {
+    mockStateRootInfo.mockResolvedValue({ path: "/data/x", exists: true, bytes: 1 })
+    mockWriteClipboard.mockRejectedValue(new Error("clipboard denied"))
+    const user = userEvent.setup()
+    const work = codex("work", { stateIsolation: "isolated" })
+    renderSection(work, [work])
+    await user.click(await screen.findByRole("button", { name: "Copy folder path" }))
+    expect(toast.error).toHaveBeenCalledWith("Couldn't copy the folder path")
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it("offers no reveal button outside the desktop shell", async () => {
@@ -198,7 +233,7 @@ describe("AgentInstanceSection", () => {
     const user = userEvent.setup()
     const a = codex("Personal")
     const { onDraftSessionLimitChange } = renderSection(a, [a])
-    const input = screen.getByTestId("instance-session-limit")
+    const input = screen.getByRole("spinbutton", { name: "Session limit" })
     expect(input).toHaveAttribute("placeholder", "Unlimited")
     await user.type(input, "3")
     expect(onDraftSessionLimitChange).toHaveBeenLastCalledWith("3")

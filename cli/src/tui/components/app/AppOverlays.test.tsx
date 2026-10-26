@@ -88,6 +88,32 @@ const wrap = (el: React.ReactElement) =>
   )
 
 describe("AppOverlays", () => {
+  it("remounts question drafts by request identity and returns the displayed request id", () => {
+    __resetInk()
+    const request = { question: "Same question", options: [], multiSelect: false, allowText: true }
+    const resolve = jest.fn()
+    const first = propsFor(
+      { kind: "askUser", request, requestId: "first" },
+      { askUser: { resolve } }
+    )
+    const view = wrap(<AppOverlays {...first} />)
+    act(() => __fireInput("old draft", {}))
+    const second = propsFor(
+      { kind: "askUser", request, requestId: "second" },
+      { askUser: { resolve } }
+    )
+    view.rerender(
+      <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+        <RenderPrefsProvider prefs={resolveRenderConfig(undefined)}>
+          <AppOverlays {...second} />
+        </RenderPrefsProvider>
+      </ThemeProvider>
+    )
+    expect(view.container.textContent).not.toContain("old draft")
+    act(() => __fireInput("new answer", {}))
+    act(() => __fireInput("", { return: true }))
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ text: "new answer" }), "second")
+  })
   it("opens the skill file tree and closes it through the overlay state", () => {
     const props = propsFor({
       kind: "skillFiles",

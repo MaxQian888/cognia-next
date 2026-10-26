@@ -1,7 +1,7 @@
 {
   "$schema": "./agent-sdk-surface.schema.json",
   "schemaVersion": 1,
-  "sdkVersion": "0.3.302",
+  "sdkVersion": "0.3.305",
   "generatedBy": "pnpm check:sdk-surface:write",
   "surface": {
     "options": {

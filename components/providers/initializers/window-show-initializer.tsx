@@ -4,6 +4,7 @@ import { useEffect } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { refreshHostMode } from "@/lib/tauri/host-mode"
+import { isMacPlatform } from "@/lib/tauri/os"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
@@ -13,10 +14,11 @@ const log = loggers.ui
  *
  * The window is created hidden (`visible:false` in `tauri.conf.json`) so the
  * user never sees the white/blank WebView flash that precedes React's first
- * paint and `next-themes` applying the `.dark` class. On mount we wait two
+ * paint and `next-themes` applying the `.dark` class. On Windows we wait two
  * animation frames — rAF #1 schedules after layout, rAF #2 runs after the
  * browser has committed a paint — then call `getCurrentWindow().show()` so the
- * window appears already displaying real, themed content.
+ * window appears already displaying real, themed content. macOS uses an
+ * effect microtask because a hidden WKWebView may not schedule animation frames.
  *
  * A Rust-side grace timer (`lib.rs` setup) force-shows the window if this never
  * runs, so a renderer crash can't leave an alive-but-invisible process.
@@ -62,9 +64,15 @@ export function WindowShowInitializer() {
       })()
     }
 
-    raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(reveal)
-    })
+    // Hidden WKWebViews may not receive animation frames. Waiting for one
+    // before showing the window would leave the native grace timer in charge.
+    if (isMacPlatform()) {
+      queueMicrotask(reveal)
+    } else {
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(reveal)
+      })
+    }
 
     return () => {
       cancelled = true

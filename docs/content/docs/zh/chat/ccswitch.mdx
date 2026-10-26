@@ -1,245 +1,69 @@
 ---
 title: CCSwitch 互操作
-description: 只读访问 CCSwitch 的 SQLite 数据库，一键切换 50+ 第三方 Claude 服务商，并同步写入 Claude Code 的 settings.json。
+description: 读取 CC Switch v4.0.18 数据、导入本地内容，并明确应用兼容的 Anthropic 供应商。
 ---
 
 # CCSwitch 互操作
 
-CCSwitch 是社区开源的 Claude 多账号切换器。Cognia 以只读方式打开 `~/.cc-switch/cc-switch.db`，在 Settings 中展示其 50+ 服务商、MCP server、prompt 和 skill。用户可通过同一操作切换 cognia-next 的配置和一组外部 agent 的配置；目前 v1 仅写入 `claude-code` 的 `~/.claude/settings.json`。Cognia **从不写入** CCSwitch 数据库。
+Cognia 读取 **CC Switch v4.0.18、SQLite schema 21**。外部数据库始终只读。旧版或更新的 schema 会明确报错，不再猜测列名或返回看似成功的空数据。数据库升级由 CC Switch 自身完成，Cognia 不迁移外部数据库。
 
-CCSwitch 互操作有两个独立 capability：
+## 支持的数据
 
-1. **只读浏览** —— 把 CCSwitch 数据库里的 4 张表直接展示在 settings 中，提供一键"导入到 cognia-next" 的捷径。
-2. **协同切换** —— 当用户选某个 CCSwitch provider 作为当前 active 时，把它的 API key 和 base URL 同时写入 (a) cognia-next 自己的 `AppSettings`，(b) 用户勾选的每个外部 agent 的 settings 文件——这样切完一次，cognia-next 和 Claude Code CLI 用同一套凭据。
+浏览当前全部 11 类应用：`claude`、`claude-desktop`、`codex`、`gemini`、`grokbuild`、`opencode`、`openclaw`、`hermes`、`pi`、`mcode`、`agy`。
 
-<Callout type="warn">
-  CCSwitch 互操作与订阅账号中心有独立的所有权边界。CCSwitch 行是外部只读来源，只有用户明确
-  执行受支持的导入/切换时才会产生写操作。账号中心的「停用」只改变 Cognia 当前凭据投影，
-  「从 Cognia 移除」只删除 Cognia 本地 vault 条目与引用。两者都不会写 CCSwitch 数据库、编辑
-  agent 登录、撤销 token，或登出 CCSwitch/Claude Code/Codex/OpenCode。「新会话默认」只是
-  Cognia resolver 偏好，不等同于 CCSwitch 切换。
-</Callout>
+| 数据 | 行为 |
+| --- | --- |
+| Providers | 解析当前各应用的凭据、端点及模型名称，包括 Codex TOML 和 OpenCode V2；身份使用 `(app_type, id)`。 |
+| MCP servers | 读取 `server_config`，复用 Cognia 的跳过／覆盖／复制导入流程；仅含 URL 的配置默认使用 HTTP。 |
+| Prompts | 保留应用身份，将选中内容导入为新的提示词预设。 |
+| Skills | 读取已安装的 `SKILL.md`，解析 frontmatter 和可选的 `agents/openai.yaml`，同时持久化脚本、参考资料和资源。 |
+| 额度元数据 | 将已识别的声明式模板导入为停用来源，等待检查；不执行 CC Switch JavaScript。 |
 
-## 代码位置
+GrokBuild 的 `env_key` 仅以变量名返回，Cognia 不根据外部数据库中的任意名称读取环境变量。对于内置 Anthropic SDK，托管认证和其他协议的卡片仅供浏览。代理、终端启动器及 OAuth 账号管理仍由 CC Switch 负责。
 
-```
-src-tauri/src/ccswitch/
-  paths.rs      # ~/.cc-switch/cc-switch.db 的跨平台解析
-  db.rs         # 只读 SQLite + 容错列映射
-  commands.rs   # 5 个 Tauri 命令
+## 模块职责
 
-lib/ccswitch/
-  types.ts      # CcswitchProvider / SwitchPlan / ActiveProviderState …
-  client.ts     # 5 个 Tauri 命令的薄壳
-  switch.ts     # planSwitch / applySwitch / detectActive
-  import.ts     # CCSwitch 行 → 既有导入路径的 adapter
-  hooks.ts      # useLiveCcswitchStatus / useLiveCcswitchProviders …
+| 模块 | 职责 |
+| --- | --- |
+| `crates/cognia-ccswitch/src/db.rs` | 只读连接、精确 schema 校验、SQL 查询 |
+| `crates/cognia-ccswitch/src/provider_config.rs` | 各应用 JSON／TOML 解析，不查找或执行凭据 |
+| `crates/cognia-ccswitch/src/skill_files.rs` | 限定根目录的技能文件读取及文件限制 |
+| `crates/cognia-ccswitch/src/types.rs` | 序列化数据类型 |
+| `crates/cognia-ccswitch/src/paths.rs` | 数据库重定向及设备本地技能存储位置 |
+| `crates/cognia-ccswitch/src/commands.rs` | Tauri 命令入口及已有的外部 agent 写入器 |
+| `crates/cognia-ccswitch/src/watcher.rs` | 数据库／WAL／SHM 变化事件 |
+| `lib/ccswitch/provider.ts` | 复合身份、SDK 兼容性、模型注册 |
+| `lib/ccswitch/switch-plan.ts` | 设置及外部 agent 补丁的纯预览 |
+| `lib/ccswitch/switch.ts` | 执行已确认的计划，分别记录外部 agent 结果 |
+| `lib/ccswitch/subscription-switch.ts` | 激活 vault 账号或采用本地 Claude 登录 |
+| `lib/ccswitch/active-provider.ts` | 只读凭据匹配与漂移判断 |
+| `lib/ccswitch/client.ts`、`hooks.ts`、`import.ts` | IPC、共享监听生命周期及已有领域导入适配 |
 
-components/settings/ccswitch/
-  ccswitch-section.tsx
-  provider-switch-dialog.tsx
-  tabs/{overview,providers,mcp,prompts,skills,sync}-tab.tsx
-```
+Rust 测试与实现在同一文件的 `#[cfg(test)]` 模块中，TypeScript 测试也与源文件相邻。`schema-v21.sql` 来自上游版本标签中的建表定义，只用于测试，不是生产迁移。
 
-## 架构
+## 路径及已安装技能
 
-```mermaid
-flowchart LR
-  subgraph CC["📂 ~/.cc-switch/"]
-    DB[("cc-switch.db<br/>providers · mcpServers · prompts · skills")]
-  end
+数据库按以下顺序定位：
 
-  subgraph Rust["🦀 src-tauri/src/ccswitch/"]
-    Paths["paths.rs<br/>dirs::home_dir().join('.cc-switch')"]
-    Tolerant["db.rs<br/>SQLITE_OPEN_READ_ONLY<br/>容忍缺表/缺列"]
-    Cmds["commands.rs<br/>status / list_*"]
-  end
+1. Cognia 的测试／调试覆盖变量 `CC_SWITCH_HOME`。
+2. Cognia 保存的 `ccswitchSync.manualDataDir`。
+3. CC Switch 扁平 `app_paths.json` 中的 `app_config_dir_override`。
+4. `~/.cc-switch/cc-switch.db`。
 
-  subgraph TS["📚 lib/ccswitch/"]
-    Client["client.ts (Tauri shells)"]
-    Switch["switch.ts<br/>planSwitch · applySwitch · detectActive"]
-    Import["import.ts<br/>CCSwitch row → existing import paths"]
-  end
+所有读取器及监听器都使用已保存的手动目录。技能默认位于数据库所在目录的 `skills/`。CC Switch 的设备本地 `~/.cc-switch/settings.json` 若选择 `skillStorageLocation: "unified"`，则读取 `~/.agents/skills/`。
 
-  subgraph UI["🌐 Settings → CCSwitch"]
-    Section["6-tab shell"]
-    Dialog["ProviderSwitchDialog<br/>plan preview + scope picker"]
-  end
+技能路径必须位于选定根目录内。路径穿越、符号链接逃逸、特殊文件及超出共享原生读取器限制的包会被拒绝。限制为 50 个资源文件、每文件 2 MiB、32 层子目录及 500 个目录。不可读取的技能仍展示，但禁止导入，不会静默导入缺少资源的半个包。
 
-  subgraph Targets["🎯 切换目的地"]
-    Cognia["cognia-next AppSettings + sidecar env"]
-    ClaudeCode["~/.claude/settings.json (Claude Code)"]
-  end
+## 明确确认的切换
 
-  DB --> Tolerant
-  Paths --> Tolerant
-  Tolerant --> Cmds
-  Cmds --> Client
-  Client --> Switch
-  Client --> Import
-  Switch --> Cognia
-  Switch --> ClaudeCode
-  UI --> Switch
+对话框先预览变化，再执行。兼容的 Anthropic 卡片可以更新 Cognia 设置及 sidecar。没有 API key 的官方 Claude 卡片需要可用的 Anthropic 登录；激活失败时不应用切换。托管 OAuth 卡片不会仅因缺少 API key 而被误判为官方 Claude。
 
-  classDef layer fill:#1e293b,stroke:#475569,color:#e2e8f0
-  classDef storage fill:#0f172a,stroke:#475569,color:#e2e8f0
-  classDef ext fill:#0b1220,stroke:#334155,color:#94a3b8
-  class Rust,TS,UI layer
-  class DB storage
-  class CC,Targets ext
-```
+已有的外部 agent 写入器只在明确勾选并确认后执行。Claude 写入会先清理竞争的 `ANTHROPIC_AUTH_TOKEN`，再设置选定 API key。传播仅限 Claude Code 和 OpenCode 的 Anthropic 凭据项；Codex/Gemini 不是当前 Anthropic 切换的兼容目标。OpenCode 只修改凭据存储，不改写独立的端点配置，预览会提示这一限制；不能等同于 CC Switch 完整的各应用原生切换。
 
-## 数据库探活
+活动标记使用 `ccswitch:claude:default` 一类复合引用。凭据匹配会清理首尾空格及 URL 尾部斜杠，优先选择显式保存且匹配的身份，避免把其他应用类型误认成内置 SDK 当前供应商。
 
-`src-tauri/src/ccswitch/paths.rs` 把 DB 路径定义为 `~/.cc-switch/cc-switch.db`——跨 OS 一致。CCSwitch 自身允许通过云同步目录重定向这条路径（Dropbox / iCloud / WebDAV），v1 不跟随重定向；用户需要把 CCSwitch 切回默认位置。
+## 验证范围
 
-`ccswitch_status()` 永远成功，返回三态：
+针对性的 Jest 与 Rust 测试覆盖 schema 拒绝、11 类应用格式、数据库只读、复合身份、导入数据、监听所有权及激活失败。可以在隔离的本地数据快照上检查记录，不修改外部数据库。
 
-- `exists: false, error: undefined` —— 用户未安装 CCSwitch；Settings 直接展示"安装提示" 卡。
-- `exists: true, counts: {...}` —— 一切正常；6 个 tab 全部启用。
-- `exists: true, error: "..."` —— 文件存在但打不开（损坏、权限）；展示降级条+排错按钮。
-
-## 容错的列映射
-
-CCSwitch 的 schema 不是由我们控制的。`db.rs` 的核心约束：
-
-| 情形        | 行为                                     |
-| ----------- | ---------------------------------------- |
-| 缺表        | 返回空数组，不报错                       |
-| 缺列        | 对应字段为 `None` / 空串                 |
-| 多出列      | 忽略                                     |
-| 文件损坏    | `status` 返回 `error`，`list_*` 返回 Err |
-| schema 改名 | 我们映射一个生成的列名超集，命中谁谁就赢 |
-
-```rust title="src-tauri/src/ccswitch/db.rs"
-let conn = Connection::open_with_flags(
-    path,
-    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-)?;
-```
-
-`SQLITE_OPEN_NO_MUTEX` 是因为 CCSwitch 是单线程写入者；只读连接不需要 sqlite 内置的连接锁。
-
-## 五个 Tauri 命令
-
-```ts title="lib/ccswitch/client.ts"
-ccswitchStatus() // 总是返回，3 态
-ccswitchListProviders() // CcswitchProvider[]
-ccswitchListMcpServers() // CcswitchMcpServer[]
-ccswitchListPrompts() // CcswitchPrompt[]
-ccswitchListSkills() // CcswitchSkill[]
-
-// 唯一写命令——不写 CCSwitch DB，写 Claude Code 的 settings.json
-writeClaudeSettingsEnv(envUpdates)
-```
-
-`writeClaudeSettingsEnv` 的目标是 `~/.claude/settings.json` 的 `env` 块——也就是 Claude Code CLI 读环境变量的地方，**不是** `~/.claude.json`（那是 MCP 配置）。Rust 侧负责路径解析、原子写入 + 备份。
-
-## 切换流程
-
-切换是三层动作——预览、确认、执行：
-
-<Steps>
-  <Step>
-    **用户在 Providers tab 点 "切换到 Kimi K2"**——`ProviderSwitchDialog` 打开，渲染
-    "会改什么"+"波及哪些 agent" 两个 panel。
-  </Step>
-  <Step>
-    **plan**——`planSwitch(provider, scope, current)` 是纯函数（无 I/O），把"切到这个 provider" 变成
-    `SwitchPlan`： - `cogniaChanges`：apiKey/baseUrl/activeProviderId 的 before/after，是否需要重启
-    sidecar。 - `agentChanges[]`：每个用户勾选的 agent 一行——target 路径（`~/.claude/settings.json`
-    等）、 是否 v1 支持、envUpdates 数组。
-  </Step>
-  <Step>**确认**——用户看完预览点"应用"；这时才进入 I/O。</Step>
-  <Step>
-    **applySwitch**——执行顺序刻意： 1. 写 Dexie `settings`（cheap、可回滚）。 2. 调 `setProviderEnv`
-    把新 env 推给 sidecar；如 key 或 URL 变了则 `restartSidecar()`。 3. 对每个支持的 agent，调
-    `writeClaudeSettingsEnv` 写 env patch。 失败的 agent 不会终止整体——每行单独记录 `ok / error`，UI
-    展示 partial-success 结果。
-  </Step>
-</Steps>
-
-```ts title="lib/ccswitch/switch.ts (env updates)"
-function envUpdatesForProvider(provider: CcswitchProvider) {
-  return [
-    { key: "ANTHROPIC_API_KEY", value: provider.apiKey?.trim() || null },
-    { key: "ANTHROPIC_BASE_URL", value: provider.baseUrl?.trim() || null },
-  ]
-}
-```
-
-`value: null` 显式 _删除_ key，避免遗留旧端点把请求路由到错误的代理上。
-
-## detectActive —— 漂移检测
-
-settings 重新获焦时 UI 调用 `detectActive()` 找出每个 surface 当前用的 CCSwitch provider id：
-
-```ts title="lib/ccswitch/types.ts"
-interface ActiveProviderState {
-  cognia: string | undefined
-  agents: Partial<Record<AgentId, string | undefined>>
-  drift: boolean // 任意一个 agent 与 cognia 不一致 → true
-}
-```
-
-当 `drift: true` 时 Overview tab 顶部渲染漂移横幅，让用户重新选 active provider 或忽略。"漂移"通常发生在用户用 CCSwitch GUI 直接切了一次而没经过 cognia-next 的 picker。
-
-## 与既有导入路径的衔接
-
-我们 **不为 CCSwitch 单独建表**——MCP server、prompt、skill 都映射到 cognia 自己的对应 Dexie 表 (`mcpServers` / `promptPresets` / `skills`)。`lib/ccswitch/import.ts` 是 4 个 adapter：
-
-| 源类型              | 转换成           | 目标导入函数           |
-| ------------------- | ---------------- | ---------------------- |
-| `CcswitchMcpServer` | `McpImportDraft` | `bulkImportMcpServers` |
-| `CcswitchPrompt`    | 直接字段映射     | `createPreset`         |
-| `CcswitchSkill`     | 直接字段映射     | `createSkill`          |
-| `CcswitchProvider`  | 走 `applySwitch` | （不导入，只 ref）     |
-
-provider 不导入——只是被引用为 active：写到 `AppSettings.activeProviderId = "ccswitch:<id>"` 后，sidecar 在 spawn 时直接拿当前 env 用，没有 catalog 条目要维护。
-
-## Settings UI 六个 tab
-
-`Settings → CCSwitch`（`?section=ccswitch&ccswitchTab=…`）：
-
-<Cards>
-  <Card title="Overview" description="状态卡 + 漂移横幅 + 计数。">
-    overview-tab.tsx
-  </Card>
-  <Card title="Providers" description="50+ 服务商按 kind 分组；行级 active 徽章 + 一键切换。">
-    providers-tab.tsx
-  </Card>
-  <Card title="MCP" description="CCSwitch 自带的 MCP server；可一键导入到 cognia。">
-    mcp-tab.tsx
-  </Card>
-  <Card title="Prompts" description="prompt 预设浏览 + 导入。">
-    prompts-tab.tsx
-  </Card>
-  <Card title="Skills" description="按 sourcePath 或 inline 内容呈现 + 导入。">
-    skills-tab.tsx
-  </Card>
-  <Card title="Sync" description="检测漂移、批量导入、重检状态。">
-    sync-tab.tsx
-  </Card>
-</Cards>
-
-## 与其他子系统
-
-<Cards>
-  <Card
-    title="Claude 订阅 OAuth"
-    href="./claude-subscription-oauth"
-    description="OAuth 与 API key 互斥优先；切到 CCSwitch provider 会清掉 OAuth bearer。"
-  />
-  <Card
-    title="Provider 系统"
-    href="./provider-system"
-    description="activeProviderId 形如 ccswitch:agentId 是 Provider 字段。"
-  />
-</Cards>
-
-## 已知限制
-
-- **v1 只写 `claude-code`**——其他 agent（codex / gemini / opencode / openclaw）在切换 dialog 中以 `unsupported: true` 灰色展示。增加新 agent 的步骤：在 `SUPPORTED_AGENTS` Set 中加入、在 `targetPathFor` 中给出路径、并扩展 Rust 写命令以支持新文件格式。
-- **两个写入者风险**——CCSwitch 自身也在写 `~/.claude/settings.json`；我们靠 `detectActive` 在获焦时检测漂移来收敛，但并发写入仍可能产生 race。`writeClaudeSettingsEnv` 写前会先备份（返回 `backupPath`）以便回滚。
-- **CCSwitch 重定向目录**——用户用 Dropbox / iCloud 把 `.cc-switch` 重定向到其他位置时我们看不到。需要用户把 CCSwitch 切回默认位置，或我们后续支持 CCSwitch 的 marker 文件协议。
-- **OAuth 优先级**——已投影的 Claude OAuth bearer 优先于 CCSwitch provider。明确执行 CCSwitch 切换前，请先在账号中心使用「停用」。这不会登出 Claude Code 或撤销 OAuth 凭据，只会清除 Cognia 的 active 投影。
+旧原生进程加载新前端不能证明 Rust 读取器已生效。最终原生验收需要重建并重启 Cognia 桌面宿主，使用真正的 schema-21 CC Switch 数据库。不能仅凭计数认定 MCP 配置或技能正文可读。

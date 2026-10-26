@@ -1,5 +1,6 @@
+import userEvent from "@testing-library/user-event"
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { A2UIPopover, type A2UIPopoverComponent } from "./a2ui-popover"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -38,4 +39,29 @@ describe("A2UIPopover", () => {
     )
     expect(screen.getByTestId("btn1")).toBeInTheDocument()
   })
+})
+
+it("keeps the actual trigger interactive with the native overlay", async () => {
+  const props = {
+    component: {
+      id: "keyboard",
+      component: "Popover",
+      trigger: "trigger",
+      children: ["content"],
+      openDelay: 0,
+    },
+    surfaceId: "s",
+    dataModel: {},
+    onDataChange: jest.fn(),
+    onAction: jest.fn(),
+    renderChild: (id: string) =>
+      id === "trigger" ? <button>Open panel</button> : <p>Panel content</p>,
+  } as A2UIComponentProps<A2UIPopoverComponent>
+  render(<A2UIPopover {...props} />)
+  const trigger = screen.getByRole("button", { name: "Open panel" })
+  trigger.focus()
+  await userEvent.keyboard("{Enter}")
+  expect(await screen.findByText("Panel content")).toBeVisible()
+  await userEvent.keyboard("{Escape}")
+  await waitFor(() => expect(trigger).toHaveFocus())
 })

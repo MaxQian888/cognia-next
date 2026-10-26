@@ -153,10 +153,22 @@ jest.mock("@/components/error/error-trace-details", () => ({
 }))
 
 jest.mock("./markdown-renderer", () => ({
-  MarkdownRenderer: ({ content, projectRoot }: { content: string; projectRoot?: string }) =>
+  MarkdownRenderer: ({
+    content,
+    projectRoot,
+    untrusted,
+  }: {
+    content: string
+    projectRoot?: string
+    untrusted?: boolean
+  }) =>
     ReactForMocks.createElement(
       "div",
-      { "data-test": "markdown", "data-project-root": projectRoot },
+      {
+        "data-test": "markdown",
+        "data-project-root": projectRoot,
+        "data-untrusted": untrusted ? "true" : undefined,
+      },
       content
     ),
 }))
@@ -2117,6 +2129,124 @@ describe("mention highlighting", () => {
     const secondChip = container.querySelector("span.rounded.bg-muted")
     // React reconciliation reuses the same DOM node when keys are stable.
     expect(secondChip).toBe(firstChip)
+  })
+})
+
+describe("mention highlighting leaves other text as Markdown", () => {
+  it("renders a user part without a mention through MarkdownRenderer", () => {
+    const characterById = new Map([
+      ["char_alice", { id: "char_alice", name: "Alice", systemPrompt: "" }],
+    ]) as unknown as Map<string, import("@cognia/agent-config-types").Character>
+    const msg: UIMessage = {
+      id: "u-no-mention",
+      role: "user",
+      parts: [{ type: "text", text: "**bold** with no names" }],
+    }
+    const { container } = render(<MessageRenderer message={msg} characterById={characterById} />)
+    expect(container.querySelector('[data-test="markdown"]')?.textContent).toBe(
+      "**bold** with no names"
+    )
+    expect(container.querySelector("span.rounded.bg-muted")).toBeNull()
+  })
+})
+
+// ── inbound IM rich projection ────────────────────────────────────────────────
+
+describe("inbound IM rich projection", () => {
+  function inbound(parts: UIMessage["parts"], metadata: Record<string, unknown>): UIMessage {
+    return { id: `in-${Math.random()}`, role: "user", parts, metadata } as unknown as UIMessage
+  }
+  const card = {
+    v: 1,
+    source: "discord",
+    body: [
+      { kind: "text", text: "release notes" },
+      {
+        kind: "card",
+        title: "v2",
+        children: [{ kind: "link", href: "https://x.test", label: "x" }],
+      },
+    ],
+  }
+
+  it("hides the fallback parts the block already shows", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "release notes" }], { inboundA2UI: card })}
+      />
+    )
+    expect(screen.getByTestId("inbound-a2ui")).toBeInTheDocument()
+    expect(screen.queryByText("release notes", { selector: '[data-test="markdown"]' })).toBeNull()
+  })
+
+  it("keeps parts that carry text the block lacks", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "a different caption" }], { inboundA2UI: card })}
+      />
+    )
+    expect(screen.getByTestId("inbound-a2ui")).toBeInTheDocument()
+    expect(screen.getByText("a different caption")).toBeInTheDocument()
+  })
+
+  it("shows nothing of a withdrawn message's block", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "[deleted]" }], {
+          inboundA2UI: card,
+          deletedAt: 1,
+        })}
+      />
+    )
+    expect(screen.queryByTestId("inbound-a2ui")).toBeNull()
+    expect(screen.getByText("[deleted]")).toBeInTheDocument()
+  })
+
+  it("renders a malformed stored block without throwing", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "body" }], {
+          inboundA2UI: {
+            v: 1,
+            source: "lark",
+            body: [null, { kind: "text", text: { x: 1 } }, { kind: "divider" }],
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("inbound-a2ui")).toBeInTheDocument()
+    expect(screen.getByText("body")).toBeInTheDocument()
+  })
+
+  it("renders an IM sender's text as untrusted Markdown with their line breaks", () => {
+    const { container } = render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "line one\nline two" }], {
+          platformMessage: { messageId: "m1", platform: "telegram" },
+        })}
+        projectRoot="/repo"
+      />
+    )
+    const md = container.querySelector('[data-test="markdown"]')!
+    expect(md).toHaveAttribute("data-untrusted", "true")
+    expect(md).not.toHaveAttribute("data-project-root")
+    expect(md.textContent).toBe("line one  \nline two")
+  })
+
+  it("keeps a local user's own text on the trusted renderer", () => {
+    const { container } = render(
+      <MessageRenderer message={inbound([{ type: "text", text: "mine" }], {})} />
+    )
+    expect(container.querySelector('[data-test="markdown"]')).not.toHaveAttribute("data-untrusted")
+  })
+
+  it("ignores a stored block with no renderable body", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "body" }], { inboundA2UI: { source: "lark" } })}
+      />
+    )
+    expect(screen.queryByTestId("inbound-a2ui")).toBeNull()
   })
 })
 

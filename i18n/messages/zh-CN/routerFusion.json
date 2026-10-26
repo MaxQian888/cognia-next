@@ -330,6 +330,15 @@
         "code_fixture": "改动必须在沙箱中通过项目已批准的测试命令，并以该命令生成的报告作为判定依据。"
       },
       "profileDormant": "需要运行时验证器，将在后续版本提供；在此之前路由不会选择此动作。",
+      "promptVersion": "角色提示词",
+      "promptVersionValue": {
+        "shipped": "内置（roles-1）",
+        "custom": "提示词中心"
+      },
+      "promptVersionDesc": {
+        "shipped": "使用 Cognia 内置的角色提示词。内置动作始终使用这一版本。",
+        "custom": "使用「设置 → 创作与自定义 → 提示词」中的 Router Fusion 角色提示词。每次运行使用开始时已发布的文本，每次发布修改都会让此动作的运行获得新的标识。"
+      },
       "runCap": "运行上限（美元）",
       "runCapDesc": "留空则使用{mode}模式的上限 ${cap}。",
       "panelSize": "评审团人数",
@@ -350,7 +359,8 @@
         "PROFILE_NOT_ALLOWED": "此模式不支持该检查方式。",
         "CAP_INVALID": "请输入最多六位小数的美元金额。",
         "PANEL_C_REQUIRED": "三人评审团需要设置评审团成员 C 角色。",
-        "LIMIT_INVALID": "评审团只能有两名或三名成员。"
+        "LIMIT_INVALID": "评审团只能有两名或三名成员。",
+        "PROMPT_VERSION_NOT_ALLOWED": "请选择内置角色提示词或提示词中心的角色提示词。"
       },
       "add": {
         "title": "添加动作",

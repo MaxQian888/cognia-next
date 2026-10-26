@@ -78,6 +78,38 @@ test("assembleLocale: ignores non-json files", () => {
   }
 })
 
+for (const fixture of [
+  { file: "collabCapabilities.json", messages: { action: { "workspace.read": "Read workspace" } } },
+  { file: "invalid.namespace.json", messages: { title: "Title" } },
+  { file: "settings/invalid.namespace.json", messages: { title: "Title" } },
+  { file: "settings/_root.json", messages: { "invalid.key": "Title" } },
+]) {
+  test(`assembleLocale: rejects dotted message keys from ${fixture.file}`, () => {
+    const dir = makeTmp()
+    try {
+      const localeDir = join(dir, "en")
+      mkdirSync(join(localeDir, "settings"), { recursive: true })
+      writeFileSync(join(localeDir, fixture.file), JSON.stringify(fixture.messages))
+      assert.throws(() => assembleLocale(localeDir), /i18n:.*key.*must not contain.*\./)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+test("assembleLocale: preserves nested message paths and dots in message values", () => {
+  const dir = makeTmp()
+  try {
+    const localeDir = join(dir, "en")
+    mkdirSync(localeDir, { recursive: true })
+    const messages = { action: { workspace: { read: "Read workspace." } } }
+    writeFileSync(join(localeDir, "collabCapabilities.json"), JSON.stringify(messages))
+    assert.deepEqual(assembleLocale(localeDir), { collabCapabilities: messages })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test("assembleLocale: throws when a namespace is both a file and a directory", () => {
   const dir = makeTmp()
   try {

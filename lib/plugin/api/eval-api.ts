@@ -8,31 +8,26 @@ import { deterministicScorers } from "@cognia/eval-core"
 import { getRunDetail, listDatasetSummaries, runEvalService } from "@/lib/ai/eval/service"
 import { APP_VERSION } from "@/lib/app-version"
 import type { TargetSpec } from "@/types/eval/run-config"
+import { allRootPaths } from "@/lib/workspace/roots"
+import { useProjectStore } from "@/stores/project/project-store"
+import type {
+  PluginEvalAPI,
+  PluginRunDatasetArgs,
+} from "@cognia/plugin-contract/lib/plugin/api/eval-api"
+export type {
+  PluginEvalAPI,
+  PluginEvalProjectArgs,
+  PluginRunCalibrationArgs,
+  PluginRunDatasetArgs,
+} from "@cognia/plugin-contract/lib/plugin/api/eval-api"
 
-export interface PluginRunDatasetArgs {
-  datasetId: string
-  targetKind?: "chat" | "team" | "workflow"
-  model?: string
-  characterId?: string
-  teamId?: string
-  workflowId?: string
-  scorerIds?: string[]
-  k?: number
-  split?: string
-  capabilities?: string[]
-}
-
-export interface PluginRunCalibrationArgs {
-  setId: string
-  judgeModel?: string
-}
-
-export interface PluginEvalProjectArgs {
-  action:
-    "preflight" | "start" | "pause" | "resume" | "cancel" | "status" | "report" | "extend-budget"
-  projectId?: string
-  experimentId?: string
-  budgetCap?: number
+function knownWorkspaceRoot(cwd: string): boolean {
+  const normalized = cwd.replace(/[\\/]+$/, "")
+  return useProjectStore
+    .getState()
+    .projects.some((project) =>
+      allRootPaths(project).some((root) => root.replace(/[\\/]+$/, "") === normalized)
+    )
 }
 
 function buildTarget(args: PluginRunDatasetArgs): TargetSpec {
@@ -48,20 +43,16 @@ function buildTarget(args: PluginRunDatasetArgs): TargetSpec {
     return { kind, label: args.workflowId, workflowId: args.workflowId }
   }
   if (!args.model) throw new Error("eval_run_dataset: model is required for a chat target")
+  if (args.cwd !== undefined && !knownWorkspaceRoot(args.cwd)) {
+    throw new Error("eval_run_dataset: cwd must be a root of one of your workspaces")
+  }
   return {
     kind: "chat",
     label: args.model,
     model: args.model,
     ...(args.characterId ? { characterId: args.characterId } : {}),
+    ...(args.cwd ? { cwd: args.cwd } : {}),
   }
-}
-
-export interface PluginEvalAPI {
-  listDatasets(): ReturnType<typeof listDatasetSummaries>
-  getRun(runId: string): ReturnType<typeof getRunDetail>
-  runDataset(args: PluginRunDatasetArgs): Promise<unknown>
-  runCalibration(args: PluginRunCalibrationArgs): Promise<unknown>
-  runProject(args: PluginEvalProjectArgs): Promise<unknown>
 }
 
 export function createEvalAPI(): PluginEvalAPI {

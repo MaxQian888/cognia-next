@@ -253,4 +253,39 @@ describe("RouterFusionActionCatalog", () => {
       expect.objectContaining({ id: "my_delegate", mode: "delegate", enabled: true }),
     ])
   })
+
+  it("lets an action of the user's own run the Prompt Center's role prompts, and a built-in never", async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByRole("button", { name: "Edit panel_review" }))
+    const builtin = screen.getByTestId("router-fusion-action-editor-panel_review")
+    expect(within(builtin).queryByRole("combobox", { name: "Role prompts" })).toBeNull()
+
+    await user.type(screen.getByLabelText("Action id"), "my_panel")
+    await choose(user, "Mode", "Panel")
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("button", { name: "Edit my_panel" }))
+    const editor = screen.getByTestId("router-fusion-action-editor-my_panel")
+    const hash = screen.getByTestId("router-fusion-action-hash-my_panel").textContent
+    expect(within(editor).getByRole("combobox", { name: "Role prompts" })).toHaveTextContent(
+      "Shipped (roles-1)"
+    )
+    expect(screen.getByTestId("router-fusion-action-prompts-desc-my_panel")).toHaveTextContent(
+      "Runs the role prompts that ship with Cognia."
+    )
+
+    await choose(user, "Role prompts", "Prompt Center")
+    expect(store.saved.customActions).toEqual([
+      expect.objectContaining({ id: "my_panel", prompt_version: "roles-1-custom" }),
+    ])
+    expect(store.saved.actionOverrides).toEqual({})
+    expect(screen.getByTestId("router-fusion-action-prompts-desc-my_panel")).toHaveTextContent(
+      "Runs the Router Fusion role prompts from Settings → Authoring → Prompts."
+    )
+    expect(screen.getByTestId("router-fusion-action-hash-my_panel").textContent).not.toBe(hash)
+
+    await choose(user, "Role prompts", "Shipped (roles-1)")
+    expect(store.saved.customActions[0]?.prompt_version).toBe("roles-1")
+    expect(screen.getByTestId("router-fusion-action-hash-my_panel").textContent).toBe(hash)
+  })
 })

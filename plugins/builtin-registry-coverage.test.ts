@@ -1,5 +1,6 @@
 /**
  * @jest-environment jsdom
+ * @cognia-host-integration-test
  */
 
 /**
@@ -34,6 +35,15 @@ import { getBrowserBuiltinRegistry } from "@/lib/plugin/core/browser-builtin-reg
 import type { PluginManifest } from "@/types/plugin"
 
 const PLUGINS_ROOT = join(__dirname)
+/** The host's curation of which plugins ship, and how (ADR-0156, packaging). */
+const DISTRIBUTION_FILE = join(
+  __dirname,
+  "..",
+  "lib",
+  "plugin",
+  "distribution",
+  "distribution.json"
+)
 
 /**
  * Frontend plugins deliberately kept OUT of the default browser builtin
@@ -49,8 +59,6 @@ const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze(
     "Installable desktop M Plan plugin — distributed as a local ZIP and enabled explicitly, separately from pay-as-you-go providers.",
   "cognia-test-lsp-contribution":
     "Phase-B LSP fixture — exercised by its own co-located suite (which drives the bundled echo-lsp server over real stdio framing), not shipped to end users.",
-  "cognia-pro-ide-fixture":
-    "ADR-0088 managed Pro IDE fixture — proves the proxy/broker chain end to end on the desktop; blocked in browser and mobile shells because that chain needs the embedded code-server, so bundling it into the browser registry would ship a plugin that can never activate.",
   "cognia-external-agent-preset-example":
     "Author reference plugin — copy-paste template, not a default.",
   "cognia-external-agent-adapter-example":
@@ -128,9 +136,7 @@ describe("builtin-registry curation guard", () => {
 })
 
 describe("on-disk plugin distribution guard", () => {
-  const distribution = JSON.parse(
-    readFileSync(join(PLUGINS_ROOT, "distribution.json"), "utf-8")
-  ) as {
+  const distribution = JSON.parse(readFileSync(DISTRIBUTION_FILE, "utf-8")) as {
     bundled: Record<string, { id: string; reason: string; include: string[] }>
     devOnly: Record<string, string>
   }
@@ -146,7 +152,7 @@ describe("on-disk plugin distribution guard", () => {
     const devOnly = dir in distribution.devOnly
     if (!bundled && !devOnly) {
       throw new Error(
-        `Plugin "${dir}" (${id}) loads from disk but plugins/distribution.json does not classify it. ` +
+        `Plugin "${dir}" (${id}) loads from disk but lib/plugin/distribution/distribution.json does not classify it. ` +
           `Nothing stages it into src-tauri/resources/plugins, and the Tauri host only scans ` +
           `<appDataDir>/cognia/plugins, so an installed build will not have it at all. ` +
           `Add it under "bundled" with the files to ship, or under "devOnly" with a reason.`

@@ -30,10 +30,10 @@ export function PluginCogsetInitializer() {
     getBootCapabilitySnapshot
   )
   const runtimeReady = isBootCapabilityReady("plugin-runtime")
-  const accountId = useAccountStore((state) => state.unlockedAccountId)
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
 
   useEffect(() => {
-    if (!runtimeReady || !accountId || isMirroredPluginClient()) return
+    if (!runtimeReady || !localAccountId || isMirroredPluginClient()) return
     let cancelled = false
     const stops: Array<() => void> = []
     void (async () => {
@@ -64,7 +64,7 @@ export function PluginCogsetInitializer() {
       cancelled = true
       for (const stop of stops.splice(0)) stop()
     }
-  }, [runtimeReady, accountId])
+  }, [runtimeReady, localAccountId])
 
   return null
 }

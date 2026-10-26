@@ -76,6 +76,7 @@ function legacyRow(type: string) {
   return {
     id: `row-${type}`,
     type,
+    notification: { channels: ["none"], dueReminder: false },
     config: { allowConcurrent: false } as TaskExecutionConfig,
   }
 }
@@ -130,6 +131,11 @@ it("installs one durable clock plus bounded event-triggered housekeeping tasks",
   expect(createTask).toHaveBeenCalledWith(
     expect.objectContaining({
       type: HOUSEKEEPING_CLOCK_TASK_TYPE,
+      notification: expect.objectContaining({
+        channels: ["none"],
+        dueReminder: false,
+        onError: false,
+      }),
       trigger: { type: "interval", intervalMs: 86_400_000 },
       config: {
         overlapPolicy: HOUSEKEEPING_OVERLAP_POLICY,
@@ -165,6 +171,11 @@ it("gives every housekeeping task a queueing overlap policy", async () => {
   expect(drafts).toHaveLength(6)
   for (const draft of drafts) {
     expect(draft.config?.overlapPolicy).toBe(HOUSEKEEPING_OVERLAP_POLICY)
+    expect(draft.notification).toMatchObject({
+      channels: ["none"],
+      dueReminder: false,
+      onError: false,
+    })
   }
 })
 
@@ -172,6 +183,7 @@ it("does not duplicate durable tasks that already exist", async () => {
   getAllTasks.mockResolvedValue(
     [HOUSEKEEPING_CLOCK_TASK_TYPE, ...SWEEP_TASK_TYPES].map((type) => ({
       id: `row-${type}`,
+      notification: { channels: ["none"], dueReminder: false },
       type,
       config: { overlapPolicy: HOUSEKEEPING_OVERLAP_POLICY } as TaskExecutionConfig,
     }))
@@ -205,6 +217,7 @@ it("leaves an operator's own queueing choice alone", async () => {
   getAllTasks.mockResolvedValue(
     [HOUSEKEEPING_CLOCK_TASK_TYPE, ...SWEEP_TASK_TYPES].map((type) => ({
       id: `row-${type}`,
+      notification: { channels: ["none"], dueReminder: false },
       type,
       config: { overlapPolicy: "queue-all" } as TaskExecutionConfig,
     }))

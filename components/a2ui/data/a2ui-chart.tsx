@@ -93,9 +93,16 @@ export const A2UIChart = memo(function A2UIChart({
   // recharts' demo hex values.
   const colors = component.colors || palette.colors.chart
 
-  const handleDataPointClick = (dataPoint: Record<string, unknown>, index: number) => {
-    if (component.clickAction) {
-      onAction(component.clickAction, { dataPoint, index })
+  const handleChartClick = (state: { activeTooltipIndex?: string | number | null }) => {
+    if (
+      state.activeTooltipIndex === null ||
+      state.activeTooltipIndex === undefined ||
+      state.activeTooltipIndex === ""
+    )
+      return
+    const index = Number(state.activeTooltipIndex)
+    if (component.clickAction && Number.isInteger(index) && data[index]) {
+      onAction(component.clickAction, { dataPoint: data[index], index })
     }
   }
 
@@ -106,7 +113,7 @@ export const A2UIChart = memo(function A2UIChart({
     switch (chartType) {
       case "bar":
         return (
-          <BarChart data={data}>
+          <BarChart onClick={handleChartClick} data={data}>
             <ChartAxes
               xKey={xKey}
               xAxisLabel={component.xAxisLabel}
@@ -118,9 +125,7 @@ export const A2UIChart = memo(function A2UIChart({
                 key={yKey}
                 dataKey={yKey}
                 fill={colors[idx % colors.length]}
-                onClick={(barData) =>
-                  handleDataPointClick(barData as unknown as Record<string, unknown>, idx)
-                }
+
                 cursor={cursorStyle}
               />
             ))}
@@ -129,7 +134,7 @@ export const A2UIChart = memo(function A2UIChart({
 
       case "pie":
         return (
-          <PieChart>
+          <PieChart onClick={handleChartClick}>
             <Pie
               data={data}
               dataKey={yKeys[0]}
@@ -150,7 +155,7 @@ export const A2UIChart = memo(function A2UIChart({
 
       case "area":
         return (
-          <AreaChart data={data}>
+          <AreaChart onClick={handleChartClick} data={data}>
             <ChartAxes
               xKey={xKey}
               xAxisLabel={component.xAxisLabel}
@@ -173,14 +178,19 @@ export const A2UIChart = memo(function A2UIChart({
 
       case "scatter":
         return (
-          <ScatterChart>
+          <ScatterChart onClick={handleChartClick}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
             <XAxis dataKey={xKey} className="text-xs" name={component.xAxisLabel || xKey}>
               {component.xAxisLabel && (
                 <Label value={component.xAxisLabel} offset={-5} position="insideBottom" />
               )}
             </XAxis>
-            <YAxis className="text-xs" name={component.yAxisLabel || yKeys[0]}>
+            <YAxis
+              type="number"
+              dataKey="__a2uiScatterValue"
+              className="text-xs"
+              name={component.yAxisLabel || yKeys[0]}
+            >
               {component.yAxisLabel && (
                 <Label value={component.yAxisLabel} angle={-90} position="insideLeft" />
               )}
@@ -191,7 +201,7 @@ export const A2UIChart = memo(function A2UIChart({
               <Scatter
                 key={yKey}
                 name={yKey}
-                data={data}
+                data={data.map((point) => ({ ...point, __a2uiScatterValue: point[yKey] }))}
                 fill={colors[idx % colors.length]}
                 cursor={cursorStyle}
               />
@@ -201,7 +211,13 @@ export const A2UIChart = memo(function A2UIChart({
 
       case "radar":
         return (
-          <RadarChart cx="50%" cy="50%" outerRadius={height / 3} data={data}>
+          <RadarChart
+            onClick={handleChartClick}
+            cx="50%"
+            cy="50%"
+            outerRadius={height / 3}
+            data={data}
+          >
             <PolarGrid />
             <PolarAngleAxis dataKey={xKey} className="text-xs" />
             <PolarRadiusAxis className="text-xs" />
@@ -221,7 +237,7 @@ export const A2UIChart = memo(function A2UIChart({
 
       case "donut":
         return (
-          <PieChart>
+          <PieChart onClick={handleChartClick}>
             <Pie
               data={data}
               dataKey={yKeys[0]}
@@ -244,7 +260,7 @@ export const A2UIChart = memo(function A2UIChart({
       case "line":
       default:
         return (
-          <LineChart data={data}>
+          <LineChart onClick={handleChartClick} data={data}>
             <ChartAxes
               xKey={xKey}
               xAxisLabel={component.xAxisLabel}

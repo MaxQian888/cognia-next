@@ -19,6 +19,7 @@ import { FingerprintIcon, GridIcon, KeyRoundIcon, LockKeyholeIcon } from "lucide
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { readNativeBiometricSecret } from "@/lib/accounts/quick-unlock/native-biometric"
 import { isMobile } from "@/lib/capacitor/_shared"
@@ -240,41 +241,10 @@ function AccountQuickUnlockPanel({
   const remaining = active ? attemptsRemaining(active) : 0
   const hint = activeUsable && remaining <= 2 ? t("attemptsLeft", { count: remaining }) : undefined
 
-  return (
-    <section
-      className="flex flex-col items-center gap-4"
-      data-testid="quick-unlock-panel"
-      aria-label={t("panelLabel")}
-    >
-      {ordered.length > 1 && (
-        <div className="flex gap-1" role="tablist" aria-label={t("methodLabel")}>
-          {ordered.map((entry) => {
-            const Icon = METHOD_ICON[entry.method]
-            const usable = isEnrollmentUsable(entry)
-            return (
-              <Button
-                key={entry.method}
-                type="button"
-                role="tab"
-                aria-selected={active?.method === entry.method}
-                variant={active?.method === entry.method ? "secondary" : "ghost"}
-                size="sm"
-                disabled={disabled || busy}
-                className={cn("gap-1.5", !usable && "opacity-60")}
-                onClick={() => {
-                  setSelected(entry.method)
-                  setError(null)
-                }}
-                data-testid={`quick-unlock-tab-${entry.method}`}
-              >
-                <Icon className="size-3.5" />
-                {t(`method.${entry.method}`)}
-              </Button>
-            )
-          })}
-        </div>
-      )}
-
+  // The input surface for the chosen method. With more than one method it is
+  // the panel of the method tabs; with one there is nothing to choose between.
+  const surface = (
+    <>
       {active && !activeUsable && (
         <p
           className="max-w-xs text-center text-xs text-destructive"
@@ -351,6 +321,67 @@ function AccountQuickUnlockPanel({
             </p>
           )}
         </div>
+      )}
+    </>
+  )
+
+  return (
+    <section
+      className="flex flex-col items-center gap-4"
+      data-testid="quick-unlock-panel"
+      aria-label={t("panelLabel")}
+    >
+      {ordered.length > 1 && active ? (
+        // `contents` keeps the list and panel as direct children of the
+        // section's centred column, exactly as before the shared Tabs.
+        <Tabs
+          value={active.method}
+          onValueChange={(value) => {
+            const next = ordered.find((entry) => entry.method === value)
+            if (!next) return
+            setSelected(next.method)
+            setError(null)
+          }}
+          className="contents"
+        >
+          <TabsList
+            aria-label={t("methodLabel")}
+            className="gap-1 rounded-none bg-transparent p-0 group-data-[orientation=horizontal]/tabs:h-auto"
+          >
+            {ordered.map((entry) => {
+              const Icon = METHOD_ICON[entry.method]
+              const usable = isEnrollmentUsable(entry)
+              return (
+                <TabsTrigger
+                  key={entry.method}
+                  value={entry.method}
+                  disabled={disabled || busy}
+                  className={cn(
+                    // The look of a small ghost Button, secondary when chosen.
+                    "h-8 flex-none gap-1.5 px-3 text-foreground has-[>svg]:px-2.5 hover:bg-accent hover:text-accent-foreground dark:text-foreground dark:hover:bg-accent/50",
+                    "data-[state=active]:bg-secondary data-[state=active]:text-secondary-foreground data-[state=active]:hover:bg-secondary/80 data-[state=active]:hover:text-secondary-foreground",
+                    "group-data-[variant=default]/tabs-list:data-[state=active]:shadow-none",
+                    "dark:data-[state=active]:border-transparent dark:data-[state=active]:bg-secondary dark:data-[state=active]:text-secondary-foreground dark:data-[state=active]:hover:bg-secondary/80",
+                    !usable && "opacity-60"
+                  )}
+                  data-testid={`quick-unlock-tab-${entry.method}`}
+                >
+                  <Icon className="size-3.5" />
+                  {t(`method.${entry.method}`)}
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+          <TabsContent
+            key={active.method}
+            value={active.method}
+            className="flex flex-none flex-col items-center gap-4"
+          >
+            {surface}
+          </TabsContent>
+        </Tabs>
+      ) : (
+        surface
       )}
 
       <Button

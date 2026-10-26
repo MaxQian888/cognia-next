@@ -15,6 +15,12 @@ import { runReplanCheckpoint } from "./replan-checkpoint"
 import { continueDecision, type ReplanDecision } from "../gates/replan-schema"
 import type { TeamRunContext } from "../team-run-context"
 import type { AgentTeamTask, CreateTaskInput } from "@/types/agent/agent-team"
+import { REPLAN_LEAD_PROMPT } from "../team-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 beforeEach(() => {
   dispatchStructuredMock.mockReset()
@@ -438,5 +444,53 @@ describe("runReplanCheckpoint", () => {
       // Empty remaining renders the "(none)" branch.
       expect(prompt).toContain("(none)")
     })
+  })
+})
+
+describe("runReplanCheckpoint — Prompt Center (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends a published re-plan prompt override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: REPLAN_LEAD_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-replan-lead",
+          body: [
+            "Goal: {{objective}}",
+            "Ran: {{results}}",
+            "Left: {{remaining}}{{recruitRoster}}",
+            'One of "continue", "inject", "cancel", "reorder", "finish".{{recruitAction}}',
+          ].join("\n"),
+          contractVersion: REPLAN_LEAD_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const { ctx } = makeCtx({}, ["lead", "w1"], { noAddTeammate: true })
+    let sent = ""
+    await runReplanCheckpoint({
+      teamCtx: ctx,
+      runId: "run1",
+      justRanTaskIds: ["t1"],
+      remaining: [task("t2")],
+      dispatch: async ({ prompt }) => {
+        sent = prompt
+        return decide({ action: "continue" })
+      },
+    })
+    expect(sent).toBe(
+      [
+        "Goal: do a thing",
+        "Ran: (no captured output)",
+        "Left: - [t2] t2: desc t2",
+        'One of "continue", "inject", "cancel", "reorder", "finish".',
+      ].join("\n")
+    )
   })
 })

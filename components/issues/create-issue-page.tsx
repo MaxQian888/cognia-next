@@ -1013,11 +1013,14 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
       return
     }
     setAiBusy(intent)
+    // Customized issue-assist wording for this tracker's workspace (ADR-0236).
+    const promptContext = { workspaceId: props.projectId }
     try {
       if (intent === "draft") {
         const base = form.form.description.trim() ? `${form.form.description.trimEnd()}\n\n` : ""
         const res = await draftIssueDescription(form.form.title, {
           client,
+          promptContext,
           projectName: props.projects.find((p) => p.id === form.selectedProjectId)?.name,
           // Live-typing effect: mirror each accumulated chunk into the
           // textarea as it streams; the settled (cleaned) text replaces it.
@@ -1031,7 +1034,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
         }
       } else if (intent === "improve") {
         const previous = form.form.description
-        const res = await improveIssueDescription(previous, { client })
+        const res = await improveIssueDescription(previous, { client, promptContext })
         if (res.kind === "text") {
           form.patch({ description: res.text })
           toast.success(t("create.ai.applied"), {
@@ -1050,7 +1053,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
             description: form.form.description,
             labelNames: (props.labels ?? []).map((label) => label.name),
           },
-          { client }
+          { client, promptContext }
         )
         if (res.kind === "suggestion") {
           const suggestedIds = new Set(res.suggestion.labelNames)
@@ -1070,7 +1073,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
         }
       } else if (intent === "title") {
         const previous = form.form.title
-        const res = await suggestIssueTitle(form.form.description, { client })
+        const res = await suggestIssueTitle(form.form.description, { client, promptContext })
         if (res.kind === "text") {
           form.patch({ title: res.text })
           toast.success(
@@ -1094,7 +1097,7 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
             description: form.form.description,
             candidates,
           },
-          { client }
+          { client, promptContext }
         )
         if (res.kind === "suggestion") {
           const { parentId, blockedByIds, duplicateIds: dupIds } = res.suggestion

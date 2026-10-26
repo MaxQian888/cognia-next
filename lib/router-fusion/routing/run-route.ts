@@ -71,6 +71,7 @@ import {
   listFusionActions,
   type DeploymentRef,
 } from "../chat/fusion-config"
+import { runRolePromptsFor } from "../prompts/role-prompts"
 
 export interface RunRouteInput {
   runId: string
@@ -262,6 +263,9 @@ export async function routeRunRequest(
     // The run is executed here with the user's API keys: metered, bounded.
     factsOf: (ref) => factsFor(host, ref, { subscription: false, lane: "ai-sdk" }),
   })
+  // The user's role texts are resolved once, here, and frozen into the
+  // snapshot the run pins; a later edit is a new action identity (A13).
+  const rolePrompts = await runRolePromptsFor(host.settings)
   // A request nothing can serve is a REFUSAL with reasons, never a throw.
   //
   // When no alias of any candidate action resolves — no provider configured,
@@ -271,7 +275,7 @@ export async function routeRunRequest(
   // `422 ROUTE_NO_SOLUTION`, and threw away the reasons already collected.
   let built: ReturnType<typeof buildFusionConfig>
   try {
-    built = buildFusionConfig(host.settings, registry, host.environment)
+    built = buildFusionConfig(host.settings, registry, host.environment, { rolePrompts })
   } catch (error) {
     if (!(error instanceof ConfigCompileError)) throw error
     return {

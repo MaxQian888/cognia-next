@@ -229,7 +229,7 @@ describe("conversation auto-archive schedule", () => {
         dueReminder: false,
         onStart: false,
         onComplete: false,
-        onError: true,
+        onError: false,
         onProgress: false,
         channels: ["none"],
       },
@@ -243,7 +243,12 @@ describe("conversation auto-archive schedule", () => {
   it("does not create a second task", async () => {
     const createTask = jest.fn()
     jest.mocked(getTaskScheduler).mockReturnValue({
-      getAllTasks: jest.fn(async () => [{ type: CONVERSATION_AUTO_ARCHIVE_TASK_TYPE }]),
+      getAllTasks: jest.fn(async () => [
+        {
+          type: CONVERSATION_AUTO_ARCHIVE_TASK_TYPE,
+          notification: { channels: ["none"], dueReminder: false },
+        },
+      ]),
       createTask,
     } as unknown as ReturnType<typeof getTaskScheduler>)
 

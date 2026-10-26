@@ -58,6 +58,10 @@ import {
   type ActionDraftIssue,
 } from "@cognia/router-fusion/settings/action-catalog"
 import type { ActionOverride, RouterFusionSettings } from "@cognia/router-fusion/settings/settings"
+import {
+  CUSTOM_ROLE_PROMPT_VERSION,
+  ROLE_PROMPT_VERSION,
+} from "@cognia/router-fusion/prompts/roles"
 
 import { KNOWN_PROFILES, KNOWN_ROLES } from "@/components/router-fusion/fusion-run-details"
 
@@ -75,6 +79,16 @@ export interface RouterFusionActionCatalogProps {
 
 const ALL_MODES: readonly ExecutionMode[] = ["direct", "cascade", "panel", "delegate"]
 const UNUSED = "__unused__"
+
+/**
+ * The role prompts an action of the user's own may run: the shipped roles-1,
+ * or the Router Fusion role prompts as edited in the Prompt Center. A built-in
+ * action always runs roles-1, so it shows no choice.
+ */
+const PROMPT_VERSION_CHOICES = [
+  { value: ROLE_PROMPT_VERSION, key: "shipped" },
+  { value: CUSTOM_ROLE_PROMPT_VERSION, key: "custom" },
+] as const
 
 /** The action as it is without any override: the built-in, or the user's own as saved. */
 function baseActionOf(settings: RouterFusionSettings, id: string): ActionConfig | undefined {
@@ -159,6 +173,30 @@ function ActionEditor({
     })
   const baseRoles = baseActionOf(settings, action.id)?.roles ?? {}
 
+  /**
+   * The prompt version is part of the user's own action, not an override: it
+   * is saved on the action itself, through the same validator that admits a
+   * new action.
+   */
+  const setPromptVersion = (next: string) =>
+    persist((current) => {
+      const own = current.customActions.find((candidate) => candidate.id === action.id)
+      if (!own) return {}
+      const updated = { ...own, roles: { ...own.roles }, prompt_version: next }
+      const others = current.customActions
+        .filter((candidate) => candidate.id !== action.id)
+        .map((candidate) => candidate.id)
+      const issues = validateActionDraft(updated, others)
+      if (issues.length > 0) {
+        toast.error(t("saveRefused", { reason: issues.map(issueText).join(" ") }))
+        return {}
+      }
+      return { customActions: withCustomAction(current, updated) }
+    })
+  const promptChoice = PROMPT_VERSION_CHOICES.find(
+    (choice) => choice.value === action.prompt_version
+  )
+
   const roleRow = (role: string, isRequired: boolean) => {
     const id = `router-fusion-action-${action.id}-role-${role}`
     const value = action.roles[role]
@@ -239,6 +277,36 @@ function ActionEditor({
               : t("profileDormant")}
           </p>
         </div>
+
+        {custom ? (
+          <div className="space-y-1.5">
+            <Label className="text-xs" htmlFor={`router-fusion-action-${action.id}-prompts`}>
+              {t("promptVersion")}
+            </Label>
+            <Select value={action.prompt_version} onValueChange={setPromptVersion}>
+              <SelectTrigger
+                id={`router-fusion-action-${action.id}-prompts`}
+                className="h-8 w-48 text-xs"
+                aria-label={t("promptVersion")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROMPT_VERSION_CHOICES.map((choice) => (
+                  <SelectItem key={choice.value} value={choice.value}>
+                    {t(`promptVersionValue.${choice.key}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p
+              className="text-[11px] text-muted-foreground"
+              data-testid={`router-fusion-action-prompts-desc-${action.id}`}
+            >
+              {t(`promptVersionDesc.${promptChoice?.key ?? "shipped"}`)}
+            </p>
+          </div>
+        ) : null}
 
         <RouterFusionUsdField
           id={`router-fusion-action-${action.id}-cap`}

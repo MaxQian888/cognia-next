@@ -1,4 +1,5 @@
 import { measureOperation } from "@/lib/perf/operation-performance"
+import { waitForModelSelection } from "@/lib/chat/model-selection"
 import Dexie from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
@@ -14,6 +15,7 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import {
   externalAgentIdFromProviderId,
   managedGatewayLinksOf,
@@ -288,6 +290,8 @@ export async function createSession(
   scope?: SessionPersistenceScope
 ): Promise<ChatSession> {
   scope?.assertActive()
+  await waitForModelSelection(null)
+  scope?.assertActive()
   if (partial && Object.prototype.hasOwnProperty.call(partial, "workingSet")) {
     throw new Error("Working set changes must use mutateSessionWorkingSet")
   }
@@ -330,8 +334,9 @@ export async function createSession(
   const projectId = await resolveScopeProjectId(partial?.projectId, scope)
   scope?.assertActive()
 
-  // The app-wide default thinking tier (`AppSettings.defaultThinkingLevel`),
-  // stamped onto the row rather than consulted at send time.
+  // App-wide Auto selection and thinking tier are stamped onto the row.
+  // Inherited Auto outranks a model auto-applied by the default preset;
+  // explicit caller seeds still win, and the rest of the preset is retained.
   //
   // Stamping is what makes the composer's control able to SHOW the default: a
   // send-time fallback never reaches the session row, so the chip would read
@@ -344,12 +349,27 @@ export async function createSession(
   // tier), and the read is best-effort: a settings failure must not stop a
   // conversation from being created.
   let defaultTier: ReturnType<typeof thinkingLevelPatch> | undefined
-  if (partial?.thinkingLevel === undefined && partial?.effort === undefined) {
+  let defaultModel: "auto" | undefined
+  const inheritThinking = partial?.thinkingLevel === undefined && partial?.effort === undefined
+  if (partial?.model === undefined || inheritThinking) {
     try {
-      const level = (await getSettings(scope))?.defaultThinkingLevel
-      if (level) defaultTier = thinkingLevelPatch(level)
+      const settings = await getSettings(scope)
+      if (
+        partial?.model === undefined &&
+        settings.autoRouting?.enabled &&
+        settings.autoRouting.defaultSelection === "auto"
+      ) {
+        defaultModel = "auto"
+      } else if (partial?.model === undefined && resolveAppDefaultModel(settings).model) {
+        // A welcome-screen provider choice must outrank the default preset's
+        // model while keeping its prompt and other configuration. Leave the
+        // row unpinned so it continues following the app default on later turns.
+        autoApplied.model = undefined
+      }
+      const level = settings.defaultThinkingLevel
+      if (inheritThinking && level) defaultTier = thinkingLevelPatch(level)
     } catch (err) {
-      console.warn("createSession: default thinking level lookup failed", err)
+      console.warn("createSession: default model/thinking level lookup failed", err)
     }
     scope?.assertActive()
   }
@@ -411,7 +431,7 @@ export async function createSession(
     projectId,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
-    model: partial?.model ?? autoApplied.model,
+    model: partial?.model ?? defaultModel ?? autoApplied.model,
     ...(agentModels ? { externalAgentModels: agentModels } : {}),
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,
     workingDir: partial?.workingDir ?? autoApplied.workingDir,

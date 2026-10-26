@@ -32,6 +32,7 @@ describe("toDocsProviderError", () => {
     ["larkBrowserUnsupported", "hostUnsupported"],
     ["larkCliUnavailable", "notConfigured"],
     ["larkNetwork", "network"],
+    ["larkOutputTruncated", "network"],
   ] as const)("maps ingest code %s to %s", (ingestCode, expected) => {
     expect(toDocsProviderError(new LarkIngestError(ingestCode))).toMatchObject({ code: expected })
   })

@@ -141,7 +141,9 @@ describe("sweepDroppedDatabaseAppData", () => {
   it("keeps a directory it cannot remove for the next sweep", async () => {
     mkdirs("generated-videos/acct_alpha/dropped-db")
     heldOpen.add("generated-videos/acct_alpha/dropped-db")
-    await expect(sweepDroppedDatabaseAppData(async () => false)).resolves.toBe(0)
+    const report = { failed: 0 }
+    await expect(sweepDroppedDatabaseAppData(async () => false, report)).resolves.toBe(0)
+    expect(report.failed).toBe(1)
     expect(tree.has("generated-videos/acct_alpha")).toBe(true)
     heldOpen.clear()
     await expect(sweepDroppedDatabaseAppData(async () => false)).resolves.toBe(1)

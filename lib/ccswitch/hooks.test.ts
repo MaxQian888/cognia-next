@@ -221,3 +221,71 @@ describe("other hooks", () => {
     await waitFor(() => expect(mSkills).toHaveBeenCalled())
   })
 })
+
+describe("shared watcher and request lifecycle", () => {
+  beforeEach(() => {
+    mIsTauri.mockReturnValue(true)
+    mStatus.mockResolvedValue({ exists: true })
+    mProviders.mockResolvedValue([])
+  })
+
+  it("keeps the native watcher alive until the final consumer unmounts", async () => {
+    const status = renderHook(() => useCcswitchStatus(true, true))
+    const providers = renderHook(() => useCcswitchProviders(true, true))
+    await waitFor(() => expect(mWatchStart).toHaveBeenCalledTimes(1))
+    status.unmount()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mWatchStop).not.toHaveBeenCalled()
+    providers.unmount()
+    await waitFor(() => expect(mWatchStop).toHaveBeenCalledTimes(1))
+  })
+
+  it("retries a failed start when another consumer subscribes", async () => {
+    mWatchStart.mockResolvedValueOnce(false).mockResolvedValue(true)
+    const status = renderHook(() => useCcswitchStatus(true, true))
+    await waitFor(() => expect(mWatchStart).toHaveBeenCalledTimes(1))
+    const providers = renderHook(() => useCcswitchProviders(true, true))
+    await waitFor(() => expect(mWatchStart).toHaveBeenCalledTimes(2))
+    status.unmount()
+    providers.unmount()
+    await waitFor(() => expect(mWatchStop).toHaveBeenCalledTimes(1))
+  })
+
+  it("releases a listener that resolves after unmount without starting a watch", async () => {
+    let resolve!: (value: () => void) => void
+    const unlisten = jest.fn()
+    mOnEvent.mockReturnValue(
+      new Promise<() => void>((r) => {
+        resolve = r
+      })
+    )
+    const hook = renderHook(() => useCcswitchStatus(true, true))
+    hook.unmount()
+    await act(async () => {
+      resolve(unlisten)
+    })
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    expect(mWatchStart).not.toHaveBeenCalled()
+  })
+
+  it("ignores a stale response after a newer refresh", async () => {
+    let old!: (value: unknown) => void
+    mStatus
+      .mockReturnValueOnce(
+        new Promise((r) => {
+          old = r
+        })
+      )
+      .mockResolvedValue({ dbPath: "new" })
+    const hook = renderHook(() => useCcswitchStatus(true))
+    await act(async () => {
+      await hook.result.current.refresh()
+    })
+    await act(async () => {
+      old({ dbPath: "old" })
+    })
+    expect(hook.result.current.data?.dbPath).toBe("new")
+  })
+})

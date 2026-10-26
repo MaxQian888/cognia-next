@@ -8,6 +8,7 @@ import { createXai } from "@ai-sdk/xai"
 import { createTogetherAI } from "@ai-sdk/togetherai"
 import { createFireworks } from "@ai-sdk/fireworks"
 import { createDeepInfra } from "@ai-sdk/deepinfra"
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import { createNativeSiwcFetch } from "@/lib/subscription/siwc/native-fetch"
 jest.mock("@/lib/subscription/siwc/native-fetch", () => ({
@@ -152,6 +153,66 @@ describe("customHeaders → ResolvedProvider.headers", () => {
   })
 })
 
+describe("Azure resolution with the actual SDK", () => {
+  it.each([
+    ["chat", "https://resource.openai.azure.com/openai/v1", "/openai/v1/chat/completions", null],
+    ["responses", "https://resource.openai.azure.com/openai/v1", "/openai/v1/responses", null],
+    ["chat", "https://resource.openai.azure.com/openai", "/openai/v1/chat/completions", "v1"],
+    ["responses", "https://gateway.test/v1", "/v1/responses", null],
+  ] as const)(
+    "builds %s requests with Azure authentication at %s",
+    async (apiFlavor, baseURL, pathname, apiVersion) => {
+      const actual = jest.requireActual<typeof import("@ai-sdk/azure")>("@ai-sdk/azure")
+      jest.mocked(createAzure).mockImplementationOnce(actual.createAzure)
+      const resolution = resolveFeatureProvider(
+        {
+          featureId: "azure-protocol-regression",
+          routeProfile: "general-text",
+          selectionMode: "explicit-provider",
+          providerId: "azure",
+          fallbackMode: "none",
+        },
+        {
+          defaultProvider: "azure",
+          providers: {
+            azure: {
+              enabled: true,
+              apiKey: "synthetic-azure-key",
+              baseURL,
+              defaultModel: "test-deployment",
+              apiFlavor,
+            },
+          },
+          customProviders: [],
+        }
+      )
+      if (resolution.kind !== "resolved") throw new Error("Azure did not resolve")
+      const stopped = new Error("Request captured before network delivery")
+      const transport = jest.fn<
+        ReturnType<typeof globalThis.fetch>,
+        Parameters<typeof globalThis.fetch>
+      >(() => Promise.reject(stopped))
+      const model = createFeatureProviderModel(resolution, { fetch: transport }) as LanguageModelV4
+      await expect(
+        model.doGenerate({
+          prompt: [{ role: "user", content: [{ type: "text", text: "Synthetic diagnostic" }] }],
+          maxOutputTokens: 16,
+        })
+      ).rejects.toThrow(stopped.message)
+      expect(transport).toHaveBeenCalledTimes(1)
+      const [input, init] = transport.mock.calls[0]
+      const url = new URL(String(input))
+      expect(url.origin).toBe(new URL(baseURL).origin)
+      expect(url.pathname).toBe(pathname)
+      expect(url.searchParams.get("api-version")).toBe(apiVersion)
+      const headers = new Headers(init?.headers)
+      expect(headers.get("api-key")).toBe("synthetic-azure-key")
+      expect(headers.has("authorization")).toBe(false)
+      expect(JSON.parse(String(init?.body))).toMatchObject({ model: "test-deployment" })
+    }
+  )
+})
+
 describe("createProviderSettingsSnapshot", () => {
   it("defaults missing inputs to empty collections", () => {
     const snap = createProviderSettingsSnapshot({
@@ -254,6 +315,88 @@ describe("resolveFeatureProvider — explicit provider", () => {
     expect(resolved.apiKey).toBe("sk-openai")
     expect(resolved.model).toBe("gpt-4o-mini")
     expect(resolved.isCustomProvider).toBe(false)
+  })
+
+  it("uses the native SDK family for the OpenAI-compatible Azure built-in", () => {
+    const providerId = "azure"
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId,
+        fallbackMode: "none",
+      },
+      {
+        defaultProvider: providerId,
+        providers: {
+          [providerId]: {
+            enabled: true,
+            apiKey: "native-test-key",
+            baseURL: "https://native-provider.test",
+            defaultModel: "native-model",
+            apiFlavor: "responses",
+          },
+        },
+        customProviders: [],
+      }
+    )
+    expect(r).toMatchObject({
+      kind: "resolved",
+      providerId,
+      protocol: providerId,
+      apiFlavor: "responses",
+    })
+  })
+
+  it.each(["mistral", "cohere"])(
+    "preserves the catalog's OpenAI compatibility adapter for %s",
+    (providerId) => {
+      const r = resolveFeatureProvider(
+        {
+          featureId: "f",
+          routeProfile: "general-text",
+          selectionMode: "explicit-provider",
+          providerId,
+          fallbackMode: "none",
+        },
+        {
+          defaultProvider: providerId,
+          providers: { [providerId]: { enabled: true, apiKey: "compatibility-key" } },
+          customProviders: [],
+        }
+      )
+      expect(r).toMatchObject({ kind: "resolved", protocol: "openai" })
+      if (providerId === "cohere") {
+        expect(r).toMatchObject({ baseURL: "https://api.cohere.com/compatibility/v1" })
+      }
+    }
+  )
+
+  it("honors an explicit OpenAI protocol override for Azure", () => {
+    const r = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "azure",
+        fallbackMode: "none",
+      },
+      {
+        defaultProvider: "azure",
+        providers: {
+          azure: {
+            enabled: true,
+            apiKey: "native-test-key",
+            baseURL: "https://azure-gateway.test/v1",
+            defaultModel: "deployment",
+            apiProtocol: "openai",
+          },
+        },
+        customProviders: [],
+      }
+    )
+    expect(r).toMatchObject({ kind: "resolved", protocol: "openai" })
   })
 
   it("forwards a built-in provider's apiFlavor onto the resolution", () => {
@@ -754,6 +897,7 @@ describe("createFeatureProviderClient / createFeatureProviderModel", () => {
   })
 
   const base = {
+    kind: "resolved" as const,
     providerId: "p",
     apiKey: "k",
     baseURL: undefined,

@@ -43,6 +43,54 @@ const encrypted: EncryptedEnvelopeV1 = {
 }
 
 describe("scanBackupForShare", () => {
+  it("requires binary consent for base64 knowledge originals while still scanning their metadata", () => {
+    const result = scanBackupForShare(
+      plaintext({
+        knowledgeBaseSources: [
+          {
+            id: "pdf",
+            title: "Source",
+            contentEncoding: "base64",
+            content: "b3duZXJAZXhhbXBsZS5jb20=",
+          },
+        ],
+      })
+    )
+    expect(result).toMatchObject({ kind: "clean", uninspectedAttachments: 1 })
+    expect(
+      scanBackupForShare(
+        plaintext({
+          knowledgeBaseSources: [
+            {
+              id: "pdf",
+              title: "owner@example.com",
+              contentEncoding: "base64",
+              content: "b3duZXJAZXhhbXBsZS5jb20=",
+            },
+          ],
+        })
+      )
+    ).toMatchObject({ kind: "hits", total: 1, uninspectedAttachments: 1 })
+  })
+  it("scans newly portable authored domains through the existing share-consent gate", () => {
+    expect(
+      scanBackupForShare(
+        plaintext({
+          projects: [{ name: "workspace-owner@example.com" }],
+          workflows: [{ name: "workflow-owner@example.com" }],
+          knowledgeBaseSources: [{ content: "source-owner@example.com" }],
+        })
+      )
+    ).toMatchObject({
+      kind: "hits",
+      total: 3,
+      domains: expect.arrayContaining([
+        { domain: "sessions", hits: 1, byKind: { EMAIL: 1 } },
+        { domain: "library", hits: 1, byKind: { EMAIL: 1 } },
+        { domain: "retrieval", hits: 1, byKind: { EMAIL: 1 } },
+      ]),
+    })
+  })
   it("groups Files folders, items and extracted asset text under library", () => {
     const result = scanBackupForShare(
       plaintext({
@@ -196,4 +244,31 @@ it("scans recorded browser flows as part of the library", () => {
   expect(result.kind).toBe("hits")
   if (result.kind !== "hits") return
   expect(result.domains.map((domain) => domain.domain)).toEqual(["library"])
+})
+
+// A customized built-in prompt is text the user wrote, so a shared backup's
+// report must show what is in it (ADR-0236).
+it("scans customized built-in prompt revisions as part of the library", () => {
+  const result = scanBackupForShare(
+    plaintext({
+      promptOverrideRevisions: [
+        {
+          id: "por_1",
+          bindingId: "pob_1",
+          promptId: "generation.title.chat",
+          parentId: null,
+          kind: "published",
+          body: "Sign every title for dave@example.com",
+          contractVersion: 1,
+          baseDigest: "sha256:x",
+          origin: "editor",
+          mutationId: "m",
+          createdAt: 1,
+        },
+      ],
+    })
+  )
+  expect(result.kind).toBe("hits")
+  if (result.kind !== "hits") return
+  expect(result.domains).toEqual([{ domain: "library", hits: 1, byKind: { EMAIL: 1 } }])
 })

@@ -25,6 +25,7 @@ import {
   rustHasInlineTests,
   rustSplitTestModules,
   rustIsDeclarationOnly,
+  tsIsReexportOnly,
 } from "./check-colocated-tests.mjs"
 
 test("isGatedTsSource covers the documented roots", () => {
@@ -96,6 +97,27 @@ test("a declaration-only Rust file is not a violation", () => {
   }
   const io = { has: () => false, readRust: (p) => sources[p] }
   assert.deepEqual(findViolations(Object.keys(sources), io), ["crates/cognia-x/src/a.rs"])
+})
+
+test("tsIsReexportOnly accepts boundary shims and rejects anything with behavior", () => {
+  assert.ok(
+    tsIsReexportOnly('/**\n * Moved.\n */\nexport * from "@cognia/plugin-contract/lib/x"\n')
+  )
+  assert.ok(tsIsReexportOnly('export * as ns from "./a"\nexport { a, type B } from "./b";\n'))
+  assert.ok(tsIsReexportOnly('export type {\n  A,\n  B,\n} from "./types" // types\n'))
+  assert.ok(!tsIsReexportOnly('export * from "./a"\nexport const LIMIT = 3\n'))
+  assert.ok(!tsIsReexportOnly('import { a } from "./a"\nexport { a }\n'))
+  assert.ok(!tsIsReexportOnly("// Comments only.\n"))
+  assert.ok(!tsIsReexportOnly(""))
+})
+
+test("a re-export-only TypeScript shim is not a violation; its sibling module still is", () => {
+  const sources = {
+    "lib/x/shim.ts": 'export * from "@cognia/plugin-contract/lib/x/shim"\n',
+    "lib/x/real.ts": "export const real = 1\n",
+  }
+  const io = { has: () => false, readRust: () => "", readTs: (p) => sources[p] }
+  assert.deepEqual(findViolations(Object.keys(sources), io), ["lib/x/real.ts"])
 })
 
 test("expectedTestPaths offers every accepted co-located name", () => {

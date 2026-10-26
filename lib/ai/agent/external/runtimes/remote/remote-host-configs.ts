@@ -84,6 +84,9 @@ export type HostConfigCommand = (typeof HOST_CONFIG_COMMANDS)[keyof typeof HOST_
  * the client has to know before it sends one rather than learn from a 422.
  */
 export const HOST_CONFIG_CAPABILITIES = Object.freeze({
+  configModelRoles: "external_agent_config_model_roles",
+  configModelRolesV2: "external_agent_config_model_roles_v2",
+  nativeSubagentControl: "external_agent_native_subagent_control",
   runTurnCogniaModel: "external_agent_run_turn_cognia_model",
   // `external_agent_run_turn` takes `attachments`: images staged through the
   // chunked upload plane, resolved and judged against the Host's own agent.
@@ -273,6 +276,37 @@ export class HostCogniaModelUpdateRequiredError extends HostConfigsUnsupportedEr
   }
 }
 
+/** The paired Host cannot persist per-slot model overrides yet. */
+export class HostModelRolesUpdateRequiredError extends HostConfigsUnsupportedError {
+  readonly code = "host-update-required" as const
+  readonly i18nKey = "externalAgent.roleModels.hostOutdated" as const
+
+  constructor() {
+    super("unsupported", HOST_CONFIG_CAPABILITIES.configModelRoles)
+    this.name = "HostModelRolesUpdateRequiredError"
+    this.message = this.i18nKey
+  }
+}
+
+export class HostNativeSubagentUpdateRequiredError extends HostConfigsUnsupportedError {
+  readonly code = "host-update-required" as const
+  readonly i18nKey = "externalAgent.sessionOperations.nativeHostUpdateRequired" as const
+  constructor() {
+    super("unsupported", HOST_CONFIG_CAPABILITIES.nativeSubagentControl)
+    this.name = "HostNativeSubagentUpdateRequiredError"
+    this.message = this.i18nKey
+  }
+}
+
+/** Whether create/update can carry role overrides to the active Host. */
+export function hostSupportsModelRoles(): boolean {
+  return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.configModelRoles).ok
+}
+
+export function hostSupportsModelRolesV2(): boolean {
+  return hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.configModelRolesV2).ok
+}
+
 /**
  * Can the active Host run a turn on a Cognia model it is handed per turn?
  * Local authority always can: the field and its handler ship together.
@@ -341,6 +375,15 @@ export async function createRemoteHostConfig(
   config: Partial<StoredExternalAgentConfig>,
   options: { fromImport?: boolean } = {}
 ): Promise<ExternalAgentConfigRecord> {
+  if (config.modelRoles !== undefined && !hostSupportsModelRoles())
+    throw new HostModelRolesUpdateRequiredError()
+  if (config.modelRoles?.version === 2 && !hostSupportsModelRolesV2())
+    throw new HostModelRolesUpdateRequiredError()
+  if (
+    config.codexOptions?.stepModelSwitching !== undefined &&
+    !hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+  )
+    throw new HostNativeSubagentUpdateRequiredError()
   const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.create,
     {
@@ -354,8 +397,19 @@ export async function createRemoteHostConfig(
 export async function updateRemoteHostConfig(input: {
   configId: string
   expectedRevision: string
-  patch: Partial<StoredExternalAgentConfig>
+  patch: Omit<Partial<StoredExternalAgentConfig>, "modelRoles"> & {
+    modelRoles?: StoredExternalAgentConfig["modelRoles"] | null
+  }
 }): Promise<ExternalAgentConfigRecord> {
+  if (input.patch.modelRoles !== undefined && !hostSupportsModelRoles())
+    throw new HostModelRolesUpdateRequiredError()
+  if (input.patch.modelRoles?.version === 2 && !hostSupportsModelRolesV2())
+    throw new HostModelRolesUpdateRequiredError()
+  if (
+    input.patch.codexOptions?.stepModelSwitching !== undefined &&
+    !hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+  )
+    throw new HostNativeSubagentUpdateRequiredError()
   const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.update,
     input as unknown as Record<string, unknown>

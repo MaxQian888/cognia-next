@@ -1,6 +1,7 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Search } from "lucide-react"
 import {
@@ -29,11 +30,25 @@ export function SearchSettings() {
   const isNarrow = useIsNarrow()
 
   const requested = params.get(SEARCH_SECTION_PARAM)
-  const active: SearchSectionId = isSearchSection(requested) ? requested : "basics"
+  const focus = params.get("focus")
+  const focusedSection =
+    focus === "web-reader"
+      ? "reading"
+      : focus?.startsWith("search-provider-")
+        ? "providers"
+        : undefined
+  const [focusSelection, setFocusSelection] = useState<SearchSectionId | undefined>(focusedSection)
+  // The finder consumes its focus param after scrolling. Keep the owning panel mounted.
+  if (focusedSection && focusedSection !== focusSelection) setFocusSelection(focusedSection)
+  const active: SearchSectionId =
+    focusedSection ?? (isSearchSection(requested) ? requested : (focusSelection ?? "basics"))
 
-  const navigate = (id: SearchSectionId) => {
+  const navigate = (id: SearchSectionId, focusId?: string) => {
+    setFocusSelection(undefined)
     const next = new URLSearchParams(params.toString())
     next.set(SEARCH_SECTION_PARAM, id)
+    next.delete("focus")
+    if (focusId) next.set("focus", focusId)
     router.replace(`?${next.toString()}`, { scroll: false })
   }
 

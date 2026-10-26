@@ -1,6 +1,19 @@
 import { isLarkDocUrl, isLarkResourceUrl, parseLarkDocUrl, parseLarkResourceUrl } from "./lark-url"
 
 describe("parseLarkDocUrl", () => {
+  it("uses a known document kind for opaque search-result tokens without widening URL detection", () => {
+    const token = "Z1FjAbCdEfGh1234567890"
+    expect(parseLarkDocUrl(token)).toBeNull()
+    expect(parseLarkDocUrl(token, "docx")).toEqual({ kind: "docx", token })
+    expect(parseLarkDocUrl(token, "doc")).toEqual({ kind: "doc", token })
+    expect(parseLarkDocUrl(token, "wiki")).toEqual({ kind: "wiki", token })
+    expect(parseLarkDocUrl("short", "docx")).toBeNull()
+    expect(parseLarkDocUrl("https://example.com/post", "docx")).toBeNull()
+    expect(parseLarkDocUrl("doxcnAbCdEfGh1234567890", "doc")?.kind).toBe("docx")
+    expect(parseLarkDocUrl("shtcnAbCdEfGh1234567890", "docx")).toBeNull()
+    expect(parseLarkDocUrl("https://acme.feishu.cn/wiki/" + token, "docx")?.kind).toBe("wiki")
+  })
+
   it("parses a feishu.cn docx URL", () => {
     expect(parseLarkDocUrl("https://acme.feishu.cn/docx/doxcnAbCdEfGh1234567890")).toEqual({
       kind: "docx",

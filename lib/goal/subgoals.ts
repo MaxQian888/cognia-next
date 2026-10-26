@@ -20,7 +20,12 @@ import { hasNoLeakingPii } from "@cognia/redact"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import type { Goal, GoalSubgoal } from "@/types/goal"
-import { SUBGOAL_DECOMPOSE_SYSTEM_PROMPT, renderSubgoalDecomposeUserPrompt } from "./prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  GOAL_SUBGOALS_PROMPT,
+  goalPromptContext,
+  renderSubgoalDecomposeUserPrompt,
+} from "./prompts"
 
 /** Hard cap on generated steps — keeps the checklist scannable. */
 export const MAX_SUBGOALS = 12
@@ -54,14 +59,18 @@ export async function decomposeObjective(input: DecomposeObjectiveInput): Promis
   if (signal?.aborted) return []
 
   const userPrompt = renderSubgoalDecomposeUserPrompt(goal)
-  if (!hasNoLeakingPii(userPrompt) || !hasNoLeakingPii(SUBGOAL_DECOMPOSE_SYSTEM_PROMPT)) {
+  const system = (
+    await resolvePromptAsync(GOAL_SUBGOALS_PROMPT, { context: goalPromptContext(goal) })
+  ).text
+  if (!hasNoLeakingPii(userPrompt) || !hasNoLeakingPii(system)) {
     return []
   }
+  if (signal?.aborted) return []
 
   let raw: string
   try {
     raw = await client.complete(userPrompt, {
-      system: SUBGOAL_DECOMPOSE_SYSTEM_PROMPT,
+      system,
       maxTokens: maxTokens ?? 400,
       temperature: temperature ?? 0.2,
     })

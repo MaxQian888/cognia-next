@@ -51,6 +51,24 @@ beforeEach(() => {
 })
 
 describe("webdavSnapshotName", () => {
+  it("stops before any upload when ownership changes during collection creation", async () => {
+    fakeClient = makeClient()
+    let current = true
+    fakeClient.ensureCollection.mockImplementationOnce(async () => {
+      current = false
+    })
+    await expect(
+      uploadSnapshotToWebDav(
+        "encrypted",
+        { filename: "backup", exportedAt: "2026-10-21T00:00:00.000Z", sizeBytes: 9 },
+        () => {
+          if (!current) throw new Error("owner changed")
+        }
+      )
+    ).rejects.toThrow("owner changed")
+    expect(fakeClient.putFile).not.toHaveBeenCalled()
+    expect(fakeClient.deleteFile).not.toHaveBeenCalled()
+  })
   it("derives a filesystem-safe name from the ISO manifest time", () => {
     expect(webdavSnapshotName("2026-05-30T12:30:00.000Z")).toBe(
       "cognia-backup-2026-05-30T12-30-00-000Z.enc.cbk"

@@ -16,9 +16,14 @@ import {
 } from "@/types/agent/ultracode"
 import { dispatchStructured } from "../teammate/structured-dispatch"
 import { fanoutLimit, getTeamCtxOrThrow, mapSettled, nonRetryable } from "./_shared"
-
-const ATTEMPT_HINT = '{ "angle": "…", "content": "…" }'
-const SCORE_HINT = '{ "score": 0-10, "rationale": "…" }'
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import {
+  freezePatternPromptScope,
+  JUDGE_ATTEMPT_PROMPT,
+  JUDGE_ATTEMPT_SCHEMA_HINT_PROMPT,
+  JUDGE_SCORE_PROMPT,
+  JUDGE_SCORE_SCHEMA_HINT_PROMPT,
+} from "./pattern-prompts"
 
 export const JUDGE_PANEL_KIND = "pattern.judge-panel" as const
 
@@ -44,6 +49,9 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
     throw nonRetryable("pattern.judge-panel requires at least one 'angles' entry")
 
   ctx.log("info", `judge-panel: ${angles.length} attempts × ${judgesPerAttempt} judges`)
+  // One snapshot for the whole step (ADR-0236): both phases read the same text.
+  const promptScope = await freezePatternPromptScope(teamCtx)
+  ctx.signal?.throwIfAborted()
 
   // Phase 1 — produce one attempt per angle, in parallel.
   const attemptResults = await mapSettled(
@@ -54,13 +62,14 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
         teamCtx,
         {
           taskId: `${ctx.stepId}:attempt:${i}`,
-          prompt:
-            `Objective: ${objective}\n\nApproach this from the angle: ${angle}\n\n` +
-            "Produce your best concrete attempt at the objective from THIS angle only.",
+          prompt: resolvePrompt(JUDGE_ATTEMPT_PROMPT, {
+            ...promptScope,
+            values: { objective, angle },
+          }).text,
           signal: ctx.signal,
         },
         attemptSchema,
-        { schemaHint: ATTEMPT_HINT }
+        { schemaHint: resolvePrompt(JUDGE_ATTEMPT_SCHEMA_HINT_PROMPT).text }
       )
       return r.value
     },
@@ -83,13 +92,14 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
         teamCtx,
         {
           taskId: `${ctx.stepId}:judge:${job.ai}:${job.ji}`,
-          prompt:
-            `Objective: ${objective}\n\nScore this attempt (0–10) on how well it meets the objective. ` +
-            `Be a demanding, independent judge.\n\nAttempt (angle: ${job.attempt.angle}):\n${job.attempt.content}`,
+          prompt: resolvePrompt(JUDGE_SCORE_PROMPT, {
+            ...promptScope,
+            values: { objective, angle: job.attempt.angle, content: job.attempt.content },
+          }).text,
           signal: ctx.signal,
         },
         judgeScoreSchema,
-        { schemaHint: SCORE_HINT }
+        { schemaHint: resolvePrompt(JUDGE_SCORE_SCHEMA_HINT_PROMPT).text }
       )
       return { ai: job.ai, score: r.value }
     },

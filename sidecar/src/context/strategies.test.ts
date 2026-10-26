@@ -24,6 +24,28 @@ test("returns none when nothing is old enough", () => {
   assert.equal(plan.kind, "none")
 })
 
+test("strategy forwards an explicit token suffix, including zero, without changing count-only mode", () => {
+  const conversation: ConversationMessage[] = [
+    { role: "user", content: "old source ".repeat(1000) },
+    ...Array.from({ length: 12 }, () => ({
+      role: "assistant" as const,
+      content: "recent evidence ".repeat(3),
+    })),
+  ]
+  const tokens = planStrategy({
+    strategy: "summary",
+    conversation,
+    keepRecent: 2,
+    keepRecentTokens: 100,
+  })
+  assert.ok(tailOf(tokens).length > 2)
+  assert.equal(tailOf(planStrategy({ strategy: "summary", conversation, keepRecent: 2 })).length, 2)
+  assert.equal(
+    tailOf(planStrategy({ strategy: "summary", conversation, keepRecentTokens: 0 })).length,
+    0
+  )
+})
+
 test("summary / hybrid produce a single-summary plan over the middle", () => {
   const conversation = convo(10)
   const plan = planStrategy({ strategy: "summary", conversation, keepRecent: 2 })
@@ -311,4 +333,15 @@ test("every strategy's retained messages stay pair-safe on a tool-heavy history"
       assertPaired(retained)
     }
   }
+})
+
+test("a total retained-content allowance drains the tail even without a fractional setting", () => {
+  const conversation = convo(12).map((m) => ({
+    ...m,
+    content: String(m.content) + "x".repeat(400),
+  }))
+  const ordinary = planStrategy({ conversation, keepRecent: 8 })
+  const budgeted = planStrategy({ conversation, keepRecent: 8, retainedTokenBudget: 350 })
+  assert.ok(tailOf(budgeted).length < tailOf(ordinary).length)
+  assert.ok(tailOf(budgeted).length >= MIN_TAIL)
 })

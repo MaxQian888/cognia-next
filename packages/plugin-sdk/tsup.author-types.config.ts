@@ -29,7 +29,7 @@ export default defineConfig({
   target: "es2022",
   platform: "neutral",
   format: ["esm"],
-  // The generator runs this cwd-independent config from the verified root:
+  // The generator runs this cwd-independent config from an isolated build root:
   // tsup 8 marks cwd production dependencies external even with noExternal.
   // Absolute source paths/baseUrl preserve resolution when cwd changes.
   noExternal: [/^@cognia\//],

@@ -24,6 +24,12 @@ import {
 import { hasNoLeakingPii } from "@cognia/redact"
 import { deriveParams, paramKindChange, type ChatTemplateParam } from "@/lib/chat/template/template"
 import { RESOURCE_PARAM_KINDS, type ResourceParamKind } from "@/lib/chat/template/resource-kinds"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  definePrompt,
+  type PromptDefinitionInput,
+  type PromptDefinitionV1,
+} from "@/lib/prompts/types"
 
 /** Thrown when the prompt trips the redaction gate — a fixable user problem, not a provider failure. */
 export class TemplateAssistPiiBlockedError extends Error {
@@ -98,23 +104,73 @@ const SUGGESTIONS_SCHEMA = z.object({
     .describe("One suggestion per {{token}} in the body"),
 })
 
-const GENERATE_SYSTEM = `You write message templates for an AI chat app.
+// The three system prompts are editable in the Prompt Center (ADR-0236).
+// They talk ABOUT `{{token}}` slots, so each literal token they mention is a
+// declared variable rendered back as itself: the template engine leaves the
+// text byte-identical, and an override may keep or drop those examples.
+
+/** Placeholder names the shipped wording mentions literally. */
+const LITERAL_TOKEN_NAMES = ["parameter", "snake_case", "token", "tokens"] as const
+
+/** Values that render each literal token back as itself. */
+const LITERAL_TOKEN_VALUES: Readonly<Record<string, string>> = Object.fromEntries(
+  LITERAL_TOKEN_NAMES.map((name) => [name, `{{${name}}}`])
+)
+
+const TEMPLATE_ASSIST_SHARED = {
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "generation",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  hosts: ["app"],
+  maxChars: 8_000,
+  variables: LITERAL_TOKEN_NAMES.map((name) => ({ name, required: false, maxChars: 32 })),
+  consumers: ["lib/ai/generation/template-assist.ts"],
+} as const satisfies Partial<PromptDefinitionInput>
+
+/** Intent -> draft template. */
+export const TEMPLATE_ASSIST_GENERATE_PROMPT = definePrompt({
+  ...TEMPLATE_ASSIST_SHARED,
+  id: "generation.template-assist.generate",
+  // The reply is parsed against the draft schema.
+  risk: "protocol",
+  outputContract:
+    "A JSON object {name, description?, body} validated against the draft schema; the body's tokens are re-derived, never trusted as declarations.",
+  defaultBody: `You write message templates for an AI chat app.
 A template is a message the user sends repeatedly: fixed prose plus {{parameter}} slots that get filled in just before sending.
 
 - The body is the message itself — write it ready to send, in the user's language.
 - Use {{snake_case}} tokens for every part the user should customize each time: names, files, dates, choices, pasted content.
 - Prefer few, well-named slots (1-4). A slot nobody would fill is clutter.
 - Never put a {{token}} inside backticks or a code fence — the app treats those as literal text, and the slot would never be asked for.
-- Return JSON matching the schema.`
+- Return JSON matching the schema.`,
+})
 
-const IMPROVE_SYSTEM = `You rewrite chat message templates — messages with {{parameter}} slots that get filled in before sending.
+/** Body -> rewritten body. */
+export const TEMPLATE_ASSIST_IMPROVE_PROMPT = definePrompt({
+  ...TEMPLATE_ASSIST_SHARED,
+  id: "generation.template-assist.improve",
+  risk: "ordinary",
+  outputContract: "The rewritten message as plain text, trimmed; it replaces the editor's body.",
+  defaultBody: `You rewrite chat message templates — messages with {{parameter}} slots that get filled in before sending.
 
 - Keep every {{token}} exactly as written, including position inside sentences. Tokens inside backticks or code fences stay inside them.
 - Keep Markdown structure and the user's language.
 - Make it clearer and tighter; do not add new {{tokens}} unless the instruction asks for one.
-- Return ONLY the rewritten message — no preamble, no explanation.`
+- Return ONLY the rewritten message — no preamble, no explanation.`,
+})
 
-const SUGGEST_PARAMS_SYSTEM = `You annotate the {{parameter}} slots of a chat message template.
+/** Body -> annotations for its tokens. */
+export const TEMPLATE_ASSIST_SUGGEST_PARAMS_PROMPT = definePrompt({
+  ...TEMPLATE_ASSIST_SHARED,
+  id: "generation.template-assist.suggest-params",
+  // The reply is parsed against the suggestions schema.
+  risk: "protocol",
+  outputContract:
+    "A JSON object {suggestions: [...]} validated against the suggestions schema; suggestions for tokens the body lacks are dropped.",
+  defaultBody: `You annotate the {{parameter}} slots of a chat message template.
 For each token in the body, decide how the app should ask the user to fill it:
 
 - label: a short human name ("Module", "Tone") — never the raw token repeated.
@@ -123,7 +179,18 @@ For each token in the body, decide how the app should ask the user to fill it:
 - required: false only when sending without it is reasonable.
 - multiline: true for slots that take pasted paragraphs or lists.
 
-Emit one suggestion per {{token}} that appears in the body, in body order. Do not invent tokens.`
+Emit one suggestion per {{token}} that appears in the body, in body order. Do not invent tokens.`,
+})
+
+/** Resolve one system prompt, then honour a cancel that landed meanwhile. */
+async function systemFor(
+  def: PromptDefinitionV1,
+  abortSignal: AbortSignal | undefined
+): Promise<string> {
+  const system = (await resolvePromptAsync(def, { values: LITERAL_TOKEN_VALUES })).text
+  abortSignal?.throwIfAborted()
+  return system
+}
 
 function assertSendable(system: string, prompt: string): void {
   if (!hasNoLeakingPii(system) || !hasNoLeakingPii(prompt)) {
@@ -142,13 +209,14 @@ export async function generateTemplateDraft(
   options?: { abortSignal?: AbortSignal; generate?: GenerationSeam }
 ): Promise<TemplateDraft> {
   const prompt = `Template request: ${intent.trim()}`
-  assertSendable(GENERATE_SYSTEM, prompt)
+  const system = await systemFor(TEMPLATE_ASSIST_GENERATE_PROMPT, options?.abortSignal)
+  assertSendable(system, prompt)
   const text = await generateThroughSeam(
     options?.generate,
     {
       stage: "generate",
       modelId: modelIdOf(model),
-      system: GENERATE_SYSTEM,
+      system,
       prompt,
       temperature: 0.7,
       abortSignal: options?.abortSignal,
@@ -157,7 +225,7 @@ export async function generateTemplateDraft(
       const result = await generateObject({
         model,
         schema: DRAFT_SCHEMA,
-        system: GENERATE_SYSTEM,
+        system,
         prompt,
         temperature: 0.7,
         abortSignal: options?.abortSignal,
@@ -181,13 +249,14 @@ export async function improveTemplateBody(
 ): Promise<string> {
   const instruction = options?.instruction?.trim()
   const prompt = instruction ? `${body}\n\nInstruction: ${instruction}` : body
-  assertSendable(IMPROVE_SYSTEM, prompt)
+  const system = await systemFor(TEMPLATE_ASSIST_IMPROVE_PROMPT, options?.abortSignal)
+  assertSendable(system, prompt)
   const text = await generateThroughSeam(
     options?.generate,
     {
       stage: "improve",
       modelId: modelIdOf(model),
-      system: IMPROVE_SYSTEM,
+      system,
       prompt,
       temperature: 0.4,
       abortSignal: options?.abortSignal,
@@ -195,7 +264,7 @@ export async function improveTemplateBody(
     (overrides) =>
       generateText({
         model,
-        system: IMPROVE_SYSTEM,
+        system,
         prompt,
         temperature: 0.4,
         abortSignal: options?.abortSignal,
@@ -216,13 +285,14 @@ export async function suggestTemplateParams(
   body: string,
   options?: { abortSignal?: AbortSignal; generate?: GenerationSeam }
 ): Promise<TemplateParamSuggestion[]> {
-  assertSendable(SUGGEST_PARAMS_SYSTEM, body)
+  const system = await systemFor(TEMPLATE_ASSIST_SUGGEST_PARAMS_PROMPT, options?.abortSignal)
+  assertSendable(system, body)
   const text = await generateThroughSeam(
     options?.generate,
     {
       stage: "suggest",
       modelId: modelIdOf(model),
-      system: SUGGEST_PARAMS_SYSTEM,
+      system,
       prompt: body,
       temperature: 0.3,
       abortSignal: options?.abortSignal,
@@ -231,7 +301,7 @@ export async function suggestTemplateParams(
       const result = await generateObject({
         model,
         schema: SUGGESTIONS_SCHEMA,
-        system: SUGGEST_PARAMS_SYSTEM,
+        system,
         prompt: body,
         temperature: 0.3,
         abortSignal: options?.abortSignal,

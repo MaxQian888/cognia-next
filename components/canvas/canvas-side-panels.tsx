@@ -50,7 +50,7 @@ import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
 import { CanvasOutlinePanel, countCanvasSymbols, parseCanvasSymbols } from "./canvas-outline-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
-import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
+import { useCanvasCollaborationEnabled } from "@/hooks/canvas/use-canvas-collaboration-enabled"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
@@ -516,9 +516,10 @@ function AutoSaveTag() {
  */
 function CollaborationHost({ documentId }: { documentId: string }) {
   const t = useTranslations("canvas.panels")
-  // Feature-flag gate: `canvas.collaboration.v1` (env / localStorage override).
-  // When disabled, the panel shows the hint but no "open collaboration" entry.
-  const collaborationEnabled = useCanvasFeatureFlag("canvas.collaboration.v1")
+  // Feature-flag gate: `canvas.collaboration.v1` (env / localStorage override),
+  // narrowed by the org's server decision. When disabled, the panel shows the
+  // hint but no "open collaboration" entry.
+  const collaborationEnabled = useCanvasCollaborationEnabled()
   const documents = useArtifactStore((s) => s.canvasDocuments)
   const doc = documents[documentId]
   return (

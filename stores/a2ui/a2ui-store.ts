@@ -16,6 +16,7 @@ import type {
   A2UIWidgetMetadata,
 } from "@/types/a2ui/schema"
 import {
+  parseA2UIDispatchMessage,
   isCreateSurfaceMessage,
   isUpdateComponentsMessage,
   isUpdateDataModelMessage,
@@ -25,9 +26,11 @@ import {
 } from "@/lib/a2ui/parser"
 import { setValueByPath, getValueByPath, deepMerge, deepClone } from "@/lib/a2ui/data-model"
 import { globalEventEmitter, createUserAction, createDataModelChange } from "@/lib/a2ui/events"
+import { getComponent as getCatalogComponent, validateComponent } from "@/lib/a2ui/catalog"
 import { getA2UIPersistenceLimit } from "@/lib/a2ui/runtime-settings"
 import { useSettingsStore } from "@/stores/settings"
 import {
+  resolveStreamedRootId,
   canDuplicateComponentSubtree,
   collectComponentSubtreeIds,
   getComponentChildReferences,
@@ -592,20 +595,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               updatedComponents[component.id] = migrateLegacyComponent(component)
             }
 
-            // The first streamed batch may use a named root and list children
-            // before it. Subsequent patches must not replace an established root.
-            let rootId = surface.rootId
-            if (Object.keys(surface.components).length === 0 && components.length > 0) {
-              const referencedIds = new Set(
-                components.flatMap((component) =>
-                  getComponentChildReferences(component).map((reference) => reference.id)
-                )
-              )
-              rootId = updatedComponents.root
-                ? "root"
-                : (components.find((component) => !referencedIds.has(component.id))?.id ??
-                  components[0].id)
-            }
+            const rootId = resolveStreamedRootId(surface.components, surface.rootId, components)
 
             return {
               ...snapshot,
@@ -615,6 +605,8 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                   ...surface,
                   components: updatedComponents,
                   rootId,
+                  // Renderability is independent of transport completion/loading.
+                  ready: surface.ready || Boolean(updatedComponents[rootId]),
                   updatedAt: Date.now(),
                 },
               },
@@ -987,7 +979,17 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
         },
 
         // Message processing
-        processMessage: (message) => {
+        processMessage: (input) => {
+          const message = parseA2UIDispatchMessage(input)
+          if (!message) throw new TypeError("Invalid A2UI dispatch message")
+          if (message.type === "updateComponents") {
+            const catalogId = get().surfaces[message.surfaceId]?.catalogId
+            for (const component of message.components) {
+              if (!getCatalogComponent(component.component, catalogId)?.schema) continue
+              const result = validateComponent(component, catalogId)
+              if (!result.valid) throw new TypeError(result.errors.join("; "))
+            }
+          }
           const {
             createSurface,
             updateComponents,
@@ -1133,6 +1135,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             if (!surface) return state
 
             const { [surfaceId]: _, ...remainingLoading } = state.loadingSurfaces
+            if (surface.ready) return { loadingSurfaces: remainingLoading }
 
             return {
               surfaces: {

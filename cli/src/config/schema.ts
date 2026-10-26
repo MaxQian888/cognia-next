@@ -18,13 +18,14 @@
 
 import { z } from "zod"
 import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
-import { SEARCH_PROVIDER_HEALTH_LIMITS } from "@cognia/web-search/types"
+import { SEARCH_PROVIDER_HEALTH_LIMITS, validateSearchEndpoint } from "@cognia/web-search/types"
+import { MAX_OPERATION_ATTEMPTS, READ_TOTAL_BUDGET_MS } from "@cognia/web-search/operation-policy"
 
 import { EFFORT_SLIDER_LEVELS, THINKING_LEVELS, type ThinkingLevel } from "@/lib/ai/thinking-level"
 import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
 /** AI SDK protocol families the sidecar's dispatch table understands. Mirrors
- *  BUILTIN_PROTOCOL_NAMES in sidecar/src/providers/provider-protocol.ts. */
+ *  BUILTIN_PROTOCOL_NAMES in packages/provider-types/src/provider-protocol.ts. */
 export const RESOLVER_PROTOCOLS = [
   "openai",
   "anthropic",
@@ -641,6 +642,10 @@ export const CLI_SEARCH_PROVIDER_IDS = [
   "bing",
   "google",
   "brave",
+  "google-ai",
+  "deepseek",
+  "tinyfish",
+  "searxng",
 ] as const
 
 export type CliSearchProviderId = (typeof CLI_SEARCH_PROVIDER_IDS)[number]
@@ -672,6 +677,17 @@ const searchProviderConfigSchema = z
     /** Google Programmable Search Engine id. */
     cx: z.string().min(1).optional(),
     enabled: z.boolean().optional(),
+    engine: z.string().min(1).optional(),
+    baseUrl: z
+      .string()
+      .superRefine((value, ctx) => {
+        const result = validateSearchEndpoint(value)
+        if (!result.ok)
+          ctx.addIssue({ code: "custom", message: `invalid search endpoint: ${result.issue}` })
+      })
+      .optional(),
+    allowPrivateEndpoint: z.boolean().optional(),
+    model: z.string().min(1).optional(),
     priority: z.number().int().positive().optional(),
     /**
      * Per-provider defaults, applied between the global search defaults and
@@ -768,6 +784,50 @@ export const searchConfigSchema = z
   .strict()
 
 export type CliSearchConfig = z.infer<typeof searchConfigSchema>
+
+/** Reader consent and routing are independent of Search provider selection. */
+const readerEntrySchema = z
+  .object({
+    enabled: z.boolean(),
+    priority: z.number().int().min(0).max(1000),
+  })
+  .strict()
+
+const readerIdSchema = z.enum([
+  "direct",
+  "platform",
+  "fxtwitter",
+  "jina",
+  "tavily",
+  "exa",
+  "deepseek",
+  "tinyfish",
+])
+
+export const webReaderConfigSchema = z
+  .object({
+    version: z.literal(1),
+    defaultReader: z.union([z.literal("auto"), readerIdSchema]),
+    readers: z
+      .object({
+        direct: readerEntrySchema.optional(),
+        platform: readerEntrySchema.optional(),
+        fxtwitter: readerEntrySchema.optional(),
+        jina: readerEntrySchema.optional(),
+        tavily: readerEntrySchema.optional(),
+        exa: readerEntrySchema.optional(),
+        deepseek: readerEntrySchema.optional(),
+        tinyfish: readerEntrySchema.optional(),
+      })
+      .strict(),
+    externalFallback: z.enum(["off", "configured"]),
+    distillation: z.enum(["off", "best-effort", "required"]),
+    timeoutMs: z.number().int().min(5000).max(READ_TOTAL_BUDGET_MS).optional(),
+    maxAttempts: z.number().int().min(1).max(MAX_OPERATION_ATTEMPTS).optional(),
+  })
+  .strict()
+
+export type CliWebReaderConfig = z.infer<typeof webReaderConfigSchema>
 
 /** Sandbox settings as resolved from the CLI's config layers. */
 export type CliSandboxConfig = z.infer<typeof sandboxConfigSchema>
@@ -958,6 +1018,9 @@ export const cliConfigFileSchema = z
      * provider configured (otherwise it returns a clean "no provider" error).
      */
     webTools: z.boolean().optional(),
+    preferCogniaSearch: z.boolean().optional(),
+    preferCogniaFetch: z.boolean().optional(),
+    webReader: webReaderConfigSchema.optional(),
     /**
      * OS-level sandboxing for the model's shell and file tools (ADR-0028).
      *
@@ -1290,6 +1353,9 @@ export interface ResolvedConfig {
   devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
+  preferCogniaSearch?: boolean
+  preferCogniaFetch?: boolean
+  webReader?: CliWebReaderConfig
   /** OS-level sandboxing for the model's shell and file tools. Enabled by default. */
   sandbox?: CliSandboxConfig
   /** Fully layered search policy and provider credentials. */

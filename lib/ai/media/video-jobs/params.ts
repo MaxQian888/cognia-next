@@ -10,14 +10,8 @@ import {
   videoStartFrameMode,
   type VideoProviderId,
 } from "../video-generation-sdk"
-
-export interface VideoJobParams {
-  durationSec?: number
-  aspectRatio?: `${number}:${number}`
-  resolution?: `${number}x${number}`
-  seed?: number
-  fps?: number
-}
+import type { VideoJobParams } from "@cognia/plugin-contract/lib/ai/media/video-jobs/params"
+export type { VideoJobParams } from "@cognia/plugin-contract/lib/ai/media/video-jobs/params"
 
 export type VideoParamsCheck =
   | { ok: true }

@@ -239,18 +239,6 @@ When `ProcessingOptions.generateChunks === true`, `processDocument` calls `chunk
 
 Twin ingest does not call `processDocument` directly for chunk generation — it has its own `prepareChunks` flow (using markdown / code / chat chunkers); but the underlying parser is fully reused from `packages/document/src/`. See [Employee Digital Twin](../subsystems/employee-twin) for details.
 
-## Knowledge-RAG Placeholder
-
-`packages/document/src/knowledge-rag.ts` is the Project knowledge-base RAG interface from the original Cognia project; cognia-next has not yet implemented it. A stub is left so code calling `retrieveKnowledge / searchKnowledgeBaseAdvanced` (from Cognia's original build-options tests) still compiles.
-
-```ts title="packages/document/src/knowledge-rag.ts"
-export async function retrieveKnowledge(_options): Promise<KnowledgeChunk[]> {
-  return [] // awaiting real RAG layer integration
-}
-```
-
-The actually active RAG path is the Twin runtime (see [Employee Digital Twin](../subsystems/employee-twin)).
-
 ## File Validation
 
 `validateFile()` (in `document-processor.ts`) supports:

@@ -348,4 +348,155 @@ describe("MCP Runtime Gateway", () => {
     await expect(gateway.invoke(input)).rejects.toThrow("circuit open")
     expect(open).toHaveBeenCalledTimes(6)
   })
+
+  describe("per-operation policy", () => {
+    it("never sends exact, glob or portable-policy denied tools to the transport", async () => {
+      const fixture = fixtureOpen()
+      const gateway = new McpRuntimeGateway({ open: fixture.open, retryDelayMs: 0 })
+      const restricted = {
+        ...server("rules"),
+        disallowedTools: ["delete"],
+        disallowedToolPatterns: ["write_*"],
+        toolPermissionRules: [{ name: "drop_table", decision: "deny" as const }],
+      }
+      const input = { scopeId: "rules", server: restricted, surface: "workflow" as const }
+      for (const toolName of ["delete", "write_file", "WRITE_ALL", "drop_table"]) {
+        await expect(gateway.invoke({ ...input, toolName })).rejects.toThrow(
+          /MCP execution deny: tool .* is denied/
+        )
+      }
+      expect(fixture.callTool).not.toHaveBeenCalled()
+      await gateway.invoke({ ...input, toolName: "read_file" })
+      expect(fixture.callTool).toHaveBeenCalledTimes(1)
+      expect(mockAppendMcpAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({ tool: "delete", decision: "deny", errorCode: "blocked" })
+      )
+      await gateway.closeScope("rules")
+    })
+
+    it("refuses an ask-policy tool headlessly but lets an interactive caller run it", async () => {
+      const fixture = fixtureOpen()
+      const gateway = new McpRuntimeGateway({ open: fixture.open, retryDelayMs: 0 })
+      const asking = {
+        ...server("ask"),
+        toolPermissionRules: [{ name: "send", decision: "ask" as const }],
+      }
+      await expect(
+        gateway.invoke({ scopeId: "ask", server: asking, surface: "workflow", toolName: "send" })
+      ).rejects.toThrow(/requires approval/)
+      expect(fixture.callTool).not.toHaveBeenCalled()
+      await gateway.invoke({
+        scopeId: "ask",
+        server: asking,
+        surface: "chat",
+        interactive: true,
+        toolName: "send",
+      })
+      expect(fixture.callTool).toHaveBeenCalledTimes(1)
+      await gateway.closeScope("ask")
+    })
+
+    it.each([
+      ["disabled", { enabled: false }],
+      ["blocked", { trust: { state: "blocked" as const } }],
+    ])("does not reuse a warm lease after the server is %s", async (_label, change) => {
+      const fixture = fixtureOpen()
+      const gateway = new McpRuntimeGateway({ open: fixture.open, retryDelayMs: 0 })
+      const original = server("revoked")
+      await gateway.invoke({
+        scopeId: "a",
+        server: original,
+        surface: "workflow",
+        toolName: "do",
+      })
+      await gateway.invoke({
+        scopeId: "b",
+        server: original,
+        surface: "workflow",
+        toolName: "do",
+      })
+      expect(fixture.open).toHaveBeenCalledTimes(2)
+
+      const revoked = { ...original, ...change } as McpServer
+      for (const operation of [
+        () =>
+          gateway.invoke({ scopeId: "a", server: revoked, surface: "workflow", toolName: "do" }),
+        () =>
+          gateway.readResource({ scopeId: "a", server: revoked, surface: "chat", uri: "x://1" }),
+        () =>
+          gateway.getPrompt({ scopeId: "a", server: revoked, surface: "chat", promptName: "p" }),
+      ]) {
+        await expect(operation()).rejects.toThrow(/MCP execution deny/)
+      }
+      expect(fixture.callTool).toHaveBeenCalledTimes(2)
+      expect(fixture.readResource).not.toHaveBeenCalled()
+      expect(fixture.getPrompt).not.toHaveBeenCalled()
+      // Revocation tears down the server's warm connections in every scope.
+      expect(fixture.close).toHaveBeenCalledTimes(2)
+      expect(fixture.open).toHaveBeenCalledTimes(2)
+    })
+
+    it("re-checks a narrower or expired grant against the warm lease of a pending server", async () => {
+      const fixture = fixtureOpen()
+      let now = 1_000
+      const gateway = new McpRuntimeGateway({ open: fixture.open, retryDelayMs: 0, now: () => now })
+      const pending = { ...server("pending"), trust: { state: "pending" as const } }
+      const { fingerprintMcpDefinition } = await import("./server-definition")
+      const grant = {
+        serverId: pending.id,
+        fingerprint: fingerprintMcpDefinition(pending),
+        tools: ["search"],
+        expiresAt: 2_000,
+      }
+      const input = { scopeId: "plan", server: pending, surface: "plan" as const, grant }
+      await gateway.invoke({ ...input, toolName: "search" })
+      await expect(gateway.invoke({ ...input, toolName: "delete" })).rejects.toThrow(
+        /pending MCP server cannot execute/
+      )
+      now = 3_000
+      await expect(gateway.invoke({ ...input, toolName: "search" })).rejects.toThrow(
+        /pending MCP server cannot execute/
+      )
+      expect(fixture.callTool).toHaveBeenCalledTimes(1)
+      expect(fixture.callTool).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "search" }),
+        undefined,
+        expect.anything()
+      )
+      await gateway.closeScope("plan")
+    })
+
+    it("re-checks policy on the refreshed definition before an auth retry", async () => {
+      const fixture = fixtureOpen()
+      fixture.callTool.mockRejectedValueOnce(Object.assign(new Error("401"), { status: 401 }))
+      const gateway = new McpRuntimeGateway({ open: fixture.open, retryDelayMs: 0 })
+      const original = server("refresh")
+      await expect(
+        gateway.invoke({
+          scopeId: "r",
+          server: original,
+          surface: "workflow",
+          toolName: "do",
+          // Disabled while the token endpoint was being called.
+          refreshAuth: async () => ({ server: { ...original, enabled: false } }),
+        })
+      ).rejects.toThrow(/server is disabled/)
+      expect(fixture.callTool).toHaveBeenCalledTimes(1)
+      expect(fixture.open).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses discovery of a blocked server even with a cached capability row", async () => {
+      const fixture = fixtureOpen()
+      const gateway = new McpRuntimeGateway({ open: fixture.open, retryDelayMs: 0 })
+      const trusted = server("cached")
+      await gateway.discover({ scopeId: "d", server: trusted, surface: "settings" })
+      await expect(
+        gateway.discover({
+          scopeId: "d",
+          server: { ...trusted, trust: { state: "blocked" } },
+          surface: "settings",
+        })
+      ).rejects.toThrow(/trust is blocked/)
+    })
+  })
 })

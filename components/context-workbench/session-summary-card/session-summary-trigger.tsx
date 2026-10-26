@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ListTodoIcon } from "lucide-react"
 import { create } from "zustand"
@@ -15,8 +15,11 @@ import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { useSessionNeedsYou } from "@/hooks/chat/use-session-needs-you"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { useElementAxisSize } from "@/hooks/use-element-axis-size"
+import { useElementWidth } from "@/hooks/use-element-width"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat"
+import { useUIStore } from "@/stores/ui/ui-store"
 
 import { SessionSummaryCard } from "./session-summary-card"
 import {
@@ -227,7 +230,9 @@ const FLOAT_TOP_OFFSET_PX = 12
  */
 export function SessionSummaryStageHost({ session }: { session: ChatSession }) {
   const [stage, setStage] = useState<HTMLElement | null>(null)
-  const stageWidth = useElementAxisSize(stage, "width")
+  const stageRef = useRef<HTMLElement | null>(null)
+  const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
+  const stageWidth = useElementWidth(stageRef, sidebarCollapsed)
   const stageHeight = useElementAxisSize(stage, "height")
   const placement = summaryCardPlacement(stageWidth, CHAT_COLUMN_MAX_REM * remPx())
   const hidden = useSummaryCardRuntime((state) => Boolean(state.hidden[session.id]))
@@ -239,30 +244,35 @@ export function SessionSummaryStageHost({ session }: { session: ChatSession }) {
   // behind (the pane closed) falls back to the popover.
   const measured = stageWidth > 0
   const { mode, width } = placement
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     setPlacement(session.id, measured ? { mode, width } : null)
   }, [measured, mode, width, session.id, setPlacement])
   useEffect(() => () => setPlacement(session.id, null), [session.id, setPlacement])
 
   const bindStage = useCallback((element: HTMLDivElement | null) => {
-    setStage(element?.closest<HTMLElement>(CHAT_SURFACE_STAGE_SELECTOR) ?? null)
+    stageRef.current = element?.closest<HTMLElement>(CHAT_SURFACE_STAGE_SELECTOR) ?? null
+    setStage(stageRef.current)
   }, [])
 
+  // Keep a real box across float/popover changes so the shell can capture both
+  // ends. A remounted card must not replay an entrance animation mid-resize.
   return (
-    <div ref={bindStage} className="contents" data-testid="session-summary-stage-host">
+    <div
+      ref={bindStage}
+      className="absolute right-3 top-3 z-20 sm:right-4"
+      data-testid="session-summary-stage-host"
+    >
       {placement.mode === "float" && !hidden ? (
-        <div className="absolute right-3 top-3 z-20 animate-in fade-in-0 slide-in-from-top-1 sm:right-4">
-          <SessionSummaryCard
-            session={session}
-            width={placement.width}
-            mode="float"
-            maxHeight={Math.max(0, stageHeight - FLOAT_TOP_OFFSET_PX - SUMMARY_CARD_MARGIN_PX)}
-            onNavigated={() => {}}
-            onManage={sheet.openWhole}
-            onManageSources={sheet.openSources}
-            onHide={() => setHidden(session.id, true)}
-          />
-        </div>
+        <SessionSummaryCard
+          session={session}
+          width={placement.width}
+          mode="float"
+          maxHeight={Math.max(0, stageHeight - FLOAT_TOP_OFFSET_PX - SUMMARY_CARD_MARGIN_PX)}
+          onNavigated={() => {}}
+          onManage={sheet.openWhole}
+          onManageSources={sheet.openSources}
+          onHide={() => setHidden(session.id, true)}
+        />
       ) : null}
       <SettingsSheetFor session={session} sheet={sheet} />
     </div>

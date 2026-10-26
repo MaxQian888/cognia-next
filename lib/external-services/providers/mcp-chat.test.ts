@@ -8,6 +8,11 @@ jest.mock("@/lib/mcp/credentials", () => ({
   resolveMcpSecrets: jest.fn(async (config: unknown) => config),
 }))
 
+const mockRegistryRow = jest.fn()
+jest.mock("@/lib/db/mcp-servers", () => ({
+  getMcpServer: (id: string) => mockRegistryRow(id),
+}))
+
 import {
   __clearDocsProvidersForTests,
   getDocsProvider,
@@ -71,6 +76,7 @@ describe("managed MCP chat surfaces", () => {
     __clearDocsProvidersForTests()
     __resetSlashCommandsForTesting()
     jest.clearAllMocks()
+    mockRegistryRow.mockResolvedValue(server)
   })
 
   it("projects resources into the remote-document attachment path", async () => {
@@ -133,5 +139,34 @@ describe("managed MCP chat surfaces", () => {
     expect(unregisterManagedMcpChatSurfacesByPlugin("figma-plugin")).toBe(1)
     expect(getDocsProvider("mcp:server-1")).toBeUndefined()
     expect(listSlashCommands()).toEqual([])
+  })
+
+  it("hands the gateway the current Registry row, not the snapshot from registration", async () => {
+    syncManagedMcpChatSurfaces(server, discovery)
+    const disabled = { ...server, enabled: false }
+    mockRegistryRow.mockResolvedValue(disabled)
+    getPrompt.mockResolvedValue({ messages: [] })
+    readResource.mockResolvedValue({ contents: [{ uri: "figma://file/abc", text: "x" }] })
+
+    await dispatchSlashCommand('/external-mcp:server-1:implement {"framework":"React"}')
+    await getDocsProvider("mcp:server-1")?.fetch(
+      { providerId: "mcp:server-1", kind: "resource", id: "figma://file/abc", title: "x" },
+      { accountId: "server-1" }
+    )
+    expect(getPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ server: expect.objectContaining({ enabled: false }) })
+    )
+    expect(readResource).toHaveBeenCalledWith(
+      expect.objectContaining({ server: expect.objectContaining({ enabled: false }) })
+    )
+  })
+
+  it("refuses once the server has been deleted", async () => {
+    syncManagedMcpChatSurfaces(server, discovery)
+    mockRegistryRow.mockResolvedValue(undefined)
+    await expect(
+      dispatchSlashCommand('/external-mcp:server-1:implement {"framework":"React"}')
+    ).rejects.toThrow(/no longer configured/)
+    expect(getPrompt).not.toHaveBeenCalled()
   })
 })

@@ -33,21 +33,16 @@ import {
   unregisterCodeAdapterExecutorsByPlugin,
   unregisterProtocolAdaptersByPlugin,
 } from "@cognia/provider-core/providers/protocol-adapter-registry"
-
-export interface ProtocolAdaptersBridgeError {
-  pluginId: string
-  adapterId: string
-  message: string
-}
-
-export interface ProtocolAdaptersBridgeResult {
-  registered: number
-  errors: ProtocolAdaptersBridgeError[]
-}
-
-export interface ProtocolAdaptersBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-}
+import type {
+  ProtocolAdaptersBridgeError,
+  ProtocolAdaptersBridgeOptions,
+  ProtocolAdaptersBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/protocol-adapters-bridge"
+export type {
+  ProtocolAdaptersBridgeError,
+  ProtocolAdaptersBridgeResult,
+  ProtocolAdaptersBridgeOptions,
+} from "@cognia/plugin-contract/lib/plugin/bridge/protocol-adapters-bridge"
 
 const DEFAULT_IMPORTER: NonNullable<ProtocolAdaptersBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

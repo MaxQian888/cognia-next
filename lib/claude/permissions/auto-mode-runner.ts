@@ -11,6 +11,7 @@ import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractCommand } from "./command-from-tool"
 import { evaluateAutoDecision, type AutoDecision, type AutoModeConfig } from "./auto-mode"
 import type { Ruleset } from "./ruleset"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 
 export interface RunAutoModeArgs {
   toolName: string
@@ -28,6 +29,8 @@ export interface RunAutoModeArgs {
    * superseded instruction.
    */
   contextKey?: string
+  /** Where the model judge's customized guidance is looked up. */
+  promptContext?: PromptResolutionContext
 }
 
 /**
@@ -45,6 +48,7 @@ export async function runAutoModeForTool({
   locale,
   pluginRules = [],
   contextKey,
+  promptContext,
 }: RunAutoModeArgs): Promise<AutoDecision | null> {
   const command = extractCommand(toolName, input)
   if (command == null) return null
@@ -63,5 +67,14 @@ export async function runAutoModeForTool({
   const rules: Ruleset[] = [...pluginRules]
   if (userRules && Object.keys(userRules).length > 0) rules.push({ Bash: userRules })
 
-  return evaluateAutoDecision({ command, config, rules, client, cwd, locale, contextKey })
+  return evaluateAutoDecision({
+    command,
+    config,
+    rules,
+    client,
+    cwd,
+    locale,
+    contextKey,
+    promptContext,
+  })
 }

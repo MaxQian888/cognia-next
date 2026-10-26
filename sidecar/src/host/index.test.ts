@@ -1,5 +1,6 @@
 import type { AddressInfo } from "node:net"
 interface FixtureRequest {
+  model: string
   messages: { role: string; content?: unknown }[]
 }
 interface FixtureFrame {
@@ -40,21 +41,25 @@ test(
       const prompt = String(body.messages[lastUser]?.content)
       const done = body.messages.slice(lastUser + 1).some((message) => message.role === "tool")
       const tool =
-        prompt === "background"
-          ? "start_process"
-          : prompt === "question"
-            ? "ask_user"
-            : prompt === "read"
-              ? "read"
-              : "write"
+        prompt === "linger"
+          ? "bash"
+          : prompt === "background"
+            ? "start_process"
+            : prompt === "question"
+              ? "ask_user"
+              : prompt === "read"
+                ? "read"
+                : "write"
       const input =
-        tool === "start_process"
-          ? { program: "node", args: ["--version"], detached: true, cwd: workspace }
-          : tool === "ask_user"
-            ? { question: "Which target?" }
-            : tool === "read"
-              ? { file_path: path.join(workspace, "allowed.txt") }
-              : { file_path: path.join(workspace, prompt + ".txt"), content: prompt }
+        tool === "bash"
+          ? { command: `${JSON.stringify(process.execPath)} linger.cjs`, run_in_background: true }
+          : tool === "start_process"
+            ? { program: "node", args: ["--version"], detached: true, cwd: workspace }
+            : tool === "ask_user"
+              ? { question: "Which target?" }
+              : tool === "read"
+                ? { file_path: path.join(workspace, "allowed.txt") }
+                : { file_path: path.join(workspace, prompt + ".txt"), content: prompt }
       res.writeHead(200, { "content-type": "text/event-stream" })
       const emit = (delta: unknown, finish_reason: string | null = null) =>
         res.write(
@@ -214,6 +219,48 @@ test(
       assert.equal(retained?.retained, true)
       assert.equal(retained?.active, false)
       assert.equal(typeof retained?.sdkSessionId, "string")
+      const burstStart = frames.length
+      const burstRequests = requests.length
+      for (const [turnId, model] of [
+        ["burst-first", "scripted-burst"],
+        ["burst-second", "scripted-refused"],
+      ]) {
+        send({
+          type: "send",
+          prompt: turnId,
+          options: { ...options, turnId, model, expectedRuntimeSessionId: retained!.sdkSessionId },
+        })
+      }
+      const refusedBurst = await wait(
+        (frame) => frame.type === "session_ended" && frame.turnId === "burst-second",
+        burstStart
+      )
+      assert.equal(refusedBurst.errorCode, "RUNTIME_SESSION_NOT_RETAINED")
+      const admittedBurst = await wait(
+        (frame) => frame.type === "session_ended" && frame.turnId === "burst-first",
+        burstStart
+      )
+      assert.equal(admittedBurst.error, undefined)
+      assert.ok(requests.length > burstRequests)
+      assert.ok(
+        requests.slice(burstRequests).every((request) => request.model === "scripted-burst")
+      )
+      assert.equal((await status()).result?.sdkSessionId, retained?.sdkSessionId)
+      for (const model of ["scripted-powerful", "scripted-fast", "scripted"]) {
+        const firstRequest = requests.length
+        options.model = model
+        await turn(`routed-${model}`)
+        assert.ok(requests.length > firstRequest)
+        assert.ok(
+          requests.slice(firstRequest).every((request) => request.model === model),
+          "every request of the retained turn uses the model chosen for that send"
+        )
+        assert.equal(
+          (await status()).result?.sdkSessionId,
+          retained?.sdkSessionId,
+          "a routed model change preserves the live conversation"
+        )
+      }
       const unsupportedControlStart = frames.length
       send({
         type: "control",
@@ -292,6 +339,37 @@ test(
         .at(-1)
       assert.match(JSON.stringify(backgroundResult), /jobId/)
       assert.doesNotMatch(JSON.stringify(backgroundResult), /jobs.spawn.*timed out/)
+      await fs.writeFile(
+        path.join(workspace, "linger.cjs"),
+        [
+          "const fs=require('node:fs');",
+          "fs.writeFileSync('linger.pid',String(process.pid));",
+          "const timer=setInterval(()=>{},100);",
+          "process.once('SIGTERM',()=>{clearInterval(timer);fs.writeFileSync('linger.stopped','clean');});",
+        ].join("")
+      )
+      await turn("linger")
+      const deadline = Date.now() + 5_000
+      let pid = 0
+      while (!pid && Date.now() < deadline) {
+        pid = await fs.readFile(path.join(workspace, "linger.pid"), "utf8").then(Number, () => 0)
+        if (!pid) await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      assert.ok(pid, "real background writer must start before EOF")
+      const exited = new Promise((resolve) => child.once("exit", resolve))
+      child.stdin.end()
+      assert.equal(await exited, 0)
+      let alive = true
+      while (alive && Date.now() < deadline) {
+        try {
+          process.kill(pid, 0)
+        } catch {
+          alive = false
+        }
+        if (alive) await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      assert.equal(alive, false, "EOF must clean the owned background process")
+      assert.equal(await fs.readFile(path.join(workspace, "linger.stopped"), "utf8"), "clean")
     } finally {
       child.kill("SIGKILL")
       server.closeAllConnections()

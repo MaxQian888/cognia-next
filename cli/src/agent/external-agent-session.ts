@@ -516,7 +516,14 @@ export function externalAgentCredentialEnv(
 function usageFromResult(result: ExternalAgentResult) {
   if (!result.tokenUsage) return undefined
   return {
-    inputTokens: result.tokenUsage.promptTokens,
+    inputTokens: result.tokenUsage.promptTokensIncludeCache
+      ? Math.max(
+          0,
+          result.tokenUsage.promptTokens -
+            (result.tokenUsage.cacheReadTokens ?? 0) -
+            (result.tokenUsage.cacheWriteTokens ?? 0)
+        )
+      : result.tokenUsage.promptTokens,
     outputTokens: result.tokenUsage.completionTokens,
     ...(result.tokenUsage.contextTokens === undefined
       ? {}
@@ -1673,6 +1680,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           config: params.config,
           home,
           gate: opts.gate,
+          ...(opts.awaitApprovals ? { awaitApprovals: opts.awaitApprovals } : {}),
           ...(opts.signal ? { signal: opts.signal } : {}),
           approvedTools: resolveApprovedTools(),
           disabledMcpTools: resolveDisabledMcpTools(),

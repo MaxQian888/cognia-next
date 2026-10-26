@@ -85,6 +85,18 @@ describe("subscribeA2UIDispatch", () => {
 
     await subscribeA2UIDispatch()
 
+    capturedHandler!({
+      payload: {
+        type: "a2ui_dispatch",
+        message: { type: "updateComponents", surfaceId: "s", components: "bad" },
+      },
+    })
+    capturedHandler!({
+      payload: {
+        type: "a2ui_dispatch",
+        message: { type: "connectorAction", surfaceId: "s", actionType: "invalid" },
+      },
+    })
     capturedHandler!({ payload: null })
     capturedHandler!({ payload: { type: "other", message: { type: "x" } } })
     capturedHandler!({ payload: { type: "a2ui_dispatch" } })

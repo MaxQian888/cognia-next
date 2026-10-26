@@ -30,9 +30,10 @@ name: ${COGNIA_INSTANCE:-cognia}
 
 services:
   signaling:
-    image: ${SIGNALING_IMAGE:-ghcr.io/maxqian888/cognia-signaling:latest}
+    image: ${SIGNALING_IMAGE:-ghcr.io/cognia-labs/cognia-signaling:latest}
+    # Local builds use the pinned cognia-services checkout (`pnpm cognia-services:fetch`).
     build:
-      context: ../../services/signaling-server
+      context: ../../.cache/cognia-services/services/signaling-server
     environment:
       PORT: "7892"
       SIGNALING_ALLOWED_ORIGINS: ${SIGNALING_ALLOWED_ORIGINS:-}
@@ -47,9 +48,10 @@ services:
     restart: unless-stopped
 
   share:
-    image: ${SHARE_IMAGE:-ghcr.io/maxqian888/cognia-share:latest}
+    image: ${SHARE_IMAGE:-ghcr.io/cognia-labs/cognia-share:latest}
+    # Local builds use the pinned cognia-services checkout (`pnpm cognia-services:fetch`).
     build:
-      context: ../../services/share-server
+      context: ../../.cache/cognia-services/services/share-server
     environment:
       PORT: "8787"
       SHARE_DB_PATH: /data/shares.sqlite
@@ -90,12 +92,19 @@ services:
     image: ${COLLAB_IMAGE:-ghcr.io/maxqian888/cognia-collab:latest}
     build:
       context: ../../
-      dockerfile: Dockerfile.collab-server
+      dockerfile: deploy/docker/Dockerfile.collab-server
     depends_on:
       collab-postgres:
         condition: service_healthy
     environment:
-      COLLAB_DATABASE_URL: postgres://cognia_collab:${COLLAB_DB_PASSWORD:-cognia-local-only}@collab-postgres:5432/cognia_collab
+      COLLAB_MIGRATION_DATABASE_URL: postgres://cognia_collab:${COLLAB_DB_PASSWORD:-cognia-local-only}@collab-postgres:5432/cognia_collab
+      COLLAB_DATABASE_URL: postgres://cognia_collab_app:${COLLAB_APP_DB_PASSWORD:-cognia-app-local-only}@collab-postgres:5432/cognia_collab
+      COLLAB_APP_DB_ROLE: cognia_collab_app
+      COLLAB_APP_DB_PASSWORD: ${COLLAB_APP_DB_PASSWORD:-cognia-app-local-only}
+      COLLAB_ALLOW_PRIVILEGED_DB_ROLE: ${COLLAB_ALLOW_PRIVILEGED_DB_ROLE:-false}
+      COLLAB_SHARED_CHAT_ENABLED: ${COLLAB_SHARED_CHAT_ENABLED:-false}
+      COLLAB_CANVAS_ENABLED: ${COLLAB_CANVAS_ENABLED:-false}
+      COLLAB_FEED_ENABLED: ${COLLAB_FEED_ENABLED:-true}
       COLLAB_GRANT_KEY: ${COLLAB_GRANT_KEY:-}
       COLLAB_OIDC_ISSUER: ${COLLAB_OIDC_ISSUER:-}
       COLLAB_OIDC_AUDIENCE: ${COLLAB_OIDC_AUDIENCE:-}
@@ -133,7 +142,7 @@ services:
     image: ${COLLAB_IMAGE:-ghcr.io/maxqian888/cognia-collab:latest}
     build:
       context: ../../
-      dockerfile: Dockerfile.collab-server
+      dockerfile: deploy/docker/Dockerfile.collab-server
     entrypoint: ["cognia-collab-bootstrap"]
     depends_on:
       collab-postgres:
@@ -162,7 +171,7 @@ services:
     image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
     build:
       context: ../../
-      dockerfile: Dockerfile.cognia-server
+      dockerfile: deploy/docker/Dockerfile.cognia-server
       target: runtime-full
     # Multicast has no meaning inside a container network, and advertising the
     # host there would only leak its presence (ADR-0224 A1).
@@ -196,6 +205,10 @@ services:
       # COGNIA_LOGTO_ISSUER must equal the token `iss` claim,
       # i.e. `${LOGTO_ENDPOINT}/oidc`, and be reachable FROM this container —
       # see LOGTO.md for the issuer-consistency footgun.
+      # Empty mode must not reach the fail-closed mode parser.
+      COGNIA_DEPLOYMENT_MODE: ${COGNIA_DEPLOYMENT_MODE:-single-user}
+      COGNIA_ENVIRONMENT_BASELINE_FILE: ${COGNIA_ENVIRONMENT_BASELINE_FILE:-}
+      COGNIA_EXECUTION: ${COGNIA_EXECUTION:-enabled}
       COGNIA_LOGTO_ISSUER: ${COGNIA_LOGTO_ISSUER:-}
       COGNIA_LOGTO_AUDIENCE: ${COGNIA_LOGTO_AUDIENCE:-}
       COGNIA_LOGTO_WEB_CLIENT_ID: ${COGNIA_LOGTO_WEB_CLIENT_ID:-}

@@ -28,7 +28,7 @@ jest.mock("@/lib/platform/detect", () => ({
   isNativeMobile: () => false,
   isTauri: () => true,
 }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     app: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
   },

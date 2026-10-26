@@ -16,7 +16,7 @@ import {
   PI_PACKAGE_PREPARE_PROGRAMS,
   PI_PACKAGE_TOOL_NAME_PATTERN,
   type PluginPiPackageDef,
-} from "@/types/plugin/plugin-pi-package"
+} from "@cognia/plugin-contract/types/plugin/plugin-pi-package"
 
 /** Pi's built-in tools; a package cannot declare one as its own. */
 const PI_BUILTIN_TOOLS = new Set(["read", "grep", "find", "ls", "edit", "write", "bash"])

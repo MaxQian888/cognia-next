@@ -9,7 +9,6 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
 export interface AgentModeSessionFields {
   agentModeId: string
-  systemPrompt?: string
   model?: string
   temperature?: number
   maxTokens?: number
@@ -21,10 +20,9 @@ export interface AgentModeSessionFields {
  * (which may carry modelOverride, temperatureOverride, maxTokensOverride).
  */
 export function buildAgentModeSessionUpdate(agentMode: AgentModeConfig): AgentModeSessionFields {
-  const update: AgentModeSessionFields = {
-    agentModeId: agentMode.id,
-    systemPrompt: agentMode.systemPrompt,
-  }
+  // The mode's prompt is not a session field: the send path reads it off the
+  // turn's preset and resolves a built-in one through the Prompt Center.
+  const update: AgentModeSessionFields = { agentModeId: agentMode.id }
 
   if ("modelOverride" in agentMode && agentMode.modelOverride) {
     update.model = agentMode.modelOverride as string

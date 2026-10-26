@@ -16,7 +16,37 @@ import { workflowDesignerAgent } from "@/lib/claude/agents/subagents/workflow-de
 import { workflowDebuggerAgent } from "@/lib/claude/agents/subagents/workflow-debugger"
 import { workflowRefactorerAgent } from "@/lib/claude/agents/subagents/workflow-refactorer"
 import { workflowDocWriterAgent } from "@/lib/claude/agents/subagents/workflow-doc-writer"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptDefinitionV1, type PromptHost } from "@/lib/prompts/types"
 import type { BuiltinAgentEntry, BuiltinAgentSurface, BuiltinToolPolicy } from "./types"
+
+/**
+ * The editable identity of one built-in (ADR-0236). Tools, turn budget and
+ * surfaces stay on the entry: editing the text cannot widen what the agent
+ * may reach.
+ */
+function builtinIdentity(
+  id: string,
+  hosts: readonly PromptHost[],
+  defaultBody: string
+): PromptDefinitionV1 {
+  return definePrompt({
+    id: `agent.builtin.${id}.identity`,
+    contractVersion: 1,
+    kind: "role",
+    group: "agents",
+    operation: "replace-template",
+    scopes: ["account"],
+    activation: "next-operation",
+    risk: "ordinary",
+    hosts,
+    maxChars: 16_000,
+    outputContract:
+      "Runs as the dispatched agent's identity. The host adds the environment block and the dispatched-subagent contract around it.",
+    consumers: ["lib/agent/builtin-catalog/catalog.ts"],
+    defaultBody,
+  })
+}
 
 /** Canonical id of the always-available general-purpose agent. */
 export const GENERAL_PURPOSE_AGENT_ID = "general-purpose"
@@ -32,7 +62,7 @@ export const CODE_REVIEWER_AGENT_ID = "code-reviewer"
  * METHOD only. The runtime frames every dispatched child with the environment
  * block and the shared dispatched-subagent contract (final message is all the
  * dispatcher reads, no questions back, whether it may delegate), see
- * `lib/claude/agents/subagent-prompt-frame.ts`. Restating that contract here
+ * `lib/agent/prompts/subagent-frame.ts`. Restating that contract here
  * would drift from the frame and contradict it for a nesting-enabled child.
  */
 
@@ -79,7 +109,8 @@ HOW TO WORK
 1. Confirm the critical files and current behavior with quick reads. Never invent
    paths or APIs.
 2. If the dispatcher handed you exploration digests, build on them rather than
-   re-deriving everything.
+   re-deriving everything. Verify only named gaps, conflicting evidence, or
+   sources that changed; cite the reason for a necessary re-read.
 3. Prefer the smallest change that fully solves the task. Reuse existing
    utilities, components, and patterns, and call them out by \`file:line\`.
 4. Return a step-by-step plan: for each step, name the file(s) to change and the
@@ -87,7 +118,14 @@ HOW TO WORK
 5. Where two designs are genuinely viable, recommend one and say why, instead
    of listing both and leaving the choice to the dispatcher.
 6. Be concise and concrete. Your output is consumed by another agent (or fed into
-   the plan-approval flow), so return an actionable plan rather than an essay.`
+   the plan-approval flow), so return an actionable plan rather than an essay.
+7. Track the original required workstreams with stable IDs and completed,
+   pending, or blocked status. A completed investigation stays completed; new
+   conflicting evidence is an explicit correction, not a silent reset. Do not
+   turn missing exhaustive file coverage into another required investigation.
+8. Once the required questions have evidence, write the plan. Report concrete
+   blockers and verification gaps in it rather than expanding into optional
+   tangents. A checkpoint in delivery stage means produce the final plan now.`
 
 const CODE_REVIEWER_PROMPT = `You are the code-reviewer subagent, a read-only reviewer that hunts for defects in a change.
 
@@ -142,7 +180,7 @@ function workflowEntry(id: string, name: string, def: AgentDefinition): BuiltinA
     id,
     name,
     description: def.description,
-    prompt: def.prompt,
+    identity: builtinIdentity(id, ["app"], def.prompt),
     surfaces: ["workflow-editor", "team", "dispatch"],
     toolPolicy: def.tools ? { kind: "allowlist", tools: def.tools } : { kind: "inherit" },
     ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
@@ -155,7 +193,7 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "General Purpose",
     description:
       "General-purpose agent for researching complex questions, searching across the codebase, and executing multi-step tasks autonomously. Use when a task is open-ended or needs several rounds of searching, reading, and editing, and you are not confident the first attempt will land it.",
-    prompt: GENERAL_PURPOSE_PROMPT,
+    identity: builtinIdentity(GENERAL_PURPOSE_AGENT_ID, ["app", "cli"], GENERAL_PURPOSE_PROMPT),
     surfaces: ["team", "cli"],
     toolPolicy: { kind: "inherit" },
     color: "blue",
@@ -165,10 +203,9 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "Explore",
     description:
       "Read-only search scout for broad codebase exploration. It locates where code lives and how it connects across many files and naming conventions, and reports a digest with `file:line` citations. Dispatch it (in parallel for independent areas) during plan-mode research before proposing changes. It reads and searches only, and never edits or reviews.",
-    prompt: EXPLORE_PROMPT,
+    identity: builtinIdentity(EXPLORE_AGENT_ID, ["app", "cli"], EXPLORE_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
-    maxTurns: 20,
     color: "cyan",
   },
   {
@@ -176,10 +213,9 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "Plan",
     description:
       "Read-only architect that turns a task (plus exploration findings) into a concrete, step-by-step implementation plan grounded in real files. It names the critical files, reuses existing patterns, and lists the verification for each step. Dispatch it during plan-mode research after exploring. It proposes only, and never edits.",
-    prompt: PLAN_PROMPT,
+    identity: builtinIdentity(PLAN_AGENT_ID, ["app", "cli"], PLAN_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
-    maxTurns: 20,
     color: "purple",
   },
   {
@@ -187,10 +223,9 @@ const ENTRIES: readonly BuiltinAgentEntry[] = [
     name: "Code Reviewer",
     description:
       "Read-only reviewer that hunts for defects in a diff, branch, or set of files: correctness, security, missing tests, and re-implemented utilities. It confirms every finding by reading the surrounding code and returns findings ordered by severity with `file:line` and the smallest fix. Dispatch it after implementing a change and before claiming it done. It never edits.",
-    prompt: CODE_REVIEWER_PROMPT,
+    identity: builtinIdentity(CODE_REVIEWER_AGENT_ID, ["app", "cli"], CODE_REVIEWER_PROMPT),
     surfaces: ["dispatch", "cli"],
     toolPolicy: { kind: "read-only" },
-    maxTurns: 30,
     color: "orange",
   },
   workflowEntry("workflow-designer", "Workflow Designer", workflowDesignerAgent),
@@ -241,11 +276,16 @@ export function resolveBuiltinToolPolicy(policy: BuiltinToolPolicy): string[] | 
  * Project one entry into the SDK `AgentDefinition` shape that rides
  * `SendOptions.agents` and the renderer's own dispatch path.
  */
+/** The identity text a built-in runs under: the account's customization, else shipped. */
+export function resolveBuiltinAgentPrompt(entry: BuiltinAgentEntry): string {
+  return resolvePrompt(entry.identity).text
+}
+
 export function builtinAgentDefinition(entry: BuiltinAgentEntry): AgentDefinition {
   const tools = resolveBuiltinToolPolicy(entry.toolPolicy)
   return {
     description: entry.description,
-    prompt: entry.prompt,
+    prompt: resolveBuiltinAgentPrompt(entry),
     ...(tools ? { tools } : {}),
     ...(entry.maxTurns !== undefined ? { maxTurns: entry.maxTurns } : {}),
     ...(entry.color ? { color: entry.color } : {}),

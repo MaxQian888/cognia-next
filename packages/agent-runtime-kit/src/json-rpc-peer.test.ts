@@ -105,6 +105,7 @@ describe("JsonRpcPeer", () => {
       const p = peer.sendRequest("turn/start")
       peer.ingest(JSON.stringify({ id: 1, error: { code: -32602, message: "bad params" } }))
       await expect(p).rejects.toThrow("-32602: bad params")
+      await expect(p).rejects.toMatchObject({ code: -32602 })
     })
 
     it("rejects on timeout", async () => {

@@ -5,7 +5,7 @@
  * Used by the Storage API to support encrypted key-value storage.
  */
 
-import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+import { getInstallEncryptionPassphrase } from "@/lib/data/backup-key"
 
 const ALGORITHM = "AES-GCM"
 const KEY_LENGTH = 256
@@ -48,7 +48,7 @@ export async function deriveKey(pluginId: string, salt?: string): Promise<Crypto
 
 /**
  * Derive the AES-GCM key for `setSecure` from the per-install master key
- * (the device-stored backup auto-key — the same root `ctx.secrets` uses on
+ * (the stable per-install credential root — the same root `ctx.secrets` uses on
  * web) combined with the plugin id. Confidentiality now rests on a secret
  * that never leaves the device rather than on the public plugin id.
  *
@@ -56,7 +56,7 @@ export async function deriveKey(pluginId: string, salt?: string): Promise<Crypto
  * fall back to the legacy public-id key.
  */
 export async function deriveInstallKey(pluginId: string): Promise<CryptoKey> {
-  const master = await getDefaultBackupPassphrase()
+  const master = await getInstallEncryptionPassphrase()
   if (!master) {
     throw new Error("Secure plugin storage unavailable: no per-install master key (SSR context)")
   }

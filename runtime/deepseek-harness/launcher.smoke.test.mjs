@@ -108,6 +108,12 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
               COGNIA_DSH_WORKSPACE: root,
               DEEPSEEK_API_KEY: "cognia-smoke-placeholder",
               DEEPSEEK_BASE_URL: backend.baseURL,
+              ...(profile === "acp"
+                ? {
+                    COGNIA_DSH_REASONING_EFFORT: "low",
+                    COGNIA_DSH_MAX_TOKENS: "1234",
+                  }
+                : {}),
             },
             stdio: ["pipe", "pipe", "pipe"],
           }
@@ -199,6 +205,8 @@ for (const profile of ["sdk-readonly", "sdk-workspace", "acp"]) {
           )
           assert.equal(existsSync(join(root, "must-not-exist.txt")), false)
           assert.ok(JSON.stringify(frames).includes("Cognia smoke completed."))
+          assert.equal(requests[0].max_tokens, 1234)
+          assert.equal(requests[0].output_config.effort, "low")
         } else {
           assert.equal(initialized.result.serverInfo.name, "deepseek-harness-sdk-runtime")
           const stale = await request(2, "session.prompt", {})

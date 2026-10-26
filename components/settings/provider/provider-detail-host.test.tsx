@@ -32,6 +32,9 @@ jest.mock("./provider-detail-panel", () => ({
           .filter(Boolean)
           .join(",")}
       </div>
+      <output aria-label="model count">
+        {(props.provider as { modelCount?: number } | null)?.modelCount}
+      </output>
     </div>
   ),
 }))
@@ -123,6 +126,9 @@ jest.mock("./openrouter-key-management", () => ({
 jest.mock("./cliproxyapi-settings", () => ({
   CLIProxyAPISettings: () => <div data-testid="cliproxyapi-settings" />,
 }))
+jest.mock("./magpie-settings", () => ({
+  MagpieSettings: () => <button>Discover local Magpie</button>,
+}))
 
 // `./provider-status-utils` stays real: the header status pill is derived
 // here, and a stub that always says "connected" hid the header disagreeing
@@ -131,6 +137,7 @@ jest.mock("@cognia/provider-core/providers/provider-parameter-schemas", () => ({
   getSchemaForProvider: () => undefined,
 }))
 jest.mock("@cognia/provider-types", () => ({
+  ...jest.requireActual("@cognia/provider-types"),
   validateBedrockConnectionSettings: () => ({ valid: true }),
 }))
 
@@ -193,6 +200,20 @@ function renderHost(over: Partial<ProviderDetailHostProps> = {}) {
 
 describe("ProviderDetailHost", () => {
   describe("a built-in provider", () => {
+    it("counts discovered models for a gateway without a static model list", () => {
+      renderHost({
+        selectedId: "magpie",
+        selectedBuiltIn: { ...builtIn!, models: [] },
+        enrichedBuiltInModels: [{ id: "native/coder", name: "Native coder" } as never],
+      })
+      expect(screen.getByLabelText("model count")).toHaveTextContent("1")
+    })
+    it("mounts the Magpie discovery panel for its gateway row", async () => {
+      renderHost({ selectedId: "magpie" })
+      expect(
+        await screen.findByRole("button", { name: "Discover local Magpie" })
+      ).toBeInTheDocument()
+    })
     it("fills the connect slot with the shared config tab", () => {
       renderHost()
       expect(screen.getByTestId("slot-connect")).toContainElement(screen.getByTestId("config-tab"))

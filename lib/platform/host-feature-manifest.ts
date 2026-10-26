@@ -211,6 +211,13 @@ export interface HostFeatureManifestV2 extends HostFeatureManifestBase {
     accountId: string
     runtimeTargetId: string
   }
+  /**
+   * Present (and only ever `true`) when this manifest is served by the
+   * caller's own person brain on a multi-tenant Host (plan §9a, P5d). Its
+   * HostState submits need no Host admin lease: they change only the
+   * caller's own data, and the Host exempts them from interactive approval.
+   */
+  personPartition?: true
   protocol: {
     min: number
     max: number
@@ -472,6 +479,7 @@ export function buildLocalHostFeatureManifest({
   platform,
   hostId = `local-${platform}`,
   hostStateScope,
+  personPartition,
   deviceGrants = [...DEFAULT_COMPANION_DEVICE_GRANTS],
   operationHealth = {},
 }: {
@@ -479,6 +487,7 @@ export function buildLocalHostFeatureManifest({
   platform: Platform
   hostId?: string
   hostStateScope?: { accountId: string; runtimeTargetId: string }
+  personPartition?: true
   deviceGrants?: string[]
   operationHealth?: Readonly<Record<string, HostOperationHealth>>
 }): HostFeatureManifestV2 {
@@ -607,6 +616,9 @@ export function buildLocalHostFeatureManifest({
         "external_agent_config_get",
         "external_agent_config_create",
         "external_agent_config_update",
+        "external_agent_config_model_roles",
+        "external_agent_config_model_roles_v2",
+        "external_agent_native_subagent_control",
         "external_agent_config_delete",
         "external_agent_config_duplicate",
         "external_agent_config_reconcile",
@@ -664,6 +676,9 @@ export function buildLocalHostFeatureManifest({
         "get_external_agent_status",
         // The Rust Host RPC is shared by desktop and cognia-server.
         "agent_tool_host_control",
+        // A marker, not a command: the gateway lease (`agent_gateway_lease_prepare`
+        // and the brain's service-only host-task lease) accepts a task model plan.
+        EXTERNAL_AGENT_MODEL_PLAN_OPERATION,
         "agent_gateway_lease_prepare",
         "agent_gateway_lease_renew",
         "agent_gateway_lease_revoke",
@@ -878,6 +893,8 @@ export function buildLocalHostFeatureManifest({
         "browser_press_key",
         "browser_scroll",
         "browser_evaluate",
+        "browser_recording_control",
+        "browser_recording_ref",
         "browser_read_console",
         "browser_read_network",
         "browser_back",
@@ -927,6 +944,7 @@ export function buildLocalHostFeatureManifest({
       kind: platform === "headless" ? "cloud" : "desktop",
     },
     ...(hostStateScope ? { hostStateScope } : {}),
+    ...(personPartition ? { personPartition } : {}),
     protocol: {
       min: HOST_PROTOCOL_MIN_VERSION,
       max: HOST_PROTOCOL_MAX_VERSION,
@@ -957,6 +975,8 @@ export function buildLocalHostFeatureManifest({
     limits: { ...DEFAULT_LIMITS },
   }
 }
+
+export const EXTERNAL_AGENT_MODEL_PLAN_OPERATION = "agent_gateway_task_model_plan"
 
 export function supportsHostFeatureOperation(
   manifest: HostFeatureManifest | null | undefined,
@@ -1059,6 +1079,7 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
           v2.hostStateScope.accountId.length === 0 ||
           typeof v2.hostStateScope.runtimeTargetId !== "string" ||
           v2.hostStateScope.runtimeTargetId.length === 0)) ||
+      (v2.personPartition !== undefined && v2.personPartition !== true) ||
       typeof protocolMin !== "number" ||
       typeof protocolMax !== "number" ||
       !Number.isSafeInteger(protocolMin) ||
@@ -1114,4 +1135,16 @@ export function parseHostFeatureManifest(value: unknown): HostFeatureManifest | 
   }
 
   return candidate as HostFeatureManifest
+}
+
+/** Undefined until a Host manifest has been received; false for older Hosts. */
+export function hostSupportsExternalAgentModelPlans(
+  manifest: HostFeatureManifest | null | undefined
+): boolean | undefined {
+  if (!manifest) return undefined
+  return supportsHostFeatureOperation(
+    manifest,
+    "external-agent.process-plane",
+    EXTERNAL_AGENT_MODEL_PLAN_OPERATION
+  )
 }

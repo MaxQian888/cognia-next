@@ -1,5 +1,0 @@
-target
-.git
-.env*
-deploy/data
-*.log

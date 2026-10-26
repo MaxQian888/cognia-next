@@ -729,6 +729,14 @@
     "manageAccounts": "配置档案",
     "menuAria": "{name} 的账户菜单",
     "noProfile": "尚未创建档案",
+    "org": {
+      "heading": "组织",
+      "switchTo": "切换到 {org}",
+      "switching": "正在切换到 {org}…",
+      "switched": "已切换到 {org}",
+      "switchFailed": "无法切换组织",
+      "listFailed": "无法列出其他组织"
+    },
     "petFailed": "无法打开桌面宠物。",
     "settings": "设置",
     "showPet": "桌面宠物",

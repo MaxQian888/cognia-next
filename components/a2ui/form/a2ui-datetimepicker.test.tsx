@@ -3,6 +3,7 @@
  */
 
 import React from "react"
+import { format } from "date-fns"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UIDateTimePicker } from "./a2ui-datetimepicker"
 import type { A2UIDateTimePickerComponent } from "@/types/a2ui/schema"
@@ -128,7 +129,9 @@ describe("A2UIDateTimePicker", () => {
       )
 
       const input = document.querySelector('input[type="datetime-local"]')
-      expect(input).toHaveValue("2024-01-15T14:30")
+      expect(input).toHaveValue(
+        format(new Date("2024-01-15T14:30:00.000Z"), "yyyy-MM-dd\'T\'HH:mm")
+      )
     })
 
     it("should call onDataChange when value changes", () => {
@@ -205,7 +208,10 @@ describe("A2UIDateTimePicker", () => {
       )
 
       const input = document.querySelector('input[type="datetime-local"]')
-      expect(input).toHaveAttribute("min", "2024-01-01T00:00")
+      expect(input).toHaveAttribute(
+        "min",
+        format(new Date("2024-01-01T00:00:00.000Z"), "yyyy-MM-dd\'T\'HH:mm")
+      )
     })
 
     it("should set max attribute", () => {
@@ -218,7 +224,10 @@ describe("A2UIDateTimePicker", () => {
       )
 
       const input = document.querySelector('input[type="datetime-local"]')
-      expect(input).toHaveAttribute("max", "2024-12-31T23:59")
+      expect(input).toHaveAttribute(
+        "max",
+        format(new Date("2024-12-31T23:59:00.000Z"), "yyyy-MM-dd\'T\'HH:mm")
+      )
     })
   })
 })

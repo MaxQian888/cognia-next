@@ -13,6 +13,7 @@
  *               adds registry integrity to lock entries a shrinkwrap left
  *               without one (run after regenerating the lock)
  *   commands    lists the commands a tree must answer --version for
+ *   prepare     selects runtime IDs and prunes the pinned npm lock offline
  *   manifest    writes bundle-manifest.json for one architecture
  *   fetch-tool  downloads git or ripgrep and verifies the vendor sha256
  *   stage       builds one libc tree inside a Dockerfile stage: the Node
@@ -354,16 +355,90 @@ export async function fillLockIntegrity(lock, { fetchImpl = fetch } = {}) {
   return filled
 }
 
-export function readRepoInputs(root = REPO_ROOT) {
-  const json = (path) => JSON.parse(readFileSync(join(root, path), "utf8"))
+export function readRepoInputs(root = REPO_ROOT, paths = {}) {
+  const path = (key) => resolve(root, paths[key] ?? PATHS[key])
+  const json = (key) => JSON.parse(readFileSync(path(key), "utf8"))
   return {
-    pins: json(PATHS.pins),
-    packageJson: json(PATHS.packageJson),
-    lock: json(PATHS.lock),
-    catalog: json(PATHS.catalog),
-    dockerfile: readFileSync(join(root, PATHS.dockerfile), "utf8"),
-    layoutRs: readFileSync(join(root, PATHS.layout), "utf8"),
+    pins: json("pins"),
+    packageJson: json("packageJson"),
+    lock: json("lock"),
+    catalog: json("catalog"),
+    dockerfile: readFileSync(path("dockerfile"), "utf8"),
+    layoutRs: readFileSync(path("layout"), "utf8"),
   }
+}
+
+/**
+ * Canonical runtime IDs in master order. `full`/`all` keeps every available
+ * runtime; `none` installs no Agent CLI. Core tooling and Node infrastructure
+ * remain available in the resulting Runner or bundle image.
+ */
+export function selectRuntimes(pins, selection) {
+  if (typeof selection !== "string" || !selection.trim()) {
+    throw new Error("runtime selection must explicitly name runtimes, full, all or none")
+  }
+  const ids = selection.split(",").map((id) => id.trim())
+  if (ids.some((id) => !id)) throw new Error("runtime selection contains an empty runtime ID")
+  const reserved = new Set(["full", "all", "none"])
+  if (ids.length > 1 && ids.some((id) => reserved.has(id))) {
+    throw new Error("reserved runtime selections full, all and none must stand alone")
+  }
+  const available = pins.runtimes.filter((runtime) => !("unavailable" in runtime))
+  let selected
+  if (ids[0] === "full" || ids[0] === "all") selected = available
+  else if (ids[0] === "none") selected = []
+  else {
+    for (const id of ids) {
+      const runtime = pins.runtimes.find((entry) => entry.id === id)
+      if (!runtime) throw new Error(`unknown runtime ${id}; use canonical runtime IDs`)
+      if ("unavailable" in runtime) throw new Error(`runtime ${id} is unavailable: ${runtime.unavailable}`)
+    }
+    const wanted = new Set(ids)
+    selected = available.filter((runtime) => wanted.has(runtime.id))
+  }
+  const packages = new Set(selected.flatMap((runtime) => (runtime.commands ?? []).map((command) => command.package)))
+  return structuredClone({
+    ...pins,
+    runtimes: selected,
+    installScripts: Object.fromEntries(Object.entries(pins.installScripts ?? {}).filter(([name]) => packages.has(name))),
+  })
+}
+
+/**
+ * Prepare a selected npm closure without registry resolution. npm owns lock
+ * graph pruning (including peers/optional dependencies); every retained
+ * package must keep its exact master version, tarball and integrity.
+ */
+export function prepareBundle(inputs, { runtimes, out, run = spawnSync }) {
+  const problems = validatePins(inputs)
+  if (problems.length) throw new Error(`invalid master bundle pins:\n${problems.join("\n")}`)
+  const pins = selectRuntimes(inputs.pins, runtimes)
+  const packages = new Set(pins.runtimes.flatMap((runtime) => (runtime.commands ?? []).map((command) => command.package)))
+  const packageJson = {
+    ...inputs.packageJson,
+    dependencies: Object.fromEntries(Object.entries(inputs.packageJson.dependencies).filter(([name]) => packages.has(name))),
+  }
+  const npmDir = resolve(out, "npm")
+  mkdirSync(npmDir, { recursive: true })
+  const writeJson = (path, value) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+  writeJson(join(npmDir, "package.json"), packageJson)
+  writeJson(join(npmDir, "package-lock.json"), inputs.lock)
+  runChecked(run, "npm", [
+    "install", "--package-lock-only", "--offline", "--ignore-scripts", "--no-audit", "--no-fund",
+  ], { cwd: npmDir })
+  const lock = JSON.parse(readFileSync(join(npmDir, "package-lock.json"), "utf8"))
+  if (JSON.stringify(sortKeys(lock.packages?.[""]?.dependencies ?? {})) !== JSON.stringify(sortKeys(packageJson.dependencies))) {
+    throw new Error("npm pruning did not retain the selected root dependencies")
+  }
+  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+    if (!path) continue
+    const master = inputs.lock.packages[path]
+    if (!master || ["version", "resolved", "integrity"].some((field) => entry[field] !== master[field])) {
+      throw new Error(`npm pruning changed locked package ${path}; regenerate the master lock explicitly`)
+    }
+  }
+  writeJson(resolve(out, "agent-versions.json"), pins)
+  return { pins, packageJson, lock }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -668,6 +743,13 @@ export async function stage({
   const agents = join(tree, "lib", "agents")
   const allowed = Object.keys(pins.installScripts ?? {})
   if (allowed.length > 0) {
+    // npm 11 requires project lifecycle permissions in package.json; its
+    // --allow-scripts flag is rejected for project-scoped rebuilds. Replace
+    // inherited policy with only this selection's reviewed install scripts.
+    const packagePath = join(agents, "package.json")
+    const packageJson = JSON.parse(readFileSync(packagePath, "utf8"))
+    packageJson.allowScripts = Object.fromEntries(allowed.map((name) => [name, true]))
+    writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`)
     runChecked(run, "npm", ["rebuild", "--foreground-scripts", ...allowed], {
       cwd: agents,
       env: { ...process.env, npm_config_ignore_scripts: "false" },
@@ -775,6 +857,22 @@ async function main(argv) {
   const { mode, options } = parseArgs(argv)
   const pinsPath = options.pins ?? join(REPO_ROOT, PATHS.pins)
   switch (mode) {
+    case "prepare": {
+      const inputs = readRepoInputs(options.root ?? REPO_ROOT, {
+        pins: options.pins,
+        packageJson: options["package-json"],
+        lock: options.lock,
+        catalog: options.catalog,
+        dockerfile: options.dockerfile,
+        layout: options.layout,
+      })
+      const prepared = prepareBundle(inputs, {
+        runtimes: required(options, "runtimes"),
+        out: required(options, "out"),
+      })
+      console.log(`bundle runtimes: ${prepared.pins.runtimes.map(({ id }) => id).join(",") || "none"}`)
+      return
+    }
     case "check": {
       const problems = validatePins(readRepoInputs(options.root ?? REPO_ROOT))
       for (const problem of problems) console.error(`bundle pins: ${problem}`)
@@ -831,7 +929,7 @@ async function main(argv) {
       return
     }
     default:
-      throw new Error("usage: bundle-agent-versions.mjs check|manifest|fetch-tool|stage [--options]")
+      throw new Error("usage: bundle-agent-versions.mjs check|prepare|manifest|fetch-tool|stage [--options]")
   }
 }
 

@@ -173,17 +173,19 @@ pub async fn run(
     let challenge = store
         .issue_challenge(&tenant, now, 600)
         .map_err(|_| refused(FAILED))?;
+    let invitation = store
+        .create_owner_invitation(&tenant, "local-trust-root", now, 600)
+        .map_err(|_| refused(FAILED))?;
     store
-        .register_oidc_device(
+        .register_owner_device(
             &tenant,
-            "native-operator",
+            &invitation,
             &challenge.id,
             &challenge.nonce,
             &device,
             "Native smoke device",
             "-----BEGIN PUBLIC KEY-----\nnative-smoke\n-----END PUBLIC KEY-----",
             &format!("native-{device}"),
-            "owner",
             now,
         )
         .map_err(|_| refused(FAILED))?;

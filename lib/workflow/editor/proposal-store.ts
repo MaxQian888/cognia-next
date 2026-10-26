@@ -32,6 +32,8 @@ import { create } from "zustand"
 import type { ProposalOp, ProposalOpCount } from "./proposal-types"
 import { summarizeOps } from "./proposal-types"
 import { appendProposalHistory } from "./proposal-history"
+import type { ProposalPayload } from "@cognia/plugin-contract/lib/workflow/editor/proposal-store"
+export type { ProposalPayload } from "@cognia/plugin-contract/lib/workflow/editor/proposal-store"
 
 function affectedNodeIdsFromOps(ops: ReadonlyArray<ProposalOp>): string[] {
   const ids = new Set<string>()
@@ -65,21 +67,6 @@ function persistHistory(payload: ProposalPayload, status: "applied" | "discarded
   }).catch((err) => {
     console.warn("proposal-store: failed to persist history", err)
   })
-}
-
-export interface ProposalPayload {
-  proposalId: string
-  workflowId: string
-  summary: string
-  ops: ReadonlyArray<ProposalOp>
-  /** Semantic editor revision captured when this proposal was created. */
-  baseRevision: string
-  opCount: ProposalOpCount
-  /**
-   * Wall-clock ms at create time. Used by the card to show "Proposed Xs
-   * ago" + by tests to assert ordering.
-   */
-  createdAt: number
 }
 
 export type ProposalStatus = "open" | "applied" | "discarded"

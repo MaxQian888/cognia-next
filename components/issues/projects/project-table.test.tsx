@@ -100,4 +100,25 @@ describe("ProjectTable", () => {
     expect(screen.getByTestId("project-row-p1")).toBeInTheDocument()
     expect(screen.getByTestId("project-row-p2")).toBeInTheDocument()
   })
+
+  // The shared Table: density surface, sticky header against the outer
+  // scroller (so its own horizontal scroller is off), container-query columns.
+  it("renders through the shared Table inside the outer scroller", () => {
+    renderTable()
+    const table = screen.getByRole("table")
+    const container = table.closest("[data-slot=table-container]")
+    expect(container).toHaveAttribute("data-surface", "table")
+    expect(container).toHaveClass("overflow-x-visible")
+    expect(screen.getByTestId("project-table")).toContainElement(container as HTMLElement)
+    expect(table.querySelector("thead")).toHaveClass("sticky", "top-0")
+    const headers = within(table).getAllByRole("columnheader")
+    for (const header of headers) expect(header).toHaveAttribute("scope", "col")
+    expect(within(table).getByRole("columnheader", { name: "projects.lead" })).toHaveClass(
+      "hidden",
+      "@3xl/project-table:table-cell"
+    )
+    expect(within(table).getByRole("columnheader", { name: "projects.issueCount" })).toHaveClass(
+      "text-right"
+    )
+  })
 })

@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Runtime, WindowEvent};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, Runtime, WindowEvent};
 
 // The shared overlay seam the pet windows pioneered and the fleet island
 // already borrows: non-activating NSPanel reclassing, generation-guarded
@@ -68,7 +68,8 @@ pub const TRAY_PANEL_SHOWN_EVENT: &str = "tray-panel://shown";
 /// Initial logical size, used only until the renderer measures its content and
 /// calls [`tray_panel_resize`]. Persisted afterwards so the next cold open
 /// starts at the size the user last saw instead of jumping.
-pub const DEFAULT_PANEL_WIDTH: f64 = 380.0;
+// Match the default 460px card plus the renderer's 16px shadow margin.
+pub const DEFAULT_PANEL_WIDTH: f64 = 476.0;
 pub const DEFAULT_PANEL_HEIGHT: f64 = 460.0;
 
 /// Gap (physical px) between the tray icon and the panel edge.
@@ -195,6 +196,13 @@ impl PanelRect {
     pub fn center_y(&self) -> f64 {
         self.y + self.height / 2.0
     }
+
+    fn contains(&self, point: (f64, f64)) -> bool {
+        point.0 >= self.x
+            && point.0 < self.x + self.width
+            && point.1 >= self.y
+            && point.1 < self.y + self.height
+    }
 }
 
 /// Last tray-icon rectangle reported by the OS, in physical px.
@@ -204,6 +212,7 @@ impl PanelRect {
 #[derive(Default)]
 pub struct TrayPanelAnchorStore {
     inner: Mutex<Option<PanelRect>>,
+    placement: Mutex<Option<TrayGeometry>>,
 }
 
 impl TrayPanelAnchorStore {
@@ -213,6 +222,14 @@ impl TrayPanelAnchorStore {
 
     pub fn get(&self) -> Option<PanelRect> {
         *self.inner.lock()
+    }
+
+    fn set_placement(&self, geometry: TrayGeometry) {
+        *self.placement.lock() = Some(geometry);
+    }
+
+    fn placement(&self) -> Option<TrayGeometry> {
+        *self.placement.lock()
     }
 }
 
@@ -315,12 +332,30 @@ pub fn resolve_panel_placement(
     (x.round(), y.round())
 }
 
-/// Work area (physical px) of the monitor holding `point`, falling back to the
-/// primary monitor and finally to a conservative 1920x1080 desktop — the same
-/// ladder `pet_window::work_area_for` walks.
+/// Select a monitor in the same physical coordinate space as tray events.
+fn monitor_for_physical_point<R: Runtime>(
+    app: &AppHandle<R>,
+    point: (f64, f64),
+) -> Option<tauri::Monitor> {
+    // Tao's macOS monitor_from_point compares against logical CGDisplayBounds,
+    // while tray rectangles and Monitor position/size are physical pixels.
+    app.available_monitors().ok()?.into_iter().find(|monitor| {
+        let position = monitor.position();
+        let size = monitor.size();
+        PanelRect {
+            x: position.x as f64,
+            y: position.y as f64,
+            width: size.width as f64,
+            height: size.height as f64,
+        }
+        .contains(point)
+    })
+}
+
+/// Work area in physical pixels, with primary-monitor and desktop fallbacks.
 fn work_area_for<R: Runtime>(app: &AppHandle<R>, point: Option<(f64, f64)>) -> PanelRect {
     let monitor = point
-        .and_then(|(x, y)| app.monitor_from_point(x, y).ok().flatten())
+        .and_then(|point| monitor_for_physical_point(app, point))
         .or_else(|| app.primary_monitor().ok().flatten());
     match monitor {
         Some(monitor) => {
@@ -362,6 +397,117 @@ fn fallback_anchor(work_area: PanelRect) -> PanelRect {
     }
 }
 
+/// A cold open from settings or a command has no mouse event yet. Prefer the
+/// OS tray rectangle over a screen-corner fallback, retaining a recorded click
+/// first because macOS can mirror the status item on another display.
+#[cfg(any(not(target_os = "macos"), test))]
+fn resolve_panel_anchor(recorded: Option<PanelRect>, live: Option<PanelRect>) -> Option<PanelRect> {
+    recorded.or(live)
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn macos_tray_rect<R: Runtime>(tray: &tauri::tray::TrayIcon<R>) -> Option<PanelRect> {
+    macos_tray_geometry(tray).map(|geometry| geometry.anchor)
+}
+
+#[derive(Clone, Copy)]
+struct TrayGeometry {
+    anchor: PanelRect,
+    work_area: PanelRect,
+    scale: f64,
+}
+
+impl TrayGeometry {
+    fn position_for_size(self, width: f64, height: f64) -> tauri::Position {
+        let (x, y) = resolve_panel_placement(
+            self.anchor,
+            (width * self.scale, height * self.scale),
+            self.work_area,
+            PANEL_GAP_PX,
+        );
+        // AppKit converts PhysicalPosition using the window's current screen,
+        // which may differ from the destination on a mixed-DPI desktop.
+        #[cfg(target_os = "macos")]
+        {
+            tauri::LogicalPosition::new(x / self.scale, y / self.scale).into()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            tauri::PhysicalPosition::new(x, y).into()
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_tray_geometry<R: Runtime>(tray: &tauri::tray::TrayIcon<R>) -> Option<TrayGeometry> {
+    tray.with_inner_tray_icon(|inner| {
+        let mtm = objc2::MainThreadMarker::new()?;
+        let button = inner.ns_status_item()?.button(mtm)?;
+        let window = button.window()?;
+        let rect = window.convertRectToScreen(button.convertRect_toView(button.bounds(), None));
+        let primary = objc2_app_kit::NSScreen::screens(mtm).firstObject()?.frame();
+        let scale = window.backingScaleFactor();
+        let area = window.screen()?.visibleFrame();
+        Some(TrayGeometry {
+            anchor: PanelRect {
+                x: rect.origin.x * scale,
+                y: (primary.size.height - rect.origin.y - rect.size.height) * scale,
+                width: rect.size.width * scale,
+                height: rect.size.height * scale,
+            },
+            work_area: PanelRect {
+                x: area.origin.x * scale,
+                y: (primary.size.height - area.origin.y - area.size.height) * scale,
+                width: area.size.width * scale,
+                height: area.size.height * scale,
+            },
+            scale,
+        })
+    })
+    .ok()
+    .flatten()
+}
+
+#[cfg(desktop)]
+fn live_tray_anchor<R: Runtime>(app: &AppHandle<R>) -> Option<TrayGeometry> {
+    let handle = app.clone();
+    let read = move || {
+        handle.tray_by_id(super::TRAY_ICON_ID).and_then(|tray| {
+            #[cfg(target_os = "macos")]
+            {
+                macos_tray_geometry(&tray)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let rect = tray.rect().ok().flatten()?;
+                let anchor = anchor_from_tray_rect(&rect, 1.0);
+                let point = (anchor.center_x(), anchor.center_y());
+                Some(TrayGeometry {
+                    anchor,
+                    work_area: work_area_for(&handle, Some(point)),
+                    scale: monitor_for_physical_point(&handle, point)
+                        .map(|monitor| monitor.scale_factor())
+                        .unwrap_or(1.0),
+                })
+            }
+        })
+    };
+    #[cfg(target_os = "macos")]
+    if objc2::MainThreadMarker::new().is_some() {
+        return read();
+    }
+    // Both lookup and handle destruction touch AppKit, not just rect(). The
+    // Wry dispatcher runs inline when already on its event-loop thread.
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let _ = tx.send(read());
+    })
+    .ok()?;
+    rx.recv_timeout(std::time::Duration::from_secs(2))
+        .ok()
+        .flatten()
+}
+
 /* ── Window lifecycle ─────────────────────────────────────────────────── */
 
 /// Hide the panel. Cheap to re-show, so we hide rather than destroy.
@@ -382,24 +528,52 @@ pub fn close_panel_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// shown before the WebView commits paints an opaque rectangle on Windows.
 pub fn open_panel_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let cfg = load_config();
-    let anchor = app
+    let recorded = app
         .try_state::<std::sync::Arc<TrayPanelAnchorStore>>()
         .and_then(|store| store.get());
+    #[cfg(desktop)]
+    let live = if cfg!(target_os = "macos") || recorded.is_none() {
+        live_tray_anchor(app)
+    } else {
+        None
+    };
+    #[cfg(not(desktop))]
+    let live: Option<TrayGeometry> = None;
+    // AppKit supplies the status button's current screen directly. Retain it
+    // with the rect so mixed-DPI global physical coordinates stay consistent.
+    #[cfg(target_os = "macos")]
+    let anchor = live.map(|geometry| geometry.anchor).or(recorded);
+    #[cfg(not(target_os = "macos"))]
+    let anchor = resolve_panel_anchor(recorded, live.map(|geometry| geometry.anchor));
 
-    let work_area = work_area_for(app, anchor.map(|r| (r.center_x(), r.center_y())));
+    let work_area = live
+        .filter(|geometry| Some(geometry.anchor) == anchor)
+        .map(|geometry| geometry.work_area)
+        .unwrap_or_else(|| work_area_for(app, anchor.map(|r| (r.center_x(), r.center_y()))));
     let anchor = anchor.unwrap_or_else(|| fallback_anchor(work_area));
 
     // The config size is logical; placement is physical. Scale through the
     // monitor the panel will actually land on.
-    let scale = app
-        .monitor_from_point(anchor.center_x(), anchor.center_y())
-        .ok()
-        .flatten()
-        .or_else(|| app.primary_monitor().ok().flatten())
-        .map(|m| m.scale_factor())
+    let scale = live
+        .filter(|geometry| geometry.anchor == anchor)
+        .map(|geometry| geometry.scale)
+        .or_else(|| {
+            monitor_for_physical_point(app, (anchor.center_x(), anchor.center_y()))
+                .or_else(|| app.primary_monitor().ok().flatten())
+                .map(|m| m.scale_factor())
+        })
         .unwrap_or(1.0);
-    let physical_size = (cfg.width * scale, cfg.height * scale);
-    let (x, y) = resolve_panel_placement(anchor, physical_size, work_area, PANEL_GAP_PX);
+    let geometry = TrayGeometry {
+        anchor,
+        work_area,
+        scale,
+    };
+    let position = geometry.position_for_size(cfg.width, cfg.height);
+    if let Some(store) = app.try_state::<std::sync::Arc<TrayPanelAnchorStore>>() {
+        // Renderer fitting may run before the first reveal. Keep the opening
+        // display and anchor through every placeholder/data size transition.
+        store.set_placement(geometry);
+    }
 
     let open_attempt = PanelOpenAttempt::begin();
 
@@ -407,9 +581,7 @@ pub fn open_panel_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         window
             .set_size(LogicalSize::new(cfg.width, cfg.height))
             .map_err(|e| e.to_string())?;
-        window
-            .set_position(PhysicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
+        window.set_position(position).map_err(|e| e.to_string())?;
         let generation = begin_overlay_panel_open(PANEL_ROLE);
         if let Err(error) = reveal_overlay_panel(&window, PANEL_ROLE, true, generation) {
             cancel_overlay_panel_reveal(PANEL_ROLE);
@@ -448,7 +620,7 @@ pub fn open_panel_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     // frameless popover (same fix as `pet_window/popup.rs`).
     let _ = window.remove_menu();
 
-    if let Err(error) = window.set_position(PhysicalPosition::new(x, y)) {
+    if let Err(error) = window.set_position(position) {
         cancel_overlay_panel_reveal(PANEL_ROLE);
         PANEL_OPEN.store(false, Ordering::SeqCst);
         let _ = window.close();
@@ -544,17 +716,37 @@ pub async fn reveal_tray_panel(app: AppHandle, focus: bool) -> Result<(), String
 /// persisted so the next cold open starts there instead of jumping.
 #[tauri::command]
 pub async fn tray_panel_resize(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
-    let mut cfg = load_config();
-    let changed = cfg.absorb_size(width, height);
-    if let Some(window) = app.get_webview_window(TRAY_PANEL_LABEL) {
-        window
-            .set_size(LogicalSize::new(cfg.width, cfg.height))
-            .map_err(|e| e.to_string())?;
-    }
-    if changed {
-        save_config(&cfg)?;
-    }
-    Ok(())
+    let handle = app.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    // ResizeObserver can send overlapping fits. Queue size and position as a
+    // pair on the main thread so one fit cannot use another fit's dimensions.
+    app.run_on_main_thread(move || {
+        let result = (|| {
+            let mut cfg = load_config();
+            let changed = cfg.absorb_size(width, height);
+            if let Some(window) = handle.get_webview_window(TRAY_PANEL_LABEL) {
+                window
+                    .set_size(LogicalSize::new(cfg.width, cfg.height))
+                    .map_err(|e| e.to_string())?;
+                if let Some(geometry) = handle
+                    .try_state::<std::sync::Arc<TrayPanelAnchorStore>>()
+                    .and_then(|store| store.placement())
+                {
+                    window
+                        .set_position(geometry.position_for_size(cfg.width, cfg.height))
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            if changed {
+                save_config(&cfg)?;
+            }
+            Ok(())
+        })();
+        let _ = tx.send(result);
+    })
+    .map_err(|e| e.to_string())?;
+    rx.await
+        .map_err(|_| "tray panel resize was dropped".to_string())?
 }
 
 /// Run one of the tray's native actions from the quick panel.
@@ -625,6 +817,180 @@ mod tests {
     fn label_matches_renderer_contract() {
         // Must stay in lockstep with `lib/pet/window-role.ts`.
         assert_eq!(TRAY_PANEL_LABEL, "tray-panel");
+    }
+
+    #[test]
+    fn cold_open_uses_the_live_tray_rect_before_the_screen_corner() {
+        let live = PanelRect {
+            x: 1814.0,
+            y: 8.0,
+            width: 72.0,
+            height: 48.0,
+        };
+        let anchor = resolve_panel_anchor(None, Some(live)).expect("live tray anchor");
+        let (x, _) = resolve_panel_placement(
+            anchor,
+            (760.0, 1312.0),
+            PanelRect {
+                x: 0.0,
+                y: 66.0,
+                width: 3456.0,
+                height: 2168.0,
+            },
+            PANEL_GAP_PX,
+        );
+        assert_eq!(
+            x, 1470.0,
+            "center below the icon instead of at the right edge"
+        );
+        assert_eq!(resolve_panel_anchor(None, None), None);
+    }
+
+    #[test]
+    fn retina_tray_point_stays_on_its_physical_monitor() {
+        let primary = PanelRect {
+            x: 0.0,
+            y: 0.0,
+            width: 3456.0,
+            height: 2234.0,
+        };
+        let secondary = PanelRect {
+            x: 3456.0,
+            y: 0.0,
+            width: 3840.0,
+            height: 2160.0,
+        };
+        // Logical x=1000 belongs to the primary screen, even though its
+        // physical x=2000 exceeds the primary screen's logical width=1728.
+        assert!(primary.contains((2000.0, 32.0)));
+        assert!(!secondary.contains((2000.0, 32.0)));
+        assert!(!primary.contains((5756.0, 30.0)));
+        assert!(secondary.contains((5756.0, 30.0)));
+        assert!(!primary.contains((3456.0, 32.0)));
+        assert!(secondary.contains((3456.0, 32.0)));
+    }
+
+    #[test]
+    fn panel_on_a_left_display_keeps_negative_screen_coordinates() {
+        let (x, y) = resolve_panel_placement(
+            PanelRect {
+                x: -900.0,
+                y: 4.0,
+                width: 36.0,
+                height: 24.0,
+            },
+            (380.0, 656.0),
+            PanelRect {
+                x: -1920.0,
+                y: 30.0,
+                width: 1920.0,
+                height: 1050.0,
+            },
+            PANEL_GAP_PX,
+        );
+        assert_eq!((x, y), (-1072.0, 38.0));
+    }
+
+    #[test]
+    fn panel_on_an_upper_display_keeps_negative_vertical_coordinates() {
+        let (x, y) = resolve_panel_placement(
+            PanelRect {
+                x: 800.0,
+                y: -1076.0,
+                width: 36.0,
+                height: 24.0,
+            },
+            (380.0, 656.0),
+            PanelRect {
+                x: 0.0,
+                y: -1050.0,
+                width: 1920.0,
+                height: 1050.0,
+            },
+            PANEL_GAP_PX,
+        );
+        assert_eq!((x, y), (628.0, -1042.0));
+    }
+
+    #[test]
+    fn placement_uses_the_destination_scale_for_a_one_x_external_display() {
+        let anchor = PanelRect {
+            x: 2860.0,
+            y: 3.0,
+            width: 36.0,
+            height: 24.0,
+        };
+        let area = PanelRect {
+            x: 1728.0,
+            y: 30.0,
+            width: 1920.0,
+            height: 1050.0,
+        };
+        let (x, y) = resolve_panel_placement(anchor, (380.0, 656.0), area, PANEL_GAP_PX);
+        assert_eq!((x, y), (2688.0, 38.0));
+        assert_eq!(x + 190.0, anchor.center_x());
+        assert!(area.contains((x, y)));
+        assert!(area.contains((x + 380.0, y + 656.0)));
+    }
+
+    #[test]
+    fn content_resizes_retain_the_opening_display_and_tray_anchor() {
+        let geometry = TrayGeometry {
+            anchor: PanelRect {
+                x: 1814.0,
+                y: 8.0,
+                width: 72.0,
+                height: 48.0,
+            },
+            work_area: PanelRect {
+                x: 0.0,
+                y: 66.0,
+                width: 3456.0,
+                height: 1994.0,
+            },
+            scale: 2.0,
+        };
+        let store = TrayPanelAnchorStore::default();
+        store.set_placement(geometry);
+        // A later hover on the mirrored tray must not move an open panel
+        // while its loading placeholder is replaced with the real data.
+        store.set(PanelRect {
+            x: 5654.0,
+            y: 6.0,
+            width: 72.0,
+            height: 48.0,
+        });
+        let opening = store.placement().expect("opening placement");
+        for (width, height) in [(380.0, 656.0), (396.0, 437.0), (296.0, 656.0)] {
+            let position: tauri::LogicalPosition<f64> = opening
+                .position_for_size(width, height)
+                .to_logical(opening.scale);
+            assert_eq!(
+                position.y, 37.0,
+                "keep the top below the tray during loading"
+            );
+            assert_eq!(position.x + width / 2.0, 925.0, "keep the tray centered");
+        }
+    }
+
+    #[test]
+    fn recorded_click_keeps_the_clicked_display_over_the_primary_tray_rect() {
+        let clicked = PanelRect {
+            x: 5654.0,
+            y: 8.0,
+            width: 72.0,
+            height: 48.0,
+        };
+        let primary = PanelRect {
+            x: 1814.0,
+            y: 8.0,
+            width: 72.0,
+            height: 48.0,
+        };
+        assert_eq!(
+            resolve_panel_anchor(Some(clicked), Some(primary)),
+            Some(clicked)
+        );
     }
 
     #[test]
@@ -726,6 +1092,7 @@ mod tests {
         let cfg = TrayPanelConfig::default();
         assert_eq!(cfg.left_click, TrayLeftClickAction::Panel);
         assert_eq!(cfg.width, DEFAULT_PANEL_WIDTH);
+        assert_eq!(cfg.width, 460.0 + 16.0);
         assert_eq!(cfg.height, DEFAULT_PANEL_HEIGHT);
     }
 
@@ -735,6 +1102,15 @@ mod tests {
             serde_json::from_str(r#"{"leftClick":"toggle-window"}"#).unwrap();
         assert_eq!(cfg.left_click, TrayLeftClickAction::ToggleWindow);
         assert_eq!(cfg.width, DEFAULT_PANEL_WIDTH);
+    }
+
+    #[test]
+    fn config_preserves_previously_measured_window_widths() {
+        for width in [336.0, 396.0, 476.0] {
+            let cfg: TrayPanelConfig =
+                serde_json::from_value(serde_json::json!({ "width": width })).unwrap();
+            assert_eq!(cfg.width, width);
+        }
     }
 
     #[test]

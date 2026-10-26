@@ -1,8 +1,8 @@
 import type { Goal, GoalConfig } from "@/types/goal"
 import {
   GOAL_SECTION_MARKER,
-  JUDGE_SYSTEM_PROMPT,
-  SUBGOAL_DECOMPOSE_SYSTEM_PROMPT,
+  GOAL_JUDGE_PROMPT,
+  GOAL_SUBGOALS_PROMPT,
   detectCompletionPromise,
   parseSuggestedDelay,
   renderContinuationMessage,
@@ -12,7 +12,17 @@ import {
   renderPromiseVerificationMessage,
   renderSubgoalDecomposeUserPrompt,
   resolveJudgeSystemPrompt,
+  GOAL_CONTINUATION_PROMPT,
+  GOAL_OBJECTIVE_UPDATED_PROMPT,
+  GOAL_PROMISE_VERIFICATION_PROMPT,
+  GOAL_SYSTEM_SECTION_PROMPT,
 } from "./prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { validatePromptBody } from "@/lib/prompts/template"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const SAMPLE_CONFIG: GoalConfig = {
   maxTurns: 20,
@@ -302,16 +312,16 @@ describe("renderObjectiveUpdatedMessage", () => {
 })
 
 describe("Judge templates", () => {
-  it("JUDGE_SYSTEM_PROMPT demands a single JSON object response", () => {
-    expect(JUDGE_SYSTEM_PROMPT).toMatch(/single JSON object/)
-    expect(JUDGE_SYSTEM_PROMPT).toMatch(/"done": <true\|false>/)
-    expect(JUDGE_SYSTEM_PROMPT).toMatch(/"reason"/)
+  it("GOAL_JUDGE_PROMPT demands a single JSON object response", () => {
+    expect(GOAL_JUDGE_PROMPT.defaultBody).toMatch(/single JSON object/)
+    expect(GOAL_JUDGE_PROMPT.defaultBody).toMatch(/"done": <true\|false>/)
+    expect(GOAL_JUDGE_PROMPT.defaultBody).toMatch(/"reason"/)
   })
 
-  it("JUDGE_SYSTEM_PROMPT lists the three done conditions", () => {
-    expect(JUDGE_SYSTEM_PROMPT).toMatch(/explicitly confirms the goal was completed/)
-    expect(JUDGE_SYSTEM_PROMPT).toMatch(/final deliverable was produced/)
-    expect(JUDGE_SYSTEM_PROMPT).toMatch(/blocked \/ needs user input/)
+  it("GOAL_JUDGE_PROMPT lists the three done conditions", () => {
+    expect(GOAL_JUDGE_PROMPT.defaultBody).toMatch(/explicitly confirms the goal was completed/)
+    expect(GOAL_JUDGE_PROMPT.defaultBody).toMatch(/final deliverable was produced/)
+    expect(GOAL_JUDGE_PROMPT.defaultBody).toMatch(/blocked \/ needs user input/)
   })
 
   it("renderJudgeUserPrompt embeds both objective and last response", () => {
@@ -332,25 +342,25 @@ describe("Judge templates", () => {
 })
 
 describe("resolveJudgeSystemPrompt (ADR-0019 Phase 2)", () => {
-  it("returns the built-in prompt when no override is set", () => {
-    expect(resolveJudgeSystemPrompt(buildGoal())).toBe(JUDGE_SYSTEM_PROMPT)
+  it("returns the built-in prompt when no override is set", async () => {
+    expect(await resolveJudgeSystemPrompt(buildGoal())).toBe(GOAL_JUDGE_PROMPT.defaultBody)
   })
 
-  it("returns the built-in prompt when the override is blank", () => {
+  it("returns the built-in prompt when the override is blank", async () => {
     const goal = buildGoal({ config: { ...SAMPLE_CONFIG, judgePromptOverride: "   " } })
-    expect(resolveJudgeSystemPrompt(goal)).toBe(JUDGE_SYSTEM_PROMPT)
+    expect(await resolveJudgeSystemPrompt(goal)).toBe(GOAL_JUDGE_PROMPT.defaultBody)
   })
 
-  it("uses a custom override that already demands JSON verbatim", () => {
+  it("uses a custom override that already demands JSON verbatim", async () => {
     const custom = 'Be terse. Reply {"done": true|false, "reason": "..."}'
     const goal = buildGoal({ config: { ...SAMPLE_CONFIG, judgePromptOverride: custom } })
-    expect(resolveJudgeSystemPrompt(goal)).toBe(custom)
+    expect(await resolveJudgeSystemPrompt(goal)).toBe(custom)
   })
 
-  it("appends the JSON directive when the override omits it", () => {
+  it("appends the JSON directive when the override omits it", async () => {
     const custom = "Judge strictly and concisely."
     const goal = buildGoal({ config: { ...SAMPLE_CONFIG, judgePromptOverride: custom } })
-    const out = resolveJudgeSystemPrompt(goal)
+    const out = await resolveJudgeSystemPrompt(goal)
     expect(out).toContain(custom)
     expect(out).toMatch(/single JSON object/)
     expect(out).toMatch(/"done": <true\|false>/)
@@ -374,9 +384,9 @@ describe("subgoal decomposition prompts", () => {
     updatedAt: 0,
   }
 
-  it("SUBGOAL_DECOMPOSE_SYSTEM_PROMPT demands a single-line steps JSON object", () => {
-    expect(SUBGOAL_DECOMPOSE_SYSTEM_PROMPT).toContain('"steps"')
-    expect(SUBGOAL_DECOMPOSE_SYSTEM_PROMPT).toContain("user-provided data")
+  it("GOAL_SUBGOALS_PROMPT demands a single-line steps JSON object", () => {
+    expect(GOAL_SUBGOALS_PROMPT.defaultBody).toContain('"steps"')
+    expect(GOAL_SUBGOALS_PROMPT.defaultBody).toContain("user-provided data")
   })
 
   it("renderSubgoalDecomposeUserPrompt wraps the safeObjective in <objective>", () => {
@@ -415,5 +425,89 @@ describe("renderJudgeUserPrompt — subgoal checklist", () => {
     )
     expect(p).toContain("0. Plan")
     expect(p).toContain("completedSubgoals")
+  })
+})
+
+describe("customized goal prompts (ADR-0236)", () => {
+  const override = (
+    promptId: string,
+    scope: "session" | "workspace" | "account",
+    targetId: string,
+    body: string
+  ) => ({
+    bindingId: `pob-${promptId}`,
+    promptId,
+    scope,
+    targetId,
+    revisionId: `por-${promptId}`,
+    body,
+    contractVersion: 1,
+  })
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    // Verdicts are cached per revision id, which these fixtures reuse.
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders a session override of the system section with the live values", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        override(
+          GOAL_SYSTEM_SECTION_PROMPT.id,
+          "session",
+          "ses_a",
+          "## Active Goal\n<objective>\n{{objective}}\n</objective>\nTurn {{turnsUsed}}/{{maxTurns}}.{{extraRules}}"
+        ),
+      ])
+    )
+    const goal = buildGoal({
+      turnsUsed: 2,
+      config: { ...SAMPLE_CONFIG, inlineStopCondition: "tests pass" },
+    })
+    expect(renderGoalSystemSection(goal)).toBe(
+      `## Active Goal\n<objective>\nwrite a haiku about winter\n</objective>\nTurn 2/${SAMPLE_CONFIG.maxTurns}.\n- Additional stop condition: tests pass`
+    )
+    // A goal in another session keeps the shipped section.
+    expect(renderGoalSystemSection(buildGoal({ sessionId: "ses_b" }))).toContain(
+      "You are working toward a standing goal."
+    )
+  })
+
+  it("never publishes or applies a section that drops the <objective> wrap", () => {
+    expect(validatePromptBody(GOAL_SYSTEM_SECTION_PROMPT, "Pursue {{objective}}.")).toEqual(
+      expect.arrayContaining([{ code: "missing-fragment", fragment: "<objective>" }])
+    )
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        override(GOAL_SYSTEM_SECTION_PROMPT.id, "account", "", "Pursue {{objective}}."),
+      ])
+    )
+    expect(renderGoalSystemSection(buildGoal())).toContain(
+      "<objective>\nwrite a haiku about winter\n</objective>"
+    )
+  })
+
+  it("lets the goal's own judge override win over a Prompt Center override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        override(GOAL_JUDGE_PROMPT.id, "workspace", "ws-1", 'Judge kindly. Reply {"done": bool}'),
+      ])
+    )
+    expect(await resolveJudgeSystemPrompt(buildGoal({ projectId: "ws-1" }))).toBe(
+      'Judge kindly. Reply {"done": bool}'
+    )
+    const perGoal = buildGoal({
+      projectId: "ws-1",
+      config: { ...SAMPLE_CONFIG, judgePromptOverride: 'Mine. {"done"}' },
+    })
+    expect(await resolveJudgeSystemPrompt(perGoal)).toBe('Mine. {"done"}')
+  })
+
+  it("renders the inspect-only loop messages from their definitions", () => {
+    expect(renderObjectiveUpdatedMessage("old", "new")).toBe(
+      GOAL_OBJECTIVE_UPDATED_PROMPT.defaultBody.replace("{{objective}}", "new")
+    )
+    expect(GOAL_CONTINUATION_PROMPT.operation).toBe("inspect-only")
+    expect(GOAL_PROMISE_VERIFICATION_PROMPT.operation).toBe("inspect-only")
   })
 })

@@ -43,6 +43,8 @@ import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
 import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { RoutingAttemptController } from "@cognia/provider-routing"
@@ -182,7 +184,11 @@ export interface ExecuteAgentConfig {
   grantSource?: { kind: CapabilityGrantSourceKind; id?: string }
   /** Reasoning-effort dial for this run, ahead of the session/character chain. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
-  /** Wall-clock timeout (ms) for the tool-enabled run. Defaults to the runner's own default. */
+  /**
+   * Wall-clock timeout (ms) for the tool-enabled run; 0 disables it. Dispatched
+   * subagents default to 0; other callers retain the capture runner's default.
+   * Stream-idle protection remains independent of this wall-clock limit.
+   */
   timeoutMs?: number
   /**
    * Live text deltas (text channel only — the sidecar stream is not
@@ -379,18 +385,42 @@ function toolResultReviewResponderFor(
 }
 
 /**
+ * The identity a persona-less tool-enabled run gets when its caller supplied
+ * no system prompt of its own (ADR-0236). A caller's `systemPrompt` always
+ * wins; this only fills the gap.
+ */
+export const EXECUTOR_FALLBACK_PROMPT = definePrompt({
+  id: "agent.executor.fallback",
+  contractVersion: 1,
+  kind: "role",
+  group: "agents",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 8_000,
+  outputContract:
+    "The system prompt of the synthesized agent for an `executeAgent` run with tools, no agent and no caller-supplied system prompt.",
+  consumers: ["lib/ai/agent/agent-executor.ts"],
+  defaultBody: "You are a focused, helpful agent.",
+})
+
+/**
  * Build a minimal in-memory `Character` from a config that has no
  * `characterId`. Mirrors `lib/ai/agent/team/teammate/teammate-character.ts` — the
  * synthesised character is never persisted, it is handed straight to
- * `resolveSendOptions` as `BuildOptionsContext.character`.
+ * `resolveSendOptions` as `BuildOptionsContext.character`. `fallbackSystemPrompt`
+ * is the resolved {@link EXECUTOR_FALLBACK_PROMPT}, used only when the config
+ * carries no system prompt.
  */
-function synthesizeCharacter(config: ExecuteAgentConfig): Character {
+function synthesizeCharacter(config: ExecuteAgentConfig, fallbackSystemPrompt: string): Character {
   const ts = Date.now()
   return {
     id: "__plugin-agent__",
     name: "Plugin Agent",
     avatarColor: "oklch(0.6 0 0)",
-    systemPrompt: config.systemPrompt?.trim() || "You are a focused, helpful agent.",
+    systemPrompt: config.systemPrompt?.trim() || fallbackSystemPrompt,
     createdAt: ts,
     updatedAt: ts,
     ...(config.model ? { model: config.model } : {}),
@@ -491,7 +521,7 @@ export async function buildAgentBoundContext(
 async function runToolEnabledStandalone(
   prompt: string,
   config: ExecuteAgentConfig
-): Promise<{ text: string; usage?: ExecuteAgentResult["usage"] }> {
+): Promise<{ text: string; usage?: ExecuteAgentResult["usage"]; finishReason?: string }> {
   const [
     { resolveCharacterById },
     sessionsDb,
@@ -526,7 +556,10 @@ async function runToolEnabledStandalone(
     }
     character = resolved
   } else {
-    character = synthesizeCharacter(config)
+    const fallback = config.systemPrompt?.trim()
+      ? ""
+      : (await resolvePromptAsync(EXECUTOR_FALLBACK_PROMPT)).text
+    character = synthesizeCharacter(config, fallback)
   }
 
   const session =
@@ -581,6 +614,10 @@ async function runToolEnabledStandalone(
       routingSurface: "agent",
       routingContextHint: { promptText: prompt },
     })
+    if (config.isDispatchedSubagent) {
+      sendOptions.agentKind = "subagent"
+      if (config.approvalRoute) sendOptions.agentRef = config.approvalRoute.subagentId
+    }
     // The structured-output instruction rides `appendSystemPrompt` after the
     // grant's fragments so the resolved character/skill blocks survive.
     const appended = composeSystem(
@@ -668,7 +705,10 @@ async function runToolEnabledStandalone(
       try {
         result = await runner.runAndCaptureAssistantReply(session.id, prompt, attemptOptions, {
           signal: config.abortSignal,
-          ...(typeof config.timeoutMs === "number" ? { timeoutMs: config.timeoutMs } : {}),
+          preserveBudgetEvidence: config.isDispatchedSubagent === true,
+          ...(typeof config.timeoutMs === "number" || config.isDispatchedSubagent
+            ? { timeoutMs: config.timeoutMs ?? 0 }
+            : {}),
           onEvent: (event) => {
             const commits =
               (event.type === "text-delta" && event.delta.length > 0) || event.type === "tool-call"
@@ -775,7 +815,13 @@ async function runToolEnabledStandalone(
           totalTokens: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
         }
       : undefined
-    return { text: result.text ?? "", ...(usage ? { usage } : {}) }
+    return {
+      text: [result.text, result.budgetContinuationContext].filter(Boolean).join("\n\n"),
+      ...(usage ? { usage } : {}),
+      ...(result.resultSubtype
+        ? { finishReason: result.resultSubtype === "success" ? "stop" : result.resultSubtype }
+        : {}),
+    }
   } finally {
     if (config.dispatchContext) clearDispatchContext(session.id)
     if (config.approvalRoute) {
@@ -806,10 +852,10 @@ export async function runAgentRail(
   prompt: string,
   config: ExecuteAgentConfig
 ): Promise<ExecuteAgentResult> {
-  const { text, usage } = await runToolEnabledStandalone(prompt, config)
+  const { text, usage, finishReason } = await runToolEnabledStandalone(prompt, config)
   return {
     text,
-    finishReason: "stop",
+    finishReason: finishReason ?? "stop",
     channel: "sidecar",
     toolsAvailable: true,
     ...(usage ? { usage } : {}),

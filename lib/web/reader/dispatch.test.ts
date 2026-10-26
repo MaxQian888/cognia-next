@@ -1,4 +1,4 @@
-import { scrapePlatform } from "./dispatch"
+import { platformReaderFor, scrapePlatform } from "./dispatch"
 
 function res(body: string, contentType = "text/html"): Response {
   return {
@@ -54,5 +54,17 @@ describe("scrapePlatform", () => {
   it("returns null for a malformed URL", async () => {
     const fetchImpl = jest.fn(async () => res("x"))
     expect(await scrapePlatform("not a url", fetchImpl as unknown as typeof fetch)).toBeNull()
+  })
+})
+
+describe("platformReaderFor", () => {
+  it("separates origin scrapers from the third-party FxTwitter reader", () => {
+    expect(platformReaderFor("https://mp.weixin.qq.com/s/abc")).toBe("platform")
+    expect(platformReaderFor("https://www.youtube.com/watch?v=1")).toBe("platform")
+    expect(platformReaderFor("https://youtu.be/1")).toBe("platform")
+    expect(platformReaderFor("https://x.com/a/status/1")).toBe("fxtwitter")
+    expect(platformReaderFor("https://twitter.com/a/status/1")).toBe("fxtwitter")
+    expect(platformReaderFor("https://example.com")).toBeNull()
+    expect(platformReaderFor("nope")).toBeNull()
   })
 })

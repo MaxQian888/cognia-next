@@ -1,0 +1,5066 @@
+import { subset, valid, validRange } from "semver"
+import { validateLibrarySchema } from "../library/schema"
+import { validateSubscriptionProvider } from "../../../types/subscription/provider-definition"
+import { isValidSubscriptionProviderId } from "../../../types/subscription/credential"
+import type { PluginSubscriptionProviderDefinition } from "../../../types/subscription/provider-definition"
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import { normalizeCogniaModelBinding } from "../../../types/agent/external-agent"
+/**
+ * Plugin Validation - Validates plugin manifests and configurations
+ */
+
+import type {
+  PluginManifest,
+  PluginConfigSchema,
+  PluginConfigProperty,
+  PluginCapability,
+  PluginPermission,
+  PluginResilienceConfig,
+  PluginType,
+  PluginQuickActionDef,
+} from "../../../types/plugin"
+import {
+  CANONICAL_PLUGIN_RUNTIME_AVAILABILITIES,
+  CANONICAL_PLUGIN_RUNTIME_PROFILES,
+  CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES,
+  CANONICAL_PLUGIN_SELECTION_INPUTS,
+  CANONICAL_PLUGIN_SELECTION_ORIGINS,
+  CANONICAL_PLUGIN_SELECTION_OUTPUTS,
+} from "../../../types/plugin"
+import { hasLucideExport, hasLucideIcon } from "../../icons/lucide-icon-names"
+import { toLucideIconName } from "../../icons/lucide-icon-name"
+import { checkResilienceBudget, resolveResilienceConfig } from "../resilience/config"
+import { loggers } from "./logger"
+import {
+  CANONICAL_PLUGIN_CAPABILITIES,
+  PLUGIN_CAPABILITY_CONTRACTS,
+  validatePluginCapabilities,
+} from "../contracts/plugin-capabilities"
+import { validateActivationEvent, validateExtensionPoint } from "../contracts/plugin-points"
+import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "../dexie/namespace"
+import {
+  CANONICAL_CONTEXT_ACTIVITIES,
+  CONTEXT_RESOURCE_READ_PERMISSIONS,
+} from "../../../types/context-workbench"
+import {
+  BOT_TIMED_TRIGGER_MIN_EVERY_MS,
+  PLUGIN_BOT_EVENT_SOURCES,
+  PLUGIN_BOT_EXECUTOR_FIELDS,
+  PLUGIN_BOT_EXECUTOR_REQUIRED_FIELD,
+  PLUGIN_BOT_EXECUTORS,
+  PLUGIN_BOT_LIFECYCLE_HOOKS,
+  PLUGIN_BOT_TRIGGER_KINDS,
+  type PluginBotExecutor,
+} from "../../../types/plugin/plugin-bot"
+import { DECLARATIVE_CONTEXT_PANEL_KINDS } from "../../../types/plugin/plugin-context-panel"
+import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "../../../types/plugin/plugin-modal"
+import { collectConfigSchemaI18nKeys } from "../i18n/config-schema-text"
+import {
+  PI_PACKAGE_ENV_NAME_PATTERN,
+  PI_PACKAGE_EXTENSION_SUFFIXES,
+  PI_PACKAGE_ID_PATTERN,
+  PI_PACKAGE_PREPARE_MAX_TIMEOUT_MS,
+  PI_PACKAGE_PREPARE_PROGRAMS,
+  PI_PACKAGE_TOOL_NAME_PATTERN,
+} from "../../../types/plugin/plugin-pi-package"
+import {
+  getPluginPathViolations,
+  normalizePluginRelativePath,
+  type PluginPathViolation,
+} from "./plugin-path"
+import { IdeManifestError, normalizeIdeManifest } from "../ide/manifest"
+import { validateWorkspaceCloneHosts } from "../workspace/clone-hosts"
+import { validateTemplateDefinition } from "../../templates/contracts"
+import { validateTemplatePackageManifest } from "../../templates/package-manifest"
+import { isValidLinkMatcherPattern } from "../api/link-matchers"
+import { GLANCE_PLUGIN_LIMITS, isGlancePluginLocalId } from "../../glance/plugin-data"
+import {
+  validatePetAchievementDef,
+  validatePetItemDef,
+} from "../registries/pet-contribution-validation"
+import {
+  AUTHOR_CAPABILITY_CONTRACTS,
+  CANONICAL_PLUGIN_PERMISSIONS,
+  CANONICAL_PLUGIN_TYPES,
+  PLUGIN_MANIFEST_CONTRIBUTIONS,
+  PLUGIN_LOCALIZED_LABEL_PATHS,
+  PLUGIN_PATH_FIELD_CONTRACTS,
+  PLUGIN_RUNTIME_ENTRY_CONTRACTS,
+} from "../../../contracts/catalog"
+import type { PluginPointGovernanceMode } from "../contracts/plugin-points"
+
+export interface ValidationError {
+  field: string
+  code: string
+  message: string
+}
+
+export interface ManifestDiagnostic extends ValidationError {
+  severity: "error" | "warning"
+  hint?: string
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  diagnostics?: ManifestDiagnostic[]
+}
+
+export interface ConfigValidationResult {
+  valid: boolean
+  errors: ValidationError[]
+  warnings: string[]
+}
+
+export interface ManifestValidationOptions {
+  governanceMode?: PluginPointGovernanceMode
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+function compareSemver(left: string, right: string): number {
+  const leftParts = left.split(".").map(Number)
+  const rightParts = right.split(".").map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index]
+  }
+  return 0
+}
+
+function declaredMinimumHostVersion(constraint: string): string | undefined {
+  return constraint.match(/\d+\.\d+\.\d+/)?.[0]
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const VALID_CAPABILITIES: PluginCapability[] = [...CANONICAL_PLUGIN_CAPABILITIES]
+
+const VALID_PERMISSIONS = [...CANONICAL_PLUGIN_PERMISSIONS] as PluginPermission[]
+
+const VALID_PLUGIN_TYPES = [...CANONICAL_PLUGIN_TYPES] as PluginType[]
+
+// Aliases of the exported vocabularies, so the validator cannot drift from the
+// types a manifest is written against.
+const VALID_RUNTIME_PROFILES = CANONICAL_PLUGIN_RUNTIME_PROFILES
+
+const VALID_RUNTIME_AVAILABILITIES = CANONICAL_PLUGIN_RUNTIME_AVAILABILITIES
+
+const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
+
+const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
+
+const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
+
+const INTEGRATION_ACTION_ID_PATTERN = /^[a-z0-9]([A-Za-z0-9-_.]*[A-Za-z0-9])?$/
+
+const RESERVED_PLUGIN_IDS = new Set([".host-state", "_marketplace_cache", "_backups"])
+
+const MAX_PLUGIN_ID_LENGTH = 128
+
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
+
+/** The plugin id rule every manifest is held to; exported so packagers apply the same one. */
+export function isValidPluginId(id: string): boolean {
+  return id.length <= MAX_PLUGIN_ID_LENGTH && ID_PATTERN.test(id) && !RESERVED_PLUGIN_IDS.has(id)
+}
+
+/** The manifest `version` rule, for code that validates plugin versions outside a manifest. */
+export function isValidPluginVersion(version: string): boolean {
+  return /^\d/.test(version) && version === version.trim() && valid(version) !== null
+}
+
+// Shared validators for the ADR-0026 lazy-factory manifest fields.
+//
+// Every new declarative provider/renderer/middleware entry uses the same
+// `{ id, label, entry, export }` shape. The validators below enforce:
+//   - id matches the standard ID_PATTERN (lowercase alphanumeric + sep)
+//   - entry is a relative path, no traversal (`..`), no NUL bytes, no
+//     absolute / drive-letter prefixes
+//   - export is a non-empty JS identifier
+//   - duplicate ids inside the same field reject
+//
+// Mirrors the path-traversal guard `lib/plugin/bridge/themes-bridge.ts`
+// applies to `vscodeJsonPath`, keeping security policy consistent across
+// every manifest plugin-supplied path.
+
+const JS_IDENT_PATTERN = /^[$_a-zA-Z][$_a-zA-Z0-9]*$/
+
+const SERVICE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/
+
+const SERVICE_CONSTRAINT_PATTERN =
+  /^(?:\*|latest|(?:\^|~|>=|<=|>|<)?\d+\.\d+\.\d+|\d+\.\d+\.\d+ - \d+\.\d+\.\d+)$/
+
+function nestedContributionValue(value: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (!isPlainObject(current)) return undefined
+    return current[segment]
+  }, value)
+}
+
+interface ContributionExecutionSplit {
+  /** At least one populated entry genuinely needs a JavaScript factory. */
+  requiresJavascript: boolean
+  /** At least one populated entry routes to Python on an experimental capability. */
+  pythonBackedExperimental: boolean
+}
+
+/**
+ * The backend a contribution entry executes on, most specific first:
+ *   1. an explicit per-entry `backend`;
+ *   2. a declared JS module path (`entry`) — writing one *is* the declaration
+ *      of JS intent, so we never silently ignore it on a python plugin;
+ *   3. the plugin-type default — python plugins default their contributions to
+ *      python-backed, every other type to JS.
+ */
+function effectiveContributionBackend(
+  entry: unknown,
+  contract: (typeof PLUGIN_MANIFEST_CONTRIBUTIONS)[number],
+  pluginType: unknown
+): string {
+  if (isPlainObject(entry) && typeof entry.backend === "string") return entry.backend
+  const entryField = contract.entryPath?.split(".").pop()
+  if (entryField && isPlainObject(entry) && typeof entry[entryField] === "string") {
+    if (entry[entryField] !== "") return "js"
+  }
+  return pluginType === "python" ? "python" : "js"
+}
+
+/**
+ * Split a contribution's populated entries into "needs a JS factory" versus
+ * "routes through the plugin_python_call seam". Keep rule-for-rule in lockstep
+ * with `crates/cognia-cli/src/commands/lint/rules.rs`.
+ */
+function contributionExecutionSplit(
+  manifest: Record<string, unknown>,
+  contract: (typeof PLUGIN_MANIFEST_CONTRIBUTIONS)[number]
+): ContributionExecutionSplit {
+  const contribution = nestedContributionValue(manifest, contract.field)
+  const entries = Array.isArray(contribution)
+    ? contribution
+    : isPlainObject(contribution)
+      ? contract.field.startsWith("library.")
+        ? Object.values(contribution)
+        : [contribution]
+      : []
+  if (entries.length === 0) return { requiresJavascript: false, pythonBackedExperimental: false }
+
+  const baseRequiresJavascript = (entry: unknown): boolean => {
+    if (contract.execution === "javascript") return true
+    if (contract.execution !== "conditional" || !contract.javascriptWhen) return false
+    const value = nestedContributionValue(entry, contract.javascriptWhen.path)
+    return contract.javascriptWhen.equals === undefined
+      ? value !== undefined && value !== null && value !== ""
+      : value === contract.javascriptWhen.equals
+  }
+
+  // An absent `pythonExecution` means "unsupported": the capability stays
+  // JS-only (React UI, config component) whichever backend is requested.
+  const pythonBackable = (contract.pythonExecution ?? "unsupported") !== "unsupported"
+  let requiresJavascript = false
+  let pythonBackedExperimental = false
+  for (const entry of entries) {
+    if (!baseRequiresJavascript(entry)) continue
+    if (
+      pythonBackable &&
+      effectiveContributionBackend(entry, contract, manifest.type) === "python"
+    ) {
+      if (contract.pythonExecution === "experimental") pythonBackedExperimental = true
+      continue
+    }
+    requiresJavascript = true
+  }
+  return { requiresJavascript, pythonBackedExperimental }
+}
+
+function pluginPathMessage(violation: PluginPathViolation): string {
+  if (violation === "invalid_chars") return '"entry" contains unsafe or encoded path characters'
+  if (violation === "absolute") return '"entry" must be a relative path'
+  return '"entry" must not contain ".." path segments'
+}
+
+interface LazyFactoryEntry {
+  id?: unknown
+  label?: unknown
+  entry?: unknown
+  export?: unknown
+}
+
+interface CatalogPathValue {
+  field: string
+  value: unknown
+}
+
+function collectCatalogPathValues(
+  value: unknown,
+  segments: readonly string[],
+  concreteSegments: readonly string[] = [],
+  output: CatalogPathValue[] = []
+): CatalogPathValue[] {
+  const [segment, ...rest] = segments
+  if (!segment) {
+    output.push({ field: concreteSegments.join("."), value })
+    return output
+  }
+  if (!isPlainObject(value)) return output
+
+  if (segment === "*") {
+    for (const [key, entry] of Object.entries(value)) {
+      collectCatalogPathValues(entry, rest, [...concreteSegments, key], output)
+    }
+    return output
+  }
+
+  const arrayField = segment.endsWith("[]") ? segment.slice(0, -2) : undefined
+  if (arrayField !== undefined) {
+    const entries = value[arrayField]
+    if (!Array.isArray(entries)) return output
+    entries.forEach((entry, index) => {
+      collectCatalogPathValues(
+        entry,
+        rest,
+        [...concreteSegments, `${arrayField}[${index}]`],
+        output
+      )
+    })
+    return output
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, segment) && value[segment] !== undefined) {
+    collectCatalogPathValues(value[segment], rest, [...concreteSegments, segment], output)
+  }
+  return output
+}
+
+function catalogPathDiagnosticCode(field: string, contractPath: string, violation: string): string {
+  const normalizedField = field.replace(/\[\d+\]/g, "")
+  const violationPath = contractPath.includes(".")
+    ? `${normalizedField}.${violation}`
+    : `${normalizedField}.entry.${violation}`
+  return `manifest.${violationPath}`
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+interface LazyFactoryFieldOptions {
+  /** Manifest field name (e.g. "ocrProviders"). Drives error codes. */
+  field: string
+  /** Whether each entry requires a `label` field. Default true. */
+  requireLabel?: boolean
+  /**
+   * Optional per-entry extra validation. Return diagnostics for the entry;
+   * the runner attaches them to the right field path. The callback receives
+   * the entry object already verified as plain object.
+   */
+  extra?: (
+    entry: Record<string, unknown>,
+    index: number,
+    push: (severity: "error" | "warning", code: string, message: string) => void
+  ) => void
+  /**
+   * When it returns true for an entry, `entry`/`export` stop being required —
+   * the contribution is backed by something other than a JS module (e.g. a
+   * `contextPanels[].webview` reference). The `extra` callback owns validating
+   * that alternative backing.
+   */
+  moduleOptional?: (entry: Record<string, unknown>) => boolean
+}
+
+function validateLazyFactoryArray(
+  raw: unknown,
+  options: LazyFactoryFieldOptions,
+  pushError: (field: string, code: string, message: string, hint?: string) => void,
+  pushWarning: (field: string, code: string, message: string, hint?: string) => void,
+  /** Owning plugin's `type` — decides the default contribution backend. */
+  pluginType?: unknown
+): void {
+  const { field, requireLabel = true, extra, moduleOptional } = options
+  if (raw === undefined) return
+
+  if (!Array.isArray(raw)) {
+    pushError(field, `manifest.${field}.invalid_type`, `"${field}" must be an array if provided`)
+    return
+  }
+
+  const seenIds = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i] as LazyFactoryEntry
+    const path = `${field}[${i}]`
+
+    if (!isPlainObject(entry)) {
+      pushError(path, `manifest.${field}.invalid_item`, `Entry at index ${i} must be an object`)
+      continue
+    }
+
+    if (typeof entry.id !== "string" || entry.id.length === 0) {
+      pushError(
+        `${path}.id`,
+        `manifest.${field}.id.missing`,
+        `Entry at index ${i} requires a non-empty string "id"`
+      )
+    } else if (!ID_PATTERN.test(entry.id)) {
+      pushError(
+        `${path}.id`,
+        `manifest.${field}.id.invalid`,
+        `Entry id "${entry.id}" must be lowercase alphanumeric with hyphens/underscores/dots`
+      )
+    } else if (seenIds.has(entry.id)) {
+      pushError(
+        `${path}.id`,
+        `manifest.${field}.id.duplicate`,
+        `Duplicate id "${entry.id}" in "${field}"`
+      )
+    } else {
+      seenIds.add(entry.id)
+    }
+
+    if (requireLabel && (typeof entry.label !== "string" || entry.label.length === 0)) {
+      pushError(
+        `${path}.label`,
+        `manifest.${field}.label.missing`,
+        `Entry at index ${i} requires a non-empty string "label"`
+      )
+    }
+
+    // `entry`/`export` name a JS module + symbol, so they are required only
+    // when this contribution actually executes in JS. A python-backed entry
+    // resolves through the plugin_python_call seam and declares neither —
+    // same rule as `effectiveContributionBackend` above. A contribution the
+    // field's `moduleOptional` claims (e.g. a webview-backed context panel)
+    // likewise has no module; its alternative backing is validated in `extra`.
+    if (moduleOptional?.(entry as Record<string, unknown>)) {
+      if (extra) {
+        extra(entry as Record<string, unknown>, i, (severity, code, message) => {
+          const fullCode = `manifest.${field}.${code}`
+          if (severity === "error") {
+            pushError(path, fullCode, message)
+          } else {
+            pushWarning(path, fullCode, message)
+          }
+        })
+      }
+      continue
+    }
+    const entryBackend =
+      typeof entry.backend === "string"
+        ? entry.backend
+        : typeof entry.entry === "string" && entry.entry.length > 0
+          ? "js"
+          : pluginType === "python"
+            ? "python"
+            : "js"
+
+    if (
+      entryBackend !== "python" &&
+      (typeof entry.entry !== "string" || entry.entry.length === 0)
+    ) {
+      pushError(
+        `${path}.entry`,
+        `manifest.${field}.entry.missing`,
+        `Entry at index ${i} requires a non-empty string "entry" (relative path)`
+      )
+    }
+
+    if (entryBackend === "python") {
+      // Nothing further to check: behaviour lives in the subprocess.
+    } else if (typeof entry.export !== "string" || entry.export.length === 0) {
+      pushError(
+        `${path}.export`,
+        `manifest.${field}.export.missing`,
+        `Entry at index ${i} requires a non-empty string "export" (named JS export)`
+      )
+    } else if (!JS_IDENT_PATTERN.test(entry.export)) {
+      pushError(
+        `${path}.export`,
+        `manifest.${field}.export.invalid`,
+        `"export" must be a valid JS identifier (got "${entry.export}")`
+      )
+    }
+
+    if (extra) {
+      extra(entry as Record<string, unknown>, i, (severity, code, message) => {
+        const fullCode = `manifest.${field}.${code}`
+        if (severity === "error") {
+          pushError(path, fullCode, message)
+        } else {
+          pushWarning(path, fullCode, message)
+        }
+      })
+    }
+  }
+}
+
+function validateDeclarativeExtensions(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const raw = manifest.extensions
+  if (raw === undefined) return
+  if (!Array.isArray(raw)) {
+    pushError(
+      "extensions",
+      "manifest.extensions.invalid_type",
+      '"extensions" must be an array if provided'
+    )
+    return
+  }
+
+  const declaredPermissions = new Set(manifest.permissions ?? [])
+  for (let index = 0; index < raw.length; index += 1) {
+    const field = `extensions[${index}]`
+    const entry = raw[index] as unknown
+    if (!isPlainObject(entry)) {
+      pushError(field, "manifest.extensions.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof entry.point !== "string" || entry.point.length === 0) {
+      pushError(
+        `${field}.point`,
+        "manifest.extensions.point.missing",
+        `${field} requires a canonical "point"`
+      )
+    } else {
+      const validation = validateExtensionPoint(entry.point, {
+        governanceMode: "block",
+        hasPermission: (permission) => declaredPermissions.has(permission as PluginPermission),
+      })
+      if (!validation.allowed || validation.canonicalId !== entry.point) {
+        pushError(
+          `${field}.point`,
+          "manifest.extensions.point.invalid",
+          `Unknown or unavailable canonical extension point "${entry.point}"`
+        )
+      }
+    }
+    if (typeof entry.entry !== "string" || entry.entry.length === 0) {
+      pushError(
+        `${field}.entry`,
+        "manifest.extensions.entry.missing",
+        `${field} requires a non-empty "entry"`
+      )
+    } else {
+      for (const violation of getPluginPathViolations(entry.entry)) {
+        pushError(
+          `${field}.entry`,
+          `manifest.extensions.entry.${violation}`,
+          pluginPathMessage(violation)
+        )
+      }
+    }
+    if (typeof entry.export !== "string" || !JS_IDENT_PATTERN.test(entry.export)) {
+      pushError(
+        `${field}.export`,
+        "manifest.extensions.export.invalid",
+        `${field} requires a valid JavaScript export name`
+      )
+    }
+    if (entry.when !== undefined && typeof entry.when !== "string") {
+      pushError(
+        `${field}.when`,
+        "manifest.extensions.when.invalid",
+        `${field}.when must be a string`
+      )
+    }
+    for (const widthField of ["minWidth", "maxWidth"] as const) {
+      const value = entry[widthField]
+      if (
+        value !== undefined &&
+        (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+      ) {
+        pushError(
+          `${field}.${widthField}`,
+          `manifest.extensions.${widthField}.invalid`,
+          `${field}.${widthField} must be a finite positive number`
+        )
+      }
+    }
+    if (
+      typeof entry.minWidth === "number" &&
+      typeof entry.maxWidth === "number" &&
+      entry.minWidth > entry.maxWidth
+    ) {
+      pushError(
+        field,
+        "manifest.extensions.width.invalid",
+        `${field}.minWidth must not exceed maxWidth`
+      )
+    }
+  }
+}
+
+function validateDeclarativeTrayItems(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const raw = manifest.trayItems
+  if (raw === undefined) return
+  if (!Array.isArray(raw)) {
+    pushError(
+      "trayItems",
+      "manifest.trayItems.invalid_type",
+      '"trayItems" must be an array if provided'
+    )
+    return
+  }
+  raw.forEach((item, index) => {
+    const field = `trayItems[${index}]`
+    if (!isPlainObject(item)) {
+      pushError(field, "manifest.trayItems.invalid_item", `${field} must be an object`)
+      return
+    }
+    if (typeof item.id !== "string" || item.id.length === 0) {
+      pushError(`${field}.id`, "manifest.trayItems.id.missing", `${field} requires an "id"`)
+    }
+    if (typeof item.label !== "string" || item.label.length === 0) {
+      pushError(
+        `${field}.label`,
+        "manifest.trayItems.label.missing",
+        `${field} requires a fallback "label"`
+      )
+    }
+    const dispatchTargets = [item.command, item.slash].filter(
+      (target) => typeof target === "string" && target.length > 0
+    )
+    if (dispatchTargets.length !== 1) {
+      pushError(
+        field,
+        "manifest.trayItems.dispatch.invalid",
+        `${field} must declare exactly one dispatch target: "command" or "slash"`
+      )
+    }
+    if (item.when !== undefined && typeof item.when !== "string") {
+      pushError(
+        `${field}.when`,
+        "manifest.trayItems.when.invalid",
+        `${field}.when must be a string`
+      )
+    }
+  })
+}
+
+const GLANCE_MODULE_SIZE_VALUES = new Set(["compact", "standard", "expanded"])
+
+const GLANCE_MODULE_PLATFORM_VALUES = new Set(["desktop", "mobile"])
+
+/**
+ * `manifest.glanceModules[]` (ADR-0225 §6). The host registry sanitizes a
+ * declaration again at enable time and drops one it cannot use; refusing it
+ * here tells the author why instead of the module silently never appearing.
+ */
+function validateDeclarativeGlanceModules(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const raw = (manifest as unknown as Record<string, unknown>).glanceModules
+  if (raw === undefined) return
+  if (!Array.isArray(raw)) {
+    pushError(
+      "glanceModules",
+      "manifest.glanceModules.invalid_type",
+      '"glanceModules" must be an array if provided'
+    )
+    return
+  }
+  if (raw.length > GLANCE_PLUGIN_LIMITS.modulesPerPlugin) {
+    pushError(
+      "glanceModules",
+      "manifest.glanceModules.too_many",
+      `"glanceModules" may declare at most ${GLANCE_PLUGIN_LIMITS.modulesPerPlugin} modules`
+    )
+  }
+  const seen = new Set<string>()
+  raw.forEach((item, index) => {
+    const field = `glanceModules[${index}]`
+    if (!isPlainObject(item)) {
+      pushError(field, "manifest.glanceModules.invalid_item", `${field} must be an object`)
+      return
+    }
+    if (!isGlancePluginLocalId(item.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.glanceModules.id.invalid",
+        `${field}.id must be letters, digits, ".", "_" or "-", starting with a letter or digit (at most ${GLANCE_PLUGIN_LIMITS.id} characters)`
+      )
+    } else if (seen.has(item.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.glanceModules.id.duplicate",
+        `${field}.id "${item.id}" is declared more than once`
+      )
+    } else {
+      seen.add(item.id)
+    }
+    if (typeof item.title !== "string" || item.title.trim().length === 0) {
+      pushError(
+        `${field}.title`,
+        "manifest.glanceModules.title.missing",
+        `${field} requires a fallback "title"`
+      )
+    }
+    if (item.titleKey !== undefined && typeof item.titleKey !== "string") {
+      pushError(
+        `${field}.titleKey`,
+        "manifest.glanceModules.titleKey.invalid",
+        `${field}.titleKey must be a string`
+      )
+    }
+    for (const [key, allowed, code] of [
+      ["sizes", GLANCE_MODULE_SIZE_VALUES, "manifest.glanceModules.sizes.invalid"],
+      ["platforms", GLANCE_MODULE_PLATFORM_VALUES, "manifest.glanceModules.platforms.invalid"],
+    ] as const) {
+      const value = item[key]
+      if (value === undefined) continue
+      if (
+        !Array.isArray(value) ||
+        value.length === 0 ||
+        value.some((entry) => typeof entry !== "string" || !allowed.has(entry))
+      ) {
+        pushError(
+          `${field}.${key}`,
+          code,
+          `${field}.${key} must be a non-empty array of ${[...allowed].map((v) => `"${v}"`).join(", ")}`
+        )
+      }
+    }
+  })
+}
+
+function validateIntegrations(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const raw = manifest.integrations
+  if (raw === undefined) return
+  if (!Array.isArray(raw)) {
+    pushError(
+      "integrations",
+      "manifest.integrations.invalid_type",
+      '"integrations" must be an array if provided'
+    )
+    return
+  }
+  const integrationIds = new Set<string>()
+  raw.forEach((integration, index) => {
+    const field = `integrations[${index}]`
+    if (!isPlainObject(integration)) {
+      pushError(field, "manifest.integrations.invalid_item", `${field} must be an object`)
+      return
+    }
+    if (typeof integration.id !== "string" || !ID_PATTERN.test(integration.id)) {
+      pushError(`${field}.id`, "manifest.integrations.id.invalid", `${field}.id is invalid`)
+    } else if (integrationIds.has(integration.id)) {
+      pushError(`${field}.id`, "manifest.integrations.id.duplicate", `${field}.id is duplicated`)
+    } else {
+      integrationIds.add(integration.id)
+    }
+    if (typeof integration.label !== "string" || integration.label.length === 0) {
+      pushError(
+        `${field}.label`,
+        "manifest.integrations.label.missing",
+        `${field}.label is required`
+      )
+    }
+    for (const arrayField of [
+      "authStrategies",
+      "resourceKinds",
+      "eventTypes",
+      "actions",
+    ] as const) {
+      if (!Array.isArray(integration[arrayField])) {
+        pushError(
+          `${field}.${arrayField}`,
+          `manifest.integrations.${arrayField}.invalid_type`,
+          `${field}.${arrayField} must be an array`
+        )
+      }
+    }
+    const authStrategyIds = new Set<string>()
+    for (const [strategyIndex, strategy] of (integration.authStrategies ?? []).entries()) {
+      const strategyField = `${field}.authStrategies[${strategyIndex}]`
+      if (!isPlainObject(strategy)) {
+        pushError(
+          strategyField,
+          "manifest.integrations.auth_strategy.invalid_item",
+          `${strategyField} must be an object`
+        )
+        continue
+      }
+      if (typeof strategy.id !== "string" || !ID_PATTERN.test(strategy.id)) {
+        pushError(
+          `${strategyField}.id`,
+          "manifest.integrations.auth_strategy.id.invalid",
+          `${strategyField}.id is invalid`
+        )
+      } else if (authStrategyIds.has(strategy.id)) {
+        pushError(
+          `${strategyField}.id`,
+          "manifest.integrations.auth_strategy.id.duplicate",
+          `${strategyField}.id is duplicated`
+        )
+      } else {
+        authStrategyIds.add(strategy.id)
+      }
+      if (!["oauth2", "api-key", "personal-access-token", "app"].includes(String(strategy.type))) {
+        pushError(
+          `${strategyField}.type`,
+          "manifest.integrations.auth_strategy.type.invalid",
+          `${strategyField}.type is unsupported`
+        )
+      }
+      if (typeof strategy.label !== "string" || strategy.label.length === 0) {
+        pushError(
+          `${strategyField}.label`,
+          "manifest.integrations.auth_strategy.label.missing",
+          `${strategyField}.label is required`
+        )
+      }
+      if (typeof strategy.providerId !== "string" || !ID_PATTERN.test(strategy.providerId)) {
+        pushError(
+          `${strategyField}.providerId`,
+          "manifest.integrations.auth_strategy.provider.invalid",
+          `${strategyField}.providerId is invalid`
+        )
+      }
+      if (
+        strategy.scopes !== undefined &&
+        (!Array.isArray(strategy.scopes) ||
+          strategy.scopes.some((scope) => typeof scope !== "string" || scope.length === 0))
+      ) {
+        pushError(
+          `${strategyField}.scopes`,
+          "manifest.integrations.auth_strategy.scopes.invalid",
+          `${strategyField}.scopes must contain non-empty strings`
+        )
+      }
+      if (strategy.configSchema !== undefined && !isPlainObject(strategy.configSchema)) {
+        pushError(
+          `${strategyField}.configSchema`,
+          "manifest.integrations.auth_strategy.config_schema.invalid",
+          `${strategyField}.configSchema must be a JSON Schema object`
+        )
+      }
+      if (strategy.requestAuth !== undefined) {
+        const requestAuth = strategy.requestAuth
+        const validBearer = isPlainObject(requestAuth) && requestAuth.type === "bearer"
+        const validHeader =
+          isPlainObject(requestAuth) &&
+          requestAuth.type === "header" &&
+          typeof requestAuth.name === "string" &&
+          /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(requestAuth.name) &&
+          (requestAuth.prefix === undefined || typeof requestAuth.prefix === "string")
+        if (!validBearer && !validHeader) {
+          pushError(
+            `${strategyField}.requestAuth`,
+            "manifest.integrations.auth_strategy.request_auth.invalid",
+            `${strategyField}.requestAuth must declare bearer or a valid header injection`
+          )
+        }
+      }
+    }
+    const actionIds = new Set<string>()
+    for (const [actionIndex, action] of (integration.actions ?? []).entries()) {
+      const actionField = `${field}.actions[${actionIndex}]`
+      if (!isPlainObject(action)) {
+        pushError(
+          actionField,
+          "manifest.integrations.actions.invalid_item",
+          `${actionField} must be an object`
+        )
+        continue
+      }
+      if (typeof action.id !== "string" || !INTEGRATION_ACTION_ID_PATTERN.test(action.id)) {
+        pushError(
+          `${actionField}.id`,
+          "manifest.integrations.actions.id.invalid",
+          `${actionField}.id is invalid`
+        )
+      } else if (actionIds.has(action.id)) {
+        pushError(
+          `${actionField}.id`,
+          "manifest.integrations.actions.id.duplicate",
+          `${actionField}.id is duplicated`
+        )
+      } else {
+        actionIds.add(action.id)
+      }
+      if (
+        typeof action.handler !== "string" ||
+        !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(action.handler)
+      ) {
+        pushError(
+          `${actionField}.handler`,
+          "manifest.integrations.actions.handler.invalid",
+          `${actionField}.handler must name a JavaScript export`
+        )
+      }
+      if (!["read", "write", "destructive"].includes(String(action.risk))) {
+        pushError(
+          `${actionField}.risk`,
+          "manifest.integrations.actions.risk.invalid",
+          `${actionField}.risk must be read, write, or destructive`
+        )
+      }
+      if (!["required", "supported", "none"].includes(String(action.idempotency))) {
+        pushError(
+          `${actionField}.idempotency`,
+          "manifest.integrations.actions.idempotency.invalid",
+          `${actionField}.idempotency must be required, supported, or none`
+        )
+      }
+      if (!isPlainObject(action.inputSchema)) {
+        pushError(
+          `${actionField}.inputSchema`,
+          "manifest.integrations.actions.input_schema.invalid",
+          `${actionField}.inputSchema must be a JSON Schema object`
+        )
+      }
+      if (
+        action.timeoutMs !== undefined &&
+        (!Number.isInteger(action.timeoutMs) || action.timeoutMs <= 0)
+      ) {
+        pushError(
+          `${actionField}.timeoutMs`,
+          "manifest.integrations.actions.timeout.invalid",
+          `${actionField}.timeoutMs must be a positive integer`
+        )
+      }
+    }
+    for (const [originIndex, origin] of (integration.allowedOrigins ?? []).entries()) {
+      let valid = false
+      try {
+        const parsed = new URL(origin)
+        valid = parsed.protocol === "https:" && parsed.origin === origin
+      } catch {
+        valid = false
+      }
+      if (!valid) {
+        pushError(
+          `${field}.allowedOrigins[${originIndex}]`,
+          "manifest.integrations.allowed_origin.invalid",
+          `${field}.allowedOrigins entries must be exact HTTPS origins`
+        )
+      }
+    }
+    if (integration.ingress) {
+      if (
+        typeof integration.ingress.normalizer !== "string" ||
+        !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(integration.ingress.normalizer)
+      ) {
+        pushError(
+          `${field}.ingress.normalizer`,
+          "manifest.integrations.ingress.normalizer.invalid",
+          `${field}.ingress.normalizer must name a JavaScript export`
+        )
+      }
+      if (!isPlainObject(integration.ingress.verification)) {
+        pushError(
+          `${field}.ingress.verification`,
+          "manifest.integrations.ingress.verification.invalid",
+          `${field}.ingress.verification must be an object`
+        )
+      }
+    }
+  })
+}
+
+const EXTERNAL_SERVICE_KINDS = new Set(["mcp", "integration", "openapi", "browser"])
+
+const EXTERNAL_SERVICE_SURFACES = new Set(["chat", "workflow", "inbox"])
+
+function validateExternalServices(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const contributionIds = {
+    mcp: new Set((manifest.mcpServerPresets ?? []).map((entry) => entry.id)),
+    integration: new Set((manifest.integrations ?? []).map((entry) => entry.id)),
+    openapi: new Set((manifest.openApiProviders ?? []).map((entry) => entry.id)),
+    browser: new Set((manifest.browserSiteProviders ?? []).map((entry) => entry.id)),
+  }
+
+  for (const [collection, entries] of [
+    ["openApiProviders", manifest.openApiProviders],
+    ["browserSiteProviders", manifest.browserSiteProviders],
+  ] as const) {
+    if (entries !== undefined && !Array.isArray(entries)) {
+      pushError(
+        collection,
+        `manifest.${collection}.invalid_type`,
+        `"${collection}" must be an array if provided`
+      )
+    }
+  }
+
+  const openApiIds = new Set<string>()
+  for (const [index, provider] of (manifest.openApiProviders ?? []).entries()) {
+    const field = `openApiProviders[${index}]`
+    if (!isPlainObject(provider)) {
+      pushError(field, "manifest.openApiProviders.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof provider.id !== "string" || !ID_PATTERN.test(provider.id)) {
+      pushError(`${field}.id`, "manifest.openApiProviders.id.invalid", `${field}.id is invalid`)
+    } else if (openApiIds.has(provider.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.openApiProviders.id.duplicate",
+        `${field}.id is duplicated`
+      )
+    } else {
+      openApiIds.add(provider.id)
+    }
+    if (typeof provider.label !== "string" || provider.label.length === 0) {
+      pushError(
+        `${field}.label`,
+        "manifest.openApiProviders.label.missing",
+        `${field}.label is required`
+      )
+    }
+    if (
+      !isPlainObject(provider.source) ||
+      !["bundled", "url"].includes(String(provider.source.type))
+    ) {
+      pushError(
+        `${field}.source`,
+        "manifest.openApiProviders.source.invalid",
+        `${field}.source is invalid`
+      )
+    } else if (provider.source.type === "bundled") {
+      const path = provider.source.path
+      if (typeof path !== "string" || getPluginPathViolations(path).length > 0) {
+        pushError(
+          `${field}.source.path`,
+          "manifest.openApiProviders.source.path.invalid",
+          `${field}.source.path must be a safe relative plugin path`
+        )
+      }
+    } else {
+      try {
+        const url = new URL(String(provider.source.url))
+        if (url.protocol !== "https:") throw new Error("unsupported protocol")
+      } catch {
+        pushError(
+          `${field}.source.url`,
+          "manifest.openApiProviders.source.url.invalid",
+          `${field}.source.url must be an HTTPS URL`
+        )
+      }
+    }
+  }
+
+  const browserIds = new Set<string>()
+  for (const [index, provider] of (manifest.browserSiteProviders ?? []).entries()) {
+    const field = `browserSiteProviders[${index}]`
+    if (!isPlainObject(provider)) {
+      pushError(field, "manifest.browserSiteProviders.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof provider.id !== "string" || !ID_PATTERN.test(provider.id)) {
+      pushError(`${field}.id`, "manifest.browserSiteProviders.id.invalid", `${field}.id is invalid`)
+    } else if (browserIds.has(provider.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.browserSiteProviders.id.duplicate",
+        `${field}.id is duplicated`
+      )
+    } else {
+      browserIds.add(provider.id)
+    }
+    if (!Array.isArray(provider.allowedDomains) || provider.allowedDomains.length === 0) {
+      pushError(
+        `${field}.allowedDomains`,
+        "manifest.browserSiteProviders.allowed_domains.invalid",
+        `${field}.allowedDomains must contain at least one domain`
+      )
+    } else if (
+      provider.allowedDomains.some(
+        (domain) =>
+          typeof domain !== "string" ||
+          domain === "*" ||
+          domain.includes("://") ||
+          domain.includes("/") ||
+          domain.trim() !== domain
+      )
+    ) {
+      pushError(
+        `${field}.allowedDomains`,
+        "manifest.browserSiteProviders.allowed_domains.unsafe",
+        `${field}.allowedDomains must contain exact host names without schemes, paths, or wildcards`
+      )
+    }
+    const operationIds = new Set<string>()
+    for (const [operationIndex, operation] of (provider.operations ?? []).entries()) {
+      const operationField = `${field}.operations[${operationIndex}]`
+      if (!isPlainObject(operation) || typeof operation.operationId !== "string") {
+        pushError(
+          operationField,
+          "manifest.browserSiteProviders.operation.invalid",
+          `${operationField} must declare a stable operationId`
+        )
+      } else if (operationIds.has(operation.operationId)) {
+        pushError(
+          `${operationField}.operationId`,
+          "manifest.browserSiteProviders.operation.duplicate",
+          `${operationField}.operationId is duplicated`
+        )
+      } else {
+        operationIds.add(operation.operationId)
+      }
+    }
+  }
+
+  if (manifest.services === undefined) return
+  if (!Array.isArray(manifest.services)) {
+    pushError(
+      "services",
+      "manifest.services.invalid_type",
+      '"services" must be an array if provided'
+    )
+    return
+  }
+  const serviceIds = new Set<string>()
+  for (const [index, service] of manifest.services.entries()) {
+    const field = `services[${index}]`
+    if (!isPlainObject(service)) {
+      pushError(field, "manifest.services.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof service.id !== "string" || !ID_PATTERN.test(service.id)) {
+      pushError(`${field}.id`, "manifest.services.id.invalid", `${field}.id is invalid`)
+    } else if (serviceIds.has(service.id)) {
+      pushError(`${field}.id`, "manifest.services.id.duplicate", `${field}.id is duplicated`)
+    } else {
+      serviceIds.add(service.id)
+    }
+    if (typeof service.label !== "string" || service.label.length === 0) {
+      pushError(`${field}.label`, "manifest.services.label.missing", `${field}.label is required`)
+    }
+    if (!["never", "confirm"].includes(String(service.fallbackPolicy))) {
+      pushError(
+        `${field}.fallbackPolicy`,
+        "manifest.services.fallback_policy.invalid",
+        `${field}.fallbackPolicy must be "never" or "confirm"`
+      )
+    }
+    if (!Array.isArray(service.providers) || service.providers.length === 0) {
+      pushError(
+        `${field}.providers`,
+        "manifest.services.providers.empty",
+        `${field}.providers must contain at least one provider`
+      )
+      continue
+    }
+    const providerIds = new Set<string>()
+    for (const [providerIndex, provider] of service.providers.entries()) {
+      const providerField = `${field}.providers[${providerIndex}]`
+      if (!isPlainObject(provider)) {
+        pushError(
+          providerField,
+          "manifest.services.provider.invalid_item",
+          `${providerField} must be an object`
+        )
+        continue
+      }
+      if (typeof provider.id !== "string" || !ID_PATTERN.test(provider.id)) {
+        pushError(
+          `${providerField}.id`,
+          "manifest.services.provider.id.invalid",
+          `${providerField}.id is invalid`
+        )
+      } else if (providerIds.has(provider.id)) {
+        pushError(
+          `${providerField}.id`,
+          "manifest.services.provider.id.duplicate",
+          `${providerField}.id is duplicated`
+        )
+      } else {
+        providerIds.add(provider.id)
+      }
+      const kind = String(provider.kind)
+      if (!EXTERNAL_SERVICE_KINDS.has(kind)) {
+        pushError(
+          `${providerField}.kind`,
+          "manifest.services.provider.kind.invalid",
+          `${providerField}.kind is invalid`
+        )
+      } else if (
+        typeof provider.contributionId !== "string" ||
+        !contributionIds[kind as keyof typeof contributionIds].has(provider.contributionId)
+      ) {
+        pushError(
+          `${providerField}.contributionId`,
+          "manifest.services.provider.contribution.missing",
+          `${providerField} references a missing ${kind} contribution`
+        )
+      }
+      if (!Number.isFinite(provider.priority)) {
+        pushError(
+          `${providerField}.priority`,
+          "manifest.services.provider.priority.invalid",
+          `${providerField}.priority must be a number`
+        )
+      }
+      if (
+        !Array.isArray(provider.surfaces) ||
+        provider.surfaces.length === 0 ||
+        provider.surfaces.some((surface) => !EXTERNAL_SERVICE_SURFACES.has(String(surface)))
+      ) {
+        pushError(
+          `${providerField}.surfaces`,
+          "manifest.services.provider.surfaces.invalid",
+          `${providerField}.surfaces is invalid`
+        )
+      }
+      if (
+        kind === "browser" &&
+        service.providers.length > 1 &&
+        service.fallbackPolicy !== "confirm"
+      ) {
+        pushError(
+          `${field}.fallbackPolicy`,
+          "manifest.services.browser_fallback.requires_confirmation",
+          `${field} must use fallbackPolicy "confirm" when Browser is a fallback provider`
+        )
+      }
+    }
+  }
+}
+
+function validateWorkflowKindAliases(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const aliases = manifest.workflowKindAliases
+  if (aliases === undefined) return
+  if (!isPlainObject(aliases)) {
+    pushError(
+      "workflowKindAliases",
+      "manifest.workflow_kind_aliases.invalid_type",
+      '"workflowKindAliases" must be an object if provided'
+    )
+    return
+  }
+  for (const [legacyKind, targetKind] of Object.entries(aliases)) {
+    if (!legacyKind.trim() || typeof targetKind !== "string" || !targetKind.trim()) {
+      pushError(
+        `workflowKindAliases.${legacyKind}`,
+        "manifest.workflow_kind_aliases.invalid_entry",
+        "Workflow kind aliases require non-empty source and target kinds"
+      )
+      continue
+    }
+    if (
+      targetKind !== "trigger.integration.event" &&
+      !targetKind.startsWith(`${manifest.id}.action.`)
+    ) {
+      pushError(
+        `workflowKindAliases.${legacyKind}`,
+        "manifest.workflow_kind_aliases.target_outside_plugin",
+        `Workflow kind alias target "${targetKind}" must belong to plugin "${manifest.id}"`
+      )
+    }
+  }
+}
+
+/**
+ * `petItems[]` / `petAchievements[]` shapes, through the same validator the
+ * overlay registration and the SDK define-helpers use. Icons are checked with
+ * every other icon below.
+ */
+function validatePetContributions(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const fields = [
+    ["petItems", validatePetItemDef, "manifest.pet_items.invalid"],
+    ["petAchievements", validatePetAchievementDef, "manifest.pet_achievements.invalid"],
+  ] as const
+  for (const [field, validate, code] of fields) {
+    const entries = (manifest as unknown as Record<string, unknown>)[field]
+    if (entries === undefined) continue
+    if (!Array.isArray(entries)) {
+      pushError(field, code, `"${field}" must be an array`)
+      continue
+    }
+    entries.forEach((entry, index) => {
+      for (const issue of validate(entry)) {
+        const path = issue.path ? `${field}[${index}].${issue.path}` : `${field}[${index}]`
+        pushError(path, code, `"${path}" ${issue.message}`)
+      }
+    })
+  }
+}
+
+const NATIVE_LUCIDE_ICON_PATHS = [
+  "commands[].icon",
+  "modes[].icon",
+  "quickActions[].icon",
+  "trayItems[].icon",
+  "glanceModules[].icon",
+  "viewsContainers[].icon",
+  "a2uiComponents[].icon",
+  "a2uiTemplates[].icon",
+  "petAchievements[].icon",
+  "petItems[].icon",
+  "workflowTemplates[].icon",
+  "agentTeamTemplates[].icon",
+  "sharedMemoryAdapters[].icon",
+  "workflows.nodes[].iconName",
+  "workflows.triggers[].iconName",
+  "integrations[].icon",
+] as const
+
+/** True when the name is a key `lucide-react` actually exports. */
+function isExportedLucideIcon(name: string): boolean {
+  // Both name spaces, as the field's own error message promises ("must name an
+  // exported lucide-react icon"). `exportNames` is where lucide's renames
+  // survive as aliases: the `history` icon is exported as `History` but keyed
+  // `RotateCcwClock`, so a canonical-names-only check refuses a manifest that
+  // names a real, importable icon.
+  return hasLucideIcon(name) || hasLucideExport(name)
+}
+
+function validateNativeLucideIcons(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void,
+  pushWarning: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  for (const path of NATIVE_LUCIDE_ICON_PATHS) {
+    for (const { field, value } of collectCatalogPathValues(
+      manifest as unknown as Record<string, unknown>,
+      path.split(".")
+    )) {
+      if (typeof value === "string" && isExportedLucideIcon(value)) continue
+      // The kebab-case spelling was the published contract until the
+      // `PLUGIN_CONTEXT_PANEL_ICONS` allowlist was retired, so an already
+      // installed plugin using it is following the documentation it was
+      // written against. Accept it with a warning that names the replacement
+      // rather than refusing to load.
+      if (typeof value === "string" && isExportedLucideIcon(toLucideIconName(value))) {
+        pushWarning(
+          field,
+          "manifest.icon.legacy_kebab_case",
+          `"${field}" uses the retired kebab-case icon name "${value}"; rename it to "${toLucideIconName(value)}"`
+        )
+        continue
+      }
+      pushError(
+        field,
+        "manifest.icon.invalid",
+        `"${field}" must name an exported lucide-react icon`
+      )
+    }
+  }
+}
+
+// =============================================================================
+// Manifest Validation
+// =============================================================================
+
+function validateLibraryContract(
+  manifest: Record<string, unknown>,
+  pushError: (field: string, code: string, message: string) => void
+): void {
+  if (manifest.library === undefined) return
+  const fail = (field: string, message: string) =>
+    pushError(field, "manifest.library.invalid", message)
+  const library = manifest.library
+  if (!isPlainObject(library)) {
+    fail("library", "Library must be an object containing rpc and/or modules")
+    return
+  }
+  const engines = isPlainObject(manifest.engines) ? manifest.engines : {}
+  if (
+    typeof engines.cognia !== "string" ||
+    validRange(engines.cognia) === null ||
+    !subset(engines.cognia, ">=0.2.0")
+  ) {
+    fail("engines.cognia", "Library plugins must require Cognia >=0.2.0")
+  }
+  const compatibility = isPlainObject(manifest.runtimeCompatibility)
+    ? manifest.runtimeCompatibility
+    : {}
+  const tauri = isPlainObject(compatibility.tauri) ? compatibility.tauri : {}
+  if (
+    !["frontend", "hybrid", "python"].includes(String(manifest.type)) ||
+    engines.node ||
+    tauri.entrypoint === "node"
+  ) {
+    fail(
+      "library",
+      "Libraries require ordinary frontend/hybrid JavaScript or Python; isolated Node and WASM are unsupported"
+    )
+  }
+  if (Object.keys(library).some((key) => key !== "rpc" && key !== "modules"))
+    fail("library", "Unknown library declaration field")
+  let count = 0
+  const permissions = new Set(Array.isArray(manifest.permissions) ? manifest.permissions : [])
+  for (const group of ["rpc", "modules"] as const) {
+    if (library[group] === undefined) continue
+    const entries = library[group]
+    if (!isPlainObject(entries)) {
+      fail(`library.${group}`, "Library declarations must be a map of public names")
+      continue
+    }
+    if (group === "modules" && manifest.type === "python")
+      fail("library.modules", "Python libraries cannot provide JavaScript modules")
+    for (const [name, entry] of Object.entries(entries)) {
+      count++
+      const field = `library.${group}.${name}`
+      if (
+        !/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(name) ||
+        ["constructor", "prototype", "__proto__"].includes(name)
+      ) {
+        fail(field, "Library public names must be simple identifiers, never prototype paths")
+      }
+      if (!isPlainObject(entry)) {
+        fail(field, "Library declarations must be objects")
+        continue
+      }
+      const allowedFields =
+        group === "rpc"
+          ? ["description", "risk", "requiredPermissions", "inputSchema", "outputSchema", "handler"]
+          : ["description", "risk", "requiredPermissions", "entry"]
+      if (Object.keys(entry).some((key) => !allowedFields.includes(key)))
+        fail(field, "Unknown library contract field")
+      if (typeof entry.description !== "string" || !entry.description.trim())
+        fail(`${field}.description`, "Library declarations require a nonempty description")
+      if (!["read", "write", "destructive"].includes(String(entry.risk)))
+        fail(`${field}.risk`, "Library risk must be read, write, or destructive")
+      if (
+        !Array.isArray(entry.requiredPermissions) ||
+        entry.requiredPermissions.some(
+          (permission) => !VALID_PERMISSIONS.includes(permission) || !permissions.has(permission)
+        ) ||
+        new Set(entry.requiredPermissions).size !== entry.requiredPermissions.length
+      ) {
+        fail(
+          `${field}.requiredPermissions`,
+          "Library permissions must be unique known permissions declared in provider permissions"
+        )
+      }
+      if (group === "rpc") {
+        if (!permissions.has("ipc:expose")) fail(field, "RPC libraries must declare ipc:expose")
+        for (const schema of ["inputSchema", "outputSchema"] as const) {
+          const error = validateLibrarySchema(entry[schema])
+          if (error) fail(`${field}.${schema}`, error)
+        }
+        if (manifest.type === "python") {
+          if (typeof entry.handler !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(entry.handler))
+            fail(`${field}.handler`, "Python methods require a public module-level handler name")
+        } else if (entry.handler !== undefined)
+          fail(
+            `${field}.handler`,
+            "Only Python libraries declare handler names; JavaScript uses IPC expose"
+          )
+      } else if (
+        typeof entry.entry !== "string" ||
+        !entry.entry.trim() ||
+        getPluginPathViolations(entry.entry).length > 0 ||
+        !/\.cjs$/.test(entry.entry) ||
+        normalizePluginRelativePath(entry.entry) ===
+          normalizePluginRelativePath(String(manifest.main ?? ""))
+      ) {
+        fail(
+          `${field}.entry`,
+          "Library modules require a confined, dedicated bundled .cjs entry distinct from main"
+        )
+      }
+    }
+  }
+  if (!count) fail("library", "Library must provide at least one method or module")
+}
+
+export function validatePluginManifest(
+  manifest: unknown,
+  options: ManifestValidationOptions = {}
+): ValidationResult {
+  const diagnostics: ManifestDiagnostic[] = []
+  const governanceMode = options.governanceMode || "warn"
+
+  if (!manifest || typeof manifest !== "object") {
+    return {
+      valid: false,
+      errors: ["Manifest must be an object"],
+      warnings: [],
+      diagnostics: [
+        {
+          severity: "error",
+          field: "$",
+          code: "manifest.invalid_type",
+          message: "Manifest must be an object",
+        },
+      ],
+    }
+  }
+
+  const m = manifest as Record<string, unknown>
+  const pushError = (field: string, code: string, message: string, hint?: string): void => {
+    diagnostics.push({ severity: "error", field, code, message, hint })
+  }
+  const pushWarning = (field: string, code: string, message: string, hint?: string): void => {
+    diagnostics.push({ severity: "warning", field, code, message, hint })
+  }
+
+  validateLibraryContract(m, pushError)
+  for (const field of ["dependencies", "optionalDependencies"] as const) {
+    const dependencies = m[field]
+    if (dependencies === undefined) continue
+    if (!isPlainObject(dependencies)) {
+      pushError(
+        field,
+        "manifest.dependencies.invalid",
+        "Plugin dependencies must map plugin IDs to semver ranges"
+      )
+      continue
+    }
+    for (const [id, range] of Object.entries(dependencies)) {
+      if (
+        !isValidPluginId(id) ||
+        id === m.id ||
+        typeof range !== "string" ||
+        !range.trim() ||
+        validRange(range) === null
+      ) {
+        pushError(
+          `${field}.${id}`,
+          "manifest.dependencies.invalid",
+          "Dependencies require another valid plugin ID and a valid semver range"
+        )
+      }
+    }
+  }
+
+  if (m.icon !== undefined && (typeof m.icon !== "string" || !m.icon.trim())) {
+    pushError(
+      "icon",
+      "manifest.icon.invalid_type",
+      '"icon" must be a non-empty image path, URL, or Lucide icon name'
+    )
+  }
+
+  // Required fields
+  if (!m.id || typeof m.id !== "string") {
+    pushError("id", "manifest.id.missing", 'Missing or invalid "id" field')
+  } else if (!isValidPluginId(m.id)) {
+    pushError(
+      "id",
+      "manifest.id.invalid_format",
+      `Invalid plugin ID "${m.id}". Must be 1-${MAX_PLUGIN_ID_LENGTH} lowercase alphanumeric/separator characters and must not use a host-reserved directory name`
+    )
+  }
+
+  if (!m.name || typeof m.name !== "string") {
+    pushError("name", "manifest.name.missing", 'Missing or invalid "name" field')
+  } else if (m.name.length > 50) {
+    pushWarning("name", "manifest.name.long", "Plugin name exceeds 50 characters")
+  }
+
+  if (!m.version || typeof m.version !== "string") {
+    pushError("version", "manifest.version.missing", 'Missing or invalid "version" field')
+  } else if (!isValidPluginVersion(m.version)) {
+    pushError(
+      "version",
+      "manifest.version.invalid_format",
+      `Invalid version "${m.version}". Must be semver format (e.g., 1.0.0)`
+    )
+  }
+
+  if (!m.description || typeof m.description !== "string") {
+    pushError(
+      "description",
+      "manifest.description.missing",
+      'Missing or invalid "description" field'
+    )
+  } else if (m.description.length > 500) {
+    pushWarning(
+      "description",
+      "manifest.description.long",
+      "Plugin description exceeds 500 characters"
+    )
+  }
+
+  if (!m.type || typeof m.type !== "string") {
+    pushError("type", "manifest.type.missing", 'Missing or invalid "type" field')
+  } else if (!VALID_PLUGIN_TYPES.includes(m.type as PluginType)) {
+    pushError(
+      "type",
+      "manifest.type.invalid",
+      `Invalid plugin type "${m.type}". Must be one of: ${VALID_PLUGIN_TYPES.join(", ")}`
+    )
+  }
+
+  if (!m.capabilities || !Array.isArray(m.capabilities)) {
+    pushError(
+      "capabilities",
+      "manifest.capabilities.missing",
+      'Missing or invalid "capabilities" field'
+    )
+  } else {
+    const declaredCapabilities: string[] = []
+    for (const cap of m.capabilities) {
+      if (typeof cap === "string") {
+        declaredCapabilities.push(cap)
+      }
+      if (!VALID_CAPABILITIES.includes(cap as PluginCapability)) {
+        pushError(
+          "capabilities",
+          "manifest.capabilities.invalid",
+          `Invalid capability "${cap}". Must be one of: ${VALID_CAPABILITIES.join(", ")}`
+        )
+      }
+    }
+
+    const capabilityOutcome = validatePluginCapabilities(declaredCapabilities, { governanceMode })
+    for (const diagnostic of capabilityOutcome.diagnostics) {
+      const code = `manifest.capabilities.${diagnostic.code}`
+      if (diagnostic.severity === "error") {
+        pushError("capabilities", code, diagnostic.message, diagnostic.hint)
+      } else {
+        pushWarning("capabilities", code, diagnostic.message, diagnostic.hint)
+      }
+    }
+
+    // Cross-check declared capabilities against their contribution fields,
+    // driven by `PLUGIN_CAPABILITY_CONTRACTS[].manifestFields` (the same single
+    // source the contracts expose). Two non-fatal smells:
+    //   - a capability declared with none of its gating fields populated, and
+    //   - a contribution field populated without its gating capability tag.
+    // Capabilities with no manifest field (api-only: tray/media/canvas/…) are
+    // skipped. A field shared by several capabilities (e.g. `workflows`) is
+    // satisfied if ANY of its capabilities is declared.
+    const declaredSet = new Set(declaredCapabilities)
+    const hasField = (field: string): boolean => {
+      const value = nestedContributionValue(m, field)
+      if (field === "library" && isPlainObject(value))
+        return Object.values(value).some(
+          (group) => isPlainObject(group) && Object.keys(group).length > 0
+        )
+      if (field.startsWith("library.") && isPlainObject(value)) return Object.keys(value).length > 0
+      if (Array.isArray(value)) return value.length > 0
+      // `workflows` is an object block (PluginManifestWorkflowsBlock), not an
+      // array contribution — it counts as populated when it carries nodes
+      // and/or triggers entries.
+      if (field === "workflows" && value !== null && typeof value === "object") {
+        const block = value as { nodes?: unknown; triggers?: unknown }
+        return (
+          (Array.isArray(block.nodes) && block.nodes.length > 0) ||
+          (Array.isArray(block.triggers) && block.triggers.length > 0)
+        )
+      }
+      return false
+    }
+    const fieldToCapabilities = new Map<string, string[]>()
+    for (const contract of PLUGIN_CAPABILITY_CONTRACTS) {
+      if (contract.manifestFields.length === 0) continue
+      // Skip `python`: its fields are entry points (pythonMain string /
+      // pythonDependencies), validated by the type-specific block, not
+      // array contributions.
+      if (contract.id === "python") continue
+      // declared-but-empty: capability tag present, no gating field populated.
+      if (
+        declaredSet.has(contract.id) &&
+        !contract.manifestFieldsOptional &&
+        !contract.manifestFields.some(hasField)
+      ) {
+        pushWarning(
+          "capabilities",
+          "manifest.capability.field_missing",
+          `Capability "${contract.id}" is declared but its contribution field(s) ${contract.manifestFields
+            .map((f) => `"${f}"`)
+            .join(" / ")} are empty.`,
+          "Add the contribution entries, or drop the capability tag."
+        )
+      }
+      for (const field of contract.manifestFields) {
+        const list = fieldToCapabilities.get(field) ?? []
+        list.push(contract.id)
+        fieldToCapabilities.set(field, list)
+      }
+    }
+    // populated-but-undeclared: field has entries, none of its caps declared.
+    for (const [field, caps] of fieldToCapabilities) {
+      if (hasField(field) && !caps.some((c) => declaredSet.has(c))) {
+        pushWarning(
+          "capabilities",
+          "manifest.capability.field_undeclared",
+          `Field "${field}" has entries but none of its capabilities (${caps.join(", ")}) is declared.`,
+          `Add one of: ${caps.join(", ")} to "capabilities".`
+        )
+      }
+    }
+  }
+
+  // Runtime ownership comes from the canonical contract. Hybrid plugins always
+  // own their Python entry; their JavaScript entry is conditional on declaring
+  // JavaScript-executed contributions.
+  const pluginType = typeof m.type === "string" ? m.type : undefined
+  const runtimeEntryContract = pluginType ? PLUGIN_RUNTIME_ENTRY_CONTRACTS[pluginType] : undefined
+  for (const field of runtimeEntryContract?.required ?? []) {
+    if (typeof m[field] === "string" && m[field].length > 0) continue
+    const messages: Record<string, [string, string]> = {
+      main: [
+        'Frontend plugin must have a "main" entry point',
+        "Add a valid relative JS entry file path in `main`.",
+      ],
+      pythonMain: [
+        'Python and hybrid plugins must have a "pythonMain" entry point',
+        "Add a valid relative Python entry file path in `pythonMain`.",
+      ],
+      wasmMain: [
+        'WASM plugin must have a "wasmMain" entry point',
+        "Set `wasmMain` to the relative path of the compiled `.wasm` component.",
+      ],
+      vscodeMain: [
+        'VS Code extension plugins must have a "vscodeMain" entry point',
+        "Set `vscodeMain` to the adapted extension runtime entry.",
+      ],
+    }
+    const [message, hint] = messages[field] ?? [
+      `Plugin type "${pluginType}" requires a "${field}" entry point`,
+      `Add a valid relative entry path in \`${field}\`.`,
+    ]
+    pushError(field, `manifest.${field}.required`, message, hint)
+  }
+  const requiredAnyOf: readonly string[] =
+    runtimeEntryContract &&
+    "requiredAnyOf" in runtimeEntryContract &&
+    Array.isArray(runtimeEntryContract.requiredAnyOf)
+      ? (runtimeEntryContract.requiredAnyOf as string[])
+      : []
+  if (
+    requiredAnyOf.length > 0 &&
+    !requiredAnyOf.some((field) => {
+      const value = m[field]
+      return (
+        (typeof value === "string" && value.length > 0) ||
+        (Array.isArray(value) && value.length > 0) ||
+        (typeof value === "object" && value !== null && Object.keys(value).length > 0)
+      )
+    })
+  ) {
+    pushError(
+      requiredAnyOf[0],
+      "manifest.runtime_entry.required_any_of",
+      `Plugin type "${pluginType}" requires at least one of: ${requiredAnyOf.join(", ")}`,
+      "Add an executable entry or a supported declarative contribution."
+    )
+  }
+
+  if (m.type === "wasm") {
+    if (typeof m.wasmMain === "string" && !m.wasmMain.toLowerCase().endsWith(".wasm")) {
+      pushError(
+        "wasmMain",
+        "manifest.wasmMain.invalid_extension",
+        '"wasmMain" must point to a `.wasm` file'
+      )
+    }
+    const wasmBlock = m.wasm as Record<string, unknown> | undefined
+    if (!wasmBlock || typeof wasmBlock !== "object") {
+      pushError(
+        "wasm",
+        "manifest.wasm.required",
+        'WASM plugin must declare a "wasm" block with at least `apiVersion`',
+        'Example: `"wasm": { "apiVersion": "0.1.0" }`.'
+      )
+    } else {
+      if (
+        typeof wasmBlock.apiVersion !== "string" ||
+        !WASM_API_VERSION_PATTERN.test(wasmBlock.apiVersion)
+      ) {
+        pushError(
+          "wasm.apiVersion",
+          "manifest.wasm.apiVersion.invalid",
+          'WASM `apiVersion` must be semver MAJOR.MINOR.PATCH (e.g. "0.1.0")'
+        )
+      }
+      if (
+        wasmBlock.memoryLimitMb !== undefined &&
+        (typeof wasmBlock.memoryLimitMb !== "number" ||
+          wasmBlock.memoryLimitMb <= 0 ||
+          wasmBlock.memoryLimitMb > 4096)
+      ) {
+        pushError(
+          "wasm.memoryLimitMb",
+          "manifest.wasm.memoryLimitMb.invalid",
+          "WASM `memoryLimitMb` must be a positive number ≤ 4096"
+        )
+      }
+      if (
+        wasmBlock.callTimeoutMs !== undefined &&
+        (typeof wasmBlock.callTimeoutMs !== "number" ||
+          wasmBlock.callTimeoutMs <= 0 ||
+          wasmBlock.callTimeoutMs > 600_000)
+      ) {
+        pushError(
+          "wasm.callTimeoutMs",
+          "manifest.wasm.callTimeoutMs.invalid",
+          "WASM `callTimeoutMs` must be a positive number ≤ 600000 (10 min)"
+        )
+      }
+      const fsBlock = wasmBlock.fs as Record<string, unknown> | undefined
+      if (fsBlock && Array.isArray(fsBlock.preopens)) {
+        for (let i = 0; i < fsBlock.preopens.length; i++) {
+          const p = fsBlock.preopens[i]
+          if (typeof p !== "string" || !WASM_PREOPEN_PATH_PATTERN.test(p)) {
+            pushError(
+              `wasm.fs.preopens[${i}]`,
+              "manifest.wasm.preopens.invalid",
+              `WASM preopen path at index ${i} must be a non-empty string without NUL bytes`
+            )
+          }
+        }
+      }
+    }
+  }
+
+  if (m.nodeRuntime !== undefined) {
+    if (!isPlainObject(m.nodeRuntime)) {
+      pushError("nodeRuntime", "manifest.nodeRuntime.invalid", '"nodeRuntime" must be an object')
+    } else {
+      for (const field of ["directory", "entry"] as const) {
+        const value = m.nodeRuntime[field]
+        try {
+          if (typeof value !== "string" || !value.trim()) throw new Error("missing path")
+          normalizePluginRelativePath(value)
+        } catch {
+          pushError(
+            `nodeRuntime.${field}`,
+            `manifest.nodeRuntime.${field}.invalid`,
+            `"nodeRuntime.${field}" must be a nonempty, confined relative path`
+          )
+        }
+      }
+      if (
+        typeof m.nodeRuntime.entry === "string" &&
+        !/\.(?:js|mjs|cjs)$/i.test(m.nodeRuntime.entry)
+      ) {
+        pushError(
+          "nodeRuntime.entry",
+          "manifest.nodeRuntime.entry.extension",
+          '"nodeRuntime.entry" must be a JavaScript file relative to nodeRuntime.directory'
+        )
+      }
+      const permissions = new Set([
+        ...(Array.isArray(m.permissions) ? m.permissions : []),
+        ...(Array.isArray(m.optionalPermissions) ? m.optionalPermissions : []),
+      ])
+      for (const permission of [
+        "filesystem:read",
+        "filesystem:write",
+        "shell:execute",
+        "network:fetch",
+      ]) {
+        if (!permissions.has(permission)) {
+          pushError(
+            "nodeRuntime",
+            "manifest.nodeRuntime.permission.required",
+            `Optional Node runtimes must declare ${permission} in permissions or optionalPermissions`
+          )
+        }
+      }
+      const commands = Array.isArray(m.shellCommands) ? m.shellCommands : []
+      for (const command of ["node", "pnpm"]) {
+        if (!commands.includes(command)) {
+          pushError(
+            "shellCommands",
+            "manifest.nodeRuntime.command.required",
+            `Optional Node runtimes require ${command} in shellCommands`
+          )
+        }
+      }
+    }
+  }
+
+  for (const contract of PLUGIN_PATH_FIELD_CONTRACTS) {
+    const values = collectCatalogPathValues(m, contract.path.split("."))
+    for (const { field, value } of values) {
+      for (const violation of getPluginPathViolations(value)) {
+        pushError(
+          field,
+          catalogPathDiagnosticCode(field, contract.path, violation),
+          pluginPathMessage(violation)
+        )
+      }
+    }
+  }
+
+  const contributionSplits = PLUGIN_MANIFEST_CONTRIBUTIONS.map((contract) => ({
+    field: contract.field,
+    ...contributionExecutionSplit(m, contract),
+  }))
+  const populatedJsContributionFields = contributionSplits
+    .filter((split) => split.requiresJavascript)
+    .map((split) => split.field)
+  const experimentalPythonField = contributionSplits.find(
+    (split) => split.pythonBackedExperimental
+  )?.field
+  if (experimentalPythonField) {
+    pushWarning(
+      experimentalPythonField,
+      "manifest.contributions.python.experimental",
+      `Python-backed "${experimentalPythonField}" is experimental; its subprocess execution path may change`,
+      "Gate it behind a feature flag and verify end-to-end before relying on it."
+    )
+  }
+  if (
+    populatedJsContributionFields.length > 0 &&
+    runtimeEntryContract &&
+    runtimeEntryContract.javascriptEntry === null
+  ) {
+    const isPythonOnly = m.type === "python"
+    pushError(
+      populatedJsContributionFields[0],
+      isPythonOnly
+        ? "manifest.contributions.javascript.unsupported_for_python"
+        : "manifest.contributions.javascript.unsupported_for_plugin_type",
+      `Plugin type "${m.type}" cannot declare JavaScript-executed contributions`,
+      isPythonOnly
+        ? 'Change the plugin type to "hybrid" and add "main", or remove those contributions.'
+        : "Use a JavaScript-capable plugin type, or remove those contributions."
+    )
+  } else if (
+    runtimeEntryContract?.javascriptEntryRequiredForContributions &&
+    populatedJsContributionFields.length > 0 &&
+    runtimeEntryContract.javascriptEntry &&
+    typeof m[runtimeEntryContract.javascriptEntry] !== "string"
+  ) {
+    pushError(
+      runtimeEntryContract.javascriptEntry,
+      `manifest.${runtimeEntryContract.javascriptEntry}.required_for_js_contributions`,
+      `JavaScript-executed contributions require a relative "${runtimeEntryContract.javascriptEntry}" entry point`,
+      `Add "${runtimeEntryContract.javascriptEntry}", or remove JavaScript-executed contributions.`
+    )
+  }
+
+  // Optional fields validation
+  if (m.runtimeCompatibility !== undefined) {
+    if (!isPlainObject(m.runtimeCompatibility)) {
+      pushError(
+        "runtimeCompatibility",
+        "manifest.runtimeCompatibility.invalid_type",
+        '"runtimeCompatibility" must be an object'
+      )
+    } else {
+      const compatibility = m.runtimeCompatibility
+      for (const profile of Object.keys(compatibility)) {
+        const field = `runtimeCompatibility.${profile}`
+        if (!(VALID_RUNTIME_PROFILES as readonly string[]).includes(profile)) {
+          pushError(
+            field,
+            "manifest.runtimeCompatibility.unknown_profile",
+            `Unknown plugin runtime profile "${profile}"`
+          )
+          continue
+        }
+        const target = compatibility[profile]
+        if (!isPlainObject(target)) {
+          pushError(
+            field,
+            "manifest.runtimeCompatibility.target.invalid_type",
+            `"${field}" must be an object`
+          )
+          continue
+        }
+        if (
+          typeof target.availability !== "string" ||
+          !(VALID_RUNTIME_AVAILABILITIES as readonly string[]).includes(target.availability)
+        ) {
+          pushError(
+            `${field}.availability`,
+            "manifest.runtimeCompatibility.availability.invalid",
+            `"${field}.availability" must be one of: ${VALID_RUNTIME_AVAILABILITIES.join(", ")}`
+          )
+        }
+        for (const key of ["reason", "entrypoint"] as const) {
+          if (target[key] !== undefined && typeof target[key] !== "string") {
+            pushError(
+              `${field}.${key}`,
+              `manifest.runtimeCompatibility.${key}.invalid_type`,
+              `"${field}.${key}" must be a string`
+            )
+          }
+        }
+      }
+    }
+  }
+
+  if (m.themePacks !== undefined) {
+    validateThemePacks(m.themePacks, pushError)
+  }
+
+  if (m.permissions && Array.isArray(m.permissions)) {
+    for (const perm of m.permissions) {
+      if (!VALID_PERMISSIONS.includes(perm as PluginPermission)) {
+        pushWarning(
+          "permissions",
+          "manifest.permissions.unknown",
+          `Unknown permission "${perm}"`,
+          "Use only documented permissions or ensure runtime guard supports this permission."
+        )
+      }
+    }
+  }
+
+  if (m.workspaceCloneHosts !== undefined) {
+    try {
+      const hosts = validateWorkspaceCloneHosts(m.workspaceCloneHosts)
+      if (
+        hosts.length > 0 &&
+        (!Array.isArray(m.permissions) || !m.permissions.includes("git:write"))
+      ) {
+        pushError(
+          "workspaceCloneHosts",
+          "manifest.workspaceCloneHosts.permission",
+          '"workspaceCloneHosts" requires the declared "git:write" permission'
+        )
+      }
+    } catch (error) {
+      pushError(
+        "workspaceCloneHosts",
+        "manifest.workspaceCloneHosts.invalid",
+        error instanceof Error ? error.message : String(error)
+      )
+    }
+  }
+
+  if (Array.isArray(m.quickActions)) {
+    const declaredPermissions = new Set<string>(
+      Array.isArray(m.permissions)
+        ? m.permissions.filter((permission): permission is string => typeof permission === "string")
+        : []
+    )
+    // Derived from the exported vocabularies, never re-typed. A hand-kept copy
+    // meant a new content type could be added to the union and to
+    // `classifySelection`, compile everywhere, and still be rejected here with
+    // no type error anywhere to catch it.
+    const validContentTypes = new Set<string>(CANONICAL_PLUGIN_SELECTION_CONTENT_TYPES)
+    const validOrigins = new Set<string>(CANONICAL_PLUGIN_SELECTION_ORIGINS)
+    const validOutputs = new Set<string>(CANONICAL_PLUGIN_SELECTION_OUTPUTS)
+    ;(m.quickActions as PluginQuickActionDef[]).forEach((action, index) => {
+      const field = `quickActions[${index}]`
+      const selectionSurface = action.surfaces?.includes("selection") === true
+      const selection = action.selection
+      if (selectionSurface && !selection) {
+        pushError(
+          `${field}.selection`,
+          "manifest.quickActions.selection.missing",
+          'A quick action on the "selection" surface requires a selection policy'
+        )
+        return
+      }
+      if (!selectionSurface && selection) {
+        pushError(
+          `${field}.selection`,
+          "manifest.quickActions.selection.surface_missing",
+          'A selection policy requires surfaces to include "selection"'
+        )
+        return
+      }
+      if (!selection) return
+      if (!(CANONICAL_PLUGIN_SELECTION_INPUTS as readonly string[]).includes(selection.input)) {
+        pushError(
+          `${field}.selection.input`,
+          "manifest.quickActions.selection.input.invalid",
+          `Selection input must be one of: ${CANONICAL_PLUGIN_SELECTION_INPUTS.join(", ")}`
+        )
+      }
+      if (!validOutputs.has(selection.output)) {
+        pushError(
+          `${field}.selection.output`,
+          "manifest.quickActions.selection.output.invalid",
+          "Selection output is invalid"
+        )
+      }
+      if (selection.contentTypes?.some((contentType) => !validContentTypes.has(contentType))) {
+        pushError(
+          `${field}.selection.contentTypes`,
+          "manifest.quickActions.selection.content_types.invalid",
+          "Selection contentTypes contains an unknown value"
+        )
+      }
+      if (selection.origins?.some((origin) => !validOrigins.has(origin))) {
+        pushError(
+          `${field}.selection.origins`,
+          "manifest.quickActions.selection.origins.invalid",
+          "Selection origins contains an unknown value"
+        )
+      }
+      if (
+        selection.maxChars !== undefined &&
+        (!Number.isInteger(selection.maxChars) ||
+          selection.maxChars <= 0 ||
+          selection.maxChars > 20_000)
+      ) {
+        pushError(
+          `${field}.selection.maxChars`,
+          "manifest.quickActions.selection.max_chars.invalid",
+          "Selection maxChars must be an integer between 1 and 20,000"
+        )
+      }
+      if (selection.input === "text" && !declaredPermissions.has("selection:read")) {
+        pushError(
+          `${field}.selection.input`,
+          "manifest.quickActions.selection.permission_missing",
+          'Selection text input requires manifest permission "selection:read"'
+        )
+      }
+    })
+  }
+
+  // Network egress allowlist (Figma-style). Validate shape + require a public
+  // `reasoning` whenever the plugin asks for any-host ("*") access, so the
+  // permission-review UI can explain WHY the plugin reaches the whole internet.
+  if (m.networkAccess !== undefined) {
+    if (typeof m.networkAccess !== "object" || m.networkAccess === null) {
+      pushError(
+        "networkAccess",
+        "manifest.networkAccess.invalid",
+        '"networkAccess" must be an object with an "allowedDomains" array'
+      )
+    } else {
+      const na = m.networkAccess as {
+        allowedDomains?: unknown
+        reasoning?: unknown
+        rules?: unknown
+      }
+      let wantsAnyHost = false
+      if (na.allowedDomains !== undefined) {
+        if (!Array.isArray(na.allowedDomains)) {
+          pushError(
+            "networkAccess.allowedDomains",
+            "manifest.networkAccess.allowedDomains.invalid",
+            '"networkAccess.allowedDomains" must be an array of host patterns'
+          )
+        } else {
+          const domains = na.allowedDomains
+          if (domains.some((d) => typeof d !== "string" || d.trim() === "")) {
+            pushError(
+              "networkAccess.allowedDomains",
+              "manifest.networkAccess.allowedDomains.entry.invalid",
+              "Each allowedDomains entry must be a non-empty host pattern " +
+                '(e.g. "api.example.com", "*.example.com", "*", or "none")'
+            )
+          }
+          wantsAnyHost = domains.some((d) => typeof d === "string" && d.trim() === "*")
+        }
+      }
+      if (na.rules !== undefined) {
+        if (!Array.isArray(na.rules) || na.rules.length === 0) {
+          pushError(
+            "networkAccess.rules",
+            "manifest.networkAccess.rules.invalid",
+            '"networkAccess.rules" must be a non-empty array'
+          )
+        } else {
+          const validMethods = new Set(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+          na.rules.forEach((value, index) => {
+            const field = `networkAccess.rules[${index}]`
+            if (!value || typeof value !== "object" || Array.isArray(value)) {
+              pushError(
+                field,
+                "manifest.networkAccess.rules.entry.invalid",
+                `${field} must be an object`
+              )
+              return
+            }
+            const rule = value as Record<string, unknown>
+            if (typeof rule.domain !== "string" || rule.domain.trim() === "") {
+              pushError(
+                `${field}.domain`,
+                "manifest.networkAccess.rules.domain.invalid",
+                `${field}.domain must be a non-empty host pattern`
+              )
+            } else if (rule.domain.trim() === "*") {
+              wantsAnyHost = true
+            }
+            if (
+              !Array.isArray(rule.methods) ||
+              rule.methods.length === 0 ||
+              rule.methods.some((method) => typeof method !== "string" || !validMethods.has(method))
+            ) {
+              pushError(
+                `${field}.methods`,
+                "manifest.networkAccess.rules.methods.invalid",
+                `${field}.methods must contain supported uppercase HTTP methods`
+              )
+            }
+            if (
+              !Array.isArray(rule.paths) ||
+              rule.paths.length === 0 ||
+              rule.paths.some((path) => typeof path !== "string" || !path.startsWith("/"))
+            ) {
+              pushError(
+                `${field}.paths`,
+                "manifest.networkAccess.rules.paths.invalid",
+                `${field}.paths must contain absolute pathname globs`
+              )
+            }
+            if (
+              rule.protocols !== undefined &&
+              (!Array.isArray(rule.protocols) ||
+                rule.protocols.length === 0 ||
+                rule.protocols.some((protocol) => protocol !== "http" && protocol !== "https"))
+            ) {
+              pushError(
+                `${field}.protocols`,
+                "manifest.networkAccess.rules.protocols.invalid",
+                `${field}.protocols must contain http and/or https`
+              )
+            }
+            if (
+              rule.ports !== undefined &&
+              (!Array.isArray(rule.ports) ||
+                rule.ports.length === 0 ||
+                rule.ports.some(
+                  (port) =>
+                    !Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535
+                ))
+            ) {
+              pushError(
+                `${field}.ports`,
+                "manifest.networkAccess.rules.ports.invalid",
+                `${field}.ports must contain integer ports between 1 and 65535`
+              )
+            }
+          })
+        }
+      }
+      if (wantsAnyHost && (typeof na.reasoning !== "string" || na.reasoning.trim() === "")) {
+        pushWarning(
+          "networkAccess.reasoning",
+          "manifest.networkAccess.reasoning.required",
+          'networkAccess requests "*" (any host) but no "reasoning" is given',
+          'Add a "reasoning" string explaining why the plugin needs unrestricted network ' +
+            "access — it is shown to the user before they enable the plugin."
+        )
+      }
+    }
+  }
+
+  if (m.engines && typeof m.engines === "object") {
+    const engines = m.engines as Record<string, unknown>
+    if (engines.cognia) {
+      if (typeof engines.cognia !== "string") {
+        pushError(
+          "engines.cognia",
+          "manifest.engines.cognia.invalid",
+          'Invalid "engines.cognia" field'
+        )
+      } else {
+        const declaredMinimum = declaredMinimumHostVersion(engines.cognia)
+        if (!declaredMinimum) {
+          pushError(
+            "engines.cognia",
+            "manifest.engines.cognia.invalid",
+            'Invalid "engines.cognia" constraint: include a semantic version such as ">=0.1.0"'
+          )
+        } else {
+          const declared = Array.isArray(m.capabilities)
+            ? new Set(
+                m.capabilities.filter(
+                  (capability): capability is string => typeof capability === "string"
+                )
+              )
+            : new Set<string>()
+          const requiredMinimum = AUTHOR_CAPABILITY_CONTRACTS.filter((contract) =>
+            declared.has(contract.id)
+          ).reduce(
+            (highest, contract) =>
+              compareSemver(contract.minimumHostVersion, highest) > 0
+                ? contract.minimumHostVersion
+                : highest,
+            "0.0.0"
+          )
+          if (compareSemver(declaredMinimum, requiredMinimum) < 0) {
+            pushError(
+              "engines.cognia",
+              "manifest.engines.cognia.capability_minimum",
+              `engines.cognia starts at ${declaredMinimum}, but declared capabilities require Cognia ${requiredMinimum} or newer`
+            )
+          }
+        }
+      }
+    }
+    if (engines.python && typeof engines.python !== "string") {
+      pushError(
+        "engines.python",
+        "manifest.engines.python.invalid",
+        'Invalid "engines.python" field'
+      )
+    }
+  }
+
+  if (m.minAppVersion !== undefined) {
+    if (typeof m.minAppVersion !== "string" || !VERSION_PATTERN.test(m.minAppVersion)) {
+      pushError(
+        "minAppVersion",
+        "manifest.minAppVersion.invalid",
+        'Invalid "minAppVersion" field. Must be semver format (e.g., 0.1.0)'
+      )
+    }
+  }
+
+  for (const field of ["providesServices", "requiresServices", "optionalServices"] as const) {
+    const services = m[field]
+    if (services === undefined) continue
+    if (!isPlainObject(services)) {
+      pushError(field, `manifest.${field}.invalid`, `"${field}" must be an object`)
+      continue
+    }
+    for (const [serviceId, version] of Object.entries(services)) {
+      const entryField = `${field}.${serviceId}`
+      if (!SERVICE_ID_PATTERN.test(serviceId)) {
+        pushError(
+          entryField,
+          `manifest.${field}.service_id.invalid`,
+          `Invalid service id "${serviceId}"`
+        )
+      }
+      if (typeof version !== "string") {
+        pushError(
+          entryField,
+          `manifest.${field}.version.invalid`,
+          `${entryField} must be a semantic version string`
+        )
+      } else if (
+        field === "providesServices"
+          ? !VERSION_PATTERN.test(version)
+          : !SERVICE_CONSTRAINT_PATTERN.test(version)
+      ) {
+        pushError(
+          entryField,
+          `manifest.${field}.version.invalid`,
+          field === "providesServices"
+            ? `${entryField} must be an exact semantic version`
+            : `${entryField} must be a supported semantic version constraint`
+        )
+      }
+    }
+  }
+
+  // requires.binaries — external CLI/binary prerequisites probed by the
+  // pre-install chain. Additive: a manifest with no `requires` block is
+  // unaffected. We validate shape (name required string; minVersion, when
+  // present, must be semver; documentation must be a string) so a typo'd
+  // requirement surfaces at author time rather than silently never gating.
+  if (m.requires !== undefined) {
+    if (typeof m.requires !== "object" || m.requires === null || Array.isArray(m.requires)) {
+      pushError("requires", "manifest.requires.invalid", '"requires" must be an object')
+    } else {
+      const requires = m.requires as Record<string, unknown>
+      if (requires.binaries !== undefined) {
+        if (!Array.isArray(requires.binaries)) {
+          pushError(
+            "requires.binaries",
+            "manifest.requires.binaries.invalid",
+            '"requires.binaries" must be an array'
+          )
+        } else {
+          requires.binaries.forEach((entry, i) => {
+            const field = `requires.binaries[${i}]`
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+              pushError(
+                field,
+                "manifest.requires.binaries.entry.invalid",
+                `${field} must be an object`
+              )
+              return
+            }
+            const bin = entry as Record<string, unknown>
+            if (!bin.name || typeof bin.name !== "string") {
+              pushError(
+                `${field}.name`,
+                "manifest.requires.binaries.name.missing",
+                `${field} requires a non-empty "name" string`
+              )
+            } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(bin.name)) {
+              // Binary names feed PATH resolution AND the
+              // `COGNIA_<NAME>_PATH` env override — a name with `/`, `..`,
+              // whitespace or control characters is never a real executable
+              // name and can only alias or confuse the lookup.
+              pushError(
+                `${field}.name`,
+                "manifest.requires.binaries.name.invalid",
+                `${field}.name must look like an executable name (letters, digits, ".", "_", "-")`
+              )
+            }
+            if (bin.minVersion !== undefined) {
+              if (typeof bin.minVersion !== "string" || !VERSION_PATTERN.test(bin.minVersion)) {
+                pushError(
+                  `${field}.minVersion`,
+                  "manifest.requires.binaries.minVersion.invalid",
+                  `${field}.minVersion must be semver format (e.g., 0.1.0)`
+                )
+              }
+            }
+            if (bin.documentation !== undefined && typeof bin.documentation !== "string") {
+              pushError(
+                `${field}.documentation`,
+                "manifest.requires.binaries.documentation.invalid",
+                `${field}.documentation must be a string URL`
+              )
+            }
+          })
+        }
+      }
+    }
+  }
+
+  if (m.configSchema) {
+    const schemaResult = validateConfigSchema(m.configSchema)
+    for (const error of schemaResult.errors) {
+      pushError("configSchema", "manifest.configSchema.invalid", error)
+    }
+    for (const warning of schemaResult.warnings) {
+      pushWarning("configSchema", "manifest.configSchema.warning", warning)
+    }
+  }
+
+  if (m.a2uiComponents && Array.isArray(m.a2uiComponents)) {
+    for (let i = 0; i < m.a2uiComponents.length; i++) {
+      const comp = m.a2uiComponents[i] as Record<string, unknown>
+      if (!comp.type || typeof comp.type !== "string") {
+        pushError(
+          `a2uiComponents[${i}].type`,
+          "manifest.a2ui.type.missing",
+          `A2UI component at index ${i} missing "type" field`
+        )
+      }
+      if (!comp.name || typeof comp.name !== "string") {
+        pushError(
+          `a2uiComponents[${i}].name`,
+          "manifest.a2ui.name.missing",
+          `A2UI component at index ${i} missing "name" field`
+        )
+      }
+    }
+  }
+
+  if (m.tools && Array.isArray(m.tools)) {
+    for (let i = 0; i < m.tools.length; i++) {
+      const tool = m.tools[i] as Record<string, unknown>
+      if (!tool.name || typeof tool.name !== "string") {
+        pushError(
+          `tools[${i}].name`,
+          "manifest.tools.name.missing",
+          `Tool at index ${i} missing "name" field`
+        )
+      }
+      if (!tool.description || typeof tool.description !== "string") {
+        pushError(
+          `tools[${i}].description`,
+          "manifest.tools.description.missing",
+          `Tool at index ${i} missing "description" field`
+        )
+      }
+      if (tool.parametersSchema !== undefined && typeof tool.parametersSchema !== "object") {
+        pushError(
+          `tools[${i}].parametersSchema`,
+          "manifest.tools.parametersSchema.invalid",
+          `Tool at index ${i} has invalid "parametersSchema" field (must be an object)`
+        )
+      }
+    }
+  }
+
+  // cliTools[] — declarative CLI wrappers. Strict by design: a malformed
+  // entry could otherwise turn into an argv-injection or path-escape hole,
+  // so every structural rule the executor relies on is enforced at author
+  // time (argv params declared, binary refs resolvable, no traversal).
+  if (m.cliTools !== undefined) {
+    validateCliTools(m as unknown as PluginManifest, pushError)
+  }
+
+  if (m.bots !== undefined) {
+    validateBots(m as unknown as PluginManifest, pushError)
+  }
+
+  // piPackages[] — Pi coding-agent packages (ADR-0210). Every path ends up as
+  // an argument to `pi install` / `-e`, the prepare step spawns a package
+  // manager, and env values cross into the agent process, so each of those is
+  // checked here rather than trusted at use.
+  if (m.piPackages !== undefined) {
+    validatePiPackages(m, pushError, pushWarning)
+  }
+
+  if (m.modes && Array.isArray(m.modes)) {
+    for (let i = 0; i < m.modes.length; i++) {
+      const mode = m.modes[i] as Record<string, unknown>
+      if (!mode.id || typeof mode.id !== "string") {
+        pushError(
+          `modes[${i}].id`,
+          "manifest.modes.id.missing",
+          `Mode at index ${i} missing "id" field`
+        )
+      }
+      if (!mode.name || typeof mode.name !== "string") {
+        pushError(
+          `modes[${i}].name`,
+          "manifest.modes.name.missing",
+          `Mode at index ${i} missing "name" field`
+        )
+      }
+      if (!mode.icon || typeof mode.icon !== "string") {
+        pushError(
+          `modes[${i}].icon`,
+          "manifest.modes.icon.missing",
+          `Mode at index ${i} missing "icon" field`
+        )
+      }
+    }
+  }
+
+  if (m.commands && Array.isArray(m.commands)) {
+    for (let i = 0; i < m.commands.length; i++) {
+      const command = m.commands[i] as Record<string, unknown>
+      if (!command.id || typeof command.id !== "string") {
+        pushError(
+          `commands[${i}].id`,
+          "manifest.commands.id.missing",
+          `Command at index ${i} missing "id" field`
+        )
+      }
+      if (!command.name || typeof command.name !== "string") {
+        pushError(
+          `commands[${i}].name`,
+          "manifest.commands.name.missing",
+          `Command at index ${i} missing "name" field`
+        )
+      }
+      if (command.description !== undefined && typeof command.description !== "string") {
+        pushError(
+          `commands[${i}].description`,
+          "manifest.commands.description.invalid",
+          `Command at index ${i} has invalid "description" field`
+        )
+      }
+      if (command.icon !== undefined && typeof command.icon !== "string") {
+        pushError(
+          `commands[${i}].icon`,
+          "manifest.commands.icon.invalid",
+          `Command at index ${i} has invalid "icon" field`
+        )
+      }
+      if (command.aliases !== undefined) {
+        if (!Array.isArray(command.aliases)) {
+          pushError(
+            `commands[${i}].aliases`,
+            "manifest.commands.aliases.invalid",
+            `Command at index ${i} has invalid "aliases" field (must be an array)`
+          )
+        } else if (!command.aliases.every((alias) => typeof alias === "string")) {
+          pushError(
+            `commands[${i}].aliases`,
+            "manifest.commands.aliases.invalid_type",
+            `Command at index ${i} has invalid "aliases" field (must contain strings)`
+          )
+        }
+      }
+    }
+  }
+
+  if (m.activationEvents !== undefined) {
+    if (!Array.isArray(m.activationEvents)) {
+      pushError(
+        "activationEvents",
+        "manifest.activationEvents.invalid_type",
+        '"activationEvents" must be an array'
+      )
+    } else {
+      for (let i = 0; i < m.activationEvents.length; i++) {
+        const event = m.activationEvents[i]
+        if (typeof event !== "string") {
+          pushError(
+            `activationEvents[${i}]`,
+            "manifest.activationEvents.invalid_item",
+            `Activation event at index ${i} must be a string`
+          )
+          continue
+        }
+
+        const outcome = validateActivationEvent(event, { governanceMode })
+        for (const diagnostic of outcome.diagnostics) {
+          const field = `activationEvents[${i}]`
+          const code = `manifest.activationEvents.${diagnostic.code}`
+          if (diagnostic.severity === "error") {
+            pushError(field, code, diagnostic.message, diagnostic.hint)
+          } else {
+            pushWarning(field, code, diagnostic.message, diagnostic.hint)
+          }
+        }
+      }
+    }
+  }
+
+  if (m.activateOnStartup !== undefined && typeof m.activateOnStartup !== "boolean") {
+    pushError(
+      "activateOnStartup",
+      "manifest.activateOnStartup.invalid_type",
+      '"activateOnStartup" must be a boolean'
+    )
+  }
+
+  if (m.dexie !== undefined) {
+    if (!m.dexie || typeof m.dexie !== "object") {
+      pushError("dexie", "manifest.dexie.invalid_type", '"dexie" must be an object if provided')
+    } else {
+      const dexie = m.dexie as Record<string, unknown>
+      if (!Array.isArray(dexie.tables)) {
+        pushError(
+          "dexie.tables",
+          "manifest.dexie.tables.missing",
+          '"dexie.tables" must be an array'
+        )
+      } else {
+        if (dexie.tables.length === 0) {
+          pushError(
+            "dexie.tables",
+            "manifest.dexie.tables.empty",
+            '"dexie.tables" must not be empty'
+          )
+        }
+        if (dexie.tables.length > MAX_TABLES_PER_PLUGIN) {
+          pushError(
+            "dexie.tables",
+            "manifest.dexie.tables.tooMany",
+            `"dexie.tables" exceeds the maximum of ${MAX_TABLES_PER_PLUGIN}`
+          )
+        }
+        const seen = new Set<string>()
+        for (let i = 0; i < dexie.tables.length; i++) {
+          const t = dexie.tables[i] as Record<string, unknown>
+          if (!t || typeof t !== "object") {
+            pushError(
+              `dexie.tables[${i}]`,
+              "manifest.dexie.tables.invalid_item",
+              `Table at index ${i} must be an object`
+            )
+            continue
+          }
+          if (typeof t.name !== "string" || !isValidPluginTableName(t.name)) {
+            pushError(
+              `dexie.tables[${i}].name`,
+              "manifest.dexie.tables.nameInvalid",
+              `Table name at index ${i} is invalid: must match ^[a-z][a-zA-Z0-9_]{0,30}$`
+            )
+          } else if (seen.has(t.name)) {
+            pushError(
+              `dexie.tables[${i}].name`,
+              "manifest.dexie.tables.duplicate",
+              `Duplicate table name "${t.name}"`
+            )
+          } else {
+            seen.add(t.name)
+          }
+          if (typeof t.schema !== "string" || t.schema.trim().length === 0) {
+            pushError(
+              `dexie.tables[${i}].schema`,
+              "manifest.dexie.tables.schemaInvalid",
+              `Table at index ${i} missing or empty "schema"`
+            )
+          }
+        }
+      }
+
+      if (dexie.migrations !== undefined) {
+        if (!Array.isArray(dexie.migrations)) {
+          pushError(
+            "dexie.migrations",
+            "manifest.dexie.migrations.invalid",
+            '"dexie.migrations" must be an array if provided'
+          )
+        } else {
+          for (let i = 0; i < dexie.migrations.length; i++) {
+            const mig = dexie.migrations[i] as Record<string, unknown>
+            if (!mig || typeof mig !== "object") {
+              pushError(
+                `dexie.migrations[${i}]`,
+                "manifest.dexie.migrations.invalid_item",
+                `Migration at index ${i} must be an object`
+              )
+              continue
+            }
+            if (
+              typeof mig.toVersion !== "number" ||
+              !Number.isInteger(mig.toVersion) ||
+              mig.toVersion < 1
+            ) {
+              pushError(
+                `dexie.migrations[${i}].toVersion`,
+                "manifest.dexie.migrations.toVersionInvalid",
+                `Migration at index ${i} requires positive integer "toVersion"`
+              )
+            }
+            if (typeof mig.upgrade !== "string" || mig.upgrade.length === 0) {
+              pushError(
+                `dexie.migrations[${i}].upgrade`,
+                "manifest.dexie.migrations.upgradeInvalid",
+                `Migration at index ${i} requires non-empty "upgrade" function name`
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Resilience policy (timeout / retry / circuit-breaker) ───────────────────
+  if (m.resilience !== undefined) {
+    if (!m.resilience || typeof m.resilience !== "object") {
+      pushError(
+        "resilience",
+        "manifest.resilience.invalid_type",
+        '"resilience" must be an object if provided'
+      )
+    } else {
+      const r = m.resilience as Record<string, unknown>
+      const checkPositiveInt = (key: string, value: unknown): void => {
+        if (value === undefined) return
+        if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+          pushError(
+            `resilience.${key}`,
+            "manifest.resilience.invalid_number",
+            `"resilience.${key}" must be a positive integer`
+          )
+        }
+      }
+      const checkNonNegativeInt = (key: string, value: unknown): void => {
+        if (value === undefined) return
+        if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+          pushError(
+            `resilience.${key}`,
+            "manifest.resilience.invalid_number",
+            `"resilience.${key}" must be a non-negative integer`
+          )
+        }
+      }
+      checkPositiveInt("timeoutMs", r.timeoutMs)
+      checkNonNegativeInt("maxRetries", r.maxRetries)
+      if (r.retryable !== undefined && typeof r.retryable !== "boolean") {
+        pushError(
+          "resilience.retryable",
+          "manifest.resilience.invalid_boolean",
+          '"resilience.retryable" must be a boolean'
+        )
+      }
+      if (
+        r.breakerScope !== undefined &&
+        r.breakerScope !== "tool" &&
+        r.breakerScope !== "plugin"
+      ) {
+        pushError(
+          "resilience.breakerScope",
+          "manifest.resilience.invalid_scope",
+          '"resilience.breakerScope" must be "tool" or "plugin"'
+        )
+      }
+      if (r.breaker !== undefined) {
+        if (!r.breaker || typeof r.breaker !== "object") {
+          pushError(
+            "resilience.breaker",
+            "manifest.resilience.breaker.invalid_type",
+            '"resilience.breaker" must be an object if provided'
+          )
+        } else {
+          const b = r.breaker as Record<string, unknown>
+          checkPositiveInt("breaker.failureThreshold", b.failureThreshold)
+          checkPositiveInt("breaker.cooldownMs", b.cooldownMs)
+          checkPositiveInt("breaker.successThreshold", b.successThreshold)
+        }
+      }
+      // Warn when the worst-case budget could exceed the sidecar IPC ceiling.
+      // Reuse the single source of truth in the resilience layer rather than
+      // re-implementing the math (and the 120s constant) here.
+      const budgetWarning = checkResilienceBudget(
+        resolveResilienceConfig({ resilience: r as PluginResilienceConfig })
+      )
+      if (budgetWarning) {
+        pushWarning("resilience.timeoutMs", "manifest.resilience.budget_exceeds_ipc", budgetWarning)
+      }
+    }
+  }
+
+  // ── ADR-0026 lazy-factory fields ────────────────────────────────────────────
+  // Each of the six new manifest blocks shares the `{ id, label, entry,
+  // export }` shape. `validateLazyFactoryArray` enforces the shared rules;
+  // the `extra` callback runs field-specific checks (e.g. `kind` for
+  // aiProviders, `partType` for messageRenderers).
+
+  validateLazyFactoryArray(
+    m.ocrProviders,
+    { field: "ocrProviders" },
+    pushError,
+    pushWarning,
+    m.type
+  )
+
+  validateLazyFactoryArray(
+    m.decisionProviders,
+    { field: "decisionProviders" },
+    pushError,
+    pushWarning,
+    m.type
+  )
+
+  if (Array.isArray(m.subagents)) {
+    m.subagents.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") return
+      try {
+        normalizeCogniaModelBinding(entry.cogniaModel)
+      } catch (error) {
+        pushError(
+          `subagents[${index}].cogniaModel`,
+          "manifest.subagent.invalid_cognia_model",
+          error instanceof Error ? error.message : "Invalid Cognia model binding"
+        )
+      }
+      try {
+        normalizeAgentModelRoleOverrides(entry.modelRoles)
+      } catch (error) {
+        pushError(
+          `subagents[${index}].modelRoles`,
+          "manifest.subagent.invalid_model_roles",
+          error instanceof Error ? error.message : "Invalid model role overrides"
+        )
+      }
+    })
+  }
+
+  if (m.subscriptionProviders !== undefined) {
+    if (!Array.isArray(m.capabilities) || !m.capabilities.includes("subscription-provider")) {
+      pushError(
+        "subscriptionProviders",
+        "manifest.subscriptionProviders.capability_required",
+        "subscriptionProviders requires the subscription-provider capability"
+      )
+    }
+    if (!Array.isArray(m.subscriptionProviders)) {
+      pushError(
+        "subscriptionProviders",
+        "manifest.subscriptionProviders.invalid",
+        "subscriptionProviders must be an array"
+      )
+    } else {
+      const ids = new Set<string>()
+      for (const [index, raw] of m.subscriptionProviders.entries()) {
+        try {
+          const definition = raw as PluginSubscriptionProviderDefinition
+          validateSubscriptionProvider(definition)
+          if (!isValidSubscriptionProviderId(`${m.id}:${definition.id}`))
+            throw new Error("Invalid namespaced subscription provider id")
+          if (ids.has(definition.id)) throw new Error("Duplicate subscription provider id")
+          if (
+            Array.isArray(m.aiProviders) &&
+            m.aiProviders.some(
+              (provider) =>
+                provider &&
+                typeof provider === "object" &&
+                (provider as { id?: unknown }).id === definition.id
+            )
+          )
+            throw new Error("Subscription provider id collides with an AI provider contribution")
+          ids.add(definition.id)
+        } catch (error) {
+          pushError(
+            `subscriptionProviders[${index}]`,
+            "manifest.subscriptionProviders.invalid",
+            error instanceof Error ? error.message : "Invalid subscription provider"
+          )
+        }
+      }
+    }
+  }
+
+  validateDeclarativeExtensions(m as unknown as PluginManifest, pushError)
+  validateDeclarativeTrayItems(m as unknown as PluginManifest, pushError)
+  validateDeclarativeGlanceModules(m as unknown as PluginManifest, pushError)
+  validateIntegrations(m as unknown as PluginManifest, pushError)
+  validateExternalServices(m as unknown as PluginManifest, pushError)
+  validateWorkflowKindAliases(m as unknown as PluginManifest, pushError)
+  validatePetContributions(m as unknown as PluginManifest, pushError)
+  validateNativeLucideIcons(m as unknown as PluginManifest, pushError, pushWarning)
+  validateLazyFactoryArray(
+    m.workspaceBackends,
+    { field: "workspaceBackends" },
+    pushError,
+    pushWarning,
+    m.type
+  )
+  validateLazyFactoryArray(
+    m.messageRenderers,
+    {
+      field: "messageRenderers",
+      requireLabel: false,
+      extra: (entry, _i, push) => {
+        if (typeof entry.partType !== "string" || entry.partType.length === 0) {
+          push("error", "partType.missing", `messageRenderers entry requires a "partType" string`)
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    m.type
+  )
+  validateLazyFactoryArray(
+    m.linkMatchers,
+    {
+      field: "linkMatchers",
+      requireLabel: false,
+      extra: (entry, _i, push) => {
+        if (
+          typeof entry.id === "string" &&
+          (entry.id.length > 128 || ["__proto__", "constructor", "prototype"].includes(entry.id))
+        ) {
+          push("error", "id.invalid", "linkMatchers id is reserved or exceeds 128 characters")
+        }
+        if (
+          !Array.isArray(entry.patterns) ||
+          entry.patterns.length === 0 ||
+          !entry.patterns.every(isValidLinkMatcherPattern)
+        ) {
+          push(
+            "error",
+            "patterns.invalid",
+            "linkMatchers requires a non-empty array of valid HTTP(S) host/URL glob patterns"
+          )
+        }
+        if (
+          entry.label !== undefined &&
+          (typeof entry.label !== "string" || entry.label.trim().length === 0)
+        ) {
+          push("error", "label.invalid", "linkMatchers label must be a non-empty string")
+        }
+        if (
+          entry.priority !== undefined &&
+          (typeof entry.priority !== "number" || !Number.isFinite(entry.priority))
+        ) {
+          push("error", "priority.invalid", "linkMatchers priority must be a finite number")
+        }
+        if (entry.backend !== undefined && entry.backend !== "js") {
+          push("error", "backend.invalid", "linkMatchers requires a JavaScript component")
+        }
+        if (!Array.isArray(m.permissions) || !m.permissions.includes("extension:ui")) {
+          push(
+            "error",
+            "permission.missing",
+            'linkMatchers requires manifest permission "extension:ui"'
+          )
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    "frontend"
+  )
+  validateLazyFactoryArray(
+    m.aiProviders,
+    {
+      field: "aiProviders",
+      moduleOptional: (entry) =>
+        isPlainObject(entry.catalog) && entry.entry === undefined && entry.export === undefined,
+      extra: (entry, _i, push) => {
+        if (entry.kind !== "llm" && entry.kind !== "embedding") {
+          push("error", "kind.invalid", `aiProviders entry "kind" must be "llm" or "embedding"`)
+          return
+        }
+        if (entry.kind === "embedding") {
+          if (
+            typeof entry.dimensions !== "number" ||
+            !Number.isInteger(entry.dimensions) ||
+            entry.dimensions <= 0
+          ) {
+            push(
+              "error",
+              "dimensions.invalid",
+              `aiProviders embedding entry requires positive integer "dimensions"`
+            )
+          }
+        }
+        if (entry.kind === "llm" && entry.models !== undefined) {
+          if (
+            !Array.isArray(entry.models) ||
+            !(entry.models as unknown[]).every((s) => typeof s === "string")
+          ) {
+            push("error", "models.invalid", `aiProviders llm entry "models" must be string[]`)
+          }
+        }
+        if (entry.catalog !== undefined) {
+          if (!isPlainObject(entry.catalog)) {
+            push("error", "catalog.invalid", `aiProviders "catalog" must be an object`)
+            return
+          }
+          const catalog = entry.catalog as Record<string, unknown>
+          if (
+            catalog.tier !== undefined &&
+            catalog.tier !== "verified" &&
+            catalog.tier !== "experimental"
+          ) {
+            push(
+              "error",
+              "catalog.tier.invalid",
+              `aiProviders catalog tier must be "verified" or "experimental"`
+            )
+          }
+          const adapterFamilies = new Set([
+            "openai-compatible",
+            "anthropic",
+            "gemini",
+            "bedrock",
+            "azure-openai",
+            "vertex-ai",
+            "openrouter",
+            "local-openai-compatible",
+          ])
+          if (!adapterFamilies.has(String(catalog.adapterFamily))) {
+            push(
+              "error",
+              "catalog.adapterFamily.invalid",
+              `aiProviders catalog adapterFamily is not allowed`
+            )
+          }
+          if (!Array.isArray(catalog.modalities) || catalog.modalities.length === 0) {
+            push(
+              "error",
+              "catalog.modalities.invalid",
+              `aiProviders catalog requires non-empty "modalities"`
+            )
+          }
+          if (!Array.isArray(catalog.offerings)) {
+            push(
+              "error",
+              "catalog.offerings.invalid",
+              `aiProviders catalog requires an "offerings" array`
+            )
+          }
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    m.type
+  )
+  validateLazyFactoryArray(
+    m.modalMounts,
+    {
+      field: "modalMounts",
+      extra: (entry, _i, push) => {
+        if (entry.options === undefined) return
+        if (!isPlainObject(entry.options)) {
+          push("error", "options.invalid", `modalMounts "options" must be an object if provided`)
+          return
+        }
+        // Rejected loudly here and merely ignored at render time on purpose:
+        // the author gets the failure at install, while an already-installed
+        // manifest that predates a value being removed still opens its modal.
+        const { size, variant } = entry.options
+        if (size !== undefined && !PLUGIN_MODAL_SIZES.includes(size as never)) {
+          push(
+            "error",
+            "options.size.invalid",
+            `modalMounts "options.size" must be one of ${PLUGIN_MODAL_SIZES.join(", ")}`
+          )
+        }
+        if (variant !== undefined && !PLUGIN_MODAL_VARIANTS.includes(variant as never)) {
+          push(
+            "error",
+            "options.variant.invalid",
+            `modalMounts "options.variant" must be one of ${PLUGIN_MODAL_VARIANTS.join(", ")}`
+          )
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    m.type
+  )
+  validateLazyFactoryArray(
+    m.routingStrategies,
+    { field: "routingStrategies" },
+    pushError,
+    pushWarning,
+    m.type
+  )
+  validateLazyFactoryArray(
+    m.chatMiddlewares,
+    {
+      field: "chatMiddlewares",
+      extra: (entry, _i, push) => {
+        if (entry.priority !== undefined) {
+          if (typeof entry.priority !== "number" || entry.priority < -100 || entry.priority > 100) {
+            push("error", "priority.range", `chatMiddlewares "priority" must be in [-100, 100]`)
+          }
+        }
+        if (entry.timeoutMs !== undefined) {
+          if (
+            typeof entry.timeoutMs !== "number" ||
+            entry.timeoutMs <= 0 ||
+            entry.timeoutMs > 60_000
+          ) {
+            push("error", "timeoutMs.range", `chatMiddlewares "timeoutMs" must be in (0, 60000]`)
+          }
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    m.type
+  )
+  validateLazyFactoryArray(
+    m.contextPanels,
+    {
+      field: "contextPanels",
+      // A panel has no JS module when its body comes from somewhere else: a
+      // sandboxed iframe resolved from `manifest.webviews[]`, an A2UI surface
+      // the plugin pushes, or the host's own resource conversation.
+      moduleOptional: (entry) =>
+        (typeof entry.webview === "string" && entry.webview.length > 0) ||
+        DECLARATIVE_CONTEXT_PANEL_KINDS.includes(
+          entry.kind as (typeof DECLARATIVE_CONTEXT_PANEL_KINDS)[number]
+        ),
+      extra: (entry, _i, push) => {
+        if (entry.kind !== undefined) {
+          const kinds = ["module", "webview", ...DECLARATIVE_CONTEXT_PANEL_KINDS]
+          if (typeof entry.kind !== "string" || !kinds.includes(entry.kind)) {
+            push("error", "kind.invalid", `contextPanels "kind" must be one of ${kinds.join(", ")}`)
+          }
+        }
+        if (
+          typeof entry.kind === "string" &&
+          DECLARATIVE_CONTEXT_PANEL_KINDS.includes(
+            entry.kind as (typeof DECLARATIVE_CONTEXT_PANEL_KINDS)[number]
+          )
+        ) {
+          // A declarative panel has no module and no webview, so naming either
+          // is a manifest that cannot be honoured — the host would have two
+          // candidate bodies and no rule for picking one.
+          const conflicting = (
+            [
+              "entry",
+              "export",
+              "webview",
+              "onFirstActivateExport",
+              "onRestoreExport",
+              "getBadgeExport",
+            ] as const
+          ).filter((f) => entry[f] !== undefined)
+          if (conflicting.length > 0) {
+            push(
+              "error",
+              "kind.conflict",
+              `contextPanels "kind": "${entry.kind}" is mutually exclusive with ${conflicting.join(", ")}`
+            )
+          }
+          if (entry.kind === "a2ui") {
+            if (typeof entry.surface !== "string" || entry.surface.length === 0) {
+              push(
+                "error",
+                "surface.missing",
+                `contextPanels "kind": "a2ui" requires a non-empty "surface" id`
+              )
+            }
+            if (
+              entry.activateTool !== undefined &&
+              (typeof entry.activateTool !== "string" || entry.activateTool.length === 0)
+            ) {
+              push(
+                "error",
+                "activateTool.invalid",
+                `contextPanels "activateTool" must be a non-empty tool name`
+              )
+            }
+          }
+          if (
+            entry.kind === "chat" &&
+            entry.contextTool !== undefined &&
+            (typeof entry.contextTool !== "string" || entry.contextTool.length === 0)
+          ) {
+            push(
+              "error",
+              "contextTool.invalid",
+              `contextPanels "contextTool" must be a non-empty tool name`
+            )
+          }
+        }
+        if (entry.webview !== undefined) {
+          if (typeof entry.webview !== "string" || entry.webview.length === 0) {
+            push(
+              "error",
+              "webview.invalid",
+              `contextPanels "webview" must be a non-empty webview id string`
+            )
+          } else {
+            const conflicting = (
+              [
+                "entry",
+                "export",
+                "onFirstActivateExport",
+                "onRestoreExport",
+                "getBadgeExport",
+              ] as const
+            ).filter((field) => entry[field] !== undefined)
+            if (conflicting.length > 0) {
+              push(
+                "error",
+                "webview.conflict",
+                `contextPanels "webview" is mutually exclusive with ${conflicting.join(", ")}`
+              )
+            }
+            if (Array.isArray(m.webviews)) {
+              const known = m.webviews.some(
+                (candidate) => isPlainObject(candidate) && candidate.id === entry.webview
+              )
+              if (!known) {
+                push(
+                  "error",
+                  "webview.unknown",
+                  `contextPanels "webview" references "${entry.webview}", which is not in "webviews"`
+                )
+              }
+            } else {
+              // First-party plugins carry contributions on the module-manifest
+              // overlay, so the raw JSON may legitimately lack `webviews[]` —
+              // the merged manifest is what the manager validates at enable.
+              push(
+                "warning",
+                "webview.unresolved",
+                `contextPanels "webview" references "${entry.webview}" but "webviews" is not declared here; the merged manifest must provide it`
+              )
+            }
+          }
+        }
+        // Shares its source with the imperative API's gate for the same reason
+        // the activity list below does: this map used to be a hand-copied
+        // literal that omitted `session` — the chat dock's own fallback
+        // resource kind — so a declarative panel targeting the right rail's
+        // default state passed tsc and then failed to install.
+        const resourcePermissions = CONTEXT_RESOURCE_READ_PERMISSIONS
+        const resourceKinds = entry.resourceKinds
+        if (
+          !Array.isArray(resourceKinds) ||
+          resourceKinds.length === 0 ||
+          !resourceKinds.every((kind) => typeof kind === "string" && kind in resourcePermissions)
+        ) {
+          push(
+            "error",
+            "resourceKinds.invalid",
+            `contextPanels "resourceKinds" must be a non-empty array of supported resource kinds`
+          )
+        }
+        // Shares its source with `CanonicalContextActivity`, which is what the
+        // SDK's `defineContextPanel` types against — a hand-copied list here
+        // let `workspace` pass tsc and then fail manifest validation.
+        const activities = new Set<string>(CANONICAL_CONTEXT_ACTIVITIES)
+        if (typeof entry.activity !== "string" || !activities.has(entry.activity)) {
+          push("error", "activity.invalid", `contextPanels "activity" must be canonical`)
+        }
+        if (typeof entry.labelKey !== "string" || entry.labelKey.length === 0) {
+          push("error", "labelKey.missing", `contextPanels entry requires a "labelKey" string`)
+        }
+        if (entry.icon !== undefined && !isExportedLucideIcon(String(entry.icon))) {
+          // `PLUGIN_CONTEXT_PANEL_ICONS` published exactly these in kebab-case,
+          // so this is the surface most likely to be holding the old spelling.
+          if (
+            typeof entry.icon === "string" &&
+            isExportedLucideIcon(toLucideIconName(entry.icon))
+          ) {
+            push(
+              "warning",
+              "icon.legacy_kebab_case",
+              `contextPanels "icon" uses the retired kebab-case name "${entry.icon}"; rename it to "${toLucideIconName(entry.icon)}"`
+            )
+          } else {
+            push("error", "icon.invalid", `contextPanels "icon" is not a valid lucide icon name`)
+          }
+        }
+        if (
+          entry.preferredMode !== undefined &&
+          !["narrow", "wide", "focus"].includes(String(entry.preferredMode))
+        ) {
+          push("error", "preferredMode.invalid", `contextPanels "preferredMode" is invalid`)
+        }
+        if (
+          entry.retention !== undefined &&
+          entry.retention !== "stateful" &&
+          entry.retention !== "ephemeral"
+        ) {
+          push("error", "retention.invalid", `contextPanels "retention" is invalid`)
+        }
+        // Behaviour hooks are named exports of the same entry module, so the
+        // only thing checkable here is that a declared name is a usable one —
+        // the bridge reports a missing export at registration time.
+        for (const field of [
+          "onFirstActivateExport",
+          "onRestoreExport",
+          "getBadgeExport",
+        ] as const) {
+          const value = entry[field]
+          if (value !== undefined && (typeof value !== "string" || value.length === 0)) {
+            push("error", `${field}.invalid`, `contextPanels "${field}" must be a non-empty string`)
+          }
+        }
+        if (entry.requiresChatScope !== undefined && typeof entry.requiresChatScope !== "boolean") {
+          push(
+            "error",
+            "requiresChatScope.invalid",
+            `contextPanels "requiresChatScope" must be a boolean`
+          )
+        }
+        const declaredPermissions = new Set(
+          Array.isArray(m.permissions)
+            ? m.permissions.filter(
+                (permission): permission is string => typeof permission === "string"
+              )
+            : []
+        )
+        const requiredPermissions = [
+          "extension:ui",
+          ...(Array.isArray(resourceKinds)
+            ? resourceKinds
+                .filter((kind): kind is string => typeof kind === "string")
+                // `kind` comes straight out of an untrusted manifest, so it is
+                // a plain string that may name no known resource. A miss is
+                // expected and dropped by the Boolean filter below.
+                .map((kind) => (resourcePermissions as Record<string, string | undefined>)[kind])
+                .filter((permission): permission is string => Boolean(permission))
+            : []),
+        ]
+        const missing = requiredPermissions.find(
+          (permission) => !declaredPermissions.has(permission as PluginPermission)
+        )
+        if (missing) {
+          push(
+            "error",
+            "permission.missing",
+            `contextPanels entry requires manifest permission "${missing}"`
+          )
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    m.type
+  )
+
+  // ── i18n block ──────────────────────────────────────────────────────────────
+  // Plugin-supplied localized strings. Validated as a flat per-locale string
+  // map; merged into the host bundle under `plugin.<id>.` by the manager.
+  if (m.i18n !== undefined) {
+    if (!m.i18n || typeof m.i18n !== "object" || Array.isArray(m.i18n)) {
+      pushError("i18n", "manifest.i18n.invalid", '"i18n" must be an object')
+    } else {
+      const i18nBlock = m.i18n as Record<string, unknown>
+      const locales = i18nBlock.locales
+      if (!locales || typeof locales !== "object" || Array.isArray(locales)) {
+        pushError(
+          "i18n.locales",
+          "manifest.i18n.locales.invalid",
+          '"i18n.locales" must be an object keyed by locale code'
+        )
+      } else {
+        const I18N_KEY_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/
+        const MAX_KEYS_PER_LOCALE = 1000
+        const HOST_LOCALES = new Set(["en", "zh-CN"])
+        for (const [locale, dict] of Object.entries(locales as Record<string, unknown>)) {
+          if (!HOST_LOCALES.has(locale)) {
+            pushWarning(
+              `i18n.locales.${locale}`,
+              "manifest.i18n.invalid_locale",
+              `Locale "${locale}" is not one of the host's canonical locales (${[...HOST_LOCALES].join(", ")}); plugin strings for this locale will never resolve.`
+            )
+            continue
+          }
+          if (!dict || typeof dict !== "object" || Array.isArray(dict)) {
+            pushError(
+              `i18n.locales.${locale}`,
+              "manifest.i18n.invalid_keys",
+              `Locale "${locale}" must be a flat string map (no nested objects or arrays).`
+            )
+            continue
+          }
+          const entries = Object.entries(dict as Record<string, unknown>)
+          if (entries.length > MAX_KEYS_PER_LOCALE) {
+            pushError(
+              `i18n.locales.${locale}`,
+              "manifest.i18n.too_many_keys",
+              `Locale "${locale}" declares ${entries.length} keys; the per-locale cap is ${MAX_KEYS_PER_LOCALE}.`
+            )
+          }
+          for (const [key, value] of entries) {
+            if (!I18N_KEY_PATTERN.test(key)) {
+              pushError(
+                `i18n.locales.${locale}.${key}`,
+                "manifest.i18n.invalid_keys",
+                `Key "${key}" must match ${I18N_KEY_PATTERN.source}.`
+              )
+            }
+            if (typeof value !== "string") {
+              pushError(
+                `i18n.locales.${locale}.${key}`,
+                "manifest.i18n.invalid_keys",
+                `Value for "${key}" must be a string.`
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const localeMaps =
+    isPlainObject(m.i18n) && isPlainObject(m.i18n.locales)
+      ? Object.entries(m.i18n.locales).filter((entry): entry is [string, Record<string, unknown>] =>
+          isPlainObject(entry[1])
+        )
+      : []
+  const localizedLabelRefs = [
+    ...PLUGIN_LOCALIZED_LABEL_PATHS.flatMap((path) => collectCatalogPathValues(m, path.split("."))),
+    // configSchema labels (`titleKey`, `enumItemLabelKeys[]`, …) at any depth.
+    ...collectConfigSchemaI18nKeys(m.configSchema).map(({ field, key }) => ({
+      field,
+      value: key,
+    })),
+  ]
+  for (const { field, value } of localizedLabelRefs) {
+    if (typeof value !== "string" || value.length === 0) {
+      pushError(
+        field,
+        "manifest.i18n.key.invalid",
+        `"${field}" must be a non-empty plugin i18n key`
+      )
+      continue
+    }
+    if (localeMaps.length === 0) {
+      pushError(
+        field,
+        "manifest.i18n.key.missing",
+        `"${field}" declares "${value}" but manifest.i18n.locales is empty`
+      )
+      continue
+    }
+    for (const [locale, messages] of localeMaps) {
+      if (!Object.prototype.hasOwnProperty.call(messages, value)) {
+        pushError(
+          field,
+          "manifest.i18n.key.missing",
+          `"${field}" references missing key "${value}" in locale "${locale}"`
+        )
+      }
+    }
+  }
+
+  if (
+    typeof m.id === "string" &&
+    (m.ide !== undefined ||
+      m.vscodeLanguages !== undefined ||
+      m.vscodeGrammars !== undefined ||
+      m.vscodeIconThemes !== undefined ||
+      m.vscodeSnippets !== undefined)
+  ) {
+    try {
+      const normalized = normalizeIdeManifest(
+        m.id,
+        m as unknown as Parameters<typeof normalizeIdeManifest>[1]
+      )
+      for (const warning of normalized.warnings) {
+        pushWarning(
+          "ide",
+          "manifest.ide.legacy_deprecated",
+          warning,
+          "Move legacy vscode* fields into manifest.ide before the next major release."
+        )
+      }
+    } catch (error) {
+      if (error instanceof IdeManifestError) {
+        pushError(error.field ?? "ide", `manifest.ide.${error.code.toLowerCase()}`, error.message)
+      } else {
+        pushError("ide", "manifest.ide.invalid", String(error))
+      }
+    }
+  }
+
+  if (m.templatePackages !== undefined) {
+    if (!Array.isArray(m.templatePackages)) {
+      pushError(
+        "templatePackages",
+        "manifest.templatePackages.invalid_type",
+        '"templatePackages" must be an array'
+      )
+    } else {
+      const packageIds = new Set<string>()
+      m.templatePackages.forEach((value, packageIndex) => {
+        const field = `templatePackages[${packageIndex}]`
+        if (!isPlainObject(value)) {
+          pushError(field, "manifest.templatePackages.invalid_item", `${field} must be an object`)
+          return
+        }
+        try {
+          const manifest = validateTemplatePackageManifest(value.manifest)
+          if (typeof m.id === "string" && !manifest.id.startsWith(`${m.id}.`)) {
+            pushError(
+              `${field}.manifest.id`,
+              "manifest.templatePackages.id.namespace",
+              `${field}.manifest.id must be prefixed with "${m.id}."`
+            )
+          }
+          if (packageIds.has(manifest.id)) {
+            pushError(
+              `${field}.manifest.id`,
+              "manifest.templatePackages.id.duplicate",
+              `Duplicate template package "${manifest.id}"`
+            )
+          }
+          packageIds.add(manifest.id)
+          if (!Array.isArray(value.definitions)) {
+            pushError(
+              `${field}.definitions`,
+              "manifest.templatePackages.definitions.invalid",
+              `${field}.definitions must be an array`
+            )
+            return
+          }
+          const expected = new Set(
+            manifest.definitions.map((definition) => `${definition.id}@${definition.version}`)
+          )
+          const actual = new Set<string>()
+          value.definitions.forEach((definition, definitionIndex) => {
+            const definitionField = `${field}.definitions[${definitionIndex}]`
+            const validation = validateTemplateDefinition(definition as never)
+            if (!validation.ok) {
+              pushError(
+                definitionField,
+                "manifest.templatePackages.definition.invalid",
+                `${definitionField} is invalid: ${validation.issues
+                  .filter((issue) => issue.severity === "error")
+                  .map((issue) => issue.message)
+                  .join("; ")}`
+              )
+              return
+            }
+            const typed = definition as {
+              id: string
+              version: string | null
+              provenance: { source?: string; pluginId?: string; packageId?: string }
+              status: string
+            }
+            const identity = `${typed.id}@${typed.version}`
+            actual.add(identity)
+            if (
+              typed.status !== "published" ||
+              typed.provenance.source !== "plugin" ||
+              typed.provenance.pluginId !== m.id ||
+              typed.provenance.packageId !== manifest.id
+            ) {
+              pushError(
+                definitionField,
+                "manifest.templatePackages.definition.provenance",
+                `${definitionField} must be a published release owned by this plugin package`
+              )
+            }
+          })
+          if (
+            actual.size !== expected.size ||
+            [...expected].some((identity) => !actual.has(identity))
+          ) {
+            pushError(
+              `${field}.definitions`,
+              "manifest.templatePackages.definitions.mismatch",
+              `${field}.definitions must exactly match the manifest definition graph`
+            )
+          }
+        } catch (error) {
+          pushError(
+            `${field}.manifest`,
+            "manifest.templatePackages.manifest.invalid",
+            error instanceof Error ? error.message : String(error)
+          )
+        }
+      })
+    }
+  }
+
+  const errors = diagnostics.filter((item) => item.severity === "error").map((item) => item.message)
+  const warnings = diagnostics
+    .filter((item) => item.severity === "warning")
+    .map((item) => item.message)
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    diagnostics,
+  }
+}
+
+// =============================================================================
+// Config Schema Validation
+// =============================================================================
+
+function validateConfigSchema(schema: unknown): ValidationResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  if (!schema || typeof schema !== "object") {
+    return { valid: false, errors: ["Config schema must be an object"], warnings: [] }
+  }
+
+  const s = schema as Record<string, unknown>
+
+  if (s.type !== "object") {
+    errors.push('Config schema root type must be "object"')
+  }
+
+  if (s.properties && typeof s.properties === "object") {
+    const props = s.properties as Record<string, unknown>
+    for (const [key, value] of Object.entries(props)) {
+      const propResult = validateConfigProperty(key, value)
+      errors.push(...propResult.errors)
+      warnings.push(...propResult.warnings)
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
+function validateConfigProperty(name: string, prop: unknown, depth = 0): ValidationResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  if (!prop || typeof prop !== "object") {
+    errors.push(`Config property "${name}" must be an object`)
+    return { valid: false, errors, warnings }
+  }
+
+  const p = prop as Record<string, unknown>
+  const validTypes = ["string", "number", "integer", "boolean", "array", "object"]
+
+  if (!p.type || typeof p.type !== "string") {
+    errors.push(`Config property "${name}" missing "type" field`)
+  } else if (!validTypes.includes(p.type)) {
+    errors.push(`Config property "${name}" has invalid type "${p.type}"`)
+  }
+
+  for (const keyField of [
+    "titleKey",
+    "descriptionKey",
+    "markdownDescriptionKey",
+    "patternMessageKey",
+    "deprecationMessageKey",
+  ]) {
+    if (p[keyField] !== undefined && (typeof p[keyField] !== "string" || p[keyField] === "")) {
+      errors.push(
+        `Config property "${name}" has invalid "${keyField}" (must be a non-empty string)`
+      )
+    }
+  }
+  for (const listField of ["enumItemLabels", "enumItemLabelKeys", "enumDescriptionKeys"]) {
+    const list = p[listField]
+    if (list === undefined) continue
+    if (!Array.isArray(list) || list.some((entry) => typeof entry !== "string")) {
+      errors.push(
+        `Config property "${name}" has invalid "${listField}" (must be an array of strings)`
+      )
+    } else if (!Array.isArray(p.enum)) {
+      warnings.push(`Config property "${name}" declares "${listField}" without an "enum"`)
+    } else if (list.length !== p.enum.length) {
+      errors.push(
+        `Config property "${name}" has ${list.length} "${listField}" entries for ${p.enum.length} enum values`
+      )
+    }
+  }
+
+  if (p.type === "array" && p.items) {
+    const itemsResult = validateConfigProperty(`${name}.items`, p.items, depth + 1)
+    errors.push(...itemsResult.errors)
+    warnings.push(...itemsResult.warnings)
+  }
+
+  if (p.type === "object" && p.properties) {
+    const props = p.properties as Record<string, unknown>
+    for (const [key, value] of Object.entries(props)) {
+      const propResult = validateConfigProperty(`${name}.${key}`, value, depth + 1)
+      errors.push(...propResult.errors)
+      warnings.push(...propResult.warnings)
+    }
+  }
+
+  // `secret: true` fields are stored in the OS keyring, not the plaintext
+  // plugin-config store; the constraints below prevent a manifest from
+  // shipping a value or from placing a secret in a runtime slot the keyring
+  // API cannot reach (Phase 1: top-level string properties only).
+  if (p.secret === true) {
+    if (p.type !== "string") {
+      errors.push(
+        `Config property "${name}" declares secret: true but type "${String(p.type)}" is not "string"`
+      )
+    }
+    if (Object.hasOwn(p, "default")) {
+      errors.push(
+        `Config property "${name}" declares secret: true and must not carry a default — secrets live in the OS keyring`
+      )
+    }
+    if (depth > 0) {
+      errors.push(
+        `Config property "${name}" declares secret: true inside a nested property; only top-level configSchema properties may be secret`
+      )
+    }
+  } else if (p.secret !== undefined && typeof p.secret !== "boolean") {
+    errors.push(`Config property "${name}" has invalid "secret" flag (must be boolean)`)
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
+// =============================================================================
+// Config Value Validation
+// =============================================================================
+
+export function validatePluginConfig(
+  config: Record<string, unknown>,
+  schema?: PluginConfigSchema
+): ConfigValidationResult {
+  const errors: ValidationError[] = []
+  const warnings: string[] = []
+
+  // If no schema provided, any config is valid
+  if (!schema) {
+    return { valid: true, errors: [], warnings: [] }
+  }
+
+  // Check required fields
+  if (schema.required) {
+    for (const required of schema.required) {
+      if (config[required] === undefined) {
+        errors.push({
+          field: required,
+          code: "required",
+          message: `Missing required config field: ${required}`,
+        })
+      }
+    }
+  }
+
+  // Validate each property
+  for (const [key, value] of Object.entries(config)) {
+    const propSchema = schema.properties[key]
+    if (!propSchema) {
+      warnings.push(`Unknown config field: ${key}`)
+      continue
+    }
+
+    const propErrors = validateConfigValueWithErrors(key, value, propSchema)
+    errors.push(...propErrors)
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
+function validateConfigValueWithErrors(
+  name: string,
+  value: unknown,
+  schema: PluginConfigProperty
+): ValidationError[] {
+  const errors: ValidationError[] = []
+
+  // Type check. "integer" accepts a JS number whose value is a whole number;
+  // everything else maps 1:1 onto the JS runtime type tag.
+  const actualType = Array.isArray(value) ? "array" : typeof value
+  const expectedRuntimeType = schema.type === "integer" ? "number" : schema.type
+  if (actualType !== expectedRuntimeType) {
+    errors.push({
+      field: name,
+      code: "invalid_type",
+      message: `Config field "${name}" expected type "${schema.type}" but got "${actualType}"`,
+    })
+    return errors
+  }
+  if (schema.type === "integer" && typeof value === "number" && !Number.isInteger(value)) {
+    errors.push({
+      field: name,
+      code: "invalid_type",
+      message: `Config field "${name}" must be an integer`,
+    })
+  }
+
+  // Enum check
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push({
+      field: name,
+      code: "enum",
+      message: `Config field "${name}" value must be one of: ${schema.enum.join(", ")}`,
+    })
+  }
+
+  // String validations
+  if (schema.type === "string" && typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      errors.push({
+        field: name,
+        code: "minLength",
+        message: `Config field "${name}" must be at least ${schema.minLength} characters`,
+      })
+    }
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+      errors.push({
+        field: name,
+        code: "maxLength",
+        message: `Config field "${name}" must be at most ${schema.maxLength} characters`,
+      })
+    }
+    if (schema.pattern) {
+      const regex = new RegExp(schema.pattern)
+      if (!regex.test(value)) {
+        errors.push({
+          field: name,
+          code: "pattern",
+          message: `Config field "${name}" does not match pattern: ${schema.pattern}`,
+        })
+      }
+    }
+  }
+
+  // Number validations (apply to both "number" and "integer")
+  if ((schema.type === "number" || schema.type === "integer") && typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum) {
+      errors.push({
+        field: name,
+        code: "minimum",
+        message: `Config field "${name}" must be at least ${schema.minimum}`,
+      })
+    }
+    if (schema.maximum !== undefined && value > schema.maximum) {
+      errors.push({
+        field: name,
+        code: "maximum",
+        message: `Config field "${name}" must be at most ${schema.maximum}`,
+      })
+    }
+  }
+
+  // Array validations
+  if (schema.type === "array" && Array.isArray(value) && schema.items) {
+    for (let i = 0; i < value.length; i++) {
+      const itemErrors = validateConfigValueWithErrors(`${name}[${i}]`, value[i], schema.items)
+      errors.push(...itemErrors)
+    }
+  }
+
+  // Object validations
+  if (
+    schema.type === "object" &&
+    typeof value === "object" &&
+    value !== null &&
+    schema.properties
+  ) {
+    for (const [key, propSchema] of Object.entries(schema.properties)) {
+      const propValue = (value as Record<string, unknown>)[key]
+      if (propValue !== undefined) {
+        const propErrors = validateConfigValueWithErrors(`${name}.${key}`, propValue, propSchema)
+        errors.push(...propErrors)
+      }
+    }
+  }
+
+  return errors
+}
+
+// =============================================================================
+// Manifest Parser
+// =============================================================================
+
+export function parseManifest(content: string): PluginManifest | null {
+  try {
+    const parsed = JSON.parse(content)
+    const validation = validatePluginManifest(parsed)
+
+    if (!validation.valid) {
+      loggers.manager.error("Invalid plugin manifest:", validation.errors)
+      return null
+    }
+
+    if (validation.warnings.length > 0) {
+      loggers.manager.warn("Plugin manifest warnings:", validation.warnings)
+    }
+
+    return parsed as PluginManifest
+  } catch (error) {
+    loggers.manager.error("Failed to parse plugin manifest:", error)
+    return null
+  }
+}
+
+// =============================================================================
+// cliTools validation (declarative CLI wrappers)
+// =============================================================================
+
+const CLI_TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*$/
+
+const CLI_OUTPUT_PARSE_VALUES = new Set(["text", "json", "lines"])
+
+const CLI_CWD_KINDS = new Set(["plugin-dir", "workspace", "param", "none"])
+
+const CLI_BINARY_KINDS = new Set(["requires", "plugin-dir"])
+
+/**
+ * Declared parameter names from a cliTool's JSON-schema `parameters`
+ * object. The executor builds zod from the same shape, so validation
+ * insists on the canonical `{ type?: "object", properties: { … } }` form.
+ * Returns null when the shape is unusable.
+ */
+function cliDeclaredParams(parameters: unknown): Set<string> | null {
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
+    return null
+  }
+  const schema = parameters as Record<string, unknown>
+  if (schema.type !== undefined && schema.type !== "object") {
+    return null
+  }
+  const properties = schema.properties
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+    return null
+  }
+  return new Set(Object.keys(properties))
+}
+
+/** Absolute paths and `..` segments can escape the plugin dir. */
+function cliHasPathTraversal(relPath: string): boolean {
+  if (relPath.length === 0) return true
+  if (relPath.startsWith("/") || relPath.startsWith("\\")) return true
+  if (/^[A-Za-z]:/.test(relPath)) return true
+  return relPath.split(/[\\/]+/).some((segment) => segment === "..")
+}
+
+type PushDiagnostic = (field: string, code: string, message: string, hint?: string) => void
+
+/**
+ * The only values `applies.motionSpeed` may carry — the same three the
+ * Appearance → Accessibility motion-speed picker offers (`MotionSpeed`).
+ */
+const VALID_THEME_PACK_MOTION_SPEEDS: readonly number[] = [0.5, 1, 1.5]
+
+/**
+ * Structural validation for `manifest.themePacks[]` (ADR-0030).
+ *
+ * `applyThemePack` writes `applies.motionSpeed` straight into the user's
+ * motion setting, which is an accessibility preference with exactly three
+ * values. A pack carrying anything else (first-party packs shipped `0.75`)
+ * persisted a speed no picker option matches, so the user could not even see
+ * what they had been given, let alone put it back. Reference integrity
+ * (`themeId` / `wallpaperId` / `density`) stays with the applier, which can
+ * resolve host presets and surface a useful error at apply time.
+ */
+function validateThemePacks(themePacks: unknown, pushError: PushDiagnostic): void {
+  if (!Array.isArray(themePacks)) {
+    pushError("themePacks", "manifest.themePacks.invalid_type", '"themePacks" must be an array')
+    return
+  }
+  themePacks.forEach((pack: unknown, index) => {
+    const field = `themePacks[${index}]`
+    if (!isPlainObject(pack)) {
+      pushError(
+        field,
+        "manifest.themePacks.invalid_item",
+        `Theme pack at index ${index} must be an object`
+      )
+      return
+    }
+    for (const key of ["id", "name"] as const) {
+      const value = pack[key]
+      if (typeof value !== "string" || value.length === 0) {
+        pushError(
+          `${field}.${key}`,
+          `manifest.themePacks.${key}.missing`,
+          `Theme pack at index ${index} is missing a string "${key}"`
+        )
+      }
+    }
+    if (!isPlainObject(pack.applies)) {
+      pushError(
+        `${field}.applies`,
+        "manifest.themePacks.applies.invalid_type",
+        `Theme pack at index ${index} must declare an "applies" object`
+      )
+      return
+    }
+    const { motionSpeed, radius } = pack.applies
+    if (
+      motionSpeed !== undefined &&
+      (typeof motionSpeed !== "number" || !VALID_THEME_PACK_MOTION_SPEEDS.includes(motionSpeed))
+    ) {
+      pushError(
+        `${field}.applies.motionSpeed`,
+        "manifest.themePacks.applies.motionSpeed.invalid",
+        `"${field}.applies.motionSpeed" must be one of: ${VALID_THEME_PACK_MOTION_SPEEDS.join(", ")}`,
+        "Motion speed is the user's accessibility preference; omit it unless the pack is about motion."
+      )
+    }
+    if (radius !== undefined && (typeof radius !== "number" || !Number.isFinite(radius))) {
+      pushError(
+        `${field}.applies.radius`,
+        "manifest.themePacks.applies.radius.invalid_type",
+        `"${field}.applies.radius" must be a finite number (rem)`
+      )
+    }
+  })
+}
+
+/**
+ * Structural validation for `manifest.cliTools[]`. Strict on purpose —
+ * every rule here is one the executor's safety model relies on (argv
+ * params declared, binary refs resolvable, no path traversal).
+ */
+/**
+ * Per-entry validation for `manifest.bots[]`.
+ *
+ * The three rules worth catching before anything is registered:
+ *
+ *   1. The executor discriminant and its one required field must agree. The
+ *      TypeScript union already refuses two, but a hand-written plugin.json
+ *      does not go through the union, and a definition carrying both
+ *      `workflow` and `team` means two different things at once.
+ *   2. A Bot with no trigger can never start, which is a silently dormant
+ *      contribution rather than an error the author would notice.
+ *   3. Each trigger kind carries a field without which it cannot fire. A
+ *      schedule with no cron and a poll with no interval are the same defect
+ *      wearing different names.
+ *
+ * Keep in lockstep with `define_bot` in `plugin-sdk/python/src/cognia/bot.py`,
+ * which enforces the identical rules for a Python author before packaging.
+ */
+function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
+  const bots = m.bots as unknown
+  if (!Array.isArray(bots)) {
+    pushError("bots", "manifest.bots.invalid", '"bots" must be an array')
+    return
+  }
+
+  const seenIds = new Set<string>()
+
+  bots.forEach((entry, i) => {
+    const field = `bots[${i}]`
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      pushError(field, "manifest.bots.entry.invalid", `${field} must be an object`)
+      return
+    }
+    const bot = entry as Record<string, unknown>
+
+    for (const key of ["id", "name", "version"] as const) {
+      if (typeof bot[key] !== "string" || (bot[key] as string).trim() === "") {
+        pushError(
+          `${field}.${key}`,
+          `manifest.bots.${key}.missing`,
+          `Bot at index ${i} is missing a non-empty "${key}"`
+        )
+      }
+    }
+
+    if (typeof bot.id === "string" && bot.id.trim() !== "") {
+      if (seenIds.has(bot.id)) {
+        pushError(
+          `${field}.id`,
+          "manifest.bots.id.duplicate",
+          `Duplicate bot id "${bot.id}" in this manifest`,
+          "Bot ids are namespaced by plugin, so they must be unique within one plugin."
+        )
+      }
+      seenIds.add(bot.id)
+    }
+
+    const executor = bot.executor
+    if (typeof executor !== "string" || !PLUGIN_BOT_EXECUTORS.includes(executor as never)) {
+      pushError(
+        `${field}.executor`,
+        "manifest.bots.executor.invalid",
+        `Bot at index ${i} has an unknown executor ${JSON.stringify(executor)}`,
+        `Expected one of ${PLUGIN_BOT_EXECUTORS.join(", ")}.`
+      )
+    } else {
+      const requiredField = PLUGIN_BOT_EXECUTOR_REQUIRED_FIELD[executor as PluginBotExecutor]
+      if (requiredField && typeof bot[requiredField] !== "string") {
+        pushError(
+          `${field}.${requiredField}`,
+          "manifest.bots.executor.field.missing",
+          `Bot executor "${executor}" requires a "${requiredField}" value`
+        )
+      }
+      for (const other of PLUGIN_BOT_EXECUTOR_FIELDS) {
+        if (other !== requiredField && bot[other] !== undefined) {
+          pushError(
+            `${field}.${other}`,
+            "manifest.bots.executor.field.unexpected",
+            `Bot executor "${executor}" must not declare "${other}"`,
+            "One executor, one target. Declaring two makes the definition mean two things."
+          )
+        }
+      }
+    }
+
+    const lifecycle = bot.lifecycle
+    if (lifecycle !== undefined) {
+      if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) {
+        pushError(
+          `${field}.lifecycle`,
+          "manifest.bots.lifecycle.invalid",
+          `${field}.lifecycle must be an object`
+        )
+      } else {
+        const lc = lifecycle as Record<string, unknown>
+        if (lc.entry !== undefined && typeof lc.entry !== "string") {
+          pushError(
+            `${field}.lifecycle.entry`,
+            "manifest.bots.lifecycle.entry.invalid",
+            `${field}.lifecycle.entry must be a string`
+          )
+        }
+        const hooks = lc.hooks
+        if (!Array.isArray(hooks) || hooks.length === 0) {
+          pushError(
+            `${field}.lifecycle.hooks`,
+            "manifest.bots.lifecycle.hooks.missing",
+            `${field}.lifecycle.hooks must name at least one hook`
+          )
+        } else {
+          const seenHooks = new Set<unknown>()
+          hooks.forEach((hook, h) => {
+            if (typeof hook !== "string" || !PLUGIN_BOT_LIFECYCLE_HOOKS.includes(hook as never)) {
+              pushError(
+                `${field}.lifecycle.hooks[${h}]`,
+                "manifest.bots.lifecycle.hooks.invalid",
+                `${field}.lifecycle.hooks[${h}] must be one of ${PLUGIN_BOT_LIFECYCLE_HOOKS.join(", ")}`
+              )
+            } else if (seenHooks.has(hook)) {
+              pushError(
+                `${field}.lifecycle.hooks[${h}]`,
+                "manifest.bots.lifecycle.hooks.duplicate",
+                `${field}.lifecycle.hooks names "${hook}" twice`
+              )
+            }
+            seenHooks.add(hook)
+          })
+        }
+        // A non-handler executor has no `entry` to fall back on, so a
+        // JS-backed definition must say where its hooks live. A python
+        // plugin's hooks are methods on the contribution object — `entry`
+        // is meaningless there, exactly as for the handler itself.
+        const pythonBacked =
+          bot.backend === "python" ||
+          (m.type === "python" && typeof bot.entry !== "string" && typeof lc.entry !== "string")
+        if (executor !== "handler" && !pythonBacked && typeof lc.entry !== "string") {
+          pushError(
+            `${field}.lifecycle.entry`,
+            "manifest.bots.lifecycle.entry.missing",
+            `${field} declares lifecycle hooks but no entry to load them from; a non-handler executor has no handler entry to fall back on`
+          )
+        }
+      }
+    }
+
+    const triggers = bot.triggers
+    if (!Array.isArray(triggers) || triggers.length === 0) {
+      pushError(
+        `${field}.triggers`,
+        "manifest.bots.triggers.missing",
+        `Bot at index ${i} needs at least one trigger, or it can never start`
+      )
+      return
+    }
+
+    triggers.forEach((rawTrigger, t) => {
+      const triggerField = `${field}.triggers[${t}]`
+      if (!rawTrigger || typeof rawTrigger !== "object" || Array.isArray(rawTrigger)) {
+        pushError(
+          triggerField,
+          "manifest.bots.trigger.invalid",
+          `${triggerField} must be an object`
+        )
+        return
+      }
+      const trigger = rawTrigger as Record<string, unknown>
+
+      if (typeof trigger.id !== "string" || trigger.id.trim() === "") {
+        pushError(
+          `${triggerField}.id`,
+          "manifest.bots.trigger.id.missing",
+          `${triggerField} is missing a non-empty "id"`
+        )
+      }
+
+      const kind = trigger.kind
+      if (typeof kind !== "string" || !PLUGIN_BOT_TRIGGER_KINDS.includes(kind as never)) {
+        pushError(
+          `${triggerField}.kind`,
+          "manifest.bots.trigger.kind.invalid",
+          `${triggerField} has an unknown kind ${JSON.stringify(kind)}`,
+          `Expected one of ${PLUGIN_BOT_TRIGGER_KINDS.join(", ")}.`
+        )
+        return
+      }
+
+      if (
+        trigger.holdConcurrencyWhileWaiting !== undefined &&
+        typeof trigger.holdConcurrencyWhileWaiting !== "boolean"
+      ) {
+        pushError(
+          `${triggerField}.holdConcurrencyWhileWaiting`,
+          "manifest.bots.trigger.holdConcurrencyWhileWaiting.invalid",
+          `${triggerField}.holdConcurrencyWhileWaiting must be a boolean`
+        )
+      }
+      if (
+        trigger.inputSchema !== undefined &&
+        (kind !== "manual" ||
+          !trigger.inputSchema ||
+          typeof trigger.inputSchema !== "object" ||
+          Array.isArray(trigger.inputSchema))
+      ) {
+        pushError(
+          `${triggerField}.inputSchema`,
+          "manifest.bots.trigger.inputSchema.invalid",
+          `${triggerField}.inputSchema must be an object on a manual trigger`
+        )
+      }
+      if (trigger.conditions !== undefined) {
+        const conditions = trigger.conditions
+        if (!conditions || typeof conditions !== "object" || Array.isArray(conditions)) {
+          pushError(
+            `${triggerField}.conditions`,
+            "manifest.bots.trigger.conditions.invalid",
+            `${triggerField}.conditions must be an object`
+          )
+        } else {
+          const lists = new Set(["repositories", "branches", "labels", "actors", "conclusions"])
+          for (const [key, value] of Object.entries(conditions)) {
+            const valid = lists.has(key)
+              ? Array.isArray(value) &&
+                value.length > 0 &&
+                value.every((item) => typeof item === "string" && item.trim().length > 0)
+              : key === "draft"
+                ? typeof value === "boolean"
+                : key === "repositoryConfigKey"
+                  ? typeof value === "string" && value.trim().length > 0
+                  : key === "match"
+                    ? isPlainObject(value) &&
+                      Object.entries(value).every(
+                        ([path, expected]) =>
+                          /^[A-Za-z0-9_.]+$/.test(path) &&
+                          (typeof expected === "string" ||
+                            typeof expected === "number" ||
+                            typeof expected === "boolean" ||
+                            (Array.isArray(expected) &&
+                              expected.length > 0 &&
+                              expected.every(
+                                (item) =>
+                                  typeof item === "string" ||
+                                  typeof item === "number" ||
+                                  typeof item === "boolean"
+                              )))
+                      )
+                    : false
+            if (!valid)
+              pushError(
+                `${triggerField}.conditions.${key}`,
+                "manifest.bots.trigger.conditions.invalid",
+                `${triggerField}.conditions.${key} is invalid`
+              )
+          }
+        }
+      }
+
+      if (trigger.retry !== undefined) {
+        const retry = trigger.retry
+        const valid =
+          isPlainObject(retry) &&
+          (retry.maxAttempts === undefined ||
+            (Number.isInteger(retry.maxAttempts) &&
+              (retry.maxAttempts as number) >= 1 &&
+              (retry.maxAttempts as number) <= 5)) &&
+          (retry.baseDelayMs === undefined ||
+            (Number.isInteger(retry.baseDelayMs) && (retry.baseDelayMs as number) > 0)) &&
+          (retry.maxDelayMs === undefined ||
+            (Number.isInteger(retry.maxDelayMs) && (retry.maxDelayMs as number) > 0)) &&
+          (retry.baseDelayMs === undefined ||
+            retry.maxDelayMs === undefined ||
+            (retry.maxDelayMs as number) >= (retry.baseDelayMs as number))
+        if (!valid) {
+          pushError(
+            `${triggerField}.retry`,
+            "manifest.bots.trigger.retry.invalid",
+            `${triggerField}.retry must declare integer maxAttempts in 1..5 and positive delays with maxDelayMs >= baseDelayMs`
+          )
+        }
+      }
+
+      // A `*ConfigKey` only makes sense on the trigger kind whose schedule it
+      // overrides, and it must name a real `configSchema` property so the
+      // console has something to render for it.
+      const configSchemaKeys =
+        isPlainObject(bot.configSchema) &&
+        isPlainObject((bot.configSchema as Record<string, unknown>).properties)
+          ? new Set(
+              Object.keys(
+                (bot.configSchema as Record<string, unknown>).properties as Record<string, unknown>
+              )
+            )
+          : undefined
+      const configKeyRules: Array<{
+        key: "cronConfigKey" | "timezoneConfigKey" | "everyMsConfigKey"
+        kinds: string[]
+      }> = [
+        { key: "cronConfigKey", kinds: ["schedule"] },
+        { key: "timezoneConfigKey", kinds: ["schedule"] },
+        { key: "everyMsConfigKey", kinds: ["poll", "derivedState"] },
+      ]
+      for (const { key, kinds } of configKeyRules) {
+        const value = trigger[key]
+        if (value === undefined) continue
+        if (!kinds.includes(kind)) {
+          pushError(
+            `${triggerField}.${key}`,
+            "manifest.bots.trigger.configKey.invalid",
+            `${triggerField}.${key} is only valid on ${kinds.join("/")} triggers`
+          )
+          continue
+        }
+        if (typeof value !== "string" || value.trim() === "" || !configSchemaKeys?.has(value)) {
+          pushError(
+            `${triggerField}.${key}`,
+            "manifest.bots.trigger.configKey.invalid",
+            `${triggerField}.${key} must name a key in the Bot's configSchema properties`
+          )
+        }
+      }
+
+      if (kind === "event") {
+        if (
+          typeof trigger.source !== "string" ||
+          !PLUGIN_BOT_EVENT_SOURCES.includes(trigger.source as never)
+        ) {
+          pushError(
+            `${triggerField}.source`,
+            "manifest.bots.trigger.source.invalid",
+            `${triggerField} needs a "source" from ${PLUGIN_BOT_EVENT_SOURCES.join(", ")}`
+          )
+        }
+        if (!Array.isArray(trigger.types) || trigger.types.length === 0) {
+          pushError(
+            `${triggerField}.types`,
+            "manifest.bots.trigger.types.missing",
+            `${triggerField} needs a non-empty "types" list`
+          )
+        }
+      }
+
+      if (kind === "schedule" && typeof trigger.cron !== "string") {
+        pushError(
+          `${triggerField}.cron`,
+          "manifest.bots.trigger.cron.missing",
+          `${triggerField} needs a "cron" expression`
+        )
+      }
+
+      if ((kind === "poll" || kind === "derivedState") && typeof trigger.everyMs !== "number") {
+        pushError(
+          `${triggerField}.everyMs`,
+          "manifest.bots.trigger.everyMs.missing",
+          `${triggerField} needs a numeric "everyMs"`
+        )
+      } else if (
+        (kind === "poll" || kind === "derivedState") &&
+        (trigger.everyMs as number) < BOT_TIMED_TRIGGER_MIN_EVERY_MS
+      ) {
+        pushError(
+          `${triggerField}.everyMs`,
+          "manifest.bots.trigger.everyMs.belowFloor",
+          `${triggerField}.everyMs must be at least ${BOT_TIMED_TRIGGER_MIN_EVERY_MS}ms; the host does not poll faster than that`
+        )
+      }
+
+      if (kind === "derivedState" && typeof trigger.state !== "string") {
+        pushError(
+          `${triggerField}.state`,
+          "manifest.bots.trigger.state.missing",
+          `${triggerField} needs a "state" name`
+        )
+      }
+    })
+  })
+}
+
+// =============================================================================
+// piPackages validation (plugin-shipped Pi packages, ADR-0210)
+// =============================================================================
+
+/** Pi's built-in tool names; a package may not claim one as its own. */
+const PI_BUILTIN_TOOL_NAMES = new Set(["read", "grep", "find", "ls", "edit", "write", "bash"])
+
+/**
+ * A plugin-relative path that is safe to hand to Pi: forward slashes only (a
+ * backslash is a separator on Windows and a literal elsewhere, so the same
+ * manifest would name two different files), no absolute/scheme prefix, no
+ * `..`, no control characters. The catalog path-field pass reports the
+ * traversal/absolute cases too; this one adds the backslash and type rules.
+ */
+function piPackagePathProblem(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return "must be a non-empty string"
+  if (value.includes("\\")) return "must use forward slashes"
+  if (getPluginPathViolations(value).length > 0) {
+    return "must be a relative path inside the plugin directory (no absolute path, no `..`)"
+  }
+  // Only the literal `.` / `./` may name the plugin root (and only for
+  // `path`, which exempts them); `./.`, `//` and friends are refused, as the
+  // install-time Rust check refuses them.
+  if (value.split("/").every((segment) => segment === "" || segment === ".")) {
+    return "must name a file or directory inside the plugin (use `.` for the plugin root)"
+  }
+  return null
+}
+
+function validatePiPackages(
+  m: Record<string, unknown>,
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  const packages = m.piPackages
+  if (!Array.isArray(packages)) {
+    pushError("piPackages", "manifest.piPackages.invalid", '"piPackages" must be an array')
+    return
+  }
+  const configSchema = isPlainObject(m.configSchema) ? m.configSchema : undefined
+  const schemaProperties =
+    configSchema && isPlainObject(configSchema.properties) ? configSchema.properties : {}
+  const defaultConfig = isPlainObject(m.defaultConfig) ? m.defaultConfig : {}
+  const seenIds = new Set<string>()
+
+  packages.forEach((entry: unknown, index) => {
+    const field = `piPackages[${index}]`
+    if (!isPlainObject(entry)) {
+      pushError(field, "manifest.piPackages.entry.invalid", `${field} must be an object`)
+      return
+    }
+
+    if (typeof entry.id !== "string" || !PI_PACKAGE_ID_PATTERN.test(entry.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.piPackages.id.invalid",
+        `${field}.id must be lowercase kebab-case (e.g. "latex-workbench")`
+      )
+    } else if (seenIds.has(entry.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.piPackages.id.duplicate",
+        `Duplicate Pi package id "${entry.id}"`
+      )
+    } else {
+      seenIds.add(entry.id)
+    }
+
+    if (typeof entry.name !== "string" || entry.name.trim().length === 0) {
+      pushError(`${field}.name`, "manifest.piPackages.name.missing", `${field}.name is required`)
+    }
+    for (const key of ["nameKey", "description", "descriptionKey"] as const) {
+      if (entry[key] !== undefined && typeof entry[key] !== "string") {
+        pushError(
+          `${field}.${key}`,
+          `manifest.piPackages.${key}.invalid`,
+          `${field}.${key} must be a string`
+        )
+      }
+    }
+
+    const pathProblem = piPackagePathProblem(entry.path)
+    if (pathProblem && !(typeof entry.path === "string" && /^\.\/?$/.test(entry.path))) {
+      pushError(`${field}.path`, "manifest.piPackages.path.invalid", `${field}.path ${pathProblem}`)
+    }
+
+    if (
+      entry.minPiVersion !== undefined &&
+      (typeof entry.minPiVersion !== "string" || !VERSION_PATTERN.test(entry.minPiVersion))
+    ) {
+      pushError(
+        `${field}.minPiVersion`,
+        "manifest.piPackages.minPiVersion.invalid",
+        `${field}.minPiVersion must be a semver version (e.g. "0.85.1")`
+      )
+    }
+
+    if (entry.prepare !== undefined) {
+      validatePiPackagePrepare(entry.prepare, `${field}.prepare`, pushError, pushWarning)
+    }
+
+    if (entry.hostedSession !== undefined) {
+      validatePiPackageHostedSession(
+        entry.hostedSession,
+        `${field}.hostedSession`,
+        { schemaProperties, defaultConfig },
+        pushError,
+        pushWarning
+      )
+    }
+  })
+}
+
+function validatePiPackagePrepare(
+  prepare: unknown,
+  field: string,
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  if (!isPlainObject(prepare)) {
+    pushError(field, "manifest.piPackages.prepare.invalid", `${field} must be an object`)
+    return
+  }
+  if (!(PI_PACKAGE_PREPARE_PROGRAMS as readonly unknown[]).includes(prepare.program)) {
+    pushError(
+      `${field}.program`,
+      "manifest.piPackages.prepare.program.invalid",
+      `${field}.program must be one of: ${PI_PACKAGE_PREPARE_PROGRAMS.join(", ")}`
+    )
+  } else if (prepare.program === "pnpm") {
+    pushWarning(
+      `${field}.program`,
+      "manifest.piPackages.prepare.program.symlinks",
+      `${field} uses pnpm, which links dependencies by default; Cognia refuses to load a plugin whose tree contains symbolic links`,
+      'Use npm (Cognia adds --no-bin-links), or pass pnpm options that install without links (e.g. "--config.node-linker=hoisted").'
+    )
+  }
+  if (
+    !Array.isArray(prepare.args) ||
+    prepare.args.some((arg) => typeof arg !== "string" || /[\u0000-\u001f\u007f]/.test(arg))
+  ) {
+    pushError(
+      `${field}.args`,
+      "manifest.piPackages.prepare.args.invalid",
+      `${field}.args must be an array of static strings (no control characters)`
+    )
+  }
+  if (prepare.timeoutMs !== undefined) {
+    const timeout = prepare.timeoutMs
+    if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0) {
+      pushError(
+        `${field}.timeoutMs`,
+        "manifest.piPackages.prepare.timeoutMs.invalid",
+        `${field}.timeoutMs must be a positive number of milliseconds`
+      )
+    } else if (timeout > PI_PACKAGE_PREPARE_MAX_TIMEOUT_MS) {
+      pushWarning(
+        `${field}.timeoutMs`,
+        "manifest.piPackages.prepare.timeoutMs.clamped",
+        `${field}.timeoutMs exceeds ${PI_PACKAGE_PREPARE_MAX_TIMEOUT_MS}ms and will be clamped`
+      )
+    }
+  }
+  if (prepare.marker === undefined) {
+    pushWarning(
+      `${field}.marker`,
+      "manifest.piPackages.prepare.marker.missing",
+      `${field} declares no marker, so Cognia cannot tell whether it ran`,
+      "Name a PLUGIN-relative file the step creates (e.g. vendor/node_modules/.package-lock.json for a package at vendor/) so install and hosted sessions can wait for it."
+    )
+  } else {
+    const problem = piPackagePathProblem(prepare.marker)
+    if (problem) {
+      pushError(
+        `${field}.marker`,
+        "manifest.piPackages.prepare.marker.invalid",
+        `${field}.marker ${problem}`
+      )
+    }
+  }
+}
+
+function validatePiPackageHostedSession(
+  hosted: unknown,
+  field: string,
+  config: {
+    schemaProperties: Record<string, unknown>
+    defaultConfig: Record<string, unknown>
+  },
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  if (!isPlainObject(hosted)) {
+    pushError(field, "manifest.piPackages.hostedSession.invalid", `${field} must be an object`)
+    return
+  }
+
+  const extensions = hosted.extensions
+  if (!Array.isArray(extensions) || extensions.length === 0) {
+    pushError(
+      `${field}.extensions`,
+      "manifest.piPackages.hostedSession.extensions.missing",
+      `${field}.extensions must list at least one extension entry file`
+    )
+  } else {
+    extensions.forEach((ext: unknown, index) => {
+      const extField = `${field}.extensions[${index}]`
+      const problem = piPackagePathProblem(ext)
+      if (problem) {
+        pushError(
+          extField,
+          "manifest.piPackages.hostedSession.extensions.invalid",
+          `${extField} ${problem}`
+        )
+        return
+      }
+      const path = ext as string
+      if (!PI_PACKAGE_EXTENSION_SUFFIXES.some((suffix) => path.endsWith(suffix))) {
+        pushError(
+          extField,
+          "manifest.piPackages.hostedSession.extensions.suffix",
+          `${extField} must end in ${PI_PACKAGE_EXTENSION_SUFFIXES.join(", ")}`
+        )
+      }
+    })
+  }
+
+  if (hosted.env !== undefined) {
+    if (!Array.isArray(hosted.env)) {
+      pushError(
+        `${field}.env`,
+        "manifest.piPackages.hostedSession.env.invalid",
+        `${field}.env must be an array`
+      )
+    } else {
+      const seenNames = new Set<string>()
+      hosted.env.forEach((binding: unknown, index) => {
+        const envField = `${field}.env[${index}]`
+        if (!isPlainObject(binding)) {
+          pushError(
+            envField,
+            "manifest.piPackages.hostedSession.env.invalid",
+            `${envField} must be an object`
+          )
+          return
+        }
+        if (typeof binding.name !== "string" || !PI_PACKAGE_ENV_NAME_PATTERN.test(binding.name)) {
+          pushError(
+            `${envField}.name`,
+            "manifest.piPackages.hostedSession.env.name.invalid",
+            `${envField}.name must match ${PI_PACKAGE_ENV_NAME_PATTERN.source} (it becomes COGNIA_PIPKG_<name>)`
+          )
+        } else if (seenNames.has(binding.name)) {
+          pushError(
+            `${envField}.name`,
+            "manifest.piPackages.hostedSession.env.name.duplicate",
+            `Duplicate env name "${binding.name}"`
+          )
+        } else {
+          seenNames.add(binding.name)
+        }
+        validatePiPackageEnvSource(binding.from, `${envField}.from`, config, pushError, pushWarning)
+      })
+    }
+  }
+
+  if (hosted.tools !== undefined) {
+    if (!Array.isArray(hosted.tools)) {
+      pushError(
+        `${field}.tools`,
+        "manifest.piPackages.hostedSession.tools.invalid",
+        `${field}.tools must be an array of tool names`
+      )
+    } else {
+      const seenTools = new Set<string>()
+      hosted.tools.forEach((tool: unknown, index) => {
+        const toolField = `${field}.tools[${index}]`
+        if (typeof tool !== "string" || !PI_PACKAGE_TOOL_NAME_PATTERN.test(tool)) {
+          pushError(
+            toolField,
+            "manifest.piPackages.hostedSession.tools.invalid",
+            `${toolField} must match ${PI_PACKAGE_TOOL_NAME_PATTERN.source}`
+          )
+        } else if (PI_BUILTIN_TOOL_NAMES.has(tool)) {
+          pushError(
+            toolField,
+            "manifest.piPackages.hostedSession.tools.builtin",
+            `${toolField} "${tool}" is a Pi built-in tool and cannot be declared by a package`
+          )
+        } else if (seenTools.has(tool)) {
+          pushError(
+            toolField,
+            "manifest.piPackages.hostedSession.tools.duplicate",
+            `Duplicate tool name "${tool}"`
+          )
+        } else {
+          seenTools.add(tool)
+        }
+      })
+    }
+  }
+
+  if (hosted.controlsSession !== undefined && typeof hosted.controlsSession !== "boolean") {
+    pushError(
+      `${field}.controlsSession`,
+      "manifest.piPackages.hostedSession.controlsSession.invalid",
+      `${field}.controlsSession must be a boolean`
+    )
+  }
+}
+
+function validatePiPackageEnvSource(
+  from: unknown,
+  field: string,
+  config: {
+    schemaProperties: Record<string, unknown>
+    defaultConfig: Record<string, unknown>
+  },
+  pushError: PushDiagnostic,
+  pushWarning: PushDiagnostic
+): void {
+  const keys = isPlainObject(from) ? Object.keys(from) : []
+  if (!isPlainObject(from) || keys.length !== 1) {
+    pushError(
+      field,
+      "manifest.piPackages.hostedSession.env.from.invalid",
+      `${field} must be exactly one of { config }, { value } or { workspace: true }`
+    )
+    return
+  }
+  if ("config" in from) {
+    if (typeof from.config !== "string" || from.config.length === 0) {
+      pushError(
+        field,
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        `${field}.config must name a configuration key`
+      )
+    } else if (
+      !Object.prototype.hasOwnProperty.call(config.schemaProperties, from.config) &&
+      !Object.prototype.hasOwnProperty.call(config.defaultConfig, from.config)
+    ) {
+      pushWarning(
+        field,
+        "manifest.piPackages.hostedSession.env.config.unknown",
+        `${field}.config "${from.config}" is not declared in configSchema or defaultConfig`,
+        "Declare the key so users can set it; an unset key forwards nothing."
+      )
+    }
+    return
+  }
+  if ("value" in from) {
+    if (typeof from.value !== "string") {
+      pushError(
+        field,
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        `${field}.value must be a string`
+      )
+    }
+    return
+  }
+  if ("workspace" in from) {
+    if (from.workspace !== true) {
+      pushError(
+        field,
+        "manifest.piPackages.hostedSession.env.from.invalid",
+        `${field}.workspace must be true`
+      )
+    }
+    return
+  }
+  pushError(
+    field,
+    "manifest.piPackages.hostedSession.env.from.invalid",
+    `${field} must be exactly one of { config }, { value } or { workspace: true }`
+  )
+}
+
+function validateCliTools(m: PluginManifest, pushError: PushDiagnostic): void {
+  const cliTools = m.cliTools as unknown
+  if (!Array.isArray(cliTools)) {
+    pushError("cliTools", "manifest.cliTools.invalid", '"cliTools" must be an array')
+    return
+  }
+  if (cliTools.length > 0 && !(m.permissions ?? []).includes("cli:execute")) {
+    pushError(
+      "permissions",
+      "manifest.cliTools.permission.missing",
+      'cliTools entries require the "cli:execute" permission',
+      'Add "cli:execute" to "permissions".'
+    )
+  }
+
+  const requiredBinaryNames = new Set(
+    (Array.isArray(m.requires?.binaries) ? m.requires.binaries : [])
+      .map((entry) => (entry as { name?: unknown } | null | undefined)?.name)
+      .filter((name): name is string => typeof name === "string")
+  )
+  const seenNames = new Set<string>()
+
+  cliTools.forEach((entry, i) => {
+    const field = `cliTools[${i}]`
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      pushError(field, "manifest.cliTools.entry.invalid", `${field} must be an object`)
+      return
+    }
+    const tool = entry as Record<string, unknown>
+
+    if (typeof tool.name !== "string" || !CLI_TOOL_NAME_PATTERN.test(tool.name)) {
+      pushError(
+        `${field}.name`,
+        "manifest.cliTools.name.invalid",
+        `${field}.name must match ${CLI_TOOL_NAME_PATTERN} (snake_case)`
+      )
+    } else if (seenNames.has(tool.name)) {
+      pushError(
+        `${field}.name`,
+        "manifest.cliTools.name.duplicate",
+        `${field}.name "${tool.name}" is declared more than once`
+      )
+    } else {
+      seenNames.add(tool.name)
+    }
+
+    if (!tool.description || typeof tool.description !== "string") {
+      pushError(
+        `${field}.description`,
+        "manifest.cliTools.description.missing",
+        `${field} requires a non-empty "description" string`
+      )
+    }
+
+    const declaredParams = cliDeclaredParams(tool.parameters)
+    if (declaredParams === null) {
+      pushError(
+        `${field}.parameters`,
+        "manifest.cliTools.parameters.invalid",
+        `${field}.parameters must be a JSON-schema object: { "type": "object", "properties": { … } }`
+      )
+    }
+    const hasParam = (name: string): boolean => declaredParams?.has(name) ?? false
+
+    const binary = tool.binary as Record<string, unknown> | undefined
+    if (!binary || typeof binary !== "object" || Array.isArray(binary)) {
+      pushError(
+        `${field}.binary`,
+        "manifest.cliTools.binary.missing",
+        `${field} requires a "binary" reference object`
+      )
+    } else if (!CLI_BINARY_KINDS.has(binary.kind as string)) {
+      pushError(
+        `${field}.binary.kind`,
+        "manifest.cliTools.binary.kind.invalid",
+        `${field}.binary.kind must be "requires" or "plugin-dir"`
+      )
+    } else if (binary.kind === "requires") {
+      if (typeof binary.name !== "string" || binary.name.length === 0) {
+        pushError(
+          `${field}.binary.name`,
+          "manifest.cliTools.binary.name.missing",
+          `${field}.binary requires a non-empty "name"`
+        )
+      } else if (!requiredBinaryNames.has(binary.name)) {
+        pushError(
+          `${field}.binary.name`,
+          "manifest.cliTools.binary.name.undeclared",
+          `${field}.binary.name "${binary.name}" is not declared in requires.binaries`,
+          "Add the binary to manifest.requires.binaries so the install/enable chain can probe it."
+        )
+      }
+    } else if (binary.kind === "plugin-dir") {
+      if (typeof binary.relPath !== "string" || cliHasPathTraversal(binary.relPath)) {
+        pushError(
+          `${field}.binary.relPath`,
+          "manifest.cliTools.binary.relPath.invalid",
+          `${field}.binary.relPath must be a relative path inside the plugin directory (no "..", no absolute paths)`
+        )
+      }
+    }
+
+    if (!Array.isArray(tool.argv)) {
+      pushError(
+        `${field}.argv`,
+        "manifest.cliTools.argv.missing",
+        `${field} requires an "argv" token array (may be empty)`
+      )
+    } else {
+      tool.argv.forEach((token, j) => {
+        const tokenField = `${field}.argv[${j}]`
+        if (!token || typeof token !== "object" || Array.isArray(token)) {
+          pushError(
+            tokenField,
+            "manifest.cliTools.argv.token.invalid",
+            `${tokenField} must be a { literal } or { param } object`
+          )
+          return
+        }
+        const tk = token as Record<string, unknown>
+        const isLiteral = typeof tk.literal === "string"
+        const isParam = typeof tk.param === "string"
+        if (isLiteral === isParam) {
+          pushError(
+            tokenField,
+            "manifest.cliTools.argv.token.invalid",
+            `${tokenField} must have exactly one of "literal" (string) or "param" (string)`
+          )
+          return
+        }
+        if (isParam && !hasParam(tk.param as string)) {
+          pushError(
+            `${tokenField}.param`,
+            "manifest.cliTools.argv.param.undeclared",
+            `${tokenField} references undeclared parameter "${tk.param}"`
+          )
+        }
+        if (tk.eachPrefixedBy !== undefined && typeof tk.eachPrefixedBy !== "string") {
+          pushError(
+            `${tokenField}.eachPrefixedBy`,
+            "manifest.cliTools.argv.eachPrefixedBy.invalid",
+            `${tokenField}.eachPrefixedBy must be a string`
+          )
+        }
+      })
+    }
+
+    if (tool.stdin !== undefined) {
+      const stdin = tool.stdin as Record<string, unknown> | null
+      if (
+        !stdin ||
+        typeof stdin !== "object" ||
+        Array.isArray(stdin) ||
+        typeof stdin.param !== "string" ||
+        !hasParam(stdin.param)
+      ) {
+        pushError(
+          `${field}.stdin`,
+          "manifest.cliTools.stdin.invalid",
+          `${field}.stdin must be { "param": <declared parameter name> }`
+        )
+      }
+    }
+
+    if (tool.cwd !== undefined) {
+      const cwd = tool.cwd as Record<string, unknown> | null
+      if (!cwd || typeof cwd !== "object" || !CLI_CWD_KINDS.has(cwd.kind as string)) {
+        pushError(
+          `${field}.cwd`,
+          "manifest.cliTools.cwd.invalid",
+          `${field}.cwd.kind must be one of: plugin-dir, workspace, param, none`
+        )
+      } else if (cwd.kind === "param" && (typeof cwd.param !== "string" || !hasParam(cwd.param))) {
+        pushError(
+          `${field}.cwd.param`,
+          "manifest.cliTools.cwd.param.undeclared",
+          `${field}.cwd references an undeclared parameter`
+        )
+      }
+    }
+
+    if (tool.env !== undefined) {
+      const env = tool.env
+      const isStringMap =
+        env !== null &&
+        typeof env === "object" &&
+        !Array.isArray(env) &&
+        Object.values(env as Record<string, unknown>).every((value) => typeof value === "string")
+      if (!isStringMap) {
+        pushError(
+          `${field}.env`,
+          "manifest.cliTools.env.invalid",
+          `${field}.env must be a flat map of string values`
+        )
+      }
+    }
+
+    if (tool.access !== undefined && tool.access !== "read" && tool.access !== "write") {
+      pushError(
+        `${field}.access`,
+        "manifest.cliTools.access.invalid",
+        `${field}.access must be "read" or "write"`
+      )
+    }
+
+    if (tool.confinedPathParams !== undefined) {
+      const list = tool.confinedPathParams
+      if (!Array.isArray(list) || list.some((name) => typeof name !== "string")) {
+        pushError(
+          `${field}.confinedPathParams`,
+          "manifest.cliTools.confinedPathParams.invalid",
+          `${field}.confinedPathParams must be an array of declared parameter names`
+        )
+      } else {
+        for (const name of list as string[]) {
+          if (!hasParam(name)) {
+            pushError(
+              `${field}.confinedPathParams`,
+              "manifest.cliTools.confinedPathParams.param.undeclared",
+              `${field}.confinedPathParams references undeclared parameter "${name}"`
+            )
+          }
+        }
+        const cwdKind = (tool.cwd as { kind?: unknown } | undefined)?.kind
+        if (cwdKind !== "workspace" && cwdKind !== "param" && cwdKind !== "plugin-dir") {
+          pushError(
+            `${field}.confinedPathParams`,
+            "manifest.cliTools.confinedPathParams.noBase",
+            `${field}.confinedPathParams needs a cwd policy (workspace, param, or plugin-dir) to confine against`
+          )
+        }
+      }
+    }
+
+    if (
+      tool.timeoutMs !== undefined &&
+      (typeof tool.timeoutMs !== "number" ||
+        !Number.isFinite(tool.timeoutMs) ||
+        tool.timeoutMs <= 0 ||
+        // `plugin_cli_exec` kills the child at 600s — a larger declared value
+        // is dead config that only inflates the resilience/relay budgets.
+        tool.timeoutMs > 600_000)
+    ) {
+      pushError(
+        `${field}.timeoutMs`,
+        "manifest.cliTools.timeoutMs.invalid",
+        `${field}.timeoutMs must be a positive number of milliseconds no larger than 600000`
+      )
+    }
+
+    if (
+      tool.maxOutputBytes !== undefined &&
+      (typeof tool.maxOutputBytes !== "number" ||
+        !Number.isInteger(tool.maxOutputBytes) ||
+        tool.maxOutputBytes <= 0)
+    ) {
+      pushError(
+        `${field}.maxOutputBytes`,
+        "manifest.cliTools.maxOutputBytes.invalid",
+        `${field}.maxOutputBytes must be a positive integer`
+      )
+    }
+
+    if (
+      tool.outputParse !== undefined &&
+      !CLI_OUTPUT_PARSE_VALUES.has(tool.outputParse as string)
+    ) {
+      pushError(
+        `${field}.outputParse`,
+        "manifest.cliTools.outputParse.invalid",
+        `${field}.outputParse must be one of: text, json, lines`
+      )
+    }
+
+    if (
+      tool.successExitCodes !== undefined &&
+      (!Array.isArray(tool.successExitCodes) ||
+        tool.successExitCodes.some((code) => !Number.isInteger(code)))
+    ) {
+      pushError(
+        `${field}.successExitCodes`,
+        "manifest.cliTools.successExitCodes.invalid",
+        `${field}.successExitCodes must be an array of integers`
+      )
+    }
+
+    if (tool.versionArg !== undefined && typeof tool.versionArg !== "string") {
+      pushError(
+        `${field}.versionArg`,
+        "manifest.cliTools.versionArg.invalid",
+        `${field}.versionArg must be a string`
+      )
+    }
+  })
+}

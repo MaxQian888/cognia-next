@@ -4,8 +4,11 @@ import type { AppSettings } from "@cognia/agent-config-types"
 const settingsState: { current: Partial<AppSettings> } = { current: {} }
 jest.mock("@/lib/db/settings", () => ({
   getSettings: async () => settingsState.current,
-  saveSettings: async (patch: Partial<AppSettings>) => {
-    settingsState.current = { ...settingsState.current, ...patch }
+  saveSettings: async (
+    patch: Partial<AppSettings> | ((current: Partial<AppSettings>) => Partial<AppSettings>)
+  ) => {
+    const resolved = typeof patch === "function" ? patch(settingsState.current) : patch
+    settingsState.current = { ...settingsState.current, ...resolved }
     return settingsState.current
   },
 }))

@@ -715,7 +715,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           : serializeGetFriendMsgHistoryV11(chatId, cursor, pageSize)
 
       const resp = await transport.send(call)
-      if (resp.status !== "ok") return
+      assertOneBotSuccess(resp, call.action)
 
       const data = resp.data as { messages?: OneBotV11Event[] } | null
       const messages = data?.messages ?? []
@@ -729,6 +729,10 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           yield event
         }
       }
+
+      // Avoid querying an exhausted cursor: NapCat rejects a request beyond
+      // the oldest message instead of returning another empty page.
+      if (yielded >= overallCap || messages.length < pageSize) return
 
       // Page returned in chronological order — oldest message's seq becomes
       // the new cursor for the next (older) page. NapCat exposes message_seq

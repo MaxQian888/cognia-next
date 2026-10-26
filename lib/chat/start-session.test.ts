@@ -778,10 +778,10 @@ describe("startNewSession — the agent's default runtime (ADR-0220)", () => {
     return { useAgentRuntimeStore, useExternalAgentStore }
   }
 
-  it("starts a conversation with the agent on its bound external agent", async () => {
+  it("starts a conversation on its enabled agent despite a retired global flag", async () => {
     const { useAgentRuntimeStore, useExternalAgentStore } = stores()
     useExternalAgentStore.setState({
-      enabled: true,
+      enabled: false,
       agents: { codex: { id: "codex", name: "Codex", enabled: true } },
     })
     const agent = await createCharacter({
@@ -803,7 +803,7 @@ describe("startNewSession — the agent's default runtime (ADR-0220)", () => {
 
   it("keeps the app default and says so when the bound agent is gone", async () => {
     const { useAgentRuntimeStore, useExternalAgentStore } = stores()
-    useExternalAgentStore.setState({ enabled: true, agents: {} })
+    useExternalAgentStore.setState({ agents: {} })
     const agent = await createCharacter({
       name: "Reviewer",
       systemPrompt: "Review.",
@@ -813,6 +813,27 @@ describe("startNewSession — the agent's default runtime (ADR-0220)", () => {
     const session = await startNewSession({ characterId: agent.id })
 
     expect(useAgentRuntimeStore.getState().sessionRuntimeRefs[session.id]).toBeUndefined()
+    expect(mockDispatchDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "agentRuntimeUnavailable" })
+    )
+  })
+
+  it("refuses the disabled bound agent while leaving enabled siblings intact", async () => {
+    const { useAgentRuntimeStore, useExternalAgentStore } = stores()
+    useExternalAgentStore.setState({
+      agents: {
+        off: { id: "off", name: "Off", enabled: false },
+        on: { id: "on", name: "On", enabled: true },
+      },
+    })
+    const agent = await createCharacter({
+      name: "Paused reviewer",
+      systemPrompt: "Review.",
+      runtime: { kind: "external", agentId: "off" },
+    })
+    const session = await startNewSession({ characterId: agent.id })
+    expect(useAgentRuntimeStore.getState().sessionRuntimeRefs[session.id]).toBeUndefined()
+    expect(useExternalAgentStore.getState().agents.on.enabled).toBe(true)
     expect(mockDispatchDiagnostic).toHaveBeenCalledWith(
       expect.objectContaining({ code: "agentRuntimeUnavailable" })
     )

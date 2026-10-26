@@ -46,7 +46,7 @@ import { dirname, join } from "node:path"
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
-export const DOCKERFILE = "Dockerfile.cognia-server"
+export const DOCKERFILE = "deploy/docker/Dockerfile.cognia-server"
 
 /** The uid/gid the runtime stages create and run as. */
 export const RUNTIME_UID = "10001"

@@ -54,8 +54,8 @@ and run checks and the release pipeline.
 Prerequisites: Node ≥ 24 (`node:sqlite` + TS type stripping), npm ≥ 10,
 the `tectonic` binary on `PATH` (verified with 0.17.0, e.g.
 `brew install tectonic` — provisioning downloads its bundle, not the
-binary), macOS arm64 + Xcode CLT (`swiftc`) for the render helper, Pi ≥ 0.85
-for the agent session (verified on 0.85.1 and 0.87.0), ~3 GB disk for the
+binary), macOS arm64 + Xcode CLT (`swiftc`) for the render helper, Pi ≥ 1.3.0
+for the agent session (verified on 1.3.0), ~3 GB disk for the
 tectonic bundle. No latexmk, Docker, or other TeX backends needed — tectonic
 is the only engine.
 
@@ -306,6 +306,9 @@ grant. The canary procedure is in [docs/EVAL.md](docs/EVAL.md).
 ```
 packages/contracts/    @latexwb/contracts — schemas, generated types, validators, errors
 packages/storage/      @latexwb/storage — SQLite, migrations, outbox, CAS
+packages/latex-kit/    @latexwb/latex-kit — pure LaTeX/BibTeX analysis (protected content,
+                       BibTeX parser, draft lint, text anchors); no workbench/fs deps,
+                       vendored by other products — see its README
 packages/core/         @latexwb/core — services: import/snapshot/build/patch/approvals/
                        workflows/bibliography/assets/checks/render/review/release/inspect
 packages/runtime/      @latexwb/runtime — tectonic + docker runners, toolchain provisioning,

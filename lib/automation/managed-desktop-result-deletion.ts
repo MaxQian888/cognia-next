@@ -297,11 +297,15 @@ export async function isManagedDesktopResultDeletionPending(
       .count()) > 0
   )
 }
-export async function retryManagedDesktopResultDeletions(): Promise<number> {
+export async function retryManagedDesktopResultDeletions(report?: {
+  blocked: number
+  failed: number
+}): Promise<number> {
   const release = await acquire()
   const db = getDb()
   const account = useAccountStore.getState()
   if (account.locked || !account.unlockedAccountId) {
+    if (report) report.blocked++
     release()
     return 0
   }
@@ -313,7 +317,10 @@ export async function retryManagedDesktopResultDeletions(): Promise<number> {
       .filter((row) => row.phase !== "deleted")
       .toArray()
     let removed = 0
-    for (const row of rows) if (await replayRow(db, row, guard.assert)) removed++
+    for (const row of rows) {
+      if (await replayRow(db, row, guard.assert)) removed++
+      else if (report) report.failed++
+    }
     return removed
   } finally {
     guard.detach()

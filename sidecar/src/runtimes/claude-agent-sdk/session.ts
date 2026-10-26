@@ -16,6 +16,7 @@ export function createAnthropicSession({
   pendingPluginToolCalls,
   pendingPluginHookCalls,
   sendOptions,
+  finishRuntime,
 }: SessionContext) {
   let steerCloseTimer: ReturnType<typeof setTimeout> | undefined
   const closeInput = () => {
@@ -62,6 +63,7 @@ export function createAnthropicSession({
       session.pushUserMessage(trimmed ? `/compact ${trimmed}` : "/compact")
     },
     closeInput,
+    finishRuntime,
     // A streaming query that receives a second user message remains open for
     // more input after emitting that response. Keep a short burst window for
     // adjacent steers, then close THIS query's input so its result can settle;

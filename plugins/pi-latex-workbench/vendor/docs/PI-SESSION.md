@@ -332,6 +332,8 @@ read-back line is printed to stderr on every bound start:
   edit files directly, or install packages — builds go exclusively through
   the provisioned tectonic preset.
 
-Integration follows Pi 0.85.1's
-[extension lifecycle and message APIs](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/extensions.md)
-and [on-demand skills](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/skills.md).
+The current integration is verified with Pi 1.3.0's
+[extension lifecycle and message APIs](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/docs/extensions.md)
+and [on-demand skills](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/docs/skills.md).
+
+Compatibility is verified with the bundled Pi 1.0.2 and current Pi 1.3.0 hosts. Development dependencies pin 1.3.0; runtime peers accept compatible 1.x hosts from 1.0.2. The Cognia preparation bridge keeps TypeScript source outside node_modules while replacing workspace symlinks with ordinary package directories.

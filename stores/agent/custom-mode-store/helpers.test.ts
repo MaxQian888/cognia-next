@@ -9,6 +9,7 @@ import {
   autoSelectMcpToolsForMode,
 } from "./helpers"
 import { analyzeModeDescription } from "./helpers"
+import { MODE_PROMPT_TEMPLATE_VARIABLES } from "@/lib/agent/modes/built-ins"
 import { initialState } from "./initial-state"
 import * as barrel from "./index"
 import { useCustomModeStore } from "./store"
@@ -64,6 +65,17 @@ describe("PROMPT_TEMPLATE_VARIABLES", () => {
         "{{mode_description}}",
       ])
     )
+  })
+})
+
+describe("built-in mode prompt placeholders (ADR-0236)", () => {
+  it("declares exactly the variables the editor advertises and the send path substitutes", () => {
+    const declared = MODE_PROMPT_TEMPLATE_VARIABLES.map((name) => `{{${name}}}`)
+    expect(declared.sort()).toEqual(Object.keys(PROMPT_TEMPLATE_VARIABLES).sort())
+    expect(Object.keys(getTemplateVariablePreview()).sort()).toEqual(declared)
+    for (const placeholder of declared) {
+      expect(processPromptTemplateVariables(placeholder, { modeName: "M" })).not.toBe(placeholder)
+    }
   })
 })
 

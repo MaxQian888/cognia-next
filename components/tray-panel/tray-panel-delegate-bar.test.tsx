@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("@/lib/tauri/pet-window", () => ({ showMainWindow: jest.fn() }))
@@ -89,6 +89,43 @@ describe("inlineFieldOf", () => {
 })
 
 describe("TrayPanelDelegateBar", () => {
+  it("remeasures wrapped text on width changes without looping on height changes", () => {
+    const previousObserver = global.ResizeObserver
+    let notify: ResizeObserverCallback | undefined
+    const disconnect = jest.fn()
+    global.ResizeObserver = jest.fn().mockImplementation((callback: ResizeObserverCallback) => {
+      notify = callback
+      return { observe: jest.fn(), disconnect }
+    })
+    const height = jest.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+    height.mockReturnValue(24)
+    try {
+      const { unmount } = render(<Bar action={delegate} />)
+      const box = screen.getByRole("textbox", { name: "Task" })
+      expect(box.style.height).toBe("24px")
+      const resize = (width: number) =>
+        act(() =>
+          notify?.([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver)
+        )
+      height.mockReturnValue(64)
+      resize(180)
+      expect(box.style.height).toBe("64px")
+      height.mockReturnValue(160)
+      resize(180)
+      expect(box.style.height).toBe("64px")
+      resize(100)
+      expect(box.style.height).toBe("100px")
+      height.mockReturnValue(24)
+      resize(300)
+      expect(box.style.height).toBe("24px")
+      unmount()
+      expect(disconnect).toHaveBeenCalled()
+    } finally {
+      height.mockRestore()
+      global.ResizeObserver = previousObserver
+    }
+  })
+
   it("edits the inline field and keeps send disabled while a required prompt is empty", async () => {
     const user = userEvent.setup()
     render(<Bar action={delegate} />)
@@ -144,6 +181,7 @@ describe("TrayPanelDelegateBar", () => {
     render(<Bar action={delegate} />)
     const chip = screen.getByRole("button", { name: "Delegate options" })
     expect(chip).toHaveTextContent("→ New conversation")
+    expect(chip).toHaveAttribute("title", "New conversation")
 
     await user.click(chip)
     expect(await screen.findByText("Send to")).toBeInTheDocument()

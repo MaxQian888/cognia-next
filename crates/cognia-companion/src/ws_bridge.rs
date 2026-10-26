@@ -42,6 +42,7 @@
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use axum::{
     extract::{
@@ -338,7 +339,15 @@ pub struct BrainHello {
     pub contract_version: u32,
 }
 
+struct PersonBridges {
+    writes: Arc<super::desktop_writes_bridge::DesktopWritesBridge>,
+    messages: Arc<super::desktop_messages_bridge::DesktopMessagesBridge>,
+    sync: Arc<super::sync_bridge::SyncBridge>,
+}
+
 struct BridgeSlot {
+    person: Option<Arc<PersonBridges>>,
+    rss_bytes: u64,
     transport: Arc<SocketBridgeTransport>,
     /// Signals the owning socket task to shut down (single-connection
     /// replacement: the new connection closes the old).
@@ -352,7 +361,7 @@ struct BridgeSlot {
 
 static CONN_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-static SOCKET_BRIDGE: Lazy<RwLock<Option<BridgeSlot>>> = Lazy::new(|| RwLock::new(None));
+static SOCKET_BRIDGE: Lazy<RwLock<HashMap<String, BridgeSlot>>> = Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Readiness channel — `true` while a brain is connected and helloed.
 /// The brain supervisor (R8) uses this as its readiness probe.
@@ -456,7 +465,7 @@ pub fn brain_runtime_health() -> BrainRuntimeHealth {
 /// update never mistakes a disconnect's cleared gauges for a healthy baseline.
 pub fn connected_brain_runtime_health() -> Option<BrainRuntimeHealth> {
     let slot = SOCKET_BRIDGE.read();
-    slot.as_ref().map(|_| brain_runtime_health())
+    slot.values().find(|slot| slot.person.is_none()).map(|_| brain_runtime_health())
 }
 
 pub fn brain_failed_runtimes() -> Vec<String> {
@@ -534,6 +543,7 @@ fn install_socket_bridge(
     shutdown: watch::Sender<bool>,
     hello: BrainHello,
     _test_owner: Option<usize>,
+    person: bool,
 ) {
     let old = {
         let mut slot = SOCKET_BRIDGE.write();
@@ -545,51 +555,88 @@ fn install_socket_bridge(
             .iter()
             .any(|capability| capability == "runtime-health")
             .then_some(false);
-        reset_brain_gauges(bootstrapped);
-        slot.replace(BridgeSlot {
+        if !person { reset_brain_gauges(bootstrapped); }
+        let old_key = if person { Some(hello.account_id.clone()) }
+            else { slot.iter().find(|(_, slot)| slot.person.is_none()).map(|(account, _)| account.clone()) };
+        let old = old_key.and_then(|key| slot.remove(&key));
+        slot.insert(hello.account_id.clone(), BridgeSlot {
+            person: person.then(|| Arc::new(PersonBridges {
+                writes: super::desktop_writes_bridge::DesktopWritesBridge::new(),
+                messages: super::desktop_messages_bridge::DesktopMessagesBridge::new(),
+                sync: super::sync_bridge::SyncBridge::new(),
+            })),
+            rss_bytes: 0,
             transport,
             shutdown,
             hello,
             #[cfg(any(test, feature = "test-support"))]
             test_owner: _test_owner,
-        })
+        });
+        old
     };
     if let Some(old) = old {
         log::info!("companion-api ws-bridge: replacing existing brain connection");
         old.transport.mark_disconnected();
         let _ = old.shutdown.send(true);
     }
-    let _ = READY.0.send(true);
-    super::ws_worker::announce_all_workers();
+    if !person {
+        let _ = READY.0.send(true);
+        super::ws_worker::announce_all_workers();
+    }
 }
 
 /// Clear the slot iff it is still owned by `conn_id` (a replaced connection
 /// must not clear its successor's slot).
 fn clear_socket_bridge_if(conn_id: u64) {
-    let cleared = {
-        let mut slot = SOCKET_BRIDGE.write();
-        if slot
-            .as_ref()
-            .map(|s| s.transport.conn_id == conn_id)
-            .unwrap_or(false)
-        {
-            slot.take();
-            reset_brain_gauges(None);
-            true
-        } else {
-            false
+    let mut slots = SOCKET_BRIDGE.write();
+    let key = slots.iter().find(|(_, slot)| slot.transport.conn_id == conn_id).map(|(id, _)| id.clone());
+    if let Some(key) = key {
+        if let Some(slot) = slots.remove(&key) {
+            if slot.person.is_none() {
+                reset_brain_gauges(None);
+                let _ = READY.0.send(false);
+            }
         }
-    };
-    if cleared {
-        let _ = READY.0.send(false);
     }
+}
+
+pub fn disconnect_account(account_id: &str) {
+    if let Some(slot) = SOCKET_BRIDGE.write().remove(account_id) {
+        slot.transport.mark_disconnected();
+        let _ = slot.shutdown.send(true);
+    }
+}
+
+pub fn account_connected(account_id: &str) -> bool { SOCKET_BRIDGE.read().contains_key(account_id) }
+pub fn account_rss_bytes(account_id: &str) -> u64 { SOCKET_BRIDGE.read().get(account_id).map_or(0, |slot| slot.rss_bytes) }
+pub fn send_account_token_refresh(account_id: &str, token: String) -> Result<(), String> {
+    let slots = SOCKET_BRIDGE.read();
+    let slot = slots.get(account_id).ok_or("no connected brain")?;
+    slot.transport.send_frame(&BridgeFrame::TokenRefresh { v: BRIDGE_PROTOCOL_VERSION, token })
+}
+
+fn person_bridges() -> Option<Arc<PersonBridges>> {
+    let person = super::person_partition::current()?;
+    SOCKET_BRIDGE.read().get(&person.account_id).and_then(|slot| slot.person.clone())
+}
+pub fn writes_bridge(state: &SharedState) -> Arc<super::desktop_writes_bridge::DesktopWritesBridge> {
+    if super::person_partition::current().is_some() { return person_bridges().map(|bridges| bridges.writes.clone()).unwrap_or_else(super::desktop_writes_bridge::DesktopWritesBridge::new); }
+    state.desktop_writes_bridge.clone()
+}
+pub fn messages_bridge(state: &SharedState) -> Arc<super::desktop_messages_bridge::DesktopMessagesBridge> {
+    if super::person_partition::current().is_some() { return person_bridges().map(|bridges| bridges.messages.clone()).unwrap_or_else(super::desktop_messages_bridge::DesktopMessagesBridge::new); }
+    state.desktop_messages_bridge.clone()
+}
+pub fn sync_bridge(state: &SharedState) -> Arc<super::sync_bridge::SyncBridge> {
+    if super::person_partition::current().is_some() { return person_bridges().map(|bridges| bridges.sync.clone()).unwrap_or_else(super::sync_bridge::SyncBridge::new); }
+    state.sync_bridge.clone()
 }
 
 /// The connected brain's transport, if any.
 pub fn socket_bridge_transport() -> Option<Arc<SocketBridgeTransport>> {
     SOCKET_BRIDGE
         .read()
-        .as_ref()
+        .values().find(|slot| slot.person.is_none())
         .map(|s| Arc::clone(&s.transport))
 }
 
@@ -599,7 +646,10 @@ pub fn socket_bridge_transport() -> Option<Arc<SocketBridgeTransport>> {
 pub(crate) fn socket_bridge_transport_for_state(
     _state: &SharedState,
 ) -> Option<Arc<SocketBridgeTransport>> {
-    let slot = SOCKET_BRIDGE.read();
+    let slots = SOCKET_BRIDGE.read();
+    let slot = if let Some(person) = super::person_partition::current() {
+        slots.get(&person.account_id).filter(|slot| slot.person.is_some())
+    } else { slots.values().find(|slot| slot.person.is_none()) };
     #[cfg(any(test, feature = "test-support"))]
     if slot
         .as_ref()
@@ -613,12 +663,12 @@ pub(crate) fn socket_bridge_transport_for_state(
 
 /// Whether a brain is currently connected and helloed.
 pub fn bridge_connected() -> bool {
-    SOCKET_BRIDGE.read().is_some()
+    SOCKET_BRIDGE.read().values().any(|slot| slot.person.is_none())
 }
 
 /// The connected brain's hello metadata (healthz).
 pub fn brain_hello() -> Option<BrainHello> {
-    SOCKET_BRIDGE.read().as_ref().map(|s| s.hello.clone())
+    SOCKET_BRIDGE.read().values().find(|slot| slot.person.is_none()).map(|s| s.hello.clone())
 }
 
 /// Capability a brain must announce before it will answer a media read.
@@ -656,7 +706,7 @@ pub fn brain_serves_filespace() -> bool {
 fn brain_announces(wanted: &str) -> bool {
     SOCKET_BRIDGE
         .read()
-        .as_ref()
+        .values().find(|slot| slot.person.is_none())
         .map(|slot| {
             slot.hello
                 .capabilities
@@ -685,7 +735,7 @@ pub fn brain_rss_bytes() -> u64 {
 #[allow(dead_code)] // consumed by the brain supervisor (R8).
 pub fn send_token_refresh(token: String) -> Result<(), String> {
     let slot = SOCKET_BRIDGE.read();
-    match slot.as_ref() {
+    match slot.values().find(|slot| slot.person.is_none()) {
         Some(s) => s.transport.send_frame(&BridgeFrame::TokenRefresh {
             v: BRIDGE_PROTOCOL_VERSION,
             token,
@@ -745,7 +795,7 @@ pub(crate) fn send_worker_detach(
 
 fn send_worker_bridge_frame(tenant_id: &str, frame: BridgeFrame) -> Result<(), String> {
     let slot = SOCKET_BRIDGE.read();
-    match slot.as_ref() {
+    match slot.values().find(|slot| slot.person.is_none()) {
         Some(slot) if slot.hello.account_id == tenant_id => slot.transport.send_frame(&frame),
         Some(_) => Err("worker tenant does not match the connected brain".to_string()),
         None => Err("no connected brain".to_string()),
@@ -755,7 +805,7 @@ fn send_worker_bridge_frame(tenant_id: &str, frame: BridgeFrame) -> Result<(), S
 pub fn current_brain_account_id() -> Option<String> {
     SOCKET_BRIDGE
         .read()
-        .as_ref()
+        .values().find(|slot| slot.person.is_none())
         .map(|slot| slot.hello.account_id.clone())
 }
 
@@ -772,6 +822,7 @@ pub fn resolve_bridge_transport(state: &SharedState) -> Result<Arc<dyn BridgeTra
     if let Some(socket) = socket_bridge_transport_for_state(state) {
         return Ok(socket);
     }
+    if super::person_partition::current().is_some() { return Err("person_brain_unavailable".into()); }
     if let Some(renderer) = state.renderer.as_ref() {
         return Ok(renderer.bridge_transport());
     }
@@ -801,7 +852,7 @@ pub async fn ws_bridge_handler(
             serde_json::json!({}),
         );
     };
-    if ctx.scope != "service" {
+    if !crate::jwt::is_service_scope(Some(ctx.scope.as_ref())) && ctx.scope != "person-brain" {
         return super::api::public_error_response(
             axum::http::StatusCode::FORBIDDEN,
             "service_scope_required",
@@ -811,9 +862,15 @@ pub async fn ws_bridge_handler(
         );
     }
 
+    let person_token = request.extensions().get::<crate::jwt::PersonBrainClaims>().cloned();
+    if ctx.scope == "person-brain" && !person_token.as_ref().is_some_and(|token|
+        super::person_partition::fleet().is_some_and(|fleet| fleet.accepts_bridge(&ctx.tenant_id, &token.generation))) {
+        return super::api::public_error_response(axum::http::StatusCode::FORBIDDEN,
+            "person_brain_unavailable", "person brain is not active", true, serde_json::json!({}));
+    }
     ws.max_message_size(MAX_BRIDGE_FRAME_BYTES)
         .max_frame_size(MAX_BRIDGE_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_socket(socket, state, ctx.tenant_id))
+        .on_upgrade(move |socket| handle_socket(socket, state, ctx.tenant_id, person_token))
 }
 
 /// Send a close frame with `code`/`reason`, ignoring transport errors.
@@ -842,6 +899,7 @@ async fn refuse(
     brain: BridgeIdentity,
     server_contract: Option<(u32, String)>,
     close_reason: &str,
+    person: bool,
 ) {
     let (contract_version, catalog_hash) = server_contract.unwrap_or_default();
     let server = BridgeIdentity {
@@ -850,12 +908,13 @@ async fn refuse(
         contract_version,
         catalog_hash,
     };
-    record_refusal(BrainRefusal {
+    let refusal = BrainRefusal {
         reason: reason.to_string(),
         at_ms: now_ms(),
         brain,
         server: server.clone(),
-    });
+    };
+    if !person { record_refusal(refusal); }
     let frame = BridgeFrame::HelloRefused {
         v: BRIDGE_PROTOCOL_VERSION,
         reason: reason.to_string(),
@@ -871,7 +930,8 @@ async fn refuse(
 }
 
 /// Drive one brain connection.
-async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: String) {
+async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: String, person_token: Option<crate::jwt::PersonBrainClaims>) {
+    let person = person_token.is_some();
     // ── 1. Await hello ───────────────────────────────────────────────────────
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, await_hello(&mut socket)).await {
         Ok(Some(hello)) => hello,
@@ -913,6 +973,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
             &format!(
                 "unsupported bridge protocol {protocol} (server speaks {BRIDGE_PROTOCOL_VERSION})"
             ),
+            person,
         )
         .await;
         return;
@@ -940,6 +1001,7 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
                 contract.catalog_hash().to_string(),
             )),
             "Headless contract mismatch",
+            person,
         )
         .await;
         return;
@@ -951,6 +1013,14 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
             "hello accountId does not match the service token's account",
         )
         .await;
+        return;
+    }
+
+    // Purge/idle stop may race a socket waiting for hello. Recheck the
+    // lifecycle reservation before installing; an old token cannot create an
+    // unsupervised slot once the fleet has stopped its account.
+    if person && !super::person_partition::fleet().is_some_and(|fleet| fleet.accepts_bridge(&account_id, &person_token.as_ref().expect("person token").generation)) {
+        close_with(&mut socket, CLOSE_POLICY_VIOLATION, "person brain is no longer active").await;
         return;
     }
 
@@ -979,19 +1049,26 @@ async fn handle_socket(mut socket: WebSocket, state: SharedState, account_id: St
     let (out_tx, mut out_rx) = mpsc::channel::<QueuedBridgeMessage>(MAX_BRIDGE_QUEUE_FRAMES);
     let transport = SocketBridgeTransport::new(out_tx, conn_id);
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-    BRAIN_REFUSAL.write().take();
-    install_socket_bridge(
-        Arc::clone(&transport),
-        shutdown_tx,
-        BrainHello {
+    if !person { BRAIN_REFUSAL.write().take(); }
+    let hello = BrainHello {
             brain_version,
             account_id: account_id.clone(),
             capabilities,
             catalog_hash,
             contract_version,
-        },
-        None,
-    );
+        };
+    let installed = if let Some(token) = person_token.as_ref() {
+        super::person_partition::fleet().and_then(|fleet| fleet.bridge_authority(&account_id))
+            .is_some_and(|authority| authority.admit(&token.generation, ||
+                install_socket_bridge(Arc::clone(&transport), shutdown_tx, hello, None, true)))
+    } else {
+        install_socket_bridge(Arc::clone(&transport), shutdown_tx, hello, None, false);
+        true
+    };
+    if !installed {
+        close_with(&mut socket, CLOSE_POLICY_VIOLATION, "person brain is no longer active").await;
+        return;
+    }
     log::info!("companion-api ws-bridge: brain connected (conn {conn_id})");
 
     // ── 4. Pump loop ─────────────────────────────────────────────────────────
@@ -1097,6 +1174,7 @@ fn handle_brain_frame(
     transport: &SocketBridgeTransport,
     account_id: &str,
 ) {
+    if !SOCKET_BRIDGE.read().get(account_id).is_some_and(|slot| slot.transport.conn_id == transport.conn_id) { return; }
     let frame = match serde_json::from_str::<BridgeFrame>(text) {
         Ok(f) => f,
         Err(e) => {
@@ -1107,7 +1185,15 @@ fn handle_brain_frame(
     match frame {
         BridgeFrame::Respond {
             command, payload, ..
-        } => route_respond(state, &command, payload),
+        } => {
+            let slots = SOCKET_BRIDGE.read();
+            let Some(slot) = slots.get(account_id).filter(|slot| slot.transport.conn_id == transport.conn_id) else { return; };
+            let person = slot.person.clone();
+            drop(slots);
+            if let Some(bridges) = person {
+                route_person_respond(state, account_id, &bridges, &command, payload);
+            } else { route_respond(state, &command, payload); }
+        },
         BridgeFrame::Pong {
             rss_bytes,
             last_flush_at,
@@ -1118,14 +1204,10 @@ fn handle_brain_frame(
             restarting_required_runtimes,
             ..
         } => {
-            // A replaced socket must not overwrite its successor's health.
-            let slot = SOCKET_BRIDGE.read();
-            if !slot
-                .as_ref()
-                .is_some_and(|slot| slot.transport.conn_id == transport.conn_id)
-            {
-                return;
-            }
+            let mut slots = SOCKET_BRIDGE.write();
+            let Some(slot) = slots.get_mut(account_id).filter(|slot| slot.transport.conn_id == transport.conn_id) else { return; };
+            slot.rss_bytes = rss_bytes;
+            if slot.person.is_some() { return; }
             BRAIN_RSS_BYTES.store(rss_bytes, Ordering::SeqCst);
             BRAIN_LAST_FLUSH_AT.store(last_flush_at, Ordering::SeqCst);
             // Every brain pong carries the full list; absence means none.
@@ -1158,6 +1240,7 @@ fn handle_brain_frame(
             frame,
             ..
         } => {
+            if SOCKET_BRIDGE.read().get(account_id).is_some_and(|slot| slot.person.is_some()) { return; }
             if let Err(error) = super::ws_worker::send_to_worker(account_id, &connection_id, frame)
             {
                 log::debug!("companion-api ws-bridge: worker frame rejected: {error}");
@@ -1244,6 +1327,41 @@ fn media_response_from_payload(
             .and_then(Value::as_str)
             .map(str::to_owned),
     )
+}
+
+/// Each person slot owns its response pools. A response naming another
+/// slot's request id cannot resolve it, including after socket replacement.
+fn route_person_respond(state: &SharedState, account_id: &str, bridges: &PersonBridges, command: &str, payload: Value) {
+    match command {
+        "companion_sync_pull_response" => {
+            if let Ok(response) = serde_json::from_value(payload) { bridges.sync.resolve(response); }
+        }
+        "companion_message_response" => {
+            if let Ok(response) = serde_json::from_value(payload) { bridges.messages.resolve(response); }
+        }
+        "companion_desktop_write_response" => {
+            if let Ok(response) = serde_json::from_value(payload) { bridges.writes.resolve(response); }
+        }
+        "companion_event_publish" => {
+            // The data roster publishes only invalidations and transcript
+            // revisions. No service-level publications, worker frames, Host
+            // configuration, orchestration or arbitrary event topics.
+            let Some(topic) = payload.get("topic").and_then(Value::as_str) else { return; };
+            let Some(event) = payload.get("event") else { return; };
+            let event = match topic {
+                "sync://invalidate" => event.clone(),
+                TRANSCRIPT_REVISION_TOPIC => match transcript_revision_envelope(event) { Some(event) => event, None => return },
+                _ => return,
+            };
+            let Some(person) = super::person_partition::fleet().and_then(|fleet| fleet.person(account_id)) else { return; };
+            let Some(store) = super::security_store::security_store() else { return; };
+            let Ok(devices) = store.person_devices(&person.org_id, &person.user_id) else { return; };
+            for device in devices {
+                state.event_bus.publish_person_to(topic.to_string(), event.clone(), device, account_id.to_string());
+            }
+        }
+        _ => {},
+    }
 }
 
 fn route_respond(state: &SharedState, command: &str, payload: Value) {
@@ -1511,7 +1629,16 @@ pub mod test_support {
                     .schema_version(),
             },
             Some(Arc::as_ptr(state) as usize),
+            false,
         );
+        TestBridgeReceiver { rx }
+    }
+
+    pub fn install_person_socket_for_testing(state: &SharedState, account_id: &str) -> TestBridgeReceiver {
+        let (tx, rx) = mpsc::channel(MAX_BRIDGE_QUEUE_FRAMES);
+        let transport = SocketBridgeTransport::new(tx, CONN_COUNTER.fetch_add(1, Ordering::SeqCst));
+        let (shutdown, _) = watch::channel(false);
+        install_socket_bridge(transport, shutdown, BrainHello { brain_version: "test".into(), account_id: account_id.into(), capabilities: vec![], catalog_hash: String::new(), contract_version: 0 }, Some(Arc::as_ptr(state) as usize), true);
         TestBridgeReceiver { rx }
     }
 
@@ -1551,7 +1678,7 @@ pub mod test_support {
     }
 
     pub fn clear_socket_for_testing() {
-        SOCKET_BRIDGE.write().take();
+        SOCKET_BRIDGE.write().clear();
         let _ = READY.0.send(false);
         super::reset_brain_gauges(None);
     }
@@ -1720,6 +1847,86 @@ mod tests {
     }
 
     // ── Golden fixtures — the cross-language wire contract ────────────────────
+
+    #[test]
+    fn p5_legacy_bridge_wire_fixtures_stay_identical() {
+        golden_fixtures_roundtrip_through_the_frame_enum();
+        golden_respond_payloads_parse_into_the_bridge_response_structs();
+    }
+
+    #[tokio::test]
+    async fn p5_stale_child_hello_cannot_displace_the_live_account_slot() {
+        let _guard = lock_slot().await; test_support::clear_socket_for_testing();
+        let state = test_state();
+        let account = "pb_aaaaaaaaaaaaaaaaaaaaaaaa";
+        let authority = crate::person_partition::PersonBrainAuthority::new(account.into());
+        let first = authority.begin_child().unwrap();
+        let stale = authority.current().unwrap();
+        drop(first);
+        let _current = authority.begin_child().unwrap();
+        let current = authority.current().unwrap();
+        let _socket = test_support::install_person_socket_for_testing(&state, account);
+        let conn = SOCKET_BRIDGE.read().get(account).unwrap().transport.conn_id;
+        let hello = SOCKET_BRIDGE.read().get(account).unwrap().hello.clone();
+        let (tx, _rx) = mpsc::channel(MAX_BRIDGE_QUEUE_FRAMES);
+        let replacement = SocketBridgeTransport::new(tx, CONN_COUNTER.fetch_add(1, Ordering::SeqCst));
+        let replacement_id = replacement.conn_id;
+        let (shutdown, _) = watch::channel(false);
+        assert!(!authority.admit(&stale, || install_socket_bridge(replacement.clone(), shutdown.clone(), hello.clone(), None, true)));
+        assert_eq!(SOCKET_BRIDGE.read().get(account).unwrap().transport.conn_id, conn);
+        assert!(authority.admit(&current, || install_socket_bridge(replacement, shutdown, hello, None, true)));
+        assert_eq!(SOCKET_BRIDGE.read().get(account).unwrap().transport.conn_id, replacement_id);
+        authority.stop();
+        assert!(!account_connected(account));
+    }
+
+    #[tokio::test]
+    async fn p5_two_person_bridges_reject_cross_slot_responses_and_never_fallback() {
+        let _guard = lock_slot().await;
+        test_support::clear_socket_for_testing();
+        let state = test_state();
+        let mut operator = test_support::install_socket_for_testing(&state);
+        let a = crate::person_partition::PersonPartition::new("org".into(), "a".into());
+        let b = crate::person_partition::PersonPartition::new("org".into(), "b".into());
+        let mut a_socket = test_support::install_person_socket_for_testing(&state, &a.account_id);
+        let mut b_socket = test_support::install_person_socket_for_testing(&state, &b.account_id);
+        let transport_a = SOCKET_BRIDGE.read().get(&a.account_id).unwrap().transport.clone();
+        let transport_b = SOCKET_BRIDGE.read().get(&b.account_id).unwrap().transport.clone();
+        assert_eq!(current_brain_account_id().as_deref(), Some("local_acct_a"));
+        for kind in ["writes", "messages", "sync"] {
+            let state_copy = state.clone(); let a_copy = a.clone();
+            let request = tokio::spawn(crate::person_partition::scope(Some(a.clone()), async move {
+                let transport = resolve_bridge_transport(&state_copy).unwrap();
+                match kind {
+                    "writes" => writes_bridge(&state_copy).dispatch(transport.as_ref(), "pet_get", json!({}), Duration::from_secs(2)).await,
+                    "messages" => messages_bridge(&state_copy).list_sessions(transport.as_ref(), 20, 0, None, Duration::from_secs(2)).await,
+                    _ => sync_bridge(&state_copy).pull(transport.as_ref(), "messages".into(), 0, a_copy.account_id, None, None, Duration::from_secs(2)).await,
+                }
+            }));
+            let outgoing = tokio::time::timeout(Duration::from_secs(1), a_socket.recv()).await.unwrap().unwrap();
+            let Message::Text(text) = outgoing else { panic!("expected event"); };
+            let event: Value = serde_json::from_str(text.as_str()).unwrap();
+            let id = event["payload"]["requestId"].as_str().or_else(|| event["payload"]["request_id"].as_str()).unwrap();
+            let command = match kind { "writes" => "companion_desktop_write_response", "messages" => "companion_message_response", _ => "companion_sync_pull_response" };
+            let response = json!({"v": BRIDGE_PROTOCOL_VERSION, "type":"respond", "command":command,
+                "payload":{"requestId":id, "result":{"owner":"a"}, "delta":{"owner":"a"}, "error":null}}).to_string();
+            let forged = response.replace("\"owner\":\"a\"", "\"owner\":\"intruder\"");
+            handle_brain_frame(&state, &forged, &transport_b, &b.account_id);
+            let operator_transport = socket_bridge_transport().unwrap();
+            handle_brain_frame(&state, &forged, &operator_transport, "local_acct_a");
+            assert!(!request.is_finished(), "cross-slot response must not resolve {kind}");
+            handle_brain_frame(&state, &response, &transport_a, &a.account_id);
+            assert_eq!(request.await.unwrap().unwrap(), json!({"owner":"a"}));
+            assert!(b_socket.try_recv().is_err()); assert!(operator.try_recv().is_err());
+        }
+        disconnect_account(&a.account_id);
+        crate::person_partition::scope(Some(a), async {
+            assert!(resolve_bridge_transport(&state).is_err());
+            assert!(crate::data_plane::DataPlane::pick(&state).is_none());
+        }).await;
+        assert!(bridge_connected(), "operator still connected");
+        test_support::clear_socket_for_testing();
+    }
 
     #[test]
     fn golden_fixtures_roundtrip_through_the_frame_enum() {

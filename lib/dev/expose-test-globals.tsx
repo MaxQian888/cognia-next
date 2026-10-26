@@ -34,9 +34,17 @@ export type MockBaseUrls = {
 
 declare global {
   interface Window {
+    /** Bundled native IPC client; exposed only by the build-time E2E gate. */
+    __cogniaE2EAutomation?: typeof import("@/lib/automation/client").desktop
+    /** Rebind the local desktop stream for native listener-race regression tests. */
+    __cogniaE2ERestartLocalTransport?: (options?: {
+      delayConsentListener?: boolean
+    }) => Promise<boolean>
+    __consentListenerGate?: { held: boolean; release: () => void }
     __cogniaResetDb?: () => Promise<void>
     __cogniaSeedWorkflow?: (kind: SeededWorkflowKind) => Promise<string>
     __cogniaSeedRawWorkflow?: (draft: unknown) => Promise<string>
+    __cogniaDeleteWorkflow?: (workflowId: string) => Promise<void>
     __cogniaReadRuns?: (workflowId: string) => Promise<
       Array<{
         id: string
@@ -284,6 +292,15 @@ export function ExposeTestGlobals(): null {
     // `import()` below would still be emitted as an (unreferenced) chunk.
     if (process.env.NEXT_PUBLIC_E2E === "1" && typeof window !== "undefined") {
       let cancelled = false
+      let restartInFlight = false
+      let ownedConsentGate: Window["__consentListenerGate"]
+      const releaseConsentGate = () => {
+        ownedConsentGate?.release()
+        if (ownedConsentGate && window.__consentListenerGate === ownedConsentGate) {
+          delete window.__consentListenerGate
+        }
+        ownedConsentGate = undefined
+      }
       let detachCompanionE2E = () => {}
 
       void (async () => {
@@ -362,12 +379,55 @@ export function ExposeTestGlobals(): null {
           { saveCompanionConfig, clearCompanionConfig, loadCompanionConfig },
           { buildWorkflowFixture },
           transportModule,
+          { desktop },
         ] = await Promise.all([
           import("@/lib/db/schema"),
           import("@/lib/tauri/transport-companion"),
           import("./workflow-fixtures"),
           import("@/lib/tauri/transport-instance"),
+          import("@/lib/automation/client"),
         ])
+
+        if (cancelled) return
+        window.__cogniaE2EAutomation = desktop
+        window.__cogniaE2ERestartLocalTransport = async (options) => {
+          if (cancelled || restartInFlight || !window.__TAURI_INTERNALS__) return false
+          restartInFlight = true
+          try {
+            const { getActiveRemoteTransport, RoutingTransport } =
+              await import("@/lib/tauri/transport-routing")
+            if (cancelled || getActiveRemoteTransport()) return false
+            let local = transportModule.localTransport
+            if (options?.delayConsentListener) {
+              const [{ TauriTransport }, { listen }] = await Promise.all([
+                import("@/lib/tauri/transport-tauri"),
+                import("@tauri-apps/api/event"),
+              ])
+              if (cancelled || getActiveRemoteTransport()) return false
+              releaseConsentGate()
+              let release!: () => void
+              const ready = new Promise<void>((resolve) => {
+                release = resolve
+              })
+              const gate = { held: false, release }
+              ownedConsentGate = gate
+              window.__consentListenerGate = gate
+              local = new TauriTransport(async (event, handler, options) => {
+                if (event === "automation:consent-request") {
+                  gate.held = true
+                  await ready
+                }
+                return listen(event, handler, options)
+              })
+            } else {
+              releaseConsentGate()
+            }
+            transportModule.setTransport(new RoutingTransport(local))
+            return true
+          } finally {
+            restartInFlight = false
+          }
+        }
 
         const ACCOUNT_DB_PREFIX = "cognia-account-"
 
@@ -441,6 +501,12 @@ export function ExposeTestGlobals(): null {
           const { createWorkflow } = await import("@/lib/db/workflows")
           const wf = await createWorkflow(draft as Parameters<typeof createWorkflow>[0])
           return wf.id
+        }
+
+        // Native fixtures share an account DB; cleanup must not reset it.
+        window.__cogniaDeleteWorkflow = async (workflowId) => {
+          const { deleteWorkflow } = await import("@/lib/db/workflows")
+          await deleteWorkflow(workflowId)
         }
 
         // Read a workflow's runs (with embedded events) straight from the
@@ -1068,8 +1134,12 @@ export function ExposeTestGlobals(): null {
       return () => {
         cancelled = true
         detachCompanionE2E()
+        delete window.__cogniaE2EAutomation
+        delete window.__cogniaE2ERestartLocalTransport
+        releaseConsentGate()
         delete window.__cogniaResetDb
         delete window.__cogniaSeedWorkflow
+        delete window.__cogniaDeleteWorkflow
         delete window.__cogniaReadMessages
         delete window.__cogniaReadSessions
         delete window.__cogniaE2EOutbound

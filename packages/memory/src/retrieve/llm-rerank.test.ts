@@ -13,6 +13,7 @@ import {
   applyRerank,
   createMemoryLlmReranker,
   mapRerankJudgements,
+  MEMORY_RERANK_SYSTEM_PROMPT,
   RERANK_DEFAULT_TIMEOUT_MS,
   RERANK_MAX_CANDIDATES,
   RERANK_MAX_IN_FLIGHT,
@@ -395,5 +396,54 @@ describe("applyRerank", () => {
       ["d", 0.9],
     ])
     expect(applyRerank(items, judged).map((i) => i.id)).toEqual(["d", "a", "b", "c"])
+  })
+})
+
+describe("system prompt", () => {
+  it("sends the shipped prompt by default", async () => {
+    const llm = client(async () => answer([0.2, 0.9]))
+    await createMemoryLlmReranker(llm)("q", candidates(2))
+    expect(llm.complete.mock.calls[0][1]?.system).toBe(MEMORY_RERANK_SYSTEM_PROMPT)
+  })
+
+  it("resolves the host's prompt on every call", async () => {
+    let n = 0
+    const llm = client(async () => answer([0.2, 0.9]))
+    const rerank = createMemoryLlmReranker(llm, {
+      systemPrompt: async () => `Custom scorer ${++n}. STRICT JSON.`,
+    })
+    expect((await rerank("q", candidates(2)))?.get("m2")).toBe(0.9)
+    await rerank("q", candidates(2))
+    expect(llm.complete.mock.calls.map((call) => call[1]?.system)).toEqual([
+      "Custom scorer 1. STRICT JSON.",
+      "Custom scorer 2. STRICT JSON.",
+    ])
+  })
+
+  it("keeps the local order, without calling the model, when aborted while resolving", async () => {
+    const controller = new AbortController()
+    const llm = client(async () => answer([0.2, 0.9]))
+    const rerank = createMemoryLlmReranker(llm, {
+      systemPrompt: async () => {
+        controller.abort()
+        return "Custom scorer."
+      },
+    })
+    expect(await rerank("q", candidates(2), { signal: controller.signal })).toBeNull()
+    expect(llm.complete).not.toHaveBeenCalled()
+  })
+
+  it("keeps the local order when the prompt cannot be resolved", async () => {
+    const llm = client(async () => answer([0.2, 0.9]))
+    const rerank = createMemoryLlmReranker(llm, {
+      systemPrompt: async () => {
+        throw new Error("snapshot unavailable")
+      },
+    })
+    expect(await rerank("q", candidates(2))).toBeNull()
+    expect(llm.complete).not.toHaveBeenCalled()
+    // The in-flight slot was released.
+    await createMemoryLlmReranker(llm)("q", candidates(2))
+    expect(llm.complete).toHaveBeenCalledTimes(1)
   })
 })

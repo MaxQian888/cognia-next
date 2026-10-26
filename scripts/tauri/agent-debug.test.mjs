@@ -1,5 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import fs from "node:fs"
+import path from "node:path"
+import { spawn } from "node:child_process"
+import { once } from "node:events"
+import * as debug from "./agent-debug.mjs"
 
 import {
   cliErrorPayload,
@@ -17,7 +22,188 @@ import {
   request,
   reconcileDebugSession,
   tauriDevArgs,
+  shutdownTrackedSession,
 } from "./agent-debug.mjs"
+
+test("scoped owner commands are rejected before reading discovery or descriptor files", async () => {
+  for (const command of [
+    "launch",
+    "stop",
+    "attach",
+    "sessions",
+    "revoke",
+    "recover",
+    "logs",
+    "evaluate",
+  ]) {
+    await assert.rejects(
+      debug.run({ command, positional: [], options: { client: "/missing/client.json" } }),
+      { code: "owner_command_denied" }
+    )
+  }
+})
+
+test("actual launch and stop entry points preserve unresolved startup intent", async () => {
+  const parent = path.resolve(".cache/tauri-agent-debug/completion-2026-10-23")
+  fs.mkdirSync(parent, { recursive: true })
+  const workspace = fs.mkdtempSync(path.join(parent, "startup-entry-"))
+  const script = path.join(workspace, "scripts/tauri/agent-debug.mjs")
+  const record = path.join(workspace, ".cache/tauri-agent-debug/session.json")
+  fs.mkdirSync(path.dirname(script), { recursive: true })
+  fs.mkdirSync(path.dirname(record), { recursive: true })
+  fs.copyFileSync(new URL("./agent-debug.mjs", import.meta.url), script)
+  const intent = { startupIntent: true, sessionId: "pending", workspace, logFile: "pending.log" }
+  fs.writeFileSync(record, JSON.stringify(intent))
+  try {
+    for (const command of ["launch", "stop"]) {
+      const child = spawn(process.execPath, [script, command, "--timeout", "1000"], {
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+      let stderr = ""
+      child.stderr.on("data", (chunk) => (stderr += chunk))
+      const [code] = await once(child, "exit")
+      assert.equal(code, 1)
+      assert.equal(JSON.parse(stderr).code, "debug_startup_unresolved")
+      assert.deepEqual(JSON.parse(fs.readFileSync(record, "utf8")), intent)
+    }
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true })
+  }
+})
+
+test("unresolved startup intent cannot be discarded by a lifecycle successor", () => {
+  assert.throws(() => debug.assertResolvedStartup({ startupIntent: true, logFile: "owned.log" }), {
+    code: "debug_startup_unresolved",
+  })
+  assert.doesNotThrow(() => debug.assertResolvedStartup({ startupIntent: false, pid: 77 }))
+})
+test("private descriptor publication never overwrites an existing credential", () => {
+  const parent = path.resolve(".cache/tauri-agent-debug/completion-2026-10-23")
+  fs.mkdirSync(parent, { recursive: true })
+  const file = path.join(fs.mkdtempSync(path.join(parent, "descriptor-")), "client.json")
+  try {
+    debug.writePrivateJson(file, { token: "first" }, { exclusive: true })
+    assert.throws(() => debug.writePrivateJson(file, { token: "second" }, { exclusive: true }), {
+      code: "EEXIST",
+    })
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { token: "first" })
+    if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600)
+  } finally {
+    fs.rmSync(path.dirname(file), { recursive: true, force: true })
+  }
+})
+
+test("lifecycle mutex serializes contenders and releases after process death", async () => {
+  const parent = path.resolve(".cache/tauri-agent-debug/completion-2026-10-23")
+  fs.mkdirSync(parent, { recursive: true })
+  const workspace = fs.mkdtempSync(path.join(parent, "mutex-"))
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    const {withLifecycleLock} = await import(process.argv[1]);
+    await withLifecycleLock(async()=>{process.send('held');await new Promise(()=>{})}, {workspace:process.argv[2],timeout:5000});
+  `,
+      new URL("./agent-debug.mjs", import.meta.url).href,
+      workspace,
+    ],
+    { stdio: ["ignore", "ignore", "pipe", "ipc"] }
+  )
+  try {
+    const result = await Promise.race([
+      once(child, "message"),
+      once(child, "exit").then(([code]) => {
+        throw new Error(`lock worker exited ${code}`)
+      }),
+    ])
+    assert.equal(result[0], "held")
+    await assert.rejects(
+      debug.withLifecycleLock(() => assert.fail("overlap"), { workspace, timeout: 50 }),
+      { code: "debug_lifecycle_busy" }
+    )
+    const exited = once(child, "exit")
+    child.kill("SIGKILL")
+    await exited
+    assert.equal(
+      await debug.withLifecycleLock(() => "acquired", { workspace, timeout: 1000 }),
+      "acquired"
+    )
+  } finally {
+    child.kill()
+    fs.rmSync(workspace, { recursive: true, force: true })
+  }
+})
+
+test("launch policy overrides an inherited opposite shared-mode setting", () => {
+  const session = { sessionId: "test", endpointFile: "/tmp/test" }
+  assert.equal(
+    agentDebugEnvironment({ COGNIA_AGENT_DEBUG_SHARED: "1" }, "/repo", {
+      ...session,
+      shared: false,
+    }).COGNIA_AGENT_DEBUG_SHARED,
+    "0"
+  )
+  assert.equal(
+    agentDebugEnvironment({ COGNIA_AGENT_DEBUG_SHARED: "0" }, "/repo", { ...session, shared: true })
+      .COGNIA_AGENT_DEBUG_SHARED,
+    "1"
+  )
+  assert.equal(parseArgs(["launch", "--shared"]).options.shared, true)
+})
+
+test("stop authenticates without renderer evaluation and kills a wedged owned process group", async () => {
+  const session = { pid: 100, healthPid: 101 }
+  const calls = []
+  let appAlive = true
+  await shutdownTrackedSession(
+    session,
+    {},
+    {
+      workspace: "/repo",
+      send: async (route) => {
+        calls.push(route)
+        if (route.includes("health")) return { agentDebug: true, pid: 101 }
+        throw new Error("GUI thread is not responding")
+      },
+      alive: (pid) => pid === 101 && appAlive,
+      terminate: (pid, signal) => {
+        calls.push([pid, signal])
+        if (signal === "SIGKILL") appAlive = false
+      },
+      delay: async () => {},
+    }
+  )
+  assert.deepEqual(calls, [
+    "/api/dev/agent/health?nativeOnly=true",
+    "/api/dev/agent/shutdown",
+    [100, "SIGTERM"],
+    [100, "SIGKILL"],
+  ])
+})
+
+test("stop refuses foreign identity before sending shutdown or signals", async () => {
+  const calls = []
+  await assert.rejects(
+    shutdownTrackedSession(
+      { pid: 100, healthPid: 101 },
+      {},
+      {
+        workspace: "/repo",
+        send: async (route) => {
+          calls.push(route)
+          return { agentDebug: true, pid: 999 }
+        },
+        alive: () => true,
+        terminate: () => assert.fail("must not signal a foreign process"),
+        delay: async () => {},
+      }
+    ),
+    /cannot validate tracked-session ownership/
+  )
+  assert.deepEqual(calls, ["/api/dev/agent/health?nativeOnly=true"])
+})
 
 test("detects terminal Cargo and Tauri launch failures from the log tail", () => {
   assert.match(

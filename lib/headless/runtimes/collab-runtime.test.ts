@@ -6,7 +6,7 @@ jest.mock("@/lib/collab/connection", () => ({ subscribeCollabConnection: jest.fn
 import { installCollabFeed } from "@/lib/collab/feed"
 import { installCollabNotificationsSync } from "@/lib/collab/notifications-sync"
 import { subscribeCollabConnection } from "@/lib/collab/connection"
-import { listHeadlessRuntimes } from "../registry"
+import { listHeadlessRuntimes, registerHeadlessRuntime } from "../registry"
 import type { HeadlessRuntimeContext } from "../types"
 import { startCollabRuntime, type HeadlessCollabAdapter } from "./collab-runtime"
 
@@ -22,6 +22,25 @@ beforeEach(() => {
   feed.mockReturnValue(detachFeed)
   notifications.mockReturnValue(detachNotifications)
   connection.mockReturnValue(unsubscribe)
+})
+
+it("can reevaluate the module during development while the registry stays loaded", () => {
+  const env = jest.replaceProperty(process, "env", { ...process.env, NODE_ENV: "development" })
+  try {
+    jest.isolateModules(() => {
+      // HMR invalidates the runtime module without necessarily invalidating its registry.
+      jest.doMock("../registry", () => ({ registerHeadlessRuntime }))
+      expect(() => jest.requireActual("./collab-runtime")).not.toThrow()
+    })
+    expect(listHeadlessRuntimes().filter((entry) => entry.name === "collab-runtime")).toHaveLength(
+      1
+    )
+    expect(feed).not.toHaveBeenCalled()
+    expect(notifications).not.toHaveBeenCalled()
+  } finally {
+    jest.dontMock("../registry")
+    env.restore()
+  }
 })
 
 it("rebinds both subscriptions on connection change and tears down once", () => {

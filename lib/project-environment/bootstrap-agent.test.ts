@@ -435,6 +435,21 @@ it("uses the actual UTF-8 configuration bytes for the 48 KiB aggregate limit", (
   ).toBeLessThanOrEqual(48 * 1024)
 })
 
+it("sends a passed system prompt and counts it against the 48 KiB limit", () => {
+  const prepared = prepareBootstrapExecution(environment, false, "Override rules.")
+  expect(JSON.parse(prepared.variables[BOOTSTRAP_CONFIG_ENV]!)).toMatchObject({
+    systemPrompt: "Override rules.",
+  })
+  expect(
+    JSON.parse(prepareBootstrapExecution(environment).variables[BOOTSTRAP_CONFIG_ENV]!)
+  ).not.toHaveProperty("systemPrompt")
+  // Four OS variants each carry the prompt, so 13 KiB of it overflows.
+  const oversized = "x".repeat(13 * 1024)
+  expect(() => assertBootstrapEnvironment(environment, oversized)).toThrow(/size/)
+  expect(() => prepareBootstrapExecution(environment, false, oversized)).toThrow(/size/)
+  expect(() => assertBootstrapEnvironment(environment)).not.toThrow()
+})
+
 it.each(["extraBody", "thinking"] as const)(
   "rejects nested and JSON-encoded credentials in %s",
   (field) => {

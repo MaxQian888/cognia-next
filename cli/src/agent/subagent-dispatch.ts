@@ -26,6 +26,7 @@ import {
   renderCollectPending,
 } from "@/lib/claude/agents/dispatch-agent-tool"
 import { runDispatchFanout } from "@/lib/claude/agents/dispatch-core"
+import { normalizeDispatchBudgetResult } from "@/lib/claude/agents/dispatch-error"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import {
   handlePluginToolExec,
@@ -52,6 +53,7 @@ import {
   collectCliBackgroundResult,
   cancelCliBackgroundRun,
   getCliBackgroundRecord,
+  recordCliIncompleteForegroundRun,
 } from "./subagent-background-tasks"
 import { frameResumePrompt } from "@/lib/background-tasks/completion-delivery"
 import {
@@ -88,6 +90,7 @@ export interface CliSubagentDispatchContext {
   home: string
   cwd: string
   gate: PermissionResponder
+  awaitApprovals?: () => Promise<void>
   /** Replay and other harnesses can bind child transport options to its actor id. */
   resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
   /** Actor-scoped approval policy for the dispatched child. */
@@ -258,8 +261,8 @@ export async function handleCliDispatchAgent(
   }
 
   /** One dispatch's outcome: the line shown to the model + whether it FAILED.
-   * `ok: false` is reserved for genuine faults (the run threw, or an unknown
-   * subagent id) — NOT for a neutral interrupt or a non-success finish reason —
+   * `ok: false` includes budget-exhausted incomplete work as well as faults
+   * (the run threw, or an unknown subagent id), but not a neutral interrupt,
    * so the dispatching tool call can render red ✗ rather than a green ✓ when a
    * subagent actually failed. */
   type DispatchOutcome = { text: string; ok: boolean; interrupted?: boolean }
@@ -325,12 +328,46 @@ export async function handleCliDispatchAgent(
     // runner lands it in the child's per-provider slot, so it beats the
     // provider's catalog default the way a frontmatter `model` does.
     const def = d.model ? { ...match.def, model: d.model } : match.def
+    const runId = liveId ?? mintRunId()
+    const interruptedOutcome = async (evidence = ""): Promise<DispatchOutcome> => {
+      const partial = `[${label}] interrupted.\nTask/research incomplete: cancelled before completion.\n${evidence}`
+      const text = `${partial}\nResume with dispatch_agent({resume:"${runId}"}).`
+      if (!liveId) {
+        try {
+          await recordCliIncompleteForegroundRun(
+            runId,
+            {
+              kind: "subagent",
+              subagentId: d.subagentId,
+              prompt: d.prompt,
+              sessionId: rootSessionId,
+              host: "cli",
+              startedAt: Date.now(),
+              toolsEnabled: d.toolsEnabled,
+              home: ctx.home,
+            },
+            text,
+            "interrupted"
+          )
+        } catch (error) {
+          settleLiveSubagent(live, "interrupted")
+          return {
+            text: `${partial}\n[Could not save continuation: ${errorMessage(error)}]`,
+            ok: false,
+            interrupted: true,
+          }
+        }
+      }
+      settleLiveSubagent(live, "interrupted")
+      return { text, ok: true, interrupted: true }
+    }
     try {
       const r = await run(def, d.prompt, req.sessionId, {
         config: ctx.config,
         home: ctx.home,
         cwd: ctx.cwd,
         gate: ctx.resolveSubagentGate?.(d.subagentId) ?? ctx.gate,
+        ...(ctx.awaitApprovals ? { awaitApprovals: ctx.awaitApprovals } : {}),
         ...(ctx.resolveSubagentOptions
           ? {
               resolveOptions: (buildContext) =>
@@ -346,20 +383,58 @@ export async function handleCliDispatchAgent(
         },
         ...(nesting ? { nesting } : {}),
       })
-      if (signal?.aborted) {
-        settleLiveSubagent(live, "interrupted")
-        return { text: `[${label}] interrupted.`, ok: true, interrupted: true }
+      if (signal?.aborted || r.finishReason === "interrupted")
+        return await interruptedOutcome(r.finishReason === "interrupted" ? r.text : "")
+      // Foreground runs normally have no journal row. Budget stops need one so
+      // the same resume tool works for foreground and background research.
+      const outcome = normalizeDispatchBudgetResult({
+        text: r.text,
+        finishReason: r.finishReason,
+        runId,
+        channel: "sidecar",
+        toolsAvailable: d.toolsEnabled,
+      })
+      const incomplete = outcome.errorEnvelope?.code === "budget-exhausted"
+      const text = `[${label}]${metaSuffix(r)}\n${outcome.text}`
+      if (incomplete && !liveId) {
+        try {
+          await recordCliIncompleteForegroundRun(
+            runId,
+            {
+              kind: "subagent",
+              subagentId: d.subagentId,
+              prompt: d.prompt,
+              sessionId: rootSessionId,
+              host: "cli",
+              startedAt: Date.now(),
+              toolsEnabled: d.toolsEnabled,
+              home: ctx.home,
+            },
+            text
+          )
+        } catch (error) {
+          settleLiveSubagent(live, "error")
+          const partial = normalizeDispatchBudgetResult({
+            text: r.text,
+            finishReason: r.finishReason,
+            channel: "sidecar",
+            toolsAvailable: d.toolsEnabled,
+          })
+          return {
+            text: `[${label}]\n${partial.text}\n[Could not save continuation: ${errorMessage(error)}]`,
+            ok: false,
+          }
+        }
       }
-      settleLiveSubagent(live, "done")
-      return { text: `[${label}]${metaSuffix(r)}\n${r.text}`, ok: true }
+      settleLiveSubagent(live, incomplete ? "error" : "done")
+      return { text, ok: !incomplete }
     } catch (err) {
       // A parent interrupt aborts the shared signal mid-run: report it as an
       // interruption (not a fault) so the model gets an accurate signal instead
       // of a raw abort-error string. An interrupt is neutral (`ok: true`) — it's
       // a user action, not a subagent failure.
       if (signal?.aborted) {
-        settleLiveSubagent(live, "interrupted")
-        return { text: `[${label}] interrupted.`, ok: true, interrupted: true }
+        return await interruptedOutcome()
       }
       settleLiveSubagent(live, "error")
       return { text: `[${label}] failed: ${errorMessage(err)}`, ok: false }

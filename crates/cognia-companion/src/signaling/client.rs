@@ -61,6 +61,70 @@ use super::peer::{
 use super::{DeviceTier, TierWriter};
 use crate::SharedState;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DataChannelAdapter {
+    Dispatch,
+    Terminal,
+    RemoteDesktop,
+}
+
+struct DataChannelSurface {
+    label: &'static str,
+    adapter: DataChannelAdapter,
+    capability: &'static str,
+    execution: bool,
+}
+
+// There is no separate browser/events channel: those frames share Dispatch.
+// RPC frames still enter remote_execution; its event/media half also needs
+// host.observe before the dispatcher attaches, just like the events ticket.
+const DATA_CHANNEL_SURFACES: &[DataChannelSurface] = &[
+    DataChannelSurface { label: super::peer::DATACHANNEL_LABEL, adapter: DataChannelAdapter::Dispatch, capability: "host.observe", execution: false },
+    DataChannelSurface { label: super::peer::LEGACY_DATACHANNEL_LABEL, adapter: DataChannelAdapter::Dispatch, capability: "host.observe", execution: false },
+    DataChannelSurface { label: super::peer::TERMINAL_DATACHANNEL_LABEL, adapter: DataChannelAdapter::Terminal, capability: "terminal.open", execution: true },
+    DataChannelSurface { label: super::peer::RFB_DATACHANNEL_LABEL, adapter: DataChannelAdapter::RemoteDesktop, capability: "host.observe", execution: true },
+];
+
+fn datachannel_surface(label: &str) -> Option<&'static DataChannelSurface> {
+    DATA_CHANNEL_SURFACES.iter().find(|surface| surface.label == label)
+}
+
+pub(super) async fn authorize_datachannel(label: &str, device_id: &str) -> Result<(), cognia_problem::Problem> {
+    let surface = datachannel_surface(label).ok_or_else(|| cognia_problem::Problem::with_status(
+        axum::http::StatusCode::FORBIDDEN, "host_surface_forbidden", "unclassified DataChannel"))?;
+    // Single-user never reads identity/standing. Observation channels still
+    // need their real tenant/person when execution is disabled; skipping this
+    // lookup would make the otherwise available control plane unusable.
+    let tenant_id = if crate::deployment::deployment_mode() == crate::deployment::DeploymentMode::MultiTenant {
+        crate::security_store::security_store()
+            .and_then(|store| store.active_device_tenant(device_id).ok().flatten())
+            .unwrap_or_default()
+    } else { String::new() };
+    let principal = crate::middleware::DeviceContext {
+        device_id: device_id.to_string(), tenant_id, scope: "device".into(),
+        granted_scopes: vec![], authorization_capabilities: None,
+    };
+    crate::host_surface_gate::authorize_channel(surface.capability, surface.execution, &principal).await
+}
+
+/// The only byte-stream adapter attachment point in signaling. Authentication
+/// by the role keys does not replace Host standing or the execution switch.
+async fn attach_direct_datachannel(
+    channel: Arc<dyn webrtc::data_channel::DataChannel>, tag: super::peer::DataChannelTag,
+    device_id: String, state: SharedState,
+) {
+    if let Err(error) = authorize_datachannel(&tag.label, &device_id).await {
+        log::warn!("signaling::client: DataChannel {} refused: {}", tag.label, error.code);
+        let _ = channel.close().await;
+        return;
+    }
+    match datachannel_surface(&tag.label).map(|surface| surface.adapter) {
+        Some(DataChannelAdapter::Terminal) => crate::ws_terminal::proxy_terminal_datachannel(channel, tag, device_id, state).await,
+        Some(DataChannelAdapter::RemoteDesktop) => crate::ws_remote_desktop::proxy_rfb_datachannel(channel, tag, device_id).await,
+        _ => { let _ = channel.close().await; }
+    }
+}
+
 /// Reconnect backoff schedule (ms). Index = attempt count (capped). Matches
 /// `SIGNALING_BACKOFF_MS` in `lib/signaling/types.ts`.
 const BACKOFF_MS: &[u64] = &[1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
@@ -1432,7 +1496,7 @@ async fn handle_relay(
                             let state = Arc::clone(&state);
                             let device_id = device_id.clone();
                             tokio::spawn(async move {
-                                crate::ws_terminal::proxy_terminal_datachannel(
+                                attach_direct_datachannel(
                                     channel, tag, device_id, state,
                                 )
                                 .await;
@@ -1440,12 +1504,14 @@ async fn handle_relay(
                         }
                     }),
                     rfb_channel: Arc::new({
+                        let state = Arc::clone(state);
                         let device_id = config.device_id.clone();
                         move |channel, tag| {
+                            let state = Arc::clone(&state);
                             let device_id = device_id.clone();
                             tokio::spawn(async move {
-                                crate::ws_remote_desktop::proxy_rfb_datachannel(
-                                    channel, tag, device_id,
+                                attach_direct_datachannel(
+                                    channel, tag, device_id, state,
                                 )
                                 .await;
                             });
@@ -1713,6 +1779,85 @@ fn open_relay_lane(config: &ClientConfig, state: &SharedState, ps: &mut PeerStat
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_peer_datachannel_label_and_direct_adapter_is_classified_and_gated() {
+        use std::collections::BTreeSet;
+        use super::*;
+        let peer = include_str!("../../../cognia-companion-connectivity/src/signaling/peer.rs");
+        let labels: BTreeSet<_> = peer.lines().filter(|line| line.starts_with("pub const ") && line.contains("DATACHANNEL_LABEL:"))
+            .map(|line| line.split('"').nth(1).unwrap()).collect();
+        let classified: BTreeSet<_> = DATA_CHANNEL_SURFACES.iter().map(|surface| surface.label).collect();
+        assert_eq!(labels, classified);
+        assert_eq!(classified.len(), DATA_CHANNEL_SURFACES.len());
+        let callbacks = peer.split("pub struct PeerCallbacks {").nth(1).unwrap().split("\n}").next().unwrap();
+        let direct: BTreeSet<_> = callbacks.lines().filter(|line| line.contains("dyn Fn(Arc<dyn DataChannel>"))
+            .map(|line| line.trim().strip_prefix("pub ").unwrap().split(':').next().unwrap()).collect();
+        let expected: BTreeSet<_> = DATA_CHANNEL_SURFACES.iter().filter_map(|surface| match surface.adapter {
+            DataChannelAdapter::Terminal => Some("terminal_channel"),
+            DataChannelAdapter::RemoteDesktop => Some("rfb_channel"),
+            DataChannelAdapter::Dispatch => None,
+        }).collect();
+        assert_eq!(direct, expected, "a new adapter must enter Host admission");
+        let client = include_str!("client.rs");
+        let wiring = client.split("let callbacks = PeerCallbacks {").nth(1).unwrap().split("state_change:").next().unwrap();
+        for callback in direct {
+            let body = wiring.split(&format!("{callback}: Arc::new(")).nth(1).unwrap().split("}),").next().unwrap();
+            assert!(body.contains("attach_direct_datachannel("), "{callback} bypasses admission");
+        }
+        let attachment = client.split("async fn attach_direct_datachannel(").nth(1).unwrap()
+            .split("/// Reconnect backoff").next().unwrap();
+        let gate = attachment.find("authorize_datachannel(").unwrap();
+        for adapter in ["proxy_terminal_datachannel(", "proxy_rfb_datachannel("] {
+            assert!(gate < attachment.find(adapter).unwrap(), "{adapter} attaches before admission");
+            assert_eq!(client.split("#[cfg(test)]").next().unwrap().matches(adapter).count(), 1,
+                "{adapter} must only attach through the gated function");
+        }
+        let policy = crate::host_surface_policy::POLICY.as_ref().unwrap();
+        for surface in DATA_CHANNEL_SURFACES { assert!(policy.get(surface.capability).is_some()); }
+        assert!(datachannel_surface("unclassified").is_none());
+    }
+
+    #[tokio::test]
+    async fn datachannel_classes_obey_host_standing_and_control_plane_only_in_both_modes() {
+        use super::*;
+        use crate::host_surface_gate::{decide, Person, Refusal, StandingProvider};
+        use crate::deployment::DeploymentMode;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Standing { outcome: u8, calls: AtomicUsize }
+        #[async_trait::async_trait]
+        impl StandingProvider for Standing {
+            fn person(&self, _: &crate::middleware::DeviceContext) -> Result<Person, Refusal> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(Person { org: "org_acme".into(), user: "usr_alice".into() })
+            }
+            async fn actions(&self, _: &Person, _: Option<&str>) -> Result<Vec<String>, Refusal> {
+                match self.outcome {
+                    0 => Ok(vec!["host.global-surfaces".into()]),
+                    1 => Ok(vec![]),
+                    _ => Err(Refusal { status: axum::http::StatusCode::SERVICE_UNAVAILABLE, code: "host_authority_unavailable" }),
+                }
+            }
+        }
+        let principal = crate::middleware::DeviceContext { device_id: "device".into(), tenant_id: "tenant".into(), scope: "device".into(), granted_scopes: vec![], authorization_capabilities: None };
+        for mode in [DeploymentMode::SingleUser, DeploymentMode::MultiTenant] {
+            for execution in [false, true] {
+                for outcome in 0..3 {
+                    for surface in DATA_CHANNEL_SURFACES {
+                        let provider = Standing { outcome, calls: AtomicUsize::new(0) };
+                        let result = if surface.execution && !execution {
+                            Err(Refusal { status: axum::http::StatusCode::SERVICE_UNAVAILABLE, code: "execution_isolation_unavailable" })
+                        } else {
+                            decide(mode, execution, true, &provider, surface.capability, None, &principal, None).await
+                        };
+                        assert_eq!(result.is_ok(), (!surface.execution || execution) && (mode == DeploymentMode::SingleUser || outcome == 0), "{}/{mode:?}/{execution}/{outcome}", surface.label);
+                        if !execution && surface.execution { assert_eq!(result.unwrap_err().code, "execution_isolation_unavailable"); }
+                        if mode == DeploymentMode::SingleUser || (!execution && surface.execution) { assert_eq!(provider.calls.load(Ordering::SeqCst), 0); }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn reconnect_delay_never_drops_below_half_the_schedule() {
         // The bug this pins: the old `random(1, base)` jitter let the *minimum*

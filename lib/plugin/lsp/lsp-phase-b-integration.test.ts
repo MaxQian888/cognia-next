@@ -10,7 +10,7 @@
  *
  * Skipped scenarios (covered elsewhere — see the plan):
  *   - Real subprocess spawn (verified in
- *     `sidecar/vscode-ext-host/tests/lsp-client.test.mjs`).
+ *     `sidecar/vscode-ext-host/tests/lsp-client.test.ts`).
  *   - Tauri-side capability gates (verified manually per the plan's
  *     verification section).
  */

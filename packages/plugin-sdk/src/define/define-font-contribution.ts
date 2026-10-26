@@ -14,7 +14,7 @@
  *   })
  */
 
-import type { PluginFontContribution } from "@/types/plugin"
+import type { PluginFontContribution } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineFontContribution(font: PluginFontContribution): PluginFontContribution {
   return font

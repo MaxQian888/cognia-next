@@ -15,9 +15,9 @@ export {
   getQuickActionSnapshot,
   subscribeQuickActions,
   runQuickAction,
-} from "@/lib/plugin/registries/quick-action-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
 
-export type { QuickActionEntry } from "@/lib/plugin/registries/quick-action-registry"
+export type { QuickActionEntry } from "@cognia/plugin-contract/lib/plugin/registries/quick-action-registry"
 export type {
   PluginQuickActionDef,
   PluginQuickActionInput,
@@ -29,4 +29,4 @@ export type {
   PluginSelectionOrigin,
   PluginSelectionQuickActionContext,
   PluginSelectionReplaceCapability,
-} from "@/types/plugin"
+} from "@cognia/plugin-contract/types/plugin/index"

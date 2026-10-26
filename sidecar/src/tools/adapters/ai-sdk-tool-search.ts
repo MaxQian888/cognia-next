@@ -16,6 +16,7 @@ import { tool } from "ai"
 import type { ToolSet } from "ai"
 import { z } from "zod"
 import { modelToolName, restoreToolName } from "../../policy/tool-catalog/model-names.ts"
+import type { ConversationMessage } from "../../context/compaction.ts"
 
 export const AI_SDK_TOOL_SEARCH_NAME = "ToolSearch"
 
@@ -46,6 +47,8 @@ export interface AiSdkToolSearchController {
   maxActiveTools(): number | null
   /** Tighten the cap, demoting resident tools and unloading discoveries to fit. */
   setMaxActiveTools(limit: number): void
+  /** Restore successful discoveries without executing tools or reviving denied tools. */
+  restoreConversation(messages: ConversationMessage[]): void
 }
 
 const TOOL_SOURCE = new WeakMap<object, AiSdkToolSource>()
@@ -278,6 +281,40 @@ export function createAiSdkToolSearchController({
 
   return {
     tools: allTools,
+    restoreConversation(messages) {
+      discovered.length = 0
+      for (const message of messages) {
+        if (message.role !== "tool" || !Array.isArray(message.content)) continue
+        for (const part of message.content) {
+          if (part.type !== "tool-result" || part.toolName !== AI_SDK_TOOL_SEARCH_NAME) continue
+          if (part.output.type !== "text") continue
+          let result: { activated?: unknown; unloaded?: unknown }
+          try {
+            result = JSON.parse(part.output.value)
+          } catch {
+            continue
+          }
+          if (!result || !Array.isArray(result.activated)) continue
+          for (const requested of result.activated) {
+            if (typeof requested !== "string") continue
+            const name = Object.hasOwn(available, requested)
+              ? requested
+              : modelToolName(aliases, requested)
+            if (!Object.hasOwn(available, name) || resident.has(name)) continue
+            const at = discovered.indexOf(name)
+            if (at >= 0) discovered.splice(at, 1)
+            discovered.push(name)
+          }
+          if (Array.isArray(result.unloaded)) {
+            for (const name of result.unloaded) {
+              const at = discovered.indexOf(name)
+              if (at >= 0) discovered.splice(at, 1)
+            }
+          }
+          applyCap()
+        }
+      }
+    },
     activeToolNames,
     prepareStep: () => ({ activeTools: activeToolNames() }),
     deferredToolNames,

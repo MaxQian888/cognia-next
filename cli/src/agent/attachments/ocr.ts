@@ -2,10 +2,13 @@
  * Node-safe OCR runner for the CLI. Reuses `@cognia/ocr`'s `extract` with a
  * hand-built `ExtractDeps` (fresh registry holding only `anthropic-vision`,
  * injected credentials from the CLI's Anthropic key, cache disabled) so it
- * pulls in NO Dexie/Tauri/keyring code. Used as the PDF fallback when the
- * active model cannot accept a native PDF block.
+ * pulls in NO OCR runtime, Tauri or keyring code and never touches a database.
+ * Used as the PDF fallback when the active model cannot accept a native PDF
+ * block.
  *
- * Import discipline: ONLY `@cognia/ocr` subpaths — the pure, zero-`@/` core.
+ * Import discipline: ONLY `@cognia/ocr` subpaths — the pure, zero-`@/` core —
+ * plus the Prompt Center resolver the CLI's base prompt already loads (it reads
+ * the in-memory snapshot the session primed and never opens the database).
  * Never `lib/ocr`'s index (its `extract` wrapper meters through
  * `@/lib/db/session-usage` → Dexie), `runtime.ts` / `deps.ts` /
  * `credentials.ts` / `cache.ts` / `lib/keyring` / `lib/db/*` (Tauri/Dexie at
@@ -16,6 +19,8 @@ import { extract as realExtract, type ExtractDeps } from "@cognia/ocr"
 import { createOcrRegistry } from "@cognia/ocr/registry"
 import { anthropicVisionProvider } from "@cognia/ocr/providers/anthropic-vision"
 import { DEFAULT_OCR_SETTINGS, type OcrInput, type OcrResult } from "@cognia/ocr/types"
+import { CLI_OCR_VISION_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
 
 export interface OcrRunDeps {
   /** Resolves the Anthropic API key (from CLI config / env). */
@@ -44,7 +49,15 @@ export async function ocrExtractText(
 
   const extractDeps: ExtractDeps = {
     registry,
-    settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "anthropic-vision" },
+    settings: {
+      ...DEFAULT_OCR_SETTINGS,
+      defaultProviderId: "anthropic-vision",
+      // The `knowledge.ocr.vision` slot (ADR-0236), read from the snapshot the
+      // turn's session setup primed; the provider sends it as the page prompt.
+      providerConfig: {
+        "anthropic-vision": { promptTemplate: resolvePrompt(CLI_OCR_VISION_PROMPT).text },
+      },
+    },
     platform: "web",
     osTag: "browser",
     credentialsResolver: async () => ({

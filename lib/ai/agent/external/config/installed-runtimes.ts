@@ -40,9 +40,8 @@ import {
 } from "../capability/process-plane"
 import { findRuntimeById } from "./install-catalog"
 import { parseProbeVersion } from "./runtime-version"
-
-/** How the host found (or failed to find) a runtime's command. */
-export type RuntimeResolution = "installed" | "missing" | "package-runner" | "not-local"
+import type { RuntimeResolution } from "@cognia/plugin-contract/lib/ai/agent/external/config/installed-runtimes"
+export type { RuntimeResolution } from "@cognia/plugin-contract/lib/ai/agent/external/config/installed-runtimes"
 
 const RESOLUTIONS: readonly RuntimeResolution[] = [
   "installed",

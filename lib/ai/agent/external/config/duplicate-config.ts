@@ -79,6 +79,7 @@ export function externalAgentDuplicateInput(
   const optional = {
     description: source.description,
     cogniaModel: source.cogniaModel,
+    modelRoles: source.cogniaModel ? source.modelRoles : undefined,
     subscriptionAccountId: source.subscriptionAccountId,
     process: source.process,
     network: source.network,

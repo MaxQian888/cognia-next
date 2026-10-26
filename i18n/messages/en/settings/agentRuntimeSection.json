@@ -77,7 +77,7 @@
     "workingDirPlaceholder": "/path/to/project",
     "workingDirTitle": "Default working directory"
   },
-  "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+  "description": "Set defaults for the built-in agent, manage tool permissions and sessions, and check runtime health. Agents and conversations can override these defaults.",
   "nav": {
     "groups": {
       "behaviorGroup": "Behavior",
@@ -411,7 +411,7 @@
     "sessions": "Sessions",
     "sidecar": "Sidecar"
   },
-  "title": "Built-in agent runtime",
+  "title": "Agent runtime",
   "toolSearch": {
     "addAria": "Add",
     "description": "Load tools on demand to keep the system prompt small. Pin servers or tools below to keep them always available.",

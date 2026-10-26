@@ -19,26 +19,32 @@ export {
   registerPluginI18n,
   subscribeToPluginI18n,
   unregisterPluginI18n,
-} from "@/lib/i18n/plugin-i18n-registry"
+} from "@cognia/plugin-contract/lib/i18n/plugin-i18n-registry"
 
-export type { LocaleCode, PluginI18nBundle } from "@/lib/i18n/plugin-i18n-registry"
+export type {
+  LocaleCode,
+  PluginI18nBundle,
+} from "@cognia/plugin-contract/lib/i18n/plugin-i18n-registry"
 
 /**
  * React components receive no `ctx`; this hook is their `ctx.i18n.t` — same
  * keys, same locale → English → key fallback, and it re-renders on a language
  * switch or when the plugin's bundle registers.
  */
-import type { usePluginTranslations as HostUsePluginTranslations } from "@/lib/plugin/api/use-plugin-translations"
+import type { PluginTranslate } from "@cognia/plugin-contract/lib/plugin/api/use-plugin-translations"
+
+/** The host's `usePluginTranslations` hook, bound by the subpath loader. */
+type HostUsePluginTranslations = (pluginId: string) => PluginTranslate
 import { PluginAdapterError } from "../errors/adapter-error"
 
-let hostTranslate: typeof HostUsePluginTranslations | undefined
+let hostTranslate: HostUsePluginTranslations | undefined
 
 /** Host loader seam; excluded from the evaluated plugin module. */
-export function bindPluginTranslationsHost(hook: typeof HostUsePluginTranslations): void {
+export function bindPluginTranslationsHost(hook: HostUsePluginTranslations): void {
   hostTranslate = hook
 }
 
-export const usePluginTranslations: typeof HostUsePluginTranslations = (pluginId) => {
+export const usePluginTranslations: HostUsePluginTranslations = (pluginId) => {
   if (!hostTranslate) {
     throw new PluginAdapterError(
       "DEPENDENCY_MISSING",
@@ -47,4 +53,4 @@ export const usePluginTranslations: typeof HostUsePluginTranslations = (pluginId
   }
   return hostTranslate(pluginId)
 }
-export type { PluginTranslate } from "@/lib/plugin/api/use-plugin-translations"
+export type { PluginTranslate } from "@cognia/plugin-contract/lib/plugin/api/use-plugin-translations"

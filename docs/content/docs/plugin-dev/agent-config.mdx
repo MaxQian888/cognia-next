@@ -1,0 +1,82 @@
+---
+title: Agent configuration
+description: Read the instruction files, agent files, Skills, characters, templates and prompts an agent loads with ctx.agentConfig, and write a change back through its owner with the user's confirmation.
+---
+
+# Agent configuration
+
+`ctx.agentConfig` (ADR-0238) is the read model governance tooling builds on: every text an
+agent loads as instructions, listed behind one shape, and one write path that goes back through
+the text's owner. The built-in **Config Governance** plugin is its first consumer.
+
+It needs `agent-config:read`; `applyEdit` also needs `agent-config:write`.
+
+## Surfaces
+
+```ts
+import type { PluginContext } from "@cognia/plugin-sdk"
+
+export async function audit(ctx: PluginContext, workspaceId: string | null) {
+  const { surfaces, failed } = await ctx.agentConfig.listSurfaces({ workspaceId })
+  for (const surface of surfaces) {
+    const document = await ctx.agentConfig.readSurface(surface.key, { workspaceId })
+    if (!document) continue // gone since it was listed
+    // document.text, document.version, document.skill (usage + validation for a Skill)
+  }
+  if (failed.length) ctx.logger.warn("could not read", failed)
+}
+```
+
+A surface is a Prompt Center resource (an instruction file, workspace instructions, a Skill, a
+character, a custom mode, a preset, a subagent or team template, a composer template, an app
+setting or a shipped code slot) or a markdown agent file (`agent-file:<dir>|<name>`). Each
+carries `source`, `kind`, `name`, `builtIn`, `modified`, `edit` (how a change is written) and,
+for files, `path`, `layer` and `loadOrder`. Omit `workspaceId` for the active workspace, pass
+`null` for account-only.
+
+## Facts, references and provenance
+
+- `readFacts({ workspaceId })` summarizes what is already enforced without exposing it: hooks
+  as event, matcher, type and a safe label (an executable's base name); permission rules as
+  tool, pattern and verdict; MCP servers as id, name, transport and state; Skill counts. Patterns
+  and matchers pass PII redaction and have credential shapes masked (`NAME=value`, `--token x`,
+  `-pX`, `user:pass@`, signed query parameters); a row that would still leak is dropped. Settings
+  files are never returned. `hooksAvailable` is `false` off the desktop.
+- `checkReferences({ workspaceId, paths, scripts })` reports each path as `exists`, `missing`,
+  `outside` (not probed), `symlink` (not followed) or `unchecked`, and each package script as
+  `defined`, `undefined` or `unchecked`.
+- `readProvenance(key)` returns `{ line, commit, authoredAtMs }` per line from version control,
+  or `null` when the surface is not a tracked file. No author is returned.
+
+## Sending text to a model
+
+`ctx.ai.chat` refuses text that still holds personal data. Redact first:
+
+```ts
+const safe = ctx.agentConfig.redactForModel(document.text)
+if (safe === null) {
+  // the text could not be made safe: run deterministic checks only
+}
+```
+
+Redaction keeps line numbers, so a line the model cites is the same line in the original. Never
+write the redacted copy back: a replacement over a redacted line would put a placeholder in the
+user's file.
+
+## Writing a change
+
+```ts
+await ctx.agentConfig.applyEdit({
+  key: surface.key,
+  text: newText, // the complete new text
+  version: document.version, // refused when the surface changed since you read it
+  workspaceId,
+  summary: "Remove 2 outdated rules", // shown in the confirmation, max 280 characters
+})
+```
+
+Every call asks the user to confirm that surface's change; a declined change throws an error with
+`code: "agent_config_consent_denied"`, a stale one `code: "agent_config_stale"`. The host writes
+through the owner: a file (checked against the version), a Prompt Center override recorded with
+origin "applied by a plugin", or — for a shipped resource that cannot be edited in place — a
+custom copy, whose key is returned.

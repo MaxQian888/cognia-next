@@ -22,17 +22,27 @@ import {
 } from "./types"
 
 /**
- * The service is a separate Cargo project with its own lockfile and release
+ * The service lives in cognia-labs/cognia-services with its own release
  * cadence, and nothing generates these types from its contract. Reading the
- * published `openapi.yaml` here is the other half of the service's own
- * `every_console_route_is_in_the_published_contract` test: that one fails when
- * a route leaves the document, this one fails when the document and the
- * TypeScript enums stop agreeing.
+ * published `openapi.yaml` (a byte-identical copy at the pinned revision,
+ * enforced by `scripts/ci/check-cognia-services.mjs`) is the other half of the
+ * service's own `every_console_route_is_in_the_published_contract` test: that
+ * one fails when a route leaves the document, this one fails when the document
+ * and the TypeScript enums stop agreeing.
  */
 const CONTRACT = readFileSync(
-  join(process.cwd(), "services/diagnostic-server/openapi.yaml"),
+  join(process.cwd(), "protocol/cognia-services/diagnostic-openapi.yaml"),
   "utf8"
 )
+
+/**
+ * A checkout of the pinned services revision, for the one check that reads
+ * service source rather than its published contract. CI's pinned-services job
+ * sets it (`pnpm cognia-services:fetch` makes one locally); without it the
+ * check reports as skipped rather than reading a stale copy.
+ */
+const SERVICES_ROOT = process.env.COGNIA_SERVICES_ROOT
+const itWithServices = SERVICES_ROOT ? it : it.skip
 
 /**
  * Pull one `enum: [...]` list out of the contract.
@@ -175,11 +185,14 @@ describe("runtime vocabularies", () => {
     expect(isAuditAction("artifact.write")).toBe(false)
   })
 
-  it("pins every audit action the service writes", () => {
+  itWithServices("pins every audit action the service writes", () => {
     // The Rust side spells each action as a string literal passed to one of
     // three helpers; reading them back keeps this list from drifting behind a
     // new action, which would otherwise render under the generic label.
-    const source = readFileSync(join(process.cwd(), "services/diagnostic-server/src/db.rs"), "utf8")
+    const source = readFileSync(
+      join(SERVICES_ROOT ?? "", "services/diagnostic-server/src/db.rs"),
+      "utf8"
+    )
     const written = new Set(
       [
         ...source.matchAll(

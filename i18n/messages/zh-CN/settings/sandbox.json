@@ -8,6 +8,31 @@
     "note": "默认开启。关闭后 Canvas Python 可访问你的文件系统与网络——请仅在你信任的机器上关闭。",
     "title": "Canvas 代码沙盒"
   },
+  "claudeCodeRuntime": {
+    "title": "Claude Code 运行时",
+    "description": "配置 Claude Agent SDK 运行时的沙盒能力和有时限的无人值守重试。",
+    "namespaces": {
+      "label": "请求嵌套 User Namespace",
+      "description": "默认关闭。适用于 Linux 和 WSL2 主机，也包括远程主机。为 Chromium 等工具请求此能力；Cognia 仍会在每次运行前要求显式批准。",
+      "warning": "嵌套 User Namespace 会削弱沙盒边界。命令可能在沙盒外运行并访问受保护文件和凭据文件。请仅为可信工作负载启用。"
+    },
+    "retry": {
+      "label": "启用无人值守重试",
+      "description": "默认关闭。仅适用于无人值守的 Claude Agent SDK 轮次；等待期间可重新检查受支持的 claude.ai 订阅用量限制。",
+      "availability": "启用 Router + Fusion 的请求额度管理时不可用，重试由该模式统一管理。",
+      "cancellation": "取消会停止当前调用及其重试等待。达到调用总时限也会取消。"
+    },
+    "maximum": {
+      "label": "调用总时限（分钟）",
+      "description": "整次调用的累计耗时，包括正常执行和所有重试。不会为单个请求重置截止时间。请输入 1–180 分钟。"
+    },
+    "recheck": {
+      "label": "用量限制复查间隔（分钟）",
+      "description": "检查受支持订阅的用量限制是否已解除的间隔。请输入 1–180 分钟。"
+    },
+    "invalidMinutes": "请输入 1 到 180 之间的整数。",
+    "saveError": "无法保存 Claude Code 运行时偏好设置，请重试。"
+  },
   "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
   "enable": {
     "description": "在每个会话中默认让高风险工具经由 OS 沙盒执行。单个会话与角色仍可覆盖此默认值。",

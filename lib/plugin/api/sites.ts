@@ -21,60 +21,21 @@
  * The Dexie imports are lazy, like `./scheduler-tasks`: a plugin that never
  * touches Sites should not drag the subsystem into its module graph.
  */
+import type { SiteDeploymentRow } from "@/types/sites"
 import type {
-  SiteDeploymentRow,
-  SiteLifecycle,
-  SiteOperationRow,
-  SiteProvider,
-  SiteVersionRow,
-  SiteVisitorPolicy,
-} from "@/types/sites"
-
-export interface PluginSiteSummary {
-  id: string
-  name: string
-  projectId: string
-  provider: SiteProvider
-  workerName: string
-  lifecycle: SiteLifecycle
-  /** The shape of the visitor policy, never its identities or domains. */
-  visitorMode: SiteVisitorPolicy["mode"]
-  /** The live URL, when one exists. */
-  productionUrl?: string
-  createdAt: number
-  updatedAt: number
-}
-
-export type PluginSiteVersion = Pick<
-  SiteVersionRow,
-  | "id"
-  | "siteId"
-  | "sequence"
-  | "status"
-  | "artifactSize"
-  | "artifactFileCount"
-  | "artifactCollectedAt"
-  | "createdAt"
-  | "completedAt"
->
-
-export type PluginSiteDeployment = Pick<
-  SiteDeploymentRow,
-  "id" | "siteId" | "versionId" | "status" | "productionUrl" | "createdAt" | "updatedAt"
->
-
-export type PluginSiteOperation = Pick<
-  SiteOperationRow,
-  "id" | "siteId" | "type" | "status" | "attemptCount" | "createdAt" | "updatedAt" | "completedAt"
->
-
-export interface PluginSitesAPI {
-  listSites: typeof listSites
-  listVersions: typeof listSiteVersionsForPlugin
-  listDeployments: typeof listSiteDeploymentsForPlugin
-  listOperations: typeof listSiteOperationsForPlugin
-  getProductionUrl: typeof getSiteProductionUrl
-}
+  PluginSiteDeployment,
+  PluginSiteOperation,
+  PluginSiteSummary,
+  PluginSiteVersion,
+  PluginSitesAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/sites"
+export type {
+  PluginSiteDeployment,
+  PluginSiteOperation,
+  PluginSiteSummary,
+  PluginSiteVersion,
+  PluginSitesAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/sites"
 
 /** Read-only, redacted Sites capability mounted as `ctx.sites`. */
 export function createSitesAPI(): PluginSitesAPI {

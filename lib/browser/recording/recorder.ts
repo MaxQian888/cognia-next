@@ -55,6 +55,7 @@ export class FlowRecorder {
   private steps: RecordedStep[] = []
   private timer: ReturnType<typeof setInterval> | null = null
   private flow: RecordedFlow | null = null
+  private failure: Error | null = null
   /** Orders renderer-minted steps; the page's own `at` counter is per-document. */
   private seq = 0
 
@@ -70,6 +71,8 @@ export class FlowRecorder {
 
   /** Begin recording at `baseUrl`, which becomes the flow's opening step. */
   async start(baseUrl: string): Promise<void> {
+    if (this.recording) await this.cancel()
+    this.failure = null
     const at = this.opts.now()
     this.seq = 0
     this.flow = {
@@ -82,19 +85,27 @@ export class FlowRecorder {
     }
     this.steps = [{ act: "navigate", at: this.seq++, url: baseUrl }]
     this.emit()
-    await this.driver.start()
+    try {
+      await this.driver.start()
+    } catch (error) {
+      this.flow = null
+      this.steps = []
+      this.emit()
+      throw error
+    }
     this.timer = setInterval(() => void this.poll(), this.opts.pollMs ?? DEFAULT_POLL_MS)
   }
 
   /** Drain whatever the page has buffered since the last poll. */
   async poll(): Promise<void> {
-    if (!this.flow) return
+    if (!this.flow || this.failure) return
     let drained: RecordedStep[]
     try {
       drained = await this.driver.drain()
-    } catch {
-      // The pane can be mid-navigation with no live JS context; the page keeps
-      // buffering to sessionStorage, so the next poll picks these up.
+    } catch (error) {
+      // The pane can be mid-navigation with no live JS context; the embedded
+      // buffer or Chromium host journal is drained by the next poll.
+      this.rememberPermanentFailure(error)
       return
     }
     if (!drained.length) return
@@ -124,9 +135,11 @@ export class FlowRecorder {
     await this.poll()
     try {
       await this.driver.resume()
-    } catch {
+    } catch (error) {
       // A page that cannot be re-armed yields no further steps; the flow keeps
-      // what it already has rather than failing the whole take.
+      // what it already has. A permanent failure prevents exporting a
+      // successful-looking partial take at stop.
+      this.rememberPermanentFailure(error)
     }
   }
 
@@ -154,19 +167,26 @@ export class FlowRecorder {
     await this.poll()
     try {
       await this.driver.stop()
-    } catch {
-      // Best-effort: the take is already in `this.steps`.
+    } catch (error) {
+      this.rememberPermanentFailure(error)
     }
     const flow: RecordedFlow = { ...this.flow, steps: this.steps, updatedAt: this.opts.now() }
     this.flow = null
+    if (this.failure) throw this.failure
     return flow
   }
 
   /** Abandon the take without producing a flow. */
   async cancel(): Promise<void> {
-    await this.stop()
-    this.steps = []
-    this.emit()
+    try {
+      await this.stop()
+    } catch {
+      // Cancel explicitly abandons the take, including its failure.
+    } finally {
+      this.steps = []
+      this.failure = null
+      this.emit()
+    }
   }
 
   /** The steps captured so far, for a live step list. */
@@ -176,5 +196,20 @@ export class FlowRecorder {
 
   private emit(): void {
     this.opts.onChange?.(this.steps)
+  }
+
+  private rememberPermanentFailure(error: unknown): void {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined
+    if (
+      error instanceof SyntaxError ||
+      (typeof code === "string" &&
+        (code.startsWith("browser_recording_") ||
+          code === "browser_human_input_required" ||
+          code === "browser_feature_unsupported"))
+    ) {
+      this.failure = error instanceof Error ? error : new Error(String(error))
+      if (this.timer) clearInterval(this.timer)
+      this.timer = null
+    }
   }
 }

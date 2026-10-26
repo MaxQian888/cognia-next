@@ -1,9 +1,12 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { isDeepStrictEqual } from "node:util"
+import { claude55CapabilitiesForModel } from "@cognia/provider-types/reasoning-effort-tables"
 import type { SendOptions } from "../../shared/wire/inbound.ts"
 import type { HostRpcCaller } from "../../tools/state/host-background-shells.ts"
 import type {
   AdapterCredentials,
+  AdapterMessage,
   ProtocolAdapter,
 } from "../../providers/protocol-adapters/types.ts"
 import type { ProtocolExecChannel } from "../../providers/protocol-adapters/code-adapter.ts"
@@ -14,6 +17,7 @@ import {
   shouldCompact,
   estimateTokens,
   makeSummaryMessage,
+  isSummaryMessage,
   summaryVersion,
   AUTO_COMPACT_FRACTION,
 } from "../../context/compaction.ts"
@@ -21,7 +25,7 @@ import { planStrategy } from "../../context/strategies.ts"
 import { queryPreCompactDecision } from "../../hooks/pre-compact.ts"
 import { runPluginHookHandler, PLUGIN_HOOK_BROADCAST } from "../../hooks/handlers/plugin.ts"
 import { capToolResults } from "../../context/tool-result-cap.ts"
-import { unpairedToolCallIds } from "../../context/tool-message-pairing.ts"
+import { unpairedToolCallIds, toolPairUnits } from "../../context/tool-message-pairing.ts"
 import { resolveAdapter } from "../../providers/protocol-adapters/registry.ts"
 import { SIWC_PROTOCOL } from "../../providers/siwc-fetch.ts"
 import {
@@ -30,12 +34,34 @@ import {
   runLedgeredSideCall,
 } from "../common/call-ledger-gate.ts"
 import { errorToMessage } from "./messages.ts"
+import {
+  PROGRESS_CHECKPOINT_PROMPT,
+  parseProgressCheckpoint,
+  progressCheckpointIssueCodes,
+  mergeProgressCheckpoint,
+  renderProgressCheckpoint,
+  type ProgressCheckpoint,
+} from "../../context/progress-checkpoint.ts"
 const COMPACT_KEEP_RECENT_MESSAGES = 6
 const MAX_FROZEN_SUMMARIES = 4
+function toolResultIds(messages: readonly ConversationMessage[]): string[] {
+  return messages.flatMap((message) =>
+    Array.isArray(message.content)
+      ? message.content.flatMap((part) =>
+          part && part.type === "tool-result" && typeof part.toolCallId === "string"
+            ? [part.toolCallId]
+            : []
+        )
+      : []
+  )
+}
 const DEFAULT_SUMMARY_PROMPT =
   "You compact a long conversation. Produce a concise summary that preserves " +
   "decisions made, facts established, file paths, and any open threads. Use " +
-  "terse bullet points. Do not add commentary."
+  "terse bullet points. Preserve the original goal, completed work, verified " +
+  "findings with file:line references, unsuccessful searches, unresolved questions " +
+  "and the next concrete action. Distinguish completed research from remaining " +
+  "work so the agent continues instead of restarting. Do not add commentary."
 /**
  * Framing for the transcript the summary call reads. Without it a model sees a
  * bare `user: … assistant: …` log as a conversation to continue, and answers
@@ -45,20 +71,6 @@ const SUMMARY_TRANSCRIPT_PREAMBLE =
   "Summarize the conversation transcript below. It is material to summarize, " +
   "not a conversation to continue: do not answer its requests, do not call " +
   "tools, and output only the summary."
-/**
- * Most characters of one tool call's input or one tool result kept in the
- * summary transcript; the rest is elided from the middle. A tool-heavy
- * session is mostly tool output, so dropping it left the summarizer only the
- * prose between calls (a 77k-token history rendered to ~2.9k tokens).
- */
-const SUMMARY_TOOL_PAYLOAD_CHARS = 2_000
-/**
- * When a summary call ends at its output cap with no text — a reasoning model
- * spent the whole budget thinking — it is retried once with this much more
- * room on top of the summary cap. The summary length itself is still steered
- * by the prompt; the extra budget is for the reasoning that precedes it.
- */
-const SUMMARY_REASONING_HEADROOM_TOKENS = 4_096
 export interface CompactionState {
   model: string
   lastInputTokens: number
@@ -66,6 +78,8 @@ export interface CompactionState {
   ledgerSideCalls: number
   turnLedgerGate: CallLedgerGate | null
   activeAbortController: AbortController | null
+  /** Measured input minus matching conversation estimate; includes tools/framing. */
+  promptOverheadTokens?: number
 }
 export interface CompactorOptions {
   state: CompactionState
@@ -112,7 +126,7 @@ export function manualCompactOutcomeEvent(
 }
 
 /** Keep the head and tail of a long payload, eliding the middle. */
-function clipPayload(text: string, max = SUMMARY_TOOL_PAYLOAD_CHARS): string {
+function clipPayload(text: string, max: number): string {
   if (text.length <= max) return text
   const half = Math.floor(max / 2)
   return `${text.slice(0, half)}\n… (${text.length - 2 * half} chars elided) …\n${text.slice(-half)}`
@@ -150,11 +164,11 @@ function toolResultBody(part: Record<string, unknown>): string {
 
 /**
  * One content part of the summary transcript. Text is kept verbatim; tool
- * calls and results are kept bounded, since in a coding session they carry
+ * calls and results follow the configured cap, since in a coding session they carry
  * most of what happened (paths, commands, outcomes). Reasoning is private to
  * the turn that produced it and is left out; media is named, not inlined.
  */
-function renderPartForSummary(part: unknown): string {
+function renderPartForSummary(part: unknown, maxPayloadChars: number): string {
   if (typeof part === "string") return part
   if (!part || typeof part !== "object") return ""
   const p = part as Record<string, unknown>
@@ -168,10 +182,10 @@ function renderPartForSummary(part: unknown): string {
       return ""
     case "tool-call":
     case "tool_use":
-      return `[tool call ${toolName}] ${clipPayload(stringifyPayload(p.input ?? p.args))}`
+      return `[tool call ${toolName}] ${clipPayload(stringifyPayload(p.input ?? p.args), maxPayloadChars)}`
     case "tool-result":
     case "tool_result":
-      return `[tool result ${toolName}] ${clipPayload(toolResultBody(p))}`
+      return `[tool result ${toolName}] ${clipPayload(toolResultBody(p), maxPayloadChars)}`
     case "image":
       return "[image]"
     case "file":
@@ -219,6 +233,8 @@ export function createCompactor({
 }: CompactorOptions) {
   // Render the to-be-summarized slice as plain transcript for the summary call.
   function renderForSummary(messages: ConversationMessage[]) {
+    const cap = sendOptions.compaction?.maxToolResultTokens
+    const maxPayloadChars = typeof cap === "number" && cap > 0 ? cap * 4 : Number.POSITIVE_INFINITY
     return messages
       .map((m) => {
         const text =
@@ -226,7 +242,7 @@ export function createCompactor({
             ? m.content
             : Array.isArray(m.content)
               ? m.content
-                  .map((p) => renderPartForSummary(p))
+                  .map((p) => renderPartForSummary(p, maxPayloadChars))
                   .filter(Boolean)
                   .join("\n")
               : ""
@@ -250,9 +266,13 @@ export function createCompactor({
     force: boolean
     result?: Prepared
     settled: boolean
+    contextKey: string
+    summaries: Map<string, Promise<{ text: string | null; failure?: string }>>
     promise: Promise<void>
   }
   let pending: Job | undefined
+  let rejected: Job | undefined
+  let softRearmTokens = 0
   const running = new Set<Job>()
 
   function invalidate() {
@@ -260,6 +280,8 @@ export function createCompactor({
     pending?.controller.abort()
     for (const job of running) job.controller.abort()
     pending = undefined
+    rejected = undefined
+    softRearmTokens = 0
   }
 
   function matches(job: Job) {
@@ -301,6 +323,18 @@ export function createCompactor({
     })
   }
 
+  function postCompactionTarget() {
+    const comp = sendOptions.compaction
+    const requested = comp?.postCompactionTokenBudget
+    const window = comp?.contextWindow
+    if (requested === undefined) return undefined
+    // Default targets accommodate fixed instructions and the pair-safe tail,
+    // but remain comfortably below the next background trigger.
+    return comp.postCompactionTokenBudgetIsDefault && typeof window === "number"
+      ? Math.max(requested, window * (comp.fraction ?? AUTO_COMPACT_FRACTION) * 0.8 * 0.9)
+      : requested
+  }
+
   async function prepare(
     creds: AdapterCredentials,
     modelParams: Record<string, unknown>,
@@ -321,6 +355,13 @@ export function createCompactor({
       },
     }
     const comp = sendOptions.compaction ?? {}
+    const progressFormat =
+      comp.checkpointFormat === "progress-v1" &&
+      comp.strategy !== "optical" &&
+      comp.strategy !== "sliding-window" &&
+      sendOptions.agentKind === "subagent" &&
+      (sendOptions.agentRef === "Plan" || sendOptions.agentRef === "Explore") &&
+      comp.useAISummarization !== false
     const signal = job.controller.signal
     // ── PreCompact plugin hook (ADR-0090 Phase 9) ──────────────────────────
     // Gives plugins a chance to skip compaction, inject context, or override
@@ -380,16 +421,34 @@ export function createCompactor({
 
     const keepRecent =
       typeof comp.keepRecent === "number" ? comp.keepRecent : COMPACT_KEEP_RECENT_MESSAGES
+    const generationBudget = comp.maxSummaryTokens ?? 16_384
+    const retainedCheckpointBudget = comp.checkpointTokenBudget ?? generationBudget
+    const framingTokens = state.promptOverheadTokens ?? 0
+    let totalTarget = postCompactionTarget()
 
     const plan = planStrategy({
       // Plugin strategy override takes precedence, then user-configured strategy
       strategy: preCompactDecision.strategyOverride ?? comp.strategy,
       conversation,
       keepRecent,
+      keepRecentTokens:
+        comp.keepRecentTokens ??
+        (comp.keepRecent === undefined
+          ? Math.min(12_000, (comp.contextWindow ?? 128_000) * 0.1)
+          : undefined),
       preserveSystemMessages: comp.preserveSystemMessages,
       recursiveChunkSize: comp.recursiveChunkSize,
       importanceThreshold: comp.importanceThreshold,
       retainedFraction: comp.retainedFraction,
+      ...(totalTarget !== undefined
+        ? {
+            retainedTokenBudget: Math.max(
+              0,
+              totalTarget - framingTokens - retainedCheckpointBudget
+            ),
+            replacesFrozen: progressFormat,
+          }
+        : {}),
       modelId: state.model,
       // Authoritative catalog-resolved window (same source `shouldCompact`
       // uses) so the drain-line budget doesn't fall back to the regex table.
@@ -420,6 +479,7 @@ export function createCompactor({
     if (manualFocus) {
       systemPrompt = `${systemPrompt}\n\nFocus especially on: ${manualFocus}`
     }
+    if (progressFormat) systemPrompt += `\n\n${PROGRESS_CHECKPOINT_PROMPT}`
 
     // Summary executor: alternate cheap state.model + credentials + adapter, with the
     // output token cap. Returns trimmed text, or null on failure/empty. When AI
@@ -428,36 +488,292 @@ export function createCompactor({
     const summaryCap =
       typeof comp.maxSummaryTokens === "number" && comp.maxSummaryTokens > 0
         ? comp.maxSummaryTokens
-        : 500
+        : 16_384
+    const retainedBase =
+      plan.kind === "rebuild"
+        ? 0
+        : estimateTokens([
+            ...plan.systemHead,
+            ...plan.keep,
+            ...plan.tail,
+            ...(progressFormat ? [] : plan.frozen),
+          ])
+    const envelopeTokens = estimateTokens([makeSummaryMessage("", state.frozenSummaryVersion + 1)])
+    if (
+      comp.postCompactionTokenBudgetIsDefault &&
+      totalTarget !== undefined &&
+      typeof comp.contextWindow === "number" &&
+      plan.kind !== "rebuild"
+    ) {
+      totalTarget = Math.min(
+        comp.contextWindow * (comp.fraction ?? AUTO_COMPACT_FRACTION) * 0.9,
+        Math.max(
+          totalTarget,
+          framingTokens + retainedBase + retainedCheckpointBudget + envelopeTokens
+        )
+      )
+    }
+    const availableState =
+      totalTarget === undefined
+        ? Infinity
+        : Math.floor(totalTarget - framingTokens - retainedBase - envelopeTokens)
+    if (availableState <= 0 && plan.kind !== "rebuild") {
+      log(
+        "warn",
+        "compaction cannot fit required instructions and recent tool pairs within the retained input budget"
+      )
+      if (force)
+        reportManualOutcome(
+          "failed",
+          "Compaction failed: fixed instructions and recent tool pairs exceed the retained input budget. History is unchanged."
+        )
+      return
+    }
+    // The default is a starting allocation. Let accumulated findings use the
+    // actual retained-input slack, while leaving room in summary requests for
+    // new source and instructions. Explicit state caps remain strict.
+    const checkpointBudget =
+      comp.checkpointTokenBudgetIsDefault && Number.isFinite(availableState)
+        ? Math.min(
+            availableState,
+            comp.summaryInputBudget === undefined
+              ? Infinity
+              : Math.floor(comp.summaryInputBudget * 0.75)
+          )
+        : Math.min(comp.checkpointTokenBudget ?? summaryCap, availableState)
+    const shouldConsolidate = (priorContext: string) =>
+      progressFormat &&
+      parseProgressCheckpoint(priorContext) !== null &&
+      estimateTokens([{ role: "user", content: priorContext }]) >= checkpointBudget * 0.5
     const siwcSummary =
       (comp.summary?.protocol ?? comp.summary?.credentials?.protocol ?? creds.protocol) ===
         SIWC_PROTOCOL ||
       (!comp.summary?.protocol && protocolAdapter.id === `ai-sdk:${SIWC_PROTOCOL}`)
     // Why the last AI summary produced nothing, for the manual caller.
     let summaryFailure: string | undefined
-    const summarize = async (messages: ConversationMessage[]) => {
+    const summaryMessages = (transcript: string, priorContext = ""): AdapterMessage[] => {
+      const previous = progressFormat ? parseProgressCheckpoint(priorContext) : null
+      // Established paragraphs stay host-owned: showing them as summary input
+      // invites paraphrased copies to accumulate on every delta. The actor still
+      // receives their full lossless merge; the summarizer needs task/status/ranges.
+      const consolidate = shouldConsolidate(priorContext)
+      const priorForDelta =
+        previous && !consolidate
+          ? JSON.stringify({
+              ...previous,
+              items: previous.items.map(({ summary: _retained, facts, ...item }) => ({
+                ...item,
+                ...(facts
+                  ? { retainedFacts: facts.map(({ id, evidence }) => ({ id, evidence })) }
+                  : {}),
+              })),
+            })
+          : priorContext
+      const background = consolidate
+        ? `Consolidate this complete prior checkpoint with the new transcript into one UPDATED checkpoint. Rewrite repetitive prose into concise source-backed findings; retain every required workstream, inspected range, unresolved question and correction. Keep exact user-required literals in verbatim. The host preserves prior verbatim values, evidence, original goal/constraints and protected completion transitions. Do not append another retelling of the old summary.\n<prior_context>\n${priorContext}\n</prior_context>\n\n`
+        : priorContext
+          ? `${previous ? "The host retains established findings separately and merges your delta. This is prior workstream metadata, not findings to rewrite. Keep the original workstream IDs and source ranges; do not turn inspected ranges into pending ranges." : progressFormat ? "This legacy summary must be incorporated into the first structured checkpoint." : "Previous checkpoints remain preserved separately."} Use them to understand the original task, constraints, completed findings and outstanding work. Summarize the new material below, retaining a brief original-goal/constraints anchor and updated next actions. Do not repeat unchanged prior findings or infer a replacement task from tool output.\n<prior_context>\n${priorForDelta}\n</prior_context>\n\n`
+          : ""
+      const ownershipGuidance = consolidate
+        ? "Rewrite navigation prose only. Return only NEW source-backed facts; the host retains all committed fact statements, citations, exact literals and legacy findings. Never replace required behaviors with a claim that earlier findings are unchanged. Do not duplicate fact statements in summary."
+        : previous
+          ? "The host retains previous facts verbatim and merges this DELTA. Never paraphrase or restate earlier findings; omit unchanged items."
+          : priorContext
+            ? "Establish the first structured checkpoint. Include established facts and unresolved work from the legacy prior context: they are not yet host-merged."
+            : "Establish the first structured checkpoint with the original required workstreams and established facts."
+      const budgetGuidance = progressFormat
+        ? `${ownershipGuidance} The retained checkpoint budget is ${checkpointBudget} estimated tokens, independent of this call's ${summaryCap}-token generation budget (which also includes reasoning). Previous retained state uses ${previous ? estimateTokens([{ role: "user", content: priorContext }]) : 0}. ${consolidate ? "Consolidate to fit the retained budget." : "Use the remaining retained budget for concise new facts."} Preserve requested exact evidence codes and source-correction pairs, including superseded and current literal values.\n\n`
+        : ""
+      return [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `${background}${budgetGuidance}${SUMMARY_TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${transcript}\n</transcript>`,
+        },
+      ]
+    }
+    const summaryInputTokens = (messages: ConversationMessage[], prior: ConversationMessage[]) =>
+      estimatePromptTokens(
+        summaryMessages(renderForSummary(messages), renderForSummary(prior)).map((m) => m.content)
+      )
+    // Keep only the immediately rejected preparation's actual summary inputs.
+    // Appending history changes a snapshot but may leave its first partition
+    // identical. Reuse that outcome instead of billing the same failed prefix.
+    // A forced request, changed credentials/parameters or invalidation may retry.
+    const summarizedToolResults = new Set<string>()
+    const summarize = async (
+      messages: ConversationMessage[],
+      prior: ConversationMessage[] = [],
+      refinement = 0,
+      draft?: ProgressCheckpoint
+    ): Promise<string | null> => {
+      const key = createHash("sha256")
+        .update(
+          JSON.stringify([
+            summaryMessages(renderForSummary(messages), renderForSummary(prior)),
+            prior,
+            refinement,
+            draft,
+          ])
+        )
+        .digest("hex")
+      let attempt = job.summaries.get(key)
+      if (
+        !attempt &&
+        !force &&
+        rejected?.contextKey === job.contextKey &&
+        rejected.generation === job.generation &&
+        rejected.gate === job.gate
+      )
+        attempt = rejected.summaries.get(key)
+      if (!attempt)
+        attempt = (async () => {
+          const text = await summarizeUncached(messages, prior, refinement, draft)
+          return { text, ...(summaryFailure ? { failure: summaryFailure } : {}) }
+        })()
+      job.summaries.set(key, attempt)
+      const result = await attempt
+      if (result.failure) summaryFailure = result.failure
+      if (result.text) for (const id of toolResultIds(messages)) summarizedToolResults.add(id)
+      return result.text
+    }
+    const summarizeUncached = async (
+      messages: ConversationMessage[],
+      prior: ConversationMessage[] = [],
+      refinement = 0,
+      draft?: ProgressCheckpoint
+    ): Promise<string | null> => {
       signal.throwIfAborted()
+      const inputBudget = comp.summaryInputBudget
+      if (
+        useAI &&
+        inputBudget !== undefined &&
+        summaryInputTokens(messages, prior) >= inputBudget
+      ) {
+        const units = toolPairUnits(messages)
+        if (units.some((unit) => summaryInputTokens(unit, prior) >= inputBudget)) {
+          summaryFailure =
+            "required prior context or one indivisible tool exchange exceeds the summary model input budget"
+          return null
+        }
+        const parts: string[] = []
+        let cursor = 0
+        while (cursor < units.length) {
+          signal.throwIfAborted()
+          // Carry a bounded accumulated checkpoint for research. Other summaries
+          // retain the first part as the original-goal/constraints anchor; all
+          // parts are reduced together below, never silently discarded.
+          const context = parts.length
+            ? progressFormat
+              ? [{ role: "user", content: parts.at(-1)! }]
+              : [...prior, { role: "user", content: parts[0]! }]
+            : prior
+          const chunk: ConversationMessage[] = []
+          while (
+            cursor < units.length &&
+            summaryInputTokens([...chunk, ...units[cursor]!], context) < inputBudget
+          ) {
+            chunk.push(...units[cursor++]!)
+          }
+          if (!chunk.length) {
+            summaryFailure =
+              "required prior context or one indivisible tool exchange exceeds the summary model input budget"
+            return null
+          }
+          const part = await summarize(chunk, context, refinement)
+          if (!part) return null
+          parts.push(part)
+        }
+        if (progressFormat) return parts.at(-1) ?? null
+        const combined: ConversationMessage[] = parts.map((content) => ({ role: "user", content }))
+        if (summaryInputTokens(combined, prior) >= summaryInputTokens(messages, prior)) {
+          summaryFailure =
+            "partitioned summaries did not reduce the material within the summary input budget"
+          return null
+        }
+        return summarize(combined, prior, refinement)
+      }
       const transcript = renderForSummary(messages)
       if (!useAI) {
-        const cap = summaryCap * 4
-        return transcript.length > cap
-          ? `${transcript.slice(0, cap)}\n... (extractive summary truncated)`
-          : transcript
+        const suffix = "\n... (extractive summary truncated)"
+        const cap = Math.max(0, checkpointBudget * 4 - suffix.length)
+        return transcript.length > cap ? `${transcript.slice(0, cap)}${suffix}` : transcript
       }
-      const first = await summarizeOnce(transcript, summaryCap)
-      if (first.text || first.finishReason !== "length" || siwcSummary) return first.text
-      // Ended at the cap without a word of summary: the budget went to
-      // reasoning. One retry with room for it, never more.
-      signal.throwIfAborted()
-      log(
-        "info",
-        `compaction summary hit its ${summaryCap}-token cap with no text; retrying with reasoning headroom`
-      )
-      return (await summarizeOnce(transcript, summaryCap + SUMMARY_REASONING_HEADROOM_TOKENS)).text
+      const text = (await summarizeOnce(transcript, summaryCap, renderForSummary(prior))).text
+      if (!text || !progressFormat) return text
+      const parsed = parseProgressCheckpoint(text)
+      if (!parsed) {
+        const issues = progressCheckpointIssueCodes(text).join(", ")
+        if (refinement === 0) {
+          log("warn", `compaction repairing one unpublished checkpoint draft (${issues})`)
+          return summarize(
+            [
+              {
+                role: "user",
+                content: `Repair only this UNPUBLISHED checkpoint JSON draft. Schema errors: ${issues}. Preserve every reported source behavior, citation, required literal and correction. Give each fact a unique stable source/behavior ID; evidence must be an array of strings. Return valid checkpoint JSON only. Do not investigate or reread sources.\n<invalid_draft>\n${text}\n</invalid_draft>`,
+              },
+            ],
+            prior,
+            1
+          )
+        }
+        summaryFailure = `invalid research progress checkpoint (${issues})`
+        return null
+      }
+      const update = draft
+        ? mergeProgressCheckpoint(draft, parsed, { consolidate: true, refineDraft: true })
+        : parsed
+      try {
+        let previous: ProgressCheckpoint | null = null
+        for (const message of prior) {
+          const parsed =
+            typeof message.content === "string" ? parseProgressCheckpoint(message.content) : null
+          if (parsed) previous = mergeProgressCheckpoint(previous, parsed)
+        }
+        const merged = renderProgressCheckpoint(
+          mergeProgressCheckpoint(
+            previous,
+            !previous && prior.length
+              ? {
+                  ...update,
+                  legacyContext: renderForSummary(prior),
+                }
+              : update,
+            {
+              consolidate: shouldConsolidate(renderForSummary(prior)),
+            }
+          )
+        )
+        // The merged state is the summary itself, not an unbudgeted appendix.
+        if (estimateTokens([{ role: "user", content: merged }]) > checkpointBudget) {
+          if (refinement === 0) {
+            // Reuse the already-produced state, not the source transcript.
+            // This retry is distinct, ledgered, PII-gated and bounded to once.
+            return summarize(
+              [
+                {
+                  role: "user",
+                  content: `This UNPUBLISHED draft exceeds the ${checkpointBudget}-token retained-state budget. Shorten its new fact statements and navigation prose without dropping required behaviors, citations, exact literals or corrections. Previously committed facts in prior_context remain host-owned; do not copy them. Return the refined delta only. No new investigation.\n<unpublished_draft>\n${renderProgressCheckpoint(update)}\n</unpublished_draft>`,
+                },
+              ],
+              prior,
+              1,
+              update
+            )
+          }
+          summaryFailure = "merged research progress exceeds the retained checkpoint budget"
+          return null
+        }
+        return merged
+      } catch {
+        summaryFailure = "research progress exceeds its bounded state schema"
+        return null
+      }
     }
     const summarizeOnce = async (
       transcript: string,
-      maxOutputTokens: number
+      maxOutputTokens: number,
+      priorContext = ""
     ): Promise<{ text: string | null; finishReason?: string }> => {
       let drained: { finishReason?: string; error?: unknown } = {}
       try {
@@ -486,9 +802,81 @@ export function createCompactor({
         }
         // The preview rejects max_output_tokens. Preserve an explicit user
         // constraint for native validation, but do not invent an unsupported cap.
-        const summaryParams = siwcSummary ? { ...modelParams } : { ...modelParams, maxOutputTokens }
+        const summaryParams: Record<string, unknown> = siwcSummary
+          ? { ...modelParams }
+          : { ...modelParams, maxOutputTokens }
         const summaryProviderId = sum.credentials ? sum.providerId : provider
-        const userContent = `${SUMMARY_TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${transcript}\n</transcript>`
+        if (summaryAdapter.id === "ai-sdk:anthropic") {
+          const thinking = (
+            summaryParams.providerOptions as
+              | {
+                  anthropic?: { thinking?: { type?: string; budgetTokens?: number } }
+                }
+              | undefined
+          )?.anthropic?.thinking
+          // The installed Anthropic SDK adds enabled thinking to maxOutputTokens.
+          // Keep the wire maximum, ledger reservation and input reserve identical.
+          // Adaptive-only families convert enabled thinking before this addition.
+          const thinkingTokens =
+            thinking?.type === "enabled" &&
+            !claude55CapabilitiesForModel(summaryModel) &&
+            !summaryModel.includes("claude-fable-5")
+              ? (thinking.budgetTokens ?? 1024)
+              : 0
+          if (thinkingTokens >= maxOutputTokens)
+            throw new Error("The explicit summary thinking budget leaves no room for summary text")
+          summaryParams.maxOutputTokens = maxOutputTokens - thinkingTokens
+        }
+        // Native DeepSeek V4 enables thinking by default; a small auxiliary
+        // summary can otherwise spend its entire existing output cap reasoning.
+        // Default to direct text for this auxiliary extraction, preserving all
+        // explicit provider knobs and effort. Relays may ignore thinking flags.
+        if (
+          summaryProviderId === "deepseek" &&
+          summaryAdapter.id === "ai-sdk:openai" &&
+          summaryCreds.apiFlavor !== "responses" &&
+          summaryModel.includes("deepseek-v4")
+        ) {
+          const rawOptions = summaryParams.providerOptions
+          const recordOptions = (value: unknown): value is Record<string, unknown> =>
+            typeof value === "object" && value !== null && !Array.isArray(value)
+          if (
+            (rawOptions === undefined || recordOptions(rawOptions)) &&
+            (rawOptions?.deepseek === undefined || recordOptions(rawOptions.deepseek))
+          ) {
+            const providerOptions = summaryParams.providerOptions as
+              Record<string, unknown> | undefined
+            const explicit = providerOptions?.deepseek as Record<string, unknown> | undefined
+            // Provider wire input may carry "none" outside the canonical agent effort union.
+            const wireOptions: { effort?: SendOptions["effort"] | "none" } = sendOptions
+            const effort = wireOptions.effort
+            const defaults =
+              effort === "none"
+                ? { thinking: { type: "disabled" } }
+                : effort
+                  ? { reasoningEffort: effort }
+                  : sendOptions.maxThinkingTokens !== undefined ||
+                      explicit?.thinking !== undefined ||
+                      explicit?.reasoningEffort !== undefined
+                    ? {}
+                    : { thinking: { type: "disabled" } }
+            summaryParams.providerOptions = {
+              ...providerOptions,
+              deepseek: { ...defaults, ...explicit },
+            }
+          }
+        }
+        const messages = summaryMessages(transcript, priorContext)
+        if (!hasNoLeakingPiiDeep(messages))
+          throw new Error("Compaction summary blocked by the PII gate")
+        const estimatedInputTokens = estimatePromptTokens(messages.map((m) => m.content))
+        if (
+          comp.summaryInputBudget !== undefined &&
+          estimatedInputTokens >= comp.summaryInputBudget
+        )
+          throw new Error(
+            `Compaction summary exceeds the summary model input budget (${estimatedInputTokens} estimated tokens; limit ${comp.summaryInputBudget})`
+          )
         // Router + Fusion: inside a ledgered turn the summary is a reserved call
         // like any other; a refusal skips the AI summary.
         const outcome = await runLedgeredSideCall(
@@ -496,7 +884,7 @@ export function createCompactor({
           {
             logicalStepId: `compact:${++state.ledgerSideCalls}`,
             deploymentId: `${summaryProviderId}::${summaryModel}`,
-            estimatedInputTokens: estimatePromptTokens([systemPrompt, userContent]),
+            estimatedInputTokens,
             maxOutputTokens,
           },
           () =>
@@ -504,10 +892,7 @@ export function createCompactor({
               const run = await summaryAdapter.start({
                 sessionId,
                 model: summaryModel,
-                messages: [
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: userContent },
-                ],
+                messages,
                 modelParams: summaryParams,
                 tools: undefined,
                 maxSteps: 1,
@@ -538,13 +923,25 @@ export function createCompactor({
           summaryFailure = `the summary call was refused by Router + Fusion (${outcome.refusal.code})`
           return { text: null }
         }
+        if (
+          drained.error ||
+          (drained.finishReason !== undefined && drained.finishReason !== "stop")
+        ) {
+          summaryFailure =
+            drained.finishReason === "length"
+              ? `the summary was truncated at its ${maxOutputTokens}-token output limit`
+              : drained.error
+                ? `the summary call failed: ${errorToMessage(drained.error)}`
+                : drained.finishReason === "tool-calls" || drained.finishReason === "content-filter"
+                  ? emptySummaryReason(drained, maxOutputTokens)
+                  : `the summary ended without a normal stop (finish reason: ${drained.finishReason}; visible characters: ${outcome.value.length})`
+          log("warn", `compaction summary rejected: ${summaryFailure}`)
+          return { text: null, finishReason: drained.finishReason }
+        }
         const text = outcome.value.trim()
         if (text)
           return { text, ...(drained.finishReason ? { finishReason: drained.finishReason } : {}) }
-        summaryFailure =
-          siwcSummary && drained.finishReason === "length"
-            ? "the SIWC summary ended without text; the preview does not support an output-token cap"
-            : emptySummaryReason(drained, maxOutputTokens)
+        summaryFailure = emptySummaryReason(drained, maxOutputTokens)
         log("warn", `compaction summary produced no text: ${summaryFailure}`)
         return {
           text: null,
@@ -574,7 +971,27 @@ export function createCompactor({
     // Reuse prior frozen summaries verbatim (prefix-cache stable) until too many
     // accumulate, then collapse once.
     const frozen = "frozen" in plan ? plan.frozen : []
-    const regenerate = frozen.length >= MAX_FROZEN_SUMMARIES
+    // A resumed child starts a new transport conversation. Restore its saved
+    // structured findings as merge state, rather than asking the model to
+    // reconstruct them from the textual continuation wrapper.
+    const restored =
+      progressFormat && frozen.length === 0
+        ? conversation
+            .filter((message) => message.role === "user")
+            .map((message) => renderForSummary([message]))
+            .filter(
+              (text) =>
+                text.includes("You previously worked on this task:\n") &&
+                text.includes("Your result was:\n")
+            )
+            .map(parseProgressCheckpoint)
+            .filter((checkpoint) => checkpoint !== null)
+            .at(-1)
+        : null
+    const summaryPrior: ConversationMessage[] = restored
+      ? [{ role: "user", content: renderProgressCheckpoint(restored) }]
+      : frozen
+    const regenerate = progressFormat || frozen.length >= MAX_FROZEN_SUMMARIES
     const nextVersion =
       (frozen.length > 0
         ? Math.max(state.frozenSummaryVersion, ...frozen.map(summaryVersion))
@@ -691,25 +1108,53 @@ export function createCompactor({
       if (plan.kind === "chunked") {
         // Chunks are independent — summarize them concurrently (order is
         // preserved by Promise.all's positional results).
-        const parts = (await Promise.all(plan.chunks.map((chunk) => summarize(chunk)))).filter(
-          Boolean
-        )
-        if (regenerate && frozen.length) parts.unshift(renderForSummary(frozen))
+        const prior = progressFormat || !regenerate ? summaryPrior : []
+        const parts: (string | null)[] = []
+        if (progressFormat) {
+          let context = prior
+          for (const chunk of plan.chunks) {
+            const part = await summarize(chunk, context)
+            parts.push(part)
+            if (!part) break
+            context = [{ role: "user", content: part }]
+          }
+        } else
+          parts.push(...(await Promise.all(plan.chunks.map((chunk) => summarize(chunk, prior)))))
+        if (parts.some((part) => !part)) {
+          reportSummaryFailure()
+          return
+        }
+        if (!progressFormat && regenerate && frozen.length) parts.unshift(renderForSummary(frozen))
         if (parts.length === 0) {
           reportSummaryFailure()
           return
         }
-        summaryText =
-          parts.length > 1 && useAI
-            ? ((await summarize([{ role: "user", content: parts.join("\n\n") }])) ??
-              parts.join("\n\n"))
-            : parts.join("\n\n")
+        if (progressFormat) {
+          summaryText = parts.at(-1)!
+          if (estimateTokens([{ role: "user", content: summaryText }]) > checkpointBudget) {
+            summaryFailure = "merged research progress exceeds the retained checkpoint budget"
+            reportSummaryFailure()
+            return
+          }
+        } else
+          summaryText =
+            parts.length > 1 && useAI
+              ? await summarize([{ role: "user", content: parts.join("\n\n") }], prior)
+              : parts.join("\n\n")
       } else {
         const material = plan.kind === "selective" ? plan.summarizeSet : plan.middle
-        const full = regenerate && frozen.length ? [...frozen, ...material] : material
-        summaryText = await summarize(full)
+        const full =
+          !progressFormat && regenerate && frozen.length ? [...frozen, ...material] : material
+        // Prior context informs a delta without paying output tokens to copy
+        // unchanged findings into each independently preserved cached checkpoint.
+        summaryText = await summarize(full, progressFormat || !regenerate ? summaryPrior : [])
       }
       if (!summaryText) {
+        reportSummaryFailure()
+        return
+      }
+      if (progressFormat && !hasNoLeakingPiiDeep(summaryText)) {
+        summaryFailure = "generated research progress blocked by the PII gate"
         reportSummaryFailure()
         return
       }
@@ -730,6 +1175,9 @@ export function createCompactor({
 
     return {
       next,
+      retainedTarget: totalTarget,
+      checkpointBudget,
+      summarizedToolResultIds: useAI && summaryProduced ? [...summarizedToolResults] : [],
       version: summaryProduced ? nextVersion : undefined,
       captureUndo: comp.captureUndoSnapshot,
       metadata: {
@@ -752,7 +1200,11 @@ export function createCompactor({
   }
 
   function publish(job: Job) {
-    if (!job.result || !matches(job)) return
+    if (!matches(job)) return
+    if (!job.result) {
+      rejected = job
+      return
+    }
     const { next, version, captureUndo, metadata } = job.result
     // Newly appended messages were never included in the preparation and must
     // survive verbatim. Undo captures the complete history at publication.
@@ -766,6 +1218,7 @@ export function createCompactor({
     const before = unpairedToolCallIds(conversation)
     const split = [...unpairedToolCallIds(combined)].filter((id) => !before.has(id))
     if (split.length > 0) {
+      rejected = job
       log(
         "warn",
         `compaction discarded: it would separate ${split.length} tool call(s) from their results (${split.slice(0, 3).join(", ")})`
@@ -777,9 +1230,41 @@ export function createCompactor({
         )
       return
     }
+    const postTokens = estimateTokens(combined)
+    const limit = sendOptions.compaction?.contextWindow
+    const comp = sendOptions.compaction
+    const projectedInput = postTokens + (state.promptOverheadTokens ?? 0)
+    // A default target may meet an irreducible system/pair-safe-tail floor.
+    // Accommodate it only below the trigger, with a further safety margin.
+    // An explicit total target is never relaxed.
+    const target = job.result.retainedTarget ?? postCompactionTarget()
+    // Validate the whole published candidate, including concurrent appends and
+    // frozen summaries. A non-shrinking automatic compaction cannot make progress.
+    if (
+      (typeof limit === "number" && projectedInput >= limit) ||
+      (target !== undefined && projectedInput > target) ||
+      (!job.force && postTokens >= estimateTokens(conversation))
+    ) {
+      rejected = job
+      log("warn", "compaction discarded: replacement does not fit or reduce the context budget")
+      if (job.force)
+        reportManualOutcome(
+          "failed",
+          "Compaction failed: replacement exceeds the context budget. Nothing was compacted."
+        )
+      return
+    }
     conversation.splice(0, conversation.length, ...combined)
+    rejected = undefined
     if (version !== undefined) state.frozenSummaryVersion = version
     state.lastInputTokens = 0
+    // Require new growth after a successful swap. Hard limits bypass this gate.
+    softRearmTokens = projectedInput + (typeof limit === "number" ? limit * 0.1 : 0)
+    const continuationSummary = combined
+      .filter(isSummaryMessage)
+      .flatMap((message) => (typeof message.content === "string" ? [message.content] : []))
+      .join("\n\n")
+    const retainedToolResults = new Set(toolResultIds(combined))
     emit({
       type: "event",
       sessionId,
@@ -792,6 +1277,19 @@ export function createCompactor({
           ...metadata,
           pre_tokens: preTokens,
           post_tokens: estimateTokens(combined),
+          projected_input_tokens: projectedInput,
+          post_compaction_token_budget: target,
+          checkpoint_token_budget: job.result.checkpointBudget,
+          summary_generation_token_budget: comp?.maxSummaryTokens,
+          // Text checkpoints only: never include optical image payloads or
+          // reasoning. Budget-stop capture retains this bounded model summary.
+          continuation_summary: continuationSummary,
+          // Serialization length, not another configurable budget. The whole
+          // candidate has already passed the retained-input guard above.
+          continuation_summary_chars: continuationSummary.length,
+          continuation_tool_result_ids: job.result.summarizedToolResultIds.filter(
+            (id) => !retainedToolResults.has(id)
+          ),
           ...(preMessages ? { pre_messages: preMessages } : {}),
         },
       },
@@ -800,6 +1298,8 @@ export function createCompactor({
   function triggered(factor: number) {
     const comp = sendOptions.compaction ?? {}
     if (comp.enabled === false || comp.trigger === "manual") return false
+    if (factor < 1 && comp.trigger !== "message-count" && state.lastInputTokens < softRearmTokens)
+      return false
     return shouldCompact(
       comp.trigger === "message-count"
         ? {
@@ -811,7 +1311,10 @@ export function createCompactor({
                 : undefined,
           }
         : {
-            lastInputTokens: state.lastInputTokens,
+            lastInputTokens: Math.max(
+              state.lastInputTokens,
+              estimateTokens(conversation) + (state.promptOverheadTokens ?? 0)
+            ),
             modelId: state.model,
             contextWindow: comp.contextWindow,
             fraction: (comp.fraction ?? AUTO_COMPACT_FRACTION) * factor,
@@ -824,7 +1327,21 @@ export function createCompactor({
     modelParams: Record<string, unknown>,
     options: { force?: boolean; focus?: string; trigger?: "auto" } = {}
   ) {
-    if (pending && (!matches(pending) || options.force)) invalidate()
+    const contextKey = createHash("sha256")
+      .update(
+        JSON.stringify([
+          state.model,
+          creds,
+          modelParams,
+          sendOptions.compaction,
+          options.focus,
+          sendOptions.effort,
+          sendOptions.maxThinkingTokens,
+        ])
+      )
+      .digest("hex")
+    if (pending && (!matches(pending) || pending.contextKey !== contextKey || options.force))
+      invalidate()
     if (pending?.settled) {
       const completed = pending
       pending = undefined
@@ -833,7 +1350,10 @@ export function createCompactor({
       return
     }
     const hard = options.force || triggered(1)
-    if (!pending && (hard || triggered(0.8))) {
+    // Small contexts cannot absorb a background checkpoint plus the growing
+    // exact tail. Compact synchronously there; retain an explicit override.
+    const background = sendOptions.compaction?.background ?? state.lastInputTokens >= 64_000
+    if (!pending && (hard || (background && triggered(0.8)))) {
       const controller = new AbortController()
       const parentSignal = state.activeAbortController?.signal
       const abort = () => controller.abort(parentSignal?.reason)
@@ -847,6 +1367,8 @@ export function createCompactor({
         gate: state.turnLedgerGate,
         force: options.force === true,
         settled: false,
+        contextKey,
+        summaries: new Map(),
         promise: Promise.resolve(),
       }
       pending = job

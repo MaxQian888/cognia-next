@@ -1,8 +1,8 @@
 "use client"
 
 import React, { memo } from "react"
-import { cn } from "@/lib/utils"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { A2UITrigger } from "../a2ui-child-renderer"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useA2UIData } from "../a2ui-context"
 import type { A2UIComponentProps, A2UIBaseComponent, A2UIStringOrPath } from "@/types/a2ui/schema"
 
@@ -22,22 +22,28 @@ export const A2UITooltip = memo(function A2UITooltip({
   const text = resolveString(component.text)
 
   return (
-    <TooltipProvider delayDuration={component.delayDuration ?? 200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            className={cn("inline-flex", component.className)}
-            style={component.style as React.CSSProperties}
-          >
-            {component.children.map((childId) => (
-              <React.Fragment key={childId}>{renderChild(childId)}</React.Fragment>
-            ))}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side={component.side || "top"}>
-          <p>{text}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip delayDuration={component.delayDuration ?? 200}>
+      <TooltipTrigger asChild>
+        <A2UITrigger
+          componentId={component.children.length === 1 ? component.children[0] : ""}
+          renderChild={(id) =>
+            component.children.length === 1 ? (
+              renderChild(id)
+            ) : (
+              <>
+                {component.children.map((childId) => (
+                  <React.Fragment key={childId}>{renderChild(childId)}</React.Fragment>
+                ))}
+              </>
+            )
+          }
+          className={component.className}
+          style={component.style as React.CSSProperties}
+        />
+      </TooltipTrigger>
+      <TooltipContent side={component.side || "top"}>
+        <p>{text}</p>
+      </TooltipContent>
+    </Tooltip>
   )
 })

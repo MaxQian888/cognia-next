@@ -4,7 +4,7 @@ jest.mock("@/lib/keyring", () => ({
   clearSecret: jest.fn(),
   setWebKeyringPassphrase: jest.fn(),
 }))
-jest.mock("@/lib/data/backup-key", () => ({ getDefaultBackupPassphrase: jest.fn() }))
+jest.mock("@/lib/data/backup-key", () => ({ getInstallEncryptionPassphrase: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 // The default profile is derived from the open Dexie database name; mocking it
 // keeps this suite off the 700-table schema and makes the key deterministic.
@@ -13,7 +13,7 @@ jest.mock("@/lib/accounts/active-account-id", () => ({
 }))
 
 import { getSecret, setSecret, clearSecret, setWebKeyringPassphrase } from "@/lib/keyring"
-import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+import { getInstallEncryptionPassphrase } from "@/lib/data/backup-key"
 import { isTauri } from "@/lib/tauri"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 
@@ -37,7 +37,7 @@ const getMock = getSecret as jest.Mock
 const setMock = setSecret as jest.Mock
 const clearMock = clearSecret as jest.Mock
 const setPassphraseMock = setWebKeyringPassphrase as jest.Mock
-const backupKeyMock = getDefaultBackupPassphrase as jest.Mock
+const backupKeyMock = getInstallEncryptionPassphrase as jest.Mock
 const isTauriMock = isTauri as jest.Mock
 const activeAccountMock = getActiveAccountId as jest.Mock
 

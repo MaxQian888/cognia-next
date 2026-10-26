@@ -27,6 +27,7 @@ import {
   builtinAgentById,
   builtinAgentsForSurface,
   resolveBuiltinToolPolicy,
+  resolveBuiltinAgentPrompt,
 } from "@/lib/agent/builtin-catalog/catalog"
 import type { BuiltinAgentEntry } from "@/lib/agent/builtin-catalog/types"
 import { type AgentSummary } from "./discover-agents"
@@ -44,7 +45,7 @@ function toSummary(entry: BuiltinAgentEntry): AgentSummary {
       id: entry.id,
       name: entry.id,
       description: entry.description,
-      prompt: entry.prompt,
+      prompt: resolveBuiltinAgentPrompt(entry),
       // No `tools` means inherit the parent's full toolset, and no `model`
       // means inherit the active provider's model in `buildChildConfig`.
       ...(tools ? { tools } : {}),

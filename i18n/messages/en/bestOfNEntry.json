@@ -1,8 +1,11 @@
 {
   "description": "Run independent attempts from one committed base, then choose a winner manually.",
   "chip": "Best-of-N for the next send",
+  "label": "Best-of-N",
+  "clear": "Turn off Best-of-N for the next send",
   "off": "Best-of-N off",
   "attempts": "Best of {count}",
+  "compactAttempts": "×{count}",
   "nextSend": "Next send only",
   "title": "Start {count} independent attempts",
   "base": "Committed base: {base}",

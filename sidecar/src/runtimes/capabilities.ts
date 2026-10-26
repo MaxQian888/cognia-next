@@ -19,7 +19,7 @@ export const ADAPTER_CAPABILITIES = {
     "set-model",
     "compaction",
     // Capabilities the CONTROL surface gates on (see
-    // `CONTROL_METHOD_CAPABILITIES` in control.mjs). They earn their place
+    // `CONTROL_METHOD_CAPABILITIES` in control.ts). They earn their place
     // here because `handleControl` now rejects an ungated control with a typed
     // `capability_error` instead of letting it fail as `unsupported_provider`.
     "context-management",

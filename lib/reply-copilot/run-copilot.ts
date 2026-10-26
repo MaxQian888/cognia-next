@@ -26,6 +26,7 @@ import { getDecisionRegistry } from "@/lib/decisions/host-registry"
 import { loadDecisionSettings } from "@/lib/decisions/config"
 import { BUILTIN_HTTP_PROVIDER_ID } from "@/lib/decisions/providers/decisions-http"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { loadPromptOverrideSnapshot } from "@/lib/prompts/snapshot"
 import {
   COPILOT_STATE_TRIM,
   isSidedTranscript,
@@ -170,6 +171,11 @@ export async function runCopilot(
   input.signal?.throwIfAborted()
   const provider = await deps.selectedProvider()
   const variant = chooseQuestionVariant(provider?.limits)
+  // One override snapshot for the run (ADR-0236): the judge and the ranking
+  // read the same question wording. A failed load asks the shipped wording.
+  const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
+  input.signal?.throwIfAborted()
+  const questionOptions = { snapshot: promptSnapshot }
   const relationship = input.knowledge.relationship || UNSPECIFIED_RELATIONSHIP
   const background = input.knowledge.background
   const decideOptions: RunDecisionOptions = {
@@ -208,19 +214,21 @@ export async function runCopilot(
       ? Promise.resolve({ kind: "unavailable", reason: "no_provider" })
       : !judgeReady
         ? Promise.resolve({ kind: "unavailable", reason: "not_validated" })
-        : decideWithBackground(judgeQuestions(variant)).then(({ result, backgroundDropped }) => {
-            if (!result.ok) return outcomeOfFailure(result.error.kind)
-            const judgment = toJudgment(result.answers)
-            if (isEmptyJudgment(judgment)) return { kind: "failed", reason: "provider_error" }
-            return {
-              kind: "ok",
-              judgment,
-              providerId: result.providerId,
-              latencyMs: result.latencyMs,
-              truncated: Boolean(result.truncation || result.stateTruncated),
-              backgroundDropped,
+        : decideWithBackground(judgeQuestions(variant, questionOptions)).then(
+            ({ result, backgroundDropped }) => {
+              if (!result.ok) return outcomeOfFailure(result.error.kind)
+              const judgment = toJudgment(result.answers)
+              if (isEmptyJudgment(judgment)) return { kind: "failed", reason: "provider_error" }
+              return {
+                kind: "ok",
+                judgment,
+                providerId: result.providerId,
+                latencyMs: result.latencyMs,
+                truncated: Boolean(result.truncation || result.stateTruncated),
+                backgroundDropped,
+              }
             }
-          })
+          )
 
   type DraftAttempt =
     DraftCandidatesResult | { kind: "failed" } | { kind: "skipped"; reason: "no-model" }
@@ -261,7 +269,9 @@ export async function runCopilot(
             : "single_candidate",
     }
   } else {
-    const { result } = await decideWithBackground(rankQuestion(drafted.candidates, variant))
+    const { result } = await decideWithBackground(
+      rankQuestion(drafted.candidates, variant, questionOptions)
+    )
     const candidates = rankCandidates(drafted.candidates, result.ok ? result.answers : null)
     drafts = {
       kind: "ok",

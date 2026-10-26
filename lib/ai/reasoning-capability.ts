@@ -30,7 +30,7 @@
  */
 import { getModelConfig } from "@cognia/provider-types/provider"
 import { snapshotModelReasoning } from "@/lib/ai/providers/models-dev-snapshot-lookup"
-import { compatibleEffortValuesForModel } from "../../sidecar/src/providers/reasoning-effort-tables"
+import { compatibleEffortValuesForModel } from "@cognia/provider-types/reasoning-effort-tables"
 
 /**
  * Anthropic model ids that accept `effort`. Matched by the family fragment in

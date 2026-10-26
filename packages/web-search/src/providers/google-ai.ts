@@ -11,13 +11,35 @@ import { log } from "../log"
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
+/**
+ * Stable Gemini model used when the provider record names none. Gemini 2.0
+ * Flash (the old default) was shut down on 2026-06-01; 3.8 Flash is the
+ * stable id Google recommends for new projects and supports Search grounding
+ * with no announced shutdown (https://ai.google.dev/gemini-api/docs/models,
+ * checked 2026-10-19).
+ */
+export const GOOGLE_AI_DEFAULT_MODEL = "gemini-3.8-flash"
+
+/**
+ * Models known to support the `google_search` tool AND still served
+ * (https://ai.google.dev/gemini-api/docs/deprecations, checked 2026-10-19).
+ * Shut-down models (2.0 Flash, 1.5) are deliberately absent: the grounding
+ * capability table still lists some of them, which is not proof they run.
+ */
+export const GOOGLE_AI_GROUNDING_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-4-argon",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+] as const
+
 export interface GoogleAISearchOptions extends SearchOptions {
-  /** Model to use for search (default: gemini-2.0-flash) */
+  /** Model to use for search (default: {@link GOOGLE_AI_DEFAULT_MODEL}) */
   model?: string
-  /** Dynamic retrieval threshold for legacy models (0.0-1.0) */
-  dynamicThreshold?: number
-  /** Whether to use legacy google_search_retrieval tool (for Gemini 1.5) */
-  useLegacyRetrieval?: boolean
 }
 
 interface GroundingMetadata {
@@ -48,25 +70,8 @@ interface GeminiResponse {
   error?: { code: number; message: string; status: string }
 }
 
-function buildRequestBody(query: string, options: GoogleAISearchOptions): Record<string, unknown> {
-  const { useLegacyRetrieval = false, dynamicThreshold = 0.7 } = options
-
-  const contents = [{ parts: [{ text: query }] }]
-
-  const tools = useLegacyRetrieval
-    ? [
-        {
-          google_search_retrieval: {
-            dynamic_retrieval_config: {
-              mode: "MODE_DYNAMIC",
-              dynamic_threshold: dynamicThreshold,
-            },
-          },
-        },
-      ]
-    : [{ google_search: {} }]
-
-  return { contents, tools }
+function buildRequestBody(query: string): Record<string, unknown> {
+  return { contents: [{ parts: [{ text: query }] }], tools: [{ google_search: {} }] }
 }
 
 function parseGroundingMetadata(metadata: GroundingMetadata | undefined): {
@@ -160,11 +165,20 @@ export function addInlineCitations(text: string, metadata: GroundingMetadata | u
   return result
 }
 
+/**
+ * The model a search runs on. A configured model outside
+ * {@link GOOGLE_AI_GROUNDING_MODELS} fails before any request: sending it
+ * would either 404 on a shut-down model or bill a generation that cannot
+ * ground.
+ */
 function getModelId(options: GoogleAISearchOptions): string {
-  if (options.model) {
-    return options.model
+  const model = options.model?.trim() || GOOGLE_AI_DEFAULT_MODEL
+  if (!supportsGoogleSearchGrounding(model)) {
+    throw new Error(
+      `Google AI API error: 400 - model "${model}" is not a supported Search-grounding model`
+    )
   }
-  return options.useLegacyRetrieval ? "gemini-1.5-flash" : "gemini-2.0-flash"
+  return model
 }
 
 /**
@@ -213,7 +227,7 @@ async function runGroundedGeneration(
   options: GoogleAISearchOptions,
   request: (body: Record<string, unknown>) => Promise<GeminiResponse>
 ): Promise<GeminiResponse> {
-  const body = buildRequestBody(query, options)
+  const body = buildRequestBody(query)
   // Written by `send` (a closure), so it is widened here rather than narrowed to `undefined`.
   let data = undefined as GeminiResponse | undefined
   await generateThroughSeam(
@@ -249,6 +263,7 @@ export async function searchWithGoogleAI(
         `${GEMINI_API_URL}/${modelId}:generateContent?key=${apiKey}`,
         {
           method: "POST",
+          signal: options.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         }
@@ -314,6 +329,7 @@ export async function getGroundedAnswerWithCitations(
       `${GEMINI_API_URL}/${modelId}:generateContent?key=${apiKey}`,
       {
         method: "POST",
+        signal: options.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       }
@@ -355,18 +371,9 @@ export async function testGoogleAIConnection(apiKey: string): Promise<boolean> {
 }
 
 export function supportsGoogleSearchGrounding(modelId: string): boolean {
-  const supportedModels = [
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-1.5-pro",
-    "gemini-1.5-flash",
-  ]
-
-  return supportedModels.some((m) => modelId.toLowerCase().includes(m.toLowerCase()))
-}
-
-export function shouldUseLegacyRetrieval(modelId: string): boolean {
-  return modelId.includes("1.5")
+  const id = modelId
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, "")
+  return GOOGLE_AI_GROUNDING_MODELS.some((m) => id === m || id.startsWith(`${m}-`))
 }

@@ -1,6 +1,7 @@
 import { streamText } from "ai"
 import { generateEmbeddings } from "@cognia/vector/embedding"
 import { createFeatureProviderModel, resolveFeatureProvider } from "@/lib/ai/provider-consumption"
+import type { WebToolRunDeps } from "@/lib/claude/web-builtin-tools"
 
 import {
   abortableStreamModel,
@@ -220,6 +221,41 @@ describe("defaults", () => {
 })
 
 describe("runHostTool", () => {
+  it.each(["ambient", "caller"] as const)(
+    "preserves %s cancellation through the renderer adapter",
+    async (cancel) => {
+      const { resolveWebToolDeps } = jest.requireMock("@/lib/claude/plugin-tool-ipc")
+      const ambient = new AbortController()
+      const caller = new AbortController()
+      const searchExecutor = jest.fn(
+        async (
+          _query: string,
+          options: Parameters<NonNullable<WebToolRunDeps["searchExecutor"]>>[1]
+        ) => {
+          const controller = cancel === "ambient" ? ambient : caller
+          controller.abort()
+          expect(options.signal?.aborted).toBe(true)
+          throw new DOMException("Aborted", "AbortError")
+        }
+      )
+      resolveWebToolDeps.mockResolvedValueOnce({
+        enabled: true,
+        signal: ambient.signal,
+        searchExecutor,
+      })
+      const runtime = createRendererHostRuntime({ pluginId: "p" })
+      await expect(
+        runtime.runHostTool("web_search", { query: "q" }, { signal: caller.signal })
+      ).resolves.toMatchObject({ ok: false, code: "execution-failed" })
+      expect(searchExecutor).toHaveBeenCalledWith(
+        "q",
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        })
+      )
+    }
+  )
+
   it("executes a promoted web tool against the host's own web deps", async () => {
     // The renderer runtime must not own a second search policy: it reuses the
     // exact snapshot the agent's promoted built-ins run with.

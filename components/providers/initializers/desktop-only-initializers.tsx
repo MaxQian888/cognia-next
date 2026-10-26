@@ -113,6 +113,10 @@ const BestOfNRecoveryInitializer = dynamic(
   () => import("./best-of-n-recovery-initializer").then((m) => m.BestOfNRecoveryInitializer),
   { ssr: false }
 )
+const HarnessEvolutionInitializer = dynamic(
+  () => import("./harness-evolution-initializer").then((m) => m.HarnessEvolutionInitializer),
+  { ssr: false }
+)
 const PluginDeepLinkRouter = dynamic(
   () => import("@/components/plugins/plugin-deep-link-router").then((m) => m.PluginDeepLinkRouter),
   { ssr: false }
@@ -223,7 +227,7 @@ export function DesktopOnlyInitializers() {
     if (requested && isClient && !secondary) markBootCapabilityReady("desktop-tools")
   }, [isClient, requested, secondary])
 
-  if (!isClient || !requested || !tauri) return null
+  if (!isClient || !tauri) return null
 
   // The transparent desktop-pet windows (sprite overlay + click popup) load this
   // same root layout, but every initializer bundled here is a MAIN-window boot
@@ -237,35 +241,44 @@ export function DesktopOnlyInitializers() {
 
   return (
     <>
-      <CodexUsageSchedulerInitializer />
-      <AnthropicUsageSchedulerInitializer />
-      <CliSyncInitializer />
-      <ComputerUseKillSwitchInitializer />
-      <TerminalBootInitializer />
-      <EditorLspRuntimeInitializer />
-      <ManagedIdeBrokerInitializer />
-      <LocalCharacterPackInitializer />
-      <FleetHistorySinkInitializer />
-      <WorkerRuntimeInitializer />
-      <ExitLeaseReleaseInitializer />
-      <BestOfNRecoveryInitializer />
-      <PluginDeepLinkRouter />
-      <ConsentOverlay />
-      <CliBridgeEventsBridge />
-      <CrashReportDialog />
-      <DiagnosticAutoSubmitInitializer />
-      <SelectionToolbarInitializer />
+      {/* Native tray clicks work on every route, including the main boot
+          profile. Their publisher and action listener must already be awake. */}
       <TrayPanelInitializer />
-      <UsageDockInitializer />
-      <IslandInitializer />
       <GlancePublisherInitializer />
-      <ChatCopilotInitializer />
-      <SessionImportWatchInitializer />
-      <BrowserDownloadsInitializer />
-      <SitesInitializer />
-      <FileShareHostSyncInitializer />
-      <RouterFusionInitializer />
-      <HostProviderKeysInitializer />
+      {/* Consent must be reachable from chat/workflow calls before a desktop
+          tools route is opened. This only subscribes to the gated broker. */}
+      <ConsentOverlay />
+      {requested ? (
+        <>
+          <CodexUsageSchedulerInitializer />
+          <AnthropicUsageSchedulerInitializer />
+          <CliSyncInitializer />
+          <ComputerUseKillSwitchInitializer />
+          <TerminalBootInitializer />
+          <EditorLspRuntimeInitializer />
+          <ManagedIdeBrokerInitializer />
+          <LocalCharacterPackInitializer />
+          <FleetHistorySinkInitializer />
+          <WorkerRuntimeInitializer />
+          <ExitLeaseReleaseInitializer />
+          <BestOfNRecoveryInitializer />
+          <HarnessEvolutionInitializer />
+          <PluginDeepLinkRouter />
+          <CliBridgeEventsBridge />
+          <CrashReportDialog />
+          <DiagnosticAutoSubmitInitializer />
+          <SelectionToolbarInitializer />
+          <UsageDockInitializer />
+          <IslandInitializer />
+          <ChatCopilotInitializer />
+          <SessionImportWatchInitializer />
+          <BrowserDownloadsInitializer />
+          <SitesInitializer />
+          <FileShareHostSyncInitializer />
+          <RouterFusionInitializer />
+          <HostProviderKeysInitializer />
+        </>
+      ) : null}
     </>
   )
 }

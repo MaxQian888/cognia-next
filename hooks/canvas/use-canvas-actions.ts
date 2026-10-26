@@ -31,6 +31,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { loggers } from "@cognia/logging"
 import type { CanvasActionAttachment } from "@/types/artifact/artifact"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
 
 export interface CanvasActionInvocation {
   actionType: CanvasActionType
@@ -41,6 +42,8 @@ export interface CanvasActionInvocation {
   targetLanguage?: string
   /** Extra context staged in the workbench (other documents, artifacts, replies). */
   attachments?: CanvasActionAttachment[]
+  /** The document's session and workspace, for customized action prompts (ADR-0236). */
+  promptContext?: PromptResolutionContext
 }
 
 /** Why a run ended without a result, so the UI can say something useful. */
@@ -143,6 +146,7 @@ export function useCanvasActions(): UseCanvasActionsResult {
         selection: req.selection,
         prompt: req.prompt,
         attachments: req.attachments,
+        promptContext: req.promptContext,
         abortSignal: controller.signal,
       }
 

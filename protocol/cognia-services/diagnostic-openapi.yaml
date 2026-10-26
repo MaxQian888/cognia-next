@@ -1,0 +1,522 @@
+openapi: 3.1.0
+info:
+  title: Cognia Diagnostic Service
+  version: 1.0.0
+  description: Tenant-scoped control plane for consented, resumable diagnostic uploads.
+servers:
+  - url: /v1
+security:
+  - uploadGrant: []
+paths:
+  /grants/oidc:
+    post:
+      security: []
+      operationId: exchangeOidcSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OidcGrantRequest" }
+      description: >-
+        Exchange an identity-provider session for a grant. Not part of intake:
+        stays available while DIAGNOSTIC_INGEST_ENABLED is false so the read,
+        triage, withdraw and admin routes remain reachable.
+      responses:
+        "200": { $ref: "#/components/responses/Grant" }
+        "401": { $ref: "#/components/responses/Error" }
+  /grants/anonymous:
+    post:
+      security: []
+      operationId: exchangeInstallationProof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnonymousGrantRequest" }
+      description: >-
+        Exchange a single-use Ed25519 installation proof for an uploader grant.
+        Like the OIDC exchange, this is not intake and stays available while
+        uploads are switched off — a client still needs a grant to withdraw
+        consent or delete what it already submitted.
+      responses:
+        "200": { $ref: "#/components/responses/Grant" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /incidents:
+    get:
+      operationId: listIncidents
+      description: Viewer-or-better triage list, newest first.
+      parameters:
+        - { name: groupId, in: query, schema: { type: string, format: uuid } }
+        - {
+            name: processingState,
+            in: query,
+            schema: { $ref: "#/components/schemas/ProcessingState" },
+          }
+        - { name: supportCode, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: Tenant/project-scoped incidents }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateIncidentRequest" }
+      responses:
+        "201":
+          description: >-
+            Created, or resumed when an identical artifactHash already exists.
+            `deletionCredential` is present only when `created` is true — the
+            upsert leaves the stored credential hash alone, so a second
+            credential could never verify.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateIncidentResponse" }
+        "413": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: getReceipt
+      responses:
+        "200": { description: Receipt and processing state }
+    delete:
+      operationId: deleteIncident
+      responses:
+        "204": { description: Artifacts deleted and metadata tombstoned }
+  /incidents/{incidentId}/parts:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: inspectUploadProgress
+      responses:
+        "200": { description: Checked part inventory and uploaded byte count }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/parts/{partNumber}:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+      - name: partNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 10000 }
+    put:
+      operationId: uploadCheckedPart
+      parameters:
+        - name: x-part-sha256
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        - name: x-artifact-kind
+          in: header
+          schema: { type: string, enum: [attachment, minidump] }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        "201": { description: Privacy-scanned durable part }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/complete:
+    post:
+      operationId: completeUpload
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "200": { description: Processing receipt }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/cancel:
+    post:
+      operationId: cancelUpload
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "204": { description: Upload cancelled and parts removed }
+        "503": { $ref: "#/components/responses/IngestDisabled" }
+  /incidents/{incidentId}/withdraw:
+    post:
+      operationId: withdrawConsent
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      responses:
+        "204": { description: Processing blocked and deletion scheduled immediately }
+  /incidents/{incidentId}/delete-with-credential:
+    post:
+      operationId: deleteIncidentWithCredential
+      description: >-
+        Delete an incident with the one-time `deletionCredential` that
+        `createIncident` returned, without a grant. The grant route
+        (`DELETE /incidents/{incidentId}`) only reaches incidents the same
+        installation uploaded; this one still works after a reinstall or a
+        lost installation key. Not part of intake: available while uploads
+        are switched off. A wrong credential, project, tenant or incident all
+        answer the same 404.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/IncidentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CredentialDeletionRequest" }
+      responses:
+        "204": { description: Incident deleted and its artifacts removed }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/audit:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: readIncidentAudit
+      description: >-
+        Viewer-or-better. The immutable trail for one incident: consent,
+        processing transitions, retention, and every operator artifact read.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200": { description: Audit events, newest first }
+        "403": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/artifacts:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+    get:
+      operationId: listIncidentArtifacts
+      description: >-
+        Viewer-or-better inventory of the stored parts. Distinct from
+        `/parts`, which is the uploader's resume view and rides the intake
+        switch; triage has to keep working while intake is off.
+      responses:
+        "200": { description: Stored parts with redaction metadata }
+        "403": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/artifacts/{partNumber}:
+    parameters:
+      - { $ref: "#/components/parameters/IncidentId" }
+      - name: partNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 10000 }
+    get:
+      operationId: downloadIncidentArtifact
+      description: >-
+        Triager-only. Returns the decrypted artifact and writes an audit event
+        naming the operator before the bytes leave. Parts of kind `minidump`
+        additionally require the tenant's `rawMinidumpAccessEnabled` opt-in and
+        answer 403 `raw_minidump_access_disabled` otherwise.
+      responses:
+        "200":
+          description: Decrypted artifact bytes
+          content:
+            application/octet-stream: { schema: { type: string, format: binary } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /groups:
+    get:
+      operationId: listIncidentGroups
+      description: Viewer-or-better. Deduplicated crash signatures, most recent activity first.
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/GroupStatus" } }
+        - { name: platform, in: query, schema: { type: string } }
+        - { name: assignedTo, in: query, schema: { type: string } }
+        - {
+            name: q,
+            in: query,
+            description: Substring match over exception,
+            module and fingerprint,
+            schema: { type: string },
+          }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+      responses:
+        "200": { description: Tenant/project-scoped groups }
+        "403": { $ref: "#/components/responses/Error" }
+  /groups/{groupId}:
+    parameters:
+      - name: groupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getIncidentGroup
+      responses:
+        "200": { description: One group }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: triageIncidentGroup
+      description: >-
+        Triager-only. Omitting `assignedTo` leaves the assignee untouched;
+        sending an explicit `null` or an empty string unassigns. The edit is
+        recorded in the audit trail against the grant's OIDC subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TriageGroupRequest" }
+      responses:
+        "200": { description: Updated group }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/tenant:
+    get:
+      operationId: getTenantPolicy
+      description: Administrator-only tenant policy.
+      responses:
+        "200": { description: Tenant policy }
+        "403": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateTenantPolicy
+      description: >-
+        Administrator-only. `rawMinidumpAccessEnabled` is the opt-in that
+        governs raw minidump downloads; `retentionOverrides` narrows the
+        per-artifact retention windows the sweeper applies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTenantRequest" }
+      responses:
+        "200": { description: Updated tenant policy }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/symbols:
+    get:
+      operationId: listSymbols
+      description: Administrator-only symbol index inspection.
+      parameters:
+        - name: buildId
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: Tenant/project-scoped symbol records }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/symbols/{buildId}/{platform}:
+    parameters:
+      - name: buildId
+        in: path
+        required: true
+        schema: { type: string, maxLength: 256 }
+      - name: platform
+        in: path
+        required: true
+        schema: { type: string, maxLength: 64 }
+    put:
+      operationId: uploadSymbol
+      description: Administrator-only idempotent symbol upload keyed by build and SHA-256.
+      parameters:
+        - name: x-symbol-sha256
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        - name: x-symbol-relative-path
+          in: header
+          required: true
+          schema: { type: string, maxLength: 512 }
+        - name: x-symbol-type
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [breakpad, pdb, dsym, elf, android_mapping, android_native, source_map]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        "201": { description: Indexed symbol record }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/tenant-key:
+    post:
+      operationId: rotateTenantDataKey
+      description: Administrator-only KMS-wrapped tenant DEK rotation. Existing versions remain decryptable.
+      responses:
+        "200": { description: New active tenant key version }
+        "403": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: cryptoShredTenant
+      description: Irreversibly destroy every wrapped tenant DEK and evict cached plaintext keys.
+      parameters:
+        - name: x-confirm-crypto-shred
+          in: header
+          required: true
+          description: Must exactly equal the authenticated tenant UUID.
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Tenant artifact keys cryptographically destroyed }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    uploadGrant:
+      type: http
+      scheme: bearer
+  parameters:
+    IncidentId:
+      name: incidentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      description: Page size, clamped to 200.
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+  responses:
+    Grant:
+      description: Short-lived tenant/project-scoped grant
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [grant, role, expiresInSeconds]
+            properties:
+              grant: { type: string }
+              role: { $ref: "#/components/schemas/GrantRole" }
+              expiresInSeconds: { type: integer }
+    IngestDisabled:
+      description: >-
+        Intake is switched off (DIAGNOSTIC_INGEST_ENABLED=false). Grant
+        exchange, read, triage, withdraw and admin routes stay available —
+        grants live 15 minutes, so refusing to mint them would take the whole
+        service down with intake. Retry the upload later rather than
+        discarding the spooled report.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string, enum: [ingest_disabled] }
+    Error:
+      description: Stable machine-readable error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string }
+  schemas:
+    CreateIncidentResponse:
+      type: object
+      required: [incident, created]
+      properties:
+        incident: { type: object }
+        created:
+          type: boolean
+          description: False when an identical artifactHash resumed an existing incident.
+        deletionCredential:
+          type: string
+          pattern: "^del_[0-9a-f]{32}$"
+          description: >-
+            One-time credential, returned only when `created` is true. Only its
+            hash is stored; keep it to delete the incident later through
+            `deleteIncidentWithCredential`.
+    CredentialDeletionRequest:
+      type: object
+      required: [tenantId, projectId, deletionCredential]
+      properties:
+        tenantId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        deletionCredential:
+          type: string
+          pattern: "^del_[0-9a-f]{32}$"
+    GrantRole:
+      type: string
+      enum: [uploader, viewer, triager, admin]
+    GroupStatus:
+      type: string
+      enum: [open, suppressed, resolved]
+    ProcessingState:
+      type: string
+      enum:
+        [
+          received,
+          scanning,
+          symbolicating,
+          grouping,
+          accepted,
+          retryable_failure,
+          permanent_failure,
+          deleted,
+        ]
+    TriageGroupRequest:
+      type: object
+      minProperties: 1
+      properties:
+        status: { $ref: "#/components/schemas/GroupStatus" }
+        assignedTo:
+          type: [string, "null"]
+          maxLength: 256
+          description: Explicit null (or an empty string) unassigns; omit the field to leave it alone.
+    UpdateTenantRequest:
+      type: object
+      minProperties: 1
+      properties:
+        rawMinidumpAccessEnabled: { type: boolean }
+        retentionOverrides:
+          type: object
+          properties:
+            minidumpDays: { type: integer, minimum: 1, maximum: 3650 }
+            attachmentDays: { type: integer, minimum: 1, maximum: 3650 }
+            metadataDays: { type: integer, minimum: 1, maximum: 3650 }
+            symbolDays: { type: integer, minimum: 1, maximum: 3650 }
+    OidcGrantRequest:
+      type: object
+      required: [sessionToken, installationId]
+      properties:
+        sessionToken: { type: string }
+        installationId: { type: string }
+    AnonymousGrantRequest:
+      type: object
+      required: [tenantId, projectId, installationId, publicKey, signature, nonce, timestamp]
+      properties:
+        tenantId: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        installationId: { type: string }
+        publicKey: { type: string, contentEncoding: base64 }
+        signature: { type: string, contentEncoding: base64 }
+        nonce: { type: string }
+        timestamp: { type: integer, format: int64 }
+    CreateIncidentRequest:
+      type: object
+      required:
+        [
+          artifactHash,
+          buildId,
+          platform,
+          module,
+          exception,
+          attachmentCount,
+          eventCount,
+          totalBytes,
+          largestAttachmentBytes,
+          largestMinidumpBytes,
+          consent,
+        ]
+      properties:
+        artifactHash: { type: string, pattern: "^[a-fA-F0-9]{64}$" }
+        buildId: { type: string }
+        platform: { type: string }
+        module: { type: string }
+        exception: { type: string }
+        attachmentCount: { type: integer, maximum: 20 }
+        eventCount: { type: integer, maximum: 50000 }
+        totalBytes: { type: integer, maximum: 1073741824 }
+        largestAttachmentBytes: { type: integer, maximum: 104857600 }
+        largestMinidumpBytes: { type: integer, maximum: 536870912 }
+        consent: { type: boolean, const: true }

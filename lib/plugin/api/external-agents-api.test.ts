@@ -78,7 +78,6 @@ beforeEach(() => {
   jest.clearAllMocks()
   resetPermissionGuard()
   state().reset()
-  state().setEnabled(true)
   mockService.createConfig.mockImplementation(async (input: CreateExternalAgentInput) =>
     state().addAgent(input)
   )
@@ -146,7 +145,7 @@ describe("permission gating (fail-closed)", () => {
     expect(() => api.updateDelegationRule("r", {})).toThrow(PermissionError)
     expect(() => api.removeDelegationRule("r")).toThrow(PermissionError)
     expect(() => api.reorderDelegationRules([])).toThrow(PermissionError)
-    expect(() => api.updateSettings({ enabled: false })).toThrow(PermissionError)
+    expect(() => api.updateSettings({ autoConnectOnStartup: true })).toThrow(PermissionError)
     expect(mockService.removeConfig).not.toHaveBeenCalled()
   })
 
@@ -346,26 +345,28 @@ describe("readiness, presets, runtimes, settings", () => {
   it("reads and validates global settings without half-applying a patch", async () => {
     const api = apiWith([READ, MANAGE])
     expect(await api.getSettings()).toEqual({
-      enabled: true,
       defaultPermissionMode: state().defaultPermissionMode,
       autoConnectOnStartup: false,
       showConnectionNotifications: true,
       chatFailurePolicy: "fallback",
     })
-    await refusal(api.updateSettings({ enabled: false, chatFailurePolicy: "sometimes" as never }))
-    expect(state().enabled).toBe(true)
+    await refusal(
+      api.updateSettings({ autoConnectOnStartup: true, chatFailurePolicy: "sometimes" as never })
+    )
+    expect(state().autoConnectOnStartup).toBe(false)
+    expect((await refusal(api.updateSettings({ enabled: false } as never))).code).toBe(
+      "invalid_input"
+    )
     await refusal(api.updateSettings({ defaultPermissionMode: "dontAsk" as never }))
     await refusal(api.updateSettings({ unknown: true } as never))
     expect(
       await api.updateSettings({
-        enabled: false,
         defaultPermissionMode: "plan",
         autoConnectOnStartup: true,
         showConnectionNotifications: false,
         chatFailurePolicy: "strict",
       })
     ).toEqual({
-      enabled: false,
       defaultPermissionMode: "plan",
       autoConnectOnStartup: true,
       showConnectionNotifications: false,
@@ -550,8 +551,6 @@ describe("update / enable / connect / remove", () => {
     expect(mockService.updateConfig).toHaveBeenCalledWith(id, { enabled: false })
     expect((await api().connect(id)).connectionStatus).toBe("connected")
     expect((await api().disconnect(id)).connectionStatus).toBe("disconnected")
-    state().setEnabled(false)
-    expect((await refusal(api().connect(id))).code).toBe("external_agents_disabled")
     await api().remove(id)
     expect(mockService.removeConfig).toHaveBeenCalledWith(id)
     expect(state().getAgent(id)).toBeUndefined()
@@ -713,5 +712,53 @@ describe("onChange", () => {
     await Promise.resolve()
     expect(seen).toEqual(["settings-changed"])
     dispose()
+  })
+})
+
+describe("plugin API model roles", () => {
+  const api = () => apiWith([READ, MANAGE])
+  it("creates, projects, preserves and clears normalized overrides", async () => {
+    const modelRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
+    const created = await api().create({
+      name: "Model roles",
+      protocol: "codex-app-server",
+      process: { command: "codex", args: ["app-server"] },
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles,
+    })
+    expect(mockService.createConfig.mock.calls[0][0].modelRoles).toEqual(modelRoles)
+    expect(created.modelRoles).toEqual(modelRoles)
+    await api().update(created.id, { name: "Renamed" })
+    expect(state().getAgent(created.id)?.modelRoles).toEqual(modelRoles)
+    await api().update(created.id, { modelRoles: null })
+    expect(mockService.updateConfig).toHaveBeenLastCalledWith(
+      created.id,
+      expect.objectContaining({ modelRoles: null })
+    )
+    expect(state().getAgent(created.id)?.modelRoles).toBeUndefined()
+  })
+  it("refuses malformed overrides and merged plans the renderer cannot save", async () => {
+    const created = await api().create({
+      name: "Roles",
+      protocol: "codex-app-server",
+      process: { command: "codex", args: ["app-server"] },
+      cogniaModel: { providerId: "p", modelId: "m" },
+    })
+    await expect(
+      api().update(created.id, { modelRoles: { version: 2 } as never })
+    ).rejects.toBeInstanceOf(PluginExternalAgentInputError)
+    await expect(
+      api().update(created.id, {
+        modelRoles: {
+          version: 1,
+          slots: {
+            "subagent.default": { kind: "cognia", binding: { providerId: "other", modelId: "m" } },
+          },
+        },
+      })
+    ).rejects.toBeInstanceOf(PluginExternalAgentInputError)
   })
 })

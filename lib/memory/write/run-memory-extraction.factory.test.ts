@@ -34,14 +34,28 @@ jest.mock("@/lib/db/memories", () => ({
   invalidateMemory: (...a: unknown[]) => mockInvalidateMemory(...a),
 }))
 jest.mock("@/lib/memory/extract/extractor", () => ({
+  ...jest.requireActual("@/lib/memory/extract/extractor"),
   extractMemories: (...a: unknown[]) => mockExtractMemories(...a),
 }))
 jest.mock("@/lib/memory/consolidate/consolidator", () => ({
+  ...jest.requireActual("@/lib/memory/consolidate/consolidator"),
   consolidate: (...a: unknown[]) => mockConsolidate(...a),
   sameMemoryNamespace: () => true,
 }))
 
-import { buildAutoExtractionDeps } from "./run-memory-extraction"
+import { CONSOLIDATE_DECIDE_SYSTEM_PROMPT } from "@/lib/memory/consolidate/consolidator"
+import { MEMORY_EXTRACT_SYSTEM_PROMPT } from "@/lib/memory/extract/extractor"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import type { PromptDefinitionV1 } from "@/lib/prompts/types"
+import {
+  buildAutoExtractionDeps,
+  MEMORY_CONSOLIDATE_PROMPT,
+  MEMORY_EXTRACT_PROMPT,
+} from "./run-memory-extraction"
 
 function cfg(over: Partial<MemoryConfig> = {}): MemoryConfig {
   return { ...DEFAULT_MEMORY_CONFIG, ...over }
@@ -216,5 +230,69 @@ describe("buildAutoExtractionDeps", () => {
       provenance: "user",
     })
     expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe("buildAutoExtractionDeps — Prompt Center system prompts", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  function publish(def: PromptDefinitionV1, body: string, revisionId: string): void {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: `pob-${revisionId}`,
+          promptId: def.id,
+          scope: "account",
+          targetId: "",
+          revisionId,
+          body,
+          contractVersion: def.contractVersion,
+        },
+      ])
+    )
+  }
+
+  const turn = { newPair: { userText: "u", assistantText: "a" }, allowTypes: ["semantic" as const] }
+  const consolidateInput = {
+    candidates: [],
+    scope: "global" as const,
+    provenance: "user" as const,
+  }
+
+  it("passes the shipped prompts when nothing is overridden", async () => {
+    __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", []))
+    mockExtractMemories.mockResolvedValue([])
+    mockConsolidate.mockResolvedValue({ applied: [] })
+    const deps = await buildAutoExtractionDeps(params, cfg())
+    await deps!.extract(turn)
+    await deps!.consolidate(consolidateInput)
+    expect(mockExtractMemories.mock.calls[0][0].systemPrompt).toBe(MEMORY_EXTRACT_SYSTEM_PROMPT)
+    expect(mockConsolidate.mock.calls[0][1].decideSystemPrompt).toBe(
+      CONSOLIDATE_DECIDE_SYSTEM_PROMPT
+    )
+  })
+
+  it("sends a published extractor override", async () => {
+    publish(MEMORY_EXTRACT_PROMPT, "Extract user facts. Return STRICT JSON only.", "por-mx-1")
+    mockExtractMemories.mockResolvedValue([])
+    const deps = await buildAutoExtractionDeps(params, cfg())
+    await deps!.extract(turn)
+    expect(mockExtractMemories.mock.calls[0][0]).toMatchObject({
+      ...turn,
+      systemPrompt: "Extract user facts. Return STRICT JSON only.",
+    })
+  })
+
+  it("sends a published consolidation-judge override", async () => {
+    publish(MEMORY_CONSOLIDATE_PROMPT, "Pick one memory op. Return STRICT JSON only.", "por-mc-1")
+    mockConsolidate.mockResolvedValue({ applied: [] })
+    const deps = await buildAutoExtractionDeps(params, cfg())
+    await deps!.consolidate(consolidateInput)
+    expect(mockConsolidate.mock.calls[0][1].decideSystemPrompt).toBe(
+      "Pick one memory op. Return STRICT JSON only."
+    )
   })
 })

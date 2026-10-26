@@ -5,6 +5,13 @@ import { runFixStreaming, buildFixPrompt, tailOutput, type FixRunDeps } from "./
 import type { ShellResult } from "../../agent/run-shell"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import type { TuiAction } from "../state/types"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_FIX_TESTS_PROMPT } from "@/lib/agent/prompts/cli-prompts"
 
 const ok: ShellResult = { stdout: "", stderr: "", code: 0 }
 const fail: ShellResult = { stdout: "1 failing", stderr: "AssertionError", code: 1 }
@@ -92,5 +99,45 @@ describe("runFixStreaming", () => {
     await runFixStreaming(h.deps)
     expect(h.send).not.toHaveBeenCalled()
     expect(h.actions).toEqual([])
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("fix prompt Prompt Center override", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders a published override with the failure values", () => {
+    publishOverride(
+      CLI_FIX_TESTS_PROMPT,
+      "Round {{round}} of {{maxRounds}}: `{{command}}` exited {{code}}.\n{{output}}",
+      "por-fix-1"
+    )
+    expect(
+      buildFixPrompt({ command: "pnpm test", code: 1, output: "boom\n", round: 2, maxRounds: 3 })
+    ).toBe("Round 2 of 3: `pnpm test` exited 1.\nboom")
   })
 })

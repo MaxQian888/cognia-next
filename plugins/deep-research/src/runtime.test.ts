@@ -7,6 +7,7 @@ interface Recorded {
   chat: jest.Mock
   embed: jest.Mock
   warn: jest.Mock
+  resolve: jest.Mock
 }
 
 function context(): { ctx: PluginContext; recorded: Recorded } {
@@ -23,12 +24,14 @@ function context(): { ctx: PluginContext; recorded: Recorded } {
     }),
     embed: jest.fn(async () => [[0.1]]),
     warn: jest.fn(),
+    resolve: jest.fn(async (id: string) => ({ text: `edited ${id}`, source: "override" })),
   }
   const ctx = {
     pluginId: "cognia-deep-research",
     agent: { invokeTool: recorded.invokeTool },
     ai: { chat: recorded.chat, embed: recorded.embed },
     logger: { info: jest.fn(), warn: recorded.warn },
+    prompts: { register: jest.fn(), resolve: recorded.resolve },
     i18n: {
       t: jest.fn(
         (key: string, params?: Record<string, unknown>) => `${key}|${params?.count ?? ""}`
@@ -39,6 +42,15 @@ function context(): { ctx: PluginContext; recorded: Recorded } {
 }
 
 describe("buildEngineDeps", () => {
+  it("resolves each instruction through ctx.prompts in the run's session", async () => {
+    const { ctx, recorded } = context()
+    const deps = buildEngineDeps(ctx, { sessionId: "s-1" })
+    await expect(deps.prompt!("outline")).resolves.toBe("edited outline")
+    expect(recorded.resolve).toHaveBeenCalledWith("outline", { sessionId: "s-1" })
+    await buildEngineDeps(ctx).prompt!("evaluate")
+    expect(recorded.resolve).toHaveBeenLastCalledWith("evaluate", {})
+  })
+
   it("assembles every dependency from the public context alone", () => {
     const { ctx } = context()
     const deps = buildEngineDeps(ctx)

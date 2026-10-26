@@ -14,7 +14,7 @@
  * abandoned attempt leaves nothing replayable.
  */
 
-import { docsProviderSecrets } from "./config"
+import { googleState } from "./state"
 
 export const GOOGLE_OAUTH_PENDING_KEY = "google-oauth-pending"
 
@@ -33,36 +33,23 @@ export interface GoogleOAuthPending {
 
 export async function setGoogleOAuthPending(
   pending: Omit<GoogleOAuthPending, "ts">,
-  now = Date.now()
+  now = Date.now(),
+  authorization?: string
 ): Promise<void> {
-  await docsProviderSecrets().save(
-    GOOGLE_OAUTH_PENDING_KEY,
-    JSON.stringify({ ...pending, ts: now } satisfies GoogleOAuthPending)
-  )
+  const owner = authorization ?? (await googleState({ action: "begin" })).state.authorization
+  await googleState({
+    action: "setPending",
+    authorization: owner,
+    pending: { ...pending, ts: now },
+  })
 }
 
-/** Read the pending record, or null when absent, malformed, or expired. */
+/** Host state is canonical; the old key is read only during native migration. */
 export async function getGoogleOAuthPending(now = Date.now()): Promise<GoogleOAuthPending | null> {
-  const raw = await docsProviderSecrets().load(GOOGLE_OAUTH_PENDING_KEY)
-  if (!raw) return null
-  let parsed: Partial<GoogleOAuthPending>
-  try {
-    parsed = JSON.parse(raw) as Partial<GoogleOAuthPending>
-  } catch {
-    return null
-  }
-  if (
-    typeof parsed.state !== "string" ||
-    typeof parsed.codeVerifier !== "string" ||
-    typeof parsed.redirectUri !== "string" ||
-    typeof parsed.ts !== "number"
-  ) {
-    return null
-  }
-  if (now - parsed.ts > GOOGLE_OAUTH_PENDING_TTL_MS) return null
-  return parsed as GoogleOAuthPending
+  const pending = (await googleState({ action: "snapshot" })).state.pending
+  return pending && now - pending.ts <= GOOGLE_OAUTH_PENDING_TTL_MS ? pending : null
 }
 
 export async function clearGoogleOAuthPending(): Promise<void> {
-  await docsProviderSecrets().delete(GOOGLE_OAUTH_PENDING_KEY)
+  await googleState({ action: "begin" })
 }

@@ -117,6 +117,8 @@
     "duplicateToEdit": "Duplicate to edit",
     "edit": "Edit",
     "editing": "Editing {name}",
+    "evolve": "Evolve",
+    "evolveTitle": "{name} · Evolution",
     "noDescription": "No description.",
     "sourceUser": "Created by you",
     "tasksEmpty": "No tasks yet. Use “Assign work” to give it one.",

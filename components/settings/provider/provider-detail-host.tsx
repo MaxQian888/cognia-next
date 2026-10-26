@@ -63,6 +63,9 @@ const CLIProxyAPISettings = dynamic(
   () => import("./cliproxyapi-settings").then((m) => m.CLIProxyAPISettings),
   { ssr: false }
 )
+const MagpieSettings = dynamic(() => import("./magpie-settings").then((m) => m.MagpieSettings), {
+  ssr: false,
+})
 
 type BuiltInProvider = (typeof PROVIDERS)[string]
 // A custom provider and a built-in one produce differently shaped readiness
@@ -197,7 +200,7 @@ export function ProviderDetailHost({
           ? {
               id: selectedId,
               name: selectedBuiltIn.name,
-              modelCount: selectedBuiltIn.models.length,
+              modelCount: enrichedBuiltInModels.length,
             }
           : selectedCustom
             ? {
@@ -405,6 +408,12 @@ export function ProviderDetailHost({
                 </>
               )}
               {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+              {selectedId === "magpie" && (
+                <MagpieSettings
+                  settings={selectedSettings}
+                  onSave={(patch) => setProviderConfig(selectedId, patch)}
+                />
+              )}
             </ProviderConfigTab>
             {parametersBlock}
           </div>

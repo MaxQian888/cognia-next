@@ -19,8 +19,12 @@
  * unrenewed lease on its own.
  */
 
+import {
+  hostSupportsExternalAgentModelPlans,
+  parseHostFeatureManifest,
+} from "@/lib/platform/host-feature-manifest"
 import { transport } from "@/lib/tauri"
-import type { GatewayModelMetadata, GatewayTaskBudget } from "@/types/gateway"
+import type { GatewayModelMetadata, GatewayTaskBudget, GatewayTaskModelPlan } from "@/types/gateway"
 
 /** Renewal cadence; the server-side TTL is four of these. */
 export const HOST_TASK_LEASE_RENEW_MS = 30_000
@@ -30,6 +34,7 @@ export interface HostTaskLeaseInput {
   /** The Host snapshot provider id (a profile deployment id on `cognia-server`). */
   providerId: string
   modelId: string
+  modelPlan?: GatewayTaskModelPlan
   ingressProtocol: "openai-chat" | "openai-responses" | "anthropic"
   /** The paired device the turn runs for; part of the lease scope. */
   originDeviceId?: string | null
@@ -49,6 +54,7 @@ export interface HostTaskLease {
   ownerAccountId: string | null
   expiresAtMs: number
   modelMetadata: GatewayModelMetadata
+  modelMetadataById: Record<string, GatewayModelMetadata>
   revoke: () => Promise<void>
   /** Aborts when the lease can no longer be renewed. */
   signal: AbortSignal
@@ -63,6 +69,7 @@ interface PreparedHostTaskLease {
   ownerAccountId: string | null
   expiresAtMs: number
   modelMetadata?: { id: string } & Record<string, unknown>
+  modelMetadataById?: Record<string, { id: string } & Record<string, unknown>>
 }
 
 const METADATA_NUMBERS = ["contextLength", "maxInputTokens", "maxOutputTokens"] as const
@@ -136,11 +143,18 @@ function assertLeaseShape(lease: PreparedHostTaskLease): void {
  */
 export async function acquireHostTaskLease(input: HostTaskLeaseInput): Promise<HostTaskLease> {
   input.signal?.throwIfAborted()
+  if (input.modelPlan) {
+    const manifest = parseHostFeatureManifest(await transport.call("host_feature_manifest"))
+    input.signal?.throwIfAborted()
+    if (hostSupportsExternalAgentModelPlans(manifest) !== true)
+      throw new Error("This Host does not support external agent model plans; update the Host")
+  }
   const lease = await transport.call<PreparedHostTaskLease>("agent_gateway_host_task_prepare", {
     request: {
       taskId: input.taskId,
       providerId: input.providerId,
       model: input.modelId,
+      ...(input.modelPlan ? { modelPlan: input.modelPlan } : {}),
       ingressProtocol: input.ingressProtocol,
       originDeviceId: input.originDeviceId ?? null,
       ...(input.budget ? { budget: input.budget } : {}),
@@ -197,6 +211,16 @@ export async function acquireHostTaskLease(input: HostTaskLeaseInput): Promise<H
       ownerAccountId: lease.ownerAccountId,
       expiresAtMs: lease.expiresAtMs,
       modelMetadata: hostTaskModelMetadata(input.modelId, lease.modelMetadata),
+      modelMetadataById: Object.fromEntries(
+        [input.modelId, ...(input.modelPlan?.additionalModels ?? [])].map((id) => [
+          id,
+          hostTaskModelMetadata(
+            id,
+            lease.modelMetadataById?.[id] ??
+              (id === input.modelId ? lease.modelMetadata : undefined)
+          ),
+        ])
+      ),
       revoke,
       signal: controller.signal,
       assertCurrent,

@@ -56,6 +56,9 @@ export const SETTABLE_KEYS = [
   "theme",
   "skillLoadMode",
   "locale",
+  "layout",
+  "mouse",
+  "selection",
 ] as const
 export type SettableKey = (typeof SETTABLE_KEYS)[number]
 

@@ -1,10 +1,42 @@
-import { render, screen } from "@testing-library/react"
+import { render as rtlRender, screen } from "@testing-library/react"
+import type { ReactElement } from "react"
 import userEvent from "@testing-library/user-event"
 import { FollowUpSuggestions } from "./follow-up-suggestions"
+import { useUIStore } from "@/stores/ui/ui-store"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 
+function render(ui: ReactElement) {
+  return rtlRender(ui, { wrapper: TooltipProvider })
+}
+
 describe("FollowUpSuggestions", () => {
+  beforeEach(() => {
+    useUIStore.setState({ predictionSetupHintHidden: false })
+  })
+
+  it("hides the setup hint in every pane without hiding errors or predictions", async () => {
+    const props = { suggestions: [], onAccept: jest.fn(), onDismiss: jest.fn() }
+    const view = render(
+      <>
+        <FollowUpSuggestions {...props} status="unavailable" />
+        <FollowUpSuggestions {...props} status="unavailable" />
+      </>
+    )
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "dontShowAgain" })[0])
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(props.onDismiss).not.toHaveBeenCalled()
+
+    view.rerender(<FollowUpSuggestions {...props} status="error" onRetry={jest.fn()} />)
+    expect(screen.getByRole("status")).toHaveTextContent("error")
+    expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "dontShowAgain" })).not.toBeInTheDocument()
+
+    view.rerender(<FollowUpSuggestions {...props} suggestions={["Continue"]} status="ready" />)
+    expect(screen.getByText("Continue")).toBeVisible()
+  })
+
   it("renders nothing without predictions", () => {
     const { container } = render(
       <FollowUpSuggestions suggestions={[]} onAccept={jest.fn()} onDismiss={jest.fn()} />
@@ -55,6 +87,9 @@ describe("FollowUpSuggestions", () => {
       />
     )
     expect(screen.getByRole("status")).toHaveTextContent("unavailable")
+    for (const name of ["configure", "retry", "dontShowAgain"]) {
+      expect(screen.getByRole("button", { name })).toHaveTextContent(/^$/)
+    }
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "configure" }))
     await user.click(screen.getByRole("button", { name: "retry" }))

@@ -3,6 +3,7 @@ import {
   envelopeForRejection,
   envelopeForBudgetExhausted,
   renderDispatchOutcomeForModel,
+  normalizeDispatchBudgetResult,
 } from "./dispatch-error"
 import type { PluginSubagentDispatchResult } from "@/types/plugin/plugin-agent-sdk"
 
@@ -114,6 +115,29 @@ describe("renderDispatchOutcomeForModel", () => {
     channel: "sidecar",
     toolsAvailable: true,
   }
+
+  it.each(["error_max_turns", "error_max_budget_usd"])(
+    "keeps partial findings and a usable resume handle for %s",
+    (finishReason) => {
+      const outcome = normalizeDispatchBudgetResult({ ...base, finishReason, runId: "research-1" })
+      expect(outcome.finishReason).toBe("error")
+      expect(outcome.errorEnvelope).toMatchObject({ code: "budget-exhausted", retryable: false })
+      expect(outcome.errorEnvelope?.partialText).toContain("final answer")
+      expect(outcome.text).toContain("incomplete")
+      expect(outcome.text).toContain('resume:"research-1"')
+      expect(normalizeDispatchBudgetResult(outcome)).toBe(outcome)
+      expect(renderDispatchOutcomeForModel("Explore", outcome)).toContain(
+        "remaining work is unverified"
+      )
+    }
+  )
+
+  it("does not treat a normal stop or a provider error as budget exhaustion", () => {
+    for (const finishReason of ["stop", "success", "error", "length"]) {
+      const outcome = { ...base, finishReason }
+      expect(normalizeDispatchBudgetResult(outcome)).toBe(outcome)
+    }
+  })
 
   it("renders success with the label prefix (unchanged formatting)", () => {
     expect(renderDispatchOutcomeForModel("explore", base)).toBe("[explore]\nfinal answer")

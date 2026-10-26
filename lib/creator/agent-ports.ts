@@ -24,6 +24,8 @@ import type {
   ScaffoldPlan,
 } from "./executor"
 import type { CreatorReviewFinding } from "@/types/creator"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptRisk } from "@/lib/prompts/types"
 
 /** What the model is asked to do. Also the reviewer's isolation boundary. */
 export type CreatorTurnPurpose = "survey" | "plan" | "review"
@@ -51,15 +53,65 @@ export interface CreatorAgentDeps {
 
 // ---- prompts ---------------------------------------------------------------
 
+// Each prompt is a Prompt Center definition (ADR-0236). The wording is
+// editable; the reply-shape line is a required fragment set, because the
+// strict parsers below reject anything else. `{{requirements}}` is the user's
+// own text and is inserted once, never re-scanned.
+
 const JSON_CONTRACT =
   "Reply with a single fenced ```json block and nothing else. No prose before or after."
 
-export function buildSurveyPrompt(ctx: CreatorRunContext): string {
-  return [
-    `You are surveying an existing codebase before a new ${ctx.artifactKind} is written.`,
+/** Requirements are the user's free text; generous so clipping never applies. */
+const REQUIREMENTS_MAX = 200_000
+
+function creatorPrompt(input: {
+  purpose: CreatorTurnPurpose
+  risk: PromptRisk
+  extraVariables?: readonly string[]
+  requiredFragments: readonly string[]
+  outputContract: string
+  defaultBody: string
+}) {
+  return definePrompt({
+    id: `developer.creator.${input.purpose}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "developer",
+    operation: "replace-template",
+    scopes: ["account"],
+    activation: "next-operation",
+    risk: input.risk,
+    hosts: ["app"],
+    maxChars: 8_000,
+    variables: [
+      { name: "artifactKind", required: false, maxChars: 64 },
+      { name: "requirements", required: true, maxChars: REQUIREMENTS_MAX },
+      // Path lists and toolchain results are host-rendered and uncapped today.
+      ...(input.extraVariables ?? []).map((name) => ({
+        name,
+        required: false,
+        maxChars: 1_000_000,
+      })),
+    ],
+    requiredFragments: input.requiredFragments,
+    outputContract: input.outputContract,
+    consumers: ["lib/creator/agent-ports.ts"],
+    defaultBody: input.defaultBody,
+  })
+}
+
+export const CREATOR_SURVEY_PROMPT = creatorPrompt({
+  purpose: "survey",
+  // Parsed strictly; a malformed reply fails the survey step.
+  risk: "protocol",
+  requiredFragments: ['"findings"', '"path"', '"why"'],
+  outputContract:
+    'One fenced JSON object {"findings":[{"path","why"}]}; anything else fails the survey step.',
+  defaultBody: [
+    "You are surveying an existing codebase before a new {{artifactKind}} is written.",
     "",
     "Requirements:",
-    ctx.requirements,
+    "{{requirements}}",
     "",
     "Find anything already in this repository that does this or most of it.",
     "Report nothing rather than something tenuous — a false match costs more",
@@ -67,15 +119,21 @@ export function buildSurveyPrompt(ctx: CreatorRunContext): string {
     "",
     JSON_CONTRACT,
     'Shape: {"findings":[{"path":"repo/relative/path.ts","why":"one sentence"}]}',
-  ].join("\n")
-}
+  ].join("\n"),
+})
 
-export function buildPlanPrompt(ctx: CreatorRunContext): string {
-  return [
-    `Generate a ${ctx.artifactKind} scaffold.`,
+export const CREATOR_PLAN_PROMPT = creatorPrompt({
+  purpose: "plan",
+  // Parsed strictly: one bad file entry rejects the whole plan.
+  risk: "protocol",
+  requiredFragments: ['"files"', '"path"', '"contents"', '"capabilities"', '"rationales"'],
+  outputContract:
+    "One fenced JSON object with relative file paths, capabilities and their rationales; a malformed plan writes nothing, and the capabilities go to the user's permission approval.",
+  defaultBody: [
+    "Generate a {{artifactKind}} scaffold.",
     "",
     "Requirements:",
-    ctx.requirements,
+    "{{requirements}}",
     "",
     "Rules:",
     "- Every path is RELATIVE to the authoring root. Never absolute, never `..`.",
@@ -85,28 +143,64 @@ export function buildPlanPrompt(ctx: CreatorRunContext): string {
     JSON_CONTRACT,
     'Shape: {"files":[{"path":"src/index.ts","contents":"..."}],' +
       '"capabilities":["fs.read"],"rationales":{"fs.read":"why"}}',
-  ].join("\n")
-}
+  ].join("\n"),
+})
 
-export function buildReviewPrompt(
-  ctx: CreatorRunContext,
-  brief: { changedPaths: readonly string[]; verification: Record<string, boolean> }
-): string {
-  return [
-    `Review a generated ${ctx.artifactKind}. You did not write it and you cannot change it.`,
+export const CREATOR_REVIEW_PROMPT = creatorPrompt({
+  purpose: "review",
+  // Any blocker finding fails the review gate before delivery.
+  risk: "approval-sensitive",
+  extraVariables: ["changedPaths", "verification"],
+  requiredFragments: ['"findings"', '"severity"', '"summary"', "blocker|warning|info"],
+  outputContract:
+    "One fenced JSON object of findings with severity blocker, warning or info; any blocker (or an unparseable reply) fails the review.",
+  defaultBody: [
+    "Review a generated {{artifactKind}}. You did not write it and you cannot change it.",
     "",
     "The requirements it was meant to satisfy:",
-    ctx.requirements,
+    "{{requirements}}",
     "",
-    `Files it produced: ${brief.changedPaths.join(", ") || "(none)"}`,
-    `Toolchain: ${JSON.stringify(brief.verification)}`,
+    "Files it produced: {{changedPaths}}",
+    "Toolchain: {{verification}}",
     "",
     "Raise a blocker only for something that makes the artifact wrong or unsafe.",
     "",
     JSON_CONTRACT,
     'Shape: {"findings":[{"id":"f1","severity":"blocker|warning|info",' +
       '"summary":"...","path":"optional/relative/path"}]}',
-  ].join("\n")
+  ].join("\n"),
+})
+
+export async function buildSurveyPrompt(ctx: CreatorRunContext): Promise<string> {
+  return (
+    await resolvePromptAsync(CREATOR_SURVEY_PROMPT, {
+      values: { artifactKind: ctx.artifactKind, requirements: ctx.requirements },
+    })
+  ).text
+}
+
+export async function buildPlanPrompt(ctx: CreatorRunContext): Promise<string> {
+  return (
+    await resolvePromptAsync(CREATOR_PLAN_PROMPT, {
+      values: { artifactKind: ctx.artifactKind, requirements: ctx.requirements },
+    })
+  ).text
+}
+
+export async function buildReviewPrompt(
+  ctx: CreatorRunContext,
+  brief: { changedPaths: readonly string[]; verification: Record<string, boolean> }
+): Promise<string> {
+  return (
+    await resolvePromptAsync(CREATOR_REVIEW_PROMPT, {
+      values: {
+        artifactKind: ctx.artifactKind,
+        requirements: ctx.requirements,
+        changedPaths: brief.changedPaths.join(", ") || "(none)",
+        verification: JSON.stringify(brief.verification),
+      },
+    })
+  ).text
 }
 
 // ---- parsing ---------------------------------------------------------------
@@ -248,7 +342,7 @@ export function createAgentSurveyHandler(
     findings: parseSurveyFindings(
       await deps.runTurn({
         purpose: "survey",
-        prompt: buildSurveyPrompt(ctx),
+        prompt: await buildSurveyPrompt(ctx),
         cwd: ctx.root.path,
         label: `Creator survey (${ctx.artifactKind})`,
       })
@@ -261,7 +355,7 @@ export function createAgentPlanHandler(deps: CreatorAgentDeps): CreatorHandlers[
     parseScaffoldPlan(
       await deps.runTurn({
         purpose: "plan",
-        prompt: buildPlanPrompt(ctx),
+        prompt: await buildPlanPrompt(ctx),
         cwd: ctx.root.path,
         label: `Creator scaffold (${ctx.artifactKind})`,
       })
@@ -284,7 +378,7 @@ export function createAgentReviewHandler(
     findings: parseReviewFindings(
       await deps.runTurn({
         purpose: "review",
-        prompt: buildReviewPrompt(ctx, {
+        prompt: await buildReviewPrompt(ctx, {
           changedPaths: brief.changedPaths,
           verification: brief.verification as unknown as Record<string, boolean>,
         }),

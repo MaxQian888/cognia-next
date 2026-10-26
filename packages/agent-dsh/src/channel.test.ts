@@ -5,6 +5,7 @@ import {
   DSH_SDK_CAPABILITIES,
   DSH_TRANSPORTS,
   dshCapabilitiesForTransport,
+  dshNativeReasoningEffort,
   dshCapabilitySnapshotSchema,
   dshRuntimeChannelSchema,
   dshPluginsForProfile,
@@ -16,6 +17,20 @@ import {
 
 const DIGEST_A = "a".repeat(64)
 const DIGEST_B = "b".repeat(64)
+
+it.each([
+  [undefined, undefined],
+  ["off", "off"],
+  ["low", "low"],
+  ["medium", "low"],
+  ["high", "high"],
+  ["xhigh", "high"],
+  ["max", "max"],
+  ["minimal", "low"],
+  ["ultracode", "max"],
+])("normalizes native reasoning %s to %s", (input, expected) => {
+  expect(dshNativeReasoningEffort(input)).toBe(expected)
+})
 
 function validChannel(): DshRuntimeChannel {
   return {

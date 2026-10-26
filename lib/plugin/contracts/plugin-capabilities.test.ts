@@ -1,12 +1,25 @@
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import {
   PLUGIN_CAPABILITY_CONTRACTS,
   getPluginCapabilityContract,
   capabilityPythonExecution,
   validatePluginCapabilities,
 } from "./plugin-capabilities"
-import { AUTHOR_CAPABILITY_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { AUTHOR_CAPABILITY_CONTRACTS } from "@cognia/plugin-contract/contracts/catalog"
 
 describe("plugin capability contracts", () => {
+  it("keeps the LSP capability's required test evidence reachable after sidecar migrations", () => {
+    const contract = getPluginCapabilityContract("lsp-server")
+    expect(contract).toBeDefined()
+    for (const file of contract!.requiredTests) {
+      expect({ file, exists: existsSync(resolve(process.cwd(), file)) }).toEqual({
+        file,
+        exists: true,
+      })
+    }
+  })
+
   it("admits library contracts and advertises the Python RPC path", () => {
     expect(validatePluginCapabilities(["library"]).allowed).toBe(true)
     expect(getPluginCapabilityContract("library")?.manifestFields).toEqual([

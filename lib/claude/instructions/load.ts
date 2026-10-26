@@ -10,8 +10,12 @@
  */
 
 import { isTauri } from "@/lib/tauri"
-import { discoverInstructionPaths } from "./discover"
-import { discoverMarkdownAgentFiles } from "./discover-agents"
+import { discoverInstructionPaths, type DiscoveredPath } from "./discover"
+import {
+  discoverMarkdownAgentFiles,
+  discoverMarkdownAgentPaths,
+  type MarkdownAgentPath,
+} from "./discover-agents"
 import { expandImports } from "./imports"
 import { renderInstructions } from "./render"
 import { dirname, joinPath, pathKey } from "./paths"
@@ -95,6 +99,61 @@ async function resolveGlobalPath(
   return undefined
 }
 
+async function discoverWithHome(
+  input: LoadInstructionsInput,
+  config: ReturnType<typeof resolveInstructionsConfig>,
+  fs: InstructionFs,
+  home: string | undefined
+): Promise<DiscoveredPath[]> {
+  const globalPath = config.includeGlobal
+    ? await resolveGlobalPath(config.globalPath, home, config.fileNames, fs)
+    : undefined
+  return discoverInstructionPaths({
+    cwd: input.cwd,
+    roots: input.roots,
+    globalPath,
+    config,
+    fs,
+  })
+}
+
+/**
+ * The instruction files a turn in `roots` would load, in load order, without
+ * reading them. The Prompt Center lists and edits these files through the
+ * checked workspace-file writes; the send path reads them with
+ * {@link loadProjectInstructions}. Same discovery, so the two cannot disagree
+ * about which files apply. Empty off-Tauri and when instruction loading is off.
+ */
+export async function discoverProjectInstructionFiles(
+  input: Omit<LoadInstructionsInput, "now">
+): Promise<DiscoveredPath[]> {
+  const config = resolveInstructionsConfig(input.config)
+  if (!config.enabled) return []
+  const tauri = input.isTauriEnv ?? isTauri()
+  if (!tauri && !input.fs) return []
+  return discoverWithHome(input, config, input.fs ?? realFs(), await resolveHome(input))
+}
+
+/**
+ * The markdown agent files a turn in `roots` would load, in load order, without
+ * reading them. Same directories and order as the send path. Empty off-Tauri
+ * (without an injected fs) and when project agents are off.
+ */
+export async function discoverProjectAgentFiles(
+  input: Omit<LoadInstructionsInput, "now" | "cwd">
+): Promise<MarkdownAgentPath[]> {
+  const config = resolveInstructionsConfig(input.config)
+  if (!config.enabled || !config.loadProjectAgents) return []
+  const tauri = input.isTauriEnv ?? isTauri()
+  if (!tauri && !input.fs) return []
+  const home = await resolveHome(input)
+  return discoverMarkdownAgentPaths({
+    roots: input.roots,
+    globalAgentsDir: home ? joinPath(home, joinPath(".cognia", "agents")) : undefined,
+    fs: input.fs ?? realFs(),
+  })
+}
+
 export async function loadProjectInstructions(
   input: LoadInstructionsInput
 ): Promise<ResolvedInstructions> {
@@ -112,17 +171,7 @@ export async function loadProjectInstructions(
 
   const warnings: string[] = []
   const home = await resolveHome(input)
-  const globalPath = config.includeGlobal
-    ? await resolveGlobalPath(config.globalPath, home, config.fileNames, fs)
-    : undefined
-
-  const discovered = await discoverInstructionPaths({
-    cwd: input.cwd,
-    roots: input.roots,
-    globalPath,
-    config,
-    fs,
-  })
+  const discovered = await discoverWithHome(input, config, fs, home)
 
   const seen = new Set<string>()
   const files: InstructionFile[] = []

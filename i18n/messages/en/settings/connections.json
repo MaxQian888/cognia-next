@@ -1458,7 +1458,7 @@
   "permissionsEditor": {
     "builtInSkills": "Built-in Skills ceiling",
     "cancel": "Cancel",
-    "confirmImpact": "Save this permission ceiling? It can block skills and host capabilities across every conversation on this adapter.",
+    "confirmImpact": "It can block skills and host capabilities across every conversation on this adapter.",
     "conversationGrantRequired": "The adapter can only cap this capability; each conversation must grant it explicitly.",
     "hitl": "Require HITL for write skills",
     "hitlHelp": "Conversation settings may override this default. Destructive skills always require approval.",
@@ -1477,7 +1477,8 @@
     "save": "Save",
     "skillHelp": "Comma-separated skill ids or wildcards. Leave blank to impose no additional adapter restriction; an explicit empty conversation allowlist still blocks all skills.",
     "skillPlaceholder": "lark.calendar.*, lark.task.list",
-    "title": "Permissions"
+    "title": "Permissions",
+    "confirmImpactTitle": "Save this permission ceiling?"
   },
   "qqOfficial": {
     "adapterCreated": "QQ Official Bot added",

@@ -1,5 +1,13 @@
 import { ocrExtractText } from "./ocr"
+import type { ExtractDeps } from "@cognia/ocr"
+import { DEFAULT_VISION_PROMPT } from "@cognia/ocr/providers/_llm-vision"
 import type { OcrInput, OcrResult } from "@cognia/ocr/types"
+import { CLI_OCR_VISION_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 const fakeResult = (combinedMarkdown: string): OcrResult =>
   ({ combinedMarkdown, combinedText: combinedMarkdown }) as unknown as OcrResult
@@ -81,5 +89,45 @@ describe("ocrExtractText", () => {
       },
     })
     expect(resolvedKey).toBe("sk-main")
+  })
+})
+
+describe("ocrExtractText page prompt", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  async function seenPrompt(): Promise<unknown> {
+    let deps: ExtractDeps | undefined
+    await ocrExtractText(new ArrayBuffer(2), "image/png", {
+      anthropicKey: () => "sk-test",
+      extract: async (_input, extractDeps) => {
+        deps = extractDeps
+        return fakeResult("text")
+      },
+    })
+    return deps?.settings.providerConfig["anthropic-vision"]?.promptTemplate
+  }
+
+  it("sends the shipped transcription prompt with no override", async () => {
+    await expect(seenPrompt()).resolves.toBe(DEFAULT_VISION_PROMPT)
+  })
+
+  it("sends a published override as the vision provider's prompt template", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-ocr",
+          promptId: CLI_OCR_VISION_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-ocr-1",
+          body: "Transcribe the page as plain text only.",
+          contractVersion: CLI_OCR_VISION_PROMPT.contractVersion,
+        },
+      ])
+    )
+    await expect(seenPrompt()).resolves.toBe("Transcribe the page as plain text only.")
   })
 })

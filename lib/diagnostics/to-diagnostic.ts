@@ -23,7 +23,7 @@ import { normalizeErrorText, resolvePreset } from "@cognia/error-parsers"
 import { classifyProviderErrorInfo } from "@cognia/provider-routing/error-classifier"
 import { CommandInvokeError, isCommandErrorEnvelope } from "@/lib/tauri/command-error"
 
-import { diagnoseCommandError } from "./adapters/from-command-error"
+import { diagnoseCommandError, isHostRefusalCode } from "./adapters/from-command-error"
 import { diagnoseDispatchEnvelope } from "./adapters/from-dispatch-envelope"
 import { diagnoseExecutionError } from "./adapters/from-execution-error"
 
@@ -59,6 +59,20 @@ function isDispatchEnvelope(
   return (
     typeof v.code === "string" && typeof v.message === "string" && typeof v.retryable === "boolean"
   )
+}
+
+/** A Host refusal's code, message and retry verdict, whatever carried it. */
+function hostRefusal(value: unknown): { code: string; message: string; retryable: boolean } | null {
+  if (typeof value !== "object" || value === null) return null
+  const v = value as Record<string, unknown>
+  if (typeof v.code !== "string" || !isHostRefusalCode(v.code)) return null
+  const message =
+    typeof v.message === "string" && v.message !== ""
+      ? v.message
+      : typeof v.detail === "string"
+        ? v.detail
+        : v.code
+  return { code: v.code, message, retryable: v.retryable === true }
 }
 
 function stackOf(err: unknown): string | undefined {
@@ -108,6 +122,23 @@ export function toDiagnostic(err: unknown, ctx: ToDiagnosticContext): CogniaDiag
   // 3 — a Tauri command rejection that was already decoded and re-thrown.
   if (err instanceof CommandInvokeError) {
     const decoded = diagnoseCommandError(err)
+    return createDiagnostic(decoded.code, {
+      source,
+      message: decoded.message,
+      retryable: decoded.retryable,
+      meta: mergeMeta(),
+      detail: stackOf(err),
+      now,
+      id,
+    })
+  }
+
+  // 3b — a Host refusal on any carrier: a `CompanionError`, a raw problem
+  // document (`detail`, no `message`) or an envelope. Checked before the
+  // dispatch duck type below, which a `CompanionError` also satisfies.
+  const host = hostRefusal(err)
+  if (host) {
+    const decoded = diagnoseCommandError({ ...host, structured: true })
     return createDiagnostic(decoded.code, {
       source,
       message: decoded.message,

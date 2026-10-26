@@ -1334,6 +1334,11 @@ describe("renderer broker Auto-mode responder", () => {
       expect(handled).toBe(decision !== "ask")
       if (decision === "ask") expect(respond).not.toHaveBeenCalled()
       else expect(respond.mock.calls[0][0]).toBe(decision)
+      // The judge's customized guidance is looked up for this session (ADR-0236).
+      expect(jest.mocked(runAutoModeForTool).mock.calls.at(-1)?.[0]).toMatchObject({
+        contextKey: "chat",
+        promptContext: { sessionId: "chat" },
+      })
     }
   )
 })

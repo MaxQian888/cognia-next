@@ -29,6 +29,11 @@ import type {
 } from "@/types/subscription"
 
 import { clearCredentialBlocks } from "@/lib/subscription/retry/failover"
+import type { DiscoveredOpencodeAuth } from "@cognia/plugin-contract/lib/subscription/core/transport"
+export type {
+  DiscoveredOpencodeEntry,
+  DiscoveredOpencodeAuth,
+} from "@cognia/plugin-contract/lib/subscription/core/transport"
 
 /**
  * Stamp the vault dirty-marker after a successful mutating command so the
@@ -625,29 +630,6 @@ export async function reauthenticateManagedCodexAccount(
   })
   vaultMutated()
   return detail
-}
-
-// ---------------------------------------------------------------------------
-// OpenCode (discovery + paste-zen-key)
-// ---------------------------------------------------------------------------
-
-export interface DiscoveredOpencodeEntry {
-  /**
-   * Whitelist value: "anthropic" | "openai" | "opencode" | "opencode-go" |
-   * "opencode-zen" (must stay in sync with `OPENCODE_WHITELIST`).
-   */
-  subProvider: string
-  /** "api-key" | "oauth" | "unknown". */
-  kind: string
-  /** Verbatim JSON object for this sub-provider's entry. */
-  payloadJson: string
-}
-
-export interface DiscoveredOpencodeAuth {
-  /** Resolved path that was read (or would have been read). */
-  authJsonPath: string
-  /** Whitelisted sub-providers actually present in auth.json. */
-  entries: DiscoveredOpencodeEntry[]
 }
 
 export async function opencodeOauthDiscover(): Promise<DiscoveredOpencodeAuth | null> {

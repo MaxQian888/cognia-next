@@ -13,6 +13,7 @@
  */
 
 import type { SchedulerTimingDriver, TaskDueCallback } from "@/types/scheduler"
+import { loggers } from "@cognia/logging"
 
 import { armTask, disarmTask, listenTaskDue } from "../daemon-bridge"
 
@@ -20,7 +21,7 @@ export class RustDaemonTimingDriver implements SchedulerTimingDriver {
   readonly supportsLeaderElection = false as const
 
   /** Armed instants by task id; a re-arm that raced a fire stays armed. */
-  private armedAt = new Map<string, number>()
+  private armedAt = new Map<string, { fireAtMs: number }>()
   private dueCb: TaskDueCallback | null = null
   private unlisten: (() => void) | null = null
   private startPromise: Promise<void> | null = null
@@ -38,7 +39,7 @@ export class RustDaemonTimingDriver implements SchedulerTimingDriver {
       const unlisten = await listenTaskDue((event) => {
         if (version !== this.lifecycleVersion) return
         const slotMs = event.scheduledForMs
-        if (this.armedAt.get(event.taskId) === slotMs) this.armedAt.delete(event.taskId)
+        if (this.armedAt.get(event.taskId)?.fireAtMs === slotMs) this.armedAt.delete(event.taskId)
         this.dueCb?.(event.taskId, slotMs)
       })
 
@@ -63,7 +64,9 @@ export class RustDaemonTimingDriver implements SchedulerTimingDriver {
     this.unlisten?.()
     this.unlisten = null
     for (const taskId of Array.from(this.armedAt.keys())) {
-      void this.disarm(taskId)
+      void this.disarm(taskId).catch((error) =>
+        loggers.scheduler.error(`Failed to disarm native task ${taskId}:`, error)
+      )
     }
   }
 
@@ -71,9 +74,15 @@ export class RustDaemonTimingDriver implements SchedulerTimingDriver {
     this.dueCb = cb
   }
 
-  arm(taskId: string, fireAtMs: number): Promise<void> {
-    this.armedAt.set(taskId, fireAtMs)
-    return this.enqueueMutation(taskId, () => armTask(taskId, fireAtMs))
+  async arm(taskId: string, fireAtMs: number): Promise<void> {
+    const arm = { fireAtMs }
+    this.armedAt.set(taskId, arm)
+    try {
+      await this.enqueueMutation(taskId, () => armTask(taskId, fireAtMs))
+    } catch (error) {
+      if (this.armedAt.get(taskId) === arm) this.armedAt.delete(taskId)
+      throw error
+    }
   }
 
   disarm(taskId: string): Promise<void> {

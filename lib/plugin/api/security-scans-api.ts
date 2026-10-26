@@ -1,11 +1,7 @@
 import { registerSecurityScanRunController } from "@/lib/execution/control-handlers"
 import { syncSecurityScanExecutionRun } from "@/lib/execution/security-scan-bridge"
-import type { SecurityScanRunRecord } from "@cognia/plugin-sdk/api/security-findings"
-
-export interface PluginSecurityScansAPI {
-  syncExecutionRun(record: SecurityScanRunRecord): Promise<void>
-  registerRunController(runId: string, controller: AbortController): () => void
-}
+import type { PluginSecurityScansAPI } from "@cognia/plugin-contract/lib/plugin/api/security-scans-api"
+export type { PluginSecurityScansAPI } from "@cognia/plugin-contract/lib/plugin/api/security-scans-api"
 
 export function createSecurityScansAPI(): PluginSecurityScansAPI {
   return {

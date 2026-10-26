@@ -5,9 +5,10 @@
  * This file is the DEFAULT variant, resolved by the browser build and by the
  * Tauri desktop build (they consume the same `out/`, so they must resolve the
  * same module). It mounts both shells, exactly as the layout used to: they are
- * mutually exclusive at RUNTIME — `MobileShellWrapper` collapses to a
- * `display:contents` pass-through off Capacitor, and `DesktopAppShell` returns
- * bare children on it — so one bundle serves web and desktop correctly.
+ * mutually exclusive at RUNTIME — the inactive web shell keeps its route
+ * containers at `display:contents`, switching only chrome and sizing so a
+ * breakpoint crossing preserves route state. `DesktopAppShell` returns bare
+ * children on Capacitor, so one bundle serves web and desktop correctly.
  *
  * `platform-shell.mobile.tsx` beside this file is the Capacitor variant. It is
  * selected by the `.mobile.tsx` platform extension that `next.config.ts`

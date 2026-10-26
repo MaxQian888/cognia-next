@@ -44,7 +44,9 @@ public/cognia-workflow-app.js
 # 1.6k icons, read only by the bundler — so Prettier reformatting either file
 # would make its check report drift on a clean tree.
 lib/icons/lucide-catalog.generated.json
+packages/plugin-contract/src/lib/icons/lucide-icon-names.generated.json
 lib/plugin/core/browser-builtin-assets.generated.json
+lib/plugin/core/builtin-preboot-manifests.generated.json
 # Companion API specs and CLI catalog are canonical generator output. Prettier
 # rewrites compact schema arrays and makes `companion-api:check` report drift.
 docs/api/mobile-companion-api.openapi.yaml
@@ -71,17 +73,10 @@ i18n/messages/zh-CN.json
 # The Support Agent corpus is compact generator output verified byte-for-byte
 # by `pnpm support:docs:check`; preserve the generator-owned representation.
 lib/support-agent/support-docs.generated.json
-# Helm chart templates — Go templating (`{{- include ... }}`) is not valid
-# YAML, so Prettier's YAML parser rejects the file outright. Helm owns them.
-services/diagnostic-server/deploy/helm/cognia-diagnostics/templates
 # CommonJS mocks for Jest; intentionally hand-written, not Prettier-shaped.
 __mocks__
 # Capacitor mobile shell — separate package, has its own conventions.
 mobile
-# WXT owns this generated TypeScript/config surface and recreates it during
-# pnpm install; formatting authored files must never scan generated output.
-browser-extension/.wxt/
-browser-extension/.output/
 # IDE configuration files — not project source.
 .vscode
 # Fumadocs MDX content — Prettier's MDX support is non-idempotent on
@@ -95,3 +90,6 @@ docs/content
 plugins/pi-latex-workbench/vendor
 plugins/pi-latex-workbench/VENDOR.md
 plugins/pi-latex-workbench/vendor-lock.json
+
+# The pinned external Browser Companion checkout and verification output.
+.cache/

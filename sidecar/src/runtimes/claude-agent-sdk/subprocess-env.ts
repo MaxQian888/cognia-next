@@ -20,6 +20,7 @@ import type { SendOptions } from "../../shared/wire/inbound.ts"
 // src/platform/process/env.ts, shared with the sandboxed tool processes.
 
 import { ENV_ALLOWLIST } from "../../platform/process/env.ts"
+import { unattendedRetryPolicy } from "./runtime-policy.ts"
 
 const PROXY_ENV_RE = /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i
 const MANAGED_PROXY_MARKER = "COGNIA_MANAGED_NETWORK_PROXY"
@@ -119,7 +120,26 @@ export function buildSubprocessEnv(
   sendOptions: SendOptions | undefined,
   parentEnv = process.env
 ): NodeJS.ProcessEnv {
-  const rawOverlay = sendOptions?.env ?? {}
+  const retry = unattendedRetryPolicy(sendOptions)
+  const retryEnv: NodeJS.ProcessEnv = retry
+    ? {
+        CLAUDE_CODE_RETRY_WATCHDOG: "1",
+        CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS: String(retry.maxWaitMs),
+        ...(retry.usageLimitRecheckMs === undefined
+          ? {}
+          : {
+              CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS: String(retry.usageLimitRecheckMs),
+            }),
+      }
+    : {}
+  // Raw env input must not enable, extend or tune hidden retries around the
+  // typed policy and the sidecar's independent wall-clock deadline.
+  const stripRetry = (env: NodeJS.ProcessEnv) =>
+    Object.fromEntries(
+      Object.entries(env).filter(([name]) => !/^CLAUDE_CODE_RETRY_WATCHDOG/i.test(name))
+    )
+  parentEnv = stripRetry(parentEnv)
+  const rawOverlay = stripRetry(sendOptions?.env ?? {})
   const claudeTempEnv =
     process.platform === "darwin" && typeof parentEnv.TMPDIR === "string" && parentEnv.TMPDIR !== ""
       ? { CLAUDE_CODE_TMPDIR: parentEnv.TMPDIR }
@@ -139,7 +159,7 @@ export function buildSubprocessEnv(
       : parentEnv
     // Preserve CLAUDE_CONFIG_DIR unless the overlay replaces it. Removing it
     // would make Claude fall back to the user's real default credential store.
-    return { ...base, ...claudeTempEnv, ...rawOverlay }
+    return { ...base, ...claudeTempEnv, ...rawOverlay, ...retryEnv }
   }
   // The renderer is not allowed to select a one-off proxy or shuttle proxy
   // credentials back into the sidecar. Only the Rust host can mark the
@@ -168,6 +188,7 @@ export function buildSubprocessEnv(
     ...claudeTempEnv,
     ...overlay,
     ...managedProxy,
+    ...retryEnv,
   }
 }
 

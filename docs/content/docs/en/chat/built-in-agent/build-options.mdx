@@ -24,7 +24,6 @@ description: resolveSendOptions — the single convergence point that collapses 
 | **`resolveSendOptions(ctx)`** | `:336-1380` | The pipeline. Async; returns the full `SendOptions`. |
 | `resolveMemberConfig(team, member, character)` | `:307-323` | Pure per-teammate override resolution (`systemPrompt`/`model`/`allowedTools`/`mcpServerIds`). Reused by UI preview. |
 | `listTeamMembers(ids)` | `:1387-1389` | Pre-resolve teammate character rows. |
-| `BRIEF_OUTPUT_SNIPPET` | `:52` | The brief-mode appendix (also reused by the ACP route). |
 
 The input is `BuildOptionsContext` (`:105-221`): `session`, `character`, `appSettings`, `activeProject` (cwd chain), `memberOverride`, `referencedPaths`, `agentMode`, `twinDeps`/`twinUserMessage`, `memoryDeps`/`memoryUserMessage`, `activeGoal`, `conversationKey`, `platformBinding`, `inboxPolicy`. The output `SendOptions` is declared in `lib/claude/types.ts:73`.
 
@@ -150,7 +149,7 @@ The exhaustive list. "Precedence" reads left-to-right, highest first.
 | # | Contributor | Injects | Line |
 | --- | --- | --- | --- |
 | 34 | Account / proxy env | `resolveAccountEnv` + `resolveProxyEnv` → `opts.env` | `:1159` |
-| 35 | Convenience modes | bare (`settingSources:[]`) / debug (env) / brief (`BRIEF_OUTPUT_SNIPPET`) | `:1179` |
+| 35 | Convenience modes | bare (`settingSources:[]`) / debug (env) / brief (`BRIEF_MODE_PROMPT` in `lib/agent/prompts/brief-mode.ts`, resolved through the Prompt Center, ADR-0236) | `:1179` |
 | 36 | Active `/goal` | `appendGoalContext` (ADR-0013/0019) | `:1211` |
 | 37 | Inbox suppression | manual > muted > quietHours → `opts.suppressedReason` | `:1224` |
 | 38 | Thinking budget | session > character > appDefault | `:1253` |

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 import {
   cargoPrepareScripts,
   devPrepareScripts,
+  devPreparePort,
   isDevLaunch,
   resolveBeforeDevCommand,
   withDefaultFeatures,
@@ -17,6 +18,23 @@ import {
 } from "./tauri.mjs"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
+
+test("clears the configured stale frontend port before Tauri's readiness probe", () => {
+  assert.equal(devPreparePort(["dev"], root), 3000)
+  assert.equal(devPreparePort(["build"], root), null)
+  assert.equal(devPreparePort(["dev", "--help"], root), null)
+  const override = (script) => [
+    "dev",
+    "--config",
+    JSON.stringify({ build: { beforeDevCommand: script } }),
+  ]
+  assert.equal(
+    devPreparePort(override("node scripts/dev/free-port.mjs 3200 && pnpm dev"), root),
+    3200
+  )
+  assert.equal(devPreparePort(override("pnpm other:dev"), root), null)
+  assert.equal(devPreparePort(override("node scripts/dev/free-port.mjs 99999"), root), null)
+})
 
 async function reservePort() {
   const server = net.createServer()

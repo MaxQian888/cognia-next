@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ExternalAgentProcessSandboxPolicy } from "@cognia/agent-contracts/external-agent"
@@ -16,16 +17,14 @@ function Editor({ initial }: { initial?: ExternalAgentProcessSandboxPolicy }) {
 }
 
 describe("ExternalAgentSandboxPolicyField", () => {
-  it("renders backward-compatible defaults and updates both controls", () => {
+  it("renders backward-compatible defaults and updates both controls", async () => {
     render(<Editor />)
     expect(screen.getByRole("combobox", { name: "Sandbox network" })).toHaveValue("full")
     const readable = screen.getByRole("combobox", { name: "Readable files" })
     expect(readable).toHaveValue("home")
-    fireEvent.change(readable, { target: { value: "workspace" } })
+    await selectOption(readable, "workspace")
     expect(readable).toHaveValue("workspace")
-    fireEvent.change(screen.getByRole("combobox", { name: "Sandbox network" }), {
-      target: { value: "off" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Sandbox network" }), "off")
     expect(screen.queryByRole("textbox", { name: "Allowed hosts" })).not.toBeInTheDocument()
   })
 

@@ -7,6 +7,63 @@ import { saveSettings } from "@/lib/db/settings"
 import { buildBackupSections, buildBackupStream } from "./build-stream"
 import { readBackupStream, type BackupStreamReadEvent } from "./stream-format"
 
+it("excludes late skill and plugin children when their parents were never emitted", async () => {
+  const db = getDb()
+  const childIds: string[] = []
+  for await (const section of buildBackupSections(
+    { includeSessions: false, includeApiKey: false },
+    { storage: null }
+  )) {
+    if (section.section === "skills") {
+      await db.skills.put({
+        id: "late-skill",
+        name: "Late",
+        description: "Late",
+        content: "x",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await db.skillResources.put({
+        id: "late-resource",
+        skillId: "late-skill",
+        path: "note.md",
+        content: "late",
+        kind: "reference",
+        name: "Note",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
+    if (section.section === "plugins") {
+      await db.plugins.put({
+        id: "late-plugin",
+        name: "Late",
+        version: "1",
+        status: "installed",
+        source: "local",
+        type: "frontend",
+        enabled: false,
+        path: "/fixture",
+        capabilities: [],
+        manifest: {},
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await db.pluginReviews.put({
+        id: "late-review",
+        pluginId: "late-plugin",
+        rating: 5,
+        createdAt: 1,
+      })
+    }
+    if (section.rows && ["skillResources", "pluginReviews"].includes(section.section)) {
+      childIds.push(...section.rows.map((row) => (row as { id: string }).id))
+    }
+  }
+  expect(childIds).not.toContain("late-resource")
+  expect(childIds).not.toContain("late-review")
+})
+
 async function collect(source: AsyncIterable<BackupStreamReadEvent>) {
   const events: BackupStreamReadEvent[] = []
   for await (const event of source) events.push(event)

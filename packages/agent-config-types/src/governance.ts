@@ -91,6 +91,8 @@ export type DecisionKindV1 =
   | "twin-observation"
   | "fact-resolution"
   | "execution-route"
+  /** An agent's harness replaced by an evolved version (ADR-0237). */
+  | "harness-adoption"
 
 export type DecisionStateV1 =
   | "observed"
@@ -394,6 +396,7 @@ export function validateDecisionCase(value: unknown): string[] {
       "twin-observation",
       "fact-resolution",
       "execution-route",
+      "harness-adoption",
     ] as const)
   )
     errors.push("kind must be a known DecisionKindV1")

@@ -4,6 +4,10 @@ let mockBoot: () => Promise<number>
 
 jest.mock("./role", () => ({ selectRole: () => "cli" }))
 jest.mock("./entry-runtime", () => ({
+  withCliProductionEnvironment: async (load: () => Promise<unknown>) => {
+    mockOrder.push("environment")
+    return load()
+  },
   installClosedPipeHandler: jest.fn(),
   runProcessEntrypoint: (boot: () => Promise<number>) => {
     mockBoot = boot
@@ -30,5 +34,5 @@ test("installs vector capabilities after the database preamble and before CLI co
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require("./entry")
   await expect(mockBoot()).resolves.toBe(0)
-  expect(mockOrder).toEqual(["marker", "indexeddb", "vector", "main"])
+  expect(mockOrder).toEqual(["environment", "marker", "indexeddb", "vector", "main"])
 })

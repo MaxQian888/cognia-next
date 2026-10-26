@@ -17,13 +17,16 @@ export {
   subscribeCommandRegistry,
   unregisterCommand,
   unregisterCommandsByPlugin,
-} from "@/lib/plugin/commands/registry"
+} from "@cognia/plugin-contract/lib/plugin/commands/registry"
 
 export type {
   CommandHandler,
   CommandRegistration,
   CommandRegistryEvent,
   CommandRegistryListener,
-} from "@/lib/plugin/commands/registry"
+} from "@cognia/plugin-contract/lib/plugin/commands/registry"
 
-export type { PluginCommand, PluginManifestCommandDef } from "@/types/plugin"
+export type {
+  PluginCommand,
+  PluginManifestCommandDef,
+} from "@cognia/plugin-contract/types/plugin/index"

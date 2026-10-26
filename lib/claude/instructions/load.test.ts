@@ -1,4 +1,9 @@
-import { loadProjectInstructions, clearInstructionCache } from "./load"
+import {
+  clearInstructionCache,
+  discoverProjectAgentFiles,
+  discoverProjectInstructionFiles,
+  loadProjectInstructions,
+} from "./load"
 import type { InstructionFs } from "./types"
 
 function fakeFs(files: Record<string, string>): InstructionFs {
@@ -264,5 +269,81 @@ describe("loadProjectInstructions", () => {
     })
     expect(r.files.map((f) => f.source)).toEqual(["global", "project"])
     expect(r.section).toContain("global rules")
+  })
+})
+
+describe("discoverProjectInstructionFiles", () => {
+  it("lists the files a turn would load, in load order, without reading them", async () => {
+    const fs = fakeFs({
+      "/home/.cognia/AGENTS.md": "global",
+      "/proj/CLAUDE.md": "root rules @shared.md",
+      "/proj/shared.md": "SHARED",
+      "/proj/sub/AGENT.md": "sub rules",
+    })
+    const readText = jest.spyOn(fs, "readText")
+    const found = await discoverProjectInstructionFiles({
+      isTauriEnv: true,
+      homeDir: "/home",
+      cwd: "/proj/sub",
+      roots: ["/proj"],
+      fs,
+    })
+    expect(found.map((file) => [file.source, file.absPath])).toEqual([
+      ["global", "/home/.cognia/AGENTS.md"],
+      ["project", "/proj/CLAUDE.md"],
+      ["project", "/proj/sub/AGENT.md"],
+    ])
+    expect(readText).not.toHaveBeenCalled()
+  })
+
+  it("is empty when loading is off or there is no filesystem", async () => {
+    const fs = fakeFs({ "/proj/CLAUDE.md": "x" })
+    expect(
+      await discoverProjectInstructionFiles({
+        isTauriEnv: true,
+        homeDir: null,
+        roots: ["/proj"],
+        config: { enabled: false },
+        fs,
+      })
+    ).toEqual([])
+    expect(await discoverProjectInstructionFiles({ roots: ["/proj"], isTauriEnv: false })).toEqual(
+      []
+    )
+  })
+})
+
+describe("discoverProjectAgentFiles", () => {
+  it("lists global then project agent files without reading them", async () => {
+    const fs = fakeFs({
+      "/home/.cognia/agents/global.md": "g",
+      "/proj/.cognia/agents/reviewer.md": "r",
+    })
+    const readText = jest.spyOn(fs, "readText")
+    const found = await discoverProjectAgentFiles({
+      isTauriEnv: true,
+      homeDir: "/home",
+      roots: ["/proj"],
+      fs,
+    })
+    expect(found.map((file) => file.absPath)).toEqual([
+      "/home/.cognia/agents/global.md",
+      "/proj/.cognia/agents/reviewer.md",
+    ])
+    expect(readText).not.toHaveBeenCalled()
+  })
+
+  it("is empty when project agents are off or there is no filesystem", async () => {
+    const fs = fakeFs({ "/proj/.cognia/agents/reviewer.md": "r" })
+    expect(
+      await discoverProjectAgentFiles({
+        isTauriEnv: true,
+        homeDir: null,
+        roots: ["/proj"],
+        config: { loadProjectAgents: false },
+        fs,
+      })
+    ).toEqual([])
+    expect(await discoverProjectAgentFiles({ roots: ["/proj"], isTauriEnv: false })).toEqual([])
   })
 })

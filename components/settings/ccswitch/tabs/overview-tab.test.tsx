@@ -21,6 +21,7 @@ jest.mock("@/lib/ccswitch/hooks", () => ({
 const detectMock = jest.fn()
 jest.mock("@/lib/ccswitch/switch", () => ({
   detectActive: (...args: unknown[]) => detectMock(...args),
+  ccswitchProviderRefId: (p: { kind?: string; id: string }) => `ccswitch:${p.kind}:${p.id}`,
 }))
 
 const getSettingsMock = jest.fn()
@@ -101,12 +102,20 @@ describe("CcswitchOverviewTab", () => {
       refresh: jest.fn(),
     })
     useProvidersMock.mockReturnValue({
-      data: [{ id: "p1", name: "Anthropic", apiKey: "sk-x", baseUrl: "https://api.anthropic.com" }],
+      data: [
+        {
+          id: "p1",
+          kind: "claude",
+          name: "Anthropic",
+          apiKey: "sk-x",
+          baseUrl: "https://api.anthropic.com",
+        },
+      ],
       loading: false,
       error: undefined,
       refresh: jest.fn(),
     })
-    detectMock.mockResolvedValue({ cognia: "p1", agents: {}, drift: false })
+    detectMock.mockResolvedValue({ cognia: "ccswitch:claude:p1", agents: {}, drift: false })
     render(<CcswitchOverviewTab />)
     expect(screen.getByText("overview.detectedTitle")).toBeInTheDocument()
     expect(screen.getByText("3")).toBeInTheDocument() // providers count
@@ -126,12 +135,12 @@ describe("CcswitchOverviewTab", () => {
       refresh: jest.fn(),
     })
     useProvidersMock.mockReturnValue({
-      data: [{ id: "p1", name: "Kimi" }],
+      data: [{ id: "p1", kind: "claude", name: "Kimi" }],
       loading: false,
       error: undefined,
       refresh: jest.fn(),
     })
-    detectMock.mockResolvedValue({ cognia: "p1", agents: {}, drift: true })
+    detectMock.mockResolvedValue({ cognia: "ccswitch:claude:p1", agents: {}, drift: true })
     render(<CcswitchOverviewTab />)
     await waitFor(() => expect(screen.getByText("overview.driftTitle")).toBeInTheDocument())
   })
@@ -153,4 +162,22 @@ describe("CcswitchOverviewTab", () => {
     expect(screen.getByText("overview.errorTitle")).toBeInTheDocument()
     expect(screen.getByText("boom")).toBeInTheDocument()
   })
+})
+
+it("shows a native schema mismatch instead of a green detected card", async () => {
+  useStatusMock.mockReturnValue({
+    data: {
+      exists: true,
+      error: "unsupported CC Switch schema 20",
+      counts: { providers: 0, mcpServers: 0, prompts: 0, skills: 0 },
+    },
+    loading: false,
+    refresh: jest.fn(),
+  })
+  useProvidersMock.mockReturnValue({ data: [], loading: false })
+  render(<CcswitchOverviewTab />)
+  await waitFor(() =>
+    expect(screen.getByText("unsupported CC Switch schema 20")).toBeInTheDocument()
+  )
+  expect(screen.queryByText("overview.detectedTitle")).not.toBeInTheDocument()
 })

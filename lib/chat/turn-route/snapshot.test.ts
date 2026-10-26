@@ -210,8 +210,7 @@ describe("snapshotRouteContext", () => {
     expect(snapshot.targets.map((t) => t.handle)).toEqual(["claude", "codex", "ann"])
     expect(snapshot.runtimes.map((r) => r.key)).toEqual(["builtin", "external:cx", "external:hand"])
     expect(snapshot.runtimes[1].presetId).toBe("codex-app-server")
-    expect(snapshot.configuredPresetIds).toEqual(["codex-app-server"])
-    expect(snapshot.externalEnabled).toBe(true)
+    expect(snapshot).not.toHaveProperty("externalEnabled")
     expect(snapshot.teams).toBe(teamState.teams)
   })
 

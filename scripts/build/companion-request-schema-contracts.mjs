@@ -153,6 +153,7 @@ const scheduledTaskTypes = [
   "provider-diagnostics-refresh",
   "conversation-auto-archive",
   "files-trash-purge",
+  "harness-evolution-sweep",
 ]
 
 const scheduledTaskType = z.enum(scheduledTaskTypes)
@@ -400,7 +401,32 @@ const remoteDesktopBindingDraft = z.object({
   confirm: z.boolean().optional(),
 })
 
+// Org is required by service scope and forbidden for tenant devices at runtime.
+// Explicit optional adminLease keeps generic generation from requiring a Host
+// owner lease: org writes also support the existing Host-consent retry flow.
+const orgScope = { orgId: z.string().min(1).optional() }
+const orgApproval = { adminLease: z.string().min(1).optional() }
+
 const schemas = {
+  org_model_credential_list: z.object({ ...orgScope }),
+  org_model_credential_set: z.object({
+    ...orgScope,
+    ...orgApproval,
+    provider: z.string().min(1).max(200),
+    apiKey: z.string().min(1).max(65536),
+  }),
+  org_model_credential_delete: z.object({
+    ...orgScope,
+    ...orgApproval,
+    provider: z.string().min(1).max(200),
+  }),
+  org_agent_policy_get: z.object({ ...orgScope }),
+  org_agent_policy_set: z.object({
+    ...orgScope,
+    ...orgApproval,
+    allowedAgents: z.array(z.string().min(1)),
+    defaultAgent: z.string().min(1).nullable(),
+  }),
   fs_read_workspace_file_versioned: z.object({
     root: z.string(),
     relPath: z.string(),
@@ -699,6 +725,8 @@ const schemas = {
     amount: z.number().optional(),
   }),
   browser_evaluate: browserSession.extend({ expression: z.string().min(1) }),
+  browser_recording_control: browserSession.extend({ action: z.enum(["start", "resume", "stop", "drain"]) }),
+  browser_recording_ref: browserSession.extend({ selector: z.string().min(1).max(4096) }),
   browser_read_console: browserSession,
   browser_read_network: browserSession,
   browser_back: browserSession,

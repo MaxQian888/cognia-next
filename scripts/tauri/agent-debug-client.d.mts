@@ -2,6 +2,7 @@
 
 export type TimeoutOption = { timeout?: number; signal?: AbortSignal }
 export type ActionOption = TimeoutOption & {
+  operationId?: string
   force?: boolean
   trial?: boolean
   scroll?: "auto" | "none"
@@ -13,6 +14,10 @@ export type LocatorState = "attached" | "detached" | "visible" | "hidden"
 export type TextMatcher = string | RegExp
 
 export interface TauriDebugCapabilities {
+  clientSessions?: number
+  sessionScopedRefs?: number
+  appWriterLease?: number
+  atomicInput?: number
   apiVersion?: number
   transport?: string
   locatorAutoWait?: boolean
@@ -38,7 +43,7 @@ export interface TauriDebugCapabilities {
   locatorActionControl?: number
   documentScopedRefs?: boolean
   networkCapture?: string
-  networkMocking?: string
+  networkMocking?: string | false
   dialogs?: boolean
   fileUpload?: boolean
   keyboard?: string
@@ -84,7 +89,12 @@ export class TauriDebugLocatorError extends Error {
   readonly code: string
   readonly retryable: boolean
   readonly dispatchState?: "not-dispatched" | "dispatched" | "unknown"
-  constructor(code: string, message: string, retryable?: boolean, dispatchState?: "not-dispatched" | "dispatched" | "unknown")
+  constructor(
+    code: string,
+    message: string,
+    retryable?: boolean,
+    dispatchState?: "not-dispatched" | "dispatched" | "unknown"
+  )
 }
 
 export class TauriDebugTimeoutError extends Error {
@@ -118,12 +128,15 @@ export class TauriDebugDocumentReplacedError extends Error {
   readonly documentEpoch?: number
   readonly retryable: false
   readonly dispatchState: "unknown"
-  constructor(message: string, options?: {
-    code?: "webview_document_replaced" | "webview_document_loading"
-    window?: string
-    documentEpoch?: number
-    cause?: unknown
-  })
+  constructor(
+    message: string,
+    options?: {
+      code?: "webview_document_replaced" | "webview_document_loading"
+      window?: string
+      documentEpoch?: number
+      cause?: unknown
+    }
+  )
 }
 
 export class TauriDebugSessionError extends Error {
@@ -246,10 +259,16 @@ export class TauriLocator {
 }
 
 export interface TauriKeyboard {
-  press(key: string, options?: { delay?: number }): Promise<void>
+  press(
+    key: string,
+    options?: TimeoutOption & { delay?: number; operationId?: string }
+  ): Promise<void>
   down(key: string): Promise<void>
   up(key: string): Promise<void>
-  type(text: string, options?: { delay?: number }): Promise<void>
+  type(
+    text: string,
+    options?: TimeoutOption & { delay?: number; operationId?: string }
+  ): Promise<void>
   insertText(text: string): Promise<void>
 }
 
@@ -270,10 +289,16 @@ export interface TauriDebugEndpoint {
   baseUrl: string
   devToken: string
   file?: string
-  debugSession?: { sessionId: string | null; workspace: string | null; appInstanceId: string; pid: number }
+  debugSession?: {
+    sessionId: string | null
+    workspace: string | null
+    appInstanceId: string
+    pid: number
+  }
 }
 
 export interface TauriPageOptions {
+  clientSession?: TauriClientSession
   endpoint?: TauriDebugEndpoint
   /** Rediscover only the pinned managed session; never replay the interrupted command. */
   endpointLoader?: () => TauriDebugEndpoint
@@ -288,6 +313,19 @@ export class TauriPage {
   readonly targetWindow: string
   defaultTimeout: number
   constructor(options?: TauriPageOptions)
+  withWriter<T>(callback: (page: TauriPage) => Promise<T>, options?: TimeoutOption): Promise<T>
+  act(
+    reference: string,
+    action: string,
+    args?: Record<string, unknown>,
+    options?: TimeoutOption & { operationId?: string }
+  ): Promise<unknown>
+  inspect(
+    reference: string,
+    operation: string,
+    args?: Record<string, unknown>,
+    options?: TimeoutOption
+  ): Promise<unknown>
   setDefaultTimeout(timeout: number): void
   capabilities(): Promise<TauriDebugCapabilities>
   rendererState(options?: TimeoutOption): Promise<RendererState>
@@ -318,7 +356,10 @@ export class TauriPage {
   reload(options?: TimeoutOption & { waitUntil?: string }): Promise<void>
   goBack(options?: TimeoutOption & { waitUntil?: string }): Promise<void>
   goForward(options?: TimeoutOption & { waitUntil?: string }): Promise<void>
-  waitForURL(pattern: TextMatcher, options?: TimeoutOption & { waitUntil?: "domcontentloaded" | "load" | "networkidle" }): Promise<void>
+  waitForURL(
+    pattern: TextMatcher,
+    options?: TimeoutOption & { waitUntil?: "domcontentloaded" | "load" | "networkidle" }
+  ): Promise<void>
   waitForLoadState(
     state?: "domcontentloaded" | "load" | "networkidle",
     options?: TimeoutOption
@@ -453,3 +494,52 @@ export interface TauriAssertions {
 export function tauriExpect(subject: TauriLocator | TauriPage): TauriAssertions
 export { tauriExpect as expect }
 export function connectTauriPage(options?: TauriPageOptions): TauriPage
+
+export interface AppWriterLease {
+  token: string
+  fence: number
+  expiresAt?: number
+}
+export class TauriClientSession {
+  constructor(options: {
+    endpoint: TauriDebugEndpoint
+    clientSessionId: string
+    windows: string[]
+    canWrite: boolean
+    lease?: AppWriterLease | null
+    fetchImpl?: typeof fetch
+    defaultTimeout?: number
+  })
+  readonly endpoint: TauriDebugEndpoint
+  readonly clientSessionId: string
+  readonly windows: string[]
+  readonly canWrite: boolean
+  readonly closed: boolean
+  readonly lease: AppWriterLease | null
+  page(window?: string): TauriPage
+  toJSON(): {
+    endpoint: TauriDebugEndpoint
+    clientSessionId: string
+    windows: string[]
+    canWrite: boolean
+    lease: AppWriterLease | null
+  }
+  verifyIdentity(options?: TimeoutOption): Promise<unknown>
+  renewWriter(options?: TimeoutOption): Promise<AppWriterLease>
+  acquireWriter(options?: TimeoutOption): Promise<AppWriterLease>
+  releaseWriter(options?: TimeoutOption): Promise<void>
+  withWriter<T>(
+    callback: (session: TauriClientSession) => Promise<T>,
+    options?: TimeoutOption
+  ): Promise<T>
+  status(): Promise<unknown>
+  detach(): Promise<void>
+}
+export function connectTauriSession(options?: {
+  endpoint?: TauriDebugEndpoint
+  windows?: string[]
+  canWrite?: boolean
+  idleTimeoutMs?: number
+  fetchImpl?: typeof fetch
+  defaultTimeout?: number
+}): Promise<TauriClientSession>

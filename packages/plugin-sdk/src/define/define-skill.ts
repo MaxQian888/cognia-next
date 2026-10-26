@@ -18,7 +18,7 @@
  * Part of the plugin-first Computer Use plan (M1·T6).
  */
 
-import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+import type { PluginSkillDef } from "@cognia/plugin-contract/types/plugin/plugin-skill"
 
 export function defineSkill(def: PluginSkillDef): PluginSkillDef {
   return def

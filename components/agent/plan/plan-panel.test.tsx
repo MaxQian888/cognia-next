@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { PlanPanel } from "./plan-panel"
 import { DEFAULT_PLAN_CONFIG, type AgentPlan } from "@/types/agent/plan"
@@ -87,8 +88,8 @@ describe("PlanPanel", () => {
     render(<PlanPanel sessionId="ses" />)
     const select = screen.getByTestId("plan-panel-history") as HTMLSelectElement
     expect(select.value).toBe("p-new")
-    expect(select.options[0].textContent).toContain("document.currentPlan")
-    expect(select.options[1].textContent).not.toContain("document.currentPlan")
+    expect(getNativeSelect(select).options[0].textContent).toContain("document.currentPlan")
+    expect(getNativeSelect(select).options[1].textContent).not.toContain("document.currentPlan")
   })
 
   it("lets an awaiting-approval plan autosave through the shared edit path", async () => {
@@ -120,10 +121,10 @@ describe("PlanPanel", () => {
     expect(screen.getByTestId("plan-doc-events")).toHaveTextContent("document.eventKind.approved")
   })
 
-  it("switches the view when a historical plan is selected", () => {
+  it("switches the view when a historical plan is selected", async () => {
     mockQueries([makePlan("p-new", "awaiting_approval", "New"), makePlan("p-old", "failed", "Old")])
     render(<PlanPanel sessionId="ses" />)
-    fireEvent.change(screen.getByTestId("plan-panel-history"), { target: { value: "p-old" } })
+    await selectOption(screen.getByTestId("plan-panel-history"), "p-old")
     expect(screen.queryByTestId("plan-doc-step-0")).not.toBeInTheDocument()
     expect(screen.getByText("status.failed")).toBeInTheDocument()
   })

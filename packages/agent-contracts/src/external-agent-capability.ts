@@ -39,6 +39,7 @@ export type BuiltinExecutableExternalAgentProtocol =
   | "pi-rpc"
   | "aider-cli"
   | "opencode-v2"
+  | "opencode"
   | "a2a"
 
 export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecutableExternalAgentProtocol[] =
@@ -50,6 +51,7 @@ export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecut
     "pi-rpc",
     "aider-cli",
     "opencode-v2",
+    "opencode",
     "a2a",
   ]
 
@@ -60,16 +62,14 @@ export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecut
  * manager since the module was written, so an `http` / `websocket` / `custom`
  * config has never been runnable — selecting one produces "no adapter for
  * protocol" at connect time. They stay READABLE so an old config still renders
- * (and can be migrated), and are excluded from every selector. OpenCode V1
- * was retired when the current V2 service became the sole native integration.
+ * (and can be migrated), and are excluded from every selector.
  */
-export type LegacyExternalAgentProtocol = "http" | "websocket" | "custom" | "opencode"
+export type LegacyExternalAgentProtocol = "http" | "websocket" | "custom"
 
 export const LEGACY_EXTERNAL_AGENT_PROTOCOLS: readonly LegacyExternalAgentProtocol[] = [
   "http",
   "websocket",
   "custom",
-  "opencode",
 ]
 
 /**
@@ -102,7 +102,7 @@ export function parsePluginExternalAgentProtocol(
 ): ParsedPluginExternalAgentProtocol | null {
   const parts = value.split(":")
   if (parts.length !== 2) return null
-  const [pluginId, adapterId] = parts
+  const [pluginId, adapterId] = parts as [string, string]
   if (!PROTOCOL_SEGMENT.test(pluginId) || !PROTOCOL_SEGMENT.test(adapterId)) return null
   return { pluginId, adapterId }
 }

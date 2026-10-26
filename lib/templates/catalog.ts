@@ -1,19 +1,6 @@
-import type {
-  TemplateDefinitionEnvelope,
-  TemplateDomain,
-  TemplatePlatform,
-  TemplateStatus,
-  TemplateTrust,
-} from "./contracts"
-
-export interface TemplateCatalogQuery {
-  domain?: TemplateDomain
-  status?: TemplateStatus
-  source?: TemplateDefinitionEnvelope["provenance"]["source"]
-  trust?: TemplateTrust
-  platform?: TemplatePlatform
-  text?: string
-}
+import type { TemplateDefinitionEnvelope } from "./contracts"
+import type { TemplateCatalogQuery } from "@cognia/plugin-contract/lib/templates/catalog"
+export type { TemplateCatalogQuery } from "@cognia/plugin-contract/lib/templates/catalog"
 
 export interface TemplateCatalogSnapshot {
   revision: number

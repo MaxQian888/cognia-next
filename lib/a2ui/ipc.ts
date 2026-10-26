@@ -6,6 +6,7 @@
 // the embedded `message` straight into the store.
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { parseA2UIDispatchMessage } from "./parser"
 import { isTauri } from "@/lib/tauri"
 import { useA2UIStore } from "@/stores/a2ui"
 import type { A2UIDispatchMessage } from "@/types/a2ui/schema"
@@ -51,8 +52,13 @@ export async function subscribeA2UIDispatch(
       loggers.app.warn("a2ui dispatch payload shape unexpected", { payload })
       return
     }
+    const message = parseA2UIDispatchMessage(payload.message)
+    if (!message) {
+      loggers.app.warn("Invalid A2UI dispatch message")
+      return
+    }
     try {
-      useA2UIStore.getState().processMessage(payload.message)
+      useA2UIStore.getState().processMessage(message)
     } catch (err) {
       loggers.app.error("a2ui dispatch processing failed", { error: String(err) })
     }

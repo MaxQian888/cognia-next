@@ -29,13 +29,14 @@
  *    `agent:external:manage` (every write; dangerous, consent-tier).
  */
 
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import type { AgentModelRoleOverrides } from "@cognia/agent-contracts/model-binding"
 import type {
   AcpPermissionMode,
   CodexAgentOptions,
   CreateExternalAgentInput,
   ExternalAgentCogniaModelBinding,
   ExternalAgentConfig,
-  ExternalAgentConnectionStatus,
   ExternalAgentDelegationRule,
   ExternalAgentProtocol,
   ExternalAgentRetryConfig,
@@ -43,22 +44,12 @@ import type {
   ExternalAgentTransport,
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
-import type {
-  ExternalAgentCredentialSlot,
-  ExternalAgentLifecycleErrorCode,
-  ExternalAgentLifecycleStatus,
-} from "@/types/agent/external-agent-lifecycle"
+import type { ExternalAgentCredentialSlot } from "@/types/agent/external-agent-lifecycle"
 import type {
   ExternalAgentCapabilityId,
   ExternalAgentCapabilityLevel,
 } from "@cognia/agent-config-types/external-agent-capability"
 import type { AddAgentFormData } from "@/types/agent/component-types"
-import type {
-  AgentReadinessAction,
-  AgentReadinessState,
-  AgentReadinessStep,
-} from "@/lib/ai/agent/external/agent-readiness"
-import type { RuntimeResolution } from "@/lib/ai/agent/external/config/installed-runtimes"
 import type { ExternalAgentStore } from "@/stores/agent/external-agent-store"
 import {
   extractInlineCredentials,
@@ -72,8 +63,34 @@ import { recordSilentFailure } from "@/lib/plugin/contracts/diagnostics-store"
 import {
   EXTERNAL_AGENT_SETTING_KEYS,
   subscribeExternalAgentChanges,
-  type ExternalAgentChangeEvent,
 } from "./external-agents-changes"
+import type {
+  PluginExternalAgentDelegationRuleInput,
+  PluginExternalAgentInputErrorCode,
+  PluginExternalAgentSettings,
+  PluginExternalAgentSummary,
+  PluginExternalAgentsAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-api"
+export type {
+  PluginExternalAgentCreateInput,
+  PluginExternalAgentDelegationRule,
+  PluginExternalAgentDelegationRuleInput,
+  PluginExternalAgentDuplicateOptions,
+  PluginExternalAgentInputErrorCode,
+  PluginExternalAgentMetadataInput,
+  PluginExternalAgentPreset,
+  PluginExternalAgentPresetOverrides,
+  PluginExternalAgentProcessInput,
+  PluginExternalAgentReadiness,
+  PluginExternalAgentReadinessSummary,
+  PluginExternalAgentRuntime,
+  PluginExternalAgentRuntimeReport,
+  PluginExternalAgentSettings,
+  PluginExternalAgentSettingsPatch,
+  PluginExternalAgentSummary,
+  PluginExternalAgentUpdatePatch,
+  PluginExternalAgentsAPI,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-api"
 
 export type {
   ExternalAgentChangeEvent as PluginExternalAgentChangeEvent,
@@ -86,250 +103,6 @@ export type {
 
 /** What a credential-looking value reads back as in a projection. */
 export const EXTERNAL_AGENT_REDACTED = "[redacted]"
-
-/** The projected readiness of one configuration (the Settings row model). */
-export interface PluginExternalAgentReadinessSummary {
-  state: AgentReadinessState
-  nextAction: AgentReadinessAction | null
-  blockReason: string | null
-}
-
-/** A configuration as a plugin sees it. Never carries a secret. */
-export interface PluginExternalAgentSummary {
-  id: string
-  name: string
-  description: string | null
-  protocol: ExternalAgentProtocol
-  transport: ExternalAgentTransport
-  enabled: boolean
-  /** The preset it was created from (`metadata.preset`), if any. */
-  presetId: string | null
-  /** Absent on the stored config means `shared`. */
-  stateIsolation: ExternalAgentStateIsolation
-  duplicatedFromAgentId: string | null
-  createdByPluginId: string | null
-  defaultPermissionMode: AcpPermissionMode | null
-  /** Command, arguments (credential-looking values redacted) and working directory. Never env. */
-  process: { command: string; args: string[]; cwd: string | null } | null
-  /** The endpoint, with any URL credential redacted. Never headers or proxy settings. */
-  network: { endpoint: string } | null
-  cogniaModel: ExternalAgentCogniaModelBinding | null
-  /** The bound subscription account id; `null` follows the active account. */
-  subscriptionAccountId: string | null
-  maxConcurrentSessions: number | null
-  sessionIdleTimeout: number | null
-  timeout: number | null
-  tags: string[]
-  connectionStatus: ExternalAgentConnectionStatus
-  readiness: PluginExternalAgentReadinessSummary
-  lifecycleStatus: ExternalAgentLifecycleStatus | null
-  lifecycleReasonCode: ExternalAgentLifecycleErrorCode | null
-  /** Credential slots the user has filled. Names only, never values. */
-  credentialSlots: ExternalAgentCredentialSlot[]
-  createdAt: string | null
-  updatedAt: string | null
-}
-
-/** Full readiness: the row model plus the lifecycle service's live verdict. */
-export interface PluginExternalAgentReadiness extends PluginExternalAgentReadinessSummary {
-  agentId: string
-  blockTransient: boolean
-  steps: AgentReadinessStep[]
-  /** `assessReadiness` run now: platform, adapter, consent, credentials. */
-  verdict: {
-    status: ExternalAgentLifecycleStatus
-    reasonCode: ExternalAgentLifecycleErrorCode | null
-    reason: string | null
-  }
-}
-
-export interface PluginExternalAgentPreset {
-  id: string
-  name: string
-  description: string
-  protocol: ExternalAgentProtocol
-  transport: ExternalAgentTransport
-  /** False for documented-only presets: discoverable, never creatable. */
-  runnable: boolean
-  supportTier: string | null
-  defaultPermissionMode: AcpPermissionMode
-  tags: string[]
-  docsUrl: string | null
-  envVarHint: string | null
-  setupHint: string | null
-  /** The plugin that contributed it; `null` for a built-in preset. */
-  contributedByPluginId: string | null
-}
-
-export interface PluginExternalAgentRuntime {
-  runtimeId: string
-  command: string | null
-  resolution: RuntimeResolution
-  executablePath: string | null
-  version: string | null
-}
-
-export interface PluginExternalAgentRuntimeReport {
-  /**
-   * False when no host that could start an agent is reachable from here (a
-   * browser with no paired Host). `runtimes` is then empty, which is not the
-   * same claim as "every runtime is missing".
-   */
-  available: boolean
-  runtimes: PluginExternalAgentRuntime[]
-}
-
-export interface PluginExternalAgentSettings {
-  /** The master switch. Off, no external agent runs. */
-  enabled: boolean
-  defaultPermissionMode: ExternalAgentStore["defaultPermissionMode"]
-  autoConnectOnStartup: boolean
-  showConnectionNotifications: boolean
-  chatFailurePolicy: ExternalAgentStore["chatFailurePolicy"]
-}
-
-export type PluginExternalAgentDelegationRule = ExternalAgentDelegationRule
-export type PluginExternalAgentDelegationRuleInput = Omit<ExternalAgentDelegationRule, "id">
-
-/** Process fields a plugin may set. Env names that look secret are refused. */
-export interface PluginExternalAgentProcessInput {
-  command?: string
-  args?: string[]
-  cwd?: string
-  env?: Record<string, string>
-  bare?: boolean
-  debug?: boolean
-}
-
-/** OpenCode connection metadata a plugin may set. `serverPassword` is refused. */
-export interface PluginExternalAgentMetadataInput {
-  autoSpawnServer?: boolean
-  port?: number
-  hostname?: string
-  serverUsername?: string
-  model?: string
-}
-
-interface PluginExternalAgentSharedInput {
-  name?: string
-  description?: string
-  /** Default `true`. A created config registers (and connects) when enabled. */
-  enabled?: boolean
-  /** Default `isolated` (ADR-0216). */
-  stateIsolation?: ExternalAgentStateIsolation
-  subscriptionAccountId?: string | null
-  /** Adapted to what the protocol can enforce, never upward. */
-  defaultPermissionMode?: AcpPermissionMode
-  process?: PluginExternalAgentProcessInput
-  network?: { endpoint: string }
-  cogniaModel?: ExternalAgentCogniaModelBinding | null
-  timeout?: number
-  retryConfig?: Partial<ExternalAgentRetryConfig>
-  maxConcurrentSessions?: number
-  sessionIdleTimeout?: number
-  tags?: string[]
-  codexOptions?: CodexAgentOptions
-  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
-  metadata?: PluginExternalAgentMetadataInput
-}
-
-export interface PluginExternalAgentCreateInput extends PluginExternalAgentSharedInput {
-  name: string
-  protocol: ExternalAgentProtocol
-  /** Defaults to what the protocol needs (`sse` for OpenCode, `http` for A2A, else `stdio`). */
-  transport?: ExternalAgentTransport
-}
-
-export type PluginExternalAgentPresetOverrides = PluginExternalAgentSharedInput
-
-/** The secret-free edit surface. Env, headers and every credential stay in Settings. */
-export interface PluginExternalAgentUpdatePatch {
-  name?: string
-  description?: string
-  enabled?: boolean
-  defaultPermissionMode?: AcpPermissionMode
-  process?: { command?: string; args?: string[]; cwd?: string }
-  network?: { endpoint: string }
-  timeout?: number
-  retryConfig?: Partial<ExternalAgentRetryConfig>
-  codexOptions?: CodexAgentOptions
-  cogniaModel?: ExternalAgentCogniaModelBinding | null
-  stateIsolation?: ExternalAgentStateIsolation
-  subscriptionAccountId?: string | null
-  maxConcurrentSessions?: number
-  sessionIdleTimeout?: number
-  tags?: string[]
-  declaredCapabilities?: Partial<Record<ExternalAgentCapabilityId, ExternalAgentCapabilityLevel>>
-}
-
-export interface PluginExternalAgentDuplicateOptions {
-  /** Defaults to the first free localized "<name> (copy)" / "(copy 2)" … */
-  name?: string
-  /** Defaults to `isolated`. */
-  stateIsolation?: ExternalAgentStateIsolation
-  /** Defaults to the source's state. A duplicate is never auto-connected. */
-  enabled?: boolean
-}
-
-export type PluginExternalAgentSettingsPatch = Partial<PluginExternalAgentSettings>
-
-/** External-agent configuration API exposed to plugins as `ctx.externalAgents`. */
-export interface PluginExternalAgentsAPI {
-  // ------------------------------------------------- reads (agent:external:read)
-  /** Every configuration, projected. */
-  list(): Promise<PluginExternalAgentSummary[]>
-  /** One configuration, or `null` when the id names none. */
-  get(id: string): Promise<PluginExternalAgentSummary | null>
-  /** Row readiness plus the lifecycle service's verdict, computed now. */
-  getReadiness(id: string): Promise<PluginExternalAgentReadiness>
-  /** Built-in and plugin-contributed presets. */
-  listPresets(): Promise<PluginExternalAgentPreset[]>
-  /** What the machine that will run agents has installed. */
-  listRuntimes(options?: { refresh?: boolean }): Promise<PluginExternalAgentRuntimeReport>
-  getSettings(): Promise<PluginExternalAgentSettings>
-  listDelegationRules(): Promise<PluginExternalAgentDelegationRule[]>
-  /**
-   * Observe configuration, connection, settings and delegation changes.
-   * Returns a disposer; the plugin scope also releases it on disable.
-   * TypeScript only — Python plugins declare the `onExternalAgentConfigChange` hook.
-   */
-  onChange(listener: (event: ExternalAgentChangeEvent) => void): () => void
-
-  // --------------------------------------------- writes (agent:external:manage)
-  create(input: PluginExternalAgentCreateInput): Promise<PluginExternalAgentSummary>
-  createFromPreset(
-    presetId: string,
-    overrides?: PluginExternalAgentPresetOverrides
-  ): Promise<PluginExternalAgentSummary>
-  update(id: string, patch: PluginExternalAgentUpdatePatch): Promise<PluginExternalAgentSummary>
-  duplicate(
-    id: string,
-    options?: PluginExternalAgentDuplicateOptions
-  ): Promise<PluginExternalAgentSummary>
-  remove(id: string): Promise<void>
-  setEnabled(id: string, enabled: boolean): Promise<PluginExternalAgentSummary>
-  connect(id: string): Promise<PluginExternalAgentSummary>
-  disconnect(id: string): Promise<PluginExternalAgentSummary>
-  addDelegationRule(
-    rule: PluginExternalAgentDelegationRuleInput
-  ): Promise<PluginExternalAgentDelegationRule>
-  updateDelegationRule(
-    id: string,
-    patch: Partial<PluginExternalAgentDelegationRuleInput>
-  ): Promise<PluginExternalAgentDelegationRule>
-  removeDelegationRule(id: string): Promise<void>
-  /** `ruleIds` must name every rule exactly once; the first gets the highest priority. */
-  reorderDelegationRules(ruleIds: string[]): Promise<PluginExternalAgentDelegationRule[]>
-  updateSettings(patch: PluginExternalAgentSettingsPatch): Promise<PluginExternalAgentSettings>
-}
-
-export type PluginExternalAgentInputErrorCode =
-  | "inline_credentials"
-  | "invalid_input"
-  | "unknown_agent"
-  | "unknown_preset"
-  | "unknown_rule"
-  | "external_agents_disabled"
 
 /** A refused plugin request. `code` is stable; `message` is for the plugin author. */
 export class PluginExternalAgentInputError extends Error {
@@ -398,6 +171,7 @@ const SHARED_INPUT_KEYS = [
   "process",
   "network",
   "cogniaModel",
+  "modelRoles",
   "timeout",
   "retryConfig",
   "maxConcurrentSessions",
@@ -419,6 +193,7 @@ const UPDATE_KEYS = [
   "retryConfig",
   "codexOptions",
   "cogniaModel",
+  "modelRoles",
   "stateIsolation",
   "subscriptionAccountId",
   "maxConcurrentSessions",
@@ -605,6 +380,8 @@ export function projectExternalAgentConfig(
       ? { endpoint: redactEndpoint(scrubbed.network.endpoint) }
       : null,
     cogniaModel: scrubbed.cogniaModel ? { ...scrubbed.cogniaModel } : null,
+    modelRoles:
+      scrubbed.cogniaModel && scrubbed.modelRoles ? structuredClone(scrubbed.modelRoles) : null,
     subscriptionAccountId: text(scrubbed.subscriptionAccountId),
     maxConcurrentSessions: scrubbed.maxConcurrentSessions ?? null,
     sessionIdleTimeout: scrubbed.sessionIdleTimeout ?? null,
@@ -855,6 +632,17 @@ async function validateDeclaredCapabilities(
   return out
 }
 
+function validateModelRoles(
+  method: string,
+  value: unknown
+): AgentModelRoleOverrides | null | undefined {
+  try {
+    return normalizeAgentModelRoleOverrides(value)
+  } catch (error) {
+    return invalid(method, error instanceof Error ? error.message : "Invalid model role overrides")
+  }
+}
+
 async function validateCogniaModel(
   method: string,
   value: unknown
@@ -1003,6 +791,8 @@ async function applyFormFields(
   }
   if (input.cogniaModel !== undefined)
     next.cogniaModel = await validateCogniaModel(method, input.cogniaModel)
+  if (input.modelRoles !== undefined)
+    next.modelRoles = validateModelRoles(method, input.modelRoles) ?? undefined
   if (input.timeout !== undefined)
     next.timeoutMs = String(
       requireInteger(method, "timeout", input.timeout, { min: 1_000, max: 86_400_000 })
@@ -1035,16 +825,22 @@ async function buildCreateInput(
   presetId: string,
   extras: SharedExtras
 ): Promise<CreateExternalAgentInput> {
-  const [{ validateAddAgentForm, buildCreateExternalAgentInput }, { adaptPermissionMode }] =
-    await Promise.all([
-      import("@/lib/ai/agent/external/config/add-agent-form"),
-      import("@/lib/ai/agent/external/policy/permission-modes"),
-    ])
+  const [
+    { validateAddAgentForm, buildCreateExternalAgentInput },
+    { adaptPermissionMode },
+    { useSettingsStore },
+  ] = await Promise.all([
+    import("@/lib/ai/agent/external/config/add-agent-form"),
+    import("@/lib/ai/agent/external/policy/permission-modes"),
+    import("@/stores/settings"),
+  ])
   const env = data.processEnv ?? {}
-  const problem = validateAddAgentForm(data, presetId, {
-    names: Object.keys(env),
-    values: env,
-  })
+  const problem = validateAddAgentForm(
+    data,
+    presetId,
+    { names: Object.keys(env), values: env },
+    useSettingsStore.getState().settings
+  )
   if (problem) invalid(method, `the configuration is not valid (${problem})`)
 
   const defaultPermissionMode = extras.defaultPermissionMode
@@ -1128,6 +924,7 @@ async function validateUpdatePatch(
   }
   if (raw.cogniaModel !== undefined)
     patch.cogniaModel = await validateCogniaModel(method, raw.cogniaModel)
+  if (raw.modelRoles !== undefined) patch.modelRoles = validateModelRoles(method, raw.modelRoles)
   if (raw.timeout !== undefined)
     patch.timeout = requireInteger(method, "timeout", raw.timeout, { min: 1_000, max: 86_400_000 })
 
@@ -1158,6 +955,27 @@ async function validateUpdatePatch(
   const command = patch.process?.command ?? config.process?.command
   if (patch.process && config.transport === "stdio" && !command?.trim()) {
     invalid(method, "a stdio agent needs process.command")
+  }
+  const primary = patch.cogniaModel === undefined ? config.cogniaModel : patch.cogniaModel
+  const modelRoles = patch.modelRoles === undefined ? config.modelRoles : patch.modelRoles
+  if (primary && modelRoles) {
+    const [{ compileEditorModelPlan }, { useSettingsStore }] = await Promise.all([
+      import("@/lib/ai/agent/external/config/cognia-model-options"),
+      import("@/stores/settings"),
+    ])
+    const settings = useSettingsStore.getState().settings
+    const result = compileEditorModelPlan({
+      config: {
+        ...config,
+        ...patch,
+        process: { ...config.process, ...patch.process },
+      } as ExternalAgentConfig,
+      primary,
+      layers: [{ source: "config", overrides: modelRoles }],
+      providerSettings: settings?.providerSettings,
+      customProviders: settings?.customProviders,
+    })
+    if (!result.ok) invalid(method, `Invalid model role overrides: ${result.reason}`)
   }
   return patch
 }
@@ -1357,7 +1175,6 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
     getSettings: async () => {
       const state = await store()
       return {
-        enabled: state.enabled,
         defaultPermissionMode: state.defaultPermissionMode,
         autoConnectOnStartup: state.autoConnectOnStartup,
         showConnectionNotifications: state.showConnectionNotifications,
@@ -1517,13 +1334,7 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
     },
 
     connect: async (id) => {
-      const { config, state } = await requireAgent("connect", id)
-      if (!state.enabled) {
-        throw new PluginExternalAgentInputError(
-          "external_agents_disabled",
-          "ctx.externalAgents.connect: external agents are turned off in Settings"
-        )
-      }
+      const { config } = await requireAgent("connect", id)
       await (await lifecycle()).connect(config.id)
       return readBack("connect", config.id)
     },
@@ -1611,10 +1422,6 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
       const state = await store()
       // Validate everything before writing anything: a half-applied settings
       // patch is worse than a refused one.
-      const enabled =
-        patch.enabled === undefined
-          ? undefined
-          : requireBoolean("updateSettings", "enabled", patch.enabled)
       const mode =
         patch.defaultPermissionMode === undefined
           ? undefined
@@ -1645,7 +1452,6 @@ export function createExternalAgentsAPI(pluginId: string): PluginExternalAgentsA
               patch.chatFailurePolicy,
               CHAT_FAILURE_POLICIES
             )
-      if (enabled !== undefined) state.setEnabled(enabled)
       if (mode !== undefined) state.setDefaultPermissionMode(mode)
       if (autoConnect !== undefined) state.setAutoConnectOnStartup(autoConnect)
       if (notifications !== undefined) state.setShowConnectionNotifications(notifications)

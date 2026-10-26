@@ -81,6 +81,10 @@ const ChatTemplatesSection = dynamic(
   () => import("./chat-templates-section").then((m) => m.ChatTemplatesSection),
   { ssr: false }
 )
+const PromptsSection = dynamic(
+  () => import("./prompts/prompts-section").then((m) => m.PromptsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const PromptPresetsSection = dynamic(
   () => import("./prompt-presets-section").then((m) => m.PromptPresetsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -254,6 +258,11 @@ const EvalSettingsSection = dynamic(
   () => import("./eval/eval-settings-section").then((m) => m.EvalSettingsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const HarnessEvolutionSection = dynamic(
+  () =>
+    import("./harness-evolution/harness-evolution-section").then((m) => m.HarnessEvolutionSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const PetSection = dynamic(() => import("./pet/pet-section").then((m) => m.PetSection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -369,6 +378,8 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   // Chat templates is a list+detail pane too (template rail + preview/editor
   // detail) — same reason as above.
   "chatTemplates",
+  // The Prompt Center is the same rail + detail shape.
+  "prompts",
 ])
 
 /**
@@ -635,6 +646,8 @@ function SectionContent({
       return <SquadsSection />
     case "eval":
       return <EvalSettingsSection />
+    case "harness-evolution":
+      return <HarnessEvolutionSection />
     case "hooks":
       return <HooksSection />
     case "fleet":
@@ -675,6 +688,8 @@ function SectionContent({
       return <PromptPresetsSection />
     case "chatTemplates":
       return <ChatTemplatesSection />
+    case "prompts":
+      return <PromptsSection />
     case "artifacts":
       return <ArtifactsSection />
     case "canvas":

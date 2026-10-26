@@ -1,20 +1,10 @@
-import type {
-  EncryptedContentEnvelopeV1,
-  IndexGeneration,
-  PersistedRetrievalTrace,
-  RetrievalJob,
-  RetrievalProfileV1,
-} from "@cognia/rag"
-
-export interface RetrievalProfileRow {
-  id: string
-  schemaVersion: 1
-  fingerprint: string
-  profile: RetrievalProfileV1
-  active: boolean
-  createdAt: number
-  updatedAt: number
-}
+import type { IndexGeneration, PersistedRetrievalTrace, RetrievalJob } from "@cognia/rag"
+export type {
+  RetrievalEncryptedContentKind,
+  RetrievalEncryptedContentRow,
+  RetrievalProfileRow,
+  RetrievalTombstoneRow,
+} from "@cognia/plugin-contract/lib/db/retrieval-control-types"
 
 export type RetrievalGenerationRow = IndexGeneration
 export type RetrievalJobRow = RetrievalJob
@@ -30,32 +20,6 @@ export interface RetrievalActivePointerRow {
 export interface RetrievalTraceRow extends PersistedRetrievalTrace {
   corpusId: string
   domain: IndexGeneration["domain"]
-}
-
-export type RetrievalEncryptedContentKind =
-  "canonical" | "safe_projection" | "evidence_excerpt" | "lexical_segment"
-
-export interface RetrievalEncryptedContentRow {
-  id: string
-  entityType: string
-  entityId: string
-  corpusId: string
-  generationId?: string
-  kind: RetrievalEncryptedContentKind
-  envelope: EncryptedContentEnvelopeV1
-  createdAt: number
-  updatedAt: number
-}
-
-export interface RetrievalTombstoneRow {
-  id: string
-  entityType: string
-  entityId: string
-  corpusId: string
-  createdAt: number
-  acknowledgedDeviceIds: string[]
-  pendingDeviceIds: string[]
-  eligiblePurgeAt?: number
 }
 
 export type RetrievalMigrationPhase =

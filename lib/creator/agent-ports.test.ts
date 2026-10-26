@@ -1,5 +1,9 @@
 import {
+  CREATOR_PLAN_PROMPT,
+  CREATOR_REVIEW_PROMPT,
+  CREATOR_SURVEY_PROMPT,
   CreatorResponseError,
+  buildReviewPrompt,
   createAgentPlanHandler,
   createAgentPorts,
   createAgentReviewHandler,
@@ -12,6 +16,12 @@ import {
 import type { CreatorTurnRequest } from "./agent-ports"
 import type { CreatorRunContext } from "./executor"
 import type { AuthoringRoot } from "@/types/creator"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { validatePromptBody } from "@/lib/prompts/template"
 
 const root: AuthoringRoot = {
   path: "/work/authoring",
@@ -270,5 +280,55 @@ describe("the agent handlers", () => {
   it("bundles all three ports", () => {
     const ports = createAgentPorts({ runTurn: async () => "", reviewerAuthority: "plan" })
     expect(Object.keys(ports).sort()).toEqual(["planScaffold", "review", "surveyExisting"])
+  })
+})
+
+describe("Creator prompts (ADR-0236)", () => {
+  beforeEach(() => __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", [])))
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("ships bodies that keep the reply shapes the parsers require", () => {
+    for (const def of [CREATOR_SURVEY_PROMPT, CREATOR_PLAN_PROMPT, CREATOR_REVIEW_PROMPT]) {
+      expect(validatePromptBody(def, def.defaultBody)).toEqual([])
+    }
+    // Dropping a parsed key cannot be published.
+    expect(
+      validatePromptBody(CREATOR_REVIEW_PROMPT, "Review {{requirements}}. Reply with findings.")
+    ).toEqual(expect.arrayContaining([{ code: "missing-fragment", fragment: '"severity"' }]))
+  })
+
+  it("renders the review brief into the shipped body", async () => {
+    await expect(
+      buildReviewPrompt(ctx, { changedPaths: [], verification: { lint: true } })
+    ).resolves.toContain('Files it produced: (none)\nToolchain: {"lint":true}')
+  })
+
+  it("sends a published plan override with the requirements as a value", async () => {
+    const body =
+      "Scaffold a {{artifactKind}}: {{requirements}}\n" +
+      'Reply {"files":[{"path":"","contents":""}],"capabilities":[],"rationales":{}}'
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: CREATOR_PLAN_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-creator-plan",
+          body,
+          contractVersion: CREATOR_PLAN_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
+      fence(JSON.stringify({ files: [] }))
+    )
+    await createAgentPlanHandler({ runTurn })(ctx)
+    expect(runTurn.mock.calls[0][0].prompt).toBe(
+      'Scaffold a plugin: clip the clipboard\nReply {"files":[{"path":"","contents":""}],"capabilities":[],"rationales":{}}'
+    )
   })
 })

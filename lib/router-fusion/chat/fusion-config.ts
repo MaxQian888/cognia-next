@@ -23,15 +23,19 @@ import {
   actionExtensionFor,
   builtinPolicy,
   compileFusionConfig,
+  CUSTOM_ROLE_PROMPT_VERSION,
   listFusionActions,
   type CompiledFusionConfig,
   type DataClass,
   type FusionDeployment,
   type FusionRegistry,
   type RateCard,
+  type RolePromptProfile,
   type RuntimeEnvironment,
 } from "@cognia/router-fusion"
 import type { RouterFusionSettings } from "@cognia/router-fusion/settings/settings"
+
+import { resolveCustomRolePrompts } from "../prompts/role-prompts"
 
 export type ChatLane = "ai-sdk" | "claude-agent-sdk"
 
@@ -220,7 +224,16 @@ export { listFusionActions }
 export function buildFusionConfig(
   settings: RouterFusionSettings,
   registry: FusionRegistry,
-  environment: RuntimeEnvironment
+  environment: RuntimeEnvironment,
+  options: {
+    /**
+     * The user's role texts, resolved when the run started
+     * (`runRolePromptsFor`). Omitted while an action needs them, they are
+     * resolved here from the loaded snapshot, so a synchronous compile still
+     * pins the exact text it hashed.
+     */
+    rolePrompts?: RolePromptProfile
+  } = {}
 ): FusionPolicyBuild {
   const all = listFusionActions(settings)
   const omittedActions: FusionPolicyBuild["omittedActions"] = []
@@ -230,11 +243,17 @@ export function buildFusionConfig(
     return !missing
   })
   const extensions = Object.fromEntries(actions.map((a) => [a.id, actionExtensionFor(a, settings)]))
+  // Resolved only when an action runs them: with none, the snapshot is
+  // exactly what roles-1 alone compiles to.
+  const rolePrompts = actions.some((a) => a.prompt_version === CUSTOM_ROLE_PROMPT_VERSION)
+    ? (options.rolePrompts ?? resolveCustomRolePrompts())
+    : undefined
   const config = compileFusionConfig({
     policy: builtinPolicy(actions),
     registry,
     extensions,
     environment,
+    ...(rolePrompts ? { rolePrompts } : {}),
   })
   return { config, omittedActions }
 }

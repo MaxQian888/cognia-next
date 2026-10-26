@@ -22,15 +22,16 @@
 
 import { spansToOtlp } from "@cognia/agent-trace/span-to-otlp"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
-
-export type TraceExportFormat = "json" | "otlp"
+import type {
+  TraceExportFormat,
+  TraceExportOptions,
+} from "@cognia/plugin-contract/lib/observability/trace-export"
+export type {
+  TraceExportFormat,
+  TraceExportOptions,
+} from "@cognia/plugin-contract/lib/observability/trace-export"
 
 export const TRACE_EXPORT_FORMATS: readonly TraceExportFormat[] = ["json", "otlp"]
-
-export interface TraceExportOptions {
-  /** Drop `inputPreview` / `outputPreview` before serializing. */
-  redactPreviews?: boolean
-}
 
 const MIME_TYPES: Record<TraceExportFormat, string> = {
   json: "application/json",

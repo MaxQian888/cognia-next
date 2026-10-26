@@ -113,6 +113,14 @@ export interface CollabWorkspaceMember {
   orgMember: boolean
 }
 
+/** `POST /v1/orgs/{org}/ownership-transfer`. */
+export interface TransferCollabOrgOwnershipInput {
+  toUserId: string
+  /** What the caller becomes once the target is an owner. */
+  previousOwnerRole: Exclude<OrgRole, "owner">
+  reason: string
+}
+
 export interface CollabHealth {
   status: string
   collabProtocolVersion?: number
@@ -768,6 +776,26 @@ export class CollabClient {
     return JSON.parse(text) as CollabHealth
   }
 
+  /**
+   * What this person may do and which features are offered in `orgId`
+   * (and `workspaceId`, when given). Parsed by `lib/collab/capabilities.ts`;
+   * returned raw here so the parser owns every shape decision.
+   */
+  async capabilities(
+    orgId: string,
+    workspaceId: string | null,
+    signal?: AbortSignal
+  ): Promise<unknown> {
+    return this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/capabilities${searchSuffix({
+        workspaceId: workspaceId ?? undefined,
+      })}`,
+      // Never served from an HTTP cache: a revoked role must not linger in one.
+      { cache: "no-store", ...(signal ? { signal } : {}) }
+    )
+  }
+
   async listIssues(
     orgId: string,
     query: { workspaceId?: string; issueProjectId?: string; assigneeId?: string } = {}
@@ -855,6 +883,18 @@ export class CollabClient {
       `/v1/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
       { method: "PATCH", body: JSON.stringify(input) }
     )
+  }
+
+  /**
+   * Hand the org to another member in one server transaction: they become an
+   * owner and the caller (an owner) drops to `previousOwnerRole`. The caller
+   * keeps their seat; the org is never left without an owner in between.
+   */
+  async transferOrgOwnership(orgId: string, input: TransferCollabOrgOwnershipInput): Promise<void> {
+    await this.json<unknown>(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/ownership-transfer`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
   }
 
   /**

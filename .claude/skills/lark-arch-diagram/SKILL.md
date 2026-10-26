@@ -1,19 +1,13 @@
 ---
 name: lark-arch-diagram
 description: >-
-  Draw polished, hand-styled SVG architecture / flow / topology / data-flow /
-  system-panorama diagrams and put them on a Lark (Feishu) whiteboard or into a
-  Feishu doc. Use this whenever the user wants 美观的架构图 / 系统图 / 流程图 / 拓扑图 /
-  数据流图 / 时序流程 / 产品全景 rendered as a Feishu 画板, wants to 把架构图放进飞书文档,
-  or says the mermaid version looks too plain and wants design-quality diagrams
-  (titled header + legend + tinted group containers + boxed nodes + orthogonal
-  connectors). Triggers: 「给项目画架构图」「飞书画板架构图」「架构图放到飞书文档」
-  「画一张系统/流程/拓扑/数据流图」「美观一点的图」「自绘 SVG 图」「像这样的图(贴参考图)」.
-  English: "draw an architecture / flow / topology diagram on a Feishu whiteboard",
-  "put architecture diagrams in a Lark doc", "make a nicer styled diagram than mermaid".
-  Prefer this over raw mermaid when design quality matters, and over
-  lark-whiteboard-mindmap when the diagram is a code/system architecture (boxes +
-  connectors) rather than a page map with real screenshots.
+  Draw design-quality SVG architecture, flow, topology, data-flow, or
+  system-overview diagrams (titled header, legend, tinted groups, boxed nodes,
+  orthogonal connectors) and land them as editable Feishu/Lark whiteboards,
+  standalone or inside a Feishu doc. Use when the user wants a styled
+  system/architecture diagram in Feishu (架构图 / 流程图 / 画板), or finds a
+  mermaid version too plain. For page maps built from screenshots, use
+  lark-whiteboard-mindmap instead.
 ---
 
 # Lark Architecture Diagram (styled SVG → Feishu whiteboard / doc)

@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { loggers } from "@cognia/logging"
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { docsProviderReach, type DocsProviderReach } from "@/lib/docs-providers/reach"
+import { bindRemoteDocRef } from "@/lib/docs-providers/account-binding"
 import {
   DocsProviderError,
   getDocsProviderByPrefix,
@@ -92,11 +93,24 @@ export function useRemoteDocSearch({
   )
   const hostSupported = reach.available
 
-  const [accounts, setAccounts] = useState<readonly DocsProviderAccount[] | null>(null)
-  const [accountId, setAccountId] = useState<string | null>(null)
-  const [items, setItems] = useState<readonly RemoteDocRef[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<RemoteDocSearchState["error"]>(null)
+  const [accountSnapshot, setAccountSnapshot] = useState<{
+    provider: DocsProvider
+    accounts: readonly DocsProviderAccount[]
+    error: RemoteDocSearchState["error"]
+  } | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const accounts = provider === accountSnapshot?.provider ? accountSnapshot.accounts : null
+  const account = accounts?.find((a) => a.id === selectedId) ?? accounts?.[0] ?? null
+  const accountId = account?.id ?? null
+  const epoch = account?.authorizationEpoch
+  const [result, setResult] = useState<{
+    provider: DocsProvider
+    query: string
+    accountId: string
+    epoch?: string
+    items: readonly RemoteDocRef[]
+    error: RemoteDocSearchState["error"]
+  } | null>(null)
 
   // Account list — reloaded whenever the panel opens for a different provider.
   // Deliberately not cached across opens: connecting an account in Settings
@@ -104,28 +118,31 @@ export function useRemoteDocSearch({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!provider || !hostSupported) {
-      setAccounts(null)
-      setAccountId(null)
+      setAccountSnapshot(null)
       return
     }
     let cancelled = false
-    setAccounts(null)
-    void provider
-      .listAccounts()
-      .then((list) => {
-        if (cancelled) return
-        setAccounts(list)
-        setAccountId((current) =>
-          current && list.some((a) => a.id === current) ? current : (list[0]?.id ?? null)
-        )
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setAccounts([])
-        setError(toError(err))
-      })
+    let version = 0
+    const reload = () => {
+      const attempt = ++version
+      setAccountSnapshot(null)
+      setResult(null)
+      void provider.listAccounts().then(
+        (list) => {
+          if (!cancelled && attempt === version)
+            setAccountSnapshot({ provider, accounts: list, error: null })
+        },
+        (err) => {
+          if (!cancelled && attempt === version)
+            setAccountSnapshot({ provider, accounts: [], error: toError(err) })
+        }
+      )
+    }
+    const unsubscribe = provider.subscribeAccounts?.(reload)
+    reload()
     return () => {
       cancelled = true
+      unsubscribe?.()
     }
   }, [provider, hostSupported])
 
@@ -144,36 +161,41 @@ export function useRemoteDocSearch({
   const trimmed = query.trim()
 
   useEffect(() => {
-    if (!provider || !hostSupported) {
-      setItems([])
-      setLoading(false)
-      return
-    }
+    setResult(null)
+    if (!provider || !hostSupported) return
     // A recognized link wins outright: it needs no network and works even
     // before an account finishes loading.
     if (matched) {
-      setItems([matched])
-      setLoading(false)
-      setError(null)
       return
     }
     if (!searchable || !trimmed || !accountId) {
-      setItems([])
-      setLoading(false)
       return
     }
     // Cleanup must invalidate searches even when the next render takes a
     // synchronous link/empty/unavailable branch and starts no replacement.
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    const controller = new AbortController()
     const handle = window.setTimeout(() => {
       void provider
-        .search?.(trimmed, { accountId, limit: DOC_SEARCH_LIMIT })
+        .search?.(trimmed, {
+          accountId,
+          ...(epoch ? { expectedAuthorizationEpoch: epoch } : {}),
+          limit: DOC_SEARCH_LIMIT,
+          signal: controller.signal,
+        })
         .then((hits) => {
           if (cancelled) return
-          setItems(hits ?? [])
-          setLoading(false)
+          setResult({
+            provider,
+            query: trimmed,
+            accountId,
+            epoch,
+            items: (hits ?? []).map((ref) => {
+              if (ref.providerId !== provider.id) throw new DocsProviderError("invalidRef")
+              return bindRemoteDocRef(ref, { id: accountId, label: "", authorizationEpoch: epoch })
+            }),
+            error: null,
+          })
         })
         .catch((err) => {
           if (cancelled) return
@@ -181,19 +203,37 @@ export function useRemoteDocSearch({
             provider: provider.id,
             err: err instanceof Error ? err.message : String(err),
           })
-          setItems([])
-          setError(toError(err))
-          setLoading(false)
+          setResult({ provider, query: trimmed, accountId, epoch, items: [], error: toError(err) })
         })
     }, DOC_SEARCH_DEBOUNCE_MS)
     return () => {
       cancelled = true
+      controller.abort()
       window.clearTimeout(handle)
     }
-  }, [provider, hostSupported, matched, searchable, trimmed, accountId])
+  }, [provider, hostSupported, matched, searchable, trimmed, accountId, epoch])
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  const chooseAccount = useCallback((id: string) => setAccountId(id), [])
+  const chooseAccount = useCallback((id: string) => setSelectedId(id), [])
+  const currentResult =
+    result?.provider === provider &&
+    result.query === trimmed &&
+    result.accountId === accountId &&
+    result.epoch === epoch
+      ? result
+      : null
+  const items = useMemo(() => {
+    if (!hostSupported) return []
+    if (matched) return [account ? bindRemoteDocRef(matched, account) : matched]
+    return currentResult?.items ?? []
+  }, [hostSupported, matched, account, currentResult])
+  const loading = Boolean(
+    provider && hostSupported && !matched && searchable && trimmed && accountId && !currentResult
+  )
+  const error =
+    (provider === accountSnapshot?.provider ? accountSnapshot.error : null) ??
+    currentResult?.error ??
+    null
 
   // Memoised: the composer popover lists this object in a `useMemo` dependency
   // array, so a fresh identity on every render would invalidate the whole

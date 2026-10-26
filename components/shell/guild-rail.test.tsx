@@ -297,9 +297,22 @@ test("does not offer a conversation-sidebar action in the Canvas workspace", () 
   expect(screen.queryByRole("button", { name: "expandSidebar" })).toBeNull()
 })
 
-test.each(["inbox", "logs"])(
-  "keeps rail feedback visible while %s navigation is suspended",
-  async (destination) => {
+test.each([
+  { destination: "inbox", iconStyle: "anime" },
+  { destination: "inbox", iconStyle: "ordinary" },
+  { destination: "logs", iconStyle: "anime" },
+  { destination: "logs", iconStyle: "ordinary" },
+])(
+  "preserves the $iconStyle icon slot while $destination navigation is suspended",
+  async ({ destination, iconStyle }) => {
+    act(() =>
+      useSettingsStore.setState({
+        settings: {
+          ...useSettingsStore.getState().settings!,
+          settingsIconStyle: iconStyle as "anime" | "ordinary",
+        },
+      })
+    )
     const user = userEvent.setup()
     let ready = false
     let resolve!: () => void
@@ -323,15 +336,23 @@ test.each(["inbox", "logs"])(
       )
     }
     render(withTooltipProvider(<Navigation />))
+    const trigger = screen.getByRole("button", {
+      name: destination === "logs" ? "more" : "inbox",
+    })
+    const icon = trigger.querySelector<HTMLElement | SVGElement>("[data-navigation-artwork], svg")!
+    const iconSlot = icon.parentElement!
+    expect(icon).toBeVisible()
     if (destination === "logs") {
       await user.click(screen.getByRole("button", { name: "more" }))
       await user.click(screen.getByTestId("guild-more-item-logs"))
     } else {
       await user.click(screen.getByRole("button", { name: "inbox" }))
     }
-    const trigger = screen.getByRole("button", { name: destination === "logs" ? "more" : "inbox" })
     expect(trigger).toHaveAttribute("aria-busy", "true")
     expect(trigger.querySelector(".animate-spin")).toBeInTheDocument()
+    expect(trigger).toContainElement(icon)
+    expect(icon.parentElement).toBe(iconSlot)
+    expect(icon.closest(".invisible")).toContainElement(icon)
     // dnd-kit mounts its own (empty) live regions beside the rail's status.
     expect(screen.getByText("loading")).toHaveAttribute("role", "status")
     await act(async () => {
@@ -339,6 +360,9 @@ test.each(["inbox", "logs"])(
       resolve()
     })
     expect(trigger).toHaveAttribute("aria-busy", "false")
+    expect(icon).toBeVisible()
+    expect(icon.closest(".invisible")).toBeNull()
+    expect(trigger.querySelector(".animate-spin")).not.toBeInTheDocument()
     expect(screen.queryByText("loading")).not.toBeInTheDocument()
   }
 )

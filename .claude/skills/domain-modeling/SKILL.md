@@ -39,6 +39,8 @@ If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The ma
 
 Create files lazily: only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
 
+In this repository the glossary is the root `CONTEXT.md`, and ADRs live in `docs/content/docs/en/adr/` and `docs/content/docs/zh/adr/` (bilingual, next free sequential number) — not `docs/adr/`.
+
 ## During the session
 
 ### Challenge against the glossary

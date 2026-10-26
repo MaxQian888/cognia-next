@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { globSync, readFileSync } from "node:fs"
 import { test } from "node:test"
 
 import {
@@ -19,9 +19,22 @@ import {
 
 const realConfig = JSON.parse(readFileSync(CONFIG_FILE, "utf8"))
 
+test("the completed migration retains only compatibility launchers and generated mjs", () => {
+  const allowed = new Set([...realConfig.launchers, ...realConfig.generated])
+  const remaining = globSync("sidecar/**/*.mjs", {
+    exclude: (path) => /(^|[/\\])(node_modules|dist|out|coverage)([/\\]|$)/.test(path),
+  })
+  assert.deepEqual(
+    remaining.filter((file) => !allowed.has(file.replaceAll("\\", "/"))),
+    []
+  )
+  assert.equal(realConfig.legacyMjsAllowed, false)
+})
+
 /** A small config with the real layer table and fixture-sized lists. */
 const config = {
   ...realConfig,
+  legacyMjsAllowed: true,
   launchers: ["sidecar/agent-host.mjs", "sidecar/tool/cli.mjs"],
   selfContained: ["sidecar/tool/"],
   isomorphic: ["sidecar/src/providers/protocol.ts"],

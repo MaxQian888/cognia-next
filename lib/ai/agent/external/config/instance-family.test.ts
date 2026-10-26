@@ -180,3 +180,21 @@ describe("instanceDifferences / distinguishingTraits", () => {
     expect(instanceDifferences(remote("a", "isolated"), remote("b"))).toEqual([])
   })
 })
+
+it("includes model-role selections in model differences", () => {
+  const base = config({ id: "a", cogniaModel: { providerId: "p", modelId: "m" } })
+  const other = {
+    ...base,
+    id: "b",
+    modelRoles: {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    },
+  }
+  expect(instanceDifferences(base, other)).toEqual([
+    { key: "model", value: "p/m", otherValue: "p/m; subagent.default: inherit-primary" },
+  ])
+  expect(distinguishingTraits(other, [base])).toEqual([
+    { key: "model", value: "p/m; subagent.default: inherit-primary" },
+  ])
+})

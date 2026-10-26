@@ -1,3 +1,4 @@
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 
 jest.mock("@/lib/subscription/core/provider-registry", () => ({
@@ -7,6 +8,8 @@ jest.mock("@/lib/subscription/core/provider-registry", () => ({
 import { listSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
 import { replaceHostProviderKeys } from "@/lib/host-secrets/provider-key-store"
 import {
+  cogniaModelReasoningFacts,
+  compileEditorModelPlan,
   filterCogniaGatewayModels,
   isCogniaGatewayModelCatalog,
   listCogniaGatewayModelOptions,
@@ -282,4 +285,142 @@ describe("listHostProfileGatewayModelOptions", () => {
       })
     ).toEqual([{ providerId: "bare", providerName: "bare", models: [{ id: "x", name: "x" }] }])
   })
+})
+
+describe("cogniaModelReasoningFacts / compileEditorModelPlan", () => {
+  const custom = {
+    providerSettings: {},
+    customProviders: [
+      {
+        id: "gw",
+        name: "Gateway",
+        apiProtocol: "openai",
+        baseURL: "https://gw.example/v1",
+        apiKey: SECRET,
+        enabled: true,
+        models: [
+          { id: "thinker", name: "Thinker", supportsReasoning: true },
+          { id: "plain", name: "Plain", supportsReasoning: false },
+          { id: "mystery", name: "Mystery" },
+        ],
+      },
+    ],
+  } as never as Parameters<typeof cogniaModelReasoningFacts>[1]
+
+  it("treats unknown reasoning support as none, so no effort is accepted for it", () => {
+    const facts = cogniaModelReasoningFacts("gw", custom)
+    expect(facts.modelSupportsReasoning("plain")).toBe(false)
+    expect(facts.modelSupportsReasoning("mystery")).toBe(false)
+    expect(facts.modelEffortValues("plain")).toEqual([])
+  })
+
+  it("compiles the editor's layers with the runtime's slots and the model facts", () => {
+    const config = {
+      protocol: "codex-app-server" as const,
+      transport: "stdio" as const,
+      process: { command: "codex", args: ["app-server"] },
+      metadata: { preset: "codex-app-server" },
+    }
+    const primary = { providerId: "gw", modelId: "thinker" }
+    const layer = (modelId: string, reasoningEffort?: string) => [
+      {
+        source: "config" as const,
+        overrides: {
+          version: 1 as const,
+          slots: {
+            "subagent.default": {
+              kind: "cognia" as const,
+              binding: { providerId: "gw", modelId },
+              ...(reasoningEffort ? { reasoningEffort } : {}),
+            },
+          },
+        },
+      },
+    ]
+    expect(
+      compileEditorModelPlan({ config, primary, layers: layer("plain", "high"), ...custom })
+    ).toEqual({ ok: false, reason: "effort-unsupported", slot: "subagent.default" })
+    expect(compileEditorModelPlan({ config, primary, layers: layer("plain"), ...custom }).ok).toBe(
+      true
+    )
+    expect(
+      compileEditorModelPlan({
+        config: { ...config, metadata: { preset: "kimi" }, protocol: "acp" },
+        primary,
+        layers: layer("plain"),
+        ...custom,
+      })
+    ).toEqual({ ok: false, reason: "unsupported-slot", slot: "subagent.default" })
+  })
+
+  it("includes inline OpenCode child models in editor admission even without role overrides", () => {
+    const config = {
+      protocol: "acp" as const,
+      transport: "stdio" as const,
+      process: {
+        command: "opencode",
+        args: ["acp"],
+        env: {
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({
+            agent: { reviewer: { mode: "subagent", model: "cognia/plain" } },
+          }),
+        },
+      },
+      metadata: { preset: "opencode-acp" },
+    }
+    const result = compileEditorModelPlan({
+      config,
+      primary: { providerId: "gw", modelId: "thinker" },
+      layers: [],
+      ...custom,
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        models: ["thinker", "plain"],
+        slots: { "opencode.agent.reviewer": { modelId: "plain" } },
+      },
+    })
+  })
+})
+
+it("validates Pi editor roles provisionally and preserves detected explicit and inherited models", () => {
+  const primary = { providerId: "p", modelId: "main" }
+  const config = {
+    protocol: "pi-rpc",
+    transport: "stdio",
+    process: { command: "pi" },
+  } as ExternalAgentConfig
+  const layers = [
+    {
+      source: "config" as const,
+      overrides: {
+        version: 1 as const,
+        slots: {
+          "subagent.default": {
+            kind: "cognia" as const,
+            binding: { providerId: "p", modelId: "cheap" },
+          },
+        },
+      },
+    },
+  ]
+  expect(compileEditorModelPlan({ config, primary, layers }).ok).toBe(true)
+  const result = compileEditorModelPlan({
+    config: {
+      ...config,
+      metadata: {
+        cogniaPiSubagents: {
+          family: "nico",
+          version: "0.80.0",
+          agents: { reviewer: { model: "cognia/review" }, parent: { model: "inherit" } },
+        },
+      },
+    },
+    primary,
+    layers,
+  })
+  expect(result.ok).toBe(true)
+  if (result.ok)
+    expect(result.plan.models).toEqual(expect.arrayContaining(["main", "cheap", "review"]))
 })

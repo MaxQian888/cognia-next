@@ -3,6 +3,7 @@
  */
 jest.mock("../../agent/subagent-background-tasks", () => ({
   listCliBackgroundRuns: jest.fn(() => []),
+  recordCliIncompleteForegroundRun: jest.fn(async () => {}),
 }))
 jest.mock("@/lib/db/background-tasks", () => ({
   listBackgroundTaskRecords: jest.fn(async () => []),
@@ -42,6 +43,7 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { CliBackgroundRunInfo } from "../../agent/subagent-background-tasks"
 import type { BackgroundTaskJournalRecord } from "@/lib/background-tasks/registry-core"
 import type { TuiAction } from "../state/types"
+import { recordCliIncompleteForegroundRun } from "../../agent/subagent-background-tasks"
 
 function recorder() {
   const actions: TuiAction[] = []
@@ -238,6 +240,51 @@ describe("agentsPanel", () => {
 })
 
 describe("agentsDispatch", () => {
+  it("marks a foreground budget stop incomplete and persists evidence for owner-scoped resume", async () => {
+    const { dispatch, actions } = recorder()
+    await agentsDispatch("Explore inspect files", {
+      dispatch,
+      cwd: "/w",
+      home: "/h",
+      sessionId: "owner",
+      list: async () => [agent("Explore")],
+      mintRunId: () => "limited-manual",
+      dispatchAgent: async () => ({
+        text: "Found source evidence A; B remains unread.",
+        finishReason: "error_max_turns",
+      }),
+    })
+    expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
+    expect((actions.at(-1) as { summary: string }).summary).toContain("Task/research incomplete")
+    expect(recordCliIncompleteForegroundRun).toHaveBeenCalledWith(
+      "limited-manual",
+      expect.objectContaining({ sessionId: "owner", home: "/h", subagentId: "Explore" }),
+      expect.stringContaining("Found source evidence A")
+    )
+    expect((actions.at(-1) as { summary: string }).summary).toContain('resume:"limited-manual"')
+  })
+  it("keeps partial evidence but never advertises a failed continuation save", async () => {
+    jest.mocked(recordCliIncompleteForegroundRun).mockRejectedValueOnce(new Error("disk full"))
+    const { dispatch, actions } = recorder()
+    await agentsDispatch("Explore inspect files", {
+      dispatch,
+      cwd: "/w",
+      home: "/h",
+      sessionId: "owner",
+      list: async () => [agent("Explore")],
+      mintRunId: () => "unsaved-manual",
+      dispatchAgent: async () => ({
+        text: "Verified source A; B unread.",
+        finishReason: "error_max_turns",
+      }),
+    })
+    expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
+    const summary = (actions.at(-1) as { summary: string }).summary
+    expect(summary).toContain("Verified source A")
+    expect(summary).toContain("Task/research incomplete")
+    expect(summary).toContain("Could not save continuation: disk full")
+    expect(summary).not.toContain('resume:"unsaved-manual"')
+  })
   it("dispatches the named subagent and surfaces its reply", async () => {
     const { dispatch, actions } = recorder()
     let received: { id: string; prompt: string } | null = null
@@ -416,9 +463,53 @@ describe("agents cancellation boundaries", () => {
     expect(actions.at(-1)).toMatchObject({
       type: "ACTIVITY_END",
       status: "done",
-      summary: 'Subagent "reviewer" interrupted.',
+      summary: expect.stringContaining('Subagent "reviewer" interrupted.'),
     })
     expect(JSON.stringify(actions)).not.toContain("late success")
+  })
+
+  it("persists completed evidence and a continuation id for a manually cancelled foreground child", async () => {
+    const { dispatch, actions } = recorder()
+    const controller = new AbortController()
+    await agentsDispatch("reviewer original task", {
+      dispatch,
+      cwd: "/w",
+      home: "/h",
+      sessionId: "owner",
+      signal: controller.signal,
+      mintRunId: () => "interrupted-child",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => {
+        controller.abort()
+        return { text: "DONE_FACT; NEXT_FILE=/remaining.ts", finishReason: "interrupted" }
+      },
+    })
+    expect(recordCliIncompleteForegroundRun).toHaveBeenCalledWith(
+      "interrupted-child",
+      expect.objectContaining({ sessionId: "owner", prompt: "original task" }),
+      expect.stringContaining("DONE_FACT"),
+      "interrupted"
+    )
+    expect(actions.at(-1)).toMatchObject({
+      summary: expect.stringContaining('resume:"interrupted-child"'),
+    })
+  })
+
+  it("keeps interrupted findings but omits a resume handle if the journal write fails", async () => {
+    jest
+      .mocked(recordCliIncompleteForegroundRun)
+      .mockRejectedValueOnce(new Error("disk unavailable"))
+    const { dispatch, actions } = recorder()
+    await agentsDispatch("reviewer task", {
+      dispatch,
+      cwd: "/w",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => ({ text: "DONE_FACT", finishReason: "interrupted" }),
+    })
+    const summary = JSON.stringify(actions.at(-1))
+    expect(summary).toContain("DONE_FACT")
+    expect(summary).toContain("Could not save continuation")
+    expect(summary).not.toContain("resume:")
   })
 
   it("validates stop ids and passes the owning session to cancellation", () => {

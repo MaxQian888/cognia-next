@@ -8,7 +8,7 @@
  * tied a compose default image to the workflow that publishes it, and
  * nothing said that two compose instances on one host must not collide.
  *
- *   - `Dockerfile.deploy-agent` / `Dockerfile.ops-controller` built on
+ *   - `deploy/docker/Dockerfile.deploy-agent` / `deploy/docker/Dockerfile.ops-controller` built on
  *     rust:1.89 while the shared Cargo.lock was resolved for the 1.95 pin.
  *   - `deploy/compose/Dockerfile.web` built the export on node:22 against an
  *     `engines.node >= 26` workspace, and the compose-e2e lane installed with
@@ -25,7 +25,8 @@
  *   2. Every Dockerfile that installs the root workspace uses a Node major
  *      that satisfies `engines.node` and pins the `packageManager` pnpm.
  *   3. Every `ghcr.io/<owner>/<name>` a compose file defaults to is published
- *      by `images.yml`.
+ *      by `images.yml`, or is a service image cognia-labs/cognia-services
+ *      publishes under `ghcr.io/cognia-labs/`.
  *   4. Every published host port in `docker-compose.yml` is interpolated, so
  *      an instance can remap it without editing the file.
  *   5. The compose project name, the runner ownership label
@@ -51,19 +52,19 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 /** Dockerfiles whose build context is the repo root and whose `cargo build --locked` resolves the shared Cargo.lock. */
 export const ROOT_CONTEXT_RUST_DOCKERFILES = [
-  "Dockerfile.cognia-server",
-  "Dockerfile.collab-server",
-  "Dockerfile.deploy-agent",
-  "Dockerfile.ops-controller",
+  "deploy/docker/Dockerfile.cognia-server",
+  "deploy/docker/Dockerfile.collab-server",
+  "deploy/docker/Dockerfile.deploy-agent",
+  "deploy/docker/Dockerfile.ops-controller",
   // ADR-0224 A8: the always-on host's Docker API proxy.
-  "Dockerfile.docker-proxy",
+  "deploy/docker/Dockerfile.docker-proxy",
   // ADR-0183: builds the static cognia-sandboxd from the workspace.
   "deploy/bundle/Dockerfile",
 ]
 
 /** Dockerfiles that run `pnpm install` against the root workspace. */
 export const ROOT_WORKSPACE_NODE_DOCKERFILES = [
-  "Dockerfile.cognia-server",
+  "deploy/docker/Dockerfile.cognia-server",
   "deploy/compose/Dockerfile.web",
   "services/workspace-runtime/Dockerfile",
 ]
@@ -172,6 +173,21 @@ export function ghcrImageName(reference) {
   return match ? match[1] : undefined
 }
 
+/** `owner` from `ghcr.io/owner/cognia-web:latest`. */
+export function ghcrImageOwner(reference) {
+  const match = String(reference ?? "").match(/^ghcr\.io\/([^/]+)\/[a-z0-9._-]+(?:[:@].*)?$/)
+  return match ? match[1] : undefined
+}
+
+/**
+ * The service images cognia-labs/cognia-services builds and publishes (its own
+ * images.yml), always under that organization's GHCR namespace.
+ */
+export const SERVICES_IMAGES = {
+  owner: "cognia-labs",
+  names: new Set(["cognia-signaling", "cognia-share", "cognia-diagnostics"]),
+}
+
 /** Every image name `images.yml` builds: matrix entries plus the `images:` metadata inputs. */
 export function publishedImageNames(imagesWorkflowText) {
   const names = new Set()
@@ -195,8 +211,16 @@ export function checkComposeImagesPublished({ composeFiles, imagesWorkflow }) {
   for (const [rel, text] of Object.entries(composeFiles)) {
     const compose = parseYaml(text)
     for (const [service, spec] of Object.entries(compose?.services ?? {})) {
-      const name = ghcrImageName(composeDefault(spec?.image))
+      const reference = composeDefault(spec?.image)
+      const name = ghcrImageName(reference)
       if (!name) continue
+      if (SERVICES_IMAGES.names.has(name)) {
+        if (ghcrImageOwner(reference) !== SERVICES_IMAGES.owner)
+          problems.push(
+            `${rel}: service "${service}" defaults to ghcr.io/${ghcrImageOwner(reference)}/${name}; cognia-labs/cognia-services publishes it as ghcr.io/${SERVICES_IMAGES.owner}/${name}.`
+          )
+        continue
+      }
       if (!published.has(name)) {
         problems.push(
           `${rel}: service "${service}" defaults to ghcr.io/…/${name}, which no job in ${IMAGES_WORKFLOW} publishes. The profile that needs it can never be satisfied from the registry.`

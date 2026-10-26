@@ -8,18 +8,21 @@ import type {
 } from "./tool-route"
 
 describe("plugin-sdk api/tool-route", () => {
-  it("exposes the authoring helper, manifest bridge, and persisted route helpers", () => {
+  it("exposes the authoring helper", () => {
     expect(typeof sdk.defineToolRoute).toBe("function")
-    expect(typeof sdk.registerToolRoutesForPlugin).toBe("function")
-    expect(typeof sdk.unregisterToolRoutesForPlugin).toBe("function")
-    expect(typeof sdk.makeToolRouteId).toBe("function")
-    expect(typeof sdk.upsertToolRoute).toBe("function")
-    expect(typeof sdk.getToolRoute).toBe("function")
-    expect(typeof sdk.listToolRoutes).toBe("function")
-    expect(typeof sdk.listEnabledToolRoutes).toBe("function")
-    expect(typeof sdk.deleteToolRoute).toBe("function")
-    expect(typeof sdk.deleteToolRoutesByPlugin).toBe("function")
-    expect(typeof sdk.cacheToolRouteEmbeddings).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins contribute through their manifest)", () => {
+    expect(sdk).not.toHaveProperty("registerToolRoutesForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterToolRoutesForPlugin")
+    expect(sdk).not.toHaveProperty("makeToolRouteId")
+    expect(sdk).not.toHaveProperty("upsertToolRoute")
+    expect(sdk).not.toHaveProperty("getToolRoute")
+    expect(sdk).not.toHaveProperty("listToolRoutes")
+    expect(sdk).not.toHaveProperty("listEnabledToolRoutes")
+    expect(sdk).not.toHaveProperty("deleteToolRoute")
+    expect(sdk).not.toHaveProperty("deleteToolRoutesByPlugin")
+    expect(sdk).not.toHaveProperty("cacheToolRouteEmbeddings")
   })
 
   it("re-exports semantic tool routing settings defaults and contract types", () => {

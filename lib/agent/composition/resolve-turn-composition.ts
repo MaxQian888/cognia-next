@@ -14,8 +14,8 @@
 import { compositionForSession } from "@/stores/agent/agent-runtime-store"
 import { appPresetCatalog } from "./app-preset-catalog"
 import { resolveComposition } from "./resolve-composition"
-import { digestPrompt, digestToolSurface, withCompositionDigest } from "./digest"
-import type { ToolSurfaceEntry } from "./digest"
+import { digestPromptSurface, digestToolSurface, withCompositionDigest } from "./digest"
+import type { PromptSurface, ToolSurfaceEntry } from "./digest"
 import { hostToolPresentations } from "@/lib/ai/code-mode/host-probe"
 // `AgentPermissionMode` is owned by the package root; `agent-composition`
 // imports it as a dependency and does not re-export it.
@@ -29,8 +29,8 @@ import type {
 export interface ResolveTurnCompositionInput {
   /** Absent for a turn with no session (e.g. a one-shot completion). */
   sessionId?: string
-  /** The final system prompt, already assembled. */
-  systemPrompt?: string
+  /** The assembled prompt fields, exactly as the send carries them. */
+  prompt?: PromptSurface
   /** The ordered tool surface this turn will offer. */
   tools?: readonly ToolSurfaceEntry[]
   /** Parent agent's resolved authority when this turn is a child. */
@@ -62,7 +62,7 @@ export async function resolveTurnComposition(
   const selection = input.selection ?? compositionForSession(input.sessionId)
 
   const [promptDigest, toolDigest] = await Promise.all([
-    digestPrompt(input.systemPrompt ?? ""),
+    digestPromptSurface(input.prompt ?? {}),
     digestToolSurface(input.tools ?? []),
   ])
 

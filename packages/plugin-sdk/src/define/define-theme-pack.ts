@@ -14,7 +14,7 @@
  *   })
  */
 
-import type { PluginThemePackContribution } from "@/types/plugin"
+import type { PluginThemePackContribution } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineThemePack(pack: PluginThemePackContribution): PluginThemePackContribution {
   return pack

@@ -1,3 +1,6 @@
+import type { PartialSourceControlPanelPrefs } from "@cognia/plugin-contract/lib/git/panel-prefs"
+export type { PartialSourceControlPanelPrefs } from "@cognia/plugin-contract/lib/git/panel-prefs"
+
 /**
  * Source Control panel preferences — the knobs that shape how the panel presents
  * diffs, guards destructive actions, automates commits, and keeps ahead/behind
@@ -67,24 +70,6 @@ export interface SourceControlPanelPrefs {
   branchSort: BranchSortMode
   defaultTimelineView: TimelineDefaultView
 }
-
-/** All-optional partial as stored on `AppSettings.gitSettings.panel`. */
-export type PartialSourceControlPanelPrefs = Partial<{
-  diffView: string
-  ignoreWhitespace: boolean
-  collapseUnchanged: boolean
-  diffWordWrap: boolean
-  confirmDiscard: boolean
-  confirmForcePush: boolean
-  smartCommit: boolean
-  postCommit: string
-  pullRebase: boolean
-  fetchPrune: boolean
-  autoFetch: boolean
-  autoFetchIntervalMinutes: number
-  branchSort: string
-  defaultTimelineView: string
-}>
 
 /** Baseline defaults — chosen to preserve the current panel look/behavior. */
 export const DEFAULT_SOURCE_CONTROL_PANEL_PREFS: SourceControlPanelPrefs = {

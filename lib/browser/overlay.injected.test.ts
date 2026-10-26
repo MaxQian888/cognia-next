@@ -6,6 +6,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
+import contract from "@cognia/companion-client/browser-agent-protocol.json"
 
 const CODE = fs.readFileSync(path.join(__dirname, "overlay.injected.js"), "utf8")
 
@@ -29,6 +30,7 @@ type SelectionPayload = {
 }
 
 type OverlayApi = {
+  abi: number
   cssSelector: (el: Element) => string
   domPath: (el: Element) => string
   buildPayload: (el: Element) => SelectionPayload
@@ -62,6 +64,10 @@ function install(): OverlayApi {
   ;(0, eval)(CODE)
   return (window as unknown as { __cogniaOverlay: OverlayApi }).__cogniaOverlay
 }
+
+it("matches the published Browser Companion overlay ABI", () => {
+  expect(install().abi).toBe(contract.overlayAbi)
+})
 
 beforeEach(() => {
   document.body.innerHTML = ""

@@ -1,9 +1,14 @@
 import {
   buildReviewSystemPrompt,
   buildReviewUserPrompt,
+  DIFF_REVIEW_PROMPT,
   generateDiffReview,
   salvageFindingsArray,
 } from "./ai-review"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 const file = { path: "src/a.ts", status: "modified" as const }
 
@@ -160,5 +165,46 @@ describe("salvageFindingsArray", () => {
 
   it("stops at the array close and ignores trailing prose", () => {
     expect(salvageFindingsArray('[{"a":1}] and some trailing text')).toEqual([{ a: 1 }])
+  })
+})
+
+describe("customized diff review prompt (ADR-0236)", () => {
+  const body = 'Flag only security issues. Return [{"hunk": n, "severity": s, "note": t}]'
+  beforeEach(() =>
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: DIFF_REVIEW_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por",
+          body,
+          contractVersion: DIFF_REVIEW_PROMPT.contractVersion,
+        },
+      ])
+    )
+  )
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("sends the override, followed by the appended review instructions", async () => {
+    const complete = jest.fn().mockResolvedValue("[]")
+    await generateDiffReview(
+      { file, hunks: [{ patch: "p" }], config: { customInstructions: "Be brief." } },
+      { complete }
+    )
+    expect(complete.mock.calls[0][1].system).toBe(`${body}\nAdditional instructions: Be brief.`)
+  })
+
+  it("pins the shipped text for a review that feeds an approval verdict", async () => {
+    const complete = jest.fn().mockResolvedValue("[]")
+    await generateDiffReview(
+      { file, hunks: [{ patch: "p" }], config: {} },
+      { complete },
+      {
+        promptPolicy: "shipped",
+      }
+    )
+    expect(complete.mock.calls[0][1].system).toBe(DIFF_REVIEW_PROMPT.defaultBody)
   })
 })

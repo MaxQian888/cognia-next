@@ -1,5 +1,5 @@
 // Pure helpers for the clonedeps manifest (`.cognia/clonedeps.json`) and the
-// derived clone workspace layout. No I/O — `clone.mjs` owns the filesystem and
+// derived clone workspace layout. No I/O — `clone.ts` owns the filesystem and
 // git side effects. Mirrors oh-my-opencode-slim's `.slim/clonedeps.json` design.
 
 import path from "node:path"

@@ -61,6 +61,9 @@ jest.mock("@/components/plugins/plugin-enable-failure-toaster", () => ({
 jest.mock("@/components/account/sync/account-sync-host", () => ({
   AccountSyncHost: () => <span data-testid="account-sync-host" />,
 }))
+jest.mock("@/components/providers/initializers/prompt-overrides-initializer", () => ({
+  PromptOverridesInitializer: () => <span data-testid="prompt-overrides-initializer" />,
+}))
 jest.mock("@/components/providers/recovery-boot-gate", () => ({
   RecoveryBootGate: ({ children }: { children: React.ReactNode }) =>
     mockRecovery ? <span data-testid="recovery" /> : <>{children}</>,
@@ -205,6 +208,14 @@ describe("AppRuntime boot boundaries", () => {
   it.each(pluginHosts)("mounts %s exactly once in the unlocked production runtime", (host) => {
     const markup = renderRuntime()
     expect(markup.split(`data-testid="${host}"`)).toHaveLength(2)
+  })
+
+  // Keystroke-path prompt consumers resolve synchronously (ADR-0236), so the
+  // snapshot must be loaded for the unlocked account's database.
+  it("mounts the prompt override snapshot initializer only in the unlocked runtime", () => {
+    expect(renderRuntime().split('data-testid="prompt-overrides-initializer"')).toHaveLength(2)
+    mockAccount = "locked"
+    expect(renderRuntime()).not.toContain('data-testid="prompt-overrides-initializer"')
   })
 
   it("mounts the account sync host once, and only in the unlocked runtime", () => {

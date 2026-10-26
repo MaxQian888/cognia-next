@@ -1,3 +1,5 @@
+import { createGoogleDocsTestHost } from "@/lib/testing/google-docs-host"
+import { __setGoogleStatePortForTests } from "./state"
 jest.mock("./config", () => ({ docsProviderSecrets: jest.fn() }))
 
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
@@ -27,7 +29,10 @@ const PENDING = {
 beforeEach(() => {
   map.clear()
   secretsMock.mockReturnValue(store)
+  __setGoogleStatePortForTests(createGoogleDocsTestHost(store).call)
 })
+
+afterEach(() => __setGoogleStatePortForTests(null))
 
 describe("google oauth pending", () => {
   it("round-trips a record and stamps the write time", async () => {

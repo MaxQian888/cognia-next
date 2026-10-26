@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ProjectEnvironmentBootstrapAgent } from "@/types/project-environment"
@@ -23,19 +24,17 @@ it("is optional and shows fields with bounded defaults when enabled", () => {
   expect(screen.getByLabelText("Total timeout (seconds)")).toHaveAttribute("max", "3600")
 })
 
-it("applies provider and task presets only on explicit action and keeps results editable", () => {
+it("applies provider and task presets only on explicit action and keeps results editable", async () => {
   render(<Harness />)
   fireEvent.click(screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" }))
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "ollama" } })
+  await selectOption(screen.getByLabelText("Provider preset"), "ollama")
   expect(screen.getByLabelText("Model API endpoint")).toHaveValue("")
   fireEvent.click(screen.getByRole("button", { name: "Apply provider" }))
   expect(screen.getByLabelText("Model API endpoint")).toHaveValue("http://localhost:11434/v1")
   expect(screen.getByText(/^Replace local-model/)).toHaveAttribute("role", "status")
-  fireEvent.change(screen.getByLabelText("Bootstrap model"), {
-    target: { value: "installed-model" },
-  })
+  await selectOption(screen.getByLabelText("Bootstrap model"), "installed-model")
   expect(screen.queryByText(/^Replace local-model/)).not.toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText("Task preset"), { target: { value: "chat" } })
+  await selectOption(screen.getByLabelText("Task preset"), "chat")
   expect(screen.getByLabelText("Enable shell tool")).toBeChecked()
   fireEvent.click(screen.getByRole("button", { name: "Apply task" }))
   expect(screen.getByLabelText("Enable shell tool")).not.toBeChecked()
@@ -45,7 +44,7 @@ it("applies provider and task presets only on explicit action and keeps results 
   expect(screen.getByLabelText("Bootstrap model")).toHaveValue("installed-model")
 })
 
-it("hands the recipe setup script and Agent settings to the parent in one callback", () => {
+it("hands the recipe setup script and Agent settings to the parent in one callback", async () => {
   const apply = jest.fn()
   const change = jest.fn()
   render(
@@ -63,9 +62,7 @@ it("hands the recipe setup script and Agent settings to the parent in one callba
       ids="recipe"
     />
   )
-  fireEvent.change(screen.getByLabelText("Initialization recipe"), {
-    target: { value: "python-uv" },
-  })
+  await selectOption(screen.getByLabelText("Initialization recipe"), "python-uv")
   expect(apply).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button", { name: "Apply recipe" }))
   expect(apply).toHaveBeenCalledWith({
@@ -98,7 +95,7 @@ it("clears stale advanced editor content when applying a provider", () => {
   expect(JSON.parse((editor as HTMLTextAreaElement).value).modelOptions).toEqual({ auth: "bearer" })
 })
 
-it("edits configuration and readiness checks, retaining a draft while disabled", () => {
+it("edits configuration and readiness checks, retaining a draft while disabled", async () => {
   render(<Harness />)
   fireEvent.click(screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" }))
   fireEvent.change(screen.getByLabelText("Initialization task"), {
@@ -107,7 +104,7 @@ it("edits configuration and readiness checks, retaining a draft while disabled",
   fireEvent.change(screen.getByLabelText("Model API endpoint"), {
     target: { value: "https://api.example.com/v1" },
   })
-  fireEvent.change(screen.getByLabelText("Bootstrap model"), { target: { value: "model" } })
+  await selectOption(screen.getByLabelText("Bootstrap model"), "model")
   fireEvent.click(screen.getByRole("button", { name: "Add readiness check" }))
   fireEvent.change(screen.getByLabelText("Readiness check name"), { target: { value: "ready" } })
   fireEvent.change(screen.getByLabelText("Readiness check command"), {
@@ -129,28 +126,28 @@ it("edits configuration and readiness checks, retaining a draft while disabled",
   expect(screen.queryByLabelText("Readiness check name")).not.toBeInTheDocument()
 })
 
-it("selects independent runtimes and preserves explicitly customized script paths", () => {
+it("selects independent runtimes and preserves explicitly customized script paths", async () => {
   render(<Harness />)
   fireEvent.click(screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" }))
-  fireEvent.change(screen.getByLabelText("Agent runtime"), { target: { value: "powershell" } })
+  await selectOption(screen.getByLabelText("Agent runtime"), "powershell")
   expect(screen.getByLabelText("Bootstrap executable")).toHaveValue("cognia-bootstrap.ps1")
   expect(screen.getByLabelText("Shell executable")).toHaveValue("pwsh")
   expect(JSON.parse(screen.getByTestId("value").textContent!)).toMatchObject({
     runtime: "powershell",
   })
-  fireEvent.change(screen.getByLabelText("Agent runtime"), { target: { value: "bash" } })
+  await selectOption(screen.getByLabelText("Agent runtime"), "bash")
   expect(screen.getByLabelText("Bootstrap executable")).toHaveValue("cognia-bootstrap.sh")
   fireEvent.change(screen.getByLabelText("Bootstrap executable"), {
     target: { value: "/custom/agent" },
   })
-  fireEvent.change(screen.getByLabelText("Agent runtime"), { target: { value: "native" } })
+  await selectOption(screen.getByLabelText("Agent runtime"), "native")
   expect(screen.getByLabelText("Bootstrap executable")).toHaveValue("/custom/agent")
 })
 
-it("customizes authentication, generation parameters and the system prompt", () => {
+it("customizes authentication, generation parameters and the system prompt", async () => {
   render(<Harness />)
   fireEvent.click(screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" }))
-  fireEvent.change(screen.getByLabelText("Authentication"), { target: { value: "header" } })
+  await selectOption(screen.getByLabelText("Authentication"), "header")
   fireEvent.change(screen.getByLabelText("API key header name"), { target: { value: "X-API-Key" } })
   fireEvent.change(screen.getByLabelText("Maximum response tokens"), { target: { value: "4096" } })
   fireEvent.change(screen.getByLabelText("Temperature"), { target: { value: "0.3" } })
@@ -209,10 +206,10 @@ it("round-trips advanced tools/context and retains invalid edits with a visible 
   expect(JSON.parse(screen.getByTestId("value").textContent!)).not.toHaveProperty("tools")
 })
 
-it("edits tools, compaction, budgets and reuse through structured controls", () => {
+it("edits tools, compaction, budgets and reuse through structured controls", async () => {
   render(<Harness />)
   fireEvent.click(screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" }))
-  fireEvent.change(screen.getByLabelText("Tool schema profile"), { target: { value: "dsh" } })
+  await selectOption(screen.getByLabelText("Tool schema profile"), "dsh")
   fireEvent.change(screen.getByLabelText("Shell executable"), {
     target: { value: "/usr/bin/bash" },
   })
@@ -239,7 +236,7 @@ it("edits tools, compaction, budgets and reuse through structured controls", () 
   ).toMatchObject({ tools: { editor: false }, reuse: { outputs: ["node_modules"] } })
 })
 
-it("preserves valid JSON text and the caret while editing, then reflects structured edits after blur", () => {
+it("preserves valid JSON text and the caret while editing, then reflects structured edits after blur", async () => {
   render(<Harness />)
   fireEvent.click(screen.getByRole("switch", { name: "Use a bootstrap Agent for initialization" }))
   const editor = screen.getByLabelText("Advanced configuration JSON") as HTMLTextAreaElement
@@ -253,6 +250,6 @@ it("preserves valid JSON text and the caret while editing, then reflects structu
     tools: { editor: false },
   })
   fireEvent.blur(editor)
-  fireEvent.change(screen.getByLabelText("Tool schema profile"), { target: { value: "dsh" } })
+  await selectOption(screen.getByLabelText("Tool schema profile"), "dsh")
   expect(JSON.parse(editor.value)).toEqual({ tools: { editor: false, profile: "dsh" } })
 })

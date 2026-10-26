@@ -4,7 +4,8 @@
  */
 
 import { useMemo, useCallback } from "react"
-import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
+import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore, type CustomModeConfig } from "@/stores/agent/custom-mode-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 
@@ -46,7 +47,6 @@ export interface UseAgentModeResult {
   isPluginMode: (id: string) => boolean
 
   // Mode configuration helpers
-  getModeSystemPrompt: (id: string) => string
   getModeTools: (id: string) => string[]
   getModeOutputFormat: (id: string) => "text" | "code" | "html" | "react" | "markdown"
 }
@@ -170,15 +170,6 @@ export function useAgentMode(options: UseAgentModeOptions = {}): UseAgentModeRes
     [customModesMap, recordModeUsage]
   )
 
-  // Get mode system prompt
-  const getModeSystemPrompt = useCallback(
-    (id: string): string => {
-      const mode = getModeById(id)
-      return mode?.systemPrompt || ""
-    },
-    [getModeById]
-  )
-
   // Get mode tools
   const getModeTools = useCallback(
     (id: string): string[] => {
@@ -212,7 +203,6 @@ export function useAgentMode(options: UseAgentModeOptions = {}): UseAgentModeRes
     isCustomMode,
     isBuiltInMode,
     isPluginMode,
-    getModeSystemPrompt,
     getModeTools,
     getModeOutputFormat,
   }

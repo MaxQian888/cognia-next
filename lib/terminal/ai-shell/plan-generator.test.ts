@@ -11,6 +11,10 @@ import {
 } from "./plan-generator"
 import type { AiShellContext } from "./types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function makeContext(overrides?: Partial<AiShellContext>): AiShellContext {
   return {
@@ -64,6 +68,10 @@ const VALID_PLAN_RESPONSE = JSON.stringify({
 describe("ai-shell/plan-generator", () => {
   beforeEach(() => {
     __resetPlanIdCounterForTesting()
+  })
+
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
   })
 
   describe("buildPlanSystemPrompt", () => {
@@ -122,6 +130,61 @@ describe("ai-shell/plan-generator", () => {
   })
 
   describe("generatePlan", () => {
+    it.each(["complete", "stream"] as const)(
+      "sends the published plan prompt override through %s",
+      async (method) => {
+        __setPromptOverrideSnapshotForTests(
+          buildPromptOverrideSnapshot("ai-shell-test", [
+            {
+              bindingId: "plan-override",
+              revisionId: `plan-${method}`,
+              promptId: "developer.ai-shell.plan",
+              scope: "account",
+              targetId: "",
+              contractVersion: 1,
+              body: 'Planner override. Maximum {{maxSteps}} steps. "reasoning" "steps" "command" "description" "requiresConfirmation"',
+            },
+          ])
+        )
+        const client = mockClient(VALID_PLAN_RESPONSE)
+        if (method === "complete") delete client.stream
+        const call = jest.spyOn(client, method)
+
+        const plan = await generatePlan(
+          "deploy",
+          makeContext(),
+          { getClient: () => client },
+          { maxSteps: 7 }
+        )
+
+        expect(plan.status).toBe("ready")
+        expect(call).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            system: expect.stringContaining("Planner override. Maximum 7 steps."),
+          })
+        )
+      }
+    )
+
+    it("PII-gates both the resolved system prompt and terminal context before sending", async () => {
+      const client = mockClient(VALID_PLAN_RESPONSE)
+      const send = jest.spyOn(client, "stream")
+      const isPiiSafe = jest.fn((text: string) => !text.includes("expert terminal command planner"))
+
+      const plan = await generatePlan("deploy", makeContext(), {
+        getClient: () => client,
+        isPiiSafe,
+      })
+
+      expect(plan.status).toBe("error")
+      expect(isPiiSafe).toHaveBeenCalledWith(expect.stringContaining("deploy"))
+      expect(isPiiSafe).toHaveBeenCalledWith(
+        expect.stringContaining("expert terminal command planner")
+      )
+      expect(send).not.toHaveBeenCalled()
+    })
+
     it("generates a valid plan from LLM response", async () => {
       const client = mockClient(VALID_PLAN_RESPONSE)
       const plan = await generatePlan("deploy to staging", makeContext(), {

@@ -280,7 +280,7 @@ async function driveTurnComplete(input: TurnCompleteInput): Promise<TurnComplete
     signal,
     temperature: goal.config.judgeTemperature,
     maxTokens: goal.config.judgeMaxTokens,
-    system: resolveJudgeSystemPrompt(goal),
+    system: await resolveJudgeSystemPrompt(goal),
     firer: input.firer,
     hookContext: input.hookContext ?? {
       agentId: "goal-judge",

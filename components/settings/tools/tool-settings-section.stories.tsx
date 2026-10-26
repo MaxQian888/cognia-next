@@ -27,8 +27,29 @@ type Story = StoryObj<typeof meta>
 // (web branch) behind the desktop-required alert.
 export const Default: Story = {}
 
-// Web tools explicitly disabled → the web-tools card dims and its native
-// toggle collapses.
+// A pre-upgrade shared preference is shown as inherited for both operations.
+export const InheritedCogniaPreference: Story = {
+  beforeEach: () => {
+    resetStore(useSettingsStore)
+    seedStore(useSettingsStore, {
+      settings: makeAppSettings({ webTools: { enabled: true, preferCognia: true } }),
+    })
+  },
+}
+
+// Keep native search while reading through Cognia Reader, without a search key.
+export const IndependentOperationPreferences: Story = {
+  beforeEach: () => {
+    resetStore(useSettingsStore)
+    seedStore(useSettingsStore, {
+      settings: makeAppSettings({
+        webTools: { enabled: true, preferCogniaSearch: false, preferCogniaFetch: true },
+      }),
+    })
+  },
+}
+
+// Web tools explicitly disabled → the card dims and operation controls collapse.
 export const WebToolsOff: Story = {
   beforeEach: () => {
     resetStore(useSettingsStore)

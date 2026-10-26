@@ -5,7 +5,7 @@ description: "公开 `/status` 页面通过协议探针报告官方中继（`sig
 
 # ADR 0211 — 公开状态页只报告它实际测量的中继
 
-**状态：** 已采纳**日期：** 2026-10-02 **相关：** [ADR-0170](./0170-cognia-relay-and-connectivity-center)（中继与连接中心）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（WebRTC/WAN 传输）、[ADR-0037](./0037-public-share-links)（公开独立 Worker 模式）、[ADR-0092](./0092-official-website-workspace)（静态公开站点）**计划：** [`docs/plans/2026-10-02-signaling-public-status-implementation.md`](https://github.com/MaxQian888/cognia-next/blob/dev/docs/plans/2026-10-02-signaling-public-status-implementation.md)
+**状态：** 已采纳**日期：** 2026-10-02 **相关：** [ADR-0170](./0170-cognia-relay-and-connectivity-center)（中继与连接中心）、[ADR-0021](./0021-webrtc-datachannel-wan-transport)（WebRTC/WAN 传输）、[ADR-0037](./0037-public-share-links)（公开独立 Worker 模式）、[ADR-0092](./0092-official-website-workspace)（静态公开站点）**计划：** [`docs/plans/2026-10-02-signaling-public-status-implementation.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/plans/2026-10-02-signaling-public-status-implementation.md)
 
 ## 背景
 

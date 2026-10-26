@@ -15,7 +15,7 @@
 //! Rust — deliberately duplicating what RLS does — so that a route which
 //! forgets to scope a query fails a test rather than passing one and leaking in
 //! production. That is a mitigation, not a substitute: the policies themselves
-//! need a live database, the way `services/diagnostic-server` proves its own
+//! need a live database, the way `cognia-services/services/diagnostic-server` proves its own
 //! through `compose-e2e`.
 
 use std::collections::HashMap;
@@ -30,6 +30,9 @@ use rustls::{ClientConfig, RootCertStore};
 use tokio_postgres::Config;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
+use crate::auth::{authorize_org_role_mutation, authorize_workspace_role_mutation};
+use crate::rollout::{FeatureKey, FeaturePolicy};
+
 use crate::model::{
     ActorError, CollabActor, Issue, IssueEvent, IssuePriority, IssueStatus, Plan, PlanStatus,
     PlanStep, PlanStepKind, PlanStepStatus, Run, RunArtifact, RunKind, RunStatus,
@@ -37,8 +40,12 @@ use crate::model::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("feature unavailable: {0:?}")]
+    FeatureUnavailable(crate::rollout::FeatureDecision),
     #[error("not found")]
     NotFound,
+    #[error("forbidden")]
+    Forbidden,
     #[error("stored row is unreadable: {0}")]
     Corrupt(String),
     #[error("database error: {0}")]
@@ -54,6 +61,8 @@ pub enum StoreError {
     },
     #[error("the last active organization owner cannot be removed or downgraded")]
     LastOwner,
+    #[error("ownership_conflict")]
+    OwnershipConflict,
     #[error("invitation is expired, revoked, or already redeemed")]
     InvitationUnavailable,
     #[error("authorization policy rejected the mutation: {0}")]
@@ -741,6 +750,17 @@ pub fn ended_at_for(terminal: bool, previous: Option<i64>, now: i64) -> Option<i
 
 #[async_trait]
 pub trait Store: Send + Sync {
+    async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError>;
+    async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError>;
+    async fn apply_feature_policy(
+        &self, document: FeaturePolicy, base_revision: i64, operation_id: &str,
+        reason: &str, principal: &str,
+    ) -> Result<FeaturePolicy, StoreError>;
+
+    /// Database RLS is absent for stores without a PostgreSQL connection.
+    fn rls_status(&self) -> RlsStatus { RlsStatus::Bypassed }
+    fn in_memory_chat_store(&self) -> Option<crate::chat_store::InMemoryChatStore> { None }
+    fn in_memory_session_file_store(&self) -> Option<crate::session_files::InMemorySessionFileStore> { None }
     /// What `user_id` may do in `org_id` / `workspace_id`.
     ///
     /// Returns the two raw memberships; collapsing them into a decision is
@@ -910,7 +930,13 @@ pub trait Store: Send + Sync {
         user_id: &str,
         role: OrgRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
+
+    /// Atomically promote the target, step down the actor, and audit the transfer.
+    async fn transfer_org_ownership(
+        &self, org_id: &str, to_user_id: &str, previous_owner_role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<Vec<String>, StoreError>;
 
     /// Removes all organization and workspace standing and revokes outstanding
     /// invitations created by the offboarded person in one transaction.
@@ -919,7 +945,7 @@ pub trait Store: Send + Sync {
         org_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
 
     async fn set_workspace_member(
         &self,
@@ -928,7 +954,7 @@ pub trait Store: Send + Sync {
         user_id: &str,
         role: WorkspaceRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
 
     async fn remove_workspace_member(
         &self,
@@ -936,7 +962,7 @@ pub trait Store: Send + Sync {
         workspace_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError>;
+    ) -> Result<Vec<String>, StoreError>;
 
     async fn append_authorization_audit(
         &self,
@@ -1012,6 +1038,58 @@ pub trait Store: Send + Sync {
     ) -> Result<Run, StoreError>;
 }
 
+// The digest includes the complete request, while the bounded audit summary
+// names changed fields only. Historical results survive subsequent applies.
+#[derive(Clone)]
+struct FeaturePolicyReplay {
+    // Retained for parity with the append-only PostgreSQL audit, which is
+    // intentionally not exposed through the application Store read API.
+    #[allow(dead_code)]
+    audit: serde_json::Value,
+    request_sha256: String,
+    document: FeaturePolicy,
+}
+
+fn policy_db_error(error: tokio_postgres::Error) -> StoreError {
+    StoreError::Database(error.to_string())
+}
+
+fn policy_conflict() -> StoreError {
+    StoreError::Conflict(serde_json::json!({"error": "feature_policy_conflict"}))
+}
+
+fn policy_request_digest(
+    document: &FeaturePolicy, base_revision: i64, operation_id: &str, reason: &str, principal: &str,
+) -> Result<String, StoreError> {
+    use sha2::{Digest, Sha256};
+    document.validate().map_err(|e| StoreError::Policy(e.to_string()))?;
+    if base_revision < 0 || base_revision == i64::MAX {
+        return Err(StoreError::Policy("base_revision must be non-negative and incrementable".into()));
+    }
+    if operation_id.trim().is_empty() || reason.trim().is_empty() || principal.trim().is_empty() {
+        return Err(StoreError::Policy("operation_id, reason and principal must be non-empty".into()));
+    }
+    let request = serde_json::json!({
+        "document": document, "base_revision": base_revision, "operation_id": operation_id,
+        "reason": reason, "principal": principal,
+    });
+    Ok(hex::encode(Sha256::digest(request.to_string().as_bytes())))
+}
+
+fn policy_summary(old: Option<&FeaturePolicy>, new: &FeaturePolicy, digest: &str) -> serde_json::Value {
+    let old = serde_json::json!(old);
+    let new = serde_json::json!(new);
+    let changed: Vec<_> = new.as_object().expect("policy is an object").iter()
+        .filter(|(key, value)| old.get(*key) != Some(*value))
+        .map(|(key, _)| key.clone()).collect();
+    serde_json::json!({"changed_fields": changed, "request_sha256": digest})
+}
+
+fn stored_policy(value: serde_json::Value) -> Result<FeaturePolicy, StoreError> {
+    crate::rollout::validate_document(&value.to_string())
+        .map_err(|error| StoreError::Corrupt(error.to_string()))
+}
+
 // ── In-memory ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -1023,15 +1101,20 @@ struct BootstrapCredentialRow {
 }
 
 #[derive(Default)]
-struct Tables {
-    org_memberships: HashMap<(String, String), OrgRole>,
+pub(crate) struct Tables {
+    pub(crate) feature_policies: HashMap<FeatureKey, FeaturePolicy>,
+    pub(crate) canvas: HashMap<String, crate::canvas_store::MemoryDocument>,
+    feature_policy_replays: HashMap<String, FeaturePolicyReplay>,
+    pub(crate) chat: crate::chat_store::MemoryTables,
+    pub(crate) session_files: crate::session_files::MemoryFileTables,
+    pub(crate) org_memberships: HashMap<(String, String), OrgRole>,
     /// `org_id -> display name`, for the account membership listing.
     org_names: HashMap<String, String>,
     provisioning: HashMap<String, ProvisioningOperation>,
     bootstrap_credentials: HashMap<String, BootstrapCredentialRow>,
     /// `(org_id, workspace_id, user_id) -> role`. The tenant belongs in the
     /// key: workspace ids are only unique inside an organization.
-    workspace_memberships: HashMap<(String, String, String), WorkspaceRole>,
+    pub(crate) workspace_memberships: HashMap<(String, String, String), WorkspaceRole>,
     /// `org_id -> logto organization id`
     org_logto_ids: HashMap<String, String>,
     /// `(org_id, provider, tenant, subject) -> user_id`
@@ -1042,7 +1125,7 @@ struct Tables {
     /// second table the test double does not have.
     users: HashMap<String, String>,
     invitations: HashMap<String, (String, Invitation)>,
-    authorization_audit: Vec<AuthorizationAuditEvent>,
+    pub(crate) authorization_audit: Vec<AuthorizationAuditEvent>,
     issues: HashMap<String, Issue>,
     events: Vec<(String, IssueEvent)>,
     /// Plans always hold `steps: Some(..)` in here; `list_plans` strips them,
@@ -1058,7 +1141,7 @@ struct Tables {
 /// Test double. Scopes by `org_id` in Rust on purpose — see the module note.
 #[derive(Default, Clone)]
 pub struct InMemoryStore {
-    tables: Arc<RwLock<Tables>>,
+    pub(crate) tables: Arc<RwLock<Tables>>,
 }
 
 impl InMemoryStore {
@@ -1157,6 +1240,43 @@ impl InMemoryStore {
     }
 }
 
+/// Org mutations share offboarding's standing barrier and lock owners plus
+/// their participants in one ascending user-id order. In particular, transfer
+/// never locks its target behind a separately locked (possibly larger) owner.
+async fn pg_lock_org_memberships(
+    transaction: &tokio_postgres::Transaction<'_>, org_id: &str, participants: &[&str],
+) -> Result<Vec<tokio_postgres::Row>, StoreError> {
+    crate::chat_store::pg_lock_invite_standing(transaction, org_id, true).await?;
+    transaction.query(
+        "SELECT user_id, role FROM org_memberships WHERE org_id=$1 AND (role='owner' OR user_id=ANY($2)) ORDER BY user_id FOR UPDATE",
+        &[&org_id, &participants],
+    ).await.map_err(|error| StoreError::Database(error.to_string()))
+}
+
+fn locked_org_role(rows: &[tokio_postgres::Row], user_id: &str) -> Result<Option<OrgRole>, StoreError> {
+    rows.iter().find(|row| row.get::<_, String>("user_id") == user_id)
+        .map(|row| OrgRole::parse(&row.get::<_, String>("role")).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose()
+}
+
+async fn pg_authorize_workspace_mutation(
+    transaction: &tokio_postgres::Transaction<'_>, org_id: &str, workspace_id: &str,
+    actor: &str, target: &str, requested: Option<WorkspaceRole>,
+) -> Result<Option<WorkspaceRole>, StoreError> {
+    // Take the standing barrier, sorted org locks, then sorted workspace locks
+    // for BOTH participants. Every membership mutation follows this order.
+    let org_rows = pg_lock_org_memberships(transaction, org_id, &[actor, target]).await?;
+    let participants = [actor, target];
+    let rows = transaction.query(
+        "SELECT user_id, role FROM workspace_memberships WHERE org_id=$1 AND workspace_id=$2 AND user_id=ANY($3) ORDER BY user_id FOR UPDATE",
+        &[&org_id, &workspace_id, &&participants[..]],
+    ).await.map_err(|e| StoreError::Database(e.to_string()))?;
+    let role = |user: &str| rows.iter().find(|row| row.get::<_, String>("user_id") == user)
+        .map(|row| WorkspaceRole::parse(&row.get::<_, String>("role")).map_err(|e| StoreError::Corrupt(e.to_string()))).transpose();
+    let target_role = role(target)?;
+    authorize_workspace_role_mutation(locked_org_role(&org_rows, actor)?, role(actor)?, target_role, requested)?;
+    Ok(target_role)
+}
+
 fn ensure_another_owner(
     memberships: &HashMap<(String, String), OrgRole>,
     org_id: &str,
@@ -1243,6 +1363,45 @@ fn membership_audit_event(
 
 #[async_trait]
 impl Store for InMemoryStore {
+    async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
+        Ok(self.tables.read().feature_policies.get(&key).cloned())
+    }
+
+    async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError> {
+        let tables = self.tables.read();
+        Ok(FeatureKey::ALL.into_iter().filter_map(|key| tables.feature_policies.get(&key).cloned()).collect())
+    }
+
+    async fn apply_feature_policy(
+        &self, mut document: FeaturePolicy, base_revision: i64, operation_id: &str,
+        reason: &str, principal: &str,
+    ) -> Result<FeaturePolicy, StoreError> {
+        let digest = policy_request_digest(&document, base_revision, operation_id, reason, principal)?;
+        let mut tables = self.tables.write();
+        if let Some(replay) = tables.feature_policy_replays.get(operation_id) {
+            return if replay.request_sha256 == digest { Ok(replay.document.clone()) } else { Err(policy_conflict()) };
+        }
+        let current = tables.feature_policies.get(&document.feature_key);
+        if current.map_or(0, |policy| policy.revision) != base_revision { return Err(policy_conflict()); }
+        document.revision = base_revision + 1;
+        let audit = serde_json::json!({
+            "old_revision": base_revision, "new_revision": document.revision,
+            "principal": principal, "reason": reason,
+            "summary": policy_summary(current, &document, &digest),
+        });
+        tables.feature_policy_replays.insert(operation_id.into(), FeaturePolicyReplay {
+            audit, request_sha256: digest, document: document.clone(),
+        });
+        tables.feature_policies.insert(document.feature_key, document.clone());
+        Ok(document)
+    }
+
+    fn in_memory_session_file_store(&self) -> Option<crate::session_files::InMemorySessionFileStore> {
+        Some(crate::session_files::InMemorySessionFileStore::from_store(self))
+    }
+    fn in_memory_chat_store(&self) -> Option<crate::chat_store::InMemoryChatStore> {
+        Some(crate::chat_store::InMemoryChatStore::from_store(self))
+    }
     async fn membership(
         &self,
         org_id: &str,
@@ -1751,17 +1910,22 @@ impl Store for InMemoryStore {
         user_id: &str,
         role: OrgRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         if !tables.users.contains_key(user_id) {
             return Err(StoreError::NotFound);
         }
         let key = (org_id.to_owned(), user_id.to_owned());
         let old = tables.org_memberships.get(&key).copied();
+        let actor = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        authorize_org_role_mutation(actor, old, Some(role))?;
         if old == Some(OrgRole::Owner) && role != OrgRole::Owner {
             ensure_another_owner(&tables.org_memberships, org_id, user_id)?;
         }
         tables.org_memberships.insert(key, role);
+        let affected = if old.is_some_and(OrgRole::can_traverse_workspaces) && role == OrgRole::Member {
+            crate::chat_store::memory_cleanup_standing(&mut tables, org_id, None, user_id, false, context.now)
+        } else { Vec::new() };
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             None,
@@ -1771,7 +1935,34 @@ impl Store for InMemoryStore {
             Some(role.as_str().to_owned()),
             context,
         ));
-        Ok(())
+        Ok(affected)
+    }
+
+    async fn transfer_org_ownership(
+        &self, org_id: &str, to_user_id: &str, previous_owner_role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut tables = self.tables.write();
+        let actor = context.actor_user_id.clone();
+        if actor == to_user_id || previous_owner_role == OrgRole::Owner {
+            return Err(StoreError::Policy("invalid ownership transfer".into()));
+        }
+        if tables.org_memberships.get(&(org_id.into(), actor.clone())) != Some(&OrgRole::Owner) {
+            return Err(StoreError::OwnershipConflict);
+        }
+        let target_key = (org_id.to_owned(), to_user_id.to_owned());
+        let old = tables.org_memberships.get(&target_key).copied().ok_or(StoreError::NotFound)?;
+        if old == OrgRole::Owner { return Err(StoreError::OwnershipConflict); }
+        tables.org_memberships.insert(target_key, OrgRole::Owner);
+        tables.org_memberships.insert((org_id.into(), actor.clone()), previous_owner_role);
+        let affected = if previous_owner_role == OrgRole::Member {
+            crate::chat_store::memory_cleanup_standing(&mut tables, org_id, None, &actor, false, context.now)
+        } else { Vec::new() };
+        tables.authorization_audit.push(membership_audit_event(
+            org_id, None, to_user_id, "org.ownership.transferred",
+            Some(old.as_str().into()), Some("owner".into()), context,
+        ));
+        Ok(affected)
     }
 
     async fn offboard_org_member(
@@ -1779,7 +1970,7 @@ impl Store for InMemoryStore {
         org_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         let key = (org_id.to_owned(), user_id.to_owned());
         let old = tables
@@ -1787,6 +1978,14 @@ impl Store for InMemoryStore {
             .get(&key)
             .copied()
             .ok_or(StoreError::NotFound)?;
+        let actor = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        authorize_org_role_mutation(actor, Some(old), None)?;
+        // HTTP authorization records its target snapshot. Direct store callers
+        // may omit it, retaining the existing offboarding API behavior.
+        if context.source.get("expectedTargetOrgRole").and_then(serde_json::Value::as_str)
+            .is_some_and(|expected| expected != old.as_str()) {
+            return Err(StoreError::OwnershipConflict);
+        }
         if old == OrgRole::Owner {
             ensure_another_owner(&tables.org_memberships, org_id, user_id)?;
         }
@@ -1803,6 +2002,8 @@ impl Store for InMemoryStore {
                 invitation.revoked_at = Some(context.now);
             }
         }
+        crate::chat_store::memory_revoke_offboarded_invites(&mut tables, org_id, user_id);
+        let affected = crate::chat_store::memory_cleanup_standing(&mut tables, org_id, None, user_id, true, context.now);
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             None,
@@ -1812,7 +2013,7 @@ impl Store for InMemoryStore {
             None,
             context,
         ));
-        Ok(())
+        Ok(affected)
     }
 
     async fn set_workspace_member(
@@ -1822,7 +2023,7 @@ impl Store for InMemoryStore {
         user_id: &str,
         role: WorkspaceRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
         if !tables.users.contains_key(user_id)
             || !tables
@@ -1831,12 +2032,19 @@ impl Store for InMemoryStore {
         {
             return Err(StoreError::NotFound);
         }
+        let actor_org = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        let actor_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), context.actor_user_id.clone())).copied();
+        let target_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), user_id.to_owned())).copied();
+        authorize_workspace_role_mutation(actor_org, actor_workspace, target_workspace, Some(role))?;
         let key = (
             org_id.to_owned(),
             workspace_id.to_owned(),
             user_id.to_owned(),
         );
         let old = tables.workspace_memberships.insert(key, role);
+        let affected = if old.is_some_and(|old| old.capability().permits(role.capability()) && old != role) {
+            crate::chat_store::memory_cleanup_standing(&mut tables, org_id, Some(workspace_id), user_id, false, context.now)
+        } else { Vec::new() };
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -1846,7 +2054,7 @@ impl Store for InMemoryStore {
             Some(role.as_str().to_owned()),
             context,
         ));
-        Ok(())
+        Ok(affected)
     }
 
     async fn remove_workspace_member(
@@ -1855,8 +2063,12 @@ impl Store for InMemoryStore {
         workspace_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut tables = self.tables.write();
+        let actor_org = tables.org_memberships.get(&(org_id.to_owned(), context.actor_user_id.clone())).copied();
+        let actor_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), context.actor_user_id.clone())).copied();
+        let target_workspace = tables.workspace_memberships.get(&(org_id.to_owned(), workspace_id.to_owned(), user_id.to_owned())).copied();
+        authorize_workspace_role_mutation(actor_org, actor_workspace, target_workspace, None)?;
         let old = tables
             .workspace_memberships
             .remove(&(
@@ -1865,6 +2077,9 @@ impl Store for InMemoryStore {
                 user_id.to_owned(),
             ))
             .ok_or(StoreError::NotFound)?;
+        // Recomputed, not forced: the seat is already gone, and an org owner or
+        // admin keeps the standing their org role gives them.
+        let affected = crate::chat_store::memory_cleanup_standing(&mut tables, org_id, Some(workspace_id), user_id, false, context.now);
         tables.authorization_audit.push(membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -1874,7 +2089,7 @@ impl Store for InMemoryStore {
             None,
             context,
         ));
-        Ok(())
+        Ok(affected)
     }
 
     async fn append_authorization_audit(
@@ -2388,6 +2603,43 @@ const ISSUE_COLUMNS: &str = "id, org_id, workspace_id, issue_project_id, title, 
 
 pub struct PgStore {
     pool: Pool,
+    rls_status: RlsStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RlsStatus {
+    Enforced,
+    Bypassed,
+}
+
+/// Boot configuration carries credentials, so deliberately does not implement Debug.
+#[derive(Default)]
+pub struct PgConnectOptions<'a> {
+    pub migration_database_url: Option<&'a str>,
+    pub app_db_role: Option<&'a str>,
+    pub app_db_password: Option<&'a str>,
+    pub allow_privileged_db_role: bool,
+}
+
+fn application_rls_status(
+    role: &str,
+    superuser: bool,
+    bypass_rls: bool,
+    allow_privileged: bool,
+) -> anyhow::Result<RlsStatus> {
+    if !superuser && !bypass_rls {
+        return Ok(RlsStatus::Enforced);
+    }
+    if !allow_privileged {
+        anyhow::bail!(
+            "application database role {role:?} is SUPERUSER or BYPASSRLS and bypasses row-level security. \
+             Use a NOSUPERUSER NOBYPASSRLS role for COLLAB_DATABASE_URL and an admin \
+             COLLAB_MIGRATION_DATABASE_URL (with COLLAB_APP_DB_ROLE and COLLAB_APP_DB_PASSWORD to provision it). \
+             Only for an intentional bypass, set COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true."
+        );
+    }
+    Ok(RlsStatus::Bypassed)
 }
 
 pub(crate) fn ensure_crypto_provider() {
@@ -2419,6 +2671,82 @@ fn provisioning_write_error(error: tokio_postgres::Error) -> StoreError {
 
 impl PgStore {
     pub async fn connect(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        Self::connect_with_options(database_url, max_connections, PgConnectOptions::default()).await
+    }
+
+    pub async fn connect_with_options(
+        database_url: &str,
+        max_connections: usize,
+        options: PgConnectOptions<'_>,
+    ) -> anyhow::Result<Self> {
+        let mut store = Self::query_pool(database_url, max_connections)?;
+        // An explicit name lets the migrator provision a role before its first
+        // login, including upgrades of volumes containing only POSTGRES_USER.
+        let app_role = match options.app_db_role {
+            Some(role) => role.to_owned(),
+            None => store.database_role().await?.0,
+        };
+        let migrator = Self::query_pool(
+            options.migration_database_url.unwrap_or(database_url), 1,
+        )?;
+        migrator.migrate(Some((&app_role, options.app_db_password))).await?;
+        let (role, superuser, bypass_rls) = store.database_role().await?;
+        if role != app_role {
+            anyhow::bail!("COLLAB_APP_DB_ROLE {app_role:?} does not match COLLAB_DATABASE_URL current_user {role:?}");
+        }
+        store.rls_status = application_rls_status(
+            &role, superuser, bypass_rls, options.allow_privileged_db_role,
+        )?;
+        if store.rls_status == RlsStatus::Bypassed {
+            tracing::warn!(role = %role, "COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true: application database role bypasses RLS on this boot");
+        }
+        Ok(store)
+    }
+
+    /// Operator queries deliberately bypass RLS and never run migrations.
+    pub async fn connect_operator(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        let store = Self::query_pool(database_url, max_connections)?;
+        let (role, superuser, bypass_rls) = store.database_role().await?;
+        if !superuser && !bypass_rls {
+            anyhow::bail!("operator database role {role:?} needs SUPERUSER or BYPASSRLS; set COLLAB_OPERATOR_DATABASE_URL (audit-standing) or COLLAB_BOOTSTRAP_DATABASE_URL (bootstrap) to an admin URL");
+        }
+        Ok(store)
+    }
+
+    /// Deployment policies have no RLS: any role with the documented table
+    /// grants may operate them. This path never migrates or requires BYPASSRLS.
+    pub async fn connect_rollout(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        let store = Self::query_pool(database_url, max_connections)?;
+        let row = store.pool.get().await?.query_one(
+            "SELECT to_regclass('public.deployment_feature_policies') IS NOT NULL AND to_regclass('public.deployment_feature_policy_audit') IS NOT NULL", &[],
+        ).await?;
+        if !row.get::<_, bool>(0) {
+            anyhow::bail!("rollout policy tables are missing; run the server once to migrate");
+        }
+        Ok(store)
+    }
+
+    pub async fn rollout_principal(&self) -> Result<String, StoreError> {
+        Ok(self.client().await?.query_one("SELECT current_user::text", &[])
+            .await.map_err(policy_db_error)?.get(0))
+    }
+
+    /// Standalone bootstrap and integration fixtures retain admin migrations.
+    pub async fn connect_admin(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        let store = Self::connect_operator(database_url, max_connections).await?;
+        store.migrate(None).await?;
+        Ok(store)
+    }
+
+    async fn database_role(&self) -> anyhow::Result<(String, bool, bool)> {
+        let row = self.pool.get().await?.query_one(
+            "SELECT current_user::text, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user",
+            &[],
+        ).await?;
+        Ok((row.get(0), row.get(1), row.get(2)))
+    }
+
+    fn query_pool(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
         ensure_crypto_provider();
         let config: Config = database_url.parse()?;
         let native_certificates = rustls_native_certs::load_native_certs();
@@ -2448,12 +2776,10 @@ impl PgStore {
             .max_size(max_connections)
             .build()
             .map_err(|error| anyhow::anyhow!(error))?;
-        let store = Self { pool };
-        store.migrate().await?;
-        Ok(store)
+        Ok(Self { pool, rls_status: RlsStatus::Bypassed })
     }
 
-    async fn migrate(&self) -> anyhow::Result<()> {
+    async fn migrate(&self, app_role: Option<(&str, Option<&str>)>) -> anyhow::Result<()> {
         let mut client = self.pool.get().await?;
         let transaction = client.transaction().await?;
         // Concurrent service replicas may bootstrap the same empty database.
@@ -2512,6 +2838,42 @@ impl PgStore {
         transaction
             .batch_execute(include_str!("../migrations/0015_session_files.sql"))
             .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0016_feature_rollout.sql"))
+            .await?;
+        transaction
+            .batch_execute(include_str!("../migrations/0017_collab_contract_pinning.sql"))
+            .await?;
+        if let Some((role, password)) = app_role {
+            // PostgreSQL quotes both the identifier and password literal; no
+            // operator-supplied text is interpolated as SQL syntax.
+            let quoted = transaction.query_one(
+                "SELECT quote_ident($1::text), quote_literal($2::text)", &[&role, &password],
+            ).await?;
+            let identifier: String = quoted.get(0);
+            let exists: bool = transaction.query_one(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", &[&role],
+            ).await?.get(0);
+            if !exists {
+                let password: Option<String> = quoted.get(1);
+                let password = password.ok_or_else(|| anyhow::anyhow!(
+                    "application database role {role:?} does not exist; set COLLAB_APP_DB_PASSWORD so the migrator can create it"
+                ))?;
+                transaction.batch_execute(&format!(
+                    "CREATE ROLE {identifier} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD {password}"
+                )).await?;
+            }
+            transaction.batch_execute(&format!(
+                "GRANT USAGE ON SCHEMA public TO {identifier}; \
+                 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {identifier}; \
+                 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {identifier}; \
+                 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {identifier}; \
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {identifier}; \
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {identifier}; \
+                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO {identifier}; \
+                 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON deployment_feature_policies, deployment_feature_policy_audit FROM {identifier};"
+            )).await?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -2725,6 +3087,20 @@ impl PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
         Ok(())
+    }
+
+    /// One bounded deployment-policy snapshot, including every transitive
+    /// prerequisite, for both capability projection and transactional admission.
+    pub(crate) async fn feature_policies_in(client: &impl tokio_postgres::GenericClient) -> Result<Vec<FeaturePolicy>, StoreError> {
+        let rows = client.query("SELECT document FROM deployment_feature_policies", &[]).await.map_err(policy_db_error)?;
+        let mut policies = rows.into_iter().map(|row| stored_policy(row.get(0))).collect::<Result<Vec<_>, _>>()?;
+        policies.sort_by_key(|policy| FeatureKey::ALL.iter().position(|key| *key == policy.feature_key));
+        Ok(policies)
+    }
+
+    pub(crate) async fn feature_policy_in(client: &impl tokio_postgres::GenericClient, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
+        let row = client.query_opt("SELECT document FROM deployment_feature_policies WHERE feature_key = $1", &[&key.as_str()]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        row.map(|row| stored_policy(row.get(0))).transpose()
     }
 
     pub(crate) async fn client(&self) -> Result<deadpool_postgres::Client, StoreError> {
@@ -3114,6 +3490,56 @@ async fn insert_authorization_audit(
 
 #[async_trait]
 impl Store for PgStore {
+    async fn feature_policy(&self, key: FeatureKey) -> Result<Option<FeaturePolicy>, StoreError> {
+        Self::feature_policy_in(&**self.client().await?, key).await
+    }
+
+    async fn feature_policies(&self) -> Result<Vec<FeaturePolicy>, StoreError> {
+        Self::feature_policies_in(&**self.client().await?).await
+    }
+
+    async fn apply_feature_policy(
+        &self, mut document: FeaturePolicy, base_revision: i64, operation_id: &str,
+        reason: &str, principal: &str,
+    ) -> Result<FeaturePolicy, StoreError> {
+        let digest = policy_request_digest(&document, base_revision, operation_id, reason, principal)?;
+        let mut client = self.client().await?;
+        let transaction = client.transaction().await.map_err(policy_db_error)?;
+        // Operator writes are rare. One deployment lock serializes both absent
+        // rows and operation ids shared across different feature keys.
+        transaction.batch_execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('cognia.collab.feature-policies', 0))",
+        ).await.map_err(policy_db_error)?;
+        if let Some(row) = transaction.query_opt(
+            "SELECT summary->>'request_sha256', document FROM deployment_feature_policy_audit WHERE operation_id = $1",
+            &[&operation_id],
+        ).await.map_err(policy_db_error)? {
+            return if row.get::<_, String>(0) == digest { stored_policy(row.get(1)) } else { Err(policy_conflict()) };
+        }
+        let current = transaction.query_opt(
+            "SELECT revision, document FROM deployment_feature_policies WHERE feature_key = $1 FOR UPDATE",
+            &[&document.feature_key.as_str()],
+        ).await.map_err(policy_db_error)?;
+        if current.as_ref().map_or(0, |row| row.get::<_, i64>(0)) != base_revision { return Err(policy_conflict()); }
+        let old = current.map(|row| stored_policy(row.get(1))).transpose()?;
+        document.revision = base_revision + 1;
+        let summary = policy_summary(old.as_ref(), &document, &digest);
+        let value = serde_json::json!(document);
+        transaction.execute(
+            "INSERT INTO deployment_feature_policies (feature_key, revision, document, updated_by, reason, operation_id) VALUES ($1,$2,$3,$4,$5,$6) \
+             ON CONFLICT (feature_key) DO UPDATE SET revision=EXCLUDED.revision, document=EXCLUDED.document, updated_at=now(), updated_by=EXCLUDED.updated_by, reason=EXCLUDED.reason, operation_id=EXCLUDED.operation_id",
+            &[&document.feature_key.as_str(), &document.revision, &value, &principal, &reason, &operation_id],
+        ).await.map_err(policy_db_error)?;
+        transaction.execute(
+            "INSERT INTO deployment_feature_policy_audit (id, feature_key, old_revision, new_revision, operation_id, principal, reason, summary, document) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            &[&uuid::Uuid::new_v4(), &document.feature_key.as_str(), &base_revision, &document.revision, &operation_id, &principal, &reason, &summary, &value],
+        ).await.map_err(policy_db_error)?;
+        transaction.commit().await.map_err(policy_db_error)?;
+        Ok(document)
+    }
+
+    fn rls_status(&self) -> RlsStatus { self.rls_status }
+
     async fn membership(
         &self,
         org_id: &str,
@@ -3896,25 +4322,15 @@ impl Store for PgStore {
         user_id: &str,
         role: OrgRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        let owner_rows = transaction
-            .query(
-                "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
-                &[&org_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?;
-        let old = transaction
-            .query_opt(
-                "SELECT role FROM org_memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
-                &[&org_id, &user_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?
-            .map(|row| row.get::<_, String>("role"));
-        if old.as_deref() == Some("owner") && role != OrgRole::Owner && owner_rows.len() <= 1 {
+        let owner_rows = pg_lock_org_memberships(&transaction, org_id, &[&context.actor_user_id, user_id]).await?;
+        let actor = locked_org_role(&owner_rows, &context.actor_user_id)?;
+        let target = locked_org_role(&owner_rows, user_id)?;
+        authorize_org_role_mutation(actor, target, Some(role))?;
+        let old = target.map(|role| role.as_str().to_owned());
+        if old.as_deref() == Some("owner") && role != OrgRole::Owner && owner_rows.iter().filter(|row| row.get::<_, String>("role") == "owner").count() <= 1 {
             return Err(StoreError::LastOwner);
         }
         transaction
@@ -3926,6 +4342,9 @@ impl Store for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let affected = if old.as_deref().and_then(|r| OrgRole::parse(r).ok()).is_some_and(OrgRole::can_traverse_workspaces) && role == OrgRole::Member {
+            crate::chat_store::pg_cleanup_standing(&transaction, org_id, None, user_id, false, context.now).await?
+        } else { Vec::new() };
         let event = membership_audit_event(
             org_id,
             None,
@@ -3940,7 +4359,35 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
+    }
+
+    async fn transfer_org_ownership(
+        &self, org_id: &str, to_user_id: &str, previous_owner_role: OrgRole,
+        context: AuthorizationContext,
+    ) -> Result<Vec<String>, StoreError> {
+        let actor = context.actor_user_id.clone();
+        if actor == to_user_id || previous_owner_role == OrgRole::Owner {
+            return Err(StoreError::Policy("invalid ownership transfer".into()));
+        }
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let rows = pg_lock_org_memberships(&transaction, org_id, &[&actor, to_user_id]).await?;
+        let role = |user: &str| rows.iter().find(|r| r.get::<_, String>("user_id") == user).map(|r| r.get::<_, String>("role"));
+        if role(&actor).as_deref() != Some("owner") { return Err(StoreError::OwnershipConflict); }
+        let old = role(to_user_id).ok_or(StoreError::NotFound)?;
+        if old == "owner" { return Err(StoreError::OwnershipConflict); }
+        transaction.execute(
+            "UPDATE org_memberships SET role=CASE WHEN user_id=$2 THEN 'owner' ELSE $4 END, updated_at=$5 WHERE org_id=$1 AND user_id IN ($2,$3)",
+            &[&org_id, &to_user_id, &actor, &previous_owner_role.as_str(), &context.now],
+        ).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let affected = if previous_owner_role == OrgRole::Member {
+            crate::chat_store::pg_cleanup_standing(&transaction, org_id, None, &actor, false, context.now).await?
+        } else { Vec::new() };
+        let event = membership_audit_event(org_id, None, to_user_id, "org.ownership.transferred", Some(old), Some("owner".into()), context);
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction.commit().await.map_err(|e| StoreError::Database(e.to_string()))?;
+        Ok(affected)
     }
 
     async fn offboard_org_member(
@@ -3948,26 +4395,19 @@ impl Store for PgStore {
         org_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        let owner_rows = transaction
-            .query(
-                "SELECT user_id FROM org_memberships WHERE org_id = $1 AND role = 'owner' FOR UPDATE",
-                &[&org_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?;
-        let old = transaction
-            .query_opt(
-                "SELECT role FROM org_memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE",
-                &[&org_id, &user_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?
-            .map(|row| row.get::<_, String>("role"))
-            .ok_or(StoreError::NotFound)?;
-        if old == "owner" && owner_rows.len() <= 1 {
+        let owner_rows = pg_lock_org_memberships(&transaction, org_id, &[&context.actor_user_id, user_id]).await?;
+        let actor = locked_org_role(&owner_rows, &context.actor_user_id)?;
+        let target = locked_org_role(&owner_rows, user_id)?;
+        authorize_org_role_mutation(actor, target, None)?;
+        let old = target.ok_or(StoreError::NotFound)?.as_str().to_owned();
+        if context.source.get("expectedTargetOrgRole").and_then(serde_json::Value::as_str)
+            .is_some_and(|expected| expected != old) {
+            return Err(StoreError::OwnershipConflict);
+        }
+        if old == "owner" && owner_rows.iter().filter(|row| row.get::<_, String>("role") == "owner").count() <= 1 {
             return Err(StoreError::LastOwner);
         }
         transaction
@@ -3992,6 +4432,8 @@ impl Store for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let affected = crate::chat_store::pg_cleanup_standing(&transaction, org_id, None, user_id, true, context.now).await?;
+        transaction.execute("UPDATE chat_session_invites SET status='revoked' WHERE org_id=$1 AND status='pending' AND (target_user_id=$2 OR created_by_user_id=$2)", &[&org_id, &user_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         let event = membership_audit_event(
             org_id,
             None,
@@ -4006,7 +4448,7 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
     }
 
     async fn set_workspace_member(
@@ -4016,18 +4458,11 @@ impl Store for PgStore {
         user_id: &str,
         role: WorkspaceRole,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
-        let old = transaction
-            .query_opt(
-                "SELECT role FROM workspace_memberships \
-                 WHERE org_id = $1 AND workspace_id = $2 AND user_id = $3 FOR UPDATE",
-                &[&org_id, &workspace_id, &user_id],
-            )
-            .await
-            .map_err(|error| StoreError::Database(error.to_string()))?
-            .map(|row| row.get::<_, String>("role"));
+        let old = pg_authorize_workspace_mutation(&transaction, org_id, workspace_id, &context.actor_user_id, user_id, Some(role)).await?
+            .map(|role| role.as_str().to_owned());
         transaction
             .execute(
                 "INSERT INTO workspace_memberships \
@@ -4045,6 +4480,9 @@ impl Store for PgStore {
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
+        let affected = if old.as_deref().and_then(|old| WorkspaceRole::parse(old).ok()).is_some_and(|old| old.capability().permits(role.capability()) && old != role) {
+            crate::chat_store::pg_cleanup_standing(&transaction, org_id, Some(workspace_id), user_id, false, context.now).await?
+        } else { Vec::new() };
         let event = membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -4059,7 +4497,7 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
     }
 
     async fn remove_workspace_member(
@@ -4068,9 +4506,10 @@ impl Store for PgStore {
         workspace_id: &str,
         user_id: &str,
         context: AuthorizationContext,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
+        pg_authorize_workspace_mutation(&transaction, org_id, workspace_id, &context.actor_user_id, user_id, None).await?;
         let row = transaction
             .query_opt(
                 "DELETE FROM workspace_memberships \
@@ -4080,6 +4519,10 @@ impl Store for PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?
             .ok_or(StoreError::NotFound)?;
+        // Recomputed, not forced: the seat is already deleted in this
+        // transaction, and an org owner or admin keeps the standing their org
+        // role gives them.
+        let affected = crate::chat_store::pg_cleanup_standing(&transaction, org_id, Some(workspace_id), user_id, false, context.now).await?;
         let event = membership_audit_event(
             org_id,
             Some(workspace_id.to_owned()),
@@ -4094,7 +4537,7 @@ impl Store for PgStore {
             .commit()
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(())
+        Ok(affected)
     }
 
     async fn append_authorization_audit(
@@ -4847,8 +5290,227 @@ impl Store for PgStore {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn feature_policy_cas_replays_and_audit_are_atomic() {
+        use crate::rollout::{tests::policy, FeatureKey, Phase};
+        let store = InMemoryStore::new();
+        assert!(store.feature_policies().await.unwrap().is_empty());
+        assert!(store.feature_policy(FeatureKey::SharedChat).await.unwrap().is_none());
+        let p = policy();
+        let first = store.apply_feature_policy(p.clone(), 0, "op1", "launch", "operator").await.unwrap();
+        assert_eq!(first.revision, 1);
+        assert!(matches!(store.apply_feature_policy(p.clone(), 0, "stale", "launch", "operator").await, Err(StoreError::Conflict(_))));
+        assert_eq!(store.apply_feature_policy(p.clone(), 0, "op1", "launch", "operator").await.unwrap(), first);
+        let mut next = p.clone();
+        next.phase = Phase::Paused;
+        assert!(matches!(store.apply_feature_policy(next.clone(), 0, "op1", "launch", "operator").await, Err(StoreError::Conflict(_))));
+        for (base, reason, principal) in [(1, "launch", "operator"), (0, "changed", "operator"), (0, "launch", "other")] {
+            assert!(matches!(store.apply_feature_policy(p.clone(), base, "op1", reason, principal).await, Err(StoreError::Conflict(_))));
+        }
+        next.revision = 1;
+        let second = store.apply_feature_policy(next, 1, "op2", "pause", "operator").await.unwrap();
+        assert_eq!(second.revision, 2);
+        // An operation replay returns its original result after a later apply.
+        assert_eq!(store.apply_feature_policy(p.clone(), 0, "op1", "launch", "operator").await.unwrap(), first);
+        assert_eq!(store.feature_policy(FeatureKey::SharedChat).await.unwrap(), Some(second.clone()));
+        assert_eq!(store.feature_policies().await.unwrap(), vec![second]);
+        let mut invalid = p.clone();
+        invalid.schema_version = 2;
+        assert!(matches!(store.apply_feature_policy(invalid, 2, "bad", "reason", "operator").await, Err(StoreError::Policy(_))));
+        for base in [-1, i64::MAX] {
+            assert!(matches!(store.apply_feature_policy(p.clone(), base, "bad", "reason", "operator").await, Err(StoreError::Policy(_))));
+        }
+        let tables = store.tables.read();
+        assert_eq!(tables.feature_policy_replays.len(), 2);
+        let audit = &tables.feature_policy_replays["op2"].audit;
+        assert_eq!(audit["old_revision"], 1);
+        assert_eq!(audit["new_revision"], 2);
+        assert_eq!(audit["principal"], "operator");
+        assert_eq!(audit["reason"], "pause");
+        assert_eq!(audit["summary"]["changed_fields"], serde_json::json!(["phase", "revision"]));
+        assert!(audit["summary"].to_string().len() < 4096);
+    }
+
+    #[tokio::test]
+    async fn membership_mutations_reject_stale_actor_and_target_authorization() {
+        for mutation in ["patch", "delete"] {
+            for changed in ["target-promoted", "actor-demoted", "actor-offboarded"] {
+                let store = InMemoryStore::new();
+                for (user, role) in [("alice", OrgRole::Owner), ("carol", OrgRole::Owner), ("bob", OrgRole::Member), ("dave", OrgRole::Admin)] {
+                    store.add_user(user, user);
+                    store.add_org_member("org_1", user, role);
+                }
+                // These are the HTTP handler's snapshots before it calls the store.
+                assert_eq!(store.membership("org_1", "dave", None).await.unwrap().org_role, Some(OrgRole::Admin));
+                assert_eq!(store.membership("org_1", "bob", None).await.unwrap().org_role, Some(OrgRole::Member));
+                match changed {
+                    "target-promoted" => { store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await.unwrap(); }
+                    "actor-demoted" => { store.set_org_member("org_1", "dave", OrgRole::Member, ownership_context("alice")).await.unwrap(); }
+                    _ => { store.offboard_org_member("org_1", "dave", ownership_context("alice")).await.unwrap(); }
+                }
+                let audit_count = store.tables.read().authorization_audit.len();
+                let result = if mutation == "patch" {
+                    store.set_org_member("org_1", "bob", OrgRole::Member, ownership_context("dave")).await
+                } else {
+                    store.offboard_org_member("org_1", "bob", ownership_context("dave")).await
+                };
+                assert!(matches!(result, Err(StoreError::Forbidden)), "{mutation} accepted stale {changed} authorization: {result:?}");
+                let refusal = axum::response::IntoResponse::into_response(crate::api::Failure::Store(result.unwrap_err()));
+                assert_eq!(refusal.status(), axum::http::StatusCode::FORBIDDEN);
+                assert_eq!(store.tables.read().authorization_audit.len(), audit_count);
+                assert_eq!(store.membership("org_1", "bob", None).await.unwrap().org_role,
+                    Some(if changed == "target-promoted" { OrgRole::Owner } else { OrgRole::Member }));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_membership_mutations_recheck_current_actor_and_target_standing() {
+        for remove in [false, true] {
+            for changed in ["org-demoted", "offboarded", "workspace-demoted", "target-promoted"] {
+                let store = InMemoryStore::new();
+                store.add_workspace("org_1", "ws_1", "Workspace");
+                for user in ["alice", "bob", "dave"] { store.add_user(user, user); }
+                store.add_org_member("org_1", "alice", OrgRole::Owner);
+                store.add_org_member("org_1", "bob", OrgRole::Member);
+                store.add_org_member("org_1", "dave", if changed == "org-demoted" || changed == "offboarded" { OrgRole::Admin } else { OrgRole::Member });
+                store.add_workspace_member("org_1", "ws_1", "dave", WorkspaceRole::Maintainer);
+                store.add_workspace_member("org_1", "ws_1", "bob", if changed == "org-demoted" { WorkspaceRole::Maintainer } else { WorkspaceRole::Member });
+                let actor = store.membership("org_1", "dave", Some("ws_1")).await.unwrap();
+                let target = store.membership("org_1", "bob", Some("ws_1")).await.unwrap();
+                authorize_workspace_role_mutation(actor.org_role, actor.workspace_role, target.workspace_role, None).unwrap();
+                match changed {
+                    "org-demoted" => { store.set_org_member("org_1", "dave", OrgRole::Member, ownership_context("alice")).await.unwrap(); }
+                    "offboarded" => { store.offboard_org_member("org_1", "dave", ownership_context("alice")).await.unwrap(); }
+                    "workspace-demoted" => { store.set_workspace_member("org_1", "ws_1", "dave", WorkspaceRole::Viewer, ownership_context("alice")).await.unwrap(); }
+                    _ => { store.set_workspace_member("org_1", "ws_1", "bob", WorkspaceRole::Maintainer, ownership_context("alice")).await.unwrap(); }
+                }
+                let before = store.membership("org_1", "bob", Some("ws_1")).await.unwrap();
+                let audit_count = store.tables.read().authorization_audit.len();
+                let result = if remove {
+                    store.remove_workspace_member("org_1", "ws_1", "bob", ownership_context("dave")).await
+                } else {
+                    store.set_workspace_member("org_1", "ws_1", "bob", WorkspaceRole::Viewer, ownership_context("dave")).await
+                };
+                assert!(matches!(result, Err(StoreError::Forbidden)), "remove={remove}, {changed}: {result:?}");
+                assert_eq!(store.membership("org_1", "bob", Some("ws_1")).await.unwrap(), before);
+                assert_eq!(store.tables.read().authorization_audit.len(), audit_count);
+            }
+        }
+    }
+
+    fn ownership_context(actor: &str) -> AuthorizationContext {
+        AuthorizationContext { actor_user_id: actor.into(), reason: "handoff".into(), request_id: "transfer".into(), grant_id: None, source: serde_json::json!({}), now: 10 }
+    }
+
+    #[tokio::test]
+    async fn ownership_transfer_is_atomic_and_rejects_stale_callers_and_invalid_targets() {
+        let store = InMemoryStore::new();
+        for user in ["alice", "bob", "carol"] { store.add_user(user, user); }
+        store.add_org_member("org_1", "alice", OrgRole::Owner);
+        store.add_org_member("org_1", "bob", OrgRole::Member);
+        store.add_org_member("org_other", "carol", OrgRole::Member);
+        assert!(matches!(store.transfer_org_ownership("org_1", "carol", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::NotFound)));
+        assert!(matches!(store.transfer_org_ownership("org_1", "alice", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::Policy(_))));
+        assert!(matches!(store.transfer_org_ownership("org_1", "bob", OrgRole::Owner, ownership_context("alice")).await, Err(StoreError::Policy(_))));
+        assert!(store.tables.read().authorization_audit.is_empty());
+        assert_eq!(store.membership("org_1", "alice", None).await.unwrap().org_role, Some(OrgRole::Owner));
+        store.transfer_org_ownership("org_1", "bob", OrgRole::Admin, ownership_context("alice")).await.unwrap();
+        assert_eq!(store.membership("org_1", "alice", None).await.unwrap().org_role, Some(OrgRole::Admin));
+        assert_eq!(store.membership("org_1", "bob", None).await.unwrap().org_role, Some(OrgRole::Owner));
+        assert!(matches!(store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::OwnershipConflict)));
+        assert_eq!(store.tables.read().authorization_audit.len(), 1);
+        store.add_org_member("org_1", "alice", OrgRole::Owner);
+        assert!(matches!(store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await, Err(StoreError::OwnershipConflict)));
+        assert_eq!(store.tables.read().authorization_audit.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ownership_transfer_and_org_demotion_reuse_effective_standing_cleanup() {
+        use crate::{chat::{SessionStatus, SessionRole}, chat_store::{ChatStore, NewSharedSession, NewChatRunQueueItem, NewChatRunLease}};
+        for transfer in [false, true] {
+            let store = InMemoryStore::new();
+            store.add_workspace("org_1", "ws_1", "Workspace");
+            for user in ["alice", "bob"] {
+                store.add_user(user, user);
+                store.add_org_member("org_1", user, OrgRole::Owner);
+            }
+            store.add_workspace_member("org_1", "ws_1", "alice", WorkspaceRole::Viewer);
+            let chat = crate::chat_store::InMemoryChatStore::from_store(&store);
+            chat.create_session(NewSharedSession {
+                id: "session".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), title: "Transfer".into(),
+                status: SessionStatus::Active, created_by_user_id: "alice".into(), now: 1, operation_id: "create".into(),
+            }).await.unwrap();
+            chat.enqueue_run_input(NewChatRunQueueItem {
+                id: "queue".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "session".into(),
+                requested_by_user_id: "alice".into(), payload: serde_json::json!({}), now: 2, operation_id: "queue".into(),
+            }).await.unwrap();
+            chat.acquire_run_lease(NewChatRunLease {
+                id: "lease".into(), org_id: "org_1".into(), workspace_id: "ws_1".into(), session_id: "session".into(),
+                run_id: "run".into(), holder_user_id: "alice".into(), holder_device_id: "device".into(), token_hash: "hash".into(),
+                token_expires_at: 100, heartbeat_expires_at: 100, now: 3, operation_id: "lease".into(),
+            }).await.unwrap();
+            let affected = if transfer {
+                store.add_org_member("org_1", "bob", OrgRole::Member);
+                store.transfer_org_ownership("org_1", "bob", OrgRole::Member, ownership_context("alice")).await.unwrap()
+            } else {
+                store.set_org_member("org_1", "alice", OrgRole::Member, ownership_context("bob")).await.unwrap()
+            };
+            assert_eq!(affected, vec!["session"]);
+            let member = chat.effective_member("org_1", "session", "alice").await.unwrap().unwrap();
+            assert_eq!(member.role, SessionRole::Viewer);
+            assert!(!member.approver);
+            assert!(chat.list_run_queue("org_1", "session").await.unwrap().is_empty());
+            assert!(chat.active_run_lease("org_1", "session", 10).await.unwrap().is_none());
+            assert!(chat.validate_run_token("org_1", "session", "run", "hash", 10).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_transfer_and_offboard_have_one_winner_and_keep_an_owner() {
+        for (previous_role, offboard_first) in [(OrgRole::Admin, false), (OrgRole::Admin, true), (OrgRole::Member, false), (OrgRole::Member, true)] {
+            let store = InMemoryStore::new();
+            for (user, role) in [("alice", OrgRole::Owner), ("bob", OrgRole::Member), ("carol", OrgRole::Owner)] {
+                store.add_user(user, user);
+                store.add_org_member("org_1", user, role);
+            }
+            let transfer = async {
+                if offboard_first { tokio::task::yield_now().await; }
+                store.transfer_org_ownership("org_1", "bob", previous_role, ownership_context("alice")).await
+            };
+            let offboard = async {
+                if !offboard_first { tokio::task::yield_now().await; }
+                let mut context = ownership_context("carol");
+                context.source["expectedTargetOrgRole"] = serde_json::json!("owner");
+                store.offboard_org_member("org_1", "alice", context).await
+            };
+            let (transfer, offboard) = tokio::join!(transfer, offboard);
+            assert_eq!(usize::from(transfer.is_ok()) + usize::from(offboard.is_ok()), 1);
+            assert!(store.tables.read().org_memberships.iter().any(|((org, _), role)| org == "org_1" && *role == OrgRole::Owner));
+            if offboard_first { assert!(offboard.is_ok()); } else { assert!(transfer.is_ok()); }
+        }
+    }
+
     use super::*;
     use cognia_tenant_auth::UserId;
+
+    #[test]
+    fn application_role_refuses_each_rls_bypass_unless_explicitly_allowed() {
+        for (superuser, bypass_rls) in [(false, false), (true, false), (false, true), (true, true)] {
+            let decision = application_rls_status("app", superuser, bypass_rls, false);
+            if superuser || bypass_rls {
+                let error = decision.unwrap_err().to_string();
+                assert!(error.contains("app") && error.contains("COLLAB_MIGRATION_DATABASE_URL"));
+                assert!(error.contains("COLLAB_ALLOW_PRIVILEGED_DB_ROLE=true"));
+                assert_eq!(application_rls_status("app", superuser, bypass_rls, true).unwrap(), RlsStatus::Bypassed);
+            } else {
+                assert_eq!(decision.unwrap(), RlsStatus::Enforced);
+                assert_eq!(application_rls_status("app", false, false, true).unwrap(), RlsStatus::Enforced);
+            }
+        }
+        assert_eq!(serde_json::to_value(RlsStatus::Enforced).unwrap(), "enforced");
+        assert_eq!(serde_json::to_value(RlsStatus::Bypassed).unwrap(), "bypassed");
+    }
 
     #[test]
     fn terminal_plan_statuses_mirror_the_client_set() {

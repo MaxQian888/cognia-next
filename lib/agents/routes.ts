@@ -8,11 +8,12 @@
 export const AGENTS_ROUTE = "/agents"
 
 /**
- * An agent's detail is one page in one of three modes. `overview` is the
+ * An agent's detail is one page in one of four modes. `overview` is the
  * profile (activity, open work, facts, capabilities); `edit` swaps it for the
- * form; `tasks` gives its durable task board the full width a kanban needs.
+ * form; `tasks` gives its durable task board the full width a kanban needs;
+ * `evolve` is its Harness Evolution page (ADR-0237: runs, versions, lessons).
  */
-export const AGENT_DETAIL_MODES = ["overview", "edit", "tasks"] as const
+export const AGENT_DETAIL_MODES = ["overview", "edit", "tasks", "evolve"] as const
 export type AgentDetailMode = (typeof AGENT_DETAIL_MODES)[number]
 
 /** `1` is the starting-point chooser; `blank` and `ai` are its two paths. */

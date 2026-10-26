@@ -16,6 +16,7 @@
     "aiEditUnavailable": "AI 暂不可用——本次未做任何改动。",
     "aiGenerate": "AI 生成",
     "aiPaperAnalysis": "AI 论文分析",
+    "aiPartialFailure": "AI 已应用部分修改后中止。请先检查当前草稿，再决定是否重试。",
     "aiRegeneratePrompt": "描述你想要修改的内容...",
     "allApps": "全部应用",
     "allCategories": "全部",
@@ -95,6 +96,16 @@
     "componentTree": "组件",
     "componentType": "组件类型",
     "continueWorking": "继续工作",
+    "controls": {
+      "dialogContent": "对话框内容",
+      "noResults": "无匹配结果",
+      "pickDate": "选择日期",
+      "required": "此项为必填项",
+      "search": "搜索…",
+      "select": "请选择…",
+      "submit": "提交",
+      "untitled": "未命名"
+    },
     "copied": "已复制!",
     "copiedExclamation": "已复制！",
     "copy": "复制",
@@ -1697,9 +1708,13 @@
       "recoveryUnlockAction": "解锁并设置新密码",
       "recoveryUnlockDescription": "输入创建账户时保存的一次性恢复密钥，然后设置新密码。恢复密钥在此之后依然有效。",
       "recoveryUnlockForm": "使用恢复密钥解锁",
+      "registryFailureTitle": "无法加载本地账号",
+      "registryTimeoutDescription": "读取本地账号超时。请关闭其他 Cognia 标签页或窗口后重试。本地数据未被删除。",
+      "registryUnavailableDescription": "无法读取本地账号。请检查浏览器是否允许使用本地存储，然后重试。",
       "reloadWindow": "重新加载窗口",
       "rememberOnDeviceHelp": "保存在本设备的安全存储中，下次打开时自动解锁。原密码仍然有效。",
       "rememberOnDeviceLabel": "记住密码",
+      "retryRegistry": "重新加载账号",
       "revealPassword": "显示密码",
       "runtimeBadgeBrowser": "本设备的浏览器保险库",
       "runtimeBadgeDesktop": "本设备的桌面密钥链",
@@ -1714,7 +1729,8 @@
       "stageVerifying": "校验密码",
       "storageLayoutBody": "本机数据由另一个版本的应用写入。密码没有问题，但在重置本机数据之前没有可解锁的内容。重置只会删除本机的这份副本，已备份或已同步到其他设备的数据不受影响。",
       "storageLayoutReset": "重置本机数据",
-      "storageLayoutResetConfirm": "确定删除本机数据吗？此操作不可撤销。备份和其他设备不受影响。",
+      "storageLayoutResetConfirm": "此操作不可撤销。备份和其他设备不受影响。",
+      "storageLayoutResetConfirmTitle": "确定删除本机数据吗？",
       "storageLayoutResetting": "正在重置…",
       "storageLayoutTitle": "无法打开本机数据",
       "stuckBody": "可能有本应用的另一个窗口仍占用着数据库。请关闭其他窗口或标签页后重新加载。",
@@ -2011,12 +2027,16 @@
     "runtimeTarget": {
       "active": "当前",
       "addHost": "添加 Host",
+      "fallbackDescription": "{name} 是当前使用的 Host。请选择移除后此浏览器要切换到的 Host。",
+      "fallbackField": "替代 Host",
       "fallbackInvalid": "请选择一个已保存的备用 Host。",
-      "fallbackPrompt": "请输入备用 Host ID（{choices}）。",
+      "fallbackTitle": "选择替代 Host",
       "heading": "运行目标",
       "legacyMixed": "旧版混合数据（只读）",
       "loadFailed": "无法加载运行目标。",
-      "removeConfirm": "要移除 {name} 吗？只有 Host 确认撤销后才会删除本地数据。",
+      "removeConfirm": "只有 Host 确认撤销后才会删除本地数据。",
+      "removeConfirmAction": "移除 Host",
+      "removeConfirmTitle": "要移除 {name} 吗？",
       "removeFailed": "无法移除该 Host。",
       "removeHost": "移除 {name}",
       "switchFailed": "无法切换运行目标。",
@@ -3075,11 +3095,9 @@
     "addExternalAgent": "添加外部代理…",
     "ariaLabel": "选择代理运行时",
     "cogniaAgent": "Cognia 智能体",
-    "enableExternal": "启用外部代理",
     "engineAiSdk": "AI SDK，运行 {provider}",
     "engineClaudeAgentSdk": "Anthropic Agent SDK，运行于随附 sidecar",
     "externalEmpty": "尚未配置外部代理。",
-    "externalTurnedOff": "外部代理已关闭。",
     "externalUnconfigured": "外部代理（未选择）",
     "label": "代理运行时",
     "lastCheckFailed": "上次检查失败 — 可能无法启动。",
@@ -3480,7 +3498,7 @@
         "minimaxCode": "MiniMax Code",
         "opencodeAcp": "OpenCode（ACP）",
         "opencodeRemote": "OpenCode（远程）",
-        "opencodeServer": "OpenCode",
+        "opencodeServer": "OpenCode V1",
         "pi": "Pi",
         "piRpc": "Pi（原生 RPC）",
         "qoder": "Qoder",
@@ -4548,6 +4566,8 @@
       "duplicateToEdit": "复制后编辑",
       "edit": "编辑",
       "editing": "编辑 {name}",
+      "evolve": "演化",
+      "evolveTitle": "{name} · 演化",
       "noDescription": "暂无描述。",
       "sourceUser": "由你创建",
       "tasksEmpty": "还没有任务。点击「分配工作」给它一个。",
@@ -5068,7 +5088,9 @@
         "generatedEventCount": "{count} 个产物事件",
         "generatedFiles": "生成产物",
         "generatedMetadataOnly": "不会保留生成产物正文，仅记录相对路径、类型、大小和生命周期。",
-        "irreversibleApplyConfirm": "本地任务账本容量已满，Cognia 无法保留反向补丁。是否单次不可逆地应用所选改动？现有工作区改动仍受冲突检查保护。",
+        "irreversibleApplyConfirm": "本地任务账本容量已满，Cognia 无法为本次应用保留反向补丁。现有工作区改动仍受冲突检查保护。",
+        "irreversibleApplyConfirmAction": "单次应用",
+        "irreversibleApplyConfirmTitle": "不保留任务撤销直接应用？",
         "lastDay": "最近 24 小时",
         "lastFiveMinutes": "最近 5 分钟",
         "lastHour": "最近 1 小时",
@@ -5093,7 +5115,8 @@
         "selectHunks": "选择差异区块",
         "selectResource": "选择一个任务资源进行检查。",
         "sensitive": "敏感资源",
-        "sensitiveConfirm": "授权本次敏感资源操作？正文仍保留在实际执行端。",
+        "sensitiveConfirm": "仅授权对此敏感资源的单次操作，正文仍保留在实际执行端。",
+        "sensitiveConfirmTitle": "授权一次敏感操作？",
         "sensitiveDescription": "此路径可能包含凭据或密钥。每次读取或下载都需要显式授权和远程控制权限。",
         "source": "源码",
         "sourceEventCount": "{count} 个源码事件",
@@ -5212,6 +5235,13 @@
     },
     "audit": {
       "clear": "清除日志",
+      "clearConfirm": {
+        "action": "清空日志",
+        "description": "将删除此设备上的全部自动化审计记录，且无法撤销。",
+        "title": "清空审计日志？"
+      },
+      "clearFailed": "清空审计日志失败",
+      "cleared": "审计日志已清空",
       "columns": {
         "command": "命令",
         "decision": "裁决",
@@ -5235,6 +5265,7 @@
         "surfacePlugin": "插件",
         "surfaceWorkflow": "工作流"
       },
+      "loadFailed": "加载审计日志失败",
       "loading": "正在加载审计日志……",
       "title": "审计日志"
     },
@@ -5827,7 +5858,9 @@
     },
     "chip": "下一次发送的 Best-of-N",
     "chooseBranch": "选择已有分支",
+    "clear": "取消下一次发送的多方案尝试",
     "committedOnly": "候选尝试仅从已提交的 SHA 开始，未提交的修改不会带入。",
+    "compactAttempts": "×{count}",
     "description": "从同一已提交基线运行多个独立尝试，然后手动选择结果。",
     "dirty": "当前工作区存在未提交的修改，这些修改不会带入候选尝试。",
     "existingBranch": "明确选择已有分支",
@@ -5835,6 +5868,7 @@
     "externalCost": "外部 agent 不报告费用，费用显示为未知，也无法对其执行金额预算。",
     "failed": "无法启动 Best-of-N：{error}",
     "invalidPolicy": "已提交的验收策略无效，请修复后再启动。",
+    "label": "多方案尝试",
     "manualOnly": "由你手动选择结果。提前选择会停止其他尝试。发布仅更新选定的本地分支，不会推送。",
     "mixedBatch": "/best-of-n 必须单独作为整条消息发送，不能和其他命令一起发送。",
     "needsCommit": "请先提交仓库，再启动 Best-of-N。",
@@ -6385,6 +6419,7 @@
     "record": {
       "addAssertion": "断言文本…",
       "assertionPlaceholder": "预期出现的文本",
+      "captureFailed": "录制失败：{error}",
       "delete": "删除流程",
       "deleted": "流程已删除",
       "downloadJson": "保存流程 JSON…",
@@ -6440,6 +6475,12 @@
       "title": "录制操作"
     },
     "remote": {
+      "approval": {
+        "authorize": "授权浏览器访问",
+        "failed": "浏览器授权被拒绝或未能完成，可以重新申请审批。",
+        "pending": "请主机所有者或另一台已配对的管理设备确认审批码 {code}，然后再次点击“授权浏览器访问”。",
+        "required": "访问此主机上的浏览器需要审批，授权有效期最长为 10 分钟。"
+      },
       "canvas": "远程浏览器画布",
       "closePage": "关闭页面",
       "connection": {
@@ -6451,6 +6492,16 @@
       },
       "error": "远程浏览器不可用（{code}）",
       "find": "在页面中查找",
+      "grants": {
+        "blocked": "被阻止的域名：{domains}",
+        "cancel": "保留当前会话",
+        "changed": "域名权限已变更，重连后才会应用到当前浏览器。",
+        "confirm": "重连浏览器",
+        "ephemeralHint": "其他标签页会关闭，当前页面会重新加载。临时会话可能需要重新登录，未保存的修改会丢失。",
+        "manage": "管理域名",
+        "persistentHint": "已保存的站点数据会保留，部分网站仍可能要求重新登录。其他标签页会关闭，当前页面会重新加载，未保存的修改会丢失。",
+        "reconnect": "应用权限并重连"
+      },
       "humanControl": "由你控制",
       "needsRemoteHost": "连接一台 Cognia 服务器后才能使用云端浏览器",
       "runtimeUnavailable": "云端浏览器不可用（{reason}）",
@@ -7397,17 +7448,19 @@
       "providers": "服务商",
       "skills": "技能"
     },
-    "description": "从本地 CCSwitch 安装中读取服务商、MCP 服务器、提示词与技能。在这里切换服务商会更新 Cognia 自带的 SDK，并可（按需）同步到选中的外部代理。",
+    "description": "读取 CC Switch v4.0.18（schema 21）的供应商、MCP 服务器、提示词及已安装技能。Anthropic 供应商可更新 Cognia 内置 SDK；其他应用协议及托管登录仅供浏览。",
     "dialog": {
       "agentsSection": "同时写入",
       "apiKey": "API 密钥",
+      "applyFailed": "无法应用切换：{error}",
       "baseUrl": "Base URL",
+      "baseUrlNotPropagated": "不会应用 Base URL",
       "body": "请确认本次切换将带来的变更。",
       "bodyFor": "切换至 {name}。请在确认前查看本次变更。",
       "cancel": "取消",
       "close": "关闭",
-      "codexBaseUrlNotPropagated": "不会应用 Base URL",
       "cogniaApplied": "已更新 Cognia。",
+      "cogniaNotApplied": "未更新 Cognia。",
       "cogniaSection": "Cognia-next",
       "confirm": "执行切换",
       "driftAbort": "切换期间该文件在磁盘上被修改，因此未写入任何内容。请重新打开此对话框再应用一次。",
@@ -7482,7 +7535,7 @@
       "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
       "importQuota": "导入额度",
       "model": "模型",
-      "officialEndpoint": "Anthropic 官方端点",
+      "officialEndpoint": "默认端点",
       "quotaImportErrorTitle": "未导入额度元数据",
       "quotaImportFailed": "无法保存导入的额度源：{error}",
       "quotaImportReason": {
@@ -7495,6 +7548,7 @@
       "quotaImportSuccess": "已把 {name} 导入为默认关闭的自定义额度源。请在订阅设置中检查后再显式启用。",
       "quotaImportSuccessTitle": "已导入额度元数据",
       "refresh": "刷新",
+      "unsupportedProtocol": "仅供浏览：此应用使用其他协议或由 CC Switch 管理认证，请在 CC Switch 中切换。",
       "useHere": "在此使用",
       "useHereAndIn": "在此并同步至…"
     },
@@ -7503,7 +7557,7 @@
       "emptyTitle": "CCSwitch 中没有技能",
       "errorTitle": "无法列出技能",
       "externalBadge": "外部文件",
-      "headerHint": "带有内联内容的技能会成为新的 Cognia 技能；指向外部文件的行（已置灰）需通过「设置 → 技能」单独导入。",
+      "headerHint": "导入已安装的技能包，包括 frontmatter、脚本、参考资料、资源及 Codex 元数据。缺失或不安全的目录无法导入。",
       "importBtn": "导入 {count, plural, =0 {0 项} =1 {1 项} other {# 项}}",
       "importing": "正在导入…",
       "listTitle": "CCSwitch 中的技能",
@@ -8005,6 +8059,7 @@
         "foldCollapseShort": "收起",
         "foldExpand": "展开另外 {count} 项"
       },
+      "contextRegion": "输入框上下文与提示",
       "draftRestore": {
         "dismiss": "关闭",
         "label": "需重新添加：",
@@ -8087,6 +8142,7 @@
         "acceptHint": "按 Tab 或 → 编辑后再发送",
         "configure": "配置",
         "dismiss": "关闭建议",
+        "dontShowAgain": "不再显示",
         "error": "无法生成预测内容。",
         "label": "追问建议",
         "retry": "重试",
@@ -8379,7 +8435,6 @@
         "blocked": "{runtime} 无法在此运行",
         "blockedDetail": "{runtime} 无法在此运行：{detail}",
         "busy": "请等当前回复结束后，再发给 @{handle}。",
-        "disabled": "外部智能体已关闭。",
         "emptyPrompt": "请在 @{handle} 后输入消息。",
         "memberMissing": "@{handle} 已不在任何 Squad 中。",
         "memberRuntime": "{name} 运行在 {runtime} 上，此处不可用。",
@@ -11612,6 +11667,7 @@
     "imagesAttached": "已附加 {count} 张图片 · /images 管理",
     "language": "界面语言",
     "languageHint": "启动、审批、错误、帮助和变更审阅面板的显示语言。",
+    "manualSubagentUnsupported": "当前后端不支持手动运行 CLI 子 Agent。",
     "mcp": {
       "agentInventory": "Agent 清单：{status}（当前会话未确认）",
       "all": "（全部）",
@@ -12383,6 +12439,76 @@
     "useFolder": "✓ 使用此文件夹",
     "workingDirectory": "工作目录：{path}",
     "workspaceBoundaryHint": "请选择可访问且位于 COGNIA_WORKSPACES_DIR 配置范围内的目录，或在目标工作区重新启动 CLI。"
+  },
+  "collabCapabilities": {
+    "action": {
+      "credential": {
+        "manage": "管理工作区凭据",
+        "use": "使用工作区凭据"
+      },
+      "environment": {
+        "manage": "管理工作区环境",
+        "use": "使用工作区环境"
+      },
+      "execution": {
+        "request": "在沙箱中运行智能体"
+      },
+      "host": {
+        "global-surfaces": "使用主机级终端、文件与插件",
+        "workspace-surfaces": "在主机上使用该工作区的终端、文件与 git"
+      },
+      "org": {
+        "admins": {
+          "manage": "管理组织管理员"
+        },
+        "members": {
+          "manage": "管理组织成员"
+        },
+        "ownership": {
+          "transfer": "转让组织所有权"
+        },
+        "policy": {
+          "manage": "管理组织策略"
+        }
+      },
+      "publish": "发布与分享",
+      "workspace": {
+        "members": {
+          "manage": "管理工作区成员"
+        },
+        "read": "查看工作区",
+        "settings": {
+          "manage": "管理工作区设置"
+        },
+        "write": "参与工作区"
+      }
+    },
+    "feature": {
+      "canvas-collaboration": "画布协作",
+      "environment-binding": "工作区环境",
+      "org-governance": "组织管理",
+      "shared-chat": "共享对话",
+      "shared-chat-execution": "共享智能体运行"
+    },
+    "reason": {
+      "client_contract_unsupported": "当前应用版本过旧，请更新 Cognia 后使用。",
+      "deployment_disabled": "当前部署未提供此功能。",
+      "execution_isolation_unavailable": "没有可用的隔离运行环境。",
+      "feature_killed": "已被运维停用，仍可阅读、导出和退出。",
+      "feature_not_offered": "尚未向该组织开放。",
+      "feature_paused": "已被运维暂停，进行中的工作会继续完成。",
+      "org_denied": "该组织不可使用。",
+      "policy_unavailable": "服务器暂时无法确认可用性，请稍后重试。",
+      "prerequisite_unavailable": "依赖的其他功能在此不可用。",
+      "workspace_denied": "该工作区不可使用。"
+    },
+    "refused": "{feature}：{reason}",
+    "state": {
+      "available": "可用",
+      "existing-only": "仅限已有内容",
+      "off": "未开启",
+      "read-only": "只读"
+    }
   },
   "common": {
     "add": "添加",
@@ -14333,6 +14459,14 @@
       "manageAccounts": "配置档案",
       "menuAria": "{name} 的账户菜单",
       "noProfile": "尚未创建档案",
+      "org": {
+        "heading": "组织",
+        "listFailed": "无法列出其他组织",
+        "switchFailed": "无法切换组织",
+        "switchTo": "切换到 {org}",
+        "switched": "已切换到 {org}",
+        "switching": "正在切换到 {org}…"
+      },
       "petFailed": "无法打开桌面宠物。",
       "settings": "设置",
       "showPet": "桌面宠物",
@@ -15723,6 +15857,10 @@
         "hint": "外部智能体在执行本回合时失败——请重试，或改用内置智能体运行。",
         "label": "智能体运行失败"
       },
+      "executionUnavailable": {
+        "hint": "此主机无法在这里运行该任务：它处于仅控制面模式、没有沙箱隔离，或者该任务会在主机进程内运行，而共享主机绝不允许这样做。如果你认为它应该可用，请联系主机管理员。",
+        "label": "此主机无法运行任务"
+      },
       "extensionHandshakeFailed": {
         "hint": "在该智能体内执行权限控制的 Cognia 扩展未报告就绪，因此会话被拒绝，而不是在无管控的情况下运行。",
         "label": "智能体扩展未启动"
@@ -15771,6 +15909,10 @@
         "hint": "Cognia 无法连上已配对的设备——请确认两端处于同一网络。",
         "label": "设备不可达"
       },
+      "hostDataUnavailable": {
+        "hint": "此主机由组织共享，目前还不能按成员分别保存对话、文件和其他个人数据。在该功能上线前，请在自己的设备或共享工作区中使用。",
+        "label": "此共享主机暂不提供"
+      },
       "hostSessionRefused": {
         "hint": "配对主机拒绝了这个新对话，通常是因为此设备在该主机上没有 Agent Control 权限。请主机所有者授予权限后重新开始对话。",
         "label": "未能在主机上创建对话"
@@ -15795,6 +15937,10 @@
         "hint": "受管策略不允许此沙箱或审批模式。请选择允许的模式，或联系管理员。",
         "label": "受管策略拒绝"
       },
+      "modelAccessUnavailable": {
+        "hint": "你在共享主机上的数据分区还没有配置任何 AI 模型，因此这里暂时无法生成回复。组织为成员开放模型访问后即可使用。",
+        "label": "此共享主机暂无模型访问"
+      },
       "modelOverloaded": {
         "hint": "服务方当前过载——请稍后重试。",
         "label": "模型过载"
@@ -15818,6 +15964,14 @@
       "offline": {
         "hint": "你当前似乎处于离线状态——恢复联网后 Cognia 会自动重试。",
         "label": "离线"
+      },
+      "orgScopeUnavailable": {
+        "hint": "共享模型密钥、允许的智能体等组织设置只存在于为组织服务的主机上。此主机只为一个人服务，因此这里没有可配置的内容。",
+        "label": "需要组织主机"
+      },
+      "partitionWorkspaceUnavailable": {
+        "hint": "在共享主机上，你的对话保存在自己的个人空间中，它不关联主机的工作区，因此无法在这里把对话移入工作区。",
+        "label": "个人空间中没有工作区"
       },
       "payloadTooLarge": {
         "hint": "请求超出大小限制——请缩减输入内容。",
@@ -16018,6 +16172,10 @@
       "workspaceUnavailable": {
         "hint": "本设备上解析不到这个会话的工作区——可以重试，或在会话的工作区面板里绑定一个目录。",
         "label": "工作区不可用"
+      },
+      "workspaceUnresolved": {
+        "hint": "共享主机只会在它能核实的工作区中运行任务。请从你所属的工作区发起；不是以这种方式发起的任务无法在这里继续。",
+        "label": "该请求没有关联工作区"
       }
     },
     "detail": {
@@ -16459,6 +16617,7 @@
       "attached": "已附加「{title}」",
       "fetching": "正在获取「{title}」…",
       "hostUnsupported": "云端文档仅在桌面端可用。",
+      "incomplete": "「{title}」的部分内容未能读取，请查看附件中的说明。",
       "linkOnlyHint": "该来源不支持搜索，请粘贴文档链接。",
       "noAccount": "请先在设置中连接账号。",
       "noMatches": "没有匹配「{query}」的文档",
@@ -16493,6 +16652,7 @@
       "description": "在聊天中用 @ 引用飞书与 Google 文档。",
       "desktopOnly": "仅桌面端可用。",
       "disconnect": "断开连接",
+      "disconnectFailed": "未能完成断开连接：{reason}",
       "disconnectNotRevoked": "已在本地断开，但向 Google 吊销失败（{reason}）。请到 Google 账号的第三方访问设置里移除 Cognia 以彻底完成。",
       "disconnectRevoked": "已断开连接，Google 侧的授权也已吊销。",
       "disconnecting": "正在断开…",
@@ -17885,13 +18045,17 @@
     },
     "instanceSection": {
       "description": "它与同一运行时的其他配置有何不同，又共享了什么。",
+      "folderCopied": "已复制目录路径",
+      "folderCopy": "复制目录路径",
+      "folderCopyFailed": "无法复制目录路径",
       "folderElsewhere": "其状态目录位于运行它的电脑上。",
       "folderError": "无法读取其状态目录：{message}",
+      "folderLabel": "状态目录",
       "folderLoading": "正在查找其状态目录…",
       "folderNotCreated": "首次启动时创建",
       "folderReveal": "显示目录",
       "remoteState": "该 Agent 运行在服务端，状态由服务端保存，这台电脑上没有需要隔离的内容。",
-      "sessionLimit": "最多同时打开的会话数",
+      "sessionLimit": "会话上限",
       "sessionLimitHint": "再打开一个会话时，会先关闭最久未使用的空闲会话。留空表示不限制。",
       "sessionLimitUnlimited": "不限",
       "sharedWith": "与 {names} 共用登录、设置和会话历史。{count, plural, other {选择「独立状态」可将它们分开。}}",
@@ -18244,6 +18408,62 @@
         "runnable": "可运行"
       }
     },
+    "roleModels": {
+      "addSpawnModel": "添加派生候选模型",
+      "choose": "选择模型",
+      "clearSpawnModels": "清除额外候选模型",
+      "description": "此运行时的原生子代理、模型别名和辅助调用可以使用主模型同一供应商、同一账号下的其他模型。未设置的项沿用主模型。若某次运行改用其他供应商或账号，则只使用该次的主模型。",
+      "effort": "推理强度",
+      "effortDefault": "模型默认",
+      "efforts": {
+        "high": "高",
+        "low": "低",
+        "medium": "中",
+        "minimal": "最低",
+        "xhigh": "超高"
+      },
+      "empty": "此供应商没有其他兼容的模型。",
+      "hints": {
+        "auxiliary": "生成标题、摘要等辅助调用，不属于子代理。",
+        "childDefault": "子代理自身定义和发起调用都未指定模型时使用。",
+        "tier": "此运行时的该别名所解析到的模型。"
+      },
+      "hostOutdated": "需要先更新已配对的 Host，才能设置子任务模型。",
+      "invalid": "请先修正子任务模型设置，再保存。",
+      "modeLabel": "{slot}：模型来源",
+      "modelLabel": "{slot}：模型",
+      "modes": {
+        "inherit": "继承 Agent 配置",
+        "model": "其他模型",
+        "primary": "主模型"
+      },
+      "needsPrimary": "开启 Cognia 模型并选择主模型后，才能设置子任务模型。",
+      "noSlots": "此运行时的所有调用都使用主模型。",
+      "refusals": {
+        "crossAccount": "子任务模型必须使用主模型的账号。",
+        "crossProvider": "请选择 {provider} 的模型。子任务模型必须使用主模型的供应商。",
+        "defaultSpawnModelNotAllowed": "候选集合必须包含默认子代理模型。",
+        "effortUnsupported": "此模型不支持所选的推理强度。",
+        "spawnModelsUnsupported": "此运行时不支持原生派生候选模型。",
+        "tooManyModels": "一个任务使用的不同模型过多，请减少子任务模型。",
+        "unsupportedSlot": "此运行时不支持这项子任务模型设置，请移除后再保存。"
+      },
+      "remove": "移除",
+      "removeSpawnModel": "移除 {model}",
+      "removeStale": "移除不受支持的子任务模型设置",
+      "sameAccount": "使用主模型所在供应商的账号。",
+      "search": "搜索 {provider} 的模型…",
+      "slots": {
+        "auxSmall": "小型辅助模型",
+        "subagentDefault": "默认子代理模型",
+        "tierHaiku": "Haiku 别名",
+        "tierOpus": "Opus 别名",
+        "tierSonnet": "Sonnet 别名"
+      },
+      "spawnModels": "原生派生候选模型",
+      "spawnModelsDescription": "在此任务的供应商账号内授权有限候选集合。主模型和默认模型也属于任务授权集合。父代理在派生时选择模型；已有 V2 子代理无法直接切换。",
+      "title": "子任务模型"
+    },
     "runCommand": "运行 /{name}",
     "runtimes": {
       "activeSessions": "正在运行的会话",
@@ -18310,6 +18530,80 @@
       "loadEntries": "查看会话历史",
       "loadTree": "浏览分支",
       "loading": "正在读取能力…",
+      "nativeBackend": "后端：{backend}（{confidence}，{evidence}）；运行时：{version}",
+      "nativeBackendValues": {
+        "disabled": "已禁用",
+        "unknown": "未知"
+      },
+      "nativeCapabilities": "派生选模能力：{spawn}。V2 功能开关关闭不代表当前会话使用 V1。",
+      "nativeChangeOutcome": "{child} · {scope} · {model}（{effort}）：{outcome}",
+      "nativeConfidence": {
+        "inferred": "推断",
+        "observed": "已观测",
+        "unknown": "未知"
+      },
+      "nativeCurrentTurn": "应用于当前 turn 的后续步骤",
+      "nativeDefaultEffort": "保留原生推理强度设置",
+      "nativeDirectForbidden": "Codex 禁止对此子代理直接输入。已有 V2 子代理无法直接切换模型。",
+      "nativeDirectUnknown": "直接输入能力未知，请先刷新线程事实再修改设置。",
+      "nativeEmpty": "此会话尚未识别到原生子代理线程。",
+      "nativeEvidence": {
+        "child-thread": "原生子线程事实",
+        "configuration": "配置",
+        "model-metadata": "模型元数据",
+        "unknown": "来源未知"
+      },
+      "nativeFeatureFlags": "实际开关：multi_agent_v2={v2}；step_model_switching={step}。",
+      "nativeFlags": {
+        "disabled": "已关闭",
+        "enabled": "已开启",
+        "unknown": "未知"
+      },
+      "nativeFutureTurns": "设置后续 turn 默认值",
+      "nativeHostUpdateRequired": "请升级 Host 后再配置或控制原生子代理模型。",
+      "nativeIdentity": "父线程：{parent}；根线程：{root}",
+      "nativeModelEvidence": "线程模型表示配置。设置获受理后仍需等待后续采样步骤，不能视为实际推理遥测。",
+      "nativeReasons": {
+        "child-not-owned": "此子代理不属于当前根会话。",
+        "child-settings-busy": "此子代理已有设置修改正在等待处理。",
+        "connection-changed": "连接已变化，操作结果未知。",
+        "direct-input-forbidden": "Codex 禁止对此子代理直接输入。",
+        "direct-input-unknown": "直接输入能力仍未知。",
+        "invalid-operation-id": "操作标识无效。",
+        "invalid-settings-scope": "设置作用域无效。",
+        "model-change-operation-limit": "运行时已达到设置操作上限。",
+        "model-not-allowed": "此模型未获得当前任务授权。",
+        "native-settings-unsupported": "此运行时不支持所请求的设置接口。",
+        "operation-id-conflict": "此操作标识已用于其他请求。",
+        "reasoning-effort-not-supported": "此模型不支持所选推理强度。",
+        "stale-child-turn": "子代理 turn 已变化或结束，请刷新原生线程。",
+        "stale-model-plan": "任务模型策略已变化，请刷新原生线程。",
+        "stale-process-generation": "运行时连接已变化，请刷新原生线程。",
+        "step-model-switching-disabled": "请先开启实验性当前 turn 模型切换并重新连接。",
+        "unknown-settings-response": "运行时返回了无法识别的设置结果。"
+      },
+      "nativeRefresh": "刷新原生线程",
+      "nativeRequested": "派生请求：{model}；推理强度：{effort}",
+      "nativeResults": {
+        "applied-awaiting-step": "Codex 已受理设置，尚未观测到实际执行。",
+        "outcome-unknown": "结果未知，请重新连接并刷新后再提交新的修改。",
+        "rejected": "Codex 拒绝了设置。",
+        "target-unavailable": "原生目标已不可用。"
+      },
+      "nativeSelectModel": "选择模型",
+      "nativeSettings": "模型配置：{model}；推理强度：{effort}；活跃 turn：{turn}",
+      "nativeStepDisabled": "当前 turn 切换需要开启实验性选项，且必须取得活跃子代理 turn。",
+      "nativeSupport": {
+        "supported": "已观测支持",
+        "unknown": "尚未观测",
+        "unsupported": "不支持"
+      },
+      "nativeTargetEffort": "新的推理强度",
+      "nativeTargetModel": "新的子代理模型",
+      "nativeTitle": "原生子代理",
+      "nativeTruncated": "线程发现已达到上限，未发现的线程无法控制。",
+      "nativeUncertain": "此子代理有一次设置修改的结果未知。请重新连接运行时后再提交修改。",
+      "nativeUnknown": "未知",
       "oneAtATime": "逐条处理",
       "queued": "指令已排队",
       "queuedInput": "排队指令",
@@ -18416,6 +18710,8 @@
       "codexSandboxWorkspaceWrite": "工作区可写",
       "codexServerDefault": "服务端默认",
       "codexSkillRootsBrowse": "浏览…",
+      "codexStepModelSwitching": "实验性当前 turn 模型切换",
+      "codexStepModelSwitchingDesc": "允许修改活跃 V1 子代理后续采样步骤的模型。修改后需要重新连接代理。V2 子代理仍由父代理管理。",
       "codexSummaryAuto": "自动",
       "codexSummaryConcise": "简洁",
       "codexSummaryDetailed": "详细",
@@ -18578,8 +18874,6 @@
       "duplicateHint": "创建一个设置和凭据相同的副本。副本需要重新批准非沙箱启动。",
       "duplicateName": "{name}（副本）",
       "editAgent": "编辑代理",
-      "enableExternalAgents": "启用外部代理",
-      "enableExternalAgentsDesc": "允许通过 ACP 协议使用外部代理（如 Claude Code）",
       "endpoint": "Endpoint URL",
       "endpointInvalid": "请输入有效的 HTTP 或 HTTPS 服务地址。",
       "endpointRequired": "HTTP 传输需要填写 Endpoint URL",
@@ -18605,9 +18899,9 @@
       "inspectorEnabled": "已启用",
       "inspectorEnabledAria": "启用 {name}",
       "inspectorKeySaved": "已保存 — 留空以保留",
-      "inspectorMasterDisabled": "请先启用外部代理，再连接。",
       "inspectorNameLabel": "名称",
       "inspectorRename": "重命名 {name}",
+      "inspectorRuntimeDetails": "运行信息",
       "inspectorStatus": "状态",
       "inspectorTabAdvanced": "高级",
       "inspectorTabConnection": "连接",
@@ -20543,7 +20837,7 @@
       "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
       "noModels": "暂无可用模型，请先配置提供商。",
       "promptOverride": "判定提示覆盖",
-      "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
+      "promptOverrideHint": "会复制到每个新目标中，并替换该目标的判定指令。若要为所有未自带指令的目标修改判定，请在「设置 → 提示词」中编辑。仍须要求返回一行 JSON 判定结果。",
       "searchPlaceholder": "搜索模型…",
       "temperature": "判定温度",
       "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",
@@ -20693,6 +20987,590 @@
       "openAgent": "在智能体页面打开",
       "permissionMode": "权限模式：{mode}",
       "systemPrompt": "系统提示"
+    }
+  },
+  "harnessEvolution": {
+    "actions": {
+      "done": {
+        "approve": "修改已批准并应用。",
+        "cancel": "运行已取消。",
+        "reject": "已保留当前 Harness。",
+        "resume": "运行已继续。",
+        "rollback": "采用已回滚。"
+      },
+      "errors": {
+        "adoption": {
+          "agent-changed": "运行开始后智能体被编辑过，请重新开始一次运行。",
+          "agent-not-found": "该智能体已不存在。",
+          "already-rolled-back": "此次采用已回滚过。",
+          "no-decision": "该运行对此 Harness 没有采用决定。",
+          "no-session": "运行所基于的对话已不存在。",
+          "no-workspace": "运行所在的工作区已不存在。",
+          "not-adopted": "该运行没有采用任何内容。"
+        },
+        "control": {
+          "busy": "该运行上的另一项操作正在进行。",
+          "not-adopted": "该运行没有生效中的采用。",
+          "not-awaiting": "该运行不在等待审批（可能已在别处处理）。",
+          "not-found": "该运行已不存在。",
+          "not-resumable": "只能继续已中断或停滞的运行。"
+        }
+      },
+      "failed": {
+        "approve": "无法应用修改。",
+        "cancel": "无法取消运行。",
+        "reject": "无法记录决定。",
+        "resume": "无法继续运行。",
+        "rollback": "无法回滚。"
+      }
+    },
+    "agentView": {
+      "blocked": {
+        "disabled": "Harness 演化已关闭。",
+        "external": "此智能体运行在外部运行时上，无法探测其 Harness。",
+        "host-owned": "此设备的对话位于其主机上，请在主机上启动运行。",
+        "no-runtime": "运行需要桌面端的智能体运行时，此处不可用。"
+      },
+      "description": "依据证据逐个任务地改进此智能体的指令、技能与工具规则。",
+      "emptyBody": "选择一个此智能体应当做得更好的任务开始运行。每个候选都会先在隔离环境中试运行。",
+      "emptyTitle": "还没有运行",
+      "openSettings": "打开设置",
+      "start": "新建运行",
+      "tabs": {
+        "experiences": "经验",
+        "runs": "运行",
+        "versions": "版本"
+      },
+      "title": "Harness 演化"
+    },
+    "budget": {
+      "dimension": {
+        "cost": "费用",
+        "modelCalls": "模型调用",
+        "tokens": "Token",
+        "wallTime": "时间"
+      },
+      "lowerBound": "部分调用未报告价格，显示的费用是下限。",
+      "usedOf": "{used} / {limit}",
+      "work": "已完成 {rollouts} 次执行、{sessions} 次编辑或评判会话。"
+    },
+    "checkKind": {
+      "acceptance-profile": "验收配置",
+      "deliverable-file": "文件存在",
+      "max-tool-errors": "工具错误不超过",
+      "output-contains": "回答包含",
+      "output-json": "回答是 JSON",
+      "output-not-contains": "回答不包含"
+    },
+    "checks": {
+      "add": "添加检查",
+      "caseSensitive": "区分大小写",
+      "kind": "检查类型",
+      "max": "最多工具错误数",
+      "noProfiles": "此工作区没有已批准的验收配置。",
+      "none": "没有检查：选择将依赖评判模型。添加检查以便依据证据决定。",
+      "path": "文件路径",
+      "pathPlaceholder": "report.md",
+      "pickProfile": "选择配置",
+      "profile": "验收配置",
+      "remove": "删除检查",
+      "requiredKeys": "必需的键",
+      "requiredKeysPlaceholder": "以逗号分隔的键（可选）",
+      "text": "文本",
+      "textPlaceholder": "要查找的文本"
+    },
+    "compare": {
+      "base": "当前 Harness",
+      "checks": "检查",
+      "checksPassed": "{total} 项中通过 {passed} 项",
+      "chosen": "已选",
+      "cost": "费用",
+      "delivered": "已交付",
+      "left": "左侧 Harness",
+      "loading": "正在加载 Harness…",
+      "no": "否",
+      "notRolled": "尚未执行。",
+      "nothingYet": "还没有可比较的候选 Harness。",
+      "right": "右侧 Harness",
+      "tokens": "Token",
+      "toolFailures": "工具失败",
+      "yes": "是"
+    },
+    "component": {
+      "guardrails": "护栏",
+      "memory": "记忆",
+      "scripts": "脚本",
+      "skills": "技能",
+      "subagents": "子智能体",
+      "systemPrompt": "系统提示词",
+      "toolGuidance": "工具指引",
+      "toolRules": "工具规则"
+    },
+    "decision": {
+      "adopt": "采用 {label}",
+      "adoptedAutomatically": "作为低风险修改已自动采用（{scope}）。",
+      "adoptedByPerson": "经你批准已采用（{scope}）。",
+      "approvalNeeded": "此修改需要你批准后才会生效。",
+      "approve": "批准",
+      "keepBase": "保留当前 Harness",
+      "pending": "尚未做出决定。",
+      "reject": "保留当前",
+      "risk": {
+        "high": "高风险",
+        "low": "低风险",
+        "medium": "中风险"
+      },
+      "rolledBack": "此次采用已回滚。",
+      "scope": {
+        "global": "全局",
+        "session": "此对话",
+        "task": "仅此任务",
+        "workspace": "此工作区"
+      },
+      "setWorkspaceDefault": "同时将演化后的智能体设为此工作区的默认智能体",
+      "variantCreated": "修改写入了演化变体，原智能体保持不变。"
+    },
+    "diff": {
+      "change": {
+        "added": "新增",
+        "modified": "修改",
+        "removed": "删除"
+      },
+      "fileLabel": "{path} 的变更",
+      "none": "这两个 Harness 完全相同。"
+    },
+    "evidence": {
+      "blocked": "被探测策略拦截",
+      "bytes": "{bytes} 字节",
+      "checkStatus": {
+        "failed": "未通过",
+        "inconclusive": "无法判定",
+        "passed": "通过"
+      },
+      "checks": "检查",
+      "degraded": "降级运行",
+      "delegations": "委派给：{list}",
+      "deliverables": "生成的文件（{count}）",
+      "delivered": "已交付",
+      "emptyOutput": "（空）",
+      "errored": "出错",
+      "externalReads": "读取了本机以外的数据（之后的运行不会复用）：{list}",
+      "metric": {
+        "cost": "费用",
+        "latency": "耗时",
+        "tokens": "输入 / 输出 Token",
+        "tools": "工具"
+      },
+      "notDelivered": "未交付",
+      "output": "回答",
+      "toolCalls": "{calls} 次调用，{failures} 次失败",
+      "trajectory": "完整轨迹",
+      "truncated": "已截断",
+      "unpriced": "未计价"
+    },
+    "failureOffer": {
+      "dismiss": "暂不",
+      "improve": "改进",
+      "offer": "这次失败看起来源于 {agent} 的配置方式。要基于这个请求尝试改进它的 Harness 吗？",
+      "runExists": "Harness 演化正在处理这次失败。",
+      "viewRun": "查看运行"
+    },
+    "isolation": {
+      "files": "临时目录",
+      "git": "Git 工作树",
+      "none": "纯文本"
+    },
+    "library": {
+      "all": "全部",
+      "applies": "适用于：{list}",
+      "confidence": {
+        "high": "高置信度",
+        "low": "低置信度",
+        "medium": "中置信度"
+      },
+      "conflicts": "{count, plural, other {# 处冲突}}",
+      "counts": "被检索 {retrieved} 次 · 有帮助 {helped} 次 · 有害 {hurt} 次",
+      "delete": "删除",
+      "empty": "还没有经验。",
+      "enabled": "在新运行中使用",
+      "evidence": "证据",
+      "excludes": "不适用于：{list}",
+      "filter": "按状态筛选经验",
+      "intro": "以往运行总结出的、哪些 Harness 修改有效的经验。它们只作为后续编辑者的参考，不会自动应用，并与记忆分开保存。",
+      "limitations": "已知局限：{list}",
+      "openRun": "打开来源运行",
+      "reinstate": "恢复",
+      "retire": "停用",
+      "status": {
+        "deprecated": "已停用",
+        "proposed": "待验证",
+        "rejected": "已否决",
+        "verified": "已验证"
+      },
+      "support": "{count, plural, other {另有 # 次运行支持}}",
+      "updateFailed": "无法更新该经验。",
+      "when": "适用情形：{cue}"
+    },
+    "mode": {
+      "parallel": "并行",
+      "sequential": "顺序"
+    },
+    "page": {
+      "backToAgent": "返回 {name}",
+      "backToAgents": "返回智能体",
+      "desktopOnlyBody": "Harness 演化在桌面应用中运行，与它所改进的智能体在一起。请在桌面端打开此运行。",
+      "desktopOnlyTitle": "运行保存在桌面端",
+      "noRunBody": "请从智能体的演化页面打开一个运行。",
+      "noRunTitle": "未选择运行",
+      "title": "Harness 演化运行"
+    },
+    "reflection": {
+      "conflicts": "{count, plural, other {与 # 条已有经验相矛盾。}}",
+      "dropped": "未保留经验：{reason}",
+      "merged": "该经验已合并到已有经验中。",
+      "noEdits": "反思未归因任何修改。",
+      "openLesson": "查看经验",
+      "retrieved": "提供给编辑者的经验",
+      "retrievedVerdict": "{verdict}",
+      "stored": "该经验已加入经验库。",
+      "verdict": {
+        "confounded": "无法区分",
+        "helped": "有帮助",
+        "hurt": "有害",
+        "noEffect": "未观察到效果"
+      }
+    },
+    "runList": {
+      "empty": "还没有运行。",
+      "improved": "已改进",
+      "keptCurrent": "保留当前",
+      "open": "打开运行 {title}"
+    },
+    "selection": {
+      "confidence": {
+        "high": "高",
+        "low": "低",
+        "medium": "中"
+      },
+      "dominant": "全面优于当前 Harness 的每次运行：{list}",
+      "judge": "评判模型选择了 {best}（置信度{confidence}）。",
+      "method": "决定方式",
+      "methods": {
+        "deterministic": "任务的检查结果",
+        "judge": "评判模型（基于匿名化证据）",
+        "no-candidate": "无可选项：没有候选与当前 Harness 不同",
+        "tie-break": "平局裁决（更便宜、更简单者优先）"
+      },
+      "regressed": "比当前 Harness 更差：{list}",
+      "unchanged": "与当前 Harness 相同：{list}"
+    },
+    "settings": {
+      "agentModel": "智能体的模型",
+      "autoAdopt": "自动采用低风险改进",
+      "autoAdoptDescription": "仅适用于任务和对话范围。工作区和全局修改始终需要询问。",
+      "backgroundInterval": "后台间隔（小时）",
+      "backgroundIntervalDescription": "两次启动后台运行之间的最短时间。",
+      "backgroundRuns": "每次巡检的运行数",
+      "backgroundRunsDescription": "同时进行的后台运行上限。",
+      "budget": {
+        "maxCandidates": {
+          "description": "整个运行提出的候选 Harness 数（2k）。",
+          "label": "候选"
+        },
+        "maxCostUsd": {
+          "description": "执行和模型调用的总花费。",
+          "label": "费用（美元）"
+        },
+        "maxIterations": {
+          "description": "一次运行可使用的最大 k。",
+          "label": "迭代"
+        },
+        "maxModelCalls": {
+          "description": "编辑、组合、选择与反思的调用。",
+          "label": "模型调用"
+        },
+        "maxParallelRuns": {
+          "description": "同时进行的执行与编辑会话数。",
+          "label": "并行任务"
+        },
+        "maxTokens": {
+          "description": "整个运行的输入与输出 Token。",
+          "label": "Token"
+        },
+        "maxTurnsPerRollout": {
+          "description": "单次尝试可进行的智能体轮次。",
+          "label": "每次执行的轮次"
+        },
+        "maxWallTimeMs": {
+          "description": "从开始到做出决定的实际时间。",
+          "label": "时间（分钟）"
+        }
+      },
+      "budgetDescription": "运行在触及任一上限时停止。每次运行可以调低这些上限。",
+      "budgetTitle": "预算上限",
+      "cooldown": "失败冷却时间（小时）",
+      "cooldownDescription": "在一次自动运行或一次被忽略的提示之后，等待这段时间再为同一智能体提示或排队下一次。",
+      "defaultK": "广度（k）",
+      "defaultKDescription": "每个阶段的候选数。一次运行包含 4k 次执行和 3k 次编辑会话。",
+      "defaultMode": "递归方式",
+      "defaultModeDescription": "并行同时尝试相互独立的修改；顺序则让每一轮建立在上一轮之上。",
+      "defaultsTitle": "新运行的默认值",
+      "description": "让智能体通过在隔离环境中针对真实任务试运行候选，并只保留有证据支持的修改，来改进自身的 Harness（指令、护栏、记忆、工具指引、技能、子智能体、工具规则）。",
+      "editorChannel": "编辑方式",
+      "editorChannelDescription": {
+        "agentic": "编辑者以智能体会话的方式处理证据文件。",
+        "auto": "证据能放进一个提示词时提交一份结构化提案；放不下时以智能体会话处理证据文件。",
+        "structured": "编辑者根据内联提供的证据返回一份结构化提案。"
+      },
+      "editorChannels": {
+        "agentic": "智能体会话",
+        "auto": "自动",
+        "structured": "结构化"
+      },
+      "enableTitle": "开启",
+      "enabled": "启用 Harness 演化",
+      "enabledDescription": "默认关闭。开启之前不会运行任何内容，下面的选项也不会生效。",
+      "experienceCap": "每个智能体保留的经验数",
+      "experienceCapDescription": "超出此数时淘汰最弱的经验。",
+      "invalidModel": "没有已配置的提供商提供此模型。",
+      "modelsDescription": "每个角色使用的模型。未设置的角色使用智能体自己的模型。",
+      "modelsTitle": "模型",
+      "noMcpServers": "未配置任何 MCP 服务器。",
+      "noModels": "未配置任何模型。",
+      "offHint": "探测从不触碰你的工作区，副作用会被拦截或模拟，任何超出单个任务的修改都会等待你的批准。",
+      "pacingTitle": "节奏",
+      "probeDescription": "你信任在探测期间只读的 MCP 服务器。对其他服务器的调用会被拦截。",
+      "probeTitle": "探测可访问的内容",
+      "role": {
+        "composer": "组合者",
+        "editor": "编辑者",
+        "executor": "执行者",
+        "reflector": "反思者",
+        "selector": "选择者"
+      },
+      "roleDescription": {
+        "composer": "把最好的修改合并为一个 Harness。",
+        "editor": "根据证据提出 Harness 修改。",
+        "executor": "在每次执行中让智能体完成任务。",
+        "reflector": "归因哪些修改有效并写下经验。",
+        "selector": "在检查无法决定时评判最终候选。"
+      },
+      "searchModels": "搜索模型",
+      "startMode": "运行的启动方式",
+      "startModeDescription": {
+        "background": "此外，在这类失败后自动排队，并由每小时一次的巡检在下方限制内启动。",
+        "disabled": "不启动任何运行，包括手动。",
+        "failure-triggered": "此外，当某轮因智能体自身行为失败时，在其下方提供改进建议。",
+        "manual": "仅在你从智能体的演化页面启动时。"
+      },
+      "startModes": {
+        "background": "后台",
+        "disabled": "从不",
+        "failure-triggered": "失败后提示",
+        "manual": "手动"
+      },
+      "title": "Harness 演化",
+      "useExperiences": "使用经验库",
+      "useExperiencesDescription": "向编辑者提供以往运行中最相关的经验。"
+    },
+    "start": {
+      "addFiles": "添加输入文件",
+      "baseRef": "基准提交",
+      "budgetDimension": {
+        "maxCandidates": "候选",
+        "maxCostUsd": "费用",
+        "maxIterations": "迭代",
+        "maxModelCalls": "模型调用",
+        "maxParallelRuns": "并行",
+        "maxTokens": "Token",
+        "maxTurnsPerRollout": "轮次",
+        "maxWallTimeMs": "时间"
+      },
+      "cancel": "取消",
+      "checks": "检查",
+      "confidence": {
+        "based": "基于 {count} 次可比运行。",
+        "few": "仅基于 {count} 次可比运行，仅供粗略参考。",
+        "none": "没有可比历史：只知道调用次数。",
+        "rough": "粗略估计：可比历史很少。"
+      },
+      "deliverables": "期望生成的文件",
+      "deliverablesPlaceholder": "每行一个路径，例如 report.md",
+      "description": "每个候选 Harness 都会在隔离环境中针对此任务试运行。在选出更好的 Harness 之前不会有任何改变，范围更大的修改会等待你的批准。",
+      "domain": "领域",
+      "domainPlaceholder": "例如 data/reports（用于在经验库中归类）",
+      "duplicate": "已有相同的运行在进行，正在打开它。",
+      "editable": "编辑者可以修改的内容",
+      "errors": {
+        "agent-not-found": "该智能体已不存在。",
+        "disabled": "Harness 演化已在设置中关闭。",
+        "external-runtime": "此智能体运行在外部运行时上，Cognia 不组装其提示词与工具循环，因此无法在这里探测其 Harness。",
+        "invalid-task": "任务不完整或前后矛盾。",
+        "model-unavailable": "有角色无法调用任何模型。请在 Harness 演化设置中为其指定模型。",
+        "no-commit": "仓库没有可作为起点的提交。",
+        "no-session": "对话范围需要运行所基于的对话。",
+        "no-workspace": "工作区范围需要一个工作区。",
+        "trigger-not-allowed": "当前设置不允许以这种方式启动运行。"
+      },
+      "estimate": "开始前的估算",
+      "estimateSpend": "约 {cost} · {tokens} Token · {time}",
+      "estimateWork": "{rollouts} 次执行、{sessions} 次编辑会话、{calls} 次模型调用",
+      "estimating": "正在估算…",
+      "exceeds": "超出{dimension}上限",
+      "failed": "无法开始运行。",
+      "invalid": "任务尚未就绪。",
+      "isolation": "每次尝试的工作位置",
+      "isolationHint": {
+        "files": "每次尝试都有一个空的临时目录，其中有输入文件的副本。",
+        "git": "每次尝试都有一个固定提交上的独立工作树。你的工作副本不会被改动。",
+        "none": "纯文本任务：尝试不使用文件直接作答。"
+      },
+      "k": "广度（k）",
+      "kCapped": "预算允许 k = {k}。",
+      "launchFailed": "运行无法启动。",
+      "maxCost": "费用上限（美元）",
+      "maxWall": "时间上限（分钟）",
+      "mode": "递归方式",
+      "networkOff": "在沙箱支持时，探测期间切断网络",
+      "pickRepo": "选择仓库文件夹",
+      "prompt": "请求",
+      "promptPlaceholder": "智能体收到的原始请求",
+      "relativePath": "任务内路径",
+      "removeFile": "移除文件",
+      "repo": "仓库",
+      "repoPlaceholder": "/path/to/repository",
+      "scope": "改进的适用范围",
+      "scopeHint": {
+        "global": "在所有地方修改该智能体，需要你的批准。",
+        "session": "将此对话切换到智能体的演化变体。",
+        "task": "仅记录在此运行上，智能体本身不变。",
+        "workspace": "为此工作区写入演化变体，需要你的批准。"
+      },
+      "started": "运行已开始。",
+      "submit": "开始运行",
+      "taskTitle": "标题",
+      "title": "改进 {agent}",
+      "useExperiences": "向编辑者提供经验库中的相关经验"
+    },
+    "status": {
+      "adopting": "正在采用",
+      "awaiting_approval": "等待审批",
+      "budget_exceeded": "预算耗尽",
+      "cancelled": "已取消",
+      "completed": "已完成",
+      "composing": "正在组合",
+      "evaluating": "正在评估",
+      "failed": "失败",
+      "interrupted": "已中断",
+      "probing": "正在探测",
+      "proposing": "正在提出修改",
+      "queued": "排队中",
+      "reference_running": "正在运行当前 Harness",
+      "reflecting": "正在反思",
+      "rejected": "保留当前",
+      "rolled_back": "已回滚",
+      "snapshotting": "正在捕获"
+    },
+    "step": {
+      "kind": {
+        "aggregate": "合并后的 Harness {index}",
+        "base": "当前 Harness，第 {index} 次运行",
+        "compose": "组合后的 Harness {index}",
+        "domain": "任务专属修改 {index}",
+        "invariant": "通用修改 {index}",
+        "reflect": "反思",
+        "rollout": "执行",
+        "select": "选择"
+      },
+      "rolloutOf": "{of}的执行"
+    },
+    "stepDetail": {
+      "changesFromBase": "相对当前 Harness 的变更",
+      "fellBack": "编辑者的提案两次无效，此阶段保留了输入。",
+      "keptBase": "编辑者未修改 Harness。",
+      "meta": "{attempts} 次尝试 · {tokens} Token · {cost} · {duration}",
+      "notes": "编辑者备注",
+      "reused": "复用了此前相同执行的证据（{from}）。",
+      "snapshotMissing": "此 Harness 版本已不再保存。"
+    },
+    "stepStatus": {
+      "failed": "失败",
+      "interrupted": "已中断",
+      "pending": "等待中",
+      "planned": "未开始",
+      "running": "运行中",
+      "skipped": "已跳过",
+      "succeeded": "完成"
+    },
+    "timeline": {
+      "fellBack": "已回退",
+      "keptBase": "无修改",
+      "phaseRound": "{phase} · 第 {round} 轮",
+      "reused": "已复用"
+    },
+    "trigger": {
+      "background": "后台",
+      "failure-triggered": "失败后启动",
+      "manual": "手动启动"
+    },
+    "versions": {
+      "close": "关闭",
+      "compare": "与当前比较",
+      "dialogBody": "与智能体当前的 Harness 相比，恢复此版本将改变的内容。智能体的模型、权限和工具保持不变。",
+      "dialogTitle": "Harness 版本",
+      "empty": "还没有记录 Harness 版本。运行开始时会捕获一个版本。",
+      "errors": {
+        "agent-changed": "打开此版本后智能体有变化，请重新查看差异。",
+        "not-found": "该版本已不存在。",
+        "other-agent": "该版本属于另一个智能体。",
+        "unchanged": "智能体已经是这个 Harness。"
+      },
+      "inEffect": "生效中",
+      "loading": "正在比较…",
+      "notEditable": "此智能体无法在这里编辑，请先复制一份。",
+      "openRun": "打开运行",
+      "origin": {
+        "adopted": "已采用",
+        "candidate": "候选",
+        "captured": "捕获",
+        "composed": "组合",
+        "restored": "已恢复"
+      },
+      "previewFailed": "无法比较此版本。",
+      "restore": "恢复此版本",
+      "restoreFailed": "无法恢复此版本。",
+      "restored": "版本已恢复。",
+      "risk": {
+        "high": "高风险",
+        "low": "低风险",
+        "medium": "中风险"
+      },
+      "sameAsCurrent": "智能体当前的 Harness 与此版本完全相同。"
+    },
+    "viewer": {
+      "cancel": "取消运行",
+      "confirmCancelBody": "进行中的工作将停止，当前 Harness 保持不变。已产生的费用不会退回。",
+      "confirmCancelTitle": "取消此运行？",
+      "confirmRollbackBody": "智能体将恢复到此次运行之前的 Harness。如果之后智能体被编辑过，回滚将被拒绝。",
+      "confirmRollbackTitle": "回滚此次采用？",
+      "interruptedHint": "运行期间应用已停止。继续将从最后完成的步骤接着执行，并会再次产生费用。",
+      "keep": "保留",
+      "loading": "正在加载运行…",
+      "missing": "该运行已不存在。",
+      "noReflection": "该运行尚未进行反思。",
+      "pickStep": "选择一个步骤查看其证据。",
+      "resume": "继续",
+      "retrieved": "{count, plural, other {向编辑者提供了经验库中的 # 条经验。}}",
+      "rollback": "回滚",
+      "stopped": "提前停止：{reason}",
+      "subtitle": "{agent} · {trigger} · {mode}，k = {k} · {created}",
+      "tabs": {
+        "compare": "比较",
+        "decision": "决定",
+        "reflection": "反思",
+        "timeline": "步骤"
+      },
+      "task": "任务"
     }
   },
   "hooks": {
@@ -21324,8 +22202,12 @@
         "pinned": "置顶",
         "proactivePush": "主动 IM 通知",
         "proactivePushHint": "允许助手将任务完成 / 出错 / 需输入等事件主动推送回此会话。默认关闭。",
-        "promoteConfirm": "将这些会话显式值提升为 Adapter 默认值？\n\n{changes}",
-        "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或 HITL 默认值，并可能影响其他会话。是否继续？",
+        "promoteConfirm": "此会话中的以下显式值将成为 Adapter 默认值，已有的会话覆盖不会被改写。",
+        "promoteConfirmAction": "提升",
+        "promoteConfirmTitle": "提升为 Adapter 默认值？",
+        "promotePermissionAction": "仍然提升",
+        "promotePermissionConfirm": "本次提升会改变 Adapter 的内置 Skill 上限或写入类 Skill 二次确认默认值，并作用于所有未单独覆盖的会话。",
+        "promotePermissionTitle": "此操作会影响其他会话",
         "promoteToAdapter": "提升为 Adapter 默认",
         "promoteToAdapterTitle": "仅提升支持的显式值，不改写已有会话覆盖",
         "promotionFields": {
@@ -21489,15 +22371,20 @@
       "sidebarSection": "收件箱侧栏分区"
     },
     "inboundA2UI": {
-      "rawPayload": "原始负载"
+      "actionUnavailable": "此操作只能在 {platform} 中使用",
+      "imageUnavailable": "图片需在 {platform} 中查看",
+      "rawPayload": "原始负载",
+      "untitledAction": "操作"
     },
     "inboundRecovery": {
       "continueSafely": "安全继续",
       "description": "有一条或多条入站消息未能处理，需要恢复。",
       "dismiss": "忽略",
       "message": "消息 {id}：{reason}",
+      "retryConfirmAction": "从头重试",
+      "retryConfirmTitle": "从头重试？",
       "retryFromStart": "从头重试",
-      "retryWarning": "从头重试会重新处理该消息，并可能重复触发外部副作用。是否继续？",
+      "retryWarning": "消息将从头重新处理，可能重复已发生的外部副作用，例如已发送的回复或已创建的记录。",
       "title": "入站恢复",
       "unknown": "未知原因"
     },
@@ -23607,6 +24494,11 @@
     },
     "pageLoading": "加载中…",
     "retryLanguage": "重试",
+    "startupRecovery": {
+      "description": "界面尚未启动，请检查网络连接后重新载入。本地数据会保留。",
+      "reload": "重新载入应用",
+      "title": "应用启动未完成"
+    },
     "stillWorking": "仍在进行…（{seconds} 秒）",
     "thinking": "Claude 正在思考…"
   },
@@ -25461,18 +26353,40 @@
   },
   "mcpApps": {
     "approvalRequired": "此 MCP App 请求了尚未批准的能力。",
-    "confirmDestructiveToolCall": "这是破坏性操作。再次确认 {tool}？",
-    "confirmDownload": "将此下载放入隔离区以供审阅吗？",
-    "confirmOpenLink": "打开指向 {hostname} 的链接吗？",
-    "confirmToolCall": "允许 {server} 调用 {tool} 吗？风险：{risk}。",
+    "deny": "拒绝",
+    "destructiveToolCall": {
+      "allow": "运行 {tool}",
+      "description": "{tool} 被标记为破坏性操作，可能无法撤销。确定允许运行吗？",
+      "title": "确认破坏性操作"
+    },
     "discardDownload": "丢弃",
+    "download": {
+      "allow": "隔离",
+      "description": "应用请求保存文件。文件会先隔离在此处，待你检查后再保存或丢弃。",
+      "title": "隔离此下载？"
+    },
     "frameTitle": "来自 {server} 的应用",
+    "openLink": {
+      "allow": "打开链接",
+      "description": "应用请求在浏览器中打开 {hostname} 上的页面。",
+      "title": "打开外部链接？"
+    },
     "provenance": "来自 {server} 的应用 · {uri}",
     "quarantinedDownload": "隔离的下载（{count} 项）",
     "resourceError": "无法安全加载 MCP App 资源。",
     "reviewTitle": "逐项审阅应用请求的能力",
+    "risk": {
+      "destructive": "破坏性",
+      "read": "只读",
+      "write": "可修改数据"
+    },
     "runtimeError": "MCP App 无法安全启动。",
-    "saveDownload": "审阅并保存"
+    "saveDownload": "审阅并保存",
+    "toolCall": {
+      "allow": "允许",
+      "description": "{server} 请求调用 {tool}。风险：{risk}。",
+      "title": "允许应用运行 {tool}？"
+    }
   },
   "memory": {
     "add": {
@@ -26246,7 +27160,9 @@
         "listenerFailed": "无法读取浏览器访问状态，请重新打开此页面重试。",
         "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入 连接 → 本机主机 → 浏览器访问 中的允许来源。扩展会在连接页面显示该来源。",
         "pairedConnected": "已连接",
+        "pairedConnectedAt": "连接时间：{time}",
         "pairedEmpty": "还没有配对任何浏览器。",
+        "pairedFeatures": "支持能力：{features}",
         "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
         "pairedLoadFailed": "无法读取已配对的浏览器。",
         "pairedOffline": "未连接",
@@ -27451,6 +28367,22 @@
       "search": "搜索设置",
       "searchAria": "搜索设置",
       "searchEmpty": "没有匹配的设置。",
+      "searchProviders": {
+        "allowPrivateEndpoint": "允许私有 / HTTP 端点",
+        "endpointAria": "{name} 端点 URL",
+        "endpointDocs": "端点文档：",
+        "endpointIssues": {
+          "embedded-credentials": "请移除端点 URL 中嵌入的凭据。",
+          "insecure-public-endpoint": "公共端点必须使用 HTTPS。",
+          "invalid-url": "请输入绝对端点 URL。",
+          "missing": "请输入 SearXNG 端点 URL，无需 API 密钥。",
+          "query-or-fragment": "请移除端点 URL 的查询参数和片段。",
+          "unsupported-scheme": "请使用 HTTPS，或为明确授权的私有主机使用 HTTP。"
+        },
+        "endpointPlaceholder": "https://search.example.org",
+        "legacy": "旧版服务：不再接受新客户，将于 {date} 停止服务。",
+        "retired": "已于 {date} 停用；已保存的凭据会保留。"
+      },
       "searchResults": "结果",
       "searchRow": "联网提问",
       "sectionAbout": "关于",
@@ -28085,9 +29017,11 @@
         "cta": "退出 / 重新配对"
       },
       "signOutDescription": "退出后需重新扫码配对才能再次连接。",
+      "signOutFallbackConfirm": "退出登录",
+      "signOutFallbackDescription": "当前正在使用此 Host。请选择退出登录后此设备要切换到的已保存 Host。",
+      "signOutFallbackField": "替代 Host",
       "signOutFallbackInvalid": "请选择一个已保存的备用 Host。",
-      "signOutFallbackPrompt": "请输入备用 Host ID（{choices}）。",
-      "signOutFallbackRequired": "移除活动 Host 前必须选择备用 Host。",
+      "signOutFallbackTitle": "选择替代 Host",
       "signOutReason": "确认退出当前配对",
       "signOutTitle": "退出登录",
       "step": {
@@ -34175,6 +35109,8 @@
       "dangerousAria": "敏感权限",
       "dangerousSection": "敏感权限",
       "descriptions": {
+        "agent-config:read": "查看你的 Agent 配置（指令文件、技能、Agent、提示词和模板），以及 Hook、权限规则和 MCP 服务器的摘要（绝不包括其中的密钥）",
+        "agent-config:write": "修改你的指令文件、技能、Agent 和提示词，每次修改前都需你确认",
         "agent:control": "控制智能体的执行",
         "agent:dispatch": "派发内置子智能体和智能体团队",
         "agent:dispatch-external": "派发外部编程智能体（Claude Code / Codex / …）",
@@ -36460,6 +37396,7 @@
   "providerCompare": {
     "compare": "对比",
     "description": "对同一查询并行调用两个 Provider 进行对比。",
+    "failed": "对比失败",
     "noResult": "暂无结果",
     "providerA": "Provider A",
     "providerB": "Provider B",
@@ -37168,6 +38105,28 @@
         "exportJson": "导出脱敏诊断历史 JSON",
         "title": "历史"
       },
+      "maintenance": {
+        "description": "按来源显示实际尝试、成功与退避状态；调度时钟完成不代表所有来源刷新成功。这里只显示诊断，不发送通知。",
+        "manualRetry": "等待手动验证凭据",
+        "never": "尚无记录",
+        "outcome": {
+          "blocked": "受阻",
+          "failed": "失败",
+          "skipped": "跳过",
+          "succeeded": "成功"
+        },
+        "status": {
+          "idle": "空闲",
+          "paused-auth": "凭据暂停",
+          "paused-offline": "离线暂停",
+          "paused-vault": "保险库锁定暂停",
+          "running": "执行中",
+          "scheduled": "已安排（含退避）"
+        },
+        "times": "最近尝试：{attempt}；最近成功：{success}；下次检查：{next}；连续失败：{failures}",
+        "title": "后台维护状态",
+        "unknown": "当前运行环境没有可用的来源维护记录；远程来源状态尚未投影。"
+      },
       "matrix": {
         "cost": "预估费用",
         "description": "始终展示原始指标与置信度，不计算不透明的综合分数。",
@@ -37255,7 +38214,6 @@
       "manage": "在“外部智能体”中管理",
       "runsOnHost": "在已配对的主机上运行",
       "summary": "{working}/{total} 已就绪",
-      "switchedOff": "外部智能体已关闭，此处配置的 {count} 个智能体在重新开启前不会运行。",
       "title": "自带模型访问的智能体"
     },
     "failed": "失败",
@@ -37413,6 +38371,14 @@
     "localProvidersTitle": "本地提供商",
     "localai": "LocalAI",
     "localaiDescription": "自托管 OpenAI 替代方案",
+    "magpie": {
+      "connected": "已连接 Magpie {version} · {count} 个模型",
+      "description": "连接正在运行的 Magpie 网关，加载其中已启用的模型。请先启动 Magpie。",
+      "discover": "发现本机 Magpie",
+      "discovering": "正在发现…",
+      "failed": "无法连接 Magpie",
+      "title": "Magpie 网关"
+    },
     "manageInstalledModels": "管理 {provider} 的已安装模型",
     "manageModels": "管理模型",
     "managementKey": "管理密钥（可选）",
@@ -39345,6 +40311,7 @@
           "MODE_NOT_EDITABLE": "此模式暂不可用。",
           "PANEL_C_REQUIRED": "三人评审团需要设置评审团成员 C 角色。",
           "PROFILE_NOT_ALLOWED": "此模式不支持该检查方式。",
+          "PROMPT_VERSION_NOT_ALLOWED": "请选择内置角色提示词或提示词中心的角色提示词。",
           "ROLE_MISSING": "{role} 角色需要一个模型别名。",
           "ROLE_UNKNOWN": "{role} 不是此模式的角色。"
         },
@@ -39369,6 +40336,15 @@
           "schema_fixture": "结构校验",
           "text_basic": "格式检查",
           "text_review": "模型复核"
+        },
+        "promptVersion": "角色提示词",
+        "promptVersionDesc": {
+          "custom": "使用「设置 → 创作与自定义 → 提示词」中的 Router Fusion 角色提示词。每次运行使用开始时已发布的文本，每次发布修改都会让此动作的运行获得新的标识。",
+          "shipped": "使用 Cognia 内置的角色提示词。内置动作始终使用这一版本。"
+        },
+        "promptVersionValue": {
+          "custom": "提示词中心",
+          "shipped": "内置（roles-1）"
         },
         "reset": "恢复内置设置",
         "resetCustom": "清除修改",
@@ -41325,6 +42301,7 @@
       "files-trash-purge": "文件回收站清理",
       "github-issue-sync": "GitHub Issue 同步",
       "goal": "目标",
+      "harness-evolution-sweep": "Harness 演化后台巡检",
       "im-push": "IM 推送",
       "issue-wakeup": "议题唤醒",
       "monitor": "Monitor",
@@ -41559,14 +42536,16 @@
     "addCustomSource": "添加",
     "addCustomSourceDesc": "为来源命名并填写网站域名，用于限制研究结果。",
     "addCustomSourceTitle": "添加自定义来源",
+    "allowPrivateEndpoint": "允许私有 / HTTP 端点",
     "apiKey": "API 密钥",
     "backupKeys": "备用密钥",
     "cancel": "取消",
+    "configureProvider": "配置 {provider}",
     "configureProviderHint": "请至少配置一个 Provider",
     "connectionFailed": "连接失败",
     "connectionSuccess": "连接成功",
     "defaultProvider": "默认 Provider",
-    "description": "配置联网搜索 provider 与对话集成。",
+    "description": "配置联网搜索服务商、网页阅读器与对话路由。",
     "disableAll": "全部禁用",
     "domainSources": {
       "arxiv": "arXiv",
@@ -41575,8 +42554,23 @@
       "wikipedia": "Wikipedia"
     },
     "enableAll": "全部启用",
+    "enableProvider": "启用 {provider}",
     "enableSearch": "启用联网搜索",
     "enabled": "已启用",
+    "endpoint": "SearXNG 端点",
+    "endpointGrantRequired": "此私有端点需要明确授权。",
+    "endpointHelp": "使用已启用 JSON 输出的 SearXNG 实例，无需 API 密钥。",
+    "endpointIssues": {
+      "embedded-credentials": "请移除 URL 中的凭据。",
+      "insecure-public-endpoint": "公共端点必须使用 HTTPS。",
+      "invalid-url": "请输入绝对 URL。",
+      "missing": "请输入 SearXNG 端点。",
+      "query-or-fragment": "请移除查询参数和片段。",
+      "unsupported-scheme": "请使用 HTTP 或 HTTPS URL。"
+    },
+    "endpointPlaceholder": "https://search.example.com",
+    "engine": "搜索引擎",
+    "enginePlaceholder": "可选的引擎名称",
     "fallbackEnabled": "失败自动切换",
     "features": {
       "academic": "学术",
@@ -41595,14 +42589,19 @@
     "googleCx": "可编程搜索引擎 ID（cx）",
     "googleCxHelp": "Google Custom Search 必填",
     "googleCxPlaceholder": "如 012345678901234567890:abcdefg1234",
+    "groundingBilling": "每次搜索都会生成模型回复，并由你的 Google 账户付费。",
+    "groundingModel": "Google 搜索接地模型",
     "hideKeys": "隐藏密钥",
     "higherPriority": "提高优先级",
+    "invalidEngine": "请输入有效引擎名称（1–40 个字母、数字、空格、下划线、点或连字符）。",
     "invalidKeyFormat": "密钥格式无效",
+    "invalidModel": "请选择当前受支持的搜索接地模型。",
     "invalidSourceDomain": "请输入有效的公网域名或 HTTP(S) URL。",
     "keyBackup": "备用密钥 #{n}",
     "keyPoolResults": "密钥池测试结果",
     "keyPoolSize": "轮换池中有 {count} 个密钥",
     "keyPrimary": "主密钥",
+    "legacyNotice": "旧版服务：不接受新客户；现有账户可使用至 {date}。",
     "lowerPriority": "降低优先级",
     "maxResults": "最大结果数",
     "maxRetries": "最大重试次数",
@@ -41617,7 +42616,9 @@
       "performance": "性能",
       "performanceDesc": "结果缓存与 Provider 熔断器",
       "providers": "Providers",
-      "providersDesc": "各 Provider 的 API 密钥与配置",
+      "providersDesc": "凭据、端点、引擎与模型",
+      "reading": "阅读",
+      "readingDesc": "阅读器、接收方、回退与蒸馏",
       "safety": "安全",
       "safetyDesc": "安全搜索与来源验证"
     },
@@ -41636,17 +42637,45 @@
     "pricingPerSearch": "${price}/次",
     "primary": "主要",
     "priority": "优先级",
+    "providerDescriptions": {
+      "bing": "Microsoft 已停用此 API。",
+      "brave": "Brave 网页、新闻、图片和视频搜索。",
+      "deepseek": "搜索和阅读器独立配置。",
+      "exa": "支持新闻和学术结果的语义搜索。",
+      "google": "旧版 Google 可编程搜索引擎 API。",
+      "google-ai": "基于 Google 搜索接地的模型生成。",
+      "perplexity": "支持时效、地区和域名筛选的搜索。",
+      "searchapi": "可选择多个 SERP 搜索引擎。",
+      "searxng": "自有的 JSON 搜索端点，无需 API 密钥。",
+      "serpapi": "可选择多个引擎的 SERP 结果。",
+      "serper": "Google 结果，支持新闻、图片、视频和学术搜索。",
+      "tavily": "提供生成式答案的 AI 搜索。",
+      "tinyfish": "搜索和阅读器独立配置。"
+    },
     "providers": "搜索 Providers",
-    "providersDescription": "为各 Provider 配置 API 密钥",
+    "providersDescription": "配置服务商凭据和端点",
     "removeKey": "移除密钥",
     "researchDomains": "限定域名",
     "researchProviders": "优先 Provider",
     "researchSources": "研究来源",
     "researchSourcesDesc": "优先 Provider 会先被尝试；选择的域名始终作为深度研究结果的硬过滤条件。",
     "reset": "重置",
+    "retiredNotice": "已于 {date} 停用。保留已存凭据；无法配置或启用此服务。",
     "rotateKeys": "轮换 API 密钥",
     "rotateKeysDesc": "在多个密钥间分摊请求；被限流或拒绝的密钥会被自动跳过。",
     "rotationStrategy": "策略",
+    "safeSearchLevels": {
+      "moderate": "安全搜索：适中",
+      "off": "安全搜索：关闭",
+      "strict": "安全搜索：严格"
+    },
+    "searchTypes": {
+      "academic": "学术",
+      "general": "通用",
+      "images": "图片",
+      "news": "新闻",
+      "videos": "视频"
+    },
     "selectProvider": "选择 Provider",
     "selected": "已选择",
     "showKeys": "显示密钥",
@@ -41656,10 +42685,20 @@
     "sourceName": "来源名称",
     "sourceNamePlaceholder": "来源名称",
     "sourceNeedsDomain": "需要补充域名",
+    "states": {
+      "configured": "已配置",
+      "disabled": "未启用",
+      "missing-config": "配置不完整",
+      "missing-key": "缺少密钥",
+      "retired": "已停用"
+    },
     "strategyLeastUsed": "最少使用",
     "strategyRandom": "随机",
     "strategyRoundRobin": "轮询",
-    "testConnection": "测试",
+    "testConnection": "测试搜索",
+    "testCost": "测试会主动发送搜索请求，可能消耗服务商额度。不会自动运行测试。",
+    "testEvidence": "此带日期的测试仅为历史证据，不保证当前可用。",
+    "testedAt": "测试时间：{date}",
     "title": "联网搜索"
   },
   "searchUsage": {
@@ -42795,7 +43834,7 @@
         "workingDirPlaceholder": "/path/to/project",
         "workingDirTitle": "默认工作目录"
       },
-      "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+      "description": "配置内置 Agent 的默认行为，管理工具权限与会话，并查看运行状态。Agent 或对话中的单独设置会覆盖这些默认值。",
       "nav": {
         "groups": {
           "behaviorGroup": "行为",
@@ -43129,7 +44168,7 @@
         "sessions": "会话",
         "sidecar": "侧载诊断"
       },
-      "title": "内置代理运行时",
+      "title": "Agent 运行时",
       "toolSearch": {
         "addAria": "添加",
         "description": "按需加载工具以保持系统提示精简。在下方固定服务器或工具以使其始终可用。",
@@ -45452,7 +46491,7 @@
       },
       "title": "上下文压缩",
       "toolResultCap": {
-        "description": "压缩时将每个工具结果上限设为该 token 数。",
+        "description": "压缩时将每个工具结果上限设为该 token 数。设为 0 时保留完整结果，不进行裁剪。",
         "heading": "工具结果上限",
         "label": "工具结果最大 token 数"
       },
@@ -46992,7 +48031,8 @@
       "permissionsEditor": {
         "builtInSkills": "内置 Skills 上限",
         "cancel": "取消",
-        "confirmImpact": "保存此权限上限？它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+        "confirmImpact": "它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+        "confirmImpactTitle": "保存此权限上限？",
         "conversationGrantRequired": "Adapter 只能限制此能力上限；每个会话仍需显式授权。",
         "hitl": "写入类 Skill 需要 HITL",
         "hitlHelp": "会话设置可覆盖此默认值；破坏性 Skill 始终需要审批。",
@@ -48084,6 +49124,7 @@
       "tunnel": {
         "busyBody": "本应用只运行一个 cloudflared 进程。它正为另一功能把 {localUrl} 暴露在 {publicUrl}。替换后，这个公网地址会指向别处。",
         "busyCancelled": "保留了现有隧道。",
+        "busyKeep": "保留",
         "busyReplace": "替换隧道",
         "busyStopBody": "本应用只运行一个 cloudflared 进程，它正为另一功能把 {localUrl} 暴露在 {publicUrl}。在这里停止，那个公网地址也会一并失效。",
         "busyStopConfirm": "仍然停止",
@@ -48939,6 +49980,52 @@
         "unit": "天",
         "zeroHint": "设为 0 则永久保留追踪记录。"
       },
+      "retentionHealth": {
+        "description": "仅显示当前窗口、当前账户最近一次清理的结果。其他窗口或重启后的状态未知；不会发送通知。用量明细保留 90 天，费用汇总额外保留边界所在的完整本地日。",
+        "lastSweep": "最近完成：{when}",
+        "reasons": {
+          "cleanup-pending": "等待原主机完成清理",
+          "configured-off": "设置为保留",
+          "file-delete-failed": "文件删除未完成",
+          "file-metadata-unknown": "文件时间未知",
+          "prune-failed": "清理未完成",
+          "unsupported-host": "当前主机不适用",
+          "vault-locked": "保险库未解锁"
+        },
+        "removed": "已移除 {count} 项",
+        "stages": {
+          "files": "文件",
+          "rows": "任务记录"
+        },
+        "status": {
+          "blocked": "受阻",
+          "completed": "完成",
+          "completed-no-work": "完成，无需清理",
+          "failed": "失败",
+          "off": "已关闭或不适用",
+          "partial": "部分完成",
+          "unknown": "未知"
+        },
+        "targets": {
+          "agentTraces": "Agent 追踪",
+          "evalArtifacts": "评估产物",
+          "evalOnline": "在线评估",
+          "managedDesktopDeletion": "桌面结果删除",
+          "mediaGenerationJobs": "视频任务和文件",
+          "memoryGovernance": "记忆治理",
+          "notificationDelivery": "通知投递记录",
+          "ocrResults": "OCR 缓存",
+          "retrievalControl": "检索治理",
+          "sessionSideChats": "会话侧聊",
+          "siteArtifacts": "站点产物",
+          "syncTombstones": "同步删除标记",
+          "usageHistory": "用量与费用历史",
+          "workSubmissions": "工作提交",
+          "workflowAppData": "工作流应用数据"
+        },
+        "title": "后台清理诊断",
+        "unknown": "当前窗口尚无清理记录。"
+      },
       "schedule": {
         "currentCount": "{count, plural, =1 {1 个活跃计划} other {# 个活跃计划}}",
         "desc": "通过任务调度器以任意 cron 表达式执行加密备份。任务在重启后保留，并可在 设置 → 计划任务 中查看。",
@@ -49256,7 +50343,7 @@
       "about": "版本、构建、诊断、更新与致谢。",
       "account": "你的身份、用量、资料、订阅与已配对设备，集中于一处。",
       "agentModes": "内置与自定义代理模式 — 系统提示词、工具列表、输出格式与实时预览预设。",
-      "agentRuntime": "内置 Anthropic SDK 侧载 — 默认值、权限模式、始终允许的工具、内置工具分类、侧载诊断与 A2UI 桥接。",
+      "agentRuntime": "管理内置 Agent 的默认行为、工具权限、会话和运行诊断。",
       "agents": "外部代理 — Claude Code CLI、Codex、Gemini CLI、Cursor，以及任何使用 ACP / OpenCode / HTTP 协议的自定义命令。",
       "aiConnections": "配置 AI 账号、端点、凭据、部署、验证、健康状态以及导入导出。",
       "apiKey": "Anthropic API 密钥（由本地 sidecar 使用）。",
@@ -49282,6 +50369,7 @@
       "gateway": "本地 OpenAI / Anthropic 兼容端点，让外部工具（Claude Code、任意 OpenAI 客户端）借用你的服务商、路由和凭据。",
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
       "goals": "持久化的聊天目标。用 /goal 设定目标后，智能体会自动续跑，直到判定模型确认达成，或触发预算 / 超时退出。",
+      "harnessEvolution": "让智能体依据执行证据改进自身的指令、技能与工具规则：隔离探测、预算、审批与经验库。",
       "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
       "imageCatalog": "项目可用于运行智能体的容器镜像",
       "logs": "日志级别、传输（控制台 / IndexedDB / 原生 / 远程 / Langfuse / OpenTelemetry）、保留策略、脱敏与按模块的采样。",
@@ -49298,6 +50386,7 @@
       "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
       "proIde": "内嵌 VS Code 的安装与磁盘占用",
       "profile": "本地显示名称、头像与简介 — 同步到伴侣设备并包含在备份中。",
+      "prompts": "Cognia 发送的所有提示词：用分范围覆盖、历史和重置编辑内置提示词，并通过各自的所有者编辑 Agent、预设、Skill、模式和指令文件的提示词。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
       "remoteHosts": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。",
@@ -49346,7 +50435,7 @@
       "hostMode": {
         "closeLocked": "常驻 host 模式下，关闭按钮固定为最小化到托盘。",
         "description": "让这台电脑在你离开时继续运行你的 bot、连接器和定时任务。",
-        "details": "阻止电脑休眠，登录时在后台启动 Cognia，并让关闭按钮最小化到托盘。从托盘选择退出仍会退出应用。",
+        "details": "阻止电脑空闲休眠（合上笔记本盖子仍会休眠），登录时在后台启动 Cognia，并让关闭按钮最小化到托盘。从托盘选择退出仍会退出应用。",
         "disabledToast": "常驻 host 模式已关闭。",
         "enabledToast": "这台电脑现在是常驻 host。",
         "failed": "无法更改常驻 host 模式：{error}",
@@ -50058,6 +51147,7 @@
         "theme": "主题",
         "ttsEnabled": "文本转语音",
         "ttsProvider": "语音提供方",
+        "webReader": "网页阅读与蒸馏",
         "webTools": "网页工具",
         "workingDir": "默认工作目录"
       },
@@ -52363,6 +53453,1471 @@
       "timezoneLabel": "时区",
       "title": "个人资料"
     },
+    "promptCenter": {
+      "actions": {
+        "cancel": "取消",
+        "discardDraft": "丢弃草稿",
+        "followBase": "重新跟随基础提示词",
+        "loadLatest": "放弃我的修改并载入最新版本",
+        "makeDefault": "设为默认",
+        "publish": "发布",
+        "reset": "重置为继承",
+        "retry": "重试",
+        "revertEdits": "撤销我的修改",
+        "save": "保存",
+        "saveCustom": "另存为我的版本",
+        "saveDraft": "保存草稿",
+        "updateVariant": "更新我的变体",
+        "useShipped": "从内置文本开始"
+      },
+      "activation": {
+        "new-session-required": "对新会话生效；正在运行的外部 Agent 会保留启动时的指令。",
+        "next-operation": "下一次使用时生效，无需重启。",
+        "reload-required": "在其所有者重新加载后生效。",
+        "unsupported": "此宿主无法应用。"
+      },
+      "baseSource": {
+        "app-default": "默认系统提示词",
+        "character": "Agent 提示词",
+        "none": "无基础提示词",
+        "session": "本会话的提示词",
+        "team-member": "团队成员覆盖"
+      },
+      "compare": {
+        "against": "对比对象",
+        "diffLabel": "两个版本之间的差异",
+        "identical": "没有差异。",
+        "published": "此范围已发布的版本",
+        "shipped": "内置文本"
+      },
+      "conflict": {
+        "body": "文件在打开后已在磁盘上被修改。你的文本已保留，下方显示磁盘上的改动，请选择保留哪一份。",
+        "diffLabel": "磁盘上的文件与你的文本之间的差异",
+        "keepMine": "用我的文本覆盖保存",
+        "takeDisk": "放弃我的文本并载入文件",
+        "title": "文件已在磁盘上被修改"
+      },
+      "detail": {
+        "missing": "此提示词已不可用。"
+      },
+      "editor": {
+        "insertVariable": "插入 {name}",
+        "length": "{length} / {max}",
+        "shippedLabel": "内置文本",
+        "variableOptional": "可选；截断至 {max} 个字符",
+        "variableRequired": "必填；截断至 {max} 个字符",
+        "variables": "变量"
+      },
+      "facts": {
+        "activation": "修改何时生效",
+        "consumers": "使用方",
+        "hosts": "运行于",
+        "lastUsed": "本窗口内最近一次使用",
+        "outputContract": "输出约定",
+        "overrides": "已覆盖的范围",
+        "requiredFragments": "回复解析依赖的文本",
+        "risk": "编辑风险"
+      },
+      "fallback": {
+        "contract-incompatible": "覆盖内容基于旧版约定编写",
+        "invalid-body": "覆盖内容未通过校验",
+        "pii-blocked": "覆盖内容包含个人信息",
+        "snapshot-unavailable": "无法读取覆盖内容"
+      },
+      "group": {
+        "agents": "Agent 与模式",
+        "chat": "对话",
+        "completion": "补全",
+        "developer": "开发者工具",
+        "generation": "生成",
+        "goals": "目标",
+        "knowledge": "知识与记忆",
+        "permissions": "权限",
+        "routing": "路由",
+        "team": "Agent 团队",
+        "twin": "数字分身"
+      },
+      "history": {
+        "active": "生效中",
+        "compareHint": "从此修订版本到编辑器中文本的改动。",
+        "currentDraft": "草稿",
+        "diffLabel": "从修订版本到编辑器的改动",
+        "empty": "此范围尚未保存任何内容。",
+        "kind": {
+          "draft": "草稿",
+          "published": "已发布",
+          "reset": "重置为继承"
+        },
+        "loadDraft": "载入编辑器",
+        "origin": {
+          "cli": "来自 CLI",
+          "editor": "来自编辑器",
+          "import": "导入",
+          "plugin": "由插件应用",
+          "restore": "恢复"
+        },
+        "restore": "恢复为新修订版本",
+        "restoreInheritance": "恢复继承",
+        "title": "修订历史"
+      },
+      "host": {
+        "app": "应用",
+        "bootstrap": "引导 Agent",
+        "cli": "CLI"
+      },
+      "inspectOnly": {
+        "body": "此文本由解析器或宿主约定读取，仅供查看，不能覆盖。",
+        "title": "只读的协议文本"
+      },
+      "instructionSource": {
+        "extra": "额外指令路径",
+        "global": "全局指令文件",
+        "import": "由其他指令文件导入",
+        "instructions-dir": "项目指令目录",
+        "project": "项目指令文件"
+      },
+      "issues": {
+        "empty": "文本为空。",
+        "malformedPlaceholder": "占位符格式错误；请使用 '{{'name'}}'。",
+        "missingFragment": "必须保留“{fragment}”：回复解析依赖它。",
+        "missingVariable": "必须使用变量 {name}。",
+        "notEditable": "此提示词不可编辑。",
+        "pii": "文本中似乎包含个人信息，提示词不能携带个人信息。",
+        "tooLong": "共 {length} 个字符，上限为 {limit}。",
+        "unknownVariable": "{name} 不是此提示词的变量。"
+      },
+      "kind": {
+        "composer-template": "输入框模板",
+        "feature-template": "功能模板",
+        "procedure": "流程",
+        "project-rule": "项目规则",
+        "protocol": "协议",
+        "role": "角色",
+        "runtime-baseline": "运行时基线"
+      },
+      "lastUsed": {
+        "default": "{time} 使用了内置文本",
+        "fallback": "{time} 使用了内置文本，原因：{reason}",
+        "never": "本窗口打开后尚未使用",
+        "override": "{time} 使用了{scope}范围的覆盖"
+      },
+      "omission": {
+        "bare-mode": "已跳过：精简模式不读取指令文件",
+        "empty": "未设置",
+        "load-failed": "无法读取文件；对话会在没有它们的情况下继续",
+        "no-filesystem": "此宿主没有可读取的项目文件"
+      },
+      "operation": {
+        "activate-procedure": "按需启用",
+        "append-rules": "追加规则",
+        "inspect-only": "只读",
+        "legacy-replace": "替换基础提示词",
+        "narrow-only": "只能收紧",
+        "replace-template": "替换模板"
+      },
+      "owner": {
+        "builtIn": "内置",
+        "customCopyName": "{name}（我的版本）",
+        "customHint": {
+          "character": "保存后会创建此 Agent 的变体，该变体只拥有自己的提示词，其余设置继续跟随原 Agent。",
+          "custom-mode": "保存后会创建你自己的模式副本。",
+          "preset": "保存后会创建你自己的预设副本；在副本上选择“设为默认”即可将其设为默认。",
+          "skill": "保存后会创建你自己的 Skill 副本，并带上其资源。",
+          "subagent-template": "保存后会基于此模板创建你自己的子代理，并保留其设置。",
+          "team-template": "保存后会复制整个模板，仅修改这位队员的提示词。"
+        },
+        "defaultSystemPrompt": "默认系统提示词",
+        "loading": "加载中…",
+        "missing": "此资源已不存在。",
+        "openCustom": "打开我的版本",
+        "openIn": {
+          "agent-modes": "在 Agent 模式中打开",
+          "agent-runtime": "在 Agent 运行时中打开",
+          "characters": "在 Agent 中打开",
+          "chatTemplates": "在会话模板中打开",
+          "presets": "在预设中打开",
+          "skills": "在 Skills 中打开",
+          "squads": "在小队中打开",
+          "subagents": "在子代理中打开"
+        },
+        "ownerOnly": {
+          "composer-template": "会话模板会作为你自己的消息插入，而不是系统指令。请在会话模板中编辑，以保持其参数和修订一致。"
+        },
+        "readFailed": "无法读取此资源",
+        "readOnly": {
+          "built-in": "Cognia 内置",
+          "host-unsupported": "此设备上不可编辑",
+          "immutable": "此 Agent 不能修改",
+          "plugin": "由插件拥有"
+        }
+      },
+      "ownerActivation": {
+        "app-setting": "用于 Agent 和会话都未设置提示词的对话，从下一轮开始生效。",
+        "character": "从与此 Agent 的每个对话的下一轮开始使用。",
+        "composer-template": "在你选择它时插入输入框。",
+        "custom-mode": "从此模式下对话的下一轮开始使用。",
+        "instruction-file": "从磁盘读取；从此工作区的下一轮开始使用。",
+        "preset": "在下次将预设应用到对话时生效；已使用它的对话保留现有配置。",
+        "skill": "由 Skill 运行时在下次加载该 Skill 时提供。",
+        "subagent-template": "下次委派给此子代理时使用。",
+        "team-template": "此后用此模板创建的团队会复制这段提示词；已有团队保留各自的副本。",
+        "workspace-instructions": "从此工作区中对话的下一轮开始使用。"
+      },
+      "preview": {
+        "agent": "Agent",
+        "description": "新对话起始使用的系统提示词，按对话拼接的顺序展示。只能由对话实时生成的部分列在下方。",
+        "failed": "无法生成预览：{message}",
+        "loading": "正在生成预览…",
+        "mode": "模式",
+        "noAgent": "不选 Agent",
+        "noMode": "不选模式",
+        "omittedTitle": "未包含",
+        "railHint": "新对话从这里开始",
+        "refresh": "刷新",
+        "segments": "按发送顺序排列的部分",
+        "sendTimeBody": "这些内容由每一轮根据实时状态（回忆、目标、计划、工具）添加，因此不在此预览。",
+        "sendTimeTitle": "发送时拼接",
+        "size": "{chars} 个字符 · 约 {tokens} 个 token",
+        "skillsCount": "{count} 个 Skill",
+        "skillsNote": "Skill 运行时会在自身预算内提供这些 Skill；具体加载哪些取决于每一轮。",
+        "title": "生效的对话提示词",
+        "total": "{chars} 个字符 · 约 {tokens} 个 token（不含发送时拼接的部分）"
+      },
+      "profile": {
+        "applied": "{count, plural, =0 {没有发布任何内容。} other {已发布 # 个覆盖。}}",
+        "appliedWithConflicts": "已发布 {applied} 个；{conflicted} 个在预览后被修改，已保持不变。",
+        "applyAction": "{count, plural, =0 {发布} other {发布 # 个覆盖}}",
+        "chooseFile": "选择配置文件",
+        "description": "以一个 JSON 文件在不同机器和安装之间迁移已发布的覆盖。",
+        "exportAction": "导出",
+        "exportHint": "所选范围内所有已发布的覆盖。草稿和历史保留在本机。",
+        "exportTab": "导出",
+        "exported": "已导出 {count} 个覆盖。",
+        "importTab": "导入",
+        "invalidFile": "这不是提示词配置文件：{reason}",
+        "mapHint": "这些覆盖属于来源机器上的工作区、Agent 或会话。请选择它们在本机应用的位置，或跳过。",
+        "mapTarget": "{id} 在本机的目标",
+        "mapTitle": "目标",
+        "nothingToExport": "所选范围内没有已发布的内容。",
+        "previewTitle": "{count} 个条目",
+        "skipTarget": "跳过",
+        "status": {
+          "contract-mismatch": "基于其他版本编写",
+          "invalid": "未通过校验",
+          "needs-target": "需要选择目标",
+          "new": "新增",
+          "replace": "替换现有覆盖",
+          "scope-unsupported": "不支持该范围",
+          "unchanged": "已发布相同内容",
+          "unknown-prompt": "未知提示词"
+        },
+        "title": "提示词配置",
+        "upstreamChanged": "内置文本已更新"
+      },
+      "rail": {
+        "allGroups": "全部分组",
+        "allSources": "全部来源",
+        "choose": "选择提示词",
+        "count": "共 {total} 个提示词 · 已修改 {modified} 个",
+        "failed": "无法读取：{sources}",
+        "groupFilter": "分组",
+        "loadFailed": "无法加载提示词：{message}",
+        "loading": "正在加载提示词…",
+        "modified": "已修改",
+        "modifiedOnly": "仅显示已修改",
+        "noMatches": "没有匹配的提示词。",
+        "noWorkspace": "不选工作区",
+        "profiles": "配置",
+        "readOnly": "只读",
+        "search": "搜索提示词",
+        "sourceFilter": "来源",
+        "unavailable": "不可用",
+        "workspace": "指令文件所属的工作区"
+      },
+      "resetDialog": {
+        "bodyAccount": "将移除账户级覆盖，下方的内置文本重新生效。历史会保留，可以恢复。",
+        "bodyScoped": "将移除此覆盖。移除后该位置会回退到下方文本（账户级覆盖或内置文本）；具体对话中仍可能遇到更具体的工作区或 Agent 覆盖。历史会保留。",
+        "title": "重置此覆盖？"
+      },
+      "risk": {
+        "approval-sensitive": "涉及审批",
+        "ordinary": "普通",
+        "protocol": "协议"
+      },
+      "riskNote": {
+        "approval-sensitive": "参与审批决策；自定义版本只能让结果更保守。",
+        "ordinary": "仅影响措辞；不佳的修改只会降低输出质量。",
+        "protocol": "其回复会被解析；必须保留规定的文本。"
+      },
+      "scope": {
+        "account": "账户",
+        "agent": "Agent",
+        "session": "对话",
+        "workspace": "工作区"
+      },
+      "segment": {
+        "base": "基础提示词",
+        "harness": "常驻规则",
+        "instructions": "指令文件",
+        "mode": "模式",
+        "persona": "人设",
+        "skills": "Skills",
+        "workspace": "工作区指令"
+      },
+      "sendTime": {
+        "brief-mode": "简洁模式",
+        "compaction-recovery": "压缩恢复",
+        "goal": "当前目标",
+        "knowledge": "知识",
+        "memory": "记忆回忆",
+        "output-style": "输出风格",
+        "plan": "当前计划",
+        "project-continuity": "项目连续性",
+        "sandbox": "沙箱提示",
+        "team-protocol": "团队协议",
+        "visual-output": "可视化输出"
+      },
+      "source": {
+        "app-setting": "应用设置",
+        "character": "Agent",
+        "code": "内置",
+        "composer-template": "会话模板",
+        "custom-mode": "模式",
+        "instruction-file": "指令文件",
+        "preset": "预设",
+        "skill": "Skill",
+        "subagent-template": "子代理",
+        "team-template": "团队模板",
+        "workspace-instructions": "工作区"
+      },
+      "sourceGroup": {
+        "app-setting": "默认提示词",
+        "character": "Agent",
+        "code": "内置提示词",
+        "composer-template": "会话模板",
+        "custom-mode": "自定义与插件模式",
+        "instruction-file": "指令文件",
+        "preset": "预设",
+        "skill": "Skills",
+        "subagent-template": "子代理模板",
+        "team-template": "Agent Team 模板",
+        "workspace-instructions": "工作区指令"
+      },
+      "status": {
+        "hasDraft": "有未发布的草稿。",
+        "inherits": "此范围未覆盖，使用继承的文本。",
+        "published": "已于 {time} 在此范围发布。"
+      },
+      "tabs": {
+        "compare": "对比",
+        "compareBase": "与基础版本对比",
+        "compareSaved": "与已保存版本对比",
+        "edit": "编辑",
+        "history": "历史（{count}）"
+      },
+      "target": {
+        "choose": {
+          "agent": "选择 Agent",
+          "session": "选择对话",
+          "workspace": "选择工作区"
+        },
+        "none": {
+          "agent": "还没有 Agent。",
+          "session": "还没有对话。",
+          "workspace": "还没有工作区。"
+        },
+        "scope": "范围",
+        "target": "目标"
+      },
+      "toast": {
+        "conflict": "此提示词已在别处被修改。你的文本已保留，请载入最新版本后继续。",
+        "customSaved": "已另存为你自己的版本。",
+        "draftDiscarded": "草稿已丢弃。",
+        "draftSaved": "草稿已保存，发布前不会被使用。",
+        "failed": "失败：{message}",
+        "followsBase": "现在重新跟随基础提示词。",
+        "madeDefault": "{name} 已设为默认。",
+        "published": "已发布，下一次调用即会使用。",
+        "reset": "已重置，继承的文本重新生效。",
+        "restored": "已恢复为新的修订版本。",
+        "saved": "已保存。",
+        "scope": "此提示词不能在该范围覆盖。"
+      },
+      "unavailable": {
+        "confirmBody": "此作用域下的已发布文本、草稿和历史将被永久删除。如需保留副本，请先导出配置。",
+        "confirmTitle": "移除此覆盖？",
+        "hasDraft": "有草稿",
+        "noActive": "没有已发布的文本，只有草稿或重置记录。",
+        "plugin": "此提示词属于插件 {plugin}，该插件未启用。你的文本会保留并包含在导出中，插件以兼容版本重新启用后会再次生效。",
+        "remove": "移除",
+        "removed": "已移除覆盖。",
+        "retired": "当前版本的 Cognia 已不再使用此提示词。你的文本会保留并包含在导出中。",
+        "slots": "已保存的覆盖",
+        "title": "当前不可用"
+      },
+      "warnings": {
+        "contractBody": "此版本中提示词的输入或输出约定已变化。覆盖内容会保留但不会被使用；请按新约定修改后重新发布。",
+        "contractTitle": "覆盖未生效",
+        "staleBody": "在你编辑期间，有人发布或重置了此位置。你的文本已保留。",
+        "staleTitle": "编辑期间已被修改",
+        "upstreamBody": "Cognia 在此覆盖编写后更新了内置文本。可与内置文本对比查看改动。",
+        "upstreamTitle": "内置文本已更新"
+      }
+    },
+    "promptEntries": {
+      "agent__browser-companion__context": {
+        "description": "由宿主读取的协议文本：把浏览器扩展抓取的单个网页标为不可信数据。",
+        "title": "单页抓取上下文"
+      },
+      "agent__browser-companion__context-multi": {
+        "description": "由宿主读取的协议文本：把浏览器扩展抓取的多个网页标为不可信数据。",
+        "title": "多页抓取上下文"
+      },
+      "agent__browser-companion__grant": {
+        "description": "在从浏览器扩展发起的对话中，告诉 Agent 它可以操作你已登录的真实标签页。",
+        "title": "Browser Companion 权限"
+      },
+      "agent__builtin__Explore__identity": {
+        "description": "Explore 子 Agent 的身份设定：以只读方式快速找到相关代码并简要汇报。",
+        "title": "Explore 子 Agent"
+      },
+      "agent__builtin__Plan__identity": {
+        "description": "Plan 子 Agent 的身份设定：不做任何改动，只设计有序的实施计划。",
+        "title": "Plan 子 Agent"
+      },
+      "agent__builtin__code-reviewer__identity": {
+        "description": "代码审查子 Agent 的身份设定：只读审阅改动并报告缺陷，不做修改。",
+        "title": "代码审查子 Agent"
+      },
+      "agent__builtin__general-purpose__identity": {
+        "description": "通用子 Agent 的身份设定：拿到委派的任务后，用完整的工具从头做到尾。",
+        "title": "通用子 Agent"
+      },
+      "agent__builtin__workflow-debugger__identity": {
+        "description": "排查工作流运行失败原因并说明可能修复方式的子 Agent 身份设定。",
+        "title": "工作流调试子 Agent"
+      },
+      "agent__builtin__workflow-designer__identity": {
+        "description": "在工作流编辑器中替你搭建和修改可视化工作流的子 Agent 身份设定。",
+        "title": "工作流设计子 Agent"
+      },
+      "agent__builtin__workflow-doc-writer__identity": {
+        "description": "在工作流的各组节点旁添加说明注释的子 Agent 身份设定。",
+        "title": "工作流文档子 Agent"
+      },
+      "agent__builtin__workflow-refactorer__identity": {
+        "description": "在不改变行为的前提下重构所选工作流片段的子 Agent 身份设定。",
+        "title": "工作流重构子 Agent"
+      },
+      "agent__cli__plan-refine": {
+        "description": "在 CLI 中要求调整计划时发送，让 Agent 只给出更新后的计划，不做改动。",
+        "title": "CLI 计划调整"
+      },
+      "agent__executor__fallback": {
+        "description": "Agent 运行带有工具却没有指定 Agent 或系统提示词时使用的最简提示词。",
+        "title": "兜底 Agent 身份"
+      },
+      "agent__loop__iteration": {
+        "description": "由宿主读取的协议文本：执行一轮 /loop，并要求用一行 JSON 决定下次间隔。",
+        "title": "循环迭代"
+      },
+      "agent__mode__academic": {
+        "description": "学术模式下，让 Agent 用自带工具检索学术数据库并分析论文。",
+        "title": "模式：学术研究"
+      },
+      "agent__mode__code-gen": {
+        "description": "代码生成模式下，让 Agent 编写整洁、有注释并带错误处理的代码。",
+        "title": "模式：代码生成"
+      },
+      "agent__mode__data-analysis": {
+        "description": "数据分析模式下，让 Agent 帮你清洗数据、做统计分析并提炼洞察。",
+        "title": "模式：数据分析"
+      },
+      "agent__mode__plan": {
+        "description": "规划模式下，让 Agent 先调查再提出分步计划，不做任何改动。",
+        "title": "模式：规划"
+      },
+      "agent__mode__ppt-generation": {
+        "description": "演示文稿模式下，让 Agent 规划结构、设计幻灯片，必要时附上演讲备注。",
+        "title": "模式：演示文稿"
+      },
+      "agent__mode__research": {
+        "description": "研究模式下，让 Agent 查找、甄别并总结资料，尽量给出引用。",
+        "title": "模式：研究"
+      },
+      "agent__mode__web-design": {
+        "description": "网页设计模式下，让 Agent 用 React 和 Tailwind 编写可直接预览的页面。",
+        "title": "模式：网页设计"
+      },
+      "agent__mode__workflow": {
+        "description": "工作流模式下，让 Agent 拆解任务、执行多步操作并汇报进度。",
+        "title": "模式：工作流"
+      },
+      "agent__mode__writing": {
+        "description": "写作模式下，让 Agent 帮你起草、修改文字并调整语气。",
+        "title": "模式：写作"
+      },
+      "agent__plan-mode": {
+        "description": "规划模式下让 Agent 保持只读：先调研、委派探索，再提交计划等待批准。",
+        "title": "规划模式规则"
+      },
+      "agent__plan-mode__structured-steps": {
+        "description": "由计划解析器读取的协议文本：要求计划以一份平铺编号的步骤列表结尾，供步骤编辑器使用。",
+        "title": "规划模式步骤格式"
+      },
+      "agent__plan__approved": {
+        "description": "你批准计划后发送，让 Agent 按计划逐步实施。",
+        "title": "计划已批准消息"
+      },
+      "agent__plan__approved-edited": {
+        "description": "你批准修改过的计划后发送，告诉 Agent 以你的版本为准，替换它原先的方案。",
+        "title": "修改后计划已批准消息"
+      },
+      "agent__plan__decompose": {
+        "description": "创建可执行计划时，把你的目标拆成 2 到 16 个有序步骤并以 JSON 返回。",
+        "title": "计划拆解"
+      },
+      "agent__plan__decompose-request": {
+        "description": "由解析器读取的协议文本：把你的目标交给计划拆解的请求。",
+        "title": "计划拆解请求"
+      },
+      "agent__plan__refine": {
+        "description": "按照你的调整要求或失败的步骤，修订计划步骤并以 JSON 返回。",
+        "title": "计划调整"
+      },
+      "agent__plan__refine-request": {
+        "description": "由解析器读取的协议文本：携带当前步骤和你的调整要求的请求。",
+        "title": "计划调整请求"
+      },
+      "agent__plan__step-message": {
+        "description": "由宿主读取的协议文本：把一个计划步骤交给 Agent 执行并汇报的消息。",
+        "title": "计划步骤消息"
+      },
+      "agent__plan__system-section": {
+        "description": "在系统提示词中展示正在执行的计划和进度，让 Agent 专注当前步骤。",
+        "title": "执行中计划段落"
+      },
+      "agent__run-retrospective": {
+        "description": "复盘一次已结束的运行并提出改进建议，在你批准前不会做任何更改。",
+        "title": "运行复盘"
+      },
+      "agent__run-retrospective__reply-format": {
+        "description": "由解析器读取的协议文本：运行复盘必须返回的 JSON 结构。",
+        "title": "运行复盘 JSON 格式"
+      },
+      "agent__subagent-frame__contract": {
+        "description": "由宿主读取的协议文本：告诉每个被派出的子 Agent，只有它最后一条完整汇报会被看到。",
+        "title": "子 Agent 汇报约定"
+      },
+      "agent__verifier__request": {
+        "description": "由解析器读取的协议文本：发给独立核验者的请求、回复和改动内容。",
+        "title": "独立核验请求"
+      },
+      "agent__verifier__system": {
+        "description": "让一个独立的 Agent 对照你的请求检查另一个 Agent 的回复，并以 JSON 给出结论。",
+        "title": "独立核验"
+      },
+      "chat__a2ui__protocol": {
+        "description": "由 A2UI 解析器读取的协议文本：教模型在聊天回复中生成可交互的界面块。",
+        "title": "A2UI 协议"
+      },
+      "chat__brief-mode": {
+        "description": "开启简洁模式时，要求聊天模型直接作答，省去开场白和冗余内容。",
+        "title": "简洁模式"
+      },
+      "chat__cli__handoff": {
+        "description": "接续 CLI 会话时的第一条消息，在你的新提示词前附上之前的对话记录。",
+        "title": "CLI 会话接续"
+      },
+      "chat__cli__output-style__concise": {
+        "description": "启用简洁风格时，让 CLI Agent 用尽量少的字作答。",
+        "title": "CLI 输出风格：简洁"
+      },
+      "chat__cli__output-style__explanatory": {
+        "description": "启用讲解风格时，让 CLI Agent 说明思路和取舍。",
+        "title": "CLI 输出风格：讲解"
+      },
+      "chat__cli__output-style__learning": {
+        "description": "启用学习风格时，让 CLI Agent 像导师一样讲解，并留一小部分给你动手。",
+        "title": "CLI 输出风格：学习"
+      },
+      "chat__compaction__handoff": {
+        "description": "提醒 Agent 对话随时可能被压缩，在长时间调用工具前先复述关键事实。",
+        "title": "压缩前交接"
+      },
+      "chat__compaction__recovery": {
+        "description": "对话压缩后，要求 Agent 以摘要为准继续工作，不让你重复之前说过的内容。",
+        "title": "压缩后恢复"
+      },
+      "chat__connector-capability__fallback": {
+        "description": "列出在该平台会降级为纯文本的 A2UI 类型，提醒模型尽量避免。",
+        "title": "IM 渠道：降级为文本"
+      },
+      "chat__connector-capability__header": {
+        "description": "告诉模型当前对话经由哪个消息平台送达，以及该平台只支持部分 A2UI。",
+        "title": "IM 渠道：能力说明开头"
+      },
+      "chat__connector-capability__native": {
+        "description": "列出该消息平台能原生渲染的 A2UI 类型。",
+        "title": "IM 渠道：原生支持"
+      },
+      "chat__connector-capability__simulated": {
+        "description": "列出该平台需要通过多步交互实现、无法在当轮直接回复的 A2UI 类型。",
+        "title": "IM 渠道：多步交互"
+      },
+      "chat__connector-capability__skills": {
+        "description": "列出该渠道可用的内置 Skills，并说明写入类操作默认要经过确认卡片。",
+        "title": "IM 渠道：可用 Skills"
+      },
+      "chat__connector-capability__unsupported": {
+        "description": "列出该平台完全不支持的 A2UI 类型，要求模型不要输出。",
+        "title": "IM 渠道：不支持"
+      },
+      "chat__peer-delivery__frame": {
+        "description": "由宿主读取的协议文本：把其他会话发来的消息标为不可信内容，不当作你的授权。",
+        "title": "来自其他会话的消息"
+      },
+      "chat__pet__history": {
+        "description": "提醒桌面宠物你们最近说过的话，让回应前后连贯。",
+        "title": "宠物近期对话"
+      },
+      "chat__pet__language": {
+        "description": "要求桌面宠物用你的界面语言回复。",
+        "title": "宠物回复语言"
+      },
+      "chat__pet__name-soul": {
+        "description": "孵化新的桌面宠物时，让模型充当命名助手，并且只输出 JSON。",
+        "title": "宠物命名：系统提示词"
+      },
+      "chat__pet__name-soul__request": {
+        "description": "孵化宠物时发送的请求，要求以 JSON 返回一个可爱的名字和一句性格描述。",
+        "title": "宠物命名：请求"
+      },
+      "chat__pet__persona": {
+        "description": "让桌面宠物按自己的性格，在气泡里用一句简短俏皮的话回应。",
+        "title": "宠物气泡人设"
+      },
+      "chat__pet__persona__bound-character": {
+        "description": "绑定了 Agent 时，告诉桌面宠物你当前使用的人设。",
+        "title": "宠物：绑定的 Agent 人设"
+      },
+      "chat__pet__persona__conversation": {
+        "description": "让桌面宠物在聊天面板里按自己的性格，用几句话和你聊天。",
+        "title": "宠物聊天人设"
+      },
+      "chat__pet__state": {
+        "description": "把桌面宠物当前的心情、精力、亲密度和等级告诉它，让回复随之变化。",
+        "title": "宠物当前状态"
+      },
+      "chat__reply-copilot__draft": {
+        "description": "让回复副驾为 IM 对话起草三条候选回复，由你审阅后再发送。",
+        "title": "回复副驾：起草"
+      },
+      "chat__reply-copilot__draft__request": {
+        "description": "由解析器读取的协议文本：起草请求的最后一行，要求以 JSON 返回三条回复。",
+        "title": "回复副驾：起草请求"
+      },
+      "chat__reply-copilot__draft__unattributed-note": {
+        "description": "提醒回复副驾不要猜测标为 Unknown 的消息是谁发的。",
+        "title": "回复副驾：未知发送者提示"
+      },
+      "chat__reply-copilot__question__best-action": {
+        "description": "回复副驾向决策模型询问：下一步最适合哪类行动，例如先翻看历史记录。",
+        "title": "副驾问题：最佳行动"
+      },
+      "chat__reply-copilot__question__best-action__compact": {
+        "description": "“最佳行动”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：最佳行动（精简）"
+      },
+      "chat__reply-copilot__question__best-reply": {
+        "description": "回复副驾向决策模型询问：哪条候选回复最适合作为下一条消息。",
+        "title": "副驾问题：最佳候选"
+      },
+      "chat__reply-copilot__question__best-reply__compact": {
+        "description": "“最佳候选”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：最佳候选（精简）"
+      },
+      "chat__reply-copilot__question__danger-level": {
+        "description": "回复副驾向决策模型询问：对话离争吵或伤害感情还有多远。",
+        "title": "副驾问题：冲突程度"
+      },
+      "chat__reply-copilot__question__danger-level__compact": {
+        "description": "“冲突程度”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：冲突程度（精简）"
+      },
+      "chat__reply-copilot__question__literal-question": {
+        "description": "回复副驾向决策模型询问：对方最新的消息是否只是字面意思、没有弦外之音。",
+        "title": "副驾问题：是否字面意思"
+      },
+      "chat__reply-copilot__question__literal-question__compact": {
+        "description": "“是否字面意思”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：是否字面意思（精简）"
+      },
+      "chat__reply-copilot__question__she-needs": {
+        "description": "回复副驾向决策模型询问：根据最新消息，对方此刻需要你做什么。",
+        "title": "副驾问题：对方需要什么"
+      },
+      "chat__reply-copilot__question__she-needs__compact": {
+        "description": "“对方需要什么”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：对方需要什么（精简）"
+      },
+      "chat__reply-copilot__question__should-reply-now": {
+        "description": "回复副驾向决策模型询问：你的下一条消息是否应包含事实、计划或认错等实质内容。",
+        "title": "副驾问题：是否实质回复"
+      },
+      "chat__reply-copilot__question__should-reply-now__compact": {
+        "description": "“是否实质回复”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：是否实质回复（精简）"
+      },
+      "chat__reply-copilot__question__tension-resolved": {
+        "description": "回复副驾向决策模型询问：对话里的紧张关系是否已经真正化解。",
+        "title": "副驾问题：矛盾是否化解"
+      },
+      "chat__reply-copilot__question__tension-resolved__compact": {
+        "description": "“矛盾是否化解”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：矛盾是否化解（精简）"
+      },
+      "chat__reply-copilot__question__true-intent": {
+        "description": "回复副驾向决策模型询问：结合语气和上下文，对方最新消息的真实意图是什么。",
+        "title": "副驾问题：真实意图"
+      },
+      "chat__reply-copilot__question__true-intent__compact": {
+        "description": "“真实意图”问题的精简措辞，供提示词预算较小的决策模型使用。",
+        "title": "副驾问题：真实意图（精简）"
+      },
+      "chat__selection__explain": {
+        "description": "在选区面板中解释你在对话里选中的段落，说明术语、拆解代码。",
+        "title": "解释选中内容"
+      },
+      "chat__selection__translate": {
+        "description": "把你在对话中选中的段落译成目标语言，保留代码和格式。",
+        "title": "翻译选中内容"
+      },
+      "chat__side-chat__contract": {
+        "description": "让侧聊只回答旁支问题，把主对话仅当作参考，不接着执行主任务。",
+        "title": "侧聊约定"
+      },
+      "chat__side-chat__read-only": {
+        "description": "要求只读侧聊只描述建议的改动而不动手，并告诉你如何开启编辑。",
+        "title": "只读侧聊"
+      },
+      "chat__visual-output__dock": {
+        "description": "在工具可用时，引导模型把图表做成产物、把文档做成 Canvas，放进停靠面板。",
+        "title": "可视化输出：停靠面板"
+      },
+      "chat__visual-output__fenced": {
+        "description": "要求模型把图表写成 JSON 代码块，由应用识别后放进停靠面板。",
+        "title": "可视化输出：代码块载荷"
+      },
+      "chat__visual-output__frame": {
+        "description": "指导聊天模型根据当前渠道的渲染能力，选择用示意图、图表还是文档来展示内容。",
+        "title": "可视化输出路由"
+      },
+      "chat__visual-output__inline-chart": {
+        "description": "允许模型用图表代码块，在回复中直接画出简单图表。",
+        "title": "可视化输出：内联图表"
+      },
+      "chat__visual-output__interactive": {
+        "description": "当你需要选择、确认、筛选或提交时，要求模型使用 A2UI 界面。",
+        "title": "可视化输出：交互界面"
+      },
+      "chat__visual-output__no-canvas": {
+        "description": "无法创建文档时，要求模型直接在回复中作答，不输出 Canvas。",
+        "title": "可视化输出：无 Canvas"
+      },
+      "chat__visual-output__no-dock-a2ui-chart": {
+        "description": "没有停靠面板时，要求模型用 A2UI 图表或 Markdown 表格展示数据。",
+        "title": "可视化输出：A2UI 图表兜底"
+      },
+      "chat__visual-output__no-dock-table": {
+        "description": "无法绘制图表时，要求模型用简洁的 Markdown 表格展示数据。",
+        "title": "可视化输出：表格兜底"
+      },
+      "cli__base__identity": {
+        "description": "CLI 编码 Agent 的基础系统提示词，规定它在项目中的角色、语气和工作方式。",
+        "title": "CLI 编码 Agent 身份"
+      },
+      "completion__enhance__style__concise": {
+        "description": "让提示词润色把草稿压缩到核心诉求的风格说明。",
+        "title": "润色风格：精简"
+      },
+      "completion__enhance__style__detailed": {
+        "description": "让提示词润色为草稿补充细节、约束和背景的风格说明。",
+        "title": "润色风格：详细"
+      },
+      "completion__enhance__style__improve": {
+        "description": "让提示词润色把草稿写得更清楚，并明确说出目标的风格说明。",
+        "title": "润色风格：优化"
+      },
+      "completion__enhance__style__simpler": {
+        "description": "让提示词润色用通俗易懂的语言改写草稿的风格说明。",
+        "title": "润色风格：通俗"
+      },
+      "completion__enhance__style__technical": {
+        "description": "让提示词润色在草稿中使用准确的专业术语的风格说明。",
+        "title": "润色风格：专业"
+      },
+      "completion__enhance__system": {
+        "description": "按所选风格改写你在输入框中的草稿，只改写不作答。",
+        "title": "提示词润色"
+      },
+      "completion__ghost-text": {
+        "description": "预测你接下来要输入的内容，以浅色文字显示在输入框光标之后。",
+        "title": "输入框补全提示"
+      },
+      "completion__suggestions__follow-up": {
+        "description": "根据上一条回复，推荐几条你接下来可能发送的简短追问。",
+        "title": "追问建议"
+      },
+      "completion__suggestions__starter": {
+        "description": "为新对话推荐几条可以直接发送的开场消息。",
+        "title": "开场建议"
+      },
+      "completion__terminal": {
+        "description": "在集成终端中预测你正在输入的完整命令。",
+        "title": "终端命令补全"
+      },
+      "developer__bootstrap__bash": {
+        "description": "Bash 初始化智能体的系统消息，在工作区环境检查运行前准备环境。",
+        "title": "环境初始化智能体（Bash）"
+      },
+      "developer__bootstrap__native": {
+        "description": "原生初始化智能体的系统消息，在工作区环境检查运行前准备环境。",
+        "title": "环境初始化智能体（原生）"
+      },
+      "developer__bootstrap__powershell": {
+        "description": "PowerShell 初始化智能体的系统消息，在工作区环境检查运行前准备环境。",
+        "title": "环境初始化智能体（PowerShell）"
+      },
+      "developer__cli__bash-analysis": {
+        "description": "由 /analyze 发送，诊断上一条失败的 Shell 命令并给出修复建议。",
+        "title": "CLI 失败命令分析"
+      },
+      "developer__cli__commit-message": {
+        "description": "在 CLI 中根据暂存的改动撰写约定式提交信息，由你确认。",
+        "title": "CLI 提交信息"
+      },
+      "developer__cli__fix-tests": {
+        "description": "每轮 /fix 时附上失败的测试输出发送，要求做最小的修复。",
+        "title": "CLI /fix 轮次"
+      },
+      "developer__cli__init-rewrite": {
+        "description": "根据现有内容和项目信息改写项目的 AGENTS.md，由你确认。",
+        "title": "CLI AGENTS.md 改写"
+      },
+      "developer__cli__pr-summary": {
+        "description": "在 CLI 中把分支总结成 Pull Request 的标题和正文。",
+        "title": "CLI Pull Request 摘要"
+      },
+      "developer__cli__review": {
+        "description": "由 /review 发送，让 Agent 自行获取改动，并按严重程度汇报问题。",
+        "title": "CLI /review"
+      },
+      "developer__commit__agent-clause": {
+        "description": "让 Agent 在撰写提交信息时可以阅读仓库，但不做任何更改。",
+        "title": "提交信息：Agent 模式"
+      },
+      "developer__commit__conventional-format": {
+        "description": "开启 Conventional Commits 设置时，提交信息遵循的格式规则。",
+        "title": "提交格式：约定式"
+      },
+      "developer__commit__freeform-format": {
+        "description": "关闭 Conventional Commits 设置时，提交信息遵循的格式规则。",
+        "title": "提交格式：自由"
+      },
+      "developer__commit__system": {
+        "description": "在源代码管理中根据暂存的改动撰写提交信息。",
+        "title": "提交信息"
+      },
+      "developer__creator__plan": {
+        "description": "规划新插件、Skill 或 Hook 脚手架的文件和所需能力，并逐项说明理由。",
+        "title": "创建器：脚手架规划"
+      },
+      "developer__creator__review": {
+        "description": "对照需求审查创建器生成的内容，有错误或不安全时予以拦截。",
+        "title": "创建器：结果审查"
+      },
+      "developer__creator__survey": {
+        "description": "在编写新的插件、Skill 或 Hook 前，先查找仓库中是否已有相同功能。",
+        "title": "创建器：现有代码调研"
+      },
+      "developer__diff-explain": {
+        "description": "在源代码管理中用通俗语言说明一段改动做了什么、为什么。",
+        "title": "差异说明"
+      },
+      "developer__diff-review": {
+        "description": "在源代码管理中逐块审查单个文件的改动，标出真正的问题。",
+        "title": "差异审查"
+      },
+      "developer__issues__draft": {
+        "description": "在事项追踪中根据标题写出完整的事项正文。",
+        "title": "事项正文起草"
+      },
+      "developer__issues__improve": {
+        "description": "把事项草稿改写得更清晰、有条理，不编造任何信息。",
+        "title": "事项正文改写"
+      },
+      "developer__issues__metadata": {
+        "description": "从现有选项中为事项建议优先级、标签和估算点数。",
+        "title": "事项优先级与标签"
+      },
+      "developer__issues__relations": {
+        "description": "从已有事项中为当前事项建议父事项、前置阻塞项和重复项。",
+        "title": "事项关联"
+      },
+      "developer__issues__title": {
+        "description": "根据事项正文写一行简洁的标题。",
+        "title": "事项标题"
+      },
+      "developer__issues__wakeup__children-done": {
+        "description": "所有子事项结束后发给 Agent，让它继续推进父事项。",
+        "title": "事项：子事项全部完成"
+      },
+      "developer__skills__authoring": {
+        "description": "在 Skill 编辑器中改写 SKILL.md 正文，作为供你审阅的建议。",
+        "title": "Skill 编辑器改写"
+      },
+      "developer__skills__authoring__expand": {
+        "description": "你要求 Skill 编辑器为 Skill 补充示例和边界情况时使用的指令。",
+        "title": "Skill 改写：扩写"
+      },
+      "developer__skills__authoring__fix-errors": {
+        "description": "你要求 Skill 编辑器解决 Skill 的校验问题时使用的指令。",
+        "title": "Skill 改写：修复错误"
+      },
+      "developer__skills__authoring__optimize": {
+        "description": "你要求 Skill 编辑器精简 Skill 的措辞时使用的指令。",
+        "title": "Skill 改写：精炼"
+      },
+      "developer__skills__authoring__request": {
+        "description": "把 Skill 名称、你的指令和当前正文交给改写模型的请求。",
+        "title": "Skill 改写请求"
+      },
+      "developer__skills__authoring__simplify": {
+        "description": "你要求 Skill 编辑器为新手读者改写 Skill时使用的指令。",
+        "title": "Skill 改写：通俗化"
+      },
+      "developer__skills__recording": {
+        "description": "把录制的桌面操作流程转成可复用的 Skill 草稿，保存前由你审阅。",
+        "title": "录制生成 Skill"
+      },
+      "developer__workflow__classify__system": {
+        "description": "让工作流分类节点只回答其中一个标签。",
+        "title": "分类节点"
+      },
+      "developer__workflow__copilot": {
+        "description": "工作流编辑器聊天中 Copilot 的角色：先读懂，再提建议，从不直接修改。",
+        "title": "工作流 Copilot"
+      },
+      "developer__workflow__ensemble__synthesizer": {
+        "description": "把集成工作流节点的多次尝试合并成一个最佳答案。",
+        "title": "集成节点综合"
+      },
+      "developer__workflow__ensemble__synthesizer__request": {
+        "description": "把每次尝试结果交给集成节点综合模型的请求。",
+        "title": "集成节点请求"
+      },
+      "developer__workflow__extract__system": {
+        "description": "让工作流提取节点以 JSON 对象返回所需字段。",
+        "title": "提取节点"
+      },
+      "developer__workflow__json-output": {
+        "description": "由解析器读取的协议文本：要求 JSON 模式的工作流节点和运行只回复 JSON。",
+        "title": "仅输出 JSON"
+      },
+      "developer__workflow__json-output__shape": {
+        "description": "由解析器读取的协议文本：JSON 模式节点的回复必须符合的结构。",
+        "title": "JSON 输出结构"
+      },
+      "developer__workflow__quick-action__explain": {
+        "description": "请 Copilot 讲解所选工作流节点的 /explain 消息。",
+        "title": "Copilot：讲解选中节点"
+      },
+      "developer__workflow__quick-action__explain-empty": {
+        "description": "未选中任何节点时的 /explain 消息，提示你先选择节点。",
+        "title": "Copilot：讲解但未选中"
+      },
+      "developer__workflow__quick-action__selection-reference": {
+        "description": "当你把 Copilot 对话限定在所选工作流节点上时发送。",
+        "title": "Copilot：处理选中节点"
+      },
+      "developer__workflow__quick-action__suggest": {
+        "description": "请 Copilot 在所选节点之后建议添加一个节点的 /suggest-next 消息。",
+        "title": "Copilot：建议下一个节点"
+      },
+      "developer__workflow__quick-action__suggest-unselected": {
+        "description": "未选中任何节点时，请 Copilot 建议添加一个节点的 /suggest-next 消息。",
+        "title": "Copilot：未选中时建议节点"
+      },
+      "developer__workflow__quick-action__validate-clean": {
+        "description": "校验未发现问题时发送的 /validate 消息，请 Copilot 做设计层面的审查。",
+        "title": "Copilot：校验无错误"
+      },
+      "developer__workflow__quick-action__validate-issues": {
+        "description": "列出校验问题的 /validate 消息，请 Copilot 逐一给出修复。",
+        "title": "Copilot：校验有问题"
+      },
+      "developer__workflow__schema-repair": {
+        "description": "由解析器读取的协议文本：回复不符合输出结构时，要求返回修正后的 JSON。",
+        "title": "结构修复重试"
+      },
+      "developer__workflow__slash__debug": {
+        "description": "把失败的工作流交给调试子 Agent 排查且不做改动的 /debug 消息。",
+        "title": "工作流 /debug"
+      },
+      "developer__workflow__slash__delegate": {
+        "description": "把任务交给指定子 Agent 并总结其回复的 /delegate 消息。",
+        "title": "工作流 /delegate"
+      },
+      "developer__workflow__slash__refactor": {
+        "description": "把你描述的改动交给重构子 Agent 的 /refactor 消息。",
+        "title": "工作流 /refactor"
+      },
+      "developer__workflow__slash__run": {
+        "description": "请 Copilot 先校验、经你批准后运行整个工作流的 /run 消息。",
+        "title": "工作流 /run"
+      },
+      "developer__workflow__slash__run-from-step": {
+        "description": "请 Copilot 经你批准后从指定步骤开始运行工作流的 /run 消息。",
+        "title": "工作流 /run 指定步骤"
+      },
+      "generation__a2ui__create-app": {
+        "description": "在 A2UI 编辑器中，根据你的需求生成一个新的可交互 A2UI 小应用。",
+        "title": "A2UI 应用生成"
+      },
+      "generation__a2ui__edit-app": {
+        "description": "把你要求的改动应用到现有 A2UI 小应用，只更新变化的部分。",
+        "title": "A2UI 应用修改"
+      },
+      "generation__a2ui__enhance-execution": {
+        "description": "为工作流运行或对话写出简短摘要和要点，显示在其交互页面上。",
+        "title": "运行摘要卡片"
+      },
+      "generation__canvas-suggestions__assist": {
+        "description": "在光标附近提出几处小修改，加入 Canvas 的建议面板。",
+        "title": "Canvas 就地建议"
+      },
+      "generation__canvas-suggestions__review": {
+        "description": "审阅整份 Canvas 文档，逐条给出发现，由你逐一接受或拒绝。",
+        "title": "Canvas 审阅发现"
+      },
+      "generation__canvas__custom": {
+        "description": "按你的指令修改 Canvas 文档或选中内容，只返回修改后的文本。",
+        "title": "Canvas：自定义指令"
+      },
+      "generation__canvas__expand": {
+        "description": "为 Canvas 内容补充细节和示例，并直接替换原文。",
+        "title": "Canvas：扩写"
+      },
+      "generation__canvas__explain": {
+        "description": "逐步讲解 Canvas 内容的作用，结果显示在文档旁。",
+        "title": "Canvas：讲解"
+      },
+      "generation__canvas__fix": {
+        "description": "修复 Canvas 内容中的错误、语法问题和错别字，并直接替换原文。",
+        "title": "Canvas：修复"
+      },
+      "generation__canvas__format": {
+        "description": "整理 Canvas 内容的缩进、间距和结构，并直接替换原文。",
+        "title": "Canvas：格式化"
+      },
+      "generation__canvas__improve": {
+        "description": "提升 Canvas 内容的可读性和结构，并直接替换原文。",
+        "title": "Canvas：优化"
+      },
+      "generation__canvas__review": {
+        "description": "审阅 Canvas 内容中的问题和可改进之处，结果显示在文档旁。",
+        "title": "Canvas：审阅"
+      },
+      "generation__canvas__run": {
+        "description": "描述 Canvas 中的代码运行后会得到什么结果，但不真正执行。",
+        "title": "Canvas：模拟运行"
+      },
+      "generation__canvas__simplify": {
+        "description": "在保留原意的前提下简化 Canvas 内容，并直接替换原文。",
+        "title": "Canvas：简化"
+      },
+      "generation__canvas__translate": {
+        "description": "把 Canvas 内容译成所选语言，保留原有格式。",
+        "title": "Canvas：翻译"
+      },
+      "generation__council__synthesis": {
+        "description": "把议会各成员的回答合并成一份回复，并评估他们的一致程度。",
+        "title": "议会综合"
+      },
+      "generation__image-edit__remove-background": {
+        "description": "在聊天图片工作台和插件媒体工具中，让图像模型去掉背景、保留主体。",
+        "title": "移除图片背景"
+      },
+      "generation__pet__hatch-sprite": {
+        "description": "起草一个新对话，让 Agent 制作可导入的桌面宠物动画形象。",
+        "title": "宠物形象孵化草稿"
+      },
+      "generation__summary__conversation": {
+        "description": "总结对话内容，用于开启新分支，或在压缩后替代较早的轮次。",
+        "title": "对话摘要"
+      },
+      "generation__summary__selection": {
+        "description": "总结你在对话中选中的内容，用于展示或作为交接的起点。",
+        "title": "选中内容摘要"
+      },
+      "generation__template-assist__generate": {
+        "description": "在模板编辑器中，根据你的描述写出一份带可填参数的新消息模板。",
+        "title": "模板起草"
+      },
+      "generation__template-assist__improve": {
+        "description": "把消息模板改写得更清晰，同时保留所有参数位置不变。",
+        "title": "模板改写"
+      },
+      "generation__template-assist__suggest-params": {
+        "description": "为消息模板的每个参数建议名称和简短填写提示。",
+        "title": "模板参数提示"
+      },
+      "generation__title__chat": {
+        "description": "根据第一轮对话为会话起标题。",
+        "title": "对话标题"
+      },
+      "generation__title__work": {
+        "description": "用几个词为自动化任务或工作流运行起标题。",
+        "title": "任务或运行标题"
+      },
+      "generation__turn-label": {
+        "description": "用不超过五个词为单轮对话打标签，显示在对话时间线上。",
+        "title": "轮次标签"
+      },
+      "goal__continuation": {
+        "description": "由宿主读取的协议文本：让 Agent 朝目标再推进一步的消息。",
+        "title": "目标续跑轮次"
+      },
+      "goal__judge": {
+        "description": "根据 Agent 的最新回复判断目标是否已彻底完成，以 JSON 作答。",
+        "title": "目标完成评判"
+      },
+      "goal__objective-updated": {
+        "description": "由宿主读取的协议文本：告诉 Agent 你修改了目标，旧目标不再适用。",
+        "title": "目标内容更新"
+      },
+      "goal__promise-verification": {
+        "description": "由宿主读取的协议文本：在关闭目标前，要求 Agent 用指定标记确认已完成。",
+        "title": "目标完成确认"
+      },
+      "goal__subgoals": {
+        "description": "把目标拆成 3 到 8 个有序子步骤，作为目标的检查清单。",
+        "title": "目标清单"
+      },
+      "goal__system-section": {
+        "description": "/goal 运行期间，每轮都在系统提示词中展示当前目标和进度。",
+        "title": "进行中目标段落"
+      },
+      "knowledge__memory__consolidate": {
+        "description": "判断新记忆与已有相似记忆的关系：新增、更新、删除还是冲突。",
+        "title": "记忆整合"
+      },
+      "knowledge__memory__episodic-distill": {
+        "description": "对话空闲后，从中挑出值得在以后会话里回想的决定和事件。",
+        "title": "情景记忆提炼"
+      },
+      "knowledge__memory__episodic-distill__request": {
+        "description": "携带对话内容的请求，并规定情景记忆提炼必须返回的 JSON 结构。",
+        "title": "情景记忆请求"
+      },
+      "knowledge__memory__extract": {
+        "description": "从每轮对话中提取关于你的长期事实，例如偏好和使用环境。",
+        "title": "用户记忆提取"
+      },
+      "knowledge__memory__project-extract": {
+        "description": "从软件项目自身的开发对话中提取关于该项目的长期事实。",
+        "title": "项目记忆提取"
+      },
+      "knowledge__memory__rerank": {
+        "description": "召回记忆时，为每条已存记忆与当前查询的相关度打分。",
+        "title": "记忆召回重排"
+      },
+      "knowledge__ocr__vision": {
+        "description": "在 CLI 中把附件页面图片里的文字全部提取为 Markdown。",
+        "title": "CLI 图片文字识别"
+      },
+      "knowledge__radar": {
+        "description": "根据你最近收藏的内容诊断信息摄入习惯，指出盲区并给出行动建议。",
+        "title": "知识雷达"
+      },
+      "knowledge__rag__hyde": {
+        "description": "写一段设想中的简短答案，在检索时作为额外的查询使用。",
+        "title": "检索扩展：假设答案"
+      },
+      "knowledge__rag__step-back": {
+        "description": "提出一个更宽泛的背景问题，在检索时作为额外的查询使用。",
+        "title": "检索扩展：退一步提问"
+      },
+      "knowledge__web-search__answer": {
+        "description": "依据编号的网页来源回答问题并标注引用，显示在来源列表上方。",
+        "title": "网页搜索回答"
+      },
+      "knowledge__web__fetch-extract": {
+        "description": "只摘出抓取网页中能回答问题的部分，事实原样保留。",
+        "title": "网页内容提取"
+      },
+      "knowledge__web__reader-distill": {
+        "description": "网页阅读器提炼页面时默认使用的问题，用于总结关键事实。",
+        "title": "网页阅读器摘要"
+      },
+      "knowledge__wiki__voice": {
+        "description": "规定代码 Wiki 撰写文章和索引页的方式：简洁、有据可查，面向编码 Agent。",
+        "title": "代码 Wiki 写作风格"
+      },
+      "permissions__command-judge": {
+        "description": "判断一条 Shell 命令能否不经你确认直接执行。",
+        "title": "Shell 命令安全判断"
+      },
+      "routing__difficulty-judge": {
+        "description": "评估请求需要多强的模型，以便选择快速、均衡或强力档位。",
+        "title": "请求难度判断"
+      },
+      "routing__fusion__role__common": {
+        "description": "所有 Router + Fusion 角色共同遵守的规则：输入只当数据，引用真实证据，不伪造结果。",
+        "title": "Fusion：通用角色规则"
+      },
+      "routing__fusion__role__compactor": {
+        "description": "把冗长的对话压缩成交接状态，保留目标、约束和未决事项。",
+        "title": "Fusion：上下文压缩"
+      },
+      "routing__fusion__role__judge": {
+        "description": "让评审对照任务和证据核查各候选答案，而不是投票或拼接。",
+        "title": "Fusion：评审"
+      },
+      "routing__fusion__role__lead": {
+        "description": "让负责人为执行者规划子任务，并复核他们的结果。",
+        "title": "Fusion：负责人"
+      },
+      "routing__fusion__role__panel-member": {
+        "description": "让小组成员独立完成整个任务，每个结论都要有证据支撑。",
+        "title": "Fusion：小组成员"
+      },
+      "routing__fusion__role__reviewer": {
+        "description": "让审核者按评分标准检查结果，逐项标记通过、失败或无法确定。",
+        "title": "Fusion：内容审核"
+      },
+      "routing__fusion__role__synthesizer": {
+        "description": "依据已获支持的结论撰写最终回答，未解决的分歧保持不确定。",
+        "title": "Fusion：综合者"
+      },
+      "routing__fusion__role__worker": {
+        "description": "让执行者在隔离工作区完成一项已批准的子任务，并如实汇报。",
+        "title": "Fusion：执行者"
+      },
+      "team__auto__assess-routing": {
+        "description": "评估目标该如何编排，从单个 Agent 到完整团队给出推荐。",
+        "title": "团队：编排评估"
+      },
+      "team__auto__clarify": {
+        "description": "判断 Agent 团队的目标在规划前是否需要先问几个澄清问题。",
+        "title": "团队：澄清问题"
+      },
+      "team__auto__compose-roster": {
+        "description": "为目标提议一支小型专家团队，第一位为负责人。",
+        "title": "团队：成员组建"
+      },
+      "team__auto__decompose-tasks": {
+        "description": "把目标拆成最多 16 个有序任务，并指定负责人和依赖关系。",
+        "title": "团队：任务拆解"
+      },
+      "team__lead-review": {
+        "description": "让团队负责人审查队员完成的工作，决定通过还是要求修改。",
+        "title": "团队：负责人审查"
+      },
+      "team__lead__planning": {
+        "description": "要求团队负责人给出 3 到 6 步、分配给各队员的计划。",
+        "title": "团队：负责人规划请求"
+      },
+      "team__lead__planning-system": {
+        "description": "团队负责人做规划时默认的系统提示词，要求只输出一个 JSON 计划块。",
+        "title": "团队：负责人规划系统提示词"
+      },
+      "team__ledger__judge": {
+        "description": "分析 Agent 团队停滞不前的原因，并推荐一个下一步动作。",
+        "title": "团队：停滞判断"
+      },
+      "team__ledger__schema-hint": {
+        "description": "由解析器读取的协议文本：停滞判断必须返回的 JSON 结构。",
+        "title": "团队：停滞结论结构"
+      },
+      "team__pattern__adversarial-verify__lens-correctness": {
+        "description": "要求质疑者检查该发现是否是真实的逻辑或行为缺陷。",
+        "title": "质疑视角：正确性"
+      },
+      "team__pattern__adversarial-verify__lens-perf": {
+        "description": "要求质疑者判断该性能影响在真实规模下是否成立。",
+        "title": "质疑视角：性能"
+      },
+      "team__pattern__adversarial-verify__lens-repro": {
+        "description": "要求质疑者先实际复现该发现，再决定是否认可。",
+        "title": "质疑视角：复现"
+      },
+      "team__pattern__adversarial-verify__lens-security": {
+        "description": "要求质疑者判断该发现是否是攻击者可利用的安全问题。",
+        "title": "质疑视角：安全"
+      },
+      "team__pattern__adversarial-verify__skeptic": {
+        "description": "在对抗式核验中，让质疑者尝试推翻一条发现。",
+        "title": "模式：质疑者"
+      },
+      "team__pattern__adversarial-verify__verdict-schema": {
+        "description": "由解析器读取的协议文本：单个质疑者结论必须返回的 JSON 结构。",
+        "title": "模式：质疑结论结构"
+      },
+      "team__pattern__completeness-critic__critic": {
+        "description": "指出目前工作遗漏了什么，供下一轮搜索和最终报告使用。",
+        "title": "模式：完整性评审"
+      },
+      "team__pattern__completeness-critic__gaps-schema": {
+        "description": "由解析器读取的协议文本：完整性评审必须返回的 JSON 结构。",
+        "title": "模式：遗漏项结构"
+      },
+      "team__pattern__judge-panel__attempt": {
+        "description": "让 Agent 从指定角度完成目标，交给评审团打分。",
+        "title": "模式：评审团作答"
+      },
+      "team__pattern__judge-panel__attempt-schema": {
+        "description": "由解析器读取的协议文本：评审团单次作答必须返回的 JSON 结构。",
+        "title": "模式：作答结构"
+      },
+      "team__pattern__judge-panel__judge": {
+        "description": "让评审对照目标为一次作答打 0 到 10 分。",
+        "title": "模式：评审团打分"
+      },
+      "team__pattern__judge-panel__score-schema": {
+        "description": "由解析器读取的协议文本：单个评审打分必须返回的 JSON 结构。",
+        "title": "模式：评分结构"
+      },
+      "team__pattern__loop-until-dry__finder": {
+        "description": "每轮只要求查找者给出新发现，直到连续几轮再无新结果。",
+        "title": "模式：循环查找"
+      },
+      "team__pattern__multi-modal-sweep__finder": {
+        "description": "在多角度扫描中，让每个查找者只用分配给它的方法搜索。",
+        "title": "模式：多角度扫描查找"
+      },
+      "team__pattern__shared__findings-schema": {
+        "description": "由解析器读取的协议文本：扫描和循环模式中查找者必须返回的 JSON 结构。",
+        "title": "模式：发现结果结构"
+      },
+      "team__pattern__synthesize__report": {
+        "description": "根据已核验的发现撰写本次运行的最终报告，并注明尚未覆盖的部分。",
+        "title": "模式：最终报告"
+      },
+      "team__pattern__synthesize__report-schema": {
+        "description": "由解析器读取的协议文本：最终报告必须返回的 JSON 结构。",
+        "title": "模式：最终报告结构"
+      },
+      "team__pr-feedback__reviewer": {
+        "description": "Agent 团队内部审查者的角色设定：只审查该 Pull Request 的改动。",
+        "title": "团队：PR 审查者"
+      },
+      "team__pr-feedback__reviewer-task": {
+        "description": "指明要审查的 Pull Request，并要求内部审查者给出 JSON 结论。",
+        "title": "团队：PR 审查请求"
+      },
+      "team__rate-limit__nudge": {
+        "description": "限流冷却结束后发到团队，提醒成员从中断处继续。",
+        "title": "团队：限流后恢复"
+      },
+      "team__replan__lead": {
+        "description": "每一波任务结束后，让负责人决定继续、追加、取消还是调整任务。",
+        "title": "团队：重新规划检查点"
+      },
+      "team__review__revision-request": {
+        "description": "附上负责人反馈、要求队员返工的请求。",
+        "title": "团队：返工请求"
+      },
+      "team__structured__json-instruction": {
+        "description": "由解析器读取的协议文本：要求队员只回复一个符合结构的 JSON 代码块。",
+        "title": "团队：JSON 回复规则"
+      },
+      "team__structured__retry-note": {
+        "description": "由解析器读取的协议文本：回复无效时要求队员返回修正后的 JSON。",
+        "title": "团队：JSON 重试说明"
+      },
+      "team__teammate__default-identity": {
+        "description": "未设置其他提示词时，队员使用的默认系统提示词。",
+        "title": "团队：默认队员身份"
+      },
+      "team__teammate__task": {
+        "description": "把分配的任务、角色和团队目标交给队员。",
+        "title": "团队：队员任务"
+      },
+      "team__teammate__upstream-results": {
+        "description": "在队员任务之前引出其依赖任务的结果。",
+        "title": "团队：上游结果"
+      },
+      "team__ultracode__plan-hint": {
+        "description": "由解析器读取的协议文本：Ultracode 规划必须返回的 JSON 结构。",
+        "title": "Ultracode 计划结构"
+      },
+      "team__ultracode__planner": {
+        "description": "决定一次 Ultracode 运行要组合哪些质量模式、按什么顺序执行。",
+        "title": "Ultracode 规划"
+      },
+      "twin__distill__entity-merge": {
+        "description": "把构建分身时发现的同一团队、人员或项目的不同叫法归并到一起。",
+        "title": "分身提炼：实体合并"
+      },
+      "twin__distill__evaluator": {
+        "description": "以新人视角为数字分身的 Agent 和 Skill 草稿打分，并给出改进建议。",
+        "title": "分身提炼：评审"
+      },
+      "twin__distill__knowledge": {
+        "description": "从你的资料中提取人员、团队、项目和决策，供数字分身使用。",
+        "title": "分身提炼：实体与决策"
+      },
+      "twin__distill__playbook": {
+        "description": "从文档和聊天中找出你反复使用的做事方式，整理成数字分身的套路。",
+        "title": "分身提炼：做事套路"
+      },
+      "twin__distill__style": {
+        "description": "挑选你有代表性的写作样本，让数字分身学会你的语气。",
+        "title": "分身提炼：写作风格"
+      },
+      "twin__distill__synthesizer": {
+        "description": "把提炼出的画像整理成一个 Agent 草稿和若干 Skill 草稿。",
+        "title": "分身提炼：汇总生成"
+      },
+      "twin__runtime__rerank": {
+        "description": "数字分身检索资料时，为每篇结果与问题的相关度打分。",
+        "title": "分身检索重排"
+      },
+      "twin__runtime__rerank-request": {
+        "description": "由解析器读取的协议文本：把查询和文档交给分身重排的请求。",
+        "title": "分身重排请求"
+      },
+      "twin__runtime__system-template__decisions": {
+        "description": "把此人做过的决策加入数字分身的系统提示词。",
+        "title": "分身提示词：过往决策"
+      },
+      "twin__runtime__system-template__entities": {
+        "description": "加入分身熟悉的人员、团队和项目，仅作背景，不主动罗列。",
+        "title": "分身提示词：熟悉的人和事"
+      },
+      "twin__runtime__system-template__identity": {
+        "description": "数字分身系统提示词的开头，告诉它以谁的名义说话。",
+        "title": "分身提示词：身份"
+      },
+      "twin__runtime__system-template__playbooks": {
+        "description": "把此人通常如何处理各种情况加入数字分身的系统提示词。",
+        "title": "分身提示词：做事套路"
+      },
+      "twin__runtime__system-template__retrieved": {
+        "description": "加入本轮检索到的资料片段，要求分身引用来源，答不上来就如实说明。",
+        "title": "分身提示词：检索资料"
+      },
+      "twin__runtime__system-template__style": {
+        "description": "加入此人的写作样本，让分身模仿语气结构但不照抄。",
+        "title": "分身提示词：风格示例"
+      },
+      "twin__runtime__system-template__voice": {
+        "description": "把此人的说话风格和语气概述加入数字分身的系统提示词。",
+        "title": "分身提示词：语气"
+      }
+    },
     "relatedSections": {
       "agentRuntime": "Agent 运行时",
       "ariaLabel": "Claude Code 相关设置入口",
@@ -52842,6 +55397,31 @@
         "label": "沙盒化 Canvas 代码执行",
         "note": "默认开启。关闭后 Canvas Python 可访问你的文件系统与网络——请仅在你信任的机器上关闭。",
         "title": "Canvas 代码沙盒"
+      },
+      "claudeCodeRuntime": {
+        "description": "配置 Claude Agent SDK 运行时的沙盒能力和有时限的无人值守重试。",
+        "invalidMinutes": "请输入 1 到 180 之间的整数。",
+        "maximum": {
+          "description": "整次调用的累计耗时，包括正常执行和所有重试。不会为单个请求重置截止时间。请输入 1–180 分钟。",
+          "label": "调用总时限（分钟）"
+        },
+        "namespaces": {
+          "description": "默认关闭。适用于 Linux 和 WSL2 主机，也包括远程主机。为 Chromium 等工具请求此能力；Cognia 仍会在每次运行前要求显式批准。",
+          "label": "请求嵌套 User Namespace",
+          "warning": "嵌套 User Namespace 会削弱沙盒边界。命令可能在沙盒外运行并访问受保护文件和凭据文件。请仅为可信工作负载启用。"
+        },
+        "recheck": {
+          "description": "检查受支持订阅的用量限制是否已解除的间隔。请输入 1–180 分钟。",
+          "label": "用量限制复查间隔（分钟）"
+        },
+        "retry": {
+          "availability": "启用 Router + Fusion 的请求额度管理时不可用，重试由该模式统一管理。",
+          "cancellation": "取消会停止当前调用及其重试等待。达到调用总时限也会取消。",
+          "description": "默认关闭。仅适用于无人值守的 Claude Agent SDK 轮次；等待期间可重新检查受支持的 claude.ai 订阅用量限制。",
+          "label": "启用无人值守重试"
+        },
+        "saveError": "无法保存 Claude Code 运行时偏好设置，请重试。",
+        "title": "Claude Code 运行时"
       },
       "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
       "enable": {
@@ -53723,6 +56303,8 @@
           "research": "研究",
           "writing": "写作"
         },
+        "cogniaModelHint": "可选：让该子代理的外部任务使用 Cognia 模型。保持关闭则沿用派发时解析到的代理配置。",
+        "cogniaModelPinnedHint": "已固定的代理配置已在使用 Cognia 模型。仅在需要为该子代理覆盖时在此设置。",
         "compactAtTokensInvalid": "请输入正整数 Token 数。",
         "compactAtTokensUnsupported": "指定其他提供商或外部运行时后，不支持该上下文压缩策略。",
         "configTitle": "高级配置",
@@ -53741,7 +56323,7 @@
         "editorCompactAtTokensHint": "留空时继承默认策略。运行时支持时，正整数 Token 阈值可降低子代理上下文窗口。",
         "editorDescription": "描述",
         "editorExternalRuntime": "外部运行时",
-        "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端；外部代理使用它自己的模型与鉴权。",
+        "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端；除非在下方设置了 Cognia 模型，外部代理使用它自己的模型与鉴权。",
         "editorIcon": "图标",
         "editorIconPlaceholder": "Search",
         "editorMaxNestingDepth": "最大嵌套深度",
@@ -53778,6 +56360,7 @@
         "mcpLabel": "MCP 服务",
         "missingBody": "它可能已在其他窗口中被删除。",
         "missingTitle": "找不到该模板",
+        "modelRolesInvalid": "请先修正子任务模型：该子代理运行时会拒绝这些设置。",
         "nameRequired": "模板名称不能为空。",
         "newTemplate": "新建模板",
         "promptShadowedBody": "系统提示词的优先级高于任务模板，因此下面的任务模板——以及为它声明的变量——都不会被使用。到「高级配置」中清空系统提示词即可恢复。",
@@ -53840,7 +56423,7 @@
       "about": "关于",
       "account": "账户",
       "agentModes": "代理模式",
-      "agentRuntime": "内置代理运行时",
+      "agentRuntime": "Agent 运行时",
       "agents": "外部代理",
       "aiConnections": "AI 连接",
       "apiKey": "API 密钥",
@@ -53866,6 +56449,7 @@
       "gateway": "入站网关",
       "general": "常规",
       "goals": "目标",
+      "harnessEvolution": "Harness 演化",
       "hooks": "钩子",
       "imageCatalog": "镜像目录",
       "logs": "日志",
@@ -53882,6 +56466,7 @@
       "presets": "预设",
       "proIde": "Pro IDE",
       "profile": "个人资料",
+      "prompts": "提示词",
       "providers": "提供商",
       "remoteControl": "远程控制",
       "remoteHosts": "远程主机",
@@ -58588,6 +61173,7 @@
         "eval": "评测",
         "gateway": "网关",
         "goal": "目标",
+        "harnessEvolution": "Harness 演化",
         "imported": "导入",
         "label": "来源",
         "memory": "记忆",
@@ -59202,6 +61788,7 @@
         "retryHint": "应用修复后重新运行原始步骤。",
         "title": "错误诊断"
       },
+      "close": "关闭 AI Shell",
       "context": {
         "branch": "分支",
         "cwd": "工作目录",
@@ -59219,12 +61806,22 @@
         "title": "AI Shell 历史"
       },
       "inputPlaceholder": "描述你想做什么…",
+      "messages": {
+        "executionFailed": "无法确认命令已完成，已请求中断；请检查终端后再重试。",
+        "generatedPlan": "已生成包含 {count} 个步骤的计划，请在运行前检查每条命令。",
+        "generationFailed": "生成计划失败。",
+        "noSession": "没有活动的终端会话。",
+        "sensitiveContext": "终端上下文包含敏感数据，请脱敏后重试。",
+        "terminalBusy": "终端忙碌中，请等待当前命令结束。",
+        "terminalUnavailable": "终端会话不可用。"
+      },
       "plan": {
         "cancelled": "计划已取消。",
         "completed": "所有步骤已完成。",
         "empty": "未生成任何步骤。",
         "error": "生成计划失败。",
         "executing": "执行中…",
+        "failed": "执行因步骤失败而停止。",
         "generating": "正在生成计划…",
         "ready": "计划就绪 — 审阅后执行。",
         "title": "执行计划"
@@ -59244,7 +61841,7 @@
         "succeeded": "完成"
       },
       "title": "AI Shell",
-      "toggle": "切换 AI Shell（Ctrl+Shift+I）"
+      "toggle": "切换 AI Shell"
     },
     "commandMenu": {
       "copyCommand": "复制命令",
@@ -59479,14 +62076,16 @@
       "participantViewer": "查看中",
       "participantsLabel": "已连接的设备",
       "readOnly": "只读",
-      "releaseConfirm": "要释放此会话的控制权吗？释放后其他客户端可以接管。",
+      "releaseConfirm": "释放后其他客户端可以接管。",
+      "releaseConfirmTitle": "要释放此会话的控制权吗？",
       "releaseControl": "释放控制权",
       "replayGap": "序列 {firstAvailable} 之前的输出已不可用。",
       "replayGapMarker": "由于回放缓冲区已截断，更早的终端输出不可用。",
       "sandboxed": "已沙箱化",
       "shared": "已与 {count} 台设备共享",
       "takeControl": "接管控制",
-      "takeoverConfirm": "要接管此会话吗？当前控制者将变为只读。"
+      "takeoverConfirm": "当前控制者将变为只读。",
+      "takeoverConfirmTitle": "要接管此会话吗？"
     },
     "share": {
       "description": "持有远程终端授权的已配对设备会通过伴侣链路接入这个宿主会话，并共用同一把控制权租约：同一时刻只有一个控制者，其余只读。不会复制任何内容，也不会生成链接。",
@@ -59938,7 +62537,13 @@
     "webNativeAnthropicDesc": "在 Anthropic 链路下，改用 Claude 内置的 WebSearch / WebFetch（服务端抽取 + 引用），而非多 provider 工具。其他 provider 仍用多 provider 工具。",
     "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
     "webPreferCogniaDesc": "即使模型所在 runtime 自带联网，也改用 Cognia 的多服务商搜索（Tavily / Brave / Exa…）。关闭时优先用 runtime 自带的原生搜索——不需要 API key，且带引用。需要先配置搜索服务商。",
+    "webPreferCogniaFetchDesc": "即使原生网页读取可用，也优先使用 Cognia Reader。直接阅读无需 Search 提供商或 API 密钥。可在「搜索 → 阅读」中单独配置阅读器。",
+    "webPreferCogniaFetchTitle": "阅读优先使用 Cognia",
+    "webPreferCogniaSearchDesc": "即使原生搜索可用，也优先使用 Cognia Search。需要配置 Search 提供商；未配置时仍可使用受支持的原生搜索。",
+    "webPreferCogniaSearchTitle": "搜索优先使用 Cognia",
     "webPreferCogniaTitle": "优先用 Cognia 的联网搜索",
+    "webPreferenceInheritedOff": "继承原有的共享偏好：原生能力可用时优先使用。",
+    "webPreferenceInheritedOn": "继承原有的共享偏好：优先使用 Cognia。",
     "webclone": "网页快照",
     "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。"
   },
@@ -60652,6 +63257,7 @@
         "larkNoPermission": "账号 {account} 无权限读取该文档。请申请访问权限，或在 设置 → 连接 中完成用户授权。",
         "larkNotAuthorized": "飞书账号 {account} 缺少凭证，请在 设置 → 连接 中重新授权。",
         "larkNotFound": "未找到该文档 — 可能已被删除，或链接有误。",
+        "larkOutputTruncated": "文档超出 lark-cli 输出上限，已丢弃不完整内容。请改用 API 连接读取。",
         "larkRateLimited": "触发飞书限流 — 请稍候重试。",
         "larkUnsupportedType": "该链接指向 {type} 对象；目前仅支持文档和知识库页面。",
         "noCommitsFound": "所选仓库未发现提交",
@@ -61204,8 +63810,73 @@
       }
     }
   },
+  "webReaderSettings": {
+    "auto": "自动",
+    "cancel": "取消",
+    "configureSearchKey": "在搜索服务商中添加 {vendor} 密钥",
+    "consequences": {
+      "best-effort": "尽力而为：尝试辅助模型；失败时返回提取的文本。",
+      "off": "关闭：返回提取的文本；明确的问题仍可请求尽力蒸馏。",
+      "required": "必须：没有辅助模型或蒸馏结果时拒绝返回；禁用原始内容和非 GET 阅读。"
+    },
+    "defaultReader": "默认阅读器",
+    "description": "独立于搜索配置网页阅读。启用搜索不会启用阅读器。",
+    "directDisclosure": "由 Cognia 直接获取",
+    "distillation": "蒸馏",
+    "externalFallback": "外部回退",
+    "fallback": {
+      "configured": "仅已配置的阅读器",
+      "off": "关闭"
+    },
+    "fallbackDescription": "自动模式在符合条件的直接阅读失败后，可按优先级尝试已启用的远程阅读器，仅使用已配置的接收方。",
+    "hostLimitations": "普通浏览器受 CORS 限制，无法使用 Jina、FxTwitter 和平台阅读。在移动端，取消会停止等待，但已发出的原生请求仍可能完成。",
+    "httpStatus": "HTTP 状态码：{status}",
+    "missingSearchKey": "不可用：请在搜索服务商中添加 {vendor} 密钥",
+    "modes": {
+      "best-effort": "尽力而为",
+      "off": "关闭",
+      "required": "必须"
+    },
+    "moveDown": "下移 {reader}",
+    "moveUp": "上移 {reader}",
+    "platformDisclosure": "从原始网站读取",
+    "priorityDescription": "自动模式先尝试匹配的平台或 FxTwitter 阅读器，再直接阅读。优先级按钮调整其余远程阅读器的外部回退顺序。",
+    "priorityOrder": "阅读器优先级顺序",
+    "readers": {
+      "deepseek": "DeepSeek",
+      "direct": "直接阅读",
+      "exa": "Exa",
+      "fxtwitter": "FxTwitter",
+      "jina": "Jina",
+      "platform": "平台（微信 / YouTube）",
+      "tavily": "Tavily",
+      "tinyfish": "TinyFish"
+    },
+    "remoteDisclosure": "您阅读的页面会发送至 {vendor}",
+    "replace": "替换配置",
+    "replaceDescription": "保存的阅读器记录来自较新版本。此次更改将以这里显示的受支持配置替换它。",
+    "replaceTitle": "替换较新的阅读器配置？",
+    "saveFailed": "无法保存阅读器配置，请重试。",
+    "testEvidence": "仅在点击时运行测试。带日期的结果仅证明该次尝试，不保证将来可用。",
+    "testFailed": "阅读器测试失败",
+    "testOk": "阅读器测试成功",
+    "testReader": "测试阅读器",
+    "testReaderNamed": "测试阅读器：{reader}",
+    "testReason": "原因：{reason}",
+    "testedAt": "测试时间：{date}",
+    "testing": "测试中…",
+    "unsupportedVersion": "此阅读器记录来自较新版本，当前未启用。这里显示兼容配置。保存任何阅读器更改将在确认后替换较新记录。",
+    "usesSearchKey": "使用您的 {vendor} 搜索密钥",
+    "vendorCost": "阅读请求独立于搜索请求，由您的服务商账户付费。"
+  },
   "webSearchToggle": {
     "goToSettings": "前往设置",
+    "operationRoutes": "搜索：{search}；读取：{fetch}",
+    "route": {
+      "cognia": "Cognia",
+      "native": "原生",
+      "none": "不可用"
+    },
     "searchFailed": "联网搜索失败：{message}",
     "searchedVia": "通过 {provider} 搜索 — {count} 条结果",
     "setupNoProvider": "未配置搜索 Provider — 前往 设置 → 联网搜索 配置",
@@ -68574,6 +71245,25 @@
     }
   },
   "workspace": {
+    "access": {
+      "actionsHeading": "可执行的操作",
+      "featuresHeading": "共享功能",
+      "guest": "访客",
+      "loading": "正在检查权限…",
+      "noActions": "你在该工作区暂无权限，请联系维护者添加。",
+      "none": "无",
+      "orgRole": "组织角色",
+      "refresh": "刷新权限",
+      "title": "我的权限",
+      "unavailable": {
+        "error": "无法检查权限：{message}",
+        "hidden": "该工作区未与你共享。",
+        "not-signed-in": "登录后可查看权限。",
+        "unsupported": "当前协作服务器尚不支持报告权限。"
+      },
+      "viaOrgAdmin": "通过组织管理员身份",
+      "workspaceRole": "工作区角色"
+    },
     "actionErrors": {
       "consentRequired": "正在等待宿主设备批准，请在该设备上用验证码 {code} 确认。",
       "consentRequiredNoCode": "正在等待宿主设备批准，请在该设备上确认后继续。",
@@ -69086,6 +71776,7 @@
         "invitationRevoked": "在工作区成员列表中撤销",
         "offboarded": "在工作区名册中移出组织",
         "orgRoleChanged": "在工作区成员列表中更改了组织角色",
+        "ownershipTransferred": "从工作区成员列表转让所有权",
         "removed": "在工作区名册中移出工作区",
         "roleChanged": "在工作区名册中更改角色"
       },
@@ -69105,8 +71796,16 @@
         "invitationRevoked": "邀请已撤销。",
         "offboarded": "已移出组织。",
         "orgRoleChanged": "组织角色已更新。",
+        "ownershipTransferred": "所有权已转让。",
         "removed": "已移出工作区。",
         "roleChanged": "角色已更新。"
+      },
+      "transfer": {
+        "action": "转让所有权",
+        "body": "对方将一步成为组织所有者，你保留席位并使用下方选择的角色。只有所有者可以撤销此操作。",
+        "confirm": "转让所有权",
+        "stepDownLabel": "转让后你的角色",
+        "title": "将 {name} 设为所有者？"
       },
       "unavailable": {
         "no-org": "当前登录未绑定组织，没有可管理的名册。",

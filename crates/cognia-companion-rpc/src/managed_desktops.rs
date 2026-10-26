@@ -342,7 +342,7 @@ fn authority(
     if local {
         return ManagedDesktopAuthority::Administrator;
     }
-    if worker || scope == Some("service") {
+    if worker || cognia_companion::jwt::is_service_scope(scope) {
         return ManagedDesktopAuthority::Agent;
     }
     if scope == Some("owner") || owner {
@@ -1146,6 +1146,10 @@ mod tests {
             .register_oidc_device(
                 tenant,
                 "test-actor",
+                &cognia_companion::security_store::VerifiedDevicePerson {
+                    user_id: "usr_managed_test".to_string().try_into().unwrap(),
+                    org_id: "org_managed_test".to_string().try_into().unwrap(),
+                },
                 &challenge.id,
                 &challenge.nonce,
                 device,

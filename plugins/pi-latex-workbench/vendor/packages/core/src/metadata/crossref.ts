@@ -18,6 +18,14 @@ import {
   utf8Bytes,
   type HostPolicy,
 } from "@latexwb/contracts";
+import {
+  crossrefSearchUrl,
+  crossrefWorkUrl,
+  matchDoi,
+  parseCrossrefWorks,
+  renderBibEntry,
+  type CrossrefItem,
+} from "@latexwb/latex-kit";
 import { makePinnedFetcher, type FetchResult, type Fetcher } from "../net.ts";
 import type {
   MetadataProvider,
@@ -46,22 +54,6 @@ function crossrefFetcher(fakeIpCidrs: readonly string[] = []): Fetcher {
 
 export const pinnedHttpsFetch: Fetcher = crossrefFetcher();
 
-const DOI_RE = /^(?:doi:|https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/\S+)$/i;
-
-interface CrossrefItem {
-  DOI?: string;
-  title?: string[];
-  author?: Array<{ family?: string; given?: string }>;
-  issued?: { "date-parts"?: number[][] };
-  type?: string;
-  URL?: string;
-  publisher?: string;
-  "container-title"?: string[];
-  volume?: string;
-  issue?: string;
-  page?: string;
-}
-
 function candidateFromItem(item: CrossrefItem): RawCandidate {
   const itemJson = canonicalJson(item);
   const authors = (item.author ?? [])
@@ -85,60 +77,6 @@ function candidateFromItem(item: CrossrefItem): RawCandidate {
     bibEntry: renderBibEntry(item),
     rawItemJson: itemJson,
   };
-}
-
-/** Crossref work type → BibTeX entry type (unknown types stay @misc). */
-const CROSSREF_TYPES: Record<string, string> = {
-  "journal-article": "article",
-  "proceedings-article": "inproceedings",
-  "book-chapter": "incollection",
-  "book-section": "incollection",
-  "book-part": "incollection",
-  "reference-entry": "incollection",
-  book: "book",
-  monograph: "book",
-  "edited-book": "book",
-  "reference-book": "book",
-  "book-set": "book",
-  proceedings: "proceedings",
-  report: "techreport",
-  "report-component": "techreport",
-  dissertation: "phdthesis",
-  standard: "misc",
-  "posted-content": "misc",
-  dataset: "misc",
-};
-
-/** Deterministic BibTeX rendering for a Crossref work item. */
-function renderBibEntry(item: CrossrefItem): string {
-  const type = CROSSREF_TYPES[item.type ?? ""] ?? "misc";
-  const firstAuthor = item.author?.[0]?.family?.toLowerCase().replace(/[^a-z0-9]/g, "") || "anon";
-  const year = item.issued?.["date-parts"]?.[0]?.[0];
-  const firstWord = (item.title?.[0] ?? "work").split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") || "work";
-  const key = `${firstAuthor}${year ?? "nd"}${firstWord}`;
-  const clean = (v: string) => v.replace(/[{}]/g, "");
-  const fields: [string, string][] = [
-    ["title", `{{${clean(item.title?.[0] ?? "")}}}`],
-  ];
-  if (item.author !== undefined && item.author.length > 0) {
-    fields.push(["author", item.author.map((a) => `${a.family ?? ""}, ${a.given ?? ""}`.replace(/,\s*$/, "").trim()).join(" and ")]);
-  }
-  if (year !== undefined) fields.push(["year", String(year)]);
-  const container = item["container-title"]?.[0];
-  if (container !== undefined && type !== "book") {
-    fields.push([type === "article" ? "journal" : "booktitle", `{${clean(container)}}`]);
-  }
-  // Crossref serves these for articles/chapters; BibTeX styles print them.
-  if (item.volume !== undefined) fields.push(["volume", clean(item.volume)]);
-  if (item.issue !== undefined) fields.push(["number", clean(item.issue)]);
-  if (item.page !== undefined) fields.push(["pages", clean(item.page).replace(/\s*[-\u2013\u2014]+\s*/g, "--")]);
-  if (item.DOI !== undefined) fields.push(["doi", item.DOI]);
-  if (item.URL !== undefined) fields.push(["url", item.URL]);
-  if (item.publisher !== undefined) {
-    fields.push([type === "techreport" ? "institution" : type === "phdthesis" ? "school" : "publisher", `{${clean(item.publisher)}}`]);
-  }
-  const body = fields.map(([k, v]) => `  ${k} = {${v}}`).join(",\n");
-  return `@${type}{${key},\n${body}\n}`;
 }
 
 /**
@@ -181,19 +119,10 @@ export function crossrefProvider(options: {
       // transport enforces it; there is nothing to opt into.
       let url: URL;
       if (query.kind === "identifier") {
-        const m = DOI_RE.exec(query.identifier.trim());
-        if (m !== null) {
-          url = new URL(`https://api.crossref.org/works/${encodeURIComponent(m[1] as string)}`);
-        } else {
-          url = new URL("https://api.crossref.org/works");
-          url.searchParams.set("query.bibliographic", query.identifier);
-          url.searchParams.set("rows", "5");
-        }
+        const doi = matchDoi(query.identifier);
+        url = new URL(doi !== null ? crossrefWorkUrl(doi) : crossrefSearchUrl(query.identifier));
       } else {
-        const q = query.kind === "query" ? query.query : query.key;
-        url = new URL("https://api.crossref.org/works");
-        url.searchParams.set("query.bibliographic", q);
-        url.searchParams.set("rows", "5");
+        url = new URL(crossrefSearchUrl(query.kind === "query" ? query.query : query.key));
       }
       let res: FetchResult | null = null;
       let attempts = 0;
@@ -244,18 +173,8 @@ export function crossrefProvider(options: {
           attempts,
         };
       }
-      let items: CrossrefItem[];
-      try {
-        const body = JSON.parse(new TextDecoder().decode(response.body)) as {
-          message?: { items?: CrossrefItem[] } | CrossrefItem;
-        };
-        const message = body.message;
-        items = Array.isArray((message as { items?: CrossrefItem[] })?.items)
-          ? ((message as { items: CrossrefItem[] }).items)
-          : message !== undefined && !Array.isArray((message as { items?: unknown }).items)
-            ? [message as CrossrefItem]
-            : [];
-      } catch {
+      const items = parseCrossrefWorks(new TextDecoder().decode(response.body));
+      if (items === null) {
         return {
           status: "unavailable",
           warning: "crossref response was not valid JSON",

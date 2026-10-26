@@ -9,22 +9,41 @@
  */
 
 import { z } from "zod"
+import { definePrompt } from "@/lib/prompts/types"
 import type { ReviewEvidence } from "../ledger/review-evidence"
 
 /**
  * The lead reviews; it never edits. Saying so matters: a lead that "fixes it
  * itself" would bypass the worker's worktree entirely and land unreviewed work.
  */
-export const LEAD_REVIEW_SYSTEM_PROMPT = [
-  "You are the reviewing lead of an AI agent team. Judge one teammate's completed work.",
-  "You cannot edit files, run commands, or use tools — you review only, and reply with JSON.",
-  "Approve when the work satisfies the task and its expected output. Request changes when it is",
-  "incomplete, incorrect, unsafe, or clearly deviates from the surrounding code's conventions.",
-  "Prefer a few high-confidence, actionable points over nitpicks. When you request changes, the",
-  "same teammate will revise the same worktree using your feedback verbatim — so address them",
-  "directly and say exactly what to change.",
-  "Always respond with a single ```json fenced block matching the requested shape.",
-].join(" ")
+export const LEAD_REVIEW_PROMPT = definePrompt({
+  id: "team.lead-review",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "team",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  // The verdict decides whether a teammate's work is accepted or sent back.
+  // An unreadable verdict fails the review, never approves it.
+  risk: "approval-sensitive",
+  hosts: ["app", "cli"],
+  maxChars: 8_000,
+  requiredFragments: ["json"],
+  outputContract:
+    'A fenced JSON block {"verdict": "approved" | "changes_requested", "feedback": string}; anything else fails the review step. Replaces the lead\'s own persona for the review turn.',
+  consumers: ["lib/ai/agent/team/agent-team-runtime-deps.ts"],
+  defaultBody: [
+    "You are the reviewing lead of an AI agent team. Judge one teammate's completed work.",
+    "You cannot edit files, run commands, or use tools — you review only, and reply with JSON.",
+    "Approve when the work satisfies the task and its expected output. Request changes when it is",
+    "incomplete, incorrect, unsafe, or clearly deviates from the surrounding code's conventions.",
+    "Prefer a few high-confidence, actionable points over nitpicks. When you request changes, the",
+    "same teammate will revise the same worktree using your feedback verbatim — so address them",
+    "directly and say exactly what to change.",
+    "Always respond with a single ```json fenced block matching the requested shape.",
+  ].join(" "),
+})
 
 export const leadReviewVerdictSchema = z.object({
   verdict: z.enum(["approved", "changes_requested"]),

@@ -189,8 +189,7 @@ Execution has these parts:
 Services run separately according to the deployment, for example:
 
 - `services/workspace-runtime/`: Workspace browser runtime.
-- `services/signaling-server/`: WebRTC signaling, with axum and workers-rs implementations.
-- `services/share-server/`: Share-link service, encrypted content storage, and viewer.
+- The cloud and self-hosted services (signaling, share links, status, account identity and sync, updates, diagnostics) live in [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services), with the wire contracts they share with the app. This repository pins one revision of it in `integrations/cognia-services.json`.
 
 The product website is maintained in [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website), with independent development, CI and static deployment. `docs/` remains the Fumadocs workspace in this repository. Generate assets for the correct target before packaging.
 
@@ -205,21 +204,22 @@ Major architecture decisions are recorded in [`docs/content/docs/en/adr/`](./doc
 
 Run development commands from the repository root. This table lists common commands; each inline code item is a separate command. Run one frontend launch path at a time: desktop development and `dev:web-headless` already start the app server.
 
-| Task                         | Commands                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| App                          | `pnpm dev`, `pnpm build`, `pnpm start`, `pnpm lint`, `pnpm format`, `pnpm typecheck`                    |
-| Unit tests                   | `pnpm test`, `pnpm test:watch`; run `pnpm test:coverage` only when a coverage check is requested        |
-| Desktop                      | `pnpm tauri dev`, `pnpm tauri build`, `pnpm tauri info`                                                 |
-| Headless and browser hosts   | `pnpm dev:headless`, `pnpm dev:web-headless`, `pnpm dev:workspace-runtime`                              |
-| Standalone CLI               | `pnpm cli:dev chat`, `pnpm cli:build`, `pnpm cli:test`, `pnpm cli:api:check`                            |
-| Mobile build and sync        | `pnpm mobile:sync:ios`, `pnpm mobile:sync:android`                                                      |
-| Mobile IDE                   | `pnpm mobile:open:ios`, `pnpm mobile:open:android`                                                      |
-| Android development and APKs | `pnpm mobile:dev:android`, `pnpm mobile:build:android`, `pnpm mobile:deploy`, `pnpm mobile:deploy:fast` |
-| Docs, port 3001              | `pnpm docs:dev`, `pnpm docs:build`                                                                      |
-| Chrome/Edge extension        | `pnpm browser-ext:build`                                                                                |
-| Sidecars                     | `pnpm sidecars:install`, `pnpm sidecar:start`, `pnpm sidecar:test`, `pnpm sidecars:build`               |
-| E2E                          | `pnpm test:e2e`, `pnpm test:e2e:workflows`, `pnpm test:e2e:mobile`, `pnpm test:e2e:tauri`               |
-| Repository checks            | `pnpm audit:slots`, `pnpm i18n:build:check`, `pnpm lint:i18n`, `pnpm webrtc:smoke`                      |
+| Task                         | Commands                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| App                          | `pnpm dev`, `pnpm build`, `pnpm start`, `pnpm lint`, `pnpm format`, `pnpm typecheck`                        |
+| Unit tests                   | `pnpm test`, `pnpm test:watch`; run `pnpm test:coverage` only when a coverage check is requested            |
+| Desktop                      | `pnpm tauri dev`, `pnpm tauri build`, `pnpm tauri info`                                                     |
+| Headless and browser hosts   | `pnpm dev:headless`, `pnpm dev:web-headless`, `pnpm dev:workspace-runtime`                                  |
+| Standalone CLI               | `pnpm cli:dev chat`, `pnpm cli:build`, `pnpm cli:test`, `pnpm cli:api:check`                                |
+| Mobile build and sync        | `pnpm mobile:sync:ios`, `pnpm mobile:sync:android`                                                          |
+| Mobile IDE                   | `pnpm mobile:open:ios`, `pnpm mobile:open:android`                                                          |
+| Android development and APKs | `pnpm mobile:dev:android`, `pnpm mobile:build:android`, `pnpm mobile:deploy`, `pnpm mobile:deploy:fast`     |
+| Docs, port 3001              | `pnpm docs:dev`, `pnpm docs:build`                                                                          |
+| Product website              | [Standalone website commands](https://github.com/cognia-labs/cognia-website)                                |
+| Chrome/Edge extension        | [Standalone extension commands](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify) |
+| Sidecars                     | `pnpm sidecars:install`, `pnpm sidecar:start`, `pnpm sidecar:test`, `pnpm sidecars:build`                   |
+| E2E                          | `pnpm test:e2e`, `pnpm test:e2e:workflows`, `pnpm test:e2e:mobile`, `pnpm test:e2e:tauri`                   |
+| Repository checks            | `pnpm audit:slots`, `pnpm i18n:build:check`, `pnpm lint:i18n`, `pnpm cognia-services:check`                 |
 
 See [`package.json`](./package.json) for the complete script list.
 
@@ -247,19 +247,23 @@ cognia-next/
 ├── packages/             Shared SDKs and business packages (agent, plugin-sdk, provider-*)
 ├── crates/               Rust hosts, protocols, security, and runtimes
 ├── cli/                  cognia-agent standalone terminal / headless agent
-├── browser-extension/    Chrome/Edge page companion
 ├── i18n/                  next-intl request + messages (en, zh-CN)
 ├── src-tauri/             Tauri 2 Rust core (axum HTTP, scheduler, automation, OCR, …)
 ├── sidecar/               Node agent / extension hosts; separate dependencies and lockfiles
 ├── mobile/                Capacitor 8 shell (workspace package)
-├── docs/                  Fumadocs site + ADRs (workspace package, port 3001)
-├── services/              Independently deployed services
-│   ├── workspace-runtime/ Workspace browser runtime
-│   ├── signaling-server/  WebRTC rendezvous service (axum + workers-rs)
-│   └── share-server/      Cloudflare Worker + Vite viewer for share links
+├── docs/                  Fumadocs site, ADRs, and contributor guides (port 3001)
+│   └── development/      CI/CD, testing, and development workflow guides
+├── deploy/                Container builds, Compose, Kubernetes, and runner deployment
+│   └── docker/           Dockerfiles built with the repository root as context
+├── services/              Services bundled with the desktop
+│   └── workspace-runtime/ Workspace browser runtime
 ├── tests/e2e/             Playwright suites (workflows, mobile, tauri)
 └── scripts/               Build, audit, and migration helpers
 ```
+
+See the [directory guide](docs/README.md) for file placement, development guides,
+and generated output. Root-level manifests, framework entry points, and tool
+configuration stay at the root so the existing commands can discover them.
 
 ### Configuration
 
@@ -328,7 +332,7 @@ Follow the project rules in [`AGENTS.md`](./AGENTS.md) and the development guida
 - **Standalone agent CLI**: [`cli/README.md`](./cli/README.md)
 - **Agent execution and recovery**: [`unified-agent-execution/`](./docs/content/docs/en/subsystems/unified-agent-execution/)
 - **Mobile workflows**: [`mobile/README.md`](./mobile/README.md)
-- **Browser companion extension**: [`browser-extension/`](./browser-extension/)
+- **Browser companion extension**: [cognia-labs/cognia-browser-extension](https://github.com/cognia-labs/cognia-browser-extension)
 - **Plugin SDK**: [`packages/plugin-sdk/`](./packages/plugin-sdk/)
 - **Working rules**: [`CLAUDE.md`](./CLAUDE.md)
 - **External docs**: [Tauri 2](https://tauri.app/) · [Next.js 16](https://nextjs.org/docs) · [shadcn/ui](https://ui.shadcn.com/) · [Capacitor](https://capacitorjs.com/docs) · [Fumadocs](https://fumadocs.dev/)

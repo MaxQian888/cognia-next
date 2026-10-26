@@ -1,12 +1,5 @@
 import type { ComponentType } from "react"
-import { createContextPanelWebviewRenderer } from "@/components/plugins/plugin-context-panel-webview"
-import {
-  createA2UIContextPanelRenderer,
-  createChatContextPanelRenderer,
-  declarativeFirstActivate,
-} from "@/components/plugins/plugin-declarative-context-panel"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
-import { attachContextPanelWebviewRpc } from "@/lib/plugin/bridge/context-panel-webview-rpc"
 import { resolveContextPanelIcon } from "@/lib/context-workbench/panel-icons"
 import { recordPluginPointDiagnostic } from "@/lib/plugin/contracts/diagnostics-store"
 import { loggers } from "@/lib/plugin/core/logger"
@@ -88,13 +81,22 @@ export async function registerContextPanelsForPlugin(
       let onRestore: ContextPanelDefinition["onRestore"]
       let getBadge: ContextPanelDefinition["getBadge"]
       if (def.kind === "a2ui") {
+        const { createA2UIContextPanelRenderer, declarativeFirstActivate } =
+          await import("@/components/plugins/plugin-declarative-context-panel")
         // Declarative: nothing to import. The body is a surface the plugin
         // pushes with `ctx.a2ui.*`, and `activateTool` is what tells it to.
         exported = createA2UIContextPanelRenderer(manifest.id, def)
         onFirstActivate = declarativeFirstActivate(manifest.id, def)
       } else if (def.kind === "chat") {
+        const { createChatContextPanelRenderer } =
+          await import("@/components/plugins/plugin-declarative-context-panel")
         exported = createChatContextPanelRenderer(manifest.id, def)
       } else if (def.webview) {
+        const [{ createContextPanelWebviewRenderer }, { attachContextPanelWebviewRpc }] =
+          await Promise.all([
+            import("@/components/plugins/plugin-context-panel-webview"),
+            import("@/lib/plugin/bridge/context-panel-webview-rpc"),
+          ])
         // Webview-backed: no module to import — the body is the referenced
         // webview's iframe, resolved lazily from the registry at render time
         // (the webview bridge runs AFTER this one in the module-bridge map).

@@ -217,3 +217,34 @@ not run animations, so a real-browser check is still owed; a first attempt found
 that the app reports `prefers-reduced-motion: false` under Playwright's
 emulation even though the same emulation works on `about:blank`, which needs its
 own investigation before a spec can be trusted.
+
+
+## Amendment — 2026-10-19 (startup recovery before React)
+
+The account loading screen is also pre-rendered HTML. Its CSS spinner can run
+before the account initializer or any React timer has executed, so a visible
+spinner is not proof of a live application.
+
+`lib/boot/startup-recovery.ts` supplies a dependency-free native inline script
+at the start of the root layout's head. It records bounded, local-only startup
+diagnostics for script/style resource errors, runtime errors and unhandled
+rejections. Diagnostics omit arbitrary messages, stacks, rejection values and
+URL queries/fragments; only allowlisted error metadata and same-origin Next.js
+asset paths can be retained. After 20 seconds without the account initializer's
+React handoff, it presents translated reload controls without depending on
+Next.js, React or application CSS. A late successful handoff removes the fallback.
+Lightweight presentation routes do not arm this account-startup watchdog.
+
+Registry startup is a separate wait. Each account-registry snapshot read has a
+15-second deadline and owns a disposable connection/transaction. Timeout aborts
+the read and closes that connection; a late result cannot continue account
+activation. The account gate presents a translated, retryable failure instead
+of treating a failed read as an empty registry. It neither creates an account
+nor mounts the protected app until a read succeeds. Shared-link readers retain
+an explicit guest action. Neither recovery path deletes local data or reloads
+automatically.
+
+Both deadlines use the renderer's event loop. They cannot run while that main
+thread is fully blocked, and an inline script cannot rescue a policy that blocks
+its own execution. Asset delivery failures and synchronous long tasks still need
+fixing at their source; these controls expose failures and provide a way out.

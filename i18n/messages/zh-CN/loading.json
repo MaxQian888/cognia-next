@@ -54,5 +54,10 @@
   "stillWorking": "仍在进行…（{seconds} 秒）",
   "thinking": "Claude 正在思考…",
   "languageLoadFailed": "语言包加载失败。",
-  "retryLanguage": "重试"
+  "retryLanguage": "重试",
+  "startupRecovery": {
+    "title": "应用启动未完成",
+    "description": "界面尚未启动，请检查网络连接后重新载入。本地数据会保留。",
+    "reload": "重新载入应用"
+  }
 }

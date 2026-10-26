@@ -11,7 +11,7 @@ import { getProviderHealth, type ProviderHealthRow } from "@cognia/web-search/pr
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   SEARCH_PROVIDERS,
-  isProviderConfigured,
+  getProviderState,
   type SearchProviderType,
 } from "@cognia/web-search/types"
 import { createLogger } from "@cognia/logging"
@@ -33,6 +33,7 @@ const STATUS_VARIANT = {
 
 export function SearchProviderHealthPanel() {
   const t = useTranslations("searchHealth")
+  const ts = useTranslations("searchSettings")
 
   const searchProviders = useSettingsStore(
     (s) => s.settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
@@ -42,20 +43,13 @@ export function SearchProviderHealthPanel() {
   )
   const resetSearchProviderHealth = useSettingsStore((s) => s.resetSearchProviderHealth)
 
-  // Rows: providers the user has enabled+configured, plus any provider with
-  // recorded breaker traffic (a configured-then-unconfigured provider keeps
-  // its stats visible until reset). Called synchronously on every render — the
-  // interval tick re-snapshots the breaker singleton, so this is a plain
-  // function, not a memo.
+  // Keep every registered provider visible, with dated traffic separate from
+  // its current configuration state. Polling only reads local breaker state.
   const snapshotRows = () => {
     const all = getProviderHealth().snapshotAll(ALL_PROVIDER_IDS)
     const out = {} as Record<SearchProviderType, ProviderHealthRow>
     for (const id of ALL_PROVIDER_IDS) {
-      const settings = searchProviders[id]
-      const hasTraffic = all[id].totalFailures + all[id].totalSuccesses > 0
-      if ((!!settings?.enabled && isProviderConfigured(id, settings)) || hasTraffic) {
-        out[id] = all[id]
-      }
+      out[id] = all[id]
     }
     return out
   }
@@ -87,12 +81,17 @@ export function SearchProviderHealthPanel() {
   )
 
   const providerIds = Object.keys(rows) as SearchProviderType[]
+  const hasActivity = providerIds.some(
+    (id) =>
+      rows[id].totalFailures + rows[id].totalSuccesses > 0 ||
+      getProviderState(id, searchProviders[id]) === "configured"
+  )
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">{t("description")}</p>
-        {providerIds.length > 0 && (
+        {hasActivity && (
           <Button
             variant="ghost"
             size="sm"
@@ -109,54 +108,54 @@ export function SearchProviderHealthPanel() {
         <p className="text-xs text-muted-foreground italic">{t("breakerDisabled")}</p>
       )}
 
-      {providerIds.length === 0 ? (
+      {!hasActivity && (
         <p className="text-xs text-muted-foreground py-4 text-center">{t("empty")}</p>
-      ) : (
-        <div className="space-y-2">
-          {providerIds.map((id) => {
-            const row = rows[id]
-            const successPercent = Math.round(row.successRate * 100)
-            return (
-              <div
-                key={id}
-                className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <BrandIcon id={id} label={SEARCH_PROVIDERS[id].name} size={20} />
-                  <span className="text-sm font-medium truncate">{SEARCH_PROVIDERS[id].name}</span>
-                  <Badge variant={STATUS_VARIANT[row.status]} className="text-[10px] px-1 py-0">
-                    {t(`status.${row.status}`)}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-end flex-wrap gap-3 shrink-0 text-xs text-muted-foreground">
-                  <span>{t("successRate", { percent: successPercent })}</span>
-                  <span>{t("avgLatency", { ms: row.avgLatency })}</span>
-                  <span>
-                    {t("counters", { ok: row.totalSuccesses, failed: row.totalFailures })}
-                  </span>
-                  <span className="w-24 text-right">
-                    {row.circuitState === "closed"
-                      ? t("circuitClosed")
-                      : row.circuitState === "half-open"
-                        ? t("circuitProbing")
-                        : t("circuitOpen", {
-                            seconds: Math.ceil(row.cooldownRemainingMs / 1000),
-                          })}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-xs"
-                    onClick={() => handleReset(id)}
-                  >
-                    {t("reset")}
-                  </Button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
       )}
+      <div className="space-y-2">
+        {providerIds.map((id) => {
+          const row = rows[id]
+          const successPercent = Math.round(row.successRate * 100)
+          return (
+            <div
+              key={id}
+              className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <BrandIcon id={id} label={SEARCH_PROVIDERS[id].name} size={20} />
+                <span className="text-sm font-medium truncate">{SEARCH_PROVIDERS[id].name}</span>
+                <Badge variant="outline" className="text-[10px] px-1 py-0">
+                  {ts(`states.${getProviderState(id, searchProviders[id])}`)}
+                </Badge>
+                <Badge variant={STATUS_VARIANT[row.status]} className="text-[10px] px-1 py-0">
+                  {t(`status.${row.status}`)}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-end flex-wrap gap-3 shrink-0 text-xs text-muted-foreground">
+                <span>{t("successRate", { percent: successPercent })}</span>
+                <span>{t("avgLatency", { ms: row.avgLatency })}</span>
+                <span>{t("counters", { ok: row.totalSuccesses, failed: row.totalFailures })}</span>
+                <span className="w-24 text-right">
+                  {row.circuitState === "closed"
+                    ? t("circuitClosed")
+                    : row.circuitState === "half-open"
+                      ? t("circuitProbing")
+                      : t("circuitOpen", {
+                          seconds: Math.ceil(row.cooldownRemainingMs / 1000),
+                        })}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => handleReset(id)}
+                >
+                  {t("reset")}
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -26,6 +26,7 @@ import {
 } from "@cognia/vector/dimension-guard"
 import { BM25Index, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { generateHypotheticalAnswer, generateStepBackQuery } from "@cognia/rag/query-expansion"
+import { loadExpansionPromptRenderers } from "@/lib/ai/retrieval/expansion-prompts"
 import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 import type { IVectorStore } from "@cognia/vector/store"
 import type { LanguageModel } from "ai"
@@ -191,14 +192,18 @@ export async function retrieveProjectChunks(
       if (hasNoLeakingPii(userMessage)) {
         try {
           const generate = await expansionGenerationSeam(projectId, deps.expansion)
+          // The expansion wording is a Prompt Center slot, overridable per workspace.
+          const renderers = await loadExpansionPromptRenderers({ workspaceId: projectId })
           const expandedText =
             deps.expansion.strategy === "stepback"
-              ? generate
-                ? await generateStepBackQuery(userMessage, deps.expansion.model, { generate })
-                : await generateStepBackQuery(userMessage, deps.expansion.model)
-              : generate
-                ? await generateHypotheticalAnswer(userMessage, deps.expansion.model, { generate })
-                : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
+              ? await generateStepBackQuery(userMessage, deps.expansion.model, {
+                  ...(generate ? { generate } : {}),
+                  renderPrompt: renderers.stepBack,
+                })
+              : await generateHypotheticalAnswer(userMessage, deps.expansion.model, {
+                  ...(generate ? { generate } : {}),
+                  renderPrompt: renderers.hyde,
+                })
           if (expandedText.trim().length > 0) {
             const expEmbedding = (
               await generateSafeEmbedding(expandedText, {

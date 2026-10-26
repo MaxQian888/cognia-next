@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The offline signer for the update catalog (ADR-0224 A10).
 //
-// The update Worker signs nothing (services/update-server/worker/README.md): it
+// The update Worker signs nothing (cognia-services/services/update-server/worker/README.md): it
 // stores bundles this tool signs on a machine that holds the role keys, and
 // every client verifies them against a root it shipped with
 // (`lib/updates/catalog-verify.ts`, `crates/cognia-update-catalog`). So the

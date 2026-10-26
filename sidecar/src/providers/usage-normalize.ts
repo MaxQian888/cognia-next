@@ -6,8 +6,8 @@
  * native shape all disagree on field names. This module collapses them into one
  * snake_case `usage` block matching the Claude Agent SDK `result` message.
  *
- * It lived in three hand-maintained copies before — `event-adapter.mjs`,
- * `feature-call.mjs`, and `lib/ai/chat/sdk-event-mapper.ts` — which is why the
+ * It lived in three hand-maintained copies before — `runtimes/ai-sdk/events.ts`,
+ * `host/feature-call/index.ts`, and `lib/ai/chat/sdk-event-mapper.ts` — which is why the
  * Anthropic cache-TTL split (`cache_creation.ephemeral_5m_input_tokens` /
  * `ephemeral_1h_input_tokens`) and server-tool counters (`server_tool_use`)
  * reached none of them: adding a field meant remembering three files.

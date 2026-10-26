@@ -13,12 +13,12 @@ import { getCopilotTemplate, listCopilotTemplates } from "@/lib/workflow/copilot
 import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
 import type { PluginToolRegistration, PluginToolContext } from "@cognia/plugin-sdk"
-import { buildTemplateTools, templateToProposalOps } from "./template-tools"
+import { buildTemplateTools } from "./template-tools"
 import { configureWorkflowApi } from "../store-bridge"
 /**
- * The template these mechanics tests drive. Any registered template works —
- * they assert `templateToProposalOps` behaviour, not template content — but it
- * must exist, so resolve it loudly. (`github-pr` was removed in
+ * The template these tool tests drive. Any registered template works — they
+ * assert the tools' behaviour, not template content — but it must exist, so
+ * resolve it loudly. (`github-pr` was removed in
  * f478448874 "align runtime nodes and triggers"; this suite was the consumer
  * that commit missed.)
  */
@@ -42,6 +42,11 @@ function template(id: string = TEMPLATE_ID) {
   }
   return found
 }
+
+// Fail loudly, before any tool test, if TEMPLATE_ID stopped being registered.
+beforeAll(() => {
+  template()
+})
 
 function workflow(id: string): VisualWorkflow {
   return {
@@ -80,63 +85,6 @@ beforeEach(() => {
   for (const { workflowId } of listEditorStores()) unregisterEditorStore(workflowId)
   for (const id of Object.keys(useProposalStore.getState().entries))
     useProposalStore.getState().clearProposalsFor(id)
-})
-
-describe("templateToProposalOps", () => {
-  it("rebrands ids and emits add_node + connect_edge in stable order", () => {
-    const wf = template().build(SLOTS)
-    let counter = 0
-    const { ops, idMap } = templateToProposalOps(
-      wf,
-      { nodeIds: new Set(), edgeIds: new Set() },
-      () => `t${counter++}`
-    )
-    const addOps = ops.filter((op) => op.type === "add_node")
-    const connectOps = ops.filter((op) => op.type === "connect_edge")
-    expect(addOps.length).toBe(wf.nodes.length)
-    expect(connectOps.length).toBe(wf.edges.length)
-    // Every connect_edge source/target must reference a rebranded id from idMap.
-    for (const op of connectOps) {
-      if (op.type !== "connect_edge") continue
-      expect(Object.values(idMap)).toContain(op.source)
-      expect(Object.values(idMap)).toContain(op.target)
-    }
-    // No collision with the (empty) existing graph or amongst themselves.
-    const ids = ops.flatMap((op) =>
-      op.type === "add_node" ? [op.nodeId] : op.type === "connect_edge" ? [op.edgeId] : []
-    )
-    expect(new Set(ids).size).toBe(ids.length)
-  })
-
-  it("avoids id collisions with the existing graph", () => {
-    const wf = template().build(SLOTS)
-    let counter = 0
-    // Pre-reserve a couple of names that the sanitizer would normally produce
-    // for this template's first two nodes (`n_cron` / `n_fetch`).
-    const existing = {
-      nodeIds: new Set<string>(["n_n_cron_t0", "n_n_fetch_t0"]),
-      edgeIds: new Set<string>(),
-    }
-    const { ops } = templateToProposalOps(wf, existing, () => `t${counter++}`)
-    for (const op of ops) {
-      if (op.type === "add_node") expect(existing.nodeIds.has(op.nodeId)).toBe(false)
-    }
-  })
-
-  it("preserves every template node typeVersion in its proposal op", () => {
-    const wf = template().build(SLOTS)
-    wf.nodes[0] = { ...wf.nodes[0], typeVersion: 7 }
-
-    let counter = 0
-    const { ops, idMap } = templateToProposalOps(
-      wf,
-      { nodeIds: new Set(), edgeIds: new Set() },
-      () => `stable${counter++}`
-    )
-    const proposed = ops.find((op) => op.type === "add_node" && op.nodeId === idMap[wf.nodes[0].id])
-
-    expect(proposed).toMatchObject({ type: "add_node", typeVersion: 7 })
-  })
 })
 
 describe("wf_list_templates tool", () => {

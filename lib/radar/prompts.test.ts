@@ -3,11 +3,11 @@ import type { RadarDataItem } from "@/types/radar"
 
 describe("RADAR_SYSTEM_PROMPT", () => {
   it("demands JSON-only output with the expected fields", () => {
-    expect(RADAR_SYSTEM_PROMPT).toContain("verdict")
-    expect(RADAR_SYSTEM_PROMPT).toContain("graveyard")
-    expect(RADAR_SYSTEM_PROMPT).toContain("JSON")
-    expect(RADAR_SYSTEM_PROMPT).toContain("sourceIndexes")
-    expect(RADAR_SYSTEM_PROMPT).toContain("Never invent evidence")
+    expect(RADAR_SYSTEM_PROMPT.defaultBody).toContain("verdict")
+    expect(RADAR_SYSTEM_PROMPT.defaultBody).toContain("graveyard")
+    expect(RADAR_SYSTEM_PROMPT.defaultBody).toContain("JSON")
+    expect(RADAR_SYSTEM_PROMPT.defaultBody).toContain("sourceIndexes")
+    expect(RADAR_SYSTEM_PROMPT.defaultBody).toContain("Never invent evidence")
   })
 })
 

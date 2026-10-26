@@ -4,11 +4,21 @@
 
 import "fake-indexeddb/auto"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import {
+  getTaskScheduler,
+  initTaskScheduler,
+  stopTaskScheduler,
+} from "@/lib/scheduler/task-scheduler"
+import { NodeTimingDriver } from "@/lib/scheduler/timing/node-driver"
 import { syncWikiCronToScheduler, resolveCronExpression, WIKI_REBUILD_TASK_ID } from "./cron-bridge"
 
+let driver: NodeTimingDriver
 beforeEach(async () => {
   await schedulerDb.clearAll()
+  driver = new NodeTimingDriver()
+  await initTaskScheduler(driver)
 })
+afterEach(() => stopTaskScheduler())
 
 describe("resolveCronExpression", () => {
   it("returns null for off mode", () => {
@@ -39,6 +49,12 @@ describe("resolveCronExpression", () => {
 })
 
 describe("syncWikiCronToScheduler", () => {
+  it("arms and disarms the live clock when the saved schedule changes", async () => {
+    await syncWikiCronToScheduler({ mode: "daily" })
+    expect(getTaskScheduler().getStatus().scheduledCount).toBe(1)
+    await syncWikiCronToScheduler({ mode: "off" })
+    expect(driver.armedCount).toBe(0)
+  })
   it("returns skipped when schedule is undefined and no row exists", async () => {
     const r = await syncWikiCronToScheduler(undefined)
     expect(r.action).toBe("skipped")

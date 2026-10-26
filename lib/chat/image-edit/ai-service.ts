@@ -38,6 +38,7 @@ import {
 import { getProviderOperationExecutor } from "@/lib/ai/operations"
 import { detectHostSurfaces } from "@/lib/ai/operations/host-surfaces"
 import { useSettingsStore } from "@/stores"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 
 import { REMOVE_BACKGROUND_PROMPT } from "./prompts"
 
@@ -265,8 +266,11 @@ export function operationForIntent(intent: ImageEditIntent): ImageEditOperation 
   }
 }
 
-function promptForIntent(intent: ImageEditIntent): string {
-  return intent.kind === "remove-background" ? REMOVE_BACKGROUND_PROMPT : intent.prompt
+/** The user's own prompt, or the Prompt Center's background-removal text (ADR-0236). */
+async function promptForIntent(intent: ImageEditIntent): Promise<string> {
+  return intent.kind === "remove-background"
+    ? (await resolvePromptAsync(REMOVE_BACKGROUND_PROMPT)).text
+    : intent.prompt
 }
 
 /**
@@ -315,7 +319,10 @@ export async function runImageEdit(
     }
   }
 
-  const prompt = promptForIntent(intent).trim()
+  const prompt = (await promptForIntent(intent)).trim()
+  if (signal?.aborted) {
+    return { ok: false, code: "cancelled", message: "Edit cancelled.", retryable: true }
+  }
   if (prompt.length === 0) {
     return {
       ok: false,

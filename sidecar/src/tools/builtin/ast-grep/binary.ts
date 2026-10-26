@@ -1,4 +1,4 @@
-// Resolve the `ast-grep` (alias `sg`) binary, mirroring `core/rg.mjs`'s policy:
+// Resolve the `ast-grep` (alias `sg`) binary, mirroring `core/rg.ts`'s policy:
 // no bundled binary — probe, in order:
 //   1. COGNIA_AST_GREP_PATH env override (explicit user configuration)
 //   2. the `@ast-grep/cli` npm package's platform binary, when resolvable from
@@ -107,7 +107,7 @@ export function stagedBinaryPath(moduleUrl = import.meta.url, executablePath = p
 }
 
 /**
- * Locate a binary on PATH without blocking the event loop. Mirrors rg.mjs.
+ * Locate a binary on PATH without blocking the event loop. Mirrors rg.ts.
  * @param {string} name
  * @returns {Promise<string | null>}
  */

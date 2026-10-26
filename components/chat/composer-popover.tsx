@@ -654,12 +654,21 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       }
       const accountId = docSearch.accountId
       const items: PopoverItem[] = accountId
-        ? docSearch.items.map((doc) => ({
-            kind: "doc" as const,
-            providerId: docSearch.provider!.id,
-            accountId,
-            doc,
-          }))
+        ? docSearch.items
+            .filter(
+              (doc) =>
+                !doc.accountBinding ||
+                (doc.accountBinding.accountId === accountId &&
+                  doc.accountBinding.authorizationEpoch ===
+                    docSearch.accounts?.find((account) => account.id === accountId)
+                      ?.authorizationEpoch)
+            )
+            .map((doc) => ({
+              kind: "doc" as const,
+              providerId: docSearch.provider!.id,
+              accountId: doc.accountBinding?.accountId ?? accountId,
+              doc,
+            }))
         : []
       const empty = !accountId
         ? tDocs("picker.noAccount")

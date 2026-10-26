@@ -192,6 +192,12 @@ export class LocalChromiumEngine implements BrowserEngine {
     emitAgentActivity(`navigate ${url}`)
     return this.op("browser.navigate", { url })
   }
+  recordingControl(action: "start" | "resume" | "stop" | "drain"): Promise<unknown> {
+    return this.op("browser.recording.control", { action })
+  }
+  resolveRecordedTarget(selector: string): Promise<string> {
+    return this.op("browser.recording.ref", { selector })
+  }
   snapshot(options?: SnapshotOptions): Promise<BrowserSnapshot> {
     const { fresh: _fresh, ...rest } = options ?? {}
     return this.op("browser.snapshot", { options: rest })

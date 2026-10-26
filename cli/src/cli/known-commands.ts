@@ -33,4 +33,5 @@ export const KNOWN_COMMANDS = new Set([
   "update",
   "api",
   "host",
+  "prompts",
 ])

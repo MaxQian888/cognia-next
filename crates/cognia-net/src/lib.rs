@@ -25,6 +25,7 @@
 //!   cloud metadata endpoints, shared by every egress filter.
 
 pub mod egress;
+pub mod guarded_http;
 pub mod http_client;
 pub mod http_download;
 pub mod inbound_policy;

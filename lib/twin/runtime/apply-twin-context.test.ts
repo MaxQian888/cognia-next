@@ -68,6 +68,12 @@ import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
 import { generateHypotheticalAnswer } from "@cognia/rag/query-expansion"
 import type { Character } from "@cognia/agent-config-types"
 import type { IVectorStore, VectorSearchResult, SearchOptions } from "@cognia/vector/store"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { TWIN_SYSTEM_TEMPLATE_PROMPTS } from "./system-prompt-template"
 
 beforeEach(async () => {
   // Settle any fire-and-forget style backfill from the previous case against
@@ -537,6 +543,40 @@ describe("applyTwinContext", () => {
     expect(result.applied?.metadata.retrievedChunkIds).toEqual([chunk.id])
     expect(result.degraded).toBe(true)
     expect(result.degradedReason).toContain("hybrid-bm25-failed")
+  })
+
+  it("resolves the template scaffolding against the twin's character (ADR-0236)", async () => {
+    mockEmbedding()
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-twin",
+          promptId: TWIN_SYSTEM_TEMPLATE_PROMPTS.identity.id,
+          scope: "agent",
+          targetId: "char_1",
+          revisionId: "por-apply-twin-identity",
+          body: "Speak as {{twinName}}.",
+          contractVersion: TWIN_SYSTEM_TEMPLATE_PROMPTS.identity.contractVersion,
+        },
+      ])
+    )
+    try {
+      const own = await applyTwinContext({
+        character: makeCharacter(),
+        userMessage: "hi",
+        deps: { ...baseDeps, store: makeFakeStore() },
+      })
+      expect(own.applied?.systemPrompt).toContain("Speak as Twin Alice.")
+      const other = await applyTwinContext({
+        character: makeCharacter({ id: "char_2" }),
+        userMessage: "hi",
+        deps: { ...baseDeps, store: makeFakeStore() },
+      })
+      expect(other.applied?.systemPrompt).toContain("You are Twin Alice.")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("falls back to twinId for twinName when character.name is empty", async () => {

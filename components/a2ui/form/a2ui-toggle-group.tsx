@@ -27,17 +27,18 @@ export const A2UIToggleGroup = memo(function A2UIToggleGroup({
   component,
   onDataChange,
 }: A2UIComponentProps<A2UIToggleGroupComponent>) {
-  const { resolveArray } = useA2UIData()
+  const { resolveArray, resolveBoolean } = useA2UIData()
   const value = resolveArray<string>(component.value, [])
+  const disabled = resolveBoolean(component.disabled ?? false, false)
   const bindingPath = getBindingPath(component.value)
 
   const handleChange = useCallback(
     (newValue: string | string[]) => {
-      if (bindingPath) {
-        onDataChange(bindingPath, Array.isArray(newValue) ? newValue : [newValue])
+      if (!disabled && bindingPath) {
+        onDataChange(bindingPath, Array.isArray(newValue) ? newValue : newValue ? [newValue] : [])
       }
     },
-    [bindingPath, onDataChange]
+    [bindingPath, disabled, onDataChange]
   )
 
   return (
@@ -48,6 +49,8 @@ export const A2UIToggleGroup = memo(function A2UIToggleGroup({
       {component.label && <Label>{component.label}</Label>}
       {component.multiple !== false ? (
         <ToggleGroup
+          disabled={disabled}
+          aria-label={component.label}
           type="multiple"
           value={value}
           onValueChange={handleChange}
@@ -61,6 +64,8 @@ export const A2UIToggleGroup = memo(function A2UIToggleGroup({
         </ToggleGroup>
       ) : (
         <ToggleGroup
+          disabled={disabled}
+          aria-label={component.label}
           type="single"
           value={value[0] ?? ""}
           onValueChange={handleChange}

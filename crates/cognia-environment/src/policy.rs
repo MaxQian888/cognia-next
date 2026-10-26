@@ -300,6 +300,21 @@ pub enum FaultDisposition {
     Refuse,
 }
 
+/// Deployment-wide execution switch. Missing configuration enables execution;
+/// any other value outside this exact vocabulary refuses boot.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ExecutionSetting { Enabled, Disabled }
+
+impl ExecutionSetting {
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None | Some("enabled") => Ok(Self::Enabled),
+            Some("disabled") => Ok(Self::Disabled),
+            Some(_) => Err("COGNIA_EXECUTION must be enabled or disabled (default enabled)".into()),
+        }
+    }
+}
+
 /// Isolation is mandatory — and a fault therefore refuses — on a multi-tenant
 /// Host, for a project that set `requireSandbox`, and for a project that named
 /// an explicit minimum tier.
@@ -318,6 +333,17 @@ pub fn fault_disposition(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_setting_is_strict_and_defaults_to_enabled() {
+        for value in [None, Some("enabled")] {
+            assert_eq!(ExecutionSetting::parse(value).unwrap(), ExecutionSetting::Enabled);
+        }
+        assert_eq!(ExecutionSetting::parse(Some("disabled")).unwrap(), ExecutionSetting::Disabled);
+        for value in ["", "true", "false", "auto", "DISABLED", " disabled ", " "] {
+            assert!(ExecutionSetting::parse(Some(value)).unwrap_err().contains("COGNIA_EXECUTION"));
+        }
+    }
     use crate::approval::{ApprovalAuthority, ApprovalRecord};
     use crate::catalog::tests::{baseline, entry};
     use crate::catalog::{CatalogScope, GpuRequest, TenantPolicy};

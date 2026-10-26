@@ -1,7 +1,14 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { CopilotTranscript } from "./build-state"
 import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
   DRAFT_SYSTEM_PROMPT,
+  REPLY_COPILOT_DRAFT_PROMPT,
+  REPLY_COPILOT_UNATTRIBUTED_NOTE_PROMPT,
   buildDraftPrompt,
   draftCandidates,
   parseCandidates,
@@ -136,5 +143,51 @@ describe("draftCandidates", () => {
         signal: controller.signal,
       })
     ).rejects.toThrow()
+  })
+})
+
+describe("draft prompt overrides (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends the published drafting wording", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-draft",
+          promptId: REPLY_COPILOT_DRAFT_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-draft-system",
+          body: "Draft three formal replies as a JSON array of strings.",
+          contractVersion: REPLY_COPILOT_DRAFT_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-note",
+          promptId: REPLY_COPILOT_UNATTRIBUTED_NOTE_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-draft-note",
+          body: "(Unknown = sender unclear.)",
+          contractVersion: REPLY_COPILOT_UNATTRIBUTED_NOTE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const { complete, client: c } = client('["a", "b", "c"]')
+    await draftCandidates({
+      transcript: { ...transcript, turns: [{ from: "unknown", text: "在吗" }] },
+      relationship: "",
+      background: "",
+      instructions: "",
+      client: c,
+    })
+    const [prompt, options] = complete.mock.calls[0]
+    expect(options).toMatchObject({
+      system: "Draft three formal replies as a JSON array of strings.",
+    })
+    expect(prompt).toContain("(Unknown = sender unclear.)")
+    expect(prompt).toMatch(/Write my next message: 3 candidates as a JSON array\.$/)
   })
 })

@@ -5,6 +5,7 @@
  * dependency-injected state machine; the runtime adapter supplies Cognia's
  * shared search and page-reader implementations through `EngineDeps`.
  */
+import type { SystemPromptResolver } from "./engine/prompts"
 import type { AiBridge } from "./lib/ai"
 
 /** What the user is asking for. */
@@ -182,5 +183,11 @@ export interface EngineDeps {
    * the plugin's `ctx.i18n.t`; an engine unit test may omit it and read keys.
    */
   text?: EngineText
+  /**
+   * Resolves a system instruction's text for this run: the user's Prompt
+   * Center override, else the plugin default. `buildEngineDeps` binds it to
+   * `ctx.prompts.resolve`; without it every call sends the default.
+   */
+  prompt?: SystemPromptResolver
   signal?: AbortSignal
 }

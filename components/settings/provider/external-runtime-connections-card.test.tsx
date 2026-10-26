@@ -37,7 +37,6 @@ const row = (overrides: Partial<ExternalRuntimeConnection>): ExternalRuntimeConn
 const connections = (
   overrides: Partial<ExternalRuntimeConnections>
 ): ExternalRuntimeConnections => ({
-  externalEnabled: true,
   configuredCount: 0,
   rows: [],
   workingCount: 0,
@@ -123,16 +122,10 @@ describe("ExternalRuntimeConnectionsCard", () => {
     expect(screen.getByTestId("external-runtime-summary")).toHaveTextContent("1 of 2 ready")
   })
 
-  it("says configured agents are switched off rather than hiding them", () => {
-    render(
-      <ExternalRuntimeConnectionsCard
-        connections={connections({ externalEnabled: false, configuredCount: 2 })}
-      />
+  it("does not present a global-off state for an empty runtime catalog", () => {
+    const { container } = render(
+      <ExternalRuntimeConnectionsCard connections={connections({ configuredCount: 2 })} />
     )
-    expect(screen.getByTestId("external-runtime-switched-off")).toHaveTextContent(
-      "External agents are switched off, so the 2 configured here will not run"
-    )
-    expect(screen.queryByTestId("external-runtime-summary")).toBeNull()
-    expect(screen.getByRole("link", { name: "Manage in External Agents" })).toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
   })
 })

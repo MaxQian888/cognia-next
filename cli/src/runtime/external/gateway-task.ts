@@ -2,6 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import type { NodeExternalAgentSpawnConfig } from "./node-backend"
+import { buildCodexModelCatalog } from "./codex-model-catalog"
 
 const PAYLOAD_ENV = "COGNIA_GATEWAY_TASK_CONFIG"
 /** Mirrors `RUNTIMES` in `crates/cognia-sandboxd/src/gateway_task.rs`. */
@@ -92,18 +93,30 @@ export function prepareGatewayTask(
     originDeviceId?: string
     rebind?: boolean
     files: Record<string, string>
+    codexModelCatalog?: unknown
   }
   if (
     !/^[a-zA-Z0-9_-]{1,128}$/.test(payload.taskId) ||
     !RUNTIMES.has(payload.runtime) ||
     !payload.files ||
+    (payload.codexModelCatalog !== undefined && payload.runtime !== "codex") ||
     Object.entries(payload.files).some(
       ([name, value]) =>
-        !ALLOWED_FILES.has(name) || typeof value !== "string" || value.length > 262144
+        (!ALLOWED_FILES.has(name) &&
+          !(
+            payload.runtime === "pi" &&
+            /^pi\/agents\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.md$/.test(name)
+          )) ||
+        typeof value !== "string" ||
+        value.length > 262144
     )
   ) {
     throw new Error("Invalid gateway task configuration")
   }
+  const catalog =
+    payload.codexModelCatalog !== undefined
+      ? buildCodexModelCatalog(payload.codexModelCatalog)
+      : undefined
   let root = path.join(home, ".local/share/cognia-agent-tasks", payload.taskId)
   privateDirectory(root)
   root = fs.realpathSync(root)
@@ -148,6 +161,11 @@ export function prepareGatewayTask(
       const filename = path.join(root, name)
       privateWrite(filename, contents)
       files.push(filename)
+    }
+    if (catalog !== undefined) {
+      const filename = path.join(root, "codex/model-catalog.json")
+      files.push(filename)
+      privateWrite(filename, catalog)
     }
     const env = { ...config.env }
     delete env[PAYLOAD_ENV]

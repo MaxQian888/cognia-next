@@ -5,7 +5,7 @@ import {
   registerPluginI18n,
   unregisterPluginI18n,
 } from "@/lib/i18n/plugin-i18n-registry"
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { createI18nAPI } from "./i18n-api"
 import { usePluginTranslations } from "./use-plugin-translations"

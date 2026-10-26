@@ -15,15 +15,29 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import { ledgeredGenerationSeam } from "@/lib/ai/ledgered-generation-seam"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { getProviderHealth } from "@cognia/web-search/provider-health"
-import { getSearchCache, type SearchCacheKeyOptions } from "@cognia/web-search/search-cache"
-import { normalizeCustomSearchSource, SEARCH_SOURCES } from "@cognia/web-search/search-constants"
+import {
+  getSearchCache,
+  opaqueDigest,
+  type SearchCacheKeyOptions,
+} from "@cognia/web-search/search-cache"
+import {
+  normalizeCustomSearchSource,
+  normalizeSearchDomain,
+  SEARCH_SOURCES,
+} from "@cognia/web-search/search-constants"
 import { optimizeSearchQuery } from "@cognia/web-search/search-query-optimizer"
 import {
+  applyEnforcedPolicy,
+  filterResponseByDomainPolicy,
   search,
+  SearchDomainPolicyError,
   stripUndefined,
+  type EnforcedSearchPolicy,
   type UnifiedSearchOptions,
 } from "@cognia/web-search/search-service"
 import { applySourceVerificationPolicy } from "@cognia/web-search/source-verification"
+import { isSafeSearchMandatory } from "@cognia/web-search/search-type-router"
+import { isAbortLike } from "@cognia/web-search/operation-policy"
 import {
   getEnabledProviders,
   normalizeSearchProviderHealthSettings,
@@ -42,11 +56,36 @@ export const WEB_SEARCH_GENERATION_FEATURE = "web-search"
  */
 const GENERATING_SEARCH_PROVIDER_ID = "google"
 
+/**
+ * Version of the search result/cache policy contract. Bumped whenever what a
+ * cached entry may contain changes (policy filtering, answer clearing, image
+ * filtering), so entries written under an older contract are never served.
+ */
+export const SEARCH_POLICY_CONTRACT_VERSION = 2
+
 export interface ConfiguredSearchRequest {
   settings?: AppSettings
   options?: UnifiedSearchOptions
   useCache?: boolean
   optimizeQuery?: boolean
+  /** Cancels the adapter requests, retries and fallback of this search. */
+  signal?: AbortSignal
+  /**
+   * Runtime/account scope (opaque). Isolates cache entries; with
+   * {@link activeScope} it also stops a request started under one account
+   * from publishing into another.
+   */
+  scope?: string
+  /** Current scope at completion time; a mismatch discards the result. */
+  activeScope?: () => string | undefined
+}
+
+/** A search whose scope changed while it was in flight; its result is discarded. */
+export class SearchScopeChangedError extends Error {
+  constructor() {
+    super("Search result discarded: the account or runtime changed during the request")
+    this.name = "SearchScopeChangedError"
+  }
 }
 
 function selectedProviderIds(settings: AppSettings | undefined): SearchProviderType[] {
@@ -86,6 +125,123 @@ function defaultSearchOptions(settings: AppSettings | undefined): SearchOptions 
   }
 }
 
+function domainWithin(domain: string, allowed: string[]): boolean {
+  return allowed.some((base) => domain === base || domain.endsWith(`.${base}`))
+}
+
+/**
+ * Callers may narrow host policy, never relax it:
+ * - host `strict` safe search (mandatory) cannot be lowered by a caller;
+ * - caller include domains are intersected with the host's selected sources;
+ * - caller exclude domains are added to the host's, not substituted.
+ */
+function constrainCallerOptions(
+  overrides: UnifiedSearchOptions,
+  host: SearchOptions
+): UnifiedSearchOptions {
+  const constrained: UnifiedSearchOptions = { ...overrides }
+  if (host.safeSearch === "strict" && overrides.safeSearch && overrides.safeSearch !== "strict") {
+    constrained.safeSearch = "strict"
+  }
+  const hostInclude = (host.includeDomains ?? [])
+    .map(normalizeSearchDomain)
+    .filter((d): d is string => d !== null)
+  if (overrides.includeDomains && hostInclude.length > 0) {
+    const narrowed = overrides.includeDomains
+      .map(normalizeSearchDomain)
+      .filter((d): d is string => d !== null && domainWithin(d, hostInclude))
+    // Nothing the caller named is inside the host's sources: the request
+    // cannot be served without widening one side, so it fails before I/O.
+    if (narrowed.length === 0) throw new SearchDomainPolicyError()
+    constrained.includeDomains = narrowed
+  }
+  if (overrides.excludeDomains && host.excludeDomains?.length) {
+    constrained.excludeDomains = [...new Set([...host.excludeDomains, ...overrides.excludeDomains])]
+  }
+  return constrained
+}
+
+/**
+ * Opaque revision of everything that decides which providers may serve and
+ * how, without any raw secret: eligible ids, engines, endpoints, models,
+ * credential digests, and the policy-contract version.
+ */
+function searchPolicyRevision(settings: AppSettings | undefined): string {
+  const providers = getEnabledProviders(settings?.searchProviders ?? {})
+    .map((p) =>
+      [
+        p.providerId,
+        p.engine ?? "",
+        p.baseUrl ?? "",
+        p.allowPrivateEndpoint ? "grant" : "",
+        p.model ?? "",
+        p.cx ? opaqueDigest(p.cx) : "",
+        opaqueDigest([p.apiKey, ...(p.apiKeys ?? [])].join("\u0000")),
+      ].join(":")
+    )
+    .join(";")
+  return `v${SEARCH_POLICY_CONTRACT_VERSION}|${providers}`
+}
+
+/**
+ * Hard result policy, applied to every response INCLUDING cache hits: the
+ * user's blocklist / credibility filter (source verification) and the
+ * request's include/exclude domains, over results and images. When any
+ * grounding result is removed the provider's synthesized `answer` is cleared —
+ * it may cite a removed page, and re-deriving one would be a separate model
+ * call the user did not ask to pay for.
+ */
+function applyResultPolicy(
+  response: SearchResponse,
+  settings: AppSettings | undefined,
+  effective: SearchOptions
+): SearchResponse {
+  const domainFiltered = filterResponseByDomainPolicy(
+    response,
+    effective.includeDomains,
+    effective.excludeDomains
+  )
+  const policy = settings?.sourceVerificationSettings
+  const verified = applySourceVerificationPolicy(domainFiltered.results, policy)
+  const blocked = policy?.enabled
+    ? (policy.blockedDomains ?? []).map(normalizeSearchDomain).filter((d): d is string => !!d)
+    : []
+  const images = blocked.length
+    ? domainFiltered.images?.filter((image) => {
+        try {
+          const host = new URL(image.url).hostname.toLowerCase().replace(/^www\./, "")
+          return !domainWithin(host, blocked)
+        } catch {
+          return false
+        }
+      })
+    : domainFiltered.images
+  const removedResults = domainFiltered.results.length - verified.length
+  const removedImages = (domainFiltered.images?.length ?? 0) - (images?.length ?? 0)
+  if (removedResults === 0 && removedImages === 0) {
+    return verified === domainFiltered.results
+      ? domainFiltered
+      : { ...domainFiltered, results: verified }
+  }
+  return {
+    ...domainFiltered,
+    results: verified,
+    images: images && images.length > 0 ? images : undefined,
+    totalResults: verified.length,
+    answer: removedResults > 0 ? undefined : domainFiltered.answer,
+    diagnostics: {
+      ...(domainFiltered.diagnostics ?? {}),
+      ...(removedResults > 0 && domainFiltered.answer
+        ? { answerCleared: "policy-filtered" as const }
+        : {}),
+      removedByPolicy: {
+        results: (domainFiltered.diagnostics?.removedByPolicy?.results ?? 0) + removedResults,
+        images: (domainFiltered.diagnostics?.removedByPolicy?.images ?? 0) + removedImages,
+      },
+    },
+  }
+}
+
 export async function searchWithSettings(
   rawQuery: string,
   request: ConfiguredSearchRequest = {}
@@ -99,7 +255,30 @@ export async function searchWithSettings(
     throw new Error("Search blocked: query contains sensitive data after redaction")
   }
 
-  const overrides = request.options ?? {}
+  // Host-level defaults ride `baseOptions` (the lowest precedence rung inside
+  // `search()`), NOT the call-time spread: a provider's own `defaultOptions`
+  // must still beat them, and only the remaining `...overrides` fields count
+  // as caller intent.
+  const assertStillCurrent = () => {
+    const callerSignal = request.signal ?? request.options?.signal
+    if (callerSignal?.aborted) {
+      throw callerSignal.reason instanceof Error && isAbortLike(callerSignal.reason)
+        ? callerSignal.reason
+        : new DOMException("Aborted", "AbortError")
+    }
+    if (request.activeScope && request.activeScope() !== request.scope) {
+      throw new SearchScopeChangedError()
+    }
+  }
+  const baseOptions = defaultSearchOptions(settings)
+  const overrides = constrainCallerOptions(request.options ?? {}, baseOptions)
+  // The same host policy is re-applied inside `search()` after each
+  // provider's own defaults merge, so no lower rung can weaken it.
+  const enforced: EnforcedSearchPolicy = {
+    ...(baseOptions.safeSearch === "strict" ? { safeSearch: "strict" as const } : {}),
+    ...(baseOptions.includeDomains?.length ? { includeDomains: baseOptions.includeDomains } : {}),
+    ...(baseOptions.excludeDomains?.length ? { excludeDomains: baseOptions.excludeDomains } : {}),
+  }
   const preferredProviders = overrides.preferredProviders ?? selectedProviderIds(settings)
   const provider =
     overrides.provider ??
@@ -115,11 +294,6 @@ export async function searchWithSettings(
     },
     settings,
   })
-  // Host-level defaults ride `baseOptions` (the lowest precedence rung inside
-  // `search()`), NOT the call-time spread: a provider's own `defaultOptions`
-  // must still beat them, and only the remaining `...overrides` fields count
-  // as caller intent.
-  const baseOptions = defaultSearchOptions(settings)
   const searchOptions: UnifiedSearchOptions = {
     ...overrides,
     provider,
@@ -128,6 +302,8 @@ export async function searchWithSettings(
     maxRetries: overrides.maxRetries ?? settings?.searchMaxRetries,
     preferredProviders,
     baseOptions,
+    enforced,
+    ...(request.signal ? { abortSignal: request.signal } : {}),
     // Last, so a caller's own options can never route a generating search
     // around the ledger while the surface is on.
     ...(generate ? { generate } : {}),
@@ -168,31 +344,61 @@ export async function searchWithSettings(
       .map((id) => [id, stripUndefined(providerSettings?.[id]?.defaultOptions ?? {})] as const)
       .filter(([, defaults]) => Object.keys(defaults).length > 0)
   )
+  const {
+    abortSignal: _abortSignal,
+    generate: _generate,
+    providerSettings: _providerSettings,
+    baseOptions: _baseOptions,
+    enforced: _enforced,
+    ...keyableOptions
+  } = searchOptions
+  const effective: SearchOptions = applyEnforcedPolicy(
+    {
+      ...baseOptions,
+      ...pinnedDefaults,
+      ...stripUndefined(keyableOptions),
+    },
+    enforced,
+    { callerIncludeDomains: Boolean(overrides.includeDomains?.length) }
+  )
   const cacheKeyOptions: SearchCacheKeyOptions = {
-    ...baseOptions,
-    ...pinnedDefaults,
-    ...stripUndefined(searchOptions),
+    ...effective,
     providerDefaults,
-  }
-  const applyVerification = (response: SearchResponse): SearchResponse => {
-    const filteredResults = applySourceVerificationPolicy(
-      response.results,
-      settings?.sourceVerificationSettings
-    )
-    return filteredResults === response.results
-      ? response
-      : { ...response, results: filteredResults }
+    safeSearchRequired: isSafeSearchMandatory(effective) || undefined,
+    // The resolved fallback policy (per-call pin OR the host switch): an entry
+    // produced by a fallback provider must not answer once fallback is off.
+    allowFallback:
+      searchOptions.allowFallback === false || searchOptions.fallbackEnabled === false
+        ? false
+        : undefined,
+    scope: request.scope,
+    policyRevision: searchPolicyRevision(
+      settings && overrides.providerSettings
+        ? {
+            ...settings,
+            searchProviders: overrides.providerSettings as AppSettings["searchProviders"],
+          }
+        : settings
+    ),
   }
   if (cacheable) {
     cache.setConfig({
       ...(settings?.searchCacheTTL ? { defaultTTL: settings.searchCacheTTL } : {}),
       ...(settings?.searchCacheMaxEntries ? { maxSize: settings.searchCacheMaxEntries } : {}),
     })
+    // A cancelled or out-of-scope request publishes nothing, cached or not.
+    assertStillCurrent()
     const cached = cache.get(query, provider, cacheKeyOptions)
-    if (cached) return applyVerification(cached)
+    if (cached) {
+      const hit = applyResultPolicy(cached, settings, effective)
+      return { ...hit, diagnostics: { ...(hit.diagnostics ?? {}), cacheHit: true } }
+    }
   }
 
   const response = await search(query, searchOptions)
+  // Final authority check: a cancelled request publishes nothing and writes
+  // nothing, and a request that outlived its scope is discarded.
+  assertStillCurrent()
   if (cacheable) cache.set(query, response, provider, cacheKeyOptions)
-  return applyVerification(response)
+  return applyResultPolicy(response, settings, effective)
 }

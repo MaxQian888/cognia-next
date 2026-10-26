@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::{
-    extract::{Json, Query, State},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Router,
@@ -16,6 +16,10 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, Webview, WebviewWindow};
+
+pub(crate) mod sessions;
+use axum::Extension;
+use sessions::{Admission, Context as ClientContext, Identity};
 
 use crate::cli_bridge::SharedState;
 use crate::webview_watchdog::{RendererLifecycle, RendererState};
@@ -46,7 +50,12 @@ pub fn session_identity() -> &'static Value {
     })
 }
 
-fn debug_session_identity(session_id: Option<String>, workspace: Option<String>, instance: String, pid: u32) -> Value {
+fn debug_session_identity(
+    session_id: Option<String>,
+    workspace: Option<String>,
+    instance: String,
+    pid: u32,
+) -> Value {
     json!({ "sessionId": session_id, "workspace": workspace, "appInstanceId": instance, "pid": pid })
 }
 
@@ -62,14 +71,29 @@ pub fn managed_endpoint_file() -> Option<PathBuf> {
 enum EvalError {
     /// A bridge/evaluation failure, classified by message in [`eval_error`].
     Failed(String),
+    /// The async helper reported a settled rejection, not a lost callback.
+    Rejected(String),
+    Session(sessions::Fault),
     /// The renderer this evaluation was sent to terminated (WKWebView web
     /// content process died) before answering. Its realm, helper state, and
     /// element refs are gone; the webview is reloading into a new renderer.
-    RendererRestarted { window: String, generation: u64 },
+    RendererRestarted {
+        window: String,
+        generation: u64,
+    },
     /// A terminated renderer's replacement has not committed a document yet.
-    RendererRestarting { window: String, generation: u64 },
-    DocumentReplaced { window: String, document_epoch: u64 },
-    DocumentLoading { window: String, document_epoch: u64 },
+    RendererRestarting {
+        window: String,
+        generation: u64,
+    },
+    DocumentReplaced {
+        window: String,
+        document_epoch: u64,
+    },
+    DocumentLoading {
+        window: String,
+        document_epoch: u64,
+    },
 }
 
 impl From<String> for EvalError {
@@ -82,6 +106,8 @@ impl std::fmt::Display for EvalError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Failed(message) => formatter.write_str(message),
+            Self::Session((code, message)) => write!(formatter, "{code}: {message}"),
+            Self::Rejected(message) => write!(formatter, "webview async evaluation rejected: {message}"),
             Self::RendererRestarted { window, generation } => write!(
                 formatter,
                 "webview renderer restarted: the {window} web content process terminated before answering (renderer generation {generation}); inspect persisted and external effects before retrying a mutation"
@@ -235,6 +261,514 @@ pub fn router() -> Router<SharedState> {
         .route("/api/dev/agent/screenshot", get(screenshot))
         .route("/api/dev/agent/logs", get(logs))
         .route("/api/dev/agent/shutdown", post(shutdown))
+        .route(
+            "/api/dev/agent/sessions",
+            post(open_client).get(list_clients),
+        )
+        .route(
+            "/api/dev/agent/sessions/{id}",
+            axum::routing::delete(revoke_client),
+        )
+        .route("/api/dev/agent/recover", post(recover_clients))
+        .route(
+            "/api/dev/agent/session",
+            get(client_status).delete(detach_client),
+        )
+        .route("/api/dev/agent/lease", post(writer_lease))
+        .route("/api/dev/agent/helper", post(helper))
+}
+
+fn session_error((code, message): sessions::Fault) -> (StatusCode, Json<Value>) {
+    let status = if matches!(
+        code,
+        "window_scope_denied" | "write_scope_denied" | "client_session_required"
+    ) {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::CONFLICT
+    };
+    api_error(status, code, message)
+}
+fn authorize_client(
+    context: &ClientContext,
+    window: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    if sessions::shared() {
+        sessions::manager()
+            .authorize(context, window)
+            .map_err(session_error)
+    } else {
+        Ok(())
+    }
+}
+/// Observers reuse session authorization on both sides of every async boundary.
+async fn observe_client<T>(
+    context: &ClientContext,
+    window: &str,
+    read: impl std::future::Future<Output = T>,
+) -> Result<T, (StatusCode, Json<Value>)> {
+    if sessions::shared() && matches!(context.identity, Identity::Client(_)) {
+        sessions::manager()
+            .observe(context, window, read)
+            .await
+            .map_err(session_error)
+    } else {
+        Ok(read.await)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenClient {
+    windows: Vec<String>,
+    #[serde(default)]
+    can_write: bool,
+    idle_timeout_ms: Option<u64>,
+}
+async fn open_client(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+    Json(request): Json<OpenClient>,
+) -> ApiResult {
+    if !sessions::shared() {
+        return Err(bad_request(
+            "shared_mode_required",
+            "launch with --shared to attach client sessions",
+        ));
+    }
+    if !matches!(context.identity, Identity::Owner) {
+        return Err(bad_request(
+            "owner_required",
+            "only the launcher owner may issue sessions",
+        ));
+    }
+    for window in &request.windows {
+        resolve_webview(&state.app_handle, window)?;
+    }
+    let mut value = sessions::manager()
+        .open_with_timeout(request.windows, request.can_write, request.idle_timeout_ms)
+        .map_err(session_error)?;
+    value["debugSession"] = session_identity().clone();
+    Ok(Json(json!({"ok":true, "session":value})))
+}
+/// Reuse the helper's session release on lazy native expiry as well as revoke.
+/// A failed enqueue stays pending; a later authenticated request retries it.
+pub(crate) fn flush_retired(app: &AppHandle) {
+    let manager = sessions::manager();
+    for id in manager.retired() {
+        let encoded = serde_json::to_string(&id).expect("session ID is serializable");
+        let script = format!("window.__cogniaAgentDebug?.releaseSession({encoded})");
+        if app
+            .webviews()
+            .values()
+            .all(|webview| webview.eval(&script).is_ok())
+        {
+            manager.retired_dispatched(&id);
+        }
+    }
+}
+
+async fn list_clients() -> ApiResult {
+    Ok(Json(
+        json!({"ok":true,"sessions":sessions::manager().list(),"control":sessions::manager().status()}),
+    ))
+}
+async fn revoke_client(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult {
+    let result = sessions::manager().revoke(&id);
+    flush_retired(&state.app_handle);
+    Ok(Json(json!({"ok":true,"result":result})))
+}
+
+/// Owner recovery retires every credential and replaces every renderer document.
+/// A timeout/cancellation leaves admission quarantined; no old operation is replayed.
+async fn recover_clients(State(state): State<SharedState>) -> ApiResult {
+    if !sessions::shared() {
+        return Err(bad_request(
+            "shared_mode_required",
+            "recovery requires shared mode",
+        ));
+    }
+    let recovery = sessions::manager().recover().map_err(session_error)?;
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let webviews = state.app_handle.webviews();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let mut previous = std::collections::HashMap::new();
+    for (label, webview) in &webviews {
+        let (health, incarnation) = eval_json_on_renderer_until(
+            webview,
+            &lifecycle,
+            "JSON.stringify(window.__cogniaAgentDebug.health())",
+            deadline,
+        )
+        .await
+        .map_err(eval_error)?;
+        if !same_incarnation(&incarnation, &lifecycle.state(label))
+            || health["documentId"].as_str().is_none()
+        {
+            return Err(session_error((
+                "recovery_unconfirmed",
+                "old document identity is unconfirmed",
+            )));
+        }
+        previous.insert(label.clone(), (incarnation, health["documentId"].clone()));
+    }
+    for webview in webviews.values() {
+        webview.reload().map_err(internal_error)?;
+    }
+    let mut proven = Vec::new();
+    for (label, webview) in &webviews {
+        wait_navigation(
+            webview,
+            &lifecycle,
+            previous[label].0.document_epoch,
+            None,
+            deadline,
+        )
+        .await?;
+        let (health, incarnation) = eval_json_on_renderer_until(
+            webview,
+            &lifecycle,
+            "JSON.stringify(window.__cogniaAgentDebug.health())",
+            deadline,
+        )
+        .await
+        .map_err(eval_error)?;
+        if incarnation.document_epoch == previous[label].0.document_epoch
+            || health["heldInput"].as_u64() != Some(0)
+            || !replaced_document(&previous[label].1, &health["documentId"])
+            || !same_incarnation(&incarnation, &lifecycle.state(label))
+        {
+            return Err(session_error((
+                "recovery_unconfirmed",
+                "renderer replacement or input cleanup is unconfirmed",
+            )));
+        }
+        proven.push((label.clone(), incarnation, health["documentId"].clone()));
+    }
+    // Check the complete target set and every incarnation after the last await.
+    let current = state.app_handle.webviews();
+    if current.len() != webviews.len()
+        || proven.iter().any(|(label, incarnation, _)| {
+            !current.contains_key(label) || !same_incarnation(incarnation, &lifecycle.state(label))
+        })
+    {
+        return Err(session_error((
+            "recovery_unconfirmed",
+            "window set or document changed during recovery",
+        )));
+    }
+    recovery.finish().map_err(session_error)?;
+    Ok(Json(
+        json!({"ok":true,"pid":std::process::id(),"documents":proven.iter()
+        .map(|(label,_,document)| json!({"window":label,"documentId":document})).collect::<Vec<_>>(),
+        "control":sessions::manager().status()}),
+    ))
+}
+fn replaced_document(previous: &Value, current: &Value) -> bool {
+    previous.as_str().is_some_and(|old| !old.is_empty())
+        && current
+            .as_str()
+            .is_some_and(|new| !new.is_empty() && previous != current)
+}
+
+fn same_incarnation(a: &RendererState, b: &RendererState) -> bool {
+    a.generation == b.generation
+        && a.document_epoch == b.document_epoch
+        && !b.document_loading
+        && !b.awaiting_load
+}
+
+async fn client_status(Extension(context): Extension<ClientContext>) -> ApiResult {
+    context.client().map_err(session_error)?;
+    Ok(Json(
+        json!({"ok":true,"control":sessions::manager().status(),"lease":sessions::manager().owned_lease(&context).map_err(session_error)?}),
+    ))
+}
+async fn detach_client(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+) -> ApiResult {
+    let id = context.client().map_err(session_error)?.to_string();
+    if let Some(lease) = sessions::manager()
+        .owned_lease(&context)
+        .map_err(session_error)?
+    {
+        release_writer(&state, &context, &lease.token, lease.fence).await?;
+    }
+    sessions::manager()
+        .detach(&context)
+        .map_err(session_error)?;
+    let encoded = serde_json::to_string(&id).map_err(internal_error)?;
+    for webview in state.app_handle.webviews().values() {
+        let _ = webview.eval(format!(
+            "window.__cogniaAgentDebug?.releaseSession({encoded})"
+        ));
+    }
+    Ok(Json(json!({"ok":true})))
+}
+#[derive(Deserialize)]
+struct LeaseRequest {
+    operation: String,
+    token: Option<String>,
+    fence: Option<u64>,
+}
+async fn writer_lease(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+    Json(request): Json<LeaseRequest>,
+) -> ApiResult {
+    let manager = sessions::manager();
+    let lease = match request.operation.as_str() {
+        "acquire" => Some(manager.acquire(&context).map_err(session_error)?),
+        "renew" => Some(
+            manager
+                .renew(
+                    &context,
+                    request.token.as_deref().unwrap_or_default(),
+                    request.fence.unwrap_or_default(),
+                )
+                .map_err(session_error)?,
+        ),
+        "release" => {
+            release_writer(
+                &state,
+                &context,
+                request.token.as_deref().unwrap_or_default(),
+                request.fence.unwrap_or_default(),
+            )
+            .await?;
+            None
+        }
+        _ => {
+            return Err(bad_request(
+                "invalid_lease_operation",
+                "expected acquire, renew or release",
+            ))
+        }
+    };
+    Ok(Json(json!({"ok":true,"lease":lease})))
+}
+
+async fn release_writer(
+    state: &SharedState,
+    context: &ClientContext,
+    token: &str,
+    fence: u64,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let manager = sessions::manager();
+    let _drain = manager
+        .drain(context, token, fence)
+        .map_err(session_error)?;
+    let mut cleanup = context.clone();
+    cleanup.writer = Some(sessions::Writer {
+        token: token.to_owned(),
+        fence,
+        operation_id: uuid::Uuid::new_v4().to_string(),
+    });
+    for label in manager.windows(context).map_err(session_error)? {
+        if let Some(webview) = state.app_handle.get_webview(&label) {
+            let lifecycle = renderer_lifecycle(&state.app_handle);
+            let health = eval_json(
+                &webview,
+                &lifecycle,
+                "JSON.stringify(window.__cogniaAgentDebug.health())",
+            )
+            .await
+            .map_err(eval_error)?;
+            if manager.input_dirty(&label) || health["heldInput"].as_u64().unwrap_or(0) > 0 {
+                if let Some(writer) = cleanup.writer.as_mut() {
+                    writer.operation_id = uuid::Uuid::new_v4().to_string();
+                }
+                execute_client(&webview, &lifecycle, &cleanup, json!({"helper":"releaseInput","window":label}), "(async()=>JSON.stringify(await window.__cogniaAgentDebug.helper('releaseInput',[],control)))()", EVAL_TIMEOUT, true).await?;
+            }
+        }
+    }
+    manager
+        .release(context, token, fence)
+        .map_err(session_error)?;
+    Ok(())
+}
+
+/// One desktop adapter for existing eval/locator helpers. A dropped HTTP/native
+/// future leaves admission quarantined rather than releasing an unknown writer.
+async fn execute_client(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    context: &ClientContext,
+    fingerprint: Value,
+    expression: &str,
+    timeout: Duration,
+    mutation: bool,
+) -> Result<Value, (StatusCode, Json<Value>)> {
+    if !sessions::shared() {
+        return eval_json_async_with_timeout(webview, lifecycle, expression, timeout, None)
+            .await
+            .map_err(eval_error);
+    }
+    authorize_client(context, webview.label())?;
+    let timeout = timeout.min(Duration::from_millis(context.timeout_ms.unwrap_or(120_000)));
+    let deadline = std::time::Instant::now() + timeout;
+    let permit = if mutation {
+        match sessions::manager()
+            .begin(context, &fingerprint)
+            .map_err(session_error)?
+        {
+            Admission::Cached(value) => return Ok(value),
+            Admission::Execute(permit) => Some(permit),
+        }
+    } else {
+        None
+    };
+    let document = match permit
+        .as_ref()
+        .and_then(|op| op.document.clone())
+        .or_else(|| context.expected_document.clone())
+    {
+        Some(document) => document,
+        None => eval_json_on_renderer_until_scoped(
+            webview,
+            lifecycle,
+            "JSON.stringify(window.__cogniaAgentDebug.health().documentId)",
+            deadline,
+            Some(context),
+        )
+        .await
+        .map_err(eval_error)?
+        .0
+        .as_str()
+        .ok_or_else(|| internal_error("missing document identity"))?
+        .to_owned(),
+    };
+    let document = serde_json::to_string(&document).map_err(internal_error)?;
+    let client =
+        serde_json::to_string(context.client().map_err(session_error)?).map_err(internal_error)?;
+    let script = format!("(async()=>{{control.clientSessionId={client};control.guard=()=>{{if(control.cancelled||Date.now()>=control.expiresAt||window.__cogniaAgentDebug.health().documentId!=={document})throw new Error('debug operation cancelled or document replaced')}};control.guard();return await ({expression})}})()");
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        return Err(session_error((
+            "deadline_exceeded",
+            "operation deadline elapsed before dispatch",
+        )));
+    }
+    if let Some(permit) = &permit {
+        permit.validate().map_err(session_error)?;
+    }
+    authorize_client(context, webview.label())?;
+    let evaluation =
+        eval_json_async_with_timeout(webview, lifecycle, &script, remaining, Some(context));
+    let result = if permit.is_none() {
+        observe_client(context, webview.label(), evaluation).await?
+    } else {
+        evaluation.await
+    };
+    let mut value = result.map_err(eval_error)?;
+    if let Some(permit) = permit {
+        permit.finish(&mut value).map_err(session_error)?;
+    }
+    Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HelperRequest {
+    #[serde(default = "default_window")]
+    window: String,
+    method: String,
+    #[serde(default)]
+    args: Vec<Value>,
+}
+async fn helper(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+    Json(request): Json<HelperRequest>,
+) -> ApiResult {
+    authorize_client(&context, &request.window)?;
+    const READS: &[&str] = &[
+        "health",
+        "url",
+        "title",
+        "content",
+        "getDialogs",
+        "getNetworkRequests",
+    ];
+    const WRITES: &[&str] = &["keyboard", "mouse", "historyBack", "historyForward"];
+    let mutation = WRITES.contains(&request.method.as_str());
+    if !mutation && !READS.contains(&request.method.as_str()) {
+        return Err(bad_request(
+            "unsupported_shared_helper",
+            "helper is unavailable in shared mode",
+        ));
+    }
+    let webview = resolve_webview(&state.app_handle, &request.window)?;
+    let method = serde_json::to_string(&request.method).map_err(internal_error)?;
+    let args = serde_json::to_string(&request.args).map_err(internal_error)?;
+    let script = format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.helper({method},{args},control)))()");
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    if matches!(request.method.as_str(), "historyBack" | "historyForward") && sessions::shared() {
+        authorize_client(&context, &request.window)?;
+        let permit = match sessions::manager()
+            .begin(
+                &context,
+                &json!({"helper":request.method,"window":request.window}),
+            )
+            .map_err(session_error)?
+        {
+            Admission::Cached(value) => return Ok(Json(json!({"ok":true,"value":value}))),
+            Admission::Execute(op) => op,
+        };
+        let deadline = std::time::Instant::now()
+            + EVAL_TIMEOUT.min(Duration::from_millis(context.timeout_ms.unwrap_or(120_000)));
+        let before = eval_json(
+            &webview,
+            &lifecycle,
+            "JSON.stringify(window.__cogniaAgentDebug.health())",
+        )
+        .await
+        .map_err(eval_error)?;
+        let previous = lifecycle.state(&request.window);
+        let document = serde_json::to_string(
+            &context
+                .expected_document
+                .clone()
+                .unwrap_or_else(|| before["documentId"].as_str().unwrap_or_default().into()),
+        )
+        .map_err(internal_error)?;
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(internal_error)?
+            .as_millis()
+            + deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis();
+        let direction = if request.method == "historyBack" {
+            "back"
+        } else {
+            "forward"
+        };
+        permit.validate().map_err(session_error)?;
+        webview.eval(format!("if(Date.now()<{expires_at}&&window.__cogniaAgentDebug.health().documentId==={document})history.{direction}()" )).map_err(internal_error)?;
+        wait_navigation(
+            &webview,
+            &lifecycle,
+            previous.document_epoch,
+            before["url"].as_str(),
+            deadline,
+        )
+        .await?;
+        permit.finish(&mut json!(true)).map_err(session_error)?;
+        return Ok(Json(json!({"ok":true,"value":true})));
+    }
+    let value = execute_client(
+        &webview,
+        &lifecycle,
+        &context,
+        json!({"helper":request.method,"args":request.args,"window":request.window}),
+        &script,
+        EVAL_TIMEOUT,
+        mutation,
+    )
+    .await?;
+    Ok(Json(json!({"ok":true,"value":value})))
 }
 
 /// Install the non-invasive page helper after each navigation. The helper is
@@ -255,25 +789,63 @@ pub fn install(webview: &Webview) {
     }
 }
 
-async fn health(State(state): State<SharedState>) -> ApiResult {
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthQuery {
+    #[serde(default)]
+    native_only: bool,
+    #[serde(default = "default_window")]
+    window: String,
+}
+
+async fn health(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+    Query(query): Query<HealthQuery>,
+) -> ApiResult {
+    if sessions::shared() && matches!(context.identity, Identity::Client(_)) {
+        authorize_client(&context, &query.window)?;
+    }
     let app = &state.app_handle;
     let lifecycle = renderer_lifecycle(app);
     // Health must stay fast while a renderer is being replaced: report the
     // restart through `renderers` instead of blocking on the reload.
-    let helper = match app.get_webview(DEFAULT_WINDOW) {
-        Some(webview) if !lifecycle.state(DEFAULT_WINDOW).awaiting_load
-            && !lifecycle.state(DEFAULT_WINDOW).document_loading => eval_json(
-            &webview,
-            &lifecycle,
-            "JSON.stringify(window.__cogniaAgentDebug.health())",
-        )
-        .await
-        .ok(),
+    let mut helper = match app.get_webview(&query.window) {
+        Some(webview)
+            if !query.native_only
+                && !lifecycle.state(&query.window).awaiting_load
+                && !lifecycle.state(&query.window).document_loading =>
+        {
+            observe_client(
+                &context,
+                &query.window,
+                eval_json_on_renderer_until_scoped(
+                    &webview,
+                    &lifecycle,
+                    "JSON.stringify(window.__cogniaAgentDebug.health())",
+                    std::time::Instant::now() + EVAL_TIMEOUT,
+                    Some(&context),
+                ),
+            )
+            .await?
+            .ok()
+            .map(|(value, _)| value)
+        }
         _ => None,
     };
+    if sessions::shared() {
+        if let Some(helper) = helper.as_mut() {
+            helper["capabilities"]["clientSessions"] = json!(1);
+            helper["capabilities"]["sessionScopedRefs"] = json!(1);
+            helper["capabilities"]["appWriterLease"] = json!(1);
+            helper["capabilities"]["networkMocking"] = json!(false);
+            helper["capabilities"]["dialogs"] = json!(false);
+        }
+    }
     Ok(Json(json!({
         "ok": true,
         "agentDebug": true,
+        "sharedMode": sessions::shared(),
         "pid": std::process::id(),
         "debugSession": session_identity(),
         "version": app.package_info().version.to_string(),
@@ -284,16 +856,63 @@ async fn health(State(state): State<SharedState>) -> ApiResult {
     })))
 }
 
-async fn windows(State(state): State<SharedState>) -> ApiResult {
+async fn windows(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+) -> ApiResult {
+    let scoped = sessions::shared() && matches!(context.identity, Identity::Client(_));
+    let allowed = if scoped {
+        Some(
+            sessions::manager()
+                .windows(&context)
+                .map_err(session_error)?,
+        )
+    } else {
+        None
+    };
     let mut entries = Vec::new();
+    let lifecycle = renderer_lifecycle(&state.app_handle);
     for (label, window) in state.app_handle.webview_windows() {
+        if allowed
+            .as_ref()
+            .is_some_and(|windows| !windows.contains(&label))
+        {
+            continue;
+        }
+        let document_url = lifecycle.last_url(&label);
+        // SPA routing does not produce native page-load events. Read the
+        // current route through the guarded JS bridge when a document exists;
+        // never ask Wry for the URL of a not-yet-loaded hidden webview.
+        let current_url = if document_url.is_some() {
+            observe_client(
+                &context,
+                &label,
+                eval_json_on_renderer_until_scoped(
+                    window.as_ref(),
+                    &lifecycle,
+                    "JSON.stringify(location.href)",
+                    std::time::Instant::now() + Duration::from_millis(250),
+                    Some(&context),
+                ),
+            )
+            .await?
+            .ok()
+            .and_then(|(value, _)| value.as_str().map(str::to_owned))
+        } else {
+            None
+        };
         entries.push(json!({
             "label": label,
-            "url": window.url().map(|url| url.to_string()).ok(),
+            "url": current_url.or(document_url),
             "title": window.title().ok(),
             "visible": window.is_visible().ok(),
             "focused": window.is_focused().ok(),
         }));
+    }
+    if scoped {
+        sessions::manager()
+            .windows(&context)
+            .map_err(session_error)?;
     }
     entries.sort_by(|left, right| left["label"].as_str().cmp(&right["label"].as_str()));
     Ok(Json(json!({ "ok": true, "windows": entries })))
@@ -301,8 +920,10 @@ async fn windows(State(state): State<SharedState>) -> ApiResult {
 
 async fn snapshot(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Json(request): Json<SnapshotRequest>,
 ) -> ApiResult {
+    authorize_client(&context, &request.window)?;
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let options = serde_json::to_string(&json!({
         "includeText": request.include_text,
@@ -312,35 +933,146 @@ async fn snapshot(
         "name": request.name,
         "nameExact": request.name_exact,
         "query": request.query,
+        "clientSessionId": if sessions::shared() { Some(context.client().map_err(session_error)?) } else { None },
     }))
     .map_err(internal_error)?;
-    let script = format!("JSON.stringify(window.__cogniaAgentDebug.snapshot({options}))");
+    let capture = if sessions::shared() {
+        Some(
+            sessions::manager()
+                .capture_snapshot(&context)
+                .map_err(session_error)?,
+        )
+    } else {
+        None
+    };
+    let before = capture
+        .as_ref()
+        .map(|capture| capture.before)
+        .unwrap_or_else(|| sessions::manager().snapshot_start());
     let lifecycle = renderer_lifecycle(&state.app_handle);
-    let value = eval_json(&webview, &lifecycle, &script)
-        .await
-        .map_err(eval_error)?;
+    let deadline = std::time::Instant::now() + EVAL_TIMEOUT;
+    let script = if let Some(active_capture) = &capture {
+        let prepared = eval_json_on_renderer_until_scoped(
+            &webview,
+            &lifecycle,
+            "JSON.stringify(window.__cogniaAgentDebug.health().documentId)",
+            deadline,
+            Some(&context),
+        )
+        .await;
+        let (document, _) = match prepared {
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(capture) = capture {
+                    capture.complete();
+                }
+                return Err(eval_error(error));
+            }
+        };
+        active_capture.validate().map_err(session_error)?;
+        let expires = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(internal_error)?
+            .as_millis()
+            + deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis();
+        format!("(()=>{{if(Date.now()>={expires}||window.__cogniaAgentDebug.health().documentId!=={document})throw new Error('snapshot document replaced or expired');return JSON.stringify(window.__cogniaAgentDebug.snapshot({options}))}})()")
+    } else {
+        format!("JSON.stringify(window.__cogniaAgentDebug.snapshot({options}))")
+    };
+    let evaluation = async {
+        if sessions::shared() {
+            eval_json_async_with_timeout(
+                &webview,
+                &lifecycle,
+                &script,
+                deadline.saturating_duration_since(std::time::Instant::now()),
+                Some(&context),
+            )
+            .await
+        } else {
+            eval_json_on_renderer_until(&webview, &lifecycle, &script, deadline)
+                .await
+                .map(|(value, _)| value)
+        }
+    };
+    let result = observe_client(&context, &request.window, evaluation).await?;
+    let mut value = match result {
+        Ok(value) => value,
+        Err(error) => {
+            settle_snapshot_error(capture, &error);
+            return Err(eval_error(error));
+        }
+    };
+    if sessions::shared() {
+        sessions::manager()
+            .record_snapshot(&context, &request.window, &mut value, before)
+            .map_err(session_error)?;
+    }
+    if let Some(capture) = capture {
+        capture.complete();
+    }
     Ok(Json(
         json!({ "ok": true, "window": request.window, "snapshot": value }),
     ))
 }
 
+fn settle_snapshot_error(capture: Option<sessions::SnapshotCapture<'_>>, error: &EvalError) {
+    // Only a settled renderer rejection proves this snapshot cannot change refs later.
+    if matches!(error, EvalError::Rejected(_)) {
+        if let Some(capture) = capture {
+            capture.complete();
+        }
+    }
+}
+
 async fn inspect(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Json(request): Json<InspectRequest>,
 ) -> ApiResult {
+    authorize_client(&context, &request.window)?;
+    if sessions::shared() && request.operation == "evaluate" {
+        return Err(bad_request(
+            "unsafe_evaluate_disabled",
+            "arbitrary inspection callbacks are unavailable",
+        ));
+    }
     validate_ref(&request.reference)?;
     validate_inspection(&request.operation)?;
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let reference = serde_json::to_string(&request.reference).map_err(internal_error)?;
     let operation = serde_json::to_string(&request.operation).map_err(internal_error)?;
     let args = serde_json::to_string(&request.args).map_err(internal_error)?;
-    let script = format!(
-        "(async()=>JSON.stringify(await window.__cogniaAgentDebug.inspect({reference},{operation},{args})))()"
-    );
+    let client = if sessions::shared() {
+        serde_json::to_string(context.client().map_err(session_error)?).map_err(internal_error)?
+    } else {
+        "undefined".into()
+    };
+    let expected = if sessions::shared() {
+        Some(
+            sessions::manager()
+                .reference_document(&context, &request.window, &request.reference, false)
+                .map_err(session_error)?,
+        )
+    } else {
+        None
+    };
+    let mut context = context;
+    context.expected_document = expected.or(context.expected_document);
+    let script = format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.inspect({reference},{operation},{args},{client})))()");
     let lifecycle = renderer_lifecycle(&state.app_handle);
-    let value = eval_json_async(&webview, &lifecycle, &script)
-        .await
-        .map_err(eval_error)?;
+    let value = execute_client(
+        &webview,
+        &lifecycle,
+        &context,
+        Value::Null,
+        &script,
+        EVAL_TIMEOUT,
+        false,
+    )
+    .await?;
     Ok(Json(json!({
         "ok": true,
         "window": request.window,
@@ -350,8 +1082,29 @@ async fn inspect(
 
 async fn locator(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Json(request): Json<LocatorRequest>,
 ) -> ApiResult {
+    authorize_client(&context, &request.window)?;
+    if sessions::shared()
+        && (contains_ref_query(&request.query)
+            || request.filters.iter().any(contains_ref_query)
+            || contains_ref_query(&request.args))
+    {
+        return Err(bad_request(
+            "ref_query_disabled",
+            "use the session-validated act/inspect routes for snapshot refs",
+        ));
+    }
+    if sessions::shared()
+        && request.operation == "inspect"
+        && request.name.as_deref() == Some("evaluate")
+    {
+        return Err(bad_request(
+            "unsafe_evaluate_disabled",
+            "arbitrary locator callbacks are unavailable",
+        ));
+    }
     const OPERATIONS: [&str; 4] = ["query", "inspect", "action", "cancel"];
     if !OPERATIONS.contains(&request.operation.as_str()) {
         return Err(bad_request(
@@ -359,10 +1112,16 @@ async fn locator(
             format!("unsupported locator operation: {}", request.operation),
         ));
     }
-    if request.request_id.as_ref().is_some_and(|id| id.is_empty() || id.len() > 128)
+    if request
+        .request_id
+        .as_ref()
+        .is_some_and(|id| id.is_empty() || id.len() > 128)
         || (request.operation == "cancel" && request.request_id.is_none())
     {
-        return Err(bad_request("invalid_request_id", "request ID must contain 1 to 128 bytes"));
+        return Err(bad_request(
+            "invalid_request_id",
+            "request ID must contain 1 to 128 bytes",
+        ));
     }
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let timeout = Duration::from_millis(
@@ -380,7 +1139,9 @@ async fn locator(
         .map_err(internal_error)?
         .as_millis() as u64;
     let expires_at = now + timeout.as_millis() as u64;
-    let expires_at = request.expires_at.map_or(expires_at, |requested| requested.min(expires_at));
+    let expires_at = request
+        .expires_at
+        .map_or(expires_at, |requested| requested.min(expires_at));
     let timeout = Duration::from_millis(expires_at.saturating_sub(now).max(1));
     let payload = serde_json::to_string(&json!({
         "query": request.query,
@@ -392,16 +1153,26 @@ async fn locator(
         "options": request.options,
         "requirements": request.requirements,
         "strict": request.strict,
-        "requestId": request.request_id,
+        "requestId": request.request_id.as_ref().map(|id| if sessions::shared() { format!("{}:{id}",context.client().unwrap_or_default()) } else { id.clone() }),
+        "clientSessionId": if sessions::shared() { Some(context.client().map_err(session_error)?) } else { None },
         "expiresAt": expires_at,
     }))
     .map_err(internal_error)?;
-    let script =
-        format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.locator({payload},control)))()");
+    let script = format!(
+        "(async()=>JSON.stringify(await window.__cogniaAgentDebug.locator({payload},control)))()"
+    );
     let lifecycle = renderer_lifecycle(&state.app_handle);
-    let value = eval_json_async_with_timeout(&webview, &lifecycle, &script, timeout)
-        .await
-        .map_err(eval_error)?;
+    let fingerprint = json!({"window":request.window,"query":request.query,"index":request.index,"filters":request.filters,"operation":request.operation,"name":request.name,"args":request.args,"strict":request.strict,"options":{"force":request.options["force"],"trial":request.options["trial"],"scroll":request.options["scroll"]},"requirements":request.requirements});
+    let value = execute_client(
+        &webview,
+        &lifecycle,
+        &context,
+        fingerprint,
+        &script,
+        timeout,
+        request.operation == "action",
+    )
+    .await?;
     Ok(Json(json!({
         "ok": true,
         "window": request.window,
@@ -409,20 +1180,32 @@ async fn locator(
     })))
 }
 
-async fn act(State(state): State<SharedState>, Json(request): Json<ActRequest>) -> ApiResult {
+fn contains_ref_query(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => {
+            fields.get("kind").is_some_and(|kind| kind == "ref")
+                || fields.values().any(contains_ref_query)
+        }
+        Value::Array(values) => values.iter().any(contains_ref_query),
+        _ => false,
+    }
+}
+
+async fn act(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+    Json(request): Json<ActRequest>,
+) -> ApiResult {
+    authorize_client(&context, &request.window)?;
     validate_ref(&request.reference)?;
     validate_action(&request.action)?;
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let reference = serde_json::to_string(&request.reference).map_err(internal_error)?;
     let action = serde_json::to_string(&request.action).map_err(internal_error)?;
     let args = serde_json::to_string(&request.args).map_err(internal_error)?;
-    let script = format!(
-        "(async()=>{{const result=await window.__cogniaAgentDebug.act({reference},{action},{args},control);const snapshot=window.__cogniaAgentDebug.snapshot({{includeText:false}});return JSON.stringify({{result,snapshot}});}})()"
-    );
+    let script = format!("(async()=>{{const result=await window.__cogniaAgentDebug.act({reference},{action},{args},control);const snapshot=window.__cogniaAgentDebug.snapshot({{includeText:false,clientSessionId:control.clientSessionId}});return JSON.stringify({{result,snapshot}});}})()");
     let lifecycle = renderer_lifecycle(&state.app_handle);
-    let value = eval_json_async(&webview, &lifecycle, &script)
-        .await
-        .map_err(eval_error)?;
+    let value = execute_client(&webview, &lifecycle, &context, json!({"window":request.window,"reference":request.reference,"action":request.action,"args":request.args}), &script, EVAL_TIMEOUT, true).await?;
     Ok(Json(
         json!({ "ok": true, "window": request.window, "act": value }),
     ))
@@ -455,9 +1238,10 @@ async fn evaluate(
         &lifecycle,
         &script,
         Duration::from_millis(request.timeout.unwrap_or(10_000).clamp(1, 120_000)),
+        None,
     )
-        .await
-        .map_err(eval_error)?;
+    .await
+    .map_err(eval_error)?;
     Ok(Json(
         json!({ "ok": true, "window": request.window, "value": value }),
     ))
@@ -465,20 +1249,39 @@ async fn evaluate(
 
 async fn console(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Query(query): Query<DiagnosticQuery>,
 ) -> ApiResult {
-    read_diagnostics(&state.app_handle, &query, "readConsole", "console").await
+    authorize_client(&context, &query.window)?;
+    read_diagnostics(
+        &state.app_handle,
+        &context,
+        &query,
+        "readConsole",
+        "console",
+    )
+    .await
 }
 
 async fn network(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Query(query): Query<DiagnosticQuery>,
 ) -> ApiResult {
-    read_diagnostics(&state.app_handle, &query, "readNetwork", "network").await
+    authorize_client(&context, &query.window)?;
+    read_diagnostics(
+        &state.app_handle,
+        &context,
+        &query,
+        "readNetwork",
+        "network",
+    )
+    .await
 }
 
 async fn read_diagnostics(
     app: &AppHandle,
+    context: &ClientContext,
     query: &DiagnosticQuery,
     method: &str,
     key: &str,
@@ -486,9 +1289,16 @@ async fn read_diagnostics(
     let webview = resolve_webview(app, &query.window)?;
     let script = diagnostic_read_script(query, method);
     let lifecycle = renderer_lifecycle(app);
-    let value = eval_json(&webview, &lifecycle, &script)
-        .await
-        .map_err(eval_error)?;
+    let value = execute_client(
+        &webview,
+        &lifecycle,
+        context,
+        Value::Null,
+        &script,
+        EVAL_TIMEOUT,
+        false,
+    )
+    .await?;
     Ok(Json(
         json!({ "ok": true, "window": query.window, (key): value }),
     ))
@@ -507,26 +1317,81 @@ fn diagnostic_read_script(query: &DiagnosticQuery, method: &str) -> String {
     )
 }
 
-async fn reload(State(state): State<SharedState>, Json(request): Json<WindowQuery>) -> ApiResult {
+async fn reload(
+    State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
+    Json(request): Json<WindowQuery>,
+) -> ApiResult {
+    authorize_client(&context, &request.window)?;
     let webview = resolve_webview(&state.app_handle, &request.window)?;
-    webview
-        .reload()
-        .map_err(|error| internal_error(format!("failed to reload {}: {error}", request.window)))?;
-    Ok(Json(json!({ "ok": true, "window": request.window })))
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let previous = lifecycle.state(&request.window);
+    let deadline = std::time::Instant::now()
+        + EVAL_TIMEOUT.min(Duration::from_millis(context.timeout_ms.unwrap_or(120_000)));
+    let permit = if sessions::shared() {
+        match sessions::manager()
+            .begin(&context, &json!({"reload":request.window}))
+            .map_err(session_error)?
+        {
+            Admission::Cached(value) => return Ok(Json(value)),
+            Admission::Execute(op) => Some(op),
+        }
+    } else {
+        None
+    };
+    if let Some(op) = &permit {
+        dispatch_navigation(
+            &webview,
+            &lifecycle,
+            op,
+            &context,
+            "location.reload()",
+            deadline,
+        )
+        .await?;
+    } else {
+        webview.reload().map_err(internal_error)?;
+    }
+    if permit.is_some() {
+        wait_navigation(
+            &webview,
+            &lifecycle,
+            previous.document_epoch,
+            None,
+            deadline,
+        )
+        .await?;
+    }
+    let mut value = json!({ "ok": true, "window": request.window });
+    if let Some(op) = permit {
+        op.finish(&mut value).map_err(session_error)?;
+    }
+    Ok(Json(value))
 }
 
 async fn navigate(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Json(request): Json<NavigateRequest>,
 ) -> ApiResult {
+    authorize_client(&context, &request.window)?;
     let webview = resolve_webview(&state.app_handle, &request.window)?;
     let target = match url::Url::parse(&request.url) {
         Ok(url) => url,
-        Err(url::ParseError::RelativeUrlWithoutBase) => webview
-            .url()
+        Err(url::ParseError::RelativeUrlWithoutBase) => {
+            let lifecycle = renderer_lifecycle(&state.app_handle);
+            let current = eval_json(&webview, &lifecycle, "JSON.stringify(location.href)")
+                .await
+                .map_err(eval_error)?;
+            url::Url::parse(
+                current
+                    .as_str()
+                    .ok_or_else(|| bad_request("invalid_url", "page URL unavailable"))?,
+            )
             .map_err(internal_error)?
             .join(&request.url)
-            .map_err(|error| bad_request("invalid_url", error.to_string()))?,
+            .map_err(|error| bad_request("invalid_url", error.to_string()))?
+        }
         Err(error) => return Err(bad_request("invalid_url", error.to_string())),
     };
     match target.scheme() {
@@ -538,16 +1403,127 @@ async fn navigate(
             ));
         }
     }
-    webview.navigate(target.clone()).map_err(internal_error)?;
-    Ok(Json(
-        json!({ "ok": true, "window": request.window, "url": target }),
-    ))
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let previous = lifecycle.state(&request.window);
+    let deadline = std::time::Instant::now()
+        + EVAL_TIMEOUT.min(Duration::from_millis(context.timeout_ms.unwrap_or(120_000)));
+    let permit = if sessions::shared() {
+        match sessions::manager()
+            .begin(&context, &json!({"navigate":request.window,"url":target}))
+            .map_err(session_error)?
+        {
+            Admission::Cached(value) => return Ok(Json(value)),
+            Admission::Execute(op) => Some(op),
+        }
+    } else {
+        None
+    };
+    if let Some(op) = &permit {
+        let encoded = serde_json::to_string(target.as_str()).map_err(internal_error)?;
+        dispatch_navigation(
+            &webview,
+            &lifecycle,
+            op,
+            &context,
+            &format!("location.assign({encoded})"),
+            deadline,
+        )
+        .await?;
+    } else {
+        webview.navigate(target.clone()).map_err(internal_error)?;
+    }
+    if permit.is_some() {
+        wait_navigation(
+            &webview,
+            &lifecycle,
+            previous.document_epoch,
+            None,
+            deadline,
+        )
+        .await?;
+    }
+    let mut value = json!({ "ok": true, "window": request.window, "url": target });
+    if let Some(op) = permit {
+        op.finish(&mut value).map_err(session_error)?;
+    }
+    Ok(Json(value))
+}
+
+async fn dispatch_navigation(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    operation: &sessions::Operation<'_>,
+    context: &ClientContext,
+    expression: &str,
+    deadline: std::time::Instant,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let document = match &context.expected_document {
+        Some(document) => json!(document),
+        None => {
+            eval_json_on_renderer_until(
+                webview,
+                lifecycle,
+                "JSON.stringify(window.__cogniaAgentDebug.health().documentId)",
+                deadline,
+            )
+            .await
+            .map_err(eval_error)?
+            .0
+        }
+    };
+    operation.validate().map_err(session_error)?;
+    let expires = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(internal_error)?
+        .as_millis()
+        + deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis();
+    webview.eval(format!("if(Date.now()<{expires}&&window.__cogniaAgentDebug?.health().documentId==={document}){{{expression}}}"))
+        .map_err(internal_error)?;
+    Ok(())
+}
+
+async fn wait_navigation(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    previous: u64,
+    previous_url: Option<&str>,
+    deadline: std::time::Instant,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    while std::time::Instant::now() < deadline {
+        let renderer = lifecycle.state(webview.label());
+        if !renderer.document_loading && !renderer.awaiting_load {
+            if let Ok((value, _)) = eval_json_on_renderer_until(
+                webview,
+                lifecycle,
+                "JSON.stringify(window.__cogniaAgentDebug.health())",
+                deadline,
+            )
+            .await
+            {
+                if value["readyState"] == "complete"
+                    && (renderer.document_epoch != previous
+                        || previous_url.is_some_and(|url| value["url"].as_str() != Some(url)))
+                {
+                    return Ok(());
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Err(session_error((
+        "outcome_unknown",
+        "navigation did not settle; app writer remains quarantined",
+    )))
 }
 
 async fn screenshot(
     State(state): State<SharedState>,
+    Extension(context): Extension<ClientContext>,
     Query(query): Query<WindowQuery>,
 ) -> ApiResult {
+    authorize_client(&context, &query.window)?;
     let window = state
         .app_handle
         .get_webview_window(&query.window)
@@ -557,18 +1533,33 @@ async fn screenshot(
                 format!("webview window not found: {}", query.window),
             )
         })?;
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let before = lifecycle.state(&query.window);
     let region = webview_window_region(&window)?;
-    let capture = tokio::task::spawn_blocking(move || {
-        crate::automation::platform::shared::screenshot::capture_global_region(
-            region,
-            crate::automation::types::ImageFormat::Png,
-        )
+    let capture = observe_client(&context, &query.window, async {
+        tokio::task::spawn_blocking(move || {
+            crate::automation::platform::shared::screenshot::capture_global_region(
+                region,
+                crate::automation::types::ImageFormat::Png,
+            )
+        })
+        .await
     })
-    .await
+    .await?
     .map_err(internal_error)?;
+    if sessions::shared() {
+        let current = lifecycle.state(&query.window);
+        check_poll_document(&query.window, before, current).map_err(eval_error)?;
+        if !same_incarnation(&before, &current) {
+            return Err(eval_error(EvalError::DocumentLoading {
+                window: query.window.clone(),
+                document_epoch: current.document_epoch,
+            }));
+        }
+    }
     let capture = match capture {
         Ok(capture) => capture,
-        Err(error) if screenshot_needs_recenter(&error) => {
+        Err(error) if !sessions::shared() && screenshot_needs_recenter(&error) => {
             window.show().map_err(internal_error)?;
             window.unminimize().map_err(internal_error)?;
             window
@@ -674,8 +1665,12 @@ async fn eval_json_on_renderer(
     script: &str,
 ) -> Result<(Value, RendererState), EvalError> {
     eval_json_on_renderer_until(
-        webview, lifecycle, script, std::time::Instant::now() + EVAL_TIMEOUT,
-    ).await
+        webview,
+        lifecycle,
+        script,
+        std::time::Instant::now() + EVAL_TIMEOUT,
+    )
+    .await
 }
 
 async fn eval_json_on_renderer_until(
@@ -684,11 +1679,34 @@ async fn eval_json_on_renderer_until(
     script: &str,
     deadline: std::time::Instant,
 ) -> Result<(Value, RendererState), EvalError> {
+    eval_json_on_renderer_until_scoped(webview, lifecycle, script, deadline, None).await
+}
+
+async fn eval_json_on_renderer_until_scoped(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    script: &str,
+    deadline: std::time::Instant,
+    context: Option<&ClientContext>,
+) -> Result<(Value, RendererState), EvalError> {
     let label = webview.label().to_string();
-    let renderer = bind_renderer(
-        lifecycle, &label,
-        deadline.saturating_duration_since(std::time::Instant::now()).min(RENDERER_RELOAD_WAIT),
-    ).await?;
+    let context = context
+        .filter(|context| sessions::shared() && matches!(context.identity, Identity::Client(_)));
+    let binding = bind_renderer(
+        lifecycle,
+        &label,
+        deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .min(RENDERER_RELOAD_WAIT),
+    );
+    let renderer = if let Some(context) = context {
+        sessions::manager()
+            .observe(context, &label, binding)
+            .await
+            .map_err(EvalError::Session)?
+    } else {
+        binding.await
+    }?;
     if std::time::Instant::now() >= deadline {
         return Err("webview evaluation timed out".to_string().into());
     }
@@ -709,10 +1727,22 @@ async fn eval_json_on_renderer_until(
         })
         .map_err(|error| EvalError::Failed(error.to_string()))?;
 
-    let raw = await_eval_answer(
-        rx, lifecycle, &label, renderer.generation, renderer.document_epoch,
+    let answer = await_eval_answer(
+        rx,
+        lifecycle,
+        &label,
+        renderer.generation,
+        renderer.document_epoch,
         deadline.saturating_duration_since(std::time::Instant::now()),
-    ).await?;
+    );
+    let raw = if let Some(context) = context {
+        sessions::manager()
+            .observe(context, &label, answer)
+            .await
+            .map_err(EvalError::Session)?
+    } else {
+        answer.await
+    }?;
     let unwrapped = unwrap_js_string(raw);
     if unwrapped.len() > MAX_RESULT_BYTES {
         return Err("webview evaluation result exceeds the 2 MiB limit"
@@ -742,7 +1772,10 @@ async fn bind_renderer(
             });
         }
         if renderer.document_loading {
-            return Err(EvalError::DocumentLoading { window: label.to_string(), document_epoch: renderer.document_epoch });
+            return Err(EvalError::DocumentLoading {
+                window: label.to_string(),
+                document_epoch: renderer.document_epoch,
+            });
         }
     }
     Ok(renderer)
@@ -773,14 +1806,12 @@ async fn await_eval_answer(
     let now = lifecycle.state(label);
     let answered = matches!(&outcome, Some(Ok(Ok(value))) if !value.is_empty());
     if !answered && now.generation == generation && now.document_epoch != document_epoch {
-        return Err(EvalError::DocumentReplaced { window: label.to_string(), document_epoch: now.document_epoch });
+        return Err(EvalError::DocumentReplaced {
+            window: label.to_string(),
+            document_epoch: now.document_epoch,
+        });
     }
-    classify_eval_answer(
-        outcome,
-        label,
-        generation,
-        now.generation,
-    )
+    classify_eval_answer(outcome, label, generation, now.generation)
 }
 
 /// Pure classification of an evaluation answer given the renderer generation
@@ -821,10 +1852,17 @@ fn check_poll_renderer(label: &str, started_on: u64, polled_on: u64) -> Result<(
     }
 }
 
-fn check_poll_document(label: &str, started_on: RendererState, polled_on: RendererState) -> Result<(), EvalError> {
+fn check_poll_document(
+    label: &str,
+    started_on: RendererState,
+    polled_on: RendererState,
+) -> Result<(), EvalError> {
     check_poll_renderer(label, started_on.generation, polled_on.generation)?;
     if started_on.document_epoch != polled_on.document_epoch {
-        return Err(EvalError::DocumentReplaced { window: label.to_string(), document_epoch: polled_on.document_epoch });
+        return Err(EvalError::DocumentReplaced {
+            window: label.to_string(),
+            document_epoch: polled_on.document_epoch,
+        });
     }
     Ok(())
 }
@@ -836,14 +1874,14 @@ fn unwrap_js_string(raw: String) -> String {
 fn async_eval_start_script(request_id: &str, expression: &str, expires_at: u128) -> String {
     let request_id = serde_json::to_string(request_id).expect("request id is serializable");
     format!(
-        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));const now=Date.now();for(const [key,result] of Object.entries(results)){{if(now-Number(result.startedAt||now)>120000){{result.cancelled=true;result.abort?.();delete results[key]}}}}const keys=Object.keys(results).sort((left,right)=>Number(results[left].startedAt||0)-Number(results[right].startedAt||0));while(keys.length>=100){{const key=keys.shift();results[key].cancelled=true;results[key].abort?.();delete results[key]}}const control={{status:\"pending\",startedAt:now,cancelled:false}};results[id]=control;Promise.resolve().then(async()=>{{if(control.cancelled)return;if(Date.now()>={expires_at}){{Object.assign(control,{{status:\"rejected\",error:\"evaluation deadline exceeded before execution\"}});return}}try{{const value=await ({expression});if(results[id]===control&&!control.cancelled)Object.assign(control,{{status:\"fulfilled\",value}})}}catch(error){{if(results[id]===control&&!control.cancelled)Object.assign(control,{{status:\"rejected\",error:String((error&&(error.stack||error.message))||error)}})}}}});return JSON.stringify({{status:\"started\"}})}})()"
+        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));const now=Date.now();for(const [key,result] of Object.entries(results)){{if(now-Number(result.startedAt||now)>120000){{result.cancelled=true;result.abort?.();delete results[key]}}}}const keys=Object.keys(results).sort((left,right)=>Number(results[left].startedAt||0)-Number(results[right].startedAt||0));if(keys.length>=100)return JSON.stringify({{status:\"capacity\"}});const control={{status:\"pending\",startedAt:now,expiresAt:{expires_at},cancelled:false}};results[id]=control;Promise.resolve().then(async()=>{{if(control.cancelled)return;if(Date.now()>={expires_at}){{Object.assign(control,{{status:\"rejected\",error:\"evaluation deadline exceeded before execution\"}});return}}try{{const value=await ({expression});if(results[id]===control&&!control.cancelled)Object.assign(control,{{status:\"fulfilled\",value}})}}catch(error){{if(results[id]===control&&!control.cancelled)Object.assign(control,{{status:\"rejected\",error:String(error)+String((error&&error.stack)||\"\")}})}}}});return JSON.stringify({{status:\"started\"}})}})()"
     )
 }
 
 fn async_eval_poll_script(request_id: &str) -> String {
     let request_id = serde_json::to_string(request_id).expect("request id is serializable");
     format!(
-        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults;const result=results&&results[id];if(!result)return JSON.stringify({{status:\"missing\"}});if(result.status===\"pending\")return JSON.stringify(result);delete results[id];return JSON.stringify(result)}})()"
+        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults;const result=results&&results[id];if(!result)return JSON.stringify({{status:\"missing\"}});if(result.status===\"pending\")return JSON.stringify(result);delete results[id];const encoded=JSON.stringify(result);if(new TextEncoder().encode(encoded).byteLength>{MAX_RESULT_BYTES})return JSON.stringify({{status:\"rejected\",error:\"webview evaluation result exceeds the 2 MiB limit\"}});return encoded}})()"
     )
 }
 
@@ -860,19 +1898,12 @@ fn cleanup_async_eval(webview: &Webview, request_id: &str) {
     let _ = webview.eval(&async_eval_cleanup_script(request_id));
 }
 
-async fn eval_json_async(
-    webview: &Webview,
-    lifecycle: &RendererLifecycle,
-    expression: &str,
-) -> Result<Value, EvalError> {
-    eval_json_async_with_timeout(webview, lifecycle, expression, EVAL_TIMEOUT).await
-}
-
 async fn eval_json_async_with_timeout(
     webview: &Webview,
     lifecycle: &RendererLifecycle,
     expression: &str,
     timeout: Duration,
+    context: Option<&ClientContext>,
 ) -> Result<Value, EvalError> {
     let label = webview.label().to_string();
     let request_id = uuid::Uuid::new_v4().simple().to_string();
@@ -880,12 +1911,14 @@ async fn eval_json_async_with_timeout(
     let expires_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| EvalError::Failed(error.to_string()))?
-        .as_millis() + timeout.as_millis();
-    let started = eval_json_on_renderer_until(
+        .as_millis()
+        + timeout.as_millis();
+    let started = eval_json_on_renderer_until_scoped(
         webview,
         lifecycle,
         &async_eval_start_script(&request_id, expression, expires_at),
         deadline,
+        context,
     )
     .await;
     let (start, started_on) = match started {
@@ -906,33 +1939,42 @@ async fn eval_json_async_with_timeout(
             cleanup_async_eval(webview, &request_id);
             return Err("webview async evaluation timed out".to_string().into());
         }
-        let result =
-            match eval_json_on_renderer_until(webview, lifecycle, &async_eval_poll_script(&request_id), deadline)
-                .await
-            {
-                Ok((result, polled_on)) => {
-                    if let Err(error) = check_poll_document(&label, started_on, polled_on) {
-                        cleanup_async_eval(webview, &request_id);
-                        return Err(error);
-                    }
-                    result
-                }
-                Err(error @ EvalError::RendererRestarted { .. })
-                | Err(error @ EvalError::RendererRestarting { .. })
-                | Err(error @ EvalError::DocumentReplaced { .. })
-                | Err(error @ EvalError::DocumentLoading { .. }) => {
+        let result = match eval_json_on_renderer_until_scoped(
+            webview,
+            lifecycle,
+            &async_eval_poll_script(&request_id),
+            deadline,
+            context,
+        )
+        .await
+        {
+            Ok((result, polled_on)) => {
+                if let Err(error) = check_poll_document(&label, started_on, polled_on) {
                     cleanup_async_eval(webview, &request_id);
                     return Err(error);
                 }
-                Err(error) => {
-                    cleanup_async_eval(webview, &request_id);
-                    return Err(error);
-                }
-            };
+                result
+            }
+            Err(error @ EvalError::RendererRestarted { .. })
+            | Err(error @ EvalError::RendererRestarting { .. })
+            | Err(error @ EvalError::DocumentReplaced { .. })
+            | Err(error @ EvalError::DocumentLoading { .. }) => {
+                cleanup_async_eval(webview, &request_id);
+                return Err(error);
+            }
+            Err(error) => {
+                cleanup_async_eval(webview, &request_id);
+                return Err(error);
+            }
+        };
         match result["status"].as_str() {
-            Some("pending") => tokio::time::sleep(
-                Duration::from_millis(25).min(deadline.saturating_duration_since(std::time::Instant::now())),
-            ).await,
+            Some("pending") => {
+                tokio::time::sleep(
+                    Duration::from_millis(25)
+                        .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                )
+                .await
+            }
             Some("fulfilled") => {
                 let raw = result["value"].as_str().ok_or_else(|| {
                     EvalError::Failed(
@@ -946,12 +1988,12 @@ async fn eval_json_async_with_timeout(
                 });
             }
             Some("rejected") => {
-                return Err(EvalError::Failed(format!(
-                    "webview async evaluation rejected: {}",
+                return Err(EvalError::Rejected(
                     result["error"]
                         .as_str()
                         .unwrap_or("webview async evaluation failed")
-                )));
+                        .to_owned(),
+                ));
             }
             Some("missing") => {
                 check_poll_document(&label, started_on, lifecycle.state(&label))?;
@@ -970,13 +2012,22 @@ async fn eval_json_async_with_timeout(
 
 fn validate_ref(reference: &str) -> Result<(), (StatusCode, Json<Value>)> {
     let reference = if let Some((document, reference)) = reference.split_once(':') {
-        if !document.starts_with('d') || document.len() < 2 || document.len() > 129
-            || !document[1..].bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        if !document.starts_with('d')
+            || document.len() < 2
+            || document.len() > 129
+            || !document[1..]
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         {
-            return Err(bad_request("invalid_ref", "invalid document identity in element ref"));
+            return Err(bad_request(
+                "invalid_ref",
+                "invalid document identity in element ref",
+            ));
         }
         reference
-    } else { reference };
+    } else {
+        reference
+    };
     let Some((generation, element)) = reference
         .strip_prefix('g')
         .and_then(|value| value.split_once('e'))
@@ -1123,17 +2174,30 @@ fn internal_error(error: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
 }
 
 fn eval_error(error: EvalError) -> (StatusCode, Json<Value>) {
+    let rejected = matches!(&error, EvalError::Rejected(_));
     let message = error.to_string();
     let (code, window, generation) = match &error {
-        EvalError::DocumentReplaced { window, document_epoch }
-        | EvalError::DocumentLoading { window, document_epoch } => {
+        EvalError::Session(fault) => return session_error(*fault),
+        EvalError::DocumentReplaced {
+            window,
+            document_epoch,
+        }
+        | EvalError::DocumentLoading {
+            window,
+            document_epoch,
+        } => {
             let code = if matches!(&error, EvalError::DocumentLoading { .. }) {
                 "webview_document_loading"
-            } else { "webview_document_replaced" };
-            return (StatusCode::CONFLICT, Json(json!({
-                "ok": false, "code": code, "error": message, "window": window,
-                "documentEpoch": document_epoch, "retryable": false, "dispatchState": "unknown",
-            })));
+            } else {
+                "webview_document_replaced"
+            };
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "ok": false, "code": code, "error": message, "window": window,
+                    "documentEpoch": document_epoch, "retryable": false, "dispatchState": "unknown",
+                })),
+            );
         }
         EvalError::RendererRestarted { window, generation } => {
             ("webview_renderer_restarted", window, *generation)
@@ -1141,10 +2205,14 @@ fn eval_error(error: EvalError) -> (StatusCode, Json<Value>) {
         EvalError::RendererRestarting { window, generation } => {
             ("webview_renderer_restarting", window, *generation)
         }
-        EvalError::Failed(error) => {
+        EvalError::Failed(error) | EvalError::Rejected(error) => {
             let (status, Json(mut payload)) = api_error(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                classify_eval_failure(error),
+                if rejected {
+                    "webview_eval_rejected"
+                } else {
+                    classify_eval_failure(error)
+                },
                 message,
             );
             payload["dispatchState"] = json!("unknown");
@@ -1201,7 +2269,98 @@ fn api_error(
 mod tests {
     use super::*;
 
-    const AGENT_ROUTES: [&str; 14] = [
+    #[test]
+    fn snapshot_settles_known_rejection_but_retains_unknown_capture() {
+        for settled in [false, true] {
+            let manager = sessions::Sessions::default();
+            let client = manager.open(vec!["main".into()], true).unwrap();
+            let mut context = ClientContext {
+                identity: Identity::Client(client["clientSessionId"].as_str().unwrap().into()),
+                writer: None,
+                expected_document: None,
+                timeout_ms: None,
+            };
+            let lease = manager.acquire(&context).unwrap();
+            context.writer = Some(sessions::Writer {
+                token: lease.token.clone(),
+                fence: lease.fence,
+                operation_id: "key-down".into(),
+            });
+            let Admission::Execute(input) = manager
+                .begin(&context, &json!({"helper":"keyboard","window":"main"}))
+                .unwrap()
+            else {
+                panic!()
+            };
+            input.finish(&mut json!(true)).unwrap();
+            let capture = manager.capture_snapshot(&context).unwrap();
+            let error = if settled {
+                EvalError::Rejected("invalid selector".into())
+            } else {
+                EvalError::Failed("webview evaluation timed out".into())
+            };
+            settle_snapshot_error(Some(capture), &error);
+            if !settled {
+                assert_eq!(
+                    manager.capture_snapshot(&context).err().unwrap().0,
+                    "concurrent_operation"
+                );
+                assert!(manager.input_dirty("main"));
+                continue;
+            }
+            manager.capture_snapshot(&context).unwrap().complete();
+            let _drain = manager.drain(&context, &lease.token, lease.fence).unwrap();
+            context.writer.as_mut().unwrap().operation_id = "cleanup".into();
+            let Admission::Execute(cleanup) = manager
+                .begin(&context, &json!({"helper":"releaseInput","window":"main"}))
+                .unwrap()
+            else {
+                panic!()
+            };
+            cleanup.finish(&mut json!(true)).unwrap();
+            manager
+                .release(&context, &lease.token, lease.fence)
+                .unwrap();
+            assert!(!manager.input_dirty("main"));
+            manager.detach(&context).unwrap();
+        }
+        let (_, Json(value)) = eval_error(EvalError::Rejected("invalid selector".into()));
+        assert_eq!(value["code"], "webview_eval_rejected");
+    }
+
+    #[test]
+    fn recovery_needs_a_new_helper_realm_not_only_a_native_load_event() {
+        assert!(!replaced_document(&json!("old"), &json!("old")));
+        assert!(!replaced_document(&Value::Null, &json!("new")));
+        assert!(!replaced_document(&json!("old"), &json!("")));
+        assert!(replaced_document(&json!("old"), &json!("new")));
+    }
+    #[test]
+    fn recovery_proof_rejects_changed_loading_and_restarted_incarnations() {
+        let original = RendererState::default();
+        assert!(same_incarnation(&original, &original));
+        let mut changed = original.clone();
+        changed.document_epoch += 1;
+        assert!(!same_incarnation(&original, &changed));
+        changed = original.clone();
+        changed.generation += 1;
+        assert!(!same_incarnation(&original, &changed));
+        changed = original.clone();
+        changed.document_loading = true;
+        assert!(!same_incarnation(&original, &changed));
+        changed = original.clone();
+        changed.awaiting_load = true;
+        assert!(!same_incarnation(&original, &changed));
+    }
+    #[test]
+    fn native_health_probe_is_opt_in_and_does_not_require_a_renderer() {
+        let normal: HealthQuery = serde_json::from_str("{}").unwrap();
+        let native: HealthQuery = serde_json::from_str(r#"{"nativeOnly":true}"#).unwrap();
+        assert!(!normal.native_only);
+        assert!(native.native_only);
+    }
+
+    const AGENT_ROUTES: [&str; 20] = [
         "/api/dev/agent/health",
         "/api/dev/agent/windows",
         "/api/dev/agent/snapshot",
@@ -1216,6 +2375,12 @@ mod tests {
         "/api/dev/agent/screenshot",
         "/api/dev/agent/logs",
         "/api/dev/agent/shutdown",
+        "/api/dev/agent/sessions",
+        "/api/dev/agent/sessions/{id}",
+        "/api/dev/agent/recover",
+        "/api/dev/agent/session",
+        "/api/dev/agent/lease",
+        "/api/dev/agent/helper",
     ];
 
     #[test]
@@ -1366,15 +2531,18 @@ mod tests {
     fn locator_control_and_evaluation_budget_deserialize_additively() {
         let cancel: LocatorRequest = serde_json::from_value(json!({
             "query": {}, "operation": "cancel", "requestId": "action-1",
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(cancel.request_id.as_deref(), Some("action-1"));
         assert_eq!(cancel.window, "main");
         assert!(cancel.expires_at.is_none());
         let evaluate: EvaluateRequest = serde_json::from_value(json!({
             "expression": "true", "timeout": 30_000,
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(evaluate.timeout, Some(30_000));
-        let legacy: EvaluateRequest = serde_json::from_value(json!({ "expression": "true" })).unwrap();
+        let legacy: EvaluateRequest =
+            serde_json::from_value(json!({ "expression": "true" })).unwrap();
         assert!(legacy.timeout.is_none());
     }
 
@@ -1559,7 +2727,15 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel::<String>();
         tx.send("\"ok\"".into()).unwrap();
         assert_eq!(
-            await_eval_answer(rx, &lifecycle, "main", renderer.generation, renderer.document_epoch, EVAL_TIMEOUT).await,
+            await_eval_answer(
+                rx,
+                &lifecycle,
+                "main",
+                renderer.generation,
+                renderer.document_epoch,
+                EVAL_TIMEOUT
+            )
+            .await,
             Ok("\"ok\"".to_string())
         );
     }
@@ -1598,8 +2774,18 @@ mod tests {
 
     #[test]
     fn app_identity_changes_without_changing_the_managed_session() {
-        let first = debug_session_identity(Some("run-a".into()), Some("/repo".into()), "app-1".into(), 101);
-        let second = debug_session_identity(Some("run-a".into()), Some("/repo".into()), "app-2".into(), 202);
+        let first = debug_session_identity(
+            Some("run-a".into()),
+            Some("/repo".into()),
+            "app-1".into(),
+            101,
+        );
+        let second = debug_session_identity(
+            Some("run-a".into()),
+            Some("/repo".into()),
+            "app-2".into(),
+            202,
+        );
         assert_eq!(first["sessionId"], second["sessionId"]);
         assert_eq!(first["workspace"], second["workspace"]);
         assert_ne!(first["appInstanceId"], second["appInstanceId"]);
@@ -1612,12 +2798,23 @@ mod tests {
         let (_silent_sender, rx) = tokio::sync::oneshot::channel::<String>();
         let pending = {
             let lifecycle = lifecycle.clone();
-            tokio::spawn(async move { await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(30)).await })
+            tokio::spawn(async move {
+                await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(30)).await
+            })
         };
         tokio::task::yield_now().await;
         lifecycle.record_page_load("main");
-        let result = tokio::time::timeout(Duration::from_secs(2), pending).await.unwrap().unwrap();
-        assert_eq!(result, Err(EvalError::DocumentReplaced { window: "main".into(), document_epoch: 1 }));
+        let result = tokio::time::timeout(Duration::from_secs(2), pending)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result,
+            Err(EvalError::DocumentReplaced {
+                window: "main".into(),
+                document_epoch: 1
+            })
+        );
         assert_eq!(lifecycle.state("main").generation, 0);
     }
 
@@ -1627,16 +2824,30 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel::<String>();
         lifecycle.record_page_load("settings");
         tx.send("1".into()).unwrap();
-        assert_eq!(await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(1)).await, Ok("1".into()));
+        assert_eq!(
+            await_eval_answer(rx, &lifecycle, "main", 0, 0, Duration::from_secs(1)).await,
+            Ok("1".into())
+        );
     }
 
     #[test]
     fn async_polling_cannot_collect_a_result_from_another_document_epoch() {
         let started = RendererState::default();
-        let replaced = RendererState { document_epoch: 1, ..started };
-        assert_eq!(check_poll_document("main", started, replaced),
-            Err(EvalError::DocumentReplaced { window: "main".into(), document_epoch: 1 }));
-        let (status, Json(payload)) = eval_error(EvalError::DocumentReplaced { window: "main".into(), document_epoch: 1 });
+        let replaced = RendererState {
+            document_epoch: 1,
+            ..started
+        };
+        assert_eq!(
+            check_poll_document("main", started, replaced),
+            Err(EvalError::DocumentReplaced {
+                window: "main".into(),
+                document_epoch: 1
+            })
+        );
+        let (status, Json(payload)) = eval_error(EvalError::DocumentReplaced {
+            window: "main".into(),
+            document_epoch: 1,
+        });
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(payload["code"], "webview_document_replaced");
         assert_eq!(payload["retryable"], false);
@@ -1647,10 +2858,17 @@ mod tests {
     async fn binding_waits_for_a_normal_reload_to_finish() {
         let lifecycle = RendererLifecycle::new();
         lifecycle.record_page_load("main");
-        assert_eq!(bind_renderer(&lifecycle, "main", Duration::from_millis(1)).await,
-            Err(EvalError::DocumentLoading { window: "main".into(), document_epoch: 1 }));
+        assert_eq!(
+            bind_renderer(&lifecycle, "main", Duration::from_millis(1)).await,
+            Err(EvalError::DocumentLoading {
+                window: "main".into(),
+                document_epoch: 1
+            })
+        );
         lifecycle.record_page_load_finished("main");
-        let bound = bind_renderer(&lifecycle, "main", Duration::from_secs(1)).await.unwrap();
+        let bound = bind_renderer(&lifecycle, "main", Duration::from_secs(1))
+            .await
+            .unwrap();
         assert_eq!(bound.document_epoch, 1);
         assert!(!bound.document_loading);
     }

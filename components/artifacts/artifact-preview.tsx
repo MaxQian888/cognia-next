@@ -59,7 +59,7 @@ import {
 import { JupyterRenderer } from "./jupyter-renderer"
 import { getArtifactRuntimeAdapter } from "./runtime-adapters"
 
-interface ArtifactPreviewProps {
+export interface ArtifactPreviewProps {
   artifact: Artifact
   className?: string
   /**

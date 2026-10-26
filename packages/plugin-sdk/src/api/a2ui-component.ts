@@ -12,4 +12,4 @@ export type {
   A2UIPluginComponentDef,
   A2UIPluginComponentProps,
   PluginA2UIComponent,
-} from "@/types/plugin"
+} from "@cognia/plugin-contract/types/plugin/index"

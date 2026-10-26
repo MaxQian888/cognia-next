@@ -71,6 +71,11 @@ import { useReportPanelDirty } from "../panel-dirty-context"
 import { ToolScopeField } from "../tool-scope-field"
 import { ExternalAgentConfigPinField } from "@/components/agent/external-agent/external-agent-config-pin-field"
 import {
+  TemplateCogniaModelFields,
+  templateModelRolesInvalid,
+} from "./template-cognia-model-fields"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import {
   dispatchRailUnavailable,
   reachability,
   taskTemplateOverridden,
@@ -219,6 +224,8 @@ function EditableView({
 }) {
   const tPriority = useTranslations("agentPriority")
   const { reduce } = useFlowMotion()
+  const externalAgents = useExternalAgentStore((state) => state.agents)
+  const appSettings = useSettingsStore((state) => state.settings)
 
   const persist = useCallback(
     async (next: SubAgentTemplate) => {
@@ -230,9 +237,19 @@ function EditableView({
       if (threshold !== undefined && (next.config.provider || next.config.externalPresetId)) {
         throw new Error(t("compactAtTokensUnsupported"))
       }
+      const pinnedId = next.config.externalAgentConfigId
+      if (
+        templateModelRolesInvalid(
+          next.config,
+          pinnedId ? externalAgents[pinnedId] : undefined,
+          appSettings
+        )
+      ) {
+        throw new Error(t("modelRolesInvalid"))
+      }
       await onPersist({ ...next, name: next.name.trim() })
     },
-    [onPersist, t]
+    [onPersist, t, externalAgents, appSettings]
   )
 
   const policy = usePolicyDraft(template.id, template, persist)
@@ -682,6 +699,10 @@ function EditableView({
                     ...draft.config,
                     externalPresetId: next,
                     externalAgentConfigId: undefined,
+                    // A Cognia binding and sub-task models were chosen for the
+                    // previous runtime's slots; keep them only while it stays.
+                    cogniaModel: undefined,
+                    modelRoles: undefined,
                   },
                 })
               }}
@@ -706,6 +727,11 @@ function EditableView({
             value={draft.config?.externalAgentConfigId}
             onChange={(configId) => updateConfig("externalAgentConfigId", configId)}
             data-testid="editor-external-config-pin"
+          />
+
+          <TemplateCogniaModelFields
+            config={draft.config ?? {}}
+            onChange={(next) => patch({ config: { ...draft.config, ...next } })}
           />
 
           <ToolScopeField

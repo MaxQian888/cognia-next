@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai"
 
 import {
+  externalTokenUsageToUsageInfo,
   AUTO_COMPACT_FRACTION,
   computeContextWindowUsage,
   getLatestRunProviderId,
@@ -25,6 +26,46 @@ function asUiMessage(role: UIMessage["role"], metadata?: Record<string, unknown>
     ...(metadata ? ({ metadata } as Record<string, unknown>) : {}),
   } as UIMessage
 }
+
+describe("external token accounting", () => {
+  it("splits explicitly cache-inclusive DSH prompts without double-counting billing or occupancy", () => {
+    const usage = externalTokenUsageToUsageInfo({
+      promptTokens: 33,
+      promptTokensIncludeCache: true,
+      completionTokens: 2,
+      totalTokens: 35,
+      cacheReadTokens: 20,
+      cacheWriteTokens: 3,
+      contextTokens: 35,
+    })
+    expect(usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadInputTokens: 20,
+      cacheCreationInputTokens: 3,
+    })
+    expect(tokensInWindow(usage)).toBe(35)
+    const billed = sumSessionUsage([asUiMessage("assistant", { usage })])
+    expect(
+      billed.inputTokens +
+        billed.outputTokens +
+        billed.cacheReadInputTokens +
+        billed.cacheCreationInputTokens
+    ).toBe(35)
+  })
+
+  it("preserves the legacy uncached prompt convention when no inclusion marker is present", () => {
+    expect(
+      externalTokenUsageToUsageInfo({
+        promptTokens: 10,
+        completionTokens: 2,
+        totalTokens: 35,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 3,
+      }).inputTokens
+    ).toBe(10)
+  })
+})
 
 describe("getModelContextWindow", () => {
   it("falls back to the documented default for an undefined id", () => {

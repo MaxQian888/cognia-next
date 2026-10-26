@@ -22,8 +22,11 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react"
 import { toast } from "sonner"
+import Link from "next/link"
+import { useLiveQuery } from "dexie-react-hooks"
 
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
@@ -42,6 +45,16 @@ import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -51,7 +64,10 @@ import { useFlowRecorder } from "@/hooks/browser/use-flow-recorder"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { configureRemoteBrowserEngine, type BrowserEngine } from "@/lib/browser/agent-engine"
 import type { BrowserBackend } from "@/lib/browser/backend-availability"
-import { RemoteChromiumEngine } from "@/lib/browser/remote-chromium-engine"
+import {
+  RemoteChromiumEngine,
+  REMOTE_BROWSER_APPROVAL_OPERATIONS,
+} from "@/lib/browser/remote-chromium-engine"
 import { createEngineRecordingDriver } from "@/lib/browser/recording/engine-recording-driver"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { cn } from "@/lib/utils"
@@ -69,8 +85,13 @@ import {
   type RemoteBrowserStreamOptions,
 } from "@/lib/browser/remote-stream"
 import { createFramePainter } from "@/lib/browser/frame-painter"
+import { REMOTE_BROWSER_SETTINGS_HREF } from "@/lib/browser/preview-data"
 import type { BrowserPageSummary } from "@/lib/browser/session-types"
-import type { BrowserSelection, SnapshotNode } from "@/lib/browser/protocol"
+import {
+  normalizePreviewUrl,
+  type BrowserSelection,
+  type SnapshotNode,
+} from "@/lib/browser/protocol"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { openExternal } from "@/lib/tauri/opener"
 import { issueCompanionSocketTicket } from "@/lib/tauri/transport-companion"
@@ -81,12 +102,21 @@ import {
   type CompanionEndpoint,
 } from "@/lib/tauri/companion-endpoint"
 import { transport } from "@/lib/tauri/transport-instance"
+import { HostConsentRequiredError } from "@/lib/tauri/admin-lease"
+import { createInteractiveApprovalScope } from "@/lib/tauri/interactive-approval"
+import type { Transport } from "@/lib/tauri/transport-types"
+import {
+  getRuntimeTargetScopeKey,
+  subscribeRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 
 interface RemoteSessionRpcSummary {
   id: string
   state: string
   pages: BrowserPageSummary[]
   activePageId: string | null
+  profileId?: string | null
+  domainGrants?: string[]
 }
 
 interface StreamLike {
@@ -127,12 +157,11 @@ export interface RemoteBrowserPreviewProps {
    */
   requestNonce?: number
   /**
-   * Switch this pane back to another engine. Present only on a desktop, where
-   * remote Chromium is an alternative to the embedded webview rather than the
-   * only engine; without it, choosing "cloud browser" was a one-way door until
-   * the pane remounted.
+   * Switch this pane back to the shell's lightweight preview: embedded webview
+   * on desktop, sandboxed iframe on Web.
    */
   onBackendChange?: (backend: BrowserBackend) => void
+  onNavigated?: (url: string) => void
   /**
    * The desktop's full engine switch (ADR-0201). Takes the place of the
    * two-way select `onBackendChange` draws, which predates the local engines.
@@ -160,6 +189,7 @@ async function resolveStreamEndpoint(): Promise<CompanionEndpoint | null> {
 /** Console / network poll rate while the dock's readouts are open, and while not. */
 const DEVTOOLS_POLL_MS = 1_500
 const DEVTOOLS_IDLE_POLL_MS = 6_000
+const createRemoteStream = (options: RemoteBrowserStreamOptions) => new RemoteBrowserStream(options)
 
 function mouseButton(button: number): "left" | "middle" | "right" {
   if (button === 1) return "middle"
@@ -217,8 +247,9 @@ export function RemoteBrowserPreview({
   requestedUrl,
   requestNonce,
   onBackendChange,
+  onNavigated,
   backendSwitcher,
-  createStream = (options) => new RemoteBrowserStream(options),
+  createStream = createRemoteStream,
 }: RemoteBrowserPreviewProps) {
   const t = useTranslations("browser.remote")
   const browserT = useTranslations("browser")
@@ -241,6 +272,83 @@ export function RemoteBrowserPreview({
   const urlInputRef = useRef<HTMLInputElement>(null)
   /** Why the runtime is not usable, straight from the gateway. */
   const [runtimeReason, setRuntimeReason] = useState<string | null>(null)
+  const [connectAttempt, setConnectAttempt] = useState(0)
+  const retryUrlRef = useRef<string | null>(null)
+  const pendingReconnectRef = useRef<Promise<unknown> | null>(null)
+  const reconnectProfileRef = useRef<{ profileId: string | null } | null>(null)
+  const [remoteSession, setRemoteSession] = useState<{
+    id: string
+    profileId: string | null
+  } | null>(null)
+  const configuredGrants = useLiveQuery(() => listBrowserDomainGrants(workspaceId), [workspaceId])
+  const [appliedGrants, setAppliedGrants] = useState<string[] | null>(null)
+  const [confirmReconnect, setConfirmReconnect] = useState(false)
+  const [blockedDomains, setBlockedDomains] = useState<string[]>([])
+  const [urlInput, setUrlInput] = useState(initialUrl ?? "")
+  const [approvalRequired, setApprovalRequired] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [consentCode, setConsentCode] = useState<string | null>(null)
+  const [approvalFailed, setApprovalFailed] = useState(false)
+  const targetScope = useSyncExternalStore(
+    subscribeRuntimeTargetContext,
+    getRuntimeTargetScopeKey,
+    getRuntimeTargetScopeKey
+  )
+  const approval = useMemo(
+    () =>
+      createInteractiveApprovalScope(REMOTE_BROWSER_APPROVAL_OPERATIONS, { scopeKey: targetScope }),
+    [targetScope]
+  )
+  useEffect(() => () => approval.clear(), [approval])
+  const browserCaller = useMemo<Pick<Transport, "call">>(
+    () => ({
+      async call<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+        try {
+          return await approval.call<T>(name, args)
+        } catch (error) {
+          if (
+            error &&
+            typeof error === "object" &&
+            "code" in error &&
+            (error.code === "interactive_approval_required" ||
+              error.code === "approval_target_changed")
+          ) {
+            setApprovalRequired(true)
+            setConsentCode(null)
+          }
+          throw error
+        }
+      },
+    }),
+    [approval]
+  )
+  const authorizeBrowser = async () => {
+    if (approving) return
+    setApproving(true)
+    setApprovalFailed(false)
+    try {
+      await approval.authorize()
+      setApprovalRequired(false)
+      setConsentCode(null)
+      if (connection !== "connected") {
+        retryUrlRef.current = recoveryUrl || null
+        setConnectAttempt((attempt) => attempt + 1)
+      }
+    } catch (error) {
+      setConsentCode(error instanceof HostConsentRequiredError ? error.consentCode : null)
+      setApprovalFailed(!(error instanceof HostConsentRequiredError))
+    } finally {
+      setApproving(false)
+    }
+  }
+  const approvalMessage = consentCode
+    ? t("approval.pending", { code: consentCode })
+    : t(approvalFailed ? "approval.failed" : "approval.required")
+  const grantsChanged =
+    appliedGrants !== null &&
+    configuredGrants !== undefined &&
+    JSON.stringify([...appliedGrants].sort()) !==
+      JSON.stringify(configuredGrants.map((grant) => grant.domain).sort())
   /** Whether the dock's readouts are on screen; polling slows while they are not. */
   const [toolsExpanded, setToolsExpanded] = useState(false)
   /** The live take's step count, for the dock header; null when not recording. */
@@ -261,7 +369,6 @@ export function RemoteBrowserPreview({
       [engine, toolsExpanded]
     ),
   })
-  const [urlInput, setUrlInput] = useState(initialUrl ?? "")
   const [clickPointer, setClickPointer] = useState<{ x: number; y: number; key: number } | null>(
     null
   )
@@ -289,6 +396,17 @@ export function RemoteBrowserPreview({
   const { sendComment, sendScreenshotBytes, sendText } = useSelectionToChat()
   const activePage =
     pages.find((page) => page.id === activePageId) ?? pages.find((page) => page.active)
+  const recoveryUrl = normalizePreviewUrl(navigationFailure ?? urlInput) ?? initialUrl ?? ""
+  useEffect(() => {
+    const url = normalizePreviewUrl(activePage?.url ?? requestedUrl ?? initialUrl ?? "")
+    if (url) onNavigated?.(url)
+  }, [activePage?.url, requestedUrl, initialUrl, onNavigated])
+  const refreshBlockedDomains = useCallback(async () => {
+    const current = engineRef.current
+    const result = await current?.snapshot({ includeText: false }).catch(() => null)
+    if (current && engineRef.current === current && result)
+      setBlockedDomains(result.blockedDomains ?? [])
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -296,6 +414,7 @@ export function RemoteBrowserPreview({
 
     const painter = createFramePainter(() => canvasRef.current)
     const drawFrame = (frame: RemoteBrowserFrame) => {
+      if (disposed) return
       frameSizeRef.current = { width: frame.width, height: frame.height }
       painter.paint(frame)
     }
@@ -303,6 +422,18 @@ export function RemoteBrowserPreview({
     const setup = async () => {
       try {
         setConnection("connecting")
+        setErrorCode(null)
+        setRuntimeReason(null)
+        setNavigationFailure(null)
+        const pendingReconnect = pendingReconnectRef.current
+        if (pendingReconnect) {
+          try {
+            await pendingReconnect
+          } finally {
+            if (pendingReconnectRef.current === pendingReconnect) pendingReconnectRef.current = null
+          }
+        }
+        if (disposed) return
         /*
           Asked FIRST, and that ordering is the whole point.
 
@@ -324,7 +455,13 @@ export function RemoteBrowserPreview({
         // Nothing downstream can succeed without the runtime, and every one of
         // those calls fails in a vocabulary the pane cannot translate. Stop on
         // the honest reason instead of collecting a second, worse one.
-        if (status && !status.compiled) return
+        if (
+          status &&
+          (!status.compiled || !status.enabled || !status.configured || !status.healthy)
+        ) {
+          setConnection("failed")
+          return
+        }
         const readiness = await transport.call<{ capabilities: string[] }>("browser_capability", {
           workspaceId,
           userEnabled: true,
@@ -336,41 +473,65 @@ export function RemoteBrowserPreview({
           listBrowserDomainGrants(workspaceId),
           listBrowserProfiles(workspaceId),
         ])
-        const effectiveProfileId = profileId ?? profiles.find((candidate) => candidate.selected)?.id
+        const effectiveProfileId = reconnectProfileRef.current
+          ? reconnectProfileRef.current.profileId
+          : (profileId ?? profiles.find((candidate) => candidate.selected)?.id)
         const inheritedParent =
           parentChatSessionId ?? decodeSubSession(chatSessionId)?.teamSessionId
-        const summary = await transport.call<RemoteSessionRpcSummary>("browser_session_ensure", {
-          chatSessionId,
-          ...(inheritedParent ? { parentChatSessionId: inheritedParent } : {}),
-          workspaceId,
-          backendPreference: "remote-chromium",
-          userEnabled: true,
-          ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
-          domainGrants: grants.map((grant) => grant.domain),
+        const summary = await browserCaller.call<RemoteSessionRpcSummary>(
+          "browser_session_ensure",
+          {
+            chatSessionId,
+            ...(inheritedParent ? { parentChatSessionId: inheritedParent } : {}),
+            workspaceId,
+            backendPreference: "remote-chromium",
+            userEnabled: true,
+            ...(effectiveProfileId ? { profileId: effectiveProfileId } : {}),
+            domainGrants: grants.map((grant) => grant.domain),
+          }
+        )
+        if (disposed) return
+        reconnectProfileRef.current = null
+        setRemoteSession({
+          id: summary.id,
+          profileId:
+            summary.profileId !== undefined ? summary.profileId : (effectiveProfileId ?? null),
         })
+        setAppliedGrants(summary.domainGrants ?? grants.map((grant) => grant.domain))
         if (effectiveProfileId) {
           await touchBrowserProfile(effectiveProfileId).catch(() => {})
         }
         if (disposed) return
-        const engine = new RemoteChromiumEngine(summary.id)
+        const engine = new RemoteChromiumEngine(summary.id, browserCaller)
         engineRef.current = engine
         setEngine(engine)
         configureRemoteBrowserEngine(engine, {
           enabled: status?.enabled ?? true,
           healthy: status?.healthy ?? true,
         })
-        if (initialUrl) {
+        const startUrl = retryUrlRef.current ?? initialUrl
+        retryUrlRef.current = null
+        let navigationFailed = false
+        if (startUrl) {
           try {
-            await engine.navigate(initialUrl)
+            await engine.navigate(startUrl)
           } catch {
+            navigationFailed = true
             // The runtime can still connect and offer navigation recovery.
-            if (!disposed) setNavigationFailure(initialUrl)
+            if (!disposed) {
+              setNavigationFailure(startUrl)
+              setUrlInput(startUrl)
+            }
           }
         }
         const currentPages = await engine.listPages()
         if (disposed) return
         setPages(currentPages)
-        setActivePageId(currentPages.find((page) => page.active)?.id ?? summary.activePageId)
+        const currentPage = currentPages.find((page) => page.active)
+        setActivePageId(currentPage?.id ?? summary.activePageId)
+        if (currentPage && !navigationFailed) setUrlInput(currentPage.url)
+        await refreshBlockedDomains()
+        if (disposed) return
 
         const endpoint = await resolveStreamEndpoint()
         if (!endpoint?.baseUrl) throw new Error("browser_companion_unconfigured")
@@ -385,8 +546,11 @@ export function RemoteBrowserPreview({
                 })
               : issueCompanionSocketTicket({ channel: "browser", sessionId: summary.id }),
           onFrame: drawFrame,
-          onLease: setLease,
+          onLease: (next) => {
+            if (!disposed) setLease(next)
+          },
           onEvent: (event) => {
+            if (disposed) return
             if (event.kind === "pages.changed" && Array.isArray(event.pages)) {
               const nextPages = event.pages as BrowserPageSummary[]
               const nextActivePageId =
@@ -404,7 +568,9 @@ export function RemoteBrowserPreview({
               setLease((event.lease as RemoteBrowserLease | undefined) ?? null)
             }
           },
-          onError: setErrorCode,
+          onError: (code) => {
+            if (!disposed) setErrorCode(code)
+          },
           onState: (state) => {
             if (disposed) return
             setConnection(state)
@@ -431,6 +597,7 @@ export function RemoteBrowserPreview({
     void setup()
     return () => {
       disposed = true
+      navigationAttemptRef.current += 1
       painter.dispose()
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       streamRef.current?.close()
@@ -447,6 +614,9 @@ export function RemoteBrowserPreview({
     initialUrl,
     createStream,
     pushHistory,
+    connectAttempt,
+    refreshBlockedDomains,
+    browserCaller,
   ])
 
   const refreshPages = useCallback(async () => {
@@ -475,8 +645,9 @@ export function RemoteBrowserPreview({
         setNavigationFailure(url)
         setErrorCode(error instanceof Error ? error.message : "browser_navigation_failed")
       }
+      await refreshBlockedDomains()
     },
-    [refreshPages, pushHistory]
+    [refreshPages, pushHistory, refreshBlockedDomains]
   )
 
   const navigatePage = useCallback(
@@ -484,9 +655,10 @@ export function RemoteBrowserPreview({
       const current = engineRef.current
       if (!current) return
       setUrlInput(url)
+      onNavigated?.(url)
       await runNavigation(url, () => current.navigate(url))
     },
-    [runNavigation]
+    [runNavigation, onNavigated]
   )
 
   // Follow an address the host states. Recorded during render so the toolbar
@@ -521,10 +693,11 @@ export function RemoteBrowserPreview({
     if (!appliedRequestedUrl || !engine) return
     if (deliveredKeyRef.current === appliedKey) return
     deliveredKeyRef.current = appliedKey
+    onNavigated?.(appliedRequestedUrl)
     void runNavigation(appliedRequestedUrl, () => engine.navigate(appliedRequestedUrl), false)
     // `appliedKey` is the dependency that makes a repeat of the same address
     // re-run this effect. `appliedRequestedUrl` alone would not change.
-  }, [appliedKey, appliedRequestedUrl, engine, runNavigation])
+  }, [appliedKey, appliedRequestedUrl, engine, runNavigation, onNavigated])
 
   const navigate = async (event: FormEvent) => {
     event.preventDefault()
@@ -802,9 +975,9 @@ export function RemoteBrowserPreview({
               <TooltipIconButton
                 tooltip={actionsT("openExternal")}
                 aria-label={actionsT("openExternal")}
-                disabled={!activePage?.url}
+                disabled={!recoveryUrl}
                 onClick={() => {
-                  if (activePage?.url) void openExternal(activePage.url)
+                  if (recoveryUrl) void openExternal(recoveryUrl)
                 }}
               >
                 <ExternalLinkIcon />
@@ -835,6 +1008,71 @@ export function RemoteBrowserPreview({
             </>
           }
         />
+
+        {approvalRequired && connection === "connected" && (
+          <div
+            role="status"
+            className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs"
+          >
+            <p className="min-w-0 flex-1 break-words">{approvalMessage}</p>
+            <Button size="sm" disabled={approving} onClick={() => void authorizeBrowser()}>
+              {t("approval.authorize")}
+            </Button>
+          </div>
+        )}
+        {(grantsChanged || blockedDomains.length > 0) && (
+          <div
+            role="status"
+            className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs"
+          >
+            <p className="min-w-0 flex-1 break-words">
+              {grantsChanged
+                ? t("grants.changed")
+                : t("grants.blocked", { domains: blockedDomains.join(", ") })}
+            </p>
+            <Button asChild size="sm" variant="outline">
+              <Link href={REMOTE_BROWSER_SETTINGS_HREF}>{t("grants.manage")}</Link>
+            </Button>
+            {grantsChanged && (
+              <Button
+                size="sm"
+                disabled={connection !== "connected"}
+                onClick={() => setConfirmReconnect(true)}
+              >
+                {t("grants.reconnect")}
+              </Button>
+            )}
+          </div>
+        )}
+        <AlertDialog open={confirmReconnect} onOpenChange={setConfirmReconnect}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("grants.reconnect")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(remoteSession?.profileId ? "grants.persistentHint" : "grants.ephemeralHint")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("grants.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  const session = remoteSession
+                  if (!session || pendingReconnectRef.current) return
+                  reconnectProfileRef.current = { profileId: session.profileId }
+                  retryUrlRef.current = normalizePreviewUrl(
+                    navigationFailure ?? activePage?.url ?? requestedUrl ?? initialUrl ?? ""
+                  )
+                  pendingReconnectRef.current = browserCaller.call("browser_session_close", {
+                    browserSessionId: session.id,
+                  })
+                  setConnectAttempt((attempt) => attempt + 1)
+                }}
+              >
+                {t("grants.confirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
 
@@ -940,16 +1178,47 @@ export function RemoteBrowserPreview({
               aria-hidden
             />
           )}
-          {connection !== "connected" && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/80 p-6 text-center">
-              <p className="text-sm text-muted-foreground">
-                {errorCode
-                  ? t("error", { code: errorCode })
-                  : runtimeReason
-                    ? t("runtimeUnavailable", { reason: runtimeReason })
-                    : t("waiting")}
-              </p>
+          {connection === "failed" || connection === "offline" ? (
+            <div className="absolute inset-0">
+              <BrowserLoadError
+                url={recoveryUrl}
+                message={
+                  approvalRequired
+                    ? approvalMessage
+                    : runtimeReason
+                      ? t("runtimeUnavailable", { reason: runtimeReason })
+                      : errorCode
+                        ? t("error", { code: errorCode })
+                        : t("connection.failed")
+                }
+                onRetry={() => {
+                  if (approvalRequired) {
+                    void authorizeBrowser()
+                    return
+                  }
+                  retryUrlRef.current = recoveryUrl || null
+                  setConnectAttempt((attempt) => attempt + 1)
+                }}
+                retryLabel={approvalRequired ? t("approval.authorize") : undefined}
+                retryDisabled={approving}
+                onEditAddress={() => urlInputRef.current?.focus()}
+                onOpenExternal={recoveryUrl ? () => void openExternal(recoveryUrl) : undefined}
+                onContinue={onBackendChange ? () => onBackendChange("embedded") : undefined}
+                continueLabel={browserT("backend.embedded")}
+              />
             </div>
+          ) : (
+            connection !== "connected" && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/80 p-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {errorCode
+                    ? t("error", { code: errorCode })
+                    : runtimeReason
+                      ? t("runtimeUnavailable", { reason: runtimeReason })
+                      : t("waiting")}
+                </p>
+              </div>
+            )
           )}
           {connection === "connected" && navigationFailure && (
             <div className="absolute inset-0">

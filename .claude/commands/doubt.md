@@ -11,7 +11,7 @@ Run the full cycle from the main session:
 1. **CLAIM** — state the decision + why it matters in 2–3 lines.
 2. **EXTRACT** — isolate the smallest artifact (diff/function/proposal) and pull
    the applicable CONTRACT clauses (relevant ADR + schema, static-export rule,
-   PII gate, i18n parity, ≥90% coverage, Dexie native-version rule, Rust
+   PII gate, i18n parity, co-located tests, Dexie native-version rule, Rust
    guard/detached-task rules). Strip your own reasoning.
 3. **DOUBT** — spawn a fresh-context reviewer with the adversarial prompt,
    passing ARTIFACT + CONTRACT only (never the CLAIM). Pick the reviewer by

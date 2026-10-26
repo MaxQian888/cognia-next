@@ -37,14 +37,8 @@ import { STANDARD_PRESET_ID } from "@/lib/agent/composition/preset-catalog"
 import { appPresetIds } from "@/lib/agent/composition/app-preset-catalog"
 import { selectionFromLegacyModeId } from "@/lib/agent/composition/legacy-mode-mapping"
 import { BUILTIN_RUNTIME_REF, type AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
-
-/**
- * @deprecated Compatibility mirror of {@link AgentRuntimeState.runtimeRef}.
- * The lane is now an `AgentRuntimeRef`, which also names the target, so a
- * "which agent" answer can no longer go missing from a "which lane" answer.
- * Readers still on this field are being migrated.
- */
-export type AgentRuntime = "claude-sdk" | "external"
+import type { AgentRuntime } from "@cognia/plugin-contract/stores/agent/agent-runtime-store"
+export type { AgentRuntime } from "@cognia/plugin-contract/stores/agent/agent-runtime-store"
 
 /** What the composer remembers about a host-owned agent it has selected. */
 export interface ExternalHostConfigSelection {

@@ -210,7 +210,14 @@ describe("fetchPreviewImageAsDataUrl", () => {
     )
     expect(result).toMatch(/^data:image\/png;base64,/)
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, Record<string, unknown>]
-    expect(init).toMatchObject({ binaryResponse: true, blockPrivateHosts: true })
+    expect(init).toMatchObject({
+      binaryResponse: true,
+      blockPrivateHosts: true,
+      downloadPolicy: {
+        allowedOrigins: ["https://cdn.example.com"],
+        maxBytes: LINK_PREVIEW_MAX_IMAGE_BYTES,
+      },
+    })
   })
 
   it("accepts an octet-stream /favicon.ico and labels it as an icon", async () => {

@@ -1,0 +1,411 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "discardDraft": "丢弃草稿",
+    "followBase": "重新跟随基础提示词",
+    "loadLatest": "放弃我的修改并载入最新版本",
+    "makeDefault": "设为默认",
+    "publish": "发布",
+    "reset": "重置为继承",
+    "retry": "重试",
+    "revertEdits": "撤销我的修改",
+    "save": "保存",
+    "saveCustom": "另存为我的版本",
+    "saveDraft": "保存草稿",
+    "updateVariant": "更新我的变体",
+    "useShipped": "从内置文本开始"
+  },
+  "activation": {
+    "new-session-required": "对新会话生效；正在运行的外部 Agent 会保留启动时的指令。",
+    "next-operation": "下一次使用时生效，无需重启。",
+    "reload-required": "在其所有者重新加载后生效。",
+    "unsupported": "此宿主无法应用。"
+  },
+  "baseSource": {
+    "app-default": "默认系统提示词",
+    "character": "Agent 提示词",
+    "none": "无基础提示词",
+    "session": "本会话的提示词",
+    "team-member": "团队成员覆盖"
+  },
+  "compare": {
+    "against": "对比对象",
+    "diffLabel": "两个版本之间的差异",
+    "identical": "没有差异。",
+    "published": "此范围已发布的版本",
+    "shipped": "内置文本"
+  },
+  "conflict": {
+    "body": "文件在打开后已在磁盘上被修改。你的文本已保留，下方显示磁盘上的改动，请选择保留哪一份。",
+    "diffLabel": "磁盘上的文件与你的文本之间的差异",
+    "keepMine": "用我的文本覆盖保存",
+    "takeDisk": "放弃我的文本并载入文件",
+    "title": "文件已在磁盘上被修改"
+  },
+  "detail": {
+    "missing": "此提示词已不可用。"
+  },
+  "editor": {
+    "insertVariable": "插入 {name}",
+    "length": "{length} / {max}",
+    "shippedLabel": "内置文本",
+    "variableOptional": "可选；截断至 {max} 个字符",
+    "variableRequired": "必填；截断至 {max} 个字符",
+    "variables": "变量"
+  },
+  "facts": {
+    "activation": "修改何时生效",
+    "consumers": "使用方",
+    "hosts": "运行于",
+    "lastUsed": "本窗口内最近一次使用",
+    "outputContract": "输出约定",
+    "overrides": "已覆盖的范围",
+    "requiredFragments": "回复解析依赖的文本",
+    "risk": "编辑风险"
+  },
+  "fallback": {
+    "contract-incompatible": "覆盖内容基于旧版约定编写",
+    "invalid-body": "覆盖内容未通过校验",
+    "pii-blocked": "覆盖内容包含个人信息",
+    "snapshot-unavailable": "无法读取覆盖内容"
+  },
+  "group": {
+    "agents": "Agent 与模式",
+    "chat": "对话",
+    "completion": "补全",
+    "developer": "开发者工具",
+    "generation": "生成",
+    "goals": "目标",
+    "knowledge": "知识与记忆",
+    "permissions": "权限",
+    "routing": "路由",
+    "team": "Agent 团队",
+    "twin": "数字分身"
+  },
+  "history": {
+    "active": "生效中",
+    "compareHint": "从此修订版本到编辑器中文本的改动。",
+    "currentDraft": "草稿",
+    "diffLabel": "从修订版本到编辑器的改动",
+    "empty": "此范围尚未保存任何内容。",
+    "kind": {
+      "draft": "草稿",
+      "published": "已发布",
+      "reset": "重置为继承"
+    },
+    "loadDraft": "载入编辑器",
+    "origin": {
+      "cli": "来自 CLI",
+      "editor": "来自编辑器",
+      "import": "导入",
+      "plugin": "由插件应用",
+      "restore": "恢复"
+    },
+    "restore": "恢复为新修订版本",
+    "restoreInheritance": "恢复继承",
+    "title": "修订历史"
+  },
+  "host": {
+    "app": "应用",
+    "bootstrap": "引导 Agent",
+    "cli": "CLI"
+  },
+  "inspectOnly": {
+    "body": "此文本由解析器或宿主约定读取，仅供查看，不能覆盖。",
+    "title": "只读的协议文本"
+  },
+  "instructionSource": {
+    "extra": "额外指令路径",
+    "global": "全局指令文件",
+    "import": "由其他指令文件导入",
+    "instructions-dir": "项目指令目录",
+    "project": "项目指令文件"
+  },
+  "issues": {
+    "empty": "文本为空。",
+    "malformedPlaceholder": "占位符格式错误；请使用 '{{'name'}}'。",
+    "missingFragment": "必须保留“{fragment}”：回复解析依赖它。",
+    "missingVariable": "必须使用变量 {name}。",
+    "notEditable": "此提示词不可编辑。",
+    "pii": "文本中似乎包含个人信息，提示词不能携带个人信息。",
+    "tooLong": "共 {length} 个字符，上限为 {limit}。",
+    "unknownVariable": "{name} 不是此提示词的变量。"
+  },
+  "kind": {
+    "composer-template": "输入框模板",
+    "feature-template": "功能模板",
+    "procedure": "流程",
+    "project-rule": "项目规则",
+    "protocol": "协议",
+    "role": "角色",
+    "runtime-baseline": "运行时基线"
+  },
+  "lastUsed": {
+    "default": "{time} 使用了内置文本",
+    "fallback": "{time} 使用了内置文本，原因：{reason}",
+    "never": "本窗口打开后尚未使用",
+    "override": "{time} 使用了{scope}范围的覆盖"
+  },
+  "omission": {
+    "bare-mode": "已跳过：精简模式不读取指令文件",
+    "empty": "未设置",
+    "load-failed": "无法读取文件；对话会在没有它们的情况下继续",
+    "no-filesystem": "此宿主没有可读取的项目文件"
+  },
+  "operation": {
+    "activate-procedure": "按需启用",
+    "append-rules": "追加规则",
+    "inspect-only": "只读",
+    "legacy-replace": "替换基础提示词",
+    "narrow-only": "只能收紧",
+    "replace-template": "替换模板"
+  },
+  "owner": {
+    "builtIn": "内置",
+    "customCopyName": "{name}（我的版本）",
+    "customHint": {
+      "character": "保存后会创建此 Agent 的变体，该变体只拥有自己的提示词，其余设置继续跟随原 Agent。",
+      "custom-mode": "保存后会创建你自己的模式副本。",
+      "preset": "保存后会创建你自己的预设副本；在副本上选择“设为默认”即可将其设为默认。",
+      "skill": "保存后会创建你自己的 Skill 副本，并带上其资源。",
+      "subagent-template": "保存后会基于此模板创建你自己的子代理，并保留其设置。",
+      "team-template": "保存后会复制整个模板，仅修改这位队员的提示词。"
+    },
+    "defaultSystemPrompt": "默认系统提示词",
+    "loading": "加载中…",
+    "missing": "此资源已不存在。",
+    "openCustom": "打开我的版本",
+    "openIn": {
+      "agent-modes": "在 Agent 模式中打开",
+      "agent-runtime": "在 Agent 运行时中打开",
+      "characters": "在 Agent 中打开",
+      "chatTemplates": "在会话模板中打开",
+      "presets": "在预设中打开",
+      "skills": "在 Skills 中打开",
+      "squads": "在小队中打开",
+      "subagents": "在子代理中打开"
+    },
+    "ownerOnly": {
+      "composer-template": "会话模板会作为你自己的消息插入，而不是系统指令。请在会话模板中编辑，以保持其参数和修订一致。"
+    },
+    "readFailed": "无法读取此资源",
+    "readOnly": {
+      "built-in": "Cognia 内置",
+      "host-unsupported": "此设备上不可编辑",
+      "immutable": "此 Agent 不能修改",
+      "plugin": "由插件拥有"
+    }
+  },
+  "ownerActivation": {
+    "app-setting": "用于 Agent 和会话都未设置提示词的对话，从下一轮开始生效。",
+    "character": "从与此 Agent 的每个对话的下一轮开始使用。",
+    "composer-template": "在你选择它时插入输入框。",
+    "custom-mode": "从此模式下对话的下一轮开始使用。",
+    "instruction-file": "从磁盘读取；从此工作区的下一轮开始使用。",
+    "preset": "在下次将预设应用到对话时生效；已使用它的对话保留现有配置。",
+    "skill": "由 Skill 运行时在下次加载该 Skill 时提供。",
+    "workspace-instructions": "从此工作区中对话的下一轮开始使用。",
+    "subagent-template": "下次委派给此子代理时使用。",
+    "team-template": "此后用此模板创建的团队会复制这段提示词；已有团队保留各自的副本。"
+  },
+  "preview": {
+    "agent": "Agent",
+    "description": "新对话起始使用的系统提示词，按对话拼接的顺序展示。只能由对话实时生成的部分列在下方。",
+    "failed": "无法生成预览：{message}",
+    "loading": "正在生成预览…",
+    "mode": "模式",
+    "noAgent": "不选 Agent",
+    "noMode": "不选模式",
+    "omittedTitle": "未包含",
+    "railHint": "新对话从这里开始",
+    "refresh": "刷新",
+    "segments": "按发送顺序排列的部分",
+    "sendTimeBody": "这些内容由每一轮根据实时状态（回忆、目标、计划、工具）添加，因此不在此预览。",
+    "sendTimeTitle": "发送时拼接",
+    "size": "{chars} 个字符 · 约 {tokens} 个 token",
+    "skillsCount": "{count} 个 Skill",
+    "skillsNote": "Skill 运行时会在自身预算内提供这些 Skill；具体加载哪些取决于每一轮。",
+    "title": "生效的对话提示词",
+    "total": "{chars} 个字符 · 约 {tokens} 个 token（不含发送时拼接的部分）"
+  },
+  "profile": {
+    "applied": "{count, plural, =0 {没有发布任何内容。} other {已发布 # 个覆盖。}}",
+    "appliedWithConflicts": "已发布 {applied} 个；{conflicted} 个在预览后被修改，已保持不变。",
+    "applyAction": "{count, plural, =0 {发布} other {发布 # 个覆盖}}",
+    "chooseFile": "选择配置文件",
+    "description": "以一个 JSON 文件在不同机器和安装之间迁移已发布的覆盖。",
+    "exportAction": "导出",
+    "exportHint": "所选范围内所有已发布的覆盖。草稿和历史保留在本机。",
+    "exportTab": "导出",
+    "exported": "已导出 {count} 个覆盖。",
+    "importTab": "导入",
+    "invalidFile": "这不是提示词配置文件：{reason}",
+    "mapHint": "这些覆盖属于来源机器上的工作区、Agent 或会话。请选择它们在本机应用的位置，或跳过。",
+    "mapTarget": "{id} 在本机的目标",
+    "mapTitle": "目标",
+    "nothingToExport": "所选范围内没有已发布的内容。",
+    "previewTitle": "{count} 个条目",
+    "skipTarget": "跳过",
+    "status": {
+      "contract-mismatch": "基于其他版本编写",
+      "invalid": "未通过校验",
+      "needs-target": "需要选择目标",
+      "new": "新增",
+      "replace": "替换现有覆盖",
+      "scope-unsupported": "不支持该范围",
+      "unchanged": "已发布相同内容",
+      "unknown-prompt": "未知提示词"
+    },
+    "title": "提示词配置",
+    "upstreamChanged": "内置文本已更新"
+  },
+  "rail": {
+    "allGroups": "全部分组",
+    "allSources": "全部来源",
+    "choose": "选择提示词",
+    "count": "共 {total} 个提示词 · 已修改 {modified} 个",
+    "failed": "无法读取：{sources}",
+    "groupFilter": "分组",
+    "loadFailed": "无法加载提示词：{message}",
+    "loading": "正在加载提示词…",
+    "modified": "已修改",
+    "modifiedOnly": "仅显示已修改",
+    "noMatches": "没有匹配的提示词。",
+    "noWorkspace": "不选工作区",
+    "profiles": "配置",
+    "readOnly": "只读",
+    "search": "搜索提示词",
+    "sourceFilter": "来源",
+    "workspace": "指令文件所属的工作区",
+    "unavailable": "不可用"
+  },
+  "resetDialog": {
+    "bodyAccount": "将移除账户级覆盖，下方的内置文本重新生效。历史会保留，可以恢复。",
+    "bodyScoped": "将移除此覆盖。移除后该位置会回退到下方文本（账户级覆盖或内置文本）；具体对话中仍可能遇到更具体的工作区或 Agent 覆盖。历史会保留。",
+    "title": "重置此覆盖？"
+  },
+  "risk": {
+    "approval-sensitive": "涉及审批",
+    "ordinary": "普通",
+    "protocol": "协议"
+  },
+  "riskNote": {
+    "approval-sensitive": "参与审批决策；自定义版本只能让结果更保守。",
+    "ordinary": "仅影响措辞；不佳的修改只会降低输出质量。",
+    "protocol": "其回复会被解析；必须保留规定的文本。"
+  },
+  "scope": {
+    "account": "账户",
+    "agent": "Agent",
+    "session": "对话",
+    "workspace": "工作区"
+  },
+  "segment": {
+    "base": "基础提示词",
+    "harness": "常驻规则",
+    "instructions": "指令文件",
+    "mode": "模式",
+    "persona": "人设",
+    "skills": "Skills",
+    "workspace": "工作区指令"
+  },
+  "sendTime": {
+    "brief-mode": "简洁模式",
+    "compaction-recovery": "压缩恢复",
+    "goal": "当前目标",
+    "knowledge": "知识",
+    "memory": "记忆回忆",
+    "output-style": "输出风格",
+    "plan": "当前计划",
+    "project-continuity": "项目连续性",
+    "sandbox": "沙箱提示",
+    "team-protocol": "团队协议",
+    "visual-output": "可视化输出"
+  },
+  "source": {
+    "app-setting": "应用设置",
+    "character": "Agent",
+    "code": "内置",
+    "composer-template": "会话模板",
+    "custom-mode": "模式",
+    "instruction-file": "指令文件",
+    "preset": "预设",
+    "skill": "Skill",
+    "workspace-instructions": "工作区",
+    "subagent-template": "子代理",
+    "team-template": "团队模板"
+  },
+  "sourceGroup": {
+    "app-setting": "默认提示词",
+    "character": "Agent",
+    "code": "内置提示词",
+    "composer-template": "会话模板",
+    "custom-mode": "自定义与插件模式",
+    "instruction-file": "指令文件",
+    "preset": "预设",
+    "skill": "Skills",
+    "workspace-instructions": "工作区指令",
+    "subagent-template": "子代理模板",
+    "team-template": "Agent Team 模板"
+  },
+  "status": {
+    "hasDraft": "有未发布的草稿。",
+    "inherits": "此范围未覆盖，使用继承的文本。",
+    "published": "已于 {time} 在此范围发布。"
+  },
+  "tabs": {
+    "compare": "对比",
+    "compareBase": "与基础版本对比",
+    "compareSaved": "与已保存版本对比",
+    "edit": "编辑",
+    "history": "历史（{count}）"
+  },
+  "target": {
+    "choose": {
+      "agent": "选择 Agent",
+      "session": "选择对话",
+      "workspace": "选择工作区"
+    },
+    "none": {
+      "agent": "还没有 Agent。",
+      "session": "还没有对话。",
+      "workspace": "还没有工作区。"
+    },
+    "scope": "范围",
+    "target": "目标"
+  },
+  "toast": {
+    "conflict": "此提示词已在别处被修改。你的文本已保留，请载入最新版本后继续。",
+    "customSaved": "已另存为你自己的版本。",
+    "draftDiscarded": "草稿已丢弃。",
+    "draftSaved": "草稿已保存，发布前不会被使用。",
+    "failed": "失败：{message}",
+    "followsBase": "现在重新跟随基础提示词。",
+    "madeDefault": "{name} 已设为默认。",
+    "published": "已发布，下一次调用即会使用。",
+    "reset": "已重置，继承的文本重新生效。",
+    "restored": "已恢复为新的修订版本。",
+    "saved": "已保存。",
+    "scope": "此提示词不能在该范围覆盖。"
+  },
+  "unavailable": {
+    "title": "当前不可用",
+    "plugin": "此提示词属于插件 {plugin}，该插件未启用。你的文本会保留并包含在导出中，插件以兼容版本重新启用后会再次生效。",
+    "retired": "当前版本的 Cognia 已不再使用此提示词。你的文本会保留并包含在导出中。",
+    "slots": "已保存的覆盖",
+    "hasDraft": "有草稿",
+    "noActive": "没有已发布的文本，只有草稿或重置记录。",
+    "remove": "移除",
+    "confirmTitle": "移除此覆盖？",
+    "confirmBody": "此作用域下的已发布文本、草稿和历史将被永久删除。如需保留副本，请先导出配置。",
+    "removed": "已移除覆盖。"
+  },
+  "warnings": {
+    "contractBody": "此版本中提示词的输入或输出约定已变化。覆盖内容会保留但不会被使用；请按新约定修改后重新发布。",
+    "contractTitle": "覆盖未生效",
+    "staleBody": "在你编辑期间，有人发布或重置了此位置。你的文本已保留。",
+    "staleTitle": "编辑期间已被修改",
+    "upstreamBody": "Cognia 在此覆盖编写后更新了内置文本。可与内置文本对比查看改动。",
+    "upstreamTitle": "内置文本已更新"
+  }
+}

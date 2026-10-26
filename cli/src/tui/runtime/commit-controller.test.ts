@@ -11,6 +11,13 @@ import {
 import type { ExecResult } from "../../agent/run-git"
 import type { TuiAction } from "../state/types"
 import type { ResolvedConfig } from "../../config/schema"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_COMMIT_MESSAGE_PROMPT } from "@/lib/agent/prompts/cli-prompts"
 
 const OK: ExecResult = { stdout: "", stderr: "", code: 0 }
 
@@ -269,5 +276,49 @@ describe("formatCommitMessage with a configured trailer", () => {
     expect(formatCommitMessage("feat: x", "Signed-off-by: A <a@b.c>")).toBe(
       "feat: x\n\nSigned-off-by: A <a@b.c>\n"
     )
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("commit-message Prompt Center override", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders a published workspace override with the staged diff", () => {
+    publishOverride(
+      CLI_COMMIT_MESSAGE_PROMPT,
+      "Gitmoji commit for {{branch}}:\n{{diff}}",
+      "por-commit-1",
+      "workspace",
+      "ws-1"
+    )
+    const ctx = { diff: " +a \n", changedFiles: "a.ts", branch: "feat/x" }
+    expect(buildCommitMessagePrompt(ctx, { workspaceId: "ws-1" })).toBe(
+      "Gitmoji commit for feat/x:\n+a"
+    )
+    expect(buildCommitMessagePrompt(ctx)).toContain("Write a Conventional Commit message")
   })
 })

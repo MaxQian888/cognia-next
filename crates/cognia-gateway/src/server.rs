@@ -1424,20 +1424,7 @@ async fn list_models(
     let visible = |model: &str| -> bool { cfg.model_is_exposed(model) && ctx_allows(&ctx, model) };
 
     let data = if let Some(ticket) = &ctx.ticket {
-        let mut selectors = ticket.model_bindings.keys().cloned().collect::<Vec<_>>();
-        selectors.extend(ticket.candidates.iter().map(|c| c.model_id.clone()));
-        selectors.sort();
-        selectors.dedup();
-        selectors
-            .into_iter()
-            .filter_map(|selector| {
-                let resolved = ticket.resolve_model(&selector)?;
-                let candidates = ticket_base_candidates(&snapshot, ticket, Some(&resolved));
-                candidates.first().map(|candidate| {
-                    model_document(&selector, &candidate.provider, &candidate.model_id)
-                })
-            })
-            .collect()
+        ticket_model_documents(&snapshot, ticket)
     } else {
         let mut data = listable_models(&snapshot, cfg.hide_raw_provider_models, &visible);
         // The `cognia/*` virtual models, for a key that may run them (ADR-0188 D13).
@@ -1450,6 +1437,27 @@ async fn list_models(
         data
     };
     Json(json!({ "object": "list", "data": data })).into_response()
+}
+
+fn ticket_model_documents(snapshot: &RoutingSnapshot, ticket: &RouteTicket) -> Vec<Value> {
+    let mut selectors = if ticket.strict_selectors {
+        ticket.model_bindings.values().cloned().collect::<Vec<_>>()
+    } else {
+        ticket.model_bindings.keys().cloned().collect::<Vec<_>>()
+    };
+    selectors.extend(ticket.candidates.iter().map(|c| c.model_id.clone()));
+    selectors.sort();
+    selectors.dedup();
+    selectors
+        .into_iter()
+        .filter_map(|selector| {
+            let resolved = ticket.resolve_model(&selector)?;
+            let candidates = ticket_base_candidates(snapshot, ticket, Some(&resolved));
+            candidates.first().map(|candidate| {
+                model_document(&selector, &candidate.provider, &candidate.model_id)
+            })
+        })
+        .collect()
 }
 
 async fn get_model(
@@ -1803,12 +1811,17 @@ fn ticket_base_candidates(
             snapshot
                 .provider_by_deployment(&tc.deployment_id)
                 .or_else(|| snapshot.provider(&tc.deployment_id))
-                .map(|p| {
+                .and_then(|p| {
+                    if ticket.strict_selectors
+                        && resolved.is_none_or(|model| !p.models.iter().any(|m| m == model))
+                    {
+                        return None;
+                    }
                     let model_id = match resolved {
                         Some(model) if p.models.iter().any(|m| m == model) => model.to_string(),
                         _ => tc.model_id.clone(),
                     };
-                    Candidate::new(p, &model_id)
+                    Some(Candidate::new(p, &model_id))
                 })
         })
         .collect()
@@ -1913,6 +1926,17 @@ async fn anthropic_count_tokens(
         Some(t) => ticket_base_candidates(&snapshot, t, resolved.as_deref()),
         None => route_candidates(&state, &snapshot, &cfg, &model, &body, &session_id).await,
     };
+    if ticket.as_ref().is_some_and(|t| t.strict_selectors) && candidates.is_empty() {
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded_error",
+            "no ticket candidate is servable by the current snapshot",
+            Some(&model),
+        );
+    }
     let anthropic = candidates
         .iter()
         .find(|c| c.provider.protocol == "anthropic")
@@ -5070,6 +5094,57 @@ mod tests {
             "generatedAtMs": 1
         }))
         .unwrap()
+    }
+
+    fn strict_plan_ticket() -> (RoutingSnapshot, RouteTicket) {
+        let snapshot: RoutingSnapshot = serde_json::from_value(json!({
+            "providers": [{"id":"task", "protocol":"openai", "baseUrl":"https://example.test/v1",
+                "enabled":true, "apiKey":"test", "models":["parent", "child"]}], "generatedAtMs":1
+        }))
+        .unwrap();
+        let request = serde_json::from_value(json!({
+            "sessionId":"task", "executionFingerprint":"plan", "strictSelectors":true,
+            "candidates":[{"deploymentId":"task", "modelId":"parent"}],
+            "modelBindings":{"primary":"parent", "haiku":"child"},
+            "credentialAffinity":"session-sticky", "routePolicy":"gateway-required"
+        }))
+        .unwrap();
+        let ticket = RouteTicketRegistry::new(Arc::new(
+            crate::route_ticket::InMemoryTicketMetaStore::default(),
+        ))
+        .mint(request, Some(&snapshot), 0)
+        .unwrap()
+        .ticket;
+        (snapshot, ticket)
+    }
+
+    #[test]
+    fn strict_plan_models_list_only_real_plan_ids() {
+        let (snapshot, ticket) = strict_plan_ticket();
+        assert_eq!(
+            listed_ids(&ticket_model_documents(&snapshot, &ticket)),
+            vec!["child", "parent"]
+        );
+    }
+
+    #[test]
+    fn strict_plan_routes_exact_model_on_task_deployment_or_refuses() {
+        let (mut snapshot, ticket) = strict_plan_ticket();
+        let candidates =
+            ticket_base_candidates(&snapshot, &ticket, ticket.resolve_model("child").as_deref());
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].provider.id, "task");
+        assert_eq!(candidates[0].model_id, "child");
+        for model in ["unknown", "claude-haiku-x"] {
+            assert!(ticket_base_candidates(
+                &snapshot,
+                &ticket,
+                ticket.resolve_model(model).as_deref()
+            )
+            .is_empty());
+        }
+        snapshot.providers[0].models.retain(|id| id != "child");
+        assert!(ticket_base_candidates(&snapshot, &ticket, Some("child")).is_empty());
     }
 
     fn listed_ids(data: &[Value]) -> Vec<String> {

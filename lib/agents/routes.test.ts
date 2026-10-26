@@ -31,6 +31,8 @@ describe("agents console routes", () => {
   it("recognises only known detail and create modes", () => {
     expect(isAgentDetailMode("edit")).toBe(true)
     expect(isAgentDetailMode("tasks")).toBe(true)
+    expect(isAgentDetailMode("evolve")).toBe(true)
+    expect(agentHref("char_1", "evolve")).toBe("/agents?id=char_1&mode=evolve")
     expect(isAgentDetailMode("work")).toBe(false)
     expect(isAgentDetailMode(null)).toBe(false)
     expect(isAgentCreateMode("blank")).toBe(true)

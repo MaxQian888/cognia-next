@@ -24,7 +24,7 @@
  *   })
  */
 
-import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
+import type { PluginCharacterPackDef } from "@cognia/plugin-contract/types/plugin/plugin-character-pack"
 
 const KNOWN_TTS_PROVIDERS = new Set([
   "system",

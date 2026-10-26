@@ -26,6 +26,39 @@ const okResult = (overrides?: Partial<RunAndCaptureResult>): RunAndCaptureResult
 })
 
 describe("createGateController", () => {
+  it("cancels only one child's approval and ignores its late signal after resolution", async () => {
+    const opened: string[] = []
+    const gate = createGateController((req) => opened.push(req.toolName))
+    const first = new AbortController(),
+      second = new AbortController()
+    const a = gate.responder({ toolName: "child-a" } as never, first.signal)
+    const b = gate.responder({ toolName: "child-b" } as never, second.signal)
+    first.abort()
+    await expect(a).resolves.toMatchObject({ decision: "deny" })
+    expect(gate.peek()?.toolName).toBe("child-b")
+    expect(opened).toEqual(["child-a", "child-b"])
+    gate.resolve({ decision: "allow" })
+    await expect(b).resolves.toEqual({ decision: "allow" })
+    const sibling = gate.responder({ toolName: "sibling" } as never)
+    second.abort()
+    expect(gate.peek()?.toolName).toBe("sibling")
+    gate.resolve({ decision: "allow" })
+    await expect(sibling).resolves.toEqual({ decision: "allow" })
+  })
+
+  it("does not enqueue a cancelled pre-check after it resolves", async () => {
+    let finish!: (value: undefined) => void
+    const opened = jest.fn()
+    const gate = createGateController(opened, () => new Promise((resolve) => (finish = resolve)))
+    const controller = new AbortController()
+    const pending = gate.responder({ toolName: "child" } as never, controller.signal)
+    controller.abort()
+    await expect(pending).resolves.toMatchObject({ decision: "deny" })
+    finish(undefined)
+    await Promise.resolve()
+    expect(opened).not.toHaveBeenCalled()
+    expect(gate.isPending()).toBe(false)
+  })
   it("settles pending pre-checks on cancel and ignores their late approval", async () => {
     let finishCheck!: (value: undefined) => void
     const requests = jest.fn()

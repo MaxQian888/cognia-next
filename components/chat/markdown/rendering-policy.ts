@@ -104,6 +104,22 @@ export function chatMarkdownUrlTransform(url: string, key?: string): string {
   return ""
 }
 
+/**
+ * URL policy for Markdown a third party wrote (an inbound IM message or card):
+ * web and mail links only, and inline images only from the web or a data URL.
+ * Relative, `file:` and `tel:` targets are dropped: the chat resolves those
+ * against the user's project or OS, which a sender must not be able to steer.
+ */
+export function untrustedMarkdownUrlTransform(url: string, key?: string): string {
+  if (/^data:image\//i.test(url)) return key === "src" ? url : ""
+  const colon = url.indexOf(":")
+  if (colon === -1) return ""
+  const protocol = url.slice(0, colon).toLowerCase()
+  if (protocol === "http" || protocol === "https") return url
+  if (protocol === "mailto") return key === "src" ? "" : url
+  return ""
+}
+
 /** Streamdown raw parsing with the finalized renderer's safe allow-list. */
 export const chatStreamdownRehypePlugins: NonNullable<StreamdownProps["rehypePlugins"]> = [
   rehypeRaw,

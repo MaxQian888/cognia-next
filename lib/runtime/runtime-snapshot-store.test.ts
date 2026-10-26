@@ -66,6 +66,17 @@ it("carries the host's published ceilings through to the client", () => {
   expect(snapshot.limits?.attachmentAcceptTypes).toContain("image/*")
 })
 
+it("carries a person partition declaration only when the Host makes one", () => {
+  expect(
+    "personPartition" in
+      runtimeHostSnapshotFromManifest(buildLocalHostFeatureManifest({ platform: "headless" }))
+  ).toBe(false)
+  const snapshot = runtimeHostSnapshotFromManifest(
+    buildLocalHostFeatureManifest({ platform: "headless", personPartition: true })
+  )
+  expect(snapshot.personPartition).toBe(true)
+})
+
 it("reaches subscribers when only the ceilings changed", () => {
   const base = runtimeHostSnapshotFromManifest(buildLocalHostFeatureManifest({ platform: "tauri" }))
   const listener = jest.fn()
@@ -120,6 +131,21 @@ it("reaches subscribers when only the HostState scope changed", () => {
     accountId: "acct-b",
     runtimeTargetId: "target-b",
   })
+  listener.mockClear()
+
+  // P5d: becoming (or leaving) a person partition must reach subscribers too.
+  setRuntimeSnapshot({
+    target: null,
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: {
+      ...base,
+      hostStateScope: { accountId: "acct-b", runtimeTargetId: "target-b" },
+      personPartition: true,
+    },
+  })
+  expect(listener).toHaveBeenCalledTimes(1)
+  expect(getRuntimeSnapshot().host?.personPartition).toBe(true)
   unsubscribe()
 })
 

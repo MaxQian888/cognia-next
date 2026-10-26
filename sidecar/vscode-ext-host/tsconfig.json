@@ -10,7 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "declaration": false,
+    "declaration": true,
     "sourceMap": true,
     "allowJs": false,
     "types": ["node"]

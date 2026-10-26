@@ -21,8 +21,8 @@
  * identity pass-through for the other half of the contract.
  */
 
-import type { PluginBotDef } from "@/types/plugin/plugin-bot"
-import type { BotHandlerV1 } from "@/types/bot/run"
+import type { PluginBotDef } from "@cognia/plugin-contract/types/plugin/plugin-bot"
+import type { BotHandlerV1 } from "@cognia/plugin-contract/types/bot/run"
 
 export function defineBot<const T extends PluginBotDef>(def: T): T {
   return def

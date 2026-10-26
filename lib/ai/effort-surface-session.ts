@@ -11,7 +11,6 @@
 import { useSettingsStore } from "@/stores/settings"
 import { runtimeRefForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { resolveEffortSurface, type EffortSurface } from "@/lib/ai/effort-surface"
-import type { ChatSession } from "@cognia/agent-config-types"
 import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import {
   cachedConversationSurface,
@@ -20,6 +19,8 @@ import {
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { activeAgentModelFor } from "@/lib/ai/agent/external/session/active-agent-model"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import type { EffortSessionColumns } from "@cognia/plugin-contract/lib/ai/effort-surface-session"
+export type { EffortSessionColumns } from "@cognia/plugin-contract/lib/ai/effort-surface-session"
 
 /** The agent a lane dispatches to: its id, or the host configuration's. */
 function laneAgentId(ref: AgentRuntimeRef): string | null {
@@ -71,19 +72,6 @@ function reasoningSignature(sessionId: string | undefined, ref: AgentRuntimeRef)
     surface?.choices.map((choice) => [choice.modelId, choice.capabilities?.reasoning ?? null]),
   ])
 }
-
-/**
- * The session columns the ladder reads. The external-agent columns are
- * optional so a caller holding only the core three still gets an answer; it
- * then describes the agent's default model, as a new conversation would.
- */
-export type EffortSessionColumns = Pick<ChatSession, "id" | "model" | "providerOverride"> &
-  Partial<
-    Pick<
-      ChatSession,
-      "externalAgentModels" | "externalAgentSession" | "externalAgentGatewaySessions"
-    >
-  >
 
 /**
  * The same answer, for a caller that has a session row but no React.

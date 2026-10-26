@@ -33,10 +33,48 @@ describe("resolveTurnComposition", () => {
       selection: { presetId: "standard" },
       supportedToolPresentations: ["native" as const],
     }
-    const a = await resolveTurnComposition({ ...base, systemPrompt: "one" })
-    const b = await resolveTurnComposition({ ...base, systemPrompt: "two" })
+    const a = await resolveTurnComposition({ ...base, prompt: { systemPrompt: "one" } })
+    const b = await resolveTurnComposition({ ...base, prompt: { systemPrompt: "two" } })
     expect(a.promptDigest).not.toBe(b.promptDigest)
     expect(a.compositionDigest).not.toBe(b.compositionDigest)
+  })
+
+  // F1: the send used to digest `systemPrompt ?? appendSystemPrompt`, so with a
+  // base present an appended Plan / goal / output-style section never reached
+  // the identity even though the runtime sent it.
+  it("changes the prompt digest when only the appended sections change", async () => {
+    const base = {
+      presets,
+      selection: { presetId: "standard" },
+      supportedToolPresentations: ["native" as const],
+    }
+    const plain = await resolveTurnComposition({
+      ...base,
+      prompt: { systemPrompt: "base", appendSystemPrompt: "plan mode" },
+    })
+    const goal = await resolveTurnComposition({
+      ...base,
+      prompt: { systemPrompt: "base", appendSystemPrompt: "goal section" },
+    })
+    expect(plain.promptDigest).not.toBe(goal.promptDigest)
+    expect(plain.compositionDigest).not.toBe(goal.compositionDigest)
+  })
+
+  it("changes the prompt digest when only the SDK overlay prompt changes", async () => {
+    const base = {
+      presets,
+      selection: { presetId: "standard" },
+      supportedToolPresentations: ["native" as const],
+    }
+    const a = await resolveTurnComposition({
+      ...base,
+      prompt: { systemPrompt: "base", sdkSystemPrompt: { type: "custom", prompt: "one" } },
+    })
+    const b = await resolveTurnComposition({
+      ...base,
+      prompt: { systemPrompt: "base", sdkSystemPrompt: { type: "custom", prompt: "two" } },
+    })
+    expect(a.promptDigest).not.toBe(b.promptDigest)
   })
 
   // Tool order is part of the request identity: providers are order-sensitive.
@@ -62,7 +100,7 @@ describe("resolveTurnComposition", () => {
       presets,
       selection: { presetId: "standard" },
       supportedToolPresentations: ["native" as const],
-      systemPrompt: "same",
+      prompt: { systemPrompt: "same", appendSystemPrompt: "tail" },
       tools: toolSurfaceFromNames(["read"]),
     }
     const a = await resolveTurnComposition(input)

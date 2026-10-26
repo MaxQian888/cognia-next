@@ -3,7 +3,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { ConversationOverrideForm } from "./conversation-override-form"
@@ -753,7 +753,7 @@ describe("ConversationOverrideForm", () => {
       updatedAt: 0,
     }
     await getDb().conversationOverrides.put(initial)
-    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true)
+    const user = userEvent.setup()
     renderForm(
       <ConversationOverrideForm
         adapterId="lark-1"
@@ -763,7 +763,18 @@ describe("ConversationOverrideForm", () => {
       />
     )
 
-    fireEvent.click(screen.getByTestId("conv-override-promote-to-adapter"))
+    await user.click(screen.getByTestId("conv-override-promote-to-adapter"))
+    const first = await screen.findByTestId("conv-override-promote-confirm")
+    // The changed fields are listed one per line, not run together.
+    const changes = within(first).getByTestId("conv-override-promote-changes")
+    expect(within(changes).getAllByRole("listitem").length).toBeGreaterThan(1)
+    await user.click(within(first).getByTestId("conv-override-promote-confirm-confirm"))
+    // The ceiling / HITL change needs its own, second yes.
+    const second = await screen.findByTestId("conv-override-promote-permission-confirm")
+    expect(await getDb().adapterInstances.get("lark-1")).not.toMatchObject({
+      builtInSkillCeiling: ["lark.calendar.*"],
+    })
+    await user.click(within(second).getByTestId("conv-override-promote-permission-confirm-confirm"))
     await waitFor(async () => {
       expect(await getDb().adapterInstances.get("lark-1")).toMatchObject({
         defaultMode: "manual",
@@ -771,9 +782,65 @@ describe("ConversationOverrideForm", () => {
         requireHitlForWrites: false,
       })
     })
-    expect(confirm).toHaveBeenCalledTimes(2)
     expect(await getDb().conversationOverrides.get(initial.id)).toEqual(initial)
-    confirm.mockRestore()
+  })
+
+  it("promotes nothing when the second, permission-wide confirmation is declined", async () => {
+    await getDb().adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const initial: ConversationOverrideRow = {
+      id: "co-promote",
+      conversationKey: "lark:lark-1:oc_promote",
+      sessionId: "s_promote",
+      mode: "manual",
+      allowedBuiltInSkillIds: ["lark.calendar.*"],
+      requireHitlForWrites: false,
+      pinned: true,
+      archived: true,
+      slaResponseMinutes: 15,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.put(initial)
+    const user = userEvent.setup()
+    renderForm(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey={initial.conversationKey}
+        sessionId={initial.sessionId}
+        initialRow={initial}
+      />
+    )
+
+    await user.click(screen.getByTestId("conv-override-promote-to-adapter"))
+    const first = await screen.findByTestId("conv-override-promote-confirm")
+    // The changed fields are listed one per line, not run together.
+    const changes = within(first).getByTestId("conv-override-promote-changes")
+    expect(within(changes).getAllByRole("listitem").length).toBeGreaterThan(1)
+    await user.click(within(first).getByTestId("conv-override-promote-confirm-confirm"))
+    // The ceiling / HITL change needs its own, second yes.
+    const second = await screen.findByTestId("conv-override-promote-permission-confirm")
+    expect(await getDb().adapterInstances.get("lark-1")).not.toMatchObject({
+      builtInSkillCeiling: ["lark.calendar.*"],
+    })
+    await user.click(within(second).getByTestId("conv-override-promote-permission-confirm-cancel"))
+    await waitFor(() =>
+      expect(screen.queryByTestId("conv-override-promote-permission-confirm")).toBeNull()
+    )
+    expect(await getDb().adapterInstances.get("lark-1")).toMatchObject({ defaultMode: "auto" })
+    expect(await getDb().conversationOverrides.get(initial.id)).toEqual(initial)
   })
 
   /**

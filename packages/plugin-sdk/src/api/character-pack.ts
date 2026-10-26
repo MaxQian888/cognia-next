@@ -3,7 +3,9 @@
 import type {
   PluginCharacterDef,
   PluginCharacterPackDef,
-} from "@/types/plugin/plugin-character-pack"
+} from "@cognia/plugin-contract/types/plugin/plugin-character-pack"
+import type { LocalCharacterPackSignature } from "@cognia/plugin-contract/api/character-pack"
+export type { LocalCharacterPackSignature } from "@cognia/plugin-contract/api/character-pack"
 
 export {
   defineCharacterPack,
@@ -12,19 +14,13 @@ export {
 } from "../define/define-character-pack"
 
 export type { PluginCharacterDef, PluginCharacterPackDef }
-export type { PluginCharacterPackWarning } from "@/lib/plugin/character-pack/validate-requires"
+export type { PluginCharacterPackWarning } from "@cognia/plugin-contract/lib/plugin/character-pack/validate-requires"
 
 export const CHARACTER_PACK_FILE_SCHEMA_VERSION = 2 as const
 export const SUPPORTED_CHARACTER_PACK_SCHEMA_VERSIONS = new Set<number>([1, 2])
 export const SUPPORTED_SCHEMA_VERSIONS = SUPPORTED_CHARACTER_PACK_SCHEMA_VERSIONS
 
 export type CharacterPackFileSchemaVersion = 1 | 2
-
-export interface LocalCharacterPackSignature {
-  algo: "ed25519"
-  pubKey: string
-  sig: string
-}
 
 export interface LocalCharacterPackFile {
   schemaVersion: CharacterPackFileSchemaVersion

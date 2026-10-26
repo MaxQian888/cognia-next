@@ -104,7 +104,9 @@ describe("sweepVideoAppData", () => {
   it("counts only what it removed; a file held open waits for the next sweep", async () => {
     files.set(VIDEOS, new Map([["vjob_orphan.mp4", NOW]]))
     heldOpen.add(`${VIDEOS}/vjob_orphan.mp4`)
-    await expect(sweepVideoAppData(deps([]))).resolves.toMatchObject({ orphanVideos: 0 })
+    const report = { failed: 0, unknown: 0, skipped: false, removed: 0 }
+    await expect(sweepVideoAppData(deps([]), report)).resolves.toMatchObject({ orphanVideos: 0 })
+    expect(report.failed).toBe(1)
     expect(files.get(VIDEOS)!.has("vjob_orphan.mp4")).toBe(true)
   })
 

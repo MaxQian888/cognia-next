@@ -165,6 +165,24 @@ describe("notification-integration", () => {
       }
     )
 
+    it("honors explicitly enabled maintenance completion with due reminders off", async () => {
+      const optedIn = {
+        ...mockTask,
+        type: "connection:presence:refresh",
+        notification: {
+          ...mockTask.notification,
+          dueReminder: false,
+          channels: ["toast"],
+        },
+      } as ScheduledTask
+
+      await notifyTaskEvent(optedIn, mockExecution, "complete")
+
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ channels: ["center", "toast"], level: "success" })
+      )
+    })
+
     it("should skip notification if channels contains none", async () => {
       const taskWithNone = {
         ...mockTask,

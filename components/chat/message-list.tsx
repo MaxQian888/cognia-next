@@ -16,6 +16,7 @@ import { deleteMessage as deleteMessageOnDesktop } from "@/lib/claude/ipc"
 import { deleteStoredMessage } from "@/lib/db/messages"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
+import { useUIStore } from "@/stores/ui/ui-store"
 import { ConversationTimeline } from "./minimap/conversation-timeline"
 import { shouldMountTimeline } from "./minimap/timeline-visibility"
 import { ActiveTurnPublisher } from "./active-turn-publisher"
@@ -153,7 +154,8 @@ export function MessageList({
   // the Inbox detail pane and at ~50% in split view, and the timeline is
   // positioned against the pane. See `timeline-visibility.ts`.
   const paneRef = useRef<HTMLDivElement | null>(null)
-  const paneWidth = useElementWidth(paneRef)
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+  const paneWidth = useElementWidth(paneRef, sidebarCollapsed)
   const tActions = useTranslations("mobile.messageActions")
   const tJump = useTranslations("chat.jump")
   const tSelect = useTranslations("chat.transcriptSelection")
@@ -465,6 +467,26 @@ export function MessageList({
     // loop, which spins the list even when nothing is happening.
     measureElement: (el) => Math.round(el?.getBoundingClientRect().height ?? 0),
   })
+
+  // The new View Transition image stays live. Waiting for row observers after
+  // a sidebar resize lets stale offsets correct themselves during the motion.
+  // Measure only mounted history rows in the layout phase; keep cached heights
+  // for off-screen history and let the existing scroll owner preserve the foot.
+  useIsomorphicLayoutEffect(() => {
+    if (!virtualize) return
+    const rows = contentRef.current?.querySelectorAll<HTMLElement>(
+      ':scope > div > [data-msg-id][data-index]:not([data-index="-1"])'
+    )
+    rows?.forEach((row) => {
+      // measureElement deliberately skips some reads while scrolling. This
+      // explicit layout change must settle even if a recent pin is scrolling.
+      rowVirtualizer.resizeItem(
+        Number(row.dataset.index),
+        Math.round(row.getBoundingClientRect().height)
+      )
+    })
+    pinNow()
+  }, [sidebarCollapsed, paneWidth, rowVirtualizer, virtualize, pinNow])
 
   // Hand the live tail back to the virtual list when the turn seals.
   //

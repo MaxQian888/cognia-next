@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -167,6 +168,89 @@ describe("TunnelTab", () => {
     )
     expect(mockStart).toHaveBeenLastCalledWith(expect.any(String), undefined, { replace: true })
     expect(screen.queryByTestId("tunnel-conflict")).toBeNull()
+  })
+
+  it("asks in a modal dialog that names the host holding the tunnel", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockStart.mockResolvedValueOnce({
+      kind: "busy",
+      current: { localUrl: "https://127.0.0.1:27890", publicUrl: "https://old.trycloudflare.com" },
+    })
+    const user = userEvent.setup()
+    wrap(<TunnelTab />)
+    await user.click(await screen.findByTestId("tunnel-start"))
+    const dialog = await screen.findByRole("alertdialog", {
+      name: enMessages.settings.connections.tunnel.busyTitle,
+    })
+    expect(dialog).toHaveAccessibleDescription(
+      expect.stringContaining("https://127.0.0.1:27890 at https://old.trycloudflare.com")
+    )
+    expect(screen.getByRole("button", { name: "Replace the tunnel" })).toBeInTheDocument()
+  })
+
+  it("keeps the existing tunnel on Keep it and returns focus to Start", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockStart.mockResolvedValueOnce({
+      kind: "busy",
+      current: { localUrl: "https://127.0.0.1:27890", publicUrl: "https://old.trycloudflare.com" },
+    })
+    const user = userEvent.setup()
+    wrap(<TunnelTab />)
+    const start = await screen.findByTestId("tunnel-start")
+    await user.click(start)
+    await screen.findByRole("alertdialog")
+    await user.click(screen.getByRole("button", { name: "Keep it" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(mockStart).toHaveBeenCalledTimes(1)
+    expect(start).toHaveFocus()
+  })
+
+  it("Escape keeps the existing tunnel", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockStart.mockResolvedValueOnce({
+      kind: "busy",
+      current: { localUrl: "https://127.0.0.1:27890", publicUrl: "https://old.trycloudflare.com" },
+    })
+    const user = userEvent.setup()
+    wrap(<TunnelTab />)
+    await user.click(await screen.findByTestId("tunnel-start"))
+    await screen.findByRole("alertdialog")
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(mockStart).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays open and inert while the replacement runs, then focuses Stop", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockStart.mockResolvedValueOnce({
+      kind: "busy",
+      current: { localUrl: "https://127.0.0.1:27890", publicUrl: "https://old.trycloudflare.com" },
+    })
+    let finish: (value: unknown) => void = () => {}
+    mockStart.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const user = userEvent.setup()
+    wrap(<TunnelTab />)
+    await user.click(await screen.findByTestId("tunnel-start"))
+    await screen.findByRole("alertdialog")
+    await user.click(screen.getByTestId("tunnel-conflict-replace"))
+    expect(screen.getByRole("alertdialog")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByTestId("tunnel-conflict-replace")).toBeDisabled()
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    await act(async () =>
+      finish({
+        kind: "started",
+        info: { publicUrl: "https://new.trycloudflare.com", localUrl: "http://127.0.0.1:7891" },
+      })
+    )
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(mockStart).toHaveBeenLastCalledWith(expect.any(String), undefined, { replace: true })
+    expect(screen.getByTestId("tunnel-stop")).toHaveFocus()
   })
 
   it("says what a tunnel started elsewhere is exposing instead of claiming it", async () => {

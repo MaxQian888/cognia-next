@@ -37,6 +37,7 @@ import {
   offboardFromOrg,
   removeFromWorkspace,
   revokeInvitation,
+  transferOrgOwnership,
   type ChangeOrgRoleInput,
   type ChangeWorkspaceRoleInput,
   type InviteToOrgInput,
@@ -44,7 +45,15 @@ import {
   type MembershipAdminDeps,
   type OffboardFromOrgInput,
   type RemoveFromWorkspaceInput,
+  type TransferOrgOwnershipInput,
 } from "@/lib/collab/membership-admin"
+import { hasAction } from "@/lib/collab/capabilities"
+import { subscribeCollabScopeChanged } from "@/lib/collab/scope-events"
+import {
+  useOrgCapabilities,
+  type OrgCapabilitiesView,
+  type UseOrgCapabilitiesDeps,
+} from "@/hooks/collab/use-org-capabilities"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { getOrgMembership, resolveWorkspaceAccessFor } from "@/lib/db/identity"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
@@ -65,6 +74,13 @@ export interface MembershipAdminState {
   canManageWorkspace: boolean
   /** Org owner or admin: may change org roles and offboard. */
   canManageOrg: boolean
+  /** Org owner: may hand the org to another member. */
+  canTransferOwnership: boolean
+  /**
+   * The server's capabilities answer. When it is `ready`, the three `can*`
+   * flags above come from its action list; otherwise from the projection.
+   */
+  capabilities: OrgCapabilitiesView
   selfUserId: string | null
   /** The canonical id plus every legacy alias the binding remembers. */
   selfUserIds: string[]
@@ -79,6 +95,7 @@ export interface MembershipAdminState {
   removeFromWorkspace: (input: Omit<RemoveFromWorkspaceInput, "workspaceId">) => Promise<void>
   changeOrgRole: (input: ChangeOrgRoleInput) => Promise<void>
   offboardFromOrg: (input: OffboardFromOrgInput) => Promise<void>
+  transferOwnership: (input: TransferOrgOwnershipInput) => Promise<void>
   /** Read from the server each time: invitations are not mirrored locally. */
   listInvitations: () => Promise<CollabInvitation[]>
   revokeInvitation: (invitationId: string, reason: string) => Promise<CollabInvitation>
@@ -86,6 +103,7 @@ export interface MembershipAdminState {
 
 export interface UseMembershipAdminDeps extends MembershipAdminDeps {
   resolveContext?: () => Promise<CurrentCollabContext | null>
+  capabilities?: UseOrgCapabilitiesDeps
   registry?: Pick<UserBindingRegistry, "get">
   refresh?: (localAccountId: string) => Promise<RefreshCollabPlaneResult | null>
 }
@@ -167,6 +185,9 @@ export function useMembershipAdmin(
   const [selfUserIds, setSelfUserIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<MembershipAdminFailure | null>(null)
+  /** Bumped when the profile switches org, so the context is resolved again. */
+  const [scopeVersion, setScopeVersion] = useState(0)
+  useEffect(() => subscribeCollabScopeChanged(() => setScopeVersion((value) => value + 1)), [])
 
   const resolveContext = deps.resolveContext ?? resolveCurrentCollabContext
   const registry = useMemo(() => deps.registry ?? new UserBindingRegistry(), [deps.registry])
@@ -206,7 +227,7 @@ export function useMembershipAdmin(
     return () => {
       cancelled = true
     }
-  }, [resolveContext, registry])
+  }, [resolveContext, registry, scopeVersion])
 
   const accessQuery = useLiveQuery<EffectiveWorkspaceAccess | null>(
     () =>
@@ -254,8 +275,30 @@ export function useMembershipAdmin(
     [deps.refresh]
   )
 
-  const canManageOrg = orgRole === "owner" || orgRole === "admin"
-  const canManageWorkspace = access?.capability === "manage"
+  const capabilityDeps = useMemo<UseOrgCapabilitiesDeps>(
+    () => ({ resolveContext, ...deps.capabilities }),
+    [resolveContext, deps.capabilities]
+  )
+  const capabilities = useOrgCapabilities(workspaceId, capabilityDeps)
+
+  // The server's action list wins once it has answered. The projection is the
+  // fallback for an older server, offline, or the first paint: it can show a
+  // control the server then refuses, never authorize one.
+  const fromServer = capabilities.status === "ready" ? capabilities.capabilities : null
+  const canManageOrg = fromServer
+    ? hasAction(fromServer, "org.members.manage")
+    : orgRole === "owner" || orgRole === "admin"
+  const canManageWorkspace = fromServer
+    ? hasAction(fromServer, "workspace.members.manage")
+    : access?.capability === "manage"
+  const canTransferOwnership = fromServer
+    ? hasAction(fromServer, "org.ownership.transfer")
+    : orgRole === "owner"
+
+  // A role or ownership write can change the writer's own standing (stepping
+  // down after a transfer is the obvious one), so ask again once it settles.
+  const refreshCapabilities = capabilities.refresh
+  const afterWrite = <T>(write: Promise<T>): Promise<T> => write.finally(refreshCapabilities)
 
   return {
     status,
@@ -265,6 +308,8 @@ export function useMembershipAdmin(
     orgRole,
     canManageWorkspace,
     canManageOrg,
+    canTransferOwnership,
+    capabilities,
     selfUserId: context?.userId ?? selfUserIds[0] ?? null,
     selfUserIds,
     busy,
@@ -276,17 +321,24 @@ export function useMembershipAdmin(
       }),
     inviteToOrg: (input) => run((ready) => inviteToOrg(ready, input)),
     changeWorkspaceRole: (input) =>
-      run((ready) => {
-        if (!workspaceId) throw new MembershipAdminError({ kind: "no-workspace" })
-        return changeWorkspaceRole(ready, { ...input, workspaceId }, adminDeps)
-      }),
+      afterWrite(
+        run((ready) => {
+          if (!workspaceId) throw new MembershipAdminError({ kind: "no-workspace" })
+          return changeWorkspaceRole(ready, { ...input, workspaceId }, adminDeps)
+        })
+      ),
     removeFromWorkspace: (input) =>
-      run((ready) => {
-        if (!workspaceId) throw new MembershipAdminError({ kind: "no-workspace" })
-        return removeFromWorkspace(ready, { ...input, workspaceId }, adminDeps)
-      }),
-    changeOrgRole: (input) => run((ready) => changeOrgRole(ready, input, adminDeps)),
-    offboardFromOrg: (input) => run((ready) => offboardFromOrg(ready, input, adminDeps)),
+      afterWrite(
+        run((ready) => {
+          if (!workspaceId) throw new MembershipAdminError({ kind: "no-workspace" })
+          return removeFromWorkspace(ready, { ...input, workspaceId }, adminDeps)
+        })
+      ),
+    changeOrgRole: (input) => afterWrite(run((ready) => changeOrgRole(ready, input, adminDeps))),
+    offboardFromOrg: (input) =>
+      afterWrite(run((ready) => offboardFromOrg(ready, input, adminDeps))),
+    transferOwnership: (input) =>
+      afterWrite(run((ready) => transferOrgOwnership(ready, input, adminDeps))),
     listInvitations: () => run((ready) => listInvitations(ready)),
     revokeInvitation: (invitationId, reason) =>
       run((ready) => revokeInvitation(ready, invitationId, reason)),

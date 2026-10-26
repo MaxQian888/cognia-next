@@ -74,7 +74,8 @@ export interface ExtractProjectClaimsInput {
   projectHint?: string
 }
 
-const SYSTEM_PROMPT = [
+/** The project-claim extractor's shipped system prompt. */
+export const PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT = [
   "You extract durable facts about a SOFTWARE PROJECT from a slice of its own",
   "development conversation. You are not describing the user; you are describing",
   "the project.",
@@ -195,7 +196,16 @@ function parseEvidence(
 export async function extractProjectClaims(
   input: ExtractProjectClaimsInput,
   client: LlmClient,
-  options: { propagateErrors?: boolean } = {}
+  options: {
+    propagateErrors?: boolean
+    /**
+     * The system prompt to send; defaults to
+     * {@link PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT}. A host that lets the user
+     * customize the wording resolves it and passes it here; the JSON shape the
+     * parser reads is asked for in the user prompt.
+     */
+    systemPrompt?: string
+  } = {}
 ): Promise<ProjectClaimCandidate[]> {
   const attachmentMessageIds = new Set(input.attachments?.map((item) => item.messageId))
   const usable = input.messages.filter(
@@ -219,7 +229,7 @@ export async function extractProjectClaims(
   let raw: string
   try {
     raw = await client.complete(buildUserPrompt({ ...input, messages: usable }), {
-      system: SYSTEM_PROMPT,
+      system: options.systemPrompt ?? PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT,
       temperature: 0,
       maxTokens: 1_024,
     })

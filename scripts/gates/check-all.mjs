@@ -87,11 +87,8 @@ const REGISTRY = [
   { script: "format:check", group: "format" },
 
   { script: "typecheck", group: "types", resource: "package-build" },
+  { script: "typecheck:workspaces", group: "types", resource: "package-build" },
   { script: "knip", group: "types", resource: "package-build" },
-  // The extension workspace is excluded from the root tsc (chrome globals,
-  // its own JSX transform), so it needs its own entry or
-  // it would be typechecked by nothing.
-  { script: "browser-ext:typecheck", group: "types" },
   // The sidecar runs its TypeScript unbuilt under Node's type stripping and is
   // excluded from the root tsc (its own lib/resolution contract, ADR-0197), so
   // this is the only thing that type-checks it.
@@ -258,6 +255,7 @@ const REGISTRY = [
   { script: "lint:frozen-wasm-api", group: "audit" },
   { script: "lint:claude-md", group: "audit" },
   { script: "plugin:author-imports", group: "audit" },
+  { script: "plugin:sdk:standalone", group: "audit" },
 
   // Mirrored config / version files must agree across the tree.
   { script: "release:sync-keys:check", group: "sync" },
@@ -284,7 +282,7 @@ const REGISTRY = [
   // verification-shaped script in package.json wired to nothing, which is
   // exactly what gates:registry exists to catch: without it, a regression in
   // the stager is invisible until an installed build ships without RepoWiki.
-  { script: "plugin:bundled:stage:test", group: "gate-tests" },
+  { script: "plugin:artifacts:test", group: "gate-tests" },
   // Rust because the glob picks up scripts/dev/agent-proxy.test.mjs, which
   // drives the native sandbox launcher. The script builds that bin first; five
   // of its assertions are a usage error rather than a test without it.
@@ -402,8 +400,8 @@ const CONTRACT_INPUTS = [
 const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
 const GATE_INPUTS = {
   typecheck: FRONTEND_INPUTS,
-  knip: [...FRONTEND_INPUTS, "browser-extension/", "docs/app/", "docs/lib/"],
-  "browser-ext:typecheck": ["browser-extension/", "packages/", "lib/", "types/"],
+  "typecheck:workspaces": [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "docs/"],
+  knip: [...FRONTEND_INPUTS, "docs/app/", "docs/lib/"],
   "sidecar:typecheck": CONTRACT_INPUTS,
   "build:packages": CONTRACT_INPUTS,
   "author-types:check": CONTRACT_INPUTS,
@@ -439,7 +437,7 @@ function matchesInput(path, input) {
 function fullQualityReason(changePlan) {
   if (changePlan.mode === "full") return changePlan.reason
   if (changePlan.deletedFiles.length) return "Deleted or renamed paths require full validation"
-  const knownInputs = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "browser-extension/", "docs/"]
+  const knownInputs = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "docs/"]
   for (const path of changePlan.changedFiles) {
     // Configuration and dependency pins can affect every gate, even when they
     // belong to a single workspace. Tooling changes also invalidate selection.

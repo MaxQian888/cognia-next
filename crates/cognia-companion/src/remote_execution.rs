@@ -376,6 +376,34 @@ async fn execute_inner(
 ) -> Result<ExecutionOutcome, Problem> {
     let descriptor = super::command_manifest::descriptor(&request.command)
         .ok_or_else(|| missing_command_problem(&request.request_id, &request.command))?;
+    let admission = super::host_surface_gate::authorize_execution(
+        state, &descriptor.capability, &descriptor.arm, &request.principal, &request.args,
+    ).await?;
+    let org_authority = if descriptor.capability == super::org_policy::CAPABILITY {
+        Some(super::org_policy::caller(&request.args, &request.principal).await?)
+    } else { None };
+    let partition = super::host_surface_gate::person_partition(
+        &descriptor.capability, &descriptor.arm, &request.principal,
+    ).await?;
+    let _person_request = if let Some(person) = partition.as_ref() {
+        let fleet = super::person_partition::fleet().ok_or_else(|| super::person_partition::unavailable("person_brain_unavailable"))?;
+        Some(fleet.acquire(person).await.map_err(super::person_partition::unavailable)?)
+    } else { None };
+    let receipt_scope = _person_request.as_ref().map(|lease| lease.receipt_scope());
+    super::org_policy::scope(org_authority, super::person_partition::scope_receipts(receipt_scope, super::person_partition::scope(partition,
+        execute_with_admission(state, request, descriptor, admission),
+    ))).await
+}
+
+async fn execute_with_admission(state: &SharedState, request: ExecutionRequest, descriptor: &CommandDescriptor,
+    admission: Option<cognia_external_agent::spawn_authority::ExecutionAdmission>) -> Result<ExecutionOutcome, Problem> {
+    cognia_external_agent::spawn_authority::with_execution_admission(
+        admission, execute_admitted(state, request, descriptor),
+    ).await
+}
+
+async fn execute_admitted(state: &SharedState, request: ExecutionRequest,
+    descriptor: &CommandDescriptor) -> Result<ExecutionOutcome, Problem> {
     authorize_transport(&request, descriptor)?;
     if let Err(error) = authorize_capability(&request, descriptor) {
         super::audit::record_async(
@@ -391,16 +419,21 @@ async fn execute_inner(
         .await;
         return Err(error);
     }
-    authorize_approval(&request, descriptor)?;
+    if descriptor.capability == super::org_policy::CAPABILITY {
+        super::org_policy::authorize_request(state, &request).await?;
+    } else {
+        authorize_approval(&request, descriptor)?;
+    }
+    let (input, plane) = partition_unleased_input(&request, descriptor);
     validate_contract_value(
         &request.request_id,
         &request.command,
-        &request.args,
+        input.as_ref().unwrap_or(&request.args),
         cognia_headless_contract::ContractDirection::Input,
-        contract_plane_for(&request.principal.scope),
+        plane,
     )?;
 
-    if request.principal.scope != "service" {
+    if !crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
         // Which bucket this call is charged to is the same question as whether
         // it can change anything, and the manifest already answers it. Reads go
         // to the wide bucket (`RateLimitConfig::read_only_default`), which was
@@ -469,20 +502,43 @@ async fn execute_inner(
             &store, &request, &request_hash, now, dispatch(state, &request),
         ).await;
     }
+    execute_receipted_request(&store, &request, &request_hash, now, dispatch(state, &request)).await
+}
+
+fn receipt_idempotency_key(request: &ExecutionRequest) -> Result<String, Problem> {
+    let key = request.idempotency_key.as_deref().expect("validated UUID key");
+    if let Some((org, user)) = super::org_policy::current_authority() {
+        return Ok(super::security_store::OrgReceiptScope::new(&org, &user).key(key));
+    }
+    if let Some(person) = super::person_partition::current() {
+        let scope = super::person_partition::receipt_scope()
+            .filter(|scope| scope.account_id == person.account_id)
+            .ok_or_else(|| store_unavailable(&request.request_id))?;
+        return Ok(scope.key(key));
+    }
+    Ok(key.to_owned())
+}
+
+async fn execute_receipted_request(
+    store: &crate::security_store::SecurityStore, request: &ExecutionRequest,
+    request_hash: &str, now: i64,
+    dispatch: impl std::future::Future<Output = Result<Value, Problem>>,
+) -> Result<ExecutionOutcome, Problem> {
+    let idempotency_key = receipt_idempotency_key(request)?;
     let operation_id = match store
         .begin_idempotent_operation(
             &request.principal.tenant_id,
             &request.principal.device_id,
             &local_host_id(),
-            idempotency_key,
-            &request_hash,
+            &idempotency_key,
+            request_hash,
             now,
         )
         .map_err(|error| map_store_error(&request.request_id, error))?
     {
         IdempotencyDecision::InProgress { operation_id } => {
             return Ok(ExecutionOutcome::Accepted {
-                request_id: request.request_id,
+                request_id: request.request_id.clone(),
                 operation_id,
             });
         }
@@ -496,7 +552,7 @@ async fn execute_inner(
         .mark_operation_running(&request.principal.tenant_id, &operation_id, now)
         .map_err(|error| map_store_error(&request.request_id, error))?;
 
-    match dispatch(state, &request).await {
+    match dispatch.await {
         Ok(result) => {
             if let Err(mut error) = validate_contract_value(
                 &request.request_id,
@@ -510,7 +566,7 @@ async fn execute_inner(
                     .complete_idempotent_operation(
                         &request.principal.tenant_id,
                         &request.principal.device_id,
-                        idempotency_key,
+                        &idempotency_key,
                         &receipt.to_string(),
                         false,
                         unix_time_secs(),
@@ -524,14 +580,14 @@ async fn execute_inner(
                 .complete_idempotent_operation(
                     &request.principal.tenant_id,
                     &request.principal.device_id,
-                    idempotency_key,
+                    &idempotency_key,
                     &receipt.to_string(),
                     true,
                     unix_time_secs(),
                 )
                 .map_err(|error| map_store_error(&request.request_id, error))?;
             Ok(ExecutionOutcome::Completed {
-                request_id: request.request_id,
+                request_id: request.request_id.clone(),
                 operation_id: Some(operation_id),
                 result,
                 replayed: false,
@@ -543,7 +599,7 @@ async fn execute_inner(
                 .complete_idempotent_operation(
                     &request.principal.tenant_id,
                     &request.principal.device_id,
-                    idempotency_key,
+                    &idempotency_key,
                     &receipt.to_string(),
                     false,
                     unix_time_secs(),
@@ -586,8 +642,30 @@ async fn execute_host_semantic_request(
 /// service-scope arguments untouched, so the two planes accept different — and
 /// both correct — request shapes. Validating everything against the service
 /// shape rejected every device `git_*` request with 422 before dispatch.
+/// The device plane requires `adminLease` on every interactive command, and a
+/// partitioned person-host-state submit is exempt from the lease
+/// (`authorize_approval`). Its body is validated as the un-leased shape the
+/// service plane publishes, without any lease a client still attached (the
+/// brain strips that field anyway). Every other request is unchanged.
+fn partition_unleased_input(
+    request: &ExecutionRequest,
+    descriptor: &CommandDescriptor,
+) -> (Option<Value>, cognia_headless_contract::ContractPlane) {
+    if descriptor.approval != CommandApproval::Interactive
+        || partition_host_state_capability(&descriptor.arm).is_none()
+    {
+        return (None, contract_plane_for(&request.principal.scope));
+    }
+    let mut input = request.args.clone();
+    if let Some(map) = input.as_object_mut() {
+        map.remove("adminLease");
+        map.remove("admin_lease");
+    }
+    (Some(input), cognia_headless_contract::ContractPlane::Service)
+}
+
 fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
-    if scope == "service" {
+    if crate::jwt::is_service_scope(Some(scope.as_ref())) {
         cognia_headless_contract::ContractPlane::Service
     } else {
         cognia_headless_contract::ContractPlane::Device
@@ -713,14 +791,24 @@ pub(super) fn command_admitted(
     descriptor: &CommandDescriptor,
     request_id: &str,
 ) -> Result<bool, Problem> {
-    let service_principal = principal.scope == "service";
+    command_admitted_in_mode(principal, transport, descriptor, request_id, super::deployment::deployment_mode())
+}
+
+fn command_admitted_in_mode(principal: &DeviceContext, transport: ExecutionTransport, descriptor: &CommandDescriptor,
+    request_id: &str, mode: super::deployment::DeploymentMode) -> Result<bool, Problem> {
+    // The service catalog stays the whole remote set on every Host (the
+    // Brain validates against it); single-user calls to the org commands are
+    // refused at dispatch with org_scope_unavailable, and no single-user
+    // device grant carries org.policy.manage.
+    let service_principal = crate::jwt::is_service_scope(Some(principal.scope.as_ref()));
     if !transport_admits(service_principal, transport, descriptor) {
         return Ok(false);
     }
     if service_principal {
         return Ok(true);
     }
-    capability_granted(principal, descriptor.capability.as_str(), request_id)
+    let capability = org_policy_device_capability(descriptor, mode).unwrap_or(descriptor.capability.as_str());
+    capability_granted(principal, capability, request_id)
 }
 
 #[allow(clippy::result_large_err)]
@@ -729,7 +817,7 @@ fn authorize_transport(
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
     let allowed = transport_admits(
-        request.principal.scope == "service",
+        crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())),
         request.transport,
         descriptor,
     );
@@ -749,12 +837,22 @@ fn authorize_capability(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
-    if request.principal.scope == "service" {
+    if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) {
         return Ok(());
     }
+    let partition = partition_host_state_capability(&descriptor.arm);
+    // The Host gate already required live org.policy.manage. A tenant admin
+    // needs ordinary device data access, never operator secret.manage/host.admin.
+    let org_policy = org_policy_device_capability(descriptor, super::deployment::deployment_mode());
+    let payload = super::payload_capability::payload_required_capability(&request.command, &request.args);
     let required = [
-        Some(descriptor.capability.as_str()),
-        super::payload_capability::payload_required_capability(&request.command, &request.args),
+        Some(org_policy.unwrap_or_else(|| partition.unwrap_or(descriptor.capability.as_str()))),
+        // A control attach in a partition drives only its owner's own data:
+        // the Remote Control grant (`workspace.write`) is the owner writing it.
+        match (partition, payload) {
+            (Some(_), Some("workspace.write")) => Some("client.write"),
+            (_, payload) => payload,
+        },
     ];
     for capability in required.into_iter().flatten() {
         let granted = capability_granted(&request.principal, capability, &request.request_id)?;
@@ -772,6 +870,19 @@ fn authorize_capability(
     Ok(())
 }
 
+fn org_policy_device_capability(descriptor: &CommandDescriptor, mode: super::deployment::DeploymentMode) -> Option<&'static str> {
+    (descriptor.capability == super::org_policy::CAPABILITY
+        && super::org_policy::COMMANDS.contains(&descriptor.arm.as_str())
+        && mode == super::deployment::DeploymentMode::MultiTenant).then_some("client.read")
+}
+
+/// Only the gate's typed, admitted partition can select this capability.
+/// Request arguments (including callerPartition) cannot weaken device grants.
+fn partition_host_state_capability(arm: &str) -> Option<&'static str> {
+    super::person_partition::current()?;
+    super::host_surface_policy::POLICY.as_ref().ok()?.person_host_state_capability(arm)
+}
+
 fn snapshot_capability_decision(principal: &DeviceContext, capability: &str) -> Option<bool> {
     principal
         .authorization_capabilities
@@ -787,9 +898,12 @@ fn authorize_approval(
     // The loopback-only service principal is the policy authority for the
     // internal Brain plane. Device transports must still present interactive
     // leases or signed host policies according to the manifest.
-    if request.principal.scope == "service" && request.transport == ExecutionTransport::Internal {
+    if crate::jwt::is_service_scope(Some(request.principal.scope.as_ref())) && request.transport == ExecutionTransport::Internal {
         return Ok(());
     }
+    // P5d submits mutate only the partition owner's data. Dormant execution
+    // intents are refused per action by that brain; no Host admin lease applies.
+    if partition_host_state_capability(&descriptor.arm).is_some() { return Ok(()); }
     match descriptor.approval {
         CommandApproval::None => Ok(()),
         // The command that MINTS a lease cannot be asked to present one. Its
@@ -973,6 +1087,117 @@ fn local_host_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p6a_org_static_grants_cannot_weaken_operator_credential_commands() {
+        let original = super::super::command_manifest::descriptor("host_provider_credential_set").unwrap();
+        assert!(org_policy_device_capability(original, super::super::deployment::DeploymentMode::MultiTenant).is_none());
+        let mut org = original.clone();
+        org.capability = super::super::org_policy::CAPABILITY.into();
+        org.arm = "org_model_credential_set".into();
+        assert_eq!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::MultiTenant), Some("client.read"));
+        let admin_device = execution_request("device", Some(vec!["client.read".into()]));
+        assert!(command_admitted_in_mode(&admin_device.principal, ExecutionTransport::Http, &org, "p6a", super::super::deployment::DeploymentMode::MultiTenant).unwrap());
+        assert!(!command_admitted_in_mode(&admin_device.principal, ExecutionTransport::Http, original, "p6a", super::super::deployment::DeploymentMode::MultiTenant).unwrap());
+        assert!(!command_admitted_in_mode(&admin_device.principal, ExecutionTransport::Http, &org, "p6a", super::super::deployment::DeploymentMode::SingleUser).unwrap());
+        let no_grants = execution_request("device", Some(vec![]));
+        assert!(!command_admitted_in_mode(&no_grants.principal, ExecutionTransport::Http, &org, "p6a", super::super::deployment::DeploymentMode::MultiTenant).unwrap());
+        assert!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::SingleUser).is_none());
+        org.arm = "host_provider_credential_set".into();
+        assert!(org_policy_device_capability(&org, super::super::deployment::DeploymentMode::MultiTenant).is_none());
+    }
+
+    #[tokio::test]
+    async fn p6a_org_receipts_are_namespaced_by_verified_org_and_user() {
+        let mut request = execution_request("device", None);
+        request.idempotency_key = Some(Uuid::new_v4().to_string());
+        let key = |org: &str, user: &str| super::super::org_policy::scope(Some((org.into(), user.into())), async {
+            receipt_idempotency_key(&request).unwrap()
+        });
+        let a = key("org_p6a_one", "usr_p6a_one").await;
+        assert_eq!(a, key("org_p6a_one", "usr_p6a_one").await);
+        assert_ne!(a, key("org_p6a_two", "usr_p6a_one").await);
+        assert_ne!(a, key("org_p6a_one", "usr_p6a_two").await);
+        assert_eq!(receipt_idempotency_key(&request).unwrap(), request.idempotency_key.unwrap());
+    }
+
+    #[tokio::test]
+    async fn p5_partition_receipts_execute_again_after_purge_and_never_replay_for_another_person() {
+        use crate::person_partition::{scope, scope_receipts, PersonPartition, PersonReceiptScope};
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("device", None);
+        request.command = "register_push_token".into();
+        request.idempotency_key = Some(Uuid::new_v4().to_string());
+        let person = PersonPartition::new("org_a".into(), "usr_aaa".into());
+        let first = PersonReceiptScope { account_id: person.account_id.clone(), data_generation: Uuid::new_v4().to_string() };
+        let executions = std::sync::atomic::AtomicUsize::new(0);
+        let run = |person, receipt| scope_receipts(Some(receipt), scope(Some(person), async {
+            execute_receipted_request(&store, &request, "same-hash", unix_time_secs(), async {
+                executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Value::Null)
+            }).await.unwrap()
+        }));
+        let old_id = match run(person.clone(), first.clone()).await {
+            ExecutionOutcome::Completed { operation_id: Some(id), replayed: false, .. } => id,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(matches!(run(person.clone(), first.clone()).await, ExecutionOutcome::Completed { replayed: true, .. }));
+        let b = PersonPartition::new("org_a".into(), "usr_bbb".into());
+        let b_scope = PersonReceiptScope { account_id: b.account_id.clone(), data_generation: Uuid::new_v4().to_string() };
+        assert!(matches!(run(b, b_scope.clone()).await, ExecutionOutcome::Completed { replayed: false, .. }));
+        assert!(store.person_operation("tenant-a", "device-a", &old_id, &b_scope).unwrap().is_none());
+        assert_eq!(store.purge_person_receipts(&person.account_id).unwrap(), 1);
+        let fresh = PersonReceiptScope { data_generation: Uuid::new_v4().to_string(), ..first };
+        assert!(matches!(run(person, fresh).await, ExecutionOutcome::Completed { operation_id: Some(id), replayed: false, .. } if id != old_id));
+        assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn p5_single_user_receipt_key_result_and_replay_remain_legacy() {
+        let store = SecurityStore::in_memory().unwrap();
+        let mut request = execution_request("device", None);
+        request.command = "register_push_token".into(); request.idempotency_key = Some(Uuid::new_v4().to_string());
+        assert_eq!(receipt_idempotency_key(&request).unwrap(), request.idempotency_key.clone().unwrap());
+        let first = execute_receipted_request(&store, &request, "hash", unix_time_secs(), async { Ok(Value::Null) }).await.unwrap();
+        let ExecutionOutcome::Completed { operation_id: Some(id), result, replayed: false, .. } = first else { panic!("first execution"); };
+        assert_eq!(result, Value::Null);
+        let replay = execute_receipted_request(&store, &request, "hash", unix_time_secs(), async { panic!("legacy receipt must replay") }).await.unwrap();
+        assert!(matches!(replay, ExecutionOutcome::Completed { operation_id: Some(replayed_id), result: Value::Null, replayed: true, .. } if replayed_id == id));
+        assert!(store.operation_person_account("tenant-a", "device-a", &id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn p4_runtime_dispatch_receives_typed_admission_and_clears_it_after_the_request() {
+        use cognia_external_agent::spawn_authority::{execution_admission, ExecutionAdmission, PlacementBinding};
+        use crate::*;
+        struct Runtime { expected: Option<PlacementBinding> }
+        #[async_trait::async_trait]
+        impl crate::runtime::CompanionRuntime for Runtime {
+            fn ide_relay_routes(&self) -> axum::Router<SharedState> { axum::Router::new() }
+            fn can_dispatch(&self, _: &SharedState) -> bool { true }
+            async fn dispatch(&self, _: &str, args: Value, _: &SharedState, _: &DeviceContext, _: ExecutionPlane) -> crate::runtime::DispatchResult {
+                assert!(args.get("binding").is_none(), "authority must not be injected into request args");
+                assert_eq!(execution_admission().map(|decision| decision.binding), self.expected);
+                Ok(Value::String("Running".into()))
+            }
+        }
+        let decision = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "host-run".into() }, actions: vec!["execution.request".into(), "workspace.read".into()] };
+        for admission in [None, Some(decision)] {
+            let state = Arc::new(CompanionState {
+                secret: parking_lot::RwLock::new(vec![0; 32]), deny_list: Arc::new(deny_list::DenyList::new()), renderer: None,
+                runtime: Arc::new(Runtime { expected: admission.as_ref().map(|decision| decision.binding.clone()) }),
+                idempotency: Arc::new(idempotency::IdempotencyCache::new()), event_bus: event_bus::EventBus::new(),
+                sync_bridge: sync_bridge::SyncBridge::new(), desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
+                desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(), sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
+                rate_limiter: rate_limit::RateLimiter::with_defaults(), push_tokens: push::PushTokenRegistry::new(),
+            });
+            let request = ExecutionRequest::new("get_external_agent_status", json!({"agent_id":"agent"}),
+                execution_request("service", None).principal, ExecutionTransport::Internal, None);
+            let descriptor = command_manifest::descriptor(&request.command).unwrap();
+            assert!(matches!(execute_with_admission(&state, request, descriptor, admission).await.unwrap(), ExecutionOutcome::Completed { result: Value::String(_), .. }));
+            assert!(execution_admission().is_none());
+        }
+    }
 
     fn execution_request(scope: &str, capabilities: Option<Vec<String>>) -> ExecutionRequest {
         ExecutionRequest::new(
@@ -1164,6 +1389,57 @@ mod tests {
             request_rate_limit_class(send, &json!({ "method": "getContextUsage" })),
             rate_limit_class(send)
         );
+    }
+
+    #[tokio::test]
+    async fn p5d_partition_capability_and_approval_do_not_change_legacy_calls() {
+        for arm in ["host_state_status", "host_state_snapshot", "host_state_submit", "host_feature_manifest", "session_attach", "session_detach"] {
+            let descriptor = super::super::command_manifest::descriptor(arm).unwrap();
+            let mut request = execution_request("device", Some(vec!["client.read".into(), "client.write".into()]));
+            request.command = arm.into();
+            request.args = json!({"callerPartition":true});
+            assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
+            let partition = super::super::person_partition::PersonPartition::new("org".into(), "user".into());
+            super::super::person_partition::scope(Some(partition), async {
+                assert!(authorize_capability(&request, descriptor).is_ok());
+                assert!(authorize_approval(&request, descriptor).is_ok());
+                if arm == "session_attach" {
+                    // A control attach (the absent mode) needs the owner's write grant.
+                    request.principal.authorization_capabilities = Some(vec!["client.read".into()]);
+                    assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
+                    request.args = json!({"callerPartition":true, "mode":"observe"});
+                    assert!(authorize_capability(&request, descriptor).is_ok());
+                }
+                request.principal.authorization_capabilities = Some(vec![]);
+                assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
+                assert!(partition_host_state_capability("shell_exec").is_none());
+            }).await;
+            request.principal.authorization_capabilities = Some(vec![descriptor.capability.clone()]);
+            assert!(authorize_capability(&request, descriptor).is_ok());
+            if arm == "host_state_submit" {
+                assert_eq!(authorize_approval(&request, descriptor).unwrap_err().code, "interactive_approval_required");
+            } else { assert!(authorize_approval(&request, descriptor).is_ok()); }
+        }
+    }
+
+    #[tokio::test]
+    async fn p5d_partition_submit_validates_the_unleased_shape_only_in_a_partition() {
+        let descriptor = super::super::command_manifest::descriptor("host_state_submit").unwrap();
+        let mut request = execution_request("device", Some(vec!["client.write".into()]));
+        request.command = "host_state_submit".into();
+        request.args = json!({"accountId":"a", "adminLease":"lease"});
+        let (input, plane) = partition_unleased_input(&request, descriptor);
+        assert!(input.is_none());
+        assert_eq!(plane, cognia_headless_contract::ContractPlane::Device);
+        let partition = super::super::person_partition::PersonPartition::new("org".into(), "user".into());
+        super::super::person_partition::scope(Some(partition), async {
+            let (input, plane) = partition_unleased_input(&request, descriptor);
+            assert_eq!(input, Some(json!({"accountId":"a"})));
+            assert_eq!(plane, cognia_headless_contract::ContractPlane::Service);
+            // A non-interactive partition arm keeps its own plane.
+            let status = super::super::command_manifest::descriptor("host_state_status").unwrap();
+            assert!(partition_unleased_input(&request, status).0.is_none());
+        }).await;
     }
 
     #[test]

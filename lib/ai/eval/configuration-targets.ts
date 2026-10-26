@@ -12,6 +12,8 @@ interface ConfigurationTargetDependencies {
   getSettings(): Promise<AppSettings>
   saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings>
   getCharacter(id: string): Promise<Character | undefined>
+  /** The effective agent (variants resolved); the `agent-harness` target reads through it. */
+  resolveCharacter?(id: string): Promise<Character | undefined>
   updateCharacter(
     id: string,
     patch: Partial<Omit<Character, "id" | "createdAt" | "isBuiltIn">>
@@ -57,6 +59,7 @@ async function defaultDependencies(): Promise<ConfigurationTargetDependencies> {
     getSettings: settings.getSettings,
     saveSettings: settings.saveSettings,
     getCharacter: characters.getCharacter,
+    resolveCharacter: characters.resolveCharacterById,
     updateCharacter: characters.updateCharacter,
     getWorkflow: workflows.getWorkflow,
     updateWorkflow: workflows.updateWorkflow,
@@ -74,6 +77,24 @@ function assertString(value: unknown, field: string): string {
     throw new Error(`${field} is required for the recommended configuration`)
   }
   return value
+}
+
+async function harnessTarget(
+  dependencies: ConfigurationTargetDependencies
+): Promise<EvalConfigurationApplicationDeps> {
+  const [{ harnessApplicationDeps }, { resolveCharacterById }] = await Promise.all([
+    import("@/lib/harness/runtime/adoption"),
+    import("@/lib/db/characters"),
+  ])
+  return harnessApplicationDeps({
+    resolveCharacter: dependencies.resolveCharacter ?? resolveCharacterById,
+    updateCharacter: dependencies.updateCharacter,
+    saveApply: dependencies.saveRecord,
+    getApply: dependencies.getRecord,
+    updateApply: dependencies.updateRecord,
+    now: dependencies.now,
+    newId: dependencies.newId,
+  })
 }
 
 export function createEvalConfigurationApplicationDeps(
@@ -95,6 +116,11 @@ export function createEvalConfigurationApplicationDeps(
         const { readActivePredictorPointer } =
           await import("@/lib/router-fusion/eval/predictor-pointer")
         return { ...(await readActivePredictorPointer()) }
+      }
+      // An evolved agent harness (ADR-0237): its own projection and writer, so
+      // a rollback started from any surface restores exactly what was applied.
+      if (target.targetType === "agent-harness") {
+        return (await harnessTarget(dependencies)).read(target)
       }
       if (target.targetType === "character") {
         const character = await dependencies.getCharacter(target.targetId)
@@ -125,6 +151,10 @@ export function createEvalConfigurationApplicationDeps(
         await writeActivePredictorPointer(parseActivePredictorPointer(value), {
           now: dependencies.now(),
         })
+        return
+      }
+      if (target.targetType === "agent-harness") {
+        await (await harnessTarget(dependencies)).write(target, value)
         return
       }
       if (target.targetType === "character") {

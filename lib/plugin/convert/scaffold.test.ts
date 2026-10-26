@@ -70,6 +70,7 @@ describe("renderPackageJson", () => {
     expect(pkg.dependencies).toBeUndefined()
     expect(pkg.devDependencies["@cognia/plugin-sdk"]).toBeTruthy()
     expect(pkg.devDependencies.esbuild).toBeTruthy()
+    expect(pkg.devDependencies.typescript).toBe("^7.0.2")
   })
 })
 

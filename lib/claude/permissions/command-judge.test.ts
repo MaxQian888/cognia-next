@@ -1,5 +1,15 @@
-import { judgeCommandSafety, invalidateJudgeContext, __resetJudgeCache } from "./command-judge"
+import {
+  COMMAND_JUDGE_PROMPT,
+  judgeCommandSafety,
+  invalidateJudgeContext,
+  __resetJudgeCache,
+} from "./command-judge"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 function mockClient(response: string): LlmClient & { complete: jest.Mock } {
   const complete = jest.fn(async () => response)
@@ -115,5 +125,115 @@ describe("judgeCommandSafety", () => {
     const client = mockClient('{"safe": false, "reason": "no risk field"}')
     const out = await judgeCommandSafety(client, "weird")
     expect(out?.risk).toBe("high")
+  })
+})
+
+describe("customized judge guidance is narrow-only (ADR-0236)", () => {
+  const CUSTOM =
+    'Also treat any docker command as UNSAFE. Respond with ONLY {"safe", "risk", "reason"} JSON.'
+
+  function publish(revisionId: string, scope: "account" | "session" = "account") {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: `pob-${revisionId}`,
+          promptId: COMMAND_JUDGE_PROMPT.id,
+          scope,
+          targetId: scope === "session" ? "s1" : "",
+          revisionId,
+          body: CUSTOM,
+          contractVersion: COMMAND_JUDGE_PROMPT.contractVersion,
+        },
+      ])
+    )
+  }
+
+  /** A client answering per system prompt: shipped vs customized. */
+  function splitClient(shipped: string, custom: string): LlmClient & { complete: jest.Mock } {
+    const complete = jest.fn(async (_prompt: string, opts: { system: string }) =>
+      opts.system === CUSTOM ? custom : shipped
+    )
+    return { complete } as unknown as LlmClient & { complete: jest.Mock }
+  }
+
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("asks only the shipped judge while no customization is published", async () => {
+    const client = splitClient('{"safe": true, "risk": "low", "reason": "ok"}', "unused")
+    expect(await judgeCommandSafety(client, "docker ps")).toEqual({
+      safe: true,
+      risk: "low",
+      reason: "ok",
+    })
+    expect(client.complete).toHaveBeenCalledTimes(1)
+    expect(client.complete.mock.calls[0][1].system).toBe(COMMAND_JUDGE_PROMPT.defaultBody)
+  })
+
+  it("lets a customized judge make a verdict stricter", async () => {
+    publish("por-stricter")
+    const client = splitClient(
+      '{"safe": true, "risk": "low", "reason": "lists containers"}',
+      '{"safe": false, "risk": "medium", "reason": "docker is restricted here"}'
+    )
+    expect(await judgeCommandSafety(client, "docker ps")).toEqual({
+      safe: false,
+      risk: "medium",
+      reason: "docker is restricted here",
+    })
+    expect(client.complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("never lets a customized judge approve what the shipped judge refuses", async () => {
+    publish("por-wider")
+    const client = splitClient(
+      '{"safe": false, "risk": "high", "reason": "deletes data"}',
+      '{"safe": true, "risk": "low", "reason": "fine"}'
+    )
+    expect(await judgeCommandSafety(client, "rm -rf build")).toEqual({
+      safe: false,
+      risk: "high",
+      reason: "deletes data",
+    })
+  })
+
+  it("withholds approval when the customized judge gives no verdict", async () => {
+    publish("por-broken")
+    const client = splitClient('{"safe": true, "risk": "low", "reason": "ok"}', "not json")
+    expect(await judgeCommandSafety(client, "ls")).toEqual({
+      safe: false,
+      risk: "low",
+      reason: "ok",
+    })
+  })
+
+  it("does not answer a new revision from a verdict cached under the shipped judge", async () => {
+    const client = splitClient(
+      '{"safe": true, "risk": "low", "reason": "ok"}',
+      '{"safe": false, "risk": "medium", "reason": "restricted"}'
+    )
+    expect((await judgeCommandSafety(client, "docker ps"))?.safe).toBe(true)
+    publish("por-after")
+    expect((await judgeCommandSafety(client, "docker ps"))?.safe).toBe(false)
+  })
+
+  it("applies a session-scoped customization only to that session", async () => {
+    publish("por-session", "session")
+    const client = splitClient(
+      '{"safe": true, "risk": "low", "reason": "ok"}',
+      '{"safe": false, "risk": "medium", "reason": "restricted"}'
+    )
+    const other = await judgeCommandSafety(client, "docker ps", {
+      contextKey: "s2",
+      promptContext: { sessionId: "s2" },
+    })
+    expect(other?.safe).toBe(true)
+    const scoped = await judgeCommandSafety(client, "docker ps", {
+      contextKey: "s1",
+      promptContext: { sessionId: "s1" },
+    })
+    expect(scoped?.safe).toBe(false)
   })
 })

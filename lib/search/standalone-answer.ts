@@ -35,6 +35,8 @@ import { searchWithAppSettings } from "./configured-search"
 import { redactText } from "@cognia/redact"
 import { wrapUntrustedContent } from "@/lib/web/untrusted-content"
 import { useSettingsStore } from "@/stores/settings"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { STANDALONE_SEARCH_ANSWER_PROMPT } from "./standalone-answer-prompt"
 
 export {
   StandaloneSearchError,
@@ -56,6 +58,9 @@ export const STANDALONE_SEARCH_ANSWER_FEATURE = "standalone-search-answer"
 export async function runStandaloneSearchAnswer(
   params: RunStandaloneSearchParams
 ): Promise<StandaloneSearchAnswer> {
+  const systemPrompt = (await resolvePromptAsync(STANDALONE_SEARCH_ANSWER_PROMPT)).text
+  // The caller may have given up while the prompt resolved.
+  params.signal?.throwIfAborted()
   // The provider `resolveModel` resolved for this call, so the ledger prices the
   // very deployment the synthesis runs on. Scoped to this one call.
   let resolvedProviderId: string | null = null
@@ -99,6 +104,7 @@ export async function runStandaloneSearchAnswer(
             }),
       sanitizeText: (text) => redactText(text).redacted,
       wrapUntrustedContent,
+      systemPrompt,
     }
   )
 }

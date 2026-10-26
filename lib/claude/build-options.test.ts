@@ -60,6 +60,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   // assertions below are about the tool names it emits.
   resolveMcpDisallowedToolNames:
     jest.requireActual("@/lib/db/mcp-servers").resolveMcpDisallowedToolNames,
+  loadMcpServerToolNames: jest.fn(async () => []),
 }))
 
 jest.mock("@/lib/db/teams", () => ({
@@ -78,6 +79,14 @@ jest.mock("@/stores/agent", () => ({
 jest.mock("@/stores/agent/agent-runtime-store", () => ({
   useAgentRuntimeStore: { getState: jest.fn(() => ({})) },
   compositionForSession: jest.fn(() => ({ presetId: "standard" })),
+}))
+
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: jest.fn(() => ({ getAgentCapabilityProfile: jest.fn() })),
+}))
+
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: jest.fn(() => null),
 }))
 
 jest.mock("@/stores/agent/custom-mode-store", () => ({
@@ -283,7 +292,18 @@ import {
   sandboxSessionRuntime,
 } from "@/lib/sandbox/session-runtime"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
-import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
+import {
+  buildMcpServerMapResolved,
+  listEnabledMcpServers,
+  loadMcpServerToolNames,
+} from "@/lib/db/mcp-servers"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
+import { createSession, getSession } from "@/lib/db/sessions"
+import { getDb } from "@/lib/db/schema"
+import { persistModelSelection } from "@/lib/chat/model-selection"
+import { createPreset, setDefaultPreset } from "@/lib/db/prompt-presets"
+import { getSettings, saveSettings as persistSettings } from "@/lib/db/settings"
+import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
 import {
   listEnabledSkillsByIds,
   listSkillsByIds,
@@ -296,6 +316,7 @@ import { getTeam } from "@/lib/db/teams"
 import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@cognia/logging"
+import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
 import * as standaloneMode from "@/lib/runtime/standalone-mode"
 import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -321,13 +342,14 @@ import {
   externalAgentProviderId,
 } from "@/lib/ai/agent/external/session/session-models"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
-import type {
-  AppSettings,
-  Character,
-  ChatSession,
-  Skill,
-  Team,
-  TeamMember,
+import {
+  DEFAULT_BUILTIN_TOOLS,
+  type AppSettings,
+  type Character,
+  type ChatSession,
+  type Skill,
+  type Team,
+  type TeamMember,
 } from "@cognia/agent-config-types"
 import { RESOLVED_SPEC_VERSION } from "@cognia/agent-config-types/agent-execution"
 import type { Project } from "@/types"
@@ -487,6 +509,24 @@ describe("resolveSendOptions — session working set", () => {
 })
 
 describe("resolveSendOptions — Cognia Support safety", () => {
+  it("keeps global runtime capability preferences out of the Support safety clamp", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "char_builtin_support" }),
+      capabilityGrants: [
+        {
+          schemaVersion: 1,
+          source: { kind: "scheduler", id: "support-task" },
+          permissionProfile: { workspace: "ask" },
+        },
+      ],
+      appSettings: {
+        claudeCodeRuntime: { allowNestedUserNamespaces: true, unattendedRetry: { enabled: true } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.toolSurface).toBe("none")
+    expect(opts.claudeAgentSdk).toBeUndefined()
+  })
+
   it("replaces normal Agent overlays with read-only docs and redacted diagnostics context", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({
@@ -844,12 +884,254 @@ describe("resolveSendOptions — opt-in Auto routing", () => {
       ...(autoRouting ? { autoRouting } : {}),
     }) as unknown as AppSettings
 
+  describe("default preset through first send", () => {
+    const fixture = createDbTestFixture()
+    beforeAll(fixture.initialize)
+    beforeEach(fixture.restore)
+    afterAll(fixture.dispose)
+
+    it("routes the persisted preset-backed session through Auto on its first send", async () => {
+      await persistSettings({
+        ...settings(),
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+      })
+      const preset = await createPreset({
+        name: "First send preset",
+        content: "Keep the preset instruction when routing automatically.",
+        model: "claude-sonnet-4-6",
+      })
+      await setDefaultPreset(preset.id)
+      const created = await createSession()
+      const session = await getSession(created.id)
+      expect(session).toMatchObject({ systemPrompt: preset.content, activePresetId: preset.id })
+      const opts = await resolveSendOptions({
+        session: session!,
+        appSettings: await getSettings(),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      expect(opts.routingPlan?.requested).toEqual({ kind: "auto" })
+      expect(opts.model).toBe("claude-opus-4-8")
+      expect(opts.model).not.toBe(preset.model)
+      expect(opts.autoRouting?.tier).toBe("powerful")
+      expect(opts.systemPrompt).toContain(preset.content)
+    })
+
+    it("keeps an explicit model seed through creation and first send with Auto enabled", async () => {
+      await persistSettings({
+        ...settings(),
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+      })
+      const created = await createSession({ model: "claude-haiku-4-5-20251001" })
+      const opts = await resolveSendOptions({
+        session: (await getSession(created.id))!,
+        appSettings: await getSettings(),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      expect(opts.model).toBe("claude-haiku-4-5-20251001")
+      expect(opts.routingPlan?.requested.kind).toBe("manual")
+      expect(opts.autoRouting).toBeUndefined()
+    })
+
+    it("uses the final concrete choice after queued Auto and manual settings saves", async () => {
+      await persistSettings(settings())
+      const preset = await createPreset({
+        name: "Manual choice with preset",
+        content: "Keep these instructions after switching away from Auto.",
+        model: "claude-sonnet-4-6",
+      })
+      await setDefaultPreset(preset.id)
+      const autoSave = persistSettings({
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+      })
+      const manualSave = persistSettings({
+        defaultModel: "claude-haiku-4-5-20251001",
+        autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "manual" },
+      })
+      await Promise.all([autoSave, manualSave])
+      const created = await createSession()
+      const opts = await resolveSendOptions({
+        session: (await getSession(created.id))!,
+        appSettings: await getSettings(),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      expect(opts.model).toBe("claude-haiku-4-5-20251001")
+      expect(opts.routingPlan?.requested.kind).toBe("manual")
+      expect(opts.autoRouting).toBeUndefined()
+      expect(opts.systemPrompt).toContain(preset.content)
+      expect((await getSession(created.id))?.activePresetId).toBe(preset.id)
+    })
+
+    it("waits for welcome Auto and concrete saves before reading the default preset", async () => {
+      await persistSettings(settings())
+      const preset = await createPreset({
+        name: "Pending welcome choice",
+        content: "Preserve this preset while the pending model selection settles.",
+        model: "claude-sonnet-4-6",
+      })
+      await setDefaultPreset(preset.id)
+      let finishSave!: () => void
+      let markStarted!: () => void
+      const pending = new Promise<void>((resolve) => {
+        finishSave = resolve
+      })
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve
+      })
+      const autoSave = persistModelSelection(null, async () => {
+        markStarted()
+        await pending
+        await persistSettings({
+          autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "auto" },
+        })
+      })
+      const manualSave = persistModelSelection(null, async () => {
+        await persistSettings({
+          defaultProvider: "openai",
+          defaultModel: "gpt-4o-mini",
+          autoRouting: { ...DEFAULT_AUTO_ROUTING, enabled: true, defaultSelection: "manual" },
+        })
+      })
+      const readPreset = jest.spyOn(getDb().promptPresets, "toArray")
+      const created = createSession()
+      try {
+        await started
+        await Promise.resolve()
+        expect(readPreset).not.toHaveBeenCalled()
+        finishSave()
+        await Promise.all([autoSave, manualSave])
+        const session = await getSession((await created).id)
+        const opts = await resolveSendOptions({
+          session: session!,
+          appSettings: await getSettings(),
+          routingContextHint: { promptText: HARD_PROMPT },
+        })
+        expect(opts.model).toBe("gpt-4o-mini")
+        expect(opts.provider).toBe("openai")
+        expect(opts.routingPlan?.requested.kind).toBe("manual")
+        expect(opts.autoRouting).toBeUndefined()
+        expect(opts.systemPrompt).toContain(preset.content)
+      } finally {
+        finishSave()
+        await Promise.allSettled([autoSave, manualSave, created])
+        readPreset.mockRestore()
+      }
+    })
+
+    it.each([
+      { provider: "anthropic", model: "claude-haiku-4-5-20251001" },
+      { provider: "openai", model: "gpt-4o-mini" },
+    ])(
+      "keeps a welcome $provider model through preset-backed creation and first send",
+      async ({ provider, model }) => {
+        await persistSettings({
+          ...settings(),
+          defaultProvider: provider,
+          defaultModel: model,
+        })
+        const preset = await createPreset({
+          name: "Welcome manual choice",
+          content: "Retain this preset while using the selected model.",
+          model: "claude-sonnet-4-6",
+        })
+        await setDefaultPreset(preset.id)
+        const created = await createSession()
+        const session = await getSession(created.id)
+        expect(session).toMatchObject({ systemPrompt: preset.content, activePresetId: preset.id })
+        const opts = await resolveSendOptions({
+          session: session!,
+          appSettings: await getSettings(),
+          routingContextHint: { promptText: HARD_PROMPT },
+        })
+        expect(opts.model).toBe(model)
+        expect(opts.provider).toBe(provider)
+        expect(opts.routingPlan?.requested.kind).toBe("manual")
+        expect(opts.autoRouting).toBeUndefined()
+        expect(opts.systemPrompt).toContain(preset.content)
+      }
+    )
+  })
+
   it("is a no-op when disabled (concrete model is untouched)", async () => {
     const opts = await resolveSendOptions({
       appSettings: settings(),
       routingContextHint: { promptText: HARD_PROMPT },
     })
     expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("uses persisted Auto defaults on the first turn of an unpinned session", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "first-auto-turn" }),
+      appSettings: settings({ enabled: true, defaultSelection: "auto" }),
+      routingContextHint: { promptText: "hi" },
+    })
+    expect(opts.model).toBe("claude-haiku-4-5-20251001")
+    expect(opts.routingPlan?.requested).toEqual({ kind: "auto" })
+  })
+
+  it.each([false, undefined])(
+    "resolves a stored Auto session to the app default when enabled is %s",
+    async (enabled) => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "disabled-auto", model: "auto" }),
+        appSettings: settings(enabled === undefined ? undefined : { enabled }),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      expect(opts.model).toBe("claude-sonnet-4-6")
+      expect(opts.routingPlan?.requested).toEqual({
+        kind: "manual",
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4-6",
+      })
+      expect(opts.autoRouting).toBeUndefined()
+    }
+  )
+
+  it("respects character fallback and explicit models after disabling Auto", async () => {
+    const appSettings = settings({ enabled: false, defaultSelection: "auto" })
+    const character = makeChar({ model: "claude-opus-4-8", providerId: "anthropic" })
+    const fallback = await resolveSendOptions({
+      session: makeSession({ id: "disabled-auto-character", model: "auto" }),
+      character,
+      appSettings,
+    })
+    expect(fallback.model).toBe("claude-opus-4-8")
+    const explicit = await resolveSendOptions({
+      session: makeSession({ id: "manual-after-auto", model: "claude-haiku-4-5-20251001" }),
+      character,
+      appSettings,
+    })
+    expect(explicit.model).toBe("claude-haiku-4-5-20251001")
+    expect(explicit.autoRouting).toBeUndefined()
+  })
+
+  it("restores routing for the stored Auto session when Auto is re-enabled", async () => {
+    const session = makeSession({ id: "toggle-auto", model: "auto" })
+    const disabled = await resolveSendOptions({
+      session,
+      appSettings: settings({ enabled: false }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(disabled.model).toBe("claude-sonnet-4-6")
+    const enabled = await resolveSendOptions({
+      session,
+      appSettings: settings({ enabled: true }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(enabled.model).toBe("claude-opus-4-8")
+    expect(enabled.routingPlan?.requested).toEqual({ kind: "auto" })
+    expect(session.model).toBe("auto")
+  })
+
+  it("honors a concrete app default after switching the pre-session choice to manual", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "first-manual-turn" }),
+      appSettings: settings({ enabled: true, defaultSelection: "manual" }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.routingPlan?.requested.kind).toBe("manual")
     expect(opts.autoRouting).toBeUndefined()
   })
 
@@ -1357,7 +1639,7 @@ describe("resolveSendOptions — compaction config", () => {
       appSettings: { compaction: { enabled: true } } as unknown as AppSettings,
     })
     expect(opts.compaction?.enabled).toBe(true)
-    expect(opts.compaction?.maxSummaryTokens).toBe(500)
+    expect(opts.compaction?.maxSummaryTokens).toBe(16_384)
     expect(opts.compaction?.strategy).toBeDefined()
     // No alternate summary provider/model configured → no summary block.
     expect(opts.compaction?.summary).toBeUndefined()
@@ -1924,7 +2206,7 @@ describe("resolveSendOptions — opencode vault auto-fallback", () => {
       protocol: "openai",
     })
     // Model backfilled from the built-in catalog default.
-    expect(opts.model).toBe("kimi-k2.6")
+    expect(opts.model).toBe(getBuiltInProviderDefaultModel("opencode-go"))
   })
 
   it("does NOT fall back when the provider is explicitly disabled", async () => {
@@ -2027,7 +2309,7 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
       headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
     })
     // Model backfilled from the built-in catalog default.
-    expect(opts.model).toBe("gpt-5.6-sol")
+    expect(opts.model).toBe(getBuiltInProviderDefaultModel("codex"))
   })
 
   it("uses the session/default resolver's selected Codex account", async () => {
@@ -2074,6 +2356,109 @@ describe("resolveSendOptions — codex vault auto-fallback", () => {
     })
     expect(mResolveCodexVaultCredential).not.toHaveBeenCalled()
     expect(opts.providerCredentials).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — a custom mode's MCP tool selection", () => {
+  // The custom-mode editor saved `mcpTools`, and nothing on the send path read
+  // it: two different selections produced identical runs.
+  const mLoadToolNames = loadMcpServerToolNames as jest.Mock
+  const mcpMode = (mcpTools: Array<{ serverId: string; toolName: string }>) =>
+    ({
+      id: "m-mcp",
+      type: "custom",
+      name: "Researcher",
+      description: "",
+      icon: "Bot",
+      mcpTools,
+    }) as AgentModeConfig
+
+  beforeEach(() => {
+    mListMcp.mockResolvedValue([
+      { id: "a", name: "search", enabled: true },
+      { id: "b", name: "files", enabled: true },
+    ])
+    mBuildMap.mockImplementation(async (servers: Array<{ name: string }>) =>
+      Object.fromEntries(servers.map((server) => [server.name, { command: server.name }]))
+    )
+    mLoadToolNames.mockImplementation(async (serverId: string) =>
+      serverId === "a" ? ["query", "crawl", "delete_index"] : ["read", "write"]
+    )
+  })
+  afterEach(() => {
+    mBuildMap.mockReset()
+    mLoadToolNames.mockReset()
+    mLoadToolNames.mockResolvedValue([])
+  })
+
+  it("attaches only the selected servers and denies their unselected tools", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: mcpMode([{ serverId: "a", toolName: "query" }]),
+    })
+    expect(Object.keys(opts.mcpServers ?? {})).toEqual(["search"])
+    // The runtime-enforced allowlist covers tools the cache has never seen.
+    expect(opts.mcpToolAllowlist).toEqual({ search: ["query"] })
+    expect(opts.disallowedTools).toEqual(
+      expect.arrayContaining(["mcp__search__crawl", "mcp__search__delete_index"])
+    )
+    expect(opts.disallowedTools).not.toContain("mcp__search__query")
+  })
+
+  it("produces different runs for different selections", async () => {
+    const one = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: mcpMode([{ serverId: "a", toolName: "query" }]),
+    })
+    const two = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: mcpMode([
+        { serverId: "b", toolName: "read" },
+        { serverId: "b", toolName: "write" },
+      ]),
+    })
+    expect(Object.keys(one.mcpServers ?? {})).toEqual(["search"])
+    expect(Object.keys(two.mcpServers ?? {})).toEqual(["files"])
+    expect(two.disallowedTools ?? []).not.toEqual(expect.arrayContaining(["mcp__files__read"]))
+  })
+
+  it("leaves MCP unrestricted for an empty selection, which the editor saves by default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: mcpMode([]),
+    })
+    expect(Object.keys(opts.mcpServers ?? {}).sort()).toEqual(["files", "search"])
+    expect(opts.disallowedTools ?? []).toEqual([])
+    expect(opts.mcpToolAllowlist).toBeUndefined()
+  })
+
+  it("does not let a capability grant re-attach a server the mode left out", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      agentMode: mcpMode([{ serverId: "a", toolName: "query" }]),
+      capabilityGrants: [
+        {
+          schemaVersion: 1,
+          source: { kind: "scheduler", id: "task-1" },
+          mcpServers: { add: ["b"] },
+        },
+      ],
+    })
+    expect(Object.keys(opts.mcpServers ?? {})).toEqual(["search"])
+  })
+
+  it("still intersects with the character's own server subset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ mcpServerIds: ["b"] }),
+      agentMode: mcpMode([{ serverId: "a", toolName: "query" }]),
+    })
+    expect(opts.mcpServers).toBeUndefined()
   })
 })
 
@@ -4521,11 +4906,84 @@ describe("resolveSendOptions — video generation tools (ADR-0205)", () => {
 })
 
 describe("resolveSendOptions — brief mode", () => {
-  it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
+  it("appends the brief-mode prompt to appendSystemPrompt when set", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", briefMode: true }),
     })
     expect(opts.appendSystemPrompt).toContain("Respond concisely")
+  })
+
+  it("uses a customized brief-mode prompt for the workspace the turn belongs to (ADR-0236)", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { BRIEF_MODE_PROMPT } = await import("@/lib/agent/prompts/brief-mode")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: BRIEF_MODE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por",
+          body: "One sentence, no lists.",
+          contractVersion: BRIEF_MODE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      // The app names the workspace on the session; the CLI passes the
+      // workspace mounting its cwd.
+      const inWorkspace = await resolveSendOptions({
+        session: makeSession({ id: "s1", briefMode: true, projectId: "ws-1" }),
+      })
+      expect(inWorkspace.appendSystemPrompt).toContain("One sentence, no lists.")
+      expect(inWorkspace.appendSystemPrompt).not.toContain("Respond concisely")
+      const fromCli = await resolveSendOptions({
+        session: makeSession({ id: "s2", briefMode: true }),
+        promptWorkspaceId: "ws-1",
+      })
+      expect(fromCli.appendSystemPrompt).toContain("One sentence, no lists.")
+      const elsewhere = await resolveSendOptions({
+        session: makeSession({ id: "s3", briefMode: true, projectId: "ws-2" }),
+      })
+      expect(elsewhere.appendSystemPrompt).toContain("Respond concisely")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+    }
+  })
+
+  it("resolves a built-in mode's prompt through its Prompt Center entry (ADR-0236)", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { BUILT_IN_MODE_PROMPTS, getAgentMode } = await import("@/lib/agent/modes/built-ins")
+    const research = getAgentMode("research")!
+    const def = BUILT_IN_MODE_PROMPTS.get("research")!
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: def.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por",
+          body: "Edited {{mode_name}} brief.",
+          contractVersion: def.contractVersion,
+        },
+      ])
+    )
+    try {
+      const shipped = await resolveSendOptions({ agentMode: research })
+      expect(shipped.systemPrompt).toContain(`Edited ${research.name} brief.`)
+      expect(shipped.systemPrompt).not.toContain(research.systemPrompt!.slice(0, 40))
+      // A custom mode reusing the id owns its own text.
+      const custom = await resolveSendOptions({
+        agentMode: { ...research, systemPrompt: "My own research rules." },
+      })
+      expect(custom.systemPrompt).toContain("My own research rules.")
+      expect(custom.systemPrompt).not.toContain("Edited")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+    }
   })
 
   it("merges with an existing appendSystemPrompt (e.g., A2UI block) under a blank line", async () => {
@@ -4622,6 +5080,33 @@ describe("resolveSendOptions — output style", () => {
 })
 
 describe("resolveSendOptions — extended thinking budget", () => {
+  it("recomputes input reservation after legacy thinking while preserving explicit text output", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "thinking-reserve",
+        model: "claude-sonnet-4-5",
+        maxThinkingTokens: 8000,
+      }),
+      appSettings: {
+        id: "singleton",
+        defaultProvider: "anthropic",
+        compaction: { enabled: true },
+        providerSettings: {
+          anthropic: {
+            enabled: true,
+            apiKey: "test-key",
+            inferenceDefaults: { maxTokens: 8192 },
+            discoveredModels: [
+              { id: "claude-sonnet-4-5", contextLength: 100000, maxOutputTokens: 64000 },
+            ],
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.modelParams?.maxOutputTokens).toBe(8192)
+    expect(opts.maxThinkingTokens).toBe(8000)
+    expect(opts.compaction?.contextWindow).toBe(83808)
+  })
   it("session > character > appSettings — session wins when all three set", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", maxThinkingTokens: 8000 }),
@@ -5322,7 +5807,7 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
       session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
     })
     // appendSystemPrompt is either undefined (no editor open) or only the
-    // workflow snapshot block — definitely NOT BRIEF_OUTPUT_SNIPPET text.
+    // workflow snapshot block — definitely NOT brief-mode text.
     if (opts.appendSystemPrompt) {
       // It can only contain the workflow snapshot block, never the brief snippet.
       expect(opts.appendSystemPrompt).not.toContain("Keep responses")
@@ -6454,6 +6939,11 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
   const webNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
     (opts.pluginTools ?? []).map((t) => t.name)
 
+  afterEach(() => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    useAgentRuntimeStore.getState.mockReturnValue({})
+  })
+
   // Native-first. The SDK already exposes WebSearch/WebFetch on an unnarrowed
   // turn, so taking that path means appending NOTHING — not the host-routed
   // pair (which would shadow it) and not the two names into `allowedTools`
@@ -6511,6 +7001,119 @@ describe("web access resolution (lib/chat/web-access.ts)", () => {
       appSettings: COGNIA_WEB_SETTINGS,
     })
     expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+    expect(opts.disallowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]))
+  })
+
+  it.each([false, true])(
+    "keeps native search and routes only fetch to Cognia (legacy native opt-in: %s)",
+    async (nativeOnAnthropic) => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: {
+          webTools: { enabled: true, nativeOnAnthropic, preferCogniaFetch: true },
+        } as AppSettings,
+      })
+      expect(webNames(opts)).not.toContain("web_search")
+      expect(webNames(opts)).toContain("web_fetch")
+      expect(opts.disallowedTools).toContain("WebFetch")
+      expect(opts.disallowedTools).not.toContain("WebSearch")
+      if (nativeOnAnthropic) {
+        expect(opts.allowedTools).toContain("WebSearch")
+        expect(opts.allowedTools).not.toContain("WebFetch")
+      }
+    }
+  )
+
+  it("keeps native fetch and routes only search to Cognia", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        ...COGNIA_WEB_SETTINGS,
+        webTools: { enabled: true, nativeOnAnthropic: true, preferCogniaSearch: true },
+      } as AppSettings,
+    })
+    expect(webNames(opts)).toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+    expect(opts.disallowedTools).toContain("WebSearch")
+    expect(opts.disallowedTools).not.toContain("WebFetch")
+    expect(opts.allowedTools).toContain("WebFetch")
+    expect(opts.allowedTools).not.toContain("WebSearch")
+  })
+
+  it("keeps Cognia's Reader for an external agent that only declares native search", async () => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+    useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
+    getExternalAgentManager.mockReturnValue({
+      // A `web.fetch` row is not part of the capability vocabulary; it is
+      // ignored rather than read as evidence of a native fetch.
+      getAgentCapabilityProfile: () => ({
+        effective: { "web.search": { level: "native" }, "web.fetch": { level: "native" } },
+      }),
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+    })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).toContain("web_fetch")
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  it("discloses required distillation and only browser-reachable readers", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        webTools: { enabled: true, preferCogniaFetch: true },
+        webReader: {
+          version: 1,
+          defaultReader: "auto",
+          readers: {
+            direct: { enabled: true, priority: 0 },
+            platform: { enabled: true, priority: 1 },
+            jina: { enabled: true, priority: 2 },
+            tavily: { enabled: true, priority: 3 },
+          },
+          externalFallback: "configured",
+          distillation: "required",
+        },
+      } as AppSettings,
+    })
+    const fetch = opts.pluginTools?.find((tool) => tool.name === "web_fetch")
+    expect(fetch?.description).toContain("no utility model is available")
+    expect(fetch?.description).toContain("Enabled readers: direct, tavily.")
+    expect(fetch?.description).not.toContain("Enabled readers: direct, platform")
+  })
+
+  it("gives an external agent without native search both Cognia tools", async () => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+    useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
+    getExternalAgentManager.mockReturnValue({
+      getAgentCapabilityProfile: () => ({ effective: { "web.search": { level: "unsupported" } } }),
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        searchProviders: COGNIA_WEB_SETTINGS.searchProviders,
+      } as AppSettings,
+    })
+    expect(webNames(opts)).toContain("web_search")
+    expect(webNames(opts)).toContain("web_fetch")
+  })
+
+  it("routes an external agent's page reads through Cognia even when the selected provider is Anthropic", async () => {
+    const { useAgentRuntimeStore } = jest.requireMock("@/stores/agent/agent-runtime-store")
+    const { getExternalAgentManager } = jest.requireMock("@/lib/ai/agent/external/manager")
+    useAgentRuntimeStore.getState.mockReturnValue({ runtime: "external", externalAgentId: "agent" })
+    getExternalAgentManager.mockReturnValue({
+      getAgentCapabilityProfile: () => ({
+        effective: { "web.search": { level: "native" }, "web.fetch": { level: "unsupported" } },
+      }),
+    })
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).toContain("web_fetch")
+    expect(opts.disallowedTools ?? []).not.toContain("WebFetch")
   })
 
   it("surfaces no web tools at all when the capability is off", async () => {
@@ -7531,6 +8134,36 @@ describe("resolveSendOptions — reusable Agent Knowledge Bases", () => {
 })
 
 describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
+  it("carries the namespace request but keeps interactive watchdog retries off", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        claudeCodeRuntime: {
+          allowNestedUserNamespaces: true,
+          unattendedRetry: { enabled: true, maxWaitMs: 120_000 },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.claudeAgentSdk?.sandbox).toMatchObject({
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      allowNestedUserNamespaces: true,
+    })
+    expect(opts.claudeAgentSdk?.unattendedRetry).toBeUndefined()
+  })
+
+  it("does not leak Claude runtime preferences into another provider runtime", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        claudeCodeRuntime: { allowNestedUserNamespaces: true, unattendedRetry: { enabled: true } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.claudeAgentSdk?.sandbox?.allowNestedUserNamespaces).not.toBe(true)
+    expect(opts.claudeAgentSdk?.unattendedRetry).toBeUndefined()
+  })
+
   it("resumes in the recorded SQLite workspace after global storage is disabled", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1" }),
@@ -7682,6 +8315,25 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     // spec and the sidecar always took the legacy provider branch.
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(opts.execution).toBeTruthy()
+  })
+
+  // F1: the composition digest used to hash `systemPrompt ?? appendSystemPrompt`,
+  // so with a base prompt present an output-style (or Plan, goal, …) section
+  // that only lands in the appended text left the turn's identity unchanged.
+  it("gives a send whose only change is an appended section a new composition digest", async () => {
+    const digest = async (outputStyle: string) => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", systemPrompt: "base identity" }),
+        session: makeSession({ id: "s1", outputStyle } as ChatSession),
+      })
+      const execution = opts.execution as unknown as { composition?: { compositionDigest: string } }
+      return { append: opts.appendSystemPrompt, digest: execution.composition?.compositionDigest }
+    }
+    const bullets = await digest("bullets")
+    const teacher = await digest("teacher")
+    expect(bullets.append).not.toBe(teacher.append)
+    expect(bullets.digest).toEqual(expect.any(String))
+    expect(bullets.digest).not.toBe(teacher.digest)
   })
 
   it("still stamps when the route-tickets flag is on, so the switch issues tickets", async () => {
@@ -8028,6 +8680,23 @@ describe("resolveSendOptions — capability grants", () => {
     expect(opts.permissionMode).toBe("bypassPermissions")
   })
 
+  it("applies finite watchdog settings after the unattended profile is resolved", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ providerId: "anthropic" }),
+      capabilityGrants: [grant({ permissionProfile: { workspace: "ask" } })],
+      appSettings: {
+        claudeCodeRuntime: {
+          unattendedRetry: { enabled: true, maxWaitMs: 120_000, usageLimitRecheckMs: 90_000 },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.permissionProfile).toBeDefined()
+    expect(opts.claudeAgentSdk?.unattendedRetry).toEqual({
+      maxWaitMs: 120_000,
+      usageLimitRecheckMs: 90_000,
+    })
+  })
+
   it("gives an interactive turn no profile, TTL or attestation", async () => {
     const opts = await resolveSendOptions({
       character: makeChar(),
@@ -8150,7 +8819,12 @@ describe("portable runtime feature projection", () => {
   it("forwards explicit subagent context mode and conversation extension refs", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "anthropic" }),
-      appSettings: { id: "singleton" as const, subagentRuntime: { contextMode: "fork" } },
+      appSettings: {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: DEFAULT_BUILTIN_TOOLS,
+        subagentRuntime: { contextMode: "fork" },
+      },
       session: makeSession({
         id: "s1",
         runtimeExtensions: [{ kind: "directory", path: "/workspace/plugin", discoverMcp: false }],
@@ -8165,7 +8839,12 @@ describe("portable runtime feature projection", () => {
     await expect(
       resolveSendOptions({
         character: makeChar({ id: "c1", providerId: "openai" }),
-        appSettings: { id: "singleton" as const, subagentRuntime: { contextMode: "fork" } },
+        appSettings: {
+          id: "singleton",
+          alwaysAllowTools: [],
+          builtinTools: DEFAULT_BUILTIN_TOOLS,
+          subagentRuntime: { contextMode: "fork" },
+        },
       })
     ).rejects.toMatchObject({ capability: "subagents.context-fork" })
   })

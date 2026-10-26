@@ -141,7 +141,7 @@ describe("larkDocsProvider.search", () => {
       }),
     })
     expect(await larkDocsProvider.search?.("q", { accountId: ACCOUNT, limit: 10 })).toEqual([
-      { providerId: "lark", kind: "doc", id: "doxcn1", title: "Spec" },
+      { providerId: "lark", kind: "doc", sourceType: "doc", id: "doxcn1", title: "Spec" },
       { providerId: "lark", kind: "sheet", id: "shtcn1", title: "Budget" },
     ])
   })
@@ -155,6 +155,53 @@ describe("larkDocsProvider.search", () => {
 })
 
 describe("larkDocsProvider.fetch — documents", () => {
+  it("rejects a result from another account before acquiring credentials or reading content", async () => {
+    await expect(
+      larkDocsProvider.fetch(
+        {
+          providerId: "lark",
+          kind: "doc",
+          id: "doc1",
+          title: "Spec",
+          accountBinding: { accountId: "other" },
+        },
+        { accountId: ACCOUNT }
+      )
+    ).rejects.toMatchObject({ code: "notAuthorized" })
+    expect(withAuthMock).not.toHaveBeenCalled()
+    expect(fetchDocMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["docx", "doc"] as const)(
+    "round-trips an opaque %s search result through the real fetcher",
+    async (sourceType) => {
+      const token = "Z1FjAbCdEfGh1234567890"
+      const get = jest.fn(async (path: string) =>
+        path.endsWith("/raw_content")
+          ? { content: "Fetched search result" }
+          : { document: { title: "Search hit" } }
+      )
+      runWith({
+        get,
+        post: async () => ({
+          docs_entities: [{ docs_token: token, docs_type: sourceType, title: "Search hit" }],
+        }),
+      })
+      fetchDocMock.mockImplementation(
+        jest.requireActual("@/lib/twin/ingest/lark-doc-fetcher").fetchLarkDocAsRawSource
+      )
+      const hits = await larkDocsProvider.search!("hit", { accountId: ACCOUNT, limit: 10 })
+      await expect(larkDocsProvider.fetch(hits[0], { accountId: ACCOUNT })).resolves.toMatchObject({
+        text: "Fetched search result",
+      })
+      expect(get).toHaveBeenCalledWith(
+        sourceType === "docx"
+          ? `/open-apis/docx/v1/documents/${token}/raw_content`
+          : `/open-apis/doc/v2/${token}/raw_content`
+      )
+    }
+  )
+
   it("delegates docs and wiki nodes to the existing twin fetcher", async () => {
     fetchDocMock.mockResolvedValue({ title: "Spec", text: "body" })
     const out = await larkDocsProvider.fetch(
@@ -185,6 +232,7 @@ describe("larkDocsProvider.fetch — documents", () => {
     )
     expect(fetchDocMock).toHaveBeenCalledWith("https://acme.feishu.cn/wiki/wikcn1", {
       adapterId: ACCOUNT,
+      kind: "wiki",
     })
   })
 

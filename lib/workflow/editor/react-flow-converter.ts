@@ -8,7 +8,7 @@
  * the trip without flattening.
  */
 
-import type { Edge as RFEdge, Node as RFNode, Viewport } from "@xyflow/react"
+import type { Viewport } from "@xyflow/react"
 import type {
   VisualWorkflow,
   WorkflowEdge,
@@ -16,27 +16,16 @@ import type {
   WorkflowNodeData,
   WorkflowViewport,
 } from "@/types/workflow/visual"
-
-/**
- * React Flow node payload. The `data` slot extends WorkflowNodeData (with its
- * index signature) and tacks on `kind` + `typeVersion` so the renderer can
- * dispatch on the kind without an extra lookup.
- */
-export interface RFWorkflowData extends WorkflowNodeData {
-  kind: WorkflowNode["type"]
-  typeVersion: number
-}
-
-export type RFWorkflowNode = RFNode<
+import type {
+  RFWorkflowEdge,
+  RFWorkflowNode,
+} from "@cognia/plugin-contract/lib/workflow/editor/react-flow-converter"
+export type {
   RFWorkflowData,
-  "workflowNode" | "loopContainer" | "groupContainer"
->
-
-export interface RFWorkflowEdgeData extends Record<string, unknown> {
-  workflowKind?: NonNullable<WorkflowEdge["data"]>["kind"]
-}
-
-export type RFWorkflowEdge = RFEdge<RFWorkflowEdgeData>
+  RFWorkflowEdge,
+  RFWorkflowEdgeData,
+  RFWorkflowNode,
+} from "@cognia/plugin-contract/lib/workflow/editor/react-flow-converter"
 
 export interface ConvertedWorkflow {
   nodes: RFWorkflowNode[]

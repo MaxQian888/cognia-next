@@ -22,7 +22,7 @@ export interface EnvelopeParams {
 //
 // The envelope field shape is pinned against the TS side
 // (`@cognia/agent-config-types/agent-execution`) by the shared fixture in
-// `event-envelope.test.mjs` / `lib/ai/agent/execution/event-envelope.test.ts`.
+// `host/events/envelope.test.ts` / `lib/ai/agent/execution/event-envelope.test.ts`.
 
 import { canonicalEventsFromSdkMessage, createSdkMappingState } from "./canonical/index.ts"
 
@@ -32,7 +32,7 @@ import { canonicalEventsFromSdkMessage, createSdkMappingState } from "./canonica
  * `plugin_tool_exec` round-trips) return an empty array and are not enveloped.
  *
  * `type: "event"` carries a raw `SDKMessage` and delegates to the exhaustive
- * 39-member mapping in `sdk-canonical-events.mjs`; one SDK message can yield
+ * 39-member mapping in `host/events/canonical/index.ts`; one SDK message can yield
  * several canonical events, which is why this returns a list.
  *
  * @param {any} msg

@@ -187,6 +187,7 @@ export const DEPENDENCY_SMOKE_TESTS = [
   "lib/claude/sidecar-wire-contract.test.ts",
   "lib/ai/operations/handlers/ai-sdk-surface.test.ts",
   "components/chat/markdown-renderer.test.tsx",
+  "components/chat/markdown-renderer.heavy.test.ts",
   "cli/src/tui/markdown/tokenize.test.ts",
   "cli/src/tui/pty/conversation-driver.test.ts",
   "cli/src/cli/coding-loop.bundle.test.ts",
@@ -232,7 +233,10 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     mobile: globalJS || any(/^mobile\/|^lib\/capacitor\/|\.mobile\.tsx?$|^next\.config\./),
     browserExtension:
       globalJS ||
-      any(/^(?:browser-extension|packages|tests\/e2e\/browser-extension)\/|^playwright\./),
+      rust ||
+      any(
+        /^(?:integrations\/browser-companion\.json|scripts\/ci\/check-browser-companion-contract\.mjs|src-tauri\/src\/lib\.rs)|^(?:protocol|packages|lib\/browser|lib\/browser-companion|src-tauri\/src\/companion_api|crates\/cognia-server|crates\/cognia-companion(?:-[^/]+)?)\//
+      ),
     rust,
     gateway:
       rust ||
@@ -244,11 +248,13 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
     // The real-binary Pro IDE E2E: slow (it starts code-server and Chromium),
     // so only the pathway it exercises triggers it; the full run covers the rest.
     proIde: any(
-      /^(?:crates\/cognia-codeserver\/|sidecar\/(?:codeserver-agent-ext|vscode-ext-host)\/|lib\/codeserver\/|lib\/plugin\/ide\/|plugins\/pro-ide-fixture\/|scripts\/gates\/(?:check-pro-ide-perf|pro-ide-perf-baseline)|scripts\/test\/run-pro-ide-e2e)/
+      /^(?:crates\/cognia-codeserver\/|sidecar\/(?:codeserver-agent-ext|vscode-ext-host)\/|lib\/codeserver\/|lib\/plugin\/ide\/|scripts\/gates\/(?:check-pro-ide-perf|pro-ide-perf-baseline)|scripts\/test\/run-pro-ide-e2e)/
     ),
-    // diagnostic-server has an independent Cargo.lock; root graph edits do not
-    // change its dependencies, while toolchain/compiler config changes do.
-    diagnostic: any(/^(?:services\/diagnostic-server\/|\.cargo\/|rust-toolchain(?:\.toml)?$)/),
+    // The pinned cognia-labs/cognia-services consumer: the pin, its check, the
+    // vendored contract copies, and the app code that reads them.
+    cogniaServices: any(
+      /^(?:integrations\/cognia-services\.json|scripts\/ci\/check-cognia-services\.mjs|Cargo\.(?:toml|lock)|package\.json|pnpm-lock\.yaml|lib\/plugin\/character-pack\/__fixtures__\/jcs-vectors\.json)$|^(?:protocol\/cognia-services|lib\/diagnostic-service|crates\/cognia-tenant-auth)\//
+    ),
     productionBuild:
       rust ||
       any(
@@ -397,9 +403,16 @@ export function buildIncrementalTestPlan({
         const stem = file.replace(/\.[cm]?[jt]sx?$/, "")
         add(
           "colocated",
-          inventory.filter((test) => test.replace(/\.(?:test|spec)\.[cm]?[jt]sx?$/, "") === stem),
+          inventory.filter(
+            (test) => test.replace(/\.(?:heavy\.)?(?:test|spec)\.[cm]?[jt]sx?$/, "") === stem
+          ),
           file
         )
+      }
+      // esbuild entrypoints are strings in the process test, not imports the
+      // Jest dependency graph can follow.
+      if (/^tests\/integration\/fixtures\/markdown-renderer-(?:parity|states)\.tsx$/.test(file)) {
+        add("process-fixture", ["components/chat/markdown-renderer.heavy.test.ts"], file)
       }
       if (deletedFiles.includes(file) && RELATED_INPUT.test(file))
         add(
@@ -418,6 +431,15 @@ export function buildIncrementalTestPlan({
             file
           )
       }
+    }
+    // A transitive source edit may select the owner's unit suite through
+    // --findRelatedTests. Keep its disk/process companion in the CI plan too.
+    const selectedOwners = new Set(
+      [...selected].map((test) => test.replace(/\.(?:test|spec)\.[cm]?[jt]sx?$/, ""))
+    )
+    for (const test of inventory) {
+      const owner = /^(.*)\.heavy\.test\.[cm]?[jt]sx?$/.exec(test)?.[1]
+      if (owner && selectedOwners.has(owner)) add("heavy-companion", [test], owner)
     }
   }
   const chosen = [...selected].sort()

@@ -122,6 +122,7 @@
     "label": "Element inspection"
   },
   "record": {
+    "captureFailed": "Recording failed: {error}",
     "addAssertion": "Expect text…",
     "assertionPlaceholder": "Text that should appear",
     "delete": "Delete flow",
@@ -190,12 +191,28 @@
     },
     "error": "Remote browser unavailable ({code})",
     "find": "Find in page",
+    "grants": {
+      "changed": "Domain permissions changed. Reconnect to apply them to this browser.",
+      "blocked": "Blocked domains: {domains}",
+      "manage": "Manage domains",
+      "reconnect": "Apply permissions and reconnect",
+      "persistentHint": "Saved site data is retained. Some websites may ask you to sign in again. Open tabs will close and this page will reload. Unsaved changes will be lost.",
+      "ephemeralHint": "Open tabs will close and this page will reload. This temporary session may require you to sign in again. Unsaved changes will be lost.",
+      "cancel": "Keep current session",
+      "confirm": "Reconnect browser"
+    },
     "humanControl": "You're controlling",
     "needsRemoteHost": "Connect a Cognia server to use the cloud browser",
     "runtimeUnavailable": "The cloud browser is not available ({reason})",
     "takeover": "Take control",
     "untitledPage": "Untitled page",
-    "waiting": "Waiting for the remote browser…"
+    "waiting": "Waiting for the remote browser…",
+    "approval": {
+      "authorize": "Authorize browser access",
+      "required": "Browser access needs approval from this host. Authorization lasts up to 10 minutes.",
+      "pending": "Ask the host owner or another paired administrator to approve code {code}, then click Authorize browser access again.",
+      "failed": "Browser authorization was refused or could not be completed. You can request approval again."
+    }
   },
   "screenshot": {
     "failed": "Could not capture the preview",

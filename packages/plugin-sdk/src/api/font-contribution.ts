@@ -13,13 +13,13 @@ export {
   cssFormatHintFor,
   detectFontKind,
   revertPluginFonts,
-} from "@/lib/plugin/bridge/font-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/font-bridge"
 
 export type {
   ApplyPluginFontsArgs,
   ApplyPluginFontsResult,
   ResolveAssetFn,
-} from "@/lib/plugin/bridge/font-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/font-bridge"
 
 export {
   findFont,
@@ -29,7 +29,10 @@ export {
   setSystemFonts,
   subscribeFonts,
   unregisterPluginFontsByPlugin,
-} from "@/lib/appearance/font-registry"
+} from "@cognia/plugin-contract/lib/appearance/font-registry"
 
-export type { FontEntry, FontSource } from "@/lib/appearance/font-registry"
-export type { PluginFontContribution, PluginFontFile } from "@/types/plugin/plugin"
+export type { FontEntry, FontSource } from "@cognia/plugin-contract/lib/appearance/font-registry"
+export type {
+  PluginFontContribution,
+  PluginFontFile,
+} from "@cognia/plugin-contract/types/plugin/plugin"

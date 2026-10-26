@@ -129,6 +129,7 @@ export function PermissionOverlay({
   index,
   onMove,
   onResolve,
+  onExit,
   maxRows = 18,
   columns = 80,
 }: {
@@ -137,6 +138,7 @@ export function PermissionOverlay({
   index: number
   onMove: (delta: number) => void
   onResolve: (decision: CapturePermissionDecision) => void
+  onExit?: () => void
   maxRows?: number
   columns?: number
 }) {
@@ -145,7 +147,11 @@ export function PermissionOverlay({
   const t = useCliTranslations("cliUiApproval")
   const boxRef = React.useRef<DOMElement | null>(null)
   const [reading, setReading] = React.useState({ req, open: false, scroll: 0 })
+  const [exitCommand, setExitCommand] = React.useState({ req, text: "" })
+  const exitCommandRef = React.useRef({ req, text: "" })
   if (reading.req !== req) setReading({ req, open: false, scroll: 0 })
+  // Exit is process-wide: a replacement approval cannot turn its trailing Enter into consent.
+  if (exitCommand.req !== req) setExitCommand({ req, text: exitCommand.text })
   const input = (req.input as Record<string, unknown>) ?? {}
   const summary = summarizeToolCall(req.toolName, input)
   const detail = permissionDetail(req, summary, t("noDetails"))
@@ -218,11 +224,40 @@ export function PermissionOverlay({
   })
   // The global interrupt route treats permission Escape as deny-and-stop.
   // Reading is a nested surface: return to the unchanged pending decision first.
-  useCriticalInput(() => setReading((state) => ({ ...state, open: false })), {
-    isActive: reading.open,
-    shouldHandle: (_input, key) => key.escape,
-  })
+  useCriticalInput(
+    () => {
+      if (exitCommandRef.current.text) {
+        exitCommandRef.current = { req, text: "" }
+        setExitCommand({ req, text: "" })
+      } else setReading((state) => ({ ...state, open: false }))
+    },
+    {
+      isActive: reading.open || Boolean(exitCommand.text),
+      shouldHandle: (_input, key) =>
+        key.escape && (reading.open || Boolean(exitCommandRef.current.text)),
+    }
+  )
   useModalInput((input, key) => {
+    // A pending approval owns Enter. Buffer an explicit exit command here so
+    // typing /exit can never accidentally approve the selected tool instead.
+    const bufferedCommand = exitCommandRef.current.text
+    if (onExit && !reading.open && (bufferedCommand || input.startsWith("/"))) {
+      if (key.return || /[\r\n]/.test(input)) {
+        // Ink can deliver a whole terminal write, including Enter, as input.
+        // Consume that packet atomically rather than waiting for another key.
+        const text = (bufferedCommand + input).replace(/[\r\n]+$/, "")
+        exitCommandRef.current = { req, text }
+        setExitCommand(exitCommandRef.current)
+        if (text.trim() === "/exit") onExit()
+      } else if (key.backspace || key.delete) {
+        exitCommandRef.current = { req, text: bufferedCommand.slice(0, -1) }
+        setExitCommand(exitCommandRef.current)
+      } else if (input && !key.ctrl && !key.meta) {
+        exitCommandRef.current = { req, text: (bufferedCommand + input).slice(0, 80) }
+        setExitCommand(exitCommandRef.current)
+      }
+      return
+    }
     if (reading.open) {
       if (key.escape || key.return || input === "q" || input === "v")
         return setReading((state) => ({ ...state, open: false }))
@@ -326,7 +361,11 @@ export function PermissionOverlay({
           {footerRows ? (
             <Box height={1} flexShrink={0}>
               <Text color={theme.muted} wrap="truncate-end">
-                {width < 70 ? t("compactActions") : `${t("inspect")} · ${t("actions")}`}
+                {exitCommand.text
+                  ? `› ${exitCommand.text}█`
+                  : width < 70
+                    ? t("compactActions")
+                    : `${t("inspect")} · ${t("actions")}`}
               </Text>
             </Box>
           ) : null}

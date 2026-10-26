@@ -138,6 +138,23 @@ beforeEach(() => {
 })
 
 describe("arming", () => {
+  it("reports a failed start without opening a partial flow", async () => {
+    const user = userEvent.setup()
+    recorderMock({ start: jest.fn().mockRejectedValue(new Error("unavailable")) })
+    render(<BrowserRecorderPanel pageUrl={BASE} />)
+    await user.click(screen.getByRole("button", { name: "record.start" }))
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("record.captureFailed"))
+    expect(screen.queryByRole("button", { name: "record.save" })).not.toBeInTheDocument()
+  })
+
+  it("reports a failed stop instead of offering an incomplete flow for saving", async () => {
+    const user = userEvent.setup()
+    recorderMock({ recording: true, stop: jest.fn().mockRejectedValue(new Error("drain failed")) })
+    render(<BrowserRecorderPanel pageUrl={BASE} />)
+    await user.click(screen.getByRole("button", { name: "record.stop" }))
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("record.captureFailed"))
+    expect(screen.queryByRole("button", { name: "record.save" })).not.toBeInTheDocument()
+  })
   it("cannot record without a loaded page", () => {
     render(<BrowserRecorderPanel pageUrl={null} />)
     expect(screen.getByRole("button", { name: "record.start" })).toBeDisabled()

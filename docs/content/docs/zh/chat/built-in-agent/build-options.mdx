@@ -23,7 +23,6 @@ description: resolveSendOptions 是将全部 UI 状态汇总为单个 SendOption
 | **`resolveSendOptions(ctx)`** | `:336-1380` | 管线。异步；返回完整 `SendOptions`。 |
 | `resolveMemberConfig(team, member, character)` | `:307-323` | 纯函数，按 teammate 解析覆盖（`systemPrompt`/`model`/`allowedTools`/`mcpServerIds`）。UI 预览复用。 |
 | `listTeamMembers(ids)` | `:1387-1389` | 预解析 teammate 角色行。 |
-| `BRIEF_OUTPUT_SNIPPET` | `:52` | brief 模式附录（ACP 路径也复用）。 |
 
 输入是 `BuildOptionsContext`（`:105-221`）：`session`、`character`、`appSettings`、`activeProject`（cwd 链）、`memberOverride`、`referencedPaths`、`agentMode`、`twinDeps`/`twinUserMessage`、`memoryDeps`/`memoryUserMessage`、`activeGoal`、`conversationKey`、`platformBinding`、`inboxPolicy`。输出 `SendOptions` 声明在 `lib/claude/types.ts:73`。
 
@@ -149,7 +148,7 @@ flowchart TB
 | # | 贡献者 | 注入 | 行号 |
 | --- | --- | --- | --- |
 | 34 | 账号 / 代理 env | `resolveAccountEnv` + `resolveProxyEnv` → `opts.env` | `:1159` |
-| 35 | 便捷模式 | bare（`settingSources:[]`）/ debug（env）/ brief（`BRIEF_OUTPUT_SNIPPET`） | `:1179` |
+| 35 | 便捷模式 | bare（`settingSources:[]`）/ debug（env）/ brief（`lib/agent/prompts/brief-mode.ts` 的 `BRIEF_MODE_PROMPT`，经 Prompt Center 解析，ADR-0236） | `:1179` |
 | 36 | 活跃 `/goal` | `appendGoalContext`（ADR-0013/0019） | `:1211` |
 | 37 | 收件箱抑制 | manual > muted > quietHours → `opts.suppressedReason` | `:1224` |
 | 38 | 思考预算 | session > character > appDefault | `:1253` |

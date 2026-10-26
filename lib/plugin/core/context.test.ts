@@ -60,6 +60,9 @@ import {
 } from "@/lib/plugin/registries/view-container-registry"
 import { useUIStore } from "@/stores/ui"
 import { getPluginConsentBroker } from "../security/consent-broker"
+import { createElement } from "react"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -353,6 +356,18 @@ function pluginTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 }
 
 describe("createPluginContext", () => {
+  it("constructs the plugin API without loading dialog or chat renderers", () => {
+    createPluginContext(createMockPlugin(), mockManager)
+    for (const renderer of [
+      "@/components/plugins/dialogs/plugin-data-dialog",
+      "@/components/artifacts/artifact-preview",
+      "@/components/context-workbench/resource-workbench-chat-panel",
+      "@/hooks/chat/use-claude-chat-controller",
+    ]) {
+      expect(require.cache[require.resolve(renderer)] !== undefined).toBe(false)
+    }
+  })
+
   beforeEach(() => {
     mockStartDebugSession.mockClear()
     mockCreateDebugContext.mockClear()
@@ -1530,6 +1545,50 @@ describe("createPluginContext", () => {
       settle(true)
 
       await expect(pending).resolves.toBe(true)
+    })
+
+    it("renders the deferred confirmation dialog and resolves its action", async () => {
+      usePluginModalStore.getState().closeAll()
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const pending = context.ui.showConfirmDialog({
+        title: "Lazy confirmation",
+        message: "Continue?",
+      })
+      const entry = usePluginModalStore.getState().stack[0]
+      const mounted = render(
+        createElement(
+          Dialog,
+          { open: true },
+          createElement(
+            DialogContent,
+            null,
+            createElement(entry.component, {
+              modalId: entry.modalId,
+              args: entry.args,
+              onClose: () => usePluginModalStore.getState().close(entry.modalId),
+            })
+          )
+        )
+      )
+      try {
+        expect(
+          await screen.findByRole("heading", { name: "Lazy confirmation" })
+        ).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "Confirm" }))
+        await expect(pending).resolves.toBe(true)
+        expect(usePluginModalStore.getState().stack).toHaveLength(0)
+      } finally {
+        mounted.unmount()
+      }
+    })
+
+    it("settles dismissal when a dialog closes before its lazy component mounts", async () => {
+      usePluginModalStore.getState().closeAll()
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const pending = context.ui.showConfirmDialog({ title: "Before paint", message: "Continue?" })
+      const entry = usePluginModalStore.getState().stack[0]
+      usePluginModalStore.getState().close(entry.modalId)
+      await expect(pending).resolves.toBe(false)
     })
 
     describe("openViewContainer", () => {
@@ -3291,6 +3350,9 @@ describe("python host-call parity (ADR-0145)", () => {
         "logger",
         "nodeRuntime",
         "notifications",
+        // ADR-0236: a python plugin declares its model-facing wording as Prompt
+        // Center slots and resolves the user's edit of it, as plain data.
+        "prompts",
         "secrets",
         "storage",
         "templates",

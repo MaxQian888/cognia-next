@@ -1,6 +1,7 @@
 import type { Goal, GoalConfig } from "@/types/goal"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { evaluateGoal } from "./judge"
+import { GOAL_JUDGE_PROMPT } from "./prompts"
 
 const SAMPLE_CONFIG: GoalConfig = {
   maxTurns: 20,
@@ -37,6 +38,7 @@ describe("evaluateGoal — happy path", () => {
   it("parses {done:true} and returns kind:decided", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "haiku produced"}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "Snowflakes drift...",
       client: mockClient(complete),
@@ -50,6 +52,7 @@ describe("evaluateGoal — happy path", () => {
   it("parses {done:false} and returns kind:decided", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": false, "reason": "not yet"}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "thinking...",
       client: mockClient(complete),
@@ -62,6 +65,7 @@ describe("evaluateGoal — happy path", () => {
   it("uses temperature 0 and maxTokens 200 by default", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": false, "reason": "x"}')
     await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -75,6 +79,7 @@ describe("evaluateGoal — happy path", () => {
   it("honours custom maxTokens", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
     await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -86,9 +91,10 @@ describe("evaluateGoal — happy path", () => {
     )
   })
 
-  it("passes JUDGE_SYSTEM_PROMPT as the system message", async () => {
+  it("passes the resolved judge prompt as the system message", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
     await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -102,6 +108,7 @@ describe("evaluateGoal — judge customization (ADR-0019 Phase 2)", () => {
   it("honours an explicit temperature override", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
     await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -128,6 +135,7 @@ describe("evaluateGoal — judge customization (ADR-0019 Phase 2)", () => {
   it("falls back to goal.config.judgeMaxTokens when the maxTokens arg is absent", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "x"}')
     await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal({ config: { ...SAMPLE_CONFIG, judgeMaxTokens: 80 } }),
       lastResponse: "x",
       client: mockClient(complete),
@@ -143,6 +151,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("fails closed before the judge provider call when assembled text contains PII", async () => {
     const complete = jest.fn()
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "Contact jane@example.com",
       client: mockClient(complete),
@@ -159,6 +168,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("returns parse_error when the response is not JSON", async () => {
     const complete = jest.fn().mockResolvedValue("not json at all")
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -172,6 +182,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("returns parse_error when 'done' is missing", async () => {
     const complete = jest.fn().mockResolvedValue('{"reason": "x"}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -184,6 +195,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("returns parse_error when 'done' is the wrong type", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": "yes", "reason": "x"}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -194,6 +206,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("tolerates a missing reason (defaults to empty string)", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -206,6 +219,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
   it("treats an LLM provider exception as parse_error (network resilience)", async () => {
     const complete = jest.fn().mockRejectedValue(new Error("503 upstream"))
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -220,6 +234,7 @@ describe("evaluateGoal — parse_error fail-OPEN", () => {
       .fn()
       .mockResolvedValue('Sure!\n```json\n{"done": true, "reason": "ok"}\n```')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -235,6 +250,7 @@ describe("evaluateGoal — abort", () => {
     const ac = new AbortController()
     ac.abort()
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -251,6 +267,7 @@ describe("evaluateGoal — abort", () => {
       return Promise.reject(new Error("aborted by signal"))
     })
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -266,6 +283,7 @@ describe("evaluateGoal — abort", () => {
       return Promise.resolve('{"done": true, "reason": "x"}')
     })
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -281,6 +299,7 @@ describe("evaluateGoal — completedSubgoals", () => {
       .fn()
       .mockResolvedValue('{"done": false, "reason": "wip", "completedSubgoals": [0, 2]}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -296,6 +315,7 @@ describe("evaluateGoal — completedSubgoals", () => {
         '{"done": false, "reason": "x", "completedSubgoals": [1, -3, "a", 2.5, 4]}'
       )
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -307,6 +327,7 @@ describe("evaluateGoal — completedSubgoals", () => {
   it("is undefined when the field is absent", async () => {
     const complete = jest.fn().mockResolvedValue('{"done": true, "reason": "done"}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -320,6 +341,7 @@ describe("evaluateGoal — completedSubgoals", () => {
       .fn()
       .mockResolvedValue('{"done": false, "reason": "x", "completedSubgoals": "nope"}')
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -338,6 +360,7 @@ describe("evaluateGoal — lifecycle hook bracketing (ADR-0040 follow-up)", () =
       return null
     })
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -355,6 +378,7 @@ describe("evaluateGoal — lifecycle hook bracketing (ADR-0040 follow-up)", () =
         : null
     )
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),
@@ -394,6 +418,7 @@ describe("evaluateGoal — lifecycle hook bracketing (ADR-0040 follow-up)", () =
       return null
     })
     const result = await evaluateGoal({
+      system: GOAL_JUDGE_PROMPT.defaultBody,
       goal: buildGoal(),
       lastResponse: "x",
       client: mockClient(complete),

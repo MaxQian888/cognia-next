@@ -8,6 +8,7 @@ import type { ToolUIPart } from "ai"
 import { useTranslations } from "next-intl"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { openExternal } from "@/lib/tauri/opener"
@@ -43,6 +44,9 @@ export function ManagedMcpAppCard({
   const [loadError, setLoadError] = useState(false)
   const [approved, setApproved] = useState<Set<string>>(() => new Set())
   const [quarantine, setQuarantine] = useState<unknown[][]>([])
+  // Every request the sandboxed app makes is answered on its own, in order, by
+  // the same themed dialog; unmounting the card denies anything still pending.
+  const { confirm, dialog: approvalDialog } = useConfirmDialog()
 
   useEffect(() => {
     let disposed = false
@@ -77,16 +81,33 @@ export function ManagedMcpAppCard({
   )
 
   const authorizeToolCall = useCallback(
-    (request: { name: string }) => {
+    async (request: { name: string }) => {
       if (!app) return false
       const risk = getMcpAppToolRisk(app.server, request.name)
-      const first = window.confirm(
-        t("confirmToolCall", { server: app.server.name, tool: request.name, risk })
-      )
+      const first = await confirm({
+        title: t("toolCall.title", { tool: request.name }),
+        description: t("toolCall.description", {
+          server: app.server.name,
+          tool: request.name,
+          risk: t(`risk.${risk}`),
+        }),
+        confirmLabel: t("toolCall.allow"),
+        cancelLabel: t("deny"),
+        destructive: risk === "destructive",
+        testid: "mcp-app-approve-tool",
+      })
       if (!first || risk !== "destructive") return first
-      return window.confirm(t("confirmDestructiveToolCall", { tool: request.name }))
+      // Destructive calls need a second, separate yes.
+      return confirm({
+        title: t("destructiveToolCall.title"),
+        description: t("destructiveToolCall.description", { tool: request.name }),
+        confirmLabel: t("destructiveToolCall.allow", { tool: request.name }),
+        cancelLabel: t("deny"),
+        destructive: true,
+        testid: "mcp-app-approve-destructive",
+      })
     },
-    [app, t]
+    [app, confirm, t]
   )
   const callTool = useCallback(
     async (request: { name: string; arguments?: Record<string, unknown> }) => {
@@ -101,10 +122,27 @@ export function ManagedMcpAppCard({
     [app, sessionId]
   )
   const confirmOpenLink = useCallback(
-    (request: { hostname: string }) => window.confirm(t("confirmOpenLink", request)),
-    [t]
+    (request: { hostname: string }) =>
+      confirm({
+        title: t("openLink.title"),
+        description: t("openLink.description", { hostname: request.hostname }),
+        confirmLabel: t("openLink.allow"),
+        cancelLabel: t("deny"),
+        testid: "mcp-app-approve-link",
+      }),
+    [confirm, t]
   )
-  const confirmDownload = useCallback(() => window.confirm(t("confirmDownload")), [t])
+  const confirmDownload = useCallback(
+    () =>
+      confirm({
+        title: t("download.title"),
+        description: t("download.description"),
+        confirmLabel: t("download.allow"),
+        cancelLabel: t("deny"),
+        testid: "mcp-app-approve-download",
+      }),
+    [confirm, t]
+  )
   const quarantineDownload = useCallback((contents: unknown[]) => {
     setQuarantine((current) => [...current, contents])
   }, [])
@@ -194,6 +232,7 @@ export function ManagedMcpAppCard({
           </div>
         </div>
       ))}
+      {approvalDialog}
     </section>
   )
 }

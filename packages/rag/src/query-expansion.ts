@@ -93,6 +93,34 @@ Return ONLY a JSON array of strings with the alternative queries. Example: ["que
 }
 
 /**
+ * Fill `{{name}}` placeholders in one pass. A value is inserted once and never
+ * re-scanned, so a query that contains `{{query}}` stays literal text; a name
+ * with no value is left verbatim.
+ */
+function fillPromptTemplate(template: string, values: Readonly<Record<string, string>>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (whole, name: string) =>
+    Object.prototype.hasOwnProperty.call(values, name) ? values[name] : whole
+  )
+}
+
+/**
+ * The HyDE instruction. `{{domainContext}}` is empty or `Domain: <domain>\n`,
+ * `{{maxLength}}` the passage cap and `{{query}}` the question.
+ */
+export const HYDE_PROMPT_TEMPLATE = `{{domainContext}}Write a short passage ({{maxLength}} characters max) that would be a perfect answer to this question. Write as if you're excerpting from a document that directly answers the question.
+
+Question: "{{query}}"
+
+Write the hypothetical passage that answers this question:`
+
+/** The values {@link HYDE_PROMPT_TEMPLATE} is filled with for one call. */
+export interface HydePromptValues {
+  domainContext: string
+  maxLength: string
+  query: string
+}
+
+/**
  * Hypothetical Document Embedding (HyDE)
  * Generates a hypothetical answer that would contain the information being searched for
  */
@@ -104,18 +132,25 @@ export async function generateHypotheticalAnswer(
     maxLength?: number
     /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
     generate?: GenerationSeam
+    /**
+     * Render the prompt from this call's values; defaults to filling
+     * {@link HYDE_PROMPT_TEMPLATE}. A host that lets the user customize the
+     * wording renders its resolved template here.
+     */
+    renderPrompt?: (values: HydePromptValues) => string
   } = {}
 ): Promise<string> {
   const { domain, maxLength = 300, generate } = options
   const { generateText } = await import("ai")
 
-  const domainContext = domain ? `Domain: ${domain}\n` : ""
-
-  const prompt = `${domainContext}Write a short passage (${maxLength} characters max) that would be a perfect answer to this question. Write as if you're excerpting from a document that directly answers the question.
-
-Question: "${query}"
-
-Write the hypothetical passage that answers this question:`
+  const values: HydePromptValues = {
+    domainContext: domain ? `Domain: ${domain}\n` : "",
+    maxLength: String(maxLength),
+    query,
+  }
+  const prompt = options.renderPrompt
+    ? options.renderPrompt(values)
+    : fillPromptTemplate(HYDE_PROMPT_TEMPLATE, { ...values })
 
   try {
     const text = await generateThroughSeam(
@@ -506,6 +541,20 @@ Return ONLY a JSON array of questions. Example: ["sub-question 1", "sub-question
   }
 }
 
+/** The step-back instruction. `{{query}}` is the specific question. */
+export const STEP_BACK_PROMPT_TEMPLATE = `Generate a more general "step-back" question that would provide useful background context for answering the specific question below.
+
+Specific question: "{{query}}"
+
+The step-back question should ask about broader concepts, principles, or background knowledge that would help answer the specific question.
+
+Step-back question (output ONLY the question):`
+
+/** The values {@link STEP_BACK_PROMPT_TEMPLATE} is filled with for one call. */
+export interface StepBackPromptValues {
+  query: string
+}
+
 /**
  * Generate step-back query for broader context
  */
@@ -515,17 +564,20 @@ export async function generateStepBackQuery(
   options: {
     /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
     generate?: GenerationSeam
+    /**
+     * Render the prompt from this call's values; defaults to filling
+     * {@link STEP_BACK_PROMPT_TEMPLATE}. A host that lets the user customize
+     * the wording renders its resolved template here.
+     */
+    renderPrompt?: (values: StepBackPromptValues) => string
   } = {}
 ): Promise<string> {
   const { generateText } = await import("ai")
 
-  const prompt = `Generate a more general "step-back" question that would provide useful background context for answering the specific question below.
-
-Specific question: "${query}"
-
-The step-back question should ask about broader concepts, principles, or background knowledge that would help answer the specific question.
-
-Step-back question (output ONLY the question):`
+  const values: StepBackPromptValues = { query }
+  const prompt = options.renderPrompt
+    ? options.renderPrompt(values)
+    : fillPromptTemplate(STEP_BACK_PROMPT_TEMPLATE, { ...values })
 
   try {
     const text = await generateThroughSeam(

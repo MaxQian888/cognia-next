@@ -3,13 +3,49 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
 }))
 
 import { transport } from "@/lib/tauri/transport-instance"
-import { REMOTE_UNSUPPORTED_FEATURES, RemoteChromiumEngine } from "./remote-chromium-engine"
+import {
+  REMOTE_UNSUPPORTED_FEATURES,
+  REMOTE_BROWSER_APPROVAL_OPERATIONS,
+  RemoteChromiumEngine,
+} from "./remote-chromium-engine"
+import { getCommandManifest } from "@/lib/tauri/command-descriptors"
 
 const call = transport.call as jest.Mock
 
 beforeEach(() => call.mockReset())
 
 describe("RemoteChromiumEngine", () => {
+  it("covers the existing interactive browser adapter commands without profile deletion authority", () => {
+    const browserCommands = getCommandManifest()
+      .commands.filter(
+        (command) =>
+          command.name.startsWith("browser_") &&
+          command.approval === "interactive" &&
+          command.name !== "browser_profile_delete"
+      )
+      .map((command) => command.name)
+    expect([...REMOTE_BROWSER_APPROVAL_OPERATIONS].sort()).toEqual(browserCommands.sort())
+  })
+  it("uses the supplied approval-aware caller for both reads and navigation", async () => {
+    const scopedCall = jest.fn().mockResolvedValue(undefined)
+    const engine = new RemoteChromiumEngine("approved-session", { call: scopedCall })
+    await engine.navigate("https://example.com")
+    await engine.listPages()
+    expect(scopedCall.mock.calls).toEqual([
+      ["browser_navigate", { browserSessionId: "approved-session", url: "https://example.com" }],
+      ["browser_pages", { browserSessionId: "approved-session" }],
+    ])
+    expect(call).not.toHaveBeenCalled()
+  })
+  it("routes recording controls and refs through dedicated RPCs", async () => {
+    const engine = new RemoteChromiumEngine("recording-session")
+    await engine.recordingControl("drain")
+    await engine.resolveRecordedTarget("#save")
+    expect(call.mock.calls).toEqual([
+      ["browser_recording_control", { browserSessionId: "recording-session", action: "drain" }],
+      ["browser_recording_ref", { browserSessionId: "recording-session", selector: "#save" }],
+    ])
+  })
   it("keeps the public BrowserEngine contract while adding session context", async () => {
     call.mockResolvedValueOnce({
       generation: 2,

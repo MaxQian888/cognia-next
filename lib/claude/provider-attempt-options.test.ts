@@ -1,6 +1,7 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import {
   applyProviderAttemptLimits,
+  buildProviderAttemptModelParams,
   resolveProviderAttemptOptions,
 } from "./provider-attempt-options"
 import {
@@ -620,6 +621,202 @@ describe("registered API subscriptions", () => {
     })
     expect(options.compaction?.contextWindow).toBe(200000)
   })
+  it("resolves the distinct summary model input ceiling without altering explicit output", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "main",
+        compaction: { enabled: true, maxSummaryTokens: 500, summary: { model: "small" } },
+      },
+      settings("openai", {
+        discoveredModels: [
+          { id: "main", contextLength: 64000, maxOutputTokens: 4096 },
+          { id: "small", contextLength: 8000, maxInputTokens: 6000, maxOutputTokens: 2048 },
+        ],
+      })
+    )
+    expect(limits.compaction).toMatchObject({ maxSummaryTokens: 500, summaryInputBudget: 6000 })
+  })
+
+  it("leaves input room for an unconfigured summary cap on a small model", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "main",
+        compaction: {
+          enabled: true,
+          maxSummaryTokens: 16_384,
+          summaryTokenBudgetIsDefault: true,
+          summary: { model: "small" },
+        },
+      },
+      settings("openai", {
+        discoveredModels: [{ id: "small", contextLength: 8192, maxOutputTokens: 8192 }],
+      })
+    )
+    expect(limits.compaction).toMatchObject({
+      maxSummaryTokens: 4096,
+      summaryInputBudget: 4096,
+    })
+  })
+
+  it("restores the original explicit summary limit after a small-model fallback attempt", () => {
+    const appSettings = settings("openai", {
+      discoveredModels: [
+        { id: "small", contextLength: 8192, maxOutputTokens: 2048 },
+        { id: "large", contextLength: 1000000, maxOutputTokens: 131072 },
+      ],
+    })
+    const first = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "small",
+        compaction: { enabled: true, maxSummaryTokens: 32000 },
+      },
+      appSettings
+    )
+    expect(first.compaction?.maxSummaryTokens).toBe(2048)
+    const retry = applyProviderAttemptLimits(
+      { ...first, provider: "openai", model: "large" },
+      appSettings
+    )
+    expect(retry.compaction?.maxSummaryTokens).toBe(32000)
+    expect(retry.compaction?.checkpointTokenBudget).toBeGreaterThan(
+      first.compaction!.checkpointTokenBudget!
+    )
+  })
+
+  it.each([3000, 16_384])("preserves an explicit or legacy summary cap of %s", (cap) => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "small",
+        compaction: { enabled: true, maxSummaryTokens: cap },
+      },
+      settings("openai", {
+        discoveredModels: [{ id: "small", contextLength: 8192, maxOutputTokens: 8192 }],
+      })
+    )
+    expect(limits.compaction?.maxSummaryTokens).toBe(Math.min(cap, 8192))
+  })
+
+  it("recomputes the default summary cap when retrying on a larger model", () => {
+    const appSettings = settings("openai", {
+      discoveredModels: [
+        { id: "small", contextLength: 8192, maxOutputTokens: 8192 },
+        { id: "large", contextLength: 1_000_000, maxOutputTokens: 131_072 },
+      ],
+    })
+    const small = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "small",
+        compaction: {
+          enabled: true,
+          maxSummaryTokens: 16_384,
+          summaryTokenBudgetIsDefault: true,
+        },
+      },
+      appSettings
+    )
+    expect(small.compaction?.maxSummaryTokens).toBe(4096)
+    const large = applyProviderAttemptLimits(
+      { ...small, provider: "openai", model: "large" },
+      appSettings
+    )
+    expect(large.compaction).toMatchObject({
+      maxSummaryTokens: 131_072,
+      summaryInputBudget: 868_928,
+    })
+  })
+
+  it("separates generation, checkpoint and total retained budgets on large windows", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "large",
+        compaction: {
+          enabled: true,
+          maxSummaryTokens: 16384,
+          summaryTokenBudgetIsDefault: true,
+        },
+      },
+      settings("openai", {
+        discoveredModels: [{ id: "large", contextLength: 1_000_000, maxOutputTokens: 131_072 }],
+      })
+    )
+    expect(limits.compaction).toMatchObject({
+      maxSummaryTokens: 131_072,
+      checkpointTokenBudget: 260_678,
+      postCompactionTokenBudget: 347_571,
+    })
+  })
+
+  it("preserves explicit independent checkpoint and retained-context budgets", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "openai",
+        model: "small",
+        compaction: {
+          enabled: true,
+          maxSummaryTokens: 700,
+          checkpointTokenBudget: 900,
+          postCompactionTokenBudget: 1500,
+        },
+      },
+      settings("openai", {
+        discoveredModels: [{ id: "small", contextLength: 8192, maxOutputTokens: 2048 }],
+      })
+    )
+    expect(limits.compaction).toMatchObject({
+      maxSummaryTokens: 700,
+      checkpointTokenBudget: 900,
+      postCompactionTokenBudget: 1500,
+    })
+  })
+
+  it("does not reserve Anthropic-only options for an OpenAI summary", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "anthropic",
+        model: "main",
+        modelParams: {
+          maxOutputTokens: 1000,
+          providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 3000 } } },
+        },
+        compaction: {
+          enabled: true,
+          maxSummaryTokens: 500,
+          summary: {
+            providerId: "openai",
+            model: "small",
+            credentials: { apiKey: "test-key" },
+          },
+        },
+      },
+      settings("openai", {
+        discoveredModels: [{ id: "small", contextLength: 8192, maxOutputTokens: 4096 }],
+      })
+    )
+    expect(limits.compaction?.summaryInputBudget).toBe(7692)
+  })
+
+  it("does not reserve top-level reasoning that the summary request does not send", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "anthropic",
+        model: "old",
+        effort: "high",
+        maxThinkingTokens: 3000,
+        modelParams: { maxOutputTokens: 1000 },
+        compaction: { enabled: true, maxSummaryTokens: 500 },
+      },
+      settings("anthropic", {
+        discoveredModels: [{ id: "old", contextLength: 8000, maxOutputTokens: 4096 }],
+      })
+    )
+    expect(limits.compaction?.summaryInputBudget).toBe(7500)
+  })
   it.each([
     [10000, 4096],
     [1024, 1024],
@@ -803,4 +1000,91 @@ it("does not dispatch an unloaded plugin using stale settings", async () => {
     resolveProviderAttemptOptions("unloaded:api", settings("unloaded:api"))
   ).resolves.toEqual({})
   expect(mockResolveFeatureProvider).not.toHaveBeenCalled()
+})
+
+describe("default output reservation", () => {
+  it.each([
+    [{ thinking: { type: "disabled" }, reasoningEffort: "max" }, 8192],
+    [{ reasoningEffort: "xhigh" }, 131072],
+    [{ reasoningEffort: "max" }, 131072],
+  ])("matches DeepSeek's default mode budget for %j", (deepseek, expected) => {
+    mockBuildModelInferenceParams.mockReturnValue({ providerOptions: { deepseek } })
+    expect(
+      buildProviderAttemptModelParams("deepseek", "deepseek-flash", settings("deepseek"))
+        ?.maxOutputTokens
+    ).toBe(expected)
+  })
+
+  it("does not add a synthetic token budget to adaptive Claude thinking", () => {
+    const app = settings("anthropic", {
+      discoveredModels: [
+        { id: "claude-sonnet-5-5", contextLength: 100000, maxOutputTokens: 64000 },
+      ],
+    })
+    const result = applyProviderAttemptLimits(
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        effort: "max",
+        modelParams: { maxOutputTokens: 16384 },
+        compaction: { enabled: true },
+      },
+      app
+    )
+    expect(result.compaction?.contextWindow).toBe(83616)
+    expect(result.modelParams?.maxOutputTokens).toBe(16384)
+  })
+
+  it("reserves a practical output budget instead of the model maximum", () => {
+    mockBuildModelInferenceParams.mockReturnValue(undefined)
+    const app = settings("deepseek", { inferenceDefaults: undefined })
+    const modelParams = buildProviderAttemptModelParams("deepseek", "deepseek-flash", app)
+    expect(modelParams?.maxOutputTokens).toBe(65_536)
+    expect(
+      applyProviderAttemptLimits(
+        {
+          provider: "deepseek",
+          model: "deepseek-flash",
+          modelParams,
+          compaction: { enabled: true },
+        },
+        app
+      ).compaction?.contextWindow
+    ).toBe(934_464)
+  })
+
+  it.each([1024, 131072])(
+    "preserves explicit output %s across initial and retry limits",
+    (maxOutputTokens) => {
+      mockBuildModelInferenceParams.mockReturnValue({ maxOutputTokens })
+      const app = settings("deepseek")
+      const modelParams = buildProviderAttemptModelParams("deepseek", "deepseek-flash", app)
+      expect(modelParams?.maxOutputTokens).toBe(maxOutputTokens)
+      expect(
+        applyProviderAttemptLimits(
+          { provider: "deepseek", model: "deepseek-flash", modelParams },
+          app
+        ).modelParams?.maxOutputTokens
+      ).toBe(maxOutputTokens)
+    }
+  )
+
+  it("reserves the adapter's additional explicit thinking budget without changing the text cap", () => {
+    const app = settings("relay", {
+      discoveredModels: [{ id: "relay-model", contextLength: 100000, maxOutputTokens: 64000 }],
+    })
+    const options = {
+      provider: "relay",
+      model: "relay-model",
+      providerCredentials: { protocol: "anthropic" },
+      modelParams: {
+        maxOutputTokens: 16384,
+        providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 32768 } } },
+      },
+      compaction: { enabled: true },
+    } as Parameters<typeof applyProviderAttemptLimits>[0]
+    const result = applyProviderAttemptLimits(options, app)
+    expect(result.modelParams?.maxOutputTokens).toBe(16384)
+    expect(result.compaction?.contextWindow).toBe(50848)
+  })
 })

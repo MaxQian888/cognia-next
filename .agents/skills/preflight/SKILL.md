@@ -19,6 +19,11 @@ Determine what's being shipped:
 
 Record the file list — it decides which auditors run.
 
+If the change has an evidence ledger (`docs/evidence/*.md`, from the
+`evidence-driven-dev` skill), include its path in every auditor's scope
+statement: its Risks and Verification obligations are claims the auditors
+should check as well as the generic rules.
+
 ## 2. Dispatch applicable auditors in parallel
 
 Pass each agent the same scope statement: the base ref to diff against and
@@ -48,6 +53,12 @@ Merge the reports into one list ordered by severity:
 
 Deduplicate cross-auditor overlaps (e.g. a new file flagged by both test-gap
 and i18n). Fix blockers before proceeding unless the user says otherwise.
+
+If there is a ledger, finish synthesis by updating it: record auditor
+findings as evidence on the matching obligations, then run
+`node .agents/skills/evidence-driven-dev/scripts/ledger.mjs check <ledger> --final`
+and fix what it reports. Blocked real-environment obligations go to Residual
+risks; don't drop them.
 
 ## 4. Deterministic gates (after fixes, before commit)
 

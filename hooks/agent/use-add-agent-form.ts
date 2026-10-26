@@ -23,6 +23,7 @@ import {
   type AddAgentFormShape,
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import type { AddAgentFormData } from "@/types/agent/component-types"
+import { useSettingsStore } from "@/stores/settings"
 
 type KvRow = ReturnType<typeof objectToKvRows>[number]
 
@@ -86,10 +87,12 @@ export function useAddAgentForm(initialPresetId = "", seed?: AddAgentFormSeed): 
 
   const prepare = useCallback((): ReturnType<AddAgentFormState["prepare"]> => {
     const processEnv = kvRowsToObject(processEnvRows)
-    const problem = validateAddAgentForm(data, presetId, {
-      names: processEnvRows.map((row) => row.key),
-      values: processEnv,
-    })
+    const problem = validateAddAgentForm(
+      data,
+      presetId,
+      { names: processEnvRows.map((row) => row.key), values: processEnv },
+      useSettingsStore.getState().settings
+    )
     if (problem) return { ok: false, problem }
     return {
       ok: true,

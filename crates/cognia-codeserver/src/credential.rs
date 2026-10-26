@@ -42,7 +42,7 @@ use sha2::{Digest, Sha256};
 pub const CREDENTIAL_FILE_ENV: &str = "COGNIA_CS_AGENT_CREDENTIAL_FILE";
 
 /// HKDF `info` prefix for the session key. Both sides must agree byte for byte
-/// (`sidecar/codeserver-agent-ext/src/broker-credential.mjs`).
+/// (`sidecar/codeserver-agent-ext/src/broker-credential.ts`).
 const SESSION_INFO: &[u8] = b"cognia-broker-session";
 /// HMAC label for the content-handle bearer derived from a session key.
 const CONTENT_LABEL: &[u8] = b"content";

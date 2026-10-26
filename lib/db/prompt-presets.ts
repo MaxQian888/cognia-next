@@ -9,11 +9,11 @@
 // `deletePreset` / `updatePreset` / `setDefaultPreset` for built-ins reject
 // (the UI only offers Duplicate). User-created rows use the `p_` id prefix;
 // built-ins use the stable `preset_builtin_<slug>` ids declared in
-// `lib/db/preset-built-ins.ts`.
+// `lib/presets/built-ins.ts`.
 
 import type { SystemPromptPreset } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
-import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "./preset-built-ins"
+import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "@/lib/presets/built-ins"
 
 function newId() {
   return "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)

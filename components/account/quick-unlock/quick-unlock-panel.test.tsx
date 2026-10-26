@@ -2,6 +2,7 @@
 
 import { StrictMode } from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { QuickUnlockPanel } from "./quick-unlock-panel"
 import {
@@ -387,13 +388,35 @@ describe("QuickUnlockPanel", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
   })
 
-  it("switches between enrolled methods", () => {
+  it("switches between enrolled methods", async () => {
+    const user = userEvent.setup()
     renderPanel([enrollment({ method: "pin" }), enrollment({ method: "pattern" })])
     expect(screen.getByTestId("pin-pad")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("quick-unlock-tab-pattern"))
+    await user.click(screen.getByTestId("quick-unlock-tab-pattern"))
     expect(screen.getByTestId("pattern-grid")).toBeInTheDocument()
     expect(screen.queryByTestId("pin-pad")).not.toBeInTheDocument()
+  })
+
+  // Shared Tabs: arrow keys move focus and selection, and the chosen method's
+  // surface is the panel its tab controls.
+  it("moves between methods with the arrow keys and labels the surface panel", async () => {
+    const user = userEvent.setup()
+    renderPanel([enrollment({ method: "pin" }), enrollment({ method: "pattern" })])
+    const pinTab = screen.getByRole("tab", { name: "method.pin" })
+    const patternTab = screen.getByRole("tab", { name: "method.pattern" })
+    expect(screen.getByRole("tablist", { name: "methodLabel" })).toBeInTheDocument()
+    expect(pinTab).toHaveAttribute("aria-selected", "true")
+    const panel = screen.getByRole("tabpanel")
+    expect(pinTab).toHaveAttribute("aria-controls", panel.id)
+    expect(panel).toContainElement(screen.getByTestId("pin-pad"))
+
+    act(() => pinTab.focus())
+    await user.keyboard("{ArrowRight}")
+    expect(patternTab).toHaveFocus()
+    expect(patternTab).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tabpanel")).toContainElement(screen.getByTestId("pattern-grid"))
+    expect(patternTab).toHaveAttribute("aria-controls", screen.getByRole("tabpanel").id)
   })
 
   it("never lands on a locked-out method by default", () => {
@@ -510,7 +533,7 @@ describe("QuickUnlockPanel", () => {
     await flush()
     expect(screen.getByRole("alert")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("quick-unlock-tab-pattern"))
+    await userEvent.setup().click(screen.getByTestId("quick-unlock-tab-pattern"))
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 })

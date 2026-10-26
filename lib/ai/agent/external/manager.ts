@@ -5,6 +5,7 @@
  * Handles agent lifecycle, routing, and coordination.
  */
 
+import { resolvePiSubagents } from "./config/pi-subagents"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -70,8 +71,13 @@ import {
   GATEWAY_RUNTIME_TRAITS,
   gatewaySessionId,
   normalizeCogniaModelBinding,
+  nativeSubagentModelBindings,
   parseGatewaySessionId,
 } from "./config/gateway-task"
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import { compileTaskModelPlan, configModelRolesApply } from "./config/model-plan"
+import { resolveGatewayModelFacts } from "./config/gateway-model-facts"
+import { gatewayModelSlots } from "./config/model-slots"
 import { loggers } from "@cognia/logging"
 import {
   executionSemanticsOf,
@@ -94,6 +100,7 @@ import { createCodexAppServerAdapterFactory } from "./integrations/codex"
 import { createSiwcAppServerAdapterFactory, isCodexAppServerProtocol } from "./integrations/siwc"
 import {
   canProjectOpenCodeV2McpOnThisHost,
+  createOpenCodeV1AdapterFactory,
   createOpenCodeV2AdapterFactory,
 } from "./integrations/opencode"
 import { createA2aAdapterFactory } from "./integrations/a2a"
@@ -384,6 +391,7 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   registry.register("codex-app-server", createCodexAppServerAdapterFactory())
   registry.register("codex-siwc-app-server", createSiwcAppServerAdapterFactory())
   registry.register("opencode-v2", createOpenCodeV2AdapterFactory())
+  registry.register("opencode", createOpenCodeV1AdapterFactory())
   registry.register("a2a", createA2aAdapterFactory())
   // Managed install/facts are local-host commands; the integration wiring
   // hands DSH the local process host (paired remote installation is not exposed).
@@ -491,7 +499,13 @@ export class ExternalAgentManager {
   >()
   private gatewayTasks = new Map<
     string,
-    { parentId: string; taskId: string; release: () => Promise<void> }
+    {
+      parentId: string
+      taskId: string
+      release: () => Promise<void>
+      allowedModels?: string[]
+      planFingerprint?: string
+    }
   >()
   private gatewayPreparing = new Set<string>()
   /**
@@ -614,6 +628,69 @@ export class ExternalAgentManager {
       } else if (!explicitId) previous = undefined
       else throw new Error("This task is bound to a different model or account; start a new task")
     }
+    const taskCwd = this.buildSessionOptions(source, options).cwd
+    const taskConfig = await resolvePiSubagents({
+      ...source.config,
+      process: {
+        ...source.config.process!,
+        cwd: taskCwd,
+      },
+    })
+    const callRoles = normalizeAgentModelRoleOverrides(options?.modelRoles) ?? undefined
+    const configRoles = configModelRolesApply(
+      normalizeCogniaModelBinding(source.config.cogniaModel),
+      options?.cogniaModel === undefined
+        ? undefined
+        : normalizeCogniaModelBinding(options.cogniaModel)
+    )
+      ? (normalizeAgentModelRoleOverrides(source.config.modelRoles) ?? undefined)
+      : undefined
+    // The same model facts the editors and the Host validate sub-task models against.
+    const facts =
+      callRoles || configRoles ? await resolveGatewayModelFacts(binding!.providerId) : undefined
+    // After the lease, the account it resolved has its own model metadata,
+    // which the task's launch files are built from; judge reasoning by it.
+    const compilePlan = (leased?: Record<string, { supportsReasoning?: boolean }>) => {
+      const supportsReasoning = facts?.modelSupportsReasoning
+      const result = compileTaskModelPlan({
+        primary: binding!,
+        explicitModels: nativeSubagentModelBindings(taskConfig, binding!),
+        slots: gatewayModelSlots(taskConfig),
+        layers: [
+          { source: "call", overrides: callRoles },
+          { source: "config", overrides: configRoles },
+        ],
+        ...(supportsReasoning
+          ? {
+              modelSupportsReasoning: (modelId: string) =>
+                leased?.[modelId]
+                  ? leased[modelId].supportsReasoning === true
+                  : supportsReasoning(modelId),
+            }
+          : {}),
+        ...(facts?.modelEffortValues ? { modelEffortValues: facts.modelEffortValues } : {}),
+      })
+      if (!result.ok)
+        throw new Error(
+          `Task model plan refused: ${result.reason}${result.slot ? ` (${result.slot})` : ""}`
+        )
+      return Object.keys(result.plan.slots).length || result.plan.allowedSpawnModels !== undefined
+        ? result.plan
+        : undefined
+    }
+    let modelPlan = compilePlan()
+    // A rebind re-points the task at a new primary, which the plan derives from;
+    // the reminted lease carries the new plan. Otherwise a changed plan is a new task.
+    // Only a task this process recorded can be compared: session metadata is
+    // not persisted, so after a restart the task resumes on the current plan,
+    // as the device and runtime checks above also accept an unknown record.
+    if (
+      previous &&
+      previousMetadata !== undefined &&
+      !rebind &&
+      previousMetadata.cogniaModelPlanFingerprint !== modelPlan?.fingerprint
+    )
+      throw new Error("This task runs on different sub-task models; start a new task")
     const transcript = traits.continuity === "transcript"
     const suppliedHistory = custom?.conversationHistory
     const storedHistory = previous ? previousMetadata?.cogniaGatewayHistory : undefined
@@ -651,6 +728,16 @@ export class ExternalAgentManager {
       const ceiling = options?.gatewayTicketBudget
       lease = await prepareExternalAgentGatewayRoute({
         ...binding,
+        ...(modelPlan
+          ? {
+              modelPlan: {
+                additionalModels: modelPlan.models.filter(
+                  (model) => model !== modelPlan!.primaryModelId
+                ),
+                modelBindings: {},
+              },
+            }
+          : {}),
         sessionId: taskId,
         ingressProtocol: traits.ingress,
         originDeviceId,
@@ -701,6 +788,7 @@ export class ExternalAgentManager {
           ...(conversation !== undefined ? { cogniaSessionId: conversation } : {}),
           ...session.metadata,
           cogniaModel: binding,
+          cogniaModelPlanFingerprint: modelPlan?.fingerprint,
           cogniaGatewayTask: taskId,
           cogniaGatewayRuntime: support.runtime,
           cogniaGatewayOwnerAccountId: ownerAccountId,
@@ -766,10 +854,17 @@ export class ExternalAgentManager {
         if (recordedOwner !== undefined && recordedOwner !== ownerAccountId)
           throw new Error("This task is bound to a different model or account; start a new task")
       }
+      modelPlan = compilePlan(lease.modelMetadataById)
+      const liveTask = this.gatewayTasks.get(childId)
+      if (liveTask) {
+        liveTask.allowedModels = modelPlan?.models ?? [binding.modelId]
+        liveTask.planFingerprint = modelPlan?.fingerprint
+      }
       const prepared = buildGatewayTaskConfig({
-        config: source.config,
+        config: taskConfig,
         taskId,
         ...lease,
+        modelPlan,
         settings,
         originDeviceId,
         rebind,
@@ -792,8 +887,7 @@ export class ExternalAgentManager {
           }),
         }
       }
-      const cwd = this.buildSessionOptions(source, options).cwd
-      if (cwd) prepared.config.process!.cwd = cwd
+      if (taskCwd) prepared.config.process!.cwd = taskCwd
       if (spawnPlacementFor(agentId) !== placement)
         throw new Error("Agent runtime environment changed during task preparation")
       if (childPlacement) registerSpawnPlacement(childId, childPlacement)
@@ -1038,6 +1132,37 @@ export class ExternalAgentManager {
     if (!adapter || !instance) throw new Error(`Agent not found: ${agentId}`)
     if (!adapter.getSession(target.sessionId)) throw new Error(`Session not found: ${sessionId}`)
     return { ...target, adapter, instance }
+  }
+
+  async getNativeSubagents(agentId: string, sessionId: string) {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.getNativeSubagents) return undefined
+    const snapshot = await target.adapter.getNativeSubagents(target.sessionId)
+    const task = this.gatewayTasks.get(target.agentId)
+    return task
+      ? {
+          ...snapshot,
+          planFingerprint: task.planFingerprint,
+          models: snapshot.models.filter((model) => task.allowedModels?.includes(model.id)),
+        }
+      : snapshot
+  }
+
+  async changeNativeSubagentModel(
+    agentId: string,
+    sessionId: string,
+    request: import("@cognia/agent-contracts/session-operations").ExternalAgentNativeSubagentModelChange
+  ) {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    if (!target.adapter.changeNativeSubagentModel)
+      throw new Error("Native subagent control unsupported")
+    const task = this.gatewayTasks.get(target.agentId)
+    if (task) {
+      if (!task.allowedModels?.includes(request.modelId)) throw new Error("model-not-allowed")
+      if (task.planFingerprint !== request.expectedPlanFingerprint)
+        throw new Error("stale-model-plan")
+    }
+    return target.adapter.changeNativeSubagentModel(target.sessionId, request)
   }
 
   async getSessionOperationCapabilities(

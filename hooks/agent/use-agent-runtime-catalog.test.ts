@@ -25,7 +25,6 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 }))
 
 const externalState = {
-  enabled: true,
   agents: {} as Record<string, { id: string; name: string; enabled: boolean; protocol: string }>,
   agentValidity: {} as Record<string, Record<string, unknown>>,
 }
@@ -61,7 +60,6 @@ function agent(id: string, name: string, enabled = true) {
 beforeEach(() => {
   runtimeState.runtimeRef = { kind: "builtin" }
   runtimeState.sessionRuntimeRefs = {}
-  externalState.enabled = true
   externalState.agents = {}
   externalState.agentValidity = {}
   hostState.configs = []
@@ -123,13 +121,17 @@ describe("useAgentRuntimeCatalog", () => {
     expect(result.current.runtimes[1].warning).toBe("codex: command not found")
   })
 
-  it("counts configured agents even while the master switch hides them", () => {
-    externalState.enabled = false
-    externalState.agents = { a1: agent("a1", "Codex") }
+  it("keeps enabled agents available independently of disabled siblings", () => {
+    externalState.agents = { a1: agent("a1", "Codex"), a2: agent("a2", "Disabled", false) }
     const { result } = renderHook(() => useAgentRuntimeCatalog())
-    expect(result.current.runtimes.map((row) => row.key)).toEqual(["builtin"])
-    expect(result.current.configuredExternalCount).toBe(1)
-    expect(result.current.externalEnabled).toBe(false)
+    expect(result.current.runtimes.map((row) => row.key)).toEqual([
+      "builtin",
+      "external:a1",
+      "external:a2",
+    ])
+    expect(result.current.runtimes[1].blockedReason).toBeUndefined()
+    expect(result.current.runtimes[2].blockedReason).toBe("Agent is disabled.")
+    expect(result.current.configuredExternalCount).toBe(2)
   })
 
   it("contributes no host rows when no host owns configurations", () => {
@@ -156,7 +158,6 @@ describe("catalogInputFromState", () => {
     const input = catalogInputFromState({
       providerId: "deepseek",
       external: {
-        enabled: true,
         agents: { a1: agent("a1", "Codex") } as never,
         agentValidity: {},
       },
@@ -165,7 +166,6 @@ describe("catalogInputFromState", () => {
     })
     expect(input).toMatchObject({
       providerId: "deepseek",
-      externalEnabled: true,
       externalAgents: [agent("a1", "Codex")],
       agentValidity: {},
       hostConfigs,
@@ -177,7 +177,7 @@ describe("catalogInputFromState", () => {
 
   it("omits the warning describer when the caller has none", () => {
     const input = catalogInputFromState({
-      external: { enabled: false, agents: {}, agentValidity: {} },
+      external: { agents: {}, agentValidity: {} },
       hostConfigs: [],
     })
     expect("describeWarning" in input).toBe(false)

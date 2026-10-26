@@ -96,6 +96,8 @@ import { useBarLayout } from "@/components/shell/use-bar-layout"
 import { recordNavigation } from "@/hooks/desktop/use-nav-history"
 import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { useProjectStore } from "@/stores/project/project-store"
+import { getAppRegistration } from "@/lib/shortcuts/app-runtime"
 
 const log = loggers.ui
 
@@ -185,6 +187,7 @@ export function TitleBar() {
   const t = useTranslations("desktop.titleBar")
   const tMenu = useTranslations("desktop.menu")
   const tShellLayout = useTranslations("desktop.shellLayout")
+  const tTerminalMenu = useTranslations("desktop.statusBar")
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [maximized, setMaximized] = useState(false)
@@ -235,8 +238,8 @@ export function TitleBar() {
   // animate, and the bar has to track them frame for frame.
   //
   // The conversation header supplies the task title. In that surface, search
-  // becomes compact and secondary navigation moves into a menu; sidebar and
-  // workspace actions remain available through their existing components.
+  // becomes compact. History and workspace controls stay directly available
+  // on wide windows; only a narrow window folds them into a menu.
   //
   // `projected.start` still folds the Windows/Linux menubar into the hamburger:
   // that one is spatial, not cosmetic — the menus would otherwise sit over the
@@ -269,6 +272,7 @@ export function TitleBar() {
   const registerStartOutlet = useTitleBarOutletRef("start")
   const centerOutletRef = useTitleBarOutletRef("center")
   const registerEndOutlet = useTitleBarOutletRef("end")
+  const sessionActionsOutletRef = useTitleBarOutletRef("sessionActions")
   const actionsOutletRef = useTitleBarOutletRef("actions")
   const startOutletRef = useCallback(
     (el: HTMLElement | null) => {
@@ -291,7 +295,24 @@ export function TitleBar() {
   const barPx = useElementWidth(barRef)
   const leftChromePx = useElementWidth(leftChromeRef)
   const rightChromePx = useElementWidth(rightChromeRef)
+  // Match the workspace/command-center segments' existing `lg` floor. Chat
+  // projection alone must never move navigation into an overflow menu.
+  const navigationFolded = narrow || (barPx > 0 && barPx < 1024)
+  const navigationItems = bar.zones.center.filter((item) => item.id !== "search")
+  const searchItems = bar.zones.center.filter((item) => item.id === "search")
   const terminalOpen = useTerminalStore((s) => s.panelOpen)
+  const terminalProjectId = useProjectStore((s) => s.activeProjectId)
+  const aiShellAvailable = useTerminalStore((s) => {
+    const anchorId = s.activeSessionIdByProject?.[terminalProjectId ?? ""]
+    if (!anchorId || !s.panelOpen) return false
+    const focused = s.focusedPaneByAnchor?.[anchorId]
+    const targetId =
+      focused && (focused === anchorId || s.splitPanes?.[anchorId]?.includes(focused))
+        ? focused
+        : anchorId
+    const row = s.sessions[targetId]
+    return !!row && row.kind !== "serial" && (row.projectId ?? "") === (terminalProjectId ?? "")
+  })
   const setTerminalPanelOpen = useTerminalStore((s) => s.setPanelOpen)
   const toggleTerminalPanel = useTerminalStore((s) => s.togglePanel)
 
@@ -613,6 +634,10 @@ export function TitleBar() {
   const handleToggleTerminal = () => {
     log.info("title-bar terminal toggle")
     toggleTerminalPanel()
+  }
+
+  const handleToggleAiShell = () => {
+    getAppRegistration("terminal.aiShell.toggle")?.handler(new KeyboardEvent("keydown"))
   }
 
   // ---- Tools menu --------------------------------------------------------
@@ -1005,6 +1030,9 @@ export function TitleBar() {
                   >
                     {tMenu("terminal.togglePanel")}
                   </DropdownMenuCheckboxItem>
+                  <DropdownMenuItem disabled={!aiShellAvailable} onSelect={handleToggleAiShell}>
+                    {tTerminalMenu("terminalAiShellToggle")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => void handleRestartSidecar()}>
                     {tMenu("terminal.restartSidecar")}
                   </DropdownMenuItem>
@@ -1283,6 +1311,9 @@ export function TitleBar() {
                     >
                       {tMenu("terminal.togglePanel")}
                     </MenubarCheckboxItem>
+                    <MenubarItem disabled={!aiShellAvailable} onSelect={handleToggleAiShell}>
+                      {tTerminalMenu("terminalAiShellToggle")}
+                    </MenubarItem>
                     <MenubarSeparator />
                     <MenubarItem onSelect={() => void handleRestartSidecar()}>
                       {tMenu("terminal.restartSidecar")}
@@ -1356,15 +1387,21 @@ export function TitleBar() {
           data-tauri-drag-region
           className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
-          {/* The task title leads. Search and navigation stay compact while a
-              conversation header owns the center outlet. */}
+          {/* Navigation keeps its leading position on a wide window. It shares
+              the title capture; session actions stay in the fixed right chrome. */}
           <div
             ref={centerOutletRef}
             data-testid="title-bar-outlet-center"
             data-title-bar-outlet="center"
             hidden={!projected.center}
             className="flex h-full min-w-0 flex-1 items-center"
-          />
+          >
+            {projected.center && !navigationFolded && (
+              <div className="order-first flex shrink-0 items-center gap-1">
+                <TitleBarZone items={navigationItems} ctx={itemCtx} />
+              </div>
+            )}
+          </div>
           {!projected.center && <TitleBarZone items={bar.zones.center} ctx={itemCtx} />}
           <PluginExtensionSlot
             point="toolbar.center"
@@ -1394,7 +1431,20 @@ export function TitleBar() {
           data-testid="title-bar-right-chrome"
           className="flex items-center"
         >
-          {projected.center && <TitleBarZone items={bar.zones.center} ctx={itemCtx} compact />}
+          <div
+            ref={sessionActionsOutletRef}
+            data-testid="title-bar-outlet-session-actions"
+            data-title-bar-outlet="sessionActions"
+            hidden={!projected.sessionActions}
+            className="flex h-full shrink-0 items-center"
+          />
+          {projected.center && (
+            <TitleBarZone
+              items={navigationFolded ? bar.zones.center : searchItems}
+              ctx={itemCtx}
+              compact
+            />
+          )}
           <PluginExtensionSlot
             point="toolbar.right"
             className="flex items-center gap-1 px-1 empty:hidden"

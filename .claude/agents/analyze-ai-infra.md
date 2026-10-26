@@ -38,5 +38,5 @@ For each area:
 
 ## Commands
 
-- Count lib/ai files: `Get-ChildItem lib/ai -Recurse -Filter "*.ts" | Measure-Object`
+- Count lib/ai files: `rg --files lib/ai -g "*.ts" | wc -l`
 - Find AI SDK usage: `rg "@ai-sdk/" --count`

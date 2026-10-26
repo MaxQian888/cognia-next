@@ -346,7 +346,7 @@
     "modelHint": "判定目标是否完成的模型。除非想用更便宜/更快的判定，否则保持聊天模型即可。",
     "noModels": "暂无可用模型，请先配置提供商。",
     "promptOverride": "判定提示覆盖",
-    "promptOverrideHint": "替换内置判定指令。仍须要求返回一行 JSON 判定结果。",
+    "promptOverrideHint": "会复制到每个新目标中，并替换该目标的判定指令。若要为所有未自带指令的目标修改判定，请在「设置 → 提示词」中编辑。仍须要求返回一行 JSON 判定结果。",
     "searchPlaceholder": "搜索模型…",
     "temperature": "判定温度",
     "temperatureHint": "0 为确定性（推荐）。越高判定越宽松。",

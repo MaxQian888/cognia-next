@@ -5,7 +5,7 @@
  */
 
 import { defineAgentTool } from "./define-agent-tool"
-import type { PluginAgentToolInput } from "@/types/plugin/plugin-agent-sdk"
+import type { PluginAgentToolInput } from "@cognia/plugin-contract/types/plugin/plugin-agent-sdk"
 
 describe("defineAgentTool", () => {
   it("returns the same object reference passed in", () => {

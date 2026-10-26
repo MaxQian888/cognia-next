@@ -11,7 +11,8 @@
 // subscribe is injectable so the wiring is unit-tested with a plain fake; the
 // default awaits `listenTaskDue` (a no-op off Tauri).
 
-import type { DaemonTaskDueEvent } from "@/types/scheduler"
+import type { DaemonTaskDueEvent, ScheduledTask } from "@/types/scheduler"
+import { isMaintenanceTask } from "@/lib/scheduler/maintenance-tasks"
 import { listenTaskDue } from "@/lib/scheduler/daemon-bridge"
 import type { PetEmit } from "../pet-event-bus"
 
@@ -22,14 +23,25 @@ export type TaskDueSubscriber = (
 const defaultSubscribe: TaskDueSubscriber = (handler) => listenTaskDue(handler)
 
 export function createSchedulerDueSource(
-  deps: { subscribe?: TaskDueSubscriber } = {}
+  deps: {
+    subscribe?: TaskDueSubscriber
+    getTask?: (id: string) => Promise<ScheduledTask | null>
+  } = {}
 ): (emit: PetEmit) => () => void {
   const subscribe = deps.subscribe ?? defaultSubscribe
   return (emit) => {
     let stop: (() => void) | null = null
     let disposed = false
     void subscribe((event) => {
-      emit({ source: "scheduler", kind: "scheduledRunDue", meta: { taskId: event.taskId } })
+      void (async () => {
+        const task = deps.getTask
+          ? await deps.getTask(event.taskId)
+          : await (await import("@/lib/scheduler/scheduler-db")).schedulerDb.getTask(event.taskId)
+        if (disposed || !task) return
+        if (task.notification.dueReminder === false) return
+        if (task.notification.dueReminder !== true && isMaintenanceTask(task)) return
+        emit({ source: "scheduler", kind: "scheduledRunDue", meta: { taskId: event.taskId } })
+      })().catch(() => undefined)
     })
       .then((off) => {
         // Dispose may land before the async subscribe resolves — tear down

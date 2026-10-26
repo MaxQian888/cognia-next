@@ -10,6 +10,12 @@ import type { OutputSink } from "./output"
 import type { TranscriptEntry } from "../agent/transcript"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
+import { CLI_HANDOFF_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 const HOME = "/home/u/.cognia"
 
@@ -538,5 +544,45 @@ describe("resumeCommand", () => {
     expect(passed.prompt).toMatch(/earlier q/)
     expect(passed.prompt).toMatch(/earlier a/)
     expect(passed.prompt).toMatch(/what next\?/)
+  })
+})
+
+describe("resume preamble Prompt Center override", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("frames the prior transcript with a published override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-handoff",
+          promptId: CLI_HANDOFF_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-handoff-1",
+          body: "Earlier work:\n{{transcript}}\n\nNow: {{prompt}}",
+          contractVersion: CLI_HANDOFF_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const s = sink()
+    const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "continued" })
+    const drop = JSON.stringify({ ts: 1, role: "user", content: "earlier q" }) + "\n"
+    const code = await resumeCommand(parseArgv(["resume", "s1", "what next?", "--yes"]), {
+      out: s.out,
+      home: HOME,
+      readDrop: (p) => (p === handoffDropPath(HOME, "s1") ? drop : null),
+      transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
+      loadConfig: () => cfg(),
+      run,
+    })
+    expect(code).toBe(0)
+    const prompt: string = run.mock.calls[0][0].prompt
+    expect(prompt.startsWith("Earlier work:\n")).toBe(true)
+    expect(prompt).toMatch(/earlier q/)
+    expect(prompt.endsWith("\n\nNow: what next?")).toBe(true)
+    expect(prompt).not.toContain("Continuing a prior session")
   })
 })

@@ -1,40 +1,36 @@
 /**
  * Plugin SDK — `terminal-completion` capability surface.
  *
- * Re-exports the authoring helper, manifest bridge, plugin adapter, and
- * namespaced host completion registry aliases for terminal suggestions.
+ * Exports the authoring helper, provider registration, and namespaced host
+ * completion registry aliases for terminal suggestions. The host adapts and
+ * registers manifest-declared providers itself.
  */
 
 export { defineTerminalCompletionProvider } from "../define/define-terminal-completion"
 
-export {
-  adaptPluginCompletionProvider,
-  registerPluginCompletionProvider,
-  registerTerminalCompletionProvidersForPlugin,
-  unregisterTerminalCompletionProvidersForPlugin,
-} from "@/lib/plugin/bridge/terminal-completion-bridge"
+export { registerPluginCompletionProvider } from "@cognia/plugin-contract/lib/plugin/bridge/terminal-completion-bridge"
 
 export type {
   TerminalCompletionBridgeError,
   TerminalCompletionBridgeOptions,
   TerminalCompletionBridgeResult,
-} from "@/lib/plugin/bridge/terminal-completion-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/terminal-completion-bridge"
 
 export {
   getCompletions as getTerminalCompletions,
   listProviders as listTerminalCompletionProviders,
   rankSuggestions as rankTerminalCompletionSuggestions,
   registerCompletionProvider as registerTerminalCompletionProvider,
-} from "@/lib/terminal/completion/registry"
+} from "@cognia/plugin-contract/lib/terminal/completion/registry"
 
 export type {
   AcceptEdit,
   TerminalCompletionContext,
   TerminalCompletionProvider,
   TerminalCompletionSuggestion,
-} from "@/lib/terminal/completion/types"
+} from "@cognia/plugin-contract/lib/terminal/completion/types"
 
-export { SOURCE_PRIORITY as TERMINAL_COMPLETION_SOURCE_PRIORITY } from "@/lib/terminal/completion/types"
+export { SOURCE_PRIORITY as TERMINAL_COMPLETION_SOURCE_PRIORITY } from "@cognia/plugin-contract/lib/terminal/completion/types"
 
 export type {
   PluginTerminalCompletionContext,
@@ -42,4 +38,4 @@ export type {
   PluginTerminalCompletionItem,
   PluginTerminalCompletionProvider,
   PluginTerminalCompletionProviderDef,
-} from "@/types/plugin/plugin-terminal-completion"
+} from "@cognia/plugin-contract/types/plugin/plugin-terminal-completion"

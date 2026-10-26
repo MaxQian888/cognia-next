@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -179,7 +180,7 @@ it("builds with exactly the inputs it was given", async () => {
   })
 })
 
-it("reports each edit rather than holding its own copy", () => {
+it("reports each edit rather than holding its own copy", async () => {
   // The inputs used to be component state that did not reset when the selected
   // Site changed, so one Site's network allowances were used for another's
   // build. Controlled by the caller now, so the field reports and never stores.
@@ -196,7 +197,7 @@ it("reports each edit rather than holding its own copy", () => {
   })
   expect(setBuildInputs).toHaveBeenLastCalledWith({ buildNetworkHosts: ["api.example.com"] })
 
-  fireEvent.change(screen.getByLabelText("build.runtime"), { target: { value: "node@20" } })
+  await selectOption(screen.getByLabelText("build.runtime"), "node@20")
   expect(setBuildInputs).toHaveBeenLastCalledWith({ runtime: "node@20" })
 })
 
@@ -213,7 +214,7 @@ it("offers known runtimes as choices, and still shows a value that is not one", 
   })
   const select = screen.getByLabelText("build.runtime") as HTMLSelectElement
   expect(select).toHaveValue("node@23-custom")
-  expect([...select.options].map((option) => option.value)).toContain("node@24")
+  expect([...getNativeSelect(select).options].map((option) => option.value)).toContain("node@24")
 })
 
 it("says where the build inputs came from", () => {

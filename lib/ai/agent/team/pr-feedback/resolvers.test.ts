@@ -14,6 +14,12 @@ import {
 import { runHeadlessExec } from "@/lib/terminal/headless-exec"
 import { resolveGithubReadToken } from "@/lib/integrations/github-read-credential"
 import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/host"
+import { REVIEWER_SYSTEM_PROMPT, REVIEWER_TASK_PROMPT } from "./reviewer"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const mockAccountToken = resolveGithubReadToken as jest.Mock
 const GHES = parseGithubHost("https://ghe.acme.io") as GithubHost
@@ -353,7 +359,10 @@ describe("createRunPrReview", () => {
       raw: "{}",
       schemaOverridden: false,
     }))
-    const run = createRunPrReview({ getCtx: () => ({}) as never, dispatch: dispatch as never })
+    const run = createRunPrReview({
+      getCtx: () => ({ team: {} }) as never,
+      dispatch: dispatch as never,
+    })
     expect(await run(binding, obs())).toEqual({ verdict: "changes_requested", body: "fix" })
     expect(dispatch).toHaveBeenCalled()
   })
@@ -362,7 +371,10 @@ describe("createRunPrReview", () => {
     const dispatch = jest.fn(async () => {
       throw new Error("dispatch failed")
     })
-    const run = createRunPrReview({ getCtx: () => ({}) as never, dispatch: dispatch as never })
+    const run = createRunPrReview({
+      getCtx: () => ({ team: {} }) as never,
+      dispatch: dispatch as never,
+    })
     expect(await run(binding, obs())).toBeNull()
   })
 
@@ -373,7 +385,10 @@ describe("createRunPrReview", () => {
       raw: "{}",
       schemaOverridden: false,
     }))
-    const run = createRunPrReview({ getCtx: () => ({}) as never, dispatch: dispatch as never })
+    const run = createRunPrReview({
+      getCtx: () => ({ team: {} }) as never,
+      dispatch: dispatch as never,
+    })
     const leaky = obs()
     leaky.pr = { ...leaky.pr, title: "fix login for alice@example.com" }
     await run(binding, leaky)
@@ -381,5 +396,53 @@ describe("createRunPrReview", () => {
     // The raw email must not leak to the model; the prompt structure survives.
     expect(sentPrompt).not.toContain("alice@example.com")
     expect(sentPrompt).toContain("Review pull request #5")
+  })
+})
+
+describe("createRunPrReview — Prompt Center (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("reviews with the team project's customized reviewer prompts", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-system",
+          promptId: REVIEWER_SYSTEM_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-resolvers-system",
+          body: "Review for security only.",
+          contractVersion: REVIEWER_SYSTEM_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-task",
+          promptId: REVIEWER_TASK_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-resolvers-task",
+          body: 'Check PR #{{number}} in {{repo}} ({{headBranch}} → {{baseBranch}}): "approved" or "changes_requested" + "body".',
+          contractVersion: REVIEWER_TASK_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const dispatch = jest.fn(async (_ctx: unknown, _opts: { prompt: string }) => ({
+      value: { verdict: "approved", body: "ok" },
+      teammateId: "x",
+      raw: "{}",
+      schemaOverridden: false,
+    }))
+    const run = createRunPrReview({
+      getCtx: () => ({ team: { projectId: "ws-1" } }) as never,
+      dispatch: dispatch as never,
+    })
+    await run(binding, obs())
+    const opts = dispatch.mock.calls[0]![1] as { prompt: string; systemPrompt: string }
+    expect(opts.systemPrompt).toBe("Review for security only.")
+    expect(opts.prompt).toBe(
+      'Check PR #5 in acme/app (b → main): "approved" or "changes_requested" + "body".'
+    )
   })
 })

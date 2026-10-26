@@ -9,6 +9,22 @@ import { TrayPanelFieldControl } from "./tray-panel-field-control"
 import type { TrayPanelField } from "@/lib/tray-panel/types"
 
 describe("TrayPanelFieldControl", () => {
+  it("keeps a long custom switch label intact and the switch operable", async () => {
+    const user = userEvent.setup()
+    const label = "LongSwitchFieldLabelWithoutAnyWordBreaksAtAllInThisPanel"
+    const onChange = jest.fn()
+    render(
+      <TrayPanelFieldControl
+        field={{ kind: "switch", id: "long", label }}
+        value={false}
+        onChange={onChange}
+      />
+    )
+    await user.click(screen.getByRole("switch", { name: label }))
+    expect(onChange).toHaveBeenCalledWith(true)
+    expect(screen.getByText(label)).toBeVisible()
+  })
+
   it("renders a text field and reports edits", async () => {
     const user = userEvent.setup()
     const onChange = jest.fn()

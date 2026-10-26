@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { PairedStep } from "./paired-step"
@@ -13,10 +13,14 @@ jest.mock("@/lib/accounts/active-account-id", () => ({ DEFAULT_LOCAL_ACCOUNT_ID:
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
   getActiveRuntimeTargetContext: () => ({ accountId: "local_acct_a", targetId: "host-a" }),
 }))
+const activeHost = { hostId: "host-a", accountNamespace: "local_acct_a", label: "Studio Mac" }
+const savedHosts: { value: { hostId: string; accountNamespace: string; label: string }[] } = {
+  value: [activeHost],
+}
 jest.mock("@/lib/companion/credential-book", () => ({
   companionCredentialBook: () => ({
-    getActive: async () => ({ hostId: "host-a", accountNamespace: "local_acct_a" }),
-    list: async () => [{ hostId: "host-a", accountNamespace: "local_acct_a" }],
+    getActive: async () => activeHost,
+    list: async () => savedHosts.value,
   }),
 }))
 jest.mock("@/lib/companion/host-removal", () => ({
@@ -287,5 +291,69 @@ describe("<PairedStep /> — Settings → Security → signOut", () => {
     await waitFor(() => expect(onAfterSignOut).toHaveBeenCalled())
     expect(guardCalls).toHaveLength(0)
     expect(removeHost).toHaveBeenCalled()
+  })
+})
+
+describe("<PairedStep /> — replacement Host on sign-out", () => {
+  const officeHost = { hostId: "host-b", accountNamespace: "local_acct_a", label: "Office PC" }
+
+  beforeEach(() => {
+    guardCalls.length = 0
+    guardBlock.reason = null
+    biometricPolicy.value = undefined
+    removeHost.mockReset().mockResolvedValue(undefined)
+    savedHosts.value = [activeHost, officeHost]
+  })
+
+  afterEach(() => {
+    savedHosts.value = [activeHost]
+  })
+
+  it("asks which saved Host takes over, before the biometric prompt", async () => {
+    const onAfterSignOut = jest.fn()
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    const chooser = await screen.findByRole("dialog")
+    expect(guardCalls).toHaveLength(0)
+    expect(within(chooser).getByRole("combobox")).toHaveTextContent("Office PC")
+    await user.click(within(chooser).getByTestId("pair-signout-fallback-confirm"))
+    await waitFor(() => expect(onAfterSignOut).toHaveBeenCalled())
+    expect(guardCalls).toHaveLength(1)
+    expect(removeHost).toHaveBeenCalledWith({
+      accountId: "local_acct_a",
+      hostId: "host-a",
+      platform: "mobile",
+      fallbackHostId: "host-b",
+    })
+  })
+
+  it("treats cancelling the choice as backing out, not as an error", async () => {
+    const onAfterSignOut = jest.fn()
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    const chooser = await screen.findByRole("dialog")
+    await user.click(within(chooser).getByTestId("pair-signout-fallback-cancel"))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(guardCalls).toHaveLength(0)
+    expect(removeHost).not.toHaveBeenCalled()
+    expect(onAfterSignOut).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("pair-signout-error")).not.toBeInTheDocument()
+  })
+
+  it("shows a failed removal inside the guard instead of dropping it", async () => {
+    removeHost.mockRejectedValue(new Error("Host refused revocation"))
+    const onAfterSignOut = jest.fn()
+    const user = userEvent.setup()
+    render(<PairedStep {...baseProps} onAfterSignOut={onAfterSignOut} />)
+    await user.click(screen.getByTestId("pair-signout"))
+    await user.click(
+      within(await screen.findByRole("dialog")).getByTestId("pair-signout-fallback-confirm")
+    )
+    expect(await screen.findByTestId("pair-signout-error")).toHaveTextContent(
+      "Host refused revocation"
+    )
+    expect(onAfterSignOut).not.toHaveBeenCalled()
   })
 })

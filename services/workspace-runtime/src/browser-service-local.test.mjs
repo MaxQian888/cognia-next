@@ -1917,3 +1917,249 @@ test("adjust hands the overlay checked JSON and passes its JSON answer back", as
     (error) => error.code === "browser_option_invalid"
   )
 })
+
+test("lifecycle subscribers preserve the event sink and failed creation releases session ownership", async (t) => {
+  const { service, chromium, events } = await fixture(t)
+  const observed = []
+  const unsubscribe = service.subscribeEvents((event) => observed.push(event))
+  service.subscribeEvents(() => {
+    throw new Error("observer failure")
+  })
+  await service.createSession({ id: "first" })
+  await service.closeSession("first")
+  assert.equal(observed.at(-1).type, "session.closed")
+  assert.deepEqual(observed.at(-1), events.at(-1))
+  unsubscribe()
+  chromium.launchPersistentContext = async () => {
+    throw new Error("launch failed")
+  }
+  await assert.rejects(() => service.createSession({ id: "failed" }), /launch failed/)
+  assert.equal(service.sessions.size, 0)
+  assert.equal(service.profileOwners.size, 0)
+  assert.equal(events.at(-1).type, "session.closed")
+  assert.equal(events.at(-1).sessionId, "failed")
+  assert.equal(events.at(-1).reason, "creation_failed")
+  assert.equal(observed.at(-1).sessionId, "first", "unsubscribed listeners are not retained")
+})
+
+test("disconnect releases session ownership even when auxiliary cleanup fails", async (t) => {
+  const { service, events } = await fixture(t)
+  await service.createSession({ id: "disconnect" })
+  service.fileBridge = {
+    cleanupSession: async () => {
+      throw new Error("cleanup failed")
+    },
+  }
+  await assert.rejects(
+    () => service.handleConnectionClosed(service.sessions.get("disconnect")),
+    /cleanup failed/
+  )
+  assert.equal(service.sessions.size, 0)
+  assert.equal(service.profileOwners.size, 0)
+  assert.equal(events.at(-1).type, "session.closed")
+  assert.equal(events.at(-1).reason, "disconnected")
+})
+
+test("capture sequences survive restart and stale ACKs cannot release a new stream", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "capture-fence" })
+  const context = chromium.launches[0].context
+  const frames = []
+  const receive = (frame) => frames.push(frame)
+  await service.startScreencast("capture-fence", receive)
+  context.cdpSessions.at(-1).cdp.emit("Page.screencastFrame", {
+    sessionId: 10,
+    data: Buffer.from("old").toString("base64"),
+  })
+  await tick()
+  const oldSequence = frames[0].readUInt32BE(4)
+  await service.stopScreencast("capture-fence")
+  await service.startScreencast("capture-fence", receive)
+  context.cdpSessions.at(-1).cdp.emit("Page.screencastFrame", {
+    sessionId: 20,
+    data: Buffer.from("new").toString("base64"),
+  })
+  await tick()
+  assert.ok(frames[1].readUInt32BE(4) > oldSequence)
+  assert.equal(await service.ackScreencastFrame("capture-fence", oldSequence), false)
+})
+
+test("viewport synchronization returns a fence and restarts a fresh capture at unchanged dimensions", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "viewport-fence" })
+  const context = chromium.launches[0].context
+  const frames = []
+  await service.startScreencast("viewport-fence", (frame) => frames.push(frame))
+  const oldCdp = context.cdpSessions.at(-1).cdp
+  oldCdp.emit("Page.screencastFrame", {
+    sessionId: 10,
+    data: Buffer.from("old").toString("base64"),
+  })
+  await tick()
+  const result = await service.emulate("viewport-fence", {
+    viewport: { width: 1280, height: 720 },
+    synchronizeFrame: true,
+  })
+  assert.equal(result.frameSequence, frames[0].readUInt32BE(4))
+  const nextCdp = context.cdpSessions.at(-1).cdp
+  assert.notEqual(nextCdp, oldCdp)
+  nextCdp.emit("Page.screencastFrame", {
+    sessionId: 20,
+    data: Buffer.from("new").toString("base64"),
+  })
+  await tick()
+  assert.ok(frames.at(-1).readUInt32BE(4) > result.frameSequence)
+})
+
+test("retiring a capture releases queued frames and detaches even when stop fails", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "failed-stop" })
+  await service.startScreencast("failed-stop", () => undefined)
+  const session = service.sessions.get("failed-stop")
+  const state = session.screencast
+  const cdp = chromium.launches[0].context.cdpSessions.at(-1).cdp
+  const send = cdp.send.bind(cdp)
+  cdp.send = (method, args) =>
+    method === "Page.stopScreencast" ? Promise.reject(new Error("closed")) : send(method, args)
+  await service.stopScreencast("failed-stop").catch(() => undefined)
+  assert.equal(session.screencast, null)
+  assert.equal(state.queuedEvent, null)
+  assert.equal(state.receive, null)
+  assert.equal(cdp.detached, true)
+})
+
+test("failed cloud initialization closes Chromium and emits lifecycle release", async (t) => {
+  const { service, context, events } = await cloudFixture(t)
+  context.addInitScript = async () => {
+    throw new Error("initialization failed")
+  }
+  await assert.rejects(() => service.createSession({ id: "partial" }), /initialization failed/)
+  assert.equal(service.sessions.size, 0)
+  assert.equal(context.closed, true)
+  assert.equal(events.at(-1).type, "session.closed")
+  assert.equal(events.at(-1).reason, "creation_failed")
+})
+
+test("a failed old launch cannot release a replacement session with the same id", async (t) => {
+  const { service, chromium, events } = await fixture(t)
+  const originalLaunch = chromium.launchPersistentContext.bind(chromium)
+  let release
+  let launched
+  const ready = new Promise((resolve) => {
+    launched = resolve
+  })
+  chromium.launchPersistentContext = async (...args) => {
+    launched()
+    await new Promise((resolve) => {
+      release = resolve
+    })
+    return originalLaunch(...args)
+  }
+  const old = service.createSession({ id: "reused" })
+  const rejected = assert.rejects(old, /closed/)
+  await ready
+  await service.closeSession("reused").catch(() => undefined)
+  chromium.launchPersistentContext = originalLaunch
+  await service.createSession({ id: "reused", profileId: "replacement" })
+  const replacement = service.sessions.get("reused")
+  const count = events.filter((event) => event.type === "session.closed").length
+  release()
+  await rejected
+  assert.equal(service.sessions.get("reused"), replacement)
+  assert.equal(
+    events.filter((event) => event.type === "session.closed").length,
+    count,
+    "retired launch cleanup must not invalidate the new generation"
+  )
+  assert.equal(service.profileOwners.get("replacement"), "reused")
+})
+
+test("a pending capture attach cannot resurrect a closed session", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "pending-capture" })
+  const session = service.sessions.get("pending-capture")
+  const context = chromium.launches[0].context
+  const cdp = new FakeCdp()
+  let finish
+  context.newCDPSession = () =>
+    new Promise((resolve) => {
+      finish = resolve
+    })
+  const starting = service.startScreencast("pending-capture", () => undefined)
+  await tick()
+  const closing = service.closeSession("pending-capture")
+  finish(cdp)
+  await Promise.all([starting, closing])
+  assert.equal(service.sessions.has("pending-capture"), false)
+  assert.equal(session.screencast, null)
+  assert.equal(cdp.detached, true)
+  assert.equal(
+    cdp.commands.some(([method]) => method === "Page.startScreencast"),
+    false
+  )
+})
+
+test("a rejected capture start retires the listener and detaches the CDP session", async (t) => {
+  const { service, chromium } = await fixture(t)
+  await service.createSession({ id: "reject-capture" })
+  const context = chromium.launches[0].context
+  const cdp = new FakeCdp((method) => {
+    if (method === "Page.startScreencast") throw new Error("start failed")
+  })
+  context.newCDPSession = async () => cdp
+  await assert.rejects(
+    service.startScreencast("reject-capture", () => undefined),
+    /start failed/
+  )
+  assert.equal(service.sessions.get("reject-capture").screencast, null)
+  assert.equal(cdp.listenerCount("Page.screencastFrame"), 0)
+  assert.equal(cdp.detached, true)
+})
+
+test("late frame ACKs cannot acknowledge a recreated session with the same id", async (t) => {
+  const { service, chromium } = await fixture(t)
+  const frames = []
+  for (let generation = 0; generation < 2; generation += 1) {
+    await service.createSession({ id: "recreated-capture" })
+    await service.startScreencast("recreated-capture", (frame) => frames.push(frame))
+    chromium.launches
+      .at(-1)
+      .context.cdpSessions.at(-1)
+      .cdp.emit("Page.screencastFrame", {
+        sessionId: 1,
+        data: Buffer.from(String(generation)).toString("base64"),
+      })
+    await tick()
+    if (generation === 0) await service.closeSession("recreated-capture")
+  }
+  assert.ok(frames[1].readUInt32BE(4) > frames[0].readUInt32BE(4))
+  assert.equal(
+    await service.ackScreencastFrame("recreated-capture", frames[0].readUInt32BE(4)),
+    false
+  )
+})
+
+test("late disconnect cleanup cannot remove a replacement session", async (t) => {
+  const { service } = await fixture(t)
+  await service.createSession({ id: "disconnect-reuse" })
+  const oldSession = service.sessions.get("disconnect-reuse")
+  let finish
+  let cleanups = 0
+  service.fileBridge = {
+    cleanupSession: async () => {
+      if (cleanups++ === 0)
+        await new Promise((resolve) => {
+          finish = resolve
+        })
+    },
+  }
+  const disconnecting = service.handleConnectionClosed(oldSession)
+  while (!finish) await tick()
+  await service.closeSession("disconnect-reuse")
+  await service.createSession({ id: "disconnect-reuse" })
+  const replacement = service.sessions.get("disconnect-reuse")
+  finish()
+  await disconnecting
+  assert.equal(service.sessions.get("disconnect-reuse"), replacement)
+  assert.notEqual(replacement, oldSession)
+})

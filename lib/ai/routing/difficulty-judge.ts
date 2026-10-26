@@ -32,6 +32,8 @@ import type { RoutingDifficultyTier } from "@cognia/provider-types/auto-router"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
 import { RouterFusionInfrastructureError } from "@/lib/router-fusion/gate/faults"
 import { breakerThresholdOf, routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
@@ -69,13 +71,35 @@ export function __resetDifficultyJudgeCache(): void {
   cache.clear()
 }
 
-const SYSTEM_PROMPT =
-  "You classify how much model capability a request needs. " +
-  '"fast" = short factual answers, rewriting, formatting, simple lookups. ' +
-  '"balanced" = ordinary multi-step work, everyday coding, summarising a document. ' +
-  '"powerful" = hard reasoning, novel algorithms, long multi-constraint tasks, subtle debugging. ' +
-  'Respond with ONLY a JSON object: {"tier": "fast"|"balanced"|"powerful", "confidence": 0..1}. ' +
-  "No prose, no code fences."
+/**
+ * The judge's guidance (ADR-0236). Editing it changes which tier an ambiguous
+ * request is routed to; the parsed tier labels are pinned so an edit cannot
+ * break the reply contract. The active revision is part of the verdict cache
+ * key, so a published edit is never answered from an old verdict.
+ */
+export const DIFFICULTY_JUDGE_PROMPT = definePrompt({
+  id: "routing.difficulty-judge",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "routing",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  requiredFragments: ['"tier"', '"fast"', '"balanced"', '"powerful"'],
+  maxChars: 4_000,
+  outputContract:
+    'Parsed as {"tier", "confidence"}; any other tier, a timeout or unparsable output keeps the deterministic tier.',
+  consumers: ["lib/ai/routing/difficulty-judge.ts"],
+  defaultBody:
+    "You classify how much model capability a request needs. " +
+    '"fast" = short factual answers, rewriting, formatting, simple lookups. ' +
+    '"balanced" = ordinary multi-step work, everyday coding, summarising a document. ' +
+    '"powerful" = hard reasoning, novel algorithms, long multi-constraint tasks, subtle debugging. ' +
+    'Respond with ONLY a JSON object: {"tier": "fast"|"balanced"|"powerful", "confidence": 0..1}. ' +
+    "No prose, no code fences.",
+})
 
 function coerceTier(value: unknown): RoutingDifficultyTier | null {
   return value === "fast" || value === "balanced" || value === "powerful" ? value : null
@@ -187,8 +211,10 @@ async function judgeDifficultyDirect(
   const trimmed = (input.promptText ?? "").trim().slice(0, PROMPT_EXCERPT)
   if (!trimmed) return null
 
+  const guidance = await resolvePromptAsync(DIFFICULTY_JUDGE_PROMPT)
+  const promptKey = guidance.source.kind === "override" ? guidance.source.revisionId : "shipped"
   const cacheTtlMs = input.cacheTtlMs ?? CACHE_TTL_MS
-  const cacheKey = `${input.deterministicTier ?? "-"}::${trimmed}`
+  const cacheKey = `${promptKey}|${input.deterministicTier ?? "-"}::${trimmed}`
   const cached = cacheTtlMs > 0 ? cache.get(cacheKey) : undefined
   if (cached && now() - cached.at < cacheTtlMs) return cached.value
 
@@ -204,7 +230,7 @@ async function judgeDifficultyDirect(
       : ""
     const text = await withTimeout(
       client.complete(`Request:\n${trimmed}${prior}`, {
-        system: SYSTEM_PROMPT,
+        system: guidance.text,
         temperature: 0,
         maxTokens: 24,
       }),

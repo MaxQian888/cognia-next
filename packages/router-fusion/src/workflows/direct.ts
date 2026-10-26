@@ -18,6 +18,7 @@
 
 import type { ExecutionMode, Message, RunResult, TaskKind } from "../contracts/schemas"
 import type { VerifierProfile } from "../config/types"
+import type { RolePromptProfile } from "../prompts/roles"
 import { acceptanceClaimFor } from "../verify/profiles"
 import {
   parseJsonDocument,
@@ -51,6 +52,8 @@ export interface DirectRunInput {
   fixtureExpectations?: Record<string, unknown>
   toolPolicyId: string | null
   stream: boolean
+  /** The role text the run pinned, for the reviewer; the shipped roles-1 when absent. */
+  rolePrompts?: RolePromptProfile
   signal: AbortSignal
   onDelta?: (text: string) => void
 }
@@ -146,6 +149,7 @@ export async function runDirect(
     reserveMicrousd: input.reserveMicrousd,
     transportAttempts: input.transportAttempts,
     deadlineAt: input.deadlineAt,
+    ...(input.rolePrompts ? { rolePrompts: input.rolePrompts } : {}),
     signal: input.signal,
   })
   await ports.events.emit({

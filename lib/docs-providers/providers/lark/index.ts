@@ -19,6 +19,7 @@ import type { LarkConnectedUser } from "@/lib/connectors/adapters/lark/oauth-han
 import { fetchLarkDocAsRawSource } from "@/lib/twin/ingest/lark-doc-fetcher"
 import { parseLarkResourceUrl } from "@/lib/twin/ingest/lark-url"
 import { clampDocText } from "@/lib/docs-providers/limits"
+import { assertRemoteDocBinding } from "@/lib/docs-providers/account-binding"
 import {
   DocsProviderError,
   type DocsProvider,
@@ -47,8 +48,8 @@ const RESOURCE_KIND_TO_DOC_KIND: Record<string, RemoteDocKind> = {
 
 /**
  * The string `fetchLarkDocAsRawSource` parses. It takes a URL or a bare token,
- * so a search hit (token only, tenant host unknown) round-trips through the
- * bare-token branch of `parseLarkDocUrl`.
+ * so a search hit (token only, tenant host unknown) carries its source type
+ * separately rather than inferring the kind from a historic token prefix.
  */
 function docInputFor(ref: RemoteDocRef): string {
   return ref.url ?? ref.id
@@ -100,9 +101,19 @@ export const larkDocsProvider: DocsProvider = {
 
   async fetch(ref: RemoteDocRef, opts: DocsProviderCallOptions): Promise<RemoteDocContent> {
     try {
+      assertRemoteDocBinding(
+        ref,
+        opts.accountId,
+        opts.expectedAuthorizationEpoch ?? ref.accountBinding?.authorizationEpoch
+      )
       if (ref.kind === "doc" || ref.kind === "wiki") {
         const fetched = await fetchLarkDocAsRawSource(docInputFor(ref), {
           adapterId: opts.accountId,
+          ...(ref.sourceType === "doc" || ref.sourceType === "docx"
+            ? { kind: ref.sourceType }
+            : ref.kind === "wiki"
+              ? { kind: "wiki" as const }
+              : {}),
         })
         const clamped = clampDocText(fetched.text)
         return {

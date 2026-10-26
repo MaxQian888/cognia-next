@@ -91,6 +91,7 @@ const MACHINE_MAINTENANCE_TASK_TYPES: ReadonlySet<ScheduledTaskType> = new Set([
   "backup",
   "conversation-auto-archive",
   "files-trash-purge",
+  "harness-evolution-sweep",
   "wiki-rebuild",
   "wiki-lint",
   "twin",

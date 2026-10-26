@@ -12,6 +12,13 @@ import {
 import type { ExecResult } from "../../agent/run-git"
 import type { TuiAction } from "../state/types"
 import type { ResolvedConfig } from "../../config/schema"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_PR_SUMMARY_PROMPT } from "@/lib/agent/prompts/cli-prompts"
 
 const OK: ExecResult = { stdout: "", stderr: "", code: 0 }
 
@@ -323,5 +330,45 @@ describe("stacked branches", () => {
     await runPr(h.deps)
     const draft = h.actions.find((a) => a.type === "SET_PR_DRAFT") as { base: string }
     expect(draft.base).toBe("main")
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("PR-summary Prompt Center override", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders a published override that keeps the parsed Title:/Body: lines", () => {
+    publishOverride(
+      CLI_PR_SUMMARY_PROMPT,
+      "PR {{branch}} -> {{base}}\n{{commits}}\nReply as Title: then Body:",
+      "por-pr-1"
+    )
+    expect(
+      buildPrSummaryPrompt({ commits: "- a\n", diffstat: "", base: "main", branch: "f" })
+    ).toBe("PR f -> main\n- a\nReply as Title: then Body:")
   })
 })

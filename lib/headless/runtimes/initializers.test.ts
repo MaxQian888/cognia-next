@@ -24,6 +24,17 @@ import {
   stopLeaseHeartbeat,
 } from "@/lib/workflow/runtime/run-lease"
 import { _waitForPluginTriggerReconciliationForTest } from "@/lib/workflow/triggers/lifecycle"
+import * as costHistory from "@/lib/db/provider-cost-daily"
+
+jest.mock("@/lib/db/provider-cost-daily", () => {
+  const actual = jest.requireActual("@/lib/db/provider-cost-daily")
+  return {
+    ...actual,
+    pruneProviderCostOlderThan: jest.fn((days: number, now?: number) =>
+      actual.pruneProviderCostOlderThan(days, now)
+    ),
+  }
+})
 
 const mockStopBackgroundRecovery = jest.fn()
 const mockStartBackgroundRecovery = jest.fn(() => mockStopBackgroundRecovery)
@@ -80,6 +91,8 @@ describe("initializer batch headless smoke", () => {
     await whenSeeded()
     __resetHeadlessRuntimesForTesting()
     await import("./initializers")
+    const pruneCost = jest.mocked(costHistory.pruneProviderCostOlderThan)
+    pruneCost.mockClear()
 
     const { useExternalAgentStore } = await import("@/stores/agent/external-agent-store")
     expect(useExternalAgentStore.getState().getAllAgents()).toEqual([])
@@ -166,6 +179,10 @@ describe("initializer batch headless smoke", () => {
     )
 
     await result.stop()
+    // The central boot sweep prunes once; the cost mirror must not launch a
+    // second independent prune outside the coordinated usage transaction.
+    expect(pruneCost).toHaveBeenCalledTimes(1)
+    pruneCost.mockClear()
     expect(mockStopBackgroundRecovery).toHaveBeenCalledTimes(1)
     expect(stop).toHaveBeenCalledTimes(1)
     expect(getPluginTrigger("trigger.headless.watch", 1)?.instances.size).toBe(0)

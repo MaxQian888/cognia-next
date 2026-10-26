@@ -1,7 +1,55 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render as renderUI, screen } from "@testing-library/react"
+import type { ReactElement } from "react"
+import { NextIntlClientProvider } from "next-intl"
+import messages from "@/i18n/messages/en.json"
+import mobileMe from "@/i18n/messages/en/mobile/me.json"
+
+jest.mock("next-intl", () => {
+  const React = jest.requireActual("react") as typeof import("react")
+  const Context = React.createContext<Record<string, unknown>>({})
+  return {
+    NextIntlClientProvider: ({
+      messages,
+      children,
+    }: {
+      messages: Record<string, unknown>
+      children: import("react").ReactNode
+    }) => React.createElement(Context.Provider, { value: messages }, children),
+    useTranslations: (namespace: string) => {
+      const messages = React.useContext(Context)
+      return (key: string, values?: Record<string, unknown>) => {
+        const value = `${namespace}.${key}`
+          .split(".")
+          .reduce<unknown>(
+            (node, segment) =>
+              node && typeof node === "object"
+                ? (node as Record<string, unknown>)[segment]
+                : undefined,
+            messages
+          )
+        const template = typeof value === "string" ? value : key
+        return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+          String(values?.[name] ?? match)
+        )
+      }
+    },
+  }
+})
+
+function render(ui: ReactElement) {
+  return renderUI(
+    <NextIntlClientProvider
+      locale="en"
+      timeZone="UTC"
+      messages={{ ...messages, mobile: { ...messages.mobile, me: mobileMe } }}
+    >
+      {ui}
+    </NextIntlClientProvider>
+  )
+}
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
@@ -72,7 +120,7 @@ jest.mock("@/components/ui/select", () => {
     )
   }
   const Select = ({ value, onValueChange, disabled, children }: Record<string, unknown>) => {
-    const items: { props: { value: string; children: unknown } }[] = []
+    const items: { props: { value: string; children: unknown; disabled?: boolean } }[] = []
     const meta: { label?: string; testid?: string } = {}
     collect(children, items as unknown[], meta)
     return React.createElement(
@@ -88,7 +136,7 @@ jest.mock("@/components/ui/select", () => {
       items.map((it) =>
         React.createElement(
           "option",
-          { key: it.props.value, value: it.props.value },
+          { key: it.props.value, value: it.props.value, disabled: it.props.disabled },
           it.props.children
         )
       )
@@ -208,5 +256,22 @@ describe("MobileWebSearchPage", () => {
     standaloneRef.current = true
     render(<Page />)
     expect(screen.getByTestId("me-section-search-keys")).toBeInTheDocument()
+  })
+
+  it("includes all new providers and labels retired Bing as unavailable", () => {
+    render(<Page />)
+    for (const name of ["DeepSeek Search", "TinyFish", "SearXNG"]) {
+      expect(screen.getByRole("option", { name })).toBeInTheDocument()
+    }
+    expect(
+      screen.getByRole("option", { name: /Bing Search.*Retired on 2025-08-11/ })
+    ).toBeDisabled()
+  })
+
+  it("does not save retired Bing as the preferred provider", () => {
+    settingsRef.current = { searchEnabled: true }
+    render(<Page />)
+    fireEvent.change(screen.getByTestId("web-search-provider"), { target: { value: "bing" } })
+    expect(saveMock).not.toHaveBeenCalled()
   })
 })

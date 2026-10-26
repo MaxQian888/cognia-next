@@ -99,6 +99,9 @@ export function runtimeHostSnapshotFromManifest(
     ...(manifest.schemaVersion === 2 && manifest.hostStateScope
       ? { hostStateScope: manifest.hostStateScope }
       : {}),
+    ...(manifest.schemaVersion === 2 && manifest.personPartition === true
+      ? { personPartition: true as const }
+      : {}),
   }
 }
 
@@ -138,6 +141,7 @@ function runtimeSnapshotsEqual(left: RuntimeSnapshot, right: RuntimeSnapshot): b
     arraysEqual(left.host?.grants, right.host?.grants) &&
     left.host?.hostStateScope?.accountId === right.host?.hostStateScope?.accountId &&
     left.host?.hostStateScope?.runtimeTargetId === right.host?.hostStateScope?.runtimeTargetId &&
+    left.host?.personPartition === right.host?.personPartition &&
     // Cheap and exact: the limits object is a flat record of scalars plus one
     // string array, and a host that republishes different ceilings has to
     // reach every subscriber.

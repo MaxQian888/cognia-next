@@ -58,8 +58,8 @@ tests, and again when a test fails for a non-obvious reason.
 
 ## Runner traps
 
-9. **`pnpm test -- --coverage` treats flags as test-name patterns** (runs
-   nothing useful). Coverage is `pnpm test:coverage` only.
+9. **Coverage is opt-in.** Run `pnpm test:coverage` only when the user asks
+   for a coverage check.
 10. **Single file**: `pnpm test -- path/to/file.test.ts`. Narrow first; the
     full suite is the final gate.
 11. **Stale background tsc** — a long-running `tsc --watch`/background check

@@ -58,7 +58,7 @@
     "stageVerifying": "Checking your password",
     "storageLayoutBody": "The data on this device was written by a different version of the app. Your password is fine — there is nothing to unlock until the local data is reset. Resetting deletes this device's local copy. Anything you have backed up or synced to another device is not affected.",
     "storageLayoutReset": "Reset local data",
-    "storageLayoutResetConfirm": "Delete this device's local data? This cannot be undone. Backups and other devices are not affected.",
+    "storageLayoutResetConfirm": "This cannot be undone. Backups and other devices are not affected.",
     "storageLayoutResetting": "Resetting…",
     "storageLayoutTitle": "Local data cannot be opened",
     "stuckBody": "Another window of this app may still be holding the database open. Close any other windows or tabs, then reload.",
@@ -86,7 +86,12 @@
     "rememberOnDeviceLabel": "Remember password",
     "rememberOnDeviceHelp": "Saved in this device’s secure storage, so it opens without asking next time. Your password keeps working.",
     "shareGuestHint": "This is a shared link. Anyone who has it can read it without an account; unlock to add it to your library.",
-    "shareGuestAction": "Read without unlocking"
+    "shareGuestAction": "Read without unlocking",
+    "registryFailureTitle": "Your accounts could not be loaded",
+    "registryTimeoutDescription": "Reading your local accounts took too long. Close other Cognia tabs or windows, then try again. Your local data has not been deleted.",
+    "registryUnavailableDescription": "Your local accounts could not be read. Check that this browser allows local storage, then try again.",
+    "retryRegistry": "Try loading accounts again",
+    "storageLayoutResetConfirmTitle": "Delete this device's local data?"
   },
   "manage": {
     "activeAccountLabel": "Current account",
@@ -289,15 +294,19 @@
     "active": "Active",
     "addHost": "Add Host",
     "fallbackInvalid": "Choose one of the saved fallback Hosts.",
-    "fallbackPrompt": "Enter the fallback Host id ({choices}).",
     "heading": "Runtime target",
     "legacyMixed": "Legacy mixed (read-only)",
     "loadFailed": "Runtime targets could not be loaded.",
-    "removeConfirm": "Remove {name}? The Host must confirm revocation before local data is deleted.",
+    "removeConfirm": "The Host must confirm revocation before local data is deleted.",
     "removeFailed": "The Host could not be removed.",
     "removeHost": "Remove {name}",
     "switchFailed": "Runtime target could not be switched.",
-    "thisBrowser": "This browser"
+    "thisBrowser": "This browser",
+    "removeConfirmTitle": "Remove {name}?",
+    "removeConfirmAction": "Remove Host",
+    "fallbackTitle": "Choose a replacement Host",
+    "fallbackDescription": "{name} is the active Host. Pick the Host this browser should switch to after it is removed.",
+    "fallbackField": "Replacement Host"
   },
   "switcher": {
     "active": "Active account: {name}",

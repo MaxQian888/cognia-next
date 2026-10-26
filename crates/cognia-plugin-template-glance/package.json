@@ -7,7 +7,8 @@
   "scripts": {
     "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js --external:react --external:react/jsx-runtime --external:react/jsx-dev-runtime --external:@cognia/plugin-sdk \"--external:@cognia/plugin-sdk/*\" --external:@cognia/plugin-ui --external:lucide-react --log-level=info",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.5.0",
@@ -34,7 +35,8 @@
     "@types/react": "^19.3.0",
     "esbuild": "^0.28.2",
     "jest": "^30.5.2",
-    "ts-jest": "^29.4.14",
-    "typescript": "^6.0.3"
+    "typescript": "7.0.2",
+    "@swc/core": "^1.16.13",
+    "@swc/jest": "^0.2.39"
   }
 }

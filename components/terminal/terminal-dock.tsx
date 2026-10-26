@@ -23,6 +23,11 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { useAiShell } from "@/hooks/terminal/use-ai-shell"
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import { useAppShortcutLabel } from "@/hooks/shortcuts/use-app-shortcut-label"
+import { AiShellPanel } from "./ai-shell"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
@@ -33,6 +38,7 @@ import {
   PanelBottomIcon,
   PanelRightIcon,
   Share2Icon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -114,6 +120,7 @@ export function TerminalDock({
   const sessions = useTerminalStore((s) => s.sessions)
   const activeByProject = useTerminalStore((s) => s.activeSessionIdByProject)
   const splitPanes = useTerminalStore((s) => s.splitPanes)
+  const focusedPaneByAnchor = useTerminalStore((s) => s.focusedPaneByAnchor)
   const setActiveSession = useTerminalStore((s) => s.setActiveSession)
   const renameSession = useTerminalStore((s) => s.renameSession)
   const setTabAppearance = useTerminalStore((s) => s.setTabAppearance)
@@ -219,6 +226,16 @@ export function TerminalDock({
 
   const activeId = activeByProject[projectKey] ?? null
   const activeRow = activeId ? sessions[activeId] : undefined
+  const storedFocusedPane = activeId ? focusedPaneByAnchor[activeId] : undefined
+  const targetSessionId =
+    activeId &&
+    storedFocusedPane &&
+    (storedFocusedPane === activeId || splitPanes[activeId]?.includes(storedFocusedPane)) &&
+    sessions[storedFocusedPane]?.projectId === activeRow?.projectId
+      ? storedFocusedPane
+      : activeId
+  const targetRow = targetSessionId ? sessions[targetSessionId] : undefined
+  const [aiShellToolbar, setAiShellToolbar] = useState<HTMLSpanElement | null>(null)
 
   // The pane group reports which pane is focused; the search overlay,
   // history rail and command-jump keys all target that pane.
@@ -769,6 +786,7 @@ export function TerminalDock({
                 {t("sshConnecting", { name: pendingSshHost.name })}
               </span>
             ) : null}
+            <span ref={setAiShellToolbar} className="contents" />
             {canSpawn && activeRow ? (
               <DockToolbarButton
                 label={t("splitRight")}
@@ -899,6 +917,13 @@ export function TerminalDock({
                 />
               </div>
             </TerminalTabContextMenu>
+            {targetRow && targetRow.kind !== "serial" && panelOpen ? (
+              <TerminalAiShell
+                key={`ai-shell:${targetRow.id}`}
+                sessionId={targetRow.id}
+                toolbar={aiShellToolbar}
+              />
+            ) : null}
             <TerminalSearchOverlay
               open={searchOpen}
               onClose={() => setSearchOpen(false)}
@@ -982,6 +1007,47 @@ export function TerminalDock({
 
       {sshConnect.dialog}
     </div>
+  )
+}
+
+/** The keyed surface owns AI state and cancels its old session on unmount. */
+function TerminalAiShell({
+  sessionId,
+  toolbar,
+}: {
+  sessionId: string
+  toolbar: HTMLSpanElement | null
+}) {
+  const [state, actions] = useAiShell(sessionId)
+  const t = useTranslations("terminal.aiShell")
+  const shortcut = useAppShortcutLabel("terminal.aiShell.toggle")
+  useAppShortcut("terminal.aiShell.toggle", actions.toggle, {
+    preventDefault: true,
+    allowInEditable: true,
+  })
+
+  return (
+    <>
+      {toolbar
+        ? createPortal(
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={actions.toggle}
+              aria-label={t("toggle")}
+              aria-pressed={state.open}
+              aria-keyshortcuts={shortcut.aria}
+              title={shortcut.label ? `${t("toggle")} (${shortcut.label})` : t("toggle")}
+              data-testid="terminal-dock-ai-shell"
+            >
+              <SparklesIcon className="h-3 w-3" />
+            </Button>,
+            toolbar
+          )
+        : null}
+      <AiShellPanel state={state} actions={actions} />
+    </>
   )
 }
 

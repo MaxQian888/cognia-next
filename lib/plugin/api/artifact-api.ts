@@ -22,15 +22,31 @@ import type {
 import type { Artifact } from "@/types/artifact"
 import { createPluginSystemLogger } from "../core/logger"
 import { createApiGuardedAPI } from "./api-permission-gate"
-import {
-  MermaidRenderer,
-  ChartRenderer,
-  MathRenderer,
-  MarkdownRenderer,
-  CodeRenderer,
-  ArtifactRenderer as ArtifactRendererComponent,
-} from "@/components/artifacts/artifact-renderers"
-import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
+import dynamic from "next/dynamic"
+
+// API construction and artifact CRUD do not render a surface. Keep the public
+// synchronous component getters, and load their implementation only on render.
+const MermaidRenderer = dynamic(() =>
+  import("@/components/artifacts/artifact-renderers").then((m) => m.MermaidRenderer)
+)
+const ChartRenderer = dynamic(() =>
+  import("@/components/artifacts/artifact-renderers").then((m) => m.ChartRenderer)
+)
+const MathRenderer = dynamic(() =>
+  import("@/components/artifacts/artifact-renderers").then((m) => m.MathRenderer)
+)
+const MarkdownRenderer = dynamic(() =>
+  import("@/components/artifacts/artifact-renderers").then((m) => m.MarkdownRenderer)
+)
+const CodeRenderer = dynamic(() =>
+  import("@/components/artifacts/artifact-renderers").then((m) => m.CodeRenderer)
+)
+const ArtifactRendererComponent = dynamic(() =>
+  import("@/components/artifacts/artifact-renderers").then((m) => m.ArtifactRenderer)
+)
+const ArtifactPreview = dynamic(() =>
+  import("@/components/artifacts/artifact-preview").then((m) => m.ArtifactPreview)
+)
 
 /**
  * Create the Artifact API for a plugin

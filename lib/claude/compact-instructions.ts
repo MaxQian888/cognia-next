@@ -2,7 +2,7 @@
  * Built-in compaction / memory instructions.
  *
  * Two outputs, both composed from the SINGLE canonical summary prompt
- * (`CONVERSATION_SUMMARY_SYSTEM_PROMPT`, owned by `lib/ai/generation/summarizer.ts`)
+ * (`CONVERSATION_SUMMARY_PROMPT`, owned by `lib/ai/generation/summarizer.ts`)
  * — this module never forks the summarization wording:
  *
  *  • {@link buildCompactionSummaryPrompt} — the system prompt the sidecar uses
@@ -10,14 +10,14 @@
  *    `focus` (Claude Code's `# Compact instructions` parity). Serialised onto
  *    `SendOptions.compaction.summaryPrompt` by `resolveSendOptions`.
  *
- *  • {@link COMPACT_HANDOFF_SNIPPET} / {@link resolveCompactInstructions} — a
+ *  • {@link COMPACT_HANDOFF_PROMPT} / {@link resolveCompactInstructions} — a
  *    short fragment appended to the LIVE agent's system prompt so it keeps
  *    durable notes ahead of a compaction boundary (Codex `SUMMARY_PREFIX`
  *    handoff + Claude Code memory-tool "ASSUME INTERRUPTION" guidance — the one
  *    piece with no existing equivalent in the repo).
  */
 
-import { CONVERSATION_SUMMARY_SYSTEM_PROMPT } from "@/lib/ai/generation/summarizer"
+import { CONVERSATION_SUMMARY_PROMPT } from "@/lib/ai/generation/summarizer"
 import { AUTO_COMPACT_FRACTION } from "@/lib/claude/usage"
 import type { ResolvedCompaction } from "@cognia/agent-config-types"
 import {
@@ -26,12 +26,13 @@ import {
   type SessionCompressionOverrides,
 } from "@/types/system/compression"
 import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
+import { definePrompt } from "@/lib/prompts/types"
 
 /** Default number of most-recent turns kept verbatim (mirrors the sidecar). */
 export const DEFAULT_KEEP_RECENT = 6
 
 /** Default cap on summary output tokens (mirrors `CompressionModelConfig.maxSummaryTokens`). */
-export const DEFAULT_MAX_SUMMARY_TOKENS = 500
+export const DEFAULT_MAX_SUMMARY_TOKENS = 16_384
 
 /**
  * `resolveCompaction`'s output, plus the two draft fields the (async, registry-
@@ -51,62 +52,100 @@ export interface ResolvedCompactionDraft extends ResolvedCompaction {
  * Tells the model its context may be summarized + truncated mid-task and to
  * surface the facts it depends on before they are compacted away.
  */
-export const COMPACT_HANDOFF_SNIPPET =
-  "Context-compaction awareness: this conversation may be summarized and " +
-  "truncated at any point to stay within the model's context window. Assume " +
-  "interruption — do not rely on earlier turns remaining verbatim. Before long " +
-  "tool sequences, restate the durable facts you depend on (the user's goal, " +
-  "key decisions, file paths, and open threads) so they survive a compaction " +
-  "boundary. After a compaction, the summary you receive is authoritative for " +
-  "everything before it; build on it rather than re-deriving prior work."
+export const COMPACT_HANDOFF_PROMPT = definePrompt({
+  id: "chat.compaction.handoff",
+  contractVersion: 1,
+  kind: "runtime-baseline",
+  group: "chat",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  consumers: ["lib/claude/build-options.ts"],
+  defaultBody:
+    "Context-compaction awareness: this conversation may be summarized and " +
+    "truncated at any point to stay within the model's context window. Assume " +
+    "interruption — do not rely on earlier turns remaining verbatim. Before long " +
+    "tool sequences, restate the durable facts you depend on (the user's goal, " +
+    "key decisions, file paths, and open threads) so they survive a compaction " +
+    "boundary. After a compaction, the summary you receive is authoritative for " +
+    "everything before it; build on it rather than re-deriving prior work.",
+})
 
 /**
- * Compose the summarization system prompt: the canonical conversation-summary
- * prompt plus the user's optional focus instruction. Returns the canonical
- * prompt unchanged when there is no focus.
+ * Compose the summarization system prompt: the conversation-summary prompt
+ * (shipped, or the resolved Prompt Center override the caller passes) plus the
+ * user's optional focus instruction. Returns the base unchanged when there is
+ * no focus.
  */
-export function buildCompactionSummaryPrompt(focus?: string): string {
+export function buildCompactionSummaryPrompt(
+  focus?: string,
+  base: string = CONVERSATION_SUMMARY_PROMPT.defaultBody
+): string {
   const trimmed = focus?.trim()
-  if (!trimmed) return CONVERSATION_SUMMARY_SYSTEM_PROMPT
-  return `${CONVERSATION_SUMMARY_SYSTEM_PROMPT}\n\nFocus especially on: ${trimmed}`
+  if (!trimmed) return base
+  return `${base}\n\nFocus especially on: ${trimmed}`
 }
 
 /**
  * Compose the live-agent system-prompt fragment: the handoff snippet plus the
  * user's optional focus instruction.
  */
-export function resolveCompactInstructions(focus?: string): string {
+export function resolveCompactInstructions(
+  focus?: string,
+  base: string = COMPACT_HANDOFF_PROMPT.defaultBody
+): string {
   const trimmed = focus?.trim()
-  if (!trimmed) return COMPACT_HANDOFF_SNIPPET
-  return `${COMPACT_HANDOFF_SNIPPET}\n\nWhen compacting, focus on: ${trimmed}`
+  if (!trimmed) return base
+  return `${base}\n\nWhen compacting, focus on: ${trimmed}`
 }
 
 /**
  * Appended to the live agent's system prompt for exactly ONE turn right after a
- * compaction boundary. Where {@link COMPACT_HANDOFF_SNIPPET} prepares the model
+ * compaction boundary. Where {@link COMPACT_HANDOFF_PROMPT} prepares the model
  * *before* a compaction, this re-orients it *after* one: the summary it now sees
  * is authoritative, and any durable operational directives that lived in the
  * (now-compacted) conversation should be treated as still in force. Model-facing
- * prompt text — not a UI string, so no i18n (mirrors `COMPACT_HANDOFF_SNIPPET`).
+ * prompt text — not a UI string, so no i18n (mirrors `COMPACT_HANDOFF_PROMPT`).
  */
-export const POST_COMPACTION_RECOVERY_SNIPPET =
-  "Post-compaction recovery: the conversation above this point was just " +
-  "summarized to free context. Treat that summary as the authoritative record " +
-  "of everything before it — do not ask the user to repeat earlier context or " +
-  "re-derive completed work. Re-read the goal, key decisions, file paths, and " +
-  "open threads from the summary before continuing, and carry forward any " +
-  "operational instructions you were following (they remain in effect across " +
-  "the compaction boundary)."
+export const POST_COMPACTION_RECOVERY_PROMPT = definePrompt({
+  id: "chat.compaction.recovery",
+  contractVersion: 1,
+  kind: "runtime-baseline",
+  group: "chat",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  consumers: ["lib/claude/build-options.ts"],
+  defaultBody:
+    "Post-compaction recovery: the conversation above this point was just " +
+    "summarized to free context. Treat that summary as the authoritative record " +
+    "of everything before it — do not ask the user to repeat earlier context or " +
+    "re-derive completed work. Re-read the goal, key decisions, file paths, and " +
+    "open threads from the summary before continuing, and carry forward any " +
+    "operational instructions you were following (they remain in effect across " +
+    "the compaction boundary).",
+})
 
 /**
  * Compose the one-shot post-compaction recovery fragment: the recovery snippet
  * plus any caller-supplied durable instructions to re-assert (e.g. team /
  * kanban coordination rules). Returns the snippet unchanged when none are given.
  */
-export function buildPostCompactionRecovery(opts?: { durableInstructions?: string }): string {
+export function buildPostCompactionRecovery(opts?: {
+  durableInstructions?: string
+  /** The resolved recovery prompt; defaults to the shipped text. */
+  base?: string
+}): string {
+  const base = opts?.base ?? POST_COMPACTION_RECOVERY_PROMPT.defaultBody
   const trimmed = opts?.durableInstructions?.trim()
-  if (!trimmed) return POST_COMPACTION_RECOVERY_SNIPPET
-  return `${POST_COMPACTION_RECOVERY_SNIPPET}\n\nInstructions still in effect:\n${trimmed}`
+  if (!trimmed) return base
+  return `${base}\n\nInstructions still in effect:\n${trimmed}`
 }
 
 /** Inputs to {@link resolveCompaction}; all optional / partial. */
@@ -119,6 +158,11 @@ export interface ResolveCompactionInput {
   sessOv?: SessionCompressionOverrides
   /** The resolved active strategy def (built-in → undefined). */
   strategy?: PluginCompactionStrategyDef
+  /**
+   * The resolved conversation-summary prompt (ADR-0236), used when no strategy
+   * supplies its own. Resolved by the caller so this function stays pure.
+   */
+  baseSummaryPrompt?: string
 }
 
 /** Percentage (0-100) → fraction (0-1); undefined/≤0 → undefined. */
@@ -134,7 +178,7 @@ function pctToFraction(p: number | undefined): number | undefined {
  * tested directly — `resolveSendOptions` looks the strategy up and calls this.
  */
 export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompactionDraft {
-  const { appComp, charOv, sessOv, strategy } = input
+  const { appComp, charOv, sessOv, strategy, baseSummaryPrompt } = input
   const D = DEFAULT_COMPRESSION_SETTINGS
 
   const enabled =
@@ -149,18 +193,17 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
     strategy?.fraction ??
     AUTO_COMPACT_FRACTION
 
-  const keepRecent =
+  const explicitRecent =
     sessOv?.preserveRecentMessages ??
     charOv?.preserveRecentMessages ??
     appComp?.preserveRecentMessages ??
-    strategy?.keepRecent ??
-    DEFAULT_KEEP_RECENT
+    strategy?.keepRecent
 
   const summaryPrompt = strategy?.summaryPrompt
     ? focus
       ? `${strategy.summaryPrompt}\n\nFocus especially on: ${focus}`
       : strategy.summaryPrompt
-    : buildCompactionSummaryPrompt(focus)
+    : buildCompactionSummaryPrompt(focus, baseSummaryPrompt)
 
   // --- Strategy / trigger (overridable per session + character) ---
   const compStrategy =
@@ -186,10 +229,10 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
 
   // --- Summary model / cap (cheap-model path; creds resolved downstream) ---
   const cfgMaxSummary = appComp?.compressionModel?.maxSummaryTokens
-  const maxSummaryTokens =
-    typeof cfgMaxSummary === "number" && cfgMaxSummary > 0
-      ? cfgMaxSummary
-      : (D.compressionModel.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS)
+  const hasExplicitSummaryCap = typeof cfgMaxSummary === "number" && cfgMaxSummary > 0
+  const maxSummaryTokens = hasExplicitSummaryCap
+    ? cfgMaxSummary
+    : (D.compressionModel.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS)
   const summaryProvider = appComp?.compressionModel?.provider?.trim() || undefined
   const summaryModel = appComp?.compressionModel?.model?.trim() || undefined
 
@@ -202,10 +245,28 @@ export function resolveCompaction(input: ResolveCompactionInput): ResolvedCompac
     optical,
     enabled,
     fraction,
-    keepRecent,
+    keepRecent: explicitRecent,
     focus,
     summaryPrompt,
+    ...(compStrategy !== "optical" &&
+    compStrategy !== "sliding-window" &&
+    !strategy?.summaryPrompt &&
+    (!baseSummaryPrompt || baseSummaryPrompt === CONVERSATION_SUMMARY_PROMPT.defaultBody)
+      ? { checkpointFormat: "progress-v1" as const }
+      : {}),
     maxSummaryTokens,
+    ...(appComp?.backgroundSummarization !== undefined
+      ? { background: appComp.backgroundSummarization }
+      : {}),
+    ...(hasExplicitSummaryCap ? { requestedMaxSummaryTokens: cfgMaxSummary } : {}),
+    ...(typeof appComp?.checkpointTokenBudget === "number" && appComp.checkpointTokenBudget > 0
+      ? { checkpointTokenBudget: appComp.checkpointTokenBudget }
+      : { checkpointTokenBudgetIsDefault: true }),
+    ...(typeof appComp?.postCompactionTokenBudget === "number" &&
+    appComp.postCompactionTokenBudget > 0
+      ? { postCompactionTokenBudget: appComp.postCompactionTokenBudget }
+      : { postCompactionTokenBudgetIsDefault: true }),
+    ...(hasExplicitSummaryCap ? {} : { summaryTokenBudgetIsDefault: true }),
     strategy: compStrategy,
     trigger,
     messageCountThreshold,

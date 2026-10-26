@@ -93,19 +93,10 @@ pub fn install(from: &Path, to: &Path, stage: Stage) -> Result<InstallOutcome, I
     let manifest = BundleManifest::parse(&manifest_bytes)?;
     let digest = hex::encode(Sha256::digest(&manifest_bytes));
 
-    if let Stage::Libc(libc) = stage {
-        if !manifest.runtimes.is_empty()
-            && !manifest
-                .runtimes
-                .iter()
-                .any(|runtime| runtime.libc.contains(&libc))
-        {
-            return Err(InstallError::Refused {
-                path: libc.to_string(),
-                reason: "the bundle builds no runtime for this libc".into(),
-            });
-        }
-    }
+    // Remote providers stage both libc trees before probing the user image.
+    // A selected bundle may offer no Agent for one libc (for example Droid
+    // on musl). Staging its Node tree grants no command: probe and command
+    // resolution still use the manifest's actual runtime list.
 
     fs::create_dir_all(to).map_err(io_error(to))?;
     let marker = to.join(stage.marker_name());
@@ -427,9 +418,10 @@ mod tests {
             r#"{"version":1,"releaseTag":"v1","minGlibc":"2.28","runtimes":[{"id":"gemini-cli","version":"1","libc":["glibc"],"commands":[{"name":"gemini"}]}]}"#,
         )
         .unwrap();
+        fs::remove_dir_all(no_musl_runtime.path().join("musl")).unwrap();
         assert!(matches!(
             install(no_musl_runtime.path(), to.path(), Stage::Libc(Libc::Musl)),
-            Err(InstallError::Refused { .. })
+            Err(InstallError::MissingEntry(entry)) if entry == "musl"
         ));
 
         let broken = tempfile::tempdir().unwrap();
@@ -438,6 +430,64 @@ mod tests {
             install(broken.path(), to.path(), Stage::Core),
             Err(InstallError::Manifest(_))
         ));
+    }
+
+    #[test]
+    fn stages_an_unoffered_libc_without_advertising_agent_commands() {
+        let from = bundle("selected");
+        let mut selected = BundleManifest::parse(manifest("selected").as_bytes()).unwrap();
+        selected
+            .runtimes
+            .retain(|runtime| runtime.id == "gemini-cli");
+        fs::write(
+            from.path().join(MANIFEST_FILE),
+            serde_json::to_vec(&selected).unwrap(),
+        )
+        .unwrap();
+        let to = tempfile::tempdir().unwrap();
+        install(from.path(), to.path(), Stage::Core).unwrap();
+        install(from.path(), to.path(), Stage::Libc(Libc::Musl)).unwrap();
+        assert!(to.path().join("musl/bin/node").exists());
+        let installed = BundleManifest::load(&to.path().join(MANIFEST_FILE)).unwrap();
+        assert!(installed.runtimes_for(Libc::Musl, None).is_empty());
+        assert!(installed.commands_for(Libc::Musl, None).is_empty());
+        assert!(matches!(
+            install(from.path(), to.path(), Stage::Libc(Libc::Musl)),
+            Ok(InstallOutcome::AlreadyCurrent { .. })
+        ));
+
+        let unsafe_to = tempfile::tempdir().unwrap();
+        symlink("../../outside", from.path().join("musl/escape")).unwrap();
+        assert!(matches!(
+            install(from.path(), unsafe_to.path(), Stage::Libc(Libc::Musl)),
+            Err(InstallError::Refused { .. })
+        ));
+        assert!(!unsafe_to
+            .path()
+            .join(Stage::Libc(Libc::Musl).marker_name())
+            .exists());
+
+        let empty = bundle("none");
+        selected.release_tag = "none".into();
+        selected.runtimes.clear();
+        fs::write(
+            empty.path().join(MANIFEST_FILE),
+            serde_json::to_vec(&selected).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(empty.path().join("glibc/bin/claude")).unwrap();
+        fs::remove_dir_all(empty.path().join("glibc/lib")).unwrap();
+        let full = bundle("full");
+        install(full.path(), to.path(), Stage::Libc(Libc::Glibc)).unwrap();
+        assert!(to.path().join("glibc/bin/claude").exists());
+        install(empty.path(), to.path(), Stage::Core).unwrap();
+        install(empty.path(), to.path(), Stage::Libc(Libc::Glibc)).unwrap();
+        assert!(!to.path().join("glibc/bin/claude").exists());
+        assert!(!to.path().join("glibc/lib").exists());
+        assert!(BundleManifest::load(&to.path().join(MANIFEST_FILE))
+            .unwrap()
+            .commands_for(Libc::Glibc, None)
+            .is_empty());
     }
 
     #[test]

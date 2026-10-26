@@ -14,7 +14,7 @@ import { CANONICAL_PLUGIN_CAPABILITIES, PLUGIN_CAPABILITY_CONTRACTS } from "./pl
 import {
   CANONICAL_PLUGIN_PERMISSIONS,
   CANONICAL_PLUGIN_TYPES,
-} from "@/packages/plugin-sdk/src/contracts/catalog"
+} from "@cognia/plugin-contract/contracts/catalog"
 
 const REPO_ROOT = join(__dirname, "..", "..", "..")
 

@@ -3,7 +3,7 @@ import {
   getExtensionPointFormFactor,
   type CanonicalExtensionPoint,
   type PluginPointContract,
-} from "../../lib/plugin/contracts/plugin-points"
+} from "../../packages/plugin-contract/src/lib/plugin/contracts/plugin-points"
 
 export const PLUGIN_POINT_SCHEMA_VERSION = 1
 

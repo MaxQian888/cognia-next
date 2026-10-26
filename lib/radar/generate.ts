@@ -6,6 +6,7 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import { RADAR_SYSTEM_PROMPT, buildRadarUserMessage } from "./prompts"
 import type { RadarDataItem, RadarLlmOutput } from "@/types/radar"
 
@@ -89,7 +90,7 @@ export async function generateRadarReport(
 ): Promise<RadarLlmOutput> {
   const prompt = buildRadarUserMessage(items, locale)
   const raw = await client.complete(prompt, {
-    system: RADAR_SYSTEM_PROMPT,
+    system: (await resolvePromptAsync(RADAR_SYSTEM_PROMPT)).text,
     temperature: 0.4,
     maxTokens: 2048,
   })

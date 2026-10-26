@@ -1,7 +1,7 @@
 "use client"
 
 import React, { memo, useCallback } from "react"
-import { cn } from "@/lib/utils"
+import { A2UITrigger } from "../a2ui-child-renderer"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,12 +47,12 @@ export const A2UIDropdownMenu = memo(function A2UIDropdownMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <span
-          className={cn("inline-flex", component.className)}
+        <A2UITrigger
+          componentId={component.trigger}
+          renderChild={renderChild}
+          className={component.className}
           style={component.style as React.CSSProperties}
-        >
-          {renderChild(component.trigger)}
-        </span>
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align={component.align || "start"} side={component.side || "bottom"}>
         {component.label && <DropdownMenuLabel>{component.label}</DropdownMenuLabel>}

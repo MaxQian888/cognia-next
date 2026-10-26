@@ -207,3 +207,13 @@ describe("execLarkCli — timeout clamping", () => {
     expect(opts.timeoutMs).toBe(1000)
   })
 })
+
+it.each(["# Partial document", '{"content":"partial'])(
+  "rejects truncated stdout before parsing: %s",
+  async (stdout) => {
+    mockProcessRunner.mockResolvedValue({ stdout, stderr: "", exitCode: 0, truncated: true })
+    await expect(
+      execLarkCli({ args: ["docs", "+fetch"], __authOverride: okAuth })
+    ).resolves.toMatchObject({ status: "error", reason: "output_truncated" })
+  }
+)

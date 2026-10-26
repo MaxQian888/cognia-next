@@ -27,7 +27,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 
 const PUSH_TOKENS_FILE: &str = "push-tokens.json";
@@ -102,6 +103,9 @@ impl PushDispatcher for NoopDispatcher {
 /// in-band is NOT stored here — see [`PushTokenRegistry::has_live_event_stream`].
 pub struct PushTokenRegistry {
     inner: RwLock<RegistryInner>,
+    partitions: RwLock<HashMap<String, Arc<PushTokenRegistry>>>,
+    persistence_lock: Mutex<()>,
+    retired: AtomicBool,
     /// Where to persist the token map. `None` ⇒ in-memory only (tests).
     persistence: Option<PathBuf>,
 }
@@ -117,6 +121,9 @@ impl PushTokenRegistry {
                 tokens: HashMap::new(),
             }),
             persistence: None,
+            partitions: RwLock::new(HashMap::new()),
+            persistence_lock: Mutex::new(()),
+            retired: AtomicBool::new(false),
         })
     }
 
@@ -140,7 +147,34 @@ impl PushTokenRegistry {
         Arc::new(Self {
             inner: RwLock::new(RegistryInner { tokens }),
             persistence: Some(path),
+            partitions: RwLock::new(HashMap::new()),
+            persistence_lock: Mutex::new(()),
+            retired: AtomicBool::new(false),
         })
+    }
+
+    /// P5 tuple namespace (partition account, device). The legacy registry
+    /// and JSON map remain unchanged; each person persists under their root.
+    pub fn for_account(self: &Arc<Self>, account_id: &str) -> Arc<Self> {
+        // Only server-derived account ids are accepted as path components.
+        assert!(account_id.len() == 27 && account_id.starts_with("pb_")
+            && account_id[3..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        let mut partitions = self.partitions.write();
+        partitions.entry(account_id.into()).or_insert_with(|| {
+            match self.persistence.as_ref().and_then(|path| path.ancestors().nth(3)) {
+                Some(root) => Self::with_persistence(&root.join("persons").join(account_id)),
+                None => Self::new(),
+            }
+        }).clone()
+    }
+
+    pub fn forget_account(&self, account_id: &str) {
+        if let Some(registry) = self.partitions.write().remove(account_id) {
+            // Finish any current write before purge removes the root. Old
+            // background delivery handles must never recreate that root.
+            let _write = registry.persistence_lock.lock();
+            registry.retired.store(true, Ordering::SeqCst);
+        }
     }
 
     pub fn register(&self, record: PushTokenRecord) {
@@ -164,6 +198,8 @@ impl PushTokenRegistry {
     /// the next push token rotation (Capacitor calls register on every
     /// app boot).
     fn save_to_disk(&self) {
+        let _write = self.persistence_lock.lock();
+        if self.retired.load(Ordering::SeqCst) { return; }
         let Some(path) = self.persistence.as_ref() else {
             return;
         };
@@ -215,6 +251,7 @@ impl PushTokenRegistry {
         payload: &PushPayload,
         dispatcher: &dyn PushDispatcher,
     ) -> DeliveryOutcome {
+        if self.retired.load(Ordering::SeqCst) { return DeliveryOutcome::SuppressedNoToken; }
         if self.has_live_event_stream(device_id) {
             return DeliveryOutcome::SuppressedWebsocketActive;
         }
@@ -424,6 +461,60 @@ mod tests {
                 if rotate { Some("rotated".into()) } else { None }
             );
         }
+    }
+
+    #[test]
+    fn p5_retired_push_handle_cannot_recreate_a_purged_partition() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = PushTokenRegistry::with_persistence(temp.path());
+        let account = "pb_000000000000000000000099";
+        let old = registry.for_account(account);
+        old.register(make_record("old-device"));
+        registry.forget_account(account);
+        let root = temp.path().join("persons").join(account);
+        std::fs::remove_dir_all(&root).unwrap();
+        old.register(make_record("old-device"));
+        assert!(!root.exists());
+        assert!(registry.for_account(account).get("old-device").is_none());
+    }
+
+    #[test]
+    fn p5_person_tokens_are_partitioned_and_legacy_file_still_loads() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let path = root.join("cognia/companion/push-tokens.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"legacy-device":{"device_id":"legacy-device","provider":"fcm","token":"legacy-token","app_version":null,"device_locale":null,"registered_at":100}}"#).unwrap();
+        let registry = PushTokenRegistry::with_persistence(root);
+        assert_eq!(registry.get("legacy-device").unwrap().token, "legacy-token");
+        registry.register(make_record("same-device"));
+        let legacy = std::fs::read(&path).unwrap();
+        let a = registry.for_account("pb_000000000000000000000001");
+        let b = registry.for_account("pb_000000000000000000000002");
+        let mut record = make_record("same-device"); record.token = "person-a".into(); a.register(record.clone());
+        record.token = "person-b".into(); b.register(record);
+        assert_eq!(a.get("same-device").unwrap().token, "person-a");
+        assert_eq!(b.get("same-device").unwrap().token, "person-b");
+        a.revoke("same-device");
+        assert!(a.get("same-device").is_none());
+        assert_eq!(b.get("same-device").unwrap().token, "person-b");
+        assert_eq!(std::fs::read(&path).unwrap(), legacy);
+        let reloaded = PushTokenRegistry::with_persistence(root);
+        assert!(reloaded.get("same-device").is_some());
+        assert_eq!(reloaded.for_account("pb_000000000000000000000002").get("same-device").unwrap().token, "person-b");
+    }
+
+    #[tokio::test]
+    async fn p5_push_delivery_uses_only_the_selected_person_tokens() {
+        let registry = PushTokenRegistry::new();
+        let a = registry.for_account("pb_000000000000000000000011");
+        let b = registry.for_account("pb_000000000000000000000012");
+        a.register(make_record("p5-push-a")); b.register(make_record("p5-push-b"));
+        let dispatcher = RecordingDispatcher::default();
+        assert_eq!(a.broadcast_to_offline(PushProvider::Fcm, &PushPayload {
+            title: None, body: None, data: Default::default(),
+        }, &dispatcher).await, 1);
+        assert_eq!(dispatcher.device_ids(), vec!["p5-push-a".to_string()]);
     }
 
     #[test]

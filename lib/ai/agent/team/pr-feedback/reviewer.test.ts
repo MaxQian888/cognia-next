@@ -2,10 +2,18 @@ import {
   buildReviewerIntent,
   buildReviewerPrompt,
   createPrReviewer,
+  resolveReviewerSystemPrompt,
   REVIEWER_SYSTEM_PROMPT,
+  REVIEWER_TASK_PROMPT,
   reviewerVerdictSchema,
   type ReviewerVerdict,
 } from "./reviewer"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1 } from "@/lib/prompts/types"
 import type { TeammatePrBinding } from "./binding"
 import type { PrObservation } from "@/lib/github/pr-observe/types"
 
@@ -48,16 +56,61 @@ function mkObs(over: Partial<PrObservation["pr"]> = {}): PrObservation {
   }
 }
 
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+function publish(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: "account" | "workspace" = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
 describe("REVIEWER_SYSTEM_PROMPT", () => {
-  it("frames a review-only role", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toMatch(/review/i)
-    expect(REVIEWER_SYSTEM_PROMPT).toMatch(/do not modify the branch/i)
+  it("frames a review-only role", async () => {
+    const text = await resolveReviewerSystemPrompt()
+    expect(text).toBe(REVIEWER_SYSTEM_PROMPT.defaultBody)
+    expect(text).toMatch(/review/i)
+    expect(text).toMatch(/do not modify the branch/i)
+  })
+
+  it("uses the team project's customized reviewer role (ADR-0236)", async () => {
+    publish(
+      REVIEWER_SYSTEM_PROMPT,
+      "Review for security only.",
+      "por-reviewer-ws",
+      "workspace",
+      "ws-1"
+    )
+    expect(await resolveReviewerSystemPrompt({ workspaceId: "ws-1" })).toBe(
+      "Review for security only."
+    )
+    expect(await resolveReviewerSystemPrompt({ workspaceId: "ws-2" })).toBe(
+      REVIEWER_SYSTEM_PROMPT.defaultBody
+    )
   })
 })
 
 describe("buildReviewerPrompt", () => {
-  it("includes PR identity, branches, sha, and the verdict instruction", () => {
-    const p = buildReviewerPrompt(mkObs())
+  it("includes PR identity, branches, sha, and the verdict instruction", async () => {
+    const p = await buildReviewerPrompt(mkObs())
     expect(p).toContain("#5")
     expect(p).toContain("Add feature")
     expect(p).toContain("agent/run-1/m1/t1")
@@ -66,10 +119,21 @@ describe("buildReviewerPrompt", () => {
     expect(p).toContain("changes_requested")
   })
 
-  it("sanitizes the PR title", () => {
-    const p = buildReviewerPrompt(mkObs({ title: `bad${ESC}[31mtitle` }))
+  it("sanitizes the PR title", async () => {
+    const p = await buildReviewerPrompt(mkObs({ title: `bad${ESC}[31mtitle` }))
     expect(p).not.toContain(ESC)
     expect(p).toContain("badtitle")
+  })
+
+  it("sends a published task prompt override (ADR-0236)", async () => {
+    publish(
+      REVIEWER_TASK_PROMPT,
+      'PR #{{number}} in {{repo}}: diff {{headBranch}} vs {{baseBranch}}. Verdict "approved" or "changes_requested" with a "body".',
+      "por-reviewer-task"
+    )
+    expect(await buildReviewerPrompt(mkObs())).toBe(
+      'PR #5 in acme/app: diff agent/run-1/m1/t1 vs main. Verdict "approved" or "changes_requested" with a "body".'
+    )
   })
 })
 

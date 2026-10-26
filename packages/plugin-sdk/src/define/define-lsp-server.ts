@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.lspServers[]` entries.
  */
 
-import type { PluginLspServerDef } from "@/types/plugin/plugin"
+import type { PluginLspServerDef } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineLspServer(def: PluginLspServerDef): PluginLspServerDef {
   return def

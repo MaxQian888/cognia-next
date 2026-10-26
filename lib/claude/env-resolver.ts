@@ -16,6 +16,7 @@ import { getActiveAccount } from "@/lib/subscription/core/transport"
 import { useAccountStore } from "@/stores/account/account-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+import { ccswitchApiKeyEnv } from "@/lib/ccswitch/provider"
 import type {
   AppSettings,
   Character,
@@ -63,6 +64,7 @@ export function resolveAccountId(
 ): string | null {
   if (session?.accountId) return session.accountId
   if (character?.accountIdOverride) return character.accountIdOverride
+  if (providerId === "anthropic" && ccswitchApiKeyEnv(settings)) return null
   const scopedProvider = subscriptionAccountProviderFor(providerId, settings?.customProviders)
   if (scopedProvider) {
     const scopedDefault = settings?.defaultAccountIds?.[scopedProvider]
@@ -108,6 +110,10 @@ export async function resolveAccountEnv(
       accountId ?? "",
       "A local account must be unlocked before a provider account can be resolved."
     )
+  }
+  if (providerId === "anthropic" && !accountId) {
+    const relayEnv = ccswitchApiKeyEnv(useSettingsStore.getState().settings)
+    if (relayEnv) return relayEnv
   }
   let resolvedAccountId = accountId
   const assertScope = () => {

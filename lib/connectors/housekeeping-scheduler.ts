@@ -26,6 +26,7 @@
  *    now go through `dispatchHousekeepingSweep`, which collapses them.
  */
 
+import { ensureMaintenanceSchedule } from "@/lib/scheduler/managed-tasks"
 import { cleanupExpiredCallbackBindings } from "./callback-binding-cleanup"
 import { sweepExecutionRunEventRetention } from "@/lib/db/execution-runs"
 import { sweepTerminalOutboundRows } from "@/lib/db/outbound-jobs"
@@ -136,7 +137,8 @@ export async function dispatchHousekeepingSweep(
 const silentNotification: CreateScheduledTaskInput["notification"] = {
   onStart: false,
   onComplete: false,
-  onError: true,
+  dueReminder: false,
+  onError: false,
   onProgress: false,
   channels: ["none"],
 }
@@ -275,17 +277,18 @@ export function housekeepingOverlapDrift(
 export async function installConnectorHousekeepingSchedule(): Promise<void> {
   registerHousekeepingExecutors()
   const scheduler = getTaskScheduler()
-  const existingByType = new Map((await scheduler.getAllTasks()).map((task) => [task.type, task]))
-  for (const draft of taskDrafts()) {
-    const existing = existingByType.get(draft.type)
-    if (!existing) {
-      await scheduler.createTask(draft)
-      continue
-    }
-    const overlapPolicy = housekeepingOverlapDrift(existing.config)
-    if (overlapPolicy) {
-      await scheduler.updateTask(existing.id, { config: { overlapPolicy } })
-    }
+  const drafts = taskDrafts()
+  for (const draft of drafts) {
+    await ensureMaintenanceSchedule(scheduler, draft)
+  }
+  const existing = await scheduler.getAllTasks()
+  for (const task of existing) {
+    if (!drafts.some((draft) => draft.type === task.type)) continue
+    if (task.owner?.kind === "remote-host") continue
+    if (task.createdBy && task.createdBy.kind !== "user") continue
+    if (task.tags?.includes("system:maintenance-duplicate")) continue
+    const overlapPolicy = housekeepingOverlapDrift(task.config)
+    if (overlapPolicy) await scheduler.updateTask(task.id, { config: { overlapPolicy } })
   }
   await dispatchHousekeepingSweep(CONNECTOR_HOUSEKEEPING_BOOT_SOURCE, { bootedAt: Date.now() })
 }

@@ -118,7 +118,7 @@
   "hostMode": {
     "title": "Always-on host mode",
     "description": "Make this computer the machine your bots, connectors and scheduled tasks run on while you are away.",
-    "details": "Keeps the computer from sleeping, starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
+    "details": "Keeps the computer from sleeping while idle (closing a laptop lid still puts it to sleep), starts Cognia hidden when you sign in, and makes the close button minimize to the tray. Quit from the tray still exits.",
     "toggle": "Toggle always-on host mode",
     "status": {
       "hosting": "Hosting: this computer runs your always-on work.",

@@ -73,6 +73,8 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "action.desktop.queryElements",
   typeVersion: 1,
+  // A failed revision-bound request needs a fresh observation, not replay.
+  retryable: false,
   execute: async (ctx) => {
     const sessionId = stringParam(ctx.params, "sessionId")
     const lineageId = stringParam(ctx.params, "lineageId")
@@ -95,6 +97,7 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "action.desktop.expandElement",
   typeVersion: 1,
+  retryable: false,
   execute: async (ctx) => {
     const handle = objectParam<ElementHandle>(ctx.params, "handle")
     const continuationToken =
@@ -112,6 +115,8 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "action.desktop.performAction",
   typeVersion: 1,
+  // Delivery may precede a lost reply. Never repeat an uncertain OS action.
+  retryable: false,
   execute: async (ctx) => {
     const request = objectParam<ActionRequest>(ctx.params, "request")
     const result = await desktop.performAction(request, callContext(ctx))

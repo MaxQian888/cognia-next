@@ -6,6 +6,8 @@ import {
   TEAM_SETTINGS_PARAM,
   settingsHref,
   teamSettingsHref,
+  PROMPT_RESOURCE_PARAM,
+  PROMPT_WORKSPACE_PARAM,
 } from "./deep-link"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 
@@ -138,5 +140,16 @@ describe("teamSettingsHref", () => {
   it("opens the teams section, with the team to edit when one is named", () => {
     expect(teamSettingsHref()).toBe("/settings?section=teams")
     expect(teamSettingsHref("team 1")).toBe(`/settings?section=teams&${TEAM_SETTINGS_PARAM}=team+1`)
+  })
+})
+
+// Plugins build Prompt Center links without host imports (public SDK only), so
+// these values are a published contract. The Config Governance plugin pins its
+// own links against them in its host-integration suite.
+describe("Prompt Center deep-link params", () => {
+  it("keep the names plugins build links with", () => {
+    expect(SETTINGS_ROUTE).toBe("/settings")
+    expect(PROMPT_RESOURCE_PARAM).toBe("resource")
+    expect(PROMPT_WORKSPACE_PARAM).toBe("workspace")
   })
 })

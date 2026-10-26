@@ -41,6 +41,7 @@ beforeEach(() => {
  * the persist options so we exercise the same code paths the runtime uses.
  */
 type PersistOpts = {
+  version: number
   migrate: (state: unknown, version: number) => unknown
   partialize: (state: ExternalAgentStore) => unknown
 }
@@ -67,6 +68,44 @@ const baseAgent = (overrides: Partial<StoredExternalAgentConfig> = {}): StoredEx
   }) as StoredExternalAgentConfig
 
 describe("persist.migrate", () => {
+  it("bumps the persisted version and keeps removed settings out of future writes", () => {
+    expect(persistOptions.version).toBe(7)
+    expect(persistOptions.partialize(useExternalAgentStore.getState())).not.toHaveProperty(
+      "enabled"
+    )
+  })
+
+  it("converts a legacy global off state into per-agent disabled states", () => {
+    const persisted = {
+      enabled: false,
+      autoConnectOnStartup: true,
+      activeAgentId: "on",
+      agents: {
+        on: baseAgent({ id: "on" }),
+        off: baseAgent({ id: "off", enabled: false }),
+      },
+    }
+    const out = persistOptions.migrate(persisted, 6) as ExternalAgentStore
+    expect(out).not.toHaveProperty("enabled")
+    expect(out.agents.on.enabled).toBe(false)
+    expect(out.agents.off.enabled).toBe(false)
+    expect(out.autoConnectOnStartup).toBe(true)
+    expect(out.activeAgentId).toBe("on")
+    expect(persisted.agents.on.enabled).toBe(true)
+  })
+
+  it.each([true, undefined])("preserves individual states for legacy global %s", (enabled) => {
+    const persisted = {
+      enabled,
+      agents: { on: baseAgent({ id: "on" }), off: baseAgent({ id: "off", enabled: false }) },
+    }
+    const out = persistOptions.migrate(persisted, 6) as ExternalAgentStore
+    expect(out).not.toHaveProperty("enabled")
+    expect(out.agents.on.enabled).toBe(true)
+    expect(out.agents.off.enabled).toBe(false)
+    expect(persistOptions.migrate(out, 6)).toEqual(out)
+  })
+
   it("returns sane defaults when the persisted state is null", () => {
     const out = persistOptions.migrate(null, 0) as ExternalAgentStore
     expect(out.agents).toEqual({})
@@ -309,7 +348,6 @@ describe("persist.partialize", () => {
         "chatFailurePolicy",
         "defaultPermissionMode",
         "delegationRules",
-        "enabled",
         "lastRunSnapshots",
         "overviewBannerCollapsed",
         "railGroupBy",
@@ -347,4 +385,24 @@ describe("persist.partialize", () => {
     }
     expect(Object.keys(out.agentValidity)).toEqual(["broken"])
   })
+})
+
+it("preserves model roles through persistence projection and reload migration", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const id = useExternalAgentStore.getState().addAgent({
+    name: "Roles",
+    protocol: "codex-app-server",
+    transport: "stdio",
+    cogniaModel: { providerId: "p", modelId: "m" },
+    modelRoles,
+  })
+  const projected = persistOptions.partialize(useExternalAgentStore.getState())
+  const reloaded = persistOptions.migrate(
+    JSON.parse(JSON.stringify(projected)),
+    5
+  ) as ExternalAgentStore
+  expect(reloaded.agents[id].modelRoles).toEqual(modelRoles)
 })

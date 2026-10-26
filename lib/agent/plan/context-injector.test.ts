@@ -1,7 +1,11 @@
 import type { AgentPlan } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 import { appendPlanContext } from "./context-injector"
-import { PLAN_SECTION_MARKER } from "./prompts"
+import { PLAN_SECTION_MARKER, PLAN_SYSTEM_SECTION_PROMPT } from "./prompts"
+import { buildPromptOverrideSnapshot } from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+
+afterEach(() => __resetPromptVerdictsForTests())
 
 function plan(status: AgentPlan["status"]): AgentPlan {
   return {
@@ -90,5 +94,23 @@ describe("appendPlanContext", () => {
       },
     ]
     expect(appendPlanContext({ appendSystemPrompt: "base", activePlan: pii })).toBe("base")
+  })
+})
+
+describe("appendPlanContext prompt snapshot", () => {
+  it("renders the section from the turn's frozen snapshot", () => {
+    const promptSnapshot = buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: PLAN_SYSTEM_SECTION_PROMPT.id,
+        scope: "account",
+        targetId: "",
+        revisionId: "por-plan-injector-frozen",
+        body: "## Active Plan\nCustom: {{checklist}}",
+        contractVersion: PLAN_SYSTEM_SECTION_PROMPT.contractVersion,
+      },
+    ])
+    const out = appendPlanContext({ activePlan: plan("executing"), promptSnapshot })
+    expect(out).toBe("## Active Plan\nCustom: [~] step one")
   })
 })

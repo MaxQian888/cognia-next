@@ -5,7 +5,7 @@
 // transport or lifecycle of its own — `LspService` (reused from
 // vscode-ext-host) does spawning, dedupe, request dispatch, and
 // diagnostics. The resolver only:
-//   1. picks the candidate server(s) for a file (servers.mjs),
+//   1. picks the candidate server(s) for a file (servers.ts),
 //   2. resolves the workspace root,
 //   3. ensures the binary exists (PATH probe / Phase 4 install ladder),
 //   4. builds LspStartParams and drives the injected LspService,

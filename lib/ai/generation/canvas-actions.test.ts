@@ -10,7 +10,7 @@ jest.mock("@cognia/provider-core/core/client", () => ({
 }))
 
 import {
-  ACTION_PROMPTS,
+  CANVAS_ACTION_PROMPTS,
   buildCanvasActionPrompts,
   runCanvasAction,
   streamCanvasAction,
@@ -22,6 +22,10 @@ import {
   type CanvasActionType,
 } from "./canvas-actions"
 import { generateText, streamText } from "ai"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import { getProviderModel } from "@cognia/provider-core/core/client"
 import {
   abortableStreamModel,
@@ -30,7 +34,7 @@ import {
   truncatedStreamModel,
 } from "@/lib/ai/webview-stream-fixtures"
 
-describe("ACTION_PROMPTS / getActionDescription", () => {
+describe("CANVAS_ACTION_PROMPTS / getActionDescription", () => {
   it("includes prompts for every action type", () => {
     const types: CanvasActionType[] = [
       "custom",
@@ -45,7 +49,8 @@ describe("ACTION_PROMPTS / getActionDescription", () => {
       "run",
     ]
     for (const t of types) {
-      expect(ACTION_PROMPTS[t]).toBeTruthy()
+      expect(CANVAS_ACTION_PROMPTS[t].id).toBe(`generation.canvas.${t}`)
+      expect(CANVAS_ACTION_PROMPTS[t].defaultBody).toBeTruthy()
       expect(getActionDescription(t)).toBeTruthy()
     }
   })
@@ -55,8 +60,8 @@ describe("buildCanvasActionPrompts", () => {
   // One builder for the hook and the plugin API. Previously the hook used a
   // second one that put the instruction in the user prompt and dropped
   // attachments entirely.
-  it("carries language, instruction and attachments in the system prompt", () => {
-    const { systemPrompt, userPrompt } = buildCanvasActionPrompts("improve", "doc body", {
+  it("carries language, instruction and attachments in the system prompt", async () => {
+    const { systemPrompt, userPrompt } = await buildCanvasActionPrompts("improve", "doc body", {
       language: "typescript",
       prompt: "polite tone",
       attachments: [
@@ -76,16 +81,16 @@ describe("buildCanvasActionPrompts", () => {
     expect(userPrompt).toBe("doc body")
   })
 
-  it("sends the selection as the user prompt when there is one", () => {
-    const { userPrompt } = buildCanvasActionPrompts("translate", "whole doc", {
+  it("sends the selection as the user prompt when there is one", async () => {
+    const { userPrompt } = await buildCanvasActionPrompts("translate", "whole doc", {
       targetLanguage: "fr",
       selection: "specific chunk",
     })
     expect(userPrompt).toBe("specific chunk")
   })
 
-  it("flags a missing or truncated attachment so the model knows", () => {
-    const { systemPrompt } = buildCanvasActionPrompts("review", "doc", {
+  it("flags a missing or truncated attachment so the model knows", async () => {
+    const { systemPrompt } = await buildCanvasActionPrompts("review", "doc", {
       attachments: [
         {
           id: "a1",
@@ -98,6 +103,56 @@ describe("buildCanvasActionPrompts", () => {
       ],
     })
     expect(systemPrompt).toContain("(truncated)")
+  })
+})
+
+describe("customized action prompts (ADR-0236)", () => {
+  const override = (scope: "session" | "account", targetId: string, body: string) =>
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${scope}`,
+        promptId: CANVAS_ACTION_PROMPTS.improve.id,
+        scope,
+        targetId,
+        revisionId: `por-${scope}`,
+        body,
+        contractVersion: CANVAS_ACTION_PROMPTS.improve.contractVersion,
+      },
+    ])
+
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("keeps the shipped body byte-for-byte with no override", async () => {
+    const { systemPrompt } = await buildCanvasActionPrompts("improve", "doc")
+    expect(systemPrompt).toBe(CANVAS_ACTION_PROMPTS.improve.defaultBody)
+  })
+
+  it("applies the document's session override and keeps the host-owned framing", async () => {
+    __setPromptOverrideSnapshotForTests(override("session", "s-1", "Tighten the prose."))
+    const { systemPrompt } = await buildCanvasActionPrompts("improve", "doc", {
+      language: "markdown",
+      prompt: "keep headings",
+      promptContext: { sessionId: "s-1" },
+    })
+    expect(systemPrompt).toBe(
+      "Language: markdown\n\nTighten the prose.\n\nUser instruction:\nkeep headings"
+    )
+  })
+
+  it("never lets the plugin path pick a session override", async () => {
+    __setPromptOverrideSnapshotForTests(override("session", "s-1", "Tighten the prose."))
+    ;(generateText as jest.Mock).mockReset().mockResolvedValue({ text: "ok" })
+    await executeCanvasAction(
+      "improve",
+      "doc",
+      { provider: "anthropic", model: "x", apiKey: "k" },
+      {
+        promptContext: { sessionId: "s-1" },
+      } as never
+    )
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({ system: CANVAS_ACTION_PROMPTS.improve.defaultBody })
+    )
   })
 })
 

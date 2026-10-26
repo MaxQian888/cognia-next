@@ -56,6 +56,7 @@ jest.mock("@cognia/eval-core", () => ({
 jest.mock("@/lib/app-version", () => ({ APP_VERSION: "test" }))
 
 import { runEvalService } from "@/lib/ai/eval/service"
+import { useProjectStore } from "@/stores/project/project-store"
 import { createEvalAPI } from "./eval-api"
 
 describe("createEvalAPI", () => {
@@ -81,6 +82,23 @@ describe("createEvalAPI", () => {
         }),
       })
     )
+  })
+
+  it("runs a chat target in a workspace root and refuses any other directory", async () => {
+    useProjectStore.setState({
+      projects: [{ id: "ws", name: "Repo", roots: [{ id: "r", path: "/repo", isPrimary: true }] }],
+    } as never)
+    await createEvalAPI().runDataset({ datasetId: "dataset", model: "model", cwd: "/repo/" })
+    expect(runEvalService).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          targets: [expect.objectContaining({ kind: "chat", cwd: "/repo/" })],
+        }),
+      })
+    )
+    await expect(
+      createEvalAPI().runDataset({ datasetId: "dataset", model: "model", cwd: "/etc" })
+    ).rejects.toThrow(/cwd must be a root/)
   })
 
   it("validates target-specific identifiers", async () => {

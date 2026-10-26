@@ -103,7 +103,7 @@ import {
   useComposerImageInput,
   type ComposerImageInput,
 } from "./composer/hooks/use-composer-image-input"
-import { ComposerBox, composerCardRadiusPx } from "./composer/composer-box"
+import { ComposerBox, composerCardRadiusPx, composerNoticeVars } from "./composer/composer-box"
 import {
   resolveComposerSkin,
   toolbarSitsInBox,
@@ -137,6 +137,7 @@ import { useComposerKeyboardAvoidance } from "./composer/use-composer-keyboard-a
 import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 import { useStableCallback } from "@/hooks/ui/use-stable-callback"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   detectTrigger,
@@ -313,7 +314,6 @@ import { useOcr } from "@/hooks/use-ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import type { OcrResult } from "@/types/ocr"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
-import { BestOfNChip } from "./composer/best-of-n-chip"
 import { BestOfNStartDialog } from "./composer/best-of-n-start-dialog"
 import type { PreparedBestOfN } from "@/lib/best-of-n/entry"
 import { BottomToolbar } from "./composer/bottom-toolbar"
@@ -824,6 +824,7 @@ function ComposerInner(props: InnerProps) {
     stageRemoteDoc,
     acceptFiles,
   } = useAttachmentIntake({
+    destinationKey: props.session?.id,
     attachments,
     attachmentCitations,
     textInput: textInput,
@@ -3418,13 +3419,25 @@ function ComposerInner(props: InnerProps) {
     // mode, which `resolveSendOptions` reads back, so the mistake reached the
     // model and not just the chrome.
     <ComposerSessionProvider value={props.session?.id ?? null}>
-      <div ref={setContainerEl}>
+      <div
+        ref={setContainerEl}
+        style={
+          composerNoticeVars(props.skin, compactLayout, {
+            isMobile,
+            nativeShell: nativeMobile,
+          }) as CSSProperties
+        }
+      >
         {/* Every band stacked above the input card shares one scroll container
           with a height cap. Restored attachments, an active goal, an open loop
           and the plan-mode banner could otherwise push the input off the
           bottom of the screen. Each band still animates its own height inside
           it. (Staged attachments live INSIDE the card — `contextRow`.) */}
-        <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+        <div
+          role="region"
+          aria-label={t("contextRegion")}
+          className="max-h-[40vh] overflow-y-auto overscroll-contain"
+        >
           {pendingLaunchSpec ? (
             <TemplateLaunchDiffBar
               differences={launchDifferences}
@@ -3506,6 +3519,17 @@ function ComposerInner(props: InnerProps) {
             })()}
           </Collapse>
           <ComposerStatusBands sessionId={sessionId} />
+          {predictionEligible && (
+            <FollowUpSuggestions
+              suggestions={prediction.suggestions}
+              onAccept={(text) => acceptPrediction(text, predictionAcceptance === "send")}
+              onDismiss={prediction.dismiss}
+              directSend={predictionAcceptance === "send"}
+              status={prediction.status}
+              onRetry={prediction.retry}
+              onConfigure={() => props.onOpenSettings("conversation")}
+            />
+          )}
         </div>
         {props.runStatus ? (
           // Docked onto the card's top edge. The inset follows the corner the
@@ -3528,17 +3552,6 @@ function ComposerInner(props: InnerProps) {
             {props.runStatus}
           </div>
         ) : null}
-        {predictionEligible && (
-          <FollowUpSuggestions
-            suggestions={prediction.suggestions}
-            onAccept={(text) => acceptPrediction(text, predictionAcceptance === "send")}
-            onDismiss={prediction.dismiss}
-            directSend={predictionAcceptance === "send"}
-            status={prediction.status}
-            onRetry={prediction.retry}
-            onConfigure={() => props.onOpenSettings("conversation")}
-          />
-        )}
         <ComposerBox
           skin={props.skin}
           compactLayout={compactLayout}
@@ -4105,6 +4118,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
   const bestOfNCount =
     bestOfNChoice && bestOfNChoice.sessionId === session?.id ? bestOfNChoice.n : null
+  const bestOfNControl =
+    session?.kind === "direct" && !session.platformBinding
+      ? {
+          value: bestOfNCount,
+          disabled,
+          onChange: (n: 2 | 3 | 4 | null) =>
+            setBestOfNChoice(n ? { sessionId: session.id, n } : null),
+        }
+      : undefined
   const [bestOfNStart, setBestOfNStart] = useState<{
     prepared: PreparedBestOfN
     resolve(value: boolean): void
@@ -4863,11 +4885,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                         tCommands("running", { command: commandProgress.command })}
                     </span>
                     {commandProgress.value !== undefined && (
-                      <progress
+                      <Progress
                         className="h-1 w-full"
                         aria-label={tCommands("progress", { command: commandProgress.command })}
-                        max={1}
-                        value={commandProgress.value}
+                        value={commandProgress.value * 100}
                       />
                     )}
                   </div>
@@ -4875,13 +4896,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                     {tCommands("cancel")}
                   </Button>
                 </div>
-              )}
-              {session?.kind === "direct" && !session.platformBinding && (
-                <BestOfNChip
-                  value={bestOfNCount}
-                  disabled={disabled || status === "streaming" || status === "awaiting_approval"}
-                  onChange={(n) => setBestOfNChoice(n ? { sessionId: session.id, n } : null)}
-                />
               )}
               <ExternalAgentExtensionUi chatSessionId={session?.id} link={externalSessionLink}>
                 <ComposerInner
@@ -4931,6 +4945,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                         {toolbar}
                         {toolbarInBox ? (
                           <BottomToolbar
+                            bestOfN={bestOfNControl}
                             session={session ?? null}
                             status={status}
                             variant={
@@ -4946,6 +4961,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               </ExternalAgentExtensionUi>
               {toolbarInBox ? null : (
                 <BottomToolbar
+                  bestOfN={bestOfNControl}
                   session={session ?? null}
                   status={status}
                   onOpenProviderSettings={() => onOpenSettings("api-key")}

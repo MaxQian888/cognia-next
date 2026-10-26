@@ -12,12 +12,8 @@ import type {
 } from "./workspace-backend"
 
 describe("plugin-sdk api/workspace-backend", () => {
-  it("exposes the authoring helper, manifest bridge, plugin API, and host registry", () => {
+  it("exposes the authoring helper and the workspace-backend registry", () => {
     expect(typeof sdk.defineWorkspaceBackend).toBe("function")
-    expect(typeof sdk.registerWorkspaceBackendsForPlugin).toBe("function")
-    expect(typeof sdk.unregisterWorkspaceBackendsForPlugin).toBe("function")
-    expect(typeof sdk.createWorkspaceAPI).toBe("function")
-    expect(typeof sdk.clearWorkspaceBackendsForPluginContext).toBe("function")
     expect(typeof sdk.registerWorkspaceBackend).toBe("function")
     expect(typeof sdk.unregisterWorkspaceBackend).toBe("function")
     expect(typeof sdk.getWorkspaceBackend).toBe("function")
@@ -25,6 +21,13 @@ describe("plugin-sdk api/workspace-backend", () => {
     expect(typeof sdk.listWorkspaceBackends).toBe("function")
     expect(typeof sdk.clearWorkspaceBackendsForPlugin).toBe("function")
     expect(typeof sdk.subscribeWorkspaceBackendRegistry).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (plugins reach it through ctx.workspace)", () => {
+    expect(sdk).not.toHaveProperty("registerWorkspaceBackendsForPlugin")
+    expect(sdk).not.toHaveProperty("unregisterWorkspaceBackendsForPlugin")
+    expect(sdk).not.toHaveProperty("createWorkspaceAPI")
+    expect(sdk).not.toHaveProperty("clearWorkspaceBackendsForPluginContext")
   })
 
   it("re-exports workspace backend bridge, registry, and provider types", () => {

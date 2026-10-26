@@ -42,7 +42,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
  * `text-muted-foreground` and brighten on hover — a full-strength glyph among
  * them read as the odd one out (the sidebar and dock toggles were).
  */
-const HEADER_ICON_BUTTON = "size-7 text-muted-foreground hover:text-foreground"
+const HEADER_ICON_BUTTON = "size-7 shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
 
 interface Props {
   session: ChatSession
@@ -99,6 +99,38 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const activeSessionId = useChatStore((state) => state.activeSessionId)
   const ownsActions = !outlet || !activeSessionId || activeSessionId === session.id
   const actionsOutlet = useTitleBarProjection("actions", { active: ownsActions })
+  const sessionActionsOutlet = useTitleBarProjection("sessionActions", { active: ownsActions })
+  // These controls belong to the focused session, but their geometry belongs
+  // to the fixed toolbar. Keeping them out of the title's clipped transition
+  // snapshot prevents them from popping when the conversation column resizes.
+  const sessionActions = (
+    <>
+      {isTauri() ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={HEADER_ICON_BUTTON}
+          aria-label={t("openInCodexApp")}
+          title={t("openInCodexApp")}
+          disabled={codexDispatching}
+          onClick={() => void handleOpenInCodexApp()}
+        >
+          {codexDispatching ? (
+            <Spinner className="size-4" />
+          ) : (
+            <ExternalLinkIcon className="size-4" />
+          )}
+        </Button>
+      ) : null}
+
+      <SingleExportTrigger
+        key={session.id}
+        session={session}
+        variant="share"
+        className={HEADER_ICON_BUTTON}
+      />
+    </>
+  )
   const paneActions = (
     <>
       {onSplitView && (
@@ -223,30 +255,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         />
       ) : null}
 
-      {isTauri() ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={HEADER_ICON_BUTTON}
-          aria-label={t("openInCodexApp")}
-          title={t("openInCodexApp")}
-          disabled={codexDispatching}
-          onClick={() => void handleOpenInCodexApp()}
-        >
-          {codexDispatching ? (
-            <Spinner className="size-4" />
-          ) : (
-            <ExternalLinkIcon className="size-4" />
-          )}
-        </Button>
-      ) : null}
-
-      <SingleExportTrigger
-        key={session.id}
-        session={session}
-        variant="share"
-        className={HEADER_ICON_BUTTON}
-      />
+      {ownsActions
+        ? sessionActionsOutlet
+          ? createPortal(sessionActions, sessionActionsOutlet)
+          : sessionActions
+        : null}
 
       {ownsActions
         ? actionsOutlet

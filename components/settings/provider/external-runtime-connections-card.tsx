@@ -96,9 +96,8 @@ export function ExternalRuntimeConnectionsCard({
   className?: string
 }) {
   const t = useTranslations("providers.externalRuntimes")
-  const { rows, configuredCount, externalEnabled, workingCount } = connections
-  const switchedOff = !externalEnabled && configuredCount > 0
-  if (rows.length === 0 && !switchedOff) return null
+  const { rows, workingCount } = connections
+  if (rows.length === 0) return null
 
   return (
     <section
@@ -128,15 +127,6 @@ export function ExternalRuntimeConnectionsCard({
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
       </div>
-
-      {switchedOff && (
-        <p
-          className="mt-2 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground"
-          data-testid="external-runtime-switched-off"
-        >
-          {t("switchedOff", { count: configuredCount })}
-        </p>
-      )}
 
       {rows.length > 0 && (
         <ul className="mt-2 divide-y" aria-label={t("listAria")}>

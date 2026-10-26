@@ -61,7 +61,9 @@ jest.mock("./scheduler-db", () => ({
     getOverdueActiveTasks: jest.fn().mockResolvedValue([]),
     createTask: jest.fn().mockResolvedValue(undefined),
     updateTask: jest.fn().mockResolvedValue(undefined),
+    setTaskPromotion: jest.fn(),
     claimTaskSlot: jest.fn().mockResolvedValue(null),
+    advanceTaskSchedule: jest.fn().mockResolvedValue(null),
     deleteTask: jest.fn().mockResolvedValue(true),
     getTask: jest.fn().mockResolvedValue(null),
     getAllTasks: jest.fn().mockResolvedValue([]),
@@ -169,14 +171,75 @@ function ownedTask(id: string, owner?: ScheduledTask["owner"]): ScheduledTask {
   }
 }
 
+// Catch-up tests retain state across transactional claims and completion writes.
+// The integration suite separately exercises the actual Dexie transactions.
+let restoreTaskStorage: (() => void) | undefined
+function mockTaskStorage(initial: ScheduledTask): void {
+  const methods = ["getTask", "updateTask", "claimTaskSlot", "advanceTaskSchedule"] as const
+  const previous = methods.map((method) => mockSchedulerDb[method].getMockImplementation())
+  let current: ScheduledTask = initial
+  mockSchedulerDb.getTask.mockImplementation(async (id) => (id === current.id ? current : null))
+  mockSchedulerDb.updateTask.mockImplementation(async (row) => {
+    current = row
+  })
+  mockSchedulerDb.claimTaskSlot.mockImplementation(async (id, expected, next) => {
+    if (
+      current.id !== id ||
+      current.status !== "active" ||
+      current.nextRunAt?.getTime() !== expected.getTime()
+    )
+      return null
+    const runCount = current.runCount + 1
+    const max = current.config.maxRuns
+    const row = { ...current, runCount, nextRunAt: max && runCount >= max ? undefined : next }
+    await mockSchedulerDb.updateTask(row)
+    return row
+  })
+  mockSchedulerDb.advanceTaskSchedule.mockImplementation(
+    async (id, expected, next, reason, status = "active") => {
+      if (
+        current.id !== id ||
+        current.status !== "active" ||
+        current.nextRunAt?.getTime() !== expected.getTime()
+      )
+        return null
+      const row = {
+        ...current,
+        status,
+        nextRunAt: next,
+        ...(reason ? { lastTerminalReason: reason } : {}),
+      }
+      await mockSchedulerDb.updateTask(row)
+      return row
+    }
+  )
+  restoreTaskStorage = () => {
+    methods.forEach((method, index) => {
+      const mock = mockSchedulerDb[method] as jest.Mock
+      mock.mockReset()
+      if (previous[index])
+        mock.mockImplementation(previous[index] as (...args: unknown[]) => unknown)
+    })
+  }
+}
+
 describe("TaskScheduler", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSchedulerDb.setTaskPromotion.mockImplementation(async (id, promotion, accepts) => {
+      const current = await mockSchedulerDb.getTask(id)
+      if (!current || !accepts(current)) return null
+      const updated = { ...current, promotion, updatedAt: new Date() }
+      await mockSchedulerDb.updateTask(updated)
+      return updated
+    })
     jest.useFakeTimers()
     stopTaskScheduler()
   })
 
   afterEach(() => {
+    restoreTaskStorage?.()
+    restoreTaskStorage = undefined
     jest.useRealTimers()
     stopTaskScheduler()
   })
@@ -292,6 +355,27 @@ describe("TaskScheduler", () => {
     })
 
     describe("createTask", () => {
+      it("defaults internal upkeep to silence while allowing explicit delivery", async () => {
+        const input: CreateScheduledTaskInput = {
+          id: "system:presence",
+          name: "Presence",
+          type: "connection:presence:refresh",
+          trigger: { type: "interval", intervalMs: 60_000 },
+        }
+        const task = await scheduler.createTask(input)
+        expect(task.id).toBe(input.id)
+        expect(task.notification).toMatchObject({
+          channels: ["none"],
+          dueReminder: false,
+          onError: false,
+        })
+        const optedIn = await scheduler.createTask({
+          ...input,
+          id: "explicit",
+          notification: { channels: ["desktop"], onError: true },
+        })
+        expect(optedIn.notification).toMatchObject({ channels: ["desktop"], onError: true })
+      })
       it("should create a new task", async () => {
         const input: CreateScheduledTaskInput = {
           name: "Test Task",
@@ -475,6 +559,20 @@ describe("TaskScheduler", () => {
     })
 
     describe("updateTask", () => {
+      it("does not revive a stopped scheduler when a migration read finishes late", async () => {
+        let resolveRead: (task: ScheduledTask) => void = () => undefined
+        mockSchedulerDb.getTask.mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveRead = resolve
+          })
+        )
+        const pending = scheduler.updateTask("late", { notification: { channels: ["none"] } })
+        scheduler.stop()
+        resolveRead(ownedTask("late"))
+        await expect(pending).resolves.toBeNull()
+        expect(scheduler.getStatus().initialized).toBe(false)
+        expect(scheduler.getStatus().scheduledCount).toBe(0)
+      })
       it("should return null for non-existent task", async () => {
         mockSchedulerDb.getTask.mockResolvedValueOnce(null)
         const result = await scheduler.updateTask("non-existent", { name: "Updated" })
@@ -910,6 +1008,7 @@ describe("TaskScheduler", () => {
           updatedAt: new Date(),
         }
 
+        mockTaskStorage(overdueTask)
         mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
@@ -957,6 +1056,7 @@ describe("TaskScheduler", () => {
           updatedAt: now,
         }
 
+        mockTaskStorage(overdueTask)
         mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
@@ -1009,6 +1109,7 @@ describe("TaskScheduler", () => {
           updatedAt: new Date(),
         }
 
+        mockTaskStorage(overdueOneTimeTask)
         mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueOneTimeTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
@@ -1957,16 +2058,16 @@ describe("TaskScheduler", () => {
         overdue("unpinned"),
         overdue("pinned", { kind: "this-device", reason: "machine-bound", pinnedAt: 1 }),
       ])
-      mockSchedulerDb.updateTask.mockClear()
+      mockSchedulerDb.advanceTaskSchedule.mockClear()
       await jest.advanceTimersByTimeAsync(61_000)
-      const touched = mockSchedulerDb.updateTask.mock.calls.map(([task]) => task.id)
+      const touched = mockSchedulerDb.advanceTaskSchedule.mock.calls.map(([id]) => id)
       expect(touched).toContain("pinned")
       expect(touched).not.toContain("unpinned")
 
       window.localStorage.removeItem("cognia-execution-authority-v1")
-      mockSchedulerDb.updateTask.mockClear()
+      mockSchedulerDb.advanceTaskSchedule.mockClear()
       await jest.advanceTimersByTimeAsync(61_000)
-      expect(mockSchedulerDb.updateTask.mock.calls.map(([task]) => task.id)).toContain("unpinned")
+      expect(mockSchedulerDb.advanceTaskSchedule.mock.calls.map(([id]) => id)).toContain("unpinned")
 
       mockSchedulerDb.getOverdueActiveTasks.mockResolvedValue([])
       sched.stop()
@@ -2968,7 +3069,7 @@ describe("TaskScheduler", () => {
           nextRunAt: new Date(staleSlot),
           createdAt: new Date(staleSlot - intervalMs),
         })
-        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockTaskStorage(task)
 
         driver.fire(task.id, staleSlot)
         await jest.advanceTimersByTimeAsync(10)
@@ -3010,7 +3111,7 @@ describe("TaskScheduler", () => {
           nextRunAt: new Date(staleSlot),
           createdAt: new Date(staleSlot - intervalMs),
         })
-        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockTaskStorage(task)
 
         driver.fire(task.id, staleSlot)
         await jest.advanceTimersByTimeAsync(10)
@@ -3039,7 +3140,7 @@ describe("TaskScheduler", () => {
           nextRunAt: new Date(staleSlot),
           createdAt: new Date(staleSlot - intervalMs),
         })
-        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockTaskStorage(task)
 
         driver.fire(task.id, staleSlot)
         await jest.advanceTimersByTimeAsync(10)
@@ -3069,7 +3170,7 @@ describe("TaskScheduler", () => {
           nextRunAt: new Date(staleSlot),
           createdAt: new Date(staleSlot - intervalMs),
         })
-        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockTaskStorage(task)
 
         driver.fire(task.id, staleSlot)
         await jest.advanceTimersByTimeAsync(10)
@@ -3108,7 +3209,7 @@ describe("TaskScheduler", () => {
             nextRunAt: new Date(staleSlot),
             createdAt: new Date(staleSlot - hourMs),
           })
-          mockSchedulerDb.getTask.mockResolvedValue(task)
+          mockTaskStorage(task)
 
           driver.fire(task.id, staleSlot)
           await jest.advanceTimersByTimeAsync(10)
@@ -3139,7 +3240,7 @@ describe("TaskScheduler", () => {
           nextRunAt: new Date(slot),
           createdAt: new Date(slot - intervalMs),
         })
-        mockSchedulerDb.getTask.mockResolvedValue(task)
+        mockTaskStorage(task)
         mockSchedulerDb.claimTaskSlot.mockResolvedValue({
           ...task,
           nextRunAt: new Date(slot + intervalMs),
@@ -4388,7 +4489,11 @@ describe("TaskScheduler", () => {
     })
 
     describe("catch-up window", () => {
-      it("skips missed slots older than catchupWindowMs with their own reason", async () => {
+      beforeEach(async () => {
+        await scheduler.initialize()
+      })
+      afterEach(() => scheduler.stop())
+      it("records expired slots without spending the fresh replay allowance", async () => {
         const executor = jest.fn().mockResolvedValue({ success: true })
         registerTaskExecutor("test", executor)
 
@@ -4396,8 +4501,8 @@ describe("TaskScheduler", () => {
         const overdueTask = makePolicyTask({
           id: "windowed-task",
           trigger: { type: "interval", intervalMs: 60_000 },
-          // Two missed slots: 5min ago (outside window) and 4min ago (outside),
-          // window 2min → both skipped as catchup-window-expired.
+          // Old -5/-4 minute slots produce bounded diagnostics; -2/-1 are
+          // fresh and retain the two-run allowance.
           nextRunAt: new Date(now - 5 * 60_000),
           createdAt: new Date(now - 60 * 60_000),
           config: {
@@ -4407,11 +4512,12 @@ describe("TaskScheduler", () => {
             catchupWindowMs: 2 * 60_000,
           },
         })
+        mockTaskStorage(overdueTask)
         mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
-        expect(executor).not.toHaveBeenCalled()
+        expect(executor).toHaveBeenCalledTimes(2)
         const skipped = mockSchedulerDb.createExecution.mock.calls
           .map(([execution]) => execution)
           .filter((execution) => execution.terminalReason === "catchup-window-expired")
@@ -4419,7 +4525,8 @@ describe("TaskScheduler", () => {
         expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
           expect.objectContaining({
             id: "windowed-task",
-            lastTerminalReason: "catchup-window-expired",
+            runCount: 2,
+            successCount: 2,
           })
         )
       })
@@ -4442,12 +4549,12 @@ describe("TaskScheduler", () => {
             catchupWindowMs: 2.5 * 60_000,
           },
         })
+        mockTaskStorage(overdueTask)
         mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
-        mockSchedulerDb.getTask.mockResolvedValue(overdueTask)
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
-        expect(executor).toHaveBeenCalledTimes(1)
+        expect(executor).toHaveBeenCalledTimes(2)
         const skipped = mockSchedulerDb.createExecution.mock.calls
           .map(([execution]) => execution)
           .filter((execution) => execution.terminalReason === "catchup-window-expired")
@@ -4471,8 +4578,8 @@ describe("TaskScheduler", () => {
             maxMissedRuns: 2,
           },
         })
+        mockTaskStorage(overdueTask)
         mockSchedulerDb.getOverdueActiveTasks.mockResolvedValueOnce([overdueTask])
-        mockSchedulerDb.getTask.mockResolvedValue(overdueTask)
 
         await (scheduler as unknown as { checkMissedTasks: () => Promise<void> }).checkMissedTasks()
 
@@ -4815,7 +4922,7 @@ describe("TaskScheduler", () => {
       expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
         expect.objectContaining({
           id: "task-p",
-          nextRunAt: undefined,
+          nextRunAt: task.nextRunAt,
           promotion: expect.objectContaining({
             systemTaskId: "sys-1",
             token: "tok",

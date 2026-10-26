@@ -8,7 +8,7 @@
 // drives, so the active-provider badges stay fresh even when the user
 // switches providers in CCSwitch with cognia-next still open.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   ccswitchListMcpServers,
@@ -31,6 +31,41 @@ import type {
 
 /** Tauri event the cc-switch.db watcher emits on debounced db mutations. */
 const DB_CHANGED_EVENT = "ccswitch://db-changed"
+
+// Every hook shares the backend's single watcher. Serialize lifecycle calls so
+// a late stop cannot tear down a new subscription during tab changes.
+const watchUsers = new Map<symbol, string | undefined>()
+let activeWatch: { manualDataDir?: string } | null = null
+let watchOperation = Promise.resolve()
+function syncWatch() {
+  watchOperation = watchOperation
+    .then(async () => {
+      const desired = [...watchUsers.values()].at(-1)
+      if (watchUsers.size === 0) {
+        if (activeWatch) await ccswitchWatchStop()
+        activeWatch = null
+        return
+      }
+      if (activeWatch && activeWatch.manualDataDir === desired) return
+      if (activeWatch) {
+        await ccswitchWatchStop()
+        activeWatch = null
+      }
+      if (await ccswitchWatchStart(desired)) activeWatch = { manualDataDir: desired }
+    })
+    .catch(() => {
+      activeWatch = null
+    })
+}
+function retainWatch(manualDataDir?: string): () => void {
+  const user = Symbol()
+  watchUsers.set(user, manualDataDir)
+  syncWatch()
+  return () => {
+    watchUsers.delete(user)
+    syncWatch()
+  }
+}
 
 export interface AsyncState<T> {
   data: T | undefined
@@ -57,28 +92,37 @@ interface UseAsyncOptions {
 
 function useAsync<T>(fetcher: () => Promise<T>, options: UseAsyncOptions = {}): AsyncState<T> {
   const { enabled = true, refreshOnFocus = false, manualDataDir } = options
+  const generation = useRef({ value: 0 })
   const [data, setData] = useState<T | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
 
   const refresh = useCallback(async () => {
     if (!enabled) return
+    const request = ++generation.current.value
     setLoading(true)
     setError(undefined)
     try {
       const v = await fetcher()
-      setData(v)
+      if (request === generation.current.value) setData(v)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (request === generation.current.value) {
+        setData(undefined)
+        setError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
-      setLoading(false)
+      if (request === generation.current.value) setLoading(false)
     }
   }, [fetcher, enabled])
 
   useEffect(() => {
     if (!enabled) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch on mount; setState is inside `refresh()`'s catch path
+    const sequence = generation.current
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- begin the asynchronous fetch when its source changes
     void refresh()
+    return () => {
+      sequence.value++
+    }
   }, [refresh, enabled])
 
   useEffect(() => {
@@ -98,34 +142,27 @@ function useAsync<T>(fetcher: () => Promise<T>, options: UseAsyncOptions = {}): 
     }
   }, [enabled, refreshOnFocus, refresh])
 
-  // Live db watch (Phase 4.2): start the backend watcher and refresh on every
-  // debounced `ccswitch://db-changed` event. Gated by the same flags as the
-  // focus refresh so a user with watch disabled pays no IPC cost. Only one
-  // hook needs to drive the watcher, but starting it from each subscribed hook
-  // is idempotent on the Rust side (it replaces any prior watcher), so we keep
-  // the wiring self-contained per-hook rather than hoisting shared state.
   useEffect(() => {
-    if (!enabled || !refreshOnFocus) return
-    if (!isTauri()) return
+    if (!enabled || !refreshOnFocus || !isTauri()) return
     let unlisten: (() => void) | undefined
+    let release: (() => void) | undefined
     let cancelled = false
-    void ccswitchWatchStart(manualDataDir).catch(() => {
-      // Watcher start can fail when cc-switch isn't installed yet — that's
-      // fine; the focus refresh still keeps the badge reasonably fresh.
-    })
     void onTauriEvent(DB_CHANGED_EVENT, () => {
       void refresh()
-    }).then((un) => {
-      if (cancelled) {
-        un()
-      } else {
-        unlisten = un
-      }
     })
+      .then((un) => {
+        if (cancelled) {
+          un()
+          return
+        }
+        unlisten = un
+        release = retainWatch(manualDataDir)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
       unlisten?.()
-      void ccswitchWatchStop().catch(() => {})
+      release?.()
     }
   }, [enabled, refreshOnFocus, refresh, manualDataDir])
 

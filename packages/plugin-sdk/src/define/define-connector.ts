@@ -29,7 +29,7 @@
  * unauthenticated public request body.
  */
 
-import type { PluginConnectorDef } from "@/types/plugin"
+import type { PluginConnectorDef } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineConnector(connector: PluginConnectorDef): PluginConnectorDef {
   return connector

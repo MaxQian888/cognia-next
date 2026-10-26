@@ -22,6 +22,7 @@ import { bypassRequested, runFlagsToOverrides } from "./run-command"
 import { boolFlag, type ParsedArgs } from "./args"
 import { configureCliLogging as defaultConfigureLogging } from "../config/cli-logging"
 import { realOutput, type OutputSink } from "./output"
+import { withCliProductionEnvironment } from "./entry-runtime"
 
 /**
  * Read the REPL's input one line at a time, without dropping the rest.
@@ -198,7 +199,8 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
     // painted above the app by Ink's console patch. Route them through the
     // console at warn+ so the screen stays coherent and quiet.
     configureLogging({ surface: "tui", verbose })
-    const renderTui = deps.renderTui ?? (await import("../tui/mount")).renderTui
+    const renderTui =
+      deps.renderTui ?? (await withCliProductionEnvironment(() => import("../tui/mount"))).renderTui
     // The TUI picks the backend itself — `/backend` can switch it mid-session —
     // so it gets BOTH factories rather than the one chosen here. The readline
     // fallback below has no such control and keeps the launch-time choice.

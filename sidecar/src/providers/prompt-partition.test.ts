@@ -39,7 +39,7 @@ test("hoists a single leading system message", () => {
 })
 
 test("preserves order and per-message providerOptions across the leading run", () => {
-  // Mirrors ai-sdk.mjs's three-breakpoint Anthropic cache layout: stable base,
+  // Mirrors runtimes/ai-sdk/index.ts's three-breakpoint Anthropic cache layout: stable base,
   // stable append, uncached per-turn tail.
   const result = partitionPrompt([
     sys("base", CACHE_CONTROL),

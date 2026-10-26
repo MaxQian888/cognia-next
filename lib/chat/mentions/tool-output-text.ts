@@ -109,8 +109,15 @@ function walk(value: unknown, depth: number, seen: Set<object>, out: string[]): 
  * A failed call returns its error: "the command I ran and what it complained
  * about" is a thing people reference, and returning `""` for it would make a
  * referenced failure look like a call that never produced anything.
+ *
+ * `maxChars` defaults to the reference cap. Harness evolution (ADR-0237) reads
+ * whole trajectories and passes a larger one: an editor diagnosing a failure
+ * needs the observation, not its first screen.
  */
-export function projectToolOutputText(part: ToolOutputPartLike): string {
+export function projectToolOutputText(
+  part: ToolOutputPartLike,
+  maxChars: number = TOOL_OUTPUT_MAX_CHARS
+): string {
   if (part.state === "output-error") {
     const error = part.errorText
     // `JSON.stringify` of an absent error yields `""` — two quote characters,
@@ -118,14 +125,14 @@ export function projectToolOutputText(part: ToolOutputPartLike): string {
     // to happen before the encoding, not after it.
     if (error === undefined || error === null || error === "") return ""
     const text = typeof error === "string" ? error : JSON.stringify(error)
-    return text ? `Error: ${text}`.slice(0, TOOL_OUTPUT_MAX_CHARS) : ""
+    return text ? `Error: ${text}`.slice(0, maxChars) : ""
   }
   if (part.output === undefined || part.output === null) return ""
   const out: string[] = []
   walk(part.output, 0, new Set<object>(), out)
   const joined = out.join("\n").trim()
   if (!joined) return ""
-  return joined.length > TOOL_OUTPUT_MAX_CHARS
-    ? `${joined.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n…[tool output truncated]`
+  return joined.length > maxChars
+    ? `${joined.slice(0, maxChars)}\n…[tool output truncated]`
     : joined
 }

@@ -41,6 +41,11 @@ jest.mock("@/lib/data/crypto", () => ({ sha256Hex: async (value: string) => `h($
 
 import { executeProjectEnvironment, resolveEnvironmentScript } from "./executor"
 import type { ProjectEnvironment } from "@/types/project-environment"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { BOOTSTRAP_SYSTEM_PROMPTS } from "./bootstrap-prompts"
 
 const environment: ProjectEnvironment = {
   id: "env-1",
@@ -461,6 +466,59 @@ describe("bootstrap Agent initialization", () => {
     expect(args.timeoutSecs).toBe(605)
     expect(args.script.byOs.linux).toContain("--force")
     expect(args.script.default).toContain("--force")
+  })
+
+  describe("Prompt Center override", () => {
+    const nativePrompt = BOOTSTRAP_SYSTEM_PROMPTS.native
+    const publish = (
+      rows: Array<{ scope: "account" | "workspace"; targetId: string; body: string }>
+    ) =>
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot(
+          "test-db",
+          rows.map((row, index) => ({
+            bindingId: `pob-${index}`,
+            promptId: nativePrompt.id,
+            revisionId: `por-${index}`,
+            contractVersion: nativePrompt.contractVersion,
+            ...row,
+          }))
+        )
+      )
+    const sentConfig = () =>
+      JSON.parse(callMock.mock.calls[0][1].variables.COGNIA_BOOTSTRAP_CONFIG) as Record<
+        string,
+        unknown
+      >
+
+    afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+    it("sends no system prompt without an override, so the runtime keeps its default", async () => {
+      publish([])
+      await executeProjectEnvironment(input)
+      expect(sentConfig()).not.toHaveProperty("systemPrompt")
+    })
+
+    it("sends the environment workspace's override", async () => {
+      publish([
+        { scope: "account", targetId: "", body: "Account bootstrap rules." },
+        { scope: "workspace", targetId: environment.projectId, body: "Workspace bootstrap rules." },
+      ])
+      await executeProjectEnvironment(input)
+      expect(sentConfig()).toMatchObject({ systemPrompt: "Workspace bootstrap rules." })
+    })
+
+    it("keeps the environment's own system prompt over an override", async () => {
+      publish([{ scope: "account", targetId: "", body: "Account bootstrap rules." }])
+      await executeProjectEnvironment({
+        ...input,
+        environment: {
+          ...bootstrapEnvironment,
+          bootstrapAgent: { ...bootstrapEnvironment.bootstrapAgent!, systemPrompt: "Own rules." },
+        },
+      })
+      expect(sentConfig()).toMatchObject({ systemPrompt: "Own rules." })
+    })
   })
 
   it("runs with an empty setup script and never intercepts actions", async () => {

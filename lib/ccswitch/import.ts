@@ -5,10 +5,12 @@
 
 import type { McpImportDraft, McpImportStrategy } from "@/lib/db/mcp-servers"
 import { bulkImportMcpServers } from "@/lib/db/mcp-servers"
+import { sanitizeMcpName } from "@/lib/mcp/config-transfer"
 import { createPreset } from "@/lib/db/prompt-presets"
 import { createSkill } from "@/lib/db/skills"
+import { parseBundleManifest } from "@/lib/skills/bundle/parse"
 import { listSkills } from "@/lib/db/skills"
-import type { McpTransport } from "@cognia/agent-config-types"
+import { normalizeMcpEntry } from "@/lib/claude/agents/shared"
 
 import { presetById } from "@/lib/subscription/limits/custom/presets"
 
@@ -134,43 +136,22 @@ export function fromCcswitchUsageScript(provider: CcswitchProvider): CcswitchUsa
 
 /* ---- MCP servers ------------------------------------------------------- */
 
-const VALID_TRANSPORTS: McpTransport[] = ["stdio", "sse", "http"]
-
-function pickTransport(raw: unknown): McpTransport {
-  if (typeof raw === "string") {
-    const lower = raw.toLowerCase()
-    if ((VALID_TRANSPORTS as string[]).includes(lower)) return lower as McpTransport
-  }
-  return "stdio"
-}
-
-/**
- * CCSwitch stores the MCP config as either a parsed object (`config: {...}`)
- * or a stringified JSON. Tolerate both.
- */
-function configAsObject(value: CcswitchMcpServer["config"]): Record<string, unknown> {
-  if (value === undefined || value === null) return {}
-  if (typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  return {}
-}
-
 export function fromCcswitchMcp(server: CcswitchMcpServer): McpImportDraft {
-  const cfg = configAsObject(server.config)
-  // CCSwitch tends to embed the transport in the config blob too; the
-  // top-level field wins when present, otherwise inspect the blob.
-  const transport = pickTransport(server.transport ?? cfg.type ?? cfg.transport)
-  // Strip the duplicate transport hint so it doesn't double-up in cognia's
-  // McpServer.config (which forwards as-is to the SDK). The leading-underscore
-  // names mark the destructured aliases as intentionally unused.
-  const { type: _t, transport: _u, ...rest } = cfg
-  void _t
-  void _u
+  const normalized = normalizeMcpEntry({
+    ...(server.config && typeof server.config === "object" && !Array.isArray(server.config)
+      ? server.config
+      : {}),
+    ...(server.transport ? { type: server.transport.toLowerCase() } : {}),
+  }) ?? { transport: "stdio" as const, config: {} }
+  const label = server.name.trim()
+  const name =
+    label && !/^[A-Za-z0-9_.-]{1,128}$/.test(label)
+      ? sanitizeMcpName(server.id) || sanitizeMcpName(label)
+      : label
   return {
-    name: server.name.trim(),
-    transport,
-    config: rest,
+    name,
+    ...(name !== label ? { displayName: label } : {}),
+    ...normalized,
   }
 }
 
@@ -282,11 +263,17 @@ export async function importCcswitchSkills(selected: CcswitchSkill[]): Promise<S
       continue
     }
     try {
+      const { draft } = parseBundleManifest({
+        skillMd: s.content,
+        openaiYaml: s.openaiYaml,
+        fallbackName: name,
+      })
       await createSkill({
+        ...draft,
         name,
-        content: s.content,
-        description: s.description,
-        source: "custom",
+        description: draft.description ?? s.description,
+        resources: s.resources,
+        source: "imported",
         status: "enabled",
       })
       byName.add(name.toLowerCase())

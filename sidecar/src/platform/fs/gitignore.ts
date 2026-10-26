@@ -1,7 +1,7 @@
 // Minimal .gitignore loader for the JS search fallback.
 //
 // The primary engine (ripgrep) honours .gitignore natively; this module only
-// serves the pure-JS fallback path (`js-search.mjs`) and the file-ops
+// serves the pure-JS fallback path (`js-search.ts`) and the file-ops
 // content/file search tools, which enumerate files through fast-glob.
 // fast-glob's `ignore` option takes plain glob patterns with NO negation
 // support, so we convert the repository's .gitignore files into that

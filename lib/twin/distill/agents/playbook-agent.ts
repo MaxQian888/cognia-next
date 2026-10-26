@@ -3,7 +3,8 @@
  */
 
 import { extractJson, type LlmClient } from "../llm"
-import { applyTemplate, PLAYBOOK_AGENT_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { PLAYBOOK_AGENT_PROMPT } from "../prompts"
 import type { Playbook, PlaybookExample, PlaybookStep, TwinChunk } from "@/types/twin"
 
 export interface PlaybookAgentInput {
@@ -81,9 +82,13 @@ export async function runPlaybookAgent(
   const chunks = input.chunks.slice(0, cap)
   if (chunks.length < 3) return { playbooks: [] }
 
-  const prompt = applyTemplate(PLAYBOOK_AGENT_PROMPT, {
-    chunks: formatChunksForPrompt(chunks),
-  })
+  const prompt = (
+    await resolvePromptAsync(PLAYBOOK_AGENT_PROMPT, {
+      values: {
+        chunks: formatChunksForPrompt(chunks),
+      },
+    })
+  ).text
 
   const response = await llm.complete(prompt, { temperature: 0, maxTokens: 4000 })
   const parsed = extractJson<{ playbooks?: RawPlaybook[] }>(response)

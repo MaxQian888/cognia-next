@@ -283,9 +283,15 @@ describe("PayloadView", () => {
         })}
       />
     )
-    fireEvent.click(screen.getByText("Download image"))
+    const download = screen.getByRole("button", { name: "Download image" })
+    expect(download).toHaveAttribute("data-variant", "outline")
+    expect(download).toHaveClass("focus-visible:ring-[3px]")
+    fireEvent.click(download)
     expect(URL.createObjectURL).toHaveBeenCalled()
-    expect(screen.getByText("Copy image")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy image" })).toHaveAttribute(
+      "data-variant",
+      "outline"
+    )
   })
 
   it("renders a backup as a download card", () => {
@@ -445,7 +451,7 @@ describe("PayloadView", () => {
     )
     expect(screen.queryByTestId("share-add-to-library")).not.toBeInTheDocument()
     rerender(<PayloadView payload={payload({ kind: "template-definition", data })} canImport />)
-    expect(screen.getByTestId("share-add-to-library")).toBeInTheDocument()
+    expect(screen.getByTestId("share-add-to-library")).toHaveAttribute("data-variant", "outline")
   })
 
   it("shows the fallback when the template payload is malformed", () => {

@@ -50,6 +50,8 @@ export type CapabilityGrantSourceKind =
   | "automation"
   /** A conversation started from the Browser Companion's agent mode (ADR-0228 §6). */
   | "browser-companion"
+  /** A Harness Evolution probe or editor session (ADR-0237). */
+  | "harness-evolution"
 
 export const CAPABILITY_GRANT_SOURCE_KINDS: readonly CapabilityGrantSourceKind[] = [
   "scheduler",
@@ -64,6 +66,7 @@ export const CAPABILITY_GRANT_SOURCE_KINDS: readonly CapabilityGrantSourceKind[]
   "cli",
   "automation",
   "browser-companion",
+  "harness-evolution",
 ]
 
 /** Additive/subtractive change to an id set. `remove` beats `add` for the same id. */

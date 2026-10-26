@@ -5,9 +5,51 @@ import { renderTui, enableBracketedPaste, disableBracketedPaste } from "./mount"
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
 import type { ResolvedConfig } from "../config/schema"
 
+jest.mock("@/lib/scheduler/task-scheduler", () => ({ stopTaskScheduler: jest.fn() }))
+
 const config: ResolvedConfig = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }
 
 describe("renderTui", () => {
+  it("awaits session cleanup before the final database drain even after Ink exits", async () => {
+    let finish!: () => void
+    const cleanup = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const render = jest.fn(
+      (element: {
+        props: {
+          children: {
+            props: { children: { props: { onShutdown?: (done: Promise<void>) => void } } }
+          }
+        }
+      }) => ({
+        waitUntilExit: async () => {
+          element.props.children.props.children.props.onShutdown?.(cleanup)
+        },
+      })
+    ) as never
+    const flushDb = jest.fn(async () => {})
+    const done = renderTui({ config, render, flushDb })
+    await new Promise((resolve) => setImmediate(resolve))
+    try {
+      expect(flushDb).not.toHaveBeenCalled()
+    } finally {
+      finish()
+      await done
+    }
+    expect(flushDb).toHaveBeenCalledTimes(1)
+  })
+  it("stops the process scheduler before the final database flush on normal exit", async () => {
+    const { stopTaskScheduler } = jest.requireMock("@/lib/scheduler/task-scheduler")
+    stopTaskScheduler.mockClear()
+    const render = jest.fn(() => ({ waitUntilExit: () => Promise.resolve() })) as never
+    const flushDb = jest.fn(async () => {
+      expect(stopTaskScheduler).toHaveBeenCalledTimes(1)
+    })
+    await renderTui({ config, render, flushDb })
+    expect(stopTaskScheduler).toHaveBeenCalledTimes(1)
+    expect(flushDb).toHaveBeenCalledTimes(1)
+  })
   it("enables Ink screen-reader output when requested", async () => {
     const render = jest.fn(() => ({ waitUntilExit: () => Promise.resolve() })) as never
     await renderTui({ config: { ...config, screenReader: true }, render })

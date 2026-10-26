@@ -40,7 +40,7 @@ const DEV_DEPENDENCIES: Record<string, string> = {
   "@cognia/plugin-sdk": "^0.1.0",
   "@types/node": "^22.0.0",
   esbuild: "^0.24.0",
-  typescript: "^5.6.0",
+  typescript: "^7.0.2",
 }
 
 const ESBUILD_ARGS =

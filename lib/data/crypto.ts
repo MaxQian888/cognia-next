@@ -7,22 +7,10 @@
 
 import type { EncryptedEnvelopeV1, BackupManifestV3 } from "./types"
 import { IntegrityCheckFailedError } from "./types"
+import type { BackupChunkEncryptionConfig } from "@cognia/plugin-contract/lib/data/crypto"
+export type { BackupChunkEncryptionConfig } from "@cognia/plugin-contract/lib/data/crypto"
 
 const PBKDF2_ITERATIONS = 600_000
-
-export interface BackupChunkEncryptionConfig {
-  enabled: true
-  format: "aes-gcm-chunks-v1"
-  algorithm: "AES-GCM"
-  kdf: {
-    algorithm: "PBKDF2"
-    hash: "SHA-256"
-    iterations: number
-    salt: string
-  }
-  /** Base64-encoded eight-byte prefix; the record sequence supplies four more IV bytes. */
-  noncePrefix: string
-}
 
 export interface BackupChunkCipher {
   config: BackupChunkEncryptionConfig

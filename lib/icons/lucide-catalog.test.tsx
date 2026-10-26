@@ -1,9 +1,18 @@
 import { createRef } from "react"
 import { render, screen } from "@testing-library/react"
 
+import catalog from "./lucide-catalog.generated.json"
+import names from "@cognia/plugin-contract/lib/icons/lucide-icon-names.generated.json"
 import { getLucideIcon, hasLucideIcon, lucideIcons } from "./lucide-catalog"
 
 describe("lucide catalog", () => {
+  it("shares its name spaces with the plugin contract's admission check", () => {
+    // One `pnpm lucide:generate` run writes both files; a name the validator
+    // admits must be a name this catalog can draw.
+    const full = catalog as unknown as { iconNames: string[]; exportNames: Record<string, string> }
+    expect(names).toEqual({ iconNames: full.iconNames, exportNames: full.exportNames })
+  })
+
   it("resolves known names and rejects unknown names", () => {
     expect(hasLucideIcon("FileText")).toBe(true)
     expect(hasLucideIcon("NotARealIcon")).toBe(false)

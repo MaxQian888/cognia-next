@@ -163,6 +163,28 @@ function hosted(customize?: (transport: FakeTransport, index: number) => void) {
 
 describe("DSH hosted conversation lifecycle", () => {
   it.each([
+    ["medium", "low"],
+    ["xhigh", "high"],
+    ["max", "max"],
+    ["off", "off"],
+  ])(
+    "folds native SDK reasoning %s to supported %s before launch and prompting",
+    async (requested, expected) => {
+      const { adapter, configs, transports } = hosted()
+      try {
+        await adapter.connect(CONFIG)
+        const session = await adapter.createSession({ metadata: { reasoningEffort: requested } })
+        expect(configs[1].process?.env?.COGNIA_DSH_REASONING_EFFORT).toBe(expected)
+        const running = adapter.execute(session.id, MESSAGE, { reasoningEffort: requested })
+        transports[1].turn(session.id)
+        await expect(running).resolves.toMatchObject({ success: true })
+      } finally {
+        await adapter.disconnect()
+      }
+    }
+  )
+
+  it.each([
     { efforts: undefined, inherited: undefined, requested: "medium", expected: undefined },
     { efforts: false, inherited: "medium", requested: "medium", expected: undefined },
     { efforts: undefined, inherited: "medium", requested: undefined, expected: undefined },
@@ -650,6 +672,122 @@ async function connected() {
 }
 
 describe("DeepSeek Harness current protocol adapter", () => {
+  it("retains the root model capacity across turns and replaces it when the model changes", async () => {
+    const { adapter, transport, session } = await connected()
+    try {
+      for (const capacity of [1_000_000, "unchanged", 64_000, undefined] as const) {
+        const result = adapter.execute(session.id, MESSAGE)
+        transport.event(session.id, "turn/start")
+        if (capacity !== "unchanged")
+          transport.event(session.id, "request/context", { contextWindow: capacity })
+        transport.raw({
+          method: "subagent.started",
+          params: { parentSessionId: session.id, childSessionId: "child" },
+        })
+        transport.event("child", "request/context", { contextWindow: 128_000 })
+        transport.turn(session.id)
+        const completed = await result
+        expect(completed.tokenUsage).toMatchObject({
+          promptTokens: 3,
+          completionTokens: 2,
+          totalTokens: 5,
+        })
+        expect(completed.tokenUsage?.modelContextWindow).toBe(
+          capacity === "unchanged" ? 1_000_000 : capacity
+        )
+      }
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("attaches capacity and latest request occupancy to streamed accounting", async () => {
+    const { adapter, transport, session } = await connected()
+    try {
+      const stream = adapter.prompt(session.id, MESSAGE)
+      transport.event(session.id, "turn/start")
+      transport.event(session.id, "request/context", { contextWindow: 1_000_000 })
+      transport.turn(session.id)
+      const events: ExternalAgentEvent[] = []
+      for await (const event of stream) events.push(event)
+      const messageEnd = events.find((event) => event.type === "message_end")
+      expect(messageEnd).toMatchObject({ tokenUsage: { modelContextWindow: 1_000_000 } })
+      if (messageEnd?.type === "message_end") expect(messageEnd.tokenUsage?.contextTokens).toBe(5)
+      expect(events.some((event) => event.type === "usage_update")).toBe(false)
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("keeps cumulative billing separate from the last committed request's context after tool calls and retries", async () => {
+    const { adapter, transport, session } = await connected()
+    try {
+      const result = adapter.execute(session.id, MESSAGE)
+      transport.event(session.id, "turn/start")
+      transport.event(session.id, "request/context", { contextWindow: 1_000_000 })
+      transport.event(session.id, "user/message", { id: "msg-1", content: [] })
+      for (const [index, usage] of [
+        { inputTokens: 10, cacheReadTokens: 20, outputTokens: 2 },
+        { inputTokens: 12, cacheReadTokens: 30, outputTokens: 3 },
+      ].entries()) {
+        transport.event(session.id, "assistant/message", {
+          message: { id: `call-${index}`, content: [] },
+          usage,
+        })
+      }
+      transport.event(session.id, "assistant/attempt", {
+        stream: [
+          {
+            type: "chunk",
+            chunk: {
+              type: "usage",
+              usage: { inputTokens: 4, outputTokens: 1 },
+            },
+          },
+        ],
+      })
+      transport.event(session.id, "turn/end", { reason: { kind: "completed" } })
+      transport.status(session.id, "idle")
+      expect((await result).tokenUsage).toMatchObject({
+        promptTokens: 76,
+        promptTokensIncludeCache: true,
+        completionTokens: 6,
+        totalTokens: 82,
+        cacheReadTokens: 50,
+        contextTokens: 45,
+        modelContextWindow: 1_000_000,
+      })
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it.each([undefined, {}, { inputTokens: 1 }, { outputTokens: 1 }])(
+    "retains the latest measured context when a later committed call has incomplete usage: %p",
+    async (usage) => {
+      const { adapter, transport, session } = await connected()
+      try {
+        const stream = adapter.prompt(session.id, MESSAGE)
+        transport.event(session.id, "turn/start")
+        transport.event(session.id, "user/message", { id: "msg-1", content: [] })
+        transport.event(session.id, "assistant/message", {
+          message: { id: "measured", content: [] },
+          usage: { inputTokens: 10, outputTokens: 2 },
+        })
+        transport.event(session.id, "assistant/message", {
+          message: { id: "unmeasured", content: [] },
+          usage,
+        })
+        transport.event(session.id, "turn/end", { reason: { kind: "completed" } })
+        transport.status(session.id, "idle")
+        const terminal = (await collect(stream)).find((event) => event.type === "done")
+        expect(terminal?.tokenUsage?.contextTokens).toBe(12)
+      } finally {
+        await adapter.disconnect()
+      }
+    }
+  )
+
   it("connects idempotently and creates tracked caller-owned session ids", async () => {
     const { adapter, transport, session } = await connected()
     await adapter.connect(CONFIG)

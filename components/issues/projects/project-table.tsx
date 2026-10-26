@@ -14,6 +14,14 @@ import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { IssueProjectProgress } from "@/lib/issues/project-progress"
 import { cn } from "@/lib/utils"
 import type { IssueProject } from "@/types/issues"
@@ -44,68 +52,72 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
       className="@container/project-table min-w-0 flex-1 overflow-auto"
       data-testid="project-table"
     >
-      <table className="w-full min-w-[22rem] border-collapse text-sm">
-        <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur">
-          <tr className="whitespace-nowrap border-b text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {/*
+        This div is the scrollport the sticky header resolves against, so the
+        shared Table's own horizontal scroller is turned off.
+      */}
+      <Table containerClassName="overflow-x-visible" className="min-w-[22rem] border-collapse">
+        <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur">
+          <TableRow className="text-left text-xs font-semibold tracking-wide whitespace-nowrap uppercase hover:bg-transparent">
             {/*
               `w-full` on ONE column is the table idiom for "absorb the slack";
               without it the name gets a content-based width and `max-w-0` on
               the cell collapses it to a few characters — which is the wrong
               column to squeeze.
             */}
-            <th scope="col" className="w-full px-4 py-2 font-semibold">
+            <TableHead scope="col" className="w-full px-4 font-semibold text-muted-foreground">
               {t("projects.nameLabel")}
-            </th>
-            <th scope="col" className="px-3 py-2 font-semibold">
+            </TableHead>
+            <TableHead scope="col" className="px-3 font-semibold text-muted-foreground">
               {t("projects.keyLabel")}
-            </th>
-            <th scope="col" className="px-3 py-2 font-semibold">
+            </TableHead>
+            <TableHead scope="col" className="px-3 font-semibold text-muted-foreground">
               {t("detail.status")}
-            </th>
-            <th
+            </TableHead>
+            <TableHead
               scope="col"
-              className="hidden px-3 py-2 font-semibold @3xl/project-table:table-cell"
+              className="hidden px-3 font-semibold @3xl/project-table:table-cell text-muted-foreground"
             >
               {t("projects.lead")}
-            </th>
-            <th
+            </TableHead>
+            <TableHead
               scope="col"
-              className="hidden px-3 py-2 font-semibold @4xl/project-table:table-cell"
+              className="hidden px-3 font-semibold @4xl/project-table:table-cell text-muted-foreground"
             >
               {t("projects.targetDate")}
-            </th>
+            </TableHead>
             {/*
               A minimum rather than a width: `w-full` on the name column wins
               the slack, and without a floor the progress bar shrinks to a stub
               that reads as broken rather than as "barely started".
             */}
-            <th
+            <TableHead
               scope="col"
-              className="hidden min-w-40 px-3 py-2 font-semibold @xl/project-table:table-cell"
+              className="hidden min-w-40 px-3 font-semibold @xl/project-table:table-cell text-muted-foreground"
             >
               {t("projects.progress")}
-            </th>
-            <th scope="col" className="px-3 py-2 text-right font-semibold">
+            </TableHead>
+            <TableHead scope="col" className="px-3 text-right font-semibold text-muted-foreground">
               {t("projects.issueCount")}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {projects.map((project) => {
             const progress = progressById.get(project.id)
             const selected = selectedId === project.id
             return (
-              <tr
+              <TableRow
                 key={project.id}
                 data-testid={`project-row-${project.id}`}
                 data-selected={selected || undefined}
                 className={cn(
-                  "border-b motion-safe:transition-colors motion-safe:duration-150",
+                  "transition-none motion-safe:transition-colors motion-safe:duration-150",
                   "hover:bg-accent/40",
                   selected && "bg-accent"
                 )}
               >
-                <td className="w-full max-w-0 px-4 py-2">
+                <TableCell className="w-full max-w-0 px-4">
                   {/*
                     The name cell is the row's button. Making the <tr> clickable
                     would leave keyboard users with no way in, and wrapping a row
@@ -123,26 +135,26 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
                     </span>
                     <span className="min-w-0 truncate font-medium">{project.name}</span>
                   </button>
-                </td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell className="px-3">
                   <Badge variant="outline" className="font-mono text-[10px]">
                     {project.key}
                   </Badge>
-                </td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell className="px-3">
                   <Badge variant="secondary" className="font-normal">
                     {t(`projects.status.${project.status}`)}
                   </Badge>
-                </td>
-                <td className="hidden max-w-32 truncate px-3 py-2 text-muted-foreground @3xl/project-table:table-cell">
+                </TableCell>
+                <TableCell className="hidden max-w-32 truncate px-3 text-muted-foreground @3xl/project-table:table-cell">
                   {project.lead
                     ? (project.lead.label ?? t(`actor.${project.lead.kind}`))
                     : t("actor.noLead")}
-                </td>
-                <td className="hidden whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground @4xl/project-table:table-cell">
+                </TableCell>
+                <TableCell className="hidden whitespace-nowrap px-3 tabular-nums text-muted-foreground @4xl/project-table:table-cell">
                   {project.targetDate ? new Date(project.targetDate).toLocaleDateString() : "—"}
-                </td>
-                <td className="hidden min-w-40 px-3 py-2 @xl/project-table:table-cell">
+                </TableCell>
+                <TableCell className="hidden min-w-40 px-3 @xl/project-table:table-cell">
                   <div className="flex items-center gap-2">
                     <Progress
                       value={(progress?.ratio ?? 0) * 100}
@@ -159,15 +171,15 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
                       })}
                     </span>
                   </div>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                </TableCell>
+                <TableCell className="px-3 text-right tabular-nums text-muted-foreground">
                   {progress?.total ?? 0}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }

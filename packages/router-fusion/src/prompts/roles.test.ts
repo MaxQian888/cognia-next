@@ -2,7 +2,18 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { ROLE_PROMPT_FILES, ROLE_PROMPT_VERSION, ROLE_PROMPTS, systemPromptFor } from "./roles"
+import {
+  BUILTIN_ROLE_PROFILE,
+  CUSTOM_ROLE_PROMPT_VERSION,
+  ROLE_PROMPT_FILES,
+  ROLE_PROMPT_VERSION,
+  ROLE_PROMPTS,
+  customRolePromptVersion,
+  isMaterializedCustomRoleVersion,
+  materializeCustomRoleProfile,
+  systemPromptFor,
+  type RolePromptName,
+} from "./roles"
 
 /** SHA-256 of each prompt as the spec bundle's MANIFEST.sha256 lists it. */
 const MANIFEST: Record<string, string> = {
@@ -43,5 +54,50 @@ describe("role prompts", () => {
     expect(member.startsWith(ROLE_PROMPTS.common)).toBe(true)
     expect(judge.endsWith(ROLE_PROMPTS.judge)).toBe(true)
     expect(systemPromptFor("judge")).toBe(judge)
+  })
+
+  it("ships roles-1 as the built-in profile, byte for byte", () => {
+    expect(BUILTIN_ROLE_PROFILE.version).toBe(ROLE_PROMPT_VERSION)
+    expect(BUILTIN_ROLE_PROFILE.prompts).toBe(ROLE_PROMPTS)
+    for (const role of Object.keys(ROLE_PROMPT_FILES) as RolePromptName[]) {
+      if (role === "common") continue
+      expect(systemPromptFor(role, BUILTIN_ROLE_PROFILE)).toBe(systemPromptFor(role))
+      expect(systemPromptFor(role)).toBe(`${ROLE_PROMPTS.common}\n${ROLE_PROMPTS[role]}`)
+    }
+  })
+})
+
+describe("custom role prompt profiles", () => {
+  const edited = (judge: string): Record<RolePromptName, string> => ({ ...ROLE_PROMPTS, judge })
+
+  it("materializes edited text into its own version and never touches roles-1", () => {
+    const before = { ...ROLE_PROMPTS }
+    const profile = materializeCustomRoleProfile(edited("# Judge\nOutput a JudgeReport."))
+    expect(profile.version).toMatch(/^roles-1-custom@[0-9a-f]{16}$/)
+    expect(isMaterializedCustomRoleVersion(profile.version)).toBe(true)
+    expect(isMaterializedCustomRoleVersion(CUSTOM_ROLE_PROMPT_VERSION)).toBe(false)
+    expect(isMaterializedCustomRoleVersion(ROLE_PROMPT_VERSION)).toBe(false)
+    expect(profile.version).toBe(customRolePromptVersion(profile.prompts))
+    expect(systemPromptFor("judge", profile)).toBe(
+      `${ROLE_PROMPTS.common}\n# Judge\nOutput a JudgeReport.`
+    )
+    // The shipped text is unchanged and still what a call without a profile sends.
+    expect(ROLE_PROMPTS).toEqual(before)
+    expect(systemPromptFor("judge")).toBe(`${ROLE_PROMPTS.common}\n${ROLE_PROMPTS.judge}`)
+    expect(Object.isFrozen(profile.prompts)).toBe(true)
+  })
+
+  it("gives different text a different version and the same text the same one", () => {
+    const a = materializeCustomRoleProfile(edited("judge A JudgeReport"))
+    const b = materializeCustomRoleProfile(edited("judge B JudgeReport"))
+    expect(a.version).not.toBe(b.version)
+    expect(materializeCustomRoleProfile(edited("judge A JudgeReport")).version).toBe(a.version)
+  })
+
+  it("refuses a profile that leaves a role out", () => {
+    const { compactor: _dropped, ...partial } = ROLE_PROMPTS
+    expect(() => materializeCustomRoleProfile(partial as Record<RolePromptName, string>)).toThrow(
+      /compactor/
+    )
   })
 })

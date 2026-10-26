@@ -52,6 +52,31 @@ function harness(over: Partial<RunManualCompactDeps> = {}) {
 }
 
 describe("runManualCompact", () => {
+  it("ends default observation when the owning backend exits", async () => {
+    jest.useFakeTimers()
+    try {
+      const h = harness({
+        timeoutMs: undefined,
+        setTimer: (fn, ms) => setTimeout(fn, ms),
+        clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      })
+      let settled = false
+      const pending = runManualCompact(h.deps).then(() => {
+        settled = true
+      })
+      h.fire({ type: "sidecar_exited" })
+      await Promise.resolve()
+      expect(settled).toBe(true)
+      expect(h.notices.at(-1)).toMatch(/Compaction interrupted.*backend stopped/)
+      expect(h.emitted).toEqual([])
+      expect(h.unsub).toHaveBeenCalledTimes(1)
+      expect(jest.getTimerCount()).toBe(0)
+      await pending
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("does not send or subscribe when the owner is already closed", async () => {
     const controller = new AbortController()
     controller.abort()
@@ -220,6 +245,30 @@ describe("runManualCompact", () => {
       "Compaction has not finished after 1s — nothing has been compacted yet. Run /compact again if the context meter does not drop."
     )
     expect(h.notices.join("\n")).not.toMatch(/next turn/)
+    expect(h.unsub).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps observing a slow default compaction after its status notice", async () => {
+    const timers: Array<() => void> = []
+    const h = harness({
+      timeoutMs: undefined,
+      setTimer: (fn) => {
+        timers.push(fn)
+        return 1
+      },
+    })
+    let settled = false
+    const done = runManualCompact(h.deps).then(() => {
+      settled = true
+    })
+    timers[0]!()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(h.unsub).not.toHaveBeenCalled()
+    expect(h.notices.at(-1)).toMatch(/still running/i)
+    h.fire(boundaryEnvelope("manual", 100000, 10000))
+    await done
+    expect(h.emitted).toHaveLength(1)
     expect(h.unsub).toHaveBeenCalledTimes(1)
   })
 

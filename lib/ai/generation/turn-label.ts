@@ -13,21 +13,40 @@
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
 import { sanitizeTitle } from "./title"
 
 export interface GenerateTurnLabelArgs {
   userText: string
   /** UI locale so the label language matches the user. */
   locale?: string
+  /** Where the system prompt resolves (ADR-0236): the turn's session, workspace and agent. */
+  promptContext?: PromptResolutionContext
 }
 
 /** Hard ceiling on a timeline label (characters) — shorter than a title. */
 export const MAX_LABEL_LENGTH = 32
 
-const SYSTEM_PROMPT =
-  "You label a single chat turn for a navigation timeline. Rules: at most 5 " +
-  "words; capture the user's intent; no surrounding quotes; no trailing " +
-  "punctuation; a single line; same language as the user's message."
+/** System prompt for labelling one user turn; editable in the Prompt Center. */
+export const TURN_LABEL_PROMPT = definePrompt({
+  id: "generation.turn-label",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "generation",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent", "session"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 4_000,
+  outputContract: `One line of plain text; sanitizeTitle cleans it and it is clamped to ${MAX_LABEL_LENGTH} characters.`,
+  consumers: ["lib/ai/generation/turn-label.ts"],
+  defaultBody:
+    "You label a single chat turn for a navigation timeline. Rules: at most 5 " +
+    "words; capture the user's intent; no surrounding quotes; no trailing " +
+    "punctuation; a single line; same language as the user's message.",
+})
 
 /**
  * Generate a short timeline label for one user turn. Returns "" on any
@@ -35,7 +54,7 @@ const SYSTEM_PROMPT =
  */
 export async function generateTurnLabel(
   client: LlmClient,
-  { userText, locale }: GenerateTurnLabelArgs
+  { userText, locale, promptContext }: GenerateTurnLabelArgs
 ): Promise<string> {
   const user = (userText ?? "").trim()
   if (!user) return ""
@@ -44,8 +63,9 @@ export async function generateTurnLabel(
   const prompt = `User turn${localeHint}:\n${user.slice(0, 1500)}\n\nLabel:`
 
   try {
+    const system = await resolvePromptAsync(TURN_LABEL_PROMPT, { context: promptContext })
     const text = await client.complete(prompt, {
-      system: SYSTEM_PROMPT,
+      system: system.text,
       temperature: 0.3,
       maxTokens: 24,
     })

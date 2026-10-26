@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SandboxSnapshotsPanel } from "./sandbox-snapshots-panel"
 import { useSandboxSnapshots } from "@/hooks/sandbox/use-sandbox-snapshots"
@@ -111,8 +112,8 @@ it("requires a restore-capable archived target and a second click to delete", as
     />
   )
   expect(screen.queryByRole("button", { name: en.snapshots.restore })).not.toBeInTheDocument()
-  expect(screen.queryByRole("option", { name: "/live" })).not.toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText(en.snapshots.restoreTarget), { target: { value: "a" } })
+  expect(screen.queryByRole("option", { hidden: true, name: "/live" })).not.toBeInTheDocument()
+  await selectOption(screen.getByLabelText(en.snapshots.restoreTarget), "a")
   fireEvent.click(screen.getByRole("button", { name: en.snapshots.restore }))
   expect(restore).toHaveBeenCalledWith("s", "a")
   fireEvent.click(screen.getByRole("button", { name: en.snapshots.delete }))

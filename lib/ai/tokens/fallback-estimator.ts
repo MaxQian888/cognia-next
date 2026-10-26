@@ -2,7 +2,7 @@ import { Tiktoken } from "js-tiktoken/lite"
 import cl100kBase from "js-tiktoken/ranks/cl100k_base"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 
-const encoder = new Tiktoken(cl100kBase)
+let encoder: Tiktoken | undefined
 const MAX_EXACT_INPUT_CHARS = 32_768
 // cl100k merges letter, punctuation and whitespace pieces independently. Its
 // JS byte-pair merger is quadratic on a long piece, even in a small document.
@@ -16,7 +16,7 @@ export function estimateFallbackTokens(text: string | null | undefined): number 
     // existing multilingual heuristic rather than tokenizing an entire upload.
     return Math.max(1, estimateCJKTokenCount(text))
   }
-  return encoder.encode(text).length
+  return (encoder ??= new Tiktoken(cl100kBase)).encode(text).length
 }
 
 /** Provider usage is authoritative; tokenize only when it is absent or invalid. */

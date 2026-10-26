@@ -13,6 +13,7 @@ pub mod discord_upload;
 // Moved to `cognia-net` (ADR-0196); re-exported so `connectors::http_client::…`
 // and `super::http_client::…` resolve unchanged.
 pub use cognia_net::http_client;
+pub mod google_docs_auth;
 pub mod keyring;
 pub mod lark_callback_reply;
 pub mod lark_upload;

@@ -3,6 +3,16 @@
 // co-located test. File names can't carry slashes, so a model's relative path
 // travels alongside its blob as `ModelFileEntry.path`.
 
+import type {
+  Live2dCompatibilitySummary,
+  Live2dImportError,
+} from "@cognia/plugin-contract/lib/pet/live2d/types"
+export type {
+  Live2dCompatibilityDiagnostic,
+  Live2dCompatibilitySummary,
+  Live2dImportError,
+} from "@cognia/plugin-contract/lib/pet/live2d/types"
+
 /** One file of a Live2D model bundle, keyed by its relative path. */
 export interface ModelFileEntry {
   /** Path relative to the model root, POSIX-normalized (forward slashes). */
@@ -66,43 +76,6 @@ export interface MotionPlan {
    * breathing / eye-blink carry the pet rather than forcing a motion.
    */
   parameterFallback: boolean
-}
-
-/** Import-time failure codes (the UI maps these to localized copy). */
-export type Live2dImportError =
-  | "noSettings"
-  | "multipleSettings"
-  | "invalidJson"
-  | "missingReferenced"
-  | "tooLarge"
-  | "cubism2Unsupported"
-  | "zipFailed"
-  | "ambiguousPath"
-  | "duplicatePath"
-  | "pathTraversal"
-  | "corruptTexture"
-
-export interface Live2dCompatibilityDiagnostic {
-  code:
-    | Live2dImportError
-    | "missingMotion"
-    | "missingExpression"
-    | "missingSound"
-    | "missingPhysics"
-    | "missingPose"
-    | "missingMetadata"
-  severity: "warning" | "error"
-  path?: string
-}
-
-export interface Live2dCompatibilitySummary {
-  version: 1
-  status: "ready" | "degraded" | "invalid"
-  diagnostics: Live2dCompatibilityDiagnostic[]
-  usableMotionGroups: string[]
-  usableExpressionIds: string[]
-  usableParameterIds: string[]
-  resourceCost: { totalBytes: number; fileCount: number; textureBytes: number }
 }
 
 /** A fully-validated model ready to persist or load. */

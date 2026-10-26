@@ -51,3 +51,14 @@ test("toolError tells the model when a repeat cannot help", () => {
   assert.equal(r._meta?.["cognia/failure"].retryable, false)
   assert.match(textOf(r), /\[resource-exhausted\]/)
 })
+
+test("effect uncertainty is separate from refusal and retry policy", () => {
+  const r = toolError("user rejected this write", "write", { effects: "unknown" })
+  assert.deepEqual(r._meta?.["cognia/failure"], {
+    kind: "user-rejected",
+    retryable: false,
+    effects: "unknown",
+  })
+  assert.match(textOf(r), /do not route around/i)
+  assert.match(textOf(r), /Inspect.*before retrying/)
+})

@@ -7,16 +7,28 @@ type AgentDebugApi = {
   version: number
   revision: number
   capabilities: Record<string, unknown>
+  health: () => { heldInput: number; revision: number }
+  helper: (
+    method: string,
+    args: unknown[],
+    control?: { cancelled: boolean; guard?: () => void }
+  ) => Promise<unknown>
   snapshot: (options?: {
     includeText?: boolean
     includeHidden?: boolean
+    clientSessionId?: string
     query?: { steps: unknown[] }
   }) => {
     generation: number
     nodes: Array<{ ref: string; role: string; name: string; value?: string; visible: boolean }>
   }
   act: (ref: string, action: string, args?: Record<string, unknown>) => Promise<unknown>
-  inspect: (ref: string, operation: string, args?: Record<string, unknown>) => Promise<unknown>
+  inspect: (
+    ref: string,
+    operation: string,
+    args?: Record<string, unknown>,
+    clientSessionId?: string
+  ) => Promise<unknown>
   locator: (
     request: Record<string, unknown>,
     control?: { cancelled: boolean }
@@ -54,10 +66,35 @@ const coreCode = fs.readFileSync(
   "utf8"
 )
 
+let productionCore: object | undefined
+
 function installAgentDebug() {
   ;(0, eval)(coreCode)
+  const host = window as unknown as { __cogniaAutomationCore: Record<string, unknown> }
+  if (Object.isFrozen(host.__cogniaAutomationCore)) {
+    productionCore = host.__cogniaAutomationCore
+    // A test-local facade lets cancellation tests suspend helpers. The real
+    // injected core remains frozen; production bytes and assertions stay intact.
+    host.__cogniaAutomationCore = { ...host.__cogniaAutomationCore }
+  }
   ;(0, eval)(code)
 }
+
+test("keeps the production core immutable while injecting a controllable test facade", () => {
+  installAgentDebug()
+  expect(Object.isFrozen(productionCore)).toBe(true)
+  expect(Object.getOwnPropertyDescriptor(productionCore, "isStable")).toMatchObject({
+    writable: false,
+    configurable: false,
+  })
+})
+
+test("reports the installed helper revision in health", () => {
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  expect(api.health().revision).toBe(api.revision)
+  expect(api.health().revision).toBe(7)
+})
 
 test("exposes generation-scoped snapshots, actions, and buffered diagnostics", async () => {
   document.body.innerHTML = `
@@ -129,6 +166,141 @@ test("exposes generation-scoped snapshots, actions, and buffered diagnostics", a
   expect(api.getDialogs()).toEqual([
     expect.objectContaining({ type: "confirm", message: "Continue?" }),
   ])
+})
+
+test("atomic delayed input stops between characters and chord cleanup releases modifiers", async () => {
+  document.body.innerHTML = '<input aria-label="Message">'
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const input = document.querySelector("input")!
+  input.focus()
+  const control = { cancelled: false }
+  input.addEventListener(
+    "input",
+    () => {
+      control.cancelled = true
+    },
+    { once: true }
+  )
+  await expect(api.helper("keyboard", ["type", { text: "aa", delay: 5 }], control)).rejects.toThrow(
+    /cancelled/
+  )
+  await new Promise((resolve) => setTimeout(resolve, 15))
+  expect(input.value).toBe("a")
+  const keys: Array<[string, boolean]> = []
+  input.addEventListener("keydown", (event) => keys.push([event.key, event.ctrlKey]))
+  await api.helper("keyboard", ["chord", { key: "Control+a" }], { cancelled: false })
+  expect(keys).toContainEqual(["a", true])
+  expect(api.health().heldInput).toBe(0)
+  const cancelledChord = { cancelled: false }
+  input.addEventListener(
+    "keydown",
+    () => {
+      cancelledChord.cancelled = true
+    },
+    { once: true }
+  )
+  await expect(
+    api.helper("keyboard", ["chord", { key: "Control+b" }], cancelledChord)
+  ).rejects.toThrow(/cancelled/)
+  expect(api.health().heldInput).toBe(0)
+})
+
+test("one locator input appends every delayed character within its cancellation fence", async () => {
+  document.body.innerHTML = '<input aria-label="Message">'
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const input = document.querySelector("input")!
+  const values: string[] = []
+  input.addEventListener("input", () => values.push(input.value))
+  const result = await api.locator(
+    {
+      query: { steps: [{ kind: "css", selector: "input" }] },
+      operation: "action",
+      name: "type",
+      args: { value: "ab", delay: 2 },
+      options: { force: true, scroll: "none" },
+    },
+    { cancelled: false }
+  )
+  expect(result.ok).toBe(true)
+  expect(values).toEqual(["a", "ab"])
+})
+
+test("locator cancellation interrupts a delayed input before the next character", async () => {
+  document.body.innerHTML = '<input aria-label="Message">'
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const input = document.querySelector("input")!
+  const first = new Promise<void>((resolve) =>
+    input.addEventListener("input", () => resolve(), { once: true })
+  )
+  const pending = api.locator(
+    {
+      query: { steps: [{ kind: "css", selector: "input" }] },
+      operation: "action",
+      name: "type",
+      args: { value: "ab", delay: 1000 },
+      requestId: "delayed-cancel",
+      options: { force: true, scroll: "none" },
+    },
+    { cancelled: false }
+  )
+  await first
+  await api.locator({ operation: "cancel", requestId: "delayed-cancel" })
+  const result = await pending
+  expect(result.ok).toBe(false)
+  expect(result.dispatchState).toBe("dispatched")
+  expect(input.value).toBe("a")
+})
+
+test("delayed input reports partial dispatch if the target is replaced", async () => {
+  document.body.innerHTML = '<input aria-label="Message">'
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const input = document.querySelector("input")!
+  input.addEventListener("input", () => input.replaceWith(input.cloneNode(true)), { once: true })
+  const result = await api.locator(
+    {
+      query: { steps: [{ kind: "css", selector: "input" }] },
+      operation: "action",
+      name: "type",
+      args: { value: "ab", delay: 2 },
+      options: { force: true, scroll: "none" },
+    },
+    { cancelled: false }
+  )
+  expect(result.ok).toBe(false)
+  expect(result.dispatchState).toBe("dispatched")
+  expect(document.querySelector("input")!.value).toBe("a")
+  expect(input.value).toBe("a")
+})
+
+test("revoked sessions cannot recreate refs with a late queued snapshot", () => {
+  document.body.innerHTML = "<button>Count</button>"
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  api.snapshot({ clientSessionId: "revoked", includeHidden: true })
+  ;(api as unknown as { releaseSession(id: string): void }).releaseSession("revoked")
+  expect(() => api.snapshot({ clientSessionId: "revoked" })).toThrow(/revoked/)
+  expect(api.snapshot({ clientSessionId: "fresh", includeHidden: true }).nodes).toHaveLength(1)
+})
+
+test("session snapshots do not invalidate or expose another session's refs", async () => {
+  document.body.innerHTML = "<button>Run</button>"
+  installAgentDebug()
+  const api = (window as unknown as { __cogniaAgentDebug: AgentDebugApi }).__cogniaAgentDebug
+  const first = api.snapshot({ clientSessionId: "agent-a", includeHidden: true })
+  const second = api.snapshot({ clientSessionId: "agent-b", includeHidden: true })
+  await expect(api.inspect(first.nodes[0].ref, "textContent", {}, "agent-a")).resolves.toBe("Run")
+  await expect(api.inspect(first.nodes[0].ref, "textContent", {}, "agent-b")).rejects.toThrow(
+    "stale or unknown"
+  )
+  api.snapshot({ clientSessionId: "agent-a", includeHidden: true })
+  await expect(api.inspect(first.nodes[0].ref, "textContent", {}, "agent-a")).rejects.toThrow(
+    "stale or unknown"
+  )
+  await expect(api.inspect(second.nodes[0].ref, "textContent", {}, "agent-b")).resolves.toBe("Run")
 })
 
 test("deduplicates nested snapshot text but preserves independent repeated results", () => {

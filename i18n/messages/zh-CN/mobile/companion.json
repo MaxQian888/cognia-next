@@ -503,6 +503,8 @@
     "forgetConfirmDescription": "该浏览器已被吊销。移除后，它会从此列表及此主机的所有列表中消失。如需再次使用，请用新的配对码重新配对。",
     "forgetConfirm": "移除",
     "forgetConfirmCancel": "取消",
+    "pairedConnectedAt": "连接时间：{time}",
+    "pairedFeatures": "支持能力：{features}",
     "pairedVersion": "扩展 {version}",
     "driveLabel": "允许代理在此操作",
     "driveAria": "允许代理在 {name} 中操作",

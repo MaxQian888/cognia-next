@@ -30,7 +30,7 @@ import {
   type AgentHookContext,
   type LifecycleHookFirer,
 } from "@/lib/claude/hooks/lifecycle-firer"
-import { JUDGE_SYSTEM_PROMPT, renderJudgeUserPrompt } from "./prompts"
+import { renderJudgeUserPrompt } from "./prompts"
 import { hasNoLeakingPii } from "@cognia/redact"
 
 /** Discriminated outcome of one `evaluateGoal` call. */
@@ -64,8 +64,12 @@ export interface EvaluateGoalInput {
   maxTokens?: number
   /** Sampling temperature. Default 0 — judge wants determinism. */
   temperature?: number
-  /** System prompt override. Default `JUDGE_SYSTEM_PROMPT`. */
-  system?: string
+  /**
+   * The judge's system prompt, from `resolveJudgeSystemPrompt`: the goal's
+   * own override, else the Prompt Center slot (ADR-0236). Required so a
+   * caller cannot silently skip the user's customization.
+   */
+  system: string
   /**
    * Lifecycle-hook firer used to bracket the judge LLM call with
    * SessionStart / UserPromptSubmit (blocking) / Stop / SessionEnd. Defaults
@@ -120,7 +124,7 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
   }
 
   const userPrompt = renderJudgeUserPrompt(goal, lastResponse)
-  const baseSystem = system ?? JUDGE_SYSTEM_PROMPT
+  const baseSystem = system
 
   // Bracket the judge LLM call with lifecycle hooks (ADR-0040 follow-up): a
   // blocking UserPromptSubmit hook denies the judge call (routed through the

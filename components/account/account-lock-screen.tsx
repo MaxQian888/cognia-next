@@ -43,6 +43,7 @@ import {
 } from "lucide-react"
 
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -240,6 +241,9 @@ export function AccountLockScreen({
   const [stage, setStage] = useState<AccountUnlockStage | null>(null)
   const [errorCode, setErrorCode] = useState<AccountUnlockErrorCode | null>(null)
   const [resetting, setResetting] = useState(false)
+  // Drawn by the app's own AlertDialog, which needs no unlocked account: it
+  // only reads the locale bundle the lock screen itself already uses.
+  const { confirm: confirmReset, dialog: resetDialog } = useConfirmDialog()
   const [localError, setLocalError] = useState<string | null>(null)
   const [startedAt, setStartedAt] = useState(0)
   const [now, setNow] = useState(() => Date.now())
@@ -814,14 +818,22 @@ export function AccountLockScreen({
                 disabled={resetting}
                 aria-busy={resetting}
                 data-testid="account-lock-screen-storage-reset"
-                onClick={() => {
-                  if (!window.confirm(t("storageLayoutResetConfirm"))) return
+                onClick={async () => {
+                  const confirmed = await confirmReset({
+                    title: t("storageLayoutResetConfirmTitle"),
+                    description: t("storageLayoutResetConfirm"),
+                    confirmLabel: t("storageLayoutReset"),
+                    destructive: true,
+                    testid: "account-lock-screen-storage-reset-confirm",
+                  })
+                  if (!confirmed) return
                   setResetting(true)
                   void onResetLocalStorage().catch(() => setResetting(false))
                 }}
               >
                 {t(resetting ? "storageLayoutResetting" : "storageLayoutReset")}
               </Button>
+              {resetDialog}
             </div>
           </AlertDescription>
         </Alert>

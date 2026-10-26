@@ -10,6 +10,27 @@
 // See scripts/build/dev-cli.mjs for the history.
 
 import path from "node:path"
+import { isBuiltin } from "node:module"
+
+/** The published CLI must provide every package left external in its output. */
+export function undeclaredCliRuntimeDependencies(metafile, manifest) {
+  const runtime = {
+    ...manifest.dependencies,
+    ...manifest.peerDependencies,
+    ...manifest.optionalDependencies,
+  }
+  const missing = new Set()
+  for (const output of Object.values(metafile.outputs)) {
+    for (const entry of output.imports) {
+      if (!entry.external || isBuiltin(entry.path) || entry.path.startsWith(".")) continue
+      const name = entry.path.startsWith("@")
+        ? entry.path.split("/").slice(0, 2).join("/")
+        : entry.path.split("/")[0]
+      if (!Object.hasOwn(runtime, name)) missing.add(name)
+    }
+  }
+  return [...missing].sort()
+}
 
 // Stub Next.js runtime + RSC marker modules. The CLI reuses lib/claude/*, whose
 // static graph incidentally reaches a few UI components that import next/image,

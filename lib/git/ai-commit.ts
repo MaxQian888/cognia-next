@@ -7,6 +7,9 @@
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { renderPromptTemplate } from "@/lib/prompts/template"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
 import type { GitFileChange } from "@/types/git"
 
 export interface CommitMessageAIConfig {
@@ -32,20 +35,101 @@ export interface BuildPromptInput {
 /** Default character budget for the diff sent to the model (token-safe proxy). */
 export const DEFAULT_DIFF_CHAR_BUDGET = 12_000
 
-const CONVENTIONAL_CLAUSE = `Follow the Conventional Commits format: a subject line \`type(scope): summary\` where type is one of feat|fix|docs|style|refactor|perf|test|build|ci|chore, scope is optional, and the summary is in the imperative mood, no trailing period, at most 72 characters. Then a blank line, then an optional body explaining WHY the change was made (wrap around 72 columns). Omit the body for trivial changes.`
+/** Every commit-message definition below resolves in this file. */
+const COMMIT_PROMPT_CONSUMERS = ["lib/git/ai-commit.ts"] as const
 
-const FREEFORM_CLAUSE = `Write a concise subject line in the imperative mood (at most 72 characters, no trailing period), optionally followed by a blank line and a short body explaining WHY the change was made.`
-
-export function buildCommitSystemPrompt(config: CommitMessageAIConfig): string {
-  const lines = [
+/**
+ * The commit-message instructions (ADR-0236). `{{formatRules}}` is the
+ * resolved Conventional Commits or free-form clause below, picked by the
+ * `conventionalCommits` setting; the source-control "Additional instructions"
+ * setting is appended after the whole text in code, like the diff review's.
+ */
+export const COMMIT_SYSTEM_PROMPT = definePrompt({
+  id: "developer.commit.system",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 8_000,
+  variables: [{ name: "formatRules", required: true, maxChars: 8_000 }],
+  outputContract:
+    'The reply becomes the commit draft after markdown fences are stripped. {{formatRules}} is the format clause the Conventional Commits setting selects; the "Additional instructions" setting is appended after this text.',
+  consumers: COMMIT_PROMPT_CONSUMERS,
+  defaultBody: [
     "You write Git commit messages from a staged diff.",
     "Output ONLY the raw commit message — no markdown fences, no preamble, no quotes.",
-    config.conventionalCommits ? CONVENTIONAL_CLAUSE : FREEFORM_CLAUSE,
+    "{{formatRules}}",
     "Never invent changes that are not present in the diff.",
-  ]
+  ].join("\n"),
+})
+
+/** The format clause when the Conventional Commits setting is on. */
+export const COMMIT_CONVENTIONAL_FORMAT_PROMPT = definePrompt({
+  id: "developer.commit.conventional-format",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 4_000,
+  outputContract:
+    "Rendered into the commit-message instructions as {{formatRules}} when Conventional Commits is on.",
+  consumers: COMMIT_PROMPT_CONSUMERS,
+  defaultBody: `Follow the Conventional Commits format: a subject line \`type(scope): summary\` where type is one of feat|fix|docs|style|refactor|perf|test|build|ci|chore, scope is optional, and the summary is in the imperative mood, no trailing period, at most 72 characters. Then a blank line, then an optional body explaining WHY the change was made (wrap around 72 columns). Omit the body for trivial changes.`,
+})
+
+/** The format clause when the Conventional Commits setting is off. */
+export const COMMIT_FREEFORM_FORMAT_PROMPT = definePrompt({
+  id: "developer.commit.freeform-format",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 4_000,
+  outputContract:
+    "Rendered into the commit-message instructions as {{formatRules}} when Conventional Commits is off.",
+  consumers: COMMIT_PROMPT_CONSUMERS,
+  defaultBody: `Write a concise subject line in the imperative mood (at most 72 characters, no trailing period), optionally followed by a blank line and a short body explaining WHY the change was made.`,
+})
+
+/** The resolved texts one generation uses; the shipped ones by default. */
+export interface CommitPromptTexts {
+  /** The base instructions with the selected format clause rendered in. */
+  system: string
+  /** The agent-lane clause appended for an agent that narrates. */
+  agentClause: string
+}
+
+function shippedSystem(config: Pick<CommitMessageAIConfig, "conventionalCommits">): string {
+  const format = config.conventionalCommits
+    ? COMMIT_CONVENTIONAL_FORMAT_PROMPT
+    : COMMIT_FREEFORM_FORMAT_PROMPT
+  return renderPromptTemplate(COMMIT_SYSTEM_PROMPT, COMMIT_SYSTEM_PROMPT.defaultBody, {
+    formatRules: format.defaultBody,
+  })
+}
+
+/**
+ * The base instructions plus the user's appended instructions, if any.
+ * `system` is the resolved base text; omitted, the shipped one for `config`.
+ */
+export function buildCommitSystemPrompt(
+  config: CommitMessageAIConfig,
+  system: string = shippedSystem(config)
+): string {
   const extra = config.customInstructions?.trim()
-  if (extra) lines.push(`Additional instructions: ${extra}`)
-  return lines.join("\n")
+  return extra ? `${system}\nAdditional instructions: ${extra}` : system
 }
 
 /**
@@ -81,22 +165,71 @@ export function buildCommitUserPrompt(input: BuildPromptInput): string {
 /** The tag an agent wraps its answer in, so its narration can be told apart. */
 export const COMMIT_MESSAGE_TAG = "commit-message"
 
-const AGENT_CLAUSE = `You are running inside the repository the diff belongs to. You may read files for context, but do not modify anything, run commands that change state, or commit. When you are done, reply with the commit message wrapped in <${COMMIT_MESSAGE_TAG}> and </${COMMIT_MESSAGE_TAG}> tags, and nothing else after the closing tag.`
+/**
+ * The agent-lane clause. Its tags are what {@link extractCommitMessage} reads
+ * the answer from, so an override must keep them.
+ */
+export const COMMIT_AGENT_CLAUSE_PROMPT = definePrompt({
+  id: "developer.commit.agent-clause",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  // The tagged block is parsed back out of the agent's narration.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: [`<${COMMIT_MESSAGE_TAG}>`, `</${COMMIT_MESSAGE_TAG}>`],
+  outputContract: `Appended to the commit-message instructions for an agent lane; the last <${COMMIT_MESSAGE_TAG}> block of the reply becomes the draft (the whole reply when there is none).`,
+  consumers: COMMIT_PROMPT_CONSUMERS,
+  defaultBody: `You are running inside the repository the diff belongs to. You may read files for context, but do not modify anything, run commands that change state, or commit. When you are done, reply with the commit message wrapped in <${COMMIT_MESSAGE_TAG}> and </${COMMIT_MESSAGE_TAG}> tags, and nothing else after the closing tag.`,
+})
+
+/**
+ * Resolve the texts one generation sends (ADR-0236). `context.workspaceId` is
+ * the workspace that mounts the repository, when one does.
+ */
+export async function resolveCommitPromptTexts(
+  config: Pick<CommitMessageAIConfig, "conventionalCommits">,
+  context: PromptResolutionContext = {}
+): Promise<CommitPromptTexts> {
+  const [format, agentClause] = await Promise.all([
+    resolvePromptAsync(
+      config.conventionalCommits
+        ? COMMIT_CONVENTIONAL_FORMAT_PROMPT
+        : COMMIT_FREEFORM_FORMAT_PROMPT,
+      { context }
+    ),
+    resolvePromptAsync(COMMIT_AGENT_CLAUSE_PROMPT, { context }),
+  ])
+  const system = await resolvePromptAsync(COMMIT_SYSTEM_PROMPT, {
+    context,
+    values: { formatRules: format.text },
+  })
+  return { system: system.text, agentClause: agentClause.text }
+}
 
 /**
  * The instructions for an agent lane. An agent narrates (tool use, a preamble),
- * so unlike the model lane it is asked to tag its answer.
+ * so unlike the model lane it is asked to tag its answer. `texts` are the
+ * resolved texts; omitted, the shipped ones.
  */
-export function buildCommitAgentSystemPrompt(config: CommitMessageAIConfig): string {
-  return `${buildCommitSystemPrompt(config)}\n${AGENT_CLAUSE}`
+export function buildCommitAgentSystemPrompt(
+  config: CommitMessageAIConfig,
+  texts?: CommitPromptTexts
+): string {
+  const agentClause = texts?.agentClause ?? COMMIT_AGENT_CLAUSE_PROMPT.defaultBody
+  return `${buildCommitSystemPrompt(config, texts?.system)}\n${agentClause}`
 }
 
 /**
  * The single prompt an agent receives. The instructions ride in the prompt as
  * well as in the system prompt, because not every adapter honours the latter.
  */
-export function buildCommitAgentPrompt(input: BuildPromptInput): string {
-  return `${buildCommitAgentSystemPrompt(input.config)}\n\n${buildCommitUserPrompt(input)}`
+export function buildCommitAgentPrompt(input: BuildPromptInput, texts?: CommitPromptTexts): string {
+  return `${buildCommitAgentSystemPrompt(input.config, texts)}\n\n${buildCommitUserPrompt(input)}`
 }
 
 /**
@@ -141,6 +274,8 @@ export interface GenerateCommitMessageOptions {
   /** The raw text so far, while it streams. Only used when the client streams. */
   onText?: (text: string) => void
   abortSignal?: AbortSignal
+  /** Where the instructions resolve (ADR-0236): the repository's workspace. */
+  promptContext?: PromptResolutionContext
 }
 
 /**
@@ -155,8 +290,10 @@ export async function generateCommitMessage(
   options: GenerateCommitMessageOptions = {}
 ): Promise<string> {
   const prompt = buildCommitUserPrompt(input)
+  const texts = await resolveCommitPromptTexts(input.config, options.promptContext)
+  options.abortSignal?.throwIfAborted()
   const callOptions = {
-    system: buildCommitSystemPrompt(input.config),
+    system: buildCommitSystemPrompt(input.config, texts.system),
     temperature: 0.3,
     maxTokens: 400,
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),

@@ -1,3 +1,6 @@
+import type { RemoteDocContent, RemoteDocIncompleteReason } from "./types"
+import { DocsProviderError } from "./types"
+
 /**
  * Truncation caps for remote document bodies, and the marker every provider
  * appends when it hits one.
@@ -53,5 +56,32 @@ export function clampDocText(text: string): { text: string; truncated: boolean }
     text:
       text.slice(0, MAX_DOC_CHARS) + truncationMarker("this document", MAX_DOC_CHARS, "characters"),
     truncated: true,
+  }
+}
+
+/** Normalize semantic and legacy losses at the shared attachment boundary. */
+export function normalizeRemoteDocContent(content: RemoteDocContent): RemoteDocContent {
+  const reasons = new Set<RemoteDocIncompleteReason>(
+    content.completeness?.status === "partial" ? content.completeness.reasons : []
+  )
+  const existingMarker = `\n\n[Incomplete by Cognia: ${[...reasons].join(", ")}. Some content was not read.]`
+  const body =
+    content.completeness?.status === "partial" && content.text.endsWith(existingMarker)
+      ? content.text.slice(0, -existingMarker.length)
+      : content.text
+  if (!body.trim()) throw new DocsProviderError("empty", { title: content.title })
+  const clamped = clampDocText(body)
+  if (content.truncated && content.completeness?.status !== "partial")
+    reasons.add("upstream-truncated")
+  if (clamped.truncated) reasons.add("budget")
+  if (content.completeness?.status === "partial" && !reasons.size)
+    reasons.add("unsupported-content")
+  const partial = reasons.size > 0
+  const marker = `[Incomplete by Cognia: ${[...reasons].join(", ")}. Some content was not read.]`
+  return {
+    ...content,
+    text: partial ? `${clamped.text}\n\n${marker}` : clamped.text,
+    truncated: partial,
+    completeness: partial ? { status: "partial", reasons: [...reasons] } : { status: "complete" },
   }
 }

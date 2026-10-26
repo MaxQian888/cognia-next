@@ -172,8 +172,12 @@ async function startLedgerDurability(
         }
       : undefined,
     getSources: resolveDurabilitySources,
-    prepareDynamicSchema: (sources, persistedVersions) =>
-      prepareBuiltinPluginSchema(sources as unknown as SnapshotSource[], persistedVersions),
+    prepareDynamicSchema: (sources, persistedVersions, persistedTables) =>
+      prepareBuiltinPluginSchema(
+        sources as unknown as SnapshotSource[],
+        persistedVersions,
+        persistedTables
+      ),
     whenReady: async () => {
       const { whenSeeded } = await import("@/lib/db/schema")
       await whenSeeded()

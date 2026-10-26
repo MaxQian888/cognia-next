@@ -29,6 +29,7 @@ jest.mock("@/hooks/mcp/use-mcp-server-tools", () => ({
   useMcpServerTools: () => toolsState,
 }))
 
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { McpToolRulesCard } from "./mcp-tool-rules-card"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
@@ -65,9 +66,7 @@ beforeEach(() => {
 describe("McpToolRulesCard", () => {
   it("persists a portable approval policy and never lets it override a pattern deny", async () => {
     render(<McpToolRulesCard server={server({ disallowedToolPatterns: ["write_*"] })} />)
-    fireEvent.change(screen.getByLabelText('policyAria:{"name":"read_file"}'), {
-      target: { value: "ask" },
-    })
+    await selectOption(screen.getByLabelText('policyAria:{"name":"read_file"}'), "ask")
     await waitFor(() =>
       expect(updateMcpServer).toHaveBeenCalledWith("mcp_1", {
         toolPermissionRules: [{ name: "read_file", decision: "ask" }],

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, memo } from "react"
+import { useEffect, useRef, memo } from "react"
 import { toast } from "sonner"
 import type { A2UIComponentProps, A2UIBaseComponent, A2UIStringOrPath } from "@/types/a2ui/schema"
 import { useA2UIData } from "../a2ui-context"
@@ -17,15 +17,29 @@ export interface A2UIToastComponent extends A2UIBaseComponent {
 
 export const A2UIToast = memo(function A2UIToast({
   component,
+  surfaceId,
   onAction,
 }: A2UIComponentProps<A2UIToastComponent>) {
   const { resolveString } = useA2UIData()
   const message = resolveString(component.message)
   const description = component.description ? resolveString(component.description) : undefined
 
+  const toastId = `a2ui:${JSON.stringify([surfaceId, component.id])}`
+  const actionRef = useRef(onAction)
+  useEffect(() => {
+    actionRef.current = onAction
+  }, [onAction])
+  useEffect(
+    () => () => {
+      toast.dismiss(toastId)
+    },
+    [toastId]
+  )
+
   useEffect(() => {
     const variant = component.variant || "default"
     const opts: Record<string, unknown> = {
+      id: toastId,
       description,
       duration: component.duration,
     }
@@ -33,7 +47,7 @@ export const A2UIToast = memo(function A2UIToast({
     if (component.actionLabel && component.action) {
       opts.action = {
         label: component.actionLabel,
-        onClick: () => onAction(component.action!, {}),
+        onClick: () => actionRef.current(component.action!, {}),
       }
     }
 
@@ -63,7 +77,7 @@ export const A2UIToast = memo(function A2UIToast({
     component.duration,
     component.actionLabel,
     component.action,
-    onAction,
+    toastId,
   ])
 
   return null

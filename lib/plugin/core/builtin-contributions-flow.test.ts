@@ -42,19 +42,24 @@ import {
   resolveFileIcon,
 } from "@/lib/plugin/bridge/icons-bridge"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
-import zhihuPluginJson from "@/plugins/zhihu-content-pipeline/plugin.json"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { stagedBuiltinFetch } from "./builtin-artifact-fixture"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
 
-jest.mock("@/stores/plugin-runtime", () => ({
-  usePluginStore: {
+// The manager writes hydrated manifests back with `setState`; apply it to
+// whatever store the test handed `getState`.
+jest.mock("@/stores/plugin-runtime", () => {
+  const usePluginStore = {
     getState: jest.fn(),
-  },
-}))
+    setState: jest.fn((update: unknown) => {
+      const state = usePluginStore.getState()
+      Object.assign(state, typeof update === "function" ? update(state) : update)
+    }),
+  }
+  return { usePluginStore }
+})
 
 jest.mock("@/lib/plugin/security/signature", () => ({
   getPluginSignatureVerifier: jest.fn(),
@@ -90,6 +95,14 @@ jest.mock("@/lib/plugin/dexie/bridge", () => ({
 import { usePluginStore } from "@/stores/plugin-runtime"
 
 const PLUGIN_ID = "zhihu-content-pipeline"
+
+/** A real guard, so the mock cannot drift from the methods the manager calls. */
+function realPermissionGuard() {
+  const { PermissionGuard } = jest.requireActual<
+    typeof import("@/lib/plugin/security/permission-guard")
+  >("@/lib/plugin/security/permission-guard")
+  return new PermissionGuard()
+}
 
 function makeStore() {
   const store = {
@@ -143,14 +156,7 @@ describe("builtin plugin contribution flow", () => {
       verify: jest.fn().mockResolvedValue({ verified: true }),
       getConfig: jest.fn().mockReturnValue({ requireSignatures: false, allowUntrusted: true }),
     })
-    ;(getPermissionGuard as jest.Mock).mockReturnValue({
-      registerPlugin: jest.fn(),
-      unregisterPlugin: jest.fn(),
-      revokeAll: jest.fn(),
-      grant: jest.fn(),
-      revoke: jest.fn(),
-      getPluginPermissions: jest.fn(() => [] as string[]),
-    })
+    ;(getPermissionGuard as jest.Mock).mockReturnValue(realPermissionGuard())
     ;(canUseTauriInvoke as jest.Mock).mockReturnValue(false)
     mockInvoke.mockResolvedValue(undefined)
   })
@@ -166,12 +172,9 @@ describe("builtin plugin contribution flow", () => {
     // plugin.json identity fields survive the merge…
     expect(manifest.id).toBe(PLUGIN_ID)
     expect(manifest.description).toBeTruthy()
-    // Every activation event plugin.json declares survives the merge — the
-    // module manifest omits the field, so it must not blank it out. Compared
-    // against the JSON itself rather than a hard-coded list, which went stale
-    // the moment the plugin declared its `/zhihu` command
-    // (`onCommand:zhihu`).
-    expect(manifest.activationEvents).toEqual(zhihuPluginJson.activationEvents)
+    // plugin.json's activation events survive the merge (the module manifest
+    // omits the field); the producer's own suite pins the general rule.
+    expect(manifest.activationEvents).toContain("startup")
     expect(manifest.activationEvents).toContain("onCommand:zhihu")
     // …and the module manifest's declarative arrays ride along.
     expect(manifest.workflowTemplates?.length).toBe(1)
@@ -184,7 +187,11 @@ describe("builtin plugin contribution flow", () => {
     const store = makeStore()
     mockGetState.mockReturnValue(store)
 
-    const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+    const manager = new PluginManager({
+      pluginDirectory: "",
+      runtimeProfile: "browser",
+      builtinAssetFetcher: stagedBuiltinFetch(),
+    })
     await manager.scanPlugins()
     await manager.enablePlugin(PLUGIN_ID)
 
@@ -232,13 +239,12 @@ describe("builtin plugin contribution flow", () => {
  * The bundled Material Icon Theme is a declarative built-in that must be
  * discovered everywhere but stay OFF until the user enables it, and whose only
  * contribution — `manifest.vscodeIconThemes` — must reach the icons bridge from
- * the `/plugins/<id>/` public mirror (the synthetic `builtin://` root has no
- * files behind it). Driven through the real registry entry and the real
- * manager enable/disable path.
+ * the package's staged resources (`<resourcesUrl>`; the synthetic `builtin://`
+ * root has no files behind it). Driven through the real registry entry and the
+ * real manager enable/disable path.
  */
 describe("bundled Material Icon Theme lifecycle", () => {
   const MATERIAL_ID = "cognia-material-icon-theme"
-  const PUBLIC_ROOT = join(process.cwd(), "public")
   const mockGetState = usePluginStore.getState as unknown as jest.Mock
   let fetchSpy: jest.SpiedFunction<typeof fetch>
 
@@ -261,24 +267,17 @@ describe("bundled Material Icon Theme lifecycle", () => {
       verify: jest.fn().mockResolvedValue({ verified: true }),
       getConfig: jest.fn().mockReturnValue({ requireSignatures: false, allowUntrusted: true }),
     })
-    ;(getPermissionGuard as jest.Mock).mockReturnValue({
-      registerPlugin: jest.fn(),
-      unregisterPlugin: jest.fn(),
-      revokeAll: jest.fn(),
-      grant: jest.fn(),
-      revoke: jest.fn(),
-      getPluginPermissions: jest.fn(() => [] as string[]),
-    })
+    ;(getPermissionGuard as jest.Mock).mockReturnValue(realPermissionGuard())
     ;(canUseTauriInvoke as jest.Mock).mockReturnValue(false)
-    // Serve the static export the way every shell does: `/plugins/<id>/…` is a
-    // file under `public/`, copied verbatim into `out/`.
+    // Serve the static export the way every shell does: built-in packages are
+    // staged under `public/_cognia/builtin-plugins/`, copied verbatim into `out/`.
+    const staged = stagedBuiltinFetch()
     fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      const file = join(PUBLIC_ROOT, decodeURIComponent(url))
-      if (!url.startsWith("/plugins/") || !existsSync(file)) {
+      if (!url.startsWith("/_cognia/builtin-plugins/")) {
         return new Response("not found", { status: 404 })
       }
-      return new Response(readFileSync(file, "utf8"), { status: 200 })
+      return staged(url)
     })
   })
 
@@ -290,7 +289,11 @@ describe("bundled Material Icon Theme lifecycle", () => {
   it("is discovered on the browser profile but not enabled by the boot restore pass", async () => {
     const store = makeLifecycleStore()
     mockGetState.mockReturnValue(store)
-    const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+    const manager = new PluginManager({
+      pluginDirectory: "",
+      runtimeProfile: "browser",
+      builtinAssetFetcher: stagedBuiltinFetch(),
+    })
     await manager.scanPlugins()
 
     expect(store.plugins[MATERIAL_ID]).toMatchObject({
@@ -314,13 +317,18 @@ describe("bundled Material Icon Theme lifecycle", () => {
   it("registers the mirrored theme on enable and removes it on disable", async () => {
     const store = makeLifecycleStore()
     mockGetState.mockReturnValue(store)
-    const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+    const manager = new PluginManager({
+      pluginDirectory: "",
+      runtimeProfile: "browser",
+      builtinAssetFetcher: stagedBuiltinFetch(),
+    })
     await manager.scanPlugins()
 
     await manager.enablePlugin(MATERIAL_ID)
 
     expect((store.setPluginError as jest.Mock).mock.calls.filter((c) => c[1] != null)).toEqual([])
-    expect(fetchSpy).toHaveBeenCalledWith(`/plugins/${MATERIAL_ID}/dist/material-icons.json`)
+    const resourcesUrl = getBrowserBuiltinRegistryEntry(MATERIAL_ID)!.asset!.resourcesUrl
+    expect(fetchSpy).toHaveBeenCalledWith(`${resourcesUrl}dist/material-icons.json`)
     const active = getActiveIconTheme()
     expect(active).toMatchObject({
       id: `${MATERIAL_ID}.material-icon-theme`,

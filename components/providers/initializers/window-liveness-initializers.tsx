@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react"
 import { isTauri } from "@/lib/native/utils"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { WindowControls } from "@/components/desktop/window-controls"
+import { WindowShowInitializer } from "./window-show-initializer"
 
 /**
  * Client-mount probe via `useSyncExternalStore` (not `useState` + effect, which
@@ -25,13 +26,11 @@ function useIsClient(): boolean {
   )
 }
 
-// Both are `next/dynamic(ssr: false)` so the browser dev server (where the
+// The remaining desktop helpers are `next/dynamic(ssr: false)` so the browser dev server (where the
 // Tauri gate below is false) never fetches — and therefore never compiles —
-// these desktop-only chunks. `next build` still emits them for the Tauri build.
-const WindowShowInitializer = dynamic(
-  () => import("./window-show-initializer").then((m) => m.WindowShowInitializer),
-  { ssr: false }
-)
+// these desktop-only chunks. The small reveal initializer is synchronous so
+// showing a hidden window never depends on fetching another desktop chunk.
+// `next build` still emits the helpers for the Tauri build.
 const WebviewHeartbeatInitializer = dynamic(
   () => import("./webview-heartbeat-initializer").then((m) => m.WebviewHeartbeatInitializer),
   { ssr: false }

@@ -19,6 +19,7 @@
  */
 import { definePlugin, definePluginManifest, type PluginContext } from "@cognia/plugin-sdk"
 
+import { DEEP_RESEARCH_PROMPTS } from "./engine/prompts"
 import { DEEP_RESEARCH_SKILL } from "./skill"
 import { handleResearchSlash } from "./slash"
 import { registerDeepResearchTool } from "./tool"
@@ -35,6 +36,9 @@ export const manifest = definePluginManifest({
 export default definePlugin({
   manifest,
   activate: (ctx: PluginContext) => {
+    // Each system instruction becomes a Prompt Center slot the user can tune;
+    // the host drops the slots with the plugin.
+    ctx.prompts.register(DEEP_RESEARCH_PROMPTS)
     registerDeepResearchTool(ctx)
     // `/research` is DECLARED in plugin.json (`commands[]`); returning the
     // hook makes the declared entry the real one.

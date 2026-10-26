@@ -22,23 +22,28 @@ function kebabId(fileName: string): string {
   )
 }
 
-async function readAgentsInDir(dir: string, fs: InstructionFs): Promise<MarkdownAgentFile[]> {
+/** One `.md` agent definition file, located but not read. */
+export interface MarkdownAgentPath {
+  /** Same kebab id `discoverMarkdownAgentFiles` assigns. */
+  id: string
+  /** Directory the file sits in (a checked write is rooted here). */
+  dir: string
+  /** File name inside `dir`. */
+  name: string
+  absPath: string
+}
+
+async function listAgentsInDir(dir: string, fs: InstructionFs): Promise<MarkdownAgentPath[]> {
   let names: string[]
   try {
     names = await fs.readDir(dir)
   } catch {
     return []
   }
-  const out: MarkdownAgentFile[] = []
-  for (const name of names.filter((n) => n.toLowerCase().endsWith(".md")).sort()) {
-    try {
-      const content = await fs.readText(joinPath(dir, name))
-      out.push({ id: kebabId(basename(name)), content })
-    } catch {
-      // skip unreadable file
-    }
-  }
-  return out
+  return names
+    .filter((n) => n.toLowerCase().endsWith(".md"))
+    .sort()
+    .map((name) => ({ id: kebabId(basename(name)), dir, name, absPath: joinPath(dir, name) }))
 }
 
 export interface DiscoverAgentsInput {
@@ -48,19 +53,44 @@ export interface DiscoverAgentsInput {
   fs: InstructionFs
 }
 
+/** Agent directories in load order: global, non-primary roots, primary root last. */
+function agentDirs(input: Omit<DiscoverAgentsInput, "fs">): string[] {
+  const dirs: string[] = []
+  if (input.globalAgentsDir) dirs.push(input.globalAgentsDir)
+  for (const root of [...input.roots].reverse()) {
+    if (root) dirs.push(joinPath(root, PROJECT_AGENTS_DIR))
+  }
+  return dirs
+}
+
+/**
+ * Every agent definition file in load order, without reading it. The agent
+ * configuration read model (`lib/agent-config/`) lists and edits these files;
+ * the send path reads them through {@link discoverMarkdownAgentFiles}, which
+ * walks the same directories in the same order.
+ */
+export async function discoverMarkdownAgentPaths(
+  input: DiscoverAgentsInput
+): Promise<MarkdownAgentPath[]> {
+  const paths: MarkdownAgentPath[] = []
+  for (const dir of agentDirs(input)) {
+    paths.push(...(await listAgentsInDir(dir, input.fs)))
+  }
+  return paths
+}
+
 export async function discoverMarkdownAgentFiles(
   input: DiscoverAgentsInput
 ): Promise<MarkdownAgentFile[]> {
-  const { roots, globalAgentsDir, fs } = input
   // global first, then non-primary roots, then primary root LAST (primary wins).
-  const dirs: string[] = []
-  if (globalAgentsDir) dirs.push(globalAgentsDir)
-  for (const root of [...roots].reverse()) {
-    if (root) dirs.push(joinPath(root, PROJECT_AGENTS_DIR))
-  }
   const files: MarkdownAgentFile[] = []
-  for (const dir of dirs) {
-    files.push(...(await readAgentsInDir(dir, fs)))
+  for (const path of await discoverMarkdownAgentPaths(input)) {
+    try {
+      const content = await input.fs.readText(path.absPath)
+      files.push({ id: path.id, content })
+    } catch {
+      // skip unreadable file
+    }
   }
   return files
 }

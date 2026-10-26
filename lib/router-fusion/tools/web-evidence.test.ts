@@ -115,8 +115,12 @@ describe("createWebEvidence", () => {
       { url: "https://example.com/t", format: "text", maxBytes: WEB_EVIDENCE_MAX_CHARS },
       expect.objectContaining({
         allowPrivateHosts: false,
-        alwaysDistill: false,
-        jinaFallback: false,
+        readerPolicy: expect.objectContaining({
+          defaultReader: "direct",
+          enabled: new Set(["direct"]),
+          externalFallback: false,
+          distillation: "off",
+        }),
       })
     )
     const passed = (d.webFetch as jest.Mock).mock.calls[0][1]
@@ -217,9 +221,14 @@ describe("createWebEvidence", () => {
         searchExecutor: jest.fn() as unknown as WebEvidenceDeps["searchExecutor"],
       })
     )
-    await expect(evidence.search!("tariffs", new AbortController().signal)).resolves.toEqual([
+    const signal = new AbortController().signal
+    await expect(evidence.search!("tariffs", signal)).resolves.toEqual([
       { title: "T", url: "https://example.com/t", snippet: "4%" },
     ])
+    expect(webSearch).toHaveBeenCalledWith(
+      { query: "tariffs", maxResults: 5 },
+      { searchExecutor: expect.any(Function), signal }
+    )
     webSearch.mockResolvedValueOnce({ ok: false } as never)
     await expect(evidence.search!("tariffs", new AbortController().signal)).resolves.toBeNull()
   })

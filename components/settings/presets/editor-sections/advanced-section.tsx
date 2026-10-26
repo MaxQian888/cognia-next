@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SettingsCard } from "@/components/settings/common/settings-section"
-import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 
 import type { PresetEditorState } from "../preset-editor-state"

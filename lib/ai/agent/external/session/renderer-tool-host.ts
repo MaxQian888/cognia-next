@@ -102,7 +102,7 @@ function serverConfigs(value: unknown, leaseId: string, deferredSandbox: boolean
       ))
   )
     throw new Error("Cognia tool host returned an invalid sandbox plugin lease; update the Host")
-  const mcpServers: AcpMcpServerConfig[] = result.mcpServers.map((value) => {
+  const mcpServers = result.mcpServers.map((value) => {
     const server = value as {
       name?: string
       transport?: string
@@ -128,7 +128,7 @@ function serverConfigs(value: unknown, leaseId: string, deferredSandbox: boolean
       throw new Error("Cognia tool host returned an invalid endpoint")
     }
     return {
-      type: "http",
+      type: "http" as const,
       name: server.name!,
       url: url.href,
       headers: Object.entries(server.headers).map(([name, value]) => ({ name, value })),

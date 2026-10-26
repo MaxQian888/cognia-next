@@ -6,6 +6,7 @@ import fsp from "node:fs/promises"
 
 import { createGrepTool, pageLines, groupByFile, DEFAULT_HEAD_LIMIT } from "./grep.ts"
 import { asCallable } from "../../../../test-support/tool-result.ts"
+import { withProcessSandbox } from "../../../platform/process/exec.ts"
 
 function textOf(result: { content: unknown[] }): string {
   return result.content.map((b) => (b as { text?: string }).text).join("\n")
@@ -22,6 +23,32 @@ async function fixture() {
   await fsp.writeFile(path.join(dir, "src", "c.ts"), "nothing\n")
   return dir
 }
+
+test("standalone host with no port allocation can execute real ripgrep", async () => {
+  const dir = await fixture()
+  try {
+    const calls: string[] = []
+    const tool = asCallable(createGrepTool({ cwd: dir }))
+    const result = await withProcessSandbox(
+      undefined,
+      dir,
+      () => tool.handler({ pattern: "needle", output_mode: "content" }, {}),
+      {
+        sessionId: "standalone-search",
+        hostRpc: {
+          async call(method) {
+            calls.push(method)
+            return {}
+          },
+        },
+      }
+    )
+    assert.match(textOf(result), /needle here/)
+    assert.ok(calls.includes("workspace.portEnv"), "must exercise the actual rg process path")
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
 
 test("files_with_matches mode lists matching files only (default)", async () => {
   const dir = await fixture()

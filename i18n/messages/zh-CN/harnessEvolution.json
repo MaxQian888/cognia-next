@@ -1,0 +1,584 @@
+{
+  "status": {
+    "queued": "排队中",
+    "snapshotting": "正在捕获",
+    "reference_running": "正在运行当前 Harness",
+    "proposing": "正在提出修改",
+    "probing": "正在探测",
+    "composing": "正在组合",
+    "evaluating": "正在评估",
+    "awaiting_approval": "等待审批",
+    "adopting": "正在采用",
+    "reflecting": "正在反思",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "budget_exceeded": "预算耗尽",
+    "rejected": "保留当前",
+    "rolled_back": "已回滚",
+    "interrupted": "已中断"
+  },
+  "stepStatus": {
+    "planned": "未开始",
+    "pending": "等待中",
+    "running": "运行中",
+    "succeeded": "完成",
+    "failed": "失败",
+    "interrupted": "已中断",
+    "skipped": "已跳过"
+  },
+  "trigger": {
+    "manual": "手动启动",
+    "failure-triggered": "失败后启动",
+    "background": "后台"
+  },
+  "mode": {
+    "parallel": "并行",
+    "sequential": "顺序"
+  },
+  "isolation": {
+    "none": "纯文本",
+    "files": "临时目录",
+    "git": "Git 工作树"
+  },
+  "checkKind": {
+    "deliverable-file": "文件存在",
+    "output-contains": "回答包含",
+    "output-not-contains": "回答不包含",
+    "output-json": "回答是 JSON",
+    "max-tool-errors": "工具错误不超过",
+    "acceptance-profile": "验收配置"
+  },
+  "component": {
+    "systemPrompt": "系统提示词",
+    "guardrails": "护栏",
+    "memory": "记忆",
+    "toolGuidance": "工具指引",
+    "subagents": "子智能体",
+    "skills": "技能",
+    "scripts": "脚本",
+    "toolRules": "工具规则"
+  },
+  "diff": {
+    "none": "这两个 Harness 完全相同。",
+    "fileLabel": "{path} 的变更",
+    "change": {
+      "added": "新增",
+      "removed": "删除",
+      "modified": "修改"
+    }
+  },
+  "budget": {
+    "dimension": {
+      "cost": "费用",
+      "tokens": "Token",
+      "modelCalls": "模型调用",
+      "wallTime": "时间"
+    },
+    "usedOf": "{used} / {limit}",
+    "lowerBound": "部分调用未报告价格，显示的费用是下限。",
+    "work": "已完成 {rollouts} 次执行、{sessions} 次编辑或评判会话。"
+  },
+  "step": {
+    "kind": {
+      "base": "当前 Harness，第 {index} 次运行",
+      "invariant": "通用修改 {index}",
+      "domain": "任务专属修改 {index}",
+      "aggregate": "合并后的 Harness {index}",
+      "compose": "组合后的 Harness {index}",
+      "rollout": "执行",
+      "select": "选择",
+      "reflect": "反思"
+    },
+    "rolloutOf": "{of}的执行"
+  },
+  "timeline": {
+    "phaseRound": "{phase} · 第 {round} 轮",
+    "reused": "已复用",
+    "fellBack": "已回退",
+    "keptBase": "无修改"
+  },
+  "evidence": {
+    "delivered": "已交付",
+    "notDelivered": "未交付",
+    "degraded": "降级运行",
+    "errored": "出错",
+    "unpriced": "未计价",
+    "toolCalls": "{calls} 次调用，{failures} 次失败",
+    "metric": {
+      "tokens": "输入 / 输出 Token",
+      "cost": "费用",
+      "latency": "耗时",
+      "tools": "工具"
+    },
+    "checks": "检查",
+    "checkStatus": {
+      "passed": "通过",
+      "failed": "未通过",
+      "inconclusive": "无法判定"
+    },
+    "blocked": "被探测策略拦截",
+    "delegations": "委派给：{list}",
+    "externalReads": "读取了本机以外的数据（之后的运行不会复用）：{list}",
+    "output": "回答",
+    "emptyOutput": "（空）",
+    "deliverables": "生成的文件（{count}）",
+    "bytes": "{bytes} 字节",
+    "truncated": "已截断",
+    "trajectory": "完整轨迹"
+  },
+  "selection": {
+    "method": "决定方式",
+    "methods": {
+      "deterministic": "任务的检查结果",
+      "judge": "评判模型（基于匿名化证据）",
+      "tie-break": "平局裁决（更便宜、更简单者优先）",
+      "no-candidate": "无可选项：没有候选与当前 Harness 不同"
+    },
+    "dominant": "全面优于当前 Harness 的每次运行：{list}",
+    "regressed": "比当前 Harness 更差：{list}",
+    "unchanged": "与当前 Harness 相同：{list}",
+    "judge": "评判模型选择了 {best}（置信度{confidence}）。",
+    "confidence": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    }
+  },
+  "decision": {
+    "pending": "尚未做出决定。",
+    "adopt": "采用 {label}",
+    "keepBase": "保留当前 Harness",
+    "risk": {
+      "low": "低风险",
+      "medium": "中风险",
+      "high": "高风险"
+    },
+    "scope": {
+      "task": "仅此任务",
+      "session": "此对话",
+      "workspace": "此工作区",
+      "global": "全局"
+    },
+    "rolledBack": "此次采用已回滚。",
+    "adoptedByPerson": "经你批准已采用（{scope}）。",
+    "adoptedAutomatically": "作为低风险修改已自动采用（{scope}）。",
+    "variantCreated": "修改写入了演化变体，原智能体保持不变。",
+    "approvalNeeded": "此修改需要你批准后才会生效。",
+    "setWorkspaceDefault": "同时将演化后的智能体设为此工作区的默认智能体",
+    "approve": "批准",
+    "reject": "保留当前"
+  },
+  "reflection": {
+    "verdict": {
+      "helped": "有帮助",
+      "hurt": "有害",
+      "noEffect": "未观察到效果",
+      "confounded": "无法区分"
+    },
+    "noEdits": "反思未归因任何修改。",
+    "retrieved": "提供给编辑者的经验",
+    "retrievedVerdict": "{verdict}",
+    "dropped": "未保留经验：{reason}",
+    "merged": "该经验已合并到已有经验中。",
+    "stored": "该经验已加入经验库。",
+    "openLesson": "查看经验",
+    "conflicts": "{count, plural, other {与 # 条已有经验相矛盾。}}"
+  },
+  "stepDetail": {
+    "meta": "{attempts} 次尝试 · {tokens} Token · {cost} · {duration}",
+    "reused": "复用了此前相同执行的证据（{from}）。",
+    "fellBack": "编辑者的提案两次无效，此阶段保留了输入。",
+    "keptBase": "编辑者未修改 Harness。",
+    "notes": "编辑者备注",
+    "changesFromBase": "相对当前 Harness 的变更",
+    "snapshotMissing": "此 Harness 版本已不再保存。"
+  },
+  "compare": {
+    "notRolled": "尚未执行。",
+    "delivered": "已交付",
+    "yes": "是",
+    "no": "否",
+    "checks": "检查",
+    "checksPassed": "{total} 项中通过 {passed} 项",
+    "toolFailures": "工具失败",
+    "tokens": "Token",
+    "cost": "费用",
+    "nothingYet": "还没有可比较的候选 Harness。",
+    "base": "当前 Harness",
+    "chosen": "已选",
+    "left": "左侧 Harness",
+    "right": "右侧 Harness",
+    "loading": "正在加载 Harness…"
+  },
+  "actions": {
+    "errors": {
+      "control": {
+        "not-found": "该运行已不存在。",
+        "not-awaiting": "该运行不在等待审批（可能已在别处处理）。",
+        "not-resumable": "只能继续已中断或停滞的运行。",
+        "not-adopted": "该运行没有生效中的采用。",
+        "busy": "该运行上的另一项操作正在进行。"
+      },
+      "adoption": {
+        "no-decision": "该运行对此 Harness 没有采用决定。",
+        "no-session": "运行所基于的对话已不存在。",
+        "no-workspace": "运行所在的工作区已不存在。",
+        "agent-changed": "运行开始后智能体被编辑过，请重新开始一次运行。",
+        "agent-not-found": "该智能体已不存在。",
+        "not-adopted": "该运行没有采用任何内容。",
+        "already-rolled-back": "此次采用已回滚过。"
+      }
+    },
+    "done": {
+      "cancel": "运行已取消。",
+      "resume": "运行已继续。",
+      "approve": "修改已批准并应用。",
+      "reject": "已保留当前 Harness。",
+      "rollback": "采用已回滚。"
+    },
+    "failed": {
+      "cancel": "无法取消运行。",
+      "resume": "无法继续运行。",
+      "approve": "无法应用修改。",
+      "reject": "无法记录决定。",
+      "rollback": "无法回滚。"
+    }
+  },
+  "viewer": {
+    "loading": "正在加载运行…",
+    "missing": "该运行已不存在。",
+    "subtitle": "{agent} · {trigger} · {mode}，k = {k} · {created}",
+    "resume": "继续",
+    "rollback": "回滚",
+    "cancel": "取消运行",
+    "stopped": "提前停止：{reason}",
+    "interruptedHint": "运行期间应用已停止。继续将从最后完成的步骤接着执行，并会再次产生费用。",
+    "task": "任务",
+    "retrieved": "{count, plural, other {向编辑者提供了经验库中的 # 条经验。}}",
+    "tabs": {
+      "timeline": "步骤",
+      "compare": "比较",
+      "decision": "决定",
+      "reflection": "反思"
+    },
+    "pickStep": "选择一个步骤查看其证据。",
+    "noReflection": "该运行尚未进行反思。",
+    "confirmRollbackTitle": "回滚此次采用？",
+    "confirmRollbackBody": "智能体将恢复到此次运行之前的 Harness。如果之后智能体被编辑过，回滚将被拒绝。",
+    "confirmCancelTitle": "取消此运行？",
+    "confirmCancelBody": "进行中的工作将停止，当前 Harness 保持不变。已产生的费用不会退回。",
+    "keep": "保留"
+  },
+  "runList": {
+    "empty": "还没有运行。",
+    "open": "打开运行 {title}",
+    "improved": "已改进",
+    "keptCurrent": "保留当前"
+  },
+  "library": {
+    "intro": "以往运行总结出的、哪些 Harness 修改有效的经验。它们只作为后续编辑者的参考，不会自动应用，并与记忆分开保存。",
+    "filter": "按状态筛选经验",
+    "all": "全部",
+    "status": {
+      "proposed": "待验证",
+      "verified": "已验证",
+      "rejected": "已否决",
+      "deprecated": "已停用"
+    },
+    "confidence": {
+      "high": "高置信度",
+      "medium": "中置信度",
+      "low": "低置信度"
+    },
+    "empty": "还没有经验。",
+    "when": "适用情形：{cue}",
+    "counts": "被检索 {retrieved} 次 · 有帮助 {helped} 次 · 有害 {hurt} 次",
+    "support": "{count, plural, other {另有 # 次运行支持}}",
+    "conflicts": "{count, plural, other {# 处冲突}}",
+    "evidence": "证据",
+    "applies": "适用于：{list}",
+    "excludes": "不适用于：{list}",
+    "limitations": "已知局限：{list}",
+    "enabled": "在新运行中使用",
+    "reinstate": "恢复",
+    "retire": "停用",
+    "delete": "删除",
+    "openRun": "打开来源运行",
+    "updateFailed": "无法更新该经验。"
+  },
+  "versions": {
+    "errors": {
+      "not-found": "该版本已不存在。",
+      "other-agent": "该版本属于另一个智能体。",
+      "unchanged": "智能体已经是这个 Harness。",
+      "agent-changed": "打开此版本后智能体有变化，请重新查看差异。"
+    },
+    "previewFailed": "无法比较此版本。",
+    "restored": "版本已恢复。",
+    "restoreFailed": "无法恢复此版本。",
+    "empty": "还没有记录 Harness 版本。运行开始时会捕获一个版本。",
+    "origin": {
+      "captured": "捕获",
+      "candidate": "候选",
+      "composed": "组合",
+      "adopted": "已采用",
+      "restored": "已恢复"
+    },
+    "inEffect": "生效中",
+    "openRun": "打开运行",
+    "compare": "与当前比较",
+    "dialogTitle": "Harness 版本",
+    "dialogBody": "与智能体当前的 Harness 相比，恢复此版本将改变的内容。智能体的模型、权限和工具保持不变。",
+    "loading": "正在比较…",
+    "sameAsCurrent": "智能体当前的 Harness 与此版本完全相同。",
+    "risk": {
+      "low": "低风险",
+      "medium": "中风险",
+      "high": "高风险"
+    },
+    "close": "关闭",
+    "restore": "恢复此版本",
+    "notEditable": "此智能体无法在这里编辑，请先复制一份。"
+  },
+  "checks": {
+    "none": "没有检查：选择将依赖评判模型。添加检查以便依据证据决定。",
+    "path": "文件路径",
+    "pathPlaceholder": "report.md",
+    "text": "文本",
+    "textPlaceholder": "要查找的文本",
+    "caseSensitive": "区分大小写",
+    "requiredKeys": "必需的键",
+    "requiredKeysPlaceholder": "以逗号分隔的键（可选）",
+    "max": "最多工具错误数",
+    "profile": "验收配置",
+    "pickProfile": "选择配置",
+    "noProfiles": "此工作区没有已批准的验收配置。",
+    "remove": "删除检查",
+    "kind": "检查类型",
+    "add": "添加检查"
+  },
+  "start": {
+    "errors": {
+      "disabled": "Harness 演化已在设置中关闭。",
+      "trigger-not-allowed": "当前设置不允许以这种方式启动运行。",
+      "invalid-task": "任务不完整或前后矛盾。",
+      "no-commit": "仓库没有可作为起点的提交。",
+      "model-unavailable": "有角色无法调用任何模型。请在 Harness 演化设置中为其指定模型。",
+      "no-session": "对话范围需要运行所基于的对话。",
+      "no-workspace": "工作区范围需要一个工作区。",
+      "agent-not-found": "该智能体已不存在。",
+      "external-runtime": "此智能体运行在外部运行时上，Cognia 不组装其提示词与工具循环，因此无法在这里探测其 Harness。"
+    },
+    "invalid": "任务尚未就绪。",
+    "launchFailed": "运行无法启动。",
+    "started": "运行已开始。",
+    "duplicate": "已有相同的运行在进行，正在打开它。",
+    "failed": "无法开始运行。",
+    "title": "改进 {agent}",
+    "description": "每个候选 Harness 都会在隔离环境中针对此任务试运行。在选出更好的 Harness 之前不会有任何改变，范围更大的修改会等待你的批准。",
+    "taskTitle": "标题",
+    "prompt": "请求",
+    "promptPlaceholder": "智能体收到的原始请求",
+    "domain": "领域",
+    "domainPlaceholder": "例如 data/reports（用于在经验库中归类）",
+    "isolation": "每次尝试的工作位置",
+    "isolationHint": {
+      "none": "纯文本任务：尝试不使用文件直接作答。",
+      "files": "每次尝试都有一个空的临时目录，其中有输入文件的副本。",
+      "git": "每次尝试都有一个固定提交上的独立工作树。你的工作副本不会被改动。"
+    },
+    "repo": "仓库",
+    "repoPlaceholder": "/path/to/repository",
+    "pickRepo": "选择仓库文件夹",
+    "baseRef": "基准提交",
+    "relativePath": "任务内路径",
+    "removeFile": "移除文件",
+    "addFiles": "添加输入文件",
+    "deliverables": "期望生成的文件",
+    "deliverablesPlaceholder": "每行一个路径，例如 report.md",
+    "checks": "检查",
+    "mode": "递归方式",
+    "k": "广度（k）",
+    "kCapped": "预算允许 k = {k}。",
+    "scope": "改进的适用范围",
+    "scopeHint": {
+      "task": "仅记录在此运行上，智能体本身不变。",
+      "session": "将此对话切换到智能体的演化变体。",
+      "workspace": "为此工作区写入演化变体，需要你的批准。",
+      "global": "在所有地方修改该智能体，需要你的批准。"
+    },
+    "editable": "编辑者可以修改的内容",
+    "maxCost": "费用上限（美元）",
+    "maxWall": "时间上限（分钟）",
+    "networkOff": "在沙箱支持时，探测期间切断网络",
+    "useExperiences": "向编辑者提供经验库中的相关经验",
+    "estimate": "开始前的估算",
+    "estimateWork": "{rollouts} 次执行、{sessions} 次编辑会话、{calls} 次模型调用",
+    "estimateSpend": "约 {cost} · {tokens} Token · {time}",
+    "confidence": {
+      "based": "基于 {count} 次可比运行。",
+      "few": "仅基于 {count} 次可比运行，仅供粗略参考。",
+      "rough": "粗略估计：可比历史很少。",
+      "none": "没有可比历史：只知道调用次数。"
+    },
+    "exceeds": "超出{dimension}上限",
+    "budgetDimension": {
+      "maxIterations": "迭代",
+      "maxCandidates": "候选",
+      "maxParallelRuns": "并行",
+      "maxModelCalls": "模型调用",
+      "maxTokens": "Token",
+      "maxCostUsd": "费用",
+      "maxWallTimeMs": "时间",
+      "maxTurnsPerRollout": "轮次"
+    },
+    "estimating": "正在估算…",
+    "cancel": "取消",
+    "submit": "开始运行"
+  },
+  "agentView": {
+    "title": "Harness 演化",
+    "description": "依据证据逐个任务地改进此智能体的指令、技能与工具规则。",
+    "start": "新建运行",
+    "blocked": {
+      "disabled": "Harness 演化已关闭。",
+      "host-owned": "此设备的对话位于其主机上，请在主机上启动运行。",
+      "no-runtime": "运行需要桌面端的智能体运行时，此处不可用。",
+      "external": "此智能体运行在外部运行时上，无法探测其 Harness。"
+    },
+    "openSettings": "打开设置",
+    "tabs": {
+      "runs": "运行",
+      "versions": "版本",
+      "experiences": "经验"
+    },
+    "emptyTitle": "还没有运行",
+    "emptyBody": "选择一个此智能体应当做得更好的任务开始运行。每个候选都会先在隔离环境中试运行。"
+  },
+  "failureOffer": {
+    "runExists": "Harness 演化正在处理这次失败。",
+    "viewRun": "查看运行",
+    "offer": "这次失败看起来源于 {agent} 的配置方式。要基于这个请求尝试改进它的 Harness 吗？",
+    "improve": "改进",
+    "dismiss": "暂不"
+  },
+  "page": {
+    "title": "Harness 演化运行",
+    "backToAgent": "返回 {name}",
+    "backToAgents": "返回智能体",
+    "noRunTitle": "未选择运行",
+    "noRunBody": "请从智能体的演化页面打开一个运行。",
+    "desktopOnlyTitle": "运行保存在桌面端",
+    "desktopOnlyBody": "Harness 演化在桌面应用中运行，与它所改进的智能体在一起。请在桌面端打开此运行。"
+  },
+  "settings": {
+    "title": "Harness 演化",
+    "description": "让智能体通过在隔离环境中针对真实任务试运行候选，并只保留有证据支持的修改，来改进自身的 Harness（指令、护栏、记忆、工具指引、技能、子智能体、工具规则）。",
+    "enableTitle": "开启",
+    "enabled": "启用 Harness 演化",
+    "enabledDescription": "默认关闭。开启之前不会运行任何内容，下面的选项也不会生效。",
+    "startMode": "运行的启动方式",
+    "startModeDescription": {
+      "disabled": "不启动任何运行，包括手动。",
+      "manual": "仅在你从智能体的演化页面启动时。",
+      "failure-triggered": "此外，当某轮因智能体自身行为失败时，在其下方提供改进建议。",
+      "background": "此外，在这类失败后自动排队，并由每小时一次的巡检在下方限制内启动。"
+    },
+    "startModes": {
+      "disabled": "从不",
+      "manual": "手动",
+      "failure-triggered": "失败后提示",
+      "background": "后台"
+    },
+    "offHint": "探测从不触碰你的工作区，副作用会被拦截或模拟，任何超出单个任务的修改都会等待你的批准。",
+    "defaultsTitle": "新运行的默认值",
+    "defaultMode": "递归方式",
+    "defaultModeDescription": "并行同时尝试相互独立的修改；顺序则让每一轮建立在上一轮之上。",
+    "defaultK": "广度（k）",
+    "defaultKDescription": "每个阶段的候选数。一次运行包含 4k 次执行和 3k 次编辑会话。",
+    "editorChannel": "编辑方式",
+    "editorChannelDescription": {
+      "auto": "证据能放进一个提示词时提交一份结构化提案；放不下时以智能体会话处理证据文件。",
+      "agentic": "编辑者以智能体会话的方式处理证据文件。",
+      "structured": "编辑者根据内联提供的证据返回一份结构化提案。"
+    },
+    "editorChannels": {
+      "auto": "自动",
+      "agentic": "智能体会话",
+      "structured": "结构化"
+    },
+    "useExperiences": "使用经验库",
+    "useExperiencesDescription": "向编辑者提供以往运行中最相关的经验。",
+    "autoAdopt": "自动采用低风险改进",
+    "autoAdoptDescription": "仅适用于任务和对话范围。工作区和全局修改始终需要询问。",
+    "budgetTitle": "预算上限",
+    "budgetDescription": "运行在触及任一上限时停止。每次运行可以调低这些上限。",
+    "budget": {
+      "maxCostUsd": {
+        "label": "费用（美元）",
+        "description": "执行和模型调用的总花费。"
+      },
+      "maxTokens": {
+        "label": "Token",
+        "description": "整个运行的输入与输出 Token。"
+      },
+      "maxModelCalls": {
+        "label": "模型调用",
+        "description": "编辑、组合、选择与反思的调用。"
+      },
+      "maxWallTimeMs": {
+        "label": "时间（分钟）",
+        "description": "从开始到做出决定的实际时间。"
+      },
+      "maxIterations": {
+        "label": "迭代",
+        "description": "一次运行可使用的最大 k。"
+      },
+      "maxCandidates": {
+        "label": "候选",
+        "description": "整个运行提出的候选 Harness 数（2k）。"
+      },
+      "maxParallelRuns": {
+        "label": "并行任务",
+        "description": "同时进行的执行与编辑会话数。"
+      },
+      "maxTurnsPerRollout": {
+        "label": "每次执行的轮次",
+        "description": "单次尝试可进行的智能体轮次。"
+      }
+    },
+    "modelsTitle": "模型",
+    "modelsDescription": "每个角色使用的模型。未设置的角色使用智能体自己的模型。",
+    "role": {
+      "executor": "执行者",
+      "editor": "编辑者",
+      "composer": "组合者",
+      "selector": "选择者",
+      "reflector": "反思者"
+    },
+    "roleDescription": {
+      "executor": "在每次执行中让智能体完成任务。",
+      "editor": "根据证据提出 Harness 修改。",
+      "composer": "把最好的修改合并为一个 Harness。",
+      "selector": "在检查无法决定时评判最终候选。",
+      "reflector": "归因哪些修改有效并写下经验。"
+    },
+    "agentModel": "智能体的模型",
+    "searchModels": "搜索模型",
+    "noModels": "未配置任何模型。",
+    "invalidModel": "没有已配置的提供商提供此模型。",
+    "probeTitle": "探测可访问的内容",
+    "probeDescription": "你信任在探测期间只读的 MCP 服务器。对其他服务器的调用会被拦截。",
+    "noMcpServers": "未配置任何 MCP 服务器。",
+    "pacingTitle": "节奏",
+    "cooldown": "失败冷却时间（小时）",
+    "cooldownDescription": "在一次自动运行或一次被忽略的提示之后，等待这段时间再为同一智能体提示或排队下一次。",
+    "backgroundInterval": "后台间隔（小时）",
+    "backgroundIntervalDescription": "两次启动后台运行之间的最短时间。",
+    "backgroundRuns": "每次巡检的运行数",
+    "backgroundRunsDescription": "同时进行的后台运行上限。",
+    "experienceCap": "每个智能体保留的经验数",
+    "experienceCapDescription": "超出此数时淘汰最弱的经验。"
+  }
+}

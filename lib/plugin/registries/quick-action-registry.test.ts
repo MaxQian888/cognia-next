@@ -22,6 +22,7 @@ import {
   registerCommand,
 } from "@/lib/plugin/commands/registry"
 import { registerSlashCommand, unregisterSlashCommand } from "@/lib/slash-commands/registry"
+import { usePluginStore } from "@/stores/plugin-runtime"
 
 afterEach(() => {
   __resetQuickActionsForTesting()
@@ -146,6 +147,29 @@ describe("runQuickAction", () => {
       { kind: "text", text: "summary" }
     )
     expect(run).toHaveBeenCalledWith(selectionInvocation)
+  })
+
+  it("runs its own plugin's manifest command, which the unified registry does not hold", async () => {
+    const execute = jest.fn(async () => undefined)
+    const foreign = jest.fn(async () => undefined)
+    usePluginStore.setState({
+      plugins: {
+        "plug-a": { commands: [{ id: "plug-a.open", name: "Open", execute }] },
+        "plug-b": { commands: [{ id: "plug-b.open", name: "Open", execute: foreign }] },
+      } as never,
+    })
+    try {
+      registerQuickAction("plug-a", { id: "x", title: "X", command: "plug-a.open" })
+      await expect(runQuickAction(getQuickAction("plug-a:x")!)).resolves.toBeUndefined()
+      expect(execute).toHaveBeenCalledTimes(1)
+
+      // Another plugin's manifest command is not reachable this way.
+      registerQuickAction("plug-a", { id: "y", title: "Y", command: "plug-b.open" })
+      await expect(runQuickAction(getQuickAction("plug-a:y")!)).rejects.toThrow(/plug-b.open/)
+      expect(foreign).not.toHaveBeenCalled()
+    } finally {
+      usePluginStore.setState({ plugins: {} as never })
+    }
   })
 
   it("falls back to executing the named command", async () => {

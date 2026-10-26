@@ -42,6 +42,12 @@ jest.mock("@/lib/twin/distill", () => ({
   createAnthropicLlmClient: jest.fn(() => ({ kind: "stub-llm" })),
 }))
 
+// These configuration tests have no IndexedDB. Keep the unrelated routing
+// gate off explicitly instead of paying two real database-reopen backoffs.
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: jest.fn(async () => null),
+}))
+
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
 import { createVectorStore } from "@cognia/vector/store"
 import {

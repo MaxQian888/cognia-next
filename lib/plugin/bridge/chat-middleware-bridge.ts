@@ -32,10 +32,8 @@ import {
 } from "@/lib/claude/chat-middleware/registry"
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
-
-export interface RegisterChatMiddlewaresOptions {
-  importer: (entry: string) => Promise<Record<string, unknown>>
-}
+import type { RegisterChatMiddlewaresOptions } from "@cognia/plugin-contract/lib/plugin/bridge/chat-middleware-bridge"
+export type { RegisterChatMiddlewaresOptions } from "@cognia/plugin-contract/lib/plugin/bridge/chat-middleware-bridge"
 
 /** What a python-backed middleware's `before` hook may return. */
 interface PythonMiddlewareBeforeResult {

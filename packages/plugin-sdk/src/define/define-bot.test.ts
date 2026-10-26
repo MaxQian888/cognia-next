@@ -1,4 +1,4 @@
-import type { PluginBotDef } from "@/types/plugin/plugin-bot"
+import type { PluginBotDef } from "@cognia/plugin-contract/types/plugin/plugin-bot"
 
 import { defineBot, defineBotHandler } from "./define-bot"
 

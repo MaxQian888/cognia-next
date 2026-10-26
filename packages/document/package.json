@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "@cognia/provider-embedding": "workspace:*",
-    "@firecrawl/anydoc-wasm": "0.2.4"
+    "@firecrawl/anydoc-wasm": "0.2.4",
+    "yaml": "^2.9.1"
   },
   "peerDependencies": {
     "cheerio": "*",
@@ -31,6 +32,8 @@
     "xlsx": ">=0.20.2"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.4",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "engines": {

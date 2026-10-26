@@ -17,6 +17,15 @@ import { listMcpServerPresetIds } from "./mcp-server-preset-registry"
 import { listNativeAnthropicToolIds } from "./native-anthropic-tool-registry"
 import { listSubagentEntries } from "./subagent-registry"
 import { getPluginCatalogSnapshot } from "@/lib/workflow/nodes/catalog"
+import type {
+  PluginWorkflowTemplateWarning,
+  WorkflowTemplateValidationResult,
+} from "@cognia/plugin-contract/lib/plugin/registries/workflow-template-registry"
+export type {
+  PluginWorkflowTemplateWarning,
+  PluginWorkflowTemplateWarningCode,
+  WorkflowTemplateValidationResult,
+} from "@cognia/plugin-contract/lib/plugin/registries/workflow-template-registry"
 
 /**
  * Built-in subagent dispatcher names always available — kept in sync with
@@ -28,24 +37,6 @@ const BUILT_IN_SUBAGENT_IDS: readonly string[] = [
   "workflow-refactorer",
   "workflow-doc-writer",
 ]
-
-export type PluginWorkflowTemplateWarningCode =
-  | "missing-skill"
-  | "missing-mcp-preset"
-  | "missing-native-tool"
-  | "missing-subagent"
-  | "missing-plugin-node"
-  | "missing-plugin-trigger"
-
-export interface PluginWorkflowTemplateWarning {
-  code: PluginWorkflowTemplateWarningCode
-  missingId: string
-}
-
-export interface WorkflowTemplateValidationResult {
-  warnings: PluginWorkflowTemplateWarning[]
-  ok: boolean
-}
 
 const registry = createValidatingOverlayRegistry<
   PluginWorkflowTemplateDef,

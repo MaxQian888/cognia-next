@@ -23,7 +23,7 @@
  *   Verify:   pnpm author-types:bundle -- --check   (exits 1 on drift)
  */
 
-import { existsSync, readFileSync, rmSync, mkdirSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Command, CommanderError } from "commander"
@@ -71,6 +71,28 @@ export function assertAuthorBuildRoot(manifest) {
     throw new Error(`Author declaration build root must not externalize ${internal.join(", ")}`)
 }
 
+/** Keep tsup's cwd externals separate from the application's install graph. */
+export function withDeclarationBuildRoot(build, root = repoRoot) {
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+  const cache = join(root, ".cache")
+  mkdirSync(cache, { recursive: true })
+  const directory = mkdtempSync(join(cache, "declaration-build-"))
+  try {
+    const externalManifest = { private: true }
+    for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+      externalManifest[field] = Object.fromEntries(
+        Object.entries(manifest[field] ?? {}).filter(([name]) => !name.startsWith("@cognia/"))
+      )
+    }
+    assertAuthorBuildRoot(externalManifest)
+    // CommonJS preserves the declaration filename convention of the old root cwd.
+    writeFileSync(join(directory, "package.json"), `${JSON.stringify(externalManifest)}\n`)
+    return build(directory)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
+
 export function assertStandaloneDeclaration(content) {
   const source = content.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
   if (/\b(?:from|import)\s*\(?["'](?:@\/|@cognia\/|\/|[A-Za-z]:[\\/])/.test(source)) {
@@ -79,7 +101,6 @@ export function assertStandaloneDeclaration(content) {
 }
 
 function build() {
-  assertAuthorBuildRoot(JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")))
   // provider-types and provider-core are normal standalone builds; both are in
   // `pnpm build:packages`, which is what guarantees they stay `@/`-free.
   run(
@@ -90,14 +111,12 @@ function build() {
   // The SDK's flattened author declaration is a second, separate dts build —
   // see `packages/plugin-sdk/tsup.author-types.config.ts` for why the published
   // `dist/` cannot be reused directly.
-  run(
-    // tsup DTS unconditionally externalizes production dependencies of cwd.
-    // The root owns no @cognia runtime edges, so internal types are flattened.
-    ["exec", "tsup", "--config", join(packagesRoot, "plugin-sdk/tsup.author-types.config.ts")],
-    repoRoot,
-    {
-      NODE_OPTIONS: "--max-old-space-size=16384",
-    }
+  withDeclarationBuildRoot((cwd) =>
+    run(
+      ["exec", "tsup", "--config", join(packagesRoot, "plugin-sdk/tsup.author-types.config.ts")],
+      cwd,
+      { NODE_OPTIONS: "--max-old-space-size=16384" }
+    )
   )
   run(["exec", "tsup", "--config", "tsup.author-types.config.ts"], join(packagesRoot, "plugin-ui"))
 }

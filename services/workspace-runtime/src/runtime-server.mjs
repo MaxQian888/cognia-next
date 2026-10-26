@@ -173,6 +173,8 @@ const PAGE_ADDRESSABLE_OPS = new Set([
   "browser.press-key",
   "browser.scroll",
   "browser.evaluate",
+  "browser.recording.control",
+  "browser.recording.ref",
   "browser.console",
   "browser.network",
   "browser.back",
@@ -211,7 +213,11 @@ const PAGE_ADDRESSABLE_OPS = new Set([
 function createDispatcher(browser, supervisor, media, eventJournal) {
   const operations = {
     "browser.session.create": (payload) => browser.createSession(payload),
-    "browser.session.close": ({ sessionId }) => browser.closeSession(sessionId),
+    "browser.session.close": ({ sessionId }) => {
+      // Also support small/legacy services without lifecycle subscriptions.
+      media.release(sessionId)
+      return browser.closeSession(sessionId)
+    },
     "browser.profile.delete": ({ profileId }) => browser.deleteProfile(profileId),
     "browser.navigate": ({ sessionId, url }) => browser.navigate(sessionId, url),
     "browser.snapshot": ({ sessionId, options }) => browser.snapshot(sessionId, options),
@@ -220,6 +226,10 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.press-key": ({ sessionId, key, ref }) => browser.pressKey(sessionId, key, ref),
     "browser.scroll": ({ sessionId, ...args }) => browser.scroll(sessionId, args),
     "browser.evaluate": ({ sessionId, expression }) => browser.evaluate(sessionId, expression),
+    "browser.recording.control": ({ sessionId, action }) =>
+      browser.recordingControl(sessionId, action),
+    "browser.recording.ref": ({ sessionId, selector }) =>
+      browser.resolveRecordedTarget(sessionId, selector),
     "browser.console": ({ sessionId }) => browser.readConsole(sessionId),
     "browser.network": ({ sessionId }) => browser.readNetwork(sessionId),
     "browser.back": ({ sessionId }) => browser.back(sessionId),
@@ -290,10 +300,14 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
     "browser.selection.for-ref": ({ sessionId, ref }) => browser.selectionForRef(sessionId, ref),
     "browser.adjust": ({ sessionId, action, input }) => browser.adjust(sessionId, action, input),
     "browser.screencast.start": async ({ sessionId, quality }) => {
-      await browser.startScreencast(sessionId, (frame) => media.publish(sessionId, frame), {
-        quality,
-      })
-      return { started: true }
+      const publish = media.publisher(sessionId)
+      try {
+        await browser.startScreencast(sessionId, publish, { quality })
+        return { started: true }
+      } catch (error) {
+        media.release(sessionId, publish)
+        throw error
+      }
     },
     "browser.screencast.ack": ({ sessionId, sequence }) =>
       browser.ackScreencastFrame(sessionId, sequence),
@@ -358,55 +372,77 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
 /** The longest a media read may wait for a frame (`?waitMs=`). */
 export const MAX_MEDIA_WAIT_MS = 1_000
 
-class MediaLatestStore {
+export class MediaLatestStore {
   constructor() {
-    this.frames = new Map()
-    this.sequence = new Map()
-    this.waiters = new Map()
+    this.sessions = new Map()
+    // An HTTP cursor belongs to this runtime, not to a reusable session id.
+    this.sequence = 0
+    this.closed = false
   }
 
-  publish(sessionId, bytes) {
-    const sequence = (this.sequence.get(sessionId) ?? 0) + 1
-    this.sequence.set(sessionId, sequence)
-    const frame = { sequence, bytes: Buffer.from(bytes) }
-    this.frames.set(sessionId, frame)
-    const waiting = this.waiters.get(sessionId)
-    if (!waiting) return
-    this.waiters.delete(sessionId)
-    for (const wake of waiting) wake()
+  ensure(sessionId) {
+    let state = this.sessions.get(sessionId)
+    if (!state) {
+      state = { frame: null, waiters: new Set(), owned: false, released: false }
+      this.sessions.set(sessionId, state)
+    }
+    return state
+  }
+
+  publisher(sessionId) {
+    if (this.closed) return () => undefined
+    const state = this.ensure(sessionId)
+    state.owned = true
+    if (state.publish) return state.publish
+    state.publish = (bytes) => {
+      if (state.released || this.closed || this.sessions.get(sessionId) !== state) return
+      state.frame = { sequence: ++this.sequence, bytes: Buffer.from(bytes) }
+      for (const wake of [...state.waiters]) wake()
+    }
+    return state.publish
+  }
+
+  release(sessionId, publisher) {
+    const state = this.sessions.get(sessionId)
+    if (!state || (publisher && state.publish !== publisher)) return
+    this.sessions.delete(sessionId)
+    state.released = true
+    state.frame = null
+    for (const wake of [...state.waiters]) wake()
+  }
+
+  clear() {
+    this.closed = true
+    for (const sessionId of this.sessions.keys()) this.release(sessionId)
   }
 
   latest(sessionId, after) {
-    const frame = this.frames.get(sessionId)
+    const frame = this.sessions.get(sessionId)?.frame
     return frame && frame.sequence > after ? frame : null
   }
 
-  /**
-   * The latest frame newer than `after`, waiting up to `waitMs` for one to be
-   * published (or for `signal` to abort). A long poll: the reader learns of a
-   * frame when it is published rather than on its next polling tick.
-   */
+  /** Wait only within the captured generation; release must end old polls. */
   async next(sessionId, after, waitMs, signal) {
     const ready = this.latest(sessionId, after)
-    if (ready || waitMs <= 0 || signal?.aborted) return ready
+    if (ready || waitMs <= 0 || signal?.aborted || this.closed) return ready
+    const state = this.ensure(sessionId)
     await new Promise((resolve) => {
       let timer = null
       const done = () => {
         clearTimeout(timer)
         signal?.removeEventListener("abort", done)
-        this.waiters.get(sessionId)?.delete(done)
+        state.waiters.delete(done)
+        if (!state.owned && state.waiters.size === 0 && this.sessions.get(sessionId) === state) {
+          this.sessions.delete(sessionId)
+        }
         resolve()
       }
+      state.waiters.add(done)
       timer = setTimeout(done, waitMs)
       signal?.addEventListener("abort", done, { once: true })
-      let waiting = this.waiters.get(sessionId)
-      if (!waiting) {
-        waiting = new Set()
-        this.waiters.set(sessionId, waiting)
-      }
-      waiting.add(done)
     })
-    return this.latest(sessionId, after)
+    if (state.released || signal?.aborted) return null
+    return state.frame && state.frame.sequence > after ? state.frame : null
   }
 }
 
@@ -424,6 +460,10 @@ export function createRuntimeServer({
     throw new Error("workspace runtime secret must be at least 32 characters")
   }
   const media = new MediaLatestStore()
+  const unsubscribe = browserService.subscribeEvents?.((event) => {
+    if (event.type === "session.closed") media.release(event.sessionId)
+  })
+  let closing = null
   const dispatch = createDispatcher(browserService, supervisor, media, eventJournal)
   const server = http.createServer(async (request, response) => {
     if (!authorized(request, secret)) {
@@ -502,13 +542,23 @@ export function createRuntimeServer({
     // Browsers first (so no Chromium outlives the runtime even if a later
     // step stalls), then agents, then the listener. Open keep-alive and
     // event-tail connections are dropped so `server.close` cannot hang.
-    async close() {
-      await browserService.closeAll()
-      await supervisor?.killAll()
-      await new Promise((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()))
-        server.closeAllConnections?.()
-      })
+    close() {
+      if (!closing) {
+        closing = (async () => {
+          media.clear()
+          try {
+            await browserService.closeAll()
+            await supervisor?.killAll()
+          } finally {
+            unsubscribe?.()
+            await new Promise((resolve, reject) => {
+              server.close((error) => (error ? reject(error) : resolve()))
+              server.closeAllConnections?.()
+            })
+          }
+        })()
+      }
+      return closing
     },
   }
 }

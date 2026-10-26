@@ -1,3 +1,21 @@
+import * as piSubagents from "./config/pi-subagents"
+jest.mock("./config/pi-subagents", () => {
+  const actual = jest.requireActual("./config/pi-subagents")
+  return { ...actual, resolvePiSubagents: jest.fn(actual.resolvePiSubagents) }
+})
+const mockModelFacts: {
+  override?: import("./config/gateway-model-facts").GatewayModelFacts
+} = {}
+jest.mock("./config/gateway-model-facts", () => {
+  const actual = jest.requireActual("./config/gateway-model-facts")
+  return {
+    ...actual,
+    resolveGatewayModelFacts: (providerId: string) =>
+      mockModelFacts.override
+        ? Promise.resolve(mockModelFacts.override)
+        : actual.resolveGatewayModelFacts(providerId),
+  }
+})
 jest.mock("@/lib/sandbox/delivery-source-hosts", () => ({
   recordDeliverySourceHost: jest.fn(async () => () => undefined),
 }))
@@ -455,6 +473,86 @@ describe("paired-web runtime readiness", () => {
 })
 
 describe("the session a model surface should describe", () => {
+  it("delegates gateway native controls to the task adapter and enforces the frozen model set", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    const child = new MockAdapter()
+    child.sessions.set("native-root", { id: "native-root", status: "idle" } as never)
+    const read = jest.fn(async () => ({
+      rootThreadId: "native-root",
+      models: [{ id: "allowed" }, { id: "denied" }],
+    }))
+    const change = jest.fn(async () => ({ status: "applied-awaiting-step" }))
+    Object.assign(child, { getNativeSubagents: read, changeNativeSubagentModel: change })
+    const internals = manager as unknown as {
+      adapters: Map<string, MockAdapter>
+      instances: Map<string, unknown>
+      gatewayTasks: Map<string, unknown>
+    }
+    internals.adapters.set("gateway-task-task-a", child)
+    internals.instances.set("gateway-task-task-a", { sessions: child.sessions })
+    internals.gatewayTasks.set("gateway-task-task-a", {
+      parentId: "agent-1",
+      taskId: "task-a",
+      allowedModels: ["allowed"],
+      planFingerprint: "frozen",
+      release: async () => {},
+    })
+    const publicId = "cognia-gateway:task-a:native-root"
+    expect(await manager.getNativeSubagents("agent-1", publicId)).toMatchObject({
+      rootThreadId: "native-root",
+      models: [{ id: "allowed" }],
+      planFingerprint: "frozen",
+    })
+    expect(read).toHaveBeenCalledWith("native-root")
+    const request = {
+      operationId: "op",
+      nativeChildThreadId: "child",
+      expectedProcessGeneration: 1,
+      expectedPlanFingerprint: "frozen",
+      scope: "future-turns" as const,
+      modelId: "denied",
+    }
+    await expect(manager.changeNativeSubagentModel("agent-1", publicId, request)).rejects.toThrow(
+      "model-not-allowed"
+    )
+    await expect(
+      manager.changeNativeSubagentModel("agent-1", publicId, {
+        ...request,
+        modelId: "allowed",
+        expectedPlanFingerprint: "stale",
+      })
+    ).rejects.toThrow("stale-model-plan")
+    expect(change).not.toHaveBeenCalled()
+    await manager.changeNativeSubagentModel("agent-1", publicId, { ...request, modelId: "allowed" })
+    expect(change).toHaveBeenCalledWith(
+      "native-root",
+      expect.objectContaining({ modelId: "allowed" })
+    )
+  })
+  it("routes native child operations only through an owned root session", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    currentMock.sessions.set("root", { id: "root", status: "idle" } as never)
+    const read = jest.fn(async () => undefined)
+    const change = jest.fn(async () => ({ status: "applied-awaiting-step" }))
+    Object.assign(currentMock, { getNativeSubagents: read, changeNativeSubagentModel: change })
+    await manager.getNativeSubagents("agent-1", "root")
+    const request = {
+      operationId: "op",
+      nativeChildThreadId: "child",
+      expectedProcessGeneration: 1,
+      scope: "future-turns" as const,
+      modelId: "model",
+    }
+    await manager.changeNativeSubagentModel("agent-1", "root", request)
+    expect(read).toHaveBeenCalledWith("root")
+    expect(change).toHaveBeenCalledWith("root", request)
+    await expect(manager.changeNativeSubagentModel("agent-1", "foreign", request)).rejects.toThrow(
+      "Session not found"
+    )
+    expect(change).toHaveBeenCalledTimes(1)
+  })
   it("has nothing to describe before the agent opens one", () => {
     // Connected with no session is ordinary right after connecting. Answering
     // with some other agent's session, or with an id that does not exist, is
@@ -3972,6 +4070,312 @@ describe("Cognia gateway task lifecycle", () => {
     return { manager, children, restorePlane }
   }
 
+  it.each(["workingDirectory", "cwd"])(
+    "detects Pi agents in context.custom.%s and admits explicit children before mint",
+    async (key) => {
+      const { manager, restorePlane } = prepare()
+      protocolAdapterRegistry.register("pi-rpc", () => new MockAdapter() as never)
+      const detect = jest
+        .mocked(piSubagents.resolvePiSubagents)
+        .mockImplementation(async (input) => ({
+          ...input,
+          metadata: {
+            ...input.metadata,
+            cogniaPiSubagents: {
+              family: "nico",
+              version: "0.80.0",
+              packageDir: "/plugins/nico",
+              extensions: ["/plugins/nico/index.js"],
+              agents: {
+                reviewer: {
+                  content: "---\nmodel: cognia/review\n---\nReview",
+                  model: "cognia/review",
+                  path: "/actual/.pi/agents/reviewer.md",
+                  digest: "snapshot",
+                },
+              },
+            },
+          },
+        }))
+      try {
+        const source = {
+          ...managedConfig(),
+          protocol: "pi-rpc" as const,
+          metadata: { preset: "pi-rpc" },
+          process: { command: "pi", cwd: "/wrong" },
+        }
+        await manager.addAgent(source)
+        await manager.execute("managed", "task", { context: { custom: { [key]: "/actual" } } })
+        expect(detect).toHaveBeenCalledWith(
+          expect.objectContaining({ process: expect.objectContaining({ cwd: "/actual" }) })
+        )
+        expect(mockGatewayMint.mock.calls[0][0].modelPlan.additionalModels).toContain("review")
+      } finally {
+        detect.mockImplementation(jest.requireActual("./config/pi-subagents").resolvePiSubagents)
+        restorePlane()
+      }
+    }
+  )
+
+  it("leases each explicit OpenCode child model before launching without a role override", async () => {
+    const { manager, restorePlane } = prepare()
+    const connected = jest.spyOn(MockAdapter.prototype, "connect")
+    try {
+      const source = managedConfig()
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agent: {
+            reviewer: { mode: "subagent", model: "cognia/review" },
+            explorer: { mode: "all", model: "provider/search" },
+            fallback: { mode: "subagent" },
+          },
+        }),
+      }
+      await manager.addAgent(source)
+      await manager.execute("managed", "task")
+      expect(mockGatewayMint.mock.calls[0][0].modelPlan).toEqual({
+        additionalModels: ["search", "review"],
+        modelBindings: {},
+      })
+      const child = connected.mock.calls
+        .map(([config]) => config)
+        .find((config) => config.metadata?.cogniaGatewayTask)
+      const inline = JSON.parse(child!.process!.env!.OPENCODE_CONFIG_CONTENT!)
+      expect(inline.agent.reviewer.model).toBe("cognia/review")
+      expect(inline.agent.explorer.model).toBe("cognia/search")
+      expect(inline.agent.fallback.model).toBe("cognia/model")
+    } finally {
+      connected.mockRestore()
+      restorePlane()
+    }
+  })
+
+  it("refuses another provider's explicit child model before minting a lease", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const source = managedConfig()
+      source.process!.env = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          agent: { reviewer: { mode: "subagent", model: "elsewhere/review" } },
+        }),
+      }
+      await manager.addAgent(source)
+      await expect(manager.execute("managed", "task")).rejects.toThrow(
+        "cross-provider-unsupported (opencode.agent.reviewer)"
+      )
+      expect(mockGatewayMint).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it.each(["unsupported-slot", "cross-provider-unsupported", "effort-unsupported"])(
+    "refuses %s before acquiring any lease",
+    async (reason) => {
+      const { manager, restorePlane } = prepare()
+      try {
+        await manager.addAgent(managedConfig())
+        const slot = reason === "unsupported-slot" ? "aux.unknown" : "subagent.default"
+        const selection = {
+          kind: "cognia" as const,
+          binding: {
+            providerId: reason === "cross-provider-unsupported" ? "other" : binding.providerId,
+            modelId: "child",
+          },
+          ...(reason === "effort-unsupported" ? { reasoningEffort: "high" } : {}),
+        }
+        await expect(
+          manager.execute("managed", "task", {
+            modelRoles: { version: 1, slots: { [slot]: selection } },
+          })
+        ).rejects.toThrow(reason)
+        expect(mockGatewayMint).not.toHaveBeenCalled()
+      } finally {
+        restorePlane()
+      }
+    }
+  )
+
+  it("judges a child's effort again by the leased account's own model metadata", async () => {
+    const { manager, restorePlane } = prepare()
+    mockModelFacts.override = {
+      modelSupportsReasoning: () => true,
+      modelEffortValues: () => ["low", "high"],
+    }
+    try {
+      const source = managedConfig()
+      source.metadata = { preset: "codex-acp" }
+      source.process = { command: "codex-acp", cwd: "/workspace" }
+      await manager.addAgent(source)
+      mockGatewayMint.mockImplementationOnce(async () => ({
+        endpoint: "http://127.0.0.1:9900/v1",
+        secret: "lease-secret",
+        ticketId: "ticket-account",
+        model: "model",
+        binding,
+        modelMetadata: { id: "model", contextLength: 128000 },
+        modelMetadataById: {
+          model: { id: "model", contextLength: 128000 },
+          child: { id: "child", supportsReasoning: false },
+        },
+      }))
+      await expect(
+        manager.execute("managed", "task", {
+          modelRoles: {
+            version: 1,
+            slots: {
+              "subagent.default": {
+                kind: "cognia",
+                binding: { providerId: binding.providerId, modelId: "child" },
+                reasoningEffort: "high",
+              },
+            },
+          },
+        })
+      ).rejects.toThrow("effort-unsupported (subagent.default)")
+      expect(mockGatewayMint).toHaveBeenCalledTimes(1)
+      expect(mockGatewayRevoke).toHaveBeenCalledWith("ticket-account")
+    } finally {
+      mockModelFacts.override = undefined
+      restorePlane()
+    }
+  })
+
+  it("refuses Codex child effort when model reasoning support is unknown before leasing", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const source = managedConfig()
+      source.metadata = { preset: "codex-acp" }
+      source.process = { command: "codex-acp", cwd: "/workspace" }
+      await manager.addAgent(source)
+      await expect(
+        manager.execute("managed", "task", {
+          modelRoles: {
+            version: 1,
+            slots: {
+              "subagent.default": {
+                kind: "cognia",
+                binding: { providerId: binding.providerId, modelId: "unknown-reasoning" },
+                reasoningEffort: "high",
+              },
+            },
+          },
+        })
+      ).rejects.toThrow("effort-unsupported (subagent.default)")
+      expect(mockGatewayMint).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("wires the compiled plan through admission and refuses a changed resume before leasing", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const modelRoles = {
+        version: 1 as const,
+        slots: {
+          "subagent.default": {
+            kind: "cognia" as const,
+            binding: { providerId: binding.providerId, modelId: "child" },
+          },
+        },
+      }
+      const first = await manager.execute("managed", "first", { modelRoles })
+      expect(mockGatewayMint.mock.calls[0][0].modelPlan).toEqual({
+        additionalModels: ["child"],
+        modelBindings: {},
+      })
+      expect(
+        manager.liveSessions("managed").find((session) => session.id === first.sessionId)?.metadata
+          ?.cogniaModelPlanFingerprint
+      ).toEqual(expect.any(String))
+      await expect(
+        manager.execute("managed", "resume", { sessionId: first.sessionId })
+      ).rejects.toThrow("different sub-task models")
+      expect(mockGatewayMint).toHaveBeenCalledTimes(1)
+      const resume = new MockAdapter()
+      resume.resumeSessionImpl = jest.fn(async (id) => {
+        const session = await resume.createSession()
+        resume.sessions.delete(session.id)
+        session.id = id
+        resume.sessions.set(id, session)
+        return session
+      })
+      protocolAdapterRegistry.register("acp", () => resume as never)
+      await manager.execute("managed", "resume", { sessionId: first.sessionId, modelRoles })
+      expect(mockGatewayMint).toHaveBeenCalledTimes(2)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  const resumable = () => {
+    const resume = new MockAdapter()
+    resume.resumeSessionImpl = jest.fn(async (id) => {
+      const session = await resume.createSession()
+      resume.sessions.delete(session.id)
+      session.id = id
+      resume.sessions.set(id, session)
+      return session
+    })
+    protocolAdapterRegistry.register("acp", () => resume as never)
+  }
+  const configRoles = {
+    version: 1 as const,
+    slots: {
+      "subagent.default": {
+        kind: "cognia" as const,
+        binding: { providerId: binding.providerId, modelId: "child" },
+      },
+    },
+  }
+
+  it("keeps a configuration's sub-task models on the next turn after the lease resolves its account", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      const { accountId: _unresolved, ...followsActive } = binding
+      await manager.addAgent({
+        ...managedConfig(),
+        cogniaModel: followsActive,
+        modelRoles: configRoles,
+      })
+      const first = await manager.execute("managed", "first")
+      resumable()
+      await manager.execute("managed", "again", { sessionId: first.sessionId })
+      // Chat passes the binding the lease resolved back as the turn's model.
+      await manager.execute("managed", "chat", {
+        sessionId: first.sessionId,
+        cogniaModel: parseGatewaySessionId(first.sessionId)!.binding,
+      })
+      expect(mockGatewayMint).toHaveBeenCalledTimes(3)
+      for (const [request] of mockGatewayMint.mock.calls)
+        expect(request.modelPlan).toEqual({ additionalModels: ["child"], modelBindings: {} })
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("resumes a task after a restart, when its recorded plan is no longer known", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      await manager.addAgent({ ...managedConfig(), modelRoles: configRoles })
+      const first = await manager.execute("managed", "first")
+      // A restart keeps the configuration and the session id, not the session record.
+      const instance = manager.getAgent("managed")!
+      instance.sessions.clear()
+      resumable()
+      await manager.execute("managed", "after restart", { sessionId: first.sessionId })
+      expect(mockGatewayMint).toHaveBeenCalledTimes(2)
+      expect(mockGatewayMint.mock.calls[1][0].modelPlan).toEqual({
+        additionalModels: ["child"],
+        modelBindings: {},
+      })
+    } finally {
+      restorePlane()
+    }
+  })
+
   it.each(["execute", "streaming"])(
     "%s preserves the aside's hard ceiling on the gateway child",
     async (execution) => {
@@ -4663,6 +5067,75 @@ describe("Cognia gateway task lifecycle", () => {
       restorePlane()
     }
   })
+
+  const childRoles = {
+    version: 1 as const,
+    slots: {
+      "subagent.default": {
+        kind: "cognia" as const,
+        binding: { providerId: "provider", modelId: "child" },
+      },
+    },
+  }
+
+  it("rebinds a task whose configuration names sub-task models to a new primary", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      captureChildren()
+      await manager.addAgent({ ...managedConfig(), modelRoles: childRoles })
+      const first = await manager.execute("managed", "first")
+      expect(mockGatewayMint.mock.calls[0][0].modelPlan).toEqual({
+        additionalModels: ["child"],
+        modelBindings: {},
+      })
+      mockGatewayMint.mockImplementationOnce(async () => leaseFor(bindingB))
+      // The primary feeds the plan fingerprint; a rebind must not read as a changed plan.
+      const rebound = await manager.execute("managed", "other model", {
+        sessionId: first.sessionId,
+        cogniaModel: bindingB,
+        rebind: true,
+      })
+      expect(parseGatewaySessionId(rebound.sessionId)!.binding).toEqual(bindingB)
+      expect(mockGatewayMint.mock.calls[1][0].modelPlan).toEqual({
+        additionalModels: ["child"],
+        modelBindings: {},
+      })
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it.each([
+    ["another provider", { providerId: "elsewhere", modelId: "big", accountId: "account-one" }],
+    ["another account", { providerId: "provider", modelId: "big", accountId: "account-two" }],
+  ])(
+    "runs a turn moved to %s on its primary alone instead of refusing the configuration's sub-task models",
+    async (_label, moved) => {
+      const { manager, restorePlane } = prepare()
+      try {
+        captureChildren()
+        await manager.addAgent({ ...managedConfig(), modelRoles: childRoles })
+        mockGatewayMint.mockImplementationOnce(async () => leaseFor(moved))
+        await manager.execute("managed", "moved", { cogniaModel: moved })
+        expect(mockGatewayMint.mock.calls[0][0].modelPlan).toBeUndefined()
+        // A caller's own sub-task models are still held to the turn's provider.
+        const pinnedChild = {
+          version: 1 as const,
+          slots: {
+            "subagent.default": {
+              kind: "cognia" as const,
+              binding: { providerId: "provider", modelId: "child", accountId: "account-one" },
+            },
+          },
+        }
+        await expect(
+          manager.execute("managed", "moved", { cogniaModel: moved, modelRoles: pinnedChild })
+        ).rejects.toThrow(/cross-(provider|account)-unsupported/)
+      } finally {
+        restorePlane()
+      }
+    }
+  )
 
   it("refuses a rebind across owner accounts and revokes the lease it minted", async () => {
     const { manager, restorePlane } = prepare()

@@ -36,7 +36,7 @@
  */
 
 import { Surface } from "@/components/surface/surface"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -56,42 +56,13 @@ import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { resolvePlanStrategy } from "@/lib/agent/plan/strategy"
 import { chatPlanStepHooks } from "@/lib/agent/plan/turn-driver"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import {
+  buildPlanApprovedPrompt,
+  resolvePlanApprovedPrompt,
+} from "@/lib/agent/plan/approval-prompts"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { AgentPlan, PlanRefinementType } from "@/types/agent/plan"
-
-/** The synthetic turn injected after a plan is approved. */
-export const PLAN_APPROVED_PROMPT =
-  "The plan above is approved. Implement it now, step by step, following the plan."
-
-/**
- * The synthetic turn injected after approval. When the user ADJUSTED the plan
- * during review (inline / interactive edits — `metadata.userEdited`, stamped by
- * {@link PlanApprovalDock}'s edit handler), the model's own transcript still
- * contains its ORIGINAL proposal, so the base "the plan above" prompt would
- * implement the wrong version. Embed the adjusted plan instead — the same
- * embed-the-plan pattern as the CLI's `PLAN_EXECUTE_PROMPT`.
- */
-export function buildPlanApprovedPrompt(plan: AgentPlan): string {
-  if (!plan.metadata?.userEdited) return PLAN_APPROVED_PROMPT
-  const meta = plan.metadata as { planText?: unknown }
-  const planText = typeof meta.planText === "string" ? meta.planText.trim() : ""
-  const body =
-    planText ||
-    [...plan.steps]
-      .sort((a, b) => a.order - b.order)
-      .map((s, i) => `${i + 1}. ${s.title}`)
-      .join("\n")
-  return [
-    "The plan is approved, but the user ADJUSTED it during review — the approved version below supersedes the plan you proposed earlier. Where they differ, follow the version below.",
-    "",
-    `# ${plan.title}`,
-    "",
-    body,
-    "",
-    "Implement it now, step by step, following the approved plan above.",
-  ].join("\n")
-}
 
 export interface PlanApprovalDockProps {
   sessionId: string
@@ -121,6 +92,13 @@ export function PlanApprovalDock({
   const reduceMotion = useReducedMotion()
   const plan = useSessionPlan(sessionId)
   const appSettings = useSettingsStore((s) => s.settings)
+  // Where the implementing turn's wording resolves (ADR-0236): this chat and
+  // its workspace.
+  const workspaceId = session?.projectId
+  const promptContext = useMemo(
+    () => ({ sessionId, ...(workspaceId ? { workspaceId } : {}) }),
+    [sessionId, workspaceId]
+  )
   // What is in flight for which plan: a decision (approve / keep planning /
   // reject / retry) or a refinement. Inline edits never set it — they are
   // serialized on `editChain` instead, so autosaves do not flicker the card.
@@ -166,23 +144,23 @@ export function PlanApprovalDock({
       return
     autoResumedRef.current = plan.id
     const planId = plan.id
+    const metadata = plan.metadata
     void (async () => {
+      // Resolution never throws: a broken override falls back to the shipped text.
+      const prompt = await resolvePlanApprovedPrompt(promptContext)
       try {
         await getPlanRuntime().updatePlanDraft(planId, {
-          metadata: { ...plan.metadata, autoResumedAt: Date.now() },
+          metadata: { ...metadata, autoResumedAt: Date.now() },
         })
-        await onResume(PLAN_APPROVED_PROMPT, "acceptEdits")
+        await onResume(prompt, "acceptEdits")
       } catch {
-        setLocalFailure({ planId, prompt: PLAN_APPROVED_PROMPT, mode: "acceptEdits" })
+        setLocalFailure({ planId, prompt, mode: "acceptEdits" })
         await getPlanRuntime()
-          .setChatResumeFailure(planId, {
-            prompt: PLAN_APPROVED_PROMPT,
-            mode: "acceptEdits",
-          })
+          .setChatResumeFailure(planId, { prompt, mode: "acceptEdits" })
           .catch(() => undefined)
       }
     })()
-  }, [plan, onResume])
+  }, [plan, onResume, promptContext])
 
   // Only gate on a plan that is actually awaiting a decision — after approval the
   // row becomes `approved` (still "open"), so gating here also prevents the dock
@@ -250,7 +228,7 @@ export function PlanApprovalDock({
       }
       // Orchestrated / exit-plan-mode parity: one implementing turn that asks
       // the model to work the approved plan through itself.
-      continuation = { prompt: buildPlanApprovedPrompt(current), mode }
+      continuation = { prompt: await buildPlanApprovedPrompt(current, promptContext), mode }
       await onResume(continuation.prompt, mode)
       // Leave `pending` set — approvePlan flips the status so this dock unmounts.
     } catch (error) {

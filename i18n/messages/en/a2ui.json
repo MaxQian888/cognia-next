@@ -15,6 +15,7 @@
   "aiEditUnavailable": "AI is unavailable right now — nothing was changed.",
   "aiGenerate": "AI Generate",
   "aiPaperAnalysis": "AI Paper Analysis",
+  "aiPartialFailure": "AI stopped after applying part of the change. Review the current draft before retrying.",
   "aiRegeneratePrompt": "Describe what you want to change...",
   "allApps": "All Apps",
   "allCategories": "All",
@@ -94,6 +95,16 @@
   "componentTree": "Components",
   "componentType": "Component type",
   "continueWorking": "Continue Working",
+  "controls": {
+    "dialogContent": "Dialog content",
+    "noResults": "No results",
+    "pickDate": "Pick a date",
+    "required": "This field is required",
+    "search": "Search...",
+    "select": "Select...",
+    "submit": "Submit",
+    "untitled": "Untitled"
+  },
   "copied": "Copied!",
   "copiedExclamation": "Copied!",
   "copy": "Copy",
@@ -412,8 +423,8 @@
     "errorLoading": "Error loading surface",
     "loading": "Loading...",
     "noContent": "No content to display",
-    "rendering": "Rendering...",
-    "preparing": "Preparing…"
+    "preparing": "Preparing…",
+    "rendering": "Rendering..."
   },
   "surfaceRoot": "Surface root (wrap existing root)",
   "systemShare": "System Share",

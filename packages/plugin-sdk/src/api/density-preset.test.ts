@@ -7,7 +7,7 @@ import type {
 } from "./density-preset"
 
 describe("plugin-sdk api/density-preset", () => {
-  it("exposes the authoring helper, density registry, and density applier helpers", () => {
+  it("exposes the authoring helper and the density registry", () => {
     expect(typeof sdk.defineDensityPreset).toBe("function")
     expect(typeof sdk.registerDensityPreset).toBe("function")
     expect(typeof sdk.registerDensityPresetsForPlugin).toBe("function")
@@ -15,10 +15,13 @@ describe("plugin-sdk api/density-preset", () => {
     expect(typeof sdk.getDensityPreset).toBe("function")
     expect(typeof sdk.listDensityPresets).toBe("function")
     expect(typeof sdk.subscribeDensityPresets).toBe("function")
-    expect(typeof sdk.applyDensityPresetVars).toBe("function")
-    expect(typeof sdk.clearDensityPresetVars).toBe("function")
-    expect(typeof sdk.resolveDensityAttrs).toBe("function")
-    expect(typeof sdk.densitySurfaceProps).toBe("function")
+  })
+
+  it("keeps host wiring off the author surface (the host applies density itself)", () => {
+    expect(sdk).not.toHaveProperty("applyDensityPresetVars")
+    expect(sdk).not.toHaveProperty("clearDensityPresetVars")
+    expect(sdk).not.toHaveProperty("resolveDensityAttrs")
+    expect(sdk).not.toHaveProperty("densitySurfaceProps")
   })
 
   it("re-exports density contribution, registry, and appearance settings types", () => {

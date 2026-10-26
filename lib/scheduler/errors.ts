@@ -5,6 +5,7 @@
 
 export type SchedulerErrorCode =
   | "INIT_FAILED"
+  | "TIMING_DRIVER_FAILED"
   | "TASK_NOT_FOUND"
   | "EXECUTOR_NOT_FOUND"
   | "EXECUTION_TIMEOUT"
@@ -21,6 +22,8 @@ export type SchedulerErrorCode =
   | "PLUGIN_HANDLER_NOT_FOUND"
   | "DEPRECATED_TASK_TYPE"
   | "NEEDS_APPROVAL"
+  | "RETIRED_MAINTENANCE_TASK"
+  | "MAINTENANCE_IDENTITY_COLLISION"
   | "UNKNOWN"
 
 export class SchedulerError extends Error {
@@ -40,6 +43,16 @@ export class SchedulerError extends Error {
     if (cause) {
       this.cause = cause
     }
+  }
+
+  static timingDriverFailed(operation: string, error: unknown): SchedulerError {
+    const cause = error instanceof Error ? error : new Error(String(error))
+    return new SchedulerError(
+      "TIMING_DRIVER_FAILED",
+      `Native scheduler ${operation} failed: ${cause.message}`,
+      { operation },
+      cause
+    )
   }
 
   static taskNotFound(taskId: string): SchedulerError {

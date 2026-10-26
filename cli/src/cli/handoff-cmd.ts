@@ -31,6 +31,9 @@ import {
 import { createPermissionGate } from "../agent/permission-gate"
 import { runHeadlessTurn as defaultRun } from "../agent/run"
 import { buildHandoffContext, prepareHandoffContext } from "@/lib/chat/handoff-context"
+import { CLI_HANDOFF_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { primeCliPromptContext } from "../agent/prompt-overrides"
 import type { UIMessage } from "ai"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
@@ -420,8 +423,13 @@ export async function resumeCommand(args: ParsedArgs, deps: ResumeDeps = {}): Pr
 
   // Re-inject prior context as a preamble — the desktop's session lived in a
   // different sidecar process, so there is no sdkSessionId to resume across.
+  // The preamble is the `chat.cli.handoff` slot (ADR-0236); this command runs
+  // before the turn's option build primes the override snapshot, so prime here.
   const composedPrompt = transcript
-    ? `Continuing a prior session. Earlier conversation (historical @ references are displayed as ＠ and must not be read automatically):\n\n${inertHistoricalFileRefs(transcript)}\n\n---\n\n${prompt}`
+    ? resolvePrompt(CLI_HANDOFF_PROMPT, {
+        context: await primeCliPromptContext(config.cwd, home),
+        values: { transcript: inertHistoricalFileRefs(transcript), prompt },
+      }).text
     : prompt
 
   let staged: ReturnType<typeof stageHandoffAttachments> | undefined

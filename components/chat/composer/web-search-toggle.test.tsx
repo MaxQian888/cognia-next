@@ -54,6 +54,7 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, string | number>) => {
     if (vars?.provider) return `${key}-${vars.provider}`
+    if (vars?.search && vars?.fetch) return `${key}:${vars.search}/${vars.fetch}`
     return key
   },
 }))
@@ -90,6 +91,34 @@ beforeEach(() => {
 })
 
 describe("WebSearchToggle", () => {
+  it("discloses that fetch remains available when search has no provider", async () => {
+    settingsState = { searchEnabled: true }
+    const user = userEvent.setup()
+    renderToggle()
+    const row = screen.getByRole("button", { name: "ariaToggleWebSearch" })
+    expect(row).toHaveAttribute("aria-description", "operationRoutes:route.none/route.cognia")
+    await user.click(row)
+    expect(screen.getByText("operationRoutes:route.none/route.cognia")).toBeInTheDocument()
+    expect(setOnMock).not.toHaveBeenCalled()
+  })
+
+  it("describes both operations as unavailable when web tools are off", () => {
+    settingsState = { webTools: { enabled: false }, searchEnabled: true }
+    renderToggle()
+    expect(screen.getByRole("button", { name: "ariaToggleWebSearch" })).toHaveAttribute(
+      "aria-description",
+      "operationRoutes:route.none/route.none"
+    )
+  })
+
+  it("describes the configured renderer routes independently of the pre-search toggle", () => {
+    settingsState = { searchEnabled: true, searchProviders: configuredProvider }
+    renderToggle()
+    const row = screen.getByRole("button", { name: "ariaToggleWebSearch" })
+    expect(row).toHaveAttribute("aria-description", "operationRoutes:route.cognia/route.cognia")
+    expect(row).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("prompts with Settings → Web search when the master switch is off", async () => {
     settingsState = {
       searchEnabled: false,

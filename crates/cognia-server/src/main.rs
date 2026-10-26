@@ -34,6 +34,8 @@
 //! arm the headless host cannot serve answers `503 headless_unsupported`
 //! naming the command.
 
+mod org_admin;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -102,6 +104,23 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Manage organization model credentials through the running Host.
+    OrgCredentials {
+        #[command(subcommand)] command: org_admin::CredentialsCommand,
+        #[arg(long, global = true)] port: Option<u16>,
+    },
+    /// Manage the organization's bundled-agent allowlist.
+    OrgAgents {
+        #[command(subcommand)] command: org_admin::AgentsCommand,
+        #[arg(long, global = true)] port: Option<u16>,
+    },
+    /// Inspect or irreversibly purge person data through the running Host.
+    Persons {
+        #[command(subcommand)]
+        command: PersonsCommand,
+        #[arg(long)]
+        port: Option<u16>,
+    },
     /// Run only the durable integrated-terminal host. No brain, AI sidecar,
     /// gateway, browser, or general companion services are started.
     DesktopHost {
@@ -313,6 +332,12 @@ enum CliCommand {
         #[command(subcommand)]
         command: TunnelIngressCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum PersonsCommand {
+    List,
+    Purge { #[arg(long)] org: String, #[arg(long)] user: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -612,6 +637,32 @@ fn spawn_headless_push_triggers(shared: cognia_companion::SharedState) {
             else {
                 continue;
             };
+            if frame.partition_account_id.is_some() {
+                if let Some(device) = frame.target_device_id.as_deref() {
+                    if !cognia_companion::person_partition::event_visible(&frame, device, None) { continue; }
+                    let person = cognia_companion::security_store::security_store()
+                        .and_then(|store| store.person_for_account_device(device).ok().flatten());
+                    if let Some(person) = person {
+                        let person = cognia_companion::person_partition::PersonPartition::new(person.org_id.to_string(), person.user_id.to_string());
+                        let registry = shared.push_tokens.for_account(&person.account_id);
+                        let data = frame.payload.as_object().cloned().unwrap_or_default();
+                        let payload = cognia_companion::push::PushPayload {
+                            title: Some("cognia".into()), body: Some(cognia_companion::push_triggers::push_body_for_channel(channel, &data)),
+                            data: cognia_companion::push_triggers::push_data_for_channel(channel, &data),
+                        };
+                        for provider in [cognia_companion::push::PushProvider::Fcm, cognia_companion::push::PushProvider::Apns, cognia_companion::push::PushProvider::Hms] {
+                            if let Some(dispatcher) = cognia_companion::push_dispatchers().for_provider(provider) {
+                                if registry.get(device).is_some_and(|record| record.provider == provider) {
+                                    registry.dispatch_to_device(device, &payload, dispatcher.as_ref()).await;
+                                }
+                            }
+                        }
+                    }
+                }
+                // A partition event without a destination is never a Host
+                // broadcast, even if a future producer forgets its audience.
+                continue;
+            }
             let raw = frame.payload.to_string();
             fan_out_push(
                 Arc::clone(&shared.push_tokens),
@@ -1076,6 +1127,11 @@ fn store_data_dir() -> PathBuf {
     data_dir()
 }
 
+/// Resolve the operator's local namespace independently of request tenant identity.
+fn configured_local_account_id(cli: Option<String>, environment: Option<String>) -> Option<String> {
+    cli.or(environment).filter(|id| !id.trim().is_empty())
+}
+
 /// Minimal stderr logger. Without an installed `log` backend every
 /// supervisor line — including the piped brain/sidecar output — is silently
 /// dropped, which makes a headless install undebuggable. `COGNIA_LOG`
@@ -1252,11 +1308,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let CliCommand::Service { command } = &cli.command {
         // The installed service serves the account named here, if any.
-        let local_account_id = cli
-            .local_account_id
-            .clone()
-            .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
-            .filter(|id| !id.trim().is_empty());
+        let local_account_id = configured_local_account_id(
+            cli.local_account_id.clone(),
+            std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok(),
+        );
         return run_service_command(command, local_account_id)
             .await
             .map_err(Into::into);
@@ -1370,12 +1425,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // no-op-to-sentinel until this runs, so ordering it after
     // `install_security_store` and before the first command is what makes the
     // headless host serve a real account instead of the unclaimed bucket.
-    let local_account_id = cli
-        .local_account_id
-        .clone()
-        .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
-        .filter(|id| !id.trim().is_empty())
-        .unwrap_or_else(|| HEADLESS_LOCAL_ACCOUNT_ID.to_string());
+    let local_account_id = configured_local_account_id(
+        cli.local_account_id.clone(),
+        std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok(),
+    )
+    .unwrap_or_else(|| HEADLESS_LOCAL_ACCOUNT_ID.to_string());
     if let Err(error) =
         cognia_companion::host_identity::bind_local_account_from_operator(&local_account_id)
     {
@@ -1411,6 +1465,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tls_material = tls::ensure_certificate(&dir)?;
 
     match cli.command {
+        CliCommand::Persons { command, port } => {
+            run_persons(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
+        CliCommand::OrgCredentials { command, port } => {
+            org_admin::credentials(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
+        CliCommand::OrgAgents { command, port } => {
+            org_admin::agents(command, resolve_pair_port(port, std::env::var("COGNIA_PORT").ok().as_deref())).await
+        }
         CliCommand::Pair {
             device_name,
             advertise_url,
@@ -1456,6 +1519,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_serve(
                 &store,
                 &tls_material,
+                local_account_id,
                 port,
                 advertise_url,
                 bind_loopback,
@@ -2268,6 +2332,27 @@ enum RunningPair {
     Failed(String),
 }
 
+async fn run_persons(command: PersonsCommand, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let signing_secret = secret::load_or_generate()?;
+    let tenant = cognia_companion::host_identity::current_tenant_or_unbound();
+    let (token, _) = cognia_companion::jwt::issue_service_jwt(&signing_secret, &tenant)?;
+    // Match pairing's authenticated loopback client: the signing secret
+    // establishes Host identity; bypass the deployment's public proxy.
+    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).no_proxy()
+        .timeout(std::time::Duration::from_secs(120)).build()?;
+    let base = format!("https://127.0.0.1:{port}/internal/persons");
+    let response = match command {
+        PersonsCommand::List => client.get(base).bearer_auth(token).send().await?,
+        PersonsCommand::Purge { org, user } => client.post(format!("{base}/purge")).bearer_auth(token)
+            .json(&serde_json::json!({ "org": org, "user": user })).send().await?,
+    };
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+    if !status.is_success() { return Err(format!("persons: {status}: {body}").into()); }
+    println!("{}", serde_json::to_string_pretty(&body)?);
+    Ok(())
+}
+
 /// Ask a running `cognia-server serve` on this machine for an invitation
 /// through `companion_create_owner_invitation` on the loopback service plane
 /// (ADR-0170) on `port`.
@@ -2577,9 +2662,24 @@ fn start_host_updater(
     tokio::spawn(updater.run());
 }
 
+fn configured_exec_backend(
+    execution: cognia_sandbox_pool::boot::ExecutionSetting,
+    deployment_id: &str,
+) -> Result<Arc<dyn cognia_external_agent::exec_backend::ExecBackend>, String> {
+    if execution == cognia_sandbox_pool::boot::ExecutionSetting::Disabled {
+        // No process manager or runtime configuration exists on this path.
+        Ok(Arc::new(cognia_external_agent::exec_backend::DisabledExecBackend))
+    } else {
+        exec_backend_from_env(deployment_id).map_err(|error| format!("exec backend: {error}"))
+    }
+}
+
+// Keep the validated boot context and existing independent Serve flags explicit.
+#[allow(clippy::too_many_arguments)]
 async fn run_serve(
     store: &std::sync::Arc<SqliteAppStore>,
     tls_material: &tls::TlsMaterial,
+    local_account_id: String,
     port: u16,
     advertise_url: Option<String>,
     bind_loopback: bool,
@@ -2587,6 +2687,12 @@ async fn run_serve(
     mdns_requested: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // ADR-0224 A10: before anything starts, settle a pending update.
+    let execution_setting = match std::env::var("COGNIA_EXECUTION") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => return Err("COGNIA_EXECUTION must be enabled or disabled (invalid Unicode)".into()),
+    };
+    let execution = cognia_sandbox_pool::boot::ExecutionSetting::parse(execution_setting.as_deref())?;
     let host_install = detect_host_install();
     let host_update_trial = boot_host_update(&host_install)?;
     let (restart_for_update, mut restart_requested) = tokio::sync::watch::channel(false);
@@ -2789,13 +2895,17 @@ async fn run_serve(
     {
         log::warn!("managed desktops unavailable: {}", error.code);
     }
-    let exec = exec_backend_from_env(&deployment_id).map_err(|e| format!("exec backend: {e}"))?;
+    let exec = configured_exec_backend(execution, &deployment_id)?;
     // ADR-0182/0183 — runtime environment sandboxes, in front of whatever the
     // line above resolved. Off unless this deployment enabled the pool, and
     // then it hands the same backend straight back; a deployment that DID
     // enable it and cannot get a sandbox is refused here rather than served by
     // the legacy runner it asked to stop using.
-    let pool = cognia_sandbox_pool::boot::install(exec, &data_dir, &deployment_id)
+    let pool = cognia_sandbox_pool::boot::install_for_deployment(
+        exec, &data_dir, &deployment_id,
+        cognia_companion::deployment::deployment_mode() == cognia_companion::deployment::DeploymentMode::MultiTenant,
+        execution_setting.as_deref(),
+    ).await
         .map_err(|e| format!("sandbox pool: {e}"))?;
     let exec = pool.backend;
     cognia_companion_rpc::managed_desktop_results::install_task_cleanup_backend(exec.clone());
@@ -2842,9 +2952,6 @@ async fn run_serve(
         serde_json::to_string(&remote_browser)
             .unwrap_or_else(|error| format!("{{\"serializationError\":\"{error}\"}}"))
     );
-    let local_account_id = cognia_companion::host_identity::current()
-        .map(|context| context.local_account_namespace)
-        .map_err(|error| format!("resolve headless local account: {error}"))?;
     let services = HeadlessServices::new_with_exec(
         sidecar_host,
         api_keys,
@@ -3075,6 +3182,7 @@ async fn run_serve(
     // runs — the degraded store serves reads and /healthz reports
     // `brain.configured: false`.
     let mut brain_supervisor: Option<Arc<brain::BrainSupervisor>> = None;
+    let mut person_fleet: Option<Arc<cognia_server::persons::Fleet>> = None;
     match resolve_brain_entry() {
         Some(entry) => {
             let brain_local_account_id = local_account_id.clone();
@@ -3089,9 +3197,9 @@ async fn run_serve(
                 data_dir.clone(),
                 // The brain creates this id in its own account registry
                 // (`cli/src/serve/account.ts`), so it must be the local account
-                // *namespace* — deliberately not the tenant. Read back from the
-                // binding rather than threaded through, so there is one answer
-                // to "which account does this host serve".
+                // *namespace* — deliberately not the request tenant. Reuse the
+                // operator value resolved and bound before entering `run_serve`;
+                // multi-tenant Hosts have no process-wide current tenant.
                 brain_local_account_id,
                 account_content_key,
                 headless_services()
@@ -3100,6 +3208,16 @@ async fn run_serve(
                 tls_material.fingerprint_sha256.clone(),
                 Some(tls_material.cert_pem_path.clone()),
             );
+            if cognia_companion::deployment::deployment_mode() == cognia_companion::deployment::DeploymentMode::MultiTenant {
+                match cognia_server::persons::Fleet::new(config.clone(), Arc::clone(&shared)) {
+                    Ok(fleet) => {
+                        cognia_companion::person_partition::install(Some(fleet.clone()));
+                        fleet.start_idle_reaper();
+                        person_fleet = Some(fleet);
+                    }
+                    Err(error) => log::error!("person-brain fleet unavailable; Host data remains refused: {error}"),
+                }
+            }
             let supervisor = brain::BrainSupervisor::new(config, Arc::clone(&shared));
             brain::install_brain(Some(Arc::clone(&supervisor)));
             supervisor.start();
@@ -3152,6 +3270,10 @@ async fn run_serve(
         std::process::exit(cognia_core::shutdown_signal::SIGNAL_EXIT_CODE);
     });
     cognia_companion::server::begin_draining();
+    if let Some(fleet) = person_fleet {
+        fleet.shutdown().await;
+        cognia_companion::person_partition::install(None);
+    }
     if let Some(supervisor) = brain_supervisor {
         supervisor.shutdown();
     }
@@ -3233,6 +3355,47 @@ async fn run_serve(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn p5_persons_cli_has_explicit_identity_and_port_selection() {
+        use super::PersonsCommand;
+        let list = Cli::try_parse_from(["cognia-server", "persons", "list"]).unwrap();
+        assert!(matches!(list.command, CliCommand::Persons { command: PersonsCommand::List, .. }));
+        let purge = Cli::try_parse_from(["cognia-server", "persons", "--port", "27891", "purge", "--org", "org_a", "--user", "usr_a"]).unwrap();
+        assert!(matches!(purge.command, CliCommand::Persons { command: PersonsCommand::Purge { org, user }, port: Some(27891) } if org == "org_a" && user == "usr_a"));
+        assert!(Cli::try_parse_from(["cognia-server", "persons", "purge", "--org", "org_a"]).is_err());
+    }
+
+    #[test]
+    fn local_namespace_uses_operator_configuration_without_a_request_tenant() {
+        use super::configured_local_account_id;
+
+        assert_eq!(
+            configured_local_account_id(Some("acct_cli".into()), Some("acct_env".into())),
+            Some("acct_cli".into())
+        );
+        assert_eq!(
+            configured_local_account_id(None, Some("acct_env".into())),
+            Some("acct_env".into())
+        );
+        assert_eq!(configured_local_account_id(None, None), None);
+        assert_eq!(configured_local_account_id(None, Some("  ".into())), None);
+        assert_eq!(
+            configured_local_account_id(Some("".into()), Some("acct_env".into())),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn control_plane_boot_selects_a_refusing_backend_without_runtime_configuration() {
+        let backend = super::configured_exec_backend(cognia_sandbox_pool::boot::ExecutionSetting::Disabled, "control-plane").unwrap();
+        assert_eq!(backend.kind(), "disabled");
+        assert!(backend.list().await.is_empty());
+        assert!(backend.status("unknown").await.is_none());
+        assert!(backend.reap_orphans().await.unwrap().is_empty());
+        backend.kill_all().await.unwrap();
+        assert_eq!(backend.send("unknown", "run").await.unwrap_err(), "execution_isolation_unavailable");
+    }
+
     #[test]
     fn remote_desktop_audit_is_installed_beside_companion_audit() {
         let source = include_str!("main.rs");

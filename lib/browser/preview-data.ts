@@ -48,3 +48,5 @@ export async function clearBrowserPreviewData(): Promise<BrowserPreviewDataClear
   const { removed } = await clearAllSiteCookies()
   return { cookiesRemoved: removed }
 }
+export const REMOTE_BROWSER_SETTINGS_HREF =
+  "/settings?section=connectivity&connectivityPanel=cloud-relay"

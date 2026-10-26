@@ -74,6 +74,8 @@ describe("ProviderDiagnosticsTab", () => {
     )
 
     expect(screen.getByText("summary.title")).toBeInTheDocument()
+    expect(screen.getByText("maintenance.title")).toBeInTheDocument()
+    expect(screen.getByText("maintenance.unknown")).toBeInTheDocument()
     expect(screen.getAllByTestId("diagnostics-run-composer")).toHaveLength(1)
     expect(screen.getByText("matrix.title")).toBeInTheDocument()
     expect(screen.getByText("balance.title")).toBeInTheDocument()

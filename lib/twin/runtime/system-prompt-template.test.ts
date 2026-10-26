@@ -4,7 +4,14 @@
  * rules, and metadata payload.
  */
 
-import { applySystemPromptTemplate } from "./system-prompt-template"
+import { applySystemPromptTemplate, TWIN_SYSTEM_TEMPLATE_PROMPTS } from "./system-prompt-template"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+  type ActivePromptOverride,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { validatePromptBody } from "@/lib/prompts/template"
 import type { Playbook, ProfileEntity, RetrievedTwinChunk, StyleSample } from "@/types/twin"
 
 function makeChunk(id: string, content = "the chunk body"): RetrievedTwinChunk["chunk"] {
@@ -290,5 +297,93 @@ describe("applySystemPromptTemplate", () => {
     })
     expect(out.cacheSegments.dynamic).toBe("")
     expect(out.cacheSegments.stable).toBe(out.systemPrompt)
+  })
+})
+
+describe("editable scaffolding (ADR-0236)", () => {
+  const override = (
+    section: keyof typeof TWIN_SYSTEM_TEMPLATE_PROMPTS,
+    body: string,
+    revisionId: string,
+    scope: ActivePromptOverride["scope"] = "account",
+    targetId = ""
+  ): ActivePromptOverride => ({
+    bindingId: `pob-${revisionId}`,
+    promptId: TWIN_SYSTEM_TEMPLATE_PROMPTS[section].id,
+    scope,
+    targetId,
+    revisionId,
+    body,
+    contractVersion: TWIN_SYSTEM_TEMPLATE_PROMPTS[section].contractVersion,
+  })
+
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("keeps profile data out of every definition body", () => {
+    for (const def of Object.values(TWIN_SYSTEM_TEMPLATE_PROMPTS)) {
+      expect(validatePromptBody(def, def.defaultBody)).toEqual([])
+      // One placeholder carries the data; the body itself is scaffolding only.
+      expect(def.variables).toHaveLength(1)
+      expect(def.defaultBody).toContain(`{{${def.variables[0].name}}}`)
+    }
+  })
+
+  it("sends published wording with the profile data as values", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        override("identity", "Du bist {{twinName}}.", "por-twin-identity"),
+        override("retrieved", "## Archiv\n{{chunks}}", "por-twin-retrieved"),
+      ])
+    )
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [{ chunk: makeChunk("c1", "the {{twinName}} body"), score: 0.9 }],
+      styleSamples: [],
+    })
+    expect(out.cacheSegments.stable).toBe("Du bist Alice.")
+    // Chunk text is inserted once and never re-scanned for placeholders.
+    expect(out.cacheSegments.dynamic).toBe(
+      "## Archiv\n### Chunk 1 — Unknown source (score 0.90)\nthe {{twinName}} body"
+    )
+  })
+
+  it("applies an agent-scoped override only to that twin's character", () => {
+    const snapshot = buildPromptOverrideSnapshot("test-db", [
+      override("identity", "You speak as {{twinName}}.", "por-twin-agent", "agent", "char-1"),
+    ])
+    const base = { twinName: "Alice", entities: [], retrievedChunks: [], styleSamples: [] }
+    expect(
+      applySystemPromptTemplate({
+        ...base,
+        promptContext: { agentId: "char-1" },
+        promptSnapshot: snapshot,
+      }).systemPrompt
+    ).toBe("You speak as Alice.")
+    expect(
+      applySystemPromptTemplate({
+        ...base,
+        promptContext: { agentId: "char-2" },
+        promptSnapshot: snapshot,
+      }).systemPrompt
+    ).toBe("You are Alice.")
+  })
+
+  it("never renders an override that drops the section's data", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        override("identity", "You are a generic assistant.", "por-twin-no-name"),
+      ])
+    )
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    expect(out.systemPrompt).toBe("You are Alice.")
   })
 })

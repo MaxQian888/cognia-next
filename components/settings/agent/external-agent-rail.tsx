@@ -174,7 +174,6 @@ function AgentRow({
   showPresetBadge,
   active,
   connecting,
-  disabled,
   onSelect,
   onPower,
 }: {
@@ -185,8 +184,6 @@ function AgentRow({
   showPresetBadge: boolean
   active: boolean
   connecting: boolean
-  /** Master switch off — the row still selects, the power button does not. */
-  disabled: boolean
   onSelect: () => void
   onPower: () => void
 }) {
@@ -283,7 +280,7 @@ function AgentRow({
             : t("quickConnect", { name: agent.name })
         }
         data-testid={`agent-power-${agent.id}`}
-        disabled={disabled || connecting || (!connected && cannotConnect)}
+        disabled={connecting || (!connected && cannotConnect)}
         onClick={onPower}
       >
         {connecting ? (
@@ -303,7 +300,6 @@ export function ExternalAgentRail({
   readinessById,
   traitsById,
   view,
-  enabled,
   groupBy,
   onGroupByChange,
   stateFilter,
@@ -321,7 +317,6 @@ export function ExternalAgentRail({
   /** What sets each agent apart from the other configurations of its runtime. */
   traitsById: ReadonlyMap<string, readonly InstanceTrait[]>
   view: AgentSettingsView
-  enabled: boolean
   groupBy: AgentRailGroupBy
   onGroupByChange: (groupBy: AgentRailGroupBy) => void
   stateFilter: AgentStateFilter
@@ -539,7 +534,6 @@ export function ExternalAgentRail({
                     showPresetBadge={groupBy === "readiness"}
                     active={view.kind === "agent" && view.id === agent.id}
                     connecting={isConnecting(agent.id)}
-                    disabled={!enabled}
                     onSelect={() => choose({ kind: "agent", id: agent.id })}
                     onPower={() =>
                       readinessById.get(agent.id)?.state === "connected"
@@ -562,7 +556,6 @@ export function ExternalAgentRail({
           type="button"
           variant="ghost"
           onClick={onNewAgent}
-          disabled={!enabled}
           data-testid="nav-new-agent"
           className="touch-hit mt-1 h-auto w-full justify-start gap-2 whitespace-normal rounded-md px-2 py-1.5 text-left text-sm font-normal text-muted-foreground hover:bg-accent/50"
         >

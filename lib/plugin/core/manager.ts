@@ -160,6 +160,7 @@ import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
 import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
 import { unregisterRemoteDesktopProvidersOf } from "@/lib/remote-desktop/provider-registry"
+import { unregisterPluginPrompts } from "@/lib/prompts/plugin-prompts"
 import {
   evaluatePluginCompatibility,
   type CompatibilityDiagnostic,
@@ -254,7 +255,7 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { refreshAllPackWarnings } from "@/lib/plugin/registries/character-pack-registry"
 import { assertPluginManifestParity, findPluginManifestParityIssues } from "./manifest-parity"
-import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@/packages/plugin-sdk/src/contracts/catalog"
+import { PLUGIN_MANIFEST_CONTRIBUTIONS } from "@cognia/plugin-contract/contracts/catalog"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
@@ -3784,6 +3785,14 @@ export class PluginManager {
         )
       }
 
+      // Browser builtins have no native load step. Host APIs invoked during
+      // activate() still require their identity in the native status ledger.
+      // Register only after trust/permissions, and do not publish "loaded"
+      // until activation actually succeeds.
+      if (this.canInvokeNativeHost()) {
+        await this.invokeNativeHost("plugin_set_status", { pluginId, status: "installed" })
+      }
+
       // Seed declarative-config defaults into the persisted row BEFORE building
       // the context, so the plugin's activate() sees `ctx.configuration.get()`
       // values without waiting for the user to open the settings form. Skipped
@@ -4012,6 +4021,7 @@ export class PluginManager {
         ],
       })
       await this.cleanupFailedActivation(pluginId, error)
+      await this.syncBackendStatus(pluginId, "error")
       throw error
     }
   }
@@ -6495,6 +6505,9 @@ export class PluginManager {
     // Drop its remote desktop providers (ADR-0234); open sessions keep the
     // Host bridge, but no new one can pick a provider that is gone.
     unregisterRemoteDesktopProvidersOf(pluginId)
+    // Drop the prompt slots it declared through `ctx.prompts.register`
+    // (ADR-0236). The user's overrides stay and are listed as unavailable.
+    unregisterPluginPrompts(pluginId)
     // Async module-bridge capabilities — drop every contribution. Includes
     // message renderers, which the standalone `purgeMessagePartRenderersForPlugin`
     // call previously handled (the bridge unregister calls the same

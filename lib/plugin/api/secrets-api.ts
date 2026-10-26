@@ -18,7 +18,7 @@
 
 import { invokePluginApi, isPluginGatewayAvailable } from "../core/transport"
 import { getSecret, setSecret, clearSecret, setWebKeyringPassphrase } from "@/lib/keyring"
-import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+import { getInstallEncryptionPassphrase } from "@/lib/data/backup-key"
 import { loggers } from "../core/logger"
 import {
   onSecretStoreRecovered,
@@ -148,7 +148,7 @@ let webPassphraseProvisioned = false
 
 async function ensureWebPassphrase(): Promise<void> {
   if (isPluginGatewayAvailable() || webPassphraseProvisioned) return
-  const passphrase = await getDefaultBackupPassphrase()
+  const passphrase = await getInstallEncryptionPassphrase()
   if (passphrase) {
     setWebKeyringPassphrase(passphrase)
     webPassphraseProvisioned = true

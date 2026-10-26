@@ -27,8 +27,8 @@ description: Phase 3a of account sync — chats, messages, characters, skills, m
 | Part | Lives in |
 | --- | --- |
 | Wire format | [Account Sync Protocol v1](../data/account-sync-protocol) §5.4, §6, §7, §9 |
-| Shared rules and vectors | `packages/sync-protocol/` (`hlc.ts`, `padding.ts`, `ops.ts`, `merge.ts`, `fixtures/v1-ops.json`) |
-| Server (op log, long-poll, socket) | `services/sync-server/` (`src/ops.ts`, `src/store.ts`, `src/space.ts`) |
+| Shared rules and vectors | `cognia-services/packages/sync-protocol/` (installed as `@cognia/sync-protocol`; `hlc.ts`, `padding.ts`, `ops.ts`, `merge.ts`, `fixtures/v1-ops.json`) |
+| Server (op log, long-poll, socket) | `cognia-services/services/sync-server/` (`src/ops.ts`, `src/store.ts`, `src/space.ts`) |
 | What syncs, field by field | `lib/account-sync/data/tables.ts` |
 | Capture | `lib/account-sync/data/capture-middleware.ts` (Dexie middleware, level 3) |
 | Push, pull, apply | `lib/account-sync/data/{pusher,applier,op-origin,sync-round}.ts` |

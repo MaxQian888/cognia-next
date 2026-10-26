@@ -1,5 +1,12 @@
-import { ROLE_PROMPTS } from "../prompts/roles"
-import { roleMessages, seededOrder, taskContract, untrustedBlock } from "./prompting"
+import { BUILTIN_ROLE_PROFILE, ROLE_PROMPTS, materializeCustomRoleProfile } from "../prompts/roles"
+import { WorkflowError } from "./durable-call"
+import {
+  roleMessages,
+  rolePromptProfileFor,
+  seededOrder,
+  taskContract,
+  untrustedBlock,
+} from "./prompting"
 
 describe("untrustedBlock", () => {
   it("fences text as data and says so", () => {
@@ -59,6 +66,66 @@ describe("roleMessages", () => {
     })
     expect(system.content.startsWith(ROLE_PROMPTS.common)).toBe(true)
     expect(system.content.endsWith("\ndegraded")).toBe(true)
+  })
+})
+
+describe("role prompt profiles", () => {
+  const custom = materializeCustomRoleProfile({
+    ...ROLE_PROMPTS,
+    common: "edited common",
+    judge: "edited judge JudgeReport",
+  })
+
+  it("sends the profile the caller pinned, and roles-1 without one", () => {
+    const [system] = roleMessages("judge", {
+      contract: "t",
+      material: [],
+      runtimeNote: "note",
+      profile: custom,
+    })
+    expect(system.content).toBe("edited common\nedited judge JudgeReport\nnote")
+    const [shipped] = roleMessages("judge", { contract: "t", material: [], runtimeNote: "note" })
+    expect(shipped.content).toBe(`${ROLE_PROMPTS.common}\n${ROLE_PROMPTS.judge}\nnote`)
+    expect(
+      roleMessages("judge", { contract: "t", material: [], profile: BUILTIN_ROLE_PROFILE })
+    ).toEqual(roleMessages("judge", { contract: "t", material: [] }))
+  })
+
+  it("picks roles-1 for a roles-1 action and the snapshot's profile for a custom one", () => {
+    const action = (prompt_version: string) => ({
+      config: {
+        id: "mine",
+        mode: "panel" as const,
+        roles: {},
+        prompt_version,
+        verifier_profile: "evidence_review",
+        enabled: true,
+      },
+    })
+    expect(rolePromptProfileFor({ rolePrompts: custom }, action("roles-1"))).toBe(
+      BUILTIN_ROLE_PROFILE
+    )
+    expect(rolePromptProfileFor({ rolePrompts: custom }, action(custom.version))).toBe(custom)
+  })
+
+  it("fails a run whose snapshot lacks the text its version names, never falling back to roles-1", () => {
+    const other = materializeCustomRoleProfile({ ...ROLE_PROMPTS, judge: "other JudgeReport" })
+    const action = {
+      config: {
+        id: "mine",
+        mode: "panel" as const,
+        roles: {},
+        prompt_version: other.version,
+        verifier_profile: "evidence_review",
+        enabled: true,
+      },
+    }
+    for (const config of [{}, { rolePrompts: custom }]) {
+      expect(() => rolePromptProfileFor(config, action)).toThrow(WorkflowError)
+    }
+    expect(() =>
+      rolePromptProfileFor({}, { config: { ...action.config, prompt_version: "roles-1-custom" } })
+    ).toThrow(/no role prompts for version roles-1-custom/)
   })
 })
 

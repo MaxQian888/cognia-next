@@ -1,5 +1,13 @@
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -12,7 +20,59 @@ import {
   collectDeclarations,
   driftKey,
   parseArgs,
+  withDeclarationBuildRoot,
 } from "./generate-author-types.mjs"
+
+test("declaration builds isolate internal dependencies without changing the app manifest", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "declaration-build-root-"))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const manifest = {
+    type: "module",
+    dependencies: { "@cognia/agent": "workspace:*", react: "19.3.0" },
+    peerDependencies: { "@cognia/provider-types": "*", ai: "7.0.128" },
+    optionalDependencies: { "@cognia/agent-host-linux-x64": "0.1.0", native: "1.0.0" },
+  }
+  const source = `${JSON.stringify(manifest)}\n`
+  writeFileSync(join(root, "package.json"), source)
+  let buildRoot
+  const result = withDeclarationBuildRoot((directory) => {
+    buildRoot = directory
+    const isolated = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"))
+    assert.deepEqual(isolated, {
+      private: true,
+      dependencies: { react: "19.3.0" },
+      peerDependencies: { ai: "7.0.128" },
+      optionalDependencies: { native: "1.0.0" },
+    })
+    assert.doesNotThrow(() => assertAuthorBuildRoot(isolated))
+    assert.equal(readFileSync(join(root, "package.json"), "utf8"), source)
+    return "built"
+  }, root)
+  assert.equal(result, "built")
+  assert.equal(existsSync(buildRoot), false)
+  assert.equal(readFileSync(join(root, "package.json"), "utf8"), source)
+})
+
+test("declaration build roots are unique and cleaned when a build fails", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "declaration-build-root-"))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  writeFileSync(join(root, "package.json"), "{}")
+  const directories = []
+  assert.throws(
+    () =>
+      withDeclarationBuildRoot((outer) => {
+        directories.push(outer)
+        withDeclarationBuildRoot((inner) => {
+          directories.push(inner)
+          assert.notEqual(outer, inner)
+          throw new Error("declaration build failed")
+        }, root)
+      }, root),
+    /declaration build failed/
+  )
+  assert.equal(directories.length, 2)
+  for (const directory of directories) assert.equal(existsSync(directory), false)
+})
 
 test("parseArgs supports check mode and rejects unknown options", () => {
   assert.deepEqual(parseArgs([]), { check: false })
@@ -77,7 +137,6 @@ test("SDK author declarations resolve AgentTeam contracts and policies from cano
   for (const [specifier, source] of [
     ["@cognia/agent-orchestration/records", "agent-orchestration/src/records.ts"],
     ["@cognia/agent-runtime-kit/permission-modes", "agent-runtime-kit/src/permission-modes.ts"],
-    ["@cognia/sync-protocol", "sync-protocol/src/index.ts"],
   ]) {
     const resolved = ts.resolveModuleName(
       specifier,
@@ -87,4 +146,15 @@ test("SDK author declarations resolve AgentTeam contracts and policies from cano
     ).resolvedModule
     assert.equal(resolved?.resolvedFileName, join(root, "packages", source))
   }
+  // Owned by cognia-labs/cognia-services and installed at the pinned revision.
+  const syncProtocol = ts.resolveModuleName(
+    "@cognia/sync-protocol",
+    join(root, "types/agent/agent-team-runtime.ts"),
+    parsed.options,
+    ts.sys
+  ).resolvedModule
+  assert.equal(
+    syncProtocol?.resolvedFileName,
+    realpathSync(join(root, "node_modules/@cognia/sync-protocol/src/index.ts"))
+  )
 })

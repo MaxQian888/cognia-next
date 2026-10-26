@@ -1,6 +1,7 @@
 import {
   digestComposition,
   digestPrompt,
+  digestPromptSurface,
   digestToolSurface,
   digestValue,
   withCompositionDigest,
@@ -67,6 +68,42 @@ describe("digestPrompt", () => {
 
   it("is stable for the same prompt", async () => {
     expect(await digestPrompt("same")).toBe(await digestPrompt("same"))
+  })
+})
+
+describe("digestPromptSurface", () => {
+  it("keeps the historical identity of a plain base prompt", async () => {
+    expect(await digestPromptSurface({ systemPrompt: "base" })).toBe(await digestPrompt("base"))
+    expect(await digestPromptSurface({})).toBe(await digestPrompt(""))
+  })
+
+  it("covers the appended sections, not just the base", async () => {
+    const withAppend = await digestPromptSurface({ systemPrompt: "base", appendSystemPrompt: "x" })
+    expect(withAppend).not.toBe(await digestPrompt("base"))
+    expect(withAppend).not.toBe(
+      await digestPromptSurface({ systemPrompt: "base", appendSystemPrompt: "y" })
+    )
+  })
+
+  it("never collides a structured surface with a plain string", async () => {
+    // An append-only surface must not digest like a base that happens to hold the same text.
+    expect(await digestPromptSurface({ appendSystemPrompt: "x" })).not.toBe(
+      await digestPromptSurface({ systemPrompt: "x" })
+    )
+  })
+
+  it("ignores a blank append, which no runtime sends", async () => {
+    expect(await digestPromptSurface({ systemPrompt: "base", appendSystemPrompt: "  \n" })).toBe(
+      await digestPrompt("base")
+    )
+  })
+
+  it("covers the SDK overlay prompt", async () => {
+    const a = await digestPromptSurface({
+      systemPrompt: "base",
+      sdkSystemPrompt: { type: "preset" },
+    })
+    expect(a).not.toBe(await digestPrompt("base"))
   })
 })
 

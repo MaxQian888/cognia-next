@@ -553,6 +553,13 @@ pub static EVENT_CHANNELS: &[EventChannelSpec] = &[
         note: "plugin runtime lifecycle; ids and status",
     },
     EventChannelSpec {
+        pattern: "google-docs-connection-changed",
+        audience: ChannelAudience::ServiceOnly,
+        default_on: false,
+        tauri_forwarded: true,
+        note: "Google document connection reload signal; no credentials or account data",
+    },
+    EventChannelSpec {
         pattern: "host://secrets-changed",
         audience: ChannelAudience::ServiceOnly,
         default_on: false,
@@ -1025,6 +1032,12 @@ mod tests {
     // ── catalog shape ────────────────────────────────────────────────────────
 
     #[test]
+    fn p5_person_brain_never_receives_service_event_visibility() {
+        assert_eq!(ConnectionScope::from_claim("person-brain"), ConnectionScope::Device);
+        assert_eq!(ConnectionScope::from_claim("service"), ConnectionScope::Service);
+    }
+
+    #[test]
     fn catalog_patterns_are_unique() {
         let mut seen = BTreeSet::new();
         for spec in EVENT_CHANNELS {
@@ -1393,4 +1406,17 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn google_docs_auth_signal_is_explicit_service_only_and_forwarded() {
+        let channel = "google-docs-connection-changed";
+        let spec = spec_for(channel).expect("registered Google connection signal");
+        assert!(spec.tauri_forwarded);
+        let mut service = EventSubscription::defaults_for(ConnectionScope::Service);
+        assert!(!service.allows(channel));
+        assert!(service.apply(&request(SubscribeMode::Add, &[channel])).rejected.is_empty());
+        assert!(service.allows(channel));
+        let mut device = EventSubscription::defaults_for(ConnectionScope::Device);
+        assert_eq!(device.apply(&request(SubscribeMode::Add, &[channel])).rejected[0].reason, reject_reason::SCOPE_FORBIDDEN);
+    }
+
 }

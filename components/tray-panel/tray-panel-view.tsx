@@ -153,6 +153,7 @@ export function TrayPanelView() {
   const {
     snapshot: received,
     receivedCount,
+    connectionError,
     send,
   } = useGlanceConsumer(TRAY_PANEL_CONSUMER, TRAY_PANEL_WINDOW_LABEL, visible)
   const receivedCountRef = useRef(receivedCount)
@@ -420,14 +421,16 @@ export function TrayPanelView() {
     void sendLight({ kind: "set-max-height", maxHeight: next })
   }
 
-  // Fit the native window to the card: SIZE ONLY, never reposition, so the
-  // panel grows from its fixed top-left.
+  // Fit the native window to the card. Rust keeps it anchored to the tray
+  // on the display selected when the panel opened.
   const lastSize = useRef<{ w: number; h: number } | null>(null)
   useEffect(() => {
     const el = cardRef.current
     if (!el || typeof ResizeObserver === "undefined") return
     const fit = () => {
-      const w = Math.ceil(el.offsetWidth) + SHADOW_MARGIN
+      // The card may be clipped by the previous native window width. Fit to
+      // the selected width so that viewport cannot lock the panel too narrow.
+      const w = GLANCE_WIDTH_PX[config.width] + SHADOW_MARGIN
       const h = Math.ceil(el.offsetHeight) + SHADOW_MARGIN
       if (w <= SHADOW_MARGIN || h <= SHADOW_MARGIN) return
       const prev = lastSize.current
@@ -439,7 +442,7 @@ export function TrayPanelView() {
     ro.observe(el)
     fit()
     return () => ro.disconnect()
-  }, [])
+  }, [config.width])
 
   const status = trayPanelStatus(snapshot)
   const openSettings: TrayPanelAction = {
@@ -469,7 +472,8 @@ export function TrayPanelView() {
   const setScope = (scope: GlanceScope) => {
     if (scope !== config.scope) void sendLight({ kind: "set-scope", scope })
   }
-  const failure = runner.failure ?? glanceFailure
+  const failure =
+    runner.failure ?? glanceFailure ?? (connectionError ? tGlance(connectionError) : null)
 
   return (
     <div className="flex min-h-screen w-screen items-start justify-center bg-transparent p-2">
@@ -478,53 +482,56 @@ export function TrayPanelView() {
         data-testid="tray-panel-card"
         data-width={config.width}
         style={{ width: GLANCE_WIDTH_PX[config.width], maxHeight }}
-        className="flex flex-col overflow-hidden rounded-xl border bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-xl"
+        className="@container/panel flex min-w-0 max-w-full flex-col overflow-hidden rounded-xl border bg-popover/95 text-popover-foreground shadow-lg backdrop-blur-xl"
       >
         <GlanceProvider value={glance}>
           <TrayPanelRunnerProvider runner={runner}>
-            <header className="flex shrink-0 items-center gap-1.5 border-b py-2 pl-3.5 pr-2">
-              <span className="shrink-0 text-[13px] font-semibold tracking-tight">
-                {t("title")}
-              </span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={t("scope.label")}
-                    className="inline-flex min-w-0 items-center gap-0.5 rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    <span className="truncate">
-                      {config.scope === "workspace" && snapshot.workspace
-                        ? snapshot.workspace.name
-                        : t("scope.all")}
-                    </span>
-                    <ChevronDownIcon aria-hidden className="size-3 shrink-0" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-60">
-                  <DropdownMenuLabel className="text-xs">{t("scope.label")}</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={() => setScope("all")}>
-                    <CheckIcon className={cn("size-3.5", config.scope !== "all" && "invisible")} />
-                    {t("scope.all")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!snapshot.workspace}
-                    onSelect={() => setScope("workspace")}
-                  >
-                    <CheckIcon
-                      className={cn("size-3.5", config.scope !== "workspace" && "invisible")}
-                    />
-                    <span className="truncate">
-                      {snapshot.workspace
-                        ? t("scope.workspace", { name: snapshot.workspace.name })
-                        : t("scope.noWorkspace")}
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <p className="px-2 py-1 text-[11px] text-muted-foreground">{t("scope.hint")}</p>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <span className="min-w-0 flex-1" />
+            <header className="grid shrink-0 grid-cols-[minmax(0,1fr)_repeat(3,1.5rem)] items-center gap-1.5 border-b py-2 pl-3.5 pr-2 @min-[420px]/panel:grid-cols-[minmax(0,1fr)_auto_repeat(3,1.5rem)]">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-[13px] font-semibold tracking-tight">
+                  {t("title")}
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={t("scope.label")}
+                      className="inline-flex min-w-0 items-center gap-0.5 rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      <span className="truncate">
+                        {config.scope === "workspace" && snapshot.workspace
+                          ? snapshot.workspace.name
+                          : t("scope.all")}
+                      </span>
+                      <ChevronDownIcon aria-hidden className="size-3 shrink-0" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-60">
+                    <DropdownMenuLabel className="text-xs">{t("scope.label")}</DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => setScope("all")}>
+                      <CheckIcon
+                        className={cn("size-3.5", config.scope !== "all" && "invisible")}
+                      />
+                      {t("scope.all")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!snapshot.workspace}
+                      onSelect={() => setScope("workspace")}
+                    >
+                      <CheckIcon
+                        className={cn("size-3.5", config.scope !== "workspace" && "invisible")}
+                      />
+                      <span className="truncate">
+                        {snapshot.workspace
+                          ? t("scope.workspace", { name: snapshot.workspace.name })
+                          : t("scope.noWorkspace")}
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <p className="px-2 py-1 text-[11px] text-muted-foreground">{t("scope.hint")}</p>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <button
                 type="button"
                 data-testid="tray-panel-status"
@@ -538,7 +545,7 @@ export function TrayPanelView() {
                       )
                 }
                 disabled={status.kind === "idle"}
-                className="inline-flex min-w-0 items-center gap-1.5 overflow-hidden rounded-full bg-muted px-2 py-0.5 text-[11.5px] enabled:hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="col-span-4 row-start-2 inline-flex min-w-0 max-w-full items-center gap-1.5 justify-self-start overflow-hidden rounded-full bg-muted px-2 py-0.5 text-[11.5px] enabled:hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 @min-[420px]/panel:col-span-1 @min-[420px]/panel:col-start-2 @min-[420px]/panel:row-start-1"
               >
                 <GlanceDot
                   tone={
@@ -629,18 +636,21 @@ export function TrayPanelView() {
             ) : null}
 
             {failure ? (
-              <p className="shrink-0 border-t px-3.5 py-1.5 text-xs text-destructive" role="alert">
+              <p
+                className="shrink-0 break-words border-t px-3.5 py-1.5 text-xs text-destructive"
+                role="alert"
+              >
                 {failure}
               </p>
             ) : null}
 
-            <footer className="flex shrink-0 items-center gap-1 px-2 pb-1 pt-1 text-[11.5px] text-muted-foreground">
+            <footer className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-0.5 px-2 pb-1 pt-1 text-[11.5px] text-muted-foreground">
               {editing ? (
                 <button
                   type="button"
                   data-testid="tray-panel-edit-done"
                   onClick={finishEditing}
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   <CheckIcon aria-hidden className="size-3" />
                   {t("edit.done")}
@@ -651,7 +661,7 @@ export function TrayPanelView() {
                   data-testid="tray-panel-edit"
                   disabled={!received}
                   onClick={() => setEditing(true)}
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+                  className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
                 >
                   <PencilIcon aria-hidden className="size-3" />
                   {t("edit.start")}
@@ -662,6 +672,7 @@ export function TrayPanelView() {
                 onApply={applyPreset}
                 disabled={!received}
                 side="top"
+                className="max-w-full shrink-0"
               />
               <button
                 type="button"
@@ -671,18 +682,19 @@ export function TrayPanelView() {
                 className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 <MonitorIcon aria-hidden className="size-3" />
-                {/* At the narrow width the footer keeps Edit and the preset readable; the icon carries the name. */}
-                <span aria-hidden className={cn(config.width === "narrow" && "hidden")}>
-                  {t("footer.openApp")}
-                </span>
+                <span aria-hidden>{t("footer.openApp")}</span>
               </button>
-              <span className="min-w-0 flex-1" />
-              <span className="min-w-0 truncate tabular-nums" data-testid="tray-panel-updated">
-                {received
-                  ? t("footer.updated", {
-                      when: format.relativeTime(new Date(snapshot.generatedAt), now),
-                    })
-                  : t("footer.connecting")}
+              <span
+                className="min-w-0 basis-full break-words text-right tabular-nums @min-[420px]/panel:ml-auto @min-[420px]/panel:basis-auto"
+                data-testid="tray-panel-updated"
+              >
+                {connectionError
+                  ? tGlance(connectionError)
+                  : received
+                    ? t("footer.updated", {
+                        when: format.relativeTime(new Date(snapshot.generatedAt), now),
+                      })
+                    : t("footer.connecting")}
               </span>
             </footer>
           </TrayPanelRunnerProvider>

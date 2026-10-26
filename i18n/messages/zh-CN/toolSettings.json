@@ -158,5 +158,11 @@
   "webPreferCogniaDesc": "即使模型所在 runtime 自带联网，也改用 Cognia 的多服务商搜索（Tavily / Brave / Exa…）。关闭时优先用 runtime 自带的原生搜索——不需要 API key，且带引用。需要先配置搜索服务商。",
   "webNativeAnthropicTitle": "使用 Anthropic 原生网络工具",
   "webclone": "网页快照",
-  "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。"
+  "webcloneDesc": "对在线网页做快照（web_clone / web_clone_convert）——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与 Vue/React/Angular/Svelte/jQuery 代码生成。除非显式放行，私有/回环地址会被拦截。仅桌面端。",
+  "webPreferCogniaSearchTitle": "搜索优先使用 Cognia",
+  "webPreferCogniaSearchDesc": "即使原生搜索可用，也优先使用 Cognia Search。需要配置 Search 提供商；未配置时仍可使用受支持的原生搜索。",
+  "webPreferCogniaFetchTitle": "阅读优先使用 Cognia",
+  "webPreferCogniaFetchDesc": "即使原生网页读取可用，也优先使用 Cognia Reader。直接阅读无需 Search 提供商或 API 密钥。可在「搜索 → 阅读」中单独配置阅读器。",
+  "webPreferenceInheritedOn": "继承原有的共享偏好：优先使用 Cognia。",
+  "webPreferenceInheritedOff": "继承原有的共享偏好：原生能力可用时优先使用。"
 }

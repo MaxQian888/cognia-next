@@ -1,4 +1,4 @@
-import type { PluginPiPackageDef } from "@/types/plugin/plugin-pi-package"
+import type { PluginPiPackageDef } from "@cognia/plugin-contract/types/plugin/plugin-pi-package"
 import { definePiPackage } from "./define-pi-package"
 
 const valid: PluginPiPackageDef = {

@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react"
 import { ImageOffIcon } from "lucide-react"
 
+import { Skeleton } from "@/components/ui/skeleton"
 import { useFilesMediaLoader } from "@/hooks/files-library/files-backend"
 import { acquireMedia, releaseMedia } from "@/lib/chat/media/resolve-media"
 import { mediaRef } from "@/lib/db/message-media"
@@ -79,7 +80,13 @@ export function FilesImageThumb({
   }
   if (!current.url) {
     return (
-      <div className={cn("animate-pulse bg-muted", className)} data-testid="files-image-loading" />
+      // Skeleton carries the `data-slot` marker the reduce-motion tier keys
+      // its pulse exemption off; `rounded-none bg-muted` keeps the old look so
+      // the caller's own rounding and size still decide the frame.
+      <Skeleton
+        className={cn("rounded-none bg-muted", className)}
+        data-testid="files-image-loading"
+      />
     )
   }
   return (

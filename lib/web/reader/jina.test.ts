@@ -1,4 +1,4 @@
-import { fetchViaJina, parseJinaBody } from "./jina"
+import { fetchViaJina, parseJinaBody, readViaJina } from "./jina"
 
 function res(body: string, opts: { ok?: boolean; status?: number } = {}): Response {
   return {
@@ -54,5 +54,44 @@ describe("fetchViaJina", () => {
   it("returns null on an empty body", async () => {
     const fetchImpl = jest.fn(async () => res("   "))
     expect(await fetchViaJina("u", fetchImpl as unknown as typeof fetch)).toBeNull()
+  })
+})
+
+describe("readViaJina", () => {
+  it("reports the reader-service status on success", async () => {
+    const fetchImpl = jest.fn(async () => res("Title: T\nMarkdown Content:\nHi"))
+    expect(await readViaJina("https://x.test/a", fetchImpl as unknown as typeof fetch)).toEqual({
+      ok: true,
+      status: 200,
+      result: { markdown: "Hi", title: "T", source: "jina", url: "https://x.test/a" },
+    })
+  })
+
+  it("keeps the failing status instead of collapsing to null", async () => {
+    const fetchImpl = jest.fn(async () => res("x", { ok: false, status: 429 }))
+    expect(await readViaJina("u", fetchImpl as unknown as typeof fetch)).toEqual({
+      ok: false,
+      status: 429,
+      error: "Jina Reader returned 429",
+    })
+  })
+
+  it("lets a caller abort propagate", async () => {
+    const c = new AbortController()
+    c.abort()
+    const fetchImpl = jest.fn(async () => {
+      throw new DOMException("Aborted", "AbortError")
+    })
+    await expect(readViaJina("u", fetchImpl as unknown as typeof fetch, c.signal)).rejects.toThrow()
+  })
+
+  it("reports a network failure without a status", async () => {
+    const fetchImpl = jest.fn(async () => {
+      throw new Error("net down")
+    })
+    expect(await readViaJina("u", fetchImpl as unknown as typeof fetch)).toEqual({
+      ok: false,
+      error: "net down",
+    })
   })
 })
