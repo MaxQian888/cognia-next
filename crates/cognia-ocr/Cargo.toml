@@ -41,7 +41,7 @@ tempfile.workspace = true
 ocrs           = { version = "0.13", optional = true }
 rten           = { version = "0.26", optional = true, default-features = false }
 rten-imageproc = { version = "0.26", optional = true }
-oar-ocr        = { version = "0.9.2", optional = true, default-features = false, features = ["download-binaries", "simd"] }
+oar-ocr        = { version = "0.10.1", optional = true, default-features = false, features = ["download-binaries", "simd"] }
 image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
 
 # Apple Vision text recognition (macOS) — in-process via the objc2 framework
