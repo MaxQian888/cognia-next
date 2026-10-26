@@ -1550,6 +1550,143 @@ describe("createLarkAdapter", () => {
     await expect(adapter.messageRoute!("om_1", "reply", ref)).resolves.toBe("within")
   })
 
+  describe("messageRoute() when Lark hides the message from the bot (ADR-0239)", () => {
+    const ref = { platform: "lark" as const, channelId: "oc_1" }
+    function adapterAs(id: string) {
+      return createLarkAdapter({
+        id,
+        displayName: "Hidden",
+        appId: async () => `cli_${id}`,
+        appSecret: async () => "secret",
+        verificationToken: async () => "token",
+        selfBotOpenId: "ou_bot",
+        transport: "long-connection",
+      })
+    }
+    /** The bot gets `botCode`; the connected person (if `userToken`) gets `asPerson`. */
+    function mockLookups(opts: {
+      botCode: number
+      userToken?: string
+      asPerson?: { status: number; body: unknown }
+    }) {
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "connectors_keyring_get") {
+          return (args as { credential: string }).credential === "user_token"
+            ? (opts.userToken ?? null)
+            : null
+        }
+        if (cmd !== "connectors_http_request") return undefined
+        const req = (args as { req: { url: string; headers: Record<string, string> } }).req
+        if (req.url.includes("tenant_access_token")) return makeTatOkResp("t-bot")
+        const asPerson = req.headers["Authorization"] === `Bearer ${opts.userToken}`
+        const resp = asPerson
+          ? (opts.asPerson ?? { status: 200, body: { code: 0, data: { items: [] } } })
+          : { status: 400, body: { code: opts.botCode, msg: "no" } }
+        return { status: resp.status, headers: {}, body: JSON.stringify(resp.body) }
+      })
+    }
+    const personCalls = (token: string) =>
+      mockInvoke.mock.calls.filter(
+        ([cmd, args]: [string, unknown]) =>
+          cmd === "connectors_http_request" &&
+          (args as { req: { headers: Record<string, string> } }).req.headers["Authorization"] ===
+            `Bearer ${token}`
+      ).length
+
+    it.each([230027, 230050, 99991672])(
+      "asks again as the connected person when the bot gets %s",
+      async (botCode) => {
+        const id = `lark-hidden-${botCode}`
+        mockLookups({
+          botCode,
+          userToken: `u-${botCode}`,
+          asPerson: {
+            status: 200,
+            body: { code: 0, data: { items: [{ message_id: "om_1", chat_id: "oc_1" }] } },
+          },
+        })
+        const adapter = adapterAs(id)
+        await expect(
+          adapter.messageRoute!("om_1", "reply", { ...ref, adapterId: id })
+        ).resolves.toBe("within")
+        expect(personCalls(`u-${botCode}`)).toBe(1)
+      }
+    )
+
+    it("cannot place it without a connected person, or when the person cannot read it either", async () => {
+      mockLookups({ botCode: 230027 })
+      const alone = adapterAs("lark-hidden-alone")
+      await expect(
+        alone.messageRoute!("om_1", "reply", { ...ref, adapterId: "lark-hidden-alone" })
+      ).resolves.toBe("unknown")
+
+      mockLookups({
+        botCode: 230027,
+        userToken: "u-blind",
+        asPerson: { status: 400, body: { code: 230027, msg: "no" } },
+      })
+      const blind = adapterAs("lark-hidden-blind")
+      await expect(
+        blind.messageRoute!("om_1", "reply", { ...ref, adapterId: "lark-hidden-blind" })
+      ).resolves.toBe("unknown")
+    })
+
+    it("throws when the person's lookup does not reach Lark", async () => {
+      mockLookups({ botCode: 230027, userToken: "u-offline" })
+      const base = mockInvoke.getMockImplementation()!
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        const req = (args as { req?: { headers?: Record<string, string> } } | undefined)?.req
+        if (
+          cmd === "connectors_http_request" &&
+          req?.headers?.["Authorization"] === "Bearer u-offline"
+        ) {
+          throw new Error("connection reset")
+        }
+        return base(cmd, args)
+      })
+      const adapter = adapterAs("lark-hidden-offline")
+      await expect(
+        adapter.messageRoute!("om_1", "reply", { ...ref, adapterId: "lark-hidden-offline" })
+      ).rejects.toThrow("connection reset")
+    })
+
+    it("cannot place it when the person's token cannot be refreshed", async () => {
+      mockLookups({
+        botCode: 230027,
+        userToken: "u-expired",
+        asPerson: { status: 401, body: { code: 99991677, msg: "token expired" } },
+      })
+      const adapter = adapterAs("lark-hidden-expired")
+      await expect(
+        adapter.messageRoute!("om_1", "reply", { ...ref, adapterId: "lark-hidden-expired" })
+      ).resolves.toBe("unknown")
+    })
+
+    it("throws when the person's lookup cannot be made now", async () => {
+      mockLookups({
+        botCode: 230027,
+        userToken: "u-busy",
+        asPerson: { status: 503, body: { code: 1, msg: "busy" } },
+      })
+      const adapter = adapterAs("lark-hidden-busy")
+      await expect(
+        adapter.messageRoute!("om_1", "reply", { ...ref, adapterId: "lark-hidden-busy" })
+      ).rejects.toBeDefined()
+    })
+
+    it.each([230002, 230110])(
+      "does not ask the person when the bot gets %s: Lark would refuse the delivery too",
+      async (botCode) => {
+        const id = `lark-final-${botCode}`
+        mockLookups({ botCode, userToken: `u-final-${botCode}` })
+        await expect(
+          adapterAs(id).messageRoute!("om_1", "reply", { ...ref, adapterId: id })
+        ).resolves.toBe("unknown")
+        expect(personCalls(`u-final-${botCode}`)).toBe(0)
+      }
+    )
+  })
+
   it("messageRoute() cannot place a message Lark refuses to return", async () => {
     mockHttp(() => ({ code: 230002, msg: "bot not in chat" }))
     await expect(

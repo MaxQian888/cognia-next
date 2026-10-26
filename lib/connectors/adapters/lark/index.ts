@@ -197,6 +197,13 @@ function larkOutboundError(err: unknown): OutboundError {
   }
 }
 
+/**
+ * `GET /im/v1/messages/:id` codes for a message the bot may share a chat
+ * with but cannot read: 230027 lacks a scope (`im:message.group_msg`),
+ * 230050 the message is invisible to the caller.
+ */
+const LARK_HIDDEN_MESSAGE_CODES: ReadonlySet<number> = new Set([230027, 230050])
+
 const LARK_CONFIG_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
   type: "object",
@@ -1304,6 +1311,15 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
    * single chat holds only the bot and that person. One the bot sent there is
    * placed by the host's own delivery records, not here.
    *
+   * When Lark will not show the bot the message although the bot may be in
+   * its chat (the app lacks `im:message.group_msg`, needed to read a group
+   * message that does not mention the bot, or the message is hidden from
+   * the bot), the lookup is asked again as the person connected to the bot
+   * (`user_access_token`, the send-as-user identity), if one is: where a
+   * message is does not depend on who reads it. Any other refusal is final:
+   * the bot is not in the message's chat or the message was deleted, so Lark
+   * would refuse the reply or edit too.
+   *
    * A message never changes chat, so lookups are cached. A failure Lark
    * would let a send retry (network, 5xx, rate limit) throws, so the host
    * places the message again before it sends; any other answer is final.
@@ -1325,6 +1341,56 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       return read(await doRequest("GET", path))
     } catch (err) {
       if (larkOutboundError(err).retryable) throw err
+      if (!hiddenFromBot(err)) return undefined
+      noteHiddenFromBot(err)
+    }
+    return lookupAsPerson(path, read)
+  }
+  /** Lark refused the bot a read it might grant the connected person. */
+  function hiddenFromBot(err: unknown): err is LarkApiError {
+    return (
+      err instanceof LarkApiError &&
+      (err.status === 403 ||
+        (err.code !== null &&
+          (LARK_HIDDEN_MESSAGE_CODES.has(err.code) || LARK_PERMISSION_CODES.has(err.code))))
+    )
+  }
+  let hiddenFromBotNoted = false
+  function noteHiddenFromBot(err: LarkApiError) {
+    if (hiddenFromBotNoted) return
+    hiddenFromBotNoted = true
+    loggers.network.warn(
+      "[lark] the bot cannot read a message a plugin replies to or edits; grant the app im:message.group_msg so the host can place it",
+      { id: opts.id, code: err.code }
+    )
+  }
+  /** The same lookup as the connected person; `undefined` without one. */
+  async function lookupAsPerson<T>(path: string, read: (resp: unknown) => T | undefined) {
+    const token = await getUserAccessToken(opts.id).catch(() => null)
+    if (!token) return undefined
+    // A transport failure of the lookup itself is retried later like the
+    // bot's; a token that cannot be refreshed is no answer (the person must
+    // reconnect).
+    let transportFailure: unknown
+    try {
+      const creds = await resolveCredentials()
+      const resp = await withUserTokenRefresh({ adapterId: opts.id, ...creds }, async () => {
+        try {
+          return await sendHttp(
+            "GET",
+            path,
+            undefined,
+            (await getUserAccessToken(opts.id)) ?? token
+          )
+        } catch (err) {
+          if (!(err instanceof LarkApiError)) transportFailure = err
+          throw err
+        }
+      })
+      return read(resp)
+    } catch (err) {
+      if (err === transportFailure) throw err
+      if (err instanceof LarkApiError && larkOutboundError(err).retryable) throw err
       return undefined
     }
   }
