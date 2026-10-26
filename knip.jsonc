@@ -146,8 +146,6 @@
     "@babel/standalone",
     // Jest reporter configured by name in jest.config.ts.
     "jest-junit",
-    // Read as files from node_modules (web/scripts/sync-agent-icons.mjs).
-    "@lobehub/icons-static-svg",
   ],
   "ignoreIssues": {
     // Resolves css-tree / @babel/traverse from the webclone sidecar's own

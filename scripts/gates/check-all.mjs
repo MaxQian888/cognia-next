@@ -89,12 +89,6 @@ const REGISTRY = [
   { script: "typecheck", group: "types", resource: "package-build" },
   { script: "typecheck:workspaces", group: "types", resource: "package-build" },
   { script: "knip", group: "types", resource: "package-build" },
-  // The root `typecheck` excludes `web` (tsconfig `exclude`), so the marketing
-  // workspace needs its own run. This is not optional bookkeeping: ADR-0092 §5
-  // chose a typed `SiteCopy` over an i18n bundle precisely because "a missing
-  // or extra key in either locale fails typecheck" — and until this entry
-  // existed, nothing on a PR ever ran that check.
-  { script: "web:typecheck", group: "types" },
   // The sidecar runs its TypeScript unbuilt under Node's type stripping and is
   // excluded from the root tsc (its own lib/resolution contract, ADR-0197), so
   // this is the only thing that type-checks it.
@@ -308,9 +302,6 @@ const REGISTRY = [
   // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
   // no runner at all and their assertions never executed.
   { script: "scripts:test:mobile", group: "gate-tests" },
-  // `node --test` over web/scripts/ — the evidence pipeline and the two capture
-  // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
-  { script: "web:test:scripts", group: "gate-tests" },
   { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
   { script: "gen:agent-catalogs:test", group: "gate-tests" },
   { script: "audit:agent-host-image:test", group: "gate-tests" },
@@ -409,9 +400,8 @@ const CONTRACT_INPUTS = [
 const SDK_INPUTS = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS]
 const GATE_INPUTS = {
   typecheck: FRONTEND_INPUTS,
-  "typecheck:workspaces": [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "docs/", "web/"],
-  knip: [...FRONTEND_INPUTS, "web/", "docs/app/", "docs/lib/"],
-  "web:typecheck": ["web/", "packages/"],
+  "typecheck:workspaces": [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "docs/"],
+  knip: [...FRONTEND_INPUTS, "docs/app/", "docs/lib/"],
   "sidecar:typecheck": CONTRACT_INPUTS,
   "build:packages": CONTRACT_INPUTS,
   "author-types:check": CONTRACT_INPUTS,
@@ -447,7 +437,7 @@ function matchesInput(path, input) {
 function fullQualityReason(changePlan) {
   if (changePlan.mode === "full") return changePlan.reason
   if (changePlan.deletedFiles.length) return "Deleted or renamed paths require full validation"
-  const knownInputs = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "web/", "docs/"]
+  const knownInputs = [...FRONTEND_INPUTS, ...CONTRACT_INPUTS, "docs/"]
   for (const path of changePlan.changedFiles) {
     // Configuration and dependency pins can affect every gate, even when they
     // belong to a single workspace. Tooling changes also invalidate selection.

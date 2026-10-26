@@ -3,9 +3,9 @@
 @import "fumadocs-ui/css/preset.css";
 
 /*
- * The website's palette (`web/app/globals.css`), mapped onto fumadocs' own
+ * The website's palette (`cognia-labs/cognia-website:app/globals.css`), mapped onto fumadocs' own
  * variables so every docs page — not just the landing page — reads as the
- * same product. The docs app cannot import across packages, so the values are
+ * same product. The website lives in a separate repository, so the values are
  * restated here; keep the two in step.
  *
  * `--cg-*` are the website tokens by their own names; `--color-fd-*` are what

@@ -49,7 +49,7 @@ const SCAN_ROOTS = ["components", "app", "hooks"]
 
 /**
  * Exempt by design:
- *  - `components/ui/` + `web/components/ui/` are where the primitives live, so
+ *  - `components/ui/` is where the primitives live, so
  *    they are the one place allowed to write the raw markup.
  *  - `components/ai-elements/` is vendored.
  *  - Tests and stories assert on the very classes this gate forbids.

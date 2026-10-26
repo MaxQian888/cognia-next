@@ -34,9 +34,9 @@ test("isGatedTsSource covers the documented roots", () => {
   }
 })
 
-test("isGatedTsSource covers the marketing workspace's three roots", () => {
+test("isGatedTsSource leaves the extracted website outside this repository's gate", () => {
   for (const f of ["web/components/site-nav.tsx", "web/hooks/use-rail.ts", "web/lib/locale.ts"]) {
-    assert.ok(isGatedTsSource(f), `${f} should be gated`)
+    assert.ok(!isGatedTsSource(f), `${f} belongs to cognia-website`)
   }
 })
 

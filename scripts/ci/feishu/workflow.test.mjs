@@ -8,6 +8,12 @@ const root = new URL("../../../", import.meta.url)
 const read = (path) => readFile(new URL(path, root), "utf8")
 const load = async () => parse(await read(".github/workflows/feishu-notify.yml"))
 
+test("website notification no longer subscribes from the product repository", async () => {
+  const workflow = await load()
+  assert.equal(Object.hasOwn(WORKFLOWS, "refresh-website.yml"), false)
+  assert.ok(!workflow.on.workflow_run.workflows.includes("Refresh website evidence"))
+})
+
 test("Feishu covers every source workflow without recursively notifying itself", async () => {
   const workflow = await load()
   const files = await readdir(new URL(".github/workflows/", root))

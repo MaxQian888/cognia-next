@@ -191,7 +191,7 @@ Services run separately according to the deployment, for example:
 - `services/workspace-runtime/`: Workspace browser runtime.
 - The cloud and self-hosted services (signaling, share links, status, account identity and sync, updates, diagnostics) live in [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services), with the wire contracts they share with the app. This repository pins one revision of it in `integrations/cognia-services.json`.
 
-`web/` is the product website. `docs/` is the Fumadocs site. Both build separately from the root app. Generate assets for the correct target before packaging.
+The product website is maintained in [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website), with independent development, CI and static deployment. `docs/` remains the Fumadocs workspace in this repository. Generate assets for the correct target before packaging.
 
 Major architecture decisions are recorded in [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/). Read the subsystem documentation for current behavior and verify it against the implementation and tests. An ADR explains why a decision was made.
 
@@ -215,7 +215,7 @@ Run development commands from the repository root. This table lists common comma
 | Mobile IDE                   | `pnpm mobile:open:ios`, `pnpm mobile:open:android`                                                          |
 | Android development and APKs | `pnpm mobile:dev:android`, `pnpm mobile:build:android`, `pnpm mobile:deploy`, `pnpm mobile:deploy:fast`     |
 | Docs, port 3001              | `pnpm docs:dev`, `pnpm docs:build`                                                                          |
-| Product website, port 3002   | `pnpm web:dev`, `pnpm web:build`                                                                            |
+| Product website              | [Standalone website commands](https://github.com/cognia-labs/cognia-website)                                |
 | Chrome/Edge extension        | [Standalone extension commands](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify) |
 | Sidecars                     | `pnpm sidecars:install`, `pnpm sidecar:start`, `pnpm sidecar:test`, `pnpm sidecars:build`                   |
 | E2E                          | `pnpm test:e2e`, `pnpm test:e2e:workflows`, `pnpm test:e2e:mobile`, `pnpm test:e2e:tauri`                   |
@@ -247,7 +247,6 @@ cognia-next/
 ├── packages/             Shared SDKs and business packages (agent, plugin-sdk, provider-*)
 ├── crates/               Rust hosts, protocols, security, and runtimes
 ├── cli/                  cognia-agent standalone terminal / headless agent
-├── web/                  Product website (workspace package, port 3002)
 ├── i18n/                  next-intl request + messages (en, zh-CN)
 ├── src-tauri/             Tauri 2 Rust core (axum HTTP, scheduler, automation, OCR, …)
 ├── sidecar/               Node agent / extension hosts; separate dependencies and lockfiles

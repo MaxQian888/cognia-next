@@ -319,14 +319,6 @@
       "request": "launch",
       "command": "pnpm docs:dev",
       "presentation": { "group": "5-tools", "order": 3 }
-    },
-    {
-      // web:dev runs web's predev (build-evidence) before next dev.
-      "name": "Marketing site: dev server (:3002)",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "pnpm web:dev",
-      "presentation": { "group": "5-tools", "order": 4 }
     }
   ],
   "inputs": [

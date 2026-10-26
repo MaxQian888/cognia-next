@@ -210,7 +210,6 @@
     ".cache",
     "node_modules",
     "docs",
-    "web",
     "mobile",
     "sidecar",
     "out",

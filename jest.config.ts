@@ -278,12 +278,6 @@ const projectCommon: Config = {
     // our wrappers, so use a small rendering-compatible CJS boundary.
     "^streamdown$": "<rootDir>/__mocks__/streamdown.js",
 
-    // ADR-0092 §3: the marketing workspace uses `@web/*`, never `@/`. Root Jest
-    // collects `web/**` tests (it is not in testPathIgnorePatterns), so a
-    // workspace-local `@/*` would resolve here against the repo root instead of
-    // against `web/`. This entry must precede the `^@/` rule below.
-    "^@web/(.*)$": "<rootDir>/web/$1",
-
     // Handle module aliases (this will be automatically configured for you by Next.js)
     "^@/(.*)$": "<rootDir>/$1",
 
@@ -528,15 +522,6 @@ const globalConfig: Config = {
     // by overlay.injected.test.ts + overlay.injected.record.test.ts.
     "!lib/browser/overlay.injected.js",
     "stores/**/*.{js,jsx,ts,tsx}",
-    // The marketing workspace (ADR-0092). `check-colocated-tests.mjs` has
-    // audited these same three roots since the site was built, but coverage
-    // never collected them — so `test:coverage:changed --strict` reported
-    // "nothing to do" for a whole workspace of components. `web/app/` and
-    // `web/content/` stay out for the reasons that gate documents: the former
-    // is thin route glue, the latter is data whose en/zh parity `tsc` proves.
-    "web/components/**/*.{ts,tsx}",
-    "web/hooks/**/*.{ts,tsx}",
-    "web/lib/**/*.{ts,tsx}",
     // Extracted provider workspace packages. provider-core originated from
     // lib/ai/providers (coverage-gated), so keep it collected. The runtime
     // catalog in provider-types is collected too; its interfaces are erased.
