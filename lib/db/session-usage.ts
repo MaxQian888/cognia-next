@@ -76,6 +76,10 @@ export async function recordExternalAgentUsage(args: {
   messageId: string
   usage: ExternalAgentTokenUsage
   model?: string
+  /** The provider the agent's model calls went to, when the caller knows it. */
+  providerId?: string
+  /** Owning workspace, for per-workspace spend (ADR-0204). */
+  projectId?: string
   durationMs?: number
   at?: number
 }): Promise<void> {
@@ -85,6 +89,8 @@ export async function recordExternalAgentUsage(args: {
     sessionId: args.sessionId,
     messageId: args.messageId,
     model: args.model,
+    ...(args.providerId ? { providerId: args.providerId } : {}),
+    ...(args.projectId ? { projectId: args.projectId } : {}),
     at: args.at ?? Date.now(),
     inputTokens: usage.inputTokens ?? 0,
     outputTokens: usage.outputTokens ?? 0,

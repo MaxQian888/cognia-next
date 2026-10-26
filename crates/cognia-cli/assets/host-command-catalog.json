@@ -74458,7 +74458,8 @@
               "petAchievements",
               "petInventory",
               "petCharacterBindings",
-              "petActivityLog"
+              "petActivityLog",
+              "sessionUsage"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -102689,5 +102690,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "05487d21d400a56e149acaac4c0aa3e885a1c622e5c34b5c85c9bd51d791fe0a"
+  "catalogHash": "425f45082870ff81d67305eeac933506c9c87c5b5e8a67868fe189dddce1b7a0"
 }

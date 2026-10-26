@@ -1283,6 +1283,7 @@ export async function bulkDeleteSessions(
         // before the refs and jobs below go.
         await preserveGeneratedVideoRecords(db, deletedIds)
         const allMessageIds: string[] = []
+        const usageIds: string[] = []
         const mediaRefs = await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).toArray()
         for (const ref of mediaRefs) {
           if (ref.sessionAsset) sessionAssetOrphans.add(ref.hash)
@@ -1302,6 +1303,9 @@ export async function bulkDeleteSessions(
           const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
           allMessageIds.push(...msgIds)
           await db.messages.where("sessionId").equals(id).delete()
+          usageIds.push(
+            ...((await db.sessionUsage.where("sessionId").equals(id).primaryKeys()) as string[])
+          )
           await db.sessionUsage.where("sessionId").equals(id).delete()
           await db.sessions.delete(id)
         }
@@ -1324,6 +1328,9 @@ export async function bulkDeleteSessions(
         // every paired client.
         scope?.assertActive()
         await recordTombstones("goals", goalIds, at)
+        // Usage rows are mirrored too (a member's dashboard reads the Host's).
+        scope?.assertActive()
+        await recordTombstones("sessionUsage", usageIds, at)
         scope?.assertActive()
       }
     )

@@ -123,6 +123,7 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   petInventory: "petInventory",
   petCharacterBindings: "petCharacterBindings",
   petActivityLog: "petActivityLog",
+  sessionUsage: "sessionUsage",
 })
 
 /** The Dexie surface this module needs — narrowed so tests can hand it a stub. */

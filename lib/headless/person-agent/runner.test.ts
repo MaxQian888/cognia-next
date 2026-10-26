@@ -106,6 +106,9 @@ function harness(options: { holdLast?: boolean } = {}) {
         event: envelope.event as unknown as Record<string, unknown>,
       })
     }),
+    recordUsage: jest.fn(async () => {
+      order.push("usage")
+    }),
     publishLive: jest.fn(async (frame) => {
       liveFrames.push(frame)
       order.push(`live:${frame.state}`)
@@ -280,6 +283,54 @@ describe("person agent runner", () => {
       })
     )
     expect(h.order.indexOf("live:settled")).toBeLessThan(h.order.lastIndexOf("write:2"))
+  })
+
+  it("p6e books the turn's token usage under its reply before settling", async () => {
+    const h = harness()
+    const tokenUsage = { promptTokens: 40, completionTokens: 9, totalTokens: 49 }
+    h.turns.push(
+      scripted([
+        event({ type: "message_delta", sessionId: "native-1", delta: { type: "text", text: "hi" } }),
+        event({ type: "done", sessionId: "native-1", success: true, tokenUsage, durationMs: 1200 }),
+      ])
+    )
+    h.turns.push(replyTurn())
+    await h.runner.startTurn(request())
+    await drain()
+    expect(h.deps.recordUsage).toHaveBeenCalledTimes(1)
+    expect(h.deps.recordUsage).toHaveBeenCalledWith({
+      sessionId: "s1",
+      messageId: "assistant-a1",
+      usage: tokenUsage,
+      model: "claude-sonnet-4-5",
+      providerId: "anthropic",
+      durationMs: 1200,
+    })
+    expect(h.order.indexOf("usage")).toBeLessThan(h.order.lastIndexOf("write:1"))
+    expect(h.settled).toEqual([{ actionId: "a1", outcome: "completed", errorCode: undefined }])
+
+    // A turn whose adapter reported no usage books nothing.
+    await h.runner.startTurn(request({ actionId: "a2", messageId: "m2" }))
+    await drain()
+    expect(h.deps.recordUsage).toHaveBeenCalledTimes(1)
+  })
+
+  it("p6e settles a turn whose usage could not be written", async () => {
+    const h = harness()
+    ;(h.deps.recordUsage as jest.Mock).mockRejectedValueOnce(new Error("disk full"))
+    h.turns.push(
+      scripted([
+        event({
+          type: "done",
+          sessionId: "native-1",
+          success: true,
+          tokenUsage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
+        }),
+      ])
+    )
+    await h.runner.startTurn(request())
+    await drain()
+    expect(h.settled).toEqual([{ actionId: "a1", outcome: "no_response", errorCode: undefined }])
   })
 
   it("p6e sends no live frame for a turn that never produced a part", async () => {

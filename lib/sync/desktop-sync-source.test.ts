@@ -41,6 +41,8 @@ import {
   projectBotDeliveryRow,
   projectBotInstallationRow,
   readDexieDelta,
+  SESSION_USAGE_FIRST_SYNC_WINDOW_MS,
+  SESSION_USAGE_PAGE_SIZE,
 } from "./desktop-sync-source"
 import {
   publishProvisionedTurnServers,
@@ -1850,4 +1852,80 @@ it("serves persisted Best-of-N summaries to paired devices with incremental time
   expect(result.rows).toEqual([summary])
   expect(result.deleted_ids).toEqual([])
   expect((await readDexieDelta("bestOfNRuns", 20)).rows).toEqual([])
+})
+
+describe("the per-turn usage reader (sessionUsage)", () => {
+  const { recordTombstones } = jest.requireActual("./tombstones") as typeof import("./tombstones")
+  const now = Date.now()
+  const row = (messageId: string, at: number, extra: Record<string, unknown> = {}) => ({
+    messageId,
+    sessionId: "s1",
+    at,
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    costUsd: 0,
+    durationMs: 0,
+    ...extra,
+  })
+  const ids = (rows: unknown[]) => rows.map((value) => (value as { id: string }).id)
+
+  beforeEach(async () => {
+    await Promise.all([getDb().sessionUsage.clear(), getDb().syncTombstones.clear()])
+  })
+
+  it("keys rows by message id, pages on `at` without losing a tie, and keeps scans local", async () => {
+    const tie = now - 1_000
+    await getDb().sessionUsage.bulkPut([
+      ...Array.from({ length: SESSION_USAGE_PAGE_SIZE - 1 }, (_, i) =>
+        row(`a${String(i).padStart(4, "0")}`, tie - SESSION_USAGE_PAGE_SIZE + i)
+      ),
+      row("tie-1", tie),
+      row("tie-2", tie),
+      row("scanned", tie, { sourceId: "claude-code", sourceSessionId: "x" }),
+      // Older than the 90 days both sides keep: a cold pull skips it.
+      row("expired", now - SESSION_USAGE_FIRST_SYNC_WINDOW_MS - 1),
+    ])
+    const first = await readDexieDelta("sessionUsage", 0, undefined, undefined, "")
+    expect(first.rows).toHaveLength(SESSION_USAGE_PAGE_SIZE)
+    expect(first.rows[0]).toEqual(expect.objectContaining({ id: "a0000", messageId: "a0000" }))
+    expect(first.has_more).toBe(true)
+    const second = await readDexieDelta(
+      "sessionUsage",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    const seen = [...ids(first.rows), ...ids(second.rows)]
+    expect(seen).toHaveLength(SESSION_USAGE_PAGE_SIZE + 1)
+    expect(seen).toEqual(expect.arrayContaining(["tie-1", "tie-2"]))
+    expect(seen).not.toContain("scanned")
+    expect(seen).not.toContain("expired")
+    expect(second.has_more).toBe(false)
+  })
+
+  it("carries a deleted conversation's tombstoned rows to a cursor client and a legacy one", async () => {
+    await getDb().sessionUsage.bulkPut([row("kept", now - 10)])
+    await recordTombstones("sessionUsage", ["gone"], now)
+    const paged = await readDexieDelta("sessionUsage", 0, undefined, undefined, "")
+    expect(ids(paged.rows)).toEqual(["kept"])
+    expect(paged.deleted_ids).toEqual(["gone"])
+    const legacy = await readDexieDelta("sessionUsage", 0)
+    expect(ids(legacy.rows)).toEqual(["kept"])
+    expect(legacy.deleted_ids).toEqual(["gone"])
+  })
+
+  it("never pages a legacy client on scanned rows it filters out", async () => {
+    await getDb().sessionUsage.bulkPut([
+      ...Array.from({ length: SESSION_USAGE_PAGE_SIZE }, (_, i) =>
+        row(`scan-${i}`, now - 2_000 + i, { sourceId: "codex" })
+      ),
+      row("turn", now - 10),
+    ])
+    const delta = await readDexieDelta("sessionUsage", 0)
+    expect(ids(delta.rows)).toEqual(["turn"])
+    expect(delta.has_more).toBe(false)
+  })
 })

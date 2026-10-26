@@ -2,7 +2,7 @@
   "latestVersion": 249,
   "schemaSha256": "5914ce50f5fba2cd0b66ee858f3021b4c2f270d485c9cd027176ddb632fa9ee7",
   "staticTableCount": 392,
-  "companionSyncTableCount": 57,
+  "companionSyncTableCount": 58,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -48,6 +48,7 @@
     "projects",
     "sessionFolders",
     "sessionState",
+    "sessionUsage",
     "sessions",
     "settings",
     "skills",

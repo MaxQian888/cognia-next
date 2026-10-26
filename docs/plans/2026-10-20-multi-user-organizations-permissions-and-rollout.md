@@ -629,7 +629,24 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - In passing, the per-model turn count is an ICU plural ("1 turn", not "1 turns").
     - **Surface:** `lib/usage/model-labels.ts` (`modelProviders`, `usageModelLabel`, `usageModelLabels`), `useActivityStats().modelLabels`, the dashboard's tile and breakdown, key `chat.empty.stats.models.unknown`.
     - **Verified (2026-10-26, P6f rig):** a browser paired to the rig as Ada, with two usage rows seeded, read "Top model: DeepSeek V4.1 Flash" (hover `ark-deepseek-v4.1-flash`) and listed "Claude Haiku 4.5" and "DeepSeek V4.1 Flash" in the Models view. The plural string is checked by the unit test against the generated `en.json`; the running page loads its messages once and was not reloaded (a reload locks the dev vault).
-    - **Known gaps:** a member's browser records no usage rows of its own (the Host runs their turns), so a member's welcome dashboard is empty unless the device also ran local turns. Their month is shown by the composer's usage figure from `personAgents`.
+    - **Known gaps:** ~~a member's browser records no usage rows of its own (the Host runs their turns), so a member's welcome dashboard is empty unless the device also ran local turns~~ (fixed by item 21). Their month is shown by the composer's usage figure from `personAgents`.
+
+21. **A member's welcome dashboard shows the turns the Host ran for them (P6 follow-up, 2026-10-26; item 20's gap).**
+    - **Decisions:**
+      - The Host books every turn it runs, as the chat view books the turns it renders. Tool-less turns (a member's chat, an owner's HostState turn with no chat view open) are booked by the global terminal-event listener on each SDK `result` (`startWorkSubmissionTerminalEvents`). It writes the same row the chat view writes (`recordResultUsage`), keyed by the reply's message id, with the conversation's model, provider (`providerOverride`), character and workspace. A turn a headless caller claimed (`claimTurnUsage`) is left to that caller. A member's sandboxed agent turn is booked by the person-agent runner from the adapter's `done` usage under `assistant-<actionId>`, whatever became of the reply (`recordExternalAgentUsage`, which now also keeps the provider and workspace). A failed usage write is logged and never holds up the settlement.
+      - `sessionUsage` joins companion sync. It is read-only, paged on `at` with the message id as tie-break, and keyed on the wire by `id` = `messageId`. A cold pull starts at the 90 days both sides keep. A member's device pulls only their own partition's rows, as for every other table, and an owner's devices pull the owner's.
+      - A conversation delete now tombstones its usage rows (`deleteSessionsCascade`), so the delete strategy is `tombstoned`. The 90-day prune runs on each side without tombstones.
+      - Rows the external usage index scanned from the Host machine's own agent logs (`sourceId`) stay local. They are replaced by each rescan without tombstones, so a mirror would keep stale rows.
+      - A device that booked a turn itself while its chat view rendered it has the same key, so the Host's row replaces it rather than counting the turn twice.
+      - The welcome dashboard needed no change: it already reads `sessionUsage`.
+    - **Surface:**
+      - Writers: `lib/work-submission/terminal-events.ts` (`recordUsage`/`loadSession` deps), `PersonAgentRunnerDeps.recordUsage` (wired in `lib/headless/person-agent/index.ts`).
+      - Sync: the `sessionUsage` sync table (Rust `sync_registry.rs` with tombstones, the catalog, `PAGED_SYNC_TABLES`, the Host reader in `desktop-sync-source.ts`, `lib/sync/handlers/session-usage.ts` in the background stage, `SYNC_TABLE_SOURCES`), and the `sync_pull` table enum in `protocol/companion-request-schemas.json` and the generated catalogs.
+    - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):** after one persons smoke, Ada's partition held a row per tool-less turn (model, provider, tokens, duration) and, after the next, a row per agent turn (`assistant-<actionId>`, SDK cost). A browser freshly paired as Ada pulled the 5 rows. Her welcome dashboard read 4 sessions, 5 turns, 2.7K tokens, a 1-day streak and "DeepSeek V4.1 Flash" as top model. Without a reload, it moved to 12 rows, 10 sessions, 12 turns and "<$0.01" while the second smoke ran.
+    - **Smoke results:** in that window the proxy took 13–60 s per call. In 3 runs, two agent turns timed out (`Request timeout: session/prompt`, 30 s) and one tool-less turn outlasted the smoke's wait. One run also missed the agent's final live frame with no socket closed. Every check passed in at least one run.
+    - **Known gaps:**
+      - `claude-agent-acp`'s turn usage carries `inputTokens: 0` through the gateway: the Host's member ledger charged about 16.5K tokens for a turn whose row has 45 output tokens. The row's SDK cost is the adapter's.
+      - DeepSeek turns booked by the tool-less path have no price (`costKnown: false`), so their cost reads as free, as on the desktop.
 
 **Intentional dormancy (Rule 7).**
 

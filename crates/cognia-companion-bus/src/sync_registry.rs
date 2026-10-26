@@ -423,6 +423,14 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Pet interaction ledger (cursored on its numeric id; capped at 2000 rows on both sides without tombstones, a reset is recognised by the profile's createdAt)".to_string(),
             has_tombstones: false,
         },
+        // Per-turn usage. A member's turns run on the Host, so the Host's rows
+        // are the only record of that spend; the member's welcome dashboard
+        // reads them here. Imported external-agent scans stay local.
+        SyncTableDescriptor {
+            name: "sessionUsage".to_string(),
+            description: "Per-turn token and cost rows (wire id is the reply's messageId; paged on `at`; a deleted conversation tombstones its rows; both sides prune past the 90-day window)".to_string(),
+            has_tombstones: true,
+        },
     ]
 }
 
@@ -472,6 +480,7 @@ mod tests {
         assert!(r.contains("petAchievements"));
         assert!(r.contains("petInventory"));
         assert!(r.contains("petCharacterBindings"));
+        assert!(r.contains("sessionUsage"));
         assert!(r.contains("petActivityLog"));
         // Chat history and the model/sprite blobs stay on the host.
         assert!(!r.contains("petConversationV2"));
@@ -535,6 +544,8 @@ mod tests {
             // Deleting a managed-desktop session removes its run projections.
             "executionRuns",
             "executionRunBindings",
+            // Deleting a conversation deletes its usage rows.
+            "sessionUsage",
         ] {
             assert_eq!(by_name.get(name), Some(&true), "{name} must tombstone");
         }

@@ -32,6 +32,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentImageContent,
   ExternalAgentConfig,
+  ExternalAgentTokenUsage,
 } from "@/types/agent/external-agent"
 import type { UIMessage } from "ai"
 import type { ChatSession, SendContent } from "@cognia/agent-config-types"
@@ -125,6 +126,19 @@ export interface PersonAgentRunnerDeps {
   ): Promise<void>
   /** Feed a runtime observation into HostState. */
   project(envelope: AgentEventEnvelope): Promise<void>
+  /**
+   * Book the turn's token usage under its reply's id, as the chat view books
+   * an external agent's turn on the desktop. The member's own partition is
+   * the only place this turn's spend is recorded.
+   */
+  recordUsage(input: {
+    sessionId: string
+    messageId: string
+    usage: ExternalAgentTokenUsage
+    model: string
+    providerId: string
+    durationMs?: number
+  }): Promise<void>
   /** Send a live reply frame to the member's devices; best effort. */
   publishLive(frame: TranscriptLiveFrame): Promise<void>
   /** The conversation's persisted transcript revision, when known. */
@@ -448,6 +462,7 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
     }
     let outcome: PersonAgentSettleOutcome = "failed"
     let errorCode: string | undefined
+    let usage: { tokens: ExternalAgentTokenUsage; durationMs?: number } | undefined
     /** Error text the agent reported, kept only to find a gateway refusal in. */
     const errorTexts: string[] = []
     try {
@@ -475,6 +490,12 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
             reason: "questions cannot be answered in a member conversation",
           })
         } else if (event.type === "done") {
+          if (event.tokenUsage) {
+            usage = {
+              tokens: event.tokenUsage,
+              ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+            }
+          }
           outcome = turn.aborted || event.stopReason === "cancelled" ? "cancelled" : "completed"
           if (!event.success && outcome === "completed") {
             outcome = "failed"
@@ -549,6 +570,19 @@ export function createPersonAgentRunner(deps: PersonAgentRunnerDeps): PersonAgen
       await sendLive(liveReply.reset())
     }
     const final = message()
+    // Whatever became of the reply, the tokens were spent.
+    if (usage) {
+      await deps
+        .recordUsage({
+          sessionId,
+          messageId: final.id,
+          usage: usage.tokens,
+          model: request.model,
+          providerId: request.provider,
+          ...(usage.durationMs !== undefined ? { durationMs: usage.durationMs } : {}),
+        })
+        .catch((error) => deps.log("warn", `person agent usage write failed: ${String(error)}`))
+    }
     await deps.settle(request.actionId, {
       outcome,
       ...(outcome === "failed" ? { errorCode: errorCode ?? "turn_error" } : {}),

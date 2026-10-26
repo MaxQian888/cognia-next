@@ -95,8 +95,12 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 56 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(57)
+  it("maps all 58 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(58)
+    // Per-turn usage, so an org member's dashboard reads the Host's record of
+    // the turns it ran for them. A deleted conversation tombstones its rows.
+    expect(policyForTable("sessionUsage")?.syncPolicy.mode).toBe("companion-readonly")
+    expect(COMPANION_SYNC_DELETE_STRATEGY.sessionUsage).toBe("tombstoned")
     // The goal event log, so a paired phone's goal detail, judge notes and
     // `/goal status` read the desktop's history. It leaves with its goal's
     // tombstone and is capped per goal on both sides, so it has none of its own.

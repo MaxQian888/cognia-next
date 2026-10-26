@@ -40,6 +40,7 @@ import type { ExecutionRunBinding } from "@/types/execution/run"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { BotDefinitionRow, BotEventDeliveryRow, BotInstallationRow } from "@/lib/db/bot-types"
 import { BOT_DELIVERY_RETENTION_MS } from "@/lib/db/bot-event-deliveries"
+import type { SessionUsageRow } from "@/lib/db/session-usage"
 import { getDb } from "@/lib/db/schema"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
@@ -296,6 +297,8 @@ export async function readDexieDelta(
       return readPetCharacterBindingsDelta(since)
     case "petActivityLog":
       return readPetActivityLogDelta(since)
+    case "sessionUsage":
+      return readSessionUsageDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -488,6 +491,23 @@ async function readCursorDelta(
       .toArray()
     hasMore = page.length > HEARTBEAT_PAGE_SIZE
     rows = page.slice(0, HEARTBEAT_PAGE_SIZE)
+  } else if (table === "sessionUsage") {
+    // `at` is the position and the message id breaks ties (the `at` index
+    // orders equal keys by primary key), as for goal events.
+    cursorOf = (row) => (row as unknown as SessionUsageRow).at
+    if (!token && since === 0) {
+      cursor.at = Math.max(0, Date.now() - SESSION_USAGE_FIRST_SYNC_WINDOW_MS)
+    }
+    const page = await db.sessionUsage
+      .where("at")
+      .aboveOrEqual(cursor.at)
+      .filter((row) => syncsSessionUsage(row) && after(sessionUsageWireRow(row)))
+      .limit(SESSION_USAGE_PAGE_SIZE + 1)
+      .toArray()
+    hasMore = page.length > SESSION_USAGE_PAGE_SIZE
+    rows = page
+      .slice(0, SESSION_USAGE_PAGE_SIZE)
+      .map(sessionUsageWireRow) as unknown as UpdatedAtRow[]
   } else {
     cursorOf = (row) => runActivityAt(row as unknown as WorkflowRunRow)
     if (!token && since === 0) cursor.at = Math.max(0, Date.now() - RUN_FIRST_SYNC_WINDOW_MS)
@@ -1083,6 +1103,50 @@ async function readBotEventDeliveriesDelta(
 // none of them has an indexed `updatedAt` except deployments, and adding an
 // index means a schema reset for every existing database, which a mirror is
 // not worth. The two scans below are bounded the same way the tables are.
+
+/**
+ * Usage a cold client pulls: the 90 days both sides keep (`sessionUsage`
+ * retention), then incremental. Paged on the indexed `at`.
+ */
+export const SESSION_USAGE_FIRST_SYNC_WINDOW_MS = 90 * 24 * 60 * 60 * 1000
+export const SESSION_USAGE_PAGE_SIZE = 500
+
+/**
+ * Whether a usage row crosses to paired devices. Rows the external usage index
+ * scanned from this machine's own agent logs (`sourceId`) are rebuilt and
+ * replaced by each rescan without tombstones, so they stay where they were
+ * scanned.
+ */
+function syncsSessionUsage(row: SessionUsageRow): boolean {
+  return !row.sourceId
+}
+
+/** A usage row on the wire: keyed by `id`, its reply's message id. */
+export function sessionUsageWireRow(row: SessionUsageRow): SessionUsageRow & { id: string } {
+  return { ...row, id: row.messageId }
+}
+
+/**
+ * Per-turn usage for a client that did not negotiate the paged cursor: the
+ * same rows, bounded the way heartbeats are.
+ */
+async function readSessionUsageDelta(since: number): Promise<SyncDelta<unknown>> {
+  const floor =
+    since === 0 ? Math.max(0, Date.now() - SESSION_USAGE_FIRST_SYNC_WINDOW_MS) : since
+  const page = await getDb()
+    .sessionUsage.where("at")
+    .above(floor)
+    .filter(syncsSessionUsage)
+    .limit(SESSION_USAGE_PAGE_SIZE)
+    .toArray()
+  return finalizeDelta(
+    "sessionUsage",
+    page.map(sessionUsageWireRow) as unknown as UpdatedAtRow[],
+    since,
+    page.length === SESSION_USAGE_PAGE_SIZE,
+    (row) => (row as unknown as SessionUsageRow).at
+  )
+}
 
 /** Heartbeats a cold client pulls: the newest hour, then incremental. */
 export const HEARTBEAT_FIRST_SYNC_WINDOW_MS = 60 * 60 * 1000

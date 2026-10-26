@@ -74,12 +74,14 @@ export async function installPersonAgents(
   const [
     { listMessages, commitMessageDelta },
     { getSession },
+    { recordExternalAgentUsage },
     { settleChatTurn },
     { hostStateRunId },
     writeSource,
   ] = await Promise.all([
     import("@/lib/db/messages"),
     import("@/lib/db/sessions"),
+    import("@/lib/db/session-usage"),
     import("@/lib/work-submission/chat-adapter"),
     import("@/lib/work-submission/host-adapter"),
     import("@/lib/companion/desktop-write-source"),
@@ -103,6 +105,10 @@ export async function installPersonAgents(
       await settleChatTurn({ runId: hostStateRunId(actionId), ...input })
     },
     project: (envelope) => writeSource.projectBrainRuntimeEnvelope(envelope),
+    recordUsage: async (input) => {
+      const projectId = (await getSession(input.sessionId).catch(() => undefined))?.projectId
+      await recordExternalAgentUsage({ ...input, ...(projectId ? { projectId } : {}) })
+    },
     // The brain's registered publisher pipes it over the bridge; the Host
     // delivers it only to this person's devices.
     publishLive: (frame) => publishHostEvent(TRANSCRIPT_LIVE_TOPIC, frame),

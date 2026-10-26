@@ -61,6 +61,7 @@ import { syncBotDefinitions } from "./handlers/bot-definitions"
 import { syncBotEventDeliveries } from "./handlers/bot-event-deliveries"
 import { syncBotInstallations } from "./handlers/bot-installations"
 import { syncConnectorHeartbeats } from "./handlers/connector-heartbeats"
+import { syncSessionUsage } from "./handlers/session-usage"
 import { syncPlatformIdentities } from "./handlers/platform-identities"
 import { syncConnectorCallbackBindings } from "./handlers/connector-callback-bindings"
 import { syncWorkflowDeployments } from "./handlers/workflow-deployments"
@@ -360,6 +361,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
     run: syncPetActivityLog,
     after: ["petProfile"],
   },
+  // Per-turn usage behind the welcome dashboard. An org member's turns run on
+  // the Host, so this mirror is the member's only record of them; nothing on
+  // the first screen waits for it.
+  { table: "sessionUsage", stage: "background", run: syncSessionUsage },
 ]
 
 /** Which stage each table is pulled in. */
@@ -519,6 +524,9 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   petCharacterBindings: syncDomain("tombstone", "internal"),
   // Capped on both sides without tombstones; the cursor is the numeric id.
   petActivityLog: syncDomain("ttl", "internal", "opaque"),
+  // Token counts, cost, model and ids; no content. Paged on `at` + message id,
+  // and a deleted conversation tombstones its rows.
+  sessionUsage: syncDomain("tombstone", "internal", "opaque"),
 })
 
 interface SyncState {

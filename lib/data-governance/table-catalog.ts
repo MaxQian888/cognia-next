@@ -709,6 +709,12 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "petInventory",
   "petCharacterBindings",
   "petActivityLog",
+  // Per-turn usage. An org member's turns run on the Host, which writes the
+  // only record of their spend into the member's partition; the member's
+  // welcome dashboard (streaks, heatmap, per-model breakdown) reads it from
+  // this mirror. Imported external-agent scans (`sourceId` rows) are this
+  // device's own and stay local.
+  "sessionUsage",
 ])
 
 /**
@@ -774,6 +780,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "petInventory",
   "petCharacterBindings",
   "petActivityLog",
+  "sessionUsage",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]
@@ -870,6 +877,9 @@ export const COMPANION_SYNC_DELETE_STRATEGY: Readonly<
   // prunes its mirror to the same cap; a reset is recognised on the client by
   // the profile's new `createdAt` (`lib/sync/handlers/pet.ts`).
   petActivityLog: "retention-pruned",
+  // The 90-day prune runs on both sides, but deleting a conversation deletes
+  // its usage rows at any age, so that path tombstones them.
+  sessionUsage: "tombstoned",
 }
 
 const CACHE_TABLES = new Set<CoreTableName>([

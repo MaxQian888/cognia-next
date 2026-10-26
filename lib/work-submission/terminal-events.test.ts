@@ -8,6 +8,10 @@ import {
   startWorkSubmissionTerminalEvents,
 } from "./terminal-events"
 import type { Unsubscribe } from "./outbox-runner"
+import {
+  __resetClaimedTurnUsageForTesting,
+  claimTurnUsage,
+} from "@/lib/usage/claimed-turn-usage"
 
 async function flushEvents(): Promise<void> {
   for (let tick = 0; tick < 5; tick += 1) await Promise.resolve()
@@ -118,6 +122,111 @@ describe("work submission terminal events", () => {
     handler?.({ type: "session_ended", sessionId: "session-1" })
     await done
     expect(persistMessages).toHaveBeenCalledWith("session-1", [first, reply, queued])
+    stop()
+  })
+
+  it("books the usage of a turn no chat view renders, under the reply's id", async () => {
+    let handler: ((event: ClaudeEvent) => void) | undefined
+    const reply = { id: "assistant-7", role: "assistant", parts: [] }
+    const result = { type: "result", subtype: "success" } as never
+    const recordUsage = jest.fn(async () => null)
+    const stop = startWorkSubmissionTerminalEvents({
+      subscribe: async (next) => {
+        handler = next
+        return () => {}
+      },
+      loadMessages: async () => [{ id: "user-1", role: "user", parts: [] }] as never,
+      applyEvent: (messages, event) =>
+        (event as { type: string }).type === "result"
+          ? { messages, result }
+          : { messages: [...messages, reply] as never },
+      hasOpenSubmission: async () => true,
+      loadSession: async () =>
+        ({
+          id: "session-1",
+          characterId: "char-1",
+          model: "ark-deepseek-v4.1-flash",
+          providerOverride: "deepseek",
+          projectId: "proj-1",
+        }) as never,
+      recordUsage,
+    })
+    await Promise.resolve()
+
+    handler?.({ type: "event", sessionId: "session-1", event: { type: "assistant" } as never })
+    handler?.({
+      type: "event",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      event: { type: "result" } as never,
+    } as ClaudeEvent)
+    for (let tick = 0; tick < 20 && recordUsage.mock.calls.length === 0; tick += 1) {
+      await Promise.resolve()
+    }
+
+    expect(recordUsage).toHaveBeenCalledTimes(1)
+    expect(recordUsage).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      messageId: "assistant-7",
+      characterId: "char-1",
+      model: "ark-deepseek-v4.1-flash",
+      providerId: "deepseek",
+      projectId: "proj-1",
+      turnId: "turn-1",
+      result,
+    })
+    stop()
+  })
+
+  it("leaves a turn a headless caller claimed, and survives a failed usage write", async () => {
+    __resetClaimedTurnUsageForTesting()
+    claimTurnUsage("session-1", "turn-claimed")
+    let handler: ((event: ClaudeEvent) => void) | undefined
+    const reply = { id: "assistant-1", role: "assistant", parts: [] }
+    const recordUsage = jest.fn(async () => {
+      throw new Error("disk full")
+    })
+    const onError = jest.fn()
+    const settleSession = jest.fn(async () => true)
+    const stop = startWorkSubmissionTerminalEvents({
+      subscribe: async (next) => {
+        handler = next
+        return () => {}
+      },
+      loadMessages: async () => [reply] as never,
+      applyEvent: (messages) => ({ messages, result: { type: "result" } as never }),
+      hasOpenSubmission: async () => true,
+      loadSession: async () => undefined,
+      recordUsage,
+      settleSession,
+      onError,
+    })
+    await Promise.resolve()
+
+    const frame = (turnId: string) =>
+      ({
+        type: "event",
+        sessionId: "session-1",
+        turnId,
+        event: { type: "result" },
+      }) as unknown as ClaudeEvent
+    handler?.(frame("turn-claimed"))
+    handler?.(frame("turn-open"))
+    handler?.({ type: "session_ended", sessionId: "session-1" })
+    for (let tick = 0; tick < 30 && settleSession.mock.calls.length === 0; tick += 1) {
+      await Promise.resolve()
+    }
+
+    expect(recordUsage).toHaveBeenCalledTimes(1)
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "assistant-1", turnId: "turn-open" })
+    )
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "disk full" }))
+    expect(settleSession).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ outcome: "completed" })
+    )
+    __resetClaimedTurnUsageForTesting()
     stop()
   })
 
@@ -354,6 +463,17 @@ it("writes a real reply and terminal settlement only into the person account dat
         },
       } as never,
     })
+    handler?.({
+      type: "event",
+      sessionId: "person-session",
+      event: {
+        type: "result",
+        subtype: "success",
+        usage: { input_tokens: 12, output_tokens: 7 },
+        total_cost_usd: 0.001,
+        duration_ms: 900,
+      } as never,
+    })
     handler?.({ type: "session_ended", sessionId: "person-session" })
     await finished
     expect(await listMessages("person-session")).toEqual(
@@ -370,11 +490,16 @@ it("writes a real reply and terminal settlement only into the person account dat
       dispatchState: "settled",
       terminalOutcome: "completed",
     })
+    // The member's usage lands beside the member's transcript.
+    expect(await getDb().sessionUsage.where("sessionId").equals("person-session").toArray()).toEqual(
+      [expect.objectContaining({ inputTokens: 12, outputTokens: 7 })]
+    )
     activateAccountDatabase("pb_other_chat_test", "local-host")
     activateAccountContentCipher(
       await AccountContentCipher.createForTesting("pb_other_chat_test", getDb().name)
     )
     expect(await listMessages("person-session")).toEqual([])
+    expect(await getDb().sessionUsage.count()).toBe(0)
     await getDb().delete()
   } finally {
     stop()

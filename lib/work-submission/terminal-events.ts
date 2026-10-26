@@ -1,11 +1,14 @@
 import { personChatCapability } from "@/lib/headless/person-chat"
 import type { UIMessage } from "ai"
-import type { ClaudeEvent, SDKMessage } from "@cognia/agent-config-types"
+import type { ClaudeEvent, SDKMessage, SDKResultMessage } from "@cognia/agent-config-types"
 
 import { applySdkEvent } from "@/lib/claude/adapter"
 import { onClaudeMessage } from "@/lib/claude/ipc"
 import { listMessages, persistMessages } from "@/lib/db/messages"
+import { recordResultUsage } from "@/lib/db/session-usage"
+import { getSession } from "@/lib/db/sessions"
 import { listWorkSubmissions } from "@/lib/db/work-submissions"
+import { isTurnUsageClaimed } from "@/lib/usage/claimed-turn-usage"
 
 import { settleChatTurnForSession } from "./chat-adapter"
 import { settleWorkSubmission } from "./service"
@@ -19,7 +22,13 @@ interface WorkSubmissionTerminalEventDeps {
   hasOpenSubmission?: (sessionId: string) => Promise<boolean>
   loadMessages?: typeof listMessages
   persistMessages?: typeof persistMessages
-  applyEvent?: (messages: UIMessage[], event: SDKMessage) => { messages: UIMessage[] }
+  applyEvent?: (
+    messages: UIMessage[],
+    event: SDKMessage
+  ) => { messages: UIMessage[]; result?: SDKResultMessage }
+  /** Book a turn's usage row; the chat view's own `recordResultUsage` call. */
+  recordUsage?: typeof recordResultUsage
+  loadSession?: typeof getSession
   onReady?: () => void
   onError?: (error: unknown) => void
   retryMs?: number
@@ -92,6 +101,42 @@ export function startWorkSubmissionTerminalEvents(
   const load = deps.loadMessages ?? listMessages
   const persist = deps.persistMessages ?? persistMessages
   const project = deps.applyEvent ?? applySdkEvent
+  const recordUsage = deps.recordUsage ?? recordResultUsage
+  const loadSession = deps.loadSession ?? getSession
+  /**
+   * Book the turn's usage, as the chat view does for the turns it renders
+   * (`hooks/chat/claude-chat-events.ts`). A turn this listener settles is one
+   * no chat view is rendering: the Host runs it for a paired device or an org
+   * member, so without this the turn's spend was recorded nowhere. Same row
+   * key (the reply's message id) and fields, so a chat view that also books
+   * the turn overwrites one row, and a turn a headless caller claimed is left
+   * to that caller. A failed write never holds up the settlement.
+   */
+  const recordTurnUsage = async (
+    sessionId: string,
+    messages: UIMessage[],
+    result: SDKResultMessage,
+    turnId: string | undefined
+  ) => {
+    if (isTurnUsageClaimed(sessionId, turnId)) return
+    const reply = [...messages].reverse().find((message) => message.role === "assistant")
+    if (!reply) return
+    try {
+      const session = await loadSession(sessionId).catch(() => undefined)
+      await recordUsage({
+        sessionId,
+        messageId: reply.id,
+        characterId: session?.characterId,
+        model: session?.model,
+        providerId: session?.providerOverride,
+        ...(session?.projectId ? { projectId: session.projectId } : {}),
+        ...(turnId ? { turnId } : {}),
+        result,
+      })
+    } catch (error) {
+      deps.onError?.(error)
+    }
+  }
   // The rows each mirror was loaded from. A row written after that is not the
   // mirror's to delete: the Host writes a message sent mid-turn when it
   // accepts it, while the running turn's mirror is already loaded, and the
@@ -142,8 +187,17 @@ export function startWorkSubmissionTerminalEvents(
           activeSessions.add(event.sessionId)
         }
         const current = mirrors.get(event.sessionId) ?? (await loadMirror(event.sessionId))
-        const projected = project(current, event.event).messages
-        mirrors.set(event.sessionId, projected)
+        const applied = project(current, event.event)
+        mirrors.set(event.sessionId, applied.messages)
+        if (applied.result) {
+          const turnId = (event as { turnId?: unknown }).turnId
+          await recordTurnUsage(
+            event.sessionId,
+            applied.messages,
+            applied.result,
+            typeof turnId === "string" ? turnId : undefined
+          )
+        }
       })
     } else if (event.type === "session_ended") {
       enqueue(event.sessionId, async () => {

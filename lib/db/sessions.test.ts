@@ -1666,6 +1666,33 @@ describe("deletion tombstones (companion sync v61)", () => {
     expect(markSessionRemovedMock).toHaveBeenCalledWith(s.id)
   })
 
+  it("tombstones the deleted conversation's usage rows, and only those", async () => {
+    const s = await createSession({ title: "X" })
+    const other = await createSession({ title: "Y" })
+    const db = getDb()
+    const usage = (messageId: string, sessionId: string) => ({
+      messageId,
+      sessionId,
+      at: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 0,
+      durationMs: 0,
+    })
+    await db.sessionUsage.bulkPut([
+      usage("a1", s.id),
+      usage("a2", s.id),
+      usage("b1", other.id),
+    ])
+    await deleteSession(s.id)
+
+    const usageTombs = await db.syncTombstones.where("table").equals("sessionUsage").toArray()
+    expect(usageTombs.map((t) => t.id).sort()).toEqual(["a1", "a2"])
+    expect((await db.sessionUsage.toArray()).map((row) => row.messageId)).toEqual(["b1"])
+  })
+
   it("records session tombstones on bulkDeleteSessions", async () => {
     const a = await createSession({ title: "A" })
     const b = await createSession({ title: "B" })

@@ -117,6 +117,22 @@ describe("recordExternalAgentUsage", () => {
     ])
   })
 
+  it("keeps the provider and workspace a Host-run agent turn names", async () => {
+    await recordExternalAgentUsage({
+      sessionId: "member-chat",
+      messageId: "assistant-a1",
+      model: "ark-deepseek-v4.1-flash",
+      providerId: "deepseek",
+      projectId: "project-1",
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    })
+    expect((await listUsageForSession("member-chat"))[0]).toMatchObject({
+      providerId: "deepseek",
+      projectId: "project-1",
+      model: "ark-deepseek-v4.1-flash",
+    })
+  })
+
   it("does not turn unlabelled provider currency into dollars", async () => {
     await recordExternalAgentUsage({
       sessionId: "s",

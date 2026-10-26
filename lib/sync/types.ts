@@ -22,6 +22,7 @@ export const PAGED_SYNC_TABLES: readonly SyncableTable[] = [
   "workflowRuns",
   "connectorHeartbeats",
   "goalEvents",
+  "sessionUsage",
 ]
 
 export interface SyncCursor {
