@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2025", "DOM"],
+    "paths": {
+      "vscode": ["../vscode-ext-host/node_modules/@types/vscode"]
+    },
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "build.mts", "vsix-zip.mts"]
+}

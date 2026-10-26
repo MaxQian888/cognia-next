@@ -6,10 +6,10 @@ export type {
   PluginContextProvider,
   PluginContextProviderDef,
   PluginContextProviderFactoryContext,
-} from "@/types/plugin/plugin-context-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-provider"
 
 export type {
   ContextProvidersBridgeError,
   ContextProvidersBridgeOptions,
   ContextProvidersBridgeResult,
-} from "@/lib/plugin/bridge/context-providers-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/context-providers-bridge"

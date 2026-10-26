@@ -4,6 +4,7 @@ import {
   BootstrapAgentValidationError,
   type BootstrapValidationCode,
 } from "./bootstrap-agent"
+import { resolveBootstrapSystemPrompt } from "./bootstrap-prompts"
 import { isTauri, transport } from "@/lib/tauri"
 import { ensureExecutionPortLease } from "@/lib/task-workspace/execution-port-lease"
 import { sha256Hex } from "@/lib/data/crypto"
@@ -272,10 +273,17 @@ async function runScript(
   let portLeaseFailed = false
   try {
     if (options.validationError !== undefined) throw options.validationError
-    const bootstrap =
+    const bootstrapAgent =
       options.recordInitialization && input.environment.bootstrapAgent?.enabled
-        ? prepareBootstrapExecution(input.environment, input.force === true)
+        ? input.environment.bootstrapAgent
         : undefined
+    const bootstrap = bootstrapAgent
+      ? prepareBootstrapExecution(
+          input.environment,
+          input.force === true,
+          await resolveBootstrapSystemPrompt(bootstrapAgent, input.environment.projectId)
+        )
+      : undefined
     try {
       await ensureExecutionPortLease({
         cwd: input.executionRoot,

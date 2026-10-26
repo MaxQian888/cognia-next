@@ -17,6 +17,17 @@ describe("buildAgentA2UICatalogSection", () => {
     expect(section).toContain("Leave `catalogId` out of createSurface")
   })
 
+  it("includes the registered custom contract rather than only its name", () => {
+    registerComponent("Ticker", Noop, {
+      catalogId: "contracts",
+      description: "Market price",
+      schema: { type: "object", required: ["symbol"], properties: { symbol: { type: "string" } } },
+    })
+    const section = buildAgentA2UICatalogSection("contracts")
+    expect(section).toContain("Market price")
+    expect(section).toContain('"required":["symbol"]')
+  })
+
   it("adds nothing for no catalog, the standard one, or an unregistered id", () => {
     expect(buildAgentA2UICatalogSection(undefined)).toBeUndefined()
     expect(buildAgentA2UICatalogSection(DEFAULT_CATALOG_ID)).toBeUndefined()

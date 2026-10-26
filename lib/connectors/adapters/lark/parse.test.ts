@@ -576,6 +576,25 @@ describe("parseLarkEventEnvelope", () => {
       expect(r!.timestamp).toBe(1714900200)
     })
 
+    // The recall event carries only `chat_id`; the bus matches it against a
+    // row stored under any thread of that chat (`<chat key>:<thread>`).
+    it("addresses the chat whose threads hold the recalled message", () => {
+      const created = parseLarkEventEnvelope(
+        ADAPTER_ID,
+        SELF_BOT_OPEN_ID,
+        replyThreadFixture as unknown as LarkEventEnvelope,
+        { replyInThread: true }
+      )!
+      const recall = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, {
+        schema: "2.0",
+        header: { event_id: "evt_recall_thr", event_type: "im.message.recalled_v1" },
+        event: { message_id: "om_thr_001", chat_id: "oc_group_chat_002" },
+      })!
+      expect(created.conversationKey).not.toBe(recall.conversationKey)
+      expect(created.conversationKey.startsWith(`${recall.conversationKey}:`)).toBe(true)
+      expect(recall.replacesMessageId).toBe(created.messageId)
+    })
+
     it("returns null when chat_id or message_id is missing", () => {
       const envelope: LarkEventEnvelope = {
         schema: "2.0",
@@ -1181,4 +1200,55 @@ it.each([
     )
   ).toBeNull()
   expect(onInvalid).toHaveBeenCalledWith(reason)
+})
+
+describe("interactive (card) messages carry a text mirror", () => {
+  function interactiveEnvelope(content: unknown): LarkEventEnvelope {
+    const base = structuredClone(dmTextFixture) as unknown as LarkEventEnvelope
+    const message = (base.event as unknown as { message: Record<string, unknown> }).message
+    message.message_type = "interactive"
+    message.content = typeof content === "string" ? content : JSON.stringify(content)
+    return base
+  }
+
+  it("mirrors the received card's prose into a markdown segment", () => {
+    const event = parseLarkEventEnvelope(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      interactiveEnvelope({
+        title: "Leave request",
+        elements: [
+          [
+            { tag: "text", text: "From " },
+            { tag: "at", user_id: "ou_1", user_name: "Bob" },
+          ],
+          [{ tag: "button", text: "Approve", type: "primary" }],
+        ],
+      })
+    )!
+    expect(event.segments).toEqual([
+      { type: "markdown", md: "Leave request\nFrom @Bob\n\\[Approve\\]" },
+    ])
+    expect(event.plainText).toContain("From @Bob")
+  })
+
+  it("escapes plain card text in the mirror so it cannot become markup or a media marker", () => {
+    const event = parseLarkEventEnvelope(
+      ADAPTER_ID,
+      SELF_BOT_OPEN_ID,
+      interactiveEnvelope({
+        title: '[image: x] <div style="position:fixed">Login</div>',
+        elements: [[{ tag: "text", text: "body" }]],
+      })
+    )!
+    const md = (event.segments[0] as { md: string }).md
+    expect(md).not.toContain("[image: x]")
+    expect(md).not.toMatch(/(^|[^\\])<div/)
+    expect(md).toContain("\\<div")
+  })
+
+  it("leaves a marker when the card has no readable content", () => {
+    const event = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, interactiveEnvelope("{}"))!
+    expect(event.segments).toEqual([{ type: "text", text: "[card]" }])
+  })
 })

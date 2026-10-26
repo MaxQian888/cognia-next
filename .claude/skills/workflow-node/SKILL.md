@@ -31,9 +31,10 @@ left gaps in node-config-registry).
    `node-config-registry`: a config component (or explicit default mapping)
    per kind. Verify: `node-config-registry.test.tsx` (known to have
    pre-existing `pattern.*` gaps — don't add to them).
-6. **i18n** — node label/description keys in BOTH
-   `i18n/messages/en.json` and `zh-CN.json` (catalog i18n was a whole audit
-   theme once). `lib/workflow/i18n/` holds the wiring.
+6. **i18n** — node label/description keys in the split sources for BOTH
+   locales (`i18n/messages/{en,zh-CN}/**`), then `pnpm i18n:build`; the
+   aggregate `en.json` / `zh-CN.json` are generated. `lib/workflow/i18n/`
+   holds the wiring.
 7. **Tests** — co-located executor test (happy path + error path + param
    validation). If the node calls Tauri/sidecar, mock at the transport
    seam, not the executor.

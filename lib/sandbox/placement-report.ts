@@ -45,6 +45,21 @@ import {
 const ISOLATION_TIERS: readonly IsolationTier[] = ["container", "gvisor", "vm"]
 const EGRESS_TIERS: readonly EgressTier[] = ["off", "allowlist", "on"]
 
+/**
+ * Injected credentials are readable by the sandboxed process. Only brokered
+ * delivery promises credential.use without credential.read (Rule 7).
+ * gateway-lease is accepted from older Hosts.
+ */
+export type CredentialDelivery = "brokered" | "injected-env" | "none" | "gateway-lease"
+
+/** Identity resolved and stamped by Host admission. */
+export interface PlacementBinding {
+  orgId: string
+  workspaceId: string
+  actorUserId: string
+  runId: string
+}
+
 /** One agent's placement as the Host reported it. */
 export interface SandboxPlacementReport {
   agentId: string
@@ -80,12 +95,14 @@ export interface SandboxPlacementReport {
    */
   egressEnforced?: boolean
   /**
-   * How the sandbox got its provider credentials. Ambient provider keys are
-   * stripped before the container sees them, so this is `gateway-lease` when
-   * a managed gateway task's per-task lease rode in and `none` otherwise.
-   * Per-sandbox gateway tickets for ordinary spawns are ADR-0185.
+   * How the sandbox received credentials. Plain injected values can be read
+   * by the process; brokered delivery is a separate security property.
    */
-  credentialsMode?: string
+  credentialsMode?: CredentialDelivery
+  binding?: PlacementBinding
+  /** Private task tmpfs, destroyed with its sandbox. */
+  scratchPath?: string
+  workspaceReadOnly?: boolean
   /** The remote provider that ran it (ADR-0221); absent for the local driver. */
   provider?: string
   /** A remote workspace: the repository it cloned, from where, onto which branch. */
@@ -175,7 +192,31 @@ export function readPlacementEvent(payload: unknown): SandboxPlacementReport | n
   set("egressTier", oneOf(EGRESS_TIERS, egress.tier))
   set("egressEnforced", typeof egress.enforced === "boolean" ? egress.enforced : undefined)
 
-  set("credentialsMode", text(object(placement.credentials).mode))
+  set(
+    "credentialsMode",
+    oneOf<CredentialDelivery>(
+      ["brokered", "injected-env", "none", "gateway-lease"],
+      object(placement.credentials).mode
+    )
+  )
+  const binding = object(placement.binding)
+  if (
+    [binding.orgId, binding.workspaceId, binding.actorUserId, binding.runId].every(
+      (value) => typeof value === "string" && value.trim() !== ""
+    )
+  ) {
+    set("binding", {
+      orgId: binding.orgId as string,
+      workspaceId: binding.workspaceId as string,
+      actorUserId: binding.actorUserId as string,
+      runId: binding.runId as string,
+    })
+    set("scratchPath", text(placement.scratchPath))
+    set(
+      "workspaceReadOnly",
+      typeof placement.workspaceReadOnly === "boolean" ? placement.workspaceReadOnly : undefined
+    )
+  }
 
   set("provider", text(placement.provider))
   set("deliveryRecordId", text(placement.deliveryRecordId))

@@ -72,6 +72,7 @@ let mockState: Pick<
   | "loading"
   | "locked"
   | "error"
+  | "bootFailure"
   | "pendingRecoveryKey"
   | "autoUnlockFailure"
   | "createAccount"
@@ -118,6 +119,7 @@ function setGateState(overrides: Partial<typeof mockState> = {}) {
     loading: false,
     locked: false,
     error: null,
+    bootFailure: null,
     pendingRecoveryKey: null,
     autoUnlockFailure: null,
     createAccount: mockCreateAccount,
@@ -192,6 +194,72 @@ describe("AccountGate", () => {
     )
     expect(screen.queryByRole("heading", { name: "title" })).not.toBeInTheDocument()
     expect(screen.getByText("registry offline")).toBeInTheDocument()
+  })
+
+  it("offers recovery instead of creating an account when the registry read times out", () => {
+    mockIsTauri = false
+    setGateState({
+      bootFailure: { code: "registry-timeout" },
+      error: "internal registry diagnostic",
+    })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    expect(screen.getByRole("heading", { name: "registryFailureTitle" })).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("registryTimeoutDescription")
+    expect(screen.getByRole("button", { name: "retryRegistry" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "reloadWindow" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "createAccount" })).not.toBeInTheDocument()
+    expect(screen.queryByText("internal registry diagnostic")).not.toBeInTheDocument()
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+  })
+
+  it("keeps stale account data behind recovery until the registry retry settles", async () => {
+    let rejectRetry!: (error: Error) => void
+    mockLoadAccounts.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectRetry = reject
+        })
+    )
+    setGateState({
+      accounts: [account("acct_alpha", "Alpha")],
+      activeAccountId: "acct_alpha",
+      unlockedAccountId: "acct_alpha",
+      bootFailure: { code: "registry-unavailable" },
+    })
+    render(
+      <AccountGate>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("registryUnavailableDescription")
+    fireEvent.click(screen.getByRole("button", { name: "retryRegistry" }))
+    expect(mockLoadAccounts).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: "retryRegistry" })).toBeDisabled()
+    await act(async () => rejectRetry(new Error("private storage details")))
+    expect(screen.getByRole("button", { name: "retryRegistry" })).toBeEnabled()
+    expect(screen.queryByText("private storage details")).not.toBeInTheDocument()
+  })
+
+  it("lets a shared-link reader explicitly continue as guest after a registry boot failure", () => {
+    mockPathname = "/share/view"
+    setGateState({ bootFailure: { code: "registry-timeout" } })
+    render(
+      <AccountGate guestView={<div>guest</div>}>
+        <div>child</div>
+      </AccountGate>
+    )
+
+    expect(screen.queryByText("guest")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "shareGuestAction" }))
+    expect(screen.getByText("guest")).toBeInTheDocument()
+    expect(screen.queryByText("child")).not.toBeInTheDocument()
   })
 
   it("shows the create-account form in an ordinary browser", () => {

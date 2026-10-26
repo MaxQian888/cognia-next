@@ -70,6 +70,16 @@ describe("detectAndDispatchA2uiLine", () => {
     }
   })
 
+  it.each([
+    { type: "createSurface" },
+    { type: "updateComponents", surfaceId: "s", components: "bad" },
+    { type: "dataModelUpdate", surfaceId: "s", data: [] },
+    { type: "createSurface", surfaceId: "__proto__" },
+  ])("rejects invalid message %j without dispatch", (message) => {
+    expect(detectAndDispatchA2uiLine(JSON.stringify(message))).toBe(false)
+    expect(processMessage).not.toHaveBeenCalled()
+  })
+
   it("tolerates surrounding whitespace", () => {
     const msg = { type: "deleteSurface", surfaceId: "sx-2" }
     expect(detectAndDispatchA2uiLine("   " + JSON.stringify(msg) + "  \n")).toBe(true)

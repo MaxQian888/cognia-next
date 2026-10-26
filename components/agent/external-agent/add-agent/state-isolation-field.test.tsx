@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { useState } from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { ExternalAgentStateIsolation } from "@/types/agent/external-agent"
@@ -61,6 +61,17 @@ describe("effectiveStateIsolation", () => {
 })
 
 describe("StateIsolationField", () => {
+  it("keeps keyboard navigation between the state choices", async () => {
+    const user = userEvent.setup()
+    render(<Harness command="codex-acp" />)
+    await user.tab()
+    expect(screen.getByRole("radio", { name: /Own state/ })).toHaveFocus()
+    await user.keyboard("{ArrowRight>}")
+    await waitFor(() => expect(screen.getByRole("radio", { name: /Shared state/ })).toBeChecked())
+    await user.keyboard("{/ArrowRight}")
+    expect(screen.getByRole("radio", { name: /Shared state/ })).toHaveFocus()
+  })
+
   it("offers both choices with an explanation and reports the change", async () => {
     const user = userEvent.setup()
     const onChange = jest.fn()

@@ -16,9 +16,17 @@
  * - `compact` — condensed instructions/criteria that fit a local encoder's
  *   head budget (laya: 192 tokens english / 256 multilingual, 48 per option).
  *   Without it laya silently cuts the instructions to ~8 tokens.
+ *
+ * Each question's `instructions`, in both variants, is a Prompt Center
+ * definition (ADR-0236) keyed by the question id. The option keys and their
+ * criteria stay code-owned: the answers are typed by those keys, and the
+ * criteria are the options a calibrated provider scores.
  */
 
 import type { DecisionProviderLimits, DecisionQuestions } from "@/types/decisions"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptOverrideSnapshot } from "@/lib/prompts/snapshot"
+import { definePrompt, type PromptDefinitionV1 } from "@/lib/prompts/types"
 
 export type QuestionVariant = "full" | "compact"
 
@@ -308,6 +316,90 @@ const COMPACT: DecisionQuestions = {
   ),
 }
 
+/** Every question the copilot asks: the seven judge questions plus the ranking. */
+export type CopilotQuestionId = (typeof JUDGE_QUESTION_IDS)[number] | "best_reply"
+
+const RANK_INSTRUCTIONS: Record<QuestionVariant, string> = {
+  full:
+    "Which candidate reply is the most appropriate next message, " +
+    "given the conversation and the other person's true need? " +
+    "Prefer a reply that matches the best action type. " +
+    "Penalize dismissive, over-promising, or off-topic replies. " +
+    "If the facts are not yet confirmed, prefer the candidate that looks them up " +
+    "instead of faking memory or a vague apology." +
+    BACKGROUND_NOTE,
+  compact: "Which candidate is the best next message for what the other person needs?",
+}
+
+function questionPrompt(
+  questionId: CopilotQuestionId,
+  variant: QuestionVariant,
+  defaultBody: string
+): PromptDefinitionV1 {
+  // Wire ids use underscores; prompt ids are kebab-case segments.
+  const slug = questionId.replaceAll("_", "-")
+  return definePrompt({
+    id: `chat.reply-copilot.question.${slug}${variant === "compact" ? ".compact" : ""}`,
+    contractVersion: 1,
+    kind: "feature-template",
+    group: "chat",
+    operation: "replace-template",
+    scopes: ["account"],
+    activation: "next-operation",
+    // The provider answers over fixed option keys; the instructions say when
+    // each key applies, and a validated provider was calibrated on this text.
+    risk: "protocol",
+    hosts: ["app"],
+    // The compact wording must leave room in a local encoder's head budget.
+    maxChars: variant === "compact" ? 300 : 4_000,
+    outputContract:
+      variant === "compact"
+        ? `Sent as the "${questionId}" question's instructions to a decision provider with a small head budget (laya: 192 English tokens for instructions plus options); text past it is cut and the read is reported as truncated. The answer is typed by the code-owned option keys. A customized wording is no longer the calibrated ${COPILOT_QUESTION_SET} set.`
+        : `Sent as the "${questionId}" question's instructions to the decision provider; the answer is typed by the code-owned option keys. A customized wording is no longer the calibrated ${COPILOT_QUESTION_SET} set.`,
+    consumers: ["lib/reply-copilot/questions.ts"],
+    defaultBody,
+  })
+}
+
+function questionPrompts(
+  variant: QuestionVariant,
+  questions: DecisionQuestions
+): Readonly<Record<CopilotQuestionId, PromptDefinitionV1>> {
+  const entries = JUDGE_QUESTION_IDS.map(
+    (id) => [id, questionPrompt(id, variant, questions[id].instructions)] as const
+  )
+  return Object.fromEntries([
+    ...entries,
+    ["best_reply", questionPrompt("best_reply", variant, RANK_INSTRUCTIONS[variant])],
+  ]) as Record<CopilotQuestionId, PromptDefinitionV1>
+}
+
+/** The editable instructions of every question, per variant. */
+export const COPILOT_QUESTION_PROMPTS: Readonly<
+  Record<QuestionVariant, Readonly<Record<CopilotQuestionId, PromptDefinitionV1>>>
+> = {
+  full: questionPrompts("full", FULL),
+  compact: questionPrompts("compact", COMPACT),
+}
+
+export interface CopilotQuestionOptions {
+  /**
+   * The snapshot one copilot run reads, so the judge and the ranking use the
+   * same revision set; defaults to the loaded one.
+   */
+  snapshot?: PromptOverrideSnapshot | null
+}
+
+function questionInstructions(
+  id: CopilotQuestionId,
+  variant: QuestionVariant,
+  options: CopilotQuestionOptions
+): string {
+  return resolvePrompt(COPILOT_QUESTION_PROMPTS[variant][id], {
+    ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+  }).text
+}
+
 /** Below this head budget a provider gets the compact wording. */
 const FULL_VARIANT_MIN_HEAD_TOKENS = 512
 
@@ -317,9 +409,16 @@ export function chooseQuestionVariant(limits?: DecisionProviderLimits): Question
     : "full"
 }
 
-/** A fresh copy of the 7 judge questions for the variant. */
-export function judgeQuestions(variant: QuestionVariant): DecisionQuestions {
-  return structuredClone(variant === "full" ? FULL : COMPACT)
+/** A fresh copy of the 7 judge questions for the variant, with the resolved instructions. */
+export function judgeQuestions(
+  variant: QuestionVariant,
+  options: CopilotQuestionOptions = {}
+): DecisionQuestions {
+  const questions = structuredClone(variant === "full" ? FULL : COMPACT)
+  for (const id of JUDGE_QUESTION_IDS) {
+    questions[id].instructions = questionInstructions(id, variant, options)
+  }
+  return questions
 }
 
 /**
@@ -328,7 +427,8 @@ export function judgeQuestions(variant: QuestionVariant): DecisionQuestions {
  */
 export function rankQuestion(
   candidates: readonly string[],
-  variant: QuestionVariant
+  variant: QuestionVariant,
+  options: CopilotQuestionOptions = {}
 ): DecisionQuestions {
   if (candidates.length < 2 || candidates.length > RANK_KEYS.length) {
     throw new Error(`rankQuestion expects 2-${RANK_KEYS.length} candidates`)
@@ -337,16 +437,7 @@ export function rankQuestion(
   return {
     best_reply: {
       type: "choice",
-      instructions:
-        variant === "full"
-          ? "Which candidate reply is the most appropriate next message, " +
-            "given the conversation and the other person's true need? " +
-            "Prefer a reply that matches the best action type. " +
-            "Penalize dismissive, over-promising, or off-topic replies. " +
-            "If the facts are not yet confirmed, prefer the candidate that looks them up " +
-            "instead of faking memory or a vague apology." +
-            BACKGROUND_NOTE
-          : "Which candidate is the best next message for what the other person needs?",
+      instructions: questionInstructions("best_reply", variant, options),
       criteria,
     },
   }

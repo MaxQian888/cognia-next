@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -91,6 +91,19 @@ it("offers a table view, so identity is never colour-alone", async () => {
   const table = screen.getByTestId("site-analytics-table")
   expect(table).toHaveTextContent("2026-08-01")
   expect(table).toHaveTextContent("1000")
+  // The shared Table: density surface and its own narrow-screen scroller.
+  expect(table).toHaveAttribute("data-slot", "table")
+  const container = table.closest("[data-slot=table-container]")
+  expect(container).toHaveAttribute("data-surface", "table")
+  expect(container).toHaveClass("overflow-x-auto")
+  const headers = within(table).getAllByRole("columnheader")
+  expect(headers).toHaveLength(4)
+  for (const header of headers) expect(header).toHaveAttribute("scope", "col")
+  // Counts stay right-aligned on tabular figures.
+  const firstRow = within(table).getAllByRole("row")[1]
+  for (const cell of within(firstRow).getAllByRole("cell").slice(1)) {
+    expect(cell).toHaveClass("text-right", "tabular-nums")
+  }
 })
 
 it("says when the provider only returned part of the answer", () => {

@@ -1,18 +1,18 @@
 /** Portable OCR provider authoring contracts and result helpers. */
 
-import type { OcrResult } from "@/types/ocr"
+import type { OcrResult } from "@cognia/plugin-contract/types/ocr/index"
 import { documentConfidence } from "@cognia/ocr/confidence"
 
 export { defineOcrProvider } from "../define/define-ocr-provider"
 
-export type { PluginOcrAPI } from "@/lib/plugin/api/ocr-api"
-export type { OcrProvider } from "@/types/ocr"
+export type { PluginOcrAPI } from "@cognia/plugin-contract/lib/plugin/api/ocr-api"
+export type { OcrProvider } from "@cognia/plugin-contract/types/ocr/index"
 export type {
   PluginOcrProviderDef,
   PluginOcrProviderFactory,
   PluginOcrProviderFactoryContext,
   PluginOcrRegistration,
-} from "@/types/plugin/plugin-ocr"
+} from "@cognia/plugin-contract/types/plugin/plugin-ocr"
 export type {
   OcrBlock,
   OcrBlockKind,
@@ -28,8 +28,8 @@ export type {
   OcrResult,
   OcrSource,
   UserOcrSettings,
-} from "@/types/ocr"
-export { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
+} from "@cognia/plugin-contract/types/ocr/index"
+export { DEFAULT_OCR_SETTINGS } from "@cognia/plugin-contract/types/ocr/index"
 
 export { createNullOcrCache, createNullOcrPageCache } from "@cognia/ocr/cache-contract"
 export type {

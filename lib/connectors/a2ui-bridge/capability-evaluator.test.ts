@@ -1,5 +1,10 @@
-import { buildCapabilityPromptSection } from "./capability-evaluator"
+import { buildCapabilityPromptSection, CONNECTOR_CAPABILITY_PROMPTS } from "./capability-evaluator"
 import { buildA2UICapabilityMatrix } from "@/types/connectors/capability"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 describe("buildCapabilityPromptSection", () => {
   it("includes native + fallback + unsupported sections", () => {
@@ -69,5 +74,44 @@ describe("buildCapabilityPromptSection", () => {
     })
     const prompt = buildCapabilityPromptSection("Slack", matrix)
     expect(prompt).not.toContain("Available via multi-step UX")
+  })
+})
+
+describe("capability section wording (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("sends published line wording with the channel's own kind lists", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: CONNECTOR_CAPABILITY_PROMPTS.unsupported.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-cap-unsupported",
+          body: "- Never send these components: {{kinds}}.",
+          contractVersion: CONNECTOR_CAPABILITY_PROMPTS.unsupported.contractVersion,
+        },
+      ])
+    )
+    const matrix = buildA2UICapabilityMatrix({ Text: "native", Chart: "unsupported" })
+    const lines = buildCapabilityPromptSection("Telegram", matrix).split("\n")
+    expect(lines[0]).toBe(
+      "This conversation is delivered via Telegram. The platform supports a limited A2UI subset:"
+    )
+    expect(lines[1]).toBe("- Renders natively: Text.")
+    expect(lines.at(-1)).toBe("- Never send these components: Chart.")
+    expect(lines.join("\n")).not.toContain("NOT supported")
+  })
+
+  it("still skips a line whose level has no kinds, whatever its wording", () => {
+    // Every kind defaults to "fallback": only the header and that line remain.
+    const prompt = buildCapabilityPromptSection("Slack", buildA2UICapabilityMatrix({}))
+    const lines = prompt.split("\n")
+    expect(lines).toHaveLength(2)
+    expect(lines[1]).toMatch(/^- Degrades to plain text on this channel: /)
   })
 })

@@ -2,9 +2,13 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import { useHostExternalAgentConfigs } from "./use-host-external-agent-configs"
+import {
+  useHostExternalAgentConfigs,
+  useHostSupportsModelRoles,
+} from "./use-host-external-agent-configs"
 import {
   HOST_CONFIG_COMMANDS,
+  HOST_CONFIG_CAPABILITIES,
   __setRemoteHostConfigDepsForTests,
   type RemoteHostConfigDeps,
 } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
@@ -288,6 +292,30 @@ describe("copyLocal", () => {
   })
 })
 
+describe("capability refusals", () => {
+  it("shows a Host refusal's own words, not its message key", async () => {
+    // A paired Host whose manifest predates per-slot models.
+    setup({ hasLocalAuthority: () => false, isRemoteHostActive: () => true }, (command) =>
+      command === HOST_CONFIG_COMMANDS.list ? { configs: [] } : {}
+    )
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let outcome: Awaited<ReturnType<typeof result.current.create>> | undefined
+    await act(async () => {
+      outcome = await result.current.create({
+        name: "Codex",
+        cogniaModel: { providerId: "p", modelId: "m" },
+        modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
+      } as never)
+    })
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const en = require("@/i18n/messages/en.json")
+    expect(outcome).toEqual({ ok: false, error: en.externalAgent.roleModels.hostOutdated })
+    expect(result.current.error).toBe(en.externalAgent.roleModels.hostOutdated)
+    expect(calls.map((entry) => entry.command)).not.toContain(HOST_CONFIG_COMMANDS.create)
+  })
+})
+
 describe("create / update / remove outcomes", () => {
   // The phone's add flow navigates away on success and has to show the Host's
   // reason on failure in the same tick; `error` would only arrive a render
@@ -429,4 +457,35 @@ describe("create / update / remove outcomes", () => {
     expect(removed).toBe(false)
     expect(result.current.error).toBe("in use")
   })
+})
+
+it("refreshes role-model support when the active Host changes its capabilities", () => {
+  let supported = false
+  setup(
+    {
+      hasLocalAuthority: () => false,
+      getRuntimeSnapshot: () =>
+        ({
+          host: {
+            compatible: true,
+            operations: supported
+              ? [...ALL_OPS, HOST_CONFIG_CAPABILITIES.configModelRoles]
+              : ALL_OPS,
+          },
+        }) as never,
+    },
+    () => ({})
+  )
+  const { result } = renderHook(() => useHostSupportsModelRoles())
+  expect(result.current).toBe(false)
+  act(() => {
+    supported = true
+    for (const listener of mockHostListeners) listener()
+  })
+  expect(result.current).toBe(true)
+  act(() => {
+    supported = false
+    for (const listener of mockHostListeners) listener()
+  })
+  expect(result.current).toBe(false)
 })

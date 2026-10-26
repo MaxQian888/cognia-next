@@ -1729,6 +1729,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         },
       }
     case "OVERLAY_CLOSE": {
+      if (action.ifKind && state.overlay.kind !== action.ifKind) return state
       const { savedCursor, ...restInput } = state.input
       const buffer = state.input.buffer
       // Restore the cursor only when the saved position is still valid for the

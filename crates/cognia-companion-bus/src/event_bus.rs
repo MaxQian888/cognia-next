@@ -81,6 +81,9 @@ pub struct EventFrame {
     /// non-origin devices.
     #[serde(skip)]
     pub target_device_id: Option<String>,
+    /// Server-only person routing; never accepted from a brain payload.
+    #[serde(skip)]
+    pub partition_account_id: Option<String>,
 }
 
 /// The sidecar's output channel: every turn's frames, whoever started it.
@@ -169,19 +172,30 @@ impl EventBus {
     ///
     /// Returns the [`EventFrame`] that was broadcast (useful in tests).
     pub fn publish(&self, event_type: String, payload: Value) -> EventFrame {
+        self.publish_targeted(event_type, payload, None, None)
+    }
+
+    /// Person events retain server-derived routing in replay without adding
+    /// routing fields to their wire payload.
+    pub fn publish_person_to(&self, event_type: String, payload: Value, device_id: String, account_id: String) -> EventFrame {
+        self.publish_targeted(event_type, payload, Some(device_id), Some(account_id))
+    }
+
+    fn publish_targeted(&self, event_type: String, payload: Value, destination: Option<String>, partition_account_id: Option<String>) -> EventFrame {
         let seq = self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let ts_ms = now_ms();
         register_remote_pending_request(&payload);
 
         let frame = EventFrame {
+            partition_account_id,
             event_type,
             seq,
-            target_device_id: payload
+            target_device_id: destination.or_else(|| payload
                 .get("remoteExecutionContext")
                 .and_then(Value::as_object)
                 .and_then(|context| context.get("originDeviceId"))
                 .and_then(Value::as_str)
-                .map(str::to_owned),
+                .map(str::to_owned)),
             payload,
             ts_ms,
         };
@@ -227,6 +241,7 @@ impl EventBus {
             payload,
             ts_ms: now_ms(),
             target_device_id: Some(target_device_id),
+            partition_account_id: None,
         };
         let _ = self.tx.send(frame.clone());
         frame
@@ -390,6 +405,30 @@ mod tests {
     use serde_json::json;
 
     // ── publish increments seq, buffers frame, broadcasts ────────────────────
+
+    #[test]
+    fn p5_targeted_person_events_preserve_legacy_payload_and_replay_visibility() {
+        let bus = EventBus::new();
+        let boundary = bus.publish("sync://invalidate".into(), serde_json::json!({"table":"seed"}));
+        let event = serde_json::json!({"sessionId":"a", "revision":1});
+        let frame = bus.publish_person_to("transcript://revision".into(), event.clone(), "person-a-device".into(), "pb_person_a".into());
+        assert!(frame.visible_to("person-a-device"));
+        assert!(!frame.visible_to("person-b-device"));
+        let wire = serde_json::to_value(&frame).unwrap();
+        assert_eq!(wire["payload"], event);
+        assert!(wire.get("target_device_id").is_none());
+        assert!(wire.get("partition_account_id").is_none());
+        assert_eq!(frame.partition_account_id.as_deref(), Some("pb_person_a"));
+        let legacy = bus.publish("sync://invalidate".into(), serde_json::json!({"table":"messages"}));
+        assert!(legacy.visible_to("person-b-device"));
+        match bus.subscribe(Some(boundary.seq), now_ms()) {
+            SubscribeResult::Ok { replay, .. } => {
+                assert!(replay.iter().any(|event| event.seq == frame.seq && event.partition_account_id.as_deref() == Some("pb_person_a")));
+                assert!(replay.iter().filter(|event| event.visible_to("person-b-device")).all(|event| event.event_type != "transcript://revision"));
+            },
+            _ => panic!("replay unavailable"),
+        }
+    }
 
     #[test]
     fn publish_increments_seq() {
@@ -571,6 +610,7 @@ mod tests {
                 payload: json!({}),
                 ts_ms: 1, // epoch + 1 ms → definitely expired
                 target_device_id: None,
+                partition_account_id: None,
             });
         }
         assert_eq!(bus.buffer_len(), 3);
@@ -765,6 +805,7 @@ mod tests {
                 payload: json!({ "secret": "short-lived" }),
                 ts_ms: now - REQUEST_SCOPED_RETENTION_MS - 1,
                 target_device_id: Some("device-a".into()),
+                partition_account_id: None,
             });
             buffer.push_back(EventFrame {
                 event_type: "sync://updated".into(),
@@ -772,6 +813,7 @@ mod tests {
                 payload: json!({ "table": "settings" }),
                 ts_ms: now - REQUEST_SCOPED_RETENTION_MS - 1,
                 target_device_id: None,
+                partition_account_id: None,
             });
         }
 

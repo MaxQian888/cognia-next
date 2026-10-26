@@ -16,10 +16,10 @@ import type {
   PluginModeDef,
   PluginScheduledTaskDef,
   PluginToolDef,
-} from "@/types/plugin/plugin"
-import type { PluginAiProviderDef } from "@/types/plugin/plugin-ai-provider"
-import type { PluginCliToolDef } from "@/types/plugin/plugin-cli-tool"
-import type { PluginOcrProviderDef } from "@/types/plugin/plugin-ocr"
+} from "@cognia/plugin-contract/types/plugin/plugin"
+import type { PluginAiProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-ai-provider"
+import type { PluginCliToolDef } from "@cognia/plugin-contract/types/plugin/plugin-cli-tool"
+import type { PluginOcrProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-ocr"
 
 describe("manifest contribution define helpers", () => {
   it("returns each manifest contribution object by reference", () => {

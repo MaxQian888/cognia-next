@@ -2673,7 +2673,7 @@
     },
     "CodeServerActiveEditor": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs readActive",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts readActive",
       "description": "What the user is looking at. Every field is present; `path`, `selection` and `selectedText` are null when no file editor is focused (or nothing is selected). Whole-file bodies are deliberately absent. The app PII-gates this payload before it reaches a model.",
       "required": ["path", "selection", "selectedText", "diagnostics", "openEditors"],
       "properties": {
@@ -2723,7 +2723,7 @@
     },
     "CodeServerApplyEditResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs applyEdit",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts applyEdit",
       "description": "`reflected` is true only when a stale open buffer was replaced through a WorkspaceEdit, so the change entered the undo stack. `opened` is false only when the file was gone or unreadable, which the caller degrades on rather than treating as an error.",
       "required": ["reflected", "opened", "path"],
       "properties": {
@@ -2741,7 +2741,7 @@
     },
     "CodeServerEditorDiagnostic": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs diagnosticSeverityName + the readActive/captureDiagnosticsContext mappers",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts diagnosticSeverityName + the readActive/captureDiagnosticsContext mappers",
       "description": "One editor diagnostic, 1-based line and column. `severity` is the narrowed vocabulary `diagnosticSeverityName` emits, not VS Code's numeric enum.",
       "required": ["message", "severity", "line", "column"],
       "properties": {
@@ -2763,7 +2763,7 @@
     },
     "CodeServerNotifyResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs notify + protocol.mjs notificationKind",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts notify + protocol.ts notificationKind",
       "description": "`kind` is the narrowed kind actually shown. An unrecognised kind reads as `info` rather than being dropped, so this echoes back what the user saw.",
       "required": ["shown", "kind"],
       "properties": {
@@ -2779,7 +2779,7 @@
     },
     "CodeServerOpenResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs openFile",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts openFile",
       "description": "The extension revealed `path`. `opened` is always true: a failure throws instead.",
       "required": ["opened", "path"],
       "properties": {
@@ -2794,7 +2794,7 @@
     },
     "CodeServerRevealResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs revealInExplorer",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts revealInExplorer",
       "required": ["revealed", "path"],
       "properties": {
         "revealed": {
@@ -2808,7 +2808,7 @@
     },
     "CodeServerRunInTerminalResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs runInTerminal",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts runInTerminal",
       "description": "`sent` reports that the text reached the terminal, not that the command succeeded: the extension host cannot read a terminal's output back. `terminal` is the reused terminal's name.",
       "required": ["sent", "terminal"],
       "properties": {
@@ -2823,7 +2823,7 @@
     },
     "CodeServerSaveAllResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs saveAll",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts saveAll",
       "description": "A partial flush is reported rather than thrown, so `failed` names the files whose disk copy the caller must not trust.",
       "required": ["saved", "failed"],
       "properties": {
@@ -2844,7 +2844,7 @@
     },
     "CodeServerShowDiffResult": {
       "type": "object",
-      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs showDiff",
+      "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.ts showDiff",
       "required": ["shown", "path"],
       "properties": {
         "shown": {
@@ -6618,7 +6618,8 @@
         "radar-report",
         "provider-diagnostics-refresh",
         "conversation-auto-archive",
-        "files-trash-purge"
+        "files-trash-purge",
+        "harness-evolution-sweep"
       ]
     },
     "SchedulerNotificationChannel": {
@@ -16424,6 +16425,128 @@
       },
       "additionalProperties": false
     },
+    "org_model_credential_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["provider", "fingerprint", "setAt", "setBy"],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "setAt": {
+            "type": "integer"
+          },
+          "setBy": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "org_model_credential_set": {
+      "type": "object",
+      "required": ["provider", "fingerprint", "setAt", "setBy"],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{12}$"
+        },
+        "setAt": {
+          "type": "integer"
+        },
+        "setBy": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "org_model_credential_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "org_agent_policy_get": {
+      "type": "object",
+      "required": ["allowedAgents", "defaultAgent", "updatedAt", "updatedBy"],
+      "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "providers", "available"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "defaultAgent": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "type": ["integer", "null"]
+        },
+        "updatedBy": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "org_agent_policy_set": {
+      "type": "object",
+      "required": ["allowedAgents", "defaultAgent", "updatedAt", "updatedBy"],
+      "properties": {
+        "allowedAgents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "providers", "available"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "defaultAgent": {
+          "type": ["string", "null"]
+        },
+        "updatedAt": {
+          "type": ["integer", "null"]
+        },
+        "updatedBy": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
     "host_provider_credential_delete": {
       "$ref": "#/$defs/NullResult"
     },
@@ -18709,6 +18832,19 @@
             }
           },
           "additionalProperties": true
+        },
+        "modelMetadataById": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": false
@@ -20773,6 +20909,164 @@
     },
     "task_workspace_port_lease_list": {
       "$ref": "#/$defs/WorkspacePortLeaseList"
+    },
+    "connectors_google_docs_auth": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "connection": {
+              "type": "string"
+            },
+            "authorization": {
+              "type": "string"
+            },
+            "tokens": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "string"
+                    },
+                    "refreshToken": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "tokenType": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["accessToken", "expiresAt"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pending": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string"
+                    },
+                    "codeVerifier": {
+                      "type": "string"
+                    },
+                    "redirectUri": {
+                      "type": "string"
+                    },
+                    "ts": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": ["state", "codeVerifier", "redirectUri", "ts"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "claimed": {
+              "type": "boolean"
+            },
+            "accountEmail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "legacyMetadata": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "version",
+            "connection",
+            "authorization",
+            "tokens",
+            "pending",
+            "claimed",
+            "accountEmail",
+            "legacyMetadata"
+          ],
+          "additionalProperties": false
+        },
+        "pending": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "codeVerifier": {
+                  "type": "string"
+                },
+                "redirectUri": {
+                  "type": "string"
+                },
+                "ts": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": ["state", "codeVerifier", "redirectUri", "ts"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "revoked": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": ["revoked"],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["state", "pending", "outcome"],
+      "additionalProperties": false
+    },
+    "browser_recording_control": {
+      "$ref": "#/$defs/LegacyResult"
+    },
+    "browser_recording_ref": {
+      "type": "string"
     }
   }
 }

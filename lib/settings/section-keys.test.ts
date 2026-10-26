@@ -56,6 +56,14 @@ describe("section-keys", () => {
   })
 
   describe("resetKeysForSection", () => {
+    it("owns reader policy in the search section", () => {
+      expect(keyToSection("webReader")).toBe("search")
+      expect(resetKeysForSection("search")).toContain("webReader")
+    })
+    it("owns the Claude Code runtime preferences in the sandbox section", () => {
+      expect(keyToSection("claudeCodeRuntime")).toBe("sandbox")
+      expect(resetKeysForSection("sandbox")).toContain("claudeCodeRuntime")
+    })
     it("returns the owned keys for a mapped section", () => {
       expect(resetKeysForSection("security")).toContain("biometricRequiredFor")
       expect(resetKeysForSection("sandbox")).toEqual(
@@ -94,7 +102,7 @@ describe("section-keys", () => {
   describe("newly wired appearance behaviors", () => {
     it("owns autoMode / monacoLink / customCssScope", () => {
       expect(SECTION_OWNED_KEYS.appearance).toEqual(
-        expect.arrayContaining(["autoMode", "monacoLink", "customCssScope"])
+        expect.arrayContaining(["autoMode", "monacoLink", "customCssScope", "settingsIconStyle"])
       )
     })
   })

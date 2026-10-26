@@ -1,10 +1,16 @@
 import {
   enhancePrompt,
   ENHANCE_MODES,
+  ENHANCE_STYLE_PROMPTS,
+  ENHANCE_SYSTEM_PROMPT,
   DEFAULT_VARIANT_COUNT,
   MAX_ENHANCED_LEN,
   type EnhanceMode,
 } from "./enhance"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
 function stubClient(reply: string | ((prompt: string) => string)): {
@@ -144,5 +150,49 @@ describe("enhancePrompt", () => {
     )
     expect(res.kind).toBe("skipped")
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe("customized enhance prompts (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("sends the shipped system text and style line with no override", async () => {
+    const { client, calls } = stubClient("Better.")
+    await enhancePrompt("make it better", "concise", { client, isPiiSafe: safe })
+    expect(calls[0].system).toBe(ENHANCE_SYSTEM_PROMPT.defaultBody)
+    expect(calls[0].prompt).toContain(
+      `Requested style: ${ENHANCE_STYLE_PROMPTS.concise.defaultBody}`
+    )
+  })
+
+  it("applies a workspace style override to that mode only", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: ENHANCE_STYLE_PROMPTS.concise.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por",
+          body: "At most two sentences.",
+          contractVersion: ENHANCE_STYLE_PROMPTS.concise.contractVersion,
+        },
+      ])
+    )
+    const concise = stubClient("Better.")
+    await enhancePrompt("make it better", "concise", {
+      client: concise.client,
+      isPiiSafe: safe,
+      promptContext: { workspaceId: "ws-1" },
+    })
+    expect(concise.calls[0].prompt).toContain("Requested style: At most two sentences.")
+
+    const detailed = stubClient("Better.")
+    await enhancePrompt("make it better", "detailed", {
+      client: detailed.client,
+      isPiiSafe: safe,
+      promptContext: { workspaceId: "ws-1" },
+    })
+    expect(detailed.calls[0].prompt).toContain(ENHANCE_STYLE_PROMPTS.detailed.defaultBody)
   })
 })

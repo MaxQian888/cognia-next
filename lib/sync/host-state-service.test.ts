@@ -13,6 +13,8 @@ import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accoun
 import {
   createEmptyHostStateSession,
   hostStateDigest,
+  personPartitionIntentDecision,
+  isHostStateStatus,
   sessionIndexChannel,
   sessionStateChannel,
   type HostStateAction,
@@ -172,6 +174,252 @@ describe("HostStateService", () => {
     __resetSearchIndexerForTesting()
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("P5d applies owner data intents with no operator grants and refuses runtime/workspace actions per item", async () => {
+    const dispatchRuntime = jest.fn(async () => undefined)
+    const deleteSessions = jest.fn(async (ids: readonly string[]) => {
+      await getDb().sessions.bulkDelete([...ids])
+    })
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "person-brain",
+      authorization: "person-partition",
+      now: () => 100,
+      publish: jest.fn(async () => undefined),
+      dispatchRuntime,
+      deleteSessions,
+    })
+    await service.start({ now: 0, heartbeat: false })
+    const member = { deviceId: "device-member", grants: ["client.read", "client.write"] }
+    const sessionId = "partition-created"
+    await getDb().projects.put({
+      id: "p5d-owned-project",
+      name: "Owned",
+      roots: [],
+      createdAt: 1,
+      updatedAt: 1,
+      lastAccessedAt: 1,
+    } as never)
+    await getDb().characters.put({
+      id: "p5d-owned-character",
+      name: "Owned",
+      isBuiltIn: false,
+      updatedAt: 1,
+    } as never)
+    const intents: HostStateAction["action"][] = [
+      {
+        kind: "session.create",
+        title: "Person conversation",
+        seed: { projectId: "p5d-owned-project", characterId: "p5d-owned-character" },
+      },
+      { kind: "message.enqueue", messageId: "m", text: "must not run", attachments: [] },
+      { kind: "session.rename", title: "Renamed" },
+      { kind: "turn.steer", text: "must not steer" },
+      { kind: "turn.followup", text: "must not follow" },
+      { kind: "turn.abort" },
+      { kind: "approval.respond", requestId: "a", decision: "allow" },
+      { kind: "elicitation.respond", requestId: "e", response: null },
+      { kind: "session.workspace", projectId: "operator-project" },
+      { kind: "session.archive", archived: true },
+    ]
+    const actions = intents.map((intent, index) =>
+      action(intent, {
+        sessionId,
+        channel: sessionStateChannel(scope.runtimeTargetId, sessionId),
+        baseRevision: index === 2 ? 1 : index === 9 ? 2 : 0,
+        actionId: `p5d-${index}`,
+        clientSeq: index + 1,
+      })
+    )
+    const result = await service.submit({ ...scope, actions }, member)
+    expect(result.results.map((receipt) => receipt.outcome)).toEqual([
+      "applied",
+      "rejected",
+      "applied",
+      "rejected",
+      "rejected",
+      "rejected",
+      "rejected",
+      "rejected",
+      "rejected",
+      "applied",
+    ])
+    for (let i = 0; i < actions.length; i++) {
+      const decision = personPartitionIntentDecision(actions[i].action.kind)
+      if (!decision.allowed) {
+        expect(result.results[i].rejection?.code).toBe(decision.code)
+        await expect(
+          getDb().hostStateActions.get([1, actions[i].actionId])
+        ).resolves.toBeUndefined()
+      }
+    }
+    expect(await getDb().sessions.get(sessionId)).toMatchObject({
+      title: "Renamed",
+      archivedAt: 100,
+      characterId: "p5d-owned-character",
+    })
+    expect((await getDb().sessions.get(sessionId))?.projectId).toBeUndefined()
+    const status = await service.status()
+    expect(isHostStateStatus(status)).toBe(true)
+    const deleted = await service.submit(
+      {
+        ...scope,
+        actions: [
+          action(
+            { kind: "session.delete" },
+            {
+              sessionId,
+              channel: sessionStateChannel(scope.runtimeTargetId, sessionId),
+              baseRevision: 3,
+              actionId: "p5d-delete",
+              clientSeq: 20,
+            }
+          ),
+        ],
+      },
+      member
+    )
+    expect(deleted.results[0].outcome).toBe("applied")
+    expect(deleteSessions).toHaveBeenCalledWith([sessionId])
+    await expect(getDb().sessions.get(sessionId)).resolves.toBeUndefined()
+    expect(dispatchRuntime).not.toHaveBeenCalled()
+    await service.stop()
+  })
+
+  it("P5d keeps the same conversation id independent in two person accounts", async () => {
+    const otherScope = { accountId: "acct-p5d-other", runtimeTargetId: scope.runtimeTargetId }
+    await getDb().sessions.clear()
+    const rawKey = new Uint8Array(32).fill(7)
+    activateAccountContentCipher(
+      await AccountContentCipher.fromRawKey(scope.accountId, getDb().name, rawKey)
+    )
+    const sessionId = "same-person-session-id"
+    const member = { deviceId: "device-member", grants: [] }
+    const create = action(
+      { kind: "session.create", title: "Person A" },
+      {
+        sessionId,
+        channel: sessionStateChannel(scope.runtimeTargetId, sessionId),
+        actionId: "create-person-a",
+      }
+    )
+    const first = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "person-a",
+      authorization: "person-partition",
+      now: () => 100,
+    })
+    await first.start({ now: 0, heartbeat: false })
+    expect((await first.submit({ ...scope, actions: [create] }, member)).results[0].outcome).toBe(
+      "applied"
+    )
+    await first.stop()
+    activateAccountDatabase(otherScope.accountId, otherScope.runtimeTargetId)
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(otherScope.accountId, getDb().name)
+    )
+    const second = createHostStateService({
+      ...otherScope,
+      hostId,
+      ownerId: "person-b",
+      authorization: "person-partition",
+      now: () => 100,
+    })
+    try {
+      await second.start({ now: 0, heartbeat: false })
+      const before = await second.snapshot({
+        ...otherScope,
+        channel: sessionIndexChannel(otherScope.runtimeTargetId),
+      })
+      expect(before.state.kind === "session-index" && before.state.sessions).toEqual([])
+      const createB = {
+        ...create,
+        accountId: otherScope.accountId,
+        actionId: "create-person-b",
+        action: { kind: "session.create" as const, title: "Person B" },
+      }
+      expect(
+        (await second.submit({ ...otherScope, actions: [createB] }, member)).results[0].outcome
+      ).toBe("applied")
+      expect((await getDb().sessions.get(sessionId))?.title).toBe("Person B")
+    } finally {
+      await second.stop()
+      await getDb().delete()
+      activateAccountDatabase(scope.accountId, scope.runtimeTargetId)
+      activateAccountContentCipher(
+        await AccountContentCipher.fromRawKey(scope.accountId, getDb().name, rawKey)
+      )
+    }
+    expect((await getDb().sessions.get(sessionId))?.title).toBe("Person A")
+  })
+
+  it("P5d does not let operator grants widen partition policy or change legacy status", async () => {
+    for (const authorization of ["device-grants", "person-partition"] as const) {
+      const service = createHostStateService({
+        ...scope,
+        hostId,
+        ownerId: "brain-a",
+        authorization,
+        now: () => 100,
+      })
+      await service.start({ now: 0, heartbeat: false })
+      const status = await service.status()
+      expect(Object.keys(status).sort()).toEqual([
+        "hostGeneration",
+        "hostId",
+        "hostSeq",
+        "leaseExpiresAt",
+        "pendingBroadcast",
+        "pendingDispatch",
+        "recovery",
+      ])
+      const response = await service.submit(
+        { ...scope, actions: [action({ kind: "turn.abort" })] },
+        authorization === "person-partition"
+          ? owner
+          : { deviceId: "member", grants: ["client.write"] }
+      )
+      expect(response.results[0].rejection?.code).toBe(
+        authorization === "person-partition"
+          ? "execution_isolation_unavailable"
+          : "host_state_forbidden"
+      )
+      await service.stop()
+    }
+  })
+
+  it("P5d abandons persisted runtime work during recovery without executing it", async () => {
+    const dispatchRuntime = jest.fn(async () => undefined)
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      authorization: "person-partition",
+      dispatchRuntime,
+      now: () => 100,
+    })
+    await service.start({ now: 0, heartbeat: false, recover: false })
+    await commitHostStateAction({
+      action: action({
+        kind: "message.enqueue",
+        messageId: "persisted",
+        text: "old work",
+        attachments: [],
+      }),
+      mutation: undefined,
+      runtimeDispatchRequired: true,
+      now: 100,
+    })
+    await service.recover()
+    expect(dispatchRuntime).not.toHaveBeenCalled()
+    await expect(getHostStateAction(1, "action-1")).resolves.toMatchObject({
+      dispatchState: "abandoned",
+      lastErrorCode: "execution_isolation_unavailable",
+    })
+    await service.stop()
   })
 
   it("atomically projects a draft and publishes the ordered event", async () => {

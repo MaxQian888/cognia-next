@@ -163,6 +163,7 @@ export async function searchWithGoogle(
   try {
     const response = await googleFetch(`${GOOGLE_SEARCH_URL}?${params.toString()}`, {
       method: "GET",
+      signal: options.signal,
       headers: { Accept: "application/json" },
     })
 

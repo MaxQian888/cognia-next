@@ -21,7 +21,7 @@ import {
   togglePresetFavorite,
   updatePreset,
 } from "./prompt-presets"
-import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "./preset-built-ins"
+import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "@/lib/presets/built-ins"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 

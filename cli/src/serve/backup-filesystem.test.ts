@@ -32,6 +32,20 @@ describe("createNodeBackupFilesystem", () => {
       ).rejects.toThrow("source read failed")
       expect(await readFile(target, "utf8")).toBe("onetwo")
       expect(await fs.readDirNames(root)).toEqual(["backup.cbk"])
+      let cancelled = false
+      await expect(
+        fs.writeStream!(
+          target,
+          (async function* () {
+            yield encoder.encode("cancelled")
+            cancelled = true
+          })(),
+          () => {
+            if (cancelled) throw new Error("cancelled")
+          }
+        )
+      ).rejects.toThrow("cancelled")
+      expect(await readFile(target, "utf8")).toBe("onetwo")
     } finally {
       await rm(root, { recursive: true, force: true })
     }

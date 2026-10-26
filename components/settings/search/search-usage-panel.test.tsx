@@ -37,6 +37,10 @@ describe("SearchUsagePanel", () => {
   it("shows noData when no searches", () => {
     render(<SearchUsagePanel />)
     expect(screen.getByText("noData")).toBeInTheDocument()
+    expect(screen.getByText("SearXNG")).toBeInTheDocument()
+    expect(screen.getByText("TinyFish")).toBeInTheDocument()
+    expect(screen.getByText("DeepSeek Search")).toBeInTheDocument()
+    expect(screen.getByText("states.retired")).toBeInTheDocument()
   })
 
   it("renders totals and provider rows", () => {

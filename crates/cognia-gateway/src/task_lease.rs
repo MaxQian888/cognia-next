@@ -10,12 +10,55 @@ use std::collections::BTreeMap;
 
 pub const TASK_LEASE_TTL_MS: i64 = 120_000;
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskModelPlan {
+    pub additional_models: Vec<String>,
+    pub model_bindings: BTreeMap<String, String>,
+}
+
+impl TaskModelPlan {
+    pub(crate) fn validate(&self, primary: &str) -> Result<(), String> {
+        let mut models = std::collections::BTreeSet::from([primary]);
+        if self.additional_models.len() > 31 || self.model_bindings.len() > 64 {
+            return Err("task model plan exceeds model or binding limit".into());
+        }
+        for model in &self.additional_models {
+            if model.is_empty()
+                || model.len() > 256
+                || model.chars().any(char::is_control)
+                || !models.insert(model.as_str())
+            {
+                return Err("invalid or duplicate additional task model".into());
+            }
+        }
+        for (selector, model) in &self.model_bindings {
+            if selector.is_empty()
+                || selector.len() > 128
+                || !selector.bytes().all(|b| (b' '..=b'~').contains(&b))
+                || !models.contains(model.as_str())
+            {
+                return Err("invalid task model binding or model outside the plan".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn models(&self, primary: &str) -> Vec<String> {
+        std::iter::once(primary.to_owned())
+            .chain(self.additional_models.iter().cloned())
+            .collect()
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskLeaseRequest {
     pub task_id: String,
     pub provider: ProviderSnapshot,
     pub model: String,
+    #[serde(default)]
+    pub model_plan: Option<TaskModelPlan>,
     pub ingress_protocol: String,
     /// Optional consumption ceiling for the task (a Bot run's remaining
     /// token allowance). Only the `max_*` members are honoured.
@@ -106,8 +149,8 @@ pub async fn validate_public_upstream(value: &str) -> Result<reqwest::Client, St
 }
 
 /// The one ticket shape a gateway task runs under, whoever supplied the
-/// provider: a single private deployment, one model bound to every selector the
-/// agents ask for, no failover, `gateway-required`, and inference/models/
+/// provider: a single private deployment with exact plan models (or the legacy
+/// primary selectors), no failover, `gateway-required`, and inference/models/
 /// count-tokens only.
 fn task_mint_request(
     session: String,
@@ -117,7 +160,24 @@ fn task_mint_request(
     model: String,
     ingress_protocol: &str,
     budget: Option<TicketBudget>,
+    model_plan: Option<TaskModelPlan>,
 ) -> MintRequest {
+    let mut bindings: BTreeMap<_, _> = [
+        model.as_str(),
+        "primary",
+        "fast",
+        "powerful",
+        "sonnet",
+        "haiku",
+        "opus",
+    ]
+    .into_iter()
+    .map(|key| (key.to_owned(), model.clone()))
+    .collect();
+    if let Some(plan) = &model_plan {
+        bindings.extend(plan.model_bindings.clone());
+        bindings.extend(plan.models(&model).into_iter().map(|id| (id.clone(), id)));
+    }
     MintRequest {
         provider_overrides: vec![provider],
         session_id: session,
@@ -127,18 +187,8 @@ fn task_mint_request(
             deployment_id: deployment,
             model_id: model.clone(),
         }],
-        model_bindings: [
-            model.as_str(),
-            "primary",
-            "fast",
-            "powerful",
-            "sonnet",
-            "haiku",
-            "opus",
-        ]
-        .into_iter()
-        .map(|key| (key.to_owned(), model.clone()))
-        .collect::<BTreeMap<_, _>>(),
+        model_bindings: bindings,
+        strict_selectors: model_plan.is_some(),
         credential_affinity: TicketAffinity::SessionSticky,
         allow_auth_failover: false,
         route_policy: "gateway-required".into(),
@@ -201,14 +251,21 @@ impl GatewayState {
         {
             return Err("a task must delegate exactly one selected provider credential".into());
         }
+        if let Some(plan) = &input.model_plan {
+            plan.validate(&input.model)?;
+        }
+        let models = input.model_plan.as_ref().map_or_else(
+            || vec![input.model.clone()],
+            |plan| plan.models(&input.model),
+        );
         let deployment = format!("task-{}-{}", input.task_id, input.provider.id);
         input.provider.id = deployment.clone();
         input.provider.deployment_id = Some(deployment.clone());
-        input.provider.models = vec![input.model.clone()];
+        input.provider.models = models.clone();
         input
             .provider
             .model_metadata
-            .retain(|m| m.id == input.model);
+            .retain(|m| models.contains(&m.id));
         // Replace any live lease for this exact device/task; no sibling device
         // can revoke it, and re-mint cannot retain two spending authorities.
         self.tickets.revoke_session(&session);
@@ -224,6 +281,7 @@ impl GatewayState {
                     model,
                     &input.ingress_protocol,
                     input.budget,
+                    input.model_plan,
                 ),
                 Some(&empty_snapshot()),
                 chrono::Utc::now().timestamp_millis(),
@@ -359,6 +417,8 @@ pub struct HostTaskLeaseRequest {
     /// The snapshot provider id (on a headless Host, the profile deployment id).
     pub provider_id: String,
     pub model: String,
+    #[serde(default)]
+    pub model_plan: Option<TaskModelPlan>,
     pub ingress_protocol: String,
     /// The paired device the Host runs the turn for. Part of the lease scope,
     /// so one device can neither renew nor reuse another device's task.
@@ -380,6 +440,7 @@ pub struct HostTaskLease {
     /// Capability facts the snapshot carries for the model, when it has any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_metadata: Option<crate::snapshot::ModelMetadata>,
+    pub model_metadata_by_id: BTreeMap<String, crate::snapshot::ModelMetadata>,
 }
 
 fn host_scope(origin: Option<&str>, task: &str) -> Result<String, String> {
@@ -443,7 +504,14 @@ impl GatewayState {
         if !["openai", "anthropic"].contains(&provider.protocol.as_str()) {
             return Err("the selected provider protocol cannot serve a gateway task".into());
         }
-        if !provider.models.iter().any(|model| model == &input.model) {
+        if let Some(plan) = &input.model_plan {
+            plan.validate(&input.model)?;
+        }
+        let models = input.model_plan.as_ref().map_or_else(
+            || vec![input.model.clone()],
+            |plan| plan.models(&input.model),
+        );
+        if models.iter().any(|model| !provider.models.contains(model)) {
             return Err("the selected model is not configured for this provider".into());
         }
         let credential = provider
@@ -465,9 +533,28 @@ impl GatewayState {
         provider.api_keys = Vec::new();
         provider.rotation_enabled = false;
         provider.rotation_strategy = None;
-        provider.models = vec![input.model.clone()];
-        provider.model_metadata.retain(|m| m.id == input.model);
-        let model_metadata = provider.model_metadata.first().cloned();
+        provider.models = models.clone();
+        provider.model_metadata.retain(|m| models.contains(&m.id));
+        let model_metadata = provider
+            .model_metadata
+            .iter()
+            .find(|m| m.id == input.model)
+            .cloned();
+        let model_metadata_by_id = models
+            .into_iter()
+            .map(|id| {
+                let metadata = provider
+                    .model_metadata
+                    .iter()
+                    .find(|m| m.id == id)
+                    .cloned()
+                    .unwrap_or_else(|| crate::snapshot::ModelMetadata {
+                        id: id.clone(),
+                        fields: BTreeMap::new(),
+                    });
+                (id, metadata)
+            })
+            .collect();
         // One live lease per task: a rebind or retry replaces the previous one.
         self.tickets.revoke_session(&session);
         let minted = self
@@ -483,6 +570,7 @@ impl GatewayState {
                     input.model,
                     &input.ingress_protocol,
                     input.budget,
+                    input.model_plan,
                 ),
                 Some(&empty_snapshot()),
                 chrono::Utc::now().timestamp_millis(),
@@ -500,6 +588,7 @@ impl GatewayState {
             account_generation: account.generation,
             owner_account_id: account.owner_account_id.clone(),
             model_metadata,
+            model_metadata_by_id,
         })
     }
 
@@ -660,6 +749,207 @@ mod tests {
         value.authority = Some(Arc::new(|| true));
         value
     }
+    fn plan() -> TaskModelPlan {
+        TaskModelPlan {
+            additional_models: vec!["model-b".into()],
+            model_bindings: BTreeMap::from([("haiku".into(), "model-b".into())]),
+        }
+    }
+
+    #[test]
+    fn model_plan_validation_rejects_invalid_models_and_bindings() {
+        for models in [
+            vec![""],
+            vec!["model-a"],
+            vec!["model-b", "model-b"],
+            vec!["bad\n"],
+        ] {
+            let mut value = plan();
+            value.additional_models = models.into_iter().map(str::to_owned).collect();
+            assert!(value.validate("model-a").is_err());
+        }
+        for key in ["", "bad\n", "非ASCII"] {
+            let mut value = plan();
+            value.model_bindings.insert(key.into(), "model-a".into());
+            assert!(value.validate("model-a").is_err());
+        }
+        let mut value = plan();
+        value
+            .model_bindings
+            .insert("other".into(), "outside".into());
+        assert!(value.validate("model-a").is_err());
+        let mut value = plan();
+        value.additional_models = (0..32).map(|n| format!("m{n}")).collect();
+        assert!(value.validate("model-a").is_err());
+        let mut value = plan();
+        value.additional_models = vec!["x".repeat(257)];
+        assert!(value.validate("model-a").is_err());
+        let mut value = plan();
+        value.model_bindings = (0..65)
+            .map(|n| (format!("s{n}"), "model-a".into()))
+            .collect();
+        assert!(value.validate("model-a").is_err());
+        let mut value = plan();
+        value
+            .model_bindings
+            .insert("s".repeat(129), "model-a".into());
+        assert!(value.validate("model-a").is_err());
+    }
+
+    #[test]
+    fn device_plan_freezes_exact_models_and_one_shared_request_budget() {
+        let state = GatewayState::new();
+        let mut input = request();
+        input.model_plan = Some(plan());
+        input.budget = Some(TicketBudget {
+            max_requests: Some(2),
+            ..Default::default()
+        });
+        let lease = state
+            .mint_task_lease(
+                "tenant",
+                "device-a",
+                state.status().account_generation,
+                input,
+            )
+            .unwrap();
+        let ticket = state
+            .tickets
+            .validate(&lease.secret, chrono::Utc::now().timestamp_millis())
+            .unwrap();
+        assert!(ticket.strict_selectors);
+        assert_eq!(ticket.candidates.len(), 1);
+        for (index, model) in ["model-a", "model-b"].into_iter().enumerate() {
+            assert_eq!(ticket.resolve_model(model).as_deref(), Some(model));
+            let request_id = format!("plan-{index}");
+            state
+                .tickets
+                .validate_and_reserve(
+                    &lease.secret,
+                    chrono::Utc::now().timestamp_millis(),
+                    TicketOperation::Chat,
+                    &request_id,
+                    0,
+                )
+                .unwrap();
+            state.tickets.settle_reservation(&request_id, 0);
+        }
+        assert_eq!(
+            state.tickets.validate_and_reserve(
+                &lease.secret,
+                chrono::Utc::now().timestamp_millis(),
+                TicketOperation::Chat,
+                "third",
+                0
+            ),
+            Err(TicketReject::BudgetExhausted)
+        );
+        assert_eq!(
+            state.tickets.list()[0]
+                .budget
+                .as_ref()
+                .unwrap()
+                .spent_requests,
+            2
+        );
+    }
+
+    #[test]
+    fn lease_refuses_binding_outside_plan_before_mint() {
+        let state = GatewayState::new();
+        let mut input = request();
+        let mut value = plan();
+        value
+            .model_bindings
+            .insert("haiku".into(), "outside".into());
+        input.model_plan = Some(value);
+        assert!(state
+            .mint_task_lease(
+                "tenant",
+                "device-a",
+                state.status().account_generation,
+                input
+            )
+            .err()
+            .unwrap()
+            .contains("outside the plan"));
+        assert!(state.tickets.list().is_empty());
+    }
+
+    #[test]
+    fn host_plan_copies_each_models_metadata_and_keeps_one_candidate() {
+        let state = host_state("https://api.example.com/v1");
+        let mut snapshot = state.with_snapshot(|s| s.unwrap().clone());
+        snapshot.providers[0]
+            .model_metadata
+            .push(crate::snapshot::ModelMetadata {
+                id: "model-b".into(),
+                fields: BTreeMap::from([("contextLength".into(), serde_json::json!(32000))]),
+            });
+        state.set_snapshot(snapshot);
+        let mut input = host_request("task-plan", None);
+        input.model_plan = Some(plan());
+        let lease = state
+            .mint_host_task_lease(state.status().account_generation, input, None)
+            .unwrap();
+        assert_eq!(
+            lease.model_metadata_by_id["model-a"].fields["contextLength"],
+            64000
+        );
+        assert_eq!(
+            lease.model_metadata_by_id["model-b"].fields["contextLength"],
+            32000
+        );
+        let ticket = state.tickets.list().pop().unwrap();
+        assert_eq!(ticket.candidates.len(), 1);
+        assert_eq!(ticket.resolve_model("model-b").as_deref(), Some("model-b"));
+        assert!(!ticket.allow_auth_failover);
+    }
+
+    #[test]
+    fn plan_limits_exclude_generated_identities_and_defaults() {
+        let state = GatewayState::new();
+        let mut input = request();
+        let primary = input.model.clone();
+        let long_id = "m".repeat(256);
+        let mut models: Vec<String> = (0..30).map(|n| format!("child-{n}")).collect();
+        models.push(long_id.clone());
+        input.model_plan = Some(TaskModelPlan {
+            additional_models: models,
+            model_bindings: (0..64)
+                .map(|n| (format!("selector-{n}"), primary.clone()))
+                .collect(),
+        });
+        let lease = state
+            .mint_task_lease(
+                "tenant",
+                "device-a",
+                state.status().account_generation,
+                input,
+            )
+            .unwrap();
+        let ticket = state.tickets.list().pop().unwrap();
+        assert_eq!(ticket.ticket_id, lease.ticket_id);
+        assert_eq!(ticket.resolve_model(&long_id), Some(long_id));
+        assert_eq!(ticket.resolve_model("selector-63"), Some(primary));
+    }
+
+    #[test]
+    fn host_plan_refuses_model_not_configured() {
+        let state = host_state("https://api.example.com/v1");
+        let mut input = host_request("task-plan", None);
+        input.model_plan = Some(TaskModelPlan {
+            additional_models: vec!["not-configured".into()],
+            model_bindings: BTreeMap::new(),
+        });
+        assert!(state
+            .mint_host_task_lease(state.status().account_generation, input, None)
+            .err()
+            .unwrap()
+            .contains("not configured"));
+        assert!(state.tickets.list().is_empty());
+    }
+
     #[test]
     fn local_task_authority_binds_task_secret_account_generation_and_listener() {
         let state = GatewayState::new();

@@ -50,9 +50,10 @@ import { createLedgerCheckpoint } from "./ledger/progress-ledger-checkpoint"
 import {
   RateLimitResumeController,
   createRealResumeDeps,
-  NUDGE_CONTINUE_PROMPT,
+  renderNudgeContinuePrompt,
 } from "./durable/rate-limit-resume"
 import { isUltracodeActive, type UltracodeOverride } from "./ultracode/ultracode-trigger"
+import { teamPromptContext } from "./team-prompts"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 
 /** Planning result kept compatible with the legacy LeadPlanResult shape. */
@@ -843,7 +844,7 @@ export async function runTeamLifecycle(
                   senderId: "system",
                   recipientId: team.leadId || memberId,
                   type: "system",
-                  content: NUDGE_CONTINUE_PROMPT,
+                  content: renderNudgeContinuePrompt(teamPromptContext(team)),
                   structuredPayload: {
                     type: "nudge",
                     nudgeType: "rate_limit_resume",

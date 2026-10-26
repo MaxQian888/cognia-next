@@ -7,7 +7,7 @@
  */
 
 import { defineAgentTeamTemplate } from "./define-agent-team-template"
-import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
+import type { PluginAgentTeamTemplateDef } from "@cognia/plugin-contract/types/plugin/plugin-agent-team-template"
 
 describe("defineAgentTeamTemplate", () => {
   it("returns the same object reference passed in", () => {

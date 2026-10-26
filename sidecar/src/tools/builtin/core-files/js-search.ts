@@ -1,6 +1,6 @@
 // Pure-JS search fallback for the core grep/glob tools, used when ripgrep is
 // not installed. Enumeration goes through fast-glob (already a sidecar dep)
-// with gitignore-derived ignore patterns from `gitignore.mjs`; content
+// with gitignore-derived ignore patterns from `platform/fs/gitignore.ts`; content
 // matching is line-based regex in JS. Deterministic ordering throughout so
 // repeated identical calls serialize identically (prompt-cache stability).
 

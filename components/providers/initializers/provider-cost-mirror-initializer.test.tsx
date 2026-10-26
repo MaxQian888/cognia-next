@@ -79,7 +79,7 @@ describe("reconcileNeeded", () => {
 })
 
 describe("ProviderCostMirrorInitializer", () => {
-  it("hydrates the mirror from Dexie once and prunes old usage rollups", async () => {
+  it("hydrates the mirror once and leaves coordinated retention to the daily sweeper", async () => {
     const { container, rerender } = render(<ProviderCostMirrorInitializer />)
     expect(container).toBeEmptyDOMElement()
 
@@ -87,8 +87,8 @@ describe("ProviderCostMirrorInitializer", () => {
       expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(1.25)
     })
     expect(useProviderCostMirrorStore.getState().day).toBe("2026-06-05")
-    expect(pruneMock).toHaveBeenCalledWith(90)
-    expect(pruneSessionUsageMock).toHaveBeenCalledWith(90)
+    expect(pruneMock).not.toHaveBeenCalled()
+    expect(pruneSessionUsageMock).not.toHaveBeenCalled()
 
     // Re-render must not hydrate again (ref guard).
     rerender(<ProviderCostMirrorInitializer />)

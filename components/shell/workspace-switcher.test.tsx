@@ -46,6 +46,14 @@ jest.mock("@/lib/task-workspace/client", () => ({
 jest.mock("@cognia/logging", () => ({
   loggers: { shell: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
+// Keep the real manage dialog, while leaving coordinator execution to its
+// own suite: opening the workspace picker must not initialize that runtime.
+jest.mock("@/components/project-coordinator/workspace-coordination-section", () => ({
+  WorkspaceCoordinationSection: () => null,
+}))
+jest.mock("@/lib/files/file-bridge", () => ({
+  pickDirectory: jest.fn(async () => null),
+}))
 // The manage dialog asks which of a workspace's conversations are running
 // before it removes one. Neither is this suite's subject.
 jest.mock("@/lib/db/sessions", () => ({ listWorkspaceSessions: jest.fn(async () => []) }))
@@ -167,7 +175,7 @@ describe("WorkspaceSwitcher", () => {
     expect(trigger).toHaveTextContent("B")
   })
 
-  it("wide variant spells the active name beside the initial and still switches", () => {
+  it("wide variant spells the active name beside a folder and still switches", () => {
     act(() => {
       useProjectStore.setState({
         projects: [
@@ -189,6 +197,19 @@ describe("WorkspaceSwitcher", () => {
     fireEvent.click(trigger)
     fireEvent.click(screen.getByTestId("workspace-switch-p2"))
     expect(useProjectStore.getState().activeProjectId).toBe("p2")
+  })
+
+  it("keeps a long title-bar workspace name available in full", () => {
+    const name = "An unusually long project name for the title bar"
+    act(() =>
+      useProjectStore.setState({ projects: [makeProject("p1", { name })], activeProjectId: "p1" })
+    )
+    render(
+      <TooltipProvider>
+        <WorkspaceSwitcher variant="wide" />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button", { name: "active" })).toHaveAttribute("title", name)
   })
 
   it("wide variant falls back to the 'none' label with a folder glyph", () => {

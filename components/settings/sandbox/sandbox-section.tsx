@@ -24,6 +24,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
 
 import { CanvasCodeSandboxCard } from "./canvas-code-sandbox-card"
+import { ClaudeCodeRuntimeCard } from "./claude-code-runtime-card"
 import { SandboxEnableCard } from "./sandbox-enable-card"
 import { SandboxPolicyCard } from "./sandbox-policy-card"
 import { SandboxTierCard } from "./sandbox-tier-card"
@@ -144,6 +145,7 @@ export function SandboxSection() {
         </CardContent>
       </Card>
       <SandboxEnableCard />
+      <ClaudeCodeRuntimeCard />
       <WorkspaceConfinementCard />
       <CanvasCodeSandboxCard />
       <SandboxTierCard />

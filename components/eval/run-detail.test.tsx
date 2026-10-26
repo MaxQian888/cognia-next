@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -345,9 +346,7 @@ describe("RunDetail", () => {
       upsertCalibrationItem.mockClear()
       render(<RunDetail runId="r1" onBack={jest.fn()} />)
       fireEvent.click(await screen.findByTestId("seed-calibration-open"))
-      fireEvent.change(screen.getByLabelText("calibration.scorer"), {
-        target: { value: "judge-task-completion" },
-      })
+      await selectOption(screen.getByLabelText("calibration.scorer"), "judge-task-completion")
       fireEvent.change(screen.getByLabelText("calibration.newSetName"), { target: { value: "s" } })
       fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
       await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalled())
@@ -372,9 +371,7 @@ describe("RunDetail", () => {
       upsertCalibrationItem.mockClear()
       render(<RunDetail runId="r1" onBack={jest.fn()} />)
       fireEvent.click(await screen.findByTestId("seed-calibration-open"))
-      fireEvent.change(screen.getByLabelText("calibration.set"), {
-        target: { value: "calset_existing" },
-      })
+      await selectOption(screen.getByLabelText("calibration.set"), "calset_existing")
       // No free-text id — picking an existing set is enough to seed.
       fireEvent.click(screen.getByText('calibration.seed:{"count":1}'))
       await waitFor(() => expect(upsertCalibrationItem).toHaveBeenCalled())

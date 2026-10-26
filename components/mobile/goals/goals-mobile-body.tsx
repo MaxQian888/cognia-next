@@ -46,7 +46,11 @@ import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { Surface } from "@/components/surface/surface"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
-import { GoalsMobileSectionSwitcher, type GoalMobileSection } from "@/components/mobile/goals/goals-mobile-section-switcher"
+import {
+  GoalsMobileSectionPanel,
+  GoalsMobileSectionSwitcher,
+  type GoalMobileSection,
+} from "@/components/mobile/goals/goals-mobile-section-switcher"
 import { GoalsMobileStatStrip } from "@/components/mobile/goals/goals-mobile-stat-strip"
 import { useGoalRowContext } from "@/hooks/goal/use-goal-row-context"
 import { getGoal, listAllGoals, listOpenGoals } from "@/lib/db/goals"
@@ -131,80 +135,85 @@ export function GoalsMobileBody() {
         )}
       </div>
 
-      <GoalsMobileSectionSwitcher active={section} onSelect={setSection} />
-
-      <PullToRefresh onRefresh={handleRefresh}>
-        <section className="flex flex-col gap-4 px-4 pb-4" data-testid={`mobile-goals-${section}`}>
-          {section === "analytics" ? (
-            <div className="overflow-x-hidden">
-              <GoalAnalyticsPanel goals={allGoals ?? []} loading={allGoals === undefined} />
-            </div>
-          ) : loading ? (
-            <RowsSkeleton />
-          ) : section === "overview" ? (
-            awaiting.length === 0 && running.length === 0 ? (
-              <EmptyState
-                spotIcon="goals"
-                title={t("console.activeEmpty")}
-                // Goals start from /goal in a chat; the composer "+" menu
-                // carries the Goal row that inserts the command.
-                cta={{
-                  label: t("console.openChat"),
-                  onSelect: () => router.push("/"),
-                  testId: "mobile-goals-open-chat",
-                }}
-              />
-            ) : (
-              <>
-                {awaiting.length > 0 ? (
-                  <div className="space-y-2" data-testid="mobile-goals-needs-you">
-                    <h2 className="text-sm font-semibold">
-                      {t("console.needsYou")}
-                      <span className="ml-1.5 rounded-pill bg-warning/15 px-1.5 text-[11px] text-warning tabular-nums">
-                        {awaiting.length}
-                      </span>
-                    </h2>
-                    <RowSurface>{awaiting.map((goal) => renderRow(goal, { acceptance: true }))}</RowSurface>
-                  </div>
-                ) : null}
-                {running.length > 0 ? (
-                  <div className="space-y-2">
+      <GoalsMobileSectionSwitcher active={section} onSelect={setSection}>
+        <PullToRefresh onRefresh={handleRefresh}>
+          <GoalsMobileSectionPanel section={section} asChild>
+            <section
+              className="flex flex-col gap-4 px-4 pb-4"
+              data-testid={`mobile-goals-${section}`}
+            >
+              {section === "analytics" ? (
+                <div className="overflow-x-hidden">
+                  <GoalAnalyticsPanel goals={allGoals ?? []} loading={allGoals === undefined} />
+                </div>
+              ) : loading ? (
+                <RowsSkeleton />
+              ) : section === "overview" ? (
+                awaiting.length === 0 && running.length === 0 ? (
+                  <EmptyState
+                    spotIcon="goals"
+                    title={t("console.activeEmpty")}
+                    // Goals start from /goal in a chat; the composer "+" menu
+                    // carries the Goal row that inserts the command.
+                    cta={{
+                      label: t("console.openChat"),
+                      onSelect: () => router.push("/"),
+                      testId: "mobile-goals-open-chat",
+                    }}
+                  />
+                ) : (
+                  <>
                     {awaiting.length > 0 ? (
-                      <h2 className="text-sm font-semibold">{t("console.openGoalsHeading")}</h2>
+                      <div className="space-y-2" data-testid="mobile-goals-needs-you">
+                        <h2 className="text-sm font-semibold">
+                          {t("console.needsYou")}
+                          <span className="ml-1.5 rounded-pill bg-warning/15 px-1.5 text-[11px] text-warning tabular-nums">
+                            {awaiting.length}
+                          </span>
+                        </h2>
+                        <RowSurface>{awaiting.map((goal) => renderRow(goal, { acceptance: true }))}</RowSurface>
+                      </div>
                     ) : null}
-                    <RowSurface>{running.map((goal) => renderRow(goal))}</RowSurface>
-                  </div>
-                ) : null}
-              </>
-            )
-          ) : (allGoals ?? []).length === 0 ? (
-            <EmptyState spotIcon="goals" title={t("history.empty")} />
-          ) : (
-            <>
-              <InputGroup className="h-10">
-                <InputGroupAddon>
-                  <SearchIcon className="size-4" aria-hidden />
-                </InputGroupAddon>
-                <InputGroupInput
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t("history.search")}
-                  aria-label={t("history.search")}
-                  data-testid="mobile-goals-search"
-                />
-              </InputGroup>
-              {history.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  {t("history.noResults")}
-                </p>
+                    {running.length > 0 ? (
+                      <div className="space-y-2">
+                        {awaiting.length > 0 ? (
+                          <h2 className="text-sm font-semibold">{t("console.openGoalsHeading")}</h2>
+                        ) : null}
+                        <RowSurface>{running.map((goal) => renderRow(goal))}</RowSurface>
+                      </div>
+                    ) : null}
+                  </>
+                )
+              ) : (allGoals ?? []).length === 0 ? (
+                <EmptyState spotIcon="goals" title={t("history.empty")} />
               ) : (
-                <RowSurface>{history.map((goal) => renderRow(goal))}</RowSurface>
+                <>
+                  <InputGroup className="h-10">
+                    <InputGroupAddon>
+                      <SearchIcon className="size-4" aria-hidden />
+                    </InputGroupAddon>
+                    <InputGroupInput
+                      type="search"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={t("history.search")}
+                      aria-label={t("history.search")}
+                      data-testid="mobile-goals-search"
+                    />
+                  </InputGroup>
+                  {history.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">
+                      {t("history.noResults")}
+                    </p>
+                  ) : (
+                    <RowSurface>{history.map((goal) => renderRow(goal))}</RowSurface>
+                  )}
+                </>
               )}
-            </>
-          )}
-        </section>
-      </PullToRefresh>
+            </section>
+          </GoalsMobileSectionPanel>
+        </PullToRefresh>
+      </GoalsMobileSectionSwitcher>
 
       {selected ? (
         <GoalDetailSheet

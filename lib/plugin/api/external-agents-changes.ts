@@ -13,20 +13,11 @@
  */
 
 import type { ExternalAgentStore } from "@/stores/agent/external-agent-store"
-
-export type ExternalAgentChangeType =
-  | "config-added"
-  | "config-updated"
-  | "config-removed"
-  | "connection-changed"
-  | "settings-changed"
-  | "delegation-changed"
-
-export interface ExternalAgentChangeEvent {
-  type: ExternalAgentChangeType
-  /** The configuration the change concerns; absent for settings and delegation changes. */
-  agentId?: string
-}
+import type { ExternalAgentChangeEvent } from "@cognia/plugin-contract/lib/plugin/api/external-agents-changes"
+export type {
+  ExternalAgentChangeEvent,
+  ExternalAgentChangeType,
+} from "@cognia/plugin-contract/lib/plugin/api/external-agents-changes"
 
 /** The slice of the store the diff reads. */
 export type ExternalAgentChangeSnapshot = Pick<
@@ -34,7 +25,6 @@ export type ExternalAgentChangeSnapshot = Pick<
   | "agents"
   | "connectionStatus"
   | "delegationRules"
-  | "enabled"
   | "defaultPermissionMode"
   | "autoConnectOnStartup"
   | "showConnectionNotifications"
@@ -43,7 +33,6 @@ export type ExternalAgentChangeSnapshot = Pick<
 
 /** Global settings a plugin can read through `ctx.externalAgents.getSettings`. */
 export const EXTERNAL_AGENT_SETTING_KEYS = [
-  "enabled",
   "defaultPermissionMode",
   "autoConnectOnStartup",
   "showConnectionNotifications",

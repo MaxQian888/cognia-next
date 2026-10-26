@@ -315,7 +315,7 @@ export function CompactionSettings() {
               id="compaction-tool-cap"
               keyPath="toolResultCap"
               value={maxToolResultTokens}
-              min={50}
+              min={0}
               max={5000}
               disabled={isAnthropicPath}
               onCommit={(n) => saveComp({ maxToolResultTokens: n })}

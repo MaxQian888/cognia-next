@@ -34,6 +34,9 @@ import { pruneRetrievalControlData } from "@/lib/db/retrieval-control"
 import { pruneSettledVideoJobs } from "@/lib/db/media-generation-jobs"
 import { purgeOrphanedSessionSideChats } from "@/lib/db/session-aside-orphans"
 import { pruneNotificationDelivery } from "@/lib/db/notification-delivery-retention"
+import { getDb } from "@/lib/db/schema"
+import { pruneSessionUsageOlderThan } from "@/lib/db/session-usage"
+import { pruneProviderCostOlderThan } from "@/lib/db/provider-cost-daily"
 import { resolvePreferences } from "@/lib/notifications/preferences"
 import {
   SITE_ARTIFACT_GC_DEFAULTS,
@@ -51,7 +54,29 @@ export type Unsubscribe = () => void
 export interface RetentionTarget {
   id: string
   policy?: "configured-window" | "row-expiry"
-  prune: (cutoffEpochMs: number) => Promise<number>
+  prune: (cutoffEpochMs: number) => Promise<number | RetentionOutcome>
+}
+
+export type RetentionStatus =
+  "completed" | "completed-no-work" | "partial" | "blocked" | "off" | "failed" | "unknown"
+export type RetentionReason =
+  | "configured-off"
+  | "prune-failed"
+  | "file-delete-failed"
+  | "file-metadata-unknown"
+  | "vault-locked"
+  | "cleanup-pending"
+  | "unsupported-host"
+export interface RetentionOutcome {
+  removed: number
+  status: RetentionStatus
+  reason?: RetentionReason
+  failed?: number
+  stages?: Array<Omit<RetentionResult, "stages">>
+}
+
+function completed(removed: number): RetentionOutcome {
+  return { removed, status: removed > 0 ? "completed" : "completed-no-work" }
 }
 
 /** The tables the sweeper manages. Extensible — add a `{ id, prune }` entry to
@@ -65,12 +90,49 @@ export interface RetentionTarget {
 const SETTLED_QUEUE_RETENTION_DAYS = 7
 
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  usageHistory: {
+    policy: "row-expiry",
+    prune: async () => {
+      const db = getDb()
+      const now = Date.now()
+      // Raw events use an exact epoch cutoff; daily rollups retain the entire
+      // boundary local day. Neither ledger receipts nor today's budget is rebuilt.
+      // Both indexed prunes commit together or both retry on the next daily sweep.
+      return db.transaction("rw", db.sessionUsage, db.providerCostDaily, async () => {
+        const assertCurrent = () => {
+          if (getDb() !== db) throw new Error("retention_owner_changed")
+        }
+        assertCurrent()
+        const usage = await pruneSessionUsageOlderThan(
+          policyForTable("sessionUsage")?.retentionPolicy.days ?? 90,
+          now
+        )
+        assertCurrent()
+        const cost = await pruneProviderCostOlderThan(
+          policyForTable("providerCostDaily")?.retentionPolicy.days ?? 90,
+          now
+        )
+        assertCurrent()
+        return usage + cost
+      })
+    },
+  },
   managedDesktopDeletion: {
     policy: "row-expiry",
     prune: async () => {
       const { retryManagedDesktopResultDeletions } =
         await import("@/lib/automation/managed-desktop-result-deletion")
-      return retryManagedDesktopResultDeletions()
+      const report = { blocked: 0, failed: 0 }
+      const removed = await retryManagedDesktopResultDeletions(report)
+      if (report.blocked) return { removed, status: "blocked", reason: "vault-locked" }
+      if (report.failed)
+        return {
+          removed,
+          status: removed ? "partial" : "blocked",
+          reason: "cleanup-pending",
+          failed: report.failed,
+        }
+      return completed(removed)
     },
   },
   syncTombstones: {
@@ -97,19 +159,66 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
     prune: async () => {
       // A workflow job's video is a file under AppData; it goes with its row.
       const { removeAppDataFile } = await import("@/lib/tauri/app-data-files")
+      const rowReport = { failed: 0 }
       const pruned = await pruneSettledVideoJobs(
         Date.now() -
           (policyForTable("mediaGenerationJobs")?.retentionPolicy.days ?? 30) * MS_PER_DAY,
-        removeAppDataFile
+        removeAppDataFile,
+        rowReport
       )
       // Then the video files no row accounts for: a dropped database's, an
       // orphan whose removal failed, a crash's staging copy. A file sweep that
       // fails must not report the row prune as failed.
       const { sweepVideoAppData } = await import("@/lib/ai/media/video-jobs/app-data-sweep")
-      await sweepVideoAppData().catch((err) =>
-        console.warn("storage retention: video file sweep failed", err)
+      const stages: NonNullable<RetentionOutcome["stages"]> = [
+        {
+          id: "rows",
+          ...completed(pruned),
+          ...(rowReport.failed
+            ? ({
+                status: "partial",
+                reason: "file-delete-failed",
+                failed: rowReport.failed,
+              } as const)
+            : {}),
+        },
+      ]
+      const fileReport = { failed: 0, unknown: 0, skipped: false, removed: 0 }
+      try {
+        const files = await sweepVideoAppData(undefined, fileReport)
+        const removed = files.databaseDirectories + files.orphanVideos + files.staleStagingCopies
+        stages.push({
+          id: "files",
+          ...completed(removed),
+          ...(fileReport.skipped
+            ? ({ status: "off", reason: "unsupported-host" } as const)
+            : fileReport.failed
+              ? ({
+                  status: "partial",
+                  reason: "file-delete-failed",
+                  failed: fileReport.failed,
+                } as const)
+              : fileReport.unknown
+                ? ({ status: "unknown", reason: "file-metadata-unknown" } as const)
+                : {}),
+        })
+      } catch {
+        stages.push({
+          id: "files",
+          removed: fileReport.removed,
+          status: fileReport.removed ? "partial" : "failed",
+          reason: "prune-failed",
+        })
+      }
+      const removed = stages.reduce((total, stage) => total + stage.removed, 0)
+      const incomplete = stages.find((stage) =>
+        ["partial", "failed", "unknown"].includes(stage.status)
       )
-      return pruned
+      return {
+        ...completed(removed),
+        stages,
+        ...(incomplete ? ({ status: "partial", reason: incomplete.reason } as const) : {}),
+      }
     },
   },
   retrievalControl: {
@@ -146,7 +255,8 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
     policy: "row-expiry",
     prune: async () => {
       const maxAgeMs = await readNotificationRetentionMs()
-      if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return 0
+      if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0)
+        return { removed: 0, status: "off", reason: "configured-off" }
       const now = Date.now()
       const report = await pruneNotificationDelivery({ cutoff: now - maxAgeMs, now })
       return (
@@ -222,9 +332,18 @@ function governedRetentionTargets(): RetentionTarget[] {
 
 export const RETENTION_TARGETS: RetentionTarget[] = governedRetentionTargets()
 
-export interface RetentionResult {
+export interface RetentionResult extends RetentionOutcome {
   id: string
-  removed: number
+}
+
+export interface RetentionSnapshot {
+  completedAt: number
+  results: RetentionResult[]
+}
+const snapshots = new WeakMap<object, RetentionSnapshot>()
+/** Last sweep in this runtime/owner only. Restart/another window has unknown evidence. */
+export function getStorageRetentionSnapshot(): RetentionSnapshot | null {
+  return snapshots.get(getDb()) ?? null
 }
 
 export type RetentionDaysByTarget = Readonly<Record<string, number>>
@@ -240,21 +359,26 @@ export async function pruneRetainedTables(
   targets: RetentionTarget[] = RETENTION_TARGETS,
   retentionDaysByTarget: RetentionDaysByTarget = {}
 ): Promise<RetentionResult[]> {
+  const db = getDb()
   const out: RetentionResult[] = []
   for (const target of targets) {
+    if (getDb() !== db) break
     const policy = target.policy ?? "configured-window"
     let cutoff = Date.now()
     if (policy === "configured-window") {
       const targetDays = retentionDaysByTarget[target.id] ?? days
-      if (!Number.isFinite(targetDays) || targetDays <= 0) continue
+      if (!Number.isFinite(targetDays) || targetDays <= 0) {
+        out.push({ id: target.id, removed: 0, status: "off", reason: "configured-off" })
+        continue
+      }
       cutoff -= targetDays * MS_PER_DAY
     }
     try {
       const removed = await target.prune(cutoff)
-      out.push({ id: target.id, removed })
-    } catch (err) {
-      console.warn(`storage retention prune failed for ${target.id}`, err)
-      out.push({ id: target.id, removed: 0 })
+      out.push({ id: target.id, ...(typeof removed === "number" ? completed(removed) : removed) })
+    } catch {
+      console.warn(`storage retention prune failed for ${target.id}`)
+      out.push({ id: target.id, removed: 0, status: "failed", reason: "prune-failed" })
     }
   }
   return out
@@ -287,15 +411,22 @@ async function readRetentionWindows(): Promise<RetentionWindows> {
 }
 
 async function sweepOnce(): Promise<void> {
+  const db = getDb()
   const windows = await readRetentionWindows()
-  await pruneRetainedTables(windows.traceRetentionDays, RETENTION_TARGETS, {
+  if (getDb() !== db) return
+  const results = await pruneRetainedTables(windows.traceRetentionDays, RETENTION_TARGETS, {
     ocrResults: windows.ocrCacheTtlDays,
   })
   // Referential, not time-windowed, so it is not a governed target: a side
   // chat has no age limit, only a conversation it belongs to.
-  await purgeOrphanedSessionSideChats().catch((err) =>
-    console.warn("orphaned side chat sweep failed", err)
-  )
+  if (getDb() !== db) return
+  try {
+    const removed = await purgeOrphanedSessionSideChats()
+    results.push({ id: "sessionSideChats", ...completed(removed) })
+  } catch {
+    results.push({ id: "sessionSideChats", removed: 0, status: "failed", reason: "prune-failed" })
+  }
+  if (getDb() === db) snapshots.set(db, { completedAt: Date.now(), results })
 }
 
 /**
@@ -309,7 +440,7 @@ export async function startStorageRetentionSweeper(): Promise<Unsubscribe> {
   )
   await sweepOnce().catch((err) => console.warn("storage retention sweep failed", err))
   const id = setInterval(() => {
-    void sweepOnce().catch((err) => console.warn("storage retention sweep failed", err))
+    return sweepOnce().catch(() => console.warn("storage retention sweep failed"))
   }, RETENTION_SWEEP_INTERVAL_MS)
   return () => clearInterval(id)
 }

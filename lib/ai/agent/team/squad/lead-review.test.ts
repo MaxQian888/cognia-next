@@ -1,8 +1,4 @@
-import {
-  buildLeadReviewPrompt,
-  LEAD_REVIEW_SYSTEM_PROMPT,
-  leadReviewVerdictSchema,
-} from "./lead-review"
+import { buildLeadReviewPrompt, LEAD_REVIEW_PROMPT, leadReviewVerdictSchema } from "./lead-review"
 import type { ReviewEvidence } from "../ledger/review-evidence"
 
 const task = {
@@ -38,12 +34,12 @@ describe("leadReviewVerdictSchema", () => {
   })
 })
 
-describe("LEAD_REVIEW_SYSTEM_PROMPT", () => {
+describe("LEAD_REVIEW_PROMPT", () => {
   it("tells the lead it reviews and cannot edit", () => {
     // The lead is given no tools; a lead that tried to "just fix it" would be
     // landing unreviewed work outside the worker's worktree.
-    expect(LEAD_REVIEW_SYSTEM_PROMPT).toMatch(/cannot edit/i)
-    expect(LEAD_REVIEW_SYSTEM_PROMPT).toMatch(/json/i)
+    expect(LEAD_REVIEW_PROMPT.defaultBody).toMatch(/cannot edit/i)
+    expect(LEAD_REVIEW_PROMPT.defaultBody).toMatch(/json/i)
   })
 })
 

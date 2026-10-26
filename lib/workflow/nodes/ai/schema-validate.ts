@@ -15,6 +15,8 @@
  */
 
 import { z } from "zod"
+import { renderPromptTemplate } from "@/lib/prompts/template"
+import { definePrompt } from "@/lib/prompts/types"
 
 /**
  * Map a single JSON-Schema property to a zod type. Unknown types fall back to
@@ -122,6 +124,31 @@ export function formatZodIssues(error: z.ZodError): string[] {
 }
 
 /**
+ * The repair turn of the single schema auto-fix retry: protocol text,
+ * visible in the Prompt Center and never editable (ADR-0236). It is rendered
+ * straight from the definition rather than through the resolver, which an
+ * inspect-only entry does not need: this module is bundled into the MCP
+ * sidecar, which must not pull in the override snapshot's account store.
+ */
+export const SCHEMA_REPAIR_PROMPT = definePrompt({
+  id: "developer.workflow.schema-repair",
+  contractVersion: 1,
+  kind: "protocol",
+  group: "developer",
+  operation: "inspect-only",
+  scopes: [],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app", "cli"],
+  variables: [{ name: "errors", required: true, maxChars: 1_000_000 }],
+  outputContract:
+    "Appended to the re-prompt of the one auto-fix retry after a reply fails the output schema; {{errors}} is one indented `- path: message` line per violation.",
+  consumers: ["lib/workflow/nodes/ai/schema-validate.ts"],
+  defaultBody:
+    "Your previous reply did not satisfy the required output schema:\n{{errors}}\nReturn ONLY corrected JSON that satisfies the schema.",
+})
+
+/**
  * Build the corrective snippet appended to the re-prompt on the single
  * auto-fix retry. Kept terse — the model already has the schema in its system
  * instruction; this only points at what was wrong.
@@ -129,5 +156,7 @@ export function formatZodIssues(error: z.ZodError): string[] {
 export function summarizeZodError(errors: string[]): string {
   if (errors.length === 0) return ""
   const lines = errors.map((e) => `  - ${e}`).join("\n")
-  return `Your previous reply did not satisfy the required output schema:\n${lines}\nReturn ONLY corrected JSON that satisfies the schema.`
+  return renderPromptTemplate(SCHEMA_REPAIR_PROMPT, SCHEMA_REPAIR_PROMPT.defaultBody, {
+    errors: lines,
+  })
 }

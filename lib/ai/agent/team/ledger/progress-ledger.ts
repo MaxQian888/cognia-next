@@ -18,6 +18,12 @@ import type { AgentTeamTask } from "@/types/agent/agent-team"
 import type { TeamRunContext } from "../team-run-context"
 import { readDependencyResults } from "../memory/shared-memory-orchestrator"
 import { dispatchStructured } from "../teammate/structured-dispatch"
+import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
+import {
+  PROGRESS_LEDGER_JUDGE_PROMPT,
+  PROGRESS_LEDGER_SCHEMA_HINT_PROMPT,
+  teamPromptContext,
+} from "../team-prompts"
 
 export interface LedgerSnapshot {
   /** Number of tasks completed so far this run. */
@@ -91,16 +97,6 @@ export const progressLedgerVerdictSchema = z.object({
 
 export type ProgressLedgerVerdict = z.infer<typeof progressLedgerVerdictSchema>
 
-/** Schema hint appended to the judge prompt for the model. */
-export const PROGRESS_LEDGER_SCHEMA_HINT = [
-  '{ "isSatisfied": boolean,',
-  '  "isProgressing": boolean,',
-  '  "isLooping": boolean,',
-  '  "diagnosis": string,',
-  '  "recommendedAction": "continue" | "replan" | "consensus" | "delegate",',
-  '  "target"?: string }',
-].join("\n")
-
 /** Deterministic fail-open verdict: defer to the lead re-plan, never escalate. */
 function failOpenVerdict(diagnosis: string): ProgressLedgerVerdict {
   return {
@@ -129,7 +125,8 @@ export interface JudgeProgressDeps {
   }) => Promise<ProgressLedgerVerdict>
 }
 
-function buildJudgePrompt(deps: JudgeProgressDeps): string {
+/** The judge's request, resolved once for this judgment (ADR-0236). */
+async function buildJudgePrompt(deps: JudgeProgressDeps): Promise<string> {
   const { teamCtx, doneTaskIds, remaining, stallCount } = deps
   const objective = teamCtx.team.task ?? teamCtx.team.description ?? teamCtx.team.name
   const results = readDependencyResults(teamCtx.teamId, doneTaskIds)
@@ -141,24 +138,18 @@ function buildJudgePrompt(deps: JudgeProgressDeps): string {
     remaining.length > 0
       ? remaining.map((t) => `- [${t.id}] ${t.title}: ${t.description}`).join("\n")
       : "(none)"
-  return [
-    `You are the progress monitor for the agent team "${teamCtx.team.name}".`,
-    `Objective: ${objective}`,
-    `The team has stalled for ${stallCount} consecutive wave(s) — no new completed tasks or output.`,
-    "",
-    "Completed-task results so far:",
-    resultLines,
-    "",
-    "Remaining planned tasks:",
-    remainingLines,
-    "",
-    "Diagnose the stall and recommend exactly one action:",
-    '- "continue": the stall is benign; keep the current plan.',
-    '- "replan": the lead should revise the remaining tasks.',
-    '- "consensus": the team disagrees; open a vote to settle direction.',
-    '- "delegate": hand a blocking sub-problem to a fresh background agent.',
-    "Set isSatisfied=true only if the objective is already met.",
-  ].join("\n")
+  return (
+    await resolvePromptAsync(PROGRESS_LEDGER_JUDGE_PROMPT, {
+      context: teamPromptContext(teamCtx.team),
+      values: {
+        teamName: teamCtx.team.name,
+        objective,
+        stallCount: String(stallCount),
+        results: resultLines,
+        remaining: remainingLines,
+      },
+    })
+  ).text
 }
 
 /**
@@ -174,15 +165,17 @@ export async function judgeProgress(deps: JudgeProgressDeps): Promise<ProgressLe
         teamCtx,
         { taskId: `progress-ledger:${teamCtx.runId}`, prompt, ...(signal ? { signal } : {}) },
         progressLedgerVerdictSchema,
-        { schemaHint: PROGRESS_LEDGER_SCHEMA_HINT }
+        { schemaHint: resolvePrompt(PROGRESS_LEDGER_SCHEMA_HINT_PROMPT).text }
       )
       return r.value
     })
 
   try {
+    const prompt = await buildJudgePrompt(deps)
+    deps.signal?.throwIfAborted()
     return await dispatch({
       teamCtx: deps.teamCtx,
-      prompt: buildJudgePrompt(deps),
+      prompt,
       ...(deps.signal ? { signal: deps.signal } : {}),
     })
   } catch {

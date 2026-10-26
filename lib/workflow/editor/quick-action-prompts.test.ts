@@ -1,5 +1,14 @@
 import type { EditorState } from "./store"
-import { buildQuickActionPrompt, buildSelectionReferencePrompt } from "./quick-action-prompts"
+import {
+  WORKFLOW_QUICK_ACTION_PROMPTS,
+  buildQuickActionPrompt,
+  buildSelectionReferencePrompt,
+} from "./quick-action-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 function makeState(overrides: Partial<EditorState> = {}): EditorState {
   return {
@@ -152,5 +161,61 @@ describe("buildSelectionReferencePrompt", () => {
     )
     expect(out).toContain("`n1`")
     expect(out).not.toContain("`gone`")
+  })
+})
+
+describe("quick-action Prompt Center entries (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  function override(promptId: string, revisionId: string, body: string) {
+    return {
+      bindingId: `pob-${revisionId}`,
+      promptId,
+      scope: "account" as const,
+      targetId: "",
+      revisionId,
+      body,
+      contractVersion: 1,
+    }
+  }
+
+  it("sends published wording with the graph data rendered in", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        override(
+          WORKFLOW_QUICK_ACTION_PROMPTS.explain.id,
+          "por-qa-explain",
+          "/explain\nExplain these {{count}}:{{nodes}}"
+        ),
+        override(
+          WORKFLOW_QUICK_ACTION_PROMPTS.suggestUnselected.id,
+          "por-qa-suggest",
+          "/suggest-next\n{{nodeCount}} nodes, {{edgeCount}} edges. One idea, please."
+        ),
+      ])
+    )
+    const nodes = [makeNode("n1", "ai.prompt", "Summarize")]
+    expect(buildQuickActionPrompt("explain", makeState({ nodes, selectedNodeIds: ["n1"] }))).toBe(
+      "/explain\nExplain these 1:\n- `n1` — **Summarize** (kind: `ai.prompt`)"
+    )
+    expect(buildQuickActionPrompt("suggest", makeState({ nodes }))).toBe(
+      "/suggest-next\n1 nodes, 0 edges. One idea, please."
+    )
+  })
+
+  it("keeps the shipped layout when a selected id is missing from the graph", () => {
+    const out = buildSelectionReferencePrompt(makeState({ selectedNodeIds: ["gone"] }))
+    expect(out).toBe(
+      [
+        "I have **1 node(s)** selected on the canvas and want to work on just those:",
+        "",
+        "",
+        "Read them, tell me in one or two sentences what this part of the graph does, then ask me what I want changed.",
+        "Scope every proposal that follows to these nodes and their edges unless I say otherwise.",
+      ].join("\n")
+    )
   })
 })

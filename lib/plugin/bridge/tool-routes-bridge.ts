@@ -10,11 +10,8 @@
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginToolRouteDef } from "@/types/plugin/plugin-tool-route"
 import { loggers } from "@/lib/plugin/core/logger"
-
-export interface ToolRoutesBridgeResult {
-  registered: number
-  errors: Array<{ pluginId: string; toolName: string; message: string }>
-}
+import type { ToolRoutesBridgeResult } from "@cognia/plugin-contract/lib/plugin/bridge/tool-routes-bridge"
+export type { ToolRoutesBridgeResult } from "@cognia/plugin-contract/lib/plugin/bridge/tool-routes-bridge"
 
 export async function registerToolRoutesForPlugin(
   manifest: PluginManifest,

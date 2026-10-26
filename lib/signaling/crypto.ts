@@ -1,4 +1,6 @@
 import { SIGNALING_PROTOCOL_VERSION, type EnvelopeKind, type PeerRole } from "./types"
+import type { RoomDescriptor } from "@cognia/plugin-contract/lib/signaling/crypto"
+export type { RoomDescriptor } from "@cognia/plugin-contract/lib/signaling/crypto"
 
 const CLOCK_SKEW_MS = 5 * 60 * 1000
 const TEXT_ENCODER = new TextEncoder()
@@ -28,15 +30,6 @@ export interface SignalingKeyPair {
 
 export interface PersistableSigningIdentity extends SignalingKeyPair {
   privateKeyJwk: JsonWebKey
-}
-
-export interface RoomDescriptor {
-  v: typeof SIGNALING_PROTOCOL_VERSION
-  roomId: string
-  roomNonce: string
-  desktopSigningKey: string
-  mobileSigningKey: string
-  notAfter: number
 }
 
 type RoomDescriptorInput = Omit<RoomDescriptor, "v" | "roomId">

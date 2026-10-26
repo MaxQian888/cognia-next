@@ -2,6 +2,13 @@
  * @jest-environment node
  */
 import { buildBashAnalysisPrompt, formatBashResult, parseBang } from "./bash-shellout"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_BASH_ANALYSIS_PROMPT } from "@/lib/agent/prompts/cli-prompts"
 
 describe("parseBang", () => {
   it("extracts the command after the bang", () => {
@@ -51,5 +58,45 @@ describe("buildBashAnalysisPrompt", () => {
     const prompt = buildBashAnalysisPrompt({ command: "x", output: "   " })
     expect(prompt).not.toContain("exit code")
     expect(prompt).toContain("[no output]")
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("bash-analysis Prompt Center override", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders a published override with the failed command", () => {
+    publishOverride(
+      CLI_BASH_ANALYSIS_PROMPT,
+      "Why did `{{command}}` fail{{exit}}?\n{{output}}",
+      "por-bash-1"
+    )
+    expect(buildBashAnalysisPrompt({ command: "make", output: "err\n", exitCode: 2 })).toBe(
+      "Why did `make` fail (exit code 2)?\nerr"
+    )
   })
 })

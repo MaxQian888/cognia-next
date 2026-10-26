@@ -5,35 +5,32 @@
  * fully unit-tested; `to-build-context` composes the effective prompt and the
  * `/output-style` command flips `config.outputStyle`.
  */
+import { CLI_OUTPUT_STYLE_PROMPTS } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptResolutionContext } from "@/lib/prompts/types"
 import { type OutputStyle } from "./schema"
 
-/** The system-prompt suffix for each style (`default` ⇒ none). */
-const OUTPUT_STYLE_PROMPTS: Record<OutputStyle, string | null> = {
+/**
+ * The Prompt Center slot behind each style (`default` ⇒ none). The bodies live
+ * in `lib/` so the app's Prompt Center can edit them (ADR-0236).
+ */
+const OUTPUT_STYLE_PROMPTS: Record<OutputStyle, PromptDefinitionV1 | null> = {
   default: null,
-  concise: [
-    "Output style: Concise.",
-    "Answer in as few words as correctness allows. Lead with the result, skip",
-    "preamble and restating the question, and prefer short lists or single",
-    "sentences over paragraphs. Only expand when the user asks for detail.",
-  ].join(" "),
-  explanatory: [
-    "Output style: Explanatory.",
-    "Alongside the solution, explain the reasoning and the trade-offs behind it —",
-    "why this approach over the alternatives, and which assumptions it rests on —",
-    "so the user understands not just what to do but why.",
-  ].join(" "),
-  learning: [
-    "Output style: Learning.",
-    "Act as a coding mentor. Break the work into steps, explain the underlying",
-    "concepts as they come up, and where it helps the user learn, leave a clearly",
-    "marked small piece for them to complete rather than writing every line.",
-  ].join(" "),
+  ...CLI_OUTPUT_STYLE_PROMPTS,
 }
 
-/** The instruction for a style, or null for `default` / undefined. */
-export function outputStyleInstruction(style: OutputStyle | undefined): string | null {
+/**
+ * The instruction for a style, or null for `default` / undefined. Synchronous:
+ * it runs inside the option build, after the session primed the override
+ * snapshot, so `context.workspaceId` is the workspace mounting the cwd.
+ */
+export function outputStyleInstruction(
+  style: OutputStyle | undefined,
+  context: PromptResolutionContext = {}
+): string | null {
   if (!style) return null
-  return OUTPUT_STYLE_PROMPTS[style] ?? null
+  const def = OUTPUT_STYLE_PROMPTS[style]
+  return def ? resolvePrompt(def, { context }).text : null
 }
 
 /**
@@ -43,9 +40,10 @@ export function outputStyleInstruction(style: OutputStyle | undefined): string |
  */
 export function composeSystemPrompt(
   base: string | undefined,
-  style: OutputStyle | undefined
+  style: OutputStyle | undefined,
+  context: PromptResolutionContext = {}
 ): string | undefined {
-  const suffix = outputStyleInstruction(style)
+  const suffix = outputStyleInstruction(style, context)
   const trimmedBase = base?.trim() ? base : undefined
   if (trimmedBase && suffix) return `${trimmedBase}\n\n${suffix}`
   return trimmedBase ?? suffix ?? undefined

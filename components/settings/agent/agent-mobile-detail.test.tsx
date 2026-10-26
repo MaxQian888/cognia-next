@@ -80,7 +80,6 @@ function setup(over: Partial<ComponentProps<typeof AgentMobileDetail>> = {}) {
       nextAction: "connect",
     },
     isConnecting: false,
-    masterEnabled: true,
     onConnect: jest.fn(),
     onDisconnect: jest.fn(),
     onEdit: jest.fn(),
@@ -377,13 +376,11 @@ it("shows one failure with causes, retry and dismissal ahead of readiness", () =
   expect(clearFailure).toHaveBeenCalledWith("a1")
 })
 
-it.each([false, true])("respects the master switch for connect/retry (failure=%s)", (failure) => {
+it.each([false, true])("allows connect/retry for an enabled agent (failure=%s)", (failure) => {
   if (failure)
     failures.a1 = { agentId: "a1", phase: "connect", message: "Failed", causes: [], at: 1 }
-  setup({ masterEnabled: false })
-  const action = screen.getByRole("button", { name: failure ? "Retry" : "Connect" })
-  expect(action).toBeDisabled()
-  expect(action).toHaveAccessibleDescription(settings.inspectorMasterDisabled)
+  setup()
+  expect(screen.getByRole("button", { name: failure ? "Retry" : "Connect" })).toBeEnabled()
 })
 
 it("provides Enable, busy connection, Connected/Disconnect, and optional routing states", async () => {

@@ -47,6 +47,7 @@ describe("browser-builtin-registry", () => {
       "cognia-clipboard-history",
       "cognia-clipboard-tools",
       "cognia-computer-use",
+      "cognia-config-governance",
       "cognia-context-inspector",
       "cognia-deep-research",
       "cognia-documents",

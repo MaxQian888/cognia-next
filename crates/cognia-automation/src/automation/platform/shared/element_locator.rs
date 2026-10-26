@@ -338,59 +338,56 @@ pub fn describe_step<N: LocatorNode>(parent: &N, child_index: usize) -> Option<A
 /// subrole — so it degrades to "positional but type-checked", never to
 /// "resolves to the wrong node".
 pub fn assign_locators<N: ElementInfoLike>(root: &mut N, base: &ElementLocator) {
-    assign_locators_inner(root, base, &[]);
-}
+    // Accessibility trees can be deep even with a node/time budget. Keep the
+    // traversal off the native worker stack while preserving preorder paths.
+    let mut pending = vec![(root, Vec::<AncestryStep>::new())];
+    while let Some((node, path)) = pending.pop() {
+        let mut locator = base.clone();
+        locator.path = path.to_vec();
+        node.set_element_ref(locator.encode());
 
-fn assign_locators_inner<N: ElementInfoLike>(
-    node: &mut N,
-    base: &ElementLocator,
-    path: &[AncestryStep],
-) {
-    let mut locator = base.clone();
-    locator.path = path.to_vec();
-    node.set_element_ref(locator.encode());
-
-    let children = node.children_mut();
-    // Ordinal bookkeeping per (role, subrole) and per (role, subrole, name),
-    // mirroring `describe_step`.
-    let shapes: Vec<(Option<String>, Option<String>, Option<String>)> = children
-        .iter()
-        .map(|c| (c.role(), c.subrole(), c.name()))
-        .collect();
-
-    for (index, child) in children.iter_mut().enumerate() {
-        let (role, subrole, name) = shapes[index].clone();
-        let same_shape: Vec<usize> = shapes
+        let children = node.children_mut();
+        // Ordinal bookkeeping per (role, subrole) and per (role, subrole, name),
+        // mirroring `describe_step`.
+        let shapes: Vec<(Option<String>, Option<String>, Option<String>)> = children
             .iter()
-            .enumerate()
-            .filter(|(_, (r, s, _))| *r == role && *s == subrole)
-            .map(|(i, _)| i)
+            .map(|c| (c.role(), c.subrole(), c.name()))
             .collect();
-        let ordinal = match name.as_deref().filter(|s| !s.is_empty()) {
-            Some(want) => {
-                let named: Vec<usize> = same_shape
-                    .iter()
-                    .copied()
-                    .filter(|&i| shapes[i].2.as_deref() == Some(want))
-                    .collect();
-                if named.len() > 1 {
-                    named.iter().position(|&i| i == index).unwrap_or(0)
-                } else {
-                    same_shape.iter().position(|&i| i == index).unwrap_or(0)
-                }
-            }
-            None => same_shape.iter().position(|&i| i == index).unwrap_or(0),
-        };
 
-        let mut child_path = path.to_vec();
-        child_path.push(AncestryStep {
-            identifier: child.identifier().filter(|s| !s.is_empty()),
-            role,
-            subrole,
-            name,
-            ordinal: ordinal as u32,
-        });
-        assign_locators_inner(child, base, &child_path);
+        for (index, child) in children.iter_mut().enumerate().rev() {
+            let (role, subrole, name) = shapes[index].clone();
+            let same_shape: Vec<usize> = shapes
+                .iter()
+                .enumerate()
+                .filter(|(_, (r, s, _))| *r == role && *s == subrole)
+                .map(|(i, _)| i)
+                .collect();
+            let ordinal = match name.as_deref().filter(|s| !s.is_empty()) {
+                Some(want) => {
+                    let named: Vec<usize> = same_shape
+                        .iter()
+                        .copied()
+                        .filter(|&i| shapes[i].2.as_deref() == Some(want))
+                        .collect();
+                    if named.len() > 1 {
+                        named.iter().position(|&i| i == index).unwrap_or(0)
+                    } else {
+                        same_shape.iter().position(|&i| i == index).unwrap_or(0)
+                    }
+                }
+                None => same_shape.iter().position(|&i| i == index).unwrap_or(0),
+            };
+
+            let mut child_path = path.to_vec();
+            child_path.push(AncestryStep {
+                identifier: child.identifier().filter(|s| !s.is_empty()),
+                role,
+                subrole,
+                name,
+                ordinal: ordinal as u32,
+            });
+            pending.push((child, child_path));
+        }
     }
 }
 
@@ -1052,6 +1049,33 @@ mod tests {
         assert_eq!(refs.len(), 8);
         let unique: std::collections::HashSet<_> = refs.iter().collect();
         assert_eq!(unique.len(), refs.len(), "refs must be distinct per node");
+    }
+
+    #[test]
+    fn assign_locators_handles_deep_tree_on_small_worker_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                const DEPTH: usize = 256;
+                let mut tree = FakeInfo::new("AXButton").name("leaf");
+                for _ in 0..DEPTH {
+                    tree = FakeInfo::new("AXGroup").kids(vec![tree]);
+                }
+                let base = ElementLocator::new(LocatorBackend::Macos, app());
+                assign_locators(&mut tree, &base);
+                let mut current = tree;
+                for depth in 0..=DEPTH {
+                    let locator = ElementLocator::decode(&current.element_ref).expect("decodes");
+                    assert_eq!(locator.path.len(), depth);
+                    assert_eq!(locator.app, base.app);
+                    if depth < DEPTH {
+                        current = current.children.pop().expect("next level");
+                    }
+                }
+            })
+            .expect("spawn worker-sized thread")
+            .join()
+            .expect("locator assignment must not exhaust the stack");
     }
 
     #[test]

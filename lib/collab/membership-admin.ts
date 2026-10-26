@@ -160,6 +160,29 @@ export async function changeOrgRole(
   await refreshAfter(context, deps)
 }
 
+export interface TransferOrgOwnershipInput {
+  toUserId: string
+  previousOwnerRole: Exclude<OrgRole, "owner">
+  reason: string
+}
+
+/**
+ * Make another member the owner and step the caller down, atomically. The
+ * server refuses unless the caller is an owner and the target is a member.
+ */
+export async function transferOrgOwnership(
+  context: CurrentCollabContext,
+  input: TransferOrgOwnershipInput,
+  deps: MembershipAdminDeps = {}
+): Promise<void> {
+  await context.client.transferOrgOwnership(context.orgId, {
+    toUserId: input.toUserId,
+    previousOwnerRole: input.previousOwnerRole,
+    reason: input.reason,
+  })
+  await refreshAfter(context, deps)
+}
+
 export interface OffboardFromOrgInput {
   userId: string
   reason?: string
@@ -187,5 +210,6 @@ export type MembershipAdminClient = Pick<
   | "setWorkspaceMember"
   | "removeWorkspaceMember"
   | "setOrgMemberRole"
+  | "transferOrgOwnership"
   | "offboardOrgMember"
 >

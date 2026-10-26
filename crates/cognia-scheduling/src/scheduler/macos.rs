@@ -9,6 +9,7 @@ use log::{debug, error, info, warn};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -19,6 +20,13 @@ use super::types::{
     SchedulerCapabilities, SystemTask, SystemTaskAction, SystemTaskStatus, SystemTaskTrigger,
     SystemTriggerKind, TaskMetadataState, TaskRunResult, TranslationValidation, TriggerCapability,
 };
+
+// Arguments are data, never shell source. The persistent atomic claim makes
+// calendar replay (including a later year or reboot) one scheduled attempt.
+const ONCE_GUARD: &str = r#"[ "$(/bin/date +%s)" -ge "$1" ] || exit 0
+/bin/mkdir -m 700 "$2" 2>/dev/null || exit 0
+shift 2
+exec "$@""#;
 
 /// macOS launchd scheduler implementation
 pub struct MacOSScheduler {
@@ -94,8 +102,23 @@ impl MacOSScheduler {
 
     /// Generate plist content for a task
     fn generate_plist(task: &SystemTask) -> Result<String> {
-        let label = Self::task_to_label(&task.name);
-        let (program, args) = Self::build_program_args(&task.action)?;
+        let label = &task.id;
+        let (mut program, mut args) = Self::build_program_args(&task.action)?;
+        if let SystemTaskTrigger::Once { run_at } = &task.trigger {
+            let dt = Self::once_datetime(run_at)?;
+            let marker = Self::once_marker_root().join(uuid::Uuid::new_v4().to_string());
+            let mut guarded = vec![
+                "-c".to_string(),
+                ONCE_GUARD.to_string(),
+                "cognia-once".to_string(),
+                Self::once_epoch(&dt).to_string(),
+                marker.to_string_lossy().into_owned(),
+                program,
+            ];
+            guarded.append(&mut args);
+            program = "/bin/sh".to_string();
+            args = guarded;
+        }
 
         let mut plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -108,7 +131,8 @@ impl MacOSScheduler {
     <array>
         <string>{}</string>
 "#,
-            label, program
+            Self::escape_xml(label),
+            Self::escape_xml(&program)
         );
 
         for arg in args {
@@ -147,28 +171,24 @@ impl MacOSScheduler {
                 plist.push_str("    <key>RunAtLoad</key>\n    <true/>\n");
             }
             SystemTaskTrigger::Once { run_at } => {
-                // launchd doesn't have native "once" - use StartCalendarInterval
-                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(run_at) {
-                    plist.push_str("    <key>StartCalendarInterval</key>\n");
-                    plist.push_str("    <dict>\n");
+                let dt = Self::once_calendar_time(run_at)?;
+                plist.push_str("    <key>CogniaOnceRunAt</key>\n");
+                plist.push_str(&format!(
+                    "    <string>{}</string>\n",
+                    Self::escape_xml(run_at)
+                ));
+                plist.push_str("    <key>StartCalendarInterval</key>\n    <dict>\n");
+                for (key, value) in [
+                    ("Month", dt.month()),
+                    ("Day", dt.day()),
+                    ("Hour", dt.hour()),
+                    ("Minute", dt.minute()),
+                ] {
                     plist.push_str(&format!(
-                        "        <key>Month</key>\n        <integer>{}</integer>\n",
-                        dt.month()
+                        "        <key>{key}</key>\n        <integer>{value}</integer>\n"
                     ));
-                    plist.push_str(&format!(
-                        "        <key>Day</key>\n        <integer>{}</integer>\n",
-                        dt.day()
-                    ));
-                    plist.push_str(&format!(
-                        "        <key>Hour</key>\n        <integer>{}</integer>\n",
-                        dt.hour()
-                    ));
-                    plist.push_str(&format!(
-                        "        <key>Minute</key>\n        <integer>{}</integer>\n",
-                        dt.minute()
-                    ));
-                    plist.push_str("    </dict>\n");
                 }
+                plist.push_str("    </dict>\n");
             }
             SystemTaskTrigger::OnEvent { .. } => {
                 warn!("OnEvent trigger not supported on macOS");
@@ -231,6 +251,54 @@ impl MacOSScheduler {
         plist.push_str("</dict>\n</plist>\n");
 
         Ok(plist)
+    }
+
+    fn once_marker_root() -> PathBuf {
+        dirs::data_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Cognia/scheduler-once")
+    }
+
+    fn once_datetime(run_at: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
+        chrono::DateTime::parse_from_rfc3339(run_at)
+            .map_err(|e| SchedulerError::InvalidConfig(format!("Invalid datetime: {e}")))
+    }
+
+    fn once_epoch(dt: &chrono::DateTime<chrono::FixedOffset>) -> i64 {
+        dt.timestamp() + i64::from(dt.timestamp_subsec_nanos() != 0)
+    }
+
+    fn once_calendar_time(run_at: &str) -> Result<chrono::DateTime<chrono::Local>> {
+        let dt = Self::once_datetime(run_at)?;
+        let epoch = Self::once_epoch(&dt);
+        let minute = epoch.div_euclid(60) * 60 + if epoch.rem_euclid(60) != 0 { 60 } else { 0 };
+        chrono::DateTime::from_timestamp(minute, 0)
+            .map(|utc| utc.with_timezone(&chrono::Local))
+            .ok_or_else(|| {
+                SchedulerError::InvalidConfig("Datetime is outside launchd range".to_string())
+            })
+    }
+
+    fn once_guard_marker(content: &str, args: &[String]) -> Option<PathBuf> {
+        let run_at = Self::extract_key_block(content, "CogniaOnceRunAt", "string")?;
+        let epoch = Self::once_epoch(&Self::once_datetime(&run_at).ok()?);
+        if args.len() < 7
+            || args[0] != "/bin/sh"
+            || args[1] != "-c"
+            || args[2] != ONCE_GUARD
+            || args[3] != "cognia-once"
+            || args[4] != epoch.to_string()
+        {
+            return None;
+        }
+        let marker = PathBuf::from(&args[5]);
+        (marker.parent() == Some(Self::once_marker_root().as_path())
+            && marker
+                .file_name()
+                .and_then(|s| s.to_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .is_some())
+        .then_some(marker)
     }
 
     /// Build program and arguments from action
@@ -352,13 +420,11 @@ impl MacOSScheduler {
     }
 
     fn decode_xml_entities(s: &str) -> String {
-        s.replace("&amp;", "&")
-            .replace("&lt;", "<")
+        s.replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&quot;", "\"")
             .replace("&apos;", "'")
-            .trim()
-            .to_string()
+            .replace("&amp;", "&")
     }
 
     fn extract_key_block(content: &str, key: &str, value_tag: &str) -> Option<String> {
@@ -367,9 +433,17 @@ impl MacOSScheduler {
             key, value_tag, value_tag
         );
         let regex = Regex::new(&pattern).ok()?;
-        regex
-            .captures(content)
-            .and_then(|cap| cap.get(1).map(|v| Self::decode_xml_entities(v.as_str())))
+        regex.captures(content).and_then(|cap| {
+            cap.get(1).map(|v| {
+                // Decode only scalar text, once. Decoding a container first
+                // would change literal entity strings inside argv/env values.
+                if value_tag == "string" {
+                    Self::decode_xml_entities(v.as_str())
+                } else {
+                    v.as_str().trim().to_string()
+                }
+            })
+        })
     }
 
     fn extract_key_int(content: &str, key: &str) -> Option<u64> {
@@ -425,7 +499,10 @@ impl MacOSScheduler {
     }
 
     fn parse_action_from_plist(content: &str) -> Option<SystemTaskAction> {
-        let args = Self::extract_program_arguments(content);
+        let mut args = Self::extract_program_arguments(content);
+        if Self::once_guard_marker(content, &args).is_some() {
+            args = args.split_off(6);
+        }
         if args.is_empty() {
             return None;
         }
@@ -500,6 +577,11 @@ impl MacOSScheduler {
                 // launchd evaluates calendar intervals in the host's local timezone.
                 timezone: None,
             });
+        }
+
+        if let Some(run_at) = Self::extract_key_block(content, "CogniaOnceRunAt", "string") {
+            Self::once_datetime(&run_at).ok()?;
+            return Some(SystemTaskTrigger::Once { run_at });
         }
 
         let calendar = Self::extract_key_block(content, "StartCalendarInterval", "dict")?;
@@ -652,6 +734,12 @@ impl SystemScheduler for MacOSScheduler {
 
         // Generate and write plist
         let plist_content = Self::generate_plist(&task)?;
+        if matches!(&task.trigger, SystemTaskTrigger::Once { .. }) {
+            fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(Self::once_marker_root())?;
+        }
         fs::write(&plist_path, &plist_content)?;
 
         debug!("Created plist at {:?}", plist_path);
@@ -695,6 +783,18 @@ impl SystemScheduler for MacOSScheduler {
         // Remove plist file
         let plist_path = self.agents_dir.join(format!("{}.plist", id));
         if plist_path.exists() {
+            if let Ok(content) = fs::read_to_string(&plist_path) {
+                if let Some(marker) =
+                    Self::once_guard_marker(&content, &Self::extract_program_arguments(&content))
+                {
+                    // Only an empty directory at the exact owned UUID path.
+                    match fs::remove_dir(marker) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+            }
             fs::remove_file(&plist_path)?;
             info!("Deleted macOS task: {}", id);
             Ok(true)
@@ -754,6 +854,29 @@ impl SystemScheduler for MacOSScheduler {
     async fn run_task_now(&self, id: &str) -> Result<TaskRunResult> {
         let start = std::time::Instant::now();
 
+        // Explicit manual execution is independent of the scheduled once claim.
+        // Run the original argv, with the same cwd/env, and report its result.
+        let content = fs::read_to_string(self.agents_dir.join(format!("{}.plist", id)))?;
+        let args = Self::extract_program_arguments(&content);
+        if Self::once_guard_marker(&content, &args).is_some() {
+            let mut command = tokio::process::Command::new(&args[6]);
+            command
+                .args(&args[7..])
+                .envs(Self::parse_env_vars(&content));
+            if let Some(dir) = Self::extract_key_block(&content, "WorkingDirectory", "string") {
+                command.current_dir(dir);
+            }
+            let output = command.output().await?;
+            return Ok(TaskRunResult {
+                success: output.status.success(),
+                exit_code: output.status.code(),
+                stdout: Some(String::from_utf8_lossy(&output.stdout).into_owned()),
+                stderr: Some(String::from_utf8_lossy(&output.stderr).into_owned()),
+                error: (!output.status.success()).then(|| "Manual task action failed".to_string()),
+                duration_ms: Some(start.elapsed().as_millis() as u64),
+            });
+        }
+
         let output = Command::new("launchctl").args(["start", id]).output()?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -791,7 +914,7 @@ impl SystemScheduler for MacOSScheduler {
             match kind {
             SystemTriggerKind::Cron => (true, false, vec![], vec!["Uses launchd StartCalendarInterval. Step, range, and list expressions are not supported; only wildcards and fixed values.".to_string()]),
             SystemTriggerKind::Interval => (true, false, vec![], vec!["Uses launchd StartInterval (seconds). Minimum granularity is 1 second.".to_string()]),
-            SystemTriggerKind::Once => (true, false, vec![], vec!["Implemented via StartCalendarInterval with fixed month/day/hour/minute.".to_string()]),
+            SystemTriggerKind::Once => (true, false, vec![], vec!["Uses local calendar minutes with a persistent one-attempt guard; rounds up to the next local minute, plus OS delivery latency. Does not wake sleeping hardware.".to_string()]),
             SystemTriggerKind::OnBoot => (false, false, vec!["Boot-level triggers require system daemon scope (LaunchDaemons). Cognia operates as a user agent (LaunchAgents). Use 'on_logon' instead.".to_string()], vec![]),
             SystemTriggerKind::OnLogon => (true, false, vec![], vec!["Maps to RunAtLoad — runs when your user agent loads at login or agent restart.".to_string()]),
             SystemTriggerKind::OnEvent => (false, false, vec!["Event-based triggers are not supported on macOS via launchd.".to_string()], vec![]),
@@ -843,19 +966,19 @@ impl SystemScheduler for MacOSScheduler {
                 native_representation: Some(format!("launchd: StartInterval = {}", seconds)),
             },
             SystemTaskTrigger::Once { run_at } => {
-                match chrono::DateTime::parse_from_rfc3339(run_at) {
+                match Self::once_calendar_time(run_at) {
                     Ok(dt) => TranslationValidation {
                         valid: true,
                         errors: vec![],
-                        warnings: vec![],
+                        warnings: vec!["launchd has minute precision: rounds up to the next local minute, plus OS delivery latency. The persistent guard permits one scheduled attempt, not guaranteed successful delivery; sleeping hardware is not woken.".to_string()],
                         native_representation: Some(format!(
-                            "launchd: StartCalendarInterval Month={} Day={} Hour={} Minute={}",
+                            "launchd: local StartCalendarInterval Month={} Day={} Hour={} Minute={} with absolute-time and persistent once guard",
                             dt.month(), dt.day(), dt.hour(), dt.minute()
                         )),
                     },
                     Err(e) => TranslationValidation {
                         valid: false,
-                        errors: vec![format!("Invalid datetime: {}", e)],
+                        errors: vec![e.to_string()],
                         warnings: vec![],
                         native_representation: None,
                     },
@@ -921,6 +1044,275 @@ mod tests {
             last_result: None,
             metadata_state: TaskMetadataState::Full,
         }
+    }
+
+    fn once_task(run_at: &str) -> SystemTask {
+        let mut task = cron_task("0 9 * * *");
+        task.id = "com.cognia.task.Cognia_once_regression".to_string();
+        task.trigger = SystemTaskTrigger::Once {
+            run_at: run_at.to_string(),
+        };
+        task
+    }
+
+    #[test]
+    fn once_calendar_is_offset_independent_and_preserves_the_original_instant() {
+        let utc = once_task("2027-10-22T18:17:45Z");
+        let offset = once_task("2027-10-23T02:17:45+08:00");
+        let a = MacOSScheduler::generate_plist(&utc).unwrap();
+        let b = MacOSScheduler::generate_plist(&offset).unwrap();
+        assert_eq!(
+            MacOSScheduler::extract_key_block(&a, "StartCalendarInterval", "dict"),
+            MacOSScheduler::extract_key_block(&b, "StartCalendarInterval", "dict")
+        );
+        assert!(matches!(MacOSScheduler::parse_trigger_from_plist(&a),
+            Some(SystemTaskTrigger::Once { run_at }) if run_at == "2027-10-22T18:17:45Z"));
+    }
+
+    #[test]
+    fn once_plist_uses_the_registered_id_and_rejects_invalid_dates() {
+        let mut task = once_task("2027-10-22T18:17:45Z");
+        let plist = MacOSScheduler::generate_plist(&task).unwrap();
+        assert_eq!(
+            MacOSScheduler::extract_key_block(&plist, "Label", "string"),
+            Some(task.id.clone())
+        );
+        task.trigger = SystemTaskTrigger::Once {
+            run_at: "invalid".to_string(),
+        };
+        assert!(MacOSScheduler::generate_plist(&task).is_err());
+    }
+
+    #[test]
+    fn once_guard_never_runs_early_and_claims_only_one_attempt() {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(MacOSScheduler::once_marker_root())
+            .unwrap();
+        for (run_at, should_run) in [
+            ("2999-01-01T00:00:00Z", false),
+            ("2000-01-01T00:00:00Z", true),
+        ] {
+            let mut task = once_task(run_at);
+            let literal = "$(touch /tmp/cognia-guard-must-not-execute) <&> \"quoted\"";
+            task.action = SystemTaskAction::RunCommand {
+                command: "/bin/echo".to_string(),
+                args: vec![literal.to_string()],
+                working_dir: None,
+                env: HashMap::from([("PATH".to_string(), "/missing".to_string())]),
+            };
+            let plist = MacOSScheduler::generate_plist(&task).unwrap();
+            let args = MacOSScheduler::extract_program_arguments(&plist);
+            let marker = MacOSScheduler::once_guard_marker(&plist, &args).unwrap();
+            let first = Command::new(&args[0])
+                .args(&args[1..])
+                .env("PATH", "/missing")
+                .output()
+                .unwrap();
+            let second = Command::new(&args[0]).args(&args[1..]).output().unwrap();
+            let claimed = marker.exists();
+            if claimed {
+                fs::remove_dir(&marker).unwrap();
+            }
+            assert!(first.status.success());
+            assert!(second.status.success());
+            assert_eq!(claimed, should_run);
+            assert_eq!(
+                String::from_utf8(first.stdout).unwrap(),
+                if should_run {
+                    format!("{literal}\n")
+                } else {
+                    String::new()
+                }
+            );
+            assert!(second.stdout.is_empty());
+            assert!(matches!(MacOSScheduler::parse_action_from_plist(&plist),
+                Some(SystemTaskAction::RunCommand { command, args, .. }) if command == "/bin/echo" && args == vec![literal]));
+        }
+    }
+
+    #[test]
+    fn once_guard_records_failed_attempt_and_rounds_across_year_boundary() {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(MacOSScheduler::once_marker_root())
+            .unwrap();
+        let mut task = once_task("2000-01-01T00:00:00Z");
+        task.action = SystemTaskAction::RunCommand {
+            command: "/missing/cognia-once-executable".to_string(),
+            args: vec![],
+            working_dir: None,
+            env: HashMap::new(),
+        };
+        let plist = MacOSScheduler::generate_plist(&task).unwrap();
+        let args = MacOSScheduler::extract_program_arguments(&plist);
+        let marker = MacOSScheduler::once_guard_marker(&plist, &args).unwrap();
+        let output = Command::new(&args[0]).args(&args[1..]).output().unwrap();
+        let claimed = marker.exists();
+        if claimed {
+            fs::remove_dir(marker).unwrap();
+        }
+        assert!(!output.status.success());
+        assert!(claimed, "a failed exec consumes the one scheduled attempt");
+        let rounded = MacOSScheduler::once_calendar_time("2026-12-31T23:59:59.999Z").unwrap();
+        assert_eq!(
+            rounded.with_timezone(&chrono::Utc).to_rfc3339(),
+            "2027-01-01T00:00:00+00:00"
+        );
+    }
+
+    #[tokio::test]
+    async fn once_manual_run_bypasses_guard_without_consuming_the_schedule() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut task = once_task("2999-01-01T00:00:00Z");
+        task.action = SystemTaskAction::RunCommand {
+            command: "/bin/pwd".to_string(),
+            args: vec![],
+            working_dir: Some(dir.path().to_string_lossy().into_owned()),
+            env: HashMap::new(),
+        };
+        let plist = MacOSScheduler::generate_plist(&task).unwrap();
+        let args = MacOSScheduler::extract_program_arguments(&plist);
+        let marker = MacOSScheduler::once_guard_marker(&plist, &args).unwrap();
+        fs::write(dir.path().join(format!("{}.plist", task.id)), plist).unwrap();
+        let scheduler = MacOSScheduler {
+            available: true,
+            agents_dir: dir.path().to_path_buf(),
+        };
+        let result = scheduler.run_task_now(&task.id).await.unwrap();
+        assert!(result.success);
+        assert_eq!(
+            result.stdout.unwrap().trim(),
+            dir.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    async fn once_manual_run_preserves_whitespace_and_literal_xml_entities() {
+        let dir = tempfile::tempdir().unwrap();
+        let literal = "  &lt;literal&gt; &amp; \"quoted\"  ";
+        let scheduler = MacOSScheduler {
+            available: true,
+            agents_dir: dir.path().to_path_buf(),
+        };
+        for from_env in [false, true] {
+            let mut task = once_task("2999-01-01T00:00:00Z");
+            task.action = if from_env {
+                SystemTaskAction::RunCommand {
+                    command: "/bin/sh".to_string(),
+                    args: vec![
+                        "-c".to_string(),
+                        "printf '%s' \"$COGNIA_ACCEPTANCE\"".to_string(),
+                    ],
+                    working_dir: None,
+                    env: HashMap::from([("COGNIA_ACCEPTANCE".to_string(), literal.to_string())]),
+                }
+            } else {
+                SystemTaskAction::RunCommand {
+                    command: "/usr/bin/printf".to_string(),
+                    args: vec!["%s".to_string(), literal.to_string()],
+                    working_dir: None,
+                    env: HashMap::new(),
+                }
+            };
+            fs::write(
+                dir.path().join(format!("{}.plist", task.id)),
+                MacOSScheduler::generate_plist(&task).unwrap(),
+            )
+            .unwrap();
+            let result = scheduler.run_task_now(&task.id).await.unwrap();
+            assert!(result.success);
+            assert_eq!(result.stdout.unwrap(), literal, "from_env={from_env}");
+        }
+    }
+
+    // Opt-in: installs only uniquely named user LaunchAgents and removes them
+    // before asserting the outcome. No existing schedule or app is touched.
+    #[tokio::test]
+    #[ignore = "real launchd calendar acceptance; waits up to 90 seconds"]
+    async fn once_launchd_calendar_and_recreation() {
+        let scheduler = MacOSScheduler::new();
+        assert!(scheduler.available, "launchctl user domain unavailable");
+        let fixture = tempfile::tempdir().unwrap();
+        let output_path = fixture.path().join("attempts");
+        let name = format!("scheduler_acceptance_{}", uuid::Uuid::new_v4().simple());
+        let target = chrono::Utc::now() + chrono::Duration::seconds(3);
+        let expected = MacOSScheduler::once_calendar_time(&target.to_rfc3339()).unwrap();
+        let input = CreateSystemTaskInput {
+            name,
+            description: Some("isolated scheduler acceptance".to_string()),
+            trigger: SystemTaskTrigger::Once {
+                run_at: target.to_rfc3339(),
+            },
+            action: SystemTaskAction::RunCommand {
+                command: "/bin/sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    "/bin/date +%s >> \"$1\"".to_string(),
+                    "cognia-acceptance".to_string(),
+                    output_path.to_string_lossy().into_owned(),
+                ],
+                working_dir: None,
+                env: HashMap::new(),
+            },
+            run_level: RunLevel::User,
+            tags: vec!["scheduler-acceptance".to_string()],
+        };
+        let task = scheduler.create_task(input.clone()).await.unwrap();
+        let outcome: std::result::Result<serde_json::Value, String> = async {
+            let loaded = scheduler.get_task(&task.id).await.map_err(|e| e.to_string())?.ok_or("created job not found")?;
+            if !matches!(loaded.trigger, SystemTaskTrigger::Once { run_at } if run_at == target.to_rfc3339()) { return Err("absolute date failed round trip".to_string()); }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+            while fs::read_to_string(&output_path).unwrap_or_default().trim().is_empty() && std::time::Instant::now() < deadline { tokio::time::sleep(std::time::Duration::from_millis(100)).await; }
+            let first = fs::read_to_string(&output_path).map_err(|e| format!("calendar job did not produce output: {e}"))?;
+            let fired = first.trim().parse::<i64>().map_err(|e| e.to_string())?;
+            if fired < expected.timestamp() { return Err("launchd job fired early".to_string()); }
+            scheduler.run_task_now(&task.id).await.map_err(|e| e.to_string())?;
+            let after_manual = fs::read_to_string(&output_path).map_err(|e| e.to_string())?;
+            if after_manual.lines().count() != 2 { return Err("explicit manual attempt did not run".to_string()); }
+            let started = Command::new("launchctl").args(["start", &task.id]).output().map_err(|e| e.to_string())?;
+            if !started.status.success() { return Err(String::from_utf8_lossy(&started.stderr).into_owned()); }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if fs::read_to_string(&output_path).map_err(|e| e.to_string())? != after_manual { return Err("duplicate OS wake executed twice".to_string()); }
+            Ok(serde_json::json!({"id": task.id, "target": target.to_rfc3339(), "calendar": expected.to_rfc3339(), "firedEpoch": fired, "lateMs": fired * 1000 - target.timestamp_millis(), "scheduledAttempts": 1, "manualAttempts": 1}))
+        }.await;
+        let deleted = scheduler.delete_task(&task.id).await;
+        let absent = !scheduler
+            .agents_dir
+            .join(format!("{}.plist", task.id))
+            .exists();
+        // Recreate with the same name: a fresh marker belongs to this lifecycle.
+        let mut replacement = input;
+        replacement.trigger = SystemTaskTrigger::Once {
+            run_at: "2000-01-01T00:00:00Z".to_string(),
+        };
+        let recreated = scheduler.create_task(replacement).await;
+        let mut recreation_ok = false;
+        if let Ok(next) = &recreated {
+            if let Ok(plist) =
+                fs::read_to_string(scheduler.agents_dir.join(format!("{}.plist", next.id)))
+            {
+                let args = MacOSScheduler::extract_program_arguments(&plist);
+                let output = Command::new(&args[0]).args(&args[1..]).output().unwrap();
+                recreation_ok = output.status.success()
+                    && fs::read_to_string(&output_path)
+                        .unwrap_or_default()
+                        .lines()
+                        .count()
+                        == 3;
+            }
+            scheduler.delete_task(&next.id).await.unwrap();
+        }
+        println!(
+            "COGNIA_LAUNCHD_ACCEPTANCE {}",
+            serde_json::json!({"outcome": outcome, "deleted": deleted.is_ok(), "absent": absent, "recreated": recreation_ok})
+        );
+        assert!(deleted.is_ok() && absent);
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert!(recreated.is_ok() && recreation_ok);
     }
 
     #[test]

@@ -9,6 +9,8 @@
  * sent.
  */
 
+import { isResponseTooLarge, readBodyBounded } from "@cognia/web-search/bounded-response"
+import { RESPONSE_BYTE_CEILING } from "@cognia/web-search/operation-policy"
 import type { ReaderFetch, ReaderResult } from "./types"
 
 const JINA_ENDPOINT = "https://r.jina.ai/"
@@ -29,12 +31,56 @@ export async function fetchViaJina(
       ...(signal ? { signal } : {}),
     })
     if (!res.ok) return null
-    const body = (await res.text()).trim()
+    const body = (await readBodyBounded(res, RESPONSE_BYTE_CEILING)).trim()
     if (!body) return null
     return parseJinaBody(body, url)
   } catch {
     return null
   }
+}
+
+export type JinaReadOutcome =
+  { ok: true; result: ReaderResult; status: number } | { ok: false; status?: number; error: string }
+
+/**
+ * Status-preserving form of {@link fetchViaJina} for the configured Reader:
+ * reports the Jina service status (a reader-service status, never the
+ * origin's) and lets an abort propagate instead of collapsing it to `null`.
+ */
+export async function readViaJina(
+  url: string,
+  fetchImpl: ReaderFetch,
+  signal?: AbortSignal,
+  byteCeiling: number = RESPONSE_BYTE_CEILING
+): Promise<JinaReadOutcome> {
+  let res: Response
+  try {
+    res = await fetchImpl(`${JINA_ENDPOINT}${url}`, {
+      method: "GET",
+      headers: { "X-Return-Format": "markdown", Accept: "text/plain" },
+      ...(signal ? { signal } : {}),
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  if (!res.ok) return { ok: false, status: res.status, error: `Jina Reader returned ${res.status}` }
+  let body: string
+  try {
+    // Same decoded-byte ceiling as a direct read: a reader service must not
+    // be buffered whole before the output caps apply.
+    body = (await readBodyBounded(res, byteCeiling)).trim()
+  } catch (error) {
+    if (signal?.aborted) throw error
+    if (isResponseTooLarge(error)) return { ok: false, status: res.status, error: "too_large" }
+    return {
+      ok: false,
+      status: res.status,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+  if (!body) return { ok: false, status: res.status, error: "empty_content" }
+  return { ok: true, result: parseJinaBody(body, url), status: res.status }
 }
 
 /**

@@ -48,6 +48,8 @@ import { allocateIssueNumber } from "./issue-counters"
 import { appendIssueEvent, deleteIssueEvents } from "./issue-events"
 import { deleteIssueRuns } from "./issue-runs"
 import { recordTombstones } from "@/lib/sync/tombstones"
+import type { ListIssuesQuery } from "@cognia/plugin-contract/lib/db/issues"
+export type { ListIssuesQuery } from "@cognia/plugin-contract/lib/db/issues"
 
 function newIssueId(): string {
   return `iss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -226,17 +228,6 @@ export async function getIssue(id: string): Promise<Issue | undefined> {
 
 export async function getIssueByIdentifier(identifier: string): Promise<Issue | undefined> {
   return getDb().issues.where("identifier").equals(identifier).first()
-}
-
-export interface ListIssuesQuery {
-  parentId?: string
-  cycleId?: string
-  /** Workspace scope. Omit only for export/settings paths. */
-  projectId?: string
-  issueProjectId?: string
-  statuses?: readonly IssueStatus[]
-  assigneeKind?: IssueActor["kind"]
-  assigneeId?: string
 }
 
 export async function listIssues(query: ListIssuesQuery = {}): Promise<Issue[]> {

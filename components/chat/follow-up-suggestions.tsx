@@ -2,9 +2,19 @@
 
 // Predictions are presented by the composer that owns their draft and send path.
 import { useTranslations } from "next-intl"
-import { SparklesIcon, XIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  EyeOffIcon,
+  InfoIcon,
+  RotateCcwIcon,
+  Settings2Icon,
+  SparklesIcon,
+  XIcon,
+} from "lucide-react"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useUIStore } from "@/stores/ui/ui-store"
 import type { FollowUpSuggestionStatus } from "@/hooks/chat/use-follow-up-suggestions"
 
 interface FollowUpSuggestionsProps {
@@ -17,6 +27,9 @@ interface FollowUpSuggestionsProps {
   onConfigure?: () => void
 }
 
+const NOTICE_ACTION =
+  "size-7 rounded-[var(--composer-notice-radius,0.5rem)] pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+
 export function FollowUpSuggestions({
   suggestions,
   onAccept,
@@ -27,24 +40,63 @@ export function FollowUpSuggestions({
   onConfigure,
 }: FollowUpSuggestionsProps) {
   const t = useTranslations("chat.composer.followUps")
+  const setupHintHidden = useUIStore((s) => s.predictionSetupHintHidden)
+  const hideSetupHint = useUIStore((s) => s.hidePredictionSetupHint)
   if (suggestions.length === 0) {
     if (status !== "unavailable" && status !== "error") return null
+    if (status === "unavailable" && setupHintHidden) return null
+    const actions = [
+      {
+        key: "configure",
+        label: t("configure"),
+        Icon: Settings2Icon,
+        onClick: status === "unavailable" ? onConfigure : undefined,
+      },
+      { key: "retry", label: t("retry"), Icon: RotateCcwIcon, onClick: onRetry },
+      {
+        key: "dontShowAgain",
+        label: t("dontShowAgain"),
+        Icon: EyeOffIcon,
+        onClick: status === "unavailable" ? hideSetupHint : undefined,
+      },
+    ].filter((action) => action.onClick)
     return (
       <div
-        className="flex flex-wrap items-center gap-2 pb-1 text-xs text-muted-foreground"
-        role="status"
+        className="@container/prediction px-[var(--composer-notice-inset,0.5rem)] pt-1 pb-2"
+        data-slot="composer-prediction-notice"
       >
-        <span>{t(status)}</span>
-        {status === "unavailable" && onConfigure && (
-          <Button type="button" variant="ghost" size="xs" onClick={onConfigure}>
-            {t("configure")}
-          </Button>
-        )}
-        {onRetry && (
-          <Button type="button" variant="ghost" size="xs" onClick={onRetry}>
-            {t("retry")}
-          </Button>
-        )}
+        <div
+          role="status"
+          className="grid grid-cols-1 items-start gap-x-2 gap-y-1 text-xs text-muted-foreground @2xl/prediction:grid-cols-[minmax(0,1fr)_auto]"
+        >
+          <div className="flex min-w-0 items-start gap-2 self-center">
+            {status === "error" ? (
+              <AlertCircleIcon className="mt-[3px] size-3.5 shrink-0 text-warning" aria-hidden />
+            ) : (
+              <InfoIcon className="mt-[3px] size-3.5 shrink-0 opacity-70" aria-hidden />
+            )}
+            <span className="min-w-0 leading-5 [overflow-wrap:anywhere]">{t(status)}</span>
+          </div>
+          <div className="ms-2 flex min-w-0 flex-wrap items-center gap-1 @2xl/prediction:col-start-2 @2xl/prediction:ms-0 @2xl/prediction:self-center">
+            {actions.map(({ key, label, Icon, onClick }) => (
+              <Tooltip key={key}>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={onClick}
+                    aria-label={label}
+                    className={NOTICE_ACTION}
+                  >
+                    <Icon className="size-3.5" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+        </div>
       </div>
     )
   }

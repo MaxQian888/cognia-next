@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 
 import { DelegateChecksTable } from "./delegate-checks-table"
 import type { DelegateAcceptanceView } from "./delegate-review-model"
@@ -46,6 +46,22 @@ describe("DelegateChecksTable", () => {
       "12 discovered · 12 passed · 0 failed · 0 skipped"
     )
     expect(screen.queryByTestId("delegate-checks-tier-unattested")).not.toBeInTheDocument()
+  })
+
+  // The shared Table: density surface, scoped headers, wrapping status cells.
+  it("lists the checks through the shared Table", () => {
+    render(<DelegateChecksTable acceptance={acceptance()} />)
+    const table = screen.getByRole("table")
+    const container = table.closest("[data-slot=table-container]")
+    expect(container).toHaveAttribute("data-surface", "table")
+    const headers = within(table).getAllByRole("columnheader")
+    expect(headers).toHaveLength(3)
+    for (const header of headers) expect(header).toHaveAttribute("scope", "col")
+    const [, row] = within(table).getAllByRole("row")
+    const [id, outcome, summary] = within(row).getAllByRole("cell")
+    expect(id).toHaveTextContent("tests_discovered")
+    expect(outcome).toHaveClass("text-emerald-600")
+    expect(summary).toHaveClass("whitespace-normal", "break-words")
   })
 
   it("[ACC:SAFE-02] says the sandbox was not attested rather than implying one", () => {

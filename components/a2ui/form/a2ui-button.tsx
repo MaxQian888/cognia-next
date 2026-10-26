@@ -8,6 +8,7 @@
 import React, { memo } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { Loader2 } from "lucide-react"
 import type { A2UIComponentProps, A2UIButtonComponent } from "@/types/a2ui/schema"
 import { useA2UIData } from "../a2ui-context"
@@ -28,15 +29,21 @@ const variantMap: Record<
 export const A2UIButton = memo(function A2UIButton({
   component,
   onAction,
-}: A2UIComponentProps<A2UIButtonComponent>) {
+  triggerProps,
+}: A2UIComponentProps<A2UIButtonComponent> & {
+  triggerProps?: React.ComponentPropsWithRef<"button">
+}) {
   const { resolveString, resolveBoolean } = useA2UIData()
 
   const text = resolveString(component.text, "")
   const isLoading = component.loading ? resolveBoolean(component.loading, false) : false
   const isDisabled = component.disabled ? resolveBoolean(component.disabled, false) : false
+  const Icon = component.icon ? resolveIcon(component.icon) : undefined
   const variant = variantMap[component.variant || "default"] || "default"
 
-  const handleClick = () => {
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    triggerProps?.onClick?.(event)
+    if (event.defaultPrevented) return
     if (!isDisabled && !isLoading && component.action) {
       onAction(component.action, { text })
     }
@@ -44,14 +51,22 @@ export const A2UIButton = memo(function A2UIButton({
 
   return (
     <Button
+      {...triggerProps}
+      type="button"
       variant={variant}
       disabled={isDisabled || isLoading}
       onClick={handleClick}
-      className={cn(component.className)}
+      className={cn(component.className, triggerProps?.className)}
       style={component.style as React.CSSProperties}
     >
       {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+      {!isLoading && Icon && component.iconPosition !== "right" && (
+        <Icon className="size-4" aria-hidden="true" />
+      )}
       {text}
+      {!isLoading && Icon && component.iconPosition === "right" && (
+        <Icon className="size-4" aria-hidden="true" />
+      )}
     </Button>
   )
 })

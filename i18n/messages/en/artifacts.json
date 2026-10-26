@@ -252,7 +252,7 @@
       "generatedEventCount": "{count} generated events",
       "generatedFiles": "Generated outputs",
       "generatedMetadataOnly": "Generated output content is not retained. Only its path, type, size, and lifecycle are recorded.",
-      "irreversibleApplyConfirm": "The local task ledger is full, so Cognia cannot retain the inverse patch. Apply this selection once without task undo? Existing workspace changes remain protected by conflict checks.",
+      "irreversibleApplyConfirm": "The local task ledger is full, so Cognia cannot keep the inverse patch for this apply. Existing workspace changes stay protected by conflict checks.",
       "lastDay": "Last 24 hours",
       "lastFiveMinutes": "Last 5 minutes",
       "lastHour": "Last hour",
@@ -277,7 +277,7 @@
       "selectHunks": "Select hunks",
       "selectResource": "Select a task resource to inspect it.",
       "sensitive": "Sensitive resource",
-      "sensitiveConfirm": "Authorize this one sensitive resource operation? Its contents remain on the execution host.",
+      "sensitiveConfirm": "This authorizes a single operation on a sensitive resource. Its contents remain on the execution host.",
       "sensitiveDescription": "This path may contain credentials or secrets. Each read or download requires explicit authorization and remote control.",
       "source": "Source",
       "sourceEventCount": "{count} source events",
@@ -294,7 +294,10 @@
       "unpin": "Unpin task",
       "upload": "Upload",
       "user": "User",
-      "watcher": "Watcher"
+      "watcher": "Watcher",
+      "irreversibleApplyConfirmTitle": "Apply without task undo?",
+      "irreversibleApplyConfirmAction": "Apply once",
+      "sensitiveConfirmTitle": "Authorize one sensitive operation?"
     },
     "unavailable": {
       "description": "Workspace editing requires the desktop app or a paired companion filesystem.",

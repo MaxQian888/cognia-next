@@ -45,7 +45,7 @@ export function pairedHostIdOf(ref: string): string | null {
 
 export interface PairedHostTargetDeps {
   activeTarget?: () => { accountId: string; targetId: string } | null
-  loadRecord?: (accountId: string, hostId: string) => Promise<CompanionHostRecord | null>
+  loadRecord?: (localAccountId: string, hostId: string) => Promise<CompanionHostRecord | null>
   loadConfig?: () => CompanionConfig | null
   transport?: () => Transport
 }
@@ -87,7 +87,8 @@ async function openPairedHostTarget(
   }
   const record = await (
     deps.loadRecord ??
-    ((accountId, id) => companionCredentialBook().get({ accountNamespace: accountId, hostId: id }))
+    ((localAccountId, id) =>
+      companionCredentialBook().get({ accountNamespace: localAccountId, hostId: id }))
   )(active.accountId, hostId)
   if (!record) throw new Error(`Paired Host ${hostId} is not paired`)
   const publicConfig: CompanionConfig = { ...config }

@@ -1,6 +1,7 @@
 {
   "title": "Plugins",
   "pages": [
+    "config-governance",
     "desktop-handlers",
     "github-comment-bot",
     "ocr",

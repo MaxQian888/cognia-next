@@ -89,6 +89,26 @@ describe("ensureOutboundApproval", () => {
     expect(issue).not.toHaveBeenCalled()
   })
 
+  // P5d: a member's own person brain exempts its HostState submits from the
+  // Host admin lease, and its lease issue would wait for a person at the Host.
+  it("skips the lease only for a person partition's HostState submit", async () => {
+    const issue = jest.fn()
+    const d = deps({
+      getRuntimeSnapshot: (() => ({
+        target: { kind: "companion" },
+        host: { personPartition: true },
+      })) as never,
+      getCommandDescriptor: (() => ({ approval: "interactive" })) as never,
+      issueAdminLease: issue as never,
+    })
+    await expect(ensureOutboundApproval("host_state_submit", d)).resolves.toBe("not-required")
+    expect(withOutboundApproval("host_state_submit", { actions: [] }, d)).toEqual({ actions: [] })
+    expect(issue).not.toHaveBeenCalled()
+    // Any other interactive command still asks the Host for a lease.
+    await expect(ensureOutboundApproval("project_mutate", d)).resolves.toBe("blocked")
+    expect(issue).toHaveBeenCalledTimes(1)
+  })
+
   // No client target means this process IS the host: the command dispatches
   // in-process, and asking it for a lease would fail a call that needs none.
   it("skips the lease on a shell with local authority", async () => {

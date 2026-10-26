@@ -18,52 +18,21 @@
 
 import { transport } from "@/lib/tauri"
 
-export type WorkspaceBackend = "local" | "e2b"
-
-export interface WorkspaceHandle {
-  backend: WorkspaceBackend
-  /** Filesystem path (local) or sandbox id (e2b). */
-  path: string
-  /** Repo this workspace was cloned from. */
-  repoFullName: string
-  /** Branch checked out. */
-  branch: string
-  /** Trusted source branch used to create the isolated target branch. */
-  baseBranch?: string
-  /** Wall clock ms when allocated. */
-  createdAt: number
-}
-
-/**
- * Pluggable E2B backend. A repository Integration plugin may wire a real
- * implementation backed by the `e2b-sandbox` plugin when present.
- * Tests inject fakes.
- */
-export interface E2BBackend {
-  clone(opts: { repoFullName: string; branch: string; token: string }): Promise<WorkspaceHandle>
-  commitAndPush(opts: {
-    workspace: WorkspaceHandle
-    message: string
-    remoteBranch?: string
-    /**
-     * PAT / installation token for this push (ADR-0176).
-     *
-     * Optional on the interface so a backend that authenticates some other way
-     * stays valid, but the sandbox backend requires it: its clone stores a
-     * credential-FREE remote, and a long-running workspace outlives the
-     * installation token it was cloned with. Passing the credential per push is
-     * what lets a rotated token reach a workspace that already exists.
-     */
-    token?: string
-  }): Promise<string>
-  remove(handle: WorkspaceHandle): Promise<boolean>
-}
-
 // The e2b backend is contributed by `plugins/e2b-sandbox` through
 // `ctx.workspace.registerBackend({ id: "e2b" })` (ADR-0026 §2 §D), which
 // namespaces it as `cognia-e2b-sandbox:e2b` in the shared registry. The host
 // dispatches by kind, so it never needs the plugin id.
 import { resolveWorkspaceBackendByKind } from "./workspace-backend-registry"
+import type {
+  E2BBackend,
+  WorkspaceBackend,
+  WorkspaceHandle,
+} from "@cognia/plugin-contract/lib/github/workspace"
+export type {
+  E2BBackend,
+  WorkspaceBackend,
+  WorkspaceHandle,
+} from "@cognia/plugin-contract/lib/github/workspace"
 
 const E2B_BACKEND_KIND: WorkspaceBackend = "e2b"
 // An issued workspace handle keeps its provider ownership even after the

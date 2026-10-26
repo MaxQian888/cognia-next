@@ -1,3 +1,6 @@
+import type { WorkspaceBaseSpec } from "@cognia/plugin-contract/lib/task-workspace/types"
+export type { WorkspaceBaseSpec } from "@cognia/plugin-contract/lib/task-workspace/types"
+
 export type TaskWorkspaceState = "active" | "ready" | "applied" | "conflict" | "expired"
 export type TaskRunState = "running" | "settling" | "ready" | "failed" | "cancelled"
 export type ChangeKind = "created" | "modified" | "deleted" | "renamed"
@@ -30,20 +33,6 @@ export interface BeginTaskWorkspaceTurn {
   surface?: string
   trackingPolicy?: ResourceTrackingPolicy
 }
-
-export type WorkspaceBaseSpec =
-  | { kind: "workingState" }
-  | { kind: "localHead" }
-  | { kind: "remoteDefault" }
-  | { kind: "gitRef"; gitRef: string }
-  | {
-      kind: "pullRequest"
-      provider: string
-      repo: string
-      number: number
-      fetchRef?: string
-      headSha?: string
-    }
 
 export type WorkspaceEnvironmentKind = "managed" | "permanent" | "imported"
 export type WorkspaceOwnerType = "user" | "imported" | "session" | "team" | "scheduled"

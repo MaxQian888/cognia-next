@@ -111,6 +111,14 @@ test("every exemption carries a non-empty reason", () => {
   }
 })
 
+test("extracted service checks retain their dedicated CI ownership", () => {
+  for (const script of ["cognia-services:check", "cognia-services:test"]) {
+    assert.match(EXEMPTIONS[script], /test\.yml's cognia-services job/)
+  }
+  assert.equal(EXEMPTIONS["update:worker:test"], undefined)
+  assert.equal(EXEMPTIONS["update:worker:typecheck"], undefined)
+})
+
 test("live: the real repo satisfies the meta-gate", () => {
   // Not a fixture. If this fails, a real script in package.json is wired to
   // nothing — which is the whole point of the gate.

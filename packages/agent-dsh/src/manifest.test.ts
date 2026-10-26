@@ -21,7 +21,7 @@ describe("managed DeepSeek Harness capability refinements", () => {
     }
   )
   it("keeps SDK native resume outside the integration", () => {
-    expect(DSH_CAPABILITIES.protocols?.["dsh-sdk"].capabilities["session.resume"].level).toBe(
+    expect(DSH_CAPABILITIES.protocols?.["dsh-sdk"]?.capabilities["session.resume"]?.level).toBe(
       "unsupported"
     )
   })

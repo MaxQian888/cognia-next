@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { selectOption } from "@/lib/testing/select-option"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Project } from "@/types"
 
@@ -128,7 +129,7 @@ it("stringifies a non-Error rejection", async () => {
 it("uses the first root and the switched project when there is no primary root", async () => {
   const { onCreated, user } = renderDialog([PROJECT, PROJECT_NO_PRIMARY], null)
   await user.click(screen.getByRole("button", { name: "actions.newSite" }))
-  fireEvent.change(screen.getByLabelText("create.project"), { target: { value: "project-2" } })
+  await selectOption(screen.getByLabelText("create.project"), "project-2")
   await fillRequired()
   await user.click(screen.getByRole("button", { name: "actions.create" }))
   await waitFor(() =>

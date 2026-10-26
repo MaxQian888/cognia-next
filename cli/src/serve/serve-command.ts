@@ -49,7 +49,8 @@ import { cliConfigFileSchema, collabCliSchema, type CollabCliConfig } from "../c
 import { VERSION } from "../version"
 import { ensureHeadlessAccount, HEADLESS_LOCAL_ACCOUNT_ID } from "./account"
 import { createNodeBackupFilesystem } from "./backup-filesystem"
-import { BridgeClient, type WebSocketLike } from "./bridge-client"
+import { resolveBrainProfile } from "./brain-profile"
+import { BridgeClient, type BridgeClientOptions, type WebSocketLike } from "./bridge-client"
 import { startHeadlessCollabReader } from "./collab-reader"
 import { startDurability } from "./durability"
 import { createNodePluginRuntimeAdapter } from "./plugin-runtime-adapter"
@@ -115,6 +116,15 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     out.error("serve: COGNIA_SERVICE_TOKEN is not set (env-only by design)\n")
     return 2
   }
+  const profile = resolveBrainProfile(env)
+  if (!profile.ok) {
+    out.error(`${profile.error}\n`)
+    return 2
+  }
+  // A member's data partition (plan §9a) serves that member's data commands
+  // only: no collaboration reader (it would use the Host's CLI session), no
+  // agent workers, no account sync, no plugins.
+  const personBrain = profile.host === "person-brain"
   const localAccountId =
     stringFlag(args, "account") ?? env.COGNIA_LOCAL_ACCOUNT_ID ?? HEADLESS_LOCAL_ACCOUNT_ID
   const bridgeUrl = env.COGNIA_BRIDGE_URL ?? deriveBridgeUrl(serverUrl)
@@ -132,6 +142,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // ── 2. Account ─────────────────────────────────────────────────────────────
   await ensureHeadlessAccount(localAccountId)
   out.write(`serve: account ${localAccountId} unlocked\n`)
+  if (personBrain) out.write("serve: person partition profile (data only)\n")
 
   // ── 3. Durability ──────────────────────────────────────────────────────────
   const durability = await startDurability({
@@ -152,7 +163,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // Optional read-only collaboration plane. Credentials are loaded from the
   // CLI's existing 0600 Logto session; no bearer token is accepted in env.
   const cliHome = resolveHome(env, os.homedir())
-  const collabConfig = resolveServeCollabConfig(env, cliHome)
+  const collabConfig = personBrain ? null : resolveServeCollabConfig(env, cliHome)
   const collabReader = collabConfig
     ? await startHeadlessCollabReader({
         localAccountId,
@@ -202,6 +213,22 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   let bootstrapped = false
   let currentRuntimeStatus: HeadlessRuntimeStatus[] = []
   let runtimeStatus: (() => HeadlessRuntimeStatus[]) | null = null
+  // A person brain never hosts agent workers; the Host does not route them to it.
+  const workerHandlers: Pick<
+    BridgeClientOptions,
+    "onWorkerAttach" | "onWorkerFrame" | "onWorkerDetach"
+  > = personBrain
+    ? {}
+    : {
+        onWorkerAttach: ({ connectionId, hostRef, manifest }) =>
+          workerPool.attach({
+            connectionId,
+            hostRef,
+            manifest,
+          }),
+        onWorkerFrame: (connectionId, frame) => workerPool.receive(connectionId, frame),
+        onWorkerDetach: ({ connectionId, reason }) => workerPool.detach(connectionId, reason),
+      }
   const bridge = new BridgeClient({
     url: bridgeUrl,
     token: currentToken,
@@ -211,14 +238,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     onTokenRefresh: (token) => {
       currentToken = token
     },
-    onWorkerAttach: ({ connectionId, hostRef, manifest }) =>
-      workerPool.attach({
-        connectionId,
-        hostRef,
-        manifest,
-      }),
-    onWorkerFrame: (connectionId, frame) => workerPool.receive(connectionId, frame),
-    onWorkerDetach: ({ connectionId, reason }) => workerPool.detach(connectionId, reason),
+    ...workerHandlers,
     rss: () => durability.rss(),
     // Every agent run and chat turn holds an execution-broker lease.
     activeRuns: () => getExecutionBroker().countRunning(),
@@ -242,7 +262,9 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   })
   bridgeRef.current = bridge
   await bridge.connect()
-  const uninstallWorkerRuntime = installRemoteWorkerRuntime(workerPool)
+  const uninstallWorkerRuntime = personBrain
+    ? () => undefined
+    : installRemoteWorkerRuntime(workerPool)
   out.write(`serve: bridge connected (${bridgeUrl})\n`)
 
   // ── 6. Runtimes ────────────────────────────────────────────────────────────
@@ -252,22 +274,27 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // Account sync (ADR-0215 phase 3a): the host's own `logto login` and the
   // key store `cognia-agent account-sync` enrolls into; absent unless
   // COGNIA_ACCOUNT_SYNC is on.
-  const accountSync = brainAccountSyncHost({
-    cliHome,
-    localAccountId,
-    env,
-    backup: brainBackup({ filesystem: backupFilesystem, fallbackDir: path.join(home, "backups") }),
-  })
+  const accountSync = personBrain
+    ? null
+    : brainAccountSyncHost({
+        cliHome,
+        localAccountId,
+        env,
+        backup: brainBackup({
+          filesystem: backupFilesystem,
+          fallbackDir: path.join(home, "backups"),
+        }),
+      })
   const runtimes = await bootstrapHeadlessRuntimes(
     {
-      host: "brain",
+      host: profile.host,
       localAccountId,
       bridge,
       notifyDbWrite: durability.notifyDbWrite,
-      backupFilesystem,
+      ...(personBrain ? {} : { backupFilesystem }),
       ...(accountSync ? { accountSync } : {}),
       ...(collabReader?.runtime ? { collab: collabReader.runtime } : {}),
-      pluginRuntime: createNodePluginRuntimeAdapter(),
+      ...(personBrain ? {} : { pluginRuntime: createNodePluginRuntimeAdapter() }),
       resolveMessage,
       log: (level, message) => {
         if (level === "error") out.error(`serve: ${message}\n`)

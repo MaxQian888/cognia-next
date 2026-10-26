@@ -15,9 +15,13 @@ export type {
   PluginIssueQuery,
   PluginIssueUpdatePatch,
   PluginIssueEventOptions,
-} from "@/lib/plugin/api/issues-api"
+} from "@cognia/plugin-contract/lib/plugin/api/issues-api"
 
-export type { IssueBulkAction, IssueBulkOutcome, IssueWire } from "@/lib/issues/service"
+export type {
+  IssueBulkAction,
+  IssueBulkOutcome,
+} from "@cognia/plugin-contract/lib/issues/bulk-actions"
+export type { IssueWire } from "@cognia/plugin-contract/lib/issues/service"
 
 export type {
   IssueSyncBinding,
@@ -29,7 +33,7 @@ export type {
   RemoteIssue,
   RemoteLink,
   RemotePatch,
-} from "@/lib/issues/sync/types"
+} from "@cognia/plugin-contract/lib/issues/sync/types"
 
 export type {
   Issue,
@@ -44,4 +48,4 @@ export type {
   IssueProject,
   IssueStatus,
   IssueSyncField,
-} from "@/types/issues"
+} from "@cognia/plugin-contract/types/issues/index"

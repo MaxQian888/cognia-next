@@ -12,11 +12,13 @@ export const WORKFLOWS = {
   "compose-e2e.yml": "ci",
   "share-server.yml": "ci",
   "signaling-server.yml": "ci",
+  "identity-server.yml": "ci",
+  "sync-server.yml": "ci",
+  "server-build-benchmark.yml": "ci",
   "release.yml": "release",
   "build-tauri.yml": "release",
   "images.yml": "release",
   "deploy.yml": "ops",
-  "refresh-website.yml": "ops",
   "sync-model-catalog.yml": "ops",
 }
 const BAD = new Set(["failure", "timed_out", "startup_failure", "action_required", "stale"])
@@ -37,7 +39,7 @@ export function normalizeRun(run, jobs) {
   ) {
     throw new Error("invalid-source-identity")
   }
-  const deployment = file === "deploy.yml" || file === "refresh-website.yml"
+  const deployment = file === "deploy.yml"
   const targets = jobs.filter((job) => /(?:Worker —|Fly —|Pages —)/u.test(job.name))
   const failed = jobs.filter((job) => isFailure(job.conclusion))
   let status = run.conclusion ?? "unknown"

@@ -38,7 +38,7 @@ fn to_rpc_error(error: cognia_file_share::FileShareError) -> (StatusCode, Json<R
 
 /// The principal the audit names for this caller.
 fn principal_for(device_id: &str, scope: Option<&str>) -> String {
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         // The brain is the owner's own app on a headless host.
         cognia_file_share::audit::OWNER.to_string()
     } else {
@@ -59,7 +59,7 @@ pub(super) async fn dispatch(
     // `dispatch` already refused these to a device token through the
     // manifest's service target; checked again so the arm cannot be reached
     // around that table.
-    if cognia_file_share::rpc::HOST_ONLY_COMMANDS.contains(&name) && scope != Some("service") {
+    if cognia_file_share::rpc::HOST_ONLY_COMMANDS.contains(&name) && !cognia_companion::jwt::is_service_scope(scope) {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
         ));

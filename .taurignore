@@ -7,7 +7,7 @@
 # `/` with all state lost, which reads as "HMR is broken"). List here only
 # outputs whose change never needs a native rebuild.
 
-# Staged by predev/prebuild scripts (stage-bundled-plugins, prepare-plugin-node,
+# Staged by predev/prebuild scripts (stage-plugin-artifacts, prepare-plugin-node,
 # stage-browser-runtime); read from disk at runtime, never compiled in.
 src-tauri/resources/plugins/
 src-tauri/resources/plugin-node/

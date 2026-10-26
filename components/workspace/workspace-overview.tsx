@@ -91,6 +91,7 @@ import { ProjectCoordinatorEntry } from "@/components/project-coordinator/projec
 import { ProjectThreadsBoard } from "@/components/project-coordinator/project-threads-board"
 import { ProjectUsagePanel } from "@/components/project-coordinator/project-usage-panel"
 import { resolveCoordinatorConfig } from "@/lib/project-coordinator/config"
+import { WorkspaceAccessSummary } from "./workspace-access-summary"
 import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceActivity } from "./workspace-activity"
 import { AgentBranchesSection } from "./agent-branches-section"
@@ -617,6 +618,9 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
               {/* ADR-0149 section 4: the roster, and the only place a guest is
                 visible to anybody but themselves. Reads the projection, so it
                 never blocks on the network. */}
+              {/* What the reader may do here and which shared features the
+                org is offered, with the server's reason when one is closed. */}
+              <WorkspaceAccessSummary workspaceId={workspaceId} />
               <WorkspaceMembers workspaceId={workspaceId} />
               <WorkspaceActivity workspaceId={workspaceId} />
             </div>

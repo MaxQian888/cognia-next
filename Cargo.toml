@@ -13,10 +13,6 @@
 #                            `src-tauri/src`.
 #
 # Intentionally excluded:
-#   - services/signaling-server/, services/share-server/
-#                                   standalone deploy artifacts built via
-#                                   Dockerfile/Fly.io. Each keeps its own
-#                                   Cargo.lock to isolate the deploy image.
 #   - crates/cognia-plugin-template, plugins/wasm-example-formatter
 #                                   wasm32-wasip2 components built with
 #                                   `cargo component`; their tighter
@@ -180,11 +176,10 @@ members = [
   "crates/cognia-server",
 ]
 exclude = [
-  "services/signaling-server",
-  "services/share-server",
   "crates/cognia-plugin-template",
   "crates/cognia-plugin-template-ts",
   "plugins/wasm-example-formatter",
+  "vendor/liteparse",
 ]
 
 # ADR-0196 — package metadata every member inherits (`edition.workspace = true`
@@ -212,6 +207,10 @@ tempfile = { version = "3" }
 parking_lot = { version = "0.12" }
 base64 = { version = "0.23" }
 uuid = { version = "1" }
+# The signaling relay's wire crate (ADR-0021), owned by the services
+# repository. `rev` must equal `integrations/cognia-services.json`;
+# `pnpm cognia-services:check` fails when it does not.
+cognia-signaling-core = { git = "https://github.com/cognia-labs/cognia-services", rev = "487e9f2d617c9d1b9b648ec510cafcf53b962c2c" }
 log = { version = "0.4" }
 sha2 = { version = "0.11" }
 tauri = { version = "=2.12.2" }
@@ -228,7 +227,7 @@ rand = { version = "0.10" }
 axum = { version = "0.8" }
 regex = { version = "1" }
 rusqlite = { version = "0.40", features = ["fallible_uint"] }
-rustls = { version = "0.23", default-features = false }
+rustls = { version = "0.23.46", default-features = false }
 libc = { version = "0.2" }
 notify = { version = "8" }
 tower-http = { version = "0.7" }
@@ -243,7 +242,7 @@ tokio-tungstenite = { version = "0.30", default-features = false }
 flate2 = { version = "1" }
 hmac = { version = "0.13" }
 rcgen = { version = "0.14" }
-zip = { version = "8", default-features = false }
+zip = { version = "9.0.5", default-features = false }
 rustls-native-certs = { version = "0.8" }
 ignore = { version = "0.4" }
 tracing-subscriber = { version = "0.3" }
@@ -288,8 +287,8 @@ incremental = true
 [profile.dev.package."*"]
 debug = 0
 
-# Ours, but outside the workspace (a path dependency from the excluded
-# signaling server), so `"*"` above would cover it.
+# Ours, but a git dependency from the services repository, so `"*"` above
+# would cover it.
 [profile.dev.package.cognia-signaling-core]
 debug = "line-tables-only"
 
@@ -338,3 +337,7 @@ strip = true
 # same tradeoff; `dev-full` remains available for full LLDB sessions.
 [profile.test]
 debug = "line-tables-only"
+
+# LiteParse still pins vulnerable lopdf 0.38 upstream; see vendor/liteparse/COGNIA-PATCH.md.
+[patch.crates-io]
+liteparse = { path = "vendor/liteparse" }

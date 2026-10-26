@@ -1,22 +1,18 @@
 /**
  * Plugin SDK — `routing-strategy` capability surface.
  *
- * Re-exports the authoring helper, manifest bridge, and provider-routing
- * strategy overlay registry used by plugin-contributed selectors.
+ * Exports the authoring helper and the provider-routing strategy overlay
+ * registry used by plugin-contributed selectors. The host registers
+ * manifest-declared strategies itself.
  */
 
 export { defineRoutingStrategy } from "../define/define-routing-strategy"
-
-export {
-  registerRoutingStrategiesForPlugin,
-  unregisterRoutingStrategiesForPlugin,
-} from "@/lib/plugin/bridge/routing-strategies-bridge"
 
 export type {
   RoutingStrategiesBridgeError,
   RoutingStrategiesBridgeOptions,
   RoutingStrategiesBridgeResult,
-} from "@/lib/plugin/bridge/routing-strategies-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/routing-strategies-bridge"
 
 export {
   getRoutingStrategy,
@@ -31,7 +27,7 @@ export type {
   PluginRoutingStrategyDef,
   PluginRoutingStrategyFactory,
   PluginRoutingStrategySelectorLike,
-} from "@/types/plugin/plugin-routing-strategy"
+} from "@cognia/plugin-contract/types/plugin/plugin-routing-strategy"
 
 export type {
   RoutingDecisionContext,

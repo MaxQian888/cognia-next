@@ -131,7 +131,7 @@ pub async fn internal_ws_handler(
             json!({}),
         );
     };
-    if context.scope != "service" {
+    if !crate::jwt::is_service_scope(Some(context.scope.as_ref())) {
         return super::api::public_error_response(
             StatusCode::FORBIDDEN,
             "service_scope_required",
@@ -561,6 +561,9 @@ fn revocation_targets(
 }
 
 fn frame_visible_to_tenant(frame: &super::event_bus::EventFrame, tenant_id: Option<&str>) -> bool {
+    if let Some(device) = frame.target_device_id.as_deref() {
+        if !super::person_partition::event_visible(frame, device, tenant_id) { return false; }
+    }
     match frame.payload.get("tenantId").and_then(Value::as_str) {
         Some(event_tenant) => tenant_id == Some(event_tenant),
         None => true,
@@ -733,6 +736,7 @@ mod tests {
             }),
             ts_ms: 1,
             target_device_id: None,
+            partition_account_id: None,
         };
         assert!(revocation_targets(&frame, Some("tenant-a"), "device-a"));
         assert!(!revocation_targets(&frame, Some("tenant-b"), "device-a"));
@@ -835,6 +839,7 @@ mod tests {
             payload: json!({ "text": "hi" }),
             ts_ms: 1_700_000_000_000,
             target_device_id: None,
+            partition_account_id: None,
         };
         let s = serde_json::to_string(&frame).expect("serialize");
         let v: Value = serde_json::from_str(&s).expect("parse");

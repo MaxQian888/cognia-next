@@ -1,4 +1,8 @@
 import {
+  checkProviderEligibility,
+  degradedControlsFor,
+  getEffectiveSearchCapabilities,
+  resolveEngine,
   getProvidersForType,
   providerSupportsType,
   getBestProviderForType,
@@ -12,6 +16,11 @@ import {
   autoRouteSearch,
 } from "./search-type-router"
 import type { SearchProviderSettings, SearchProviderType, SearchResponse } from "./types"
+import { SEARCH_PROVIDERS } from "./types"
+import { searchWithBrave } from "./providers/brave"
+import { searchWithSearchAPI } from "./providers/searchapi"
+import { searchWithExa } from "./providers/exa"
+import { searchWithGoogle } from "./providers/google"
 
 jest.mock("./providers/brave", () => ({
   searchWithBrave: jest.fn(async () => makeResp("brave", "general")),
@@ -29,6 +38,7 @@ jest.mock("./providers/google", () => ({
   searchImagesWithGoogle: jest.fn(async () => makeResp("google", "images")),
 }))
 jest.mock("./providers/google-ai", () => ({
+  GOOGLE_AI_DEFAULT_MODEL: "gemini-3.8-flash",
   searchWithGoogleAI: jest.fn(async () => makeResp("google-ai", "general")),
 }))
 jest.mock("./providers/searchapi", () => ({
@@ -67,6 +77,18 @@ jest.mock("./providers/tavily", () => ({
 jest.mock("./providers/perplexity", () => ({
   searchWithPerplexity: jest.fn(async () => makeResp("perplexity", "general")),
 }))
+jest.mock("./providers/deepseek", () => ({
+  searchWithDeepSeek: jest.fn(async () => makeResp("deepseek", "general")),
+}))
+jest.mock("./providers/tinyfish", () => ({
+  searchWithTinyFish: jest.fn(async () => makeResp("tinyfish", "general")),
+}))
+jest.mock("./providers/searxng", () => ({
+  SEARXNG_ENGINE_PATTERN: /^[a-z0-9][a-z0-9 _.-]{0,39}$/i,
+  searchWithSearXNG: jest.fn(async (_q: string, _s: unknown, _o: unknown, type: string) =>
+    makeResp("searxng", type)
+  ),
+}))
 
 function makeResp(provider: SearchProviderType | string, label: string): SearchResponse {
   return {
@@ -96,19 +118,13 @@ describe("getProvidersForType", () => {
     expect(result.length).toBeGreaterThanOrEqual(10)
   })
 
-  it("returns providers that support news", () => {
+  it("returns providers that support news, never retired or general-only ones", () => {
     const result = getProvidersForType("news")
     expect(result).toEqual(
-      expect.arrayContaining([
-        "brave",
-        "bing",
-        "searchapi",
-        "serper",
-        "serpapi",
-        "tavily",
-        "perplexity",
-      ])
+      expect.arrayContaining(["brave", "searchapi", "serper", "serpapi", "tavily", "exa"])
     )
+    expect(result).not.toContain("bing")
+    expect(result).not.toContain("perplexity")
   })
 
   it("returns providers that support academic", () => {
@@ -147,14 +163,14 @@ describe("getBestProviderForType", () => {
       perplexity: makeSettings("perplexity", { priority: 1 }),
       exa: makeSettings("exa", { priority: 2 }),
     }
-    expect(getBestProviderForType("news", settings)).toBe("perplexity")
+    expect(getBestProviderForType("news", settings)).toBe("exa")
   })
 
-  it("falls back to the first enabled provider when none support the type", () => {
+  it("returns null rather than a provider that would run general search instead", () => {
     const settings = {
       "google-ai": makeSettings("google-ai", { priority: 1 }),
     }
-    expect(getBestProviderForType("videos", settings)).toBe("google-ai")
+    expect(getBestProviderForType("videos", settings)).toBeNull()
   })
 })
 
@@ -171,11 +187,11 @@ describe("routeSearch", () => {
     expect(result.query).toBe("news")
   })
 
-  it("falls back to general when news handler missing", async () => {
-    const result = await routeSearch("q", "google", makeSettings("google", { cx: "abc" }), {
-      searchType: "news",
-    })
-    expect(result.query).toBe("general")
+  it("refuses an explicit type the adapter does not implement, before any request", async () => {
+    await expect(
+      routeSearch("q", "google", makeSettings("google", { cx: "abc" }), { searchType: "news" })
+    ).rejects.toMatchObject({ name: "SearchCapabilityError", reason: "unsupported-type" })
+    expect(searchWithGoogle).not.toHaveBeenCalled()
   })
 
   it("routes images / videos / academic", async () => {
@@ -190,7 +206,13 @@ describe("routeSearch", () => {
     const acad = await routeSearch("q", "exa", makeSettings("exa"), {
       searchType: "academic",
     })
-    expect(acad.query).toBe("general")
+    // Exa academic is the general endpoint with the research-paper category.
+    expect(searchWithExa).toHaveBeenLastCalledWith(
+      "q",
+      expect.any(String),
+      expect.objectContaining({ category: "research paper" })
+    )
+    expect(acad.searchType).toBe("academic")
   })
 
   it("throws for unknown provider", async () => {
@@ -204,7 +226,7 @@ describe("routeSearch", () => {
       defaultOptions: { searchType: "news" },
     })
     const result = await routeSearch("q", "tavily", settings)
-    expect(result.query).toBe("general")
+    expect(result.searchType).toBe("news")
   })
 
   it("does not let explicit undefined call-time fields clobber defaultOptions", async () => {
@@ -270,5 +292,108 @@ describe("autoRouteSearch", () => {
       brave: makeSettings("brave"),
     })
     expect(r.query).toBe("news")
+  })
+})
+
+describe("effective capabilities", () => {
+  it("agree with every provider's advertised feature badges", () => {
+    for (const id of Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]) {
+      if (SEARCH_PROVIDERS[id].lifecycle.status === "retired") continue
+      const caps = getEffectiveSearchCapabilities(id)!
+      const f = SEARCH_PROVIDERS[id].features
+      expect({ id, news: caps.types.includes("news") }).toEqual({ id, news: f.newsSearch })
+      expect({ id, academic: caps.types.includes("academic") }).toEqual({
+        id,
+        academic: f.academicSearch,
+      })
+      expect({ id, images: caps.types.includes("images") }).toEqual({ id, images: f.imageSearch })
+      expect({ id, videos: caps.types.includes("videos") }).toEqual({ id, videos: f.videoSearch })
+      expect({ id, recency: caps.controls.recency }).toEqual({ id, recency: f.recencyFilter })
+    }
+  })
+
+  it("lists engines only for engine-capable providers", () => {
+    expect(getEffectiveSearchCapabilities("searchapi")!.engines.map((e) => e.id)).toContain("baidu")
+    expect(getEffectiveSearchCapabilities("brave")!.engines).toEqual([])
+    expect(getEffectiveSearchCapabilities("searxng")!.freeFormEngines).toBe(true)
+  })
+})
+
+describe("eligibility", () => {
+  it("rejects an engine a provider does not list", () => {
+    expect(checkProviderEligibility("searchapi", undefined, { engine: "altavista" })?.reason).toBe(
+      "unsupported-engine"
+    )
+    expect(checkProviderEligibility("searchapi", undefined, { engine: "bing" })).toBeNull()
+    expect(checkProviderEligibility("brave", undefined, { engine: "bing" })?.reason).toBe(
+      "unsupported-engine"
+    )
+  })
+
+  it("only lets the default engine pair with a vertical type", () => {
+    expect(
+      checkProviderEligibility("searchapi", undefined, { engine: "bing", searchType: "news" })
+        ?.reason
+    ).toBe("unsupported-engine")
+    expect(
+      checkProviderEligibility("searchapi", undefined, { engine: "google", searchType: "news" })
+    ).toBeNull()
+  })
+
+  it("treats strict and required-moderate safe search as mandatory", () => {
+    expect(checkProviderEligibility("exa", undefined, { safeSearch: "strict" })?.reason).toBe(
+      "safe-search-unenforceable"
+    )
+    expect(checkProviderEligibility("exa", undefined, { safeSearch: "moderate" })).toBeNull()
+    expect(
+      checkProviderEligibility("exa", undefined, {
+        safeSearch: "moderate",
+        safeSearchRequired: true,
+      })?.reason
+    ).toBe("safe-search-unenforceable")
+    expect(checkProviderEligibility("brave", undefined, { safeSearch: "strict" })).toBeNull()
+  })
+
+  it("never lets a retired provider run", () => {
+    expect(checkProviderEligibility("bing", undefined, {})?.reason).toBe("retired")
+  })
+
+  it("discloses advisory controls an adapter cannot carry", () => {
+    expect(degradedControlsFor("exa", { safeSearch: "moderate", country: "us" })).toEqual([
+      "safeSearch",
+      "country",
+    ])
+    expect(degradedControlsFor("brave", { safeSearch: "moderate", country: "us" })).toEqual([])
+  })
+})
+
+describe("wire mapping", () => {
+  it("passes the canonical safe-search level to Brave's native field", async () => {
+    await routeSearch("q", "brave", makeSettings("brave"), { safeSearch: "strict" })
+    expect(searchWithBrave).toHaveBeenLastCalledWith(
+      "q",
+      expect.any(String),
+      expect.objectContaining({ safesearch: "strict" })
+    )
+  })
+
+  it("passes Google safe search through instead of dropping it", async () => {
+    await routeSearch("q", "google", makeSettings("google", { cx: "abc" }), { safeSearch: "off" })
+    expect(searchWithGoogle).toHaveBeenLastCalledWith(
+      "q",
+      expect.any(String),
+      expect.objectContaining({ safe: "off" })
+    )
+  })
+
+  it("routes the configured engine to SearchAPI and reports it", async () => {
+    const r = await routeSearch("q", "searchapi", makeSettings("searchapi", { engine: "baidu" }))
+    expect(searchWithSearchAPI).toHaveBeenLastCalledWith(
+      "q",
+      expect.any(String),
+      expect.objectContaining({ engine: "baidu" })
+    )
+    expect(r.engine).toBe("baidu")
+    expect(resolveEngine("searchapi", undefined, {})).toBe("google")
   })
 })

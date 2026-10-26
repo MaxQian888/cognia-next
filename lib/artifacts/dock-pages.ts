@@ -101,6 +101,8 @@ export function activateDockPageTab(
 /** The engine a request asks a new tab for, in the strip's vocabulary. */
 export function dockPageEngineFor(backend: BrowserBackend | undefined): DockPageEngine {
   switch (backend) {
+    case "web-fallback":
+      return "embedded"
     case "embedded":
     case "local-chromium":
     case "user-chrome":

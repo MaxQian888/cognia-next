@@ -3,8 +3,15 @@ import { join } from "node:path"
 import { validateDecisionQuestions } from "@/lib/decisions/validate"
 import type { DecisionQuestion } from "@/types/decisions"
 import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { validatePromptBody } from "@/lib/prompts/template"
+import {
   ACTION_KEYS,
   BACKGROUND_NOTE,
+  COPILOT_QUESTION_PROMPTS,
   DANGER_LEVELS,
   INTENT_KEYS,
   JUDGE_QUESTION_IDS,
@@ -95,5 +102,68 @@ describe("rankQuestion", () => {
     })
     expect(() => rankQuestion(["a"], "compact")).toThrow(/2-3/)
     expect(() => rankQuestion(["a", "b", "c", "d"], "compact")).toThrow(/2-3/)
+  })
+})
+
+describe("question instruction prompts (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("defines every question in both variants with kebab ids and valid defaults", () => {
+    for (const variant of ["full", "compact"] as const) {
+      const prompts = COPILOT_QUESTION_PROMPTS[variant]
+      expect(Object.keys(prompts)).toEqual([...JUDGE_QUESTION_IDS, "best_reply"])
+      for (const def of Object.values(prompts)) {
+        expect(def.id).toMatch(/^chat\.reply-copilot\.question\.[a-z-]+(\.compact)?$/)
+        expect(validatePromptBody(def, def.defaultBody)).toEqual([])
+      }
+    }
+    expect(COPILOT_QUESTION_PROMPTS.full.she_needs.id).toBe("chat.reply-copilot.question.she-needs")
+    expect(COPILOT_QUESTION_PROMPTS.compact.best_reply.id).toBe(
+      "chat.reply-copilot.question.best-reply.compact"
+    )
+  })
+
+  it("applies a published override to one question and keeps its option keys", () => {
+    const snapshot = buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob-literal",
+        promptId: COPILOT_QUESTION_PROMPTS.full.literal_question.id,
+        scope: "account",
+        targetId: "",
+        revisionId: "por-question-literal",
+        body: "Is the latest message meant literally?",
+        contractVersion: 1,
+      },
+    ])
+    const full = judgeQuestions("full", { snapshot })
+    expect(full.literal_question.instructions).toBe("Is the latest message meant literally?")
+    expect(full.literal_question.criteria).toEqual(judgeQuestions("full").literal_question.criteria)
+    expect(full.true_intent.instructions).toBe(
+      COPILOT_QUESTION_PROMPTS.full.true_intent.defaultBody
+    )
+    expect(validateDecisionQuestions(full)).toBeNull()
+  })
+
+  it("ranks with the loaded override", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-rank",
+          promptId: COPILOT_QUESTION_PROMPTS.full.best_reply.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-question-rank",
+          body: "Pick the kindest reply.",
+          contractVersion: 1,
+        },
+      ])
+    )
+    expect(rankQuestion(["a", "b"], "full").best_reply.instructions).toBe("Pick the kindest reply.")
+    expect(rankQuestion(["a", "b"], "compact").best_reply.instructions).toBe(
+      "Which candidate is the best next message for what the other person needs?"
+    )
   })
 })

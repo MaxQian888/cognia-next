@@ -44,6 +44,70 @@ use crate::status::SandboxDriverStatus;
 /// The tenant environment store, beside the other Rust-owned databases.
 pub const STORE_FILE: &str = "environment.sqlite";
 
+pub use cognia_environment::policy::ExecutionSetting;
+
+/// Pure boot decision: probing is a distinct stage so no single-user or
+/// control-plane-only deployment contacts a runtime as part of preflight.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum Preflight { Legacy, ControlPlaneOnly, ProbeRuntime, Ready }
+
+pub struct PreflightInput<'a> {
+    pub multi_tenant: bool,
+    pub execution: Option<&'a str>,
+    pub baseline: &'a cognia_environment::catalog::EnvironmentBaseline,
+    pub runtime: Option<Result<&'a [cognia_environment::spec::IsolationTier], &'a str>>,
+}
+
+pub fn preflight(input: PreflightInput<'_>) -> Result<Preflight, String> {
+    if ExecutionSetting::parse(input.execution)? == ExecutionSetting::Disabled {
+        return Ok(Preflight::ControlPlaneOnly);
+    }
+    if !input.multi_tenant { return Ok(Preflight::Legacy); }
+    if !input.baseline.multi_tenant {
+        return Err("COGNIA_DEPLOYMENT_MODE=multi-tenant requires multiTenant=true in COGNIA_ENVIRONMENT_BASELINE_FILE".into());
+    }
+    if !input.baseline.sandbox_pool.enabled {
+        return Err("COGNIA_DEPLOYMENT_MODE=multi-tenant requires sandboxPool.enabled=true in COGNIA_ENVIRONMENT_BASELINE_FILE (COGNIA_SANDBOX_POOL_ENABLED applies only without a file)".into());
+    }
+    // Reuse the catalog validator, including its gVisor/VM minimum; do not
+    // create a second definition of a conforming multi-tenant baseline.
+    input.baseline.validate().map_err(|error| format!("COGNIA_ENVIRONMENT_BASELINE_FILE: {error}"))?;
+    let Some(runtime) = input.runtime else { return Ok(Preflight::ProbeRuntime); };
+    let tiers = runtime.map_err(|error| format!("COGNIA_ENVIRONMENT_BASELINE_FILE isolationFloor runtime unavailable: {error}; configure a reachable sandbox runtime or COGNIA_EXECUTION=disabled"))?;
+    if !tiers.iter().any(|tier| *tier >= input.baseline.isolation_floor) {
+        return Err(format!("COGNIA_ENVIRONMENT_BASELINE_FILE isolationFloor={} has no available runtime; configure runsc for gvisor or a VM provider, or COGNIA_EXECUTION=disabled", input.baseline.isolation_floor.as_str()));
+    }
+    Ok(Preflight::Ready)
+}
+
+/// Headless boot boundary. Disabled execution skips pool configuration and
+/// runtime probing entirely; the companion refuses execution entry points.
+pub async fn install_for_deployment(
+    existing: Arc<dyn ExecBackend>, data_dir: &Path, deployment_id: &str,
+    multi_tenant: bool, execution: Option<&str>,
+) -> Result<InstalledPool, String> {
+    let setting = ExecutionSetting::parse(execution)?;
+    if setting == ExecutionSetting::Disabled {
+        return Ok(InstalledPool { backend: existing, services: None });
+    }
+    if !multi_tenant { return install(existing, data_dir, deployment_id); }
+    let loaded = load_baseline_from(&BaselineInputs::from_process_env())
+        .map_err(|error| format!("COGNIA_ENVIRONMENT_BASELINE_FILE: {error}"))?;
+    preflight(PreflightInput { multi_tenant, execution, baseline: &loaded.baseline, runtime: None })?;
+    let pool = install(existing, data_dir, deployment_id)?;
+    let services = pool.services.as_ref().ok_or("COGNIA_ENVIRONMENT_BASELINE_FILE sandboxPool.enabled must install a sandbox driver")?;
+    // Driver API is the same capability probe admission uses on first spawn:
+    // Docker lists registered OCI runtimes (runsc); remote drivers probe tiers.
+    let probe = match &services.providers {
+        Some(providers) => providers.available_placement_tiers().await,
+        None => services.status.available_tiers().await,
+    }.map_err(|error| error.to_string());
+    preflight(PreflightInput { multi_tenant, execution, baseline: services.admission.baseline(),
+        runtime: Some(probe.as_deref().map_err(String::as_str)) })?;
+    if !pool.backend.routes_sandboxes() { return Err("COGNIA_SANDBOX_POOL_ENABLED did not install sandbox routing".into()); }
+    Ok(pool)
+}
+
 /// What the pool put in place.
 ///
 /// A Host needs two things out of this seam: the execution backend to hand to
@@ -355,6 +419,56 @@ fn docker_driver(
 mod tests {
     use super::*;
     use cognia_external_agent::exec_backend::LocalProcessBackend;
+
+    #[test]
+    fn deployment_preflight_covers_every_branch_without_runtime_io() {
+        use cognia_environment::{catalog::EnvironmentBaseline, spec::IsolationTier};
+        let mut baseline = EnvironmentBaseline::disabled();
+        let check = |baseline: &EnvironmentBaseline, multi_tenant, execution, runtime| {
+            preflight(PreflightInput { baseline, multi_tenant, execution, runtime })
+        };
+        assert_eq!(check(&baseline, false, None, None).unwrap(), Preflight::Legacy);
+        assert!(check(&baseline, true, Some("invalid"), None).unwrap_err().contains("COGNIA_EXECUTION"));
+        assert_eq!(check(&baseline, true, Some("disabled"), None).unwrap(), Preflight::ControlPlaneOnly);
+        assert!(check(&baseline, true, None, None).unwrap_err().contains("multiTenant"));
+        baseline.multi_tenant = true;
+        assert_eq!(check(&baseline, false, None, None).unwrap(), Preflight::Legacy);
+        assert!(check(&baseline, true, None, None).unwrap_err().contains("sandboxPool.enabled"));
+        baseline.sandbox_pool.enabled = true;
+        assert!(check(&baseline, true, None, None).unwrap_err().contains("isolation"));
+        baseline = load_baseline_from(&BaselineInputs {
+            sandbox_pool_enabled: Some("true".into()),
+            runner_image: Some(format!("ghcr.io/acme/runner@sha256:{}", "1".repeat(64))),
+            agent_bundle_image: Some(format!("ghcr.io/acme/bundle@sha256:{}", "2".repeat(64))),
+            ..BaselineInputs::default()
+        }).unwrap().baseline;
+        baseline.multi_tenant = true;
+        baseline.isolation_floor = IsolationTier::Gvisor;
+        baseline.validate().unwrap();
+        assert_eq!(check(&baseline, true, None, None).unwrap(), Preflight::ProbeRuntime);
+        assert!(check(&baseline, true, None, Some(Err("daemon offline"))).unwrap_err().contains("daemon offline"));
+        assert!(check(&baseline, true, None, Some(Ok(&[]))).unwrap_err().contains("isolationFloor"));
+        assert!(check(&baseline, true, None, Some(Ok(&[IsolationTier::Container]))).is_err());
+        assert_eq!(check(&baseline, true, None, Some(Ok(&[IsolationTier::Gvisor]))).unwrap(), Preflight::Ready);
+        assert_eq!(check(&baseline, true, None, Some(Ok(&[IsolationTier::Vm]))).unwrap(), Preflight::Ready);
+        baseline.isolation_floor = IsolationTier::Vm;
+        assert!(check(&baseline, true, None, Some(Ok(&[IsolationTier::Gvisor]))).is_err());
+        assert_eq!(check(&baseline, false, Some("disabled"), Some(Err("must not probe"))).unwrap(), Preflight::ControlPlaneOnly);
+        assert_eq!(check(&baseline, false, None, Some(Err("must not probe"))).unwrap(), Preflight::Legacy);
+    }
+
+    #[tokio::test]
+    async fn control_plane_only_does_not_read_a_baseline_or_install_a_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing: Arc<dyn ExecBackend> = Arc::new(cognia_external_agent::exec_backend::DisabledExecBackend);
+        let pool = install_for_deployment(existing.clone(), dir.path(), "deployment", true, Some("disabled")).await.unwrap();
+        assert!(Arc::ptr_eq(&existing, &pool.backend));
+        assert!(pool.services.is_none());
+        assert_eq!(pool.backend.kind(), "disabled");
+        assert!(pool.backend.list().await.is_empty());
+        assert!(pool.backend.reap_orphans().await.unwrap().is_empty());
+        assert!(!dir.path().join(STORE_FILE).exists());
+    }
 
     /// `expect_err` needs `Debug` on the success type, and an execution
     /// backend is a trait object.

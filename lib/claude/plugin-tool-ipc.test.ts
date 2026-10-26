@@ -16,6 +16,7 @@ import {
   __setSessionPeerToolDepsForTesting,
   __setTemplateToolDepsForTesting,
   handlePluginToolExec,
+  resolveWebToolDeps,
   type PluginToolExecRequest,
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
@@ -89,11 +90,24 @@ jest.mock("@/lib/web/web-tools-core", () => ({
   buildFetchExtractor: jest.fn(() => async () => "extracted"),
 }))
 jest.mock("@cognia/web-search/search-cache", () => ({
+  opaqueDigest: jest.requireActual("@cognia/web-search/search-cache").opaqueDigest,
   getSearchCache: jest.fn(() => ({
     setConfig: jest.fn(),
     get: jest.fn(() => null),
     set: jest.fn(),
   })),
+}))
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isCapacitor: jest.fn(() => false),
+}))
+jest.mock("@/lib/native/utils", () => ({
+  ...jest.requireActual("@/lib/native/utils"),
+  isTauri: jest.fn(() => false),
+}))
+jest.mock("@/lib/tauri/pinned-fetch", () => ({ pinnedFetch: jest.fn() }))
+jest.mock("@/lib/network/proxy-fetch", () => ({
+  createProxyFetch: jest.fn(() => jest.fn()),
 }))
 jest.mock("@/lib/search/configured-search", () => ({
   searchWithAppSettings: jest.fn(async () => ({ results: [], provider: "tavily", query: "hi" })),
@@ -850,17 +864,19 @@ describe("handlePluginToolExec — ask_user elicitation", () => {
       await import("./plugin-tool-ipc")
     freshSet({ getTool: () => undefined })
 
+    const controller = new AbortController()
     const response = await freshHandle({
       type: "plugin_tool_exec",
       sessionId: "sess-A",
       toolUseId: "use-A",
       name: "ask_user",
+      abortSignal: controller.signal,
       args: { question: "Pick", options: [{ value: "a", label: "Apple" }] },
     })
 
     expect(runAskUser).toHaveBeenCalledWith(
       { question: "Pick", options: [{ value: "a", label: "Apple" }] },
-      { sessionId: "sess-A" }
+      { sessionId: "sess-A", signal: controller.signal }
     )
     expect(response.result).toBe("Selected: Apple")
     expect(response.error).toBeUndefined()
@@ -1239,7 +1255,11 @@ describe("handlePluginToolExec — Task alias for dispatch_agent", () => {
     const runDispatchAgentTool = jest.fn().mockResolvedValue("subagent result")
     jest.doMock("@/lib/claude/agents/dispatch-agent-handler", () => ({ runDispatchAgentTool }))
 
-    const { handlePluginToolExec: freshHandle } = await import("./plugin-tool-ipc")
+    const { handlePluginToolExec: freshHandle, __setPluginToolResolverForTesting: freshSet } =
+      await import("./plugin-tool-ipc")
+    // This routing fixture has no live PluginManager. Resolve an empty plugin
+    // registry so its absence does not throw before the Task fallback is reached.
+    freshSet({ getTool: () => undefined })
     const response = await freshHandle({
       type: "plugin_tool_exec",
       sessionId: "sess-T",
@@ -1247,6 +1267,7 @@ describe("handlePluginToolExec — Task alias for dispatch_agent", () => {
       name: "Task",
       args: { subagent_type: "researcher", prompt: "go" },
     })
+    freshSet(null)
 
     expect(runDispatchAgentTool).toHaveBeenCalledWith({
       sessionId: "sess-T",
@@ -1259,7 +1280,7 @@ describe("handlePluginToolExec — Task alias for dispatch_agent", () => {
 
 // ── resolveWebToolDeps — default (settings-store) resolver ────────────────
 describe("resolveWebToolDeps (default resolver)", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     __setWebToolDepsForTesting(null) // exercise the real settings-store resolver
     mockClient = { complete: jest.fn() }
     // `clearMocks: true` wipes call history each test; re-assert implementations
@@ -1271,6 +1292,10 @@ describe("resolveWebToolDeps (default resolver)", () => {
       get: jest.fn(() => null),
       set: jest.fn(),
     }))
+    const { isCapacitor } = await import("@/lib/platform/detect")
+    const { isTauri } = await import("@/lib/native/utils")
+    ;(isCapacitor as jest.Mock).mockReturnValue(false)
+    ;(isTauri as jest.Mock).mockReturnValue(false)
     mockSettings = {
       searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } },
       searchMaxResults: 5,
@@ -1316,26 +1341,89 @@ describe("resolveWebToolDeps (default resolver)", () => {
     return mockWebFetch.mock.calls[0][1] as Record<string, unknown>
   }
 
-  it("forwards the user's search defaults + source verification to web_search", async () => {
-    const deps = await searchDeps()
-    expect(deps.searchOptions).toMatchObject({
-      searchType: "news",
-      searchDepth: "advanced",
-      recency: "week",
-      country: "us",
-      language: "en",
-      excludeDomains: ["bad.test"],
-      includeAnswer: true,
-      includeRawContent: true,
-    })
-    expect(deps.searchExecutor).toEqual(expect.any(Function))
+  it("leaves global defaults in the canonical executor below provider and caller options", async () => {
+    const deps = await resolveWebToolDeps()
+    expect(deps).not.toHaveProperty("searchOptions")
+    expect(deps).not.toHaveProperty("searchMaxResults")
     expect(deps.sourceVerification).toEqual({ enabled: true })
+    const signal = new AbortController().signal
+    const options = { searchType: "images" as const, signal }
+    await deps.searchExecutor!("hi", options)
+    const { searchWithAppSettings } = await import("@/lib/search/configured-search")
+    expect(searchWithAppSettings).toHaveBeenCalledWith("hi", {
+      settings: mockSettings,
+      options,
+      signal,
+      scope: deps.scope,
+      activeScope: deps.activeScope,
+      useCache: true,
+    })
+    expect(deps.activeScope!()).toBe(deps.scope)
   })
 
   it("builds a summarizer + cache for web_fetch from settings", async () => {
     const deps = await fetchDeps()
     expect(typeof deps.summarize).toBe("function")
     expect(deps.cache).toBeDefined()
+  })
+
+  it("uses independent Reader policy and only the trimmed vendor search credential", async () => {
+    mockSettings.webTools = { alwaysDistill: true }
+    mockSettings.searchProviders = {
+      tavily: { enabled: false, apiKey: "  reader-key  " },
+      exa: { enabled: true, apiKey: "   " },
+    }
+    const deps = await resolveWebToolDeps()
+    expect(deps.readerPolicy?.distillation).toBe("required")
+    expect(deps.credentialFor!("tavily")).toBe("reader-key")
+    expect(deps.credentialFor!("exa")).toBeUndefined()
+    expect(deps).not.toHaveProperty("alwaysDistill")
+    expect(deps).not.toHaveProperty("jinaFallback")
+    expect(deps.hostReachable).toEqual({ jina: false, fxtwitter: false, platform: false })
+    expect(deps.transportCancels).toBe(true)
+  })
+
+  it("revokes an in-flight operation when the user changes its web authority", async () => {
+    const deps = await resolveWebToolDeps()
+    expect(deps.activeScope!()).toBe(deps.scope)
+    mockSettings = { ...mockSettings, webTools: { enabled: false } }
+    expect(deps.activeScope!()).not.toBe(deps.scope)
+    mockSettings = { ...mockSettings, webTools: undefined }
+    expect(deps.activeScope!()).toBe(deps.scope)
+    mockSettings = {
+      ...mockSettings,
+      searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "rotated" } },
+    }
+    expect(deps.activeScope!()).not.toBe(deps.scope)
+  })
+
+  it("uses cancellable proxy fetch and allows every reader on Tauri", async () => {
+    const { isTauri } = await import("@/lib/native/utils")
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const proxy = jest.fn()
+    const { createProxyFetch } = await import("@/lib/network/proxy-fetch")
+    ;(createProxyFetch as jest.Mock).mockReturnValue(proxy)
+    const deps = await resolveWebToolDeps()
+    const signal = new AbortController().signal
+    await deps.fetchImpl!("https://example.test", { signal })
+    expect(proxy).toHaveBeenCalledWith("https://example.test", { signal, blockPrivateHosts: true })
+    expect(deps.hostReachable).toEqual({})
+    expect(deps.transportCancels).toBe(true)
+  })
+
+  it("passes logical cancellation to Capacitor and discloses its transport limit", async () => {
+    const { isCapacitor } = await import("@/lib/platform/detect")
+    ;(isCapacitor as jest.Mock).mockReturnValue(true)
+    const deps = await resolveWebToolDeps()
+    const signal = new AbortController().signal
+    await deps.fetchImpl!("https://example.test", { signal })
+    const { pinnedFetch } = await import("@/lib/tauri/pinned-fetch")
+    expect(pinnedFetch).toHaveBeenCalledWith(
+      "https://example.test",
+      expect.objectContaining({ signal })
+    )
+    expect(deps.hostReachable).toEqual({})
+    expect(deps.transportCancels).toBe(false)
   })
 
   it("tells the executor to bypass the cache when the user disabled it", async () => {
@@ -1359,20 +1447,54 @@ describe("resolveWebToolDeps (default resolver)", () => {
     expect(deps.summarize).toBeUndefined()
   })
 
-  it("yields empty search options when no defaults are configured", async () => {
+  it("does not project defaults when none are configured", async () => {
     // Minimal settings — exercises the absent-field branches of every default.
     mockSettings = {
       searchProviders: { tavily: { providerId: "tavily", enabled: true, apiKey: "k" } },
     }
     const deps = await searchDeps()
-    expect(deps.searchOptions).toEqual({})
+    expect(deps).not.toHaveProperty("searchOptions")
     expect(deps.sourceVerification).toBeUndefined()
     // The cache is owned by the canonical executor, not re-wired onto the deps.
     expect(deps.searchExecutor).toEqual(expect.any(Function))
   })
+
+  it("captures settings and scope together after lazy imports yield to an account switch", async () => {
+    jest.resetModules()
+    mockSettings = { searchProviders: { tavily: { apiKey: "departing-key" } } }
+    jest.doMock("@/lib/web/web-scope", () => {
+      // Simulate the new account loading while the scope module is imported.
+      mockSettings = { searchProviders: { tavily: { apiKey: "arriving-key" } } }
+      return {
+        currentWebScope: () => "arriving-account",
+        webAuthorityRevision: jest.requireActual("@/lib/web/web-scope").webAuthorityRevision,
+      }
+    })
+    try {
+      const deps = await resolveWebToolDeps()
+      expect(deps.scope).toBe("arriving-account")
+      expect(deps.credentialFor?.("tavily")).toBe("arriving-key")
+    } finally {
+      jest.dontMock("@/lib/web/web-scope")
+      jest.resetModules()
+    }
+  })
 })
 
 describe("handlePluginToolExec — host web dependency injection", () => {
+  it.each(["web_search", "web_fetch"])("passes caller cancellation into %s", async (name) => {
+    const caller = new AbortController()
+    const host = new AbortController()
+    await handlePluginToolExec(makeRequest({ name, abortSignal: caller.signal }), {
+      resolveWebToolDeps: () => ({ signal: host.signal }),
+    })
+    const mockTool = name === "web_search" ? mockWebSearch : mockWebFetch
+    const deps = mockTool.mock.calls.at(-1)![1]
+    expect(deps.signal.aborted).toBe(false)
+    host.abort()
+    expect(deps.signal.aborted).toBe(true)
+  })
+
   it("lets a non-renderer host supply search config without Zustand", async () => {
     const searchExecutor = jest.fn()
     const response = await handlePluginToolExec(

@@ -40,6 +40,7 @@ import { parseConversationKey } from "@/types/connectors/event"
 import type { EscalationPolicy } from "@/types/connectors/escalation"
 import { EscalationPolicyEditor } from "./escalation-policy-editor"
 import { UnavailableNotice } from "@/components/connectors/unavailable-notice"
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { ConversationTriggerOverride } from "./conversation-trigger-override"
 import { MediaGrantEditor } from "./media-grant-editor"
 import type { MediaModelGrant } from "@/lib/connectors/media-model-gate"
@@ -454,6 +455,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   }
 
   const [promotingToAdapter, setPromotingToAdapter] = useState(false)
+  const { confirm: confirmPromotion, dialog: promotionDialog } = useConfirmDialog()
 
   const onPromoteToAdapter = async () => {
     if (!adapterId) return
@@ -505,21 +507,38 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     }
     const changedKeys = Object.keys(patch) as Array<keyof typeof PROMOTION_FIELD_LABELS>
     if (changedKeys.length === 0) return
-    const translatedChanges = changedKeys
-      .map((key) => t(`fields.promotionFields.${PROMOTION_FIELD_LABELS[key]}`))
-      .join(", ")
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(t("fields.promoteConfirm", { changes: translatedChanges }))
-    ) {
-      return
-    }
-    if (
-      typeof window !== "undefined" &&
-      ("builtInSkillCeiling" in patch || "requireHitlForWrites" in patch) &&
-      !window.confirm(t("fields.promotePermissionConfirm"))
-    ) {
-      return
+    const translatedChanges = changedKeys.map((key) =>
+      t(`fields.promotionFields.${PROMOTION_FIELD_LABELS[key]}`)
+    )
+    // Two separate decisions: what becomes the adapter default, and — only
+    // when the promotion widens or narrows permissions — a second yes for the
+    // effect on every other conversation of this adapter.
+    const promote = await confirmPromotion({
+      title: t("fields.promoteConfirmTitle"),
+      description: t("fields.promoteConfirm"),
+      details: (
+        <ul
+          className="max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5 text-muted-foreground"
+          data-testid="conv-override-promote-changes"
+        >
+          {translatedChanges.map((label) => (
+            <li key={label}>{label}</li>
+          ))}
+        </ul>
+      ),
+      confirmLabel: t("fields.promoteConfirmAction"),
+      testid: "conv-override-promote-confirm",
+    })
+    if (!promote) return
+    if ("builtInSkillCeiling" in patch || "requireHitlForWrites" in patch) {
+      const widen = await confirmPromotion({
+        title: t("fields.promotePermissionTitle"),
+        description: t("fields.promotePermissionConfirm"),
+        confirmLabel: t("fields.promotePermissionAction"),
+        destructive: true,
+        testid: "conv-override-promote-permission-confirm",
+      })
+      if (!widen) return
     }
     setPromotingToAdapter(true)
     try {
@@ -1205,6 +1224,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         <InfoIcon aria-hidden />
         <AlertDescription>{t("fields.advancedJsonHelp")}</AlertDescription>
       </Alert>
+      {promotionDialog}
     </div>
   )
 }

@@ -1,4 +1,10 @@
 import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  SKILL_RECORDING_PROMPT,
   buildGenerationEnvelope,
   MAX_ENVELOPE_STEPS,
   type EnvelopeOptions,
@@ -183,6 +189,43 @@ describe("the system prompt", () => {
       expect(envelope.systemPrompt).toContain(heading)
     }
     expect(envelope.systemPrompt).toContain(CATEGORY_IDS)
+  })
+})
+
+describe("the system prompt as a Prompt Center entry (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("keeps the literal {{name}} placeholder example", () => {
+    const envelope = buildGenerationEnvelope([view(1)], options(), CATEGORY_IDS)
+    expect(envelope.systemPrompt).toContain(
+      "Placeholders written as {{name}} are caller-supplied inputs — keep them as placeholders."
+    )
+    expect(envelope.systemPrompt).toContain(
+      '- "allowedTools": an array of tool names the skill needs, or []. Only these tool names exist: Read, Bash. Never invent tool names.'
+    )
+  })
+
+  it("previews and sends a published override", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-recording",
+          promptId: SKILL_RECORDING_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-skill-recording",
+          body: 'Write in {{locale}}. JSON keys "name", "description", "content", "tags", "category" ({{categories}}), "allowedTools" ({{toolGuidance}}).',
+          contractVersion: SKILL_RECORDING_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const envelope = buildGenerationEnvelope([view(1)], options({ locale: "fr" }), CATEGORY_IDS)
+    expect(envelope.systemPrompt).toBe(
+      'Write in fr. JSON keys "name", "description", "content", "tags", "category" (custom | productivity), "allowedTools" (Only these tool names exist: Read, Bash.).'
+    )
   })
 })
 

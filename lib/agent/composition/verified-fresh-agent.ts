@@ -51,20 +51,80 @@ import type { VerificationVerdict, VerificationVerdictPart } from "@/lib/claude/
 import { flattenMessageText } from "@/lib/claude/replay"
 import { extractJson } from "@cognia/eval-core/json"
 import type { WorkspaceDiffSnapshot } from "@/lib/git/workspace-diff"
+import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 // ---- Prompt -----------------------------------------------------------------
+//
+// The verifier's system prompt is editable in the Prompt Center (ADR-0236);
+// the verdict keys the parser reads are required fragments an override cannot
+// drop. The request is inspect-only protocol text rendered from its
+// definition: its closing line restates the JSON-only answer.
 
-export const VERIFIER_SYSTEM_PROMPT = [
-  "You are an independent verifier. Another agent has just answered a user's request.",
-  "You share none of its context: you did not see its reasoning, its tool calls or its memory, and you must not assume any of it.",
-  "Judge only what is in front of you: the user's request, the agent's final reply and, when present, the diff of what changed on disk.",
-  "You may read files in the working directory to check claims, but you must not modify anything.",
-  "Decide whether the reply actually satisfies the request. Look for claims the diff does not support, work the request asked for that is missing, and errors in what was done.",
-  "Answer with ONLY a JSON object, nothing before or after it and no markdown fences:",
-  '{"verdict": "pass" | "fail" | "unsure", "summary": "<one or two sentences>", "points": ["<one concrete finding per entry>"]}',
-  'Use "pass" when the request is met and you found no material problem, "fail" when it is not met or you found one, and "unsure" when you cannot tell from the evidence.',
-  "Keep every point specific and under 200 characters. Do not invent problems you cannot point at.",
-].join("\n")
+/** Live values are clipped to this; far above any request, reply or capped diff. */
+const LIVE_VALUE_MAX = 1_000_000
+
+export const VERIFIER_PROMPT = definePrompt({
+  id: "agent.verifier.system",
+  contractVersion: 1,
+  kind: "role",
+  group: "agents",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "session"],
+  activation: "next-operation",
+  // The reply is parsed as a verdict; a missing verdict reads as "unsure".
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 8_000,
+  requiredFragments: ['"verdict"', '"summary"', '"points"'],
+  outputContract:
+    'One JSON object {"verdict": "pass" | "fail" | "unsure", "summary": string, "points": string[]}; points are trimmed and capped at 20. A reply without a recognised verdict is recorded as "unsure".',
+  consumers: ["lib/agent/composition/verified-fresh-agent.ts"],
+  defaultBody: [
+    "You are an independent verifier. Another agent has just answered a user's request.",
+    "You share none of its context: you did not see its reasoning, its tool calls or its memory, and you must not assume any of it.",
+    "Judge only what is in front of you: the user's request, the agent's final reply and, when present, the diff of what changed on disk.",
+    "You may read files in the working directory to check claims, but you must not modify anything.",
+    "Decide whether the reply actually satisfies the request. Look for claims the diff does not support, work the request asked for that is missing, and errors in what was done.",
+    "Answer with ONLY a JSON object, nothing before or after it and no markdown fences:",
+    '{"verdict": "pass" | "fail" | "unsure", "summary": "<one or two sentences>", "points": ["<one concrete finding per entry>"]}',
+    'Use "pass" when the request is met and you found no material problem, "fail" when it is not met or you found one, and "unsure" when you cannot tell from the evidence.',
+    "Keep every point specific and under 200 characters. Do not invent problems you cannot point at.",
+  ].join("\n"),
+})
+
+/**
+ * The verifier's one user turn: the request, the reply and the diff section,
+ * then the closing line asking for the JSON object.
+ */
+export const VERIFICATION_REQUEST_PROMPT = definePrompt({
+  id: "agent.verifier.request",
+  contractVersion: 1,
+  kind: "protocol",
+  group: "agents",
+  operation: "inspect-only",
+  scopes: [],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  variables: [
+    { name: "request", required: true, maxChars: LIVE_VALUE_MAX },
+    { name: "reply", required: true, maxChars: LIVE_VALUE_MAX },
+    { name: "diffSection", required: true, maxChars: LIVE_VALUE_MAX },
+  ],
+  consumers: ["lib/agent/composition/verified-fresh-agent.ts"],
+  defaultBody: [
+    "## The user's request",
+    "{{request}}",
+    "",
+    "## The agent's final reply",
+    "{{reply}}",
+    "",
+    "{{diffSection}}",
+    "",
+    "Verify the reply against the request and answer with the JSON object.",
+  ].join("\n"),
+})
 
 export interface VerificationPromptInput {
   request: string
@@ -73,27 +133,25 @@ export interface VerificationPromptInput {
 }
 
 export function buildVerificationPrompt(input: VerificationPromptInput): string {
-  const sections = [
-    "## The user's request",
-    input.request.trim() || "(empty)",
-    "",
-    "## The agent's final reply",
-    input.reply.trim() || "(empty)",
-  ]
+  let diffSection: string
   if (input.diff && input.diff.text) {
     const count = input.diff.fileCount
-    sections.push(
-      "",
+    diffSection = [
       `## Working-tree diff (${count} file${count === 1 ? "" : "s"}${input.diff.truncated ? ", truncated" : ""})`,
       "```diff",
       input.diff.text,
-      "```"
-    )
+      "```",
+    ].join("\n")
   } else {
-    sections.push("", "## Working-tree diff", "(no repository, or nothing changed)")
+    diffSection = ["## Working-tree diff", "(no repository, or nothing changed)"].join("\n")
   }
-  sections.push("", "Verify the reply against the request and answer with the JSON object.")
-  return sections.join("\n")
+  return resolvePrompt(VERIFICATION_REQUEST_PROMPT, {
+    values: {
+      request: input.request.trim() || "(empty)",
+      reply: input.reply.trim() || "(empty)",
+      diffSection,
+    },
+  }).text
 }
 
 // ---- Verdict parsing --------------------------------------------------------
@@ -253,10 +311,16 @@ export async function runVerifiedFreshAgentTurn(
 
   const diff = cwd ? await d.readDiff(cwd).catch(() => null) : null
   const prompt = buildVerificationPrompt({ request: input.request, reply: input.reply, diff })
+  // Resolved in the MAIN session's scope: the verifier session does not exist
+  // yet, and a customization made for this chat should check this chat.
+  const system = await resolvePromptAsync(VERIFIER_PROMPT, {
+    context: { sessionId: input.mainSessionId, workspaceId: input.projectId },
+  })
+  input.signal?.throwIfAborted()
 
   const created = await d.createSession({
     title: verificationSessionTitle(input.mainSessionTitle),
-    systemPrompt: VERIFIER_SYSTEM_PROMPT,
+    systemPrompt: system.text,
     permissionMode: "plan",
     ...(cwd ? { workingDir: cwd } : {}),
     ...(input.projectId ? { projectId: input.projectId } : {}),

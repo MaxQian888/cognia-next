@@ -8,7 +8,6 @@ import {
   selectBenchmarkCapabilityMap,
   selectActiveAgentId,
   selectDelegationRules,
-  selectEnabled,
   selectDefaultPermissionMode,
   selectConnectedAgents,
   selectEnabledAgents,
@@ -67,6 +66,7 @@ const buildAgent = (
 describe("external-agent-store barrel", () => {
   it("re-exports selectors and the store hook", () => {
     expect(typeof barrel.useExternalAgentStore).toBe("function")
+    expect(barrel).not.toHaveProperty("selectEnabled")
     expect(typeof barrel.selectAgents).toBe("function")
     expect(typeof barrel.selectConnectedAgents).toBe("function")
     expect(typeof barrel.selectActiveRunningAgents).toBe("function")
@@ -84,7 +84,7 @@ describe("external-agent-store selectors with empty state", () => {
     expect(selectBenchmarkCapabilityMap(state)).toEqual({})
     expect(selectActiveAgentId(state)).toBeNull()
     expect(selectDelegationRules(state)).toEqual([])
-    expect(selectEnabled(state)).toBe(true)
+    expect(state).not.toHaveProperty("enabled")
     expect(selectDefaultPermissionMode(state)).toBe("default")
     expect(selectConnectedAgents(state)).toEqual([])
     expect(selectEnabledAgents(state)).toEqual([])
@@ -326,7 +326,7 @@ describe("external-agent-store initial-state", () => {
     expect(initialState.lastRunSnapshots).toEqual({})
     expect(initialState.activeAgentId).toBeNull()
     expect(initialState.delegationRules).toEqual([])
-    expect(initialState.enabled).toBe(true)
+    expect(initialState).not.toHaveProperty("enabled")
     expect(initialState.defaultPermissionMode).toBe("default")
     expect(initialState.autoConnectOnStartup).toBe(false)
     expect(initialState.showConnectionNotifications).toBe(true)

@@ -6,6 +6,8 @@ import {
   putRunRetrospectiveBundle,
 } from "@/lib/db/run-retrospectives"
 import { getExecutionRun, listVisibleExecutionRunEvents } from "@/lib/db/execution-runs"
+import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import { sha256Hex } from "@/lib/share/hash"
 import type { ExecutionRun, RunEvent } from "@/types/execution/run"
 import {
@@ -65,6 +67,58 @@ export interface RunRetrospectiveServiceOptions {
   now?: () => number
   analysisVersion?: number
 }
+
+const RETROSPECTIVE_CONSUMER = "lib/execution/run-retrospective.ts"
+
+/**
+ * The analysis request (ADR-0236). `{{input}}` is the run's safe projection as
+ * JSON, already redacted and PII-gated; the body around it is editable. The
+ * proposals it asks for go to the user for approval, never applied directly.
+ */
+export const RUN_RETROSPECTIVE_PROMPT = definePrompt({
+  id: "agent.run-retrospective",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "agents",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  // The reply becomes pending learning proposals the user approves or rejects.
+  risk: "approval-sensitive",
+  hosts: ["app"],
+  maxChars: 8_000,
+  variables: [
+    // The serialized projection is uncapped (one entry per visible run event); this only guards.
+    { name: "input", required: true, maxChars: 10_000_000 },
+  ],
+  outputContract:
+    "Sent with the reply-format system prompt; the JSON reply is validated (at most 20 timeline items and 8 proposals, PII-gated) and stored as pending proposals for review.",
+  consumers: [RETROSPECTIVE_CONSUMER],
+  defaultBody:
+    "Analyze this terminal Cognia ExecutionRun from safe projections only.\n\n" +
+    "Do not infer hidden reasoning. Return approval-required proposals; do not claim they were applied.\n\n" +
+    "{{input}}",
+})
+
+/**
+ * The system prompt naming the reply shape. Inspect-only: its keys and the
+ * allowed target kinds are exactly what `normalizeResult` accepts.
+ */
+export const RUN_RETROSPECTIVE_REPLY_FORMAT_PROMPT = definePrompt({
+  id: "agent.run-retrospective.reply-format",
+  contractVersion: 1,
+  kind: "protocol",
+  group: "agents",
+  operation: "inspect-only",
+  scopes: [],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  consumers: [RETROSPECTIVE_CONSUMER],
+  defaultBody:
+    "Return JSON only: {issueTimeline:[{at,summary,eventRef?}],proposals:[{targetKind,targetId?,title,before?,after,evidenceRefs?}]}. " +
+    "Allowed targetKind: team-config, project-environment, memory-candidate, skill-draft, observation.",
+})
 
 function id(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
@@ -179,11 +233,11 @@ function normalizeResult(
   return { issueTimeline, proposals }
 }
 
-function buildPrompt(
+async function buildPrompt(
   run: ExecutionRun,
   events: RunEvent[],
   adapterContext?: SafeRunRetrospectiveAdapterContext
-): string {
+): Promise<string> {
   const safeAdapter = adapterContext
     ? {
         ...(adapterContext.summary
@@ -204,11 +258,12 @@ function buildPrompt(
     ...(safeAdapter ? { adapterContext: safeAdapter } : {}),
   }
   if (!hasNoLeakingPiiDeep(input)) throw new Error("Run retrospective input rejected by PII gate")
-  return [
-    "Analyze this terminal Cognia ExecutionRun from safe projections only.",
-    "Do not infer hidden reasoning. Return approval-required proposals; do not claim they were applied.",
-    JSON.stringify(input),
-  ].join("\n\n")
+  return (
+    await resolvePromptAsync(RUN_RETROSPECTIVE_PROMPT, {
+      context: { workspaceId: run.projectId },
+      values: { input: JSON.stringify(input) },
+    })
+  ).text
 }
 
 export function createRunRetrospectiveService(options: RunRetrospectiveServiceOptions) {
@@ -228,7 +283,7 @@ export function createRunRetrospectiveService(options: RunRetrospectiveServiceOp
         listVisibleExecutionRunEvents(runId),
         options.buildAdapterContext?.(run),
       ])
-      const result = await options.runModel(buildPrompt(run, events, adapterContext), run)
+      const result = await options.runModel(await buildPrompt(run, events, adapterContext), run)
       const createdAt = now()
       const retrospectiveId = id("run-retrospective")
       const normalized = normalizeResult(runId, result, retrospectiveId, createdAt)
@@ -277,9 +332,7 @@ export async function generateConfiguredRunRetrospective(
       })
       if (!client) throw new Error("A utility model is required for run retrospective analysis")
       const response = await client.complete(prompt, {
-        system:
-          "Return JSON only: {issueTimeline:[{at,summary,eventRef?}],proposals:[{targetKind,targetId?,title,before?,after,evidenceRefs?}]}. " +
-          "Allowed targetKind: team-config, project-environment, memory-candidate, skill-draft, observation.",
+        system: resolvePrompt(RUN_RETROSPECTIVE_REPLY_FORMAT_PROMPT).text,
         temperature: 0.1,
         maxTokens: 2000,
       })

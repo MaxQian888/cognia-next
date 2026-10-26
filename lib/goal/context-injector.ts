@@ -12,6 +12,7 @@
  */
 
 import type { Goal } from "@/types/goal"
+import type { PromptOverrideSnapshot } from "@/lib/prompts/snapshot"
 import { renderGoalSystemSection } from "./prompts"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { loggers } from "@cognia/logging"
@@ -28,10 +29,15 @@ import { loggers } from "@cognia/logging"
 export function appendGoalContext(opts: {
   appendSystemPrompt?: string
   activeGoal?: Goal | null
+  /** The turn's frozen Prompt Center snapshot (ADR-0236). */
+  promptSnapshot?: PromptOverrideSnapshot | null
 }): string | undefined {
   const goal = opts.activeGoal
   if (!goal || goal.status !== "active") return opts.appendSystemPrompt
-  const section = renderGoalSystemSection(goal)
+  const section = renderGoalSystemSection(
+    goal,
+    opts.promptSnapshot !== undefined ? { snapshot: opts.promptSnapshot } : {}
+  )
   // PII red-line: the goal text is human-editable and flows straight into the
   // outbound system prompt. Skip the injection if it carries leaking PII rather
   // than send it to the model (matches the connector auto-mode safe-send gate).

@@ -38,6 +38,7 @@ import {
   issueWakeupEventSource,
 } from "@/types/issues"
 import type { ScheduledTask, TaskExecutionConfig, TaskTrigger } from "@/types/scheduler"
+import { definePrompt } from "@/lib/prompts/types"
 
 /** Fire budget when the author names none (`TaskExecutionConfig.maxRuns`). */
 export const ISSUE_WAKEUP_DEFAULT_MAX_FIRES = 20
@@ -112,6 +113,38 @@ export interface CompiledIssueWakeup {
   config: Partial<TaskExecutionConfig>
   endAt?: Date
 }
+
+/**
+ * The built-in instruction when the parent has none of its own (ADR-0236).
+ *
+ * Defined here, with the other pure parts, so the Prompt Center catalog can
+ * list it without loading the scheduler-facing half; `service.ts` resolves it.
+ *
+ * Resolved when the rule is WRITTEN, not when it fires: the text is persisted
+ * into the rule's payload (`instruction`) and description, and the executor
+ * reads it back from there (`effectiveWakeupInstruction`, below the parent's
+ * own override and its container's default). So an edit in the Prompt Center
+ * reaches parents whose rule is created afterwards; a rule that already exists
+ * keeps the text it was written with.
+ */
+export const CHILDREN_DONE_INSTRUCTION_PROMPT = definePrompt({
+  id: "developer.issues.wakeup.children-done",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  // The payload refuses a longer instruction (`normalizeWakeupInstruction`).
+  maxChars: ISSUE_WAKEUP_INSTRUCTION_MAX,
+  outputContract:
+    "Persisted as the instruction of a parent's children-done wakeup when the rule is created, then sent to the agent each time its sub-issues all finish (unless the parent or its container sets its own). Trimmed; at most 2000 characters.",
+  consumers: ["lib/issues/wakeups/service.ts"],
+  defaultBody:
+    "Every sub-issue of this issue is now done or canceled. Review what they delivered and continue this issue: finish it, or say what is still missing.",
+})
 
 /**
  * Spec → the three parts of a `ScheduledTask`. Throws on a spec the executor

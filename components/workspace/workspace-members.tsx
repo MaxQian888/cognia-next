@@ -43,12 +43,16 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { UserMinusIcon, UserPlusIcon, UserXIcon, UsersIcon } from "lucide-react"
+import { CrownIcon, UserMinusIcon, UserPlusIcon, UserXIcon, UsersIcon } from "lucide-react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 
 import { CollabRefreshStaleBadge } from "@/components/issues/collab-refresh-stale-badge"
 import { ConsoleSection } from "@/components/surface/console-section"
+import {
+  TransferOwnershipDialog,
+  type PreviousOwnerRole,
+} from "@/components/workspace/transfer-ownership-dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -122,6 +126,9 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
     userId: string
     name: string
   } | null>(null)
+  const [transferTarget, setTransferTarget] = useState<{ userId: string; name: string } | null>(
+    null
+  )
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [inviteOpen, setInviteOpen] = useState(false)
   /** Bumped after every server write, so the live sections below re-read. */
@@ -213,6 +220,19 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
     try {
       await admin.removeFromWorkspace({ userId, reason: t("reason.removed") })
       toast.success(t("toast.removed"))
+      wrote()
+    } catch (cause) {
+      toast.error(t("toast.failed"), { description: explain(cause) })
+    }
+  }
+  const transferOwnership = async (input: {
+    toUserId: string
+    previousOwnerRole: PreviousOwnerRole
+  }) => {
+    try {
+      await admin.transferOwnership({ ...input, reason: t("reason.ownershipTransferred") })
+      toast.success(t("toast.ownershipTransferred"))
+      setTransferTarget(null)
       wrote()
     } catch (cause) {
       toast.error(t("toast.failed"), { description: explain(cause) })
@@ -424,6 +444,30 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
                         <UserMinusIcon aria-hidden className="size-3.5" />
                       </Button>
                     ) : null}
+                    {/* The handover is the server's one-transaction route,
+                        never the org-role select (see the dialog's header). */}
+                    {!isSelf &&
+                    !entry.guest &&
+                    admin.canTransferOwnership &&
+                    orgRoles[entry.membership.userId] !== "owner" ? (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="size-6"
+                        disabled={admin.busy}
+                        title={t("transfer.action")}
+                        aria-label={t("transfer.action")}
+                        onClick={() =>
+                          setTransferTarget({
+                            userId: entry.membership.userId,
+                            name: entry.user?.displayName ?? entry.membership.userId,
+                          })
+                        }
+                        data-testid={`workspace-member-transfer-${entry.membership.userId}`}
+                      >
+                        <CrownIcon aria-hidden className="size-3.5" />
+                      </Button>
+                    ) : null}
                     {manageable && admin.canManageOrg && !entry.guest ? (
                       <Button
                         size="icon-sm"
@@ -499,6 +543,12 @@ export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersPro
         <WorkspaceInvitations admin={admin} reloadKey={writes} />
         <WorkspaceMembershipAudit admin={admin} reloadKey={writes} />
       </div>
+      <TransferOwnershipDialog
+        target={transferTarget}
+        busy={admin.busy}
+        onCancel={() => setTransferTarget(null)}
+        onConfirm={(input) => void transferOwnership(input)}
+      />
       <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
         <AlertDialogContent data-testid="workspace-member-confirm">
           <AlertDialogHeader>

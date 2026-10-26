@@ -15,7 +15,7 @@ jest.mock("@/lib/keyring", () => ({
   setWebKeyringPassphrase: jest.fn(),
 }))
 jest.mock("@/lib/data/backup-key", () => ({
-  getDefaultBackupPassphrase: jest.fn(async () => "pp"),
+  getInstallEncryptionPassphrase: jest.fn(async () => "pp"),
 }))
 jest.mock("../core/logger", () => ({
   loggers: { manager: { warn: jest.fn() } },

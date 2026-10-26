@@ -20,7 +20,12 @@ import {
   resolveModelMeta,
 } from "@/lib/ai/model-options"
 import { getModelContextWindow } from "./usage"
+import { DEFAULT_COMPRESSION_SETTINGS } from "@cognia/agent-config-types/compression"
 import { hasOwnKey, isRemoteHostKeyedProvider } from "@/lib/host-secrets/remote-host-keys"
+import {
+  EFFORT_TO_BUDGET,
+  claude55CapabilitiesForModel,
+} from "@cognia/provider-types/reasoning-effort-tables"
 
 export interface ProviderAttemptOptions {
   providerCredentials?: SendOptions["providerCredentials"]
@@ -28,6 +33,47 @@ export interface ProviderAttemptOptions {
   modelParams?: SendOptions["modelParams"]
   defaultModel?: string
   concurrentLimit?: number
+}
+
+/** Match documented DeepSeek defaults; other providers retain their existing policy. */
+function defaultOutputTokens(
+  provider: string | undefined,
+  model: string | undefined,
+  ceiling: number,
+  params: SendOptions["modelParams"]
+): number {
+  if (provider !== "deepseek" || !/^deepseek-(?:flash|v4-)/.test(model ?? "")) return ceiling
+  const options = params?.providerOptions?.deepseek as
+    { thinking?: { type?: string }; reasoningEffort?: string } | undefined
+  return Math.min(
+    ceiling,
+    options?.thinking?.type === "disabled" || options?.reasoningEffort === "none"
+      ? 8_192
+      : options?.reasoningEffort === "max" || options?.reasoningEffort === "xhigh"
+        ? 131_072
+        : 65_536
+  )
+}
+
+/** Anthropic's AI SDK adds enabled thinking to the text limit before clamping. */
+export function resolveProviderOutputReserve(options: SendOptions, ceiling?: number): number {
+  const output = Math.max(0, options.modelParams?.maxOutputTokens ?? 0)
+  const thinking = options.modelParams?.providerOptions?.anthropic?.thinking as
+    { type?: string; budgetTokens?: number } | undefined
+  const protocol = options.providerCredentials?.protocol ?? options.provider
+  const effortBudget = options.effort
+    ? ((EFFORT_TO_BUDGET as Readonly<Record<string, number>>)[options.effort] ??
+      EFFORT_TO_BUDGET.high)
+    : 0
+  const generated = protocol === "anthropic" && (options.maxThinkingTokens || effortBudget)
+  const added = generated
+    ? claude55CapabilitiesForModel(options.model)
+      ? 0
+      : options.maxThinkingTokens || effortBudget
+    : protocol === "anthropic" && thinking?.type === "enabled"
+      ? (thinking.budgetTokens ?? 0)
+      : 0
+  return Math.min(ceiling ?? Infinity, output + Math.max(0, added))
 }
 
 /** Recompute model-dependent retry limits for chat and Room/team dispatch alike. */
@@ -43,7 +89,12 @@ export function applyProviderAttemptLimits(
     settings?.providerSettings,
     settings?.customProviders
   )
-  const outputLimits = [modelParams?.maxOutputTokens, previousOutputLimit, knownOutput].filter(
+  const requestedOutput =
+    modelParams?.maxOutputTokens ??
+    (knownOutput !== undefined
+      ? defaultOutputTokens(options.provider, options.model, knownOutput, modelParams)
+      : undefined)
+  const outputLimits = [requestedOutput, previousOutputLimit, knownOutput].filter(
     (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0
   )
   if (outputLimits.length)
@@ -63,7 +114,7 @@ export function applyProviderAttemptLimits(
       settings?.providerSettings,
       settings?.customProviders
     ).maxInputTokens
-    const outputReserve = modelParams?.maxOutputTokens ?? 0
+    const outputReserve = resolveProviderOutputReserve({ ...options, modelParams }, knownOutput)
     compaction = {
       ...compaction,
       contextWindow: Math.max(
@@ -77,8 +128,73 @@ export function applyProviderAttemptLimits(
       settings?.providerSettings,
       settings?.customProviders
     )
-    if (summaryOutput !== undefined && compaction.maxSummaryTokens !== undefined) {
-      compaction.maxSummaryTokens = Math.min(compaction.maxSummaryTokens, summaryOutput)
+    if (!compaction.summaryTokenBudgetIsDefault && compaction.maxSummaryTokens !== undefined) {
+      const requested = compaction.requestedMaxSummaryTokens ?? compaction.maxSummaryTokens
+      compaction.requestedMaxSummaryTokens = requested
+      compaction.maxSummaryTokens = Math.min(requested, summaryOutput ?? Infinity)
+    }
+    const summaryProvider = compaction.summary?.providerId ?? options.provider
+    const summaryModel = compaction.summary?.model ?? options.model
+    const summaryWindow =
+      resolveModelContextLength(
+        summaryModel,
+        summaryProvider,
+        settings?.providerSettings,
+        settings?.customProviders
+      ) ?? getModelContextWindow(summaryModel)
+    const summaryMaxInput = resolveModelMeta(
+      summaryProvider,
+      summaryModel,
+      settings?.providerSettings,
+      settings?.customProviders
+    ).maxInputTokens
+    if (compaction.summaryTokenBudgetIsDefault) {
+      // Generation (including reasoning) and retained state have separate caps.
+      // Leave half a small window for source input; use the model's output
+      // capacity on larger windows. Recompute on each provider attempt.
+      compaction.maxSummaryTokens = Math.min(
+        summaryOutput ?? 65_536,
+        Math.max(1, Math.floor(summaryWindow / 2))
+      )
+    }
+    // The sidecar enforces this as total generated output, including thinking.
+    const summaryReserve = compaction.maxSummaryTokens ?? 16_384
+    compaction.summaryInputBudget = Math.max(
+      1,
+      Math.min(summaryWindow - summaryReserve, summaryMaxInput ?? summaryWindow)
+    )
+    if (
+      compaction.checkpointTokenBudget === undefined ||
+      compaction.checkpointTokenBudgetIsDefault
+    ) {
+      // Cumulative findings can exceed one generated delta. Leave a quarter
+      // of retained input and summary input for navigation and new source.
+      compaction.checkpointTokenBudget = Math.max(
+        1,
+        Math.floor(
+          Math.min(
+            compaction.contextWindow! *
+              (compaction.retainedFraction ??
+                DEFAULT_COMPRESSION_SETTINGS.retainedThreshold / 100) *
+              0.75,
+            compaction.summaryInputBudget * 0.75
+          )
+        )
+      )
+      compaction.checkpointTokenBudgetIsDefault = true
+    }
+    if (
+      compaction.postCompactionTokenBudget === undefined ||
+      compaction.postCompactionTokenBudgetIsDefault
+    ) {
+      compaction.postCompactionTokenBudget = Math.max(
+        1,
+        Math.floor(
+          compaction.contextWindow! *
+            (compaction.retainedFraction ?? DEFAULT_COMPRESSION_SETTINGS.retainedThreshold / 100)
+        )
+      )
+      compaction.postCompactionTokenBudgetIsDefault = true
     }
   }
   return { modelParams, ...(compaction ? { compaction } : {}) }
@@ -133,7 +249,13 @@ export function buildProviderAttemptModelParams(
     appSettings.customProviders
   )
   return limit !== undefined
-    ? { ...params, maxOutputTokens: Math.min(params?.maxOutputTokens ?? limit, limit) }
+    ? {
+        ...params,
+        maxOutputTokens: Math.min(
+          params?.maxOutputTokens ?? defaultOutputTokens(providerId, targetModelId, limit, params),
+          limit
+        ),
+      }
     : params
 }
 

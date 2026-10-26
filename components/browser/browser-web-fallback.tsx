@@ -3,7 +3,7 @@
 import { ExternalLinkIcon } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
@@ -14,11 +14,11 @@ import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browse
 import { WebPreview } from "@/components/ai-elements/web-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
-import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useRecentPages } from "@/hooks/browser/use-recent-pages"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { normalizePreviewUrl } from "@/lib/browser/protocol"
+import { REMOTE_BROWSER_SETTINGS_HREF } from "@/lib/browser/preview-data"
 import { openExternal } from "@/lib/tauri/opener"
 
 export interface BrowserWebFallbackProps {
@@ -41,14 +41,9 @@ export interface BrowserWebFallbackProps {
    * and something else is missing, so inviting again would be nonsense.
    */
   unreachableReason?: string
+  backendSwitcher?: ReactNode
+  onNavigated?: (url: string) => void
 }
-
-/**
- * Where the cloud-browser switch lives. `?section=companion` is a retired
- * section that now lands on the Connectivity overview, a panel away from the
- * card the button promises.
- */
-const REMOTE_BROWSER_SETTINGS_HREF = "/settings?section=connectivity&connectivityPanel=cloud-relay"
 
 // Cross-origin iframe CSS cannot be rewritten. Give desktop-only pages their
 // common minimum layout width, then fit that surface to the actual host pane.
@@ -69,6 +64,8 @@ export function BrowserWebFallback({
   requestedUrl,
   requestNonce,
   unreachableReason,
+  backendSwitcher,
+  onNavigated,
 }: BrowserWebFallbackProps) {
   const t = useTranslations("browser")
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -99,6 +96,9 @@ export function BrowserWebFallback({
    */
   const [loading, setLoading] = useState(!!normalizedInitialUrl)
   const [frameIssue, setFrameIssue] = useState<"error" | "timeout" | null>(null)
+  useEffect(() => {
+    if (currentUrl) onNavigated?.(currentUrl)
+  }, [currentUrl, onNavigated])
   useEffect(() => {
     if (!loading) return
     const timer = setTimeout(() => {
@@ -166,117 +166,116 @@ export function BrowserWebFallback({
   }
 
   return (
-    <TooltipProvider>
-      <WebPreview
-        className="h-full min-h-0 min-w-0 max-w-full overflow-hidden rounded-none border-0"
-        data-testid="browser-web-preview"
-        defaultUrl={normalizedInitialUrl ?? ""}
-      >
-        <BrowserToolbar
-          toolbarRef={toolbarRef}
-          url={draftUrl}
-          urlInputRef={urlInputRef}
-          onUrlChange={setDraftUrl}
-          onSubmit={navigate}
-          addressDisplay={draftUrl === currentUrl ? addressDisplayParts(draftUrl) : null}
-          loading={loading}
-          navigation={
-            <BrowserNavigationControls
-              backDisabled={!canGoBack}
-              forwardDisabled={!canGoForward}
-              reloadDisabled={!currentUrl}
-              onBack={() => goTo(goBack())}
-              onForward={() => goTo(goForward())}
-              onReload={reload}
-            />
-          }
-          inspectActions={
-            <BrowserHistoryMenu
-              recent={recent}
-              onNavigate={goToNew}
-              onClear={clearHistory}
-              disabled={recent.length === 0}
-            />
-          }
-          pageActions={
-            <TooltipIconButton
-              tooltip={t("actions.openExternal")}
-              aria-label={t("actions.openExternal")}
-              disabled={!currentUrl}
-              onClick={() => void openExternal(currentUrl)}
-            >
-              <ExternalLinkIcon />
-            </TooltipIconButton>
-          }
-        />
-        <div className="flex min-w-0 items-center gap-3 border-b bg-muted/40 px-3 py-2">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-            {unreachableReason ?? t("webFallback.notice")}
-          </p>
-          {!unreachableReason && (
-            <Button asChild size="sm" variant="outline" className="shrink-0">
-              <Link href={REMOTE_BROWSER_SETTINGS_HREF}>{t("webFallback.enableRemote")}</Link>
-            </Button>
-          )}
-        </div>
-        {currentUrl && !frameIssue && (
-          <div className="flex shrink-0 justify-end border-b px-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-auto whitespace-normal py-1 text-xs"
-              onClick={() => {
-                setLoading(false)
-                setFrameIssue("error")
-              }}
-            >
-              {t("loadError.frameHelp")}
-            </Button>
-          </div>
+    <WebPreview
+      className="h-full min-h-0 min-w-0 max-w-full overflow-hidden rounded-none border-0"
+      data-testid="browser-web-preview"
+      defaultUrl={normalizedInitialUrl ?? ""}
+    >
+      <BrowserToolbar
+        toolbarRef={toolbarRef}
+        url={draftUrl}
+        urlInputRef={urlInputRef}
+        onUrlChange={setDraftUrl}
+        onSubmit={navigate}
+        addressDisplay={draftUrl === currentUrl ? addressDisplayParts(draftUrl) : null}
+        loading={loading}
+        overflowExtras={backendSwitcher}
+        navigation={
+          <BrowserNavigationControls
+            backDisabled={!canGoBack}
+            forwardDisabled={!canGoForward}
+            reloadDisabled={!currentUrl}
+            onBack={() => goTo(goBack())}
+            onForward={() => goTo(goForward())}
+            onReload={reload}
+          />
+        }
+        inspectActions={
+          <BrowserHistoryMenu
+            recent={recent}
+            onNavigate={goToNew}
+            onClear={clearHistory}
+            disabled={recent.length === 0}
+          />
+        }
+        pageActions={
+          <TooltipIconButton
+            tooltip={t("actions.openExternal")}
+            aria-label={t("actions.openExternal")}
+            disabled={!currentUrl}
+            onClick={() => void openExternal(currentUrl)}
+          >
+            <ExternalLinkIcon />
+          </TooltipIconButton>
+        }
+      />
+      <div className="flex min-w-0 items-center gap-3 border-b bg-muted/40 px-3 py-2">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {unreachableReason ?? t("webFallback.notice")}
+        </p>
+        {!unreachableReason && (
+          <Button asChild size="sm" variant="outline" className="shrink-0">
+            <Link href={REMOTE_BROWSER_SETTINGS_HREF}>{t("webFallback.enableRemote")}</Link>
+          </Button>
         )}
-        <div
-          ref={frameViewportRef}
-          className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
-          data-testid="browser-web-frame-viewport"
-        >
-          {!currentUrl && <BrowserEmptyState onOpen={goToNew} recent={recent} />}
-          <iframe
-            key={`${currentUrl}:${reloadKey}`}
-            className="absolute left-0 top-0 max-w-none bg-background"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-            src={currentUrl || undefined}
-            hidden={!currentUrl || !!frameIssue}
-            style={{
-              width: `${100 / pageScale}%`,
-              height: `${100 / pageScale}%`,
-              transform: `scale(${pageScale})`,
-              transformOrigin: "top left",
-            }}
-            title={t("webFallback.frameTitle")}
-            onLoad={() => {
-              setLoading(false)
-              setFrameIssue((issue) => (issue === "timeout" ? null : issue))
-            }}
-            onError={() => {
+      </div>
+      {currentUrl && !frameIssue && (
+        <div className="flex shrink-0 justify-end border-b px-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-auto whitespace-normal py-1 text-xs"
+            onClick={() => {
               setLoading(false)
               setFrameIssue("error")
             }}
-          />
-          {currentUrl && frameIssue && (
-            <div className="absolute inset-0">
-              <BrowserLoadError
-                url={currentUrl}
-                timedOut={frameIssue === "timeout"}
-                message={frameIssue === "error" ? t("loadError.frameHint") : undefined}
-                onRetry={reload}
-                onEditAddress={() => urlInputRef.current?.focus()}
-                onOpenExternal={() => void openExternal(currentUrl)}
-                onContinue={() => setFrameIssue(null)}
-              />
-            </div>
-          )}
+          >
+            {t("loadError.frameHelp")}
+          </Button>
         </div>
-      </WebPreview>
-    </TooltipProvider>
+      )}
+      <div
+        ref={frameViewportRef}
+        className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
+        data-testid="browser-web-frame-viewport"
+      >
+        {!currentUrl && <BrowserEmptyState onOpen={goToNew} recent={recent} />}
+        <iframe
+          key={`${currentUrl}:${reloadKey}`}
+          className="absolute left-0 top-0 max-w-none bg-background"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+          src={currentUrl || undefined}
+          hidden={!currentUrl || !!frameIssue}
+          style={{
+            width: `${100 / pageScale}%`,
+            height: `${100 / pageScale}%`,
+            transform: `scale(${pageScale})`,
+            transformOrigin: "top left",
+          }}
+          title={t("webFallback.frameTitle")}
+          onLoad={() => {
+            setLoading(false)
+            setFrameIssue((issue) => (issue === "timeout" ? null : issue))
+          }}
+          onError={() => {
+            setLoading(false)
+            setFrameIssue("error")
+          }}
+        />
+        {currentUrl && frameIssue && (
+          <div className="absolute inset-0">
+            <BrowserLoadError
+              url={currentUrl}
+              timedOut={frameIssue === "timeout"}
+              message={frameIssue === "error" ? t("loadError.frameHint") : undefined}
+              onRetry={reload}
+              onEditAddress={() => urlInputRef.current?.focus()}
+              onOpenExternal={() => void openExternal(currentUrl)}
+              onContinue={() => setFrameIssue(null)}
+            />
+          </div>
+        )}
+      </div>
+    </WebPreview>
   )
 }

@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { UIMessage } from "ai"
@@ -188,9 +189,7 @@ describe("BranchDialog", () => {
 
   it("passes an explicit working state policy through the existing branch action", async () => {
     renderDialog()
-    fireEvent.change(screen.getByRole("combobox", { name: "Working state" }), {
-      target: { value: "initial" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Working state" }), "initial")
     fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
     await waitFor(() =>
       expect(mockBranch).toHaveBeenCalledWith(

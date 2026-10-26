@@ -30,7 +30,9 @@ describe("PlatformShell (default variant)", () => {
     expect(screen.getByText("routed")).toBeInTheDocument()
   })
 
-  it("nests the desktop shell inside the mobile wrapper, as the layout used to", () => {
+  // The real wrappers' breakpoint state retention is covered together in
+  // desktop-app-shell.test.tsx; this suite pins the build's composition seam.
+  it("keeps both shell boundaries around the routed content", () => {
     render(
       <PlatformShell>
         <p>routed</p>

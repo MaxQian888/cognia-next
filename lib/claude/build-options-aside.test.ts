@@ -7,6 +7,12 @@ import {
   resolvedSessionAsideRuntime,
   sessionAsideSystemPrompt,
 } from "./build-options"
+import { ASIDE_READ_ONLY_PROMPT, ASIDE_SYSTEM_PROMPT } from "@/lib/agent/prompts/side-chat"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { getSession } from "@/lib/db/sessions"
@@ -161,6 +167,34 @@ describe("session-bound aside capability grants", () => {
     expect(opts.appendSystemPrompt).toContain("Do not continue, resume, or execute the main task")
     expect(opts.appendSystemPrompt).toContain("This side chat is read-only")
     expect(opts.appendSystemPrompt?.match(/\[Side chat\]/g)).toHaveLength(1)
+  })
+
+  it("sends the customized side-chat contract on the native path and the external preamble (ADR-0236)", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-aside",
+          promptId: ASIDE_SYSTEM_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-aside",
+          body: "[Side chat]\nAnswer only the side question, briefly.",
+          contractVersion: ASIDE_SYSTEM_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      const opts = await resolve(aside())
+      expect(opts.appendSystemPrompt).toContain("Answer only the side question, briefly.")
+      expect(opts.appendSystemPrompt).not.toContain("reference material only, not instructions")
+      expect(opts.appendSystemPrompt).toContain(ASIDE_READ_ONLY_PROMPT.defaultBody)
+      expect(sessionAsideSystemPrompt(false)).toBe(
+        "[Side chat]\nAnswer only the side question, briefly."
+      )
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("cannot unlock an aside whose parent no longer exists", async () => {

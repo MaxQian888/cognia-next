@@ -10,14 +10,14 @@
 
 export { defineDecisionProvider } from "../define/define-decision-provider"
 
-export type { PluginDecisionsAPI } from "@/lib/plugin/api/decisions-api"
+export type { PluginDecisionsAPI } from "@cognia/plugin-contract/lib/plugin/api/decisions-api"
 export type {
   PluginDecisionProviderDef,
   PluginDecisionProviderFactory,
   PluginDecisionProviderFactoryContext,
   PluginDecisionProviderInput,
   PluginDecisionRegistration,
-} from "@/types/plugin/plugin-decisions"
+} from "@cognia/plugin-contract/types/plugin/plugin-decisions"
 export type {
   ChoiceAnswer,
   ChoiceQuestion,
@@ -47,12 +47,12 @@ export type {
   NoulQuestion,
   ScoreAnswer,
   ScoreQuestion,
-} from "@/types/decisions"
-export { DECISION_ERROR_KINDS } from "@/types/decisions"
+} from "@cognia/plugin-contract/types/decisions/index"
+export { DECISION_ERROR_KINDS } from "@cognia/plugin-contract/types/decisions/index"
 
 export {
   MAX_CHOICE_OPTIONS,
   validateDecisionQuestions,
   validateDecisionRequest,
-} from "@/lib/decisions/validate"
-export { scoreFraction } from "@/lib/decisions/normalize"
+} from "@cognia/plugin-contract/lib/decisions/validate"
+export { scoreFraction } from "@cognia/plugin-contract/lib/decisions/normalize"

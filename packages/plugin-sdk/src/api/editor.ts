@@ -11,7 +11,10 @@ export type {
   PluginEditorAPI,
   PluginEditorOpenOptions,
   PluginEditorOpenResult,
-} from "@/lib/plugin/api/editor-api"
+} from "@cognia/plugin-contract/lib/plugin/api/editor-api"
 
 /** The snapshot shape `readActive` resolves to, shared with the host. */
-export type { ActiveEditorContext, ActiveEditorDiagnostic } from "@/lib/files/project-editor-bridge"
+export type {
+  ActiveEditorContext,
+  ActiveEditorDiagnostic,
+} from "@cognia/plugin-contract/lib/files/project-editor-bridge"

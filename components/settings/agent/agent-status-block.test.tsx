@@ -64,10 +64,8 @@ function setup(over: Partial<Parameters<typeof AgentStatusBlock>[0]> = {}) {
   const props = {
     agent,
     readiness,
-    masterEnabled: true,
     isConnecting: false,
     onConnect: jest.fn(),
-    onEnable: jest.fn(),
     onEdit: jest.fn(),
     onOpenRuntimes: jest.fn(),
     onOpenPlugins: jest.fn(),
@@ -134,6 +132,17 @@ it.each(["off", "error"] as const)("leaves the %s connection remedy to the heade
   expect(screen.queryByRole("button")).not.toBeInTheDocument()
 })
 
+it("leaves enabling to the header switch without repeating its action", () => {
+  setup({
+    agent: { ...agent, enabled: false },
+    readiness: { ...readiness, state: "disabled", nextAction: "enable" },
+  })
+  expect(
+    screen.queryByRole("button", { name: en.readiness.actions.enable })
+  ).not.toBeInTheDocument()
+  expect(screen.getByRole("region", { name: en.settings.inspectorStatus })).toBeInTheDocument()
+})
+
 it("explains unsupported platforms without an action", () => {
   setup({
     agent: { ...agent, lifecycleStatus: "blocked", lifecycleReasonCode: "platform_unsupported" },
@@ -160,6 +169,6 @@ it("shows only this agent's failure with retry and dismiss", () => {
   expect(view.onConnect).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
   expect(clearFailure).toHaveBeenCalledWith("a")
-  view.rerender(<AgentStatusBlock {...view} masterEnabled={false} />)
+  view.rerender(<AgentStatusBlock {...view} readiness={{ ...readiness, state: "disabled" }} />)
   expect(screen.queryByRole("button", { name: en.failure.retry })).not.toBeInTheDocument()
 })

@@ -1,10 +1,6 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import {
-  SELECTION_SUMMARY_SYSTEM_PROMPT,
-  packSegments,
-  summarizeMaterial,
-} from "./summarize-material"
-import { CONVERSATION_SUMMARY_SYSTEM_PROMPT } from "./summarizer"
+import { SELECTION_SUMMARY_PROMPT, packSegments, summarizeMaterial } from "./summarize-material"
+import { CONVERSATION_SUMMARY_PROMPT } from "./summarizer"
 
 jest.mock("@cognia/redact", () => ({ hasNoLeakingPii: () => true }))
 
@@ -53,10 +49,10 @@ describe("summarizeMaterial", () => {
     const llm = client(["the gist"])
     const out = await summarizeMaterial({ segments: ["a", "b"], purpose: "selection", client: llm })
     expect(out).toEqual({ kind: "summary", text: "the gist", chunks: 1 })
-    expect(llm.complete.mock.calls[0][1].system).toBe(SELECTION_SUMMARY_SYSTEM_PROMPT)
+    expect(llm.complete.mock.calls[0][1].system).toBe(SELECTION_SUMMARY_PROMPT.defaultBody)
 
     await summarizeMaterial({ segments: ["a"], purpose: "branch-seed", client: llm })
-    expect(llm.complete.mock.calls[1][1].system).toBe(CONVERSATION_SUMMARY_SYSTEM_PROMPT)
+    expect(llm.complete.mock.calls[1][1].system).toBe(CONVERSATION_SUMMARY_PROMPT.defaultBody)
   })
 
   // The old summarizer sliced at 24k and dropped the rest without a word.

@@ -5,6 +5,11 @@ import { subscribePluginToolDispatch } from "./plugin-tool-dispatch"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 
+jest.mock("@/lib/claude/ipc", () => ({
+  ...jest.requireActual("@/lib/claude/ipc"),
+  subscribePluginHookExec: jest.fn(async () => () => {}),
+}))
+
 const req: PluginToolExecRequest = {
   type: "plugin_tool_exec",
   sessionId: "s1",
@@ -199,4 +204,142 @@ describe("subscribePluginToolDispatch", () => {
     expect(runtimeRef).toHaveBeenCalledTimes(1)
     stop()
   })
+})
+
+describe("CLI lifecycle hook round trips", () => {
+  it("routes parent and child hooks once, acknowledges no contributors and preserves plugin decisions", async () => {
+    let callback!: Parameters<typeof import("@/lib/claude/ipc").subscribePluginHookExec>[0]
+    const unlisten = jest.fn()
+    const subscribe = jest.fn(async (cb: typeof callback) => {
+      callback = cb
+      return unlisten
+    })
+    const parentSend = jest.fn(async () => {})
+    const childSend = jest.fn(async () => {})
+    const parentHandle = jest.fn(async () => ({ result: null }))
+    const childHandle = jest.fn(async () => ({ result: { skip: true } }))
+    const toolSubscribe = async () => () => {}
+    const parent = await subscribePluginToolDispatch({
+      sessionId: "parent",
+      subscribe: toolSubscribe,
+      hooks: { subscribe, handle: parentHandle, send: parentSend },
+    })
+    const child = await subscribePluginToolDispatch({
+      sessionId: "child",
+      subscribe: toolSubscribe,
+      hooks: { subscribe, handle: childHandle, send: childSend },
+    })
+    const request = {
+      type: "plugin_hook_exec" as const,
+      sessionId: "child",
+      execId: "c1",
+      pluginId: "*",
+      hookId: "onPreCompact",
+      payload: {},
+    }
+    callback(request)
+    callback(request)
+    callback({ ...request, sessionId: "parent", execId: "p1" })
+    callback({ ...request, sessionId: "unowned", execId: "u1" })
+    await new Promise((resolve) => setImmediate(resolve))
+    callback(request)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(subscribe).toHaveBeenCalledTimes(1)
+    expect(childHandle).toHaveBeenCalledTimes(1)
+    expect(parentHandle).toHaveBeenCalledTimes(1)
+    expect(childSend).toHaveBeenCalledWith({
+      sessionId: "child",
+      execId: "c1",
+      result: { skip: true },
+    })
+    expect(parentSend).toHaveBeenCalledWith({ sessionId: "parent", execId: "p1", result: null })
+    child()
+    expect(unlisten).not.toHaveBeenCalled()
+    parent()
+    parent()
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports a throwing hook and rolls back tools if hook subscription fails", async () => {
+    let callback!: Parameters<typeof import("@/lib/claude/ipc").subscribePluginHookExec>[0]
+    const send = jest.fn(async () => {})
+    const stop = await subscribePluginToolDispatch({
+      subscribe: async () => () => {},
+      hooks: {
+        subscribe: async (cb) => {
+          callback = cb
+          return () => {}
+        },
+        handle: async () => {
+          throw new Error("secret")
+        },
+        send,
+      },
+    })
+    callback({
+      type: "plugin_hook_exec",
+      sessionId: "s",
+      execId: "1",
+      pluginId: "*",
+      hookId: "onPreCompact",
+      payload: {},
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(send).toHaveBeenCalledWith({
+      sessionId: "s",
+      execId: "1",
+      error: "Plugin lifecycle hook executor failed",
+    })
+    stop()
+    const stopTools = jest.fn()
+    await expect(
+      subscribePluginToolDispatch({
+        subscribe: async () => stopTools,
+        hooks: {
+          subscribe: async () => {
+            throw new Error("closed")
+          },
+        },
+      })
+    ).rejects.toThrow("closed")
+    expect(stopTools).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("retains in-flight hook ownership across the last owner's teardown and remount", async () => {
+  let callback!: Parameters<typeof import("@/lib/claude/ipc").subscribePluginHookExec>[0]
+  let complete!: (result: { result: null }) => void
+  const pending = new Promise<{ result: null }>((resolve) => {
+    complete = resolve
+  })
+  const handle = jest.fn(() => pending)
+  const subscribe = async (cb: typeof callback) => {
+    callback = cb
+    return () => {}
+  }
+  const deps = {
+    sessionId: "child",
+    subscribe: async () => () => {},
+    hooks: { subscribe, handle, send: jest.fn(async () => {}) },
+  }
+  const first = await subscribePluginToolDispatch(deps)
+  const request = {
+    type: "plugin_hook_exec" as const,
+    sessionId: "child",
+    execId: "pending",
+    pluginId: "*",
+    hookId: "onPreCompact",
+    payload: {},
+  }
+  callback(request)
+  first()
+  const second = await subscribePluginToolDispatch(deps)
+  callback(request)
+  expect(handle).toHaveBeenCalledTimes(1)
+  complete({ result: null })
+  await new Promise((resolve) => setImmediate(resolve))
+  callback(request)
+  await new Promise((resolve) => setImmediate(resolve))
+  expect(handle).toHaveBeenCalledTimes(1)
+  second()
 })

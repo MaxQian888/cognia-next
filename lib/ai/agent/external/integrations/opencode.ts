@@ -6,8 +6,7 @@
  * the streaming fetch (the Tauri/companion transport off the web), the local
  * process plane, the sandbox placement registry, the PII gate and the
  * discovery route: the desktop asks its sidecar, the standalone CLI probes
- * in-process. The legacy `opencode` server protocol (`./client`) is not
- * registered: `getUnsupportedProtocolReason` tells the user to move to V2.
+ * in-process. The V1 adapter uses the same host ports for local server tasks.
  */
 
 import type { ProtocolAdapterFactory } from "@cognia/agent-contracts/adapter"
@@ -17,6 +16,9 @@ import {
   type OpenCodeV2Discovery,
 } from "@cognia/agent-opencode/discovery"
 import { OpenCodeV2ClientAdapter } from "@cognia/agent-opencode/v2-client"
+import { OpenCodeClientAdapter } from "@cognia/agent-opencode/client"
+import { loggers } from "@cognia/logging"
+import { createAgentLogger } from "../host/agent-logger"
 import {
   canProjectOpenCodeV2Mcp,
   createOpenCodeV2Launcher,
@@ -72,4 +74,17 @@ export function createOpenCodeV2AdapterFactory(
   placement: OpenCodeV2Placement = appOpenCodeV2Placement
 ): ProtocolAdapterFactory {
   return () => createOpenCodeV2Adapter(processHost, placement)
+}
+
+/** The explicit V1 server protocol; never used as a V2 fallback. */
+export function createOpenCodeV1AdapterFactory(
+  processHost = createAgentTransportProcessHost()
+): ProtocolAdapterFactory {
+  return () =>
+    new OpenCodeClientAdapter({
+      fetch: platformStreamingFetch,
+      processHost,
+      outboundGate: hasNoLeakingPiiDeep,
+      logger: createAgentLogger(loggers.agent),
+    })
 }

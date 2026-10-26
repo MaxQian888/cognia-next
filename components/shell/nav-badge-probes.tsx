@@ -31,6 +31,8 @@ import {
   subscribePendingAskUsers,
 } from "@/lib/connectors/hitl/ask-user-registry"
 import { deriveAttention } from "@/lib/scheduler/attention"
+import { allowsMaintenanceAttention } from "@/lib/scheduler/maintenance-tasks"
+import { useSchedulerHostSummary } from "@/components/scheduler/scheduler-host-popover"
 import {
   getEffectiveSchedulerHostTarget,
   subscribeSchedulerHostTarget,
@@ -71,6 +73,7 @@ function AgentRunsBadgeProbe() {
 }
 
 function SchedulerBadgeProbe() {
+  const host = useSchedulerHostSummary()
   // The store the scheduler page reads. `SchedulerInitializer` hydrates it
   // when the workflow-automation capability boots, and from then on keeps it
   // current and re-points it when the managed host switches, so the count
@@ -100,7 +103,8 @@ function SchedulerBadgeProbe() {
     if (tasks.length === 0) return 0
     // Scoped the way the page scopes its list, so the badge never counts a
     // task the page would not show for this workspace.
-    const items = filterUnifiedItems(tasks.map(toUnified), {
+    const visibleTasks = tasks.filter(allowsMaintenanceAttention)
+    const items = filterUnifiedItems(visibleTasks.map(toUnified), {
       projectId: workspaceScopeForSchedulerHost(hostTarget, activeProjectId),
     })
     const signals = deriveAttention({
@@ -108,12 +112,12 @@ function SchedulerBadgeProbe() {
       tasksById: new Map(tasks.map((task) => [task.id, task])),
       runs: [],
       pendingConfirmations: 0,
-      hostSuspended: false,
+      hostSuspended: host.suspended,
       sourceErrors: {},
       maxTasksPerSource,
     })
     return signals.filter((signal) => signal.itemUnifiedId && signal.severity !== "info").length
-  }, [tasks, hostTarget, activeProjectId, maxTasksPerSource])
+  }, [tasks, hostTarget, activeProjectId, maxTasksPerSource, host.suspended])
   useReportNavBadge("scheduler.attention", count)
   return null
 }

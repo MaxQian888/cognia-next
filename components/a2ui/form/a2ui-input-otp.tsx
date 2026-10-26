@@ -20,18 +20,19 @@ export const A2UIInputOTP = memo(function A2UIInputOTP({
   component,
   onDataChange,
 }: A2UIComponentProps<A2UIInputOTPComponent>) {
-  const { resolveString } = useA2UIData()
+  const { resolveString, resolveBoolean } = useA2UIData()
   const value = resolveString(component.value)
+  const disabled = resolveBoolean(component.disabled ?? false, false)
   const bindingPath = getBindingPath(component.value)
   const maxLength = component.maxLength || 6
 
   const handleChange = useCallback(
     (newValue: string) => {
-      if (bindingPath) {
+      if (!disabled && bindingPath) {
         onDataChange(bindingPath, newValue)
       }
     },
-    [bindingPath, onDataChange]
+    [bindingPath, disabled, onDataChange]
   )
 
   return (
@@ -39,12 +40,13 @@ export const A2UIInputOTP = memo(function A2UIInputOTP({
       className={cn("space-y-1.5", component.className)}
       style={component.style as React.CSSProperties}
     >
-      {component.label && <Label>{component.label}</Label>}
+      {component.label && <Label htmlFor={component.id}>{component.label}</Label>}
       <InputOTP
+        id={component.id}
         maxLength={maxLength}
         value={value}
         onChange={handleChange}
-        disabled={component.disabled}
+        disabled={disabled}
       >
         <InputOTPGroup>
           {Array.from({ length: maxLength }).map((_, i) => (

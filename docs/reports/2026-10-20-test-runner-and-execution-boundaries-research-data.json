@@ -1,0 +1,2638 @@
+{
+  "date": "2026-10-20",
+  "scope": "Read-only source research and temporary in-memory experiments; no production or test configuration patch retained.",
+  "environment": {
+    "platform": "macOS arm64",
+    "node": "26.5.0",
+    "jest": "30.5.2",
+    "logicalCpus": 14,
+    "memoryGiB": 48,
+    "sharedDirtyTree": true
+  },
+  "method": {
+    "rawDirectory": ".cache/test-resource-research-2026-10-20/continuation-02",
+    "sampling": "ps descendant-tree RSS approximately every 200 ms; process count includes runner and compiler descendants",
+    "profiling": "Jest CJS executor counts and first-evaluation parent edges; not all imports/cache hits",
+    "timing": "Fresh child process, warm transform cache; presenter comparison alternates 10 pairs after one warmup per variant; no executor profiling in timing comparison",
+    "threshold": "At least 10 percent and more than twice larger MAD for performance acceptance",
+    "nodeLimit": "Three existing temporary-fixture files; three quiet samples per policy. Early overlapping screens excluded; no full-lane performance extrapolation."
+  },
+  "sourceHashesBefore": {
+    "lib/plugin/core/manager.ts": "359d50814706d6447fed825ca95e3e247c3ccf4dee8fe4094935e1a936d34381",
+    "lib/plugin/core/manager.test.ts": "1ea60096f7775d5df6aab1f736fc8eccaed72e227c364ec86392f53462c7c810",
+    "lib/plugin/core/context.ts": "37a4611cf7b55f8e82d579108a9f45e0aa8124d6b281c62a1d48f1cc05e4011e",
+    "lib/plugin/api/workflow-author-api.ts": "0661f316bc71cba37097a9cf3dbc0af363af6c715a3c2d1f776d752668253527",
+    "lib/plugin/api/bot-integration-binding.ts": "c00c2323cecc3c672a12cfd9879819f633ee3eac87afb3f1cf485eee76c37bdf",
+    "lib/workflow/runtime/execution-authority.ts": "2d3fa84c99e8043b88962a508e936a5f9a53ac4957da6be6f588e19a45b0b810",
+    "lib/workflow/runtime/run-from-step.ts": "bd75532102f97696be5fec9ed849102821377bc386b8c909702074a0b4a65666",
+    "lib/workflow/nodes/built-ins/index.ts": "fadd4ebf065daf94c6e926f7c96cdc845fa6006cbe20aac1fe2de74ce4e9d6ab",
+    "lib/workflow/nodes/registry.ts": "0ba015d2cdbc756c70112321b188f11c491e887bfed59536042fc66c8e2f4bea",
+    "lib/connectors/bus.ts": "6784caaf9ec659041b8467b12c33d8c598ee4d7bfc50f9d88b2dd01827128d13",
+    "lib/connectors/commands/dispatch.ts": "c1cca021b947007d9eb99eebb7071c4f8d48cba7235c5af767ca11bb2db78fe9",
+    "lib/connectors/commands/goal.ts": "92464ba1a9a61cd348303e23e5903cb9155fbb7a468c400f8d62b8ce481939b7",
+    "lib/plugin/core/vscode-loader.test.ts": "0d66b6d0ac9a796c0ac766f73b13bc80122f0802abc422d73d307ee1989b564f",
+    "lib/plugin/core/vscode-loader.ts": "173a27c9577029bfb7e931a588c63f6aae9f780842ddb31891ad68e0bbbb2a11",
+    "jest.config.ts": "ce6f2051bb10a3949fb7b71bbdec0baa5cd60d9401c98b37a7e85a7d2b88562d"
+  },
+  "sourceDrift": [],
+  "managerScreens": {
+    "control": {
+      "profile": [
+        {
+          "suite": "lib/plugin/core/manager.test.ts",
+          "distinctFiles": 3663,
+          "evaluations": 7203,
+          "resetCalls": 0
+        }
+      ],
+      "tests": {
+        "success": true,
+        "numPassedTests": 267,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      }
+    },
+    "workflow": {
+      "profile": [
+        {
+          "suite": "lib/plugin/core/manager.test.ts",
+          "distinctFiles": 3374,
+          "evaluations": 6622,
+          "resetCalls": 0
+        }
+      ],
+      "tests": {
+        "success": true,
+        "numPassedTests": 267,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      }
+    },
+    "connector": {
+      "profile": [
+        {
+          "suite": "lib/plugin/core/manager.test.ts",
+          "distinctFiles": 3623,
+          "evaluations": 7123,
+          "resetCalls": 0
+        }
+      ],
+      "tests": {
+        "success": true,
+        "numPassedTests": 267,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      }
+    },
+    "combined": {
+      "profile": [
+        {
+          "suite": "lib/plugin/core/manager.test.ts",
+          "distinctFiles": 3334,
+          "evaluations": 6542,
+          "resetCalls": 0
+        }
+      ],
+      "tests": {
+        "success": true,
+        "numPassedTests": 267,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      }
+    },
+    "commands": {
+      "profile": [
+        {
+          "suite": "lib/plugin/core/manager.test.ts",
+          "distinctFiles": 3173,
+          "evaluations": 6219,
+          "resetCalls": 0
+        }
+      ],
+      "tests": {
+        "success": true,
+        "numPassedTests": 267,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      }
+    }
+  },
+  "behaviorChecks": {
+    "control-guard": {
+      "tests": {
+        "success": true,
+        "numPassedTests": 268,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/plugin/core/manager.test.ts",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/control-guard.results.json"
+        ],
+        "exit": 0,
+        "wallSec": 10.424,
+        "peakTreeRssMiB": 1407.5,
+        "maxProcesses": 5
+      }
+    },
+    "commands-guard": {
+      "tests": {
+        "success": false,
+        "numPassedTests": 267,
+        "numFailedTests": 1,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 0,
+        "numFailedTestSuites": 1,
+        "numRuntimeErrorTestSuites": 0
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/plugin/core/manager.test.ts",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/commands-guard.results.json"
+        ],
+        "exit": 1,
+        "wallSec": 13.757,
+        "peakTreeRssMiB": 1392.1,
+        "maxProcesses": 5
+      }
+    },
+    "commands-contracts": {
+      "tests": {
+        "success": false,
+        "numPassedTests": 144,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 5,
+        "numFailedTestSuites": 1,
+        "numRuntimeErrorTestSuites": 1
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/plugin/api/workflow-author-api.test.ts",
+          "lib/plugin/api/bot-integration-binding.test.ts",
+          "lib/connectors/commands/dispatch.test.ts",
+          "lib/connectors/commands/goal.test.ts",
+          "lib/connectors/ai-loop/safe-send-prompt.test.ts",
+          "lib/workflow/nodes/registry.test.ts",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/commands-contracts.results.json"
+        ],
+        "exit": 1,
+        "wallSec": 14.069,
+        "peakTreeRssMiB": 1782.7,
+        "maxProcesses": 5
+      }
+    },
+    "safe-send-baseline": {
+      "tests": {
+        "success": false,
+        "numPassedTests": 0,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 0,
+        "numFailedTestSuites": 1,
+        "numRuntimeErrorTestSuites": 1
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/connectors/ai-loop/safe-send-prompt.test.ts",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/safe-send-baseline.results.json"
+        ],
+        "exit": 1,
+        "wallSec": 19.657,
+        "peakTreeRssMiB": 995.8,
+        "maxProcesses": 5
+      }
+    },
+    "reset-targeted-control": {
+      "tests": {
+        "success": true,
+        "numPassedTests": 3,
+        "numFailedTests": 0,
+        "numPendingTests": 18,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/plugin/core/vscode-loader.test.ts",
+          "-t",
+          "calls plugin_load_vscode|propagates Tauri load|propagates Tauri activate",
+          "--testTimeout=5000",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/reset-targeted-control.results.json"
+        ],
+        "exit": 0,
+        "wallSec": 12.682,
+        "peakTreeRssMiB": 1418.2,
+        "maxProcesses": 5
+      }
+    },
+    "vscode-no-reset-targeted": {
+      "tests": {
+        "success": false,
+        "numPassedTests": 1,
+        "numFailedTests": 2,
+        "numPendingTests": 18,
+        "numPassedTestSuites": 0,
+        "numFailedTestSuites": 1,
+        "numRuntimeErrorTestSuites": 0
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/plugin/core/vscode-loader.test.ts",
+          "-t",
+          "calls plugin_load_vscode|propagates Tauri load|propagates Tauri activate",
+          "--testTimeout=5000",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-no-reset-targeted.results.json"
+        ],
+        "exit": 1,
+        "wallSec": 11.203,
+        "peakTreeRssMiB": 1437.1,
+        "maxProcesses": 5
+      }
+    },
+    "vscode-presenter-lazy-dom": {
+      "tests": {
+        "success": true,
+        "numPassedTests": 8,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numRuntimeErrorTestSuites": 0
+      },
+      "resources": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "components/plugins/vscode/vscode-window-presenter.test.tsx",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-presenter-lazy-dom.results.json"
+        ],
+        "exit": 0,
+        "wallSec": 10.345,
+        "peakTreeRssMiB": 1267.8,
+        "maxProcesses": 5
+      }
+    }
+  },
+  "resetScreen": {
+    "profiles": [
+      {
+        "suite": "lib/plugin/core/loader.test.ts",
+        "distinctFiles": 1338,
+        "evaluations": 2804,
+        "resetCalls": 4
+      },
+      {
+        "suite": "lib/plugin/core/vscode-loader.test.ts",
+        "distinctFiles": 1428,
+        "evaluations": 9905,
+        "resetCalls": 21
+      },
+      {
+        "suite": "lib/workflow/runtime/tauri-bridge.test.ts",
+        "distinctFiles": 747,
+        "evaluations": 1278,
+        "resetCalls": 19
+      },
+      {
+        "suite": "lib/plugin/core/plugin-asset-resolver.test.ts",
+        "distinctFiles": 71,
+        "evaluations": 73,
+        "resetCalls": 3
+      }
+    ],
+    "tests": {
+      "success": true,
+      "numPassedTests": 101,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numPassedTestSuites": 4,
+      "numFailedTestSuites": 0,
+      "numRuntimeErrorTestSuites": 0
+    },
+    "noResetFullTimeout": {
+      "command": [
+        "pnpm",
+        "test",
+        "--",
+        "lib/plugin/core/vscode-loader.test.ts",
+        "--runInBand",
+        "--silent",
+        "--json",
+        "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-no-reset.results.json"
+      ],
+      "exit": -15,
+      "wallSec": 180.108,
+      "peakTreeRssMiB": 1346.5,
+      "maxProcesses": 5
+    }
+  },
+  "presenterScreen": {
+    "profile": [
+      {
+        "suite": "components/plugins/vscode/vscode-window-presenter.test.tsx",
+        "distinctFiles": 1063,
+        "evaluations": 1070,
+        "resetCalls": 0
+      },
+      {
+        "suite": "lib/plugin/core/vscode-loader.test.ts",
+        "distinctFiles": 1304,
+        "evaluations": 8789,
+        "resetCalls": 21
+      }
+    ],
+    "tests": {
+      "success": true,
+      "numPassedTests": 28,
+      "numFailedTests": 0,
+      "numPendingTests": 0,
+      "numPassedTestSuites": 2,
+      "numFailedTestSuites": 0,
+      "numRuntimeErrorTestSuites": 0
+    }
+  },
+  "presenterTiming": {
+    "control": {
+      "runs": [
+        {
+          "label": "vscode-plain-control-0",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-0.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.963,
+          "peakTreeRssMiB": 1464.2,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-1",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-1.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.531,
+          "peakTreeRssMiB": 1460.9,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-2",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-2.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.46,
+          "peakTreeRssMiB": 1480.5,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-3",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-3.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 12.505,
+          "peakTreeRssMiB": 1279.4,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-4",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-4.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 12.918,
+          "peakTreeRssMiB": 1463.1,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-5",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-5.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.726,
+          "peakTreeRssMiB": 1475.3,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-6",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-6.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 11.187,
+          "peakTreeRssMiB": 1468.5,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-7",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-7.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 13.883,
+          "peakTreeRssMiB": 1176.2,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-8",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-8.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 11.221,
+          "peakTreeRssMiB": 1470.8,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-control-9",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-control-9.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 9.287,
+          "peakTreeRssMiB": 1446.5,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        }
+      ],
+      "statistics": {
+        "wallSec": {
+          "median": 11.075,
+          "mad": 0.5794999999999986,
+          "min": 9.287,
+          "max": 13.883
+        },
+        "peakTreeRssMiB": {
+          "median": 1463.65,
+          "mad": 9.399999999999864,
+          "min": 1176.2,
+          "max": 1480.5
+        },
+        "maxProcesses": {
+          "median": 5.0,
+          "mad": 0.0,
+          "min": 5,
+          "max": 5
+        }
+      }
+    },
+    "vscode-presenter-lazy": {
+      "runs": [
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-0",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-0.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.035,
+          "peakTreeRssMiB": 1472.5,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-1",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-1.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.021,
+          "peakTreeRssMiB": 1480.4,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-2",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-2.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.868,
+          "peakTreeRssMiB": 1443.3,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-3",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-3.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 11.343,
+          "peakTreeRssMiB": 1405.6,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-4",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-4.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 13.492,
+          "peakTreeRssMiB": 1391.3,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-5",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-5.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 10.348,
+          "peakTreeRssMiB": 1469.8,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-6",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-6.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 11.506,
+          "peakTreeRssMiB": 1492.4,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-7",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-7.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 11.343,
+          "peakTreeRssMiB": 1462.4,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-8",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-8.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 13.333,
+          "peakTreeRssMiB": 1202.4,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        },
+        {
+          "label": "vscode-plain-vscode-presenter-lazy-9",
+          "command": [
+            "pnpm",
+            "test",
+            "--",
+            "lib/plugin/core/vscode-loader.test.ts",
+            "--runInBand",
+            "--silent",
+            "--json",
+            "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-research-2026-10-20/continuation-02/vscode-plain-vscode-presenter-lazy-9.results.json"
+          ],
+          "exit": 0,
+          "wallSec": 9.616,
+          "peakTreeRssMiB": 1453.3,
+          "maxProcesses": 5,
+          "tests": {
+            "success": true,
+            "numPassedTests": 21,
+            "numFailedTests": 0,
+            "numPendingTests": 0,
+            "numPassedTestSuites": 1,
+            "numFailedTestSuites": 0,
+            "numRuntimeErrorTestSuites": 0
+          }
+        }
+      ],
+      "statistics": {
+        "wallSec": {
+          "median": 11.1055,
+          "mad": 0.9139999999999988,
+          "min": 9.616,
+          "max": 13.492
+        },
+        "peakTreeRssMiB": {
+          "median": 1457.85,
+          "mad": 18.600000000000136,
+          "min": 1202.4,
+          "max": 1492.4
+        },
+        "maxProcesses": {
+          "median": 5.0,
+          "mad": 0.0,
+          "min": 5,
+          "max": 5
+        }
+      }
+    }
+  },
+  "nodeTiming": {
+    "default": {
+      "runs": [
+        {
+          "label": "node-quiet-default-0",
+          "command": [
+            "node",
+            "--test",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 1.156,
+          "peakTreeRssMiB": 366.5,
+          "maxProcesses": 8,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        },
+        {
+          "label": "node-quiet-default-1",
+          "command": [
+            "node",
+            "--test",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 0.913,
+          "peakTreeRssMiB": 373.1,
+          "maxProcesses": 9,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        },
+        {
+          "label": "node-quiet-default-2",
+          "command": [
+            "node",
+            "--test",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 0.916,
+          "peakTreeRssMiB": 411.6,
+          "maxProcesses": 9,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        }
+      ],
+      "statistics": {
+        "wallSec": {
+          "median": 0.916,
+          "mad": 0.0030000000000000027,
+          "min": 0.913,
+          "max": 1.156
+        },
+        "peakTreeRssMiB": {
+          "median": 373.1,
+          "mad": 6.600000000000023,
+          "min": 366.5,
+          "max": 411.6
+        },
+        "maxProcesses": {
+          "median": 9,
+          "mad": 0,
+          "min": 8,
+          "max": 9
+        }
+      }
+    },
+    "two": {
+      "runs": [
+        {
+          "label": "node-quiet-two-0",
+          "command": [
+            "node",
+            "--test",
+            "--test-concurrency=2",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 2.469,
+          "peakTreeRssMiB": 288.5,
+          "maxProcesses": 6,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        },
+        {
+          "label": "node-quiet-two-1",
+          "command": [
+            "node",
+            "--test",
+            "--test-concurrency=2",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 0.926,
+          "peakTreeRssMiB": 290.3,
+          "maxProcesses": 6,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        },
+        {
+          "label": "node-quiet-two-2",
+          "command": [
+            "node",
+            "--test",
+            "--test-concurrency=2",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 0.916,
+          "peakTreeRssMiB": 282.7,
+          "maxProcesses": 6,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        }
+      ],
+      "statistics": {
+        "wallSec": {
+          "median": 0.926,
+          "mad": 0.010000000000000009,
+          "min": 0.916,
+          "max": 2.469
+        },
+        "peakTreeRssMiB": {
+          "median": 288.5,
+          "mad": 1.8000000000000114,
+          "min": 282.7,
+          "max": 290.3
+        },
+        "maxProcesses": {
+          "median": 6,
+          "mad": 0,
+          "min": 6,
+          "max": 6
+        }
+      }
+    },
+    "serial": {
+      "runs": [
+        {
+          "label": "node-quiet-serial-0",
+          "command": [
+            "node",
+            "--test",
+            "--test-concurrency=1",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 2.546,
+          "peakTreeRssMiB": 199.1,
+          "maxProcesses": 4,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        },
+        {
+          "label": "node-quiet-serial-1",
+          "command": [
+            "node",
+            "--test",
+            "--test-concurrency=1",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 2.312,
+          "peakTreeRssMiB": 201.7,
+          "maxProcesses": 4,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        },
+        {
+          "label": "node-quiet-serial-2",
+          "command": [
+            "node",
+            "--test",
+            "--test-concurrency=1",
+            "scripts/build/build-browser-builtin-plugins.test.mjs",
+            "scripts/build/build-workflow-app-embed.test.mjs",
+            "scripts/build/bundle-tui-fixture.test.mjs"
+          ],
+          "exit": 1,
+          "wallSec": 1.595,
+          "peakTreeRssMiB": 201.1,
+          "maxProcesses": 4,
+          "tests": {
+            "pass": 12,
+            "fail": 1
+          }
+        }
+      ],
+      "statistics": {
+        "wallSec": {
+          "median": 2.312,
+          "mad": 0.23399999999999999,
+          "min": 1.595,
+          "max": 2.546
+        },
+        "peakTreeRssMiB": {
+          "median": 201.1,
+          "mad": 0.5999999999999943,
+          "min": 199.1,
+          "max": 201.7
+        },
+        "maxProcesses": {
+          "median": 4,
+          "mad": 0,
+          "min": 4,
+          "max": 4
+        }
+      }
+    }
+  },
+  "confirmedFailures": [
+    {
+      "file": "scripts/build/build-browser-builtin-plugins.test.mjs",
+      "error": "57 !== 54",
+      "cause": "Curated source has 57 entries; test hard-codes 54.",
+      "retained": true
+    },
+    {
+      "file": "lib/connectors/ai-loop/safe-send-prompt.test.ts",
+      "error": "TypeError: Class extends value undefined is not a constructor or null",
+      "cause": "Full task-workspace/client mock omits WorkspacePortLeaseError, which managed-workspace extends.",
+      "retained": true
+    }
+  ],
+  "verdicts": {
+    "nodeBudget": "Priority candidate; implement explicit argv/wrapper budget, then measure complete groups. Small n=3 failing-fixture sample is exploratory.",
+    "manager": "13.7 percent fewer evaluations, but initial built-in registry population differs. Needs explicit initialization contract before production implementation.",
+    "resetRemoval": "Rejected: focused error propagation checks fail and full-file run reaches 180 second deadline.",
+    "presenterLazy": "No meaningful end-to-end gain: approximately +0.3 percent wall time and -0.4 percent RSS. No production patch retained.",
+    "ideValidator": "10,536,499 byte generated CSP-safe validator loaded nine times; attribution target only. Generator already disables inlineRefs."
+  },
+  "implementationFollowUp": {
+    "date": "2026-10-20",
+    "revision": "07eb0d44b5567f815bbdf70bcb7693f518a9a38d",
+    "sharedDirtyTree": true,
+    "rawDirectory": ".cache/test-resource-fixes-2026-10-20",
+    "contract": "# Node test runner budget experiment\n\n2026-10-20, macOS arm64, Node 26.5.0, shared dirty checkout. User outcome: bound resource use of Node script-test groups while preserving all test selections and behavior. Primary metric: sampled descendant-tree peak RSS; wall time/process count and test outcomes are guardrails.\n\nFix fixture drift first, identically for both policies. Compare the complete existing build script-test selection at Node default concurrency versus a portable wrapper capped at two by default (one on a single available CPU). CLI and NODE_TEST_CONCURRENCY overrides must preserve Node validation and test selectors. Use fresh processes, warm existing caches, no cache deletion, one warmup per policy, three alternating samples per policy for these high-cost complete groups; report median/MAD and ranges. A separate ten-pair repeat of the prior three fixture files can resolve short-workload noise if warranted.\n\nAccept a resource governance policy for its deterministic worker bound, independent of speed claims. Claim measured full-lane resource improvement only if median RSS improves at least 15 percent and exceeds twice the larger MAD. Report wall-time regression explicitly; no blanket throughput claim. Missing dependencies/baseline failures remain visible; no assertions removed.\n\nAlso run the complete bounded gates group and CI script group after wiring. Retain cargo preparation in the CI command; inspect execution costs before running and bound task-owned processes. Signal/exit forwarding, argument precedence and real runner fan-out must have focused regression checks. No coverage, real provider calls, application/native build, or production import/reset changes. Allowed mutations: owned test fixes, a dedicated Node runner and tests, package script entry points, evidence reports and ignored logs.\n",
+    "beforeAndAfter": {
+      "default": {
+        "runs": [
+          {
+            "command": [
+              "node",
+              "--test",
+              "scripts/build/assert-tauri-frontend.test.mjs",
+              "scripts/build/build-a2ui-sidecar.test.mjs",
+              "scripts/build/build-artifact-runtime.test.mjs",
+              "scripts/build/build-browser-builtin-plugins.test.mjs",
+              "scripts/build/build-builtin-skills.test.mjs",
+              "scripts/build/build-external-agent-launcher.test.mjs",
+              "scripts/build/build-mcp-sidecar.test.mjs",
+              "scripts/build/build-sidecar-linked-packages.test.mjs",
+              "scripts/build/build-sign-in-icons.test.mjs",
+              "scripts/build/build-status-site.test.mjs",
+              "scripts/build/build-support-docs.test.mjs",
+              "scripts/build/build-terminal-host-sidecar.test.mjs",
+              "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+              "scripts/build/build-webclone-sidecar.test.mjs",
+              "scripts/build/build-workflow-app-embed.test.mjs",
+              "scripts/build/bundle-agent-versions.test.mjs",
+              "scripts/build/bundle-tui-fixture.test.mjs",
+              "scripts/build/clean-stale-turbopack-cache.test.mjs",
+              "scripts/build/clean-stale-webpack-cache.test.mjs",
+              "scripts/build/cli-artifact-integrity.test.mjs",
+              "scripts/build/cli-artifact-size.test.mjs",
+              "scripts/build/cli-bun-contract.test.mjs",
+              "scripts/build/dependency-dedupe.test.mjs",
+              "scripts/build/dev-cli.test.mjs",
+              "scripts/build/docs-search-worker.test.mjs",
+              "scripts/build/download-cubism-core.test.mjs",
+              "scripts/build/download-share-wallpapers.test.mjs",
+              "scripts/build/ensure-native-hosts.test.mjs",
+              "scripts/build/esbuild-input-cache.test.mjs",
+              "scripts/build/esbuild-shared.test.mjs",
+              "scripts/build/gen-agent-capabilities.test.mjs",
+              "scripts/build/gen-companion-api.test.mjs",
+              "scripts/build/gen-external-agent-runtimes.test.mjs",
+              "scripts/build/gen-settings-sync.test.mjs",
+              "scripts/build/generate-lucide-catalog.test.mjs",
+              "scripts/build/lib/build-linked-packages.test.mjs",
+              "scripts/build/lib/bun-sidecar-patches.test.mjs",
+              "scripts/build/lib/companion-known-commands.test.mjs",
+              "scripts/build/lib/copy-runtime-closure.test.mjs",
+              "scripts/build/lib/generated-json.test.mjs",
+              "scripts/build/lib/mcp-host-bridge.test.mjs",
+              "scripts/build/lib/newest-mtime.test.mjs",
+              "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+              "scripts/build/lib/prune-sidecar-residue.test.mjs",
+              "scripts/build/lib/sidecar-version-info.test.mjs",
+              "scripts/build/lib/stage-ast-grep.test.mjs",
+              "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+              "scripts/build/lib/stage-claude-runtime.test.mjs",
+              "scripts/build/lib/stage-pi-extension.test.mjs",
+              "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+              "scripts/build/managed-desktop-context.test.mjs",
+              "scripts/build/managed-desktop-release.test.mjs",
+              "scripts/build/mcp-bridge-runtime.test.mjs",
+              "scripts/build/mobile-config.test.mjs",
+              "scripts/build/native-host-files.test.mjs",
+              "scripts/build/package-host-archive.test.mjs",
+              "scripts/build/prepare-docs-pages.test.mjs",
+              "scripts/build/prepare-mobile.test.mjs",
+              "scripts/build/prepare-plugin-node.test.mjs",
+              "scripts/build/run-tauri-system-node.test.mjs",
+              "scripts/build/sidecar-bundle-resources.test.mjs",
+              "scripts/build/sign-cli-bun.test.mjs",
+              "scripts/build/stage-browser-runtime.test.mjs",
+              "scripts/build/stage-bundled-plugins.test.mjs",
+              "scripts/build/test-bundle-cache.test.mjs",
+              "scripts/build/verify-agent-host-package.test.mjs"
+            ],
+            "exit": 1,
+            "wallSec": 70.555,
+            "peakTreeRssMiB": 3526.9,
+            "maxProcesses": 24,
+            "label": "build-default-0",
+            "tests": {
+              "tests": 438,
+              "pass": 434,
+              "fail": 4,
+              "skipped": 0
+            },
+            "failureLocations": [
+              "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+              "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+              "scripts/build/gen-companion-api.test.mjs:151:1",
+              "scripts/build/gen-companion-api.test.mjs:823:1"
+            ],
+            "failedTestNames": [
+              "browser socket tickets require a session-bound canonical request",
+              "root analysis builds generated entrypoints before resolving them",
+              "scheduler response contracts admit every persisted task type",
+              "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+            ]
+          },
+          {
+            "command": [
+              "node",
+              "--test",
+              "scripts/build/assert-tauri-frontend.test.mjs",
+              "scripts/build/build-a2ui-sidecar.test.mjs",
+              "scripts/build/build-artifact-runtime.test.mjs",
+              "scripts/build/build-browser-builtin-plugins.test.mjs",
+              "scripts/build/build-builtin-skills.test.mjs",
+              "scripts/build/build-external-agent-launcher.test.mjs",
+              "scripts/build/build-mcp-sidecar.test.mjs",
+              "scripts/build/build-sidecar-linked-packages.test.mjs",
+              "scripts/build/build-sign-in-icons.test.mjs",
+              "scripts/build/build-status-site.test.mjs",
+              "scripts/build/build-support-docs.test.mjs",
+              "scripts/build/build-terminal-host-sidecar.test.mjs",
+              "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+              "scripts/build/build-webclone-sidecar.test.mjs",
+              "scripts/build/build-workflow-app-embed.test.mjs",
+              "scripts/build/bundle-agent-versions.test.mjs",
+              "scripts/build/bundle-tui-fixture.test.mjs",
+              "scripts/build/clean-stale-turbopack-cache.test.mjs",
+              "scripts/build/clean-stale-webpack-cache.test.mjs",
+              "scripts/build/cli-artifact-integrity.test.mjs",
+              "scripts/build/cli-artifact-size.test.mjs",
+              "scripts/build/cli-bun-contract.test.mjs",
+              "scripts/build/dependency-dedupe.test.mjs",
+              "scripts/build/dev-cli.test.mjs",
+              "scripts/build/docs-search-worker.test.mjs",
+              "scripts/build/download-cubism-core.test.mjs",
+              "scripts/build/download-share-wallpapers.test.mjs",
+              "scripts/build/ensure-native-hosts.test.mjs",
+              "scripts/build/esbuild-input-cache.test.mjs",
+              "scripts/build/esbuild-shared.test.mjs",
+              "scripts/build/gen-agent-capabilities.test.mjs",
+              "scripts/build/gen-companion-api.test.mjs",
+              "scripts/build/gen-external-agent-runtimes.test.mjs",
+              "scripts/build/gen-settings-sync.test.mjs",
+              "scripts/build/generate-lucide-catalog.test.mjs",
+              "scripts/build/lib/build-linked-packages.test.mjs",
+              "scripts/build/lib/bun-sidecar-patches.test.mjs",
+              "scripts/build/lib/companion-known-commands.test.mjs",
+              "scripts/build/lib/copy-runtime-closure.test.mjs",
+              "scripts/build/lib/generated-json.test.mjs",
+              "scripts/build/lib/mcp-host-bridge.test.mjs",
+              "scripts/build/lib/newest-mtime.test.mjs",
+              "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+              "scripts/build/lib/prune-sidecar-residue.test.mjs",
+              "scripts/build/lib/sidecar-version-info.test.mjs",
+              "scripts/build/lib/stage-ast-grep.test.mjs",
+              "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+              "scripts/build/lib/stage-claude-runtime.test.mjs",
+              "scripts/build/lib/stage-pi-extension.test.mjs",
+              "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+              "scripts/build/managed-desktop-context.test.mjs",
+              "scripts/build/managed-desktop-release.test.mjs",
+              "scripts/build/mcp-bridge-runtime.test.mjs",
+              "scripts/build/mobile-config.test.mjs",
+              "scripts/build/native-host-files.test.mjs",
+              "scripts/build/package-host-archive.test.mjs",
+              "scripts/build/prepare-docs-pages.test.mjs",
+              "scripts/build/prepare-mobile.test.mjs",
+              "scripts/build/prepare-plugin-node.test.mjs",
+              "scripts/build/run-tauri-system-node.test.mjs",
+              "scripts/build/sidecar-bundle-resources.test.mjs",
+              "scripts/build/sign-cli-bun.test.mjs",
+              "scripts/build/stage-browser-runtime.test.mjs",
+              "scripts/build/stage-bundled-plugins.test.mjs",
+              "scripts/build/test-bundle-cache.test.mjs",
+              "scripts/build/verify-agent-host-package.test.mjs"
+            ],
+            "exit": 1,
+            "wallSec": 70.936,
+            "peakTreeRssMiB": 3141.9,
+            "maxProcesses": 26,
+            "label": "build-default-1",
+            "tests": {
+              "tests": 438,
+              "pass": 434,
+              "fail": 4,
+              "skipped": 0
+            },
+            "failureLocations": [
+              "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+              "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+              "scripts/build/gen-companion-api.test.mjs:151:1",
+              "scripts/build/gen-companion-api.test.mjs:823:1"
+            ],
+            "failedTestNames": [
+              "browser socket tickets require a session-bound canonical request",
+              "root analysis builds generated entrypoints before resolving them",
+              "scheduler response contracts admit every persisted task type",
+              "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+            ]
+          },
+          {
+            "command": [
+              "node",
+              "--test",
+              "scripts/build/assert-tauri-frontend.test.mjs",
+              "scripts/build/build-a2ui-sidecar.test.mjs",
+              "scripts/build/build-artifact-runtime.test.mjs",
+              "scripts/build/build-browser-builtin-plugins.test.mjs",
+              "scripts/build/build-builtin-skills.test.mjs",
+              "scripts/build/build-external-agent-launcher.test.mjs",
+              "scripts/build/build-mcp-sidecar.test.mjs",
+              "scripts/build/build-sidecar-linked-packages.test.mjs",
+              "scripts/build/build-sign-in-icons.test.mjs",
+              "scripts/build/build-status-site.test.mjs",
+              "scripts/build/build-support-docs.test.mjs",
+              "scripts/build/build-terminal-host-sidecar.test.mjs",
+              "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+              "scripts/build/build-webclone-sidecar.test.mjs",
+              "scripts/build/build-workflow-app-embed.test.mjs",
+              "scripts/build/bundle-agent-versions.test.mjs",
+              "scripts/build/bundle-tui-fixture.test.mjs",
+              "scripts/build/clean-stale-turbopack-cache.test.mjs",
+              "scripts/build/clean-stale-webpack-cache.test.mjs",
+              "scripts/build/cli-artifact-integrity.test.mjs",
+              "scripts/build/cli-artifact-size.test.mjs",
+              "scripts/build/cli-bun-contract.test.mjs",
+              "scripts/build/dependency-dedupe.test.mjs",
+              "scripts/build/dev-cli.test.mjs",
+              "scripts/build/docs-search-worker.test.mjs",
+              "scripts/build/download-cubism-core.test.mjs",
+              "scripts/build/download-share-wallpapers.test.mjs",
+              "scripts/build/ensure-native-hosts.test.mjs",
+              "scripts/build/esbuild-input-cache.test.mjs",
+              "scripts/build/esbuild-shared.test.mjs",
+              "scripts/build/gen-agent-capabilities.test.mjs",
+              "scripts/build/gen-companion-api.test.mjs",
+              "scripts/build/gen-external-agent-runtimes.test.mjs",
+              "scripts/build/gen-settings-sync.test.mjs",
+              "scripts/build/generate-lucide-catalog.test.mjs",
+              "scripts/build/lib/build-linked-packages.test.mjs",
+              "scripts/build/lib/bun-sidecar-patches.test.mjs",
+              "scripts/build/lib/companion-known-commands.test.mjs",
+              "scripts/build/lib/copy-runtime-closure.test.mjs",
+              "scripts/build/lib/generated-json.test.mjs",
+              "scripts/build/lib/mcp-host-bridge.test.mjs",
+              "scripts/build/lib/newest-mtime.test.mjs",
+              "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+              "scripts/build/lib/prune-sidecar-residue.test.mjs",
+              "scripts/build/lib/sidecar-version-info.test.mjs",
+              "scripts/build/lib/stage-ast-grep.test.mjs",
+              "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+              "scripts/build/lib/stage-claude-runtime.test.mjs",
+              "scripts/build/lib/stage-pi-extension.test.mjs",
+              "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+              "scripts/build/managed-desktop-context.test.mjs",
+              "scripts/build/managed-desktop-release.test.mjs",
+              "scripts/build/mcp-bridge-runtime.test.mjs",
+              "scripts/build/mobile-config.test.mjs",
+              "scripts/build/native-host-files.test.mjs",
+              "scripts/build/package-host-archive.test.mjs",
+              "scripts/build/prepare-docs-pages.test.mjs",
+              "scripts/build/prepare-mobile.test.mjs",
+              "scripts/build/prepare-plugin-node.test.mjs",
+              "scripts/build/run-tauri-system-node.test.mjs",
+              "scripts/build/sidecar-bundle-resources.test.mjs",
+              "scripts/build/sign-cli-bun.test.mjs",
+              "scripts/build/stage-browser-runtime.test.mjs",
+              "scripts/build/stage-bundled-plugins.test.mjs",
+              "scripts/build/test-bundle-cache.test.mjs",
+              "scripts/build/verify-agent-host-package.test.mjs"
+            ],
+            "exit": 1,
+            "wallSec": 70.164,
+            "peakTreeRssMiB": 3030.9,
+            "maxProcesses": 24,
+            "label": "build-default-2",
+            "tests": {
+              "tests": 438,
+              "pass": 434,
+              "fail": 4,
+              "skipped": 0
+            },
+            "failureLocations": [
+              "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+              "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+              "scripts/build/gen-companion-api.test.mjs:151:1",
+              "scripts/build/gen-companion-api.test.mjs:823:1"
+            ],
+            "failedTestNames": [
+              "browser socket tickets require a session-bound canonical request",
+              "root analysis builds generated entrypoints before resolving them",
+              "scheduler response contracts admit every persisted task type",
+              "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+            ]
+          }
+        ],
+        "statistics": {
+          "wallSec": {
+            "median": 70.555,
+            "mad": 0.3810000000000002,
+            "range": [70.164, 70.936]
+          },
+          "peakTreeRssMiB": {
+            "median": 3141.9,
+            "mad": 111.0,
+            "range": [3030.9, 3526.9]
+          },
+          "maxProcesses": {
+            "median": 24,
+            "mad": 0,
+            "range": [24, 26]
+          }
+        }
+      },
+      "bounded": {
+        "runs": [
+          {
+            "command": [
+              "node",
+              "scripts/test/node.mjs",
+              "scripts/build/assert-tauri-frontend.test.mjs",
+              "scripts/build/build-a2ui-sidecar.test.mjs",
+              "scripts/build/build-artifact-runtime.test.mjs",
+              "scripts/build/build-browser-builtin-plugins.test.mjs",
+              "scripts/build/build-builtin-skills.test.mjs",
+              "scripts/build/build-external-agent-launcher.test.mjs",
+              "scripts/build/build-mcp-sidecar.test.mjs",
+              "scripts/build/build-sidecar-linked-packages.test.mjs",
+              "scripts/build/build-sign-in-icons.test.mjs",
+              "scripts/build/build-status-site.test.mjs",
+              "scripts/build/build-support-docs.test.mjs",
+              "scripts/build/build-terminal-host-sidecar.test.mjs",
+              "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+              "scripts/build/build-webclone-sidecar.test.mjs",
+              "scripts/build/build-workflow-app-embed.test.mjs",
+              "scripts/build/bundle-agent-versions.test.mjs",
+              "scripts/build/bundle-tui-fixture.test.mjs",
+              "scripts/build/clean-stale-turbopack-cache.test.mjs",
+              "scripts/build/clean-stale-webpack-cache.test.mjs",
+              "scripts/build/cli-artifact-integrity.test.mjs",
+              "scripts/build/cli-artifact-size.test.mjs",
+              "scripts/build/cli-bun-contract.test.mjs",
+              "scripts/build/dependency-dedupe.test.mjs",
+              "scripts/build/dev-cli.test.mjs",
+              "scripts/build/docs-search-worker.test.mjs",
+              "scripts/build/download-cubism-core.test.mjs",
+              "scripts/build/download-share-wallpapers.test.mjs",
+              "scripts/build/ensure-native-hosts.test.mjs",
+              "scripts/build/esbuild-input-cache.test.mjs",
+              "scripts/build/esbuild-shared.test.mjs",
+              "scripts/build/gen-agent-capabilities.test.mjs",
+              "scripts/build/gen-companion-api.test.mjs",
+              "scripts/build/gen-external-agent-runtimes.test.mjs",
+              "scripts/build/gen-settings-sync.test.mjs",
+              "scripts/build/generate-lucide-catalog.test.mjs",
+              "scripts/build/lib/build-linked-packages.test.mjs",
+              "scripts/build/lib/bun-sidecar-patches.test.mjs",
+              "scripts/build/lib/companion-known-commands.test.mjs",
+              "scripts/build/lib/copy-runtime-closure.test.mjs",
+              "scripts/build/lib/generated-json.test.mjs",
+              "scripts/build/lib/mcp-host-bridge.test.mjs",
+              "scripts/build/lib/newest-mtime.test.mjs",
+              "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+              "scripts/build/lib/prune-sidecar-residue.test.mjs",
+              "scripts/build/lib/sidecar-version-info.test.mjs",
+              "scripts/build/lib/stage-ast-grep.test.mjs",
+              "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+              "scripts/build/lib/stage-claude-runtime.test.mjs",
+              "scripts/build/lib/stage-pi-extension.test.mjs",
+              "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+              "scripts/build/managed-desktop-context.test.mjs",
+              "scripts/build/managed-desktop-release.test.mjs",
+              "scripts/build/mcp-bridge-runtime.test.mjs",
+              "scripts/build/mobile-config.test.mjs",
+              "scripts/build/native-host-files.test.mjs",
+              "scripts/build/package-host-archive.test.mjs",
+              "scripts/build/prepare-docs-pages.test.mjs",
+              "scripts/build/prepare-mobile.test.mjs",
+              "scripts/build/prepare-plugin-node.test.mjs",
+              "scripts/build/run-tauri-system-node.test.mjs",
+              "scripts/build/sidecar-bundle-resources.test.mjs",
+              "scripts/build/sign-cli-bun.test.mjs",
+              "scripts/build/stage-browser-runtime.test.mjs",
+              "scripts/build/stage-bundled-plugins.test.mjs",
+              "scripts/build/test-bundle-cache.test.mjs",
+              "scripts/build/verify-agent-host-package.test.mjs"
+            ],
+            "exit": 1,
+            "wallSec": 75.321,
+            "peakTreeRssMiB": 2834.6,
+            "maxProcesses": 8,
+            "label": "build-bounded-0",
+            "tests": {
+              "tests": 438,
+              "pass": 434,
+              "fail": 4,
+              "skipped": 0
+            },
+            "failureLocations": [
+              "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+              "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+              "scripts/build/gen-companion-api.test.mjs:151:1",
+              "scripts/build/gen-companion-api.test.mjs:823:1"
+            ],
+            "failedTestNames": [
+              "browser socket tickets require a session-bound canonical request",
+              "root analysis builds generated entrypoints before resolving them",
+              "scheduler response contracts admit every persisted task type",
+              "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+            ]
+          },
+          {
+            "command": [
+              "node",
+              "scripts/test/node.mjs",
+              "scripts/build/assert-tauri-frontend.test.mjs",
+              "scripts/build/build-a2ui-sidecar.test.mjs",
+              "scripts/build/build-artifact-runtime.test.mjs",
+              "scripts/build/build-browser-builtin-plugins.test.mjs",
+              "scripts/build/build-builtin-skills.test.mjs",
+              "scripts/build/build-external-agent-launcher.test.mjs",
+              "scripts/build/build-mcp-sidecar.test.mjs",
+              "scripts/build/build-sidecar-linked-packages.test.mjs",
+              "scripts/build/build-sign-in-icons.test.mjs",
+              "scripts/build/build-status-site.test.mjs",
+              "scripts/build/build-support-docs.test.mjs",
+              "scripts/build/build-terminal-host-sidecar.test.mjs",
+              "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+              "scripts/build/build-webclone-sidecar.test.mjs",
+              "scripts/build/build-workflow-app-embed.test.mjs",
+              "scripts/build/bundle-agent-versions.test.mjs",
+              "scripts/build/bundle-tui-fixture.test.mjs",
+              "scripts/build/clean-stale-turbopack-cache.test.mjs",
+              "scripts/build/clean-stale-webpack-cache.test.mjs",
+              "scripts/build/cli-artifact-integrity.test.mjs",
+              "scripts/build/cli-artifact-size.test.mjs",
+              "scripts/build/cli-bun-contract.test.mjs",
+              "scripts/build/dependency-dedupe.test.mjs",
+              "scripts/build/dev-cli.test.mjs",
+              "scripts/build/docs-search-worker.test.mjs",
+              "scripts/build/download-cubism-core.test.mjs",
+              "scripts/build/download-share-wallpapers.test.mjs",
+              "scripts/build/ensure-native-hosts.test.mjs",
+              "scripts/build/esbuild-input-cache.test.mjs",
+              "scripts/build/esbuild-shared.test.mjs",
+              "scripts/build/gen-agent-capabilities.test.mjs",
+              "scripts/build/gen-companion-api.test.mjs",
+              "scripts/build/gen-external-agent-runtimes.test.mjs",
+              "scripts/build/gen-settings-sync.test.mjs",
+              "scripts/build/generate-lucide-catalog.test.mjs",
+              "scripts/build/lib/build-linked-packages.test.mjs",
+              "scripts/build/lib/bun-sidecar-patches.test.mjs",
+              "scripts/build/lib/companion-known-commands.test.mjs",
+              "scripts/build/lib/copy-runtime-closure.test.mjs",
+              "scripts/build/lib/generated-json.test.mjs",
+              "scripts/build/lib/mcp-host-bridge.test.mjs",
+              "scripts/build/lib/newest-mtime.test.mjs",
+              "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+              "scripts/build/lib/prune-sidecar-residue.test.mjs",
+              "scripts/build/lib/sidecar-version-info.test.mjs",
+              "scripts/build/lib/stage-ast-grep.test.mjs",
+              "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+              "scripts/build/lib/stage-claude-runtime.test.mjs",
+              "scripts/build/lib/stage-pi-extension.test.mjs",
+              "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+              "scripts/build/managed-desktop-context.test.mjs",
+              "scripts/build/managed-desktop-release.test.mjs",
+              "scripts/build/mcp-bridge-runtime.test.mjs",
+              "scripts/build/mobile-config.test.mjs",
+              "scripts/build/native-host-files.test.mjs",
+              "scripts/build/package-host-archive.test.mjs",
+              "scripts/build/prepare-docs-pages.test.mjs",
+              "scripts/build/prepare-mobile.test.mjs",
+              "scripts/build/prepare-plugin-node.test.mjs",
+              "scripts/build/run-tauri-system-node.test.mjs",
+              "scripts/build/sidecar-bundle-resources.test.mjs",
+              "scripts/build/sign-cli-bun.test.mjs",
+              "scripts/build/stage-browser-runtime.test.mjs",
+              "scripts/build/stage-bundled-plugins.test.mjs",
+              "scripts/build/test-bundle-cache.test.mjs",
+              "scripts/build/verify-agent-host-package.test.mjs"
+            ],
+            "exit": 1,
+            "wallSec": 75.627,
+            "peakTreeRssMiB": 2696.5,
+            "maxProcesses": 8,
+            "label": "build-bounded-1",
+            "tests": {
+              "tests": 438,
+              "pass": 434,
+              "fail": 4,
+              "skipped": 0
+            },
+            "failureLocations": [
+              "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+              "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+              "scripts/build/gen-companion-api.test.mjs:151:1",
+              "scripts/build/gen-companion-api.test.mjs:823:1"
+            ],
+            "failedTestNames": [
+              "browser socket tickets require a session-bound canonical request",
+              "root analysis builds generated entrypoints before resolving them",
+              "scheduler response contracts admit every persisted task type",
+              "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+            ]
+          },
+          {
+            "command": [
+              "node",
+              "scripts/test/node.mjs",
+              "scripts/build/assert-tauri-frontend.test.mjs",
+              "scripts/build/build-a2ui-sidecar.test.mjs",
+              "scripts/build/build-artifact-runtime.test.mjs",
+              "scripts/build/build-browser-builtin-plugins.test.mjs",
+              "scripts/build/build-builtin-skills.test.mjs",
+              "scripts/build/build-external-agent-launcher.test.mjs",
+              "scripts/build/build-mcp-sidecar.test.mjs",
+              "scripts/build/build-sidecar-linked-packages.test.mjs",
+              "scripts/build/build-sign-in-icons.test.mjs",
+              "scripts/build/build-status-site.test.mjs",
+              "scripts/build/build-support-docs.test.mjs",
+              "scripts/build/build-terminal-host-sidecar.test.mjs",
+              "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+              "scripts/build/build-webclone-sidecar.test.mjs",
+              "scripts/build/build-workflow-app-embed.test.mjs",
+              "scripts/build/bundle-agent-versions.test.mjs",
+              "scripts/build/bundle-tui-fixture.test.mjs",
+              "scripts/build/clean-stale-turbopack-cache.test.mjs",
+              "scripts/build/clean-stale-webpack-cache.test.mjs",
+              "scripts/build/cli-artifact-integrity.test.mjs",
+              "scripts/build/cli-artifact-size.test.mjs",
+              "scripts/build/cli-bun-contract.test.mjs",
+              "scripts/build/dependency-dedupe.test.mjs",
+              "scripts/build/dev-cli.test.mjs",
+              "scripts/build/docs-search-worker.test.mjs",
+              "scripts/build/download-cubism-core.test.mjs",
+              "scripts/build/download-share-wallpapers.test.mjs",
+              "scripts/build/ensure-native-hosts.test.mjs",
+              "scripts/build/esbuild-input-cache.test.mjs",
+              "scripts/build/esbuild-shared.test.mjs",
+              "scripts/build/gen-agent-capabilities.test.mjs",
+              "scripts/build/gen-companion-api.test.mjs",
+              "scripts/build/gen-external-agent-runtimes.test.mjs",
+              "scripts/build/gen-settings-sync.test.mjs",
+              "scripts/build/generate-lucide-catalog.test.mjs",
+              "scripts/build/lib/build-linked-packages.test.mjs",
+              "scripts/build/lib/bun-sidecar-patches.test.mjs",
+              "scripts/build/lib/companion-known-commands.test.mjs",
+              "scripts/build/lib/copy-runtime-closure.test.mjs",
+              "scripts/build/lib/generated-json.test.mjs",
+              "scripts/build/lib/mcp-host-bridge.test.mjs",
+              "scripts/build/lib/newest-mtime.test.mjs",
+              "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+              "scripts/build/lib/prune-sidecar-residue.test.mjs",
+              "scripts/build/lib/sidecar-version-info.test.mjs",
+              "scripts/build/lib/stage-ast-grep.test.mjs",
+              "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+              "scripts/build/lib/stage-claude-runtime.test.mjs",
+              "scripts/build/lib/stage-pi-extension.test.mjs",
+              "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+              "scripts/build/managed-desktop-context.test.mjs",
+              "scripts/build/managed-desktop-release.test.mjs",
+              "scripts/build/mcp-bridge-runtime.test.mjs",
+              "scripts/build/mobile-config.test.mjs",
+              "scripts/build/native-host-files.test.mjs",
+              "scripts/build/package-host-archive.test.mjs",
+              "scripts/build/prepare-docs-pages.test.mjs",
+              "scripts/build/prepare-mobile.test.mjs",
+              "scripts/build/prepare-plugin-node.test.mjs",
+              "scripts/build/run-tauri-system-node.test.mjs",
+              "scripts/build/sidecar-bundle-resources.test.mjs",
+              "scripts/build/sign-cli-bun.test.mjs",
+              "scripts/build/stage-browser-runtime.test.mjs",
+              "scripts/build/stage-bundled-plugins.test.mjs",
+              "scripts/build/test-bundle-cache.test.mjs",
+              "scripts/build/verify-agent-host-package.test.mjs"
+            ],
+            "exit": 1,
+            "wallSec": 76.639,
+            "peakTreeRssMiB": 2648.4,
+            "maxProcesses": 8,
+            "label": "build-bounded-2",
+            "tests": {
+              "tests": 438,
+              "pass": 434,
+              "fail": 4,
+              "skipped": 0
+            },
+            "failureLocations": [
+              "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+              "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+              "scripts/build/gen-companion-api.test.mjs:151:1",
+              "scripts/build/gen-companion-api.test.mjs:823:1"
+            ],
+            "failedTestNames": [
+              "browser socket tickets require a session-bound canonical request",
+              "root analysis builds generated entrypoints before resolving them",
+              "scheduler response contracts admit every persisted task type",
+              "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+            ]
+          }
+        ],
+        "statistics": {
+          "wallSec": {
+            "median": 75.627,
+            "mad": 0.3059999999999974,
+            "range": [75.321, 76.639]
+          },
+          "peakTreeRssMiB": {
+            "median": 2696.5,
+            "mad": 48.09999999999991,
+            "range": [2648.4, 2834.6]
+          },
+          "maxProcesses": {
+            "median": 8,
+            "mad": 0,
+            "range": [8, 8]
+          }
+        }
+      }
+    },
+    "warmups": {
+      "default": {
+        "command": [
+          "node",
+          "--test",
+          "scripts/build/assert-tauri-frontend.test.mjs",
+          "scripts/build/build-a2ui-sidecar.test.mjs",
+          "scripts/build/build-artifact-runtime.test.mjs",
+          "scripts/build/build-browser-builtin-plugins.test.mjs",
+          "scripts/build/build-builtin-skills.test.mjs",
+          "scripts/build/build-external-agent-launcher.test.mjs",
+          "scripts/build/build-mcp-sidecar.test.mjs",
+          "scripts/build/build-sidecar-linked-packages.test.mjs",
+          "scripts/build/build-sign-in-icons.test.mjs",
+          "scripts/build/build-status-site.test.mjs",
+          "scripts/build/build-support-docs.test.mjs",
+          "scripts/build/build-terminal-host-sidecar.test.mjs",
+          "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+          "scripts/build/build-webclone-sidecar.test.mjs",
+          "scripts/build/build-workflow-app-embed.test.mjs",
+          "scripts/build/bundle-agent-versions.test.mjs",
+          "scripts/build/bundle-tui-fixture.test.mjs",
+          "scripts/build/clean-stale-turbopack-cache.test.mjs",
+          "scripts/build/clean-stale-webpack-cache.test.mjs",
+          "scripts/build/cli-artifact-integrity.test.mjs",
+          "scripts/build/cli-artifact-size.test.mjs",
+          "scripts/build/cli-bun-contract.test.mjs",
+          "scripts/build/dependency-dedupe.test.mjs",
+          "scripts/build/dev-cli.test.mjs",
+          "scripts/build/docs-search-worker.test.mjs",
+          "scripts/build/download-cubism-core.test.mjs",
+          "scripts/build/download-share-wallpapers.test.mjs",
+          "scripts/build/ensure-native-hosts.test.mjs",
+          "scripts/build/esbuild-input-cache.test.mjs",
+          "scripts/build/esbuild-shared.test.mjs",
+          "scripts/build/gen-agent-capabilities.test.mjs",
+          "scripts/build/gen-companion-api.test.mjs",
+          "scripts/build/gen-external-agent-runtimes.test.mjs",
+          "scripts/build/gen-settings-sync.test.mjs",
+          "scripts/build/generate-lucide-catalog.test.mjs",
+          "scripts/build/managed-desktop-context.test.mjs",
+          "scripts/build/managed-desktop-release.test.mjs",
+          "scripts/build/mcp-bridge-runtime.test.mjs",
+          "scripts/build/mobile-config.test.mjs",
+          "scripts/build/native-host-files.test.mjs",
+          "scripts/build/package-host-archive.test.mjs",
+          "scripts/build/prepare-docs-pages.test.mjs",
+          "scripts/build/prepare-mobile.test.mjs",
+          "scripts/build/prepare-plugin-node.test.mjs",
+          "scripts/build/run-tauri-system-node.test.mjs",
+          "scripts/build/sidecar-bundle-resources.test.mjs",
+          "scripts/build/sign-cli-bun.test.mjs",
+          "scripts/build/stage-browser-runtime.test.mjs",
+          "scripts/build/stage-bundled-plugins.test.mjs",
+          "scripts/build/test-bundle-cache.test.mjs",
+          "scripts/build/verify-agent-host-package.test.mjs",
+          "scripts/build/lib/build-linked-packages.test.mjs",
+          "scripts/build/lib/bun-sidecar-patches.test.mjs",
+          "scripts/build/lib/companion-known-commands.test.mjs",
+          "scripts/build/lib/copy-runtime-closure.test.mjs",
+          "scripts/build/lib/generated-json.test.mjs",
+          "scripts/build/lib/mcp-host-bridge.test.mjs",
+          "scripts/build/lib/newest-mtime.test.mjs",
+          "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+          "scripts/build/lib/prune-sidecar-residue.test.mjs",
+          "scripts/build/lib/sidecar-version-info.test.mjs",
+          "scripts/build/lib/stage-ast-grep.test.mjs",
+          "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+          "scripts/build/lib/stage-claude-runtime.test.mjs",
+          "scripts/build/lib/stage-pi-extension.test.mjs",
+          "scripts/build/lib/webclone-bundle-plugin.test.mjs"
+        ],
+        "exit": 1,
+        "wallSec": 71.356,
+        "peakTreeRssMiB": 3228.7,
+        "maxProcesses": 25,
+        "label": "build-warmup-default",
+        "tests": {
+          "tests": 438,
+          "pass": 434,
+          "fail": 4,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+          "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+          "scripts/build/gen-companion-api.test.mjs:151:1",
+          "scripts/build/gen-companion-api.test.mjs:823:1"
+        ],
+        "failedTestNames": [
+          "browser socket tickets require a session-bound canonical request",
+          "root analysis builds generated entrypoints before resolving them",
+          "scheduler response contracts admit every persisted task type",
+          "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+        ]
+      },
+      "bounded": {
+        "command": [
+          "node",
+          "scripts/test/node.mjs",
+          "scripts/build/assert-tauri-frontend.test.mjs",
+          "scripts/build/build-a2ui-sidecar.test.mjs",
+          "scripts/build/build-artifact-runtime.test.mjs",
+          "scripts/build/build-browser-builtin-plugins.test.mjs",
+          "scripts/build/build-builtin-skills.test.mjs",
+          "scripts/build/build-external-agent-launcher.test.mjs",
+          "scripts/build/build-mcp-sidecar.test.mjs",
+          "scripts/build/build-sidecar-linked-packages.test.mjs",
+          "scripts/build/build-sign-in-icons.test.mjs",
+          "scripts/build/build-status-site.test.mjs",
+          "scripts/build/build-support-docs.test.mjs",
+          "scripts/build/build-terminal-host-sidecar.test.mjs",
+          "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+          "scripts/build/build-webclone-sidecar.test.mjs",
+          "scripts/build/build-workflow-app-embed.test.mjs",
+          "scripts/build/bundle-agent-versions.test.mjs",
+          "scripts/build/bundle-tui-fixture.test.mjs",
+          "scripts/build/clean-stale-turbopack-cache.test.mjs",
+          "scripts/build/clean-stale-webpack-cache.test.mjs",
+          "scripts/build/cli-artifact-integrity.test.mjs",
+          "scripts/build/cli-artifact-size.test.mjs",
+          "scripts/build/cli-bun-contract.test.mjs",
+          "scripts/build/dependency-dedupe.test.mjs",
+          "scripts/build/dev-cli.test.mjs",
+          "scripts/build/docs-search-worker.test.mjs",
+          "scripts/build/download-cubism-core.test.mjs",
+          "scripts/build/download-share-wallpapers.test.mjs",
+          "scripts/build/ensure-native-hosts.test.mjs",
+          "scripts/build/esbuild-input-cache.test.mjs",
+          "scripts/build/esbuild-shared.test.mjs",
+          "scripts/build/gen-agent-capabilities.test.mjs",
+          "scripts/build/gen-companion-api.test.mjs",
+          "scripts/build/gen-external-agent-runtimes.test.mjs",
+          "scripts/build/gen-settings-sync.test.mjs",
+          "scripts/build/generate-lucide-catalog.test.mjs",
+          "scripts/build/lib/build-linked-packages.test.mjs",
+          "scripts/build/lib/bun-sidecar-patches.test.mjs",
+          "scripts/build/lib/companion-known-commands.test.mjs",
+          "scripts/build/lib/copy-runtime-closure.test.mjs",
+          "scripts/build/lib/generated-json.test.mjs",
+          "scripts/build/lib/mcp-host-bridge.test.mjs",
+          "scripts/build/lib/newest-mtime.test.mjs",
+          "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+          "scripts/build/lib/prune-sidecar-residue.test.mjs",
+          "scripts/build/lib/sidecar-version-info.test.mjs",
+          "scripts/build/lib/stage-ast-grep.test.mjs",
+          "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+          "scripts/build/lib/stage-claude-runtime.test.mjs",
+          "scripts/build/lib/stage-pi-extension.test.mjs",
+          "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+          "scripts/build/managed-desktop-context.test.mjs",
+          "scripts/build/managed-desktop-release.test.mjs",
+          "scripts/build/mcp-bridge-runtime.test.mjs",
+          "scripts/build/mobile-config.test.mjs",
+          "scripts/build/native-host-files.test.mjs",
+          "scripts/build/package-host-archive.test.mjs",
+          "scripts/build/prepare-docs-pages.test.mjs",
+          "scripts/build/prepare-mobile.test.mjs",
+          "scripts/build/prepare-plugin-node.test.mjs",
+          "scripts/build/run-tauri-system-node.test.mjs",
+          "scripts/build/sidecar-bundle-resources.test.mjs",
+          "scripts/build/sign-cli-bun.test.mjs",
+          "scripts/build/stage-browser-runtime.test.mjs",
+          "scripts/build/stage-bundled-plugins.test.mjs",
+          "scripts/build/test-bundle-cache.test.mjs",
+          "scripts/build/verify-agent-host-package.test.mjs"
+        ],
+        "exit": 1,
+        "wallSec": 74.141,
+        "peakTreeRssMiB": 3088.3,
+        "maxProcesses": 9,
+        "label": "build-warmup-bounded",
+        "tests": {
+          "tests": 438,
+          "pass": 434,
+          "fail": 4,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+          "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+          "scripts/build/gen-companion-api.test.mjs:151:1",
+          "scripts/build/gen-companion-api.test.mjs:823:1"
+        ],
+        "failedTestNames": [
+          "browser socket tickets require a session-bound canonical request",
+          "root analysis builds generated entrypoints before resolving them",
+          "scheduler response contracts admit every persisted task type",
+          "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+        ]
+      }
+    },
+    "checks": {
+      "runner-and-builtins": {
+        "command": [
+          "node",
+          "--test",
+          "scripts/test/node.test.mjs",
+          "scripts/build/build-browser-builtin-plugins.test.mjs"
+        ],
+        "exit": 1,
+        "wallSec": 2.034,
+        "peakTreeRssMiB": 470.4,
+        "maxProcesses": 9,
+        "label": "runner-and-builtins",
+        "tests": {
+          "tests": 14,
+          "pass": 13,
+          "fail": 1,
+          "skipped": 0
+        },
+        "failureLocations": ["scripts/test/node.test.mjs:118:1"],
+        "failedTestNames": ["signalling only the wrapper terminates its runner and test worker"]
+      },
+      "runner-and-builtins-final": {
+        "command": [
+          "node",
+          "--test",
+          "scripts/test/node.test.mjs",
+          "scripts/build/build-browser-builtin-plugins.test.mjs"
+        ],
+        "exit": 0,
+        "wallSec": 1.817,
+        "peakTreeRssMiB": 463.7,
+        "maxProcesses": 9,
+        "label": "runner-and-builtins-final",
+        "tests": {
+          "tests": 14,
+          "pass": 14,
+          "fail": 0,
+          "skipped": 0
+        },
+        "failureLocations": [],
+        "failedTestNames": []
+      },
+      "focused-jest": {
+        "command": [
+          "pnpm",
+          "test",
+          "--",
+          "lib/connectors/ai-loop/safe-send-prompt.test.ts",
+          "lib/task-workspace/managed-workspace.test.ts",
+          "lib/plugin/core/manager.test.ts",
+          "lib/plugin/core/vscode-loader.test.ts",
+          "--runInBand",
+          "--silent",
+          "--json",
+          "--outputFile=/Users/bytedance/Project/cognia-next/.cache/test-resource-fixes-2026-10-20/focused-jest.results.json"
+        ],
+        "exit": 0,
+        "wallSec": 14.615,
+        "peakTreeRssMiB": 1740.5,
+        "maxProcesses": 5,
+        "label": "focused-jest",
+        "failureLocations": [],
+        "failedTestNames": []
+      },
+      "bounded-gates": {
+        "command": ["pnpm", "run", "scripts:test:gates"],
+        "exit": 1,
+        "wallSec": 14.179,
+        "peakTreeRssMiB": 1951.8,
+        "maxProcesses": 9,
+        "label": "bounded-gates",
+        "tests": {
+          "tests": 866,
+          "pass": 862,
+          "fail": 4,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/gates/check-colocated-tests.test.mjs:246:1",
+          "scripts/gates/check-deploy-suite.test.mjs:332:1",
+          "scripts/gates/check-gate-registry.test.mjs:114:1",
+          "scripts/gates/check-identity-vocabulary.test.mjs:81:1"
+        ],
+        "failedTestNames": [
+          "live: the real repo matches its baseline",
+          "live: the real repo satisfies the meta-gate",
+          "the committed baseline matches the tree \u2014 the gate is green as shipped",
+          "the web image activates bounded CI static generation inside its build container"
+        ]
+      },
+      "bounded-gates-final": {
+        "command": ["pnpm", "run", "scripts:test:gates"],
+        "exit": 1,
+        "wallSec": 9.708,
+        "peakTreeRssMiB": 2216.5,
+        "maxProcesses": 9,
+        "label": "bounded-gates-final",
+        "tests": {
+          "tests": 866,
+          "pass": 862,
+          "fail": 4,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/gates/check-colocated-tests.test.mjs:246:1",
+          "scripts/gates/check-deploy-suite.test.mjs:332:1",
+          "scripts/gates/check-gate-registry.test.mjs:114:1",
+          "scripts/gates/check-identity-vocabulary.test.mjs:81:1"
+        ],
+        "failedTestNames": [
+          "live: the real repo matches its baseline",
+          "live: the real repo satisfies the meta-gate",
+          "the committed baseline matches the tree \u2014 the gate is green as shipped",
+          "the web image activates bounded CI static generation inside its build container"
+        ]
+      },
+      "gates-default-final": {
+        "command": [
+          "node",
+          "--test",
+          "scripts/gates/check-acp-v1-contract.test.mjs",
+          "scripts/gates/check-adapter-capability-parity.test.mjs",
+          "scripts/gates/check-adr-catalog.test.mjs",
+          "scripts/gates/check-agent-capabilities.test.mjs",
+          "scripts/gates/check-agent-control-methods.test.mjs",
+          "scripts/gates/check-agent-host-image.test.mjs",
+          "scripts/gates/check-ai-elements-adoption.test.mjs",
+          "scripts/gates/check-all.test.mjs",
+          "scripts/gates/check-claude-md.test.mjs",
+          "scripts/gates/check-clippy.test.mjs",
+          "scripts/gates/check-colocated-tests.test.mjs",
+          "scripts/gates/check-command-grammar.test.mjs",
+          "scripts/gates/check-command-parity.test.mjs",
+          "scripts/gates/check-companion-command-manifest.test.mjs",
+          "scripts/gates/check-data-governance.test.mjs",
+          "scripts/gates/check-deploy-suite.test.mjs",
+          "scripts/gates/check-docs-links.test.mjs",
+          "scripts/gates/check-e2e-governance.test.mjs",
+          "scripts/gates/check-external-agent-runtimes.test.mjs",
+          "scripts/gates/check-frozen-wasm-api.test.mjs",
+          "scripts/gates/check-gate-registry.test.mjs",
+          "scripts/gates/check-headless-registry.test.mjs",
+          "scripts/gates/check-host-parity.test.mjs",
+          "scripts/gates/check-identity-vocabulary.test.mjs",
+          "scripts/gates/check-invoke-arg-parity.test.mjs",
+          "scripts/gates/check-llm-ledger-boundary.test.mjs",
+          "scripts/gates/check-loading-states.test.mjs",
+          "scripts/gates/check-network-egress.test.mjs",
+          "scripts/gates/check-package-boundaries.test.mjs",
+          "scripts/gates/check-pii-boundaries.test.mjs",
+          "scripts/gates/check-plugin-externals.test.mjs",
+          "scripts/gates/check-plugin-hooks.test.mjs",
+          "scripts/gates/check-pro-ide-constants.test.mjs",
+          "scripts/gates/check-pro-ide-perf.test.mjs",
+          "scripts/gates/check-provider-name-branches.test.mjs",
+          "scripts/gates/check-provider-operation-manifest.test.mjs",
+          "scripts/gates/check-root-loading-boundaries.test.mjs",
+          "scripts/gates/check-router-fusion-gate.test.mjs",
+          "scripts/gates/check-rpc-semantic-parity.test.mjs",
+          "scripts/gates/check-rust-architecture.test.mjs",
+          "scripts/gates/check-sdk-surface.test.mjs",
+          "scripts/gates/check-sidecar-architecture.test.mjs",
+          "scripts/gates/check-silent-failure-flags.test.mjs",
+          "scripts/gates/check-static-export.test.mjs",
+          "scripts/gates/check-surface-usage.test.mjs",
+          "scripts/gates/check-unreachable-components.test.mjs",
+          "scripts/gates/check-vscode-api-coverage.test.mjs",
+          "scripts/gates/check-workspace-attribution.test.mjs",
+          "scripts/gates/typecheck-root.test.mjs",
+          "scripts/gates/typescript-toolchain.test.mjs",
+          "scripts/gates/lib/companion-source-paths.test.mjs",
+          "scripts/gates/lib/generate-handler.test.mjs",
+          "scripts/gates/lib/sdk-surface.test.mjs"
+        ],
+        "exit": 1,
+        "wallSec": 4.318,
+        "peakTreeRssMiB": 1988.8,
+        "maxProcesses": 21,
+        "label": "gates-default-final",
+        "tests": {
+          "tests": 866,
+          "pass": 862,
+          "fail": 4,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/gates/check-colocated-tests.test.mjs:246:1",
+          "scripts/gates/check-deploy-suite.test.mjs:332:1",
+          "scripts/gates/check-gate-registry.test.mjs:114:1",
+          "scripts/gates/check-identity-vocabulary.test.mjs:81:1"
+        ],
+        "failedTestNames": [
+          "live: the real repo matches its baseline",
+          "live: the real repo satisfies the meta-gate",
+          "the committed baseline matches the tree \u2014 the gate is green as shipped",
+          "the web image activates bounded CI static generation inside its build container"
+        ]
+      },
+      "bounded-ci": {
+        "command": ["pnpm", "run", "scripts:test:ci"],
+        "exit": 1,
+        "wallSec": 54.091,
+        "peakTreeRssMiB": 1315.1,
+        "maxProcesses": 15,
+        "label": "bounded-ci",
+        "tests": {
+          "tests": 522,
+          "pass": 520,
+          "fail": 2,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/ci/feishu/workflow.test.mjs:11:1",
+          "scripts/test/merge-coverage.test.mjs:142:1"
+        ],
+        "failedTestNames": [
+          "Feishu covers every source workflow without recursively notifying itself",
+          "coverage source manifest stays synchronized with Jest"
+        ]
+      },
+      "ci-failure-baseline": {
+        "command": [
+          "node",
+          "--test",
+          "scripts/ci/feishu/workflow.test.mjs",
+          "scripts/test/merge-coverage.test.mjs"
+        ],
+        "exit": 1,
+        "wallSec": 0.229,
+        "peakTreeRssMiB": 1.2,
+        "maxProcesses": 1,
+        "label": "ci-failure-baseline",
+        "tests": {
+          "tests": 16,
+          "pass": 14,
+          "fail": 2,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/ci/feishu/workflow.test.mjs:11:1",
+          "scripts/test/merge-coverage.test.mjs:142:1"
+        ],
+        "failedTestNames": [
+          "Feishu covers every source workflow without recursively notifying itself",
+          "coverage source manifest stays synchronized with Jest"
+        ]
+      },
+      "bounded-build-final": {
+        "command": ["pnpm", "run", "scripts:test:build"],
+        "exit": 1,
+        "wallSec": 74.704,
+        "peakTreeRssMiB": 2957.1,
+        "maxProcesses": 11,
+        "label": "bounded-build-final",
+        "tests": {
+          "tests": 438,
+          "pass": 434,
+          "fail": 4,
+          "skipped": 0
+        },
+        "failureLocations": [
+          "scripts/build/build-sidecar-linked-packages.test.mjs:127:1",
+          "scripts/build/build-webclone-sidecar.test.mjs:14:1",
+          "scripts/build/gen-companion-api.test.mjs:151:1",
+          "scripts/build/gen-companion-api.test.mjs:823:1"
+        ],
+        "failedTestNames": [
+          "browser socket tickets require a session-bound canonical request",
+          "root analysis builds generated entrypoints before resolving them",
+          "scheduler response contracts admit every persisted task type",
+          "the sidecar tsconfig maps exactly the linked packages to their source, for bundlers"
+        ]
+      },
+      "typecheck": {
+        "command": ["pnpm", "typecheck"],
+        "exit": 2,
+        "wallSec": 50.915,
+        "peakTreeRssMiB": 10764.6,
+        "maxProcesses": 5,
+        "label": "typecheck",
+        "failureLocations": [],
+        "failedTestNames": []
+      },
+      "lint": {
+        "command": ["pnpm", "lint"],
+        "exit": 1,
+        "wallSec": 18.484,
+        "peakTreeRssMiB": 1881.0,
+        "maxProcesses": 3,
+        "label": "lint",
+        "failureLocations": [],
+        "failedTestNames": ["4937 problems (81 errors, 4856 warnings)"]
+      },
+      "lint-i18n": {
+        "command": ["pnpm", "lint:i18n"],
+        "exit": 0,
+        "wallSec": 4.954,
+        "peakTreeRssMiB": 746.0,
+        "maxProcesses": 3,
+        "label": "lint-i18n",
+        "failureLocations": [],
+        "failedTestNames": []
+      },
+      "i18n-sort": {
+        "command": ["pnpm", "i18n:sort:check"],
+        "exit": 0,
+        "wallSec": 0.453,
+        "peakTreeRssMiB": 271.0,
+        "maxProcesses": 2,
+        "label": "i18n-sort",
+        "failureLocations": [],
+        "failedTestNames": []
+      }
+    },
+    "buildSelection": [
+      "scripts/build/assert-tauri-frontend.test.mjs",
+      "scripts/build/build-a2ui-sidecar.test.mjs",
+      "scripts/build/build-artifact-runtime.test.mjs",
+      "scripts/build/build-browser-builtin-plugins.test.mjs",
+      "scripts/build/build-builtin-skills.test.mjs",
+      "scripts/build/build-external-agent-launcher.test.mjs",
+      "scripts/build/build-mcp-sidecar.test.mjs",
+      "scripts/build/build-sidecar-linked-packages.test.mjs",
+      "scripts/build/build-sign-in-icons.test.mjs",
+      "scripts/build/build-status-site.test.mjs",
+      "scripts/build/build-support-docs.test.mjs",
+      "scripts/build/build-terminal-host-sidecar.test.mjs",
+      "scripts/build/build-vscode-ext-host-sidecar.test.mjs",
+      "scripts/build/build-webclone-sidecar.test.mjs",
+      "scripts/build/build-workflow-app-embed.test.mjs",
+      "scripts/build/bundle-agent-versions.test.mjs",
+      "scripts/build/bundle-tui-fixture.test.mjs",
+      "scripts/build/clean-stale-turbopack-cache.test.mjs",
+      "scripts/build/clean-stale-webpack-cache.test.mjs",
+      "scripts/build/cli-artifact-integrity.test.mjs",
+      "scripts/build/cli-artifact-size.test.mjs",
+      "scripts/build/cli-bun-contract.test.mjs",
+      "scripts/build/dependency-dedupe.test.mjs",
+      "scripts/build/dev-cli.test.mjs",
+      "scripts/build/docs-search-worker.test.mjs",
+      "scripts/build/download-cubism-core.test.mjs",
+      "scripts/build/download-share-wallpapers.test.mjs",
+      "scripts/build/ensure-native-hosts.test.mjs",
+      "scripts/build/esbuild-input-cache.test.mjs",
+      "scripts/build/esbuild-shared.test.mjs",
+      "scripts/build/gen-agent-capabilities.test.mjs",
+      "scripts/build/gen-companion-api.test.mjs",
+      "scripts/build/gen-external-agent-runtimes.test.mjs",
+      "scripts/build/gen-settings-sync.test.mjs",
+      "scripts/build/generate-lucide-catalog.test.mjs",
+      "scripts/build/lib/build-linked-packages.test.mjs",
+      "scripts/build/lib/bun-sidecar-patches.test.mjs",
+      "scripts/build/lib/companion-known-commands.test.mjs",
+      "scripts/build/lib/copy-runtime-closure.test.mjs",
+      "scripts/build/lib/generated-json.test.mjs",
+      "scripts/build/lib/mcp-host-bridge.test.mjs",
+      "scripts/build/lib/newest-mtime.test.mjs",
+      "scripts/build/lib/prefer-esm-entry-plugin.test.mjs",
+      "scripts/build/lib/prune-sidecar-residue.test.mjs",
+      "scripts/build/lib/sidecar-version-info.test.mjs",
+      "scripts/build/lib/stage-ast-grep.test.mjs",
+      "scripts/build/lib/stage-builtin-plugin-assets.test.mjs",
+      "scripts/build/lib/stage-claude-runtime.test.mjs",
+      "scripts/build/lib/stage-pi-extension.test.mjs",
+      "scripts/build/lib/webclone-bundle-plugin.test.mjs",
+      "scripts/build/managed-desktop-context.test.mjs",
+      "scripts/build/managed-desktop-release.test.mjs",
+      "scripts/build/mcp-bridge-runtime.test.mjs",
+      "scripts/build/mobile-config.test.mjs",
+      "scripts/build/native-host-files.test.mjs",
+      "scripts/build/package-host-archive.test.mjs",
+      "scripts/build/prepare-docs-pages.test.mjs",
+      "scripts/build/prepare-mobile.test.mjs",
+      "scripts/build/prepare-plugin-node.test.mjs",
+      "scripts/build/run-tauri-system-node.test.mjs",
+      "scripts/build/sidecar-bundle-resources.test.mjs",
+      "scripts/build/sign-cli-bun.test.mjs",
+      "scripts/build/stage-browser-runtime.test.mjs",
+      "scripts/build/stage-bundled-plugins.test.mjs",
+      "scripts/build/test-bundle-cache.test.mjs",
+      "scripts/build/verify-agent-host-package.test.mjs"
+    ],
+    "sourceHashesAtMeasurement": {
+      "package.json": "5a1a41ea2f616374150b9539c144c59821e3a28512c6485997344def77114a18",
+      "pnpm-lock.yaml": "cf7691daf1b9e830d7bfa0d26d5fed482d81c592f8b54801a9d317bf09f35ffb",
+      "protocol/acp/v1/contract.json": "b5d8e9f7296a6c6b75c64fb2e6627830baf9b1d5f05154f8794529d306e50e65",
+      "protocol/acp/v1/meta.json": "061edb6efa8fb2aa2792459a86ec7268de5fe665bba48b2ffe7939df01481f88",
+      "protocol/acp/v1/meta.unstable.json": "3026898232badf413624010d1343e20bef853e6705c62d6b56387cf9de6b0543",
+      "protocol/agent-capabilities.json": "df03c7cada05fb34a1ce4f63ec4a8cffcd79731ceed4c8af751b05d8962b3cd1",
+      "protocol/agent-control-methods.json": "6f7534acae352f98e417104783f65a69aee0548774b175212a7675ea32e396f4",
+      "protocol/agent-sdk-surface.json": "e76b56d6e7d03eed19245871a8724339bedd0ff91a0c25b5e9d9de620931642e",
+      "protocol/companion-api-routes.json": "bb2a91aae293cb663c1d7714a43008a64b7522db7f49ffa4401b3408fe691247",
+      "protocol/companion-command-renames.json": "3949c0eaae2d6886448952a79d72a883c3fdfdadfe9451382558d5c58a88f444",
+      "protocol/companion-commands.json": "3c1f19a8512d61c7dc91a74fab905eaf9b73ae4ec713f75e6ddee0983d489867",
+      "protocol/companion-request-schemas.json": "93f6e2f5cfaa0630873060189fd6ae174619eccb815a557d8fd32d01eb792d47",
+      "protocol/companion-resources.json": "4bdd445c59908910d02923bbbac506790fdcbc14871157fa73818c8c6cae6da6",
+      "protocol/companion-response-schemas.json": "b98d414750628e29c81642001fb9eb776c8c00529ebd75149ae77b9aae18e108",
+      "protocol/companion-verbs.json": "6d3379da41a39753db698c3d6ff4b76ee04d3dae1e68e829e5fd227445459615",
+      "protocol/environment-spec-fixtures.json": "2abccf5d5405c58026c9fe938a58742c10452080125154f7849b32b88f69ba29",
+      "protocol/external-agent-runtimes.json": "771301786969f450e628fa027610e1d8cbe205998e669427872b42cd6093d83a",
+      "protocol/external-agent-security-policy.json": "22ad87401569c6bf27be1a8827112b02b2a56638c43c2cd118e723c54e558477",
+      "protocol/headless-command-dispositions.json": "45e31e1e841465a5e602de3cf0b1ae8f6edeeda39c8fc49c112a9efcb8fa0ab6",
+      "protocol/image-reference-fixtures.json": "3fa7e27f6ac9afb6774c09687b004ebfdfe90d70b04ae5aa8a6895260e1ada37",
+      "protocol/provider-operations.json": "8bf6dbad637a5f8c74107cba37d5dcbc10b3ab8dd4a002c8a541f1c3b75dd5d0",
+      "protocol/terminal-fixtures.json": "a049f4051de78ac671d06392d0cbfce58c7ae851b5d98b60617df1365b72b662",
+      "scripts/build/assert-tauri-frontend.mjs": "e8579b612d6a813474cd0a8ed55b414129489a1055d636e120ba931cf1e8e11e",
+      "scripts/build/assert-tauri-frontend.test.mjs": "79e36a994d9548f74bde6e6be69840cad6bb375895b37cbd90331da76e15027c",
+      "scripts/build/build-a2ui-sidecar.mjs": "dd2e23c169fa4630791e865f0eee97df5eac8501e25673c6a27b7deb97157a37",
+      "scripts/build/build-a2ui-sidecar.test.mjs": "25cb661780b42d3a1508cf0d73e1055caddcfb9feb4febc0f3df461acaa03521",
+      "scripts/build/build-artifact-runtime.mjs": "7dffc734895d48ce5dac00e9a94db70b487cbccc16491c77fd72ce9aa6934291",
+      "scripts/build/build-artifact-runtime.test.mjs": "8b42157098114fda3e1f55b6408287ab5bab081f6836a6f3aaddb12a165d2cfc",
+      "scripts/build/build-browser-builtin-plugins.mjs": "360e3115ff97d17b10629112b237d144a3f50b41301abb13538de0a0f4cdb5da",
+      "scripts/build/build-browser-builtin-plugins.test.mjs": "9145c722a88653025dbe06ccdab02d34576fc9a8157e59d207bad7e0369bd1ad",
+      "scripts/build/build-builtin-skills.mjs": "5d7a55897b6658d310dbf42cc0f526cc906202419f9c970fd053230c6f8b9378",
+      "scripts/build/build-builtin-skills.test.mjs": "c68a28af6143f052c45fcc2231f972e61fb3f1ab819332039056c390a33480cb",
+      "scripts/build/build-cli-binary.mjs": "5d04c0af84fc2516033821ad3f0338f8da351568b92a242943c0b5eb30a38a49",
+      "scripts/build/build-cli-bun.mjs": "42852bba5a1d2b2de26f785ba78ea43950d7510a4adef18ba75b3deacf2f775c",
+      "scripts/build/build-cli.mjs": "c4c18d7f6c208dadf70b1097b401abcd412ee54da9af02650bedb4dbe101c09c",
+      "scripts/build/build-external-agent-launcher.mjs": "3ffffa4c415ef28174520a6cb01f381eca0680edd48b872f2869c4d422a9ce84",
+      "scripts/build/build-external-agent-launcher.test.mjs": "1334c4d36798d91b50168530d8a862dd4f827dca7f317bbc78b273912423ccca",
+      "scripts/build/build-mcp-sidecar.mjs": "971e159c8263234b0d0cf27398e7b97333bd2e532f82e97514f63ff07ce23043",
+      "scripts/build/build-mcp-sidecar.test.mjs": "268c5584fea0e22492a8f7a6ab26b0231ef2caa4760b5b4c7c4d2ac5e6a426a5",
+      "scripts/build/build-profile.mjs": "4c2da65c12966a9eb5811bf7f578692d9a0c932b85684c14c7d2e67e4bcada39",
+      "scripts/build/build-sidecar-linked-packages.mjs": "2efb5680f16e4f9f9befcb50223a45f6163ae4ff070a8cf691a09006e348ccc3",
+      "scripts/build/build-sidecar-linked-packages.test.mjs": "38f60a42b7919070f1ab60e1466cf59104891f40803d6f53d0447ee1e5e85938",
+      "scripts/build/build-sign-in-icons.mjs": "6c317d8e62dedf97db979d7cd78463150b46b23f6c634f7addd0c81390a56e45",
+      "scripts/build/build-sign-in-icons.test.mjs": "18131f61280410b51a270cfc0f3a767d2c74ab8744c6c60e95fde802094075be",
+      "scripts/build/build-status-site.mjs": "eac532b4a5e3e8a9848004f35d256b45b5dc8304f58a3bcc85281e9b5bea7b37",
+      "scripts/build/build-status-site.test.mjs": "bae65cc1fa6fae1906cc3da75ba4951d725a98b35cb9dfbe40405b9cba9d7aca",
+      "scripts/build/build-support-docs.mjs": "7bb406bed8db5d5f43637b83df8f3b89e7007e5a60df2371f254342301d56976",
+      "scripts/build/build-support-docs.test.mjs": "7cfe180c668b619152a087f9dddf33a9182b78bc8db3188db6f5022187e348fd",
+      "scripts/build/build-terminal-host-sidecar.mjs": "59d90ec4b6343c4c77ff073d8f59ab33300c974817c468bc69bc92bff751bf3a",
+      "scripts/build/build-terminal-host-sidecar.test.mjs": "bd7a7966e3e46c822e2f4fe833d6c854048f95e3bfd7eef726c49b852f339823",
+      "scripts/build/build-vscode-ext-host-sidecar.mjs": "4c5f16dd0b9ae06b920e0b578a81e6a017ac3c4ebc31d56c14c9a82760ea9e44",
+      "scripts/build/build-vscode-ext-host-sidecar.test.mjs": "17bc6e406970977f783513ba0c5dca902e0086e3649fdffdbd363e4ef426076c",
+      "scripts/build/build-webclone-sidecar.mjs": "59a339d06c389370205a54dd5c8c5c4371e6c00231f1318ab523636334631038",
+      "scripts/build/build-webclone-sidecar.test.mjs": "fb0e851bb6c30860f0e062122641f2f9a85bcaf0df3c8aa3d65312d39fac04dd",
+      "scripts/build/build-workflow-app-embed.mjs": "56fdf7babcc979686b7c9ccaf07185db1ad3c1df4bbca88f93bd53084f491d12",
+      "scripts/build/build-workflow-app-embed.test.mjs": "a94b0ea74ba55a506cd3f7c24d2b9dc5e03e69639f062b3a2cab23582e8bbe28",
+      "scripts/build/bundle-agent-versions.mjs": "6b422afcc511c7c82cb80fd5cc7279e8ec188453a04c5eb51bce9252b19e33e5",
+      "scripts/build/bundle-agent-versions.test.mjs": "081d1081a0287556dab7475f209e431dd3c00deb2a200bd09dc1b811bec2ffc2",
+      "scripts/build/bundle-tui-fixture.mjs": "f500083d878a747409f2bdf9b184f8bcc644b367dbfa8fcc432029f8db8fbec5",
+      "scripts/build/bundle-tui-fixture.test.mjs": "29fb6b1d963cf00e2d0e0cc491696e4ed478179bb153be507f96b584a2d66dad",
+      "scripts/build/clean-stale-turbopack-cache.mjs": "395fa33ee7b9bd3b68692f3acc23504bbd9a82da96e389486edd1144b1b0bbe4",
+      "scripts/build/clean-stale-turbopack-cache.test.mjs": "d4b3d26dd275ea5624ee55735b830b13c4d6bc6dbd45e15973647be883b6bc05",
+      "scripts/build/clean-stale-webpack-cache.mjs": "61e366fecceabb6b4c8a533c39f11a7c98eec3751f91c6a5dd20cf146383cd7e",
+      "scripts/build/clean-stale-webpack-cache.test.mjs": "1349ad98076f84bfd028fa505330303d23b884046bed2598cc018bbd00984d2c",
+      "scripts/build/cli-artifact-integrity.mjs": "8f690f2e7effb9fc82bfa073d6d155d2c4b4541d51492c6558c810cd762d40b1",
+      "scripts/build/cli-artifact-integrity.test.mjs": "9ec3e8f3be16b0fc729026fdd66aa71b1743bf9402d093ec96c88a314a027f3d",
+      "scripts/build/cli-artifact-size.mjs": "d74f2c5b5b0d972c45c28af1a11f2c530c1f976c3f74ceceac5fd3b5102fa237",
+      "scripts/build/cli-artifact-size.test.mjs": "fc1c2db59e8c61d32843a6c9360ae56a51c57a45f894ac25254c485f93352048",
+      "scripts/build/cli-bun-contract.mjs": "eef04f77d71f97d86ac1abaf7b36db9744a8d4c5e57978fbc97583ca5f93a8cd",
+      "scripts/build/cli-bun-contract.test.mjs": "006143337a65dc7a9f818a78419cd8f9ab2e0f241117e1e548b3392f87110c90",
+      "scripts/build/companion-request-schema-contracts.mjs": "b75dea6628eb5379f7cec712f04a2624df6ebd6f6bd64ca9ed5c63edb558f10c",
+      "scripts/build/copy-codegraph-grammars.mjs": "a2fd94d3b7aad2c37afd419d4766a5d65d36d0c37bb5109495ebd5c7c4d2246e",
+      "scripts/build/copy-monaco-assets.mjs": "5e6c82369b3d6ac416b339deb5e540f260b372b12d3de3e96d9ac29c6a5677f3",
+      "scripts/build/copy-ocr-assets.mjs": "2914168c9f9a5b58985453c543b7b87e441180f107bf72e1410863b4c781c235",
+      "scripts/build/dependency-dedupe.test.mjs": "80f2e18d28db7ec3ea3a76cb3ca3cbd9a1c0e8121971c39c21c82e39f6788a6f",
+      "scripts/build/dev-cli.mjs": "88ed916aae56d10f64dbd384503dfe0cd344369a61243b738acda29c0edada5b",
+      "scripts/build/dev-cli.test.mjs": "582d910fe09de8b981133c511d02f16c95d3e6e31f0c2f661e7b061901ca62b7",
+      "scripts/build/docs-search-worker.mjs": "ad1045711a523dc27c7f4ee94dc1d1662ed7c299754e6640d72853f2e836ae7b",
+      "scripts/build/docs-search-worker.test.mjs": "e95980c15fd8f4d335bbc74c30d35ebfb6dd6931c78c7e5e2332208c57c5677a",
+      "scripts/build/download-cubism-core.mjs": "7b344f169ed10eefb0946129026a5f45cd88b31afea00ac1aedcb8e922e04569",
+      "scripts/build/download-cubism-core.test.mjs": "1919fd42d5f479295cabe2735ba24e6303c13a0db1da5f2bd6958622bbe97382",
+      "scripts/build/download-share-wallpapers.mjs": "41559f733c56d0ce7e3d3eaf09bb233f837f69a278fc2862c111b0da62134e66",
+      "scripts/build/download-share-wallpapers.test.mjs": "f4bc97b07ae443e37b71ee76897a81aa9a19ff9c9e01722f71bc4a2610a78897",
+      "scripts/build/ensure-native-hosts.mjs": "46f38f99660fdac8da36f37cbe2d61cf6978f5bd0ae498c4fb074202e880ec0a",
+      "scripts/build/ensure-native-hosts.test.mjs": "6f99a3968c905d6a46de832425d877ca7f570965cb5338a1e373832b88cd26e4",
+      "scripts/build/esbuild-input-cache.mjs": "0aab18f68e942e356d6b4055d3d8f08fb5377bdefd89bd9aa97708bc9aa6680a",
+      "scripts/build/esbuild-input-cache.test.mjs": "132a9500473b910e6bbbc226a329f7600faf3c15eff4dae111346d0f1cddb061",
+      "scripts/build/esbuild-shared.mjs": "51af02f5c9b0b51c6ef0be3f95e42cff3056cb3da2612a697ddb24e2697e9210",
+      "scripts/build/esbuild-shared.test.mjs": "7089d88c3d51895dcba603eed8eed5ed8ce38a392a0bc0a23a8cab4c23d4b328",
+      "scripts/build/gen-agent-capabilities.mjs": "7341745e02cac1223c5a30b5667553dd71a73739d538b2a03e0bca718bfe8611",
+      "scripts/build/gen-agent-capabilities.test.mjs": "4f00d4394dcfdb7668ce9e539461895435344fb4714e2a9f24b06c022bc204c5",
+      "scripts/build/gen-cli-api-index.mjs": "ed1e377a75858e74b6e5ed5ecce21db4c3e3bae818232f280327ec7e2e692a02",
+      "scripts/build/gen-companion-api.mjs": "2594d8e66ebc422ad039f397fbcb8a1af27130211d82b3085ac12ae3fe18fbe1",
+      "scripts/build/gen-companion-api.test.mjs": "f2c6f3949ceefe4c3bd66487d3bb381407497b27100cec1fe91dc390bb8ee291",
+      "scripts/build/gen-external-agent-runtimes.mjs": "983b3365cfa773d68ef7081e08cfd096c206e1e0c225249bfbf1eeca95bd5c11",
+      "scripts/build/gen-external-agent-runtimes.test.mjs": "929fccb2257fddb5f642ab10071a9b3f02a67042535bd7d7d584f30f6d14b3ac",
+      "scripts/build/gen-settings-sync.mjs": "4c53efa85c5da7d7fb653f157439ac846747b9d8f170607dad23a20e496a30dc",
+      "scripts/build/gen-settings-sync.test.mjs": "d160e70b27bc37b33b39ac471dace2d616b2841b3fa2a2818e5f4a19fbc0807c",
+      "scripts/build/generate-lucide-catalog.mjs": "f68d050febf132613714dfbc647496d492ac6d3d6d616c124f613860c7162fe0",
+      "scripts/build/generate-lucide-catalog.test.mjs": "fbe6a73ca59b0e035d40bb2599cbc668d82ff2910ba5d3284edf2db768ea267a",
+      "scripts/build/lib/build-linked-packages.mjs": "88ecfc3a65218effae475b725a1a2611fffffcafd61f1aec500a2934c77b3e59",
+      "scripts/build/lib/build-linked-packages.test.mjs": "f44bcecfe12084a8a6837bdc2c4ce6bed2d8ab8df89524f3943101581a6ba2e2",
+      "scripts/build/lib/bun-sidecar-patches.mjs": "7e7929fe6d046a7343739aae30ed70c13dbe42a09793fda504ea5d67e28d3f32",
+      "scripts/build/lib/bun-sidecar-patches.test.mjs": "5fb7723804ec63e59f14ec425b5eb8f779822b564952ea0daddfeb2e67af5a92",
+      "scripts/build/lib/companion-known-commands.mjs": "0b64f72cb42fe4335e2cb5891b17933c59e88032226b9cdf592d60cd4db4c224",
+      "scripts/build/lib/companion-known-commands.test.mjs": "061ca8f909e8889ab633d47d40a4ea79334e19a82a543b6576af9837d739e769",
+      "scripts/build/lib/copy-runtime-closure.mjs": "2d5f88c45671a4b61baa462f251825b662621ee6fc0b60fdcf2702d7790ec5af",
+      "scripts/build/lib/copy-runtime-closure.test.mjs": "10a95309c7d32a66012165fb5ff10cee03aa3d650bdd58bc45660dfa8b3cdadd",
+      "scripts/build/lib/generated-json.mjs": "0af9765307d2e0b17fc3db0d394be382cb42cd89f18fe34228f332dc14aec703",
+      "scripts/build/lib/generated-json.test.mjs": "a7a6e8f8bd05adb5f51bc75f5653e29da06934ba2134e0dce27ca25d13313bbb",
+      "scripts/build/lib/mcp-host-bridge.mjs": "1988387ac61b0e36d58b1077a372c5ec511b72ae166e8ef212f61affd814d165",
+      "scripts/build/lib/mcp-host-bridge.test.mjs": "fd7031e61cf9bd1116ef1f6bcb39c5f218c101d541fe3b585bb92a594e251a04",
+      "scripts/build/lib/newest-mtime.mjs": "fc489cfa130603a5018d78d3bd38241d51ad44232ae4342bce6bc381efac5896",
+      "scripts/build/lib/newest-mtime.test.mjs": "0882c59468228d52fb05c7f2bfa8f7f043e8cd320e9eed8c782d5c844ac4fe08",
+      "scripts/build/lib/prefer-esm-entry-plugin.mjs": "3fb94aa311533c7dfa164c4150c083858d598183c479cc35ebd5cf7a0a81cba1",
+      "scripts/build/lib/prefer-esm-entry-plugin.test.mjs": "d57532704aaa0c024ef9ae9d3d7e390d6befacdf7ebf086049c6d2ddec360ef7",
+      "scripts/build/lib/prune-sidecar-residue.mjs": "cb4b0e74f87c2131f15f7bbf02dfc1b566490b6c3b8e314746d9ca6cee6111bf",
+      "scripts/build/lib/prune-sidecar-residue.test.mjs": "64700f6bb0972001dd0280190ec185bbfca2405a1c70f2cde42eea1790ae8633",
+      "scripts/build/lib/sidecar-version-info.mjs": "5a24f626493eb63315b5144a425b8eab19794261dfcd4b806973dc17af9aeec2",
+      "scripts/build/lib/sidecar-version-info.test.mjs": "5afbb5466943d1809dd0ebea7d7f968f7b9cff71f49ccea8132b4abea163c71b",
+      "scripts/build/lib/stage-ast-grep.mjs": "7acbd86f4f4f6e13ae9cbe32ac3dca412fd08e08510e2c15fba15225226bd008",
+      "scripts/build/lib/stage-ast-grep.test.mjs": "2079744e3ee1bb4c04769ddb9029b0d1a89e06004a40c0a470ebd1ed1660c896",
+      "scripts/build/lib/stage-builtin-plugin-assets.mjs": "94c2b7e01354c64d731ce725158b3845c668daacb6b6bff5c92e5fd36e99fb48",
+      "scripts/build/lib/stage-builtin-plugin-assets.test.mjs": "a8df472ae8a371d723f3cc407aac7f3fe5187290e08b7f7940d3e073df2b0976",
+      "scripts/build/lib/stage-claude-runtime.mjs": "d4c26f924c392663f8848905cfac46c44e171eba4a95cef969b97b5d2b7441e3",
+      "scripts/build/lib/stage-claude-runtime.test.mjs": "415bd86b352f0fc7d448fa0f8b55f095cc6d0ae5fd06d4d26a6c8718baa425a0",
+      "scripts/build/lib/stage-pi-extension.mjs": "be42226afe64ed8bdaa801a7ef6096c68910ac63599d0d1a4e8941f0a719ff23",
+      "scripts/build/lib/stage-pi-extension.test.mjs": "4dbe349f8288812039fd30700c3bcebc1ae3fc1dbeed732601f5b45c7e3b8a2f",
+      "scripts/build/lib/webclone-bundle-plugin.mjs": "9bdcf75107d142beceb46b4f5cd3e592365b878beced1e77e3634e758c1edc98",
+      "scripts/build/lib/webclone-bundle-plugin.test.mjs": "811dd5792ea0c067cb8eaaf0a8faec5bc4e88658120d2bcc30e52ee311ed6f70",
+      "scripts/build/managed-desktop-context.mjs": "b7e47b26eb4813d193e95315df7fb1f9aabdba4bdfbd2c683219ad17354a17d0",
+      "scripts/build/managed-desktop-context.test.mjs": "0f52a1e71c13ac8d9b19dc21532076b7c1bb5f35209872bdefdf5c36c9caec6e",
+      "scripts/build/managed-desktop-release.mjs": "16edc41cf05785a185e2fa80405b332670dffbcd90cc6db41a5702c83656f98c",
+      "scripts/build/managed-desktop-release.test.mjs": "55329720245939f096e56a8145164e43ee7aac92ade490ab5a8fbdb2f4c499bb",
+      "scripts/build/mcp-bridge-runtime.test.mjs": "b1ea8d3d3046448631f40bf23419a0377db3da13b38f43d2955630436f056298",
+      "scripts/build/mobile-config.test.mjs": "04be11af5ac65cd08cbc4cfc46c3df32a4a967ab2048ebdf14b4350958817a02",
+      "scripts/build/native-host-files.mjs": "395725f40de12904796cf7587ee27045db57a4e704a60993be65040ce810dd92",
+      "scripts/build/native-host-files.test.mjs": "c53cec796f7b688f72e797b2bb3cc6383b38c517352956a4d72447bd44ac87ba",
+      "scripts/build/pack-test-agent-package.mjs": "0125a5b60dfd2096afaabfa8fc312a9b225dee21da1194cc3848c31157df8d23",
+      "scripts/build/package-agent-host.mjs": "03214935ca38509da9fe445b88fa73e46c37cb45e7e815af67147ad86ed83416",
+      "scripts/build/package-host-archive.mjs": "8d1cb35b98aafda6a0c8a949856c92969504d7e41a0ec981b7b3160b45254ede",
+      "scripts/build/package-host-archive.test.mjs": "e2c444ab9008e4e9eb132f2b7a82b71b015a0f8659252377cfdaf6059fa3853c",
+      "scripts/build/prepare-docs-pages.mjs": "9e63afbfd29ab8fe1c2955a9a9016d09c2eeb8cab3178b0872cc9032b9d669aa",
+      "scripts/build/prepare-docs-pages.test.mjs": "23e19d48fb4fd6dbb2b6f1cb1a12f6f769a1057bfe8bc64ff20e2920dd1ce725",
+      "scripts/build/prepare-mobile.mjs": "3522425cb34391bac034768e0cb4c75218aac7c5a7771b5cae4ba26b4fec4c69",
+      "scripts/build/prepare-mobile.test.mjs": "22ce4e84370ee85b76be2cf0bcebfc4a126919bc795b1cc48d412425f273fc26",
+      "scripts/build/prepare-plugin-node.mjs": "c421c8072c78154a7a1c0bbca699c43ebe0a6c58653ae64c54ee869d1c1cab9d",
+      "scripts/build/prepare-plugin-node.test.mjs": "41b1d6bbf0a50f622ab6e61f99a635a8442ebb913f81eb573816931351278d61",
+      "scripts/build/run-tauri-system-node.mjs": "43424aa5081bef661e0b4fca8c86125a815abf3bf26fe66597c0f2907edfdbc7",
+      "scripts/build/run-tauri-system-node.test.mjs": "a141da1a52148e9c246b1f697c0b19ce942e028af233cc306806c6e3b6e649e3",
+      "scripts/build/sidecar-bundle-resources.mjs": "f2dc0b7d9a0af3e6db7ee0be2dfc3cf17a631a9aac213539684456e9981a727b",
+      "scripts/build/sidecar-bundle-resources.test.mjs": "c537bac51bbc133d8b9f637a2ccfccfc60c21f786dcd167a36689c773eb4e29d",
+      "scripts/build/sign-cli-bun.mjs": "374098d658b722fa861cfd1c79dc950a0db05054aa21827e47fde71b03f9e10c",
+      "scripts/build/sign-cli-bun.test.mjs": "5be78a030f62b0b9d4cee8deba63b492f4bc6b4af53b68d2a2c1e1b2a1764b49",
+      "scripts/build/stage-browser-runtime.mjs": "0b646f1533f18861db7a6805d53e3b9fb7a63d9b9bcc4b89fce38eb24cbb939a",
+      "scripts/build/stage-browser-runtime.test.mjs": "ca059c17778d33f6f257c239101d141652b7a0a085b632b9aaafd82c21e87041",
+      "scripts/build/stage-bundled-plugins.mjs": "39402961a84f50ba48414aec02f28dc6e1896873d2cfabd7889b016077bc4ef5",
+      "scripts/build/stage-bundled-plugins.test.mjs": "9acef966c3f6145a26f9f1a0d38a64da30d1e4346030ba6827fb0faa523011c9",
+      "scripts/build/test-bundle-cache.mjs": "d300c4919610e7ddb0f2f4e434c05207de62f30023b3b149783cafc9af50bf76",
+      "scripts/build/test-bundle-cache.test.mjs": "dcd0d0f13c9a7094c18038290fb042c2d16afcc333024f7600a4720fbc961a51",
+      "scripts/build/verify-agent-host-package.mjs": "75850c2500157bfef041e01cbe8eda7e012691bd12551b46469aa361e8a59b9b",
+      "scripts/build/verify-agent-host-package.test.mjs": "3a5e9da7c22791eca7e15c9eda6e65c9c6c7a2bbb7a8d1e17554e58aa24821db",
+      "scripts/test/node.mjs": "9d005fc8b070105287e64126ec54dbecb8a10cdd5e7e5ee400da562c60ee33ae"
+    },
+    "sourceDriftDuringMeasurement": [],
+    "correctionAfterMeasurement": "The POSIX shutdown test found Node can convert SIGTERM to exit1. The final wrapper remembers receivedSignal; normal worker budgeting is unchanged. A separate complete pnpm build entry-point run verifies the final code.",
+    "decision": "Keep deterministic per-file worker budget. Observed RSS median decrease14.2 percent misses preregistered15 percent threshold; no significant general memory/throughput claim. Wall median increases7.2 percent.",
+    "audits": {
+      "wiring": "no actionable findings, including follow-up signal and lane-ownership review",
+      "testGap": "no blockers; recommended signal regression added and passed",
+      "pii": "test-only real superclass import does not initiate transport/model calls"
+    },
+    "unverified": [
+      "remote CI",
+      "native desktop/browser flows",
+      "coverage collection",
+      "application build"
+    ],
+    "focusedJestSummary": {
+      "success": true,
+      "numPassedTestSuites": 4,
+      "numPassedTests": 351,
+      "numFailedTests": 0,
+      "numPendingTests": 0
+    },
+    "finalOwnedSourceHashes": {
+      "package.json": "5a1a41ea2f616374150b9539c144c59821e3a28512c6485997344def77114a18",
+      "scripts/test/node.mjs": "f505c470d96534a114d6badd3764de22c06ee1df355b7e2bf87c116c8465fc08",
+      "scripts/test/node.test.mjs": "198b4501a91eda359dd7f477c8b955a952d2ed6b998f0c86f1bfe9b90fc38da3",
+      "scripts/build/build-browser-builtin-plugins.test.mjs": "9145c722a88653025dbe06ccdab02d34576fc9a8157e59d207bad7e0369bd1ad",
+      "lib/connectors/ai-loop/safe-send-prompt.test.ts": "74f527417883d1c6b3f67a7f8ce8122d2d95e0e802f7c874910cecd31e2e0da4",
+      "scripts/gates/check-gate-registry.mjs": "37a754d3530f897938ffc9a8c742e0471f909de98074c3ab1fd116fd8837c396"
+    }
+  }
+}

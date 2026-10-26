@@ -1,6 +1,6 @@
 // Shared contracts for outbound protocol adapters. An adapter turns a
 // normalized request into a stream of AI-SDK-fullStream-shaped events — the
-// single normalizer downstream (`event-adapter.mjs`) stays untouched no
+// single normalizer downstream (`runtimes/ai-sdk/events.ts`) stays untouched no
 // matter which wire protocol served the turn.
 //
 // The renderer's `types/plugin/plugin-protocol-adapter.ts` mirrors the
@@ -81,6 +81,8 @@ export interface NormalizedRequest extends AdapterTelemetryContext {
   repairToolCall?: unknown
   /** Set only for a ledger-reserved call: one reservation, one request. */
   maxRetries?: number
+  /** Keep standardized step prompts in memory for context-budget calibration. */
+  captureRequestMessages?: boolean
   reasoning?: ReasoningControls
   credentials?: AdapterCredentials
   abortSignal?: AbortSignal
@@ -125,7 +127,7 @@ export interface AdapterResult {
    * AI-SDK-fullStream-shaped events: `{type:"text-delta", text}` /
    * `{type:"reasoning-delta", text}` / `{type:"tool-call", ...}` /
    * `{type:"tool-result", ...}` / `{type:"finish", finishReason, usage}` —
-   * exactly what `event-adapter.mjs` consumes.
+   * exactly what `runtimes/ai-sdk/events.ts` consumes.
    */
   fullStream: AsyncIterable<unknown>
   /** Resolves after the stream ends; null when the stream never finished. */

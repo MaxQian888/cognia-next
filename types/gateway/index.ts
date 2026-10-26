@@ -441,6 +441,7 @@ export interface GatewayRouteTicket {
   parentSessionId?: string | null
   candidates: Array<{ deploymentId: string; modelId: string }>
   modelBindings: Record<string, string>
+  strictSelectors?: boolean
   credentialAffinity: "session-sticky" | "sticky-with-failover" | "per-request"
   allowAuthFailover?: boolean
   routePolicy: string
@@ -469,6 +470,7 @@ export interface GatewayMintRouteTicketRequest {
    * Without bindings Claude Code's first background haiku turn fails closed.
    */
   modelBindings?: Record<string, string>
+  strictSelectors?: boolean
   /** The model the execution will ask for. */
   model?: string
   credentialAffinity: "session-sticky" | "sticky-with-failover" | "per-request"
@@ -588,3 +590,16 @@ export const GATEWAY_REQUEST_LOG_EVENT = "gateway://request-log"
 export const GATEWAY_REQUEST_OUTCOME_EVENT = "gateway://request-outcome"
 export const GATEWAY_DECIDE_EVENT = "gateway://decide"
 export const GATEWAY_SNAPSHOT_INVALIDATED_EVENT = "gateway://snapshot-invalidated"
+
+/** Models authorized within one task deployment and account. */
+/** The extra models one gateway task may reach, beside its primary. */
+export interface GatewayTaskModelPlan {
+  /** Plan models other than the primary, each one the task's deployment lists. */
+  additionalModels: string[]
+  /**
+   * Reserved selector→model aliases. Slice 1 always sends `{}`: every runtime
+   * names its models by their real IDs, and a strict ticket adds an identity
+   * binding for each plan model itself. Pinned by the manager tests.
+   */
+  modelBindings: Record<string, string>
+}

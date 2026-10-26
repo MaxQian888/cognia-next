@@ -28,12 +28,19 @@ test("source failure survives an empty job list and reporting success", () => {
   assert.equal(decide(result).send, true)
 })
 
+test("website evidence refresh is owned by the standalone repository", () => {
+  assert.throws(
+    () => normalizeRun(run({ path: ".github/workflows/refresh-website.yml" }), []),
+    /unsupported-workflow/
+  )
+})
+
 test("green deployment with every target skipped is not a deployment success", () => {
   const result = normalizeRun(
     run({ path: ".github/workflows/deploy.yml", conclusion: "success" }),
     [
       { name: "Gate (production)", conclusion: "success" },
-      { name: "Pages — website", conclusion: "skipped" },
+      { name: "Pages — docs", conclusion: "skipped" },
     ]
   )
   assert.equal(result.status, "not-deployed")

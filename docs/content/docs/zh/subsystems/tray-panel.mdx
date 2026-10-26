@@ -46,6 +46,7 @@ description: 点击桌面托盘图标打开的速览面板 —— 由模块组�
 
 预设（`balanced`、`usage-first`、`agent-ops`、`minimal`）位于 `lib/glance/presets.ts`。
 已存布局只能通过 `normalizeGlancePanelSettings` 读取：未知 id 丢弃，重复项保留第一个，缺失的模块以隐藏状态补在末尾，越界高度会被钳制。
+默认宽度为 460 px（`wide`）。未保存或无效的宽度使用此默认值；有效的已存选择，包括 320 px（`narrow`）和 380 px（`standard`），均会保留。
 
 ## 插件模块
 

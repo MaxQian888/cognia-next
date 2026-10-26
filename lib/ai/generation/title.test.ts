@@ -1,4 +1,14 @@
-import { generateConversationTitle, sanitizeTitle, MAX_TITLE_LENGTH } from "./title"
+import {
+  generateConversationTitle,
+  sanitizeTitle,
+  MAX_TITLE_LENGTH,
+  TITLE_CHAT_PROMPT,
+  TITLE_WORK_PROMPT,
+} from "./title"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
 function mockClient(impl: (prompt: string) => Promise<string> | string): LlmClient {
@@ -123,5 +133,51 @@ describe("generateConversationTitle", () => {
     expect(prompt).not.toContain("Assistant reply:")
     const opts = (client.complete as jest.Mock).mock.calls[0][1] as { system: string }
     expect(opts.system).toContain("unit of work")
+  })
+})
+
+describe("title prompt resolution (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("sends a published override instead of the shipped system prompt", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("db", [
+        {
+          bindingId: "pob",
+          promptId: TITLE_CHAT_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws1",
+          revisionId: "por",
+          body: "Title it like a newspaper headline.",
+          contractVersion: TITLE_CHAT_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const client = mockClient(() => "Headline")
+    await generateConversationTitle(client, {
+      firstUserText: "hello",
+      promptContext: { workspaceId: "ws1" },
+    })
+    expect((client.complete as jest.Mock).mock.calls[0][1].system).toBe(
+      "Title it like a newspaper headline."
+    )
+
+    // Another workspace still gets the shipped text.
+    await generateConversationTitle(client, {
+      firstUserText: "hello",
+      promptContext: { workspaceId: "ws2" },
+    })
+    expect((client.complete as jest.Mock).mock.calls[1][1].system).toBe(
+      TITLE_CHAT_PROMPT.defaultBody
+    )
+  })
+
+  it("uses the work template for work titles", async () => {
+    __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("db", []))
+    const client = mockClient(() => "Run")
+    await generateConversationTitle(client, { firstUserText: "task", kind: "work" })
+    expect((client.complete as jest.Mock).mock.calls[0][1].system).toBe(
+      TITLE_WORK_PROMPT.defaultBody
+    )
   })
 })

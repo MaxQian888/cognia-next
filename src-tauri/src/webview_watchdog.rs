@@ -426,6 +426,8 @@ pub fn decide_termination_recovery(recent: usize, max: u32) -> TerminationRecove
 #[derive(Debug, Default)]
 struct RendererRecord {
     state: RendererState,
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
+    last_url: Option<String>,
     /// Termination instants inside the [`RECOVERY_COUNTER_RESET`] window.
     recent_terminations: Vec<Instant>,
 }
@@ -465,6 +467,28 @@ impl RendererLifecycle {
         self.inner
             .epoch
             .send_modify(|epoch| *epoch = epoch.wrapping_add(1));
+    }
+
+    /// Page-load metadata is safe even before WKWebView has a native URL.
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
+    pub fn record_page_url(&self, label: &str, url: &str) {
+        self.inner
+            .records
+            .lock()
+            .unwrap()
+            .entry(label.to_string())
+            .or_default()
+            .last_url = Some(url.to_string());
+    }
+
+    #[cfg(any(test, all(feature = "agent-debug", desktop)))]
+    pub fn last_url(&self, label: &str) -> Option<String> {
+        self.inner
+            .records
+            .lock()
+            .unwrap()
+            .get(label)
+            .and_then(|record| record.last_url.clone())
     }
 
     /// Current state for `label` (default for a webview never seen).
@@ -639,6 +663,26 @@ pub fn handle_web_content_process_terminate<R: tauri::Runtime>(webview: &tauri::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_urls_are_absent_before_load_and_isolated_from_renderer_state() {
+        let lifecycle = RendererLifecycle::new();
+        assert_eq!(lifecycle.last_url("pet"), None);
+        lifecycle.record_page_url("main", "http://localhost:3000/");
+        lifecycle.record_page_url("pet", "http://localhost:3000/pet-overlay");
+        lifecycle.record_page_load("main");
+        lifecycle.record_page_url("main", "http://localhost:3000/settings");
+        lifecycle.record_page_load_finished("main");
+        lifecycle.record_termination("main", Instant::now());
+        assert_eq!(
+            lifecycle.last_url("main").as_deref(),
+            Some("http://localhost:3000/settings")
+        );
+        assert_eq!(
+            lifecycle.last_url("pet").as_deref(),
+            Some("http://localhost:3000/pet-overlay")
+        );
+    }
 
     const TIMEOUT: Duration = Duration::from_secs(15);
     const MAX: u32 = 3;

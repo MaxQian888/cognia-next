@@ -19,7 +19,8 @@
  *
  * - Whenever the compact shell owns the layout (`lib/shell/compact-shell.ts`:
  *   a native mobile runtime at any width, or a narrow non-Tauri viewport)
- *   this component is a no-op so `MobileShellWrapper` keeps full ownership.
+ *   this component keeps its route containers transparent and omits its chrome
+ *   so `MobileShellWrapper` keeps full ownership without remounting the route.
  *   Tauri is deliberately excluded from the narrow branch: its window is
  *   `decorations: false`, so the `TitleBar` below carries the window
  *   controls and handing the frame away would take them with it.
@@ -187,7 +188,8 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     ) : (
       <PageLoading variant="workspace" milestone="interface" allowReload />
     )
-  if (compactShell || bypass) return <>{children}</>
+  if (platform === "mobile" || bypass) return <>{children}</>
+  const desktopChrome = !compactShell
 
   const handleCreateTeam = () => {
     log.info("guild create-team via shell")
@@ -220,20 +222,28 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     // The provider is what lets the chat workspace's column headers render into
     // the title bar's outlets (`components/shell/title-bar-outlets.tsx`); it
     // has to sit above both the bar and the routed children.
-    <WebStatusProvider enabled={platform === "web"}>
+    <WebStatusProvider enabled={platform === "web"} active={desktopChrome}>
       <TitleBarOutletsProvider>
-        <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
-          <WindowFocusTracker />
-          <WindowResizeEdges />
-          <ZoomShortcuts />
-          <TerminalToggleShortcut />
-          <PanelQuickSwitch />
+        {/* All route ancestors stay mounted across the web breakpoint. The
+          inactive shell contributes no layout boxes or desktop-only chrome. */}
+        <div
+          className={
+            desktopChrome
+              ? "relative flex h-screen w-full flex-col bg-background text-foreground"
+              : "contents"
+          }
+        >
+          {desktopChrome ? <WindowFocusTracker /> : null}
+          {desktopChrome ? <WindowResizeEdges /> : null}
+          {desktopChrome ? <ZoomShortcuts /> : null}
+          {desktopChrome ? <TerminalToggleShortcut /> : null}
+          {desktopChrome ? <PanelQuickSwitch /> : null}
           {/* Unmounted rather than hidden: nothing is projected, persisted, or
             kept warm inside it, and mounting the bar on the web default would
             still register the outlets that pull the column headers off their
             rows. When it is absent the headers draw inline — see
             `title-bar-outlets.tsx`. */}
-          {titleBarMounted ? <TitleBar /> : null}
+          {desktopChrome && titleBarMounted ? <TitleBar /> : null}
           {/* Residual notice for a first run the user left early (ADR-0122).
           Mounted here rather than at the body level: this shell is `h-screen`
           and the body it sits in is `overflow:hidden`, so an in-flow bar after
@@ -241,7 +251,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           no route. As a row of the shell's own column it takes real height and
           the content row below simply absorbs it. Self-hiding, so the normal
           path costs one selector. */}
-          <FinishSetupBar />
+          {desktopChrome ? <FinishSetupBar /> : null}
           {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
           edge drop zones it paints during a drag are `fixed`, so the row's
           child order (which the rail-placement tests pin) is unchanged. */}
@@ -250,44 +260,55 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
             that leaves no DOM here (`terminal-dock-surface.tsx`). Inside the
             move provider because the dock's grip is a drag source of it. */}
             <TerminalDockSurfaceProvider>
-              <div className="flex flex-1 overflow-hidden">
-                {sidebarSide === "left" ? guildRail : null}
-                <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-                  <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
+              <div className={desktopChrome ? "flex flex-1 overflow-hidden" : "contents"}>
+                {desktopChrome && sidebarSide === "left" ? guildRail : null}
+                <div
+                  className={
+                    desktopChrome
+                      ? "relative flex min-w-0 flex-1 flex-col overflow-hidden"
+                      : "contents"
+                  }
+                >
+                  <div
+                    data-find-scope={desktopChrome ? true : undefined}
+                    className={desktopChrome ? "flex min-h-0 flex-1 overflow-hidden" : "contents"}
+                  >
                     {children}
                   </div>
-                  <TerminalDockRegion slot="bottom" />
+                  {desktopChrome ? <TerminalDockRegion slot="bottom" /> : null}
                 </div>
                 {/* Right-docked terminal. Sits inboard of the extension host bar and
               the rail so those stay pinned to the window edge. */}
-                <TerminalDockRegion slot="right" />
+                {desktopChrome ? <TerminalDockRegion slot="right" /> : null}
                 {/*
                  * VS Code extension host bar — hosts webviews + terminals from
                  * any activated extension. Returns `null` until an extension
                  * registers a surface, so the layout is unchanged in the
                  * default case. Phase A4 of the LSP reuse work.
                  */}
-                <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
-                {sidebarSide === "right" ? guildRail : null}
+                {desktopChrome ? (
+                  <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
+                ) : null}
+                {desktopChrome && sidebarSide === "right" ? guildRail : null}
               </div>
             </TerminalDockSurfaceProvider>
           </TerminalDockMoveProvider>
-          {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
-          <FindBar />
+          {desktopChrome ? <CommandPalette onOpenSettings={handleOpenSettings} /> : null}
+          {desktopChrome ? <FindBar /> : null}
           {/* Global, like the palette beside it. It used to live inside the terminal
           dock, which renders only while that panel is open — so clicking a file
           reference in chat with the terminal closed wrote to the store and showed
           nothing at all. */}
-          <FileViewerDialog />
+          {desktopChrome ? <FileViewerDialog /> : null}
           {/* The four workspace editors, mounted once so the command palette
             can open one. The palette closes before it runs an action, so it
             cannot mount what the action opens. */}
-          <WorkspaceDialogHost />
-          <ShellLayoutNotice />
+          {desktopChrome ? <WorkspaceDialogHost /> : null}
+          {desktopChrome ? <ShellLayoutNotice /> : null}
           {/* Collapses to zero height on the same clock rather than unmounting —
           hiding it used to drop 24px out of the window in one frame. */}
           {platform === "tauri" ? <StatusBar collapsed={statusBarCollapsed} /> : null}
-          {platform === "web" ? <WebGlobalStatusPill /> : null}
+          {desktopChrome && platform === "web" ? <WebGlobalStatusPill /> : null}
         </div>
       </TitleBarOutletsProvider>
     </WebStatusProvider>

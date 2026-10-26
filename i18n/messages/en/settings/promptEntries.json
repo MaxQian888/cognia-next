@@ -1,0 +1,1054 @@
+{
+  "agent__browser-companion__context": {
+    "title": "Captured page context",
+    "description": "Protocol text read by the host: marks one page captured by the browser extension as untrusted data."
+  },
+  "agent__browser-companion__context-multi": {
+    "title": "Captured pages context",
+    "description": "Protocol text read by the host: marks several pages captured by the browser extension as untrusted data."
+  },
+  "agent__browser-companion__grant": {
+    "title": "Browser Companion access",
+    "description": "Tells the agent it may act in your real, signed-in browser tabs in a chat started from the extension."
+  },
+  "agent__builtin__Explore__identity": {
+    "title": "Explore subagent",
+    "description": "Identity of the Explore subagent, a fast read-only scout that finds the relevant code and reports back."
+  },
+  "agent__builtin__Plan__identity": {
+    "title": "Plan subagent",
+    "description": "Identity of the Plan subagent, which designs an ordered implementation plan without changing anything."
+  },
+  "agent__builtin__code-reviewer__identity": {
+    "title": "Code reviewer subagent",
+    "description": "Identity of the code reviewer subagent, which reads a change and reports defects without editing."
+  },
+  "agent__builtin__general-purpose__identity": {
+    "title": "General-purpose subagent",
+    "description": "Identity of the general-purpose subagent, which finishes one delegated task end to end with full tools."
+  },
+  "agent__builtin__workflow-debugger__identity": {
+    "title": "Workflow debugger subagent",
+    "description": "Identity of the subagent that works out why a workflow run failed and explains the likely fix."
+  },
+  "agent__builtin__workflow-designer__identity": {
+    "title": "Workflow designer subagent",
+    "description": "Identity of the subagent that builds and edits visual workflows for you in the workflow editor."
+  },
+  "agent__builtin__workflow-doc-writer__identity": {
+    "title": "Workflow doc writer subagent",
+    "description": "Identity of the subagent that adds explanatory notes next to groups of nodes in a workflow."
+  },
+  "agent__builtin__workflow-refactorer__identity": {
+    "title": "Workflow refactorer subagent",
+    "description": "Identity of the subagent that restructures a selected part of a workflow without changing what it does."
+  },
+  "agent__cli__plan-refine": {
+    "title": "CLI plan refinement",
+    "description": "Sent in the CLI when you ask to refine the plan, asking for an updated plan without making changes."
+  },
+  "agent__executor__fallback": {
+    "title": "Fallback agent identity",
+    "description": "The minimal system prompt used when an agent run has tools but no agent or prompt of its own."
+  },
+  "agent__loop__iteration": {
+    "title": "Loop iteration",
+    "description": "Protocol text read by the host: runs one /loop iteration and asks for a JSON line choosing the next delay."
+  },
+  "agent__mode__academic": {
+    "title": "Mode: Academic research",
+    "description": "In Academic mode, has the agent search scholarly databases and analyze papers with its tools."
+  },
+  "agent__mode__code-gen": {
+    "title": "Mode: Code generation",
+    "description": "In Code generation mode, has the agent write clean, documented code with error handling."
+  },
+  "agent__mode__data-analysis": {
+    "title": "Mode: Data analysis",
+    "description": "In Data analysis mode, has the agent help clean data, run statistics, and draw insights."
+  },
+  "agent__mode__plan": {
+    "title": "Mode: Plan",
+    "description": "In Plan mode, has the agent investigate and propose a step-by-step plan without making changes."
+  },
+  "agent__mode__ppt-generation": {
+    "title": "Mode: Presentation",
+    "description": "In Presentation mode, has the agent structure and design slides, with speaker notes when useful."
+  },
+  "agent__mode__research": {
+    "title": "Mode: Research",
+    "description": "In Research mode, has the agent find, weigh, and summarize sources, with citations where possible."
+  },
+  "agent__mode__web-design": {
+    "title": "Mode: Web design",
+    "description": "In Web design mode, has the agent write React and Tailwind pages you can preview right away."
+  },
+  "agent__mode__workflow": {
+    "title": "Mode: Workflow",
+    "description": "In Workflow mode, has the agent break down tasks, run multi-step work, and report progress."
+  },
+  "agent__mode__writing": {
+    "title": "Mode: Writing",
+    "description": "In Writing mode, has the agent help draft, edit, and adjust the tone of your text."
+  },
+  "agent__plan-mode": {
+    "title": "Plan mode rules",
+    "description": "Keeps the agent read-only in plan mode: research, delegate exploration, then submit the plan for approval."
+  },
+  "agent__plan-mode__structured-steps": {
+    "title": "Plan mode step list format",
+    "description": "Protocol text read by the plan parser: end the plan with a flat numbered step list for the step editor."
+  },
+  "agent__plan__approved": {
+    "title": "Plan approved message",
+    "description": "Sent after you approve a plan, telling the agent to implement it step by step."
+  },
+  "agent__plan__approved-edited": {
+    "title": "Edited plan approved message",
+    "description": "Sent after you approve an adjusted plan, telling the agent your version replaces the one it proposed."
+  },
+  "agent__plan__decompose": {
+    "title": "Plan decomposition",
+    "description": "Breaks your objective into 2 to 16 ordered steps, as JSON, when you create an executable plan."
+  },
+  "agent__plan__decompose-request": {
+    "title": "Plan decomposition request",
+    "description": "Protocol text read by the parser: the request that carries your objective to plan decomposition."
+  },
+  "agent__plan__refine": {
+    "title": "Plan refinement",
+    "description": "Revises a plan's steps, as JSON, following your refinement instruction or a failed step."
+  },
+  "agent__plan__refine-request": {
+    "title": "Plan refinement request",
+    "description": "Protocol text read by the parser: the request carrying the current steps and your refinement instruction."
+  },
+  "agent__plan__step-message": {
+    "title": "Plan step message",
+    "description": "Protocol text read by the host: the message that hands the agent one plan step to do and report on."
+  },
+  "agent__plan__system-section": {
+    "title": "Active plan section",
+    "description": "Shows the running plan and its progress in the system prompt so the agent works on the current step."
+  },
+  "agent__run-retrospective": {
+    "title": "Run retrospective",
+    "description": "Reviews a finished run and proposes improvements that wait for your approval before anything changes."
+  },
+  "agent__run-retrospective__reply-format": {
+    "title": "Run retrospective JSON shape",
+    "description": "Protocol text read by the parser: the JSON shape a run retrospective must return."
+  },
+  "agent__subagent-frame__contract": {
+    "title": "Subagent report contract",
+    "description": "Protocol text read by the host: tells each dispatched subagent that only its final, complete report is seen."
+  },
+  "agent__verifier__request": {
+    "title": "Fresh verifier request",
+    "description": "Protocol text read by the parser: the request, reply, and diff sent to the independent verifier."
+  },
+  "agent__verifier__system": {
+    "title": "Fresh verifier",
+    "description": "Has an independent agent check another agent's reply against your request and return a JSON verdict."
+  },
+  "chat__a2ui__protocol": {
+    "title": "A2UI protocol",
+    "description": "Protocol text read by the A2UI parser: teaches the model to build interactive UI blocks in chat replies."
+  },
+  "chat__brief-mode": {
+    "title": "Brief mode",
+    "description": "Tells the chat model to answer briefly, without preamble or filler, while brief mode is on."
+  },
+  "chat__cli__handoff": {
+    "title": "CLI session handoff",
+    "description": "The first message of a resumed CLI session, carrying the earlier transcript ahead of your new prompt."
+  },
+  "chat__cli__output-style__concise": {
+    "title": "CLI output style: Concise",
+    "description": "Makes the CLI agent answer in as few words as possible while the Concise style is on."
+  },
+  "chat__cli__output-style__explanatory": {
+    "title": "CLI output style: Explanatory",
+    "description": "Makes the CLI agent explain its reasoning and trade-offs while the Explanatory style is on."
+  },
+  "chat__cli__output-style__learning": {
+    "title": "CLI output style: Learning",
+    "description": "Makes the CLI agent act as a mentor and leave small parts for you while the Learning style is on."
+  },
+  "chat__compaction__handoff": {
+    "title": "Compaction readiness",
+    "description": "Warns the agent that the chat may be compacted, so it restates key facts before long tool runs."
+  },
+  "chat__compaction__recovery": {
+    "title": "Post-compaction recovery",
+    "description": "After compaction, tells the agent to trust the summary and continue without asking you to repeat yourself."
+  },
+  "chat__connector-capability__fallback": {
+    "title": "IM channel: plain-text kinds",
+    "description": "Lists A2UI kinds that fall back to plain text on the platform, so the model avoids them."
+  },
+  "chat__connector-capability__header": {
+    "title": "IM channel: capability intro",
+    "description": "Tells the model which messaging platform carries the chat and that it supports only part of A2UI."
+  },
+  "chat__connector-capability__native": {
+    "title": "IM channel: native kinds",
+    "description": "Lists the A2UI kinds that the messaging platform renders natively."
+  },
+  "chat__connector-capability__simulated": {
+    "title": "IM channel: multi-step kinds",
+    "description": "Lists A2UI kinds the platform handles through a multi-step exchange instead of an immediate reply."
+  },
+  "chat__connector-capability__skills": {
+    "title": "IM channel: available Skills",
+    "description": "Lists the built-in Skills usable in the channel and notes that write actions need a confirm card."
+  },
+  "chat__connector-capability__unsupported": {
+    "title": "IM channel: unsupported kinds",
+    "description": "Lists A2UI kinds the platform cannot show at all, so the model never emits them."
+  },
+  "chat__peer-delivery__frame": {
+    "title": "Message from another session",
+    "description": "Protocol text read by the host: wraps a message from another session as untrusted, never as your consent."
+  },
+  "chat__pet__history": {
+    "title": "Pet recent history",
+    "description": "Reminds the desktop pet of the lines you recently exchanged so it stays consistent."
+  },
+  "chat__pet__language": {
+    "title": "Pet reply language",
+    "description": "Tells the desktop pet to reply in your interface language."
+  },
+  "chat__pet__name-soul": {
+    "title": "Pet naming system prompt",
+    "description": "Sets the model up as a pet-naming helper that answers only in JSON when a new desktop pet hatches."
+  },
+  "chat__pet__name-soul__request": {
+    "title": "Pet naming request",
+    "description": "The request sent when a pet hatches, asking for a cute name and a one-line personality as JSON."
+  },
+  "chat__pet__persona": {
+    "title": "Pet bubble persona",
+    "description": "Makes the desktop pet reply in character with one short, playful line in its speech bubble."
+  },
+  "chat__pet__persona__bound-character": {
+    "title": "Pet: bound Agent persona",
+    "description": "Tells the desktop pet which Agent persona you are using when one is bound to it."
+  },
+  "chat__pet__persona__conversation": {
+    "title": "Pet chat persona",
+    "description": "Makes the desktop pet chat in character, in a few short sentences, in the pet chat panel."
+  },
+  "chat__pet__state": {
+    "title": "Pet mood and stats",
+    "description": "Gives the desktop pet its current mood, energy, bond, and level so its replies reflect them."
+  },
+  "chat__reply-copilot__draft": {
+    "title": "Reply copilot: drafts",
+    "description": "Has the reply copilot write three candidate replies for an IM chat, which you review before sending."
+  },
+  "chat__reply-copilot__draft__request": {
+    "title": "Reply copilot: draft request",
+    "description": "Protocol text read by the parser: the last line of the drafting request, asking for three replies as JSON."
+  },
+  "chat__reply-copilot__draft__unattributed-note": {
+    "title": "Reply copilot: unknown sender note",
+    "description": "Warns the reply copilot not to guess who wrote the messages marked Unknown."
+  },
+  "chat__reply-copilot__question__best-action": {
+    "title": "Copilot question: best action",
+    "description": "Asks the decision provider which kind of next action fits best, such as checking the history first, for the reply copilot."
+  },
+  "chat__reply-copilot__question__best-action__compact": {
+    "title": "Copilot question: best action (compact)",
+    "description": "A shorter wording of the best action question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__best-reply": {
+    "title": "Copilot question: best candidate",
+    "description": "Asks the decision provider which candidate reply is the most fitting next message, for the reply copilot."
+  },
+  "chat__reply-copilot__question__best-reply__compact": {
+    "title": "Copilot question: best candidate (compact)",
+    "description": "A shorter wording of the best candidate question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__danger-level": {
+    "title": "Copilot question: conflict level",
+    "description": "Asks the decision provider how close the chat is to a fight or to hurting the relationship, for the reply copilot."
+  },
+  "chat__reply-copilot__question__danger-level__compact": {
+    "title": "Copilot question: conflict level (compact)",
+    "description": "A shorter wording of the conflict level question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__literal-question": {
+    "title": "Copilot question: literal meaning",
+    "description": "Asks the decision provider whether the other person's latest message means only what it says, with no subtext, for the reply copilot."
+  },
+  "chat__reply-copilot__question__literal-question__compact": {
+    "title": "Copilot question: literal meaning (compact)",
+    "description": "A shorter wording of the literal meaning question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__she-needs": {
+    "title": "Copilot question: what they need",
+    "description": "Asks the decision provider what the other person needs from you right now, judged from their latest message, for the reply copilot."
+  },
+  "chat__reply-copilot__question__she-needs__compact": {
+    "title": "Copilot question: what they need (compact)",
+    "description": "A shorter wording of the what they need question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__should-reply-now": {
+    "title": "Copilot question: substantive reply",
+    "description": "Asks the decision provider whether your next message should carry substance, such as a fact, a plan, or an admission, for the reply copilot."
+  },
+  "chat__reply-copilot__question__should-reply-now__compact": {
+    "title": "Copilot question: substantive reply (compact)",
+    "description": "A shorter wording of the substantive reply question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__tension-resolved": {
+    "title": "Copilot question: tension resolved",
+    "description": "Asks the decision provider whether the tension in the chat has genuinely been resolved, for the reply copilot."
+  },
+  "chat__reply-copilot__question__tension-resolved__compact": {
+    "title": "Copilot question: tension resolved (compact)",
+    "description": "A shorter wording of the tension resolved question for decision providers with a small prompt budget."
+  },
+  "chat__reply-copilot__question__true-intent": {
+    "title": "Copilot question: true intent",
+    "description": "Asks the decision provider what the other person really wants with their latest message, judged from tone and context, for the reply copilot."
+  },
+  "chat__reply-copilot__question__true-intent__compact": {
+    "title": "Copilot question: true intent (compact)",
+    "description": "A shorter wording of the true intent question for decision providers with a small prompt budget."
+  },
+  "chat__selection__explain": {
+    "title": "Explain selected text",
+    "description": "Explains a passage you selected in a chat, defining jargon and unpacking code, in the selection panel."
+  },
+  "chat__selection__translate": {
+    "title": "Translate selected text",
+    "description": "Translates a passage you selected in a chat into your chosen language, keeping code and formatting."
+  },
+  "chat__side-chat__contract": {
+    "title": "Side chat contract",
+    "description": "Keeps a side chat answering only the side question, using the main conversation as reference only."
+  },
+  "chat__side-chat__read-only": {
+    "title": "Read-only side chat",
+    "description": "Tells a read-only side chat to describe changes instead of making them, and how you can enable editing."
+  },
+  "chat__visual-output__dock": {
+    "title": "Visual output: dock artifacts",
+    "description": "Points the model to chart artifacts and Canvas documents in the dock when those tools are available."
+  },
+  "chat__visual-output__fenced": {
+    "title": "Visual output: fenced payloads",
+    "description": "Tells the model to write charts as fenced JSON blocks that the app lifts into the dock."
+  },
+  "chat__visual-output__frame": {
+    "title": "Visual output routing",
+    "description": "Guides the chat model to pick diagrams, charts, or documents based on what the current channel can render."
+  },
+  "chat__visual-output__inline-chart": {
+    "title": "Visual output: inline charts",
+    "description": "Lets the model draw a quick chart right inside the reply as a fenced chart block."
+  },
+  "chat__visual-output__interactive": {
+    "title": "Visual output: interactive surfaces",
+    "description": "Tells the model to use an A2UI surface when you need to choose, confirm, filter, or submit something."
+  },
+  "chat__visual-output__no-canvas": {
+    "title": "Visual output: no Canvas",
+    "description": "When documents cannot be created, tells the model to answer inline instead of producing a Canvas."
+  },
+  "chat__visual-output__no-dock-a2ui-chart": {
+    "title": "Visual output: A2UI chart fallback",
+    "description": "With no dock available, tells the model to show numbers as an A2UI chart or a markdown table."
+  },
+  "chat__visual-output__no-dock-table": {
+    "title": "Visual output: table fallback",
+    "description": "With no chart route available, tells the model to show numbers as a compact markdown table."
+  },
+  "cli__base__identity": {
+    "title": "CLI coding agent identity",
+    "description": "The base system prompt of the command-line coding agent: its role, tone, and way of working in your project."
+  },
+  "completion__enhance__style__concise": {
+    "title": "Enhance style: Concise",
+    "description": "The style hint that makes the prompt enhancer cut your draft down to the essential ask."
+  },
+  "completion__enhance__style__detailed": {
+    "title": "Enhance style: Detailed",
+    "description": "The style hint that makes the prompt enhancer add details, constraints, and context to your draft."
+  },
+  "completion__enhance__style__improve": {
+    "title": "Enhance style: Improve",
+    "description": "The style hint that makes the prompt enhancer clarify your draft and state its goal explicitly."
+  },
+  "completion__enhance__style__simpler": {
+    "title": "Enhance style: Simpler",
+    "description": "The style hint that makes the prompt enhancer rewrite your draft in plain language."
+  },
+  "completion__enhance__style__technical": {
+    "title": "Enhance style: Technical",
+    "description": "The style hint that makes the prompt enhancer use precise technical terms in your draft."
+  },
+  "completion__enhance__system": {
+    "title": "Prompt enhancer",
+    "description": "Rewrites your draft in the composer in the chosen style, without answering it."
+  },
+  "completion__ghost-text": {
+    "title": "Composer ghost text",
+    "description": "Predicts how you will finish your message, shown as dim text after the cursor in the composer."
+  },
+  "completion__suggestions__follow-up": {
+    "title": "Follow-up suggestions",
+    "description": "Suggests short follow-up messages you might send next, based on the last reply."
+  },
+  "completion__suggestions__starter": {
+    "title": "Starter suggestions",
+    "description": "Suggests opening messages you could send to start a new chat."
+  },
+  "completion__terminal": {
+    "title": "Terminal command completion",
+    "description": "Predicts the full command line you are typing in the integrated terminal."
+  },
+  "developer__bootstrap__bash": {
+    "title": "Environment setup agent (Bash)",
+    "description": "System message of the Bash bootstrap agent that prepares a workspace environment before its checks run."
+  },
+  "developer__bootstrap__native": {
+    "title": "Environment setup agent (native)",
+    "description": "System message of the native bootstrap agent that prepares a workspace environment before its checks run."
+  },
+  "developer__bootstrap__powershell": {
+    "title": "Environment setup agent (PowerShell)",
+    "description": "System message of the PowerShell bootstrap agent that prepares a workspace environment before its checks run."
+  },
+  "developer__cli__bash-analysis": {
+    "title": "CLI failed command analysis",
+    "description": "Sent by /analyze to diagnose the last failed shell command and suggest a fix."
+  },
+  "developer__cli__commit-message": {
+    "title": "CLI commit message",
+    "description": "Writes a Conventional Commit message from staged changes in the CLI, for you to confirm."
+  },
+  "developer__cli__fix-tests": {
+    "title": "CLI /fix round",
+    "description": "Sent in each /fix round with the failing test output, asking for the smallest fix."
+  },
+  "developer__cli__init-rewrite": {
+    "title": "CLI AGENTS.md rewrite",
+    "description": "Rewrites the project's AGENTS.md from its current text and project facts, for you to confirm."
+  },
+  "developer__cli__pr-summary": {
+    "title": "CLI pull request summary",
+    "description": "Summarizes a branch into a pull request title and body in the CLI."
+  },
+  "developer__cli__review": {
+    "title": "CLI /review",
+    "description": "Sent by /review so the agent gathers the diff itself and reports findings by severity."
+  },
+  "developer__commit__agent-clause": {
+    "title": "Commit message: agent mode",
+    "description": "Lets an agent read the repository while writing the commit message, without changing anything."
+  },
+  "developer__commit__conventional-format": {
+    "title": "Commit format: Conventional",
+    "description": "The format rules for commit messages when the Conventional Commits setting is on."
+  },
+  "developer__commit__freeform-format": {
+    "title": "Commit format: freeform",
+    "description": "The format rules for commit messages when the Conventional Commits setting is off."
+  },
+  "developer__commit__system": {
+    "title": "Commit message",
+    "description": "Writes a commit message from the staged diff in source control."
+  },
+  "developer__creator__plan": {
+    "title": "Creator: scaffold plan",
+    "description": "Plans the files and capabilities of a new plugin, Skill, or hook scaffold, each with a reason."
+  },
+  "developer__creator__review": {
+    "title": "Creator: generated result review",
+    "description": "Reviews what the creator generated against its requirements and blocks it if wrong or unsafe."
+  },
+  "developer__creator__survey": {
+    "title": "Creator: existing code survey",
+    "description": "Checks the repository for code that already does what a new plugin, Skill, or hook would do."
+  },
+  "developer__diff-explain": {
+    "title": "Diff explanation",
+    "description": "Explains in plain language what a diff changed and why, in source control."
+  },
+  "developer__diff-review": {
+    "title": "Diff review",
+    "description": "Reviews one file's diff hunk by hunk in source control and flags real problems."
+  },
+  "developer__issues__draft": {
+    "title": "Issue body draft",
+    "description": "Writes a full issue body from its title in the issue tracker."
+  },
+  "developer__issues__improve": {
+    "title": "Issue body rewrite",
+    "description": "Rewrites an issue draft into a clearer, structured body without inventing facts."
+  },
+  "developer__issues__metadata": {
+    "title": "Issue priority and labels",
+    "description": "Suggests a priority, labels, and an estimate for an issue, chosen from your existing options."
+  },
+  "developer__issues__relations": {
+    "title": "Issue relations",
+    "description": "Suggests a parent, blockers, and duplicates for an issue from the existing issues."
+  },
+  "developer__issues__title": {
+    "title": "Issue title",
+    "description": "Writes a concise one-line title from an issue's body."
+  },
+  "developer__issues__wakeup__children-done": {
+    "title": "Issue: sub-issues done",
+    "description": "Sent to the agent when every sub-issue is finished, asking it to continue the parent issue."
+  },
+  "developer__skills__authoring": {
+    "title": "Skill editor rewrite",
+    "description": "Rewrites a SKILL.md body in the Skill editor as a suggestion you can review."
+  },
+  "developer__skills__authoring__expand": {
+    "title": "Skill rewrite: Expand",
+    "description": "The instruction used when you ask the Skill editor to add examples and edge cases to a Skill."
+  },
+  "developer__skills__authoring__fix-errors": {
+    "title": "Skill rewrite: Fix errors",
+    "description": "The instruction used when you ask the Skill editor to resolve a Skill's validation issues."
+  },
+  "developer__skills__authoring__optimize": {
+    "title": "Skill rewrite: Optimize",
+    "description": "The instruction used when you ask the Skill editor to tighten a Skill's wording."
+  },
+  "developer__skills__authoring__request": {
+    "title": "Skill rewrite request",
+    "description": "The request carrying the Skill's name, your instruction, and its current body to the rewriter."
+  },
+  "developer__skills__authoring__simplify": {
+    "title": "Skill rewrite: Simplify",
+    "description": "The instruction used when you ask the Skill editor to rewrite a Skill for readers new to the topic."
+  },
+  "developer__skills__recording": {
+    "title": "Skill from recording",
+    "description": "Turns a recorded desktop workflow into a reusable Skill draft that you review before saving."
+  },
+  "developer__workflow__classify__system": {
+    "title": "Classify node",
+    "description": "Has a classify workflow node answer with exactly one of its labels."
+  },
+  "developer__workflow__copilot": {
+    "title": "Workflow Copilot",
+    "description": "The Workflow Copilot's role in the workflow editor chat: read first, propose changes, never edit directly."
+  },
+  "developer__workflow__ensemble__synthesizer": {
+    "title": "Ensemble node synthesizer",
+    "description": "Merges the attempts of an ensemble workflow node into one best answer."
+  },
+  "developer__workflow__ensemble__synthesizer__request": {
+    "title": "Ensemble node request",
+    "description": "The request carrying every attempt to the ensemble node's synthesizer."
+  },
+  "developer__workflow__extract__system": {
+    "title": "Extract node",
+    "description": "Has an extract workflow node return the requested fields as a JSON object."
+  },
+  "developer__workflow__json-output": {
+    "title": "JSON-only output",
+    "description": "Protocol text read by the parser: tells JSON-mode workflow nodes and runs to reply with JSON only."
+  },
+  "developer__workflow__json-output__shape": {
+    "title": "JSON output shape",
+    "description": "Protocol text read by the parser: the JSON shape a JSON-mode node's reply must match."
+  },
+  "developer__workflow__quick-action__explain": {
+    "title": "Copilot: explain selection",
+    "description": "The /explain message asking the Copilot to explain the selected workflow nodes."
+  },
+  "developer__workflow__quick-action__explain-empty": {
+    "title": "Copilot: explain, nothing selected",
+    "description": "The /explain message when no nodes are selected, asking you to pick some first."
+  },
+  "developer__workflow__quick-action__selection-reference": {
+    "title": "Copilot: work on selection",
+    "description": "Sent when you limit the Copilot chat to the workflow nodes you selected."
+  },
+  "developer__workflow__quick-action__suggest": {
+    "title": "Copilot: suggest next node",
+    "description": "The /suggest-next message asking the Copilot for one node to add after your selection."
+  },
+  "developer__workflow__quick-action__suggest-unselected": {
+    "title": "Copilot: suggest, no selection",
+    "description": "The /suggest-next message asking the Copilot for one node to add when nothing is selected."
+  },
+  "developer__workflow__quick-action__validate-clean": {
+    "title": "Copilot: validate, no errors",
+    "description": "The /validate message when the validator finds nothing, asking the Copilot for a design review."
+  },
+  "developer__workflow__quick-action__validate-issues": {
+    "title": "Copilot: validate with issues",
+    "description": "The /validate message listing the validator's issues and asking the Copilot to fix them."
+  },
+  "developer__workflow__schema-repair": {
+    "title": "Schema repair retry",
+    "description": "Protocol text read by the parser: asks for corrected JSON after a reply fails the output schema."
+  },
+  "developer__workflow__slash__debug": {
+    "title": "Workflow /debug",
+    "description": "The /debug message handing a failed workflow to the debugger subagent, without changing it."
+  },
+  "developer__workflow__slash__delegate": {
+    "title": "Workflow /delegate",
+    "description": "The /delegate message passing your task to a named subagent and summarizing its reply."
+  },
+  "developer__workflow__slash__refactor": {
+    "title": "Workflow /refactor",
+    "description": "The /refactor message handing the change you describe to the refactorer subagent."
+  },
+  "developer__workflow__slash__run": {
+    "title": "Workflow /run",
+    "description": "The /run message asking the Copilot to validate, then run the whole workflow after your approval."
+  },
+  "developer__workflow__slash__run-from-step": {
+    "title": "Workflow /run from step",
+    "description": "The /run message asking the Copilot to run the workflow from a given step after your approval."
+  },
+  "generation__a2ui__create-app": {
+    "title": "A2UI app generation",
+    "description": "Builds a new interactive A2UI mini-app from your request in the A2UI editor."
+  },
+  "generation__a2ui__edit-app": {
+    "title": "A2UI app edit",
+    "description": "Applies your requested change to an existing A2UI mini-app, updating only the parts that change."
+  },
+  "generation__a2ui__enhance-execution": {
+    "title": "Run summary card",
+    "description": "Writes a short summary and insights for a workflow run or chat, shown on its interactive page."
+  },
+  "generation__canvas-suggestions__assist": {
+    "title": "Canvas inline suggestions",
+    "description": "Proposes a few small edits near your cursor, added to the Canvas Suggestions panel."
+  },
+  "generation__canvas-suggestions__review": {
+    "title": "Canvas review findings",
+    "description": "Reviews the whole Canvas document and offers findings you accept or reject one at a time."
+  },
+  "generation__canvas__custom": {
+    "title": "Canvas: custom instruction",
+    "description": "Applies your own instruction to the Canvas document or selection and returns only the new text."
+  },
+  "generation__canvas__expand": {
+    "title": "Canvas: expand",
+    "description": "Adds detail and examples to the Canvas content and replaces it."
+  },
+  "generation__canvas__explain": {
+    "title": "Canvas: explain",
+    "description": "Explains what the Canvas content does, step by step, shown beside the document."
+  },
+  "generation__canvas__fix": {
+    "title": "Canvas: fix",
+    "description": "Fixes bugs, syntax errors, and typos in the Canvas content and replaces it."
+  },
+  "generation__canvas__format": {
+    "title": "Canvas: format",
+    "description": "Tidies the indentation, spacing, and structure of the Canvas content and replaces it."
+  },
+  "generation__canvas__improve": {
+    "title": "Canvas: improve",
+    "description": "Improves the readability and structure of the Canvas content and replaces it."
+  },
+  "generation__canvas__review": {
+    "title": "Canvas: review",
+    "description": "Reviews the Canvas content for issues and improvements, shown beside the document."
+  },
+  "generation__canvas__run": {
+    "title": "Canvas: simulate run",
+    "description": "Describes what the Canvas code would output if run, without actually running it."
+  },
+  "generation__canvas__simplify": {
+    "title": "Canvas: simplify",
+    "description": "Simplifies the Canvas content while keeping its meaning, and replaces it."
+  },
+  "generation__canvas__translate": {
+    "title": "Canvas: translate",
+    "description": "Translates the Canvas content into the chosen language, keeping its formatting."
+  },
+  "generation__council__synthesis": {
+    "title": "Council synthesis",
+    "description": "Merges the council members' answers into one response and rates how far they agreed."
+  },
+  "generation__image-edit__remove-background": {
+    "title": "Remove image background",
+    "description": "Asks the image model to remove the background, in the chat image workbench and the plugin media tools."
+  },
+  "generation__pet__hatch-sprite": {
+    "title": "Pet sprite hatch draft",
+    "description": "Drafts a new chat asking an agent to create an animated pet sprite that you can then import."
+  },
+  "generation__summary__conversation": {
+    "title": "Conversation summary",
+    "description": "Summarizes a conversation to seed a new branch or to stand in for older turns after compaction."
+  },
+  "generation__summary__selection": {
+    "title": "Selection summary",
+    "description": "Summarizes material you selected in a chat, to show you or to seed a handoff."
+  },
+  "generation__template-assist__generate": {
+    "title": "Template draft",
+    "description": "Writes a new message template with fill-in parameters from your description, in the template editor."
+  },
+  "generation__template-assist__improve": {
+    "title": "Template rewrite",
+    "description": "Rewrites a message template more clearly while keeping every parameter slot in place."
+  },
+  "generation__template-assist__suggest-params": {
+    "title": "Template parameter hints",
+    "description": "Suggests a label and a short hint for each parameter slot in a message template."
+  },
+  "generation__title__chat": {
+    "title": "Chat title",
+    "description": "Names a conversation from its first exchange."
+  },
+  "generation__title__work": {
+    "title": "Task or run title",
+    "description": "Names an automated task or workflow run in a few words."
+  },
+  "generation__turn-label": {
+    "title": "Turn label",
+    "description": "Labels a single chat turn in five words or fewer for the conversation timeline."
+  },
+  "goal__continuation": {
+    "title": "Goal continuation turn",
+    "description": "Protocol text read by the host: the message asking the agent to take the next step toward the goal."
+  },
+  "goal__judge": {
+    "title": "Goal completion judge",
+    "description": "Decides from the agent's latest reply whether the goal is fully done, answering in JSON."
+  },
+  "goal__objective-updated": {
+    "title": "Goal objective update",
+    "description": "Protocol text read by the host: tells the agent you revised the goal and the old objective no longer applies."
+  },
+  "goal__promise-verification": {
+    "title": "Goal completion check",
+    "description": "Protocol text read by the host: asks the agent to confirm completion with an exact token before the goal closes."
+  },
+  "goal__subgoals": {
+    "title": "Goal checklist",
+    "description": "Breaks a goal into 3 to 8 ordered sub-steps shown as its checklist."
+  },
+  "goal__system-section": {
+    "title": "Active goal section",
+    "description": "Shows the active goal and its progress in the system prompt on every turn while a /goal runs."
+  },
+  "knowledge__memory__consolidate": {
+    "title": "Memory consolidation",
+    "description": "Decides whether a new memory adds to, updates, removes, or conflicts with similar stored memories."
+  },
+  "knowledge__memory__episodic-distill": {
+    "title": "Episodic memory distill",
+    "description": "After a chat goes idle, picks out decisions and events worth recalling in later sessions."
+  },
+  "knowledge__memory__episodic-distill__request": {
+    "title": "Episodic memory request",
+    "description": "The request carrying the conversation, and the JSON shape episodic memory distilling must return."
+  },
+  "knowledge__memory__extract": {
+    "title": "User memory extraction",
+    "description": "Picks out lasting facts about you, such as preferences and environment, from each conversation turn."
+  },
+  "knowledge__memory__project-extract": {
+    "title": "Project memory extraction",
+    "description": "Extracts lasting facts about a software project from its own development conversations."
+  },
+  "knowledge__memory__rerank": {
+    "title": "Memory recall reranker",
+    "description": "Scores how relevant each stored memory is to the current query during recall."
+  },
+  "knowledge__ocr__vision": {
+    "title": "CLI image OCR",
+    "description": "Extracts all the text from an attached page image as Markdown in the CLI."
+  },
+  "knowledge__radar": {
+    "title": "Knowledge radar",
+    "description": "Diagnoses your information diet from recently saved items, including blind spots and next actions."
+  },
+  "knowledge__rag__hyde": {
+    "title": "Retrieval: hypothetical answer",
+    "description": "Writes a short imagined answer passage that is used as an extra search query during retrieval."
+  },
+  "knowledge__rag__step-back": {
+    "title": "Retrieval: step-back question",
+    "description": "Writes a broader background question that is used as an extra search query during retrieval."
+  },
+  "knowledge__web-search__answer": {
+    "title": "Web search answer",
+    "description": "Answers your question from numbered web sources with citations, shown above the sources."
+  },
+  "knowledge__web__fetch-extract": {
+    "title": "Web page extraction",
+    "description": "Pulls only the parts of a fetched web page that answer the question, keeping facts verbatim."
+  },
+  "knowledge__web__reader-distill": {
+    "title": "Web reader summary",
+    "description": "The default question the web reader uses to summarize a page's key facts when distilling it."
+  },
+  "knowledge__wiki__voice": {
+    "title": "Code wiki writing voice",
+    "description": "Sets how the code wiki writes articles and index pages: concise, grounded, and aimed at coding agents."
+  },
+  "permissions__command-judge": {
+    "title": "Shell command safety judge",
+    "description": "Decides whether a shell command is safe to run without asking you first."
+  },
+  "routing__difficulty-judge": {
+    "title": "Request difficulty judge",
+    "description": "Rates how capable a model a request needs, to pick a fast, balanced, or powerful model."
+  },
+  "routing__fusion__role__common": {
+    "title": "Fusion: shared role rules",
+    "description": "Rules every Router + Fusion role follows: treat inputs as data, cite real evidence, never fake results."
+  },
+  "routing__fusion__role__compactor": {
+    "title": "Fusion: context compactor",
+    "description": "Condenses a long transcript into a handoff that keeps goals, constraints, and open issues."
+  },
+  "routing__fusion__role__judge": {
+    "title": "Fusion: judge",
+    "description": "Has the judge check candidate answers against the task and evidence rather than vote or merge them."
+  },
+  "routing__fusion__role__lead": {
+    "title": "Fusion: lead planner",
+    "description": "Has the lead plan subtasks for workers and then review their results."
+  },
+  "routing__fusion__role__panel-member": {
+    "title": "Fusion: panel member",
+    "description": "Has a panel member answer the whole task on its own, with its claims backed by evidence."
+  },
+  "routing__fusion__role__reviewer": {
+    "title": "Fusion: content reviewer",
+    "description": "Has a reviewer check a result against the rubric, marking each check passed, failed, or unclear."
+  },
+  "routing__fusion__role__synthesizer": {
+    "title": "Fusion: synthesizer",
+    "description": "Writes the final answer from supported claims and keeps unresolved points marked as uncertain."
+  },
+  "routing__fusion__role__worker": {
+    "title": "Fusion: worker",
+    "description": "Has a worker carry out one approved subtask in an isolated workspace and report honestly."
+  },
+  "team__auto__assess-routing": {
+    "title": "Team: routing assessment",
+    "description": "Recommends how to orchestrate an objective, from a single agent up to a full team."
+  },
+  "team__auto__clarify": {
+    "title": "Team: clarifying questions",
+    "description": "Decides whether an Agent Team objective needs a few clarifying questions before planning."
+  },
+  "team__auto__compose-roster": {
+    "title": "Team: roster composition",
+    "description": "Proposes a small team of specialists for an objective, with the lead first."
+  },
+  "team__auto__decompose-tasks": {
+    "title": "Team: task breakdown",
+    "description": "Breaks an objective into up to 16 ordered tasks with assignees and dependencies."
+  },
+  "team__lead-review": {
+    "title": "Team: lead review",
+    "description": "Has the team lead approve a teammate's finished work or request changes."
+  },
+  "team__lead__planning": {
+    "title": "Team: lead plan request",
+    "description": "Asks the team lead for a plan of 3 to 6 steps assigned to teammates."
+  },
+  "team__lead__planning-system": {
+    "title": "Team: lead planning system prompt",
+    "description": "The default system prompt for a team lead's planning, requiring a single JSON plan block."
+  },
+  "team__ledger__judge": {
+    "title": "Team: stall judge",
+    "description": "Works out why an Agent Team has stalled and recommends one next action."
+  },
+  "team__ledger__schema-hint": {
+    "title": "Team: stall verdict schema",
+    "description": "Protocol text read by the parser: the JSON shape the stall judge must return."
+  },
+  "team__pattern__adversarial-verify__lens-correctness": {
+    "title": "Skeptic lens: correctness",
+    "description": "Asks a skeptic to check whether the finding is a real logic or behavior defect."
+  },
+  "team__pattern__adversarial-verify__lens-perf": {
+    "title": "Skeptic lens: performance",
+    "description": "Asks a skeptic to judge whether the performance impact is real at realistic scale."
+  },
+  "team__pattern__adversarial-verify__lens-repro": {
+    "title": "Skeptic lens: reproduction",
+    "description": "Asks a skeptic to actually reproduce the finding before accepting it."
+  },
+  "team__pattern__adversarial-verify__lens-security": {
+    "title": "Skeptic lens: security",
+    "description": "Asks a skeptic to judge whether the finding is a security issue an attacker can exploit."
+  },
+  "team__pattern__adversarial-verify__skeptic": {
+    "title": "Pattern: skeptic prompt",
+    "description": "Has a skeptic try to refute one finding during adversarial verification."
+  },
+  "team__pattern__adversarial-verify__verdict-schema": {
+    "title": "Pattern: skeptic verdict schema",
+    "description": "Protocol text read by the parser: the JSON shape one skeptic verdict must return."
+  },
+  "team__pattern__completeness-critic__critic": {
+    "title": "Pattern: completeness critic prompt",
+    "description": "Names what the work so far has missed, feeding the next search round and the final report."
+  },
+  "team__pattern__completeness-critic__gaps-schema": {
+    "title": "Pattern: gaps schema",
+    "description": "Protocol text read by the parser: the JSON shape the completeness critic must return."
+  },
+  "team__pattern__judge-panel__attempt": {
+    "title": "Pattern: judge panel attempt",
+    "description": "Has an agent attempt the objective from one assigned angle for the judge panel."
+  },
+  "team__pattern__judge-panel__attempt-schema": {
+    "title": "Pattern: attempt schema",
+    "description": "Protocol text read by the parser: the JSON shape one judge panel attempt must return."
+  },
+  "team__pattern__judge-panel__judge": {
+    "title": "Pattern: judge panel scoring",
+    "description": "Has a judge score one attempt from 0 to 10 against the objective."
+  },
+  "team__pattern__judge-panel__score-schema": {
+    "title": "Pattern: judge score schema",
+    "description": "Protocol text read by the parser: the JSON shape one judge score must return."
+  },
+  "team__pattern__loop-until-dry__finder": {
+    "title": "Pattern: loop finder prompt",
+    "description": "Asks a finder for new findings only, round after round, until rounds come back empty."
+  },
+  "team__pattern__multi-modal-sweep__finder": {
+    "title": "Pattern: sweep finder prompt",
+    "description": "Has each finder in a multi-modal sweep search with only its assigned approach."
+  },
+  "team__pattern__shared__findings-schema": {
+    "title": "Pattern: findings schema",
+    "description": "Protocol text read by the parser: the JSON shape finders in the sweep and loop patterns must return."
+  },
+  "team__pattern__synthesize__report": {
+    "title": "Pattern: final report prompt",
+    "description": "Writes the run's final report from verified findings, noting open gaps as limits."
+  },
+  "team__pattern__synthesize__report-schema": {
+    "title": "Pattern: final report schema",
+    "description": "Protocol text read by the parser: the JSON shape the final report must return."
+  },
+  "team__pr-feedback__reviewer": {
+    "title": "Team: PR reviewer",
+    "description": "The internal reviewer's role for an Agent Team: review only the pull request's changes."
+  },
+  "team__pr-feedback__reviewer-task": {
+    "title": "Team: PR review request",
+    "description": "Names the pull request to review and asks the internal reviewer for a JSON verdict."
+  },
+  "team__rate-limit__nudge": {
+    "title": "Team: rate limit resume",
+    "description": "Posted to the team after a rate-limit cooldown, telling members to pick up where they stopped."
+  },
+  "team__replan__lead": {
+    "title": "Team: replan checkpoint",
+    "description": "Has the lead decide after each wave whether to continue, add, cancel, or change tasks."
+  },
+  "team__review__revision-request": {
+    "title": "Team: revision request",
+    "description": "The request sent back to a teammate with the lead's feedback, asking for a revision."
+  },
+  "team__structured__json-instruction": {
+    "title": "Team: JSON reply rule",
+    "description": "Protocol text read by the parser: tells a teammate to reply with one JSON block matching the schema."
+  },
+  "team__structured__retry-note": {
+    "title": "Team: JSON retry note",
+    "description": "Protocol text read by the parser: asks a teammate for corrected JSON after an invalid reply."
+  },
+  "team__teammate__default-identity": {
+    "title": "Team: default teammate identity",
+    "description": "The teammate system prompt used when nothing else sets one."
+  },
+  "team__teammate__task": {
+    "title": "Team: teammate task",
+    "description": "Hands a teammate its assigned task, its role, and the team goal."
+  },
+  "team__teammate__upstream-results": {
+    "title": "Team: upstream results",
+    "description": "Introduces the results of tasks a teammate depends on, placed before its own task."
+  },
+  "team__ultracode__plan-hint": {
+    "title": "Ultracode plan schema",
+    "description": "Protocol text read by the parser: the JSON shape the ultracode planner must return."
+  },
+  "team__ultracode__planner": {
+    "title": "Ultracode planner",
+    "description": "Chooses which quality patterns an ultracode run combines, and in what order."
+  },
+  "twin__distill__entity-merge": {
+    "title": "Twin distill: entity merging",
+    "description": "Groups different names for the same team, person, or project found while building the twin."
+  },
+  "twin__distill__evaluator": {
+    "title": "Twin distill: reviewer",
+    "description": "Scores the twin's Agent and Skill drafts from a newcomer's point of view and suggests fixes."
+  },
+  "twin__distill__knowledge": {
+    "title": "Twin distill: entities and decisions",
+    "description": "Extracts the people, teams, projects, and decisions in your material for the digital twin."
+  },
+  "twin__distill__playbook": {
+    "title": "Twin distill: playbooks",
+    "description": "Finds work patterns you repeat across documents and chats, to become the twin's playbooks."
+  },
+  "twin__distill__style": {
+    "title": "Twin distill: writing style",
+    "description": "Picks representative samples of your writing so the digital twin can match your tone."
+  },
+  "twin__distill__synthesizer": {
+    "title": "Twin distill: synthesizer",
+    "description": "Turns the distilled profile into one Agent draft and several Skill drafts for the digital twin."
+  },
+  "twin__runtime__rerank": {
+    "title": "Twin search reranker",
+    "description": "Scores how well each retrieved document answers a question when the twin searches its material."
+  },
+  "twin__runtime__rerank-request": {
+    "title": "Twin rerank request",
+    "description": "Protocol text read by the parser: the request carrying the query and documents to the twin reranker."
+  },
+  "twin__runtime__system-template__decisions": {
+    "title": "Twin prompt: decisions",
+    "description": "Adds the decisions the person has made to the digital twin's system prompt."
+  },
+  "twin__runtime__system-template__entities": {
+    "title": "Twin prompt: known people",
+    "description": "Adds the people, teams, and projects the twin knows, as background it should not list unprompted."
+  },
+  "twin__runtime__system-template__identity": {
+    "title": "Twin prompt: identity",
+    "description": "Opens the digital twin's system prompt by telling it whose name it speaks under."
+  },
+  "twin__runtime__system-template__playbooks": {
+    "title": "Twin prompt: playbooks",
+    "description": "Adds how the person typically handles situations to the digital twin's system prompt."
+  },
+  "twin__runtime__system-template__retrieved": {
+    "title": "Twin prompt: retrieved material",
+    "description": "Adds the excerpts retrieved for this turn and asks the twin to cite them or admit gaps."
+  },
+  "twin__runtime__system-template__style": {
+    "title": "Twin prompt: style examples",
+    "description": "Adds samples of the person's writing for the twin to match without copying them."
+  },
+  "twin__runtime__system-template__voice": {
+    "title": "Twin prompt: voice",
+    "description": "Adds the person's voice and tone summary to the digital twin's system prompt."
+  }
+}

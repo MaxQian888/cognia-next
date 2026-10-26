@@ -102,7 +102,8 @@ export async function existingVideoJobIds(ids: readonly string[]): Promise<Set<s
  */
 export async function pruneSettledVideoJobs(
   cutoff: number,
-  removeFile: (relativePath: string) => Promise<void>
+  removeFile: (relativePath: string) => Promise<void>,
+  report?: { failed: number }
 ): Promise<number> {
   const db = getDb()
   const rows = await db.mediaGenerationJobs
@@ -121,6 +122,7 @@ export async function pruneSettledVideoJobs(
       try {
         await removeFile(content.relativePath)
       } catch {
+        if (report) report.failed++
         // Keep the row, so the next sweep tries again rather than orphan the file.
         continue
       }

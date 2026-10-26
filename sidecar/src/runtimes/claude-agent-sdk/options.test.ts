@@ -66,8 +66,10 @@ test("portable subagent options translate at the runtime boundary", () => {
     () => ({ async *[Symbol.asyncIterator]() {}, interrupt() {}, close() {} })
   )
   assert.equal(options.env?.CLAUDE_CODE_FORK_SUBAGENT, "1")
-  assert.equal(options.agents?.reviewer.autoCompactWindow, 120000)
-  assert.equal("contextPolicy" in options.agents!.reviewer, false)
+  const reviewer = options.agents?.reviewer
+  assert.ok(reviewer)
+  assert.equal(reviewer.autoCompactWindow, 120000)
+  assert.equal("contextPolicy" in reviewer, false)
   session.closeInput()
 })
 

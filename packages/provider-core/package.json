@@ -29,22 +29,35 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cognia/provider-types": "workspace:*"
+    "@cognia/provider-types": "workspace:*",
+    "nanoid": "^6.0.2"
   },
   "peerDependencies": {
-    "ai": "*",
+    "@ai-sdk/amazon-bedrock": "*",
     "@ai-sdk/anthropic": "*",
-    "@ai-sdk/openai": "*",
+    "@ai-sdk/azure": "^4.0.92",
+    "@ai-sdk/cohere": "*",
     "@ai-sdk/google": "*",
     "@ai-sdk/mistral": "*",
-    "@ai-sdk/cohere": "*",
-    "@ai-sdk/amazon-bedrock": "*",
+    "@ai-sdk/openai": "*",
+    "@tauri-apps/api": "^2.12.1",
+    "ai": "*",
     "zod": "*"
   },
   "devDependencies": {
+    "@ai-sdk/azure": "4.0.92",
+    "@tauri-apps/api": "^2.12.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.4",
+    "tsup": "^8.5.1",
     "zod": "catalog:"
   },
   "engines": {
     "node": ">=26.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tauri-apps/api": {
+      "optional": true
+    }
   }
 }

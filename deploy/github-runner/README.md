@@ -67,7 +67,7 @@ availability or relay connectivity. Configure the actor allowlist and confirm
 these deployment requirements separately. Checks have a 90-second overall limit;
 a timeout or API failure can reflect connectivity as well as authentication.
 
-Build the Host from `Dockerfile.cognia-server` and the Agent bundle from
+Build the Host from `deploy/docker/Dockerfile.cognia-server` and the Agent bundle from
 `deploy/bundle/Dockerfile`. Use `runtime-full` for preinstalled native Agent CLIs
 on the Host; `runtime-slim` provides headless services. The development image
 supplies project tools. Publish all three images where the runner can pull them,
@@ -96,7 +96,7 @@ export RUNNER_IMAGE_NAMESPACE=ghcr.io/your-owner
 export RUNNER_IMAGE_TAG=your-release
 
 docker buildx build --platform linux/amd64 --target runtime-full \
-  -f Dockerfile.cognia-server \
+  -f deploy/docker/Dockerfile.cognia-server \
   -t "$RUNNER_IMAGE_NAMESPACE/cognia-host:$RUNNER_IMAGE_TAG" --push .
 
 docker buildx build --platform linux/amd64 -f deploy/bundle/Dockerfile \

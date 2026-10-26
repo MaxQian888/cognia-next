@@ -14,8 +14,12 @@ import {
 } from "@/types/agent/ultracode"
 import { dispatchStructured } from "../teammate/structured-dispatch"
 import { collectFindings, getTeamCtxOrThrow, nonRetryable, renderFinding } from "./_shared"
-
-const GAPS_HINT = '{ "gaps": [{ "description": "…", "suggestedSearch"?: "…" }] }'
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import {
+  CRITIC_GAPS_SCHEMA_HINT_PROMPT,
+  CRITIC_PROMPT,
+  freezePatternPromptScope,
+} from "./pattern-prompts"
 
 export const COMPLETENESS_CRITIC_KIND = "pattern.completeness-critic" as const
 
@@ -35,21 +39,21 @@ async function execute(ctx: StepExecutionContext): Promise<StepExecutionResult> 
 
   ctx.log("info", `completeness-critic: reviewing ${findings.length} findings for gaps`)
 
+  // Resolved once for this step (ADR-0236).
+  const promptScope = await freezePatternPromptScope(teamCtx)
+  ctx.signal?.throwIfAborted()
   const r = await dispatchStructured(
     teamCtx,
     {
       taskId: `${ctx.stepId}:critic`,
-      prompt:
-        `Objective: ${objective}\n\n` +
-        `The work so far produced these findings:\n${findingsBlock}\n\n` +
-        "Acting as a completeness critic, identify what is MISSING — a search angle never run, " +
-        "a claim left unverified, a region or source not yet examined. For each gap, optionally " +
-        "suggest the concrete next search that would close it. Return an empty list only if you are " +
-        "confident the coverage is exhaustive.",
+      prompt: resolvePrompt(CRITIC_PROMPT, {
+        ...promptScope,
+        values: { objective, findings: findingsBlock },
+      }).text,
       signal: ctx.signal,
     },
     critiqueResultSchema,
-    { schemaHint: GAPS_HINT }
+    { schemaHint: resolvePrompt(CRITIC_GAPS_SCHEMA_HINT_PROMPT).text }
   )
 
   ctx.log("info", `completeness-critic complete: ${r.value.gaps.length} gaps identified`)

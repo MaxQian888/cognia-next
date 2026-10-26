@@ -4,6 +4,11 @@
 // default — they'd just be re-seeded on import — but `includeBuiltIns: true`
 // can override for "true full snapshot" use cases.
 
+import {
+  exportAuthoredContent,
+  portableSessionReferences,
+  type AuthoredIdMaps,
+} from "./authored-content"
 import { getDb } from "@/lib/db/schema"
 import { isPortableVideoJob } from "@/lib/db/media-generation-jobs"
 import { COGSET_STATE_ID } from "@/types/plugin/plugin-cogset"
@@ -121,6 +126,8 @@ export async function buildBackupPackage(
     cogpackInstalls,
     chatTemplates,
     documentTemplates,
+    promptOverrides,
+    promptOverrideRevisions,
     scheduledTasks,
     petProfile,
     petAchievements,
@@ -185,6 +192,8 @@ export async function buildBackupPackage(
     readTable(db.cogpackInstalls),
     readTable(db.chatTemplates),
     readTable(db.documentTemplates),
+    readTable(db.promptOverrides),
+    readTable(db.promptOverrideRevisions),
     readTable(db.scheduledTasks),
     db.petProfile.get("global"),
     readTable(db.petAchievements),
@@ -308,6 +317,10 @@ export async function buildBackupPackage(
     // Same shape of thing as a chat template: every row is something the user
     // saved. The built-in document templates are code and never travel.
     documentTemplates,
+    // Every binding is something the user published over a shipped template;
+    // the shipped defaults themselves are code and never travel.
+    promptOverrides,
+    promptOverrideRevisions,
     // Configuration only. Run history stays on the machine that ran it.
     scheduledTasks,
     // The desktop pet. The profile is the singleton nothing can rebuild; the
@@ -332,8 +345,19 @@ export async function buildBackupPackage(
     libraryFolders,
     libraryAssets,
   }
+  const authoredMembership: AuthoredIdMaps = {}
+  for await (const section of exportAuthoredContent(db, opts, {
+    sessions,
+    membership: authoredMembership,
+  })) {
+    if (!Array.isArray(section.rows)) continue
+    const rows = ((payload as Record<string, unknown>)[section.section] ??= []) as unknown[]
+    rows.push(...section.rows)
+  }
   if (opts.includeSessions) {
-    const exportedSessions = filterExposedSessions(sessions, "standard-export")
+    const exportedSessions = filterExposedSessions(sessions, "standard-export").map((row) =>
+      portableSessionReferences(row, authoredMembership)
+    )
     const exportedSessionIds = new Set(exportedSessions.map((session) => session.id))
     payload.sessions = exportedSessions
     payload.messages = messages.filter((message) => exportedSessionIds.has(message.sessionId))
@@ -402,6 +426,8 @@ export async function buildBackupPackage(
       "retrievalProfileDeks",
       "chatTemplates",
       "documentTemplates",
+      "promptOverrides",
+      "promptOverrideRevisions",
       "scheduledTasks",
       "petProfile",
       "petAchievements",

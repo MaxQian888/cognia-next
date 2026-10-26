@@ -17,7 +17,7 @@
  *  - Runtime API types live in `@cognia/plugin-sdk/context`.
  */
 
-export type { PluginNodeRuntimeDeclaration } from "@/types/plugin/plugin-node-runtime"
+export type { PluginNodeRuntimeDeclaration } from "@cognia/plugin-contract/types/plugin/plugin-node-runtime"
 export type {
   PluginManifest,
   PluginManifestDexieBlock,
@@ -96,48 +96,48 @@ export type {
   PluginWallpaperContribution,
   PluginDensityPresetContribution,
   PluginLspServerDef,
-} from "@/types/plugin/plugin"
-export type * from "@/types/plugin/plugin-ide"
+} from "@cognia/plugin-contract/types/plugin/plugin"
+export type * from "@cognia/plugin-contract/types/plugin/plugin-ide"
 
 export { definePlugin, definePluginManifest } from "../define/define-plugin"
 export type { PluginManifestJson } from "../define/define-plugin"
 
-export type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
-export type { PluginAiProviderDef } from "@/types/plugin/plugin-ai-provider"
-export type { PluginAuthProviderDef } from "@/types/plugin/plugin-auth"
-export type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
-export type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
-export type { PluginChatMiddlewareDef } from "@/types/plugin/plugin-chat-middleware"
-export type { PluginCliToolDef } from "@/types/plugin/plugin-cli-tool"
-export type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
-export type { PluginContextProviderDef } from "@/types/plugin/plugin-context-provider"
+export type { PluginAgentTeamTemplateDef } from "@cognia/plugin-contract/types/plugin/plugin-agent-team-template"
+export type { PluginAiProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-ai-provider"
+export type { PluginAuthProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-auth"
+export type { PluginBalanceAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-balance-adapter"
+export type { PluginCharacterPackDef } from "@cognia/plugin-contract/types/plugin/plugin-character-pack"
+export type { PluginChatMiddlewareDef } from "@cognia/plugin-contract/types/plugin/plugin-chat-middleware"
+export type { PluginCliToolDef } from "@cognia/plugin-contract/types/plugin/plugin-cli-tool"
+export type { PluginCompactionStrategyDef } from "@cognia/plugin-contract/types/plugin/plugin-compaction-strategy"
+export type { PluginContextProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-context-provider"
 export type {
   PluginContextPanelDef,
   PluginContextPanelIcon,
   PluginContextPanelRenderer,
-} from "@/types/plugin/plugin-context-panel"
-export type { PluginDeploymentFilterDef } from "@/types/plugin/plugin-deployment-filter"
-export type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
-export type { PluginIconName } from "@/types/plugin/plugin-icon"
-export type { PluginExtensionDef } from "@/types/plugin/plugin-extension"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-panel"
+export type { PluginDeploymentFilterDef } from "@cognia/plugin-contract/types/plugin/plugin-deployment-filter"
+export type { PluginImRateSourceDef } from "@cognia/plugin-contract/types/plugin/plugin-im-rate-source"
+export type { PluginIconName } from "@cognia/plugin-contract/types/plugin/plugin-icon"
+export type { PluginExtensionDef } from "@cognia/plugin-contract/types/plugin/plugin-extension"
 export type {
   PluginGlanceModuleSize,
   PluginGlancePlatform,
   PluginManifestGlanceModuleDef,
-} from "@/types/plugin/plugin-glance"
-export type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
-export type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
-export type { PluginLinkMatcherDef } from "@/types/plugin/plugin-link-matcher"
-export type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-renderer"
-export type { PluginModalMountDef } from "@/types/plugin/plugin-modal"
-export type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
-export type { PluginOcrProviderDef } from "@/types/plugin/plugin-ocr"
-export type { PluginDecisionProviderDef } from "@/types/plugin/plugin-decisions"
+} from "@cognia/plugin-contract/types/plugin/plugin-glance"
+export type { PluginLimitsSourceDef } from "@cognia/plugin-contract/types/plugin/plugin-limits-source"
+export type { PluginMcpServerPresetDef } from "@cognia/plugin-contract/types/plugin/plugin-mcp-preset"
+export type { PluginLinkMatcherDef } from "@cognia/plugin-contract/types/plugin/plugin-link-matcher"
+export type { PluginMessageRendererDef } from "@cognia/plugin-contract/types/plugin/plugin-message-renderer"
+export type { PluginModalMountDef } from "@cognia/plugin-contract/types/plugin/plugin-modal"
+export type { PluginNativeAnthropicToolDef } from "@cognia/plugin-contract/types/plugin/plugin-native-tool"
+export type { PluginOcrProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-ocr"
+export type { PluginDecisionProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-decisions"
 export type {
   PluginPetAchievementCondition,
   PluginPetAchievementDef,
   PluginPetItemDef,
-} from "@/types/plugin/plugin-pet"
+} from "@cognia/plugin-contract/types/plugin/plugin-pet"
 export type {
   PluginPiPackageDef,
   PluginPiPackageEnvBinding,
@@ -145,27 +145,27 @@ export type {
   PluginPiPackageHostedSession,
   PluginPiPackagePrepare,
   PluginPiPackageRef,
-} from "@/types/plugin/plugin-pi-package"
-export type { PluginProtocolAdapterDef } from "@/types/plugin/plugin-protocol-adapter"
-export type { PluginRoutingStrategyDef } from "@/types/plugin/plugin-routing-strategy"
-export type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
-export type { PluginSkillDef } from "@/types/plugin/plugin-skill"
-export type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
-export type { PluginTerminalCompletionProviderDef } from "@/types/plugin/plugin-terminal-completion"
-export type { PluginToolRouteDef } from "@/types/plugin/plugin-tool-route"
-export type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
-export type { PluginViewDef } from "@/types/plugin/plugin-view"
-export type { PluginWebviewDef } from "@/types/plugin/plugin-webview"
-export type { PluginManifestWorkflowsBlock } from "@/types/plugin/plugin-workflow"
-export type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
-export type { PluginWorkspaceBackendDef } from "@/types/plugin/plugin-workspace-backend"
+} from "@cognia/plugin-contract/types/plugin/plugin-pi-package"
+export type { PluginProtocolAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-protocol-adapter"
+export type { PluginRoutingStrategyDef } from "@cognia/plugin-contract/types/plugin/plugin-routing-strategy"
+export type { PluginSharedMemoryAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-shared-memory-adapter"
+export type { PluginSkillDef } from "@cognia/plugin-contract/types/plugin/plugin-skill"
+export type { PluginSubagentDef } from "@cognia/plugin-contract/types/plugin/plugin-subagent"
+export type { PluginTerminalCompletionProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-terminal-completion"
+export type { PluginToolRouteDef } from "@cognia/plugin-contract/types/plugin/plugin-tool-route"
+export type { PluginViewContainerDef } from "@cognia/plugin-contract/types/plugin/plugin-view-container"
+export type { PluginViewDef } from "@cognia/plugin-contract/types/plugin/plugin-view"
+export type { PluginWebviewDef } from "@cognia/plugin-contract/types/plugin/plugin-webview"
+export type { PluginManifestWorkflowsBlock } from "@cognia/plugin-contract/types/plugin/plugin-workflow"
+export type { PluginWorkflowTemplateDef } from "@cognia/plugin-contract/types/plugin/plugin-workflow-template"
+export type { PluginWorkspaceBackendDef } from "@cognia/plugin-contract/types/plugin/plugin-workspace-backend"
 export type {
   IntegrationActionDef,
   IntegrationAuthStrategy,
   IntegrationEventEnvelope,
   IntegrationInboxProjectionDef,
   PluginIntegrationDef,
-} from "@/types/plugin/plugin-integration"
+} from "@cognia/plugin-contract/types/plugin/plugin-integration"
 
 export type {
   CronTrigger,
@@ -189,11 +189,11 @@ export type {
   PluginTaskExecutionPhase,
   PluginTaskExecutionEvent,
   PluginTaskStatistics,
-} from "@/types/plugin/plugin-scheduler"
+} from "@cognia/plugin-contract/types/plugin/plugin-scheduler"
 
-export type { VsCodeExtensionBlock } from "@/types/plugin/plugin-vscode"
+export type { VsCodeExtensionBlock } from "@cognia/plugin-contract/types/plugin/plugin-vscode"
 
-export type { PluginVerificationSnapshot } from "@/types/plugin/plugin-verification"
+export type { PluginVerificationSnapshot } from "@cognia/plugin-contract/types/plugin/plugin-verification"
 
 /**
  * Manifest validation — the SAME validator the plugin manager runs at install
@@ -206,19 +206,19 @@ export {
   parseManifest,
   validatePluginConfig,
   validatePluginManifest,
-} from "@/lib/plugin/core/validation"
+} from "@cognia/plugin-contract/lib/plugin/core/validation"
 
 /**
  * Host-version compatibility — the same check the manager applies before it
  * enables a plugin (`engines.cognia`, `minAppVersion`, `maxAppVersion`). Pure:
  * pass the host version you want to test against.
  */
-export { evaluatePluginCompatibility } from "@/lib/plugin/core/compatibility"
+export { evaluatePluginCompatibility } from "@cognia/plugin-contract/lib/plugin/core/compatibility"
 export type {
   CompatibilityDiagnostic,
   CompatibilityEvaluation,
   CompatibilityRuntime,
-} from "@/lib/plugin/core/compatibility"
+} from "@cognia/plugin-contract/lib/plugin/core/compatibility"
 
 export type {
   ConfigValidationResult,
@@ -226,7 +226,7 @@ export type {
   ManifestValidationOptions,
   ValidationError,
   ValidationResult,
-} from "@/lib/plugin/core/validation"
+} from "@cognia/plugin-contract/lib/plugin/core/validation"
 
 /**
  * Parity between a packaged `plugin.json` and a TypeScript manifest overlay.
@@ -241,9 +241,9 @@ export {
   assertPluginManifestParity,
   findPluginManifestParityIssues,
   PluginManifestParityError,
-} from "@/lib/plugin/core/manifest-parity"
+} from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
 
-export type { PluginManifestParityIssue } from "@/lib/plugin/core/manifest-parity"
+export type { PluginManifestParityIssue } from "@cognia/plugin-contract/lib/plugin/core/manifest-parity"
 
 export type {
   PluginLibrarySchema,
@@ -254,4 +254,4 @@ export type {
   PluginLibrariesAPI,
   PluginLibraryModuleInstance,
   PluginLibraryModuleFactory,
-} from "@/types/plugin/plugin-library"
+} from "@cognia/plugin-contract/types/plugin/plugin-library"

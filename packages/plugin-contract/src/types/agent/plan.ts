@@ -1,0 +1,511 @@
+/**
+ * Unified Plan Execution Hub — type model. (ADR-0045)
+ *
+ * `AgentPlan` is the canonical intermediate representation (IR) for every
+ * multi-step agentic execution in the app. A plan is a DAG of typed
+ * `PlanStep`s; approving one runs it under the hybrid-adaptive engine in
+ * `lib/agent/plan/runtime.ts` (in-session driver for linear `agent_turn`
+ * plans, or compiled to a `VisualWorkflow` via `synthesize-workflow.ts` for
+ * anything with delegation / parallelism).
+ *
+ * Two Dexie tables back the subsystem (see `lib/db/schema.ts` v71):
+ *
+ *   • `agentPlans`       — one row per plan; session-scoped (at most one
+ *                          "open" plan — draft/awaiting_approval/approved/
+ *                          executing/paused — per session at a time).
+ *   • `agentPlanEvents`  — append-only lifecycle log; drives the tracker
+ *                          panel + audit trail.
+ *
+ * Conventions deliberately mirror `types/goal.ts` (the closest sibling whose
+ * runtime / db / prompt patterns this subsystem reuses): `number` epoch-ms
+ * timestamps, a `string` `generationId` race guard, a discriminated-union
+ * event payload, and a `isTerminal*` helper.
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step kind + params (kind-tagged union)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How a single step executes. The `action.plan.step.dispatch` node executor
+ * (`lib/workflow/nodes/built-ins.ts`) and the in-session driver both route on
+ * this discriminator.
+ *
+ *   agent_turn        → an in-session turn by the main agent (visible, conversational)
+ *   teammate_dispatch → delegate to a teammate / subagent — reuses `dispatchTeammate`
+ *   tool_call         → a specific plugin-registered tool invocation with fixed input
+ *   mcp_tool_call     → a single MCP server tool invocation — reuses `lib/mcp/invoke`
+ *   sub_workflow      → run a nested VisualWorkflow — reuses `runWorkflow`
+ *   approval_gate     → human approval checkpoint — reuses `lib/runtime/approval-bus`
+ */
+export type PlanStepKind =
+  | "agent_turn"
+  | "teammate_dispatch"
+  | "tool_call"
+  | "mcp_tool_call"
+  | "sub_workflow"
+  | "approval_gate"
+  | "editor_review"
+
+/** Per-kind execution parameters. Discriminated by `PlanStep.kind`. */
+export type PlanStepParams =
+  | { kind: "agent_turn"; prompt?: string }
+  | { kind: "teammate_dispatch"; teamId?: string; teammateId?: string; spawnPrompt?: string }
+  | { kind: "tool_call"; toolName: string; input: Record<string, unknown> }
+  | { kind: "mcp_tool_call"; serverId: string; toolName: string; input?: Record<string, unknown> }
+  | { kind: "sub_workflow"; workflowId: string; triggerPayload?: unknown }
+  | { kind: "approval_gate"; prompt?: string }
+  /**
+   * Show proposed contents beside a file in the Pro IDE's native diff view, then
+   * block on the same human gate `approval_gate` uses (ADR-0088 Phase 3).
+   *
+   * A review step, not an edit step: `content` is served from memory and nothing
+   * is written. The plan writes the file in a LATER step, once this one is
+   * approved. Degrades to a plain approval gate carrying the proposal as text
+   * when no Pro IDE is available, so a plan authored on the desktop still runs
+   * elsewhere.
+   */
+  | {
+      kind: "editor_review"
+      /** Absolute, or relative to the resolved workspace. */
+      path: string
+      /** Full proposed contents. Empty is a real proposal ("empty this file"). */
+      content: string
+      /** Optional label for the diff tab. */
+      title?: string
+      /** Optional question shown in the approval dialog. */
+      prompt?: string
+      /** Optional explicit workspace; defaults to the bound Pro IDE. */
+      root?: string
+    }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PlanStep
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Step lifecycle.
+ *
+ *   pending     → not yet schedulable (deps unmet)
+ *   ready       → deps satisfied, awaiting a slot
+ *   in_progress → executing
+ *   completed   → done (terminal)
+ *   failed      → exhausted retries (terminal)
+ *   skipped     → bypassed by a refinement / branch (terminal)
+ *   blocked     → an upstream dep failed and error policy is "stop"
+ */
+export type PlanStepStatus =
+  "pending" | "ready" | "in_progress" | "completed" | "failed" | "skipped" | "blocked"
+
+export interface PlanStep {
+  /** UUIDv4, stable across edits and re-renders. */
+  id: string
+  title: string
+  description?: string
+  kind: PlanStepKind
+  status: PlanStepStatus
+  /** Ascending display/order index (0-based). DAG order comes from `dependencies`. */
+  order: number
+  /** Step ids that must reach a terminal-success status before this is `ready`. */
+  dependencies: string[]
+  /** Kind-specific execution params. Absent for a bare `agent_turn` derived from title/description. */
+  params?: PlanStepParams
+  /** Short human-readable result summary (mirrors AgentTeamTask.result). */
+  result?: string
+  /** Raw structured output, if the executor produced one. */
+  output?: unknown
+  error?: string
+  /** Number of execution attempts so far (retry accounting). */
+  attempts?: number
+  /** Tool-call ids associated with this step (chat-render cross-link). */
+  toolCallIds?: string[]
+  /**
+   * Tracker issue this step is doing the work for (spec 2026-09-06 D9). The
+   * runtime writes the step's terminal status to the issue's trail.
+   */
+  issueId?: string
+  startedAt?: number
+  completedAt?: number
+  estimatedDurationMs?: number
+  actualDurationMs?: number
+}
+
+/** True when a step status can no longer transition. */
+export function isTerminalStepStatus(status: PlanStepStatus): boolean {
+  return status === "completed" || status === "failed" || status === "skipped"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AgentPlan
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where a plan came from. Drives provenance display and decides which author
+ * pipeline produced it (ADR-0045 §3).
+ */
+export type PlanSource =
+  | "exit_plan_mode" // captured from the SDK plan-mode ExitPlanMode tool_use
+  | "agent_tool" // the agent called CreatePlan / UpdatePlan
+  | "planner_llm" // decomposed from a one-line objective
+  | "team_projection" // projected from an AgentTeam task DAG
+  | "goal_projection" // projected from Goal subgoals
+  | "manual" // authored by the user in the plan panel
+
+/**
+ * Execution strategy. `auto` = hybrid-adaptive: the runtime picks in-session
+ * vs orchestrated from the plan's shape (ADR-0045 §2).
+ */
+export type PlanExecutionMode = "in_session" | "orchestrated" | "auto"
+
+/**
+ * Plan status state machine. `draft`/`awaiting_approval`/`approved` are
+ * pre-execution; `executing`/`paused` are live; the rest are terminal.
+ *
+ *   rejected  → the user declined the plan BEFORE it ran (the approval gate's
+ *               "no"). Distinct from `cancelled`, which abandons a plan that
+ *               was approved or already running: a rejection is a verdict on
+ *               the plan itself and carries its own `rejected` trail event
+ *               (with the optional reason). Only reachable from the
+ *               pre-execution statuses — see {@link REJECTABLE_PLAN_STATUSES}.
+ *
+ * A step failure in an in-session run lands `paused` (not `failed`): the plan
+ * halts on the broken step with a {@link PlanStepHalt} record and waits for
+ * the user to retry / skip / mark-done the step or cancel the plan.
+ */
+export type PlanStatus =
+  | "draft"
+  | "awaiting_approval"
+  | "approved"
+  | "executing"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "rejected"
+
+/** Statuses that count as "open" for the one-open-plan-per-session invariant. */
+export const OPEN_PLAN_STATUSES: readonly PlanStatus[] = [
+  "draft",
+  "awaiting_approval",
+  "approved",
+  "executing",
+  "paused",
+]
+
+/** Statuses a plan can never leave. Runtime authority for {@link isTerminalPlanStatus}. */
+export const TERMINAL_PLAN_STATUSES: readonly PlanStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "rejected",
+]
+
+/**
+ * Statuses from which a plan may be REJECTED: the pre-execution half of the
+ * machine. A plan that is executing or paused has already been accepted, so
+ * backing out of it is a cancellation, not a rejection.
+ */
+export const REJECTABLE_PLAN_STATUSES: readonly PlanStatus[] = [
+  "draft",
+  "awaiting_approval",
+  "approved",
+]
+
+/** True when a plan status is terminal (cannot transition out). */
+export function isTerminalPlanStatus(status: PlanStatus): boolean {
+  return TERMINAL_PLAN_STATUSES.includes(status)
+}
+
+/** True when a plan in this status can still be rejected. */
+export function isRejectablePlanStatus(status: PlanStatus): boolean {
+  return REJECTABLE_PLAN_STATUSES.includes(status)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-session step supervision (halt record + dispatch stamp)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why an in-session step stopped without finishing. Written by
+ * `PlanRuntime.failInSessionStep`, rendered (localized) by the tracker's
+ * step-failure card.
+ *
+ *   dispatch_failed → the chat surface refused to send the step's turn
+ *   turn_failed     → the turn started and ended with an error
+ *   not_started     → no turn began within the start budget (never dispatched)
+ *   silent          → the turn kept streaming but produced nothing for the
+ *                     silence budget (a stalled spawn / dropped stream)
+ *   unrecorded      → the turn ended but nothing recorded the step as done
+ *   interrupted     → the renderer that ran the step went away (app restart)
+ */
+export type PlanStepHaltCause =
+  "dispatch_failed" | "turn_failed" | "not_started" | "silent" | "unrecorded" | "interrupted"
+
+/**
+ * The halt an in-session plan is paused on. Present only while the plan sits
+ * `paused` waiting for the user's decision; cleared when the user retries,
+ * skips or completes the step (the plan resumes) and left as history when the
+ * plan is cancelled.
+ */
+export interface PlanStepHalt {
+  /** The step that stopped. Absent when the run was interrupted between steps. */
+  stepId?: string
+  cause: PlanStepHaltCause
+  /** Raw technical detail (error text / budget). Supporting text, never the label. */
+  detail: string
+  /** Epoch ms the halt was recorded. */
+  at: number
+}
+
+/** The user's decision on a halted (or paused) in-session plan. */
+export type PlanStepContinueAction = "retry" | "skip" | "complete" | "resume"
+
+/**
+ * Which renderer dispatched the in-session step that is currently running.
+ * `bootId` is that renderer's per-load id: a step still `in_progress` under a
+ * different boot id was orphaned by an app restart, because a chat turn cannot
+ * outlive the renderer that sent it.
+ */
+export interface PlanTurnDispatch {
+  stepId: string
+  bootId: string
+  dispatchedAt: number
+}
+
+/** Per-plan knobs. Defaults come from `DEFAULT_PLAN_CONFIG`. */
+export interface PlanConfig {
+  /** Gate execution behind explicit approval (draft → awaiting_approval). Default true. */
+  requireApproval: boolean
+  /** Cap on automatic (step-failure / judge-deviation) refinements. Default 2. */
+  maxAutoRefinements: number
+  /** Per-step retry budget before the step fails. Default 1. */
+  maxStepRetries: number
+  /** Run a between-steps judge that triggers a refinement on drift. Default false. */
+  judgeDeviation: boolean
+  /** Hard cap on cumulative tokens billed against the plan. Undefined → no cap. */
+  maxTokens?: number
+  /** Error policy forwarded to the synthesized workflow. Default "stop". */
+  errorPolicy?: "stop" | "continue"
+  /** Max parallel steps when orchestrated. Default 1 (sequential). */
+  maxConcurrency?: number
+}
+
+export const DEFAULT_PLAN_CONFIG: PlanConfig = {
+  requireApproval: true,
+  maxAutoRefinements: 2,
+  maxStepRetries: 1,
+  judgeDeviation: false,
+  errorPolicy: "stop",
+  maxConcurrency: 1,
+}
+
+/**
+ * Edit payload produced by the plan document surface. `planText` rewrites the
+ * source markdown (the host re-derives `steps[]` from it); `stepTitles` edits
+ * only the executable projection and leaves the markdown body untouched.
+ */
+export type PlanEditPatch =
+  { title: string; planText: string } | { title: string; stepTitles: string[] }
+
+export interface AgentPlan {
+  /** UUIDv4. Globally unique; safe as a Dexie primary key. */
+  id: string
+  /** FK → ChatSession.id. Session-scoped: at most one "open" plan per session. */
+  sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
+  /** Snapshot of the character at creation time (UI avatar; survives character switch). */
+  characterId?: string
+  title: string
+  description?: string
+  source: PlanSource
+  executionMode: PlanExecutionMode
+  steps: PlanStep[]
+  status: PlanStatus
+  /** Id of the step currently executing (in-session driver / orchestrator cursor). */
+  currentStepId?: string
+  /** Denormalised counts for cheap progress rendering. Kept in sync by the writer. */
+  totalSteps: number
+  completedSteps: number
+  config: PlanConfig
+  /** Count of refinements applied so far (capped by `config.maxAutoRefinements`). */
+  refinementCount: number
+  /**
+   * Race guard. Every status mutation rotates this (UUIDv4). The driver /
+   * orchestrator captures it before scheduling and refuses to advance if it
+   * changed (pause / cancel / refine mid-step → bumped → stale result dropped).
+   */
+  generationId: string
+  createdAt: number
+  updatedAt: number
+  /** Set when status becomes terminal. Drives history sorting. */
+  endedAt?: number
+  /** Why an in-session run is paused on a step. See {@link PlanStepHalt}. */
+  stepHalt?: PlanStepHalt
+  /** The in-session step turn currently in flight. See {@link PlanTurnDispatch}. */
+  turnDispatch?: PlanTurnDispatch
+  metadata?: Record<string, unknown>
+}
+
+/** Recompute the denormalised counts from a step array. */
+export function computePlanCounts(steps: PlanStep[]): {
+  totalSteps: number
+  completedSteps: number
+} {
+  return {
+    totalSteps: steps.length,
+    completedSteps: steps.filter((s) => s.status === "completed").length,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Create / update inputs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Step shape accepted at creation; status/order/id are assigned by the runtime. */
+export interface CreatePlanStepInput {
+  title: string
+  description?: string
+  kind: PlanStepKind
+  /** Indices into the input array (0-based) of prerequisite steps. Resolved to ids. */
+  dependsOn?: number[]
+  params?: PlanStepParams
+  estimatedDurationMs?: number
+  /** Tracker issue this step is for. Carried onto the materialized step. */
+  issueId?: string
+}
+
+export interface CreatePlanInput {
+  sessionId: string
+  characterId?: string
+  title: string
+  description?: string
+  source: PlanSource
+  executionMode?: PlanExecutionMode
+  steps: CreatePlanStepInput[]
+  config?: Partial<PlanConfig>
+  metadata?: Record<string, unknown>
+}
+
+export interface UpdatePlanInput {
+  title?: string
+  description?: string
+  steps?: PlanStep[]
+  executionMode?: PlanExecutionMode
+  config?: Partial<PlanConfig>
+  metadata?: Record<string, unknown>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Refinement (replan)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PlanRefinementType = "optimize" | "simplify" | "expand" | "reorder" | "repair"
+
+export type PlanRefinementTrigger = "manual" | "step_failure" | "judge_deviation"
+
+export interface PlanRefinementRequest {
+  planId: string
+  refinementType: PlanRefinementType
+  trigger: PlanRefinementTrigger
+  /** The step that failed, when `trigger === "step_failure"`. */
+  failedStepId?: string
+  customInstructions?: string
+}
+
+export interface PlanRefinementResult {
+  originalPlan: AgentPlan
+  refinedPlan: AgentPlan
+  /** Human-readable change list for the audit trail. */
+  changes: string[]
+  reasoning: string
+}
+
+/**
+ * Prompt fragments the planner LLM uses per refinement type. Ported from the
+ * formerly-dead `types/agent/agent.ts:PLAN_REFINEMENT_PROMPTS` with `repair`
+ * added for the step-failure auto-replan loop.
+ */
+export const PLAN_REFINEMENT_PROMPTS: Record<PlanRefinementType, string> = {
+  optimize: `Analyze the given plan and optimize it for efficiency. Combine redundant steps, parallelize independent tasks where possible, and ensure the most efficient execution order. Maintain the original goals while reducing complexity.`,
+
+  simplify: `Simplify the given plan by breaking down complex steps into smaller, more manageable tasks. Remove unnecessary complexity while ensuring all original objectives are still achievable.`,
+
+  expand: `Expand the given plan with more detailed steps. Add intermediate checkpoints, validation steps, and error handling considerations. Make the plan more comprehensive and robust.`,
+
+  reorder: `Analyze the dependencies between steps and reorder them for optimal execution. Ensure prerequisites are completed before dependent steps, and group related tasks together.`,
+
+  repair: `A step in this plan failed. Analyze the failure and revise the plan to route around it: add recovery steps, split the failed step into smaller ones, or adjust dependencies so the objective is still reached. Preserve completed steps unchanged.`,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PlanEvent — append-only lifecycle log
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PlanEventKind =
+  | "plan_created"
+  | "plan_updated"
+  | "approved"
+  | "rejected"
+  | "deferred"
+  | "refined"
+  | "step_started"
+  | "step_completed"
+  | "step_failed"
+  | "step_skipped"
+  | "replanned"
+  | "paused"
+  | "resumed"
+  | "cancelled"
+  | "exit"
+
+/**
+ * Per-kind payloads (discriminated union via `kind`). Lets the tracker panel
+ * render kind-specific cards without runtime checks beyond the discriminator.
+ */
+export type PlanEventPayload =
+  | {
+      kind: "plan_created"
+      source: PlanSource
+      totalSteps: number
+      executionMode: PlanExecutionMode
+    }
+  | { kind: "plan_updated"; totalSteps: number }
+  | { kind: "approved" }
+  /** The plan was declined before execution (terminal `rejected`); `feedback` is the reason. */
+  | { kind: "rejected"; feedback?: string }
+  /** "No, keep planning": approval deferred, plan retained as a draft. */
+  | { kind: "deferred"; feedback?: string }
+  | {
+      kind: "refined"
+      refinementType: PlanRefinementType
+      trigger: PlanRefinementTrigger
+      changes: string[]
+    }
+  | {
+      kind: "step_started"
+      stepId: string
+      title: string
+      stepKind: PlanStepKind
+      /** 1-based attempt number; > 1 when the user retried the step. */
+      attempt?: number
+    }
+  | { kind: "step_completed"; stepId: string; title: string; tokensDelta?: number }
+  | { kind: "step_failed"; stepId: string; title: string; error: string; attempt: number }
+  /** The user skipped a step; its dependents were re-pointed at its prerequisites. */
+  | { kind: "step_skipped"; stepId: string; title: string; reason?: string }
+  | { kind: "replanned"; reason: PlanRefinementTrigger; failedStepId?: string }
+  | { kind: "paused" }
+  | { kind: "resumed" }
+  | { kind: "cancelled" }
+  | { kind: "exit"; status: PlanStatus; reason: string }
+
+export interface PlanEvent {
+  /** UUIDv4 primary key. */
+  id: string
+  /** FK → AgentPlan.id. Cascade-delete handled at the CRUD layer. */
+  planId: string
+  kind: PlanEventKind
+  ts: number
+  payload: PlanEventPayload
+}

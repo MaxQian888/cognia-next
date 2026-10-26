@@ -12,7 +12,7 @@
   "connectionFailed": "连接失败",
   "connectionSuccess": "连接成功",
   "defaultProvider": "默认 Provider",
-  "description": "配置联网搜索 provider 与对话集成。",
+  "description": "配置联网搜索服务商、网页阅读器与对话路由。",
   "disableAll": "全部禁用",
   "domainSources": {
     "arxiv": "arXiv",
@@ -63,9 +63,11 @@
     "performance": "性能",
     "performanceDesc": "结果缓存与 Provider 熔断器",
     "providers": "Providers",
-    "providersDesc": "各 Provider 的 API 密钥与配置",
+    "providersDesc": "凭据、端点、引擎与模型",
     "safety": "安全",
-    "safetyDesc": "安全搜索与来源验证"
+    "safetyDesc": "安全搜索与来源验证",
+    "reading": "阅读",
+    "readingDesc": "阅读器、接收方、回退与蒸馏"
   },
   "noMatchingProviders": "无匹配的 Provider",
   "noProviders": "尚未配置任何 Provider",
@@ -83,7 +85,7 @@
   "primary": "主要",
   "priority": "优先级",
   "providers": "搜索 Providers",
-  "providersDescription": "为各 Provider 配置 API 密钥",
+  "providersDescription": "配置服务商凭据和端点",
   "removeKey": "移除密钥",
   "researchDomains": "限定域名",
   "researchProviders": "优先 Provider",
@@ -105,6 +107,66 @@
   "strategyLeastUsed": "最少使用",
   "strategyRandom": "随机",
   "strategyRoundRobin": "轮询",
-  "testConnection": "测试",
-  "title": "联网搜索"
+  "testConnection": "测试搜索",
+  "title": "联网搜索",
+  "states": {
+    "retired": "已停用",
+    "disabled": "未启用",
+    "missing-key": "缺少密钥",
+    "missing-config": "配置不完整",
+    "configured": "已配置"
+  },
+  "enableProvider": "启用 {provider}",
+  "legacyNotice": "旧版服务：不接受新客户；现有账户可使用至 {date}。",
+  "retiredNotice": "已于 {date} 停用。保留已存凭据；无法配置或启用此服务。",
+  "endpoint": "SearXNG 端点",
+  "endpointPlaceholder": "https://search.example.com",
+  "endpointHelp": "使用已启用 JSON 输出的 SearXNG 实例，无需 API 密钥。",
+  "allowPrivateEndpoint": "允许私有 / HTTP 端点",
+  "endpointGrantRequired": "此私有端点需要明确授权。",
+  "endpointIssues": {
+    "missing": "请输入 SearXNG 端点。",
+    "invalid-url": "请输入绝对 URL。",
+    "unsupported-scheme": "请使用 HTTP 或 HTTPS URL。",
+    "embedded-credentials": "请移除 URL 中的凭据。",
+    "query-or-fragment": "请移除查询参数和片段。",
+    "insecure-public-endpoint": "公共端点必须使用 HTTPS。"
+  },
+  "engine": "搜索引擎",
+  "enginePlaceholder": "可选的引擎名称",
+  "invalidEngine": "请输入有效引擎名称（1–40 个字母、数字、空格、下划线、点或连字符）。",
+  "groundingModel": "Google 搜索接地模型",
+  "groundingBilling": "每次搜索都会生成模型回复，并由你的 Google 账户付费。",
+  "testedAt": "测试时间：{date}",
+  "testEvidence": "此带日期的测试仅为历史证据，不保证当前可用。",
+  "searchTypes": {
+    "general": "通用",
+    "news": "新闻",
+    "academic": "学术",
+    "images": "图片",
+    "videos": "视频"
+  },
+  "safeSearchLevels": {
+    "off": "安全搜索：关闭",
+    "moderate": "安全搜索：适中",
+    "strict": "安全搜索：严格"
+  },
+  "providerDescriptions": {
+    "tavily": "提供生成式答案的 AI 搜索。",
+    "perplexity": "支持时效、地区和域名筛选的搜索。",
+    "exa": "支持新闻和学术结果的语义搜索。",
+    "searchapi": "可选择多个 SERP 搜索引擎。",
+    "serper": "Google 结果，支持新闻、图片、视频和学术搜索。",
+    "serpapi": "可选择多个引擎的 SERP 结果。",
+    "bing": "Microsoft 已停用此 API。",
+    "google": "旧版 Google 可编程搜索引擎 API。",
+    "google-ai": "基于 Google 搜索接地的模型生成。",
+    "brave": "Brave 网页、新闻、图片和视频搜索。",
+    "deepseek": "搜索和阅读器独立配置。",
+    "tinyfish": "搜索和阅读器独立配置。",
+    "searxng": "自有的 JSON 搜索端点，无需 API 密钥。"
+  },
+  "invalidModel": "请选择当前受支持的搜索接地模型。",
+  "configureProvider": "配置 {provider}",
+  "testCost": "测试会主动发送搜索请求，可能消耗服务商额度。不会自动运行测试。"
 }

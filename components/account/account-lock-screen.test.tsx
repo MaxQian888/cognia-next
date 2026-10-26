@@ -693,14 +693,23 @@ describe("unsupported storage layout", () => {
     return view
   }
 
+  /** Press reset and answer the themed confirmation. */
+  async function answerReset(answer: "confirm" | "cancel") {
+    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+    const dialog = await screen.findByTestId("account-lock-screen-storage-reset-confirm")
+    expect(dialog).toHaveAttribute("role", "alertdialog")
+    fireEvent.click(
+      within(dialog).getByTestId(`account-lock-screen-storage-reset-confirm-${answer}`)
+    )
+  }
+
   it("offers a reset, because no password can clear this failure", async () => {
     const onResetLocalStorage = jest.fn().mockReturnValue(new Promise(() => {}))
-    jest.spyOn(window, "confirm").mockReturnValue(true)
     await refuse({ onResetLocalStorage })
 
-    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+    await answerReset("confirm")
 
-    expect(onResetLocalStorage).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(onResetLocalStorage).toHaveBeenCalledTimes(1))
     // The button stays busy: the reset ends in a reload, not a re-render.
     await waitFor(() =>
       expect(screen.getByTestId("account-lock-screen-storage-reset")).toBeDisabled()
@@ -717,11 +726,15 @@ describe("unsupported storage layout", () => {
 
   it("does not reset when the confirmation is declined", async () => {
     const onResetLocalStorage = jest.fn()
-    jest.spyOn(window, "confirm").mockReturnValue(false)
     await refuse({ onResetLocalStorage })
 
-    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+    await answerReset("cancel")
 
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("account-lock-screen-storage-reset-confirm")
+      ).not.toBeInTheDocument()
+    )
     expect(onResetLocalStorage).not.toHaveBeenCalled()
   })
 
@@ -729,10 +742,10 @@ describe("unsupported storage layout", () => {
     // Leaving it spinning forever would strand the user on a screen whose only
     // action appears to be running.
     const onResetLocalStorage = jest.fn().mockRejectedValue(new Error("delete blocked"))
-    jest.spyOn(window, "confirm").mockReturnValue(true)
     await refuse({ onResetLocalStorage })
 
-    fireEvent.click(screen.getByTestId("account-lock-screen-storage-reset"))
+    await answerReset("confirm")
+    await waitFor(() => expect(onResetLocalStorage).toHaveBeenCalled())
 
     await waitFor(() =>
       expect(screen.getByTestId("account-lock-screen-storage-reset")).toBeEnabled()

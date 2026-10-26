@@ -1,6 +1,12 @@
 import { runEntityMergeAgent, __TESTING__ } from "./entity-merge-agent"
 import type { LlmClient } from "../llm"
 import type { EntityRole, ProfileEntity } from "@/types/twin"
+import { ENTITY_MERGE_AGENT_PROMPT } from "../prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 function mockLlm(responses: string[]): LlmClient {
   let cursor = 0
@@ -134,5 +140,55 @@ describe("runEntityMergeAgent", () => {
     expect(clusters.canonicalOf.get("infra-team")).toBe("Infra")
     expect(clusters.canonicalOf.get("eng-infra")).toBe("Infra")
     expect(clusters.aliasOf.get("Infra")?.has("infra-team")).toBe(true)
+  })
+})
+
+describe("entity merge prompt (ADR-0236)", () => {
+  const entities = [team("Infra", ["infra-team"]), team("Eng-Infra"), team("Platform")]
+  const capture = () => {
+    const calls: string[] = []
+    const llm: LlmClient = {
+      async complete(prompt) {
+        calls.push(prompt)
+        return '{"clusters":[]}'
+      },
+    }
+    return { calls, llm }
+  }
+
+  beforeEach(() => __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", [])))
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders the shipped prompt with the role and numbered entries", async () => {
+    const { calls, llm } = capture()
+    await runEntityMergeAgent(llm, { entities, minBucket: 1 })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('entity registry of role "team"')
+    expect(calls[0]).toMatch(
+      /Entries:\n\[0\] name="Infra" aliases=\[infra-team\]\n\[1\] name="Eng-Infra"/
+    )
+  })
+
+  it("sends a published override with the same values", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: ENTITY_MERGE_AGENT_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-entity-merge",
+          body: 'Merge {{role}} aliases. Reply {"clusters":[{"canonical":"","aliases":[]}]}\n{{entries}}',
+          contractVersion: ENTITY_MERGE_AGENT_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const { calls, llm } = capture()
+    await runEntityMergeAgent(llm, { entities, minBucket: 1 })
+    expect(calls[0]).toMatch(/^Merge team aliases\. Reply /)
+    expect(calls[0]).toContain('[2] name="Platform" aliases=[]')
   })
 })

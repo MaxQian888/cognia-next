@@ -33,14 +33,6 @@ jest.mock("../a2ui-context", () => ({
   }),
 }))
 
-// Mock data-model functions
-jest.mock("@/lib/a2ui/data-model", () => ({
-  resolveArrayOrPath: (value: unknown) => {
-    if (Array.isArray(value)) return value
-    return []
-  },
-}))
-
 // Deterministic virtualizer window (mirrors the log-virtualized-list test).
 jest.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({
@@ -85,6 +77,30 @@ describe("A2UITable", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  it("restores selected rows, follows external changes, and emits select-all actions", () => {
+    const component: A2UITableComponent = {
+      id: "bound",
+      component: "Table",
+      columns: [{ key: "name", header: "Name" }],
+      data: [
+        { id: "a", name: "Ada" },
+        { id: "b", name: "Grace" },
+      ],
+      selectable: true,
+      selectedRows: { path: "/selected" },
+      selectAction: "selected",
+    }
+    const props = createProps(component)
+    const { rerender } = render(<A2UITable {...props} dataModel={{ selected: ["a"] }} />)
+    expect(screen.getAllByRole("checkbox")[1]).toBeChecked()
+    rerender(<A2UITable {...props} dataModel={{ selected: ["b"] }} />)
+    expect(screen.getAllByRole("checkbox")[1]).not.toBeChecked()
+    expect(screen.getAllByRole("checkbox")[2]).toBeChecked()
+    fireEvent.click(screen.getAllByRole("checkbox")[0])
+    expect(mockOnDataChange).toHaveBeenCalledWith("/selected", ["b", "a"])
+    expect(mockOnAction).toHaveBeenCalledWith("selected", { selectedRows: ["b", "a"] })
   })
 
   it("should render a table with columns and data", () => {

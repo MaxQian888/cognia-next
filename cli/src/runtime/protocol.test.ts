@@ -192,3 +192,20 @@ describe("commandToInbound", () => {
     expect(() => commandToInbound("claude_restart_sidecar", {})).toThrow(/unsupported command/)
   })
 })
+
+it("maps lifecycle hook responses to the sidecar without dropping decisions or errors", () => {
+  expect(
+    commandToInbound("claude_plugin_hook_response", {
+      sessionId: "child",
+      execId: "compact-1",
+      result: { skip: true },
+      error: "hook warning",
+    })
+  ).toEqual({
+    type: "plugin_hook_response",
+    sessionId: "child",
+    execId: "compact-1",
+    result: { skip: true },
+    error: "hook warning",
+  })
+})

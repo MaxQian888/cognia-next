@@ -12,7 +12,7 @@ type ZodInput = { safeParse?: unknown }
  * the one place raw caller arguments are validated against it.
  *
  * Lives in the tool kernel rather than beside its first caller because it
- * has several — the MCP bridge (`cognia-tool-bridge.mjs`), the `run_code`
+ * has several — the MCP bridge (`cognia-tool-bridge.ts`), the `run_code`
  * broker (`applyToolPresentation`) — and each rail that grew its
  * own copy of "just call the handler" reintroduced the same defect: every
  * `.default()`, `.min()`, `.max()` and `.enum()` silently inert. Keeping the

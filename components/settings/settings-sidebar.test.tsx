@@ -84,6 +84,20 @@ describe("SettingsSidebar desktop-only entries", () => {
 })
 
 describe("SettingsSidebar icon style", () => {
+  it.each([true, false])(
+    "renders Harness Evolution artwork with defaultOpen=%s",
+    async (defaultOpen) => {
+      setDesktop(true)
+      await setup({ defaultOpen, activeSection: "harness-evolution" })
+      const harness = screen.getByRole("button", { name: "settings.tabs.harnessEvolution" })
+      expect(harness.querySelector("img")).toHaveAttribute(
+        "src",
+        "/icons/cognia-mobile-spots/webp/harness-evolution.webp"
+      )
+      expect(harness.querySelector("img")).toHaveClass("size-7", "shrink-0")
+    }
+  )
+
   it("uses larger anime artwork by default, including media generation", async () => {
     await setup()
     const account = screen.getByRole("button", { name: "settings.tabs.account" })
@@ -94,6 +108,7 @@ describe("SettingsSidebar icon style", () => {
   })
 
   it("restores ordinary icons for every entry, including Squads, and updates live", async () => {
+    setDesktop(true)
     const { container } = await setup({ settings: { settingsIconStyle: "ordinary" } })
     const buttons = container.querySelectorAll('[data-slot="sidebar-menu-button"]')
     for (const button of buttons) {
@@ -103,6 +118,9 @@ describe("SettingsSidebar icon style", () => {
     expect(
       screen.getByRole("button", { name: "settings.tabs.squads" }).querySelector("svg")
     ).toHaveClass("lucide-users")
+    expect(
+      screen.getByRole("button", { name: "settings.tabs.harnessEvolution" }).querySelector("svg")
+    ).toHaveClass("lucide-dna")
     act(() =>
       useSettingsStore.setState({ settings: { settingsIconStyle: "anime" } as AppSettings })
     )

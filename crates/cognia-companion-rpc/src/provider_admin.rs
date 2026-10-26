@@ -195,6 +195,7 @@ pub fn mint_bridge_ticket(
         execution_fingerprint: request.execution_fingerprint,
         candidates,
         model_bindings: Default::default(),
+        strict_selectors: false,
         credential_affinity: if failover {
             TicketAffinity::StickyWithFailover
         } else {

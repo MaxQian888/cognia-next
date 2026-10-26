@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 const generateTextMock = jest.fn()
 const streamTextMock = jest.fn()
@@ -252,7 +252,8 @@ describe("useCanvasActions", () => {
       pending.catch(() => undefined)
     })
     expect(result.current.cancellable).toBe(true)
-    expect(seenSignal).toBeInstanceOf(AbortSignal)
+    // The action prompt resolves (ADR-0236) before the provider is called.
+    await waitFor(() => expect(seenSignal).toBeInstanceOf(AbortSignal))
 
     await act(async () => {
       result.current.cancel()
@@ -306,8 +307,57 @@ describe("useCanvasActions", () => {
     act(() => {
       result.current.run({ actionType: "improve" as never, content: "x" }).catch(() => undefined)
     })
+    await waitFor(() => expect(seenSignal).toBeDefined())
 
     unmount()
     expect(seenSignal?.aborted).toBe(true)
+  })
+
+  it("never dispatches a run cancelled while its prompt was resolving", async () => {
+    const { result } = renderHook(() => useCanvasActions())
+    let pending: Promise<string> | undefined
+    act(() => {
+      pending = result.current.run({ actionType: "improve" as never, content: "x" })
+      pending.catch(() => undefined)
+      result.current.cancel()
+    })
+    await act(async () => {
+      await expect(pending).rejects.toThrow()
+    })
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.errorKind).toBe("cancelled")
+  })
+
+  it("forwards the document's prompt context to the action builder (ADR-0236)", async () => {
+    const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+      await import("@/lib/prompts/snapshot")
+    const { CANVAS_ACTION_PROMPTS } = await import("@/lib/ai/generation/canvas-actions")
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: CANVAS_ACTION_PROMPTS.improve.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por",
+          body: "House style: plain words.",
+          contractVersion: CANVAS_ACTION_PROMPTS.improve.contractVersion,
+        },
+      ])
+    )
+    try {
+      generateTextMock.mockResolvedValueOnce({ text: "ok" })
+      const { result } = renderHook(() => useCanvasActions())
+      await act(async () => {
+        await result.current.run({
+          actionType: "improve" as never,
+          content: "x",
+          promptContext: { sessionId: "s-1", workspaceId: "ws-1" },
+        })
+      })
+      expect(generateTextMock.mock.calls[0][0].system).toBe("House style: plain words.")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+    }
   })
 })

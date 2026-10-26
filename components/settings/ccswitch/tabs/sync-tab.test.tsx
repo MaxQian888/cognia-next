@@ -129,3 +129,18 @@ describe("CcswitchSyncTab", () => {
     expect(getSettingsMock).not.toHaveBeenCalled()
   })
 })
+
+it("drops incompatible saved propagation defaults", async () => {
+  getSettingsMock.mockResolvedValue({
+    ccswitchSync: { defaultPropagation: ["codex", "gemini", "claude-code", "opencode"] },
+  })
+  render(<CcswitchSyncTab />)
+  fireEvent.click(await screen.findByRole("button", { name: "sync.save" }))
+  await waitFor(() => expect(saveSettingsMock).toHaveBeenCalled())
+  expect(saveSettingsMock.mock.calls[0][0].ccswitchSync.defaultPropagation).toEqual([
+    "claude-code",
+    "opencode",
+  ])
+  expect(screen.queryByText("agents.codex")).not.toBeInTheDocument()
+  expect(screen.queryByText("agents.gemini")).not.toBeInTheDocument()
+})

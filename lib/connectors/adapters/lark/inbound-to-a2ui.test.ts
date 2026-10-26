@@ -6,7 +6,9 @@ describe("larkInboundToA2UI", () => {
       schema: "2.0",
       body: { elements: [{ tag: "markdown", content: "A complete answer" }] },
     }
-    expect(larkInboundToA2UI(card)?.body).toEqual([{ kind: "text", text: "A complete answer" }])
+    expect(larkInboundToA2UI(card)?.body).toEqual([
+      { kind: "text", text: "A complete answer", format: "markdown" },
+    ])
   })
 
   it("preserves nested Card 2.0 forms, panels, buttons and unknown components", () => {
@@ -44,7 +46,7 @@ describe("larkInboundToA2UI", () => {
           {
             kind: "column",
             children: [
-              { kind: "text", text: "Review this" },
+              { kind: "text", text: "Review this", format: "markdown" },
               {
                 kind: "button",
                 label: "Continue",
@@ -114,7 +116,7 @@ describe("larkInboundToA2UI", () => {
     expect(out!.body).toEqual([
       { kind: "text", text: "Hello" },
       { kind: "divider" },
-      { kind: "text", text: "**bold**" },
+      { kind: "text", text: "**bold**", format: "markdown" },
     ])
   })
 
@@ -250,5 +252,94 @@ describe("larkInboundToA2UI (production event envelope)", () => {
   it("returns null when the envelope carries no message", () => {
     const envelope = { header: { event_type: "im.message.message_read_v1" }, event: {} }
     expect(larkInboundToA2UI(envelope)).toBeNull()
+  })
+
+  it("converts card Markdown dialect and lark_md div text", () => {
+    const out = larkInboundToA2UI({
+      elements: [
+        { tag: "div", text: { tag: "lark_md", content: "<at id=all></at> **go**\nnow" } },
+        { tag: "div", text: { tag: "plain_text", content: "a*b*c" } },
+      ],
+    })
+    expect(out!.body).toEqual([
+      { kind: "text", text: "@all **go**  \nnow", format: "markdown" },
+      { kind: "text", text: "a*b*c" },
+    ])
+  })
+
+  it("reads legacy note text from its nested elements", () => {
+    const out = larkInboundToA2UI({
+      elements: [{ tag: "note", elements: [{ tag: "plain_text", content: "footer" }] }],
+    })
+    expect(out!.body).toEqual([{ kind: "text", text: "footer", emphasis: "muted" }])
+  })
+
+  it("never lets a non-string content value through as text", () => {
+    const out = larkInboundToA2UI({
+      header: { title: { content: { x: 1 } } },
+      elements: [{ tag: "markdown", content: { nested: true } }, { tag: "hr" }],
+    } as never)
+    expect(out!.title).toBeUndefined()
+    expect(out!.body).toEqual([{ kind: "divider" }])
+  })
+
+  describe("converted card form (what im.message.receive_v1 delivers)", () => {
+    const converted = {
+      title: "Deploy prod",
+      elements: [
+        [
+          { tag: "text", text: "Status: " },
+          { tag: "a", href: "https://x.test/run(1)", text: "run_1" },
+          { tag: "text", text: " by " },
+          { tag: "at", user_id: "ou_1", user_name: "Alice" },
+        ],
+        [{ tag: "img", image_key: "img_v3_x" }],
+        [
+          { tag: "button", text: "Approve", type: "primary" },
+          { tag: "button", text: "Reject", type: "danger" },
+        ],
+        [{ tag: "hr" }],
+        [{ tag: "note", elements: [{ tag: "text", text: "footer" }] }],
+        [{ tag: "select_static", options: ["a"], placeholder: "Pick one" }],
+        [{ tag: "chart_v9", x: 1 }],
+      ],
+    }
+
+    it("projects lines, links, mentions, controls and unknown nodes", () => {
+      const out = larkInboundToA2UI({
+        header: { event_type: "im.message.receive_v1" },
+        event: { message: { message_type: "interactive", content: JSON.stringify(converted) } },
+      })
+      expect(out?.title).toBe("Deploy prod")
+      expect(out?.body).toEqual([
+        { kind: "heading", level: 2, text: "Deploy prod" },
+        {
+          kind: "text",
+          text: "Status: [run\\_1](https://x.test/run%281%29) by @Alice",
+          format: "markdown",
+        },
+        { kind: "image", url: "lark-img:img_v3_x" },
+        {
+          kind: "row",
+          children: [
+            { kind: "button", label: "Approve", style: "primary" },
+            { kind: "button", label: "Reject", style: "danger" },
+          ],
+        },
+        { kind: "divider" },
+        { kind: "text", text: "footer", format: "markdown", emphasis: "muted" },
+        { kind: "button", label: "Pick one" },
+        { kind: "raw_json", label: "chart_v9", payload: { tag: "chart_v9", x: 1 } },
+      ])
+    })
+
+    it("escapes Markdown in plain card text", () => {
+      const out = larkInboundToA2UI({
+        elements: [[{ tag: "text", text: "# not a heading *nor bold*" }]],
+      } as never)
+      expect(out?.body).toEqual([
+        { kind: "text", text: "\\# not a heading \\*nor bold\\*", format: "markdown" },
+      ])
+    })
   })
 })

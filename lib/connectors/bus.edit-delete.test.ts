@@ -451,3 +451,129 @@ describe("ConnectorBus.applyMessageDelete (v49 indexed lookup)", () => {
     toArraySpy.mockRestore()
   })
 })
+
+describe("ConnectorBus edit/delete — threads and rich metadata", () => {
+  const staleBlock = {
+    v: 1,
+    source: "telegram",
+    body: [{ kind: "row", children: [{ kind: "button", label: "Old", actionId: "old" }] }],
+  }
+
+  it("matches a row filed under a thread of the event's chat (Lark recall carries no thread)", async () => {
+    const db = getDb()
+    await db.messages.put(
+      makeStoredMessage({
+        id: "thread-row",
+        platformMessageId: "om_1",
+        platform: "telegram",
+        scope: {
+          adapterId: "telegram-test",
+          conversationKey: "telegram:telegram-test:42:om_root",
+        },
+      })
+    )
+    await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "om_1"))
+    expect((await db.messages.get("thread-row"))?.metadata?.deletedAt).toBeDefined()
+  })
+
+  it("does not treat a different chat that shares a key prefix as a thread", async () => {
+    const db = getDb()
+    await db.messages.put(
+      makeStoredMessage({
+        id: "chat420-row",
+        platformMessageId: "om_2",
+        platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:420" },
+      })
+    )
+    await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "om_2"))
+    expect((await db.messages.get("chat420-row"))?.metadata?.deletedAt).toBeUndefined()
+  })
+
+  it("prefers the exact conversation over a thread row with the same id", async () => {
+    const db = getDb()
+    await db.messages.bulkPut([
+      makeStoredMessage({
+        id: "in-thread",
+        platformMessageId: "om_3",
+        platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:42:t1" },
+      }),
+      makeStoredMessage({
+        id: "in-chat",
+        platformMessageId: "om_3",
+        platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:42" },
+      }),
+    ])
+    await getBus().dispatchInboundFull(makeEditEvent("telegram", "om_3", "edited"))
+    expect((await db.messages.get("in-chat"))?.parts).toEqual([{ type: "text", text: "edited" }])
+    expect((await db.messages.get("in-thread"))?.parts).toEqual([
+      { type: "text", text: "original" },
+    ])
+  })
+
+  it("a delete drops the rich block and labels so the withdrawn content is not shown", async () => {
+    const db = getDb()
+    const row = makeStoredMessage({
+      id: "rich-del",
+      platformMessageId: "tg:7",
+      platform: "telegram",
+    })
+    row.metadata = {
+      ...row.metadata,
+      inboundA2UI: staleBlock,
+      inboundLabels: [{ key: "x" }],
+    } as StoredMessage["metadata"]
+    await db.messages.put(row)
+    await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:7"))
+    const updated = await db.messages.get("rich-del")
+    expect(updated?.metadata?.deletedAt).toBeDefined()
+    expect(updated?.metadata?.inboundA2UI).toBeUndefined()
+    expect(updated?.metadata?.inboundLabels).toBeUndefined()
+    expect(updated?.metadata?.platformMessage).toBeDefined()
+  })
+
+  it("an edit re-projects the rich block from the new revision", async () => {
+    const db = getDb()
+    const row = makeStoredMessage({
+      id: "rich-edit",
+      platformMessageId: "tg:8",
+      platform: "telegram",
+    })
+    row.metadata = { ...row.metadata, inboundA2UI: staleBlock } as StoredMessage["metadata"]
+    await db.messages.put(row)
+    const event = makeEditEvent("telegram", "tg:8", "new text")
+    event.raw = {
+      update_id: 1,
+      edited_message: {
+        text: "new text",
+        reply_markup: { inline_keyboard: [[{ text: "Docs", url: "https://x.test" }]] },
+      },
+    }
+    await getBus().dispatchInboundFull(event)
+    const block = (await db.messages.get("rich-edit"))?.metadata?.inboundA2UI as
+      { body: unknown[] } | undefined
+    expect(block?.body).toEqual([
+      { kind: "text", text: "new text" },
+      { kind: "row", children: [{ kind: "button", label: "Docs", url: "https://x.test" }] },
+    ])
+  })
+
+  it("an edit that removes the rich content removes the stale block", async () => {
+    const db = getDb()
+    const row = makeStoredMessage({
+      id: "rich-gone",
+      platformMessageId: "tg:9",
+      platform: "telegram",
+    })
+    row.metadata = { ...row.metadata, inboundA2UI: staleBlock } as StoredMessage["metadata"]
+    await db.messages.put(row)
+    const event = makeEditEvent("telegram", "tg:9", "plain now")
+    event.raw = { update_id: 2, edited_message: { text: "plain now" } }
+    await getBus().dispatchInboundFull(event)
+    const updated = await db.messages.get("rich-gone")
+    expect(updated?.parts).toEqual([{ type: "text", text: "plain now" }])
+    expect(updated?.metadata?.inboundA2UI).toBeUndefined()
+  })
+})

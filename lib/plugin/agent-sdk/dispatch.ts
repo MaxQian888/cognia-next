@@ -15,6 +15,8 @@
  * load and unit-testable.
  */
 
+import { normalizeAgentModelRoleOverrides } from "@cognia/agent-contracts/external-agent"
+import { mergeModelRoleLayers } from "@/lib/ai/agent/external/config/model-plan"
 import type { AgentTeamConfig } from "@/lib/ai/agent/team/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
@@ -28,10 +30,11 @@ import type {
 import { assertNoLeakingPiiDeep } from "@/lib/plugin/api/plugin-pii-gate"
 import { fireAgentHook, type AgentHookContext } from "@/lib/ai/agent/external/agent-hooks"
 import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
-import { composeSubagentSystemPrompt } from "@/lib/claude/agents/subagent-prompt-frame"
+import { composeSubagentSystemPrompt } from "@/lib/agent/prompts/subagent-frame"
 import {
   envelopeForBudgetExhausted,
   envelopeForRejection,
+  normalizeDispatchBudgetResult,
 } from "@/lib/claude/agents/dispatch-error"
 
 /** Generate a run id (app code — Date.now/randomUUID are allowed here). */
@@ -128,10 +131,19 @@ export async function dispatchSubagent(
   let def: PluginSubagentDef | undefined
   let thisId: string
   if (typeof idOrDef === "string") {
-    const { getSubagent } = await import("@/lib/plugin/registries/subagent-registry")
-    def = getSubagent(idOrDef)
-    if (!def) {
+    const [{ getSubagentEntry }, { resolvePluginSubagentPrompt }] = await Promise.all([
+      import("@/lib/plugin/registries/subagent-registry"),
+      import("@/lib/prompts/plugin-subagent-prompts"),
+    ])
+    const registered = getSubagentEntry(idOrDef)
+    if (!registered) {
       throw new Error(`dispatchSubagent: subagent "${idOrDef}" is not registered`)
+    }
+    // The registry holds the plugin's own text; a Prompt Center override of it
+    // applies on this rail as on the projected ones.
+    def = {
+      ...registered.entry,
+      prompt: resolvePluginSubagentPrompt(registered.pluginId, registered.entry),
     }
     thisId = idOrDef
   } else {
@@ -200,6 +212,22 @@ export async function dispatchSubagent(
     }
   }
 
+  const deadlineMs = options._deadlineMs
+  const timeoutMs = typeof deadlineMs === "number" ? deadlineMs - Date.now() : undefined
+  // Zero disables capture's wall-clock timer, so an elapsed explicit deadline
+  // must be refused rather than becoming an unlimited run.
+  if (timeoutMs !== undefined && timeoutMs <= 0) {
+    const message = "Dispatch incomplete: the configured execution deadline has already expired."
+    return {
+      text: message,
+      channel: "text",
+      toolsAvailable: false,
+      finishReason: "error",
+      runId,
+      errorEnvelope: envelopeForBudgetExhausted(message),
+    }
+  }
+
   // Thread A2: route to an external CLI agent when the def (or options) names a
   // preset. External agents run their own loop and do not nest back in, so the
   // depth/budget threading stops here.
@@ -227,10 +255,6 @@ export async function dispatchSubagent(
       ? Math.min(def.maxDepth, options._maxDepth)
       : (def.maxDepth ?? options._maxDepth)
   const childChain = [...parentChain, thisId]
-  const deadlineMs = options._deadlineMs
-  const timeoutMs =
-    typeof deadlineMs === "number" ? Math.max(0, deadlineMs - Date.now()) : undefined
-
   // Lifecycle hooks: a cognia-dispatched subagent runs as its OWN top-level
   // session, so the SDK never emits `SubagentStart` / `SubagentStop` for it —
   // only SDK-Task-dispatched agents get those. Without synthesizing them here a
@@ -332,8 +356,13 @@ export async function dispatchSubagent(
     }
   )
 
+  // Only host-managed runs have a journal row that dispatch_agent can resume.
+  const outcome = normalizeDispatchBudgetResult({
+    ...result,
+    ...(options._runId ? { runId } : {}),
+  })
   void fireAgentHook("SubagentStop", hookCtx, {
-    payload: { ...subagentHookPayload, success: true },
+    payload: { ...subagentHookPayload, success: outcome.finishReason !== "error" },
   })
 
   // Draw the run's usage down the shared subtree budget (best-effort — the
@@ -379,11 +408,12 @@ export async function dispatchSubagent(
   }
 
   return {
-    text: result.text,
+    text: outcome.text,
     channel: result.channel,
     toolsAvailable: result.toolsAvailable,
     runId,
-    ...(result.finishReason ? { finishReason: result.finishReason } : {}),
+    ...(outcome.finishReason ? { finishReason: outcome.finishReason } : {}),
+    ...(outcome.errorEnvelope ? { errorEnvelope: outcome.errorEnvelope } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
     ...(result.runtime ? { runtime: result.runtime } : {}),
     ...(result.routeKind ? { routeKind: result.routeKind } : {}),
@@ -501,11 +531,22 @@ async function runExternalSubagent(
   const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
   await placeDispatchedAgent(agentId, options.cwd, manager)
 
+  const effectiveBinding =
+    cogniaModel === undefined && pinned
+      ? manager.getAgent(agentId)?.config.cogniaModel
+      : cogniaModel
+  const modelRoles = effectiveBinding
+    ? mergeModelRoleLayers(
+        normalizeAgentModelRoleOverrides(options.modelRoles) ?? undefined,
+        normalizeAgentModelRoleOverrides(def.modelRoles) ?? undefined
+      )
+    : undefined
   const result = await manager.execute(agentId, prompt, {
     // A preset names an executable, not another saved agent's model/account.
     // A pinned config IS the saved agent, so without an explicit override its
     // own gateway binding (or native mode) applies.
     ...(cogniaModel !== undefined ? { cogniaModel } : pinned ? {} : { cogniaModel: null }),
+    ...(modelRoles ? { modelRoles } : {}),
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     // Honor the subagent's declared model on the external CLI too (the sidecar
     // path already threads `def.model`). Best-effort per the manager.

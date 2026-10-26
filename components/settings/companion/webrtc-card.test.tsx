@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 /**
  * WebRtcCard — covers the input parser, default population, save round-trip,
  * the new per-device tier list, and the consecutive-poll-failure banner.
@@ -822,7 +823,7 @@ describe("WebRtcCard — TURN provider UI", () => {
     renderCard()
     await waitForHydrate()
     const select = await screen.findByTestId("webrtc-turn-provider-kind")
-    await userEvent.selectOptions(select, "cloudflare-calls")
+    await selectOption(select, "cloudflare-calls")
     expect(screen.getByTestId("webrtc-turn-cf-keyid")).toBeInTheDocument()
     expect(screen.getByTestId("webrtc-turn-token")).toBeInTheDocument()
     expect(screen.getByTestId("webrtc-turn-test")).toBeInTheDocument()
@@ -840,7 +841,7 @@ describe("WebRtcCard — TURN provider UI", () => {
     renderCard()
     await waitForHydrate()
     const select = await screen.findByTestId("webrtc-turn-provider-kind")
-    await user.selectOptions(select, "cloudflare-calls")
+    await selectOption(select, "cloudflare-calls")
     await user.type(screen.getByTestId("webrtc-turn-cf-keyid"), "key-1")
     await user.type(screen.getByTestId("webrtc-turn-token"), "tok")
     await user.click(screen.getByTestId("webrtc-turn-test"))

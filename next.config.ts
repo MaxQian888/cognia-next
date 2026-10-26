@@ -295,6 +295,10 @@ const nextConfig: NextConfig = {
   // browser bundle via the standalone/BYOK chat engine, so transpiling it is
   // correct for the static export too, not a test-only concession.
   transpilePackages: [
+    // Source-only TypeScript contracts from cognia-labs/cognia-services,
+    // installed at the pinned revision (integrations/cognia-services.json).
+    "@cognia/status-contract",
+    "@cognia/sync-protocol",
     "@noble/hashes",
     // ESM-only; the account sync recovery key derives its P-256 keys with it.
     "@noble/curves",
@@ -324,7 +328,6 @@ const nextConfig: NextConfig = {
     "@ai-sdk/openai-compatible",
     "@ai-sdk/provider",
     "@ai-sdk/provider-utils",
-    "@ai-sdk/react",
     "@ai-sdk/replicate",
     "@ai-sdk/togetherai",
     "@ai-sdk/xai",

@@ -1,5 +1,6 @@
+import userEvent from "@testing-library/user-event"
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { A2UIHoverCard, type A2UIHoverCardComponent } from "./a2ui-hover-card"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -38,4 +39,29 @@ describe("A2UIHoverCard", () => {
     )
     expect(screen.getByTestId("avatar1")).toBeInTheDocument()
   })
+})
+
+it("keeps the actual trigger interactive with the native overlay", async () => {
+  const props = {
+    component: {
+      id: "keyboard",
+      component: "HoverCard",
+      trigger: "trigger",
+      children: ["content"],
+      openDelay: 0,
+    },
+    surfaceId: "s",
+    dataModel: {},
+    onDataChange: jest.fn(),
+    onAction: jest.fn(),
+    renderChild: (id: string) =>
+      id === "trigger" ? <button>Open panel</button> : <p>Panel content</p>,
+  } as A2UIComponentProps<A2UIHoverCardComponent>
+  render(<A2UIHoverCard {...props} />)
+  const trigger = screen.getByRole("button", { name: "Open panel" })
+  trigger.focus()
+  await userEvent.hover(trigger)
+  expect(await screen.findByText("Panel content")).toBeVisible()
+  await userEvent.unhover(trigger)
+  await waitFor(() => expect(screen.queryByText("Panel content")).not.toBeInTheDocument())
 })

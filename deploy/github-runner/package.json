@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@actions/artifact": "2.3.2"
+    "@actions/artifact": "6.3.1"
   }
 }

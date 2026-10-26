@@ -122,9 +122,8 @@ export const piAdapter: SubagentSourceAdapter = {
           description,
           systemPrompt: parsed.body,
           tools,
-          // Pi picks the model per session, not per agent — there is no model
-          // field to map, and inventing one would misreport the import.
-          model: undefined,
+          // Nico and Gotgenes both accept explicit per-agent model hints.
+          model: stringOrUndef(fm.model),
           rawFrontmatter: fm,
           warnings,
         })

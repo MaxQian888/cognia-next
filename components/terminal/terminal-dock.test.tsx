@@ -9,6 +9,42 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/hooks/terminal/use-ai-shell", () => {
+  const React = jest.requireActual("react")
+  return {
+    useAiShell: jest.fn((sessionId: string) => {
+      const [open, setOpen] = React.useState(false)
+      return [
+        {
+          open,
+          messages: [
+            { id: "session", role: "user", content: `AI target: ${sessionId}`, timestamp: 0 },
+          ],
+          plan: null,
+          generating: false,
+          executing: false,
+          advisory: null,
+          advisoryLoading: false,
+        },
+        {
+          toggle: () => setOpen((value: boolean) => !value),
+          openPanel: () => setOpen(true),
+          closePanel: () => setOpen(false),
+          submit: jest.fn(),
+          runAll: jest.fn(),
+          runNextStep: jest.fn(),
+          skipStep: jest.fn(),
+          editStep: jest.fn(),
+          cancel: jest.fn(),
+          requestAdvisory: jest.fn(),
+          applyFix: jest.fn(),
+          clearHistory: jest.fn(),
+        },
+      ]
+    }),
+  }
+})
+
 const mockPush = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush }),
@@ -202,6 +238,8 @@ jest.mock("./terminal-shell-picker", () => ({
   ),
 }))
 
+import { getAppRegistration } from "@/lib/shortcuts/app-runtime"
+import { useAiShell } from "@/hooks/terminal/use-ai-shell"
 import { TerminalDock } from "./terminal-dock"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -258,6 +296,53 @@ function seedProjectAndSession(
 }
 
 describe("TerminalDock", () => {
+  it("mounts AI Shell through its toolbar and registered shortcut", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    const toggle = screen.getByRole("button", { name: "toggle" })
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(toggle)
+    expect(screen.getByText("AI target: s-1")).toBeInTheDocument()
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    act(() => getAppRegistration("terminal.aiShell.toggle")?.handler(new KeyboardEvent("keydown")))
+    expect(screen.queryByText("AI target: s-1")).not.toBeInTheDocument()
+  })
+
+  it("targets the focused split pane and resets AI state when switching tabs", () => {
+    const project = seedProjectAndSession({ sessionId: "s-1" })
+    const state = useTerminalStore.getState()
+    for (const id of ["split", "other"]) {
+      state.registerSession({
+        id,
+        projectId: project.id,
+        extensionId: null,
+        origin: "local",
+        shell: "/bin/zsh",
+      })
+    }
+    state.addPaneToGroup("s-1", "split", "row")
+    state.setActiveSession(project.id, "s-1")
+    state.setFocusedPane("s-1", "split")
+    render(<TerminalDock />)
+    fireEvent.click(screen.getByRole("button", { name: "toggle" }))
+    expect(screen.getByText("AI target: split")).toBeInTheDocument()
+    act(() => useTerminalStore.getState().setActiveSession(project.id, "other"))
+    expect(screen.queryByText("AI target: split")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "toggle" }))
+    expect(screen.getByText("AI target: other")).toBeInTheDocument()
+    expect(jest.mocked(useAiShell).mock.calls.at(-1)?.[0]).toBe("other")
+  })
+
+  it("does not mount AI Shell for serial terminals", () => {
+    seedProjectAndSession({ sessionId: "serial" })
+    useTerminalStore.setState((state) => ({
+      sessions: { ...state.sessions, serial: { ...state.sessions.serial, kind: "serial" } },
+    }))
+    render(<TerminalDock />)
+    expect(screen.queryByRole("button", { name: "toggle" })).not.toBeInTheDocument()
+    expect(getAppRegistration("terminal.aiShell.toggle")).toBeUndefined()
+  })
+
   it.each(["bottom", "right"] as const)(
     "resizes the %s dock against its measured parent",
     (position) => {

@@ -42,6 +42,7 @@ import {
   A2UIAiUnavailableError,
 } from "@/lib/a2ui/ai-generate"
 import { cn } from "@/lib/utils"
+import type { A2UIDispatchMessage } from "@/types/a2ui/schema"
 import { toast } from "sonner"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { a2uiPayload } from "@/lib/share/payload"
@@ -72,7 +73,6 @@ export function A2UIToolbar() {
   const redo = useA2UIStore((state) => state.redo)
   const replaceSurfaceContent = useA2UIStore((state) => state.replaceSurfaceContent)
   const updateComponents = useA2UIStore((state) => state.updateComponents)
-  const updateDataModel = useA2UIStore((state) => state.updateDataModel)
   const appBuilder = useA2UIAppBuilder({})
   const saveApp = useA2UISave(surfaceId)
   const [shareOpen, setShareOpen] = useState(false)
@@ -133,14 +133,19 @@ export function A2UIToolbar() {
     const instruction = regeneratePrompt.trim()
     if (!instruction || isGenerating) return
     setIsGenerating(true)
+    let appliedPartialChange = false
+    const onDispatch = (message: A2UIDispatchMessage) => {
+      streamDispatchToStore(message)
+      if (message.type !== "surfaceReady") appliedPartialChange = true
+    }
 
     try {
       const appLocale = appBuilder.getAppInstance(surfaceId)?.locale ?? locale
       const language = appLocale === "zh-CN" ? "zh" : "en"
 
       if (aiMode === "edit") {
-        // Incremental edit: stream patches onto the live canvas, then reconcile
-        // with the authoritative merged tree the model returned.
+        // Stream data operations directly into the live model. The capture
+        // contains only this turn's changes, not a complete model snapshot.
         const surface = useA2UIStore.getState().surfaces[surfaceId]
         const result = await generateA2UIApp({
           instruction,
@@ -148,10 +153,9 @@ export function A2UIToolbar() {
           surfaceId,
           language,
           currentComponents: surface ? Object.values(surface.components) : [],
-          onDispatch: streamDispatchToStore,
+          onDispatch,
         })
         updateComponents(surfaceId, result.components)
-        updateDataModel(surfaceId, result.dataModel, false)
         toast.success(t("appEdited"))
       } else {
         // Whole-app regenerate: stream in, then a clean full replace so no
@@ -161,7 +165,7 @@ export function A2UIToolbar() {
           mode: "create",
           surfaceId,
           language,
-          onDispatch: streamDispatchToStore,
+          onDispatch,
         })
         const replaced = replaceSurfaceContent(
           surfaceId,
@@ -180,7 +184,8 @@ export function A2UIToolbar() {
       setRegenerateOpen(false)
       setRegeneratePrompt("")
     } catch (err) {
-      if (err instanceof A2UIAiUnavailableError) toast.error(t("aiEditUnavailable"))
+      if (appliedPartialChange) toast.error(t("aiPartialFailure"))
+      else if (err instanceof A2UIAiUnavailableError) toast.error(t("aiEditUnavailable"))
       else toast.error(t("generationFailed"))
     } finally {
       setIsGenerating(false)
@@ -195,7 +200,6 @@ export function A2UIToolbar() {
     surfaceId,
     t,
     updateComponents,
-    updateDataModel,
   ])
 
   return (

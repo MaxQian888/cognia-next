@@ -9,11 +9,11 @@ You analyze the frontend architecture of cognia-next. Focus on:
 ## Scope
 
 - `app/` — Next.js App Router structure (static export), route organization, layout hierarchy
-- `components/` — Component tree: which components exist, how they compose. Note `ui/` (57 shadcn components) and `ai-elements/` (vendored) are excluded from tests
+- `components/` — Component tree: which components exist, how they compose. Note `ui/` (shadcn) and `ai-elements/` (vendored) are excluded from tests
 - `hooks/` — Shared hooks catalog: what patterns are used, which are most reused (cross-cutting)
 - `stores/` — Zustand store architecture: what stores exist, how they organize state
-- `i18n/` — next-intl setup, message catalog (en.json + zh-CN.json), key conventions
-- `styles/` — Tailwind v4, oklch CSS vars, dark mode, globals.css
+- `i18n/` — next-intl setup, split message sources under `messages/{en,zh-CN}/` (the `en.json` / `zh-CN.json` aggregates are generated), key conventions
+- `app/globals.css` — Tailwind v4, oklch CSS vars, dark mode
 
 ## Output Format
 
@@ -31,11 +31,11 @@ For each area, report:
 - `components/app-shell-mobile.tsx` (the shell)
 - `stores/index.ts` (store registry)
 - `i18n/config.ts`, `i18n/request.ts`
-- `globals.css`
+- `app/globals.css`
 - One representative page component and its children
 
 ## Commands Available
 
-- Count files: `Get-ChildItem -Recurse -Filter "*.tsx" | Measure-Object | Select -Expand Count`
+- Count files: `rg --files -g "*.tsx" | wc -l`
 - Find patterns: `rg "export (default )?function" --stats`
 - Check imports from a module: `rg "from '@/components/" --count`

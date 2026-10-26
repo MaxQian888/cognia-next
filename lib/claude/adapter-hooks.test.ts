@@ -39,6 +39,10 @@ import {
   registerPluginHookContribution,
   __resetHookRegistryForTesting,
 } from "@/lib/plugin/registries/hook-registry"
+import {
+  installPluginRecordReader,
+  type PluginRecordFacts,
+} from "@/lib/plugin/registries/plugin-liveness"
 
 // PluginEventHooks reads enabled plugins from this store; default is empty so
 // the no-listener fast path is exercised unless a test opts in.
@@ -47,6 +51,11 @@ jest.mock("@/stores/plugin-runtime", () => ({
   __esModule: true,
   usePluginStore: { getState: () => getStateMock() },
 }))
+// The mocked store never runs the real store's module body, which is what
+// installs the liveness reader; install one over the mock instead.
+installPluginRecordReader(
+  (pluginId) => getStateMock().plugins[pluginId] as PluginRecordFacts | undefined
+)
 
 // An enabled plugin advertising every event hook — flips `hasEventListeners`
 // true for the forwarding tests without faking the singleton's internals.
@@ -112,6 +121,15 @@ describe("adapter-hooks", () => {
     expect(spy).toHaveBeenCalledWith("calc", { x: 1 }, "session_b")
   })
 
+  it("dispatchPreToolUse surfaces the plugin's denyReason as the reason call sites read", async () => {
+    enableAllEventHooks()
+    jest
+      .spyOn(getPluginEventHooks(), "dispatchPreToolUse")
+      .mockResolvedValue({ action: "deny", denyReason: "Project rule forbids it" } as never)
+    const result = await dispatchPreToolUse("bash", { command: "rm -rf /" }, "session_c")
+    expect(result).toEqual({ action: "deny", reason: "Project rule forbids it" })
+  })
+
   it("dispatchPostToolUse returns the dispatcher's merge result", async () => {
     enableAllEventHooks()
     jest
@@ -119,6 +137,15 @@ describe("adapter-hooks", () => {
       .mockResolvedValue({ modifiedResult: { ok: true } } as never)
     const result = await dispatchPostToolUse("calc", {}, { ok: false }, "s")
     expect(result.modifiedResult).toEqual({ ok: true })
+  })
+
+  it("forwards the call's outcome and turn to the dispatcher", async () => {
+    enableAllEventHooks()
+    const spy = jest
+      .spyOn(getPluginEventHooks(), "dispatchPostToolUse")
+      .mockResolvedValue({} as never)
+    await dispatchPostToolUse("calc", {}, "out", "s", { isError: false, turnId: "t9" })
+    expect(spy).toHaveBeenCalledWith("calc", {}, "out", "s", { isError: false, turnId: "t9" })
   })
 
   it("skips the dispatch entirely when nothing is registered on the point", async () => {

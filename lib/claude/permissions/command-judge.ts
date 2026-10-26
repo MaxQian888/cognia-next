@@ -15,10 +15,18 @@
  * to `null` so the caller falls back to the safe default (prompt the user).
  * Results are cached by command string with a short TTL to avoid re-judging a
  * command the agent runs repeatedly in a turn.
+ *
+ * The judge's guidance is a narrow-only Prompt Center entry (ADR-0236, plan
+ * R6): a customized judge runs beside the shipped one and the stricter verdict
+ * wins, so editing it can make Auto-mode ask more often but never approve a
+ * command the shipped judge would not. The active revision is part of the
+ * cache key, so a published edit is never answered from an old verdict.
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
 import { hasNoLeakingPii } from "@cognia/redact"
 
 export type RiskLevel = "low" | "medium" | "high"
@@ -45,6 +53,8 @@ export interface JudgeOptions {
    * reusing the "safe" verdict the previous instruction produced.
    */
   contextKey?: string
+  /** Where the judge's customized guidance is looked up (the session, in practice). */
+  promptContext?: PromptResolutionContext
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -75,9 +85,9 @@ export function invalidateJudgeContext(contextKey: string): void {
   contextEpochs.set(contextKey, (contextEpochs.get(contextKey) ?? 0) + 1)
 }
 
-function cacheKey(command: string, contextKey: string | undefined): string {
-  if (!contextKey) return command
-  return `${contextKey}#${contextEpochs.get(contextKey) ?? 0}::${command}`
+function cacheKey(command: string, contextKey: string | undefined, promptKey: string): string {
+  if (!contextKey) return `${promptKey}::${command}`
+  return `${promptKey}|${contextKey}#${contextEpochs.get(contextKey) ?? 0}::${command}`
 }
 
 /** Test seam — clear the memoization cache and every context epoch. */
@@ -86,20 +96,59 @@ export function __resetJudgeCache(): void {
   contextEpochs.clear()
 }
 
-const SYSTEM_PROMPT =
-  "You are a security gate for a coding agent's shell. Decide whether a single " +
-  "shell command is safe to execute WITHOUT asking the human for confirmation. " +
-  "Treat as UNSAFE: deleting or overwriting data, modifying system/global state, " +
-  "changing permissions or users, downloading-and-executing code, exfiltrating " +
-  "data, irreversible or privileged operations. Treat as SAFE: read-only " +
-  "inspection, builds, tests, linters, and local edits a developer routinely runs. " +
-  'Respond with ONLY a JSON object: {"safe": boolean, "risk": "low"|"medium"|"high", ' +
-  '"reason": "<=12 words"}. No prose, no code fences.'
+export const COMMAND_JUDGE_PROMPT = definePrompt({
+  id: "permissions.command-judge",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "permissions",
+  operation: "narrow-only",
+  scopes: ["account", "session"],
+  activation: "next-operation",
+  risk: "approval-sensitive",
+  hosts: ["app"],
+  requiredFragments: ['"safe"', '"risk"', '"reason"'],
+  maxChars: 4_000,
+  outputContract:
+    'Parsed as {"safe", "risk", "reason"}. A customized judge runs beside the shipped one: a command runs unattended only when both call it safe and low risk, and the higher risk of the two applies.',
+  consumers: ["lib/claude/permissions/command-judge.ts"],
+  defaultBody:
+    "You are a security gate for a coding agent's shell. Decide whether a single " +
+    "shell command is safe to execute WITHOUT asking the human for confirmation. " +
+    "Treat as UNSAFE: deleting or overwriting data, modifying system/global state, " +
+    "changing permissions or users, downloading-and-executing code, exfiltrating " +
+    "data, irreversible or privileged operations. Treat as SAFE: read-only " +
+    "inspection, builds, tests, linters, and local edits a developer routinely runs. " +
+    'Respond with ONLY a JSON object: {"safe": boolean, "risk": "low"|"medium"|"high", ' +
+    '"reason": "<=12 words"}. No prose, no code fences.',
+})
+
+const RISK_RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 }
 
 function coerceRisk(value: unknown, safe: boolean): RiskLevel {
   if (value === "low" || value === "medium" || value === "high") return value
   // Unknown / missing: a safe verdict is low risk, an unsafe one is high.
   return safe ? "low" : "high"
+}
+
+/**
+ * The stricter of the shipped and the customized verdict. A customized judge
+ * that gives no verdict cannot approve anything, so the shipped verdict stands
+ * minus its approval.
+ */
+function narrowVerdict(
+  shipped: CommandJudgement,
+  custom: CommandJudgement | null
+): CommandJudgement {
+  if (!custom) return { ...shipped, safe: false }
+  const stricter =
+    RISK_RANK[custom.risk] > RISK_RANK[shipped.risk] || (!custom.safe && shipped.safe)
+      ? custom
+      : shipped
+  return {
+    safe: shipped.safe && custom.safe,
+    risk: RISK_RANK[custom.risk] > RISK_RANK[shipped.risk] ? custom.risk : shipped.risk,
+    reason: stricter.reason,
+  }
 }
 
 function evict(): void {
@@ -122,35 +171,44 @@ export async function judgeCommandSafety(
   const trimmed = (command ?? "").trim()
   if (!trimmed) return null
 
-  const key = cacheKey(trimmed, opts.contextKey)
+  const guidance = await resolvePromptAsync(COMMAND_JUDGE_PROMPT, {
+    context: opts.promptContext ?? {},
+  })
+  const custom = guidance.source.kind === "override" ? guidance.text : null
+  const key = cacheKey(
+    trimmed,
+    opts.contextKey,
+    guidance.source.kind === "override" ? guidance.source.revisionId : "shipped"
+  )
   const cached = cache.get(key)
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value
 
   // Never send a command carrying secrets / PII to the model.
   if (!hasNoLeakingPii(trimmed)) return null
 
-  let result: CommandJudgement | null = null
-  try {
-    const localeHint = opts.locale ? `\nReply language: ${opts.locale}` : ""
-    const cwdHint = opts.cwd ? `\nWorking directory: ${opts.cwd}` : ""
-    const text = await client.complete(`Command:\n${trimmed}${cwdHint}${localeHint}`, {
-      system: SYSTEM_PROMPT,
-      temperature: 0,
-      maxTokens: 80,
-    })
-    const raw = extractJson<{ safe?: unknown; risk?: unknown; reason?: unknown }>(text)
-    if (typeof raw.safe !== "boolean") {
-      result = null
-    } else {
-      result = {
+  const localeHint = opts.locale ? `\nReply language: ${opts.locale}` : ""
+  const cwdHint = opts.cwd ? `\nWorking directory: ${opts.cwd}` : ""
+  const prompt = `Command:\n${trimmed}${cwdHint}${localeHint}`
+  const judge = async (system: string): Promise<CommandJudgement | null> => {
+    try {
+      const text = await client.complete(prompt, { system, temperature: 0, maxTokens: 80 })
+      const raw = extractJson<{ safe?: unknown; risk?: unknown; reason?: unknown }>(text)
+      if (typeof raw.safe !== "boolean") return null
+      return {
         safe: raw.safe,
         risk: coerceRisk(raw.risk, raw.safe),
         reason: typeof raw.reason === "string" ? raw.reason.slice(0, 160) : "",
       }
+    } catch {
+      return null
     }
-  } catch {
-    result = null
   }
+
+  const [shipped, customized] = await Promise.all([
+    judge(COMMAND_JUDGE_PROMPT.defaultBody),
+    custom === null ? Promise.resolve(null) : judge(custom),
+  ])
+  const result = shipped && custom !== null ? narrowVerdict(shipped, customized) : shipped
 
   cache.set(key, { at: Date.now(), value: result })
   evict()

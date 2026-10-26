@@ -17,7 +17,7 @@ import {
 } from "@/lib/ai/agent/execution/agent-execution-handle"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
-import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/claude/agents/workflow-copilot-prompt"
+import { WORKFLOW_COPILOT_ALLOWED_TOOLS } from "@/lib/workflow/editor/copilot-prompts"
 
 import {
   createAgentSession,
@@ -34,6 +34,7 @@ import { createHookRunner, type HookRunner } from "../runtime/hook-runner"
 import { createCheckpointCapture, type CheckpointCapture } from "../runtime/checkpoint-capture"
 import { realCheckpointFs } from "../runtime/checkpoint-store"
 import { createGateController, runTurn } from "./turn-engine"
+import type { PermissionResponder } from "../../agent/permission-gate"
 import { captureEventToActions, canonicalEnvelopeToActions } from "../state/event-mapper"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { sidecarEventToMcpLog } from "../runtime/mcp-log-model"
@@ -88,6 +89,9 @@ export interface AgentSessionApi {
   sendInFlight(): boolean
   abort(): void
   resolvePermission(decision: CapturePermissionDecision): void
+  isCurrentPermission?(
+    request: import("@cognia/agent-config-types").PermissionRequestEvent
+  ): boolean
   /**
    * Deny every approval the agent is still waiting on, and say how many.
    *
@@ -139,6 +143,10 @@ export interface AgentSessionApi {
   /** Re-resolve SendOptions on the next turn (after an MCP/skill/plugin toggle)
    * without respawning the sidecar. No-op when no session is live yet. */
   invalidate(): void
+  /** Bootstrap/reuse this session's sidecar for manual CLI child dispatch. */
+  prepareForSubagent?(signal?: AbortSignal): Promise<void>
+  requestSubagentPermission?: PermissionResponder
+  awaitSubagentApprovals?: () => Promise<void>
   reloadHooks?(): Promise<void>
   /** Manually compact the live session's context (`/compact`), both dispatch
    * paths. No-op (with a notice) until a turn has spawned the sidecar. */
@@ -336,6 +344,7 @@ export function useAgentSession({
   // and two live turns on one session fan every notification out to both
   // prompt listeners, which is how transcript rows render twice.
   const sendChainRef = useRef<Promise<unknown>>(Promise.resolve())
+  const closingRef = useRef(false)
   // Session-only grants (for example when persistence fails). Persisted rules
   // are reread at each request so external revocations take effect live.
   const approvedToolsRef = useRef<Set<string>>(new Set())
@@ -624,6 +633,34 @@ export function useAgentSession({
     return sessionRef.current
   }, [attachSessionUi, captureExecutionSpec, createSession, hookRunner])
 
+  const prepareForSubagent = useCallback(
+    async (signal?: AbortSignal) => {
+      signal?.throwIfAborted()
+      if (cwdChangeRef.current) await cwdChangeRef.current
+      signal?.throwIfAborted()
+      const session = ensureSession()
+      if (!session.prepareForSubagent) {
+        const t = createCliTranslator(configRef.current.locale, "cliUiCommon")
+        throw new Error(t("manualSubagentUnsupported"))
+      }
+      await session.prepareForSubagent()
+      signal?.throwIfAborted()
+    },
+    [ensureSession]
+  )
+
+  const requestSubagentPermission = useCallback<PermissionResponder>(
+    async (request, signal) => {
+      try {
+        return await gate.responder(request, signal)
+      } finally {
+        if (signal?.aborted && !gate.isPending())
+          dispatch({ type: "OVERLAY_CLOSE", ifKind: "permission" })
+      }
+    },
+    [gate, dispatch]
+  )
+
   const dropSession = useCallback(async () => {
     compactAbortRef.current?.abort()
     compactAbortRef.current = null
@@ -853,13 +890,16 @@ export function useAgentSession({
 
   const send = useCallback(
     (prompt: string, preparePrompt?: () => Promise<string>) => {
+      if (closingRef.current) return Promise.resolve(null)
       sendInFlightCountRef.current += 1
       const chained =
         sendInFlightCountRef.current === 1
           ? // Idle: call `sendInner` directly so TURN_START still dispatches
             // synchronously in this tick, exactly as an unchained send did.
             sendInner(prompt, preparePrompt)
-          : sendChainRef.current.then(() => sendInner(prompt, preparePrompt))
+          : sendChainRef.current.then(() =>
+              closingRef.current ? null : sendInner(prompt, preparePrompt)
+            )
       // A failed turn must not wedge every send chained behind it.
       sendChainRef.current = chained.catch(() => undefined)
       return chained.finally(() => {
@@ -1035,6 +1075,10 @@ export function useAgentSession({
     async (mode: PermissionMode) => {
       const session = sessionRef.current
       if (!session?.isLive?.()) {
+        // A manual child may have prepared and cached the parent's options
+        // without starting a parent runtime session yet.
+        if (session) await dropSession()
+        configRef.current = { ...configRef.current, permissionMode: mode }
         dispatch({ type: "SET_MODE", mode })
         return
       }
@@ -1063,7 +1107,7 @@ export function useAgentSession({
         })
       }
     },
-    [dispatch]
+    [dispatch, dropSession]
   )
 
   const switchThinking = useCallback(
@@ -1320,15 +1364,22 @@ export function useAgentSession({
   )
 
   const close = useCallback(async () => {
+    closingRef.current = true
+    abort()
+    gate.reset()
+    // Keep the sidecar alive for the interrupt terminal snapshot and durable
+    // transcript. Queued sends are fenced above and cannot start during drain.
+    await sendChainRef.current
     await dropSession()
     await dropCopilotSession()
-  }, [dropSession, dropCopilotSession])
+  }, [abort, gate, dropSession, dropCopilotSession])
 
   return {
     send,
     sendInFlight,
     abort,
     resolvePermission,
+    isCurrentPermission: (request) => gate.peek() === request,
     denyPendingPermissions,
     rememberApproval,
     clear,
@@ -1344,6 +1395,9 @@ export function useAgentSession({
     switchAgentMode,
     changeCwd,
     invalidate,
+    prepareForSubagent,
+    requestSubagentPermission,
+    awaitSubagentApprovals: gate.whenSettled,
     reloadHooks,
     compact,
     stopTask,

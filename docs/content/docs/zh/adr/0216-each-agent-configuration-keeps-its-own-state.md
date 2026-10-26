@@ -81,7 +81,7 @@ TypeScript 侧（`lib/ai/agent/external/lifecycle/launch-preparation.ts`）设�
 
 投影从不包含密钥、环境变量、请求头或钥匙串引用。带内联凭证的输入会被拒绝；凭证和非沙箱授权只能在宿主界面中完成。写入经过生命周期服务，并记录 `metadata.createdByPluginId`。
 
-`runExternalAgent` 在总开关关闭、目标被禁用或未就绪时拒绝，把请求的权限模式限制在配置的默认值以内（预设的临时实例使用全局默认值），并在运行结束后移除临时实例。指向外部 Agent 的 `dispatchSubagent` 还需要 `agent:dispatch-external`。
+`runExternalAgent` 在目标被禁用或未就绪时拒绝，把请求的权限模式限制在配置的默认值以内（预设的临时实例使用全局默认值），并在运行结束后移除临时实例。指向外部 Agent 的 `dispatchSubagent` 还需要 `agent:dispatch-external`。
 
 ## 后果
 
@@ -96,3 +96,9 @@ TypeScript 侧（`lib/ai/agent/external/lifecycle/launch-preparation.ts`）设�
 - `crates/cognia-external-agent/src/state_isolation.rs`（文件内测试）、`cli/src/runtime/external/state-isolation.test.ts`
 - `lib/plugin/api/external-agents-api.test.ts`、`lib/plugin/messaging/external-agent-config-hook-source.test.ts`、`plugin-sdk/python/tests/test_contributions.py`
 - `components/settings/agent/*.test.tsx`、`components/mobile/external-agents/*.test.tsx`
+
+## 移除全局开关（2026-10-20）
+
+外部 Agent 由各配置的 `enabled` 状态控制。设置页、运行时目录、聊天路由和插件 API 不再读取全局启用标记。`getSettings` 不再返回 `enabled`，`updateSettings` 将其作为未知设置拒绝；`setEnabled(id, enabled)` 继续控制单个配置。
+
+持久化版本 7 删除旧全局标记。旧全局 `enabled: false` 会转换为所有已有配置的 `enabled: false`，避免升级后启动用户此前暂停的 Agent；旧标记为 true 或不存在时，保留各配置原有状态。配置、凭据、路由规则和连接偏好继续保留，用户可以逐个重新启用配置。

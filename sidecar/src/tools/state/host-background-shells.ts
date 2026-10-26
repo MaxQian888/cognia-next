@@ -2,7 +2,7 @@
 //
 // Implements the SAME port interface as the in-process registry in
 // `./background-shells.ts` (`spawnBackground` / `read` / `waitForOutput` /
-// `kill` / `killAll` / `list`), so `bash.mjs` and the dispatch modules are
+// `kill` / `killAll` / `list`), so `bash.ts` and the dispatch modules are
 // unchanged — only the adapter behind the port swaps. What changes is where the processes actually
 // live: the Rust supervisor (`crates/cognia-jobs`) instead of this Node
 // process.

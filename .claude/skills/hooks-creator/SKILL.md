@@ -105,14 +105,14 @@ id through `builtinHookOverrides` (id → enabled), so users keep final control.
 - **Override field:** `builtinHookOverrides` exists in the CLI config schema and
   the desktop settings; the Settings → Hooks "Built-in hooks" list toggles it.
 
-### 4. Test it (required — coverage gate ≥90%)
+### 4. Test it (required — co-located tests)
 
 - Add spawn-smoke cases to `lib/claude/hooks/builtin-hooks.test.ts`: run the
   script with `execFileSync(process.execPath, [scriptPath], { input })` and
   assert exit code + stdout/stderr for the allow, block, and inject paths.
 - If you added a registry entry, assert `buildBuiltinHookGroups` emits/omits it
   under the right `overrides`.
-- Run `NODE_ENV=test npx jest lib/claude/hooks` from the repo root.
+- Run `pnpm test -- lib/claude/hooks` from the repo root.
 
 ---
 
@@ -121,7 +121,7 @@ id through `builtinHookOverrides` (id → enabled), so users keep final control.
 When the hook belongs to a plugin reacting to an app/agent event.
 
 - **TypeScript:** register handlers in the plugin's entry; the author-facing
-  types live in `plugin-sdk/typescript/src/hooks/index.ts` (`PluginHooks`,
+  types live in `packages/plugin-sdk/src/hooks/index.ts` (`PluginHooks`,
   `PreToolUseResult`, `PromptSubmitContext`, …). Dispatch happens in
   `lib/plugin/messaging/hooks-system.ts`.
 - **Python:** decorate with `@hook("onMessageSend")` etc. from
@@ -144,12 +144,12 @@ If you're adding lifecycle hooks around an autonomous LLM call that runs
 event firing — reuse the firer seam:
 `lib/claude/hooks/lifecycle-firer.ts` (`firePreCallHooks` / `firePostCallHooks`,
 `defaultLifecycleFirer`). See how `lib/goal/judge.ts` and
-`lib/ai/agent/agent-team-runtime-deps.ts` bracket their calls. The CLI backs the
+`lib/ai/agent/team/agent-team-runtime-deps.ts` bracket their calls. The CLI backs the
 same interface with `cli/src/tui/runtime/lifecycle-firer.ts`.
 
 ## Before you call it done
 
 - The event you chose actually fires (catalog) — a hook on a dormant event is dead code.
-- Co-located tests cover allow / block / inject; `pnpm test:coverage` stays ≥90%.
+- Co-located tests cover allow / block / inject.
 - Any new user-facing string (settings label, toast) has en + zh keys; `pnpm lint:i18n` passes.
 - Run the `preflight` skill — the `wiring-auditor` confirms the hook is reachable, not built-but-dormant.

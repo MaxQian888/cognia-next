@@ -13,6 +13,8 @@
  */
 
 import { hasNoLeakingPii } from "@cognia/redact"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import type {
@@ -26,16 +28,36 @@ import type {
 /** Max steps the model is allowed to produce. */
 export const DEFAULT_MAX_STEPS = 20
 
-/** The system prompt for plan generation. */
-export function buildPlanSystemPrompt(maxSteps: number): string {
-  return `You are an expert terminal command planner. Given a user's intent and their current terminal context, generate a step-by-step execution plan of shell commands.
+export const AI_SHELL_PLAN_PROMPT = definePrompt({
+  id: "developer.ai-shell.plan",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 8_000,
+  variables: [{ name: "maxSteps", required: true, maxChars: 16 }],
+  requiredFragments: [
+    '"reasoning"',
+    '"steps"',
+    '"command"',
+    '"description"',
+    '"requiresConfirmation"',
+  ],
+  outputContract:
+    "Return a JSON object with reasoning and steps; each step has command, description and requiresConfirmation. The consumer validates the shape and caps the number of steps before review and execution.",
+  consumers: ["lib/terminal/ai-shell/plan-generator.ts"],
+  defaultBody: `You are an expert terminal command planner. Given a user's intent and their current terminal context, generate a step-by-step execution plan of shell commands.
 
 RULES:
 1. Each step must be a single, executable shell command.
 2. Order steps so earlier steps set up dependencies for later steps.
 3. Mark steps as requiresConfirmation: true if they are destructive (rm -rf, force push, drop database, etc.), involve network calls to production systems, or modify global system state.
 4. Keep descriptions concise (one line) — explain what the command does, not how.
-5. Maximum ${maxSteps} steps per plan.
+5. Maximum {{maxSteps}} steps per plan.
 6. If the intent is unclear or unsafe, return an empty steps array with a brief explanation in the "reasoning" field.
 7. Adapt to the user's shell (bash/zsh/fish/pwsh differ in syntax).
 8. Use the working directory context — don't cd unnecessarily if already there.
@@ -57,7 +79,12 @@ If you cannot fulfill the request (dangerous, nonsensical, or requires informati
 {
   "reasoning": "explanation of why",
   "steps": []
-}`
+}`,
+})
+
+/** Resolve plan instructions at each generation, including the live step limit. */
+export function buildPlanSystemPrompt(maxSteps: number): string {
+  return resolvePrompt(AI_SHELL_PLAN_PROMPT, { values: { maxSteps: String(maxSteps) } }).text
 }
 
 /** Build the user-facing prompt that includes context + intent. */
@@ -179,7 +206,7 @@ export async function generatePlan(
   const prompt = buildPlanUserPrompt(intent, context)
 
   // PII gate
-  if (!isPiiSafe(prompt)) {
+  if (!isPiiSafe(`${system}\n\n${prompt}`)) {
     return {
       id: planId,
       intent,

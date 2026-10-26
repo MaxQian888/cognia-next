@@ -23,6 +23,14 @@ import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, CheckCircle2Icon, CircleHelpIcon, XCircleIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
 import { RunDetailRow } from "./fusion-run-details"
@@ -144,33 +152,46 @@ export function DelegateChecksTable({ acceptance }: DelegateChecksTableProps) {
       )}
 
       {acceptance.checks.length > 0 ? (
-        <table className="w-full table-fixed border-collapse text-[11px]">
-          <thead>
-            <tr className="text-left text-muted-foreground">
-              <th className="w-1/3 py-1 font-normal">{t("check")}</th>
-              <th className="w-20 py-1 font-normal">{t("outcome")}</th>
-              <th className="py-1 font-normal">{t("summary")}</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="table-fixed border-collapse text-[11px]">
+          <TableHeader>
+            <TableRow className="text-left hover:bg-transparent">
+              <TableHead scope="col" className="w-1/3 px-0 font-normal text-muted-foreground">
+                {t("check")}
+              </TableHead>
+              <TableHead scope="col" className="w-20 px-0 font-normal text-muted-foreground">
+                {t("outcome")}
+              </TableHead>
+              <TableHead scope="col" className="px-0 font-normal text-muted-foreground">
+                {t("summary")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {acceptance.checks.map((check) => (
-              <tr key={check.checkId} className="border-t align-top">
-                <td className="py-1 pr-2 font-mono break-words">{check.checkId}</td>
-                <td className={cn("py-1 pr-2", STATUS_CLASS[check.status])}>
+              <TableRow key={check.checkId} className="hover:bg-transparent">
+                <TableCell className="pr-2 pl-0 align-top font-mono break-words whitespace-normal">
+                  {check.checkId}
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "pr-2 pl-0 align-top whitespace-normal",
+                    STATUS_CLASS[check.status]
+                  )}
+                >
                   {t(`status.${check.status}`)}
-                </td>
-                <td className="py-1 break-words">
+                </TableCell>
+                <TableCell className="px-0 align-top break-words whitespace-normal">
                   {check.summary}
                   {check.executedBy !== "runtime" ? (
                     <Badge variant="outline" className="ml-1 h-4 px-1 text-[10px] font-normal">
                       {t(`executedBy.${check.executedBy}`)}
                     </Badge>
                   ) : null}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       ) : null}
 
       {acceptance.hasModelCheck ? (

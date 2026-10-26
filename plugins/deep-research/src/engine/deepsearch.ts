@@ -45,7 +45,7 @@ export async function runDeepSearch(
       return finalize(state, deps, beastReason(state))
     }
 
-    const { decision, tokens } = await decideNextAction(state, deps.ai, deps.signal)
+    const { decision, tokens } = await decideNextAction(state, deps.ai, deps.signal, deps.prompt)
     state.tokensUsed += tokens
     const step = describe(decision)
     reportEngineProgress(deps, progress(state), step.key, step.params)
@@ -81,7 +81,7 @@ export async function runDeepSearch(
 
 /** Draft + evaluate an answer. Returns the result on pass; bumps bad-attempt state on fail. */
 async function tryAnswer(state: ResearchState, deps: EngineDeps): Promise<DeepSearchResult | null> {
-  const { answer, citations, tokens } = await draftAnswer(state, deps.ai, false)
+  const { answer, citations, tokens } = await draftAnswer(state, deps.ai, false, deps.prompt)
   state.tokensUsed += tokens
   const { evaluation, tokens: evalTokens } = await evaluateAnswer(
     state.question,
@@ -89,7 +89,8 @@ async function tryAnswer(state: ResearchState, deps: EngineDeps): Promise<DeepSe
     renderEvidence(state),
     deps.ai,
     state.config.locale,
-    deps.signal
+    deps.signal,
+    deps.prompt
   )
   state.tokensUsed += evalTokens
 
@@ -146,7 +147,7 @@ async function finalize(
   deps: EngineDeps,
   reason: string
 ): Promise<DeepSearchResult> {
-  const { answer, citations, tokens } = await draftAnswer(state, deps.ai, true)
+  const { answer, citations, tokens } = await draftAnswer(state, deps.ai, true, deps.prompt)
   state.tokensUsed += tokens
   recordStep(state, "answer", `forced (${reason})`)
   reportEngineProgress(deps, 1, "progress.done")

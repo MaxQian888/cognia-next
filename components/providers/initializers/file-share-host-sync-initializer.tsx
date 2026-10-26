@@ -44,7 +44,7 @@ export function FileShareHostSyncInitializer() {
     const sync: FileShareHostSync = createFileShareHostSync({
       ...defaultMountTableDeps,
       target: { hostId: LOCAL_FILESPACE_HOST_ID },
-      accountId: () => unlockedAccountId,
+      localAccountId: () => unlockedAccountId,
       loadPolicy: defaultLoadPolicy,
       log: (level, message) => log[level](message),
     })

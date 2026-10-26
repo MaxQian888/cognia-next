@@ -3,7 +3,7 @@
   "about": "关于",
   "account": "账户",
   "agentModes": "代理模式",
-  "agentRuntime": "内置代理运行时",
+  "agentRuntime": "Agent 运行时",
   "agents": "外部代理",
   "aiConnections": "AI 连接",
   "apiKey": "API 密钥",
@@ -69,5 +69,7 @@
   "workflows": "工作流",
   "workspaceTrust": "工作区信任",
   "connectivity": "连接",
-  "mediaGeneration": "媒体生成"
+  "mediaGeneration": "媒体生成",
+  "prompts": "提示词",
+  "harnessEvolution": "Harness 演化"
 }

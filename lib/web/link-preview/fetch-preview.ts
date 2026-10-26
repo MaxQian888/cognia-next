@@ -214,7 +214,7 @@ export async function fetchPreviewImageAsDataUrl(
   const fetchImpl = deps.fetchImpl ?? createPlatformFetch({ kind })
   const deadline = deadlineSignal(options.signal, LINK_PREVIEW_TIMEOUT_MS)
   try {
-    return await readPreviewImage(target, fetchImpl, deadline.signal)
+    return await readPreviewImage(target, fetchImpl, deadline.signal, kind === "tauri")
   } finally {
     deadline.dispose()
   }
@@ -223,7 +223,8 @@ export async function fetchPreviewImageAsDataUrl(
 async function readPreviewImage(
   target: string,
   fetchImpl: PlatformFetch,
-  signal: AbortSignal
+  signal: AbortSignal,
+  desktop = false
 ): Promise<string> {
   const response = await fetchImpl(target, {
     method: "GET",
@@ -233,6 +234,14 @@ async function readPreviewImage(
     timeout: LINK_PREVIEW_TIMEOUT_MS,
     binaryResponse: true,
     blockPrivateHosts: true,
+    ...(desktop && new URL(target).protocol === "https:"
+      ? {
+          downloadPolicy: {
+            allowedOrigins: [new URL(target).origin],
+            maxBytes: LINK_PREVIEW_MAX_IMAGE_BYTES,
+          },
+        }
+      : {}),
   })
   if (!response.ok) throw new LinkPreviewHttpError(response.status)
   const type = mimeType(response)

@@ -1,14 +1,15 @@
 # Cognia mobile spot icons
 
-This folder contains 81 project-matched chibi anime feature illustrations: the
-original 16 icons and 65 additions generated on 2026-09-27. The original assets
-are preserved. Use these for feature cards, onboarding, and empty states at
-48 px or larger; keep Lucide for compact 16–24 px controls. Main navigation and
+This folder contains 82 project-matched chibi anime feature illustrations: the
+original 16 icons, 65 additions generated on 2026-09-27, and the Harness Evolution
+icon added on 2026-10-22. The original assets are preserved. Use these for feature
+cards, onboarding, and empty states at 48 px or larger; keep Lucide for compact
+16–24 px controls. Main navigation and
 the settings sidebar also offer these illustrations at 28 px, with an ordinary
 Lucide alternative.
 
-`icon-manifest.json` maps all 59 mobile Me entries, 30 desktop navigation
-entries, and 64 desktop settings sections to an appropriate illustration.
+`icon-manifest.json` maps all 60 mobile Me entries, 30 desktop navigation
+entries, and 66 desktop settings sections to an appropriate illustration.
 Related settings can share the same feature artwork. The 12 mobile home
 shortcuts are also mapped in `lib/shell/mobile-home-nav.ts`, with dedicated
 Inbox, Templates, Fleet, Servers, and Devices artwork.
@@ -32,11 +33,13 @@ identity and are outside this feature-illustration inventory.
   generated 4×4 source sheet.
 - `../../../assets/icons/cognia-mobile-spots/raw/expansion/*.png` preserves the
   individual built-in image generation outputs.
+- `harness-evolution` adds a dedicated DNA-helix illustration using `png/chat.png`
+  as its identity/style reference, with PNG and lossless WebP runtime assets.
 - `png/*.png` are transparent runtime assets; new icons are 512×512.
 - `webp/*.webp` contains lossless alternatives for the additions.
 - `../../../assets/icons/cognia-mobile-spots/qa/contact-sheet-magenta.png` is the
   contrasting-background QA sheet. The same directory's `expanded-light.png`,
-  `expanded-magenta.png`, and `expanded-dark-48.png` show all 81 icons.
+  `expanded-magenta.png`, and `expanded-dark-48.png` show the original 81 icons.
 - [Authoring preview](../../../assets/icons/cognia-mobile-spots/qa/index.html)
   previews the complete inventory on light, dark, and magenta
   backgrounds, with search and adjustable sizes.

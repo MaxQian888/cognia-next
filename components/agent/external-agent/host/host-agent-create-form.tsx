@@ -57,7 +57,10 @@ import {
 import { useAddAgentForm } from "@/hooks/agent/use-add-agent-form"
 import { useAddAgentProblemMessage } from "@/hooks/agent/use-add-agent-problem-message"
 import { useExternalAgentProcessPlane } from "@/hooks/agent/use-external-agent-process-plane"
-import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-agent-configs"
+import {
+  useHostExternalAgentConfigs,
+  useHostSupportsModelRoles,
+} from "@/hooks/agent/use-host-external-agent-configs"
 import { useInstalledAgentRuntimes } from "@/hooks/agent/use-installed-agent-runtimes"
 import { PROCESS_PLANE_COMMANDS } from "@/lib/ai/agent/external/capability/process-plane"
 import {
@@ -67,6 +70,11 @@ import {
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
+import {
+  HOST_CONFIG_CAPABILITIES,
+  hostConfigsAvailability,
+  hostSupportsModelRolesV2,
+} from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 import type { AcpPermissionMode, ExternalAgentStateIsolation } from "@/types/agent/external-agent"
 
@@ -130,6 +138,7 @@ function HostAgentCreateFormBody({ presetId, onCreated, onCancel }: HostAgentCre
   const tHost = useTranslations("externalAgent.hostConfigs")
   const tCommon = useTranslations("common")
   const host = useHostExternalAgentConfigs()
+  const supportsModelRoles = useHostSupportsModelRoles()
   const form = useAddAgentForm(presetId)
   const problemMessage = useAddAgentProblemMessage()
   const detection = useInstalledAgentRuntimes(true)
@@ -198,6 +207,7 @@ function HostAgentCreateFormBody({ presetId, onCreated, onCancel }: HostAgentCre
     const input = buildCreateExternalAgentInput(prepared.data, {
       defaultPermissionMode: permissionMode,
     })
+    if (!supportsModelRoles) delete input.modelRoles
     const created = await host.create({
       ...(input as Partial<StoredExternalAgentConfig>),
       stateIsolation,
@@ -330,7 +340,14 @@ function HostAgentCreateFormBody({ presetId, onCreated, onCancel }: HostAgentCre
         <CollapsibleContent className="grid min-w-0 gap-5 pb-4 [&_input]:min-h-11 [&_button[role=combobox]]:min-h-11 [&_div.grid]:grid-cols-1 @sm/host-create:[&_div.sm\:grid-cols-2]:grid-cols-2">
           <ConnectionFields form={form} planeWarning={planeWarning} />
           <ExecutionTuningFields form={form} collapsible={false} />
-          <AddAgentCogniaModelField form={form} />
+          <AddAgentCogniaModelField
+            form={form}
+            roleModelsBlocker={supportsModelRoles ? undefined : "host-outdated"}
+            spawnModelsSupported={hostSupportsModelRolesV2()}
+            nativeModelControlSupported={
+              hostConfigsAvailability(HOST_CONFIG_CAPABILITIES.nativeSubagentControl).ok
+            }
+          />
         </CollapsibleContent>
       </Collapsible>
 

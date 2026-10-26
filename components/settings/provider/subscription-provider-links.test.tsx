@@ -33,13 +33,45 @@ const subscription: SubscriptionProviderDefinition = {
   baseUrl: "https://api.kimi.com/coding/v1",
 }
 
-beforeEach(() => {
-  jest.mocked(useAccounts).mockReturnValue({
-    accounts: [{ id: "account-1", label: "Work plan" }],
-    activeAccountId: "account-1",
+function accountsResult(
+  overrides: Partial<ReturnType<typeof useAccounts>> = {}
+): ReturnType<typeof useAccounts> {
+  return {
+    accounts: [],
+    activeAccountId: null,
     loading: false,
     error: null,
-  } as ReturnType<typeof useAccounts>)
+    pendingAction: null,
+    pendingAccountId: null,
+    reload: jest.fn(async () => {}),
+    setActive: jest.fn(async () => {}),
+    rename: jest.fn(async () => {}),
+    remove: jest.fn(async () => {}),
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  jest.mocked(useAccounts).mockReturnValue(
+    accountsResult({
+      accounts: [
+        {
+          id: "account-1",
+          label: "Work plan",
+          provider: subscription.id,
+          variant: "api-key",
+          expiresAtMs: 0,
+          createdAtMs: 0,
+          lastUsedAtMs: 0,
+          authMode: "api-key",
+          credentialSource: "managed",
+          health: "ready",
+          isExternal: false,
+        },
+      ],
+      activeAccountId: "account-1",
+    })
+  )
 })
 
 it("separates a subscription from its PAYG counterpart and links to both settings panels", () => {
@@ -90,13 +122,7 @@ it.each([
   [{ error: "vault locked" }, "subscriptionLinks.accountsUnavailable"],
   [{ activeAccountId: null }, "subscriptionLinks.noActiveAccount"],
 ])("reports account status without exposing credential data (%s)", (state, message) => {
-  jest.mocked(useAccounts).mockReturnValue({
-    accounts: [],
-    activeAccountId: null,
-    loading: false,
-    error: null,
-    ...state,
-  } as ReturnType<typeof useAccounts>)
+  jest.mocked(useAccounts).mockReturnValue(accountsResult(state))
   render(<SubscriptionProviderLinks providerId={subscription.id} providers={[subscription]} />)
   expect(screen.getByText(message)).toBeInTheDocument()
 })

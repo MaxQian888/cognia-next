@@ -14,6 +14,8 @@ import type { AgentTraceSessionAnalyticsSummary } from "@/types/agent/agent-trac
 import Dexie from "dexie"
 import { getDb } from "./schema"
 import { uniqueIndexKeys } from "./unique-keys"
+import type { AgentTraceStatsSummary } from "@cognia/plugin-contract/lib/db/agent-traces"
+export type { AgentTraceStatsSummary } from "@cognia/plugin-contract/lib/db/agent-traces"
 
 /** Idempotent upsert. The span's `id` is the Dexie primary key. */
 export async function insertSpan(span: AgentTraceSpan): Promise<void> {
@@ -171,25 +173,6 @@ export async function aggregateBySession(
 export async function aggregateAll(): Promise<AgentTraceSessionAnalyticsSummary> {
   const spans = await getDb().agentTraces.toArray()
   return aggregate(spans)
-}
-
-/** Richer per-window stats consumed by the agent-trace stats bar — adds
- * token / cache / cost breakdowns + per-model histogram on top of the
- * legacy `AgentTraceSessionAnalyticsSummary`. */
-export interface AgentTraceStatsSummary extends AgentTraceSessionAnalyticsSummary {
-  totalSpans: number
-  totalInputTokens: number
-  totalOutputTokens: number
-  totalCacheReadTokens: number
-  totalCacheCreationTokens: number
-  /** `cacheReadTokens / (inputTokens + cacheReadTokens)` ∈ [0, 1]. 0 when no input tokens recorded. */
-  cacheHitRate: number
-  errorCount: number
-  byModel: Record<
-    string,
-    { spans: number; inputTokens: number; outputTokens: number; costUsd: number }
-  >
-  bySurface: Record<string, number>
 }
 
 /** Compute the richer stats summary for a span window. The `since` filter

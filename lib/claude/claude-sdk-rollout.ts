@@ -1,4 +1,44 @@
-import type { ClaudeAgentSdkOptionsV1 } from "@cognia/agent-config-types/claude-agent-sdk-options"
+import {
+  CLAUDE_CODE_RETRY_DEFAULT_MAX_WAIT_MS,
+  CLAUDE_CODE_RETRY_MIN_MS,
+  validateClaudeAgentSdkOptions,
+  type ClaudeAgentSdkOptionsV1,
+  type ClaudeCodeRuntimePreferences,
+} from "@cognia/agent-config-types/claude-agent-sdk-options"
+
+/** Resolve saved requests after the unattended profile and runtime have been selected. */
+export function claudeCodeRuntimeOptions(
+  preferences: ClaudeCodeRuntimePreferences | undefined,
+  context: { unattended: boolean; current?: ClaudeAgentSdkOptionsV1 }
+): ClaudeAgentSdkOptionsV1 | undefined {
+  if (!preferences) return context.current
+  const namespaceRequested = preferences.allowNestedUserNamespaces === true
+  const next: ClaudeAgentSdkOptionsV1 = {
+    ...context.current,
+    version: 1,
+    sandbox: {
+      ...context.current?.sandbox,
+      allowNestedUserNamespaces: namespaceRequested,
+      ...(namespaceRequested
+        ? { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false }
+        : {}),
+    },
+  }
+  delete next.unattendedRetry
+  if (context.unattended && preferences.unattendedRetry?.enabled === true) {
+    next.unattendedRetry = {
+      maxWaitMs: preferences.unattendedRetry.maxWaitMs ?? CLAUDE_CODE_RETRY_DEFAULT_MAX_WAIT_MS,
+      usageLimitRecheckMs:
+        preferences.unattendedRetry.usageLimitRecheckMs ?? CLAUDE_CODE_RETRY_MIN_MS,
+    }
+    const validation = validateClaudeAgentSdkOptions({
+      version: 1,
+      unattendedRetry: next.unattendedRetry,
+    })
+    if (!validation.ok) throw new Error(validation.errors.join("; "))
+  }
+  return next
+}
 
 export interface ClaudeSdkRolloutFlags {
   claudeSdkParityV1?: boolean

@@ -281,6 +281,9 @@ fn parse_env_number(key: &str, default: i64) -> Result<i64, String> {
 /// How the workspace reaches the runner.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RunnerMount {
+    /// A Host-admitted read-only workspace. Legacy variants retain their
+    /// exact daemon request when no tenant execution decision exists.
+    ReadOnly { mount: Box<RunnerMount> },
     /// Named-volume subpath (compose/k8s): the runner sees ONLY its own
     /// workspace even though every workspace shares one volume.
     Volume {
@@ -289,6 +292,12 @@ pub enum RunnerMount {
     },
     /// Host-dir bind (bare-metal self-host).
     Bind { host_dir: String },
+}
+
+impl RunnerMount {
+    pub fn source_mount(&self) -> &Self {
+        match self { Self::ReadOnly { mount } => mount.source_mount(), mount => mount }
+    }
 }
 
 /// Label key marking a container as ours. Present on every container this
@@ -1728,6 +1737,11 @@ pub mod bollard_api {
 
     fn to_mount(mount: &RunnerMount) -> Mount {
         match mount {
+            RunnerMount::ReadOnly { mount } => {
+                let mut mount = to_mount(mount);
+                mount.read_only = Some(true);
+                mount
+            }
             RunnerMount::Volume { volume, subpath } => Mount {
                 typ: Some(MountType::VOLUME),
                 source: Some(volume.clone()),
@@ -2654,6 +2668,18 @@ pub mod bollard_api {
                 read_only_rootfs: false,
                 tmpfs: Vec::new(),
                 writable_dirs: Vec::new(),
+            }
+        }
+
+        #[test]
+        fn p4_read_only_bind_and_volume_mounts_reach_the_daemon() {
+            for original in [RunnerMount::Bind { host_dir: "/srv/workspaces/task".into() },
+                RunnerMount::Volume { volume: "workspaces".into(), subpath: Some("task".into()) }] {
+                let legacy = create_body_for(&spec(Some(original.clone()), vec![]));
+                assert_eq!(legacy.host_config.unwrap().mounts.unwrap()[0].read_only, None);
+                let readonly = RunnerMount::ReadOnly { mount: Box::new(original) };
+                let body = create_body_for(&spec(Some(readonly), vec![]));
+                assert_eq!(body.host_config.unwrap().mounts.unwrap()[0].read_only, Some(true));
             }
         }
 

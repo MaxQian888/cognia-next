@@ -25,7 +25,12 @@ import {
 } from "@/lib/claude/build-options"
 import type { SendOptions } from "@cognia/agent-config-types"
 
+import { CLI_INIT_REWRITE_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
+
 import { runHeadlessTurn } from "../../agent/run"
+import { primeCliPromptContext } from "../../agent/prompt-overrides"
 import { createPermissionGate } from "../../agent/permission-gate"
 import type { ResolvedConfig } from "../../config/schema"
 import { errorMessage, openDocument } from "./shared"
@@ -110,27 +115,26 @@ export interface RewriteContext {
   readme: string
 }
 
-/** Build the rewrite prompt. Pure, so its shape is unit-tested. */
-export function buildRewritePrompt(ctx: RewriteContext): string {
-  return [
-    `You are editing the project instruction file AGENTS.md for "${ctx.projectName}".`,
-    "",
-    "Current AGENTS.md:",
-    "---",
-    ctx.current.trim() || "(empty)",
-    "---",
-    "",
-    "Project context:",
-    `- Scripts: ${ctx.scripts.join(", ") || "(none found)"}`,
-    `- Dependencies: ${ctx.deps.join(", ") || "(none found)"}`,
-    `- Top-level dirs: ${ctx.dirs.join(", ") || "(none found)"}`,
-    "- README excerpt:",
-    ctx.readme.trim() || "(none found)",
-    "",
-    "Rewrite AGENTS.md to be clear, complete, and useful for an AI coding assistant.",
-    "Include these sections: Project overview, Tech stack, Commands, Conventions, Notes for the agent.",
-    "Output ONLY the markdown content; do not wrap it in a code block or add commentary.",
-  ].join("\n")
+/**
+ * Build the rewrite prompt from the `developer.cli.init-rewrite` slot
+ * (ADR-0236). Pure apart from reading the loaded override snapshot, so its
+ * shape is unit-tested.
+ */
+export function buildRewritePrompt(
+  ctx: RewriteContext,
+  context: PromptResolutionContext = {}
+): string {
+  return resolvePrompt(CLI_INIT_REWRITE_PROMPT, {
+    context,
+    values: {
+      projectName: ctx.projectName,
+      current: ctx.current.trim() || "(empty)",
+      scripts: ctx.scripts.join(", ") || "(none found)",
+      dependencies: ctx.deps.join(", ") || "(none found)",
+      dirs: ctx.dirs.join(", ") || "(none found)",
+      readme: ctx.readme.trim() || "(none found)",
+    },
+  }).text
 }
 
 /** The fs surface the controller needs — all injectable. */
@@ -173,7 +177,7 @@ export interface InitDeps {
     cwd: string
   }) => Promise<string>
   /** Build the rewrite prompt. Defaults to {@link buildRewritePrompt}. */
-  buildPrompt?: (ctx: RewriteContext) => string
+  buildPrompt?: (ctx: RewriteContext, context: PromptResolutionContext) => string
 }
 
 function fsOf(deps: InitDeps): InitFs {
@@ -364,7 +368,8 @@ async function runRewrite(deps: InitDeps): Promise<void> {
   }
   const current = io.read(target)
   const ctx: RewriteContext = { current, ...gatherProjectContext(deps.cwd, io) }
-  const prompt = (deps.buildPrompt ?? buildRewritePrompt)(ctx)
+  const promptContext = await primeCliPromptContext(deps.cwd, deps.home)
+  const prompt = (deps.buildPrompt ?? buildRewritePrompt)(ctx, promptContext)
   const rewrite = deps.rewriteWithModel ?? defaultRewrite
   deps.dispatch({ type: "NOTICE", message: "Rewriting AGENTS.md with the current model…" })
   let text: string

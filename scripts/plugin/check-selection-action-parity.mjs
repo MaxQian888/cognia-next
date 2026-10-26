@@ -3,8 +3,8 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const REQUIREMENTS = [
-  ["types/plugin/plugin.ts", '"selection"', "selection surface type"],
-  ["packages/plugin-sdk/contract/catalog.json", '"selection:read"', "canonical permission"],
+  ["packages/plugin-contract/src/types/plugin/plugin.ts", '"selection"', "selection surface type"],
+  ["packages/plugin-contract/contract/catalog.json", '"selection:read"', "canonical permission"],
   [
     "packages/plugin-sdk/src/api/quick-action.ts",
     "PluginSelectionActionSpec",

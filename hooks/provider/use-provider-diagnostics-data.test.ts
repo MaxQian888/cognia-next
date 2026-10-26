@@ -92,6 +92,20 @@ describe("useProviderDiagnosticsData", () => {
     expect(fetchStatus).not.toHaveBeenCalled()
   })
 
+  it("exposes local source evidence without confusing an auth pause with a fresh success", () => {
+    const state = {
+      sourceId: "probe",
+      providerId: "openai",
+      status: "paused-auth",
+      nextDueAt: Number.MAX_SAFE_INTEGER,
+      lastSuccessAt: 1,
+      lastAttemptAt: NOW,
+      consecutiveFailures: 3,
+    }
+    queueLiveQueries([[], [], [], undefined, [], [state]])
+    expect(render().result.current.refreshStates).toEqual([state])
+  })
+
   it("narrows measured samples and exposes the newest one", () => {
     queueLiveQueries([
       [sample({ id: "measured" }), sample({ id: "warmup", sampleRole: "warmup" })],

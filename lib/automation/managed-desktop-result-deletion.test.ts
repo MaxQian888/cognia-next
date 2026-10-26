@@ -90,7 +90,9 @@ it("offline cleanup survives reopen and retention until an acknowledged retry", 
   await deleteSession(row.id)
   getDb().close()
   await getDb().open()
-  expect(await retryManagedDesktopResultDeletions()).toBe(0)
+  const report = { blocked: 0, failed: 0 }
+  expect(await retryManagedDesktopResultDeletions(report)).toBe(0)
+  expect(report).toEqual({ blocked: 0, failed: 1 })
   const queued = await listPendingManagedDesktopResultDeletions()
   expect(queued).toHaveLength(1)
   expect(JSON.stringify(queued)).not.toContain("sensitive")

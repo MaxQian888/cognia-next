@@ -81,7 +81,8 @@ export interface EnsureCliDbOptions {
   /** Re-declare dynamic schemas before a production table snapshot is restored. */
   prepareDynamicSchema?: (
     sources: readonly SnapshotSource[],
-    snapshotVersions: Readonly<Record<string, number>>
+    snapshotVersions: Readonly<Record<string, number>>,
+    snapshotTables?: Readonly<Record<string, readonly string[]>>
   ) => Promise<void>
 }
 
@@ -698,11 +699,20 @@ function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly
  */
 export async function prepareBuiltinPluginSchema(
   sources: readonly SnapshotSource[],
-  snapshotVersions: Readonly<Record<string, number>>
+  snapshotVersions: Readonly<Record<string, number>>,
+  snapshotTables: Readonly<Record<string, readonly string[]>> = {}
 ): Promise<void> {
   const primary = sources[0]
-  const snapshotVersion = snapshotVersions[primary?.name ?? ""] ?? primary?.db.verno ?? 0
-  if (!primary || snapshotVersion <= primary.db.verno) return
+  if (!primary) return
+  const snapshotVersion = snapshotVersions[primary.name] ?? primary.db.verno
+  // A newer code version can catch up with the number plugin tables lifted
+  // the snapshot to (code 247 + one plugin = 248, then code itself ships 248).
+  // The version alone then says "nothing to lift" while the plugin tables are
+  // still undeclared, and their rows would be dropped on restore. So a table
+  // the snapshot holds and this database does not declare also asks for it.
+  const declared = new Set(primary.db.tables.map((table) => table.name))
+  const missingTables = (snapshotTables[primary.name] ?? []).some((name) => !declared.has(name))
+  if (snapshotVersion <= primary.db.verno && !missingTables) return
 
   const [{ getBrowserBuiltinRegistry }, { restorePluginTables }] = await Promise.all([
     import("@/lib/plugin/core/browser-builtin-registry"),
@@ -808,6 +818,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   let sources: readonly SnapshotSource[] = []
   let cancelTimer: (() => void) | null = null
   let disposed = false
+  let disposing: Promise<void> | null = null
   const dirtyTables = new Set<string>()
   let flushTail: Promise<void> = Promise.resolve()
 
@@ -846,6 +857,9 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
         sources,
         Object.fromEntries(
           Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
+        ),
+        Object.fromEntries(
+          Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.tables])
         )
       )
       dynamicSchemaPrepared = true
@@ -1006,6 +1020,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   }
 
   function scheduleFlush(): void {
+    if (disposed) return
     if (useTableStore && mode !== "writer") {
       if (!lockLost) warnReadOnly()
       return
@@ -1015,6 +1030,7 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   }
 
   function scheduleTableFlush(databaseName: string, tableName: string): void {
+    if (disposed) return
     if (useTableStore && mode !== "writer") {
       if (!lockLost) warnReadOnly()
       return
@@ -1032,6 +1048,10 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
 
   function scheduleDebouncedFlush(): void {
     if (cancelTimer) cancelTimer()
+    cancelTimer = null
+    // Finalization drains dirty tables itself; no debounce may start a second
+    // snapshot after the final flush has released the store lock.
+    if (disposing) return
     cancelTimer = schedule(async () => {
       cancelTimer = null
       try {
@@ -1044,14 +1064,23 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     }, debounceMs)
   }
 
-  async function dispose(): Promise<void> {
-    if (disposed) return
-    await flush()
-    disposed = true
-    if (defaultDbWriteSink === writeSink) defaultDbWriteSink = null
-    // Final flush has settled; release the store lock so a later process can
-    // take over as writer.
-    releaseStoreLockIfHeld()
+  function dispose(): Promise<void> {
+    if (disposed) return Promise.resolve()
+    return (disposing ??= (async () => {
+      try {
+        // A mutation can settle while an earlier snapshot is syncing. Keep it
+        // dirty and drain it before detaching the write sink and store lock.
+        do {
+          await flush()
+        } while (useTableStore && mode === "writer" && dirtyTables.size > 0)
+        disposed = true
+        if (defaultDbWriteSink === writeSink) defaultDbWriteSink = null
+        releaseStoreLockIfHeld()
+      } catch (error) {
+        disposing = null
+        throw error
+      }
+    })())
   }
 
   return {
@@ -1125,6 +1154,18 @@ export async function flushOpenCliDb(): Promise<void> {
   await handle.flush()
 }
 
+/** Drain the store and release its lock on process shutdown, without opening it. */
+export async function disposeOpenCliDb(): Promise<void> {
+  const handle = cached
+  if (!handle) return
+  try {
+    await handle.ready
+  } catch {
+    return
+  }
+  await handle.dispose()
+}
+
 /** Test-only: drop the cached handle. */
 export interface SnapshotStoreImportOptions {
   /** Directory the snapshot store lives in (the serve home). */
@@ -1134,7 +1175,8 @@ export interface SnapshotStoreImportOptions {
   /** Re-declare dynamic schemas before restoring (defaults to the built-in plugin tables). */
   prepareDynamicSchema?: (
     sources: readonly SnapshotSource[],
-    snapshotVersions: Readonly<Record<string, number>>
+    snapshotVersions: Readonly<Record<string, number>>,
+    snapshotTables?: Readonly<Record<string, readonly string[]>>
   ) => Promise<void>
   /** Store-lock environment (tests). */
   lockEnvironment?: StoreLockEnvironment
@@ -1144,6 +1186,37 @@ export type SnapshotStoreImportResult =
   | { kind: "none" }
   | { kind: "table-store"; tables: number }
   | { kind: "legacy-file"; tables: number }
+
+/**
+ * Whether the CLI store may hold rows of `tableName`, answered without opening
+ * the database. Plain chat never opens it; a feature whose rows are usually
+ * absent (prompt overrides) uses this to stay off the open/restore cost unless
+ * there is something to read. `true` when the database is already open in this
+ * process, or when only a legacy single-file store exists (it cannot be probed
+ * per table without parsing the whole file).
+ */
+export function cliStoreMayHoldRows(
+  tableName: string,
+  opts: { home?: string; fileName?: string } = {}
+): boolean {
+  if (cached) return true
+  const home = opts.home ?? resolveHome(process.env, os.homedir())
+  const file = path.join(home, opts.fileName ?? "db.json")
+  const tableDirectory = `${file}.tables`
+  if (!fs.existsSync(path.join(tableDirectory, "manifest.json"))) return fs.existsSync(file)
+  const suffix = `--${encodeURIComponent(tableName)}.json`
+  for (const entry of fs.readdirSync(tableDirectory)) {
+    if (!entry.endsWith(suffix)) continue
+    try {
+      const rows: unknown = JSON.parse(fs.readFileSync(path.join(tableDirectory, entry), "utf8"))
+      if (!Array.isArray(rows) || rows.length > 0) return true
+    } catch {
+      // Unreadable: let the real open decide (it quarantines and reports).
+      return true
+    }
+  }
+  return false
+}
 
 /** Whether `home` holds a `snapshot-v3` store (table store or legacy single file) for `fileName`. */
 export function hasSnapshotStore(home: string, fileName: string): boolean {
@@ -1199,6 +1272,9 @@ export async function importSnapshotStore(
         sources,
         Object.fromEntries(
           Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.version])
+        ),
+        Object.fromEntries(
+          Object.entries(manifest.dbs).map(([name, entry]) => [name, entry.tables])
         )
       )
       const restore = await restoreTableStore(

@@ -8,6 +8,11 @@ jest.mock("./configured-plugin-tool-handle", () => ({
 jest.mock("../plugin/plugin-tool-dispatch", () => ({
   subscribePluginToolDispatch: jest.fn(async () => () => undefined),
 }))
+// Session lifecycle tests inject tool manifests/options separately. Starting
+// the real plugin servers here leaks their process handles across test cases.
+jest.mock("../plugin/plugin-runtime", () => ({
+  ensurePluginRuntime: jest.fn(async () => undefined),
+}))
 
 import {
   createAgentSession,
@@ -146,6 +151,88 @@ describe("withCliDisabledMcpTools", () => {
 })
 
 describe("createAgentSession", () => {
+  it("prepares a cold child transport once without sending or creating parent history", async () => {
+    const shutdown = jest.fn(async () => {})
+    const bootstrap = jest.fn(async () => ({ transport: {}, shutdown }) as never)
+    const capture = jest.fn(async () => result("ok"))
+    const transcript = memFs()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      bootstrap,
+      capture,
+      transcriptFs: transcript.fsx,
+      loadPluginRuntime: async () => undefined,
+      ensureDb: async () => undefined,
+      resolveSkillIds: () => [],
+      primePromptOverrides: async () => ({}),
+      resolveOptions: async () => ({ provider: "anthropic", model: "m" }) as never,
+    })
+    try {
+      await session.prepareForSubagent!()
+      await session.prepareForSubagent!()
+      expect(bootstrap).toHaveBeenCalledTimes(1)
+      expect(capture).not.toHaveBeenCalled()
+      expect(transcript.files.size).toBe(0)
+      expect(session.isLive!()).toBe(false)
+      await session.send("first main turn", { gate: createPermissionGate({ yes: true }) })
+      expect(bootstrap).toHaveBeenCalledTimes(1)
+      expect(session.isLive!()).toBe(true)
+    } finally {
+      await session.close()
+    }
+    expect(shutdown).toHaveBeenCalledTimes(1)
+  })
+  it.each([false, true])(
+    "coalesces cold preparations and owns shutdown when closed during bootstrap: %s",
+    async (closeDuringBootstrap) => {
+      let finish!: (value: SidecarBootstrap) => void
+      const pending = new Promise<SidecarBootstrap>((resolve) => {
+        finish = resolve
+      })
+      const shutdown = jest.fn(async () => {})
+      const bootstrap = jest.fn(() => pending)
+      const transcript = memFs()
+      const capture = jest.fn(async () => result("ok"))
+      const session = createAgentSession({
+        config: cfg(),
+        home: HOME,
+        bootstrap,
+        capture,
+        transcriptFs: transcript.fsx,
+        loadPluginRuntime: async () => undefined,
+        ensureDb: async () => undefined,
+        resolveSkillIds: () => [],
+        primePromptOverrides: async () => ({}),
+        resolveOptions: async () => ({ provider: "anthropic", model: "m" }) as never,
+      })
+      const prepared = Promise.allSettled([
+        session.prepareForSubagent!(),
+        session.prepareForSubagent!(),
+      ])
+      while (bootstrap.mock.calls.length === 0)
+        await new Promise((resolve) => setImmediate(resolve))
+      const closed = closeDuringBootstrap ? session.close() : undefined
+      finish({ transport: {} as never, shutdown })
+      try {
+        const outcomes = await prepared
+        expect(outcomes.map((outcome) => outcome.status)).toEqual(
+          closeDuringBootstrap ? ["rejected", "rejected"] : ["fulfilled", "fulfilled"]
+        )
+        expect(bootstrap).toHaveBeenCalledTimes(1)
+        expect(capture).not.toHaveBeenCalled()
+        expect(transcript.files.size).toBe(0)
+        expect(session.isLive!()).toBe(false)
+        if (closed) {
+          await closed
+          await expect(session.prepareForSubagent!()).rejects.toThrow("closed")
+        }
+      } finally {
+        await session.close()
+      }
+      expect(shutdown).toHaveBeenCalledTimes(1)
+    }
+  )
   it("binds the default plugin-tool executor to this session's resolved search config", async () => {
     const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
       "./configured-plugin-tool-handle"
@@ -213,6 +300,50 @@ describe("createAgentSession", () => {
     const execute = jest.mocked(makeConfiguredCliPluginToolHandle).mock.results.at(-1)?.value
     expect(execute).not.toHaveBeenCalled()
     await session.close()
+  })
+
+  it("waits for an accepted child host call to persist before shutting down the sidecar", async () => {
+    const { subscribePluginToolDispatch } = await import("../plugin/plugin-tool-dispatch")
+    const { makeConfiguredCliPluginToolHandle } = await import("./configured-plugin-tool-handle")
+    let finish!: () => void
+    const pendingWrite = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const execute = jest.fn(async () => {
+      await pendingWrite
+      return { result: "journal saved" }
+    })
+    jest.mocked(makeConfiguredCliPluginToolHandle).mockReturnValueOnce(execute as never)
+    const shutdown = jest.fn(async () => {})
+    let hostCall!: Promise<unknown>
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: async () => ({ transport: {}, shutdown }) as never,
+      resolveOptions: async () => ({ provider: "anthropic", model: "m" }) as never,
+      capture: (async (_id: string, _content: unknown, options: SendOptions) => {
+        const handle = jest.mocked(subscribePluginToolDispatch).mock.calls.at(-1)![0]!.handle!
+        hostCall = handle({
+          type: "plugin_tool_exec",
+          sessionId: session.sessionId,
+          turnId: options.turnId,
+          toolUseId: "child",
+          name: "dispatch_agent",
+          args: {},
+        })
+        await new Promise((resolve) => setImmediate(resolve))
+        return result("parent interrupted")
+      }) as never,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect(execute).toHaveBeenCalledTimes(1)
+    const closing = session.close()
+    await Promise.resolve()
+    expect(shutdown).not.toHaveBeenCalled()
+    finish()
+    await Promise.all([closing, hostCall])
+    expect(shutdown).toHaveBeenCalledTimes(1)
   })
 
   it("shuts down failed relay startup and retries before dispatching a prompt", async () => {
@@ -797,6 +928,8 @@ describe("createAgentSession", () => {
       transcriptFs: memFs().fsx,
       resolveSkillIds: () => ["skill-a"],
       ensureDb,
+      // Prompt-center bootstrap is covered separately; isolate skill DB ordering.
+      primePromptOverrides: async () => ({}),
       bootstrap: jest.fn().mockResolvedValue({
         transport: {} as never,
         shutdown: jest.fn().mockResolvedValue(undefined),
@@ -811,6 +944,7 @@ describe("createAgentSession", () => {
     expect(ensureDb).toHaveBeenCalledTimes(1)
     // The db must be open BEFORE options resolve (which reads the skill rows).
     expect(order).toEqual(["ensureDb", "resolveOptions"])
+    await session.close()
   })
 
   it("opens the CLI-local db once for contextual built-in enablement in plain chat", async () => {
@@ -821,6 +955,8 @@ describe("createAgentSession", () => {
       transcriptFs: memFs().fsx,
       resolveSkillIds: () => [],
       ensureDb,
+      // Prompt-center bootstrap is covered separately; isolate skill DB ordering.
+      primePromptOverrides: async () => ({}),
       bootstrap: jest.fn().mockResolvedValue({
         transport: {} as never,
         shutdown: jest.fn().mockResolvedValue(undefined),
@@ -830,6 +966,7 @@ describe("createAgentSession", () => {
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     expect(ensureDb).toHaveBeenCalledTimes(1)
+    await session.close()
   })
 
   it("degrades to no skills (no crash) when opening the CLI-local db fails", async () => {
@@ -1176,6 +1313,7 @@ describe("createAgentSession", () => {
   })
 
   it("publishes the dispatch context for the turn and clears it afterwards", async () => {
+    const awaitApprovals = jest.fn(async () => {})
     let ctxDuringTurn: ReturnType<typeof getCliSubagentContext>
     const resolveSubagentOptions = jest.fn(async () => ({ provider: "anthropic" }) as never)
     const resolveSubagentGate = jest.fn(() => createPermissionGate({ yes: true }))
@@ -1197,10 +1335,11 @@ describe("createAgentSession", () => {
       },
       resolveAgents: async () => [subagent("reviewer")],
     })
-    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }), awaitApprovals })
     expect(ctxDuringTurn?.agents.map((a) => a.id)).toEqual(["reviewer"])
     expect(ctxDuringTurn?.resolveSubagentOptions).toBe(resolveSubagentOptions)
     expect(ctxDuringTurn?.resolveSubagentGate).toBe(resolveSubagentGate)
+    expect(ctxDuringTurn?.awaitApprovals).toBe(awaitApprovals)
     expect(getCliSubagentContext("s_ctx")).toBeUndefined()
   })
 

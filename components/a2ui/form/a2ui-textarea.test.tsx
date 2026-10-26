@@ -3,6 +3,7 @@
  */
 
 import React from "react"
+import { A2UIInputGroupContext } from "./a2ui-input-group"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UITextArea } from "./a2ui-textarea"
 import type { A2UITextAreaComponent, A2UIComponentProps } from "@/types/a2ui/schema"
@@ -123,4 +124,20 @@ describe("A2UITextArea", () => {
     render(<A2UITextArea {...createProps(component)} />)
     expect(screen.getByText("*")).toBeInTheDocument()
   })
+})
+
+it("uses a compound input control when rendered inside InputGroup", () => {
+  const { container } = render(
+    <A2UIInputGroupContext.Provider value={true}>
+      <A2UITextArea
+        component={{ id: "grouped", component: "TextArea", value: "", label: "Grouped field" }}
+        surfaceId="s"
+        dataModel={{}}
+        onDataChange={jest.fn()}
+        onAction={jest.fn()}
+        renderChild={() => null}
+      />
+    </A2UIInputGroupContext.Provider>
+  )
+  expect(container.querySelector("[data-slot='input-group-control']")).toBeInTheDocument()
 })

@@ -127,9 +127,16 @@ export interface EvalConfigurationApplyRow {
    * a 64-character pointer into the fusion database, applied and rolled back
    * through the same mechanism as every other recommended configuration. The
    * table is unchanged — `targetType` is a stored string, not an index — so no
-   * schema version moves for it.
+   * schema version moves for it. `agent-harness` is an agent's evolved
+   * harness (ADR-0237): its system prompt, harness sections and skill ids.
    */
-  targetType: "default-model" | "character" | "workflow" | "routing-policy" | "routing-predictor"
+  targetType:
+    | "default-model"
+    | "character"
+    | "workflow"
+    | "routing-policy"
+    | "routing-predictor"
+    | "agent-harness"
   targetId: string
   previousConfiguration: Record<string, unknown>
   appliedConfiguration: Record<string, unknown>

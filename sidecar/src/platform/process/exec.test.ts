@@ -15,6 +15,33 @@ import {
   spawnInProcessSandbox,
 } from "./exec.ts"
 
+test("port env accepts an empty standalone overlay but rejects malformed allocations", async () => {
+  for (const value of [{}, null]) {
+    assert.deepEqual(
+      await withProcessSandbox(undefined, process.cwd(), () => resolveProcessPortEnv(), {
+        hostRpc: {
+          async call() {
+            return value
+          },
+        },
+      }),
+      {}
+    )
+  }
+  for (const value of [{ PORT: "41000" }, { COGNIA_PORT: 41000 }, []]) {
+    await assert.rejects(
+      withProcessSandbox(undefined, process.cwd(), () => resolveProcessPortEnv(), {
+        hostRpc: {
+          async call() {
+            return value
+          },
+        },
+      }),
+      /invalid/
+    )
+  }
+})
+
 test("execFileAsync resolves with stdout for a successful run", async () => {
   const { stdout } = await execFileAsync("node", ["-e", "process.stdout.write('hi')"])
   assert.equal(String(stdout), "hi")

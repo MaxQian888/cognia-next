@@ -1,6 +1,37 @@
 import type { AgentPlan, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
-import { PLAN_SECTION_MARKER, renderPlanStepMessage, renderPlanSystemSection } from "./prompts"
+import {
+  PLAN_SECTION_MARKER,
+  PLAN_STEP_MESSAGE_PROMPT,
+  PLAN_SYSTEM_SECTION_PROMPT,
+  planPromptContext,
+  renderPlanStepMessage,
+  renderPlanSystemSection,
+} from "./prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+  type PromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptScope } from "@/lib/prompts/types"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+function overrideSnapshot(
+  promptId: string,
+  scope: PromptScope,
+  targetId: string,
+  revisionId: string,
+  body: string
+): PromptOverrideSnapshot {
+  return buildPromptOverrideSnapshot("test-db", [
+    { bindingId: "pob", promptId, scope, targetId, revisionId, body, contractVersion: 1 },
+  ])
+}
 
 function step(over: Partial<PlanStep> = {}): PlanStep {
   return {
@@ -124,5 +155,67 @@ describe("renderPlanStepMessage", () => {
   it("tells the model to stop after the step instead of running ahead", () => {
     const out = renderPlanStepMessage({ title: "P", totalSteps: 3 }, { title: "t", order: 0 })
     expect(out).toContain("Don't run ahead into later steps.")
+  })
+})
+
+describe("plan prompts in the Prompt Center", () => {
+  const SECTION_OVERRIDE = "## Active Plan\nWork {{planTitle}}:\n{{checklist}}{{currentStep}}"
+
+  it("resolves in the plan's session, workspace and agent", () => {
+    expect(planPromptContext({ sessionId: "s", projectId: "w", characterId: "c" })).toEqual({
+      sessionId: "s",
+      workspaceId: "w",
+      agentId: "c",
+    })
+  })
+
+  it("renders a session override with the live plan data", () => {
+    __setPromptOverrideSnapshotForTests(
+      overrideSnapshot(
+        PLAN_SYSTEM_SECTION_PROMPT.id,
+        "session",
+        "ses_a",
+        "por-plan-section-session",
+        SECTION_OVERRIDE
+      )
+    )
+    const steps = [step({ id: "s1", title: "alpha", order: 0 })]
+    expect(renderPlanSystemSection(plan({ steps, currentStepId: "s1" }))).toBe(
+      "## Active Plan\nWork Ship the feature:\n[ ] alpha\n\nCurrent step: **alpha**"
+    )
+    // Another session's plan keeps the shipped section.
+    expect(renderPlanSystemSection({ ...plan({ steps }), sessionId: "ses_b" })).toContain(
+      "Execution rules:"
+    )
+  })
+
+  it("reads the turn's frozen snapshot when one is passed", () => {
+    const frozen = overrideSnapshot(
+      PLAN_SYSTEM_SECTION_PROMPT.id,
+      "account",
+      "",
+      "por-plan-section-frozen",
+      SECTION_OVERRIDE
+    )
+    expect(renderPlanSystemSection(plan(), { snapshot: frozen })).toContain(
+      "Work Ship the feature:"
+    )
+    expect(renderPlanSystemSection(plan(), { snapshot: null })).toContain("Execution rules:")
+  })
+
+  it("keeps the step message inspect-only: a stored override is never sent", () => {
+    expect(PLAN_STEP_MESSAGE_PROMPT.operation).toBe("inspect-only")
+    __setPromptOverrideSnapshotForTests(
+      overrideSnapshot(
+        PLAN_STEP_MESSAGE_PROMPT.id,
+        "account",
+        "",
+        "por-plan-step-message",
+        "Do whatever you like."
+      )
+    )
+    const out = renderPlanStepMessage({ title: "P", totalSteps: 1 }, { title: "t", order: 0 })
+    expect(out).not.toContain("Do whatever you like.")
+    expect(out).toContain("<step>\nt\n</step>")
   })
 })

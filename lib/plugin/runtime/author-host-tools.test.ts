@@ -28,6 +28,43 @@ describe("promotion allowlist", () => {
 })
 
 describe("web_search", () => {
+  it.each(["ambient", "caller"] as const)(
+    "combines %s cancellation with the executor signal",
+    async (cancel) => {
+      const ambient = new AbortController()
+      const caller = new AbortController()
+      const searchExecutor = jest.fn(
+        async (
+          _query: string,
+          options: Parameters<NonNullable<WebToolRunDeps["searchExecutor"]>>[1]
+        ) => {
+          expect(options.signal?.aborted).toBe(false)
+          const controller = cancel === "ambient" ? ambient : caller
+          controller.abort()
+          expect(options.signal?.aborted).toBe(true)
+          throw new DOMException("Aborted", "AbortError")
+        }
+      )
+      await expect(
+        runAuthorCallableHostTool(
+          "web_search",
+          { query: "cognia", searchType: "news", engine: "bing", allowFallback: false },
+          deps({ signal: ambient.signal, searchExecutor }),
+          { signal: caller.signal }
+        )
+      ).resolves.toMatchObject({ ok: false, code: "execution-failed" })
+      expect(searchExecutor).toHaveBeenCalledWith(
+        "cognia",
+        expect.objectContaining({
+          searchType: "news",
+          engine: "bing",
+          allowFallback: false,
+          signal: expect.any(AbortSignal),
+        })
+      )
+    }
+  )
+
   it("returns the host's shaped search result", async () => {
     const result = (await runAuthorCallableHostTool(
       "web_search",

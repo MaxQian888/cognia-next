@@ -1,7 +1,7 @@
 // Single source of truth for the A2UI bridge tool contract on the *sidecar*
 // side. Both MCP server implementations import from here:
 //
-//   - sidecar/a2ui-tools/index.mjs  → in-process Agent SDK server (Zod shapes)
+//   - sidecar/src/tools/a2ui/tools.ts  → in-process Agent SDK server (Zod shapes)
 //   - sidecar/a2ui-mcp.mjs          → stand-alone stdio server (raw JSON Schema)
 //
 // Keeping the names, descriptions, enums, raw JSON schemas, and the
@@ -52,7 +52,7 @@ export const TOOL_DESCRIPTIONS = {
   a2ui_create_surface:
     "Create a new A2UI surface where the agent can render interactive UI. Reuse the same surfaceId on subsequent updates.",
   a2ui_update_components:
-    "Replace the components tree on an existing surface. Components must follow the A2UI v0.9 schema.",
+    "Upsert components by id on an existing surface; omitted components remain. Uses Cognia legacy descriptors, not the official A2UI envelope. Alert uses message; Table uses columns (key/header) and data; Chart uses chartType/data/xKey/yKeys.",
   a2ui_data_model_update:
     "Patch (or replace) the surface's data model — form values, chart data, table rows, etc.",
   a2ui_delete_surface: "Remove an A2UI surface and free its resources.",

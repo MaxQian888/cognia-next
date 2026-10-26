@@ -954,6 +954,133 @@ describe("createOneBotAdapter — identity probe edge cases", () => {
 
 describe("OneBot action acknowledgements", () => {
   it.each([
+    ["g", 2, 50],
+    ["p", 2, 50],
+    ["g", 20, 20],
+    ["p", 20, 20],
+  ])("stops %s history after a %i-message terminal page (max=%i)", async (chatType, size, max) => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    const adapter = makeAdapter("history-terminal")
+    await adapter.start(makeCtx().ctx)
+    bus.trigger(
+      "connectors://onebot/history-terminal/event",
+      JSON.stringify({ post_type: "meta_event" })
+    )
+    const messages = Array.from({ length: size }, (_, index) => ({
+      time: 1700000000 + index,
+      self_id: 100000,
+      post_type: "message",
+      message_type: chatType === "g" ? "group" : "private",
+      message_id: index + 1,
+      message_seq: index + 1,
+      user_id: 200001,
+      ...(chatType === "g" ? { group_id: 300001 } : {}),
+      sender: { user_id: 200001, nickname: "Alice" },
+      message: [{ type: "text", data: { text: `history-${index}` } }],
+    }))
+    mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+      const call = JSON.parse(payload)
+      bus.trigger(
+        "connectors://onebot/history-terminal/response",
+        JSON.stringify(
+          mockOnebotSend.mock.calls.length === 1
+            ? { status: "ok", retcode: 0, data: { messages }, echo: call.echo }
+            : { status: "failed", retcode: 1200, message: "cursor exhausted", echo: call.echo }
+        )
+      )
+    })
+    try {
+      const collected = []
+      for await (const event of adapter.fetchHistory!(
+        `onebot:history-terminal:${chatType}:300001`,
+        { max }
+      ))
+        collected.push(event.messageId)
+      expect(collected).toEqual(messages.map((message) => String(message.message_id)))
+      expect(mockOnebotSend).toHaveBeenCalledTimes(1)
+    } finally {
+      await adapter.stop()
+    }
+  })
+
+  it.each([
+    ["g", "get_group_msg_history"],
+    ["p", "get_friend_msg_history"],
+  ])(
+    "surfaces rejected %s history instead of returning an empty page",
+    async (chatType, action) => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      const adapter = makeAdapter("history-reject")
+      await adapter.start(makeCtx().ctx)
+      bus.trigger(
+        "connectors://onebot/history-reject/event",
+        JSON.stringify({ post_type: "meta_event" })
+      )
+      mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+        const call = JSON.parse(payload)
+        expect(call.action).toBe(action)
+        bus.trigger(
+          "connectors://onebot/history-reject/response",
+          JSON.stringify({
+            status: "failed",
+            retcode: 1200,
+            data: null,
+            message: "fixture history denied",
+            echo: call.echo,
+          })
+        )
+      })
+      try {
+        await expect(
+          (async () => {
+            for await (const event of adapter.fetchHistory!(
+              `onebot:history-reject:${chatType}:300001`,
+              {}
+            ))
+              void event
+          })()
+        ).rejects.toMatchObject({
+          name: "OneBotRpcError",
+          code: "platform_4xx",
+          message: expect.stringContaining("fixture history denied"),
+          retryable: false,
+        })
+      } finally {
+        await adapter.stop()
+      }
+    }
+  )
+
+  it("rejects an inconsistent success acknowledgement when fetching history", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    const adapter = makeAdapter("history-unconfirmed")
+    await adapter.start(makeCtx().ctx)
+    bus.trigger(
+      "connectors://onebot/history-unconfirmed/event",
+      JSON.stringify({ post_type: "meta_event" })
+    )
+    mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+      const call = JSON.parse(payload)
+      bus.trigger(
+        "connectors://onebot/history-unconfirmed/response",
+        JSON.stringify({ status: "ok", retcode: 1200, data: { messages: [] }, echo: call.echo })
+      )
+    })
+    try {
+      await expect(
+        adapter.fetchHistory!("onebot:history-unconfirmed:g:300001", {})
+          [Symbol.asyncIterator]()
+          .next()
+      ).rejects.toMatchObject({ name: "OneBotRpcError", code: "delivery_unknown" })
+    } finally {
+      await adapter.stop()
+    }
+  })
+
+  it.each([
     [{ status: "failed", retcode: 1400, data: null, wording: "permission denied" }, "platform_4xx"],
     [{ status: "async", retcode: 1, data: null }, "delivery_unknown"],
     [{ status: "ok", retcode: 1400, data: { message_id: 9 } }, "delivery_unknown"],

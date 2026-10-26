@@ -2,6 +2,7 @@
 
 import { create } from "zustand"
 import { readBootLocalePreference, resolveLocalePreference } from "@/lib/i18n/locale-preference"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import type {
   AppSettings,
   AppLanguage,
@@ -12,7 +13,12 @@ import type {
   OnboardingMode,
   OnboardingStepId,
   UpdateSettings,
+  WebReaderSettingsV1,
+  WebReaderId,
+  WebReaderEntry,
+  WebReaderDistillation,
 } from "@cognia/agent-config-types"
+import { freshInstallWebReader, normalizeWebReaderSettings } from "@/lib/web/reader/reader-settings"
 import {
   DEFAULT_BUILTIN_TOOLS,
   DEFAULT_UPDATE_SETTINGS,
@@ -162,6 +168,13 @@ interface SettingsState {
   setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
   /** Use Cognia's multi-provider web tools even where the runtime has natives. */
   setWebToolsPreferCognia: (preferCognia: boolean) => Promise<void>
+  setWebToolsPreferCogniaSearch: (preferCogniaSearch: boolean) => Promise<void>
+  setWebToolsPreferCogniaFetch: (preferCogniaFetch: boolean) => Promise<void>
+  setWebReader: (next: WebReaderSettingsV1) => Promise<void>
+  setWebReaderEntry: (id: WebReaderId, patch: Partial<WebReaderEntry>) => Promise<void>
+  setWebReaderDistillation: (mode: WebReaderDistillation) => Promise<void>
+  setWebReaderExternalFallback: (mode: WebReaderSettingsV1["externalFallback"]) => Promise<void>
+  setWebReaderDefault: (id: WebReaderId | "auto") => Promise<void>
   setWebToolsAllowPrivateHosts: (allowPrivateHosts: boolean) => Promise<void>
   setWebToolsAlwaysDistill: (alwaysDistill: boolean) => Promise<void>
   setSkillToolEnabled: (enabled: boolean) => Promise<void>
@@ -487,6 +500,7 @@ const DEFAULTS: AppSettings = {
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   updates: { ...DEFAULT_UPDATE_SETTINGS },
+  webReader: freshInstallWebReader(),
   // Canvas-executed code is confined by default (ADR-0028); independently
   // overridable from Settings → Sandbox.
   canvasCodeSandboxEnabled: true,
@@ -629,6 +643,13 @@ function getProvidersMap(
   s: AppSettings | null
 ): Record<SearchProviderType, SearchProviderSettings> {
   return s?.searchProviders ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS }
+}
+
+function effectiveWebReader(settings: AppSettings): WebReaderSettingsV1 {
+  return normalizeWebReaderSettings(settings.webReader, {
+    rowExists: true,
+    webTools: settings.webTools,
+  }).effective
 }
 
 interface FlatPluginFields {
@@ -873,7 +894,16 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           // imported-theme row locally should not delete it on the desktop).
           await saveSettings(patch, { mirrorToHost: false })
         }
-        if (isTauri() && s.networkProxy) {
+        const controlsNativeHost = !isSecondaryOverlayRole(getPetWindowRole())
+        if (!controlsNativeHost && s.networkProxy) {
+          // Overlays need presentation settings, not credential migration or
+          // writes to the host's global network policy. Keep legacy secrets
+          // out of their renderer state without persisting a migration here.
+          const networkProxy = { ...s.networkProxy }
+          delete (networkProxy as { password?: string }).password
+          s = { ...s, networkProxy }
+        }
+        if (controlsNativeHost && isTauri() && s.networkProxy) {
           try {
             const { migrateLegacyProxyPassword } = await import("@/lib/network/proxy-credentials")
             const migrated = await migrateLegacyProxyPassword(
@@ -897,13 +927,14 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         set({ settings: s, loaded: true, loadFailed: false, loadError: null })
         // Push the API key to the Rust process on first load. The user expects
         // their previously-entered key to be active without a manual save.
-        if (s.apiKey) {
+        if (controlsNativeHost && s.apiKey) {
           await syncApiKeyToTauri(s.apiKey)
         }
         // Mirror the persisted network proxy config into the Rust
         // `proxy_config::current()` slot so reqwest clients honour it from
         // the very first outbound request. Lazy-import so the network-proxy
         // store doesn't cycle through this file.
+        if (!controlsNativeHost) return
         try {
           const { applyProxyToRust, maybeAutoDetectProxy } = await import("@/stores/network-proxy")
           // An absent row is still an explicit Off policy. Native outbound
@@ -1013,7 +1044,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setWebToolsNativeOnAnthropic: async (nativeOnAnthropic) => {
       const current = get().settings?.webTools
       const next = await saveSettings({
-        webTools: { enabled: current?.enabled ?? true, nativeOnAnthropic },
+        webTools: { ...current, enabled: current?.enabled ?? true, nativeOnAnthropic },
       })
       set({ settings: next })
     },
@@ -1026,6 +1057,58 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
+    setWebToolsPreferCogniaSearch: async (preferCogniaSearch) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { ...current, enabled: current?.enabled ?? true, preferCogniaSearch },
+      })
+      set({ settings: next })
+    },
+
+    setWebToolsPreferCogniaFetch: async (preferCogniaFetch) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { ...current, enabled: current?.enabled ?? true, preferCogniaFetch },
+      })
+      set({ settings: next })
+    },
+
+    setWebReader: async (profile) => {
+      const current = get().settings ?? (await getSettings())
+      const webReader = normalizeWebReaderSettings(
+        { ...effectiveWebReader(current), ...profile },
+        {
+          rowExists: true,
+          webTools: current.webTools,
+        }
+      ).effective
+      const next = await saveSettings({ webReader })
+      set({ settings: next })
+    },
+
+    setWebReaderEntry: async (id, patch) => {
+      const current = effectiveWebReader(get().settings ?? (await getSettings()))
+      await get().setWebReader({
+        ...current,
+        readers: { ...current.readers, [id]: { ...current.readers[id]!, ...patch } },
+      })
+    },
+
+    setWebReaderDistillation: async (distillation) => {
+      const current = effectiveWebReader(get().settings ?? (await getSettings()))
+      await get().setWebReader({ ...current, distillation })
+    },
+
+    setWebReaderExternalFallback: async (externalFallback) => {
+      const current = effectiveWebReader(get().settings ?? (await getSettings()))
+      await get().setWebReader({ ...current, externalFallback })
+    },
+
+    setWebReaderDefault: async (defaultReader) => {
+      const current = effectiveWebReader(get().settings ?? (await getSettings()))
+      await get().setWebReader({ ...current, defaultReader })
+    },
+
     setWebToolsAllowPrivateHosts: async (allowPrivateHosts) => {
       const current = get().settings?.webTools
       const next = await saveSettings({
@@ -1035,9 +1118,21 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
 
     setWebToolsAlwaysDistill: async (alwaysDistill) => {
-      const current = get().settings?.webTools
+      // The legacy switch and the Reader's distillation mode are one setting:
+      // reads follow `webReader.distillation`, so the switch writes it too
+      // (on ⇒ required; off ⇒ off only when it was required, leaving a chosen
+      // best-effort alone).
+      const settings = get().settings ?? (await getSettings())
+      const current = settings.webTools
+      const reader = effectiveWebReader(settings)
+      const distillation = alwaysDistill
+        ? "required"
+        : reader.distillation === "required"
+          ? "off"
+          : reader.distillation
       const next = await saveSettings({
         webTools: { enabled: current?.enabled ?? true, ...current, alwaysDistill },
+        webReader: { ...reader, distillation },
       })
       set({ settings: next })
     },

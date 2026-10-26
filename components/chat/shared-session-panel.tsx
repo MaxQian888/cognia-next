@@ -58,6 +58,7 @@ import {
   scanSharedTranscriptReferences,
   type SharedTranscriptReference,
 } from "@/lib/collab/shared-reference-scan"
+import { useCollabFeature } from "@/hooks/collab/use-collab-feature"
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { syncSharedSession, sharedChatCacheKey } from "@/lib/collab/shared-chat-sync"
@@ -526,6 +527,15 @@ export function SharedSessionPanel({
 
   const isShared = Boolean(session.collaboration)
   const featureEnabled = useSharedChatEnabled()
+  // The server's rollout decision for this org and workspace. It can only
+  // narrow what the build flag and preference allow, and the server re-checks
+  // every write regardless; these gates say why before the click, not after.
+  const collabWorkspaceId = session.collaboration?.workspaceId ?? session.projectId ?? null
+  const chatGate = useCollabFeature("shared-chat", collabWorkspaceId)
+  const runGate = useCollabFeature("shared-chat-execution", collabWorkspaceId)
+  const tCaps = useTranslations("collabCapabilities")
+  const gateReason = (gate: typeof chatGate) =>
+    gate.decision?.reason ? tCaps(`reason.${gate.decision.reason}`) : undefined
   // Every opening loads, whoever opened it — the inline trigger, or a caller
   // holding `open` (the phone's ⋮ menu), whose change never passes through the
   // Sheet's own `onOpenChange`.
@@ -551,7 +561,9 @@ export function SharedSessionPanel({
           <Button
             variant="outline"
             size="sm"
-            disabled={!online || !latestUserMessage}
+            disabled={!online || !latestUserMessage || !runGate.canStart}
+            title={runGate.canStart ? undefined : gateReason(runGate)}
+            data-unavailable={runGate.canStart ? undefined : runGate.decision?.reason}
             onClick={() => requestAI()}
           >
             {t("requestAI")}
@@ -637,10 +649,19 @@ export function SharedSessionPanel({
               ) : null}
               {/* Disabled and explained rather than hidden: a missing button
                   cannot distinguish "not for this conversation" from "broken". */}
+              {!chatGate.canStart ? (
+                <p
+                  className="text-sm text-muted-foreground"
+                  data-testid="shared-convert-unavailable"
+                >
+                  {gateReason(chatGate)}
+                </p>
+              ) : null}
               <Button
                 className="w-full gap-2"
-                disabled={loading || !online || isTeamRoom}
+                disabled={loading || !online || isTeamRoom || !chatGate.canStart}
                 onClick={() => void requestShareHistory()}
+                data-testid="shared-convert-and-share"
               >
                 <Share2Icon className="size-4" /> {t("convertAndShare")}
               </Button>
@@ -695,7 +716,8 @@ export function SharedSessionPanel({
                 queue.some((item) => item.status === "queued") ? (
                   <Button
                     variant="outline"
-                    disabled={!online || !latestUserMessage}
+                    disabled={!online || !latestUserMessage || !runGate.canStart}
+                    title={runGate.canStart ? undefined : gateReason(runGate)}
                     onClick={() => requestAI(true)}
                   >
                     {t("takeoverExecution")}
@@ -831,7 +853,8 @@ export function SharedSessionPanel({
                     </div>
                     <Button
                       className="w-full"
-                      disabled={!inviteGuest && !inviteUserId.trim()}
+                      disabled={(!inviteGuest && !inviteUserId.trim()) || !chatGate.canStart}
+                      title={chatGate.canStart ? undefined : gateReason(chatGate)}
                       onClick={() => void createInvite()}
                     >
                       {t("createInvite")}

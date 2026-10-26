@@ -12,7 +12,7 @@
   "connectionFailed": "Connection failed",
   "connectionSuccess": "Connection successful",
   "defaultProvider": "Default provider",
-  "description": "Configure web search providers and chat integration.",
+  "description": "Configure web search providers, page readers, and chat routing.",
   "disableAll": "Disable all",
   "domainSources": {
     "arxiv": "arXiv",
@@ -63,9 +63,11 @@
     "performance": "Performance",
     "performanceDesc": "Result caching and provider circuit breaker",
     "providers": "Providers",
-    "providersDesc": "API keys and per-provider configuration",
+    "providersDesc": "Credentials, endpoints, engines, and models",
     "safety": "Safety",
-    "safetyDesc": "Safe search and source verification"
+    "safetyDesc": "Safe search and source verification",
+    "reading": "Reading",
+    "readingDesc": "Readers, recipients, fallback, and distillation"
   },
   "noMatchingProviders": "No matching providers",
   "noProviders": "No providers configured",
@@ -83,7 +85,7 @@
   "primary": "Primary",
   "priority": "Priority",
   "providers": "Search providers",
-  "providersDescription": "Configure API keys for each provider",
+  "providersDescription": "Configure provider credentials and endpoints",
   "removeKey": "Remove key",
   "researchDomains": "Required domains",
   "researchProviders": "Preferred providers",
@@ -105,6 +107,66 @@
   "strategyLeastUsed": "Least used",
   "strategyRandom": "Random",
   "strategyRoundRobin": "Round-robin",
-  "testConnection": "Test",
-  "title": "Web search"
+  "testConnection": "Test search",
+  "title": "Web search",
+  "states": {
+    "retired": "Retired",
+    "disabled": "Disabled",
+    "missing-key": "Missing key",
+    "missing-config": "Missing configuration",
+    "configured": "Configured"
+  },
+  "enableProvider": "Enable {provider}",
+  "legacyNotice": "Legacy: closed to new customers; available to existing accounts until {date}.",
+  "retiredNotice": "Retired on {date}. Stored credentials are preserved; this provider cannot be configured or enabled.",
+  "endpoint": "SearXNG endpoint",
+  "endpointPlaceholder": "https://search.example.com",
+  "endpointHelp": "Use your JSON-enabled SearXNG instance. No API key is required.",
+  "allowPrivateEndpoint": "Allow private / HTTP endpoint",
+  "endpointGrantRequired": "Explicit permission is required for this private endpoint.",
+  "endpointIssues": {
+    "missing": "Enter a SearXNG endpoint.",
+    "invalid-url": "Enter an absolute URL.",
+    "unsupported-scheme": "Use an HTTP or HTTPS URL.",
+    "embedded-credentials": "Remove credentials from the URL.",
+    "query-or-fragment": "Remove the query string and fragment.",
+    "insecure-public-endpoint": "Public endpoints must use HTTPS."
+  },
+  "engine": "Search engine",
+  "enginePlaceholder": "Optional engine name",
+  "invalidEngine": "Enter a supported engine name (1–40 letters, digits, spaces, underscore, dot or hyphen).",
+  "groundingModel": "Google Search grounding model",
+  "groundingBilling": "Each search generates a model response and is billed to your Google account.",
+  "testedAt": "Tested at {date}",
+  "testEvidence": "This dated test is evidence, not a guarantee of current availability.",
+  "searchTypes": {
+    "general": "General",
+    "news": "News",
+    "academic": "Academic",
+    "images": "Images",
+    "videos": "Videos"
+  },
+  "safeSearchLevels": {
+    "off": "Safe search: off",
+    "moderate": "Safe search: moderate",
+    "strict": "Safe search: strict"
+  },
+  "providerDescriptions": {
+    "tavily": "AI search with generated answers.",
+    "perplexity": "Search with recency, region and domain filters.",
+    "exa": "Semantic search with news and academic results.",
+    "searchapi": "Search across selectable SERP engines.",
+    "serper": "Google results with news, images, video and academic search.",
+    "serpapi": "SERP results across selectable engines.",
+    "bing": "Microsoft retired this API.",
+    "google": "Legacy Google Programmable Search Engine API.",
+    "google-ai": "Model generation grounded in Google Search.",
+    "brave": "Brave web, news, image and video search.",
+    "deepseek": "Search and Reader are configured independently.",
+    "tinyfish": "Search and Reader are configured independently.",
+    "searxng": "Your own JSON-enabled search endpoint; no API key."
+  },
+  "invalidModel": "Select a currently supported grounding model.",
+  "configureProvider": "Configure {provider}",
+  "testCost": "Testing sends an explicit Search request and may use vendor credits. No test runs automatically."
 }

@@ -31,6 +31,8 @@ import type { EmbeddingConfig } from "@cognia/provider-embedding/embedding"
 import { isLocalEmbeddingProvider } from "@cognia/rag"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { MEMORY_RERANK_PROMPT } from "./rerank-prompt"
 
 /** Single global collection for memory vectors. */
 export const MEMORY_VECTOR_COLLECTION = "cognia_memory"
@@ -161,7 +163,11 @@ export async function tryBuildMemoryDeps(
         appSettings: (await getSettings().catch(() => undefined)) ?? null,
         featureId: "memory-rerank",
       })
-      if (client) deps.rerank = createMemoryLlmReranker(client)
+      if (client) {
+        deps.rerank = createMemoryLlmReranker(client, {
+          systemPrompt: async () => (await resolvePromptAsync(MEMORY_RERANK_PROMPT)).text,
+        })
+      }
     } catch {
       // No reranker — recall keeps its local order.
     }

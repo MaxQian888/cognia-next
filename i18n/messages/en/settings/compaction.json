@@ -90,7 +90,7 @@
   },
   "title": "Context compaction",
   "toolResultCap": {
-    "description": "Cap each tool result to this many tokens during compaction.",
+    "description": "Cap each tool result to this many tokens during compaction. Set 0 to preserve complete results.",
     "heading": "Tool-result cap",
     "label": "Max tool-result tokens"
   },

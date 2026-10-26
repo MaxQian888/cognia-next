@@ -4,13 +4,8 @@
 
 import { transport } from "@/lib/tauri"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-
-export interface PythonExecResult {
-  stdout: string
-  stderr: string
-  exit_code: number
-  duration_ms: number
-}
+import type { PythonExecResult } from "@cognia/plugin-contract/lib/tauri/canvas"
+export type { PythonExecResult } from "@cognia/plugin-contract/lib/tauri/canvas"
 
 export async function runPython(code: string, timeoutMs?: number): Promise<PythonExecResult> {
   // Plugin host: announce start / completion / error of every Python sandbox

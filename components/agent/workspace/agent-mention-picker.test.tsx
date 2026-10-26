@@ -37,7 +37,6 @@ const i18n = {
       route: {
         blocked: "{runtime} can't run here",
         blockedDetail: "{runtime} can't run here: {detail}",
-        disabled: "External agents are turned off.",
         memberMissing: "@{handle} is no longer in a Squad.",
         memberRuntime: "{name} runs on {runtime}, which isn't available here.",
         notConfigured: "No {runtime} agent is set up.",
@@ -188,7 +187,10 @@ describe("routeFailureText", () => {
     const target = { handle: "alice", name: "Alice" }
     const cases: Array<[Extract<RouteLane, { ok: false }>, string]> = [
       [{ ok: false, reason: "not-configured", runtime: "codex" }, "No Codex agent is set up."],
-      [{ ok: false, reason: "disabled", runtime: "codex" }, "External agents are turned off."],
+      [
+        { ok: false, reason: "blocked", runtime: "codex", detail: "Agent is disabled." },
+        "Codex can't run here: Agent is disabled.",
+      ],
       [
         { ok: false, reason: "blocked", runtime: "codex", detail: "codex: not found" },
         "Codex can't run here: codex: not found",

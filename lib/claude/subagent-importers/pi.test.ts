@@ -92,10 +92,20 @@ describe("piAdapter.parse", () => {
     expect(drafts[0].warnings.join(" ")).toContain("run_in_background")
   })
 
-  it("leaves the model unset — Pi chooses it per session, not per agent", () => {
+  it("leaves omitted model hints unset", () => {
     const { drafts } = piAdapter.parse({ files: [file()] })
     expect(drafts[0].model).toBeUndefined()
   })
+
+  it.each(["cognia/reviewer", "deepseek/deepseek-v4-pro", "inherit"])(
+    "preserves the explicit %s model hint",
+    (model) => {
+      const content = REVIEWER.replace("thinking: high", `thinking: high\nmodel: ${model}`)
+      const { drafts } = piAdapter.parse({ files: [file({ content })] })
+      expect(drafts[0].model).toBe(model)
+      expect(drafts[0].rawFrontmatter?.model).toBe(model)
+    }
+  )
 
   it("retains the raw frontmatter for fields it cannot map", () => {
     const { drafts } = piAdapter.parse({ files: [file()] })

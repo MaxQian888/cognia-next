@@ -47,7 +47,6 @@ export const selectBenchmarkCapabilityMap = (state: ExternalAgentStore) =>
   state.benchmarkCapabilityMap
 export const selectActiveAgentId = (state: ExternalAgentStore) => state.activeAgentId
 export const selectDelegationRules = (state: ExternalAgentStore) => state.delegationRules
-export const selectEnabled = (state: ExternalAgentStore) => state.enabled
 export const selectDefaultPermissionMode = (state: ExternalAgentStore) =>
   state.defaultPermissionMode
 

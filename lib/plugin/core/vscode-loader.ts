@@ -26,7 +26,6 @@ import {
   configureRpcDispatcher,
   subscribeToVscodeEvents,
 } from "@/lib/plugin/vscode-shim/rpc-dispatcher"
-import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
 import { getVscodeHostSupervisor } from "@/lib/plugin/vscode-shim/host-supervisor"
 import { listWorkspaceFolders } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
@@ -116,6 +115,7 @@ export async function ensureDispatcherConfigured(): Promise<void> {
     },
     listen: (event, cb) => listen(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
   })
+  const { installVscodeRpcHandlers } = await import("@/lib/plugin/vscode-shim/setup-handlers")
   installVscodeRpcHandlers()
 
   // `workspace.workspaceFolders`, `workspace.fs`, `findFiles` and file

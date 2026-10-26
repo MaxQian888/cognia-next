@@ -7,19 +7,12 @@
  * no extra permission is required. Like VS Code `window.registerUriHandler`.
  */
 
-import type { ParsedDeepLink } from "@/lib/plugin/uri/parse-deep-link"
 import { registerUriHandler, type UriHandler } from "@/lib/plugin/uri/uri-handler-registry"
-
-export interface PluginUriHandlerDef {
-  /** Optional id (for diagnostics). A plugin has at most one active handler. */
-  id?: string
-  handle: (uri: ParsedDeepLink) => void | Promise<void>
-}
-
-export interface PluginUriAPI {
-  /** Register the handler for this plugin's deep-links. Returns a disposer. */
-  registerHandler(def: PluginUriHandlerDef): () => void
-}
+import type { PluginUriAPI } from "@cognia/plugin-contract/lib/plugin/api/uri-api"
+export type {
+  PluginUriAPI,
+  PluginUriHandlerDef,
+} from "@cognia/plugin-contract/lib/plugin/api/uri-api"
 
 export function createUriAPI(pluginId: string): PluginUriAPI {
   return {

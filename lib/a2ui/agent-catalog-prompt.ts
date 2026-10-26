@@ -8,7 +8,12 @@
  * A2UI prompt already describes it.
  */
 
-import { DEFAULT_CATALOG_ID, getRegisteredCatalogIds, getRegisteredTypes } from "./catalog"
+import {
+  DEFAULT_CATALOG_ID,
+  getRegisteredCatalogIds,
+  getRegisteredTypes,
+  getComponent,
+} from "./catalog"
 
 export function buildAgentA2UICatalogSection(catalogId: string | undefined): string | undefined {
   if (!catalogId || catalogId === DEFAULT_CATALOG_ID) return undefined
@@ -18,6 +23,14 @@ export function buildAgentA2UICatalogSection(catalogId: string | undefined): str
   return [
     `## A2UI catalog`,
     `Your surfaces render with the "${catalogId}" component catalog. Besides the standard components it provides: ${types.join(", ")}.`,
+    ...types.map((type) => {
+      const entry = getComponent(type, catalogId)
+      return JSON.stringify({
+        component: type,
+        description: entry?.description,
+        schema: entry?.schema,
+      })
+    }),
     `Leave \`catalogId\` out of createSurface so your surfaces use it.`,
   ].join("\n")
 }

@@ -120,6 +120,8 @@ pub struct RouteTicket {
     /// Frozen selector → concrete model map (primary/fast/powerful roles and
     /// the sonnet/haiku/opus family selectors Claude Code sends).
     pub model_bindings: BTreeMap<String, String>,
+    #[serde(default)]
+    pub strict_selectors: bool,
     pub credential_affinity: TicketAffinity,
     /// 401/403 never switches accounts unless explicitly allowed (R4).
     #[serde(default)]
@@ -151,6 +153,13 @@ impl RouteTicket {
     pub fn resolve_model(&self, selector: &str) -> Option<String> {
         if let Some(bound) = self.model_bindings.get(selector) {
             return Some(bound.clone());
+        }
+        if self.strict_selectors {
+            return self
+                .candidates
+                .iter()
+                .find(|c| c.model_id == selector)
+                .map(|c| c.model_id.clone());
         }
         // Family selectors ("sonnet"/"haiku"/"opus") may arrive embedded in a
         // full model id; check the bindings by containment, longest key wins.
@@ -194,6 +203,8 @@ pub struct MintRequest {
     pub candidates: Vec<TicketCandidate>,
     #[serde(default)]
     pub model_bindings: BTreeMap<String, String>,
+    #[serde(default)]
+    pub strict_selectors: bool,
     pub credential_affinity: TicketAffinity,
     #[serde(default)]
     pub allow_auth_failover: bool,
@@ -219,6 +230,8 @@ pub struct MintRequest {
 pub enum TicketError {
     #[error("no candidates supplied")]
     NoCandidates,
+    #[error("invalid strict model plan: {0}")]
+    InvalidModelPlan(String),
     #[error("candidate {deployment_id}:{model_id} is not servable by the current snapshot")]
     UnknownCandidate {
         deployment_id: String,
@@ -452,6 +465,61 @@ impl RouteTicketRegistry {
                 &model,
             );
         }
+        if request.strict_selectors {
+            if request.candidates.len() != 1
+                || request.allow_auth_failover
+                || request.credential_affinity != TicketAffinity::SessionSticky
+            {
+                return Err(TicketError::InvalidModelPlan(
+                    "one deployment and no auth failover required".into(),
+                ));
+            }
+            let candidate = &request.candidates[0];
+            let provider = snapshot
+                .provider_by_deployment(&candidate.deployment_id)
+                .or_else(|| snapshot.provider(&candidate.deployment_id))
+                .ok_or_else(|| TicketError::InvalidModelPlan("missing task deployment".into()))?;
+            // The plan is what the request binds, never everything the
+            // deployment happens to list: a strict ticket on a shared
+            // deployment must not become addressable for its other models.
+            let bound: std::collections::BTreeSet<&String> = request
+                .model_bindings
+                .values()
+                .filter(|m| *m != &candidate.model_id)
+                .collect();
+            if bound.iter().any(|m| !provider.models.contains(m)) {
+                return Err(TicketError::InvalidModelPlan(
+                    "bound model missing from deployment".into(),
+                ));
+            }
+            let plan = crate::task_lease::TaskModelPlan {
+                additional_models: bound.into_iter().cloned().collect(),
+                // The lease adds defaults and identities after validating the caller's
+                // 64 selectors. Those generated entries do not consume that limit.
+                model_bindings: request
+                    .model_bindings
+                    .iter()
+                    .filter(|(key, value)| {
+                        !(key == value && provider.models.contains(value))
+                            && !(["primary", "fast", "powerful", "sonnet", "haiku", "opus"]
+                                .contains(&key.as_str())
+                                && *value == &candidate.model_id)
+                    })
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            };
+            plan.validate(&candidate.model_id)
+                .map_err(TicketError::InvalidModelPlan)?;
+            if !provider.models.contains(&candidate.model_id) {
+                return Err(TicketError::InvalidModelPlan(
+                    "primary model missing from deployment".into(),
+                ));
+            }
+            // Every plan model is addressable by its real id, never a family substring.
+            for model in std::iter::once(&candidate.model_id).chain(&plan.additional_models) {
+                request.model_bindings.insert(model.clone(), model.clone());
+            }
+        }
         let operations = request
             .operations
             .clone()
@@ -508,7 +576,9 @@ impl RouteTicketRegistry {
                     });
                 }
             }
-            if request.model_bindings != prior.ticket.model_bindings {
+            if request.model_bindings != prior.ticket.model_bindings
+                || request.strict_selectors != prior.ticket.strict_selectors
+            {
                 return Err(TicketError::WidenedRemint {
                     fingerprint: request.execution_fingerprint.clone(),
                     detail: "model bindings differ from the original ticket".into(),
@@ -550,6 +620,7 @@ impl RouteTicketRegistry {
             parent_session_id: request.parent_session_id,
             candidates: request.candidates,
             model_bindings: request.model_bindings,
+            strict_selectors: request.strict_selectors,
             credential_affinity: request.credential_affinity,
             allow_auth_failover: request.allow_auth_failover,
             route_policy: request.route_policy,
@@ -1017,6 +1088,76 @@ mod tests {
     }
 
     #[test]
+    fn strict_model_resolution_never_uses_containment() {
+        let reg = registry();
+        let mut ticket = reg
+            .mint(mint_request(), Some(&snapshot()), 0)
+            .unwrap()
+            .ticket;
+        ticket
+            .model_bindings
+            .insert("haiku".into(), "model-alpha".into());
+        assert_eq!(
+            ticket.resolve_model("claude-haiku-x").as_deref(),
+            Some("model-alpha")
+        );
+        ticket.strict_selectors = true;
+        assert_eq!(
+            ticket.resolve_model("haiku").as_deref(),
+            Some("model-alpha")
+        );
+        assert_eq!(
+            ticket.resolve_model("model-alpha").as_deref(),
+            Some("model-alpha")
+        );
+        assert_eq!(ticket.resolve_model("claude-haiku-x"), None);
+        assert_eq!(ticket.resolve_model("unknown"), None);
+    }
+
+    #[test]
+    fn strict_mint_refuses_binding_outside_deployment() {
+        let reg = registry();
+        let mut request = mint_request();
+        request.strict_selectors = true;
+        request.candidates.truncate(1);
+        request.allow_auth_failover = false;
+        request.credential_affinity = TicketAffinity::SessionSticky;
+        request
+            .model_bindings
+            .insert("haiku".into(), "outside".into());
+        assert!(matches!(
+            reg.mint(request, Some(&snapshot()), 0),
+            Err(TicketError::InvalidModelPlan(_))
+        ));
+    }
+
+    #[test]
+    fn strict_mint_binds_only_the_requested_models_of_a_shared_deployment() {
+        let reg = registry();
+        let mut snapshot = snapshot();
+        snapshot.providers[0].models = vec![
+            "model-alpha".into(),
+            "model-beta".into(),
+            "model-gamma".into(),
+        ];
+        let mut request = mint_request();
+        request.strict_selectors = true;
+        request.candidates.truncate(1);
+        request.credential_affinity = TicketAffinity::SessionSticky;
+        request
+            .model_bindings
+            .insert("haiku".into(), "model-beta".into());
+        let ticket = reg.mint(request, Some(&snapshot), 0).unwrap().ticket;
+        assert_eq!(ticket.resolve_model("haiku").as_deref(), Some("model-beta"));
+        assert_eq!(
+            ticket.resolve_model("model-beta").as_deref(),
+            Some("model-beta")
+        );
+        assert_eq!(ticket.resolve_model("model-gamma"), None);
+        assert!(!ticket.model_bindings.contains_key("model-gamma"));
+    }
+
+    #[test]
     fn remint_authority_is_scoped_to_the_local_account_owner() {
         let reg = registry();
         let snapshot = snapshot();
@@ -1190,6 +1331,7 @@ mod tests {
         assert!(!ticket.allows(TicketOperation::Embeddings));
         assert!(!ticket.allows(TicketOperation::Responses));
         assert!(ticket.budget.is_none(), "absent budget is unmetered");
+        assert!(!ticket.strict_selectors);
     }
 
     #[test]

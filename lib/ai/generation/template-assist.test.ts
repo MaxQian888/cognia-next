@@ -21,11 +21,41 @@ import {
   normalizeDraft,
   suggestTemplateParams,
   TemplateAssistPiiBlockedError,
+  TEMPLATE_ASSIST_GENERATE_PROMPT,
+  TEMPLATE_ASSIST_IMPROVE_PROMPT,
+  TEMPLATE_ASSIST_SUGGEST_PARAMS_PROMPT,
 } from "./template-assist"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1 } from "@/lib/prompts/types"
 import type { LanguageModel } from "ai"
 import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 
 const model: LanguageModel = "test-model"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+function publish(def: PromptDefinitionV1, body: string, revisionId: string): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: def.id,
+        scope: "account",
+        targetId: "",
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
 
 beforeEach(() => {
   generateObjectMock.mockReset()
@@ -254,5 +284,51 @@ describe("template assist ledger seam", () => {
     await expect(improveTemplateBody(model, "safe", { generate })).rejects.toThrow("budget_refused")
     expect(generateTextMock).not.toHaveBeenCalled()
     expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("Prompt Center overrides", () => {
+  it("ships each system prompt with its literal {{token}} examples intact", async () => {
+    generateObjectMock.mockResolvedValue({ object: { name: "n", body: "b" } })
+    await generateTemplateDraft(model, "x")
+    expect(generateObjectMock.mock.calls[0][0].system).toBe(
+      TEMPLATE_ASSIST_GENERATE_PROMPT.defaultBody
+    )
+  })
+
+  it("sends a published draft prompt and keeps its literal tokens verbatim", async () => {
+    publish(
+      TEMPLATE_ASSIST_GENERATE_PROMPT,
+      "Write a template; mark slots as {{snake_case}}.",
+      "por-ta-generate"
+    )
+    generateObjectMock.mockResolvedValue({ object: { name: "n", body: "b" } })
+    await generateTemplateDraft(model, "x")
+    expect(generateObjectMock.mock.calls[0][0].system).toBe(
+      "Write a template; mark slots as {{snake_case}}."
+    )
+  })
+
+  it("sends a published rewrite prompt", async () => {
+    publish(TEMPLATE_ASSIST_IMPROVE_PROMPT, "Tighten it. Keep {{token}} as is.", "por-ta-improve")
+    generateTextMock.mockResolvedValue({ text: "ok" })
+    await improveTemplateBody(model, "Hi {{name}}")
+    expect(generateTextMock.mock.calls[0][0].system).toBe("Tighten it. Keep {{token}} as is.")
+  })
+
+  it("sends a published annotation prompt", async () => {
+    publish(TEMPLATE_ASSIST_SUGGEST_PARAMS_PROMPT, "Annotate every slot.", "por-ta-suggest")
+    generateObjectMock.mockResolvedValue({ object: { suggestions: [] } })
+    await suggestTemplateParams(model, "Hi {{name}}")
+    expect(generateObjectMock.mock.calls[0][0].system).toBe("Annotate every slot.")
+  })
+
+  it("does not call the model when the run was cancelled while the prompt resolved", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      improveTemplateBody(model, "Hi", { abortSignal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(generateTextMock).not.toHaveBeenCalled()
   })
 })

@@ -208,7 +208,7 @@ Phase 1 ships the identity half: the official account, signing in to it everywhe
 - Sign-in is through Feishu (self-built), GitHub, Google or Apple. Provider tokens are dropped. Accounts link only on an email both providers verified.
 - `cognia_identities` lists the person's linked sign-ins in the ID token and UserInfo.
 - CORS covers the web origins. `/api/account/deletion` runs the §10 cooling-off, and an hourly cron purges.
-- Operator guide: its README. Incidents: `docs/runbooks/identity-worker.md`.
+- Operator guide: its README. Incidents: [`docs/runbooks/identity-worker.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/runbooks/identity-worker.md) in cognia-services.
 
 **The person's id.** Only the official issuer's subject, when it is a valid `usr_` id, is the person's id. Every other issuer's subject is hashed with the issuer, Logto's and any self-hosted OIDC issuer's alike. A deployment's own claims about its kind never decide this, so no gateway can mint a subject that equals somebody's official id. The renderer (`lib/identity/sign-in.ts`) and the desktop host (`crates/cognia-companion-security/src/official_identity.rs`) read the same vectors (`fixtures/identity-id-vectors.json`).
 
@@ -251,7 +251,7 @@ Phase 2 ships keys and enrollment: device keys, the sync recovery key, approving
 - It checks a device proof on every device action, and refuses a revoked device before reading anything.
 - It enforces complete envelope sets, the atomic recovery batch and the approval's request state, transcript and approver.
 - `SyncAdmin.purgeSpace` deletes a space. The identity Worker calls it through its `SYNC_ADMIN` binding when it purges an account, on staging and on production.
-- Operator guide: its README. Incidents: `docs/runbooks/sync-worker.md`.
+- Operator guide: its README. Incidents: [`docs/runbooks/sync-worker.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/runbooks/sync-worker.md) in cognia-services.
 
 **The client.**
 

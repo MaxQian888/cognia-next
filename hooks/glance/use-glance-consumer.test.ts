@@ -125,19 +125,20 @@ describe("useGlanceConsumer", () => {
     it("renews the lease every GLANCE_LEASE_RENEW_MS", async () => {
       renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
       await flush()
+      act(() => snapshotHandler(snapshot(1, 1)))
       sendSubscriptionMock.mockClear()
 
-      act(() => {
+      await act(async () => {
         jest.advanceTimersByTime(GLANCE_LEASE_RENEW_MS - 1)
       })
       expect(sendSubscriptionMock).not.toHaveBeenCalled()
 
-      act(() => {
+      await act(async () => {
         jest.advanceTimersByTime(1)
       })
       expect(sendSubscriptionMock).toHaveBeenCalledTimes(1)
 
-      act(() => {
+      await act(async () => {
         jest.advanceTimersByTime(GLANCE_LEASE_RENEW_MS * 2)
       })
       expect(sendSubscriptionMock).toHaveBeenCalledTimes(3)
@@ -193,11 +194,34 @@ describe("useGlanceConsumer", () => {
       sendSubscriptionMock.mockClear()
 
       rerender({ visible: true })
+      await flush()
       expect(sendSubscriptionMock).toHaveBeenCalledWith({
         consumer: "tray-panel",
         windowLabel: "tray",
         visible: true,
       })
+    })
+
+    it("accepts an unchanged snapshot as a connection acknowledgement after reopening", async () => {
+      const { result, rerender } = renderHook(
+        ({ visible }: { visible: boolean }) => useGlanceConsumer("tray-panel", "tray", visible),
+        { initialProps: { visible: true } }
+      )
+      await flush()
+      act(() => snapshotHandler(snapshot(1, 1)))
+      rerender({ visible: false })
+      rerender({ visible: true })
+      await flush()
+      // Another consumer can keep the publisher alive, so the re-open lease
+      // receives its current revision rather than forcing a fresh build.
+      act(() => snapshotHandler(snapshot(1, 1)))
+      sendSubscriptionMock.mockClear()
+      await act(async () => {
+        jest.advanceTimersByTime(GLANCE_REQUEST_TIMEOUT_MS)
+      })
+      expect(result.current.connectionError).toBeNull()
+      expect(result.current.receivedCount).toBe(1)
+      expect(sendSubscriptionMock).not.toHaveBeenCalled()
     })
 
     it("stops renewing on unmount", async () => {
@@ -213,6 +237,57 @@ describe("useGlanceConsumer", () => {
   })
 
   describe("snapshots", () => {
+    it("listens before subscribing so an immediate first snapshot cannot be lost", async () => {
+      let finishListening!: () => void
+      onSnapshotMock.mockImplementation(
+        (handler: typeof snapshotHandler) =>
+          new Promise((resolve) => {
+            finishListening = () => {
+              snapshotHandler = handler
+              resolve(offSnapshot)
+            }
+          })
+      )
+      sendSubscriptionMock.mockImplementation(async () => {
+        snapshotHandler(snapshot(1, 1))
+        return true
+      })
+      const { result } = renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
+      await flush()
+      expect(sendSubscriptionMock).not.toHaveBeenCalled()
+      await act(async () => {
+        finishListening()
+        await Promise.resolve()
+      })
+      expect(result.current.snapshot?.revision).toBe(1)
+    })
+
+    it("retries a missed first subscription without waiting for the lease renewal", async () => {
+      renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
+      await flush()
+      sendSubscriptionMock.mockClear()
+      await act(async () => {
+        jest.advanceTimersByTime(1_000)
+      })
+      expect(sendSubscriptionMock).toHaveBeenCalledWith({
+        consumer: "tray-panel",
+        windowLabel: "tray",
+        visible: true,
+      })
+    })
+
+    it("reports a missing first snapshot and recovers when the publisher arrives", async () => {
+      const { result } = renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
+      await flush()
+      await act(async () => {
+        jest.advanceTimersByTime(GLANCE_REQUEST_TIMEOUT_MS)
+      })
+      expect(result.current.connectionError).toBe("errors.timeout")
+      act(() => snapshotHandler(snapshot(1, 1)))
+      expect(result.current.connectionError).toBeNull()
+      expect(result.current.snapshot?.revision).toBe(1)
+    })
+
     it("starts with no snapshot", async () => {
       const { result } = renderHook(() => useGlanceConsumer("tray-panel", "tray", true))
       await flush()

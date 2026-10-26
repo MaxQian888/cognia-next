@@ -10,57 +10,96 @@
  *   - readable HTML → text extraction → `lib/document/parsers/html-parser`
  */
 
-import {
-  type SearchProviderType,
-  type SearchOptions,
-  type SearchResponse,
-  type SourceVerificationSettings,
+import type {
+  SearchProviderType,
+  SearchOptions,
+  SearchResponse,
+  SearchType,
+  SourceVerificationSettings,
 } from "@cognia/web-search/types"
+import type { CredentialedWebReaderId, WebReaderId } from "@cognia/agent-config-types"
 import { applySourceVerificationPolicy, verifySource } from "@cognia/web-search/source-verification"
+import {
+  EXTRACTOR_INPUT_MAX_CHARS,
+  EXTRACTOR_OUTPUT_MAX_TOKENS,
+  MAX_OPERATION_ATTEMPTS,
+  READ_TOTAL_BUDGET_MS,
+  SEARCH_EXCERPT_MAX_CHARS,
+  SEARCH_IMAGES_MAX,
+  SEARCH_SNIPPET_MAX_CHARS,
+  type OperationAdmission,
+} from "@cognia/web-search/operation-policy"
+import { isSearchCapabilityError } from "@cognia/web-search/search-type-router"
+import { SearchDomainPolicyError } from "@cognia/web-search/search-service"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
-import { parseHTML } from "@cognia/document/parsers/html-parser"
-import { fetchCacheKey, type FetchCacheLike } from "@/lib/web/fetch-cache"
-import { scrapePlatform } from "@/lib/web/reader/dispatch"
-import { fetchViaJina } from "@/lib/web/reader/jina"
-import { assertFetchTargetAllowed, FetchTargetBlockedError } from "@/lib/web/fetch-guard"
+import type { FetchCacheLike } from "@/lib/web/fetch-cache"
+import { FetchTargetBlockedError } from "@/lib/web/fetch-guard"
+import {
+  readWithPolicy,
+  type FetchFormat,
+  type FetchSummarize,
+  type ReadRequest,
+} from "@/lib/web/reader/configured-reader"
+import type { ReaderPolicy } from "@/lib/web/reader/reader-settings"
 import { UNTRUSTED_CONTENT_NOTICE } from "./untrusted-content"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import type { PluginHostToolErrorCode } from "@/types/plugin/plugin-host-tools"
 
-/** How `web_fetch` should present the response body. */
-export type FetchFormat = "auto" | "text" | "raw"
+export type { FetchFormat, FetchSummarize } from "@/lib/web/reader/configured-reader"
+export { windowText } from "@/lib/web/reader/configured-reader"
 
 export interface WebFetchArgs {
   url: string
   method?: string
   headers?: Record<string, string>
   body?: string
+  /** Read-window cap in CHARACTERS (legacy name kept for compatibility). */
   maxBytes?: number
   /**
    * `auto` (default) extracts readable text for HTML responses and returns the
-   * raw body for everything else; `text` forces extraction; `raw` skips it.
+   * raw body for everything else; `text` forces extraction; `raw` skips it and
+   * is always served by the direct reader.
    */
   format?: FetchFormat
   /**
    * Query-focused extraction. When set (and a `summarize` dep is available),
    * the extracted page text is distilled to just the content relevant to this
-   * question before being returned — collapsing a full page (tens of thousands
-   * of tokens) to a short, on-topic answer. Falls back to truncated page text
-   * when no summarizer is available or the call fails.
+   * question. Best-effort unless the Reader policy requires distillation.
    */
   prompt?: string
   /**
-   * Read-window start (char offset) for paging through a long page. When the
-   * result was `truncated`, it reports a `nextOffset`; pass it back here to read
-   * the next segment instead of re-fetching the whole page. Defaults to 0.
+   * Read-window start (character offset) for paging through a long page. When
+   * the result was `truncated`, it reports a `nextOffset`; pass it back here
+   * to read the next segment — served from the cached document when resident.
    */
   offset?: number
+  /** Pin one reader (`direct`, `jina`, `tavily`, …). Strict unless `allowFallback`. */
+  reader?: WebReaderId
+  /** `true` lets a pinned reader fall back; `false` makes the configured default strict. */
+  allowFallback?: boolean
 }
 
 export interface WebSearchArgs {
   query: string
-  /** Force a specific provider; defaults to the user's configured default. */
+  /**
+   * Preferred provider. Under the user's fallback setting another eligible
+   * provider may serve the request; pass `allowFallback: false` to pin it.
+   */
   provider?: SearchProviderType
   maxResults?: number
+  /** Specialized search type; never silently downgraded to general search. */
+  searchType?: SearchType
+  /** Provider-scoped SERP engine (e.g. `bing` on SearchAPI). */
+  engine?: string
+  /** `false` = strict pin: the named provider serves or the call fails. */
+  allowFallback?: boolean
+  /**
+   * Ask for a bounded per-result page excerpt (characters, ≤ 2000) from
+   * providers that return page content. Omitted ⇒ snippets only, and no
+   * paid full-content extraction is requested.
+   */
+  excerptChars?: number
 }
 
 export interface WebFetchDeps {
@@ -69,41 +108,46 @@ export interface WebFetchDeps {
   /** Injectable fetch for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch
   /**
-   * Query-focused extractor. When present and `args.prompt` is set, the
-   * extracted page text is passed through this to return only the relevant
-   * content. The host builds it from the cheap utility model
-   * (see {@link buildFetchExtractor}); absent on hosts without a usable model
-   * key, in which case the full (truncated) page text is returned.
+   * Query-focused extractor built from the cheap utility model
+   * (see {@link buildFetchExtractor}); absent on hosts without a usable model.
    */
   summarize?: FetchSummarize
-  /** Forwarded to `summarize` so an aborted turn cancels the extraction call. */
+  /** Cancels the whole read: every reader attempt, distillation and cache write. */
   signal?: AbortSignal
-  /** Optional TTL/LRU cache for repeated GETs (host passes `getFetchCache()`). */
+  /** Reader cache (host passes `getFetchCache()`). */
   cache?: FetchCacheLike
   /**
-   * Enable the Jina Reader fallback (`r.jina.ai`) for pages the local cheerio
-   * parser can't read (JS-rendered SPAs). Off by default so the pure core /
-   * tests never reach a third party; the renderer host turns it on. Platform
-   * scrapers (WeChat/X/YouTube) run regardless of this flag.
+   * The configured Reader policy (`readerPolicyFromSettings`). Absent ⇒ a
+   * policy derived from the legacy `jinaFallback` / `alwaysDistill` flags.
+   */
+  readerPolicy?: ReaderPolicy
+  /** Runtime/account scope (opaque) for cache and admission isolation. */
+  scope?: string
+  /** Current scope at completion; a mismatch discards the read. */
+  activeScope?: () => string | undefined
+  /** The stored vendor credential for a vendor reader. */
+  credentialFor?: (reader: CredentialedWebReaderId) => string | undefined
+  /** Readers this host can physically reach (Jina needs a CORS-free transport). */
+  hostReachable?: Partial<Record<WebReaderId, boolean>>
+  /** False when the host transport cannot recall an in-flight request. */
+  transportCancels?: boolean
+  admission?: OperationAdmission
+  /**
+   * Legacy: enable the Jina Reader fallback. Read only when `readerPolicy` is
+   * absent.
    */
   jinaFallback?: boolean
   /**
-   * Allow fetching private/loopback/link-local hosts (localhost, 10./192.168.,
-   * 169.254.x cloud metadata, …). Off by default — the SSRF guard blocks them
-   * so a model-supplied URL can't reach the user's internal network. The
-   * renderer host forwards the user's Settings → Search opt-in.
+   * Allow fetching private/loopback/link-local hosts. Off by default — the
+   * SSRF guard blocks them. Private targets are only ever read directly.
    */
   allowPrivateHosts?: boolean
   /**
-   * Always distill fetched page text through {@link FetchSummarize} even when
-   * the model didn't pass a `prompt` — the main agent then never sees raw page
-   * text (Claude-Code-style isolation). No-op when no `summarize` is available.
+   * Legacy: always distill. Read only when `readerPolicy` is absent, where it
+   * means `required` distillation (fail closed without a utility model).
    */
   alwaysDistill?: boolean
 }
-
-/** Distill page text down to just the content relevant to `prompt`. */
-export type FetchSummarize = (text: string, prompt: string, signal?: AbortSignal) => Promise<string>
 
 /**
  * Minimal cheap-model client shape (a subset of `LlmClient` from
@@ -122,15 +166,42 @@ export interface FetchExtractorClient {
   ): Promise<string>
 }
 
-/** System prompt for query-focused page extraction. */
+/** Shipped system prompt for query-focused page extraction. */
 export const FETCH_EXTRACT_SYSTEM_PROMPT =
   "You extract only the parts of a web page that answer the user's question. " +
   "Return the relevant facts, quotes, numbers, names, dates and URLs concisely, " +
   "preserving them verbatim. If the page does not address the question, say so " +
   "in one line. Do not add a preamble like 'Here is'. Write in the question's language."
 
+/**
+ * The extractor's instructions as a Prompt Center definition (ADR-0236).
+ * Resolved synchronously from the loaded snapshot: the app loads it at
+ * startup and the CLI primes it before a turn, and a web fetch runs inside a
+ * turn, so the extractor never opens the account store itself.
+ */
+export const FETCH_EXTRACT_PROMPT = definePrompt({
+  id: "knowledge.web.fetch-extract",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 4_000,
+  outputContract:
+    "The trimmed reply becomes the distilled text of a web_fetch read (it is cached with the read for five minutes, keyed by these instructions); the redacted question and page text are sent as the user message.",
+  consumers: ["lib/web/web-tools-core.ts"],
+  defaultBody: FETCH_EXTRACT_SYSTEM_PROMPT,
+})
+
+function fetchExtractInstructions(): string {
+  return resolvePrompt(FETCH_EXTRACT_PROMPT).text
+}
+
 /** Hard ceiling on page characters fed to the extractor (keeps the cheap call bounded). */
-const FETCH_EXTRACT_INPUT_MAX = 32 * 1024
+const FETCH_EXTRACT_INPUT_MAX = EXTRACTOR_INPUT_MAX_CHARS
 
 /**
  * Wrap a cheap-model client into a {@link FetchSummarize}. The host (renderer
@@ -138,28 +209,31 @@ const FETCH_EXTRACT_INPUT_MAX = 32 * 1024
  * passes the result as `deps.summarize`.
  */
 export function buildFetchExtractor(client: FetchExtractorClient): FetchSummarize {
-  return async (text, prompt, signal) => {
+  const extract: FetchSummarize = async (text, prompt, signal) => {
     const bounded =
       text.length > FETCH_EXTRACT_INPUT_MAX ? text.slice(0, FETCH_EXTRACT_INPUT_MAX) : text
     const safePrompt = redactText(prompt).redacted
     const safeText = redactText(bounded).redacted
     const extractionPrompt = `Question:\n${safePrompt}\n\nPage content:\n${safeText}`
+    const system = fetchExtractInstructions()
     if (
       !hasNoLeakingPiiDeep({
         prompt: extractionPrompt,
-        system: FETCH_EXTRACT_SYSTEM_PROMPT,
+        system,
       })
     ) {
       throw new Error("Web extraction blocked: sensitive data remains after redaction")
     }
     const out = await client.complete(extractionPrompt, {
-      system: FETCH_EXTRACT_SYSTEM_PROMPT,
+      system,
       temperature: 0.2,
-      maxTokens: 1024,
+      maxTokens: EXTRACTOR_OUTPUT_MAX_TOKENS,
       abortSignal: signal,
     })
     return (out ?? "").trim()
   }
+  extract.instructions = fetchExtractInstructions
+  return extract
 }
 
 /**
@@ -172,26 +246,23 @@ export function buildFetchExtractor(client: FetchExtractorClient): FetchSummariz
  * configuration and drift silently.
  */
 export interface WebSearchDeps {
-  /** Host-owned canonical search policy (settings, PII, cache, fallback, filtering). */
+  /**
+   * Host-owned canonical search policy (settings, PII, cache, fallback,
+   * filtering, defaults). The host's global defaults live INSIDE the executor
+   * at the lowest precedence rung; this module forwards only the caller's
+   * explicit fields, so a host fallback value never masquerades as intent.
+   */
   searchExecutor?: (
     query: string,
-    options: SearchOptions & { provider?: SearchProviderType }
+    options: SearchOptions & { provider?: SearchProviderType; allowFallback?: boolean }
   ) => Promise<SearchResponse>
-  /** Default max results when the caller doesn't specify. */
-  searchMaxResults?: number
   /**
-   * The user's configured default search options (type, depth, recency,
-   * country, language, include/exclude domains, includeAnswer). Forwarded to
-   * the search service so the agent honors Settings → Search instead of
-   * ignoring it.
-   */
-  searchOptions?: SearchOptions
-  /**
-   * Source-verification settings. When `enabled`, results are filtered by
-   * blocked domains / minimum credibility and sorted by credibility, reusing
-   * the existing `lib/search/source-verification` engine.
+   * Source-verification settings, read only for the credibility badges. The
+   * executor already applied the filtering policy.
    */
   sourceVerification?: SourceVerificationSettings
+  /** Cancels the search's adapter requests, retries and fallback. */
+  signal?: AbortSignal
 }
 
 /**
@@ -204,415 +275,143 @@ export interface WebSearchDeps {
  * classification survives rewording and localization.
  */
 function executionFailureCode(err: unknown): PluginHostToolErrorCode {
-  return err instanceof FetchTargetBlockedError ? "blocked" : "execution-failed"
+  if (err instanceof FetchTargetBlockedError) return "blocked"
+  if (isSearchCapabilityError(err) || err instanceof SearchDomainPolicyError) {
+    return "invalid-arguments"
+  }
+  return "execution-failed"
 }
-
-/** Default cap on the raw body returned to the model (chars). */
-const DEFAULT_MAX = 64 * 1024
-/** Default cap on EXTRACTED page text when the caller didn't set `maxBytes`. */
-const DEFAULT_EXTRACT_MAX = 40 * 1024
-/** Per-result snippet cap in `web_search` results. */
-const SNIPPET_MAX = 300
-/**
- * Below this many chars of local extraction, treat the page as "unreadable"
- * locally (a JS-rendered SPA) and — when enabled — try the Jina fallback.
- */
-const MIN_LOCAL_EXTRACT = 200
-
-/** Generic distillation question used when `alwaysDistill` is on but the model gave no `prompt`. */
-const GENERIC_DISTILL_PROMPT =
-  "Summarize the key facts, figures, names, dates, quotes, and conclusions on this page."
 
 // Re-exported from `./untrusted-content`, which owns them so that callers
 // outside the web stack (the composer's entity mentions, remote-document
 // staging) can wrap text without importing the search service and the reader.
 export { UNTRUSTED_CONTENT_NOTICE, wrapUntrustedContent } from "./untrusted-content"
 
-/**
- * Slice a `[offset, offset+cap)` window out of `text` for adaptive segmented
- * reading. Reports the total length and the offset to read next when more
- * content remains, so the model can page through a long page instead of
- * re-fetching it whole.
- */
-export function windowText(
-  text: string,
-  offset: number | undefined,
-  cap: number
-): { slice: string; total: number; start: number; truncated: boolean; nextOffset?: number } {
-  const total = text.length
-  const start = offset && offset > 0 ? Math.min(Math.floor(offset), total) : 0
-  const slice = text.slice(start, start + cap)
-  const end = start + slice.length
-  const truncated = end < total
-  return { slice, total, start, truncated, ...(truncated ? { nextOffset: end } : {}) }
-}
-
-/**
- * Textual content types `web_fetch` returns as-is. Everything else (PDF, images,
- * archives, octet-stream, …) is treated as binary and never decoded as text.
- * An empty/absent content type is treated as textual (many servers omit it).
- */
-function isTextualContentType(contentType: string): boolean {
-  if (!contentType.trim()) return true
-  const c = contentType.toLowerCase()
-  if (c.startsWith("text/")) return true
-  return /(json|xml|xhtml|javascript|ecmascript|csv|yaml|html|markdown|graphql|x-www-form-urlencoded|plain)/.test(
-    c
-  )
-}
-
-/** True when the response looks like a PDF (by content type or URL suffix). */
-function looksLikePdf(contentType: string, url: string): boolean {
-  return /application\/pdf/i.test(contentType) || /\.pdf(?:$|[?#])/i.test(url)
-}
-
-/**
- * Distill (via `prompt`, or a generic question when `alwaysDistill` is on) then
- * truncate extracted text to `cap`. All external text stays framed as
- * untrusted, including distilled output. Never throws — distillation failures
- * fall back to the extracted text.
- */
-async function shapeExtracted(
-  rawText: string,
-  title: string | undefined,
-  args: WebFetchArgs,
-  deps: WebFetchDeps,
-  cap: number
-): Promise<{
-  text: string
-  truncated: boolean
-  title?: string
-  totalLength?: number
-  nextOffset?: number
-}> {
-  let text = rawText.trim()
-  // Query-focused (or, with alwaysDistill, generic) distillation collapses the
-  // page to a sub-model summary the main agent can trust.
-  const question = args.prompt ?? (deps.alwaysDistill ? GENERIC_DISTILL_PROMPT : undefined)
-  if (text && question && deps.summarize) {
-    try {
-      const focused = (await deps.summarize(text, question, deps.signal))?.trim()
-      if (focused) {
-        text = focused
-      }
-    } catch {
-      // Keep the extracted text.
-    }
-  }
-  // Adaptive segmented reading — window `[offset, offset+cap)` out of the text.
-  const win = windowText(text, args.offset, cap)
-  // Distillation reduces content but does not make an external page trusted.
-  // The frame is applied ONCE to the whole payload (`untrustedNotice`), not per
-  // field: banner-per-field turned a one-line `title` into a multi-line string
-  // and made a JSON `body` unparseable for every consumer.
-  const out = win.slice
+/** The policy a host that predates `webReader` gets from its legacy flags. */
+function legacyReaderPolicy(deps: WebFetchDeps): ReaderPolicy {
+  const jina = deps.jinaFallback === true
+  const enabled = new Set<WebReaderId>([
+    "direct",
+    "platform",
+    "fxtwitter",
+    ...(jina ? ["jina" as const] : []),
+  ])
+  const distillation = deps.alwaysDistill === true ? "required" : "off"
   return {
-    text: out,
-    truncated: win.truncated,
-    ...(title ? { title } : {}),
-    ...(win.total > cap || win.start > 0 ? { totalLength: win.total } : {}),
-    ...(win.nextOffset != null ? { nextOffset: win.nextOffset } : {}),
+    defaultReader: "auto",
+    enabled,
+    externalOrder: jina ? ["jina"] : [],
+    externalFallback: jina,
+    distillation,
+    timeoutMs: READ_TOTAL_BUDGET_MS,
+    maxAttempts: MAX_OPERATION_ATTEMPTS,
+    revision: `legacy|${jina ? "jina" : ""}|${distillation}`,
   }
 }
 
 /**
- * Perform an HTTP request and return readable content for the model.
- *
- * For HTML responses we return ONLY the extracted `text` (+ `title`) — the raw
- * markup the model shouldn't wade through is dropped, which is the single
- * biggest token saving here. The raw `body` is returned only for non-HTML
- * responses, `format: "raw"`, or when extraction yields nothing. When
- * `args.prompt` + `deps.summarize` are present the extracted text is further
- * distilled to just the relevant content. GET results are served from / stored
- * in `deps.cache` when provided.
+ * Read a URL through the configured Reader and return readable content for
+ * the model. See `lib/web/reader/configured-reader.ts` for routing, status and
+ * distillation semantics. The success payload carries one `untrustedNotice`.
  */
 export async function webFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Promise<unknown> {
-  const result = await performWebFetch(args, deps)
+  const request: ReadRequest = { ...args }
+  const result = await readWithPolicy(request, {
+    policy: deps.readerPolicy ?? legacyReaderPolicy(deps),
+    fetchImpl: deps.fetchImpl,
+    userAgent: deps.userAgent,
+    summarize: deps.summarize,
+    signal: deps.signal,
+    cache: deps.cache,
+    scope: deps.scope,
+    activeScope: deps.activeScope,
+    allowPrivateHosts: deps.allowPrivateHosts,
+    credentialFor: deps.credentialFor,
+    hostReachable: deps.hostReachable,
+    transportCancels: deps.transportCancels,
+    admission: deps.admission,
+  })
   // One frame for the whole payload, exactly as `shapeSearchResponse` does it.
-  // Applied here rather than inside each branch so `title`, `text` and `body`
-  // stay usable verbatim and no success path can forget the frame. A structured
-  // failure carries no external text, so it needs none.
-  if (
-    result &&
-    typeof result === "object" &&
-    typeof (result as WebFetchShape).status === "number"
-  ) {
-    return { ...(result as WebFetchShape), untrustedNotice: UNTRUSTED_CONTENT_NOTICE }
+  // A structured failure carries no external text, so it needs none.
+  if (typeof (result as { status?: unknown }).status === "number") {
+    return { ...result, untrustedNotice: UNTRUSTED_CONTENT_NOTICE }
   }
   return result
 }
 
-/** The success shape `webFetch` frames — an HTTP outcome, not a tool failure. */
-type WebFetchShape = Record<string, unknown> & { status?: unknown }
-
-async function performWebFetch(args: WebFetchArgs, deps: WebFetchDeps = {}): Promise<unknown> {
-  if (!args.url) {
-    return { ok: false as const, code: "invalid-arguments" as const, error: "url is required" }
-  }
-  const headers: Record<string, string> = { ...(args.headers ?? {}) }
-  if (deps.userAgent && !headers["User-Agent"]) headers["User-Agent"] = deps.userAgent
-  if (!hasNoLeakingPiiDeep({ url: args.url, headers, body: args.body })) {
-    return {
-      ok: false as const,
-      code: "blocked" as const,
-      error: "web_fetch blocked: outbound request contains sensitive data",
-    }
-  }
-  const method = args.method ?? "GET"
-  const format: FetchFormat = args.format ?? "auto"
-  // Only idempotent, body-less GETs are safe to cache; the prompt is part of
-  // the key because it changes the distilled output.
-  const cacheable = method.toUpperCase() === "GET" && !args.body
-  const cacheKey = cacheable
-    ? fetchCacheKey({
-        url: args.url,
-        method,
-        format,
-        maxBytes: args.maxBytes,
-        prompt: args.prompt,
-        offset: args.offset,
-      })
-    : ""
-  if (deps.cache && cacheable) {
-    const hit = deps.cache.get(cacheKey)
-    if (hit != null) return hit
-  }
-
-  const fetchImpl = deps.fetchImpl ?? fetch
-  const cap = args.maxBytes && args.maxBytes > 0 ? args.maxBytes : DEFAULT_MAX
-  const extractCap = args.maxBytes && args.maxBytes > 0 ? cap : DEFAULT_EXTRACT_MAX
-  const mayExtract = format !== "raw"
-  const isGet = method.toUpperCase() === "GET"
-
-  try {
-    // ── 0. SSRF guard ──────────────────────────────────────────────────────
-    // Reject non-http(s) schemes and private/loopback/link-local targets before
-    // any network is touched (throws → structured error below), unless the user
-    // opted into private hosts.
-    assertFetchTargetAllowed(args.url, { allowPrivateHosts: deps.allowPrivateHosts })
-
-    // ── 1. Platform scrapers (WeChat / X / YouTube) ────────────────────────
-    // Hostname-keyed and tried before the generic fetch because a bespoke
-    // scraper beats generic extraction for those sites. Returns null (no
-    // network) for every other host, so this is a no-op for normal pages.
-    if (mayExtract && isGet && !args.body) {
-      try {
-        const scraped = await scrapePlatform(args.url, fetchImpl, deps.signal)
-        if (scraped && scraped.markdown.trim()) {
-          const shaped = await shapeExtracted(
-            scraped.markdown,
-            scraped.title,
-            args,
-            deps,
-            extractCap
-          )
-          const result = {
-            ok: true as const,
-            status: 200,
-            url: args.url,
-            contentType: "text/markdown",
-            source: scraped.source,
-            text: shaped.text,
-            truncated: shaped.truncated,
-            ...(shaped.title ? { title: shaped.title } : {}),
-            ...(shaped.totalLength != null ? { totalLength: shaped.totalLength } : {}),
-            ...(shaped.nextOffset != null ? { nextOffset: shaped.nextOffset } : {}),
-          }
-          if (deps.cache && cacheable) deps.cache.set(cacheKey, result)
-          return result
-        }
-      } catch {
-        // Fall through to the generic path.
-      }
-    }
-
-    // ── 2. Generic fetch + local (cheerio) extraction ──────────────────────
-    const res = await fetchImpl(args.url, { method, headers, body: args.body })
-    const contentType = res.headers.get?.("content-type") ?? ""
-
-    // ── 2a. Binary / PDF handling ──────────────────────────────────────────
-    // Never decode binary as text (the Rust proxy already read the body as a
-    // string, so a PDF/image would come back as mojibake). PDFs → Jina, which
-    // renders them to markdown; other binaries → a clear note. `format:"raw"`
-    // opts out and gets the raw string.
-    if (mayExtract && !isTextualContentType(contentType)) {
-      const isPdf = looksLikePdf(contentType, args.url)
-      if (isPdf && isGet && !args.body && (deps.jinaFallback ?? false)) {
-        try {
-          const jina = await fetchViaJina(args.url, fetchImpl, deps.signal)
-          if (jina && jina.markdown.trim()) {
-            const shaped = await shapeExtracted(jina.markdown, jina.title, args, deps, extractCap)
-            const result = {
-              ok: res.ok,
-              status: res.status,
-              url: args.url,
-              contentType: "text/markdown",
-              source: jina.source,
-              text: shaped.text,
-              truncated: shaped.truncated,
-              ...(shaped.title ? { title: shaped.title } : {}),
-              ...(shaped.totalLength != null ? { totalLength: shaped.totalLength } : {}),
-              ...(shaped.nextOffset != null ? { nextOffset: shaped.nextOffset } : {}),
-            }
-            if (deps.cache && cacheable && res.ok) deps.cache.set(cacheKey, result)
-            return result
-          }
-        } catch {
-          // Fall through to the binary note.
-        }
-      }
-      const result = {
-        ok: res.ok,
-        status: res.status,
-        url: args.url,
-        contentType,
-        binary: true as const,
-        note: isPdf
-          ? "PDF content was not extracted to text. Enable the Jina reader in Settings → Search, or fetch with format:'raw'."
-          : "Non-text (binary) content was not extracted. Use format:'raw' to get the raw bytes as a string.",
-      }
-      if (deps.cache && cacheable && res.ok) deps.cache.set(cacheKey, result)
-      return result
-    }
-
-    const raw = await res.text()
-    const wantsExtract = mayExtract && (format === "text" || /html/i.test(contentType))
-
-    let extracted:
-      | {
-          text: string
-          truncated: boolean
-          title?: string
-          totalLength?: number
-          nextOffset?: number
-        }
-      | undefined
-    if (wantsExtract && res.ok && raw) {
-      try {
-        const parsed = await parseHTML(raw, { includeLinks: false, includeImages: false })
-        const text = parsed.text?.trim() ?? ""
-        if (text) {
-          extracted = await shapeExtracted(text, parsed.title, args, deps, extractCap)
-        }
-      } catch {
-        // Malformed HTML — fall through to the raw body below.
-      }
-    }
-
-    // ── 3. Jina Reader fallback ────────────────────────────────────────────
-    // Only when local extraction came back empty/too thin (a JS-rendered page
-    // cheerio can't see) AND the host opted in. Off by default in the pure
-    // core; the renderer host enables it.
-    if (
-      mayExtract &&
-      isGet &&
-      !args.body &&
-      (deps.jinaFallback ?? false) &&
-      (!extracted || extracted.text.length < MIN_LOCAL_EXTRACT)
-    ) {
-      try {
-        const jina = await fetchViaJina(args.url, fetchImpl, deps.signal)
-        if (jina && jina.markdown.trim().length > (extracted?.text.length ?? 0)) {
-          const shaped = await shapeExtracted(jina.markdown, jina.title, args, deps, extractCap)
-          const result = {
-            ok: res.ok,
-            status: res.status,
-            url: args.url,
-            contentType: "text/markdown",
-            source: jina.source,
-            text: shaped.text,
-            truncated: shaped.truncated,
-            ...(shaped.title ? { title: shaped.title } : {}),
-            ...(shaped.totalLength != null ? { totalLength: shaped.totalLength } : {}),
-            ...(shaped.nextOffset != null ? { nextOffset: shaped.nextOffset } : {}),
-          }
-          if (deps.cache && cacheable && res.ok) deps.cache.set(cacheKey, result)
-          return result
-        }
-      } catch {
-        // Keep local extraction / raw body.
-      }
-    }
-
-    let result: Record<string, unknown>
-    if (extracted != null) {
-      result = {
-        ok: res.ok,
-        status: res.status,
-        url: args.url,
-        contentType,
-        text: extracted.text,
-        truncated: extracted.truncated,
-        ...(extracted.title ? { title: extracted.title } : {}),
-        ...(extracted.totalLength != null ? { totalLength: extracted.totalLength } : {}),
-        ...(extracted.nextOffset != null ? { nextOffset: extracted.nextOffset } : {}),
-      }
-    } else {
-      // Raw body path (non-HTML textual responses / extraction yielded nothing).
-      // Window it too so the model can page through a large text/JSON payload.
-      const win = windowText(raw, args.offset, cap)
-      result = {
-        ok: res.ok,
-        status: res.status,
-        url: args.url,
-        contentType,
-        body: win.slice,
-        truncated: win.truncated,
-        ...(win.total > cap || win.start > 0 ? { totalLength: win.total } : {}),
-        ...(win.nextOffset != null ? { nextOffset: win.nextOffset } : {}),
-      }
-    }
-
-    if (deps.cache && cacheable && res.ok) deps.cache.set(cacheKey, result)
-    return result
-  } catch (err) {
-    return {
-      ok: false as const,
-      code: executionFailureCode(err),
-      error: err instanceof Error ? err.message : String(err),
-    }
-  }
+/** Cap `text` at `cap` characters, reporting whether it was cut. */
+function bounded(text: unknown, cap: number): { text: string; truncated: boolean } | undefined {
+  if (typeof text !== "string") return undefined
+  return text.length > cap
+    ? { text: text.slice(0, cap) + "…", truncated: true }
+    : { text, truncated: false }
 }
 
 /**
- * Filter + reorder results through the source-verification engine when the
- * user enabled it: drop blocked domains, drop below-minimum-credibility results
- * (when auto-filter is on), then sort most-credible-first. Pure; no-op when
- * verification is disabled.
+ * Map a policy-filtered `SearchResponse` into the compact, token-bounded tool
+ * result. The executor already applied verification and domain policy
+ * (including on cache hits); this only shapes, badges and bounds.
  */
-/** Map a raw `SearchResponse` into the compact, token-bounded tool result. */
 function shapeSearchResponse(
   query: string,
   response: SearchResponse,
-  sv: SourceVerificationSettings | undefined
+  sv: SourceVerificationSettings | undefined,
+  excerptChars: number | undefined
 ): unknown {
-  const verified = applySourceVerificationPolicy(response.results, sv)
   const withBadges = Boolean(sv?.enabled && sv.showVerificationBadges)
+  // Defense in depth for executors other than the canonical one: re-apply
+  // the verification filter (idempotent) and, if it removes a grounding
+  // result, drop the answer it may cite.
+  const verified = applySourceVerificationPolicy(response.results, sv)
+  const answer = verified.length === response.results.length ? (response.answer ?? null) : null
+  const images = (response.images ?? []).slice(0, SEARCH_IMAGES_MAX).map((image) => ({
+    url: image.url,
+    ...(image.thumbnailUrl ? { thumbnailUrl: image.thumbnailUrl } : {}),
+    ...(image.title ? { title: image.title } : {}),
+    ...(typeof image.width === "number" ? { width: image.width } : {}),
+    ...(typeof image.height === "number" ? { height: image.height } : {}),
+  }))
+  const diagnostics = response.diagnostics
   return {
     ok: true as const,
     query,
     provider: response.provider,
-    // One frame for the whole payload instead of one per field. Wrapping every
-    // title AND every snippet repeated this ~137-char banner up to 2N+1 times
-    // per search (~700 tokens of boilerplate on ten results) and turned each
-    // one-line `title` into a multi-line string every consumer had to unwrap.
+    // One frame for the whole payload instead of one per field.
     untrustedNotice: UNTRUSTED_CONTENT_NOTICE,
-    answer: response.answer ?? null,
-    // Structured results only — the previous `formatted` markdown block
-    // duplicated every snippet a second time. Each snippet is capped so a
-    // chatty provider can't blow up the tool-result token cost; the model
-    // can `web_fetch` a result URL when it needs the full page.
-    results: verified.map((r) => ({
-      title: r.title,
-      url: r.url,
-      content:
-        typeof r.content === "string" && r.content.length > SNIPPET_MAX
-          ? r.content.slice(0, SNIPPET_MAX) + "…"
-          : r.content,
-      score: r.score,
-      ...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
-      ...(withBadges ? { credibility: verifySource(r.url).credibilityLevel } : {}),
-    })),
+    answer,
+    ...(response.searchType ? { searchType: response.searchType } : {}),
+    ...(response.engine ? { engine: response.engine } : {}),
+    // Structured results only. Each snippet is capped (and says so) so a
+    // chatty provider can't blow up the tool-result token cost; the model can
+    // `web_fetch` a result URL when it needs the full page.
+    results: verified.map((r) => {
+      const snippet = bounded(r.content, SEARCH_SNIPPET_MAX_CHARS)
+      const excerpt = excerptChars ? bounded(r.rawContent, excerptChars) : undefined
+      return {
+        title: r.title,
+        url: r.url,
+        content: snippet?.text ?? r.content,
+        ...(snippet?.truncated ? { truncated: true } : {}),
+        ...(excerpt
+          ? { excerpt: excerpt.text, ...(excerpt.truncated ? { excerptTruncated: true } : {}) }
+          : {}),
+        score: r.score,
+        ...(r.publishedDate ? { publishedDate: r.publishedDate } : {}),
+        ...(withBadges ? { credibility: verifySource(r.url).credibilityLevel } : {}),
+      }
+    }),
+    ...(images.length > 0 ? { images } : {}),
+    ...(response.images && response.images.length > SEARCH_IMAGES_MAX
+      ? { imagesTruncated: true }
+      : {}),
+    ...(diagnostics?.answerCleared || (response.answer && answer === null)
+      ? { answerCleared: diagnostics?.answerCleared ?? "policy-filtered" }
+      : {}),
+    ...(diagnostics?.degradedControls?.length
+      ? { degradedControls: diagnostics.degradedControls }
+      : {}),
+    // Credibility badges are a domain heuristic, not fact verification.
+    ...(withBadges ? { credibilityBasis: "domain-heuristic" } : {}),
   }
 }
 
@@ -622,12 +421,6 @@ export async function webSearch(args: WebSearchArgs, deps: WebSearchDeps = {}): 
   if (!rawQuery) {
     return { ok: false as const, code: "invalid-arguments" as const, error: "query is required" }
   }
-  const maxResults =
-    typeof args.maxResults === "number"
-      ? args.maxResults
-      : typeof deps.searchMaxResults === "number"
-        ? deps.searchMaxResults
-        : undefined
   if (!deps.searchExecutor) {
     return {
       ok: false as const,
@@ -636,18 +429,37 @@ export async function webSearch(args: WebSearchArgs, deps: WebSearchDeps = {}): 
         "No web search provider is configured. Enable one and add its API key in Settings → Search.",
     }
   }
+  const excerptChars =
+    typeof args.excerptChars === "number" && args.excerptChars > 0
+      ? Math.min(Math.floor(args.excerptChars), SEARCH_EXCERPT_MAX_CHARS)
+      : undefined
   try {
+    // Only the caller's EXPLICIT fields travel as overrides. Host defaults
+    // (max results, type, depth, …) are folded in by the executor at the
+    // lowest rung, beneath each provider's own defaults.
     const response = await deps.searchExecutor(rawQuery, {
-      ...(deps.searchOptions ?? {}),
       ...(args.provider ? { provider: args.provider } : {}),
-      ...(maxResults != null ? { maxResults } : {}),
+      ...(typeof args.maxResults === "number" ? { maxResults: args.maxResults } : {}),
+      ...(args.searchType ? { searchType: args.searchType } : {}),
+      ...(args.engine ? { engine: args.engine } : {}),
+      ...(args.allowFallback === false ? { allowFallback: false } : {}),
+      // Snippet-only results never request paid full-content extraction.
+      includeRawContent: excerptChars ? "text" : false,
+      ...(deps.signal ? { signal: deps.signal } : {}),
     })
-    return shapeSearchResponse(response.query || rawQuery, response, deps.sourceVerification)
+    return shapeSearchResponse(
+      response.query || rawQuery,
+      response,
+      deps.sourceVerification,
+      excerptChars
+    )
   } catch (err) {
     return {
       ok: false as const,
       code: executionFailureCode(err),
       error: err instanceof Error ? err.message : String(err),
+      ...(isSearchCapabilityError(err) ? { reason: err.reason } : {}),
+      ...(err instanceof SearchDomainPolicyError ? { reason: "domain-policy-conflict" } : {}),
     }
   }
 }

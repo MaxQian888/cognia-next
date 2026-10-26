@@ -480,6 +480,7 @@
       "importParseFailed": "Failed to parse export",
       "importParseFailedFallback": "Failed to parse export (fallback parser also rejected it)",
       "larkBrowserUnsupported": "Feishu docs can only be fetched in the desktop app (the browser blocks cross-origin requests).",
+      "larkOutputTruncated": "The document exceeded the lark-cli output limit. Partial content was discarded; use the API connection to read it.",
       "larkCliUnavailable": "lark-cli is not available in this environment.",
       "larkEmptyDoc": "The document {title} has no readable text.",
       "larkInvalidUrl": "This does not look like a Feishu/Lark doc link or token.",

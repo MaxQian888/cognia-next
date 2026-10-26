@@ -3,7 +3,8 @@
  */
 
 import { extractJson, type LlmClient } from "../llm"
-import { applyTemplate, EVALUATOR_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { EVALUATOR_PROMPT } from "../prompts"
 import type { TwinDraft, TwinDraftEvaluation } from "@/types/twin"
 
 export interface EvaluatorInput {
@@ -54,9 +55,13 @@ export async function runEvaluator(
 ): Promise<EvaluatorResult> {
   if (input.drafts.length === 0) return { evaluations: {} }
 
-  const prompt = applyTemplate(EVALUATOR_PROMPT, {
-    drafts: formatDraftsForPrompt(input.drafts),
-  })
+  const prompt = (
+    await resolvePromptAsync(EVALUATOR_PROMPT, {
+      values: {
+        drafts: formatDraftsForPrompt(input.drafts),
+      },
+    })
+  ).text
 
   const response = await llm.complete(prompt, { temperature: 0.1, maxTokens: 3000 })
   const parsed = extractJson<{ evaluations?: RawEvaluation[] }>(response)

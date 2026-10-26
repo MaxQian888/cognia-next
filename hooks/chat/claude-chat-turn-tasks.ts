@@ -180,6 +180,11 @@ export function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): 
               const label = await generateTurnLabel(client, {
                 userText: extractPlainText(userMsg),
                 locale,
+                promptContext: {
+                  sessionId,
+                  workspaceId: sessionRow.projectId,
+                  agentId: sessionRow.characterId,
+                },
               })
               if (label) {
                 // Patch the in-memory store by *id* against its current state —

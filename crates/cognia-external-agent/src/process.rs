@@ -293,9 +293,7 @@ impl ExternalAgentProcess {
             .iter()
             .filter(|(key, _)| {
                 let name = key.to_ascii_uppercase();
-                !["TOKEN", "PASSWORD", "SECRET", "API_KEY"]
-                    .iter()
-                    .any(|part| name.contains(part))
+                !crate::spawn_authority::credential_env_name(&name)
                     && !matches!(
                         name.as_str(),
                         "OPENCODE_CONFIG_CONTENT"
@@ -365,6 +363,10 @@ impl ExternalAgentProcessManager {
         mut config: ExternalAgentSpawnConfig,
         sink: Arc<dyn ExternalAgentEventSink>,
     ) -> Result<String, String> {
+        if crate::spawn_authority::execution_admission().is_some()
+            || std::env::var("COGNIA_DEPLOYMENT_MODE").is_ok_and(|mode| mode == "multi-tenant") {
+            return Err("execution_isolation_unavailable: multi-tenant execution cannot use a Host process".into());
+        }
         let id = config.id.clone();
 
         // Check if already running
@@ -901,6 +903,15 @@ fn configure_kimi_environment(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn p4_admitted_tenant_execution_refuses_the_host_process_path() {
+        use crate::spawn_authority::{with_execution_admission, ExecutionAdmission, PlacementBinding};
+        let decision = ExecutionAdmission { binding: PlacementBinding { org_id: "org_a".into(), workspace_id: "w".into(), actor_user_id: "usr_a".into(), run_id: "run".into() }, actions: vec!["execution.request".into(), "workspace.write".into()] };
+        let manager = ExternalAgentProcessManager::new();
+        let error = with_execution_admission(Some(decision), manager.spawn(echo_config("tenant"), Arc::new(CollectorSink::default()))).await.unwrap_err();
+        assert!(error.starts_with("execution_isolation_unavailable:"));
+        assert!(manager.list().await.is_empty());
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn siwc_child_has_no_generic_send_or_retained_capability() {

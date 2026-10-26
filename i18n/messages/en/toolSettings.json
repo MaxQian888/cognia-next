@@ -158,5 +158,11 @@
   "webPreferCogniaDesc": "Use Cognia's multi-provider search (Tavily / Brave / Exa …) even when the model's own runtime brings web search. Off means the runtime's native search is used where it exists — it needs no API key and returns citations. Needs a configured search provider.",
   "webNativeAnthropicTitle": "Use native Anthropic web tools",
   "webclone": "Web page snapshot",
-  "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only."
+  "webcloneDesc": "Snapshot a live web page (web_clone / web_clone_convert) — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction and Vue/React/Angular/Svelte/jQuery codegen. Private/loopback targets are blocked unless opted in. Desktop only.",
+  "webPreferCogniaSearchTitle": "Prefer Cognia for search",
+  "webPreferCogniaSearchDesc": "Use Cognia Search even when native search is available. Requires a configured Search provider; otherwise native search remains available when supported.",
+  "webPreferCogniaFetchTitle": "Prefer Cognia for reading",
+  "webPreferCogniaFetchDesc": "Use Cognia Reader for web fetch even when native fetch is available. No Search provider or API key is needed for direct reading. Configure readers separately in Search → Reading.",
+  "webPreferenceInheritedOn": "Inherited from the previous shared preference: Cognia preferred.",
+  "webPreferenceInheritedOff": "Inherited from the previous shared preference: native preferred when available."
 }

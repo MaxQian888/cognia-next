@@ -602,8 +602,12 @@ async function runExternalBacked(
 
   // Forward the teammate's explicitly-resolved MCP servers into the external
   // agent's ACP session so it can call the same tools a built-in teammate would
-  // (the external CLI keeps its own MCP config in addition to these).
-  const mcpServers = await resolveAcpMcpServers(resolvedCaps.mcpServerIds)
+  // (the external CLI keeps its own MCP config in addition to these). They are
+  // selected against the team's workspace, not whichever one is on screen.
+  const mcpServers = await resolveAcpMcpServers(
+    resolvedCaps.mcpServerIds,
+    teamCtx.team.projectId ? { scope: { projectId: teamCtx.team.projectId } } : {}
+  )
 
   let observedSessionId: string | undefined
   const liveControl: { release?: () => void } = {}

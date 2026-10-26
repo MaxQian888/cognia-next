@@ -16,6 +16,10 @@
  * CLI is English-only.
  */
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
+import { CLI_FIX_TESTS_PROMPT } from "@/lib/agent/prompts/cli-prompts"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import type { PromptResolutionContext } from "@/lib/prompts/types"
+import { primeCliPromptContext } from "../../agent/prompt-overrides"
 import type { RunShellOpts, ShellResult } from "../../agent/run-shell"
 import { runShell } from "../../agent/run-shell"
 import { runDrivenTurns, type DrivenAdvance } from "./driven-turns"
@@ -29,6 +33,8 @@ export interface FixRunDeps {
   send: (prompt: string) => Promise<RunAndCaptureResult | null>
   dispatch: (action: TuiAction) => void
   cwd: string
+  /** Config home; primes the Prompt Center overrides the fix prompt resolves. */
+  home?: string
   signal: AbortSignal
   testCommand: string
   maxRounds: number
@@ -52,20 +58,22 @@ export interface FixFailure {
   maxRounds: number
 }
 
-/** Build the framed fix instruction. Pure, so its shape is unit-tested. */
-export function buildFixPrompt(f: FixFailure): string {
+/**
+ * Build the framed fix instruction from the `developer.cli.fix-tests` slot
+ * (ADR-0236). Synchronous: the run primed the override snapshot first.
+ */
+export function buildFixPrompt(f: FixFailure, context: PromptResolutionContext = {}): string {
   const output = tailOutput(f.output) || "(no output captured)"
-  return [
-    `The test command \`${f.command}\` failed (exit ${f.code}) — round ${f.round}/${f.maxRounds}.`,
-    "",
-    "Test output:",
-    "```",
-    output,
-    "```",
-    "",
-    "Fix the failing tests by editing the code (or the tests themselves only if they are genuinely wrong). Make the smallest change that addresses the actual failure — do not refactor unrelated code.",
-    "Do NOT run the tests yourself: they are re-run automatically after your edits and the results fed back to you.",
-  ].join("\n")
+  return resolvePrompt(CLI_FIX_TESTS_PROMPT, {
+    context,
+    values: {
+      command: f.command,
+      code: String(f.code),
+      round: String(f.round),
+      maxRounds: String(f.maxRounds),
+      output,
+    },
+  }).text
 }
 
 /** Combined stdout+stderr for the failure prompt. */
@@ -87,6 +95,9 @@ export async function runFixStreaming(deps: FixRunDeps): Promise<void> {
     return
   }
 
+  const promptContext = await primeCliPromptContext(deps.cwd, deps.home)
+  if (deps.signal.aborted) return
+
   let round = 1
   const advance = async (): Promise<DrivenAdvance> => {
     const res = await runTest(command, { cwd: deps.cwd, signal: deps.signal })
@@ -107,25 +118,31 @@ export async function runFixStreaming(deps: FixRunDeps): Promise<void> {
     round += 1
     return {
       kind: "continue",
-      prompt: buildFixPrompt({
-        command,
-        code: res.code,
-        output: combineOutput(res),
-        round,
-        maxRounds: deps.maxRounds,
-      }),
+      prompt: buildFixPrompt(
+        {
+          command,
+          code: res.code,
+          output: combineOutput(res),
+          round,
+          maxRounds: deps.maxRounds,
+        },
+        promptContext
+      ),
     }
   }
 
   await runDrivenTurns({
     send: deps.send,
-    firstPrompt: buildFixPrompt({
-      command,
-      code: first.code,
-      output: combineOutput(first),
-      round: 1,
-      maxRounds: deps.maxRounds,
-    }),
+    firstPrompt: buildFixPrompt(
+      {
+        command,
+        code: first.code,
+        output: combineOutput(first),
+        round: 1,
+        maxRounds: deps.maxRounds,
+      },
+      promptContext
+    ),
     advance,
     dispatch: deps.dispatch,
     signal: deps.signal,

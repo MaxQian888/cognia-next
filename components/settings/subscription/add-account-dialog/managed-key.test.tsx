@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { SubscriptionProviderDefinition } from "@/lib/subscription/core/provider-registry"
@@ -122,7 +123,7 @@ it("creates custom service metadata separately from the vault secret", async () 
   fireEvent.change(screen.getByLabelText("Model IDs (comma separated)"), {
     target: { value: "model-a, model-a, model-b" },
   })
-  fireEvent.change(screen.getByLabelText("API protocol"), { target: { value: "anthropic" } })
+  await selectOption(screen.getByLabelText("API protocol"), "anthropic")
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "secret-key" } })
   await userEvent.click(screen.getByRole("button", { name: "Save" }))
   await waitFor(() => expect(onAdded).toHaveBeenCalled())
@@ -301,7 +302,9 @@ it("does not label normalized unknown model capabilities as verified facts", asy
   render(<ManagedKeyAccountDialog definition={pluginDefinition} open onOpenChange={jest.fn()} />)
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "preview-key" } })
   await userEvent.click(screen.getByRole("button", { name: "Fetch models" }))
-  expect(await screen.findByRole("option", { name: "Unknown model" })).toBeInTheDocument()
+  expect(
+    await screen.findByRole("option", { hidden: true, name: "Unknown model" })
+  ).toBeInTheDocument()
   expect(screen.queryByText("Tool calls")).not.toBeInTheDocument()
   expect(screen.queryByText("Vision")).not.toBeInTheDocument()
   expect(screen.queryByText("Context tokens")).not.toBeInTheDocument()
@@ -343,7 +346,9 @@ it("omits unknown input and output limits from live metadata", async () => {
   render(<ManagedKeyAccountDialog definition={pluginDefinition} open onOpenChange={jest.fn()} />)
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "preview-key" } })
   await userEvent.click(screen.getByRole("button", { name: "Fetch models" }))
-  expect(await screen.findByRole("option", { name: "Unknown model" })).toBeInTheDocument()
+  expect(
+    await screen.findByRole("option", { hidden: true, name: "Unknown model" })
+  ).toBeInTheDocument()
   expect(screen.getByText("200,000")).toBeInTheDocument()
   expect(screen.queryByText("Maximum input tokens")).not.toBeInTheDocument()
   expect(screen.queryByText("Maximum output tokens")).not.toBeInTheDocument()

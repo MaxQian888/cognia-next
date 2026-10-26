@@ -5,6 +5,9 @@ name: Feishu Notifications
 on:
   workflow_run:
     workflows:
+      - Identity Server
+      - Sync Server
+      - Server image benchmark
       - CI/CD Pipeline
       - Code Quality
       - Test Suite
@@ -19,7 +22,6 @@ on:
       - Signaling Server
       - Standalone bootstrap scripts
       - Sync model catalog
-      - Refresh website evidence
     types: [completed]
   workflow_dispatch:
     inputs:

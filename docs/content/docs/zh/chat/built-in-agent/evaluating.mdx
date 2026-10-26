@@ -35,7 +35,7 @@ Cognia 内置使用 TS 实现、在进程内运行的 **eval 引擎**（`lib/ai/
 
 | 类别 | 是什么 | 定义于 | 数量 | 评估 target |
 | --- | --- | --- | --- | --- |
-| **Mode** | 聊天上下文注入器（system prompt + 工具白名单 + 输出格式 + 权限模式） | `types/agent/agent-mode.ts`（`BUILT_IN_AGENT_MODES`） | 11 | `createChatTarget` |
+| **Mode** | 聊天上下文注入器（system prompt + 工具白名单 + 输出格式 + 权限模式） | `lib/agent/modes/built-ins.ts`（`BUILT_IN_AGENT_MODES`） | 11 | `createChatTarget` |
 | **Subagent** | 4 个 `workflow-*` 专家，靠 `description` 被派发器自选 | `lib/claude/agents/subagents/` | 4 | `createChatTarget`（直驱）或在 team/workflow 内 |
 | **External preset** | Codex / Claude Code / Gemini CLI / Cursor CLI 的 ACP 配置 | `lib/ai/agent/external/config/presets.ts` | 4（+custom） | 建两个 chat target 后对比 |
 | **Agent team** | lead + teammates 编排（任务 DAG、委派、预算、HITL） | `lib/ai/agent/team/agent-team-runtime.ts` | 模板 | `createTeamTarget` |

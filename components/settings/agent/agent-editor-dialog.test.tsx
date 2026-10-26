@@ -56,7 +56,33 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
 }))
 
 jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
-  CogniaModelPicker: () => <div data-testid="cognia-model-picker" />,
+  CogniaModelPicker: ({ onChange }: { onChange: (value: unknown) => void }) => (
+    <div data-testid="cognia-model-picker">
+      <button type="button" onClick={() => onChange({ providerId: "gateway", modelId: "big" })}>
+        use gateway model
+      </button>
+      <button type="button" onClick={() => onChange(null)}>
+        use native model
+      </button>
+    </div>
+  ),
+}))
+
+const roleModelProps: Array<Record<string, unknown>> = []
+jest.mock("@/components/agent/external-agent/role-model-fields", () => ({
+  RoleModelFields: (props: { onChange: (value: unknown) => void }) => {
+    roleModelProps.push(props)
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          props.onChange({ version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } })
+        }
+      >
+        set sub-task models
+      </button>
+    )
+  },
 }))
 
 jest.mock("@/lib/files/file-bridge", () => ({
@@ -133,6 +159,81 @@ async function withAgent(patch: Record<string, unknown>, body: () => Promise<voi
 }
 
 describe("AgentEditorDialog", () => {
+  it("preserves inline child models when saving a task-owned OpenCode V2 launch", async () => {
+    const env = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        agents: {
+          reviewer: { mode: "subagent", model: "cognia/review" },
+          researcher: { mode: "subagent", model: "cognia/search" },
+        },
+      }),
+    }
+    await withAgent(
+      {
+        protocol: "opencode-v2",
+        transport: "sse",
+        metadata: { preset: "opencode-v2-service" },
+        cogniaModel: { providerId: "gateway", modelId: "big" },
+        process: { command: "", args: [], env },
+        network: { endpoint: "" },
+      },
+      async () => {
+        const onSave = jest.fn().mockResolvedValue(true)
+        render(
+          <AgentEditorDialog
+            open
+            editingAgentId="agent-1"
+            onOpenChange={jest.fn()}
+            onSave={onSave}
+          />
+        )
+        expect(screen.getByRole("radio", { name: /^Own state/ })).not.toBeDisabled()
+        expect(
+          screen.getByRole("button", { name: "Process environment variables" })
+        ).toBeInTheDocument()
+        await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+        expect(onSave).toHaveBeenCalledWith(
+          expect.objectContaining({ process: expect.objectContaining({ env }) })
+        )
+      }
+    )
+  })
+  it.each(["elsewhere/review", "malformed"])(
+    "refuses an explicit OpenCode child model without role overrides: %s",
+    async (model) => {
+      await withAgent(
+        {
+          protocol: "acp",
+          metadata: { preset: "opencode-acp" },
+          cogniaModel: { providerId: "gateway", modelId: "big" },
+          modelRoles: undefined,
+          process: {
+            command: "opencode",
+            args: ["acp"],
+            env: {
+              OPENCODE_CONFIG_CONTENT: JSON.stringify({
+                agent: { reviewer: { mode: "subagent", model } },
+              }),
+            },
+          },
+        },
+        async () => {
+          const onSave = jest.fn()
+          render(
+            <AgentEditorDialog
+              open
+              editingAgentId="agent-1"
+              onOpenChange={jest.fn()}
+              onSave={onSave}
+            />
+          )
+          await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+          expect(onSave).not.toHaveBeenCalled()
+          expect(toastErrorMock).toHaveBeenCalledWith(messages.externalAgent.roleModels.invalid)
+        }
+      )
+    }
+  )
   it("edits SIWC Codex options while keeping native command and independent account binding", async () => {
     const metadata = {
       preset: "codex",
@@ -212,23 +313,44 @@ describe("AgentEditorDialog", () => {
     )
   })
 
-  it("refuses an invalid sandbox host before saving", async () => {
-    const onSave = jest.fn()
-    render(
-      <AgentEditorDialog open editingAgentId="agent-1" onOpenChange={jest.fn()} onSave={onSave} />
-    )
-    fireEvent.change(screen.getByRole("combobox", { name: "Sandbox network" }), {
-      target: { value: "allowlist" },
-    })
-    fireEvent.change(screen.getByRole("textbox", { name: "Allowed hosts" }), {
-      target: { value: "https://example.com" },
-    })
-    await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
-    expect(onSave).not.toHaveBeenCalled()
-    expect(toastErrorMock).toHaveBeenCalledWith(
-      externalAgentManage.editor.sandboxAllowedHostsInvalid
-    )
-  })
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ])(
+    "refuses an invalid sandbox host before saving OpenCode %s",
+    async (preset, protocol, transport) => {
+      await withAgent(
+        {
+          protocol,
+          transport,
+          process: { command: "opencode", args: [protocol === "acp" ? "acp" : "serve"] },
+          metadata: { preset, autoSpawnServer: true },
+          cogniaModel: { providerId: "gateway", modelId: "big" },
+        },
+        async () => {
+          const onSave = jest.fn()
+          render(
+            <AgentEditorDialog
+              open
+              editingAgentId="agent-1"
+              onOpenChange={jest.fn()}
+              onSave={onSave}
+            />
+          )
+          await selectOption(screen.getByRole("combobox", { name: "Sandbox network" }), "allowlist")
+          fireEvent.change(screen.getByRole("textbox", { name: "Allowed hosts" }), {
+            target: { value: "https://example.com" },
+          })
+          await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
+          expect(onSave).not.toHaveBeenCalled()
+          expect(toastErrorMock).toHaveBeenCalledWith(
+            externalAgentManage.editor.sandboxAllowedHostsInvalid
+          )
+        }
+      )
+    }
+  )
 
   it("does not show process sandbox controls for an existing network service", async () => {
     await withAgent(
@@ -253,6 +375,7 @@ describe("AgentEditorDialog", () => {
         protocol: "codex-app-server",
         defaultPermissionMode: "acceptEdits",
         codexOptions: {
+          stepModelSwitching: true,
           sandboxMode: "workspaceWrite",
           networkAccess: true,
           writableRoots: ["/projects/shared"],
@@ -277,6 +400,7 @@ describe("AgentEditorDialog", () => {
         await userEvent.click(screen.getByRole("switch", { name: "Network access" }))
         await userEvent.click(screen.getByRole("button", { name: /^save$/i }))
         expect(onSave.mock.calls[0][0].codexOptions).toEqual({
+          stepModelSwitching: true,
           sandboxMode: "workspaceWrite",
           networkAccess: false,
           writableRoots: ["/projects/shared", "/opt/build-output"],
@@ -748,6 +872,55 @@ describe("AgentEditorDialog", () => {
         protocol: "acp",
         process: expect.objectContaining({ command: "claude" }),
       })
+    )
+  })
+
+  it("saves sub-task models beside the Cognia model and clears them on the native lane", async () => {
+    const user = userEvent.setup()
+    const onSave = jest.fn().mockResolvedValue(true)
+    render(
+      <AgentEditorDialog
+        open
+        onOpenChange={jest.fn()}
+        initialPreset="claude-code"
+        onSave={onSave}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "use gateway model" }))
+    expect(roleModelProps.at(-1)).toMatchObject({
+      primary: { providerId: "gateway", modelId: "big" },
+    })
+    await user.click(screen.getByRole("button", { name: "set sub-task models" }))
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        cogniaModel: { providerId: "gateway", modelId: "big" },
+        modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
+      })
+    )
+  })
+
+  it("clears stored sub-task models when the configuration returns to the native lane", async () => {
+    const user = userEvent.setup()
+    const onSave = jest.fn().mockResolvedValue(true)
+    render(
+      <AgentEditorDialog
+        open
+        onOpenChange={jest.fn()}
+        initialPreset="claude-code"
+        onSave={onSave}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "use gateway model" }))
+    await user.click(screen.getByRole("button", { name: "set sub-task models" }))
+    await user.click(screen.getByRole("button", { name: "use native model" }))
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /^add$/i }))
+    })
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cogniaModel: null, modelRoles: null })
     )
   })
 
@@ -1334,3 +1507,4 @@ describe("new preset names", () => {
     expect(screen.getByLabelText(/agent name/i)).toHaveValue("My Codex")
   })
 })
+import { selectOption } from "@/lib/testing/select-option"

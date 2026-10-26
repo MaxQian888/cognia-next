@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 /** @jest-environment jsdom */
 
 import { render, screen, waitFor } from "@testing-library/react"
@@ -75,7 +76,7 @@ it("previews references and migrates them to an explicit replacement", async () 
   expect(await screen.findByText("referenceSummary")).toBeInTheDocument()
   expect(screen.getByText("activeReference")).toBeInTheDocument()
   expect(screen.getByText("defaultReference")).toBeInTheDocument()
-  await user.selectOptions(screen.getByLabelText("replacementLabel"), "a2")
+  await selectOption(screen.getByLabelText("replacementLabel"), "a2")
   await user.click(screen.getByText("removeConfirm"))
 
   await waitFor(() => expect(onConfirm).toHaveBeenCalledWith("a2"))

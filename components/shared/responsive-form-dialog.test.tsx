@@ -52,6 +52,8 @@ describe("ResponsiveFormDialog", () => {
   it("keeps the body as the one scroll region in dynamic-viewport units", () => {
     renderForm({ contentClassName: "sm:max-w-[640px]" })
     expect(screen.getByTestId("thing-editor-body")).toHaveClass("overflow-y-auto", "min-h-0")
+    // A shrinkable column, so one wide child cannot push the form past the edge.
+    expect(screen.getByTestId("thing-editor-body")).toHaveClass("grid-cols-[minmax(0,1fr)]")
     const content = screen.getByTestId("thing-editor-dialog")
     expect(content.className).toContain("max-h-[85dvh]")
     expect(content).toHaveClass("sm:max-w-[640px]")
@@ -87,5 +89,51 @@ describe("ResponsiveFormDialog", () => {
     const { onOpenChange } = renderForm()
     await userEvent.keyboard("{Escape}")
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  describe("holdShellWhileOpen", () => {
+    function Editor(props: { open: boolean; hold?: boolean }) {
+      return (
+        <ResponsiveFormDialog
+          open={props.open}
+          onOpenChange={() => {}}
+          title="Edit thing"
+          testid="thing-editor"
+          holdShellWhileOpen={props.hold}
+        >
+          <label>
+            Name
+            <input />
+          </label>
+        </ResponsiveFormDialog>
+      )
+    }
+
+    it("keeps the opening shell — and the typed draft — across a resize", async () => {
+      const user = userEvent.setup()
+      const { rerender } = render(<Editor open hold />)
+      await user.type(screen.getByLabelText("Name"), "draft")
+      useIsMobileMock.mockReturnValue(true)
+      rerender(<Editor open hold />)
+      expect(screen.getByTestId("thing-editor-dialog")).toBeInTheDocument()
+      expect(screen.queryByTestId("thing-editor-drawer")).toBeNull()
+      expect(screen.getByLabelText("Name")).toHaveValue("draft")
+    })
+
+    it("takes the current viewport's shell on the next opening", () => {
+      const { rerender } = render(<Editor open hold />)
+      expect(screen.getByTestId("thing-editor-dialog")).toBeInTheDocument()
+      rerender(<Editor open={false} hold />)
+      useIsMobileMock.mockReturnValue(true)
+      rerender(<Editor open hold />)
+      expect(screen.getByTestId("thing-editor-drawer")).toBeInTheDocument()
+    })
+
+    it("follows the viewport when not asked to hold (the default)", () => {
+      const { rerender } = render(<Editor open />)
+      useIsMobileMock.mockReturnValue(true)
+      rerender(<Editor open />)
+      expect(screen.getByTestId("thing-editor-drawer")).toBeInTheDocument()
+    })
   })
 })

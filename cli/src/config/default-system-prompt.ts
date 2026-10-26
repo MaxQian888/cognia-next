@@ -11,7 +11,9 @@
  * working directory so a runtime `/cd` re-resolves it on the next turn.
  */
 
-import { PLAN_MODE_PROMPT } from "@/lib/claude/plan-mode-prompt"
+import { CLI_BASE_IDENTITY_PROMPT } from "@/lib/agent/prompts/cli-base"
+import { PLAN_MODE_PROMPT } from "@/lib/agent/prompts/plan-mode"
+import { resolvePrompt } from "@/lib/prompts/resolve"
 
 import { buildShellEnvironmentSection } from "./shell-environment-prompt"
 
@@ -37,18 +39,9 @@ export interface DefaultSystemPromptInput {
    * omitted) leaves the prompt unchanged.
    */
   permissionMode?: string
+  /** The workspace the session belongs to, so a workspace-scoped override applies. */
+  workspaceId?: string
 }
-
-/**
- * The Plan-mode workflow guidance appended when the session is read-only
- * (`permissionMode === "plan"`). Re-exported from the shared single source
- * (`lib/claude/plan-mode-prompt.ts`) that the GUI's `PLAN_MODE_SNIPPET` also
- * re-exports — the two surfaces must not drift. Kept as a named constant so
- * the `/plan explore` pipeline and tests can reference the exact contract.
- * Names the built-in read-only `Explore` / `Plan` subagents and both
- * exit-plan tool names.
- */
-export const PLAN_MODE_PROMPT_SECTION = PLAN_MODE_PROMPT
 
 /** The environment facts the operating rules need. */
 export interface CliOperatingRulesInput {
@@ -102,23 +95,29 @@ export function buildCliOperatingRules(input: CliOperatingRulesInput = {}): stri
   ].join("\n")
 }
 
-/** Build the default CLI base system prompt for the given environment. */
+/**
+ * Build the default CLI base system prompt for the given environment: the
+ * (possibly customized) identity line, the host's `<env>` block, the tone
+ * section, the operating rules, and the Plan-mode workflow in plan mode. The
+ * identity and Plan-mode text resolve through the Prompt Center store of the
+ * CLI's own account database; with no override they are the shipped text.
+ */
 export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): string {
   const platform = input.platform ?? process.platform
   const date = new Date(input.now).toISOString().slice(0, 10)
-  const planSection = input.permissionMode === "plan" ? ["", PLAN_MODE_PROMPT_SECTION] : []
+  const context = input.workspaceId ? { workspaceId: input.workspaceId } : {}
+  const planSection =
+    input.permissionMode === "plan" ? ["", resolvePrompt(PLAN_MODE_PROMPT, { context }).text] : []
+  const [identity, ...tone] = resolvePrompt(CLI_BASE_IDENTITY_PROMPT, { context }).text.split("\n")
   return [
-    "You are Cognia's command-line coding agent. You help with software-engineering tasks in the user's project, using the available tools to read, search, edit, and run code.",
+    identity,
     "",
     "<env>",
     `Working directory: ${input.cwd}`,
     `Platform: ${platform}`,
     `Today's date: ${date}`,
     "</env>",
-    "",
-    "Tone and output:",
-    "- You run in a terminal; your output is shown as plain text. Be concise and direct — skip preamble, restating the question, and end-of-turn summaries unless the user asks. Match the response length to the task: a one-line answer for a simple question, no filler.",
-    "- Reference code as `path:line` so the user can jump to it. Don't dump large file contents you've already read back into the chat.",
+    ...tone,
     "",
     buildCliOperatingRules({
       platform,

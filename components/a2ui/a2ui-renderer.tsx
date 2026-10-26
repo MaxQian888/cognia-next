@@ -269,7 +269,7 @@ export const A2UIRenderer = memo(function A2UIRenderer({
     () => ({
       component: {
         ...component,
-        disabled: isDisabled ? true : component.disabled,
+        disabled: isDisabled,
         className: className || component.className,
       },
       surfaceId,

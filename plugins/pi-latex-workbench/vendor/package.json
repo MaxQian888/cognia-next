@@ -18,7 +18,8 @@
     "test": "node --test 'packages/*/test/*.test.ts'",
     "test:contracts": "node --test 'packages/contracts/test/*.test.ts'",
     "contracts:types": "python3 scripts/generate-types.py",
-    "doctor": "node packages/cli/src/bin.ts doctor"
+    "doctor": "node packages/cli/src/bin.ts doctor",
+    "prepare:plugin": "node prepare-plugin.mjs"
   },
   "devDependencies": {
     "@types/node": "26.5.1",

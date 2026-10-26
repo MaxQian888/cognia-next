@@ -25,23 +25,16 @@ import {
   createPythonBackedProxy,
   isPythonBackedContribution,
 } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
-
-export interface WorkspaceBackendBridgeError {
-  pluginId: string
-  backendId: string
-  message: string
-}
-
-export interface WorkspaceBackendBridgeResult {
-  registered: number
-  errors: WorkspaceBackendBridgeError[]
-}
-
-export interface WorkspaceBackendBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-  getConfig?: (pluginId: string, key: string) => unknown
-  getSecret?: (pluginId: string, key: string) => Promise<string | undefined>
-}
+import type {
+  WorkspaceBackendBridgeError,
+  WorkspaceBackendBridgeOptions,
+  WorkspaceBackendBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/workspace-backend-bridge"
+export type {
+  WorkspaceBackendBridgeError,
+  WorkspaceBackendBridgeResult,
+  WorkspaceBackendBridgeOptions,
+} from "@cognia/plugin-contract/lib/plugin/bridge/workspace-backend-bridge"
 
 const DEFAULT_IMPORTER: NonNullable<WorkspaceBackendBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

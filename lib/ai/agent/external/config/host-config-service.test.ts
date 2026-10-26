@@ -1,5 +1,11 @@
 /** @jest-environment jsdom */
 
+import * as piSubagents from "./pi-subagents"
+jest.mock("./pi-subagents", () => {
+  const actual = jest.requireActual("./pi-subagents")
+  return { ...actual, resolvePiSubagents: jest.fn(actual.resolvePiSubagents) }
+})
+
 import { hostConfigOriginAgentId } from "@/lib/ai/agent/runtime-catalog/pairing"
 import "fake-indexeddb/auto"
 
@@ -955,4 +961,265 @@ describe("getHostCogniaModelCatalog", () => {
       mockTransportCall.mockReset()
     }
   })
+})
+
+describe("Host model role persistence", () => {
+  it.each([
+    ["opencode-server", "opencode", "sse"],
+    ["opencode-acp", "acp", "stdio"],
+    ["opencode-v2-service", "opencode-v2", "sse"],
+  ] as const)(
+    "validates supported model-role versions for OpenCode %s",
+    async (preset, protocol, transport) => {
+      const source = config({
+        protocol,
+        transport,
+        process: { command: "opencode", args: [protocol === "acp" ? "acp" : "serve"] },
+        metadata: { preset, autoSpawnServer: true },
+        cogniaModel: { providerId: "p", modelId: "m" },
+        modelRoles: { version: 2, slots: {} },
+      })
+      const created = await createHostExternalAgentConfig({ config: source }, ready)
+      expect(created.config.modelRoles).toEqual({ version: 2, slots: {} })
+      const patched = await updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { modelRoles: { version: 1, slots: {} } },
+        },
+        ready
+      )
+      expect(patched.config.modelRoles).toEqual({ version: 1, slots: {} })
+      const invalid = { version: 999, slots: {} } as never
+      await expect(
+        createHostExternalAgentConfig({ config: { ...source, modelRoles: invalid } }, ready)
+      ).rejects.toThrow(/model role/)
+      await expect(
+        updateHostExternalAgentConfig(
+          {
+            configId: created.configId,
+            expectedRevision: patched.revision,
+            patch: { modelRoles: invalid },
+          },
+          ready
+        )
+      ).rejects.toThrow(/model role/)
+      expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(patched.revision)
+    }
+  )
+  it("validates explicit OpenCode child bindings on create and patch without modelRoles", async () => {
+    const inline = (provider: string) => ({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        agent: { reviewer: { mode: "subagent", model: `${provider}/review` } },
+      }),
+    })
+    const source = config({
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "opencode", args: ["acp"], env: inline("cognia") },
+      metadata: { preset: "opencode-acp" },
+      cogniaModel: { providerId: "p", modelId: "m" },
+    })
+    const created = await createHostExternalAgentConfig({ config: source }, ready)
+    expect(created.config.process?.env).toEqual(inline("cognia"))
+    expect(created.config.modelRoles).toBeUndefined()
+    await expect(
+      createHostExternalAgentConfig(
+        { config: { ...source, process: { ...source.process!, env: inline("other") } } },
+        ready
+      )
+    ).rejects.toThrow("cross-provider-unsupported")
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { process: { ...source.process!, env: inline("other") } },
+        },
+        ready
+      )
+    ).rejects.toThrow("cross-provider-unsupported")
+    expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(created.revision)
+  })
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const bound = () =>
+    config({
+      protocol: "codex-app-server",
+      process: { command: "codex", args: ["app-server"] },
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles,
+    })
+  it("creates, preserves, duplicates, and clears roles", async () => {
+    const created = await createHostExternalAgentConfig({ config: bound() }, ready)
+    expect(created.config.modelRoles).toEqual(modelRoles)
+    const renamed = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: created.revision,
+        patch: { name: "renamed" },
+      },
+      ready
+    )
+    expect(renamed.config.modelRoles).toEqual(modelRoles)
+    const copied = await duplicateHostExternalAgentConfig({ configId: created.configId }, ready)
+    expect(copied.config.modelRoles).toEqual(modelRoles)
+    const cleared = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: renamed.revision,
+        patch: { modelRoles: null },
+      },
+      ready
+    )
+    expect(cleared.config.modelRoles).toBeUndefined()
+    const restored = await updateHostExternalAgentConfig(
+      { configId: created.configId, expectedRevision: cleared.revision, patch: { modelRoles } },
+      ready
+    )
+    const native = await updateHostExternalAgentConfig(
+      {
+        configId: created.configId,
+        expectedRevision: restored.revision,
+        patch: { cogniaModel: null },
+      },
+      ready
+    )
+    expect(native.config.modelRoles).toBeUndefined()
+  })
+  it("refuses malformed, unsupported, cross-provider and cross-account selections before writing", async () => {
+    const created = await createHostExternalAgentConfig({ config: bound() }, ready)
+    for (const invalid of [
+      { version: 999, slots: {} },
+      { version: 1, slots: { "aux.small": { kind: "inherit-primary" } } },
+      {
+        version: 1,
+        slots: {
+          "subagent.default": {
+            kind: "cognia",
+            binding: { providerId: "other", modelId: "child" },
+          },
+        },
+      },
+      {
+        version: 1,
+        slots: {
+          "subagent.default": {
+            kind: "cognia",
+            binding: { providerId: "p", modelId: "child", accountId: "other" },
+          },
+        },
+      },
+    ]) {
+      await expect(
+        createHostExternalAgentConfig(
+          { config: { ...bound(), modelRoles: invalid as never } },
+          ready
+        )
+      ).rejects.toThrow(/model role/)
+      await expect(
+        updateHostExternalAgentConfig(
+          {
+            configId: created.configId,
+            expectedRevision: created.revision,
+            patch: { modelRoles: invalid as never },
+          },
+          ready
+        )
+      ).rejects.toThrow(/model role/)
+    }
+    expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(created.revision)
+  })
+  it("judges a sub-task effort by this Host's own model metadata, as admission does", async () => {
+    const marker = globalThis as Record<string, unknown>
+    marker.__COGNIA_HEADLESS__ = true
+    const child = (reasoningEffort: string) => ({
+      version: 1 as const,
+      slots: {
+        "subagent.default": {
+          kind: "cognia" as const,
+          binding: { providerId: "p", modelId: "child" },
+          reasoningEffort,
+        },
+      },
+    })
+    try {
+      mockTransportCall.mockImplementation(async (name: string) =>
+        name === "gateway_provider_capabilities"
+          ? { providers: [{ id: "p", modelMetadataById: { child: { supportsReasoning: false } } }] }
+          : undefined
+      )
+      await expect(
+        createHostExternalAgentConfig({ config: { ...bound(), modelRoles: child("high") } }, ready)
+      ).rejects.toThrow("effort-unsupported")
+      mockTransportCall.mockImplementation(async (name: string) =>
+        name === "gateway_provider_capabilities"
+          ? { providers: [{ id: "p", modelMetadataById: { child: { supportsReasoning: true } } }] }
+          : undefined
+      )
+      const created = await createHostExternalAgentConfig(
+        { config: { ...bound(), modelRoles: child("high") } },
+        ready
+      )
+      expect(created.config.modelRoles).toEqual(child("high"))
+    } finally {
+      delete marker.__COGNIA_HEADLESS__
+      mockTransportCall.mockReset()
+    }
+  })
+})
+
+it("rechecks Pi plugin availability and explicit models on save and rejects removal on patch", async () => {
+  const detect = jest.mocked(piSubagents.resolvePiSubagents).mockImplementation(async (source) => ({
+    ...source,
+    metadata: {
+      ...source.metadata,
+      cogniaPiSubagents: {
+        family: "nico",
+        version: "0.80.0",
+        agents: { reviewer: { model: "cognia/review" } },
+      },
+    },
+  }))
+  const source = config({
+    protocol: "pi-rpc",
+    process: { command: "pi" },
+    cogniaModel: { providerId: "p", modelId: "main" },
+    modelRoles: { version: 1, slots: { "subagent.default": { kind: "inherit-primary" } } },
+  })
+  try {
+    const created = await createHostExternalAgentConfig({ config: source }, ready)
+    expect(detect).toHaveBeenCalled()
+    expect(created.config.modelRoles).toEqual(source.modelRoles)
+    expect(created.config.metadata?.cogniaPiSubagents).toBeUndefined()
+    detect.mockImplementation(async (input) => input)
+    await expect(
+      updateHostExternalAgentConfig(
+        {
+          configId: created.configId,
+          expectedRevision: created.revision,
+          patch: { name: "Changed" },
+        },
+        ready
+      )
+    ).rejects.toThrow(/unsupported-slot/)
+    detect.mockImplementation(async (input) => ({
+      ...input,
+      metadata: {
+        cogniaPiSubagents: {
+          family: "nico",
+          version: "0.80.0",
+          agents: { reviewer: { model: "other/review" } },
+        },
+      },
+    }))
+    await expect(createHostExternalAgentConfig({ config: source }, ready)).rejects.toThrow(
+      /cross-provider/
+    )
+    expect((await getHostExternalAgentConfig(created.configId))?.revision).toBe(created.revision)
+  } finally {
+    detect.mockImplementation(jest.requireActual("./pi-subagents").resolvePiSubagents)
+  }
 })

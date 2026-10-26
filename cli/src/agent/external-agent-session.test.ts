@@ -1,6 +1,7 @@
 /**
  * @jest-environment node
  */
+import { getCliSubagentContext } from "./subagent-dispatch"
 jest.mock("@/lib/claude/adapter-hooks", () => {
   const actual = jest.requireActual("@/lib/claude/adapter-hooks")
   return {
@@ -19,6 +20,11 @@ jest.mock("@/lib/claude/adapter-hooks", () => {
 })
 jest.mock("./configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
+}))
+// Session tests inject their tool hosts and manifests. Booting unrelated real
+// plugins here starts scheduler/watch timers that outlive those fake sessions.
+jest.mock("../plugin/plugin-runtime", () => ({
+  ensurePluginRuntime: jest.fn(async () => ({ ok: true })),
 }))
 jest.mock("@/lib/ai/agent/external/config/presets", () => {
   const actual = jest.requireActual("@/lib/ai/agent/external/config/presets")
@@ -320,15 +326,23 @@ describe("createExternalAgentSession", () => {
       cancelInFlight: jest.fn(),
       close: jest.fn(async () => undefined),
     }))
+    const awaitApprovals = jest.fn(async () => {})
+    const manager = fakeManager().manager
+    const execute = jest.mocked(manager.execute).getMockImplementation()!
+    jest.mocked(manager.execute).mockImplementationOnce(async (...args) => {
+      expect(getCliSubagentContext("external-host-config")?.awaitApprovals).toBe(awaitApprovals)
+      return execute(...args)
+    })
     const session = createExternalAgentSession({
+      sessionId: "external-host-config",
       config,
-      manager: fakeManager().manager,
+      manager,
       transcriptFs: memoryTranscript().fs,
       startToolHost: startToolHost as never,
       buildToolHostServers: () => [],
     })
 
-    await session.send("search", { gate: async () => ({ decision: "allow" }) })
+    await session.send("search", { gate: async () => ({ decision: "allow" }), awaitApprovals })
 
     expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config)
     expect(startToolHost).toHaveBeenCalledTimes(1)
@@ -2231,6 +2245,55 @@ describe("external-agent turn bounds", () => {
     expect(getExecuteOptions()?.permissionMode).toBe("default")
   })
 
+  it.each([
+    { promptTokensIncludeCache: true, expectedInput: 3 },
+    { promptTokensIncludeCache: undefined, expectedInput: 19 },
+  ])(
+    "keeps CLI input/cache buckets disjoint only when declared: $promptTokensIncludeCache",
+    async ({ promptTokensIncludeCache, expectedInput }) => {
+      const transcript = memoryTranscript()
+      const { manager } = fakeManager({
+        tokenUsage: {
+          promptTokens: 19,
+          promptTokensIncludeCache,
+          completionTokens: 2,
+          totalTokens: 21,
+          cacheReadTokens: 7,
+          cacheWriteTokens: 9,
+          contextTokens: 21,
+          modelContextWindow: 1_000_000,
+        },
+      })
+      const session = createExternalAgentSession({
+        disableToolHost: true,
+        config: baseConfig,
+        manager,
+        transcriptFs: transcript.fs,
+      })
+
+      try {
+        const turn = await session.send("go", { gate: async () => ({ decision: "allow" }) })
+        const expectedUsage = {
+          inputTokens: expectedInput,
+          outputTokens: 2,
+          cacheReadInputTokens: 7,
+          cacheCreationInputTokens: 9,
+          contextTokens: 21,
+          contextWindow: 1_000_000,
+        }
+        expect(turn.usage).toMatchObject(expectedUsage)
+        expect(transcript.lines.map((line) => JSON.parse(line))).toContainEqual(
+          expect.objectContaining({
+            role: "assistant",
+            meta: expect.objectContaining({ usage: expect.objectContaining(expectedUsage) }),
+          })
+        )
+      } finally {
+        await session.close()
+      }
+    }
+  )
+
   it("tracks liveness and tolerates a close before any turn", async () => {
     const { manager } = fakeManager()
     const session = createExternalAgentSession({
@@ -2446,10 +2509,15 @@ describe("external-agent turn bounds", () => {
 it("reserves turn startup before allowing an MCP apply", async () => {
   const { manager } = fakeManager()
   let release!: () => void
+  let markStarted!: () => void
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve
+  })
   manager.addAgent = jest.fn(
     () =>
       new Promise<void>((resolve) => {
         release = resolve
+        markStarted()
       })
   )
   const session = createExternalAgentSession({
@@ -2462,6 +2530,7 @@ it("reserves turn startup before allowing an MCP apply", async () => {
   await expect(applySessionMcpStatus(session.sessionId, true)).rejects.toThrow(
     "Wait for the active agent turn"
   )
+  await started
   release()
   await sending
   await session.close()

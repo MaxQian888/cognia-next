@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 /** @jest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -348,12 +349,12 @@ describe("EvalLabWorkspace", () => {
     const direction = document.getElementById("eval-dimension-3-direction")
     expect(metric).toBeInstanceOf(HTMLInputElement)
     expect(weight).toBeInstanceOf(HTMLInputElement)
-    expect(direction).toBeInstanceOf(HTMLSelectElement)
+    expect(direction).toHaveAttribute("role", "combobox")
     await user.clear(metric as HTMLInputElement)
     await user.type(metric as HTMLInputElement, "safety")
     await user.clear(weight as HTMLInputElement)
     await user.type(weight as HTMLInputElement, "0.4")
-    await user.selectOptions(direction as HTMLSelectElement, "minimize")
+    await selectOption(direction as HTMLSelectElement, "minimize")
 
     await user.click(screen.getByRole("button", { name: "lab.scoring.addConstraint" }))
     expect(screen.getAllByLabelText("lab.scoring.operator")).toHaveLength(2)
@@ -415,12 +416,12 @@ describe("EvalLabWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "lab.steps.variants" }))
 
     const kinds = screen.getAllByLabelText("lab.variants.agentTarget")
-    await user.selectOptions(kinds[0], "workflow")
+    await selectOption(kinds[0], "workflow")
     expect(screen.getAllByLabelText("lab.variants.targetIds.workflow")[0]).toBeInTheDocument()
     await user.type(screen.getAllByLabelText("lab.variants.targetIds.workflow")[0], "workflow-1")
     await user.type(screen.getAllByLabelText("lab.variants.workflowVersion")[0], "version-1")
     expect(screen.getAllByLabelText("lab.variants.workflowVersion")[0]).toHaveValue("version-1")
-    await user.selectOptions(kinds[0], "team")
+    await selectOption(kinds[0], "team")
     expect(screen.getAllByLabelText("lab.variants.targetIds.team")[0]).toHaveValue("")
     expect(screen.queryByLabelText("lab.variants.workflowVersion")).not.toBeInTheDocument()
     expect(
@@ -748,7 +749,7 @@ describe("EvalLabWorkspace", () => {
 
     render(<EvalLabWorkspace />)
     const projectPicker = await screen.findByLabelText("lab.project.saved")
-    await user.selectOptions(projectPicker, "saved-project")
+    await selectOption(projectPicker, "saved-project")
     expect(screen.getByLabelText("lab.project.name")).toHaveValue("Saved selection")
     expect(screen.getByRole("button", { name: "lab.mode.agent" })).toHaveAttribute(
       "aria-pressed",
@@ -765,7 +766,7 @@ describe("EvalLabWorkspace", () => {
     )
 
     const experimentPicker = await screen.findByLabelText("lab.project.experiments")
-    await user.selectOptions(experimentPicker, "completed-experiment")
+    await selectOption(experimentPicker, "completed-experiment")
     await waitFor(() => {
       expect(mockServiceStatus).toHaveBeenCalledWith("completed-experiment")
       expect(mockLatestApplication).toHaveBeenCalledWith("completed-experiment")
@@ -773,7 +774,7 @@ describe("EvalLabWorkspace", () => {
     expect(screen.getByText("lab.review.title")).toBeInTheDocument()
 
     await user.click(screen.getByRole("button", { name: "lab.steps.goal" }))
-    await user.selectOptions(screen.getByLabelText("lab.project.saved"), "")
+    await selectOption(screen.getByLabelText("lab.project.saved"), "")
     expect(screen.getByLabelText("lab.project.name")).toHaveValue("")
     expect(screen.getByRole("button", { name: "lab.mode.model" })).toHaveAttribute(
       "aria-pressed",

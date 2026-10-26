@@ -46,6 +46,26 @@ afterEach(() => {
   __resetRemoteAttachForTests()
 })
 
+describe("P5d partition attachment authority", () => {
+  it("uses partition ownership without changing legacy grant or event-plane checks", () => {
+    const base = { eventStreams: streams(), grants: [], now: T0 }
+    expect(attachSession("s", "legacy", base)).toMatchObject({
+      mode: "observe",
+      downgradeReason: "missing-capability",
+    })
+    expect(attachSession("s", "person", { ...base, partition: true })).toMatchObject({
+      mode: "control",
+      downgradeReason: null,
+    })
+    expect(
+      attachSession("s", "observer", { ...base, partition: true, requestedMode: "observe" })
+    ).toMatchObject({ mode: "observe", downgradeReason: null })
+    expect(
+      attachSession("s", "offline", { ...base, partition: true, eventStreams: [] })
+    ).toMatchObject({ mode: "observe", downgradeReason: "event-plane-not-ready" })
+  })
+})
+
 describe("attach registry", () => {
   it("a fresh session is not attached", () => {
     expect(isSessionAttached("s1", T0)).toBe(false)

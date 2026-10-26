@@ -1,4 +1,5 @@
 {
+  "manualSubagentUnsupported": "This backend cannot host manual CLI subagents.",
   "trustQuestion": "Do you trust the files in {path}?",
   "trustDescription": "Cognia Agent may read and edit files and run commands in this folder.",
   "trustProceed": "Yes, proceed",

@@ -172,3 +172,17 @@ describe("uniqueDuplicateName", () => {
     )
   })
 })
+
+it("deep copies role overrides only alongside the Cognia binding", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const bound = { ...source, modelRoles }
+  const copied = externalAgentDuplicateInput(bound, "Copy")
+  expect(copied.modelRoles).toEqual(modelRoles)
+  expect(copied.modelRoles).not.toBe(modelRoles)
+  expect(
+    externalAgentDuplicateInput({ ...bound, cogniaModel: null }, "Native").modelRoles
+  ).toBeUndefined()
+})

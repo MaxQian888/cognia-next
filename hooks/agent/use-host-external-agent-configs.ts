@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useTranslations } from "next-intl"
 
 import {
   HOST_CONFIG_COMMANDS,
@@ -23,6 +24,7 @@ import {
   deleteRemoteHostConfig,
   duplicateRemoteHostConfig,
   hostConfigsAvailability,
+  hostSupportsModelRoles,
   listRemoteHostConfigs,
   reconcileRemoteHostConfigs,
   updateRemoteHostConfig,
@@ -103,7 +105,17 @@ function hostLoadKey(): string {
 
 const EMPTY_CONFIGS: ExternalAgentConfigRecord[] = []
 
+/** Subscribe to capability changes, including switching the active paired Host. */
+export function useHostSupportsModelRoles(): boolean {
+  return useSyncExternalStore(
+    subscribeExternalAgentProcessPlane,
+    hostSupportsModelRoles,
+    () => false
+  )
+}
+
 export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
+  const tRoot = useTranslations()
   const hostKey = useSyncExternalStore(
     subscribeExternalAgentProcessPlane,
     hostLoadKey,
@@ -183,7 +195,14 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       try {
         outcome = { ok: true, value: await run() }
       } catch (cause) {
-        failure = cause instanceof Error ? cause.message : String(cause)
+        // A Host capability refusal names its own message key; show the words.
+        const i18nKey = (cause as { i18nKey?: unknown } | null)?.i18nKey
+        failure =
+          typeof i18nKey === "string"
+            ? tRoot(i18nKey as never)
+            : cause instanceof Error
+              ? cause.message
+              : String(cause)
         outcome = { ok: false, error: failure }
       }
       // The refresh runs BEFORE the failure is recorded, not after. A refresh
@@ -197,7 +216,7 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       setBusy(false)
       return outcome
     },
-    [refresh]
+    [refresh, tRoot]
   )
 
   const update = useCallback(

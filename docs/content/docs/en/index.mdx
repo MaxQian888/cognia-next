@@ -37,10 +37,10 @@ flowchart LR
   Docs --> Next
 ```
 
-Two standalone services live alongside the monorepo:
+The cloud and self-hosted services live in [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services), pinned by `integrations/cognia-services.json`. Among them:
 
 - `services/signaling-server/` — WebRTC rendezvous (axum + workers-rs).
-- `services/share-server/` — Cloudflare Worker + Vite viewer for zero-knowledge share links.
+- `services/share-server/` — Cloudflare Worker for zero-knowledge share links.
 
 ## Quick navigation
 

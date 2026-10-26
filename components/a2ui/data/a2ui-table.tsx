@@ -22,7 +22,12 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react"
 import type { A2UIComponentProps, A2UITableComponent, A2UITableColumn } from "@/types/a2ui/schema"
 import { A2UIDataCtx } from "@/hooks/a2ui/use-a2ui-context"
-import { resolveArrayOrPath, resolveStringOrPath, getValueByPath } from "@/lib/a2ui/data-model"
+import {
+  resolveArrayOrPath,
+  resolveStringOrPath,
+  getValueByPath,
+  getBindingPath,
+} from "@/lib/a2ui/data-model"
 
 type SortDirection = "asc" | "desc" | null
 
@@ -80,7 +85,12 @@ export const A2UITable = memo(function A2UITable({
     ? resolveStringOrPath(component.description, dataModel, "")
     : ""
   const [currentPage, setCurrentPage] = useState(0)
-  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
+  const [localSelectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set())
+  const selectionPath = getBindingPath(component.selectedRows)
+  const selectedRowKeys =
+    selectionPath || Array.isArray(component.selectedRows)
+      ? new Set(resolveArrayOrPath<string>(component.selectedRows ?? [], dataModel, []).map(String))
+      : localSelectedRowKeys
   const pageSize = component.pageSize || 10
   const rowKey = component.rowKey || "id"
   const selectable = component.selectable || false
@@ -216,57 +226,29 @@ export const A2UITable = memo(function A2UITable({
     [rowKey]
   )
 
-  const handleSelectRow = useCallback(
-    (rowId: string, checked: boolean) => {
-      setSelectedRowKeys((prev) => {
-        const next = new Set(prev)
-        if (checked) {
-          next.add(rowId)
-        } else {
-          next.delete(rowId)
-        }
-        // Emit data change for selectedRows binding
-        if (
-          component.selectedRows &&
-          typeof component.selectedRows === "object" &&
-          "path" in component.selectedRows
-        ) {
-          onDataChange(component.selectedRows.path, Array.from(next))
-        }
-        if (component.selectAction) {
-          onAction(component.selectAction, { selectedRows: Array.from(next) })
-        }
-        return next
-      })
-    },
-    [component.selectedRows, component.selectAction, onAction, onDataChange]
-  )
+  const commitSelection = (next: Set<string>) => {
+    const selectedRows = Array.from(next)
+    if (selectionPath) onDataChange(selectionPath, selectedRows)
+    else setSelectedRowKeys(next)
+    if (component.selectAction) onAction(component.selectAction, { selectedRows })
+  }
 
-  const handleSelectAll = useCallback(
-    (checked: boolean) => {
-      if (checked) {
-        const allKeys = new Set(paginatedData.map((row, idx) => getRowId(row, idx)))
-        setSelectedRowKeys(allKeys)
-        if (
-          component.selectedRows &&
-          typeof component.selectedRows === "object" &&
-          "path" in component.selectedRows
-        ) {
-          onDataChange(component.selectedRows.path, Array.from(allKeys))
-        }
-      } else {
-        setSelectedRowKeys(new Set())
-        if (
-          component.selectedRows &&
-          typeof component.selectedRows === "object" &&
-          "path" in component.selectedRows
-        ) {
-          onDataChange(component.selectedRows.path, [])
-        }
-      }
-    },
-    [paginatedData, getRowId, component.selectedRows, onDataChange]
-  )
+  const handleSelectRow = (rowId: string, checked: boolean) => {
+    const next = new Set(selectedRowKeys)
+    if (checked) next.add(rowId)
+    else next.delete(rowId)
+    commitSelection(next)
+  }
+
+  const handleSelectAll = (checked: boolean) => {
+    const next = new Set(selectedRowKeys)
+    paginatedData.forEach((row, index) => {
+      const id = getRowId(row, index)
+      if (checked) next.add(id)
+      else next.delete(id)
+    })
+    commitSelection(next)
+  }
 
   const isAllSelected =
     paginatedData.length > 0 &&

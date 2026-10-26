@@ -36,6 +36,21 @@ const manifest = {
 
 afterEach(() => unregisterContextPanelsForPlugin(manifest.id))
 
+it("keeps renderer modules unloaded for ordinary React panel registration", async () => {
+  const renderers = [
+    "@/components/plugins/plugin-declarative-context-panel",
+    "@/components/plugins/plugin-context-panel-webview",
+  ]
+  for (const renderer of renderers)
+    expect(require.cache[require.resolve(renderer)] !== undefined).toBe(false)
+  await registerContextPanelsForPlugin(manifest, "/plugins/review", {
+    importer: async () => ({ OutlinePanel: () => null }),
+    hasPermission: () => true,
+  })
+  for (const renderer of renderers)
+    expect(require.cache[require.resolve(renderer)] !== undefined).toBe(false)
+})
+
 it("loads and registers declarative panels through the namespaced registry", async () => {
   const Renderer = () => null
   const result = await registerContextPanelsForPlugin(manifest, "/plugins/review", {

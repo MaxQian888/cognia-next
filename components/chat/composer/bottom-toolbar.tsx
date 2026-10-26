@@ -12,8 +12,8 @@
 // Turn capabilities (enhance, web search, skills) live under the composer's `+`
 // on both desktop and mobile.
 //
-// The "⋯" overflow is a PACKING device, not a tier: it exists only where the
-// row genuinely cannot hold the roster. What folds is decided by the fold
+// The "⋯" menu holds occasional next-send options such as Best-of-N and
+// controls that do not fit on the row. What folds is decided by the fold
 // ladder (`resolveToolbarFoldTier` in `lib/chat/composer-skin.ts`): the
 // measured width maps to a tier, and each tier surrenders the next-least-
 // essential controls — first into a glyph form on the row, then into the
@@ -82,6 +82,7 @@ import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { useComposerSessionId } from "./composer-session-context"
+import { BestOfNChip, BestOfNSelect, type BestOfNChoiceProps } from "./best-of-n-chip"
 
 interface BottomToolbarProps {
   session: ChatSession | null
@@ -96,6 +97,7 @@ interface BottomToolbarProps {
   variant?: "default" | ComposerToolbarLayout
   /** Where the "No API key" badge sends the user — provider settings. */
   onOpenProviderSettings?: () => void
+  bestOfN?: BestOfNChoiceProps
 }
 
 export function BottomToolbar({
@@ -103,6 +105,7 @@ export function BottomToolbar({
   status,
   variant = "default",
   onOpenProviderSettings,
+  bestOfN,
 }: BottomToolbarProps) {
   // The workflow-editor session is the same discriminator that
   // `resolveSendOptions` keys on to inject workflow subagents + the graph
@@ -127,6 +130,7 @@ export function BottomToolbar({
       status={status}
       variant={variant}
       onOpenProviderSettings={onOpenProviderSettings}
+      bestOfN={bestOfN}
     />
   )
 }
@@ -136,8 +140,10 @@ function GenericBottomToolbar({
   status: paneStatus,
   variant = "default",
   onOpenProviderSettings,
+  bestOfN,
 }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
+  const tBestOfN = useTranslations("bestOfNEntry")
   // The cost badge's token label lived with the header these moved out of.
   const tHeader = useTranslations("chat.header")
   const focusedStatus = useChatStore((s) => s.status)
@@ -201,6 +207,7 @@ function GenericBottomToolbar({
     providerId,
     JSON.stringify(runtimeRef),
     executor.squadId ?? "",
+    bestOfN?.value ?? "",
   ].join("|")
   const { tier, exhausted } = useFittedToolbar(rootRef, toolbarWidth, foldSignature)
   // Past the last rung the in-box row changes arrangement instead of crushing
@@ -209,7 +216,7 @@ function GenericBottomToolbar({
   // this happens. The detached row keeps its own packing below the box.
   const layout: ComposerToolbarLayout =
     exhausted && (fittedLayout === "embedded" || fittedLayout === "rail") ? "folded" : fittedLayout
-  const tierActive = !onBuiltinRuntime
+  const tierActive = !onBuiltinRuntime || !!bestOfN?.value
 
   /** The per-turn chips run icon-only — the words cost more than they teach. */
   const glyphChips = tier >= 2
@@ -407,6 +414,19 @@ function GenericBottomToolbar({
     />
   )
 
+  const bestOfNChip = bestOfN ? (
+    <BestOfNChip
+      {...bestOfN}
+      disabled={bestOfN.disabled || isStreaming}
+      compact={glyphChips || layout === "folded"}
+    />
+  ) : null
+  const bestOfNMenuRow = bestOfN ? (
+    <ToolbarMenuRow label={tBestOfN("label")}>
+      <BestOfNSelect {...bestOfN} disabled={bestOfN.disabled || isStreaming} />
+    </ToolbarMenuRow>
+  ) : null
+
   const runConfigChildren = (inMenu: boolean) => (
     <>
       {/* Leaving the model/effort pickers on the row of a Squad-bound
@@ -423,9 +443,11 @@ function GenericBottomToolbar({
           self-hides on a surface with no depth control, which is why it can
           live on the permanent row rather than behind the overflow. */}
           {effortDialSlot(!inMenu && glyphChips)}
+          {bestOfNChip}
           {fusionFolded && !inMenu ? null : fusionChip(inMenu)}
         </>
       )}
+      {executor.squadId && bestOfNChip}
       {permissionChip(inMenu)}
     </>
   )
@@ -474,9 +496,12 @@ function GenericBottomToolbar({
     <ContextUsageIndicator
       modelId={modelId}
       providerId={providerId}
-      // A window the agent reports with a turn still wins over this
-      // (`computeContextWindowUsage`); this covers the turns before one.
-      maxTokens={agentContextWindow}
+      // Native runtime reports win over its catalog. A Cognia selection owns
+      // the next request's window even while the last reply used another model.
+      maxTokens={agentContextWindow?.maxTokens}
+      selectedModelContextWindow={
+        agentContextWindow?.source === "cognia" ? (agentContextWindow.maxTokens ?? null) : undefined
+      }
       sdkUsage={sdkUsage}
       ringOnly={ringOnlyForm}
       triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5 has-[>svg]:px-1.5")}
@@ -493,7 +518,7 @@ function GenericBottomToolbar({
     </ToolbarMenuRow>
   )
 
-  // Narrow packing only. A Popover, not a DropdownMenu: the agent-mode
+  // Occasional options and folded controls share a Popover, not a DropdownMenu: the agent-mode
   // selector and the plugin slots own their own overlays, and re-mounting
   // those inside a `DropdownMenuItem` desyncs their open state. Every folded
   // control renders its FULL labelled form inside — there is always room in a
@@ -503,12 +528,13 @@ function GenericBottomToolbar({
   // and context a rail of their own under the row, so they are left out here.
   const foldGroups = (ambientOnRail: boolean) => (
     <div className="flex flex-col gap-0.5">
+      {bestOfNMenuRow}
       {fusionFolded && menuRow(t("moreMenu.routing"), fusionChip(true))}
       {modeFolded && menuRow(t("moreMenu.mode"), modeChip(true))}
-      {menuRow(t("moreMenu.preset"), presetControl)}
-      {menuRow(t("moreMenu.sandbox"), sandboxIndicator)}
+      {sessionFolded && menuRow(t("moreMenu.preset"), presetControl)}
+      {sessionFolded && menuRow(t("moreMenu.sandbox"), sandboxIndicator)}
       {costFolded && !ambientOnRail && menuRow(t("moreMenu.cost"), costBadge(false))}
-      {menuRow(t("moreMenu.plugins"), pluginSlots, false)}
+      {sessionFolded && menuRow(t("moreMenu.plugins"), pluginSlots, false)}
     </div>
   )
   const overflowMenu = (ambientOnRail: boolean) => (
@@ -524,6 +550,7 @@ function GenericBottomToolbar({
   const foldedMenu = (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
       <div className="flex flex-col gap-0.5">
+        {bestOfNMenuRow}
         {executor.squadId ? (
           menuRow(tComposition("label"), squadSummary)
         ) : (
@@ -564,6 +591,7 @@ function GenericBottomToolbar({
           compactLabel={glyphChips}
           className={cn(TOOLBAR_CHIP, "max-w-[9rem]")}
         />
+        {bestOfNChip}
         <span className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
           <WebGlobalStatusInline />
           {foldedMenu}
@@ -584,9 +612,9 @@ function GenericBottomToolbar({
   // margin.
   //
   // The fold ladder applies here exactly as on the detached row: a wide box
-  // spells the session shape out inline and renders no "⋯" at all — a menu
-  // holding two chips inside the input box read as a stray floating card —
-  // while a narrow one packs the tail into the disclosure in stages.
+  // spells the session shape out inline, while a narrow one packs the tail
+  // into the disclosure in stages. Best-of-N keeps the disclosure available
+  // even when every session control fits inline.
   if (layout === "embedded" || layout === "rail") {
     return (
       <div
@@ -621,7 +649,7 @@ function GenericBottomToolbar({
           {credentialBadge(glyphChips)}
           {contextChip(ringOnly)}
           {!sessionFolded && sandboxIndicator}
-          {sessionFolded && overflowMenu(false)}
+          {(sessionFolded || bestOfN) && overflowMenu(false)}
         </div>
       </div>
     )
@@ -696,7 +724,7 @@ function GenericBottomToolbar({
         {!ambientOnRail && credentialBadge(glyphChips)}
         {!ambientOnRail && contextChip(ringOnly)}
         {!sessionFolded && sandboxIndicator}
-        {sessionFolded && overflowMenu(ambientOnRail)}
+        {(sessionFolded || bestOfN) && overflowMenu(ambientOnRail)}
       </div>
     </div>
   )

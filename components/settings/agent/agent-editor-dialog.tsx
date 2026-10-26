@@ -44,6 +44,7 @@ import {
 import { ResponsiveFormDialog } from "@/components/shared/responsive-form-dialog"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
+import { RoleModelFields } from "@/components/agent/external-agent/role-model-fields"
 import {
   StateIsolationField,
   defaultStateIsolationFor,
@@ -72,6 +73,9 @@ import {
   SIWC_APP_SERVER_PROTOCOL,
 } from "@/lib/ai/agent/external/protocol-options"
 import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { resolvePiSubagents } from "@/lib/ai/agent/external/config/pi-subagents"
+import { compileEditorModelPlan } from "@/lib/ai/agent/external/config/cognia-model-options"
+import { useSettingsStore } from "@/stores/settings"
 import { uniqueDuplicateName } from "@/lib/ai/agent/external/config/duplicate-config"
 import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 import { CODEX_PRESET_FAMILY } from "@/lib/ai/agent/external/config/agent-binding"
@@ -94,6 +98,7 @@ import {
 } from "@/stores/agent/external-agent-store"
 import type {
   AcpPermissionMode,
+  AgentModelRoleOverrides,
   CreateExternalAgentInput,
   ExternalAgentProtocol,
   ExternalAgentStateIsolation,
@@ -124,14 +129,17 @@ export const PERMISSION_MODE_LABEL_KEY: Record<AcpPermissionMode, string> = {
  */
 export type AgentEditorSaveInput = Omit<
   CreateExternalAgentInput,
-  "maxConcurrentSessions" | "sessionIdleTimeout"
+  "maxConcurrentSessions" | "sessionIdleTimeout" | "modelRoles"
 > & {
   maxConcurrentSessions?: number | null
   sessionIdleTimeout?: number | null
+  /** `null` clears saved sub-task models (also when the Cognia model is turned off). */
+  modelRoles?: AgentModelRoleOverrides | null
 }
 
 interface AgentFormData {
   cogniaModel?: CreateExternalAgentInput["cogniaModel"]
+  modelRoles?: AgentModelRoleOverrides
   name: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport
@@ -180,6 +188,7 @@ interface AgentFormData {
   // Codex app-server options (shown only for protocol === "codex-app-server")
   codexSandboxMode: "readOnly" | "workspaceWrite" | "dangerFullAccess"
   codexNetworkAccess: boolean
+  codexStepModelSwitching: boolean
   /** Newline-separated extra writable folders; active only in workspaceWrite. */
   codexWritableRoots: string
   /** Empty string = model default */
@@ -306,6 +315,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   clearApiKey: false,
   codexSandboxMode: "workspaceWrite",
   codexNetworkAccess: false,
+  codexStepModelSwitching: false,
   codexWritableRoots: "",
   codexDefaultEffort: "",
   codexReasoningSummary: "",
@@ -595,6 +605,7 @@ export function AgentEditorDialog({
   const tManage = useTranslations("externalAgentManage.editor")
   const tCommon = useTranslations("common")
   const tGateway = useTranslations("externalAgent.cogniaModel")
+  const tRoleModels = useTranslations("externalAgent.roleModels")
   const tSiwc = useTranslations("siwc")
   const { getAgent, getAllAgents } = useExternalAgentStore()
   const [customName, setCustomName] = useState(false)
@@ -664,6 +675,7 @@ export function AgentEditorDialog({
       ...DEFAULT_FORM_DATA,
       name: agent.name,
       cogniaModel: agent.cogniaModel,
+      modelRoles: agent.modelRoles,
       protocol: agent.protocol,
       transport: agent.transport,
       processCommand: agent.process?.command || "",
@@ -691,6 +703,7 @@ export function AgentEditorDialog({
       autoApprovePatterns: agent.autoApprovePatterns ?? [],
       codexSandboxMode: agent.codexOptions?.sandboxMode ?? "workspaceWrite",
       codexNetworkAccess: agent.codexOptions?.networkAccess ?? false,
+      codexStepModelSwitching: agent.codexOptions?.stepModelSwitching ?? false,
       codexWritableRoots: agent.codexOptions?.writableRoots?.join("\n") ?? "",
       codexDefaultEffort: agent.codexOptions?.defaultReasoningEffort ?? "",
       codexReasoningSummary: agent.codexOptions?.reasoningSummary ?? "",
@@ -708,15 +721,18 @@ export function AgentEditorDialog({
   const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows(formData.processEnv))
   const [submitting, setSubmitting] = useState(false)
 
-  // The launch target the state-isolation rule is decided on. A managed or
-  // network agent has no local command, and the field says so.
+  // Gateway-owned V2 tasks launch a private service even without a saved command.
   const launchesProcess =
     formData.transport === "stdio" ||
-    (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+    (formData.protocol === "opencode" && formData.opencodeAutoSpawn) ||
+    (formData.protocol === "opencode-v2" &&
+      Boolean(formData.cogniaModel) &&
+      !formData.networkEndpoint.trim())
   const isolationCommand =
     managedDsh || !launchesProcess
       ? undefined
-      : formData.processCommand.trim() || (formData.protocol === "opencode" ? "opencode" : "")
+      : formData.processCommand.trim() ||
+        (formData.protocol === "opencode" || formData.protocol === "opencode-v2" ? "opencode" : "")
   const isolationArgs = tokenizeShellCommand(formData.processArgs) ?? []
   // A runtime with no home variable cannot be given its own state: whatever was
   // chosen, it runs on the shared one, and the saved value must say so.
@@ -749,9 +765,7 @@ export function AgentEditorDialog({
   )
 
   const handleSave = useCallback(async () => {
-    const usesProcess =
-      formData.transport === "stdio" ||
-      (formData.protocol === "opencode" && formData.opencodeAutoSpawn)
+    const usesProcess = launchesProcess
     const allowedHosts = formData.sandboxPolicy?.allowedHosts
       ?.map((host) => host.trim())
       .filter(Boolean)
@@ -812,6 +826,7 @@ export function AgentEditorDialog({
     const input: AgentEditorSaveInput = {
       name: formData.name.trim(),
       cogniaModel: siwcMode ? null : (formData.cogniaModel ?? null),
+      modelRoles: siwcMode || !formData.cogniaModel ? null : (formData.modelRoles ?? null),
       protocol: formData.protocol,
       transport: formData.transport,
       description: formData.description.trim(),
@@ -889,7 +904,12 @@ export function AgentEditorDialog({
         endpoint,
         apiKey: formData.networkApiKey || undefined,
       }
-      input.process = { command: "", args: [], cwd: formData.processCwd.trim() || undefined }
+      input.process = {
+        command: "",
+        args: [],
+        cwd: formData.processCwd.trim() || undefined,
+        env: environment,
+      }
     } else if (formData.protocol === "opencode") {
       // OpenCode auto-spawns a local `opencode serve` when the toggle is on
       // (seeded from the preset); otherwise it connects to a server endpoint.
@@ -941,6 +961,10 @@ export function AgentEditorDialog({
       input.codexOptions = {
         sandboxMode: formData.codexSandboxMode,
         networkAccess: formData.codexNetworkAccess,
+        ...(formData.codexStepModelSwitching ||
+        editingAgent?.codexOptions?.stepModelSwitching !== undefined
+          ? { stepModelSwitching: formData.codexStepModelSwitching }
+          : {}),
         ...(parseSkillRootLines(formData.codexWritableRoots).length
           ? { writableRoots: parseSkillRootLines(formData.codexWritableRoots) }
           : {}),
@@ -1043,6 +1067,25 @@ export function AgentEditorDialog({
       toast.error(tGateway("invalid"))
       return
     }
+    if (input.cogniaModel) {
+      const { settings } = useSettingsStore.getState()
+      try {
+        const plan = compileEditorModelPlan({
+          config: await resolvePiSubagents(input as CreateExternalAgentInput),
+          primary: input.cogniaModel,
+          layers: [{ source: "config", overrides: input.modelRoles ?? undefined }],
+          providerSettings: settings?.providerSettings ?? {},
+          customProviders: settings?.customProviders,
+        })
+        if (!plan.ok) {
+          toast.error(tRoleModels("invalid"))
+          return
+        }
+      } catch {
+        toast.error(tRoleModels("invalid"))
+        return
+      }
+    }
 
     // Secret removals the user asked for, minus any slot a new value replaces.
     const usesServerPassword =
@@ -1103,6 +1146,7 @@ export function AgentEditorDialog({
     t,
     tManage,
     tGateway,
+    tRoleModels,
   ])
 
   // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
@@ -1155,6 +1199,29 @@ export function AgentEditorDialog({
         })
   const validateApproval = (value: string) =>
     isApprovalEntryValid(value) ? null : tManage("approvalInvalid")
+
+  // The connection the form describes, judged by the Cognia model pickers.
+  const gatewayConfig = {
+    protocol: formData.protocol,
+    transport: formData.transport,
+    process: {
+      command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
+      args: tokenizeShellCommand(formData.processArgs) ?? [],
+    },
+    network:
+      formData.transport !== "stdio" && !formData.opencodeAutoSpawn
+        ? { endpoint: formData.networkEndpoint }
+        : undefined,
+    metadata: {
+      ...(selectedPreset
+        ? getPresetConfig(selectedPreset)?.metadata
+        : editingAgent
+          ? editingAgent.metadata
+          : {}),
+      preset: selectedPreset || undefined,
+      autoSpawnServer: formData.opencodeAutoSpawn,
+    },
+  }
 
   return (
     <ResponsiveFormDialog
@@ -1765,31 +1832,19 @@ export function AgentEditorDialog({
         )}
 
         {!siwcMode && (
-          <CogniaModelPicker
-            config={{
-              protocol: formData.protocol,
-              transport: formData.transport,
-              process: {
-                command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
-                args: tokenizeShellCommand(formData.processArgs) ?? [],
-              },
-              network:
-                formData.transport !== "stdio" && !formData.opencodeAutoSpawn
-                  ? { endpoint: formData.networkEndpoint }
-                  : undefined,
-              metadata: {
-                ...(selectedPreset
-                  ? getPresetConfig(selectedPreset)?.metadata
-                  : editingAgent
-                    ? editingAgent.metadata
-                    : {}),
-                preset: selectedPreset || undefined,
-                autoSpawnServer: formData.opencodeAutoSpawn,
-              },
-            }}
-            value={formData.cogniaModel}
-            onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
-          />
+          <>
+            <CogniaModelPicker
+              config={gatewayConfig}
+              value={formData.cogniaModel}
+              onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+            />
+            <RoleModelFields
+              config={gatewayConfig}
+              primary={formData.cogniaModel}
+              value={formData.modelRoles}
+              onChange={(modelRoles) => setFormData((current) => ({ ...current, modelRoles }))}
+            />
+          </>
         )}
 
         {/* Permission Mode — narrowed to the modes the chosen backend can
@@ -1957,6 +2012,23 @@ export function AgentEditorDialog({
                   disabled={!codexWorkspaceAccessActive}
                   onCheckedChange={(checked) =>
                     setFormData({ ...formData, codexNetworkAccess: checked })
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 space-y-0.5">
+                  <Label htmlFor={fid("codex-step-model-switching")}>
+                    {t("codexStepModelSwitching")}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("codexStepModelSwitchingDesc")}
+                  </p>
+                </div>
+                <Switch
+                  id={fid("codex-step-model-switching")}
+                  checked={formData.codexStepModelSwitching}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, codexStepModelSwitching: checked })
                   }
                 />
               </div>

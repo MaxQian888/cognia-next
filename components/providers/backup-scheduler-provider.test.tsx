@@ -22,7 +22,8 @@ jest.mock("@/lib/db/backup-history", () => ({
 }))
 jest.mock("@/lib/db/settings", () => ({
   getSettings: (...a: unknown[]) => getSettingsMock(...a),
-  saveSettings: (...a: unknown[]) => saveSettingsMock(...a),
+  saveSettings: async (input: unknown) =>
+    saveSettingsMock(typeof input === "function" ? input(await getSettingsMock()) : input),
 }))
 jest.mock("@/lib/data/destinations/webdav", () => ({
   uploadSnapshotToWebDav: (...a: unknown[]) => uploadMock(...a),

@@ -4,7 +4,7 @@ import type { OpenAiCompatibleVariantSpec } from "../../providers/protocol-adapt
 // End-to-end: a turn dispatched with a NON-builtin protocol + declarative
 // spec flows through the variant adapter and the event adapter, producing
 // the same SDKMessage shapes downstream as the builtin path. Lives in its
-// own file so `ai-sdk.test.mjs` (the byte-identical regression canary for
+// own file so `runtimes/ai-sdk/index.test.ts` (the byte-identical regression canary for
 // builtin protocols) stays untouched.
 
 import { test } from "node:test"

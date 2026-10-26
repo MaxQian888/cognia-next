@@ -333,6 +333,7 @@ impl DockerSandboxBackend {
         }
         Ok(crate::runtime::SnapshotRuntimeSource {
             placement: SandboxPlacement::Container {
+                binding: None,
                 spec,
                 isolation_mandatory: true,
                 hosted_tool_host_lease_ids: Vec::new(),
@@ -529,6 +530,7 @@ impl DockerSandboxBackend {
             project_id: project_id.into(),
             workspace_root: workspace_root.into(),
             placement: SandboxPlacement::Container {
+                binding: None,
                 spec,
                 isolation_mandatory: true,
                 hosted_tool_host_lease_ids: Vec::new(),
@@ -558,13 +560,14 @@ impl DockerSandboxBackend {
             .stored_spec(&authority.spec_digest)
             .ok_or_else(|| fault("Runtime spec missing"))?;
         let placement = SandboxPlacement::Container {
+            binding: None,
             spec: body,
             isolation_mandatory: true,
             hosted_tool_host_lease_ids: Vec::new(),
             provider: None,
             workspace: None,
         };
-        let root = match &authority.mount {
+        let root = match authority.mount.source_mount() {
             RunnerMount::Bind { host_dir } => host_dir.clone(),
             RunnerMount::Volume { subpath, .. } => self
                 .config
@@ -573,6 +576,7 @@ impl DockerSandboxBackend {
                 .join(subpath.as_deref().unwrap_or(""))
                 .to_string_lossy()
                 .into_owned(),
+            RunnerMount::ReadOnly { .. } => unreachable!("source_mount unwraps read-only mounts"),
         };
         let prepared = self
             .prepare_local(&placement, &root, OperationLeases::default())

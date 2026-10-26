@@ -21,6 +21,8 @@ jest.mock("@/lib/ccswitch/hooks", () => ({
 const detectMock = jest.fn()
 jest.mock("@/lib/ccswitch/switch", () => ({
   detectActive: (...args: unknown[]) => detectMock(...args),
+  canSwitchProvider: jest.requireActual("@/lib/ccswitch/switch").canSwitchProvider,
+  ccswitchProviderRefId: jest.requireActual("@/lib/ccswitch/switch").ccswitchProviderRefId,
 }))
 
 const getSettingsMock = jest.fn()
@@ -53,8 +55,20 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CcswitchProvidersTab } from "./providers-tab"
 
 const providers = [
-  { id: "p1", name: "Anthropic Official", apiKey: "sk-x", baseUrl: "https://api.anthropic.com" },
-  { id: "p2", name: "Kimi K2", apiKey: "sk-moon", baseUrl: "https://api.moonshot.cn" },
+  {
+    id: "p1",
+    kind: "claude",
+    name: "Anthropic Official",
+    apiKey: "sk-x",
+    baseUrl: "https://api.anthropic.com",
+  },
+  {
+    id: "p2",
+    kind: "claude",
+    name: "Kimi K2",
+    apiKey: "sk-moon",
+    baseUrl: "https://api.moonshot.cn",
+  },
 ]
 
 beforeEach(() => {
@@ -76,7 +90,7 @@ beforeEach(() => {
     error: undefined,
     refresh: jest.fn(),
   })
-  detectMock.mockResolvedValue({ cognia: "p2", agents: {}, drift: false })
+  detectMock.mockResolvedValue({ cognia: "ccswitch:claude:p2", agents: {}, drift: false })
   getSettingsMock.mockResolvedValue({
     id: "singleton",
     ccswitchSync: { enabled: true, watchDb: false, defaultPropagation: ["claude-code"] },
@@ -87,6 +101,17 @@ beforeEach(() => {
 })
 
 describe("CcswitchProvidersTab", () => {
+  it("shows database schema errors instead of an empty successful list", async () => {
+    useStatusMock.mockReturnValue({
+      data: undefined,
+      loading: false,
+      error: "unsupported CC Switch schema 22",
+      refresh: jest.fn(),
+    })
+    render(<CcswitchProvidersTab />)
+    expect(await screen.findByText("unsupported CC Switch schema 22")).toBeInTheDocument()
+  })
+
   it("renders both providers", async () => {
     render(<CcswitchProvidersTab />)
     expect(await screen.findByText("Anthropic Official")).toBeInTheDocument()
@@ -206,4 +231,35 @@ describe("CcswitchProvidersTab", () => {
     render(<CcswitchProvidersTab />)
     expect(screen.getByText("overview.webModeBody")).toBeInTheDocument()
   })
+})
+
+it("keeps the active composite identity first", async () => {
+  render(<CcswitchProvidersTab />)
+  await waitFor(() => expect(screen.getByText("providers.activeBadge")).toBeInTheDocument())
+  const buttons = screen.getAllByRole("button", { name: "providers.useHere" })
+  fireEvent.click(buttons[0])
+  await waitFor(() => expect(dialogProps.mock.calls.at(-1)?.[0].provider?.id).toBe("p2"))
+})
+
+it("disables SDK switching for other protocols", async () => {
+  useProvidersMock.mockReturnValue({
+    data: [{ id: "agy", kind: "agy", name: "Antigravity", apiKey: "fixture" }],
+    loading: false,
+    refresh: jest.fn(),
+  })
+  render(<CcswitchProvidersTab />)
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "providers.useHere" })).toBeDisabled()
+  )
+  expect(screen.getByText("providers.unsupportedProtocol")).toBeInTheDocument()
+})
+
+it("shows errors returned inside a successful native status response", () => {
+  useStatusMock.mockReturnValue({
+    data: { exists: true, error: "missing table: skills" },
+    loading: false,
+    refresh: jest.fn(),
+  })
+  render(<CcswitchProvidersTab />)
+  expect(screen.getByText("missing table: skills")).toBeInTheDocument()
 })

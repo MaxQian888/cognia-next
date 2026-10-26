@@ -13,7 +13,7 @@ function fixture() {
     createSessionTaskStore,
     createSessionBgShellRegistry(options) {
       const registry = createSessionBgShellRegistry(options)
-      registry.killAll = () => {
+      registry.killAll = async () => {
         events.push("shells")
       }
       return registry

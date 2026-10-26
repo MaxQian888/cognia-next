@@ -65,6 +65,7 @@ const onResultMock = onTrayPanelResult as jest.Mock
 let visibilityHandler: ((shown: boolean) => void) | undefined
 let resultHandler: ((result: { ok: boolean; error?: string }) => void) | undefined
 let glanceSnapshot: GlanceSnapshotV1 | null
+let connectionError: string | null
 /** The catalogue the snapshot carries; `null` keeps the snapshot's own. */
 let catalogue: TrayPanelAction[] | null
 let receivedCount: number
@@ -156,12 +157,14 @@ beforeEach(() => {
     return () => {}
   })
   glanceSnapshot = null
+  connectionError = null
   glanceSend = jest.fn().mockResolvedValue(null)
   consumerMock.mockReset().mockImplementation(() => {
     const snapshot = currentSnapshot()
     return {
       snapshot,
       receivedCount: snapshot ? Math.max(1, receivedCount) : receivedCount,
+      connectionError,
       send: glanceSend,
     }
   })
@@ -281,6 +284,17 @@ describe("TrayPanelView", () => {
     )
   })
 
+  it("explains a failed first connection instead of showing Connecting forever", async () => {
+    connectionError = "errors.timeout"
+    const { rerender } = render(<TrayPanelView />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("errors.timeout")
+    expect(screen.queryByText("footer.connecting")).not.toBeInTheDocument()
+    connectionError = null
+    glanceSnapshot = snapshotWith()
+    rerender(<TrayPanelView />)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it("sizes the card from the stored width and max height", async () => {
     glanceSnapshot = snapshotWith({
       config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "wide", maxHeight: 500 },
@@ -319,7 +333,28 @@ describe("TrayPanelView", () => {
     const height = jest.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(420)
     try {
       render(<TrayPanelView />)
+      await waitFor(() => expect(resizeMock).toHaveBeenCalledWith(476, 436))
+    } finally {
+      width.mockRestore()
+      height.mockRestore()
+    }
+  })
+
+  it("expands a clipped native window to the selected width", async () => {
+    const width = jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(280)
+    const height = jest.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(420)
+    try {
+      glanceSnapshot = snapshotWith({
+        config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "standard" },
+      })
+      const { rerender } = render(<TrayPanelView />)
       await waitFor(() => expect(resizeMock).toHaveBeenCalledWith(396, 436))
+      resizeMock.mockClear()
+      glanceSnapshot = snapshotWith({
+        config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "wide" },
+      })
+      rerender(<TrayPanelView />)
+      await waitFor(() => expect(resizeMock).toHaveBeenCalledWith(476, 436))
     } finally {
       width.mockRestore()
       height.mockRestore()
@@ -650,6 +685,14 @@ describe("TrayPanelView", () => {
     await waitFor(() => expect(closeMock).toHaveBeenCalled())
   })
 
+  it("keeps the footer app label available at the narrow width", async () => {
+    glanceSnapshot = snapshotWith({ config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "narrow" } })
+    render(<TrayPanelView />)
+    expect(await screen.findByRole("button", { name: "footer.openApp" })).toHaveTextContent(
+      "footer.openApp"
+    )
+  })
+
   it("opens the app from the footer", async () => {
     const user = userEvent.setup()
     setActions([delegate])
@@ -921,6 +964,9 @@ describe("TrayPanelView", () => {
 
     it("hides the delegate bar and changes the width from the editor", async () => {
       const user = userEvent.setup()
+      glanceSnapshot = snapshotWith({
+        config: { ...DEFAULT_GLANCE_PANEL_SETTINGS, width: "standard" },
+      })
       setActions([delegate, openApp])
       render(<TrayPanelView />)
       await user.click(await screen.findByTestId("tray-panel-edit"))

@@ -7,5 +7,5 @@
 
 export { defineA2UITemplate } from "../define/define-a2ui-template"
 
-export type { A2UITemplateDef } from "@/types/plugin"
-export type { A2UIComponent, A2UISurfaceType } from "@/types/artifact/a2ui"
+export type { A2UITemplateDef } from "@cognia/plugin-contract/types/plugin/index"
+export type { A2UIComponent, A2UISurfaceType } from "@cognia/plugin-contract/types/artifact/a2ui"

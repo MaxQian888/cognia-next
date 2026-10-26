@@ -2,7 +2,7 @@ import { VerificationReportSchema } from "../contracts/schemas"
 import { FakeProvider, sequenceScript, type FakeStep } from "../fake/fake-provider"
 import { MemoryCallLedger } from "../fake/memory-ledger"
 import { SPEC_MOCK_REGISTRY } from "../fake/mock-registry"
-import { ROLE_PROMPTS } from "../prompts/roles"
+import { ROLE_PROMPTS, materializeCustomRoleProfile } from "../prompts/roles"
 import {
   REVIEW_SCHEMA,
   verifyAnswer,
@@ -96,6 +96,18 @@ describe("verifyAnswer", () => {
       )
     ).toBe(true)
     expect(ledger.attempts).toHaveLength(1)
+  })
+
+  it("reviews with the role text the run pinned when it carries a custom profile", async () => {
+    const { ports, provider } = setup([{ kind: "json", value: { status: "passed", issues: [] } }])
+    const rolePrompts = materializeCustomRoleProfile({
+      ...ROLE_PROMPTS,
+      reviewer: "edited reviewer: passed/failed/inconclusive, executed_by model",
+    })
+    await verifyAnswer(ports, input({ profile: "text_review", rolePrompts }))
+    expect(provider.requests[0].messages[0].content).toBe(
+      `${ROLE_PROMPTS.common}\nedited reviewer: passed/failed/inconclusive, executed_by model`
+    )
   })
 
   it("does not spend a review on an answer that already failed its format checks", async () => {

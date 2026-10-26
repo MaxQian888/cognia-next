@@ -20,6 +20,12 @@
  */
 
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import {
+  maintenanceNotificationPatch,
+  SILENT_MAINTENANCE_NOTIFICATION,
+} from "@/lib/scheduler/maintenance-tasks"
+import { saveManagedTask } from "@/lib/scheduler/managed-tasks"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
 import { resolveWorkspaceGithubBindings } from "./sync-runner"
 import { resolveWorkspaceSyncBindings } from "@/lib/issues/sync/runner"
@@ -50,7 +56,7 @@ function defaultConfig(): TaskExecutionConfig {
 function defaultNotification(): TaskNotificationConfig {
   // A background cache refresh that succeeded is not news. A failing one is:
   // it means the board has quietly gone stale.
-  return { onStart: false, onComplete: false, onError: true }
+  return { ...SILENT_MAINTENANCE_NOTIFICATION }
 }
 
 function buildTask(existing: ScheduledTask | null): ScheduledTask {
@@ -106,19 +112,21 @@ export async function syncGithubIssueSchedule(): Promise<SyncGithubIssueSchedule
 
   if (bindings.length === 0) {
     if (existing) {
-      await schedulerDb.deleteTask(GITHUB_ISSUE_SYNC_TASK_ID)
+      await getTaskScheduler().deleteTask(GITHUB_ISSUE_SYNC_TASK_ID)
       return { action: "deleted", bindingCount: 0 }
     }
     return { action: "skipped", bindingCount: 0 }
   }
 
   if (existing) {
-    // Deliberately NOT an update: rewriting the row on every resource change
+    const notification = maintenanceNotificationPatch(existing.notification)
+    if (notification) await getTaskScheduler().updateTask(existing.id, { notification })
+    // Preserve cadence: rewriting the row on every resource change
     // would reset a cadence the user may have retuned in the scheduler UI, and
     // would restart the interval clock each time.
     return { action: "kept", bindingCount: bindings.length }
   }
 
-  await schedulerDb.createTask(buildTask(null))
+  await saveManagedTask(getTaskScheduler(), buildTask(null), null)
   return { action: "created", bindingCount: bindings.length }
 }

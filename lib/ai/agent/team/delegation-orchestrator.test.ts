@@ -518,6 +518,149 @@ describe("delegation-orchestrator", () => {
       const after = cancelDelegation("missing")
       expect(after).toBeUndefined()
     })
+
+    // An external run is stopped through the signal handed to the manager:
+    // `ExternalAgentManager.execute` cancels the agent's session when it aborts.
+    it("aborts a running external delegation so the agent is stopped", async () => {
+      let runSignal: AbortSignal | undefined
+      externalExecuteMock.mockImplementation(
+        (_id: string, _p: string, opts: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            runSignal = opts.signal
+            opts.signal.addEventListener("abort", () => reject(new Error("aborted")))
+          })
+      )
+      const { delegation, completionPromise } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "p",
+        reason: "y",
+      })
+      await flush()
+      expect(runSignal?.aborted).toBe(false)
+
+      cancelDelegation(delegation.id)
+
+      expect(runSignal?.aborted).toBe(true)
+      const settled = await completionPromise
+      expect(settled.status).toBe("cancelled")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "cancelled",
+      })
+    })
+
+    it("does not start the external agent when cancelled during placement", async () => {
+      let releasePlacement: () => void = () => {}
+      placeDispatchedAgentMock.mockImplementationOnce(
+        () => new Promise<undefined>((resolve) => (releasePlacement = () => resolve(undefined)))
+      )
+      const { delegation, completionPromise } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "p",
+        reason: "y",
+      })
+      await flush()
+      cancelDelegation(delegation.id)
+      releasePlacement()
+
+      const settled = await completionPromise
+      expect(externalExecuteMock).not.toHaveBeenCalled()
+      expect(settled.status).toBe("cancelled")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+    })
+
+    it("fires one complete hook when a cancelled background run ends afterwards", async () => {
+      let finishRun: (value: unknown) => void = () => {}
+      executeAgentMock.mockImplementation(() => new Promise((resolve) => (finishRun = resolve)))
+      const { delegation, completionPromise } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "x",
+        reason: "y",
+      })
+      cancelDelegation(delegation.id)
+      finishRun({ text: "late" })
+
+      const settled = await completionPromise
+      expect(settled.status).toBe("cancelled")
+      expect(finishAgentMock).toHaveBeenCalledWith(delegation.targetId, { text: "late" })
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "cancelled",
+      })
+    })
+
+    it("does not start a twin delegation cancelled while its persona loads", async () => {
+      let releaseDeps: () => void = () => {}
+      tryBuildTwinDepsMock.mockImplementationOnce(
+        () => new Promise((resolve) => (releaseDeps = () => resolve(undefined)))
+      )
+      const { delegation, completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "x",
+        reason: "y",
+      })
+      await flush()
+      cancelDelegation(delegation.id)
+      releaseDeps()
+
+      const settled = await completionPromise
+      expect(settled.status).toBe("cancelled")
+      expect(registerAgentMock).not.toHaveBeenCalled()
+      expect(executeAgentMock).not.toHaveBeenCalled()
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+    })
+
+    it("completeExternalDelegation leaves a cancelled delegation cancelled", async () => {
+      externalExecuteMock.mockReturnValue(new Promise(() => {}))
+      const { delegation } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "p",
+        reason: "y",
+      })
+      cancelDelegation(delegation.id)
+      const after = completeExternalDelegation(delegation.id, "completed", "manual result")
+
+      expect(after?.status).toBe("cancelled")
+      expect(after?.result).not.toBe("manual result")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps a cancelled external delegation cancelled when a late result arrives", async () => {
+      // The run resolves after the cancel (the agent finished before the
+      // cancel reached it); that completion must not revive the delegation or
+      // tell consumers it completed.
+      let finishRun: (value: unknown) => void = () => {}
+      externalExecuteMock.mockImplementation(() => new Promise((resolve) => (finishRun = resolve)))
+      const { delegation, completionPromise } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "p",
+        reason: "y",
+      })
+      await flush()
+      cancelDelegation(delegation.id)
+      finishRun({ success: true, finalResponse: "late answer" })
+
+      const settled = await completionPromise
+      expect(settled.status).toBe("cancelled")
+      expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("cancelled")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+      expect(dispatchOnTeamDelegationComplete).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: "completed" })
+      )
+    })
   })
 
   describe("quiet-hours gating", () => {
@@ -743,6 +886,37 @@ describe("delegateToTeam (team → team)", () => {
     cancelDelegation(delegation.id)
     expect(abortTeamMock).toHaveBeenCalledWith("b", expect.any(String))
     expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("cancelled")
+  })
+
+  it("keeps a cancelled team delegation cancelled when the aborted run settles", async () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    let endRun: () => void = () => {}
+    teamStartMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          endRun = () => {
+            seedTeam("b", { status: "failed" })
+            resolve()
+          }
+        })
+    )
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    })
+    await flush()
+    cancelDelegation(delegation.id)
+    endRun()
+
+    const settled = await completionPromise
+    expect(settled.status).toBe("cancelled")
+    expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledTimes(1)
+    expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+      delegationId: delegation.id,
+      status: "cancelled",
+    })
   })
 
   // ── ADR-0090 Phase 7: HandoffEnvelope + maxTeamDelegationDepth ─────────────

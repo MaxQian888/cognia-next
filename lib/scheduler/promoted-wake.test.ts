@@ -3,7 +3,7 @@ import { handlePromotedTaskWake } from "./promoted-wake"
 function deps() {
   const selectTask = jest.fn()
   const initialize = jest.fn(async () => undefined)
-  const run = jest.fn(async () => ({ id: "exec" }))
+  const run = jest.fn<Promise<unknown>, [string, string]>(async () => ({ id: "exec" }))
   const navigate = jest.fn()
   const warn = jest.fn()
   return {
@@ -38,6 +38,15 @@ describe("handlePromotedTaskWake", () => {
     })
     expect(x.initialize).toHaveBeenCalledTimes(1)
     expect(x.run).toHaveBeenCalledWith("t1", "tok")
+    expect(x.warn).not.toHaveBeenCalled()
+  })
+
+  it("reports a rejected or early wake as not run", async () => {
+    const x = deps()
+    x.run.mockResolvedValueOnce(null)
+    await expect(handlePromotedTaskWake({ taskId: "t1", runToken: "tok" }, x.d)).resolves.toEqual({
+      ran: false,
+    })
     expect(x.warn).not.toHaveBeenCalled()
   })
 

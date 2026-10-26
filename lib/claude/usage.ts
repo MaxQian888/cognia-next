@@ -22,6 +22,8 @@
 import type { UIMessage } from "ai"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 import type { UsageInfo } from "@/lib/claude/adapter"
+import type { ContextLevel } from "@cognia/plugin-contract/lib/claude/usage"
+export type { ContextLevel } from "@cognia/plugin-contract/lib/claude/usage"
 
 /**
  * Default context-window size for an unknown / unrecognised model id. 128k is a
@@ -127,6 +129,7 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
  */
 export function externalTokenUsageToUsageInfo(usage: {
   promptTokens: number
+  promptTokensIncludeCache?: boolean
   completionTokens: number
   totalTokens: number
   cacheReadTokens?: number
@@ -137,7 +140,14 @@ export function externalTokenUsageToUsageInfo(usage: {
   providerCost?: { amount: number; currency?: string }
 }): UsageInfo {
   return {
-    inputTokens: usage.promptTokens,
+    // The renderer prices uncached input and cache buckets separately. DSH
+    // explicitly reports aggregate prompt counts; do not infer other channels.
+    inputTokens: usage.promptTokensIncludeCache
+      ? Math.max(
+          0,
+          usage.promptTokens - (usage.cacheReadTokens ?? 0) - (usage.cacheWriteTokens ?? 0)
+        )
+      : usage.promptTokens,
     outputTokens: usage.completionTokens,
     ...(usage.contextTokens === undefined ? {} : { contextTokens: usage.contextTokens }),
     ...(usage.modelContextWindow === undefined ? {} : { contextWindow: usage.modelContextWindow }),
@@ -249,9 +259,6 @@ export function sumSessionUsage(messages: UIMessage[]): SessionUsageTotals {
   }
   return total
 }
-
-/** Severity of context-window fill, mirroring the observability threshold dots. */
-export type ContextLevel = "ok" | "warn" | "crit"
 
 /**
  * Map a fill fraction to a severity level. `crit` is reached at the

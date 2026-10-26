@@ -17,6 +17,18 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { resolveRespondViaTarget } from "./runtime"
 
+// Resolving a delivery target must work without initializing an executor or
+// workspace backend. Throwing on import guards that boundary for every case.
+jest.mock("@/lib/claude/build-options", () => {
+  throw new Error("Delivery target resolution must not load model send options")
+})
+jest.mock("@/lib/workflow/runtime/start-from-im", () => {
+  throw new Error("Delivery target resolution must not load workflow execution")
+})
+jest.mock("@/lib/task-workspace/managed-workspace", () => {
+  throw new Error("Delivery target resolution must not load workspace provisioning")
+})
+
 /** Put an adapterInstances row with an explicit id. */
 async function putInstance(id: string, patch: Partial<AdapterInstanceRow> = {}): Promise<void> {
   await getDb().adapterInstances.put({

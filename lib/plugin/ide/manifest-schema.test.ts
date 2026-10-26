@@ -11,7 +11,7 @@ const base = {
 describe("validateIdeManifestSchema", () => {
   it("loads the generated validator in a context that forbids eval and Function", () => {
     const file =
-      require.resolve("@/packages/plugin-sdk/contract/ide-manifest-validator.generated.cjs")
+      require.resolve("@/packages/plugin-contract/contract/ide-manifest-validator.generated.cjs")
     const commonjsModule = { exports: {} }
     runInNewContext(
       readFileSync(file, "utf8"),

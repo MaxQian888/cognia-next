@@ -10,6 +10,7 @@ import {
   intentRequiresRuntimeDispatch,
   OPEN_DECISION_STATUSES,
   callerMaySubmitHostStateIntent,
+  personPartitionIntentDecision,
   hostStateIntentCapability,
   type HostStateActionReceipt,
   type HostStateAction,
@@ -471,7 +472,11 @@ export function createAgentRpcHostStateDispatcher(
   }
 }
 
+/** Chosen by the local brain profile, never from a client's request. */
+export type HostStateAuthorizationStrategy = "device-grants" | "person-partition"
+
 export interface HostStateServiceOptions {
+  authorization?: HostStateAuthorizationStrategy
   accountId: string
   runtimeTargetId: string
   hostId: string
@@ -1148,7 +1153,22 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         // broadcast; an authorization failure is a device reaching for
         // something it may never do, and must not be able to append to durable
         // Host state or fan an event out to every replica at all.
-        if (!callerMaySubmitHostStateIntent(caller, action.action)) {
+        const partitionDecision =
+          options.authorization === "person-partition"
+            ? personPartitionIntentDecision(action.action.kind)
+            : undefined
+        if (partitionDecision && !partitionDecision.allowed) {
+          const meta = await getHostStateMeta()
+          results.push({
+            actionId: action.actionId,
+            outcome: "rejected",
+            hostGeneration: meta.hostGeneration,
+            hostSeq: meta.hostSeq,
+            rejection: { code: partitionDecision.code, message: partitionDecision.code },
+          })
+          continue
+        }
+        if (!partitionDecision && !callerMaySubmitHostStateIntent(caller, action.action)) {
           results.push(await forbiddenReceipt(action, caller))
           continue
         }
@@ -1188,7 +1208,9 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
         }
         const sessionSeed =
           action.action.kind === "session.create" && decision.mutation
-            ? await ownedSessionSeed(action.action.seed)
+            ? await ownedSessionSeed(action.action.seed, {
+                partition: options.authorization === "person-partition",
+              })
             : undefined
         // The workspace the conversation is leaving, read before the commit
         // rewrites the row, for the roster relink below.
@@ -1503,6 +1525,13 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
     if (!row.action) {
       await abandonDispatch(row, "host_state_recovery_payload_missing")
       return "settled"
+    }
+    if (options.authorization === "person-partition") {
+      const decision = personPartitionIntentDecision(row.action.action.kind)
+      if (!decision.allowed) {
+        await abandonDispatch(row, decision.code)
+        return "settled"
+      }
     }
     const scope = dispatchRetryScope(row.action.action.kind)
     // A previous generation's runtime is gone. Its live controls and prompt

@@ -7,6 +7,7 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import { runSidebarGesture } from "./sidebar-edge-transition"
 
 interface TransitionStub {
+  ready: Promise<void>
   finished: Promise<void>
   skipTransition: jest.Mock
   resolve: () => void
@@ -21,7 +22,12 @@ function installViewTransition(): jest.Mock {
     const finished = new Promise<void>((r) => {
       resolve = r
     })
-    const stub: TransitionStub = { finished, skipTransition: jest.fn(), resolve }
+    const stub: TransitionStub = {
+      ready: Promise.resolve(),
+      finished,
+      skipTransition: jest.fn(),
+      resolve,
+    }
     stubs.push(stub)
     update()
     return stub
@@ -38,6 +44,7 @@ function buildShellRow(): {
   aside: HTMLElement
   rail: HTMLElement
   workspace: HTMLElement
+  chat: HTMLElement
   group: HTMLElement
   dockPanel: HTMLElement
   outlets: Record<"start" | "center" | "end", HTMLElement>
@@ -49,12 +56,15 @@ function buildShellRow(): {
   const workspace = document.createElement("div")
   workspace.setAttribute("data-testid", "artifact-workspace-dock")
   const group = document.createElement("div")
+  const chat = document.createElement("div")
+  chat.id = "artifact-chat"
+  chat.setAttribute("data-panel", "")
   const dockPanel = document.createElement("div")
   dockPanel.setAttribute("data-panel", "")
   const wrapper = document.createElement("div")
   wrapper.setAttribute("data-testid", "artifact-dock-wrapper")
   dockPanel.appendChild(wrapper)
-  group.appendChild(dockPanel)
+  group.append(chat, dockPanel)
   workspace.appendChild(group)
   const outlets = {
     start: document.createElement("div"),
@@ -65,10 +75,11 @@ function buildShellRow(): {
   outlets.center.setAttribute("data-title-bar-outlet", "center")
   outlets.end.setAttribute("data-title-bar-outlet", "end")
   document.body.append(aside, rail, workspace, outlets.start, outlets.center, outlets.end)
-  return { aside, rail, workspace, group, dockPanel, outlets }
+  return { aside, rail, workspace, chat, group, dockPanel, outlets }
 }
 
 beforeEach(() => {
+  stubs = []
   document.body.innerHTML = ""
   delete document.documentElement.dataset.shellEdge
   act(() =>
@@ -79,7 +90,10 @@ beforeEach(() => {
   )
 })
 
-afterEach(() => {
+afterEach(async () => {
+  stubs.forEach((stub) => stub.resolve())
+  await Promise.resolve()
+  await Promise.resolve()
   Reflect.deleteProperty(document, "startViewTransition")
   document.documentElement.style.viewTransitionName = ""
   delete document.documentElement.dataset.shellEdge
@@ -94,7 +108,7 @@ describe("runSidebarGesture", () => {
   })
 
   it("captures the whole row in one transition and publishes the dock's settled width", async () => {
-    const { aside, rail, workspace, group, dockPanel, outlets } = buildShellRow()
+    const { aside, rail, workspace, chat, group, dockPanel, outlets } = buildShellRow()
     installViewTransition()
     // Collapsing: the 256px aside folds away, the group widens by the same
     // amount, and the dock — a fixed percentage of that group — settles
@@ -111,6 +125,7 @@ describe("runSidebarGesture", () => {
     expect(aside.style.viewTransitionName).toBe("cognia-shell-sidebar")
     expect(rail.style.viewTransitionName).toBe("cognia-shell-rail")
     expect(workspace.style.viewTransitionName).toBe("cognia-shell-workspace")
+    expect(chat.style.viewTransitionName).toBe("cognia-shell-chat")
     expect(outlets.start.style.viewTransitionName).toBe("cognia-shell-outlet-start")
     expect(outlets.center.style.viewTransitionName).toBe("cognia-shell-outlet-center")
     expect(outlets.end.style.viewTransitionName).toBe("cognia-shell-outlet-end")
@@ -123,7 +138,44 @@ describe("runSidebarGesture", () => {
     await Promise.resolve()
 
     expect(aside.style.viewTransitionName).toBe("")
+    expect(chat.style.viewTransitionName).toBe("")
     expect(useShellColumnsStore.getState().targets.dock).toBeNull()
+  })
+
+  it("captures one bounded chat pane regardless of the number of messages", () => {
+    const { chat } = buildShellRow()
+    const log = document.createElement("div")
+    log.setAttribute("role", "log")
+    log.style.cssText = "height: 600px; overflow: auto"
+    const messages = Array.from({ length: 1000 }, () => document.createElement("article"))
+    log.append(...messages)
+    chat.append(log)
+    installViewTransition()
+
+    runSidebarGesture(jest.fn(), 256)
+
+    expect(chat.style.viewTransitionName).toBe("cognia-shell-chat")
+    expect(log.style.viewTransitionName).toBeFalsy()
+    expect(messages.every((message) => !message.style.viewTransitionName)).toBe(true)
+  })
+
+  it("captures both summary hosts separately from the moving reading column", async () => {
+    const { chat } = buildShellRow()
+    const summaries = [document.createElement("div"), document.createElement("div")]
+    summaries.forEach((summary) => {
+      summary.setAttribute("data-testid", "session-summary-stage-host")
+      chat.append(summary)
+    })
+    installViewTransition()
+
+    runSidebarGesture(jest.fn(), 256)
+
+    expect(summaries[0].style.viewTransitionName).toBe("cognia-shell-summary")
+    expect(summaries[1].style.viewTransitionName).toBe("cognia-shell-summary-secondary")
+    stubs[0].resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(summaries.every((summary) => !summary.style.viewTransitionName)).toBe(true)
   })
 
   it("shrinks the published dock target by the same share when expanding", () => {
@@ -171,6 +223,19 @@ describe("runSidebarGesture", () => {
     runSidebarGesture(jest.fn(), 0)
 
     expect(useShellColumnsStore.getState().targets.dock).toBeNull()
+  })
+
+  it("keeps the workspace transition available when the chat pane is absent", () => {
+    const { workspace, chat } = buildShellRow()
+    chat.remove()
+    const start = installViewTransition()
+    const apply = jest.fn()
+
+    runSidebarGesture(apply, 0)
+
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(workspace.style.viewTransitionName).toBe("cognia-shell-workspace")
   })
 
   it("takes the instant path when no View Transition support exists", () => {

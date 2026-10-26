@@ -1,6 +1,6 @@
 // Output styles — user-customizable agent response style, injected into the
 // system prompt. Claude Code parity (`/output-style`). Built on the same
-// append-to-appendSystemPrompt mechanism as brief mode (`BRIEF_OUTPUT_SNIPPET`)
+// append-to-appendSystemPrompt mechanism as brief mode (`BRIEF_MODE_PROMPT`)
 // and composes with it: a user can run brief + a style at once.
 //
 // Resolution precedence (in build-options): session > character > appSettings.

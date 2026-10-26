@@ -28,11 +28,24 @@ import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-optio
 import { Spinner } from "@/components/ui/spinner"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Check, Copy, Edit, Pencil, Power, PowerOff, MoreHorizontal, Trash2, X } from "lucide-react"
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Edit,
+  Pencil,
+  Power,
+  PowerOff,
+  MoreHorizontal,
+  Trash2,
+  X,
+} from "lucide-react"
 
 import { toast } from "@/components/ui/sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -173,7 +186,6 @@ export function AgentInspector({
   allAgents,
   readiness,
   isConnecting,
-  masterEnabled,
   onOpenRuntimes,
   onOpenPlugins,
   onConnect,
@@ -190,7 +202,6 @@ export function AgentInspector({
   allAgents: readonly LifecycleExternalAgentConfig[]
   readiness: AgentReadiness
   isConnecting: boolean
-  masterEnabled: boolean
   onOpenRuntimes: () => void
   onOpenPlugins: () => void
   onConnect: () => void
@@ -206,6 +217,7 @@ export function AgentInspector({
 }) {
   const t = useTranslations("externalAgent.settings")
   const tCommon = useTranslations("common")
+  const tReadiness = useTranslations("externalAgent.readiness")
   const tManage = useTranslations("externalAgentManage.editor")
   const tErrors = useTranslations("externalAgent.lifecycleErrors")
   const tTier = useTranslations("externalAgent.supportTier")
@@ -361,6 +373,18 @@ export function AgentInspector({
     return tDiagnostics.has(key) ? tDiagnostics(key, action.params ?? {}) : action.id
   })
 
+  const runtimeFacts: Array<{ label: string; value: string | undefined; monospace?: boolean }> = [
+    { label: t("command"), value: agent.process?.command, monospace: true },
+    { label: t("workingDirectory"), value: agent.process?.cwd || undefined, monospace: true },
+    { label: t("endpoint"), value: agent.network?.endpoint || undefined, monospace: true },
+    { label: t("detailsAdapter"), value: ecosystem?.adapterName || undefined },
+    { label: t("detailsSurface"), value: ecosystem?.surfaceName || undefined },
+    {
+      label: t("detailsPrerequisiteStatus"),
+      value: ecosystem?.prerequisiteStatus ? tPrereq(ecosystem.prerequisiteStatus) : undefined,
+    },
+  ]
+
   const setField = <K extends keyof ConnectionDraft>(key: K, value: ConnectionDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }))
 
@@ -382,8 +406,8 @@ export function AgentInspector({
     <div className="space-y-4" data-testid={`agent-detail-${agent.id}`}>
       {/* Header — every action for this agent next to its title. It wraps
           rather than squeezing: the detail column can be phone-narrow. */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 basis-64 space-y-1.5">
+      <div className="@container/inspector-header flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-full space-y-1.5 @2xl/inspector-header:basis-64">
           <div className="flex flex-wrap items-center gap-2">
             <BrandIcon
               id={presetId ?? findRuntimeForConfig(agent)?.runtimeId ?? agent.name}
@@ -455,6 +479,25 @@ export function AgentInspector({
               </span>
             )}
             <AgentStatePill readiness={readiness} />
+            <DuplicatedFromHint
+              sourceName={duplicatedFrom?.name ?? null}
+              onOpenSource={duplicatedFrom ? () => onOpenAgent(duplicatedFrom.id) : undefined}
+              className="max-w-full rounded-md px-1.5 py-0.5 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label htmlFor={`${ids}-description`} className="sr-only">
+              {t("inspectorDescriptionLabel")}
+            </Label>
+            <Textarea
+              id={`${ids}-description`}
+              value={draft.description}
+              onChange={(event) => setField("description", event.target.value)}
+              placeholder={t("inspectorDescriptionPlaceholder")}
+              rows={1}
+              className="min-h-8 resize-none border-transparent bg-transparent px-0 py-1 text-sm text-muted-foreground shadow-none hover:border-input focus-visible:border-input dark:bg-transparent"
+              data-testid="inspector-description"
+            />
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="outline" className="text-xs">
@@ -481,27 +524,13 @@ export function AgentInspector({
                 the project asked for. Nothing at all when it asked for none. */}
             <SandboxPlacementBadge agentId={agent.id} />
           </div>
-          <DuplicatedFromHint
-            sourceName={duplicatedFrom?.name ?? null}
-            onOpenSource={duplicatedFrom ? () => onOpenAgent(duplicatedFrom.id) : undefined}
-          />
-          <div className="grid gap-1">
-            <Label htmlFor={`${ids}-description`} className="sr-only">
-              {t("inspectorDescriptionLabel")}
-            </Label>
-            <Textarea
-              id={`${ids}-description`}
-              value={draft.description}
-              onChange={(event) => setField("description", event.target.value)}
-              placeholder={t("inspectorDescriptionPlaceholder")}
-              rows={1}
-              className="min-h-8 resize-none border-transparent bg-transparent px-1 py-1 text-sm text-muted-foreground shadow-none hover:border-input focus-visible:border-input"
-              data-testid="inspector-description"
-            />
-          </div>
         </div>
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5">
+        <div
+          role="group"
+          aria-label={t("inspectorActionsAria", { name: agent.name })}
+          className="flex min-w-0 max-w-full flex-wrap items-center gap-2"
+        >
+          <div className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-input bg-muted/30 px-2.5">
             <Switch
               id={`${ids}-enabled`}
               checked={agent.enabled}
@@ -509,94 +538,90 @@ export function AgentInspector({
                 void applyInstantUpdate({ enabled: checked }, true)
               }}
               aria-label={t("inspectorEnabledAria", { name: agent.name })}
+              aria-describedby={`${ids}-enabled-state`}
               data-testid="inspector-enabled"
             />
-            <Label htmlFor={`${ids}-enabled`} className="text-xs text-muted-foreground">
-              {t("inspectorEnabled")}
+            <Label
+              id={`${ids}-enabled-state`}
+              htmlFor={`${ids}-enabled`}
+              className="cursor-pointer text-xs font-normal"
+            >
+              {agent.enabled ? t("inspectorEnabled") : tReadiness("states.disabled")}
             </Label>
           </div>
-          {isConnected ? (
-            <Button size="sm" onClick={onDisconnect}>
-              <PowerOff className="mr-1 h-4 w-4" />
-              {t("disconnect")}
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              onClick={onConnect}
-              title={!masterEnabled ? t("inspectorMasterDisabled") : undefined}
-              aria-describedby={!masterEnabled ? `${ids}-master-disabled` : undefined}
-              // A disabled agent's way back is its Enable switch, not a
-              // connect attempt that can only fail.
-              disabled={
-                !masterEnabled ||
-                isConnecting ||
-                readiness.state === "blocked" ||
-                readiness.state === "disabled"
-              }
-            >
-              {isConnecting ? (
-                <Spinner className="mr-1 h-4 w-4" />
-              ) : (
-                <Power className="mr-1 h-4 w-4" />
-              )}
-              {t("connect")}
-            </Button>
-          )}
-          {!masterEnabled && (
-            <span id={`${ids}-master-disabled`} className="sr-only">
-              {t("inspectorMasterDisabled")}
-            </span>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="touch-hit"
-                aria-label={t("inspectorActionsAria", { name: agent.name })}
-                data-testid="inspector-actions-menu"
-              >
-                <MoreHorizontal className="size-4" />
+          <ButtonGroup>
+            {isConnected ? (
+              <Button variant="outline" size="sm" onClick={onDisconnect}>
+                <PowerOff className="size-4" aria-hidden />
+                {t("disconnect")}
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onSelect={onEdit}
-                aria-label={t("inspectorEditAria", { name: agent.name })}
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onConnect}
+                // A disabled agent's way back is its Enable switch, not a
+                // connect attempt that can only fail.
+                disabled={
+                  isConnecting || readiness.state === "blocked" || readiness.state === "disabled"
+                }
               >
-                <Edit className="size-4" />
-                {t("inspectorEditAll")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={onDuplicate}
-                aria-label={t("inspectorDuplicateAria", { name: agent.name })}
-                data-testid="inspector-duplicate"
-              >
-                <Copy className="size-4" />
-                {tCommon("duplicate")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={onDelete}
-                aria-label={t("inspectorDeleteAria", { name: agent.name })}
-              >
-                <Trash2 className="size-4" />
-                {tCommon("delete")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {isConnecting ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <Power className="size-4" aria-hidden />
+                )}
+                {t("connect")}
+              </Button>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="touch-hit"
+                  aria-label={t("inspectorActionsAria", { name: agent.name })}
+                  data-testid="inspector-actions-menu"
+                >
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={onEdit}
+                  aria-label={t("inspectorEditAria", { name: agent.name })}
+                >
+                  <Edit className="size-4" />
+                  {t("inspectorEditAll")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={onDuplicate}
+                  aria-label={t("inspectorDuplicateAria", { name: agent.name })}
+                  data-testid="inspector-duplicate"
+                >
+                  <Copy className="size-4" />
+                  {tCommon("duplicate")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={onDelete}
+                  aria-label={t("inspectorDeleteAria", { name: agent.name })}
+                >
+                  <Trash2 className="size-4" />
+                  {tCommon("delete")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
         </div>
       </div>
 
       <AgentStatusBlock
         agent={agent}
         readiness={readiness}
-        masterEnabled={masterEnabled}
         isConnecting={isConnecting}
         onConnect={onConnect}
-        onEnable={() => void applyInstantUpdate({ enabled: true })}
         onEdit={onEdit}
         onOpenRuntimes={onOpenRuntimes}
         onOpenPlugins={onOpenPlugins}
@@ -636,116 +661,128 @@ export function AgentInspector({
               />
             </div>
 
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm @lg/agent-detail:grid-cols-2">
-              <div>
-                <dt className="text-muted-foreground">{t("detailTimeout")}</dt>
-                <dd className="min-w-0 break-all">
-                  {t("milliseconds", { value: agent.timeout ?? 300000 })}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">{t("detailRetry")}</dt>
-                <dd className="min-w-0 break-all">
-                  {t("retrySummary", {
-                    count: agent.retryConfig?.maxRetries ?? 3,
-                    delay: agent.retryConfig?.retryDelay ?? 1000,
-                  })}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">{t("detailBackoff")}</dt>
-                <dd className="min-w-0 break-all">
-                  {(agent.retryConfig?.exponentialBackoff ?? true)
-                    ? t("backoffExponential")
-                    : t("backoffFixed")}
-                </dd>
-              </div>
-              {agent.process && (
-                <>
-                  <div>
-                    <dt className="text-muted-foreground">{t("command")}</dt>
-                    <dd className="min-w-0">
-                      <code className="break-all rounded bg-muted px-1 text-xs">
-                        {agent.process.command}
-                      </code>
-                    </dd>
-                  </div>
-                  {agent.process.cwd && (
-                    <div className="@lg/agent-detail:col-span-2">
-                      <dt className="text-muted-foreground">{t("workingDirectory")}</dt>
-                      <dd className="min-w-0">
-                        <code className="break-all rounded bg-muted px-1 text-xs">
-                          {agent.process.cwd}
-                        </code>
-                      </dd>
-                    </div>
-                  )}
-                </>
-              )}
-              {agent.network?.endpoint && (
-                <div className="@lg/agent-detail:col-span-2">
-                  <dt className="text-muted-foreground">{t("endpoint")}</dt>
-                  <dd className="min-w-0">
-                    <code className="break-all rounded bg-muted px-1 text-xs">
-                      {agent.network.endpoint}
-                    </code>
-                  </dd>
-                </div>
-              )}
-              {ecosystem?.adapterName && (
-                <div>
-                  <dt className="text-muted-foreground">{t("detailsAdapter")}</dt>
-                  <dd className="min-w-0 break-all">{ecosystem.adapterName}</dd>
-                </div>
-              )}
-              {ecosystem?.surfaceName && (
-                <div>
-                  <dt className="text-muted-foreground">{t("detailsSurface")}</dt>
-                  <dd className="min-w-0 break-all">{ecosystem.surfaceName}</dd>
-                </div>
-              )}
-              {/* Support tier is already a badge in the header — not repeated here. */}
-              {ecosystem?.prerequisiteStatus && (
-                <div>
-                  <dt className="text-muted-foreground">{t("detailsPrerequisiteStatus")}</dt>
-                  <dd className="min-w-0 break-all">{tPrereq(ecosystem.prerequisiteStatus)}</dd>
-                </div>
-              )}
-              {ecosystem?.docsUrl && (
-                <div className="@lg/agent-detail:col-span-2">
-                  <dt className="text-muted-foreground">{t("detailsOfficialDocs")}</dt>
-                  <dd>
+            <SettingsBlock
+              title={t("inspectorRuntimeDetails")}
+              headingLevel={4}
+              className="@container/runtime-summary"
+              action={
+                ecosystem?.docsUrl ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    asChild
+                    className="max-w-full whitespace-normal text-left"
+                  >
                     <a
                       href={ecosystem.docsUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                      title={t("detailsDocsLink")}
                     >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      {t("detailsDocsLink")}
+                      <ExternalLink className="size-3" aria-hidden />
+                      {t("detailsOfficialDocs")}
                     </a>
+                  </Button>
+                ) : undefined
+              }
+            >
+              <dl className="grid gap-3 rounded-lg bg-muted/40 p-3 @lg/runtime-summary:grid-cols-3">
+                <div className="flex min-w-0 items-baseline justify-between gap-3 @lg/runtime-summary:block">
+                  <dt className="text-xs text-muted-foreground">{t("detailTimeout")}</dt>
+                  <dd className="min-w-0 text-right text-sm font-medium tabular-nums [overflow-wrap:anywhere] @lg/runtime-summary:mt-1 @lg/runtime-summary:text-left">
+                    {t("milliseconds", { value: agent.timeout ?? 300000 })}
                   </dd>
                 </div>
-              )}
-              {ecosystem?.limitationNote && (
-                <div className="@lg/agent-detail:col-span-2">
-                  <dt className="text-muted-foreground">{t("detailsLimitation")}</dt>
-                  <dd className="min-w-0 break-all">{ecosystem.limitationNote}</dd>
+                <div className="flex min-w-0 items-baseline justify-between gap-3 @lg/runtime-summary:block">
+                  <dt className="text-xs text-muted-foreground">{t("detailRetry")}</dt>
+                  <dd className="min-w-0 text-right text-sm font-medium tabular-nums [overflow-wrap:anywhere] @lg/runtime-summary:mt-1 @lg/runtime-summary:text-left">
+                    {t("retrySummary", {
+                      count: agent.retryConfig?.maxRetries ?? 3,
+                      delay: agent.retryConfig?.retryDelay ?? 1000,
+                    })}
+                  </dd>
                 </div>
+                <div className="flex min-w-0 items-baseline justify-between gap-3 @lg/runtime-summary:block">
+                  <dt className="text-xs text-muted-foreground">{t("detailBackoff")}</dt>
+                  <dd className="min-w-0 text-right text-sm font-medium [overflow-wrap:anywhere] @lg/runtime-summary:mt-1 @lg/runtime-summary:text-left">
+                    {(agent.retryConfig?.exponentialBackoff ?? true)
+                      ? t("backoffExponential")
+                      : t("backoffFixed")}
+                  </dd>
+                </div>
+              </dl>
+
+              {runtimeFacts.some((fact) => fact.value !== undefined) ? (
+                <dl className="grid gap-x-6 @2xl/runtime-summary:grid-cols-2">
+                  {runtimeFacts.map((fact) =>
+                    fact.value !== undefined ? (
+                      <div
+                        key={fact.label}
+                        className="grid min-w-0 gap-1.5 border-b border-border/50 py-2.5 @sm/runtime-summary:grid-cols-[8rem_minmax(0,1fr)] @sm/runtime-summary:gap-3"
+                      >
+                        <dt className="text-xs text-muted-foreground">{fact.label}</dt>
+                        <dd className="min-w-0 text-sm [overflow-wrap:anywhere]">
+                          {fact.monospace ? (
+                            <code className="break-all font-mono text-xs">{fact.value}</code>
+                          ) : (
+                            fact.value
+                          )}
+                        </dd>
+                      </div>
+                    ) : null
+                  )}
+                </dl>
+              ) : null}
+
+              {ecosystem?.limitationNote && (
+                <dl className="grid min-w-0 gap-1 text-xs">
+                  <dt className="font-medium">{t("detailsLimitation")}</dt>
+                  <dd className="text-muted-foreground [overflow-wrap:anywhere]">
+                    {ecosystem.limitationNote}
+                  </dd>
+                </dl>
               )}
-              {recommendedActions.length ? (
-                <div className="@lg/agent-detail:col-span-2">
-                  <dt className="text-muted-foreground">{t("detailsRecommendedActions")}</dt>
-                  <dd>
-                    <ul className="mt-1 ml-4 list-disc space-y-0.5">
+              {recommendedActions.length > 0 && (
+                <Collapsible
+                  key={agent.id}
+                  defaultOpen={false}
+                  className="min-w-0 rounded-md border border-border/60"
+                >
+                  <CollapsibleTrigger
+                    id={`${ids}-recommendations`}
+                    className="group touch-hit flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="min-w-0 [overflow-wrap:anywhere]">
+                      {t("detailsRecommendedActions")}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <Badge
+                        variant="secondary"
+                        className="h-5 min-w-5 justify-center px-1.5 text-[10px] tabular-nums"
+                        aria-hidden
+                      >
+                        {recommendedActions.length}
+                      </Badge>
+                      <ChevronDown
+                        className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none"
+                        aria-hidden
+                      />
+                    </span>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent
+                    role="region"
+                    aria-labelledby={`${ids}-recommendations`}
+                    className="min-w-0 px-3 pb-3"
+                  >
+                    <ul className="ml-4 flex list-disc flex-col gap-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
                       {recommendedActions.map((action, index) => (
                         <li key={index}>{action}</li>
                       ))}
                     </ul>
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </SettingsBlock>
 
             {/* Native Codex app-server status (MCP servers + skills) */}
             {isCodexAppServerProtocol(agent.protocol) && (

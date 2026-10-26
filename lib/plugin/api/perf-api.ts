@@ -17,26 +17,8 @@ import {
   subscribePerfSample,
 } from "@/lib/perf/backend/commands"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import type {
-  PerfSample,
-  PerfSnapshot,
-  SpanSnapshot,
-  SystemDetails,
-  TraceFile,
-} from "@/lib/perf/backend/types"
-
-export interface PluginPerfAPI {
-  /** Recent ring-buffer samples + current sampler state. */
-  snapshot(): Promise<PerfSnapshot>
-  /** Span hotspot rows (heaviest-first). */
-  hotspots(): Promise<SpanSnapshot[]>
-  /** Static host + build details (`null` on web). */
-  systemDetails(): Promise<SystemDetails | null>
-  /** Flight-recorder trace files on disk. */
-  listTraces(): Promise<TraceFile[]>
-  /** Subscribe to live `perf://sample` frames. Returns a disposer. */
-  subscribe(handler: (sample: PerfSample) => void): () => void
-}
+import type { PluginPerfAPI } from "@cognia/plugin-contract/lib/plugin/api/perf-api"
+export type { PluginPerfAPI } from "@cognia/plugin-contract/lib/plugin/api/perf-api"
 
 /** Create the read-only Performance API for a plugin (gated `perf:read`). */
 export function createPerfAPI(pluginId: string): PluginPerfAPI {

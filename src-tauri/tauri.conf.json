@@ -57,6 +57,7 @@
       "../sidecar/mcp-stdio-relay.mjs",
       "../sidecar/codex-app-control/**/*",
       "../sidecar/pi-extension/**/*",
+      "../packages/agent-pi/src/subagent-models.ts",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",
       "../sidecar/src/**/*",

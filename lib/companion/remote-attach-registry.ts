@@ -74,6 +74,9 @@ export const DEFAULT_APPROVAL_BACKSTOP_MS = 120_000
 export type AttachDowngradeReason = "missing-capability" | "event-plane-not-ready"
 
 export interface AttachSessionOptions {
+  /** Trusted local person-brain profile. Its owner may control data intents;
+   *  operator grants do not apply. A ready event stream is still required. */
+  partition?: boolean
   /**
    * What the client asked for. Absent means `control`: that is what every
    * client did before the mode existed, and silently demoting them to a
@@ -137,7 +140,8 @@ export function attachSession(
 
   const requested: AttachMode = options.requestedMode ?? "control"
   const readyLeaseId = readyEventStreamLeaseId(deviceId)
-  const mayControl = options.grants.includes(REMOTE_CONTROL_CAPABILITY)
+  const mayControl =
+    options.partition === true || options.grants.includes(REMOTE_CONTROL_CAPABILITY)
   const existing = sessionLeaseFor(sessionId, deviceId, now)
 
   // A renewal arriving mid-reconnect must not demote a controller. The lease

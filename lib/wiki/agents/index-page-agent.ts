@@ -10,7 +10,8 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { findDeadLinks } from "./cross-ref-agent"
-import { indexPagePrompt, WIKI_SYSTEM_VOICE } from "../prompts"
+import { indexPagePrompt, WIKI_SYSTEM_VOICE_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import type { IndexPageDraft } from "../types"
 
 const MAX_OUTPUT_TOKENS = 1500
@@ -35,7 +36,7 @@ export async function runIndexPageAgent(
 
   const prompt = indexPagePrompt({ articles: ordered })
   const responseMd = await deps.llm.complete(prompt, {
-    system: WIKI_SYSTEM_VOICE,
+    system: (await resolvePromptAsync(WIKI_SYSTEM_VOICE_PROMPT)).text,
     maxTokens: MAX_OUTPUT_TOKENS,
     temperature: 0,
   })

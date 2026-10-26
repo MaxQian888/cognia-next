@@ -19,6 +19,7 @@ const PROBLEMS = {
   cogniaModelInvalid: "externalAgent.cogniaModel.invalid",
   argumentsInvalid: "externalAgent.settings.argumentsInvalid",
   environmentInvalid: "externalAgent.settings.environmentInvalid",
+  modelRolesInvalid: "externalAgent.roleModels.invalid",
 } satisfies Record<AddAgentFormProblem, string>
 
 function lookup(bundle: unknown, dotted: string): unknown {

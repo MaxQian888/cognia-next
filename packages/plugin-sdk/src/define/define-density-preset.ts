@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.densityPresets[]` entries.
  */
 
-import type { PluginDensityPresetContribution } from "@/types/plugin"
+import type { PluginDensityPresetContribution } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineDensityPreset(
   preset: PluginDensityPresetContribution

@@ -15,18 +15,20 @@
  */
 
 import type { GoalSortKey, SortDir } from "@/lib/goal/history-filter"
+import type {
+  GoalConsolePrefs,
+  GoalConsoleTab,
+  StoredGoalConsolePrefs,
+} from "@cognia/plugin-contract/lib/goal/console-prefs"
+export type {
+  GoalConsolePrefs,
+  GoalConsoleTab,
+  StoredGoalConsolePrefs,
+} from "@cognia/plugin-contract/lib/goal/console-prefs"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tabs
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * The console's tabs: three views of goals (`overview`, `history`,
- * `analytics`) and one place to configure them (`config`). Templates, defaults
- * and the tracker used to be tabs of their own, side by side with the views;
- * they are blocks of `config` now.
- */
-export type GoalConsoleTab = "overview" | "history" | "analytics" | "config"
 
 /** Canonical tab order — also the render order of the tab strip. */
 export const GOAL_CONSOLE_TABS: readonly GoalConsoleTab[] = [
@@ -114,25 +116,6 @@ export function goalConsoleHref(
 // ─────────────────────────────────────────────────────────────────────────────
 // Preferences
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Fully-resolved console preferences (every field present). */
-export interface GoalConsolePrefs {
-  /** Tab the console opens on when no `?tab=` deep link is supplied. */
-  defaultTab: GoalConsoleTab
-  /** Initial sort column for the open-goals toolbar. */
-  openGoalsSort: GoalSortKey
-  /** Initial sort direction for the open-goals toolbar. */
-  openGoalsDir: SortDir
-}
-
-/**
- * The persisted shape — every field optional (partial override of the
- * defaults). `defaultTab` is a plain string because rows written before the
- * tab merge can still hold `"templates"` / `"defaults"` / `"tracker"`.
- */
-export type StoredGoalConsolePrefs = Partial<Omit<GoalConsolePrefs, "defaultTab">> & {
-  defaultTab?: string
-}
 
 /** Hard defaults applied when `AppSettings.goalConsolePrefs` is absent. */
 export const DEFAULT_GOAL_CONSOLE_PREFS: GoalConsolePrefs = {

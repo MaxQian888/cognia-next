@@ -14,9 +14,9 @@ function reference(value: string): string {
 }
 
 function unlockedAccountId(): string {
-  const accountId = useAccountStore.getState().unlockedAccountId
-  if (!accountId?.trim()) throw new Error("A local account must be unlocked before using SIWC")
-  return accountId
+  const localAccountId = useAccountStore.getState().unlockedAccountId
+  if (!localAccountId?.trim()) throw new Error("A local account must be unlocked before using SIWC")
+  return localAccountId
 }
 
 function accountScope() {

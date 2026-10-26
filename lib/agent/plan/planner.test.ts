@@ -1,7 +1,42 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import type { AgentPlan, PlanRefinementRequest, PlanStep } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
-import { decomposeIntoPlan, refinePlanSteps } from "./planner"
+import {
+  decomposeIntoPlan,
+  PLAN_DECOMPOSE_PROMPT,
+  PLAN_DECOMPOSE_REQUEST_PROMPT,
+  PLAN_REFINE_PROMPT,
+  refinePlanSteps,
+} from "./planner"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptScope } from "@/lib/prompts/types"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+function publish(
+  promptId: string,
+  scope: PromptScope,
+  targetId: string,
+  revisionId: string,
+  body: string
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      { bindingId: "pob", promptId, scope, targetId, revisionId, body, contractVersion: 1 },
+    ])
+  )
+}
+
+function systemOf(c: LlmClient): string | undefined {
+  return ((c.complete as jest.Mock).mock.calls[0][1] as { system?: string }).system
+}
 
 function client(reply: string | (() => Promise<string>)): LlmClient {
   return {
@@ -129,5 +164,62 @@ describe("refinePlanSteps", () => {
     ).toBeNull()
     expect(await refinePlanSteps(plan([step("a")]), req, client("nope"))).toBeNull()
     expect(await refinePlanSteps(plan([step("a")]), req, client('{"steps":[]}'))).toBeNull()
+  })
+})
+
+describe("planner prompts in the Prompt Center", () => {
+  const DECOMPOSE_OVERRIDE = 'Plan it. Reply {"title":"...","steps":["..."]}'
+
+  it("sends the shipped prompts when nothing is published", async () => {
+    const c = client('{"steps":["a"]}')
+    await decomposeIntoPlan({ objective: "Ship", sessionId: "ses", client: c })
+    expect(systemOf(c)).toBe(PLAN_DECOMPOSE_PROMPT.defaultBody)
+    expect((c.complete as jest.Mock).mock.calls[0][0]).toBe(
+      PLAN_DECOMPOSE_REQUEST_PROMPT.defaultBody.replace("{{objective}}", "Ship")
+    )
+  })
+
+  it("decomposes with a workspace override only inside that workspace", async () => {
+    publish(
+      PLAN_DECOMPOSE_PROMPT.id,
+      "workspace",
+      "ws-1",
+      "por-plan-decompose-ws",
+      DECOMPOSE_OVERRIDE
+    )
+    const inside = client('{"steps":["a"]}')
+    await decomposeIntoPlan({
+      objective: "x",
+      sessionId: "ses",
+      workspaceId: "ws-1",
+      client: inside,
+    })
+    expect(systemOf(inside)).toBe(DECOMPOSE_OVERRIDE)
+
+    const outside = client('{"steps":["a"]}')
+    await decomposeIntoPlan({ objective: "x", sessionId: "ses", client: outside })
+    expect(systemOf(outside)).toBe(PLAN_DECOMPOSE_PROMPT.defaultBody)
+  })
+
+  it("refines with the override published for the plan's session", async () => {
+    const body = 'Revise. Reply {"steps":["..."],"reasoning":"..."}'
+    publish(PLAN_REFINE_PROMPT.id, "session", "ses", "por-plan-refine-session", body)
+    const c = client('{"steps":["x"],"reasoning":"r"}')
+    await refinePlanSteps(
+      plan([step("a")]),
+      { planId: "p1", refinementType: "optimize", trigger: "manual" },
+      c
+    )
+    expect(systemOf(c)).toBe(body)
+  })
+
+  it("does not call the model when the run was aborted", async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const c = client('{"steps":["a"]}')
+    expect(
+      await decomposeIntoPlan({ objective: "x", sessionId: "ses", client: c, signal: ac.signal })
+    ).toBeNull()
+    expect(c.complete).not.toHaveBeenCalled()
   })
 })

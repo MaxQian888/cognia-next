@@ -33,6 +33,22 @@ interface StreamArgs {
 /** A numeric leaf of a provider-options block, 0 when absent. */
 const numberAt = (obj: unknown, path: string) => Number(getPath(obj, path) ?? 0)
 
+test("context calibration opts into per-step request messages without enabling raw HTTP body capture", async () => {
+  let captured: Record<string, unknown> = {}
+  await makeAiSdkAdapter("openai").start({
+    model: "test-model",
+    messages: [],
+    credentials: { apiKey: "test-key" },
+    captureRequestMessages: true,
+    modelParams: { include: { responseBody: false } },
+    streamTextFn: (args) => {
+      captured = args
+      return { stream: (async function* () {})() }
+    },
+  })
+  assert.deepEqual(captured.include, { responseBody: false, requestMessages: true })
+})
+
 test("CommandCode selects the model protocol for chat and auxiliary requests", async () => {
   for (const [model, expected] of [
     ["claude-sonnet-5", "anthropic.messages"],
@@ -421,7 +437,7 @@ test("start passes model/messages/params through to streamText verbatim", async 
 })
 
 test("start hoists leading system messages out of messages, cacheControl intact", async () => {
-  // AI SDK 7 rejects `{ role: "system" }` inside `messages`. dispatch/ai-sdk.mjs
+  // AI SDK 7 rejects `{ role: "system" }` inside `messages`. src/runtimes/ai-sdk/index.ts
   // plants up to three Anthropic cache breakpoints on separate leading system
   // messages; each must arrive with its own providerOptions.
   const cacheControl = { anthropic: { cacheControl: { type: "ephemeral" } } }

@@ -78,7 +78,8 @@ jest.mock("@/lib/templates/catalog", () => {
   }
 })
 
-jest.mock("@/plugins/workflow-ai/src/tools/template-tools", () => ({
+jest.mock("@cognia/plugin-sdk/api/workflow-editor", () => ({
+  ...jest.requireActual("@cognia/plugin-sdk/api/workflow-editor"),
   templateToProposalOps: () => ({
     ops: [
       {

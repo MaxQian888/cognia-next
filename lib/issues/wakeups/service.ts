@@ -26,7 +26,9 @@ import { getIssueProject } from "@/lib/db/issue-projects"
 import { isGithubImportBinding } from "@/lib/issues/sync/bindings"
 import { getDb } from "@/lib/db/schema"
 import { uniqueIndexKeys } from "@/lib/db/unique-keys"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import {
+  CHILDREN_DONE_INSTRUCTION_PROMPT,
   compileIssueWakeup,
   isTerminalIssueStatus,
   normalizeWakeupInstruction,
@@ -392,10 +394,6 @@ export function childrenDoneWakeupId(parentId: string): string {
   return `issue-wakeup::children-done::${parentId}`
 }
 
-/** The built-in instruction when the parent has none of its own. */
-export const CHILDREN_DONE_INSTRUCTION =
-  "Every sub-issue of this issue is now done or canceled. Review what they delivered and continue this issue: finish it, or say what is still missing."
-
 /** The actor a platform-owned rule acts as. An id-less agent, never a person. */
 export const SYSTEM_WAKEUP_ACTOR: IssueActor = { kind: "agent", label: "issue-wakeup" }
 
@@ -414,9 +412,15 @@ export async function ensureChildrenDoneWakeup(
     if (await table.getTask(id)) return "exists"
     const parent = await getIssue(parentId)
     if (!parent || isTerminalIssueStatus(parent.status)) return "skipped"
+    // Resolved in the parent's workspace and frozen into the payload here.
+    const instruction = (
+      await resolvePromptAsync(CHILDREN_DONE_INSTRUCTION_PROMPT, {
+        context: parent.projectId ? { workspaceId: parent.projectId } : {},
+      })
+    ).text
     const compiled = compileIssueWakeup({
       issueId: parentId,
-      instruction: CHILDREN_DONE_INSTRUCTION,
+      instruction,
       trigger: { on: "children-done" },
       // Children can be added after the first batch finishes, and each batch
       // finishing is worth one delivery.
@@ -429,7 +433,7 @@ export async function ensureChildrenDoneWakeup(
     await table.createTask({
       id,
       name: `${parent.identifier} — sub-issues finished`,
-      description: CHILDREN_DONE_INSTRUCTION,
+      description: compiled.payload.instruction,
       type: ISSUE_WAKEUP_TASK_TYPE,
       trigger: compiled.trigger,
       payload: compiled.payload,

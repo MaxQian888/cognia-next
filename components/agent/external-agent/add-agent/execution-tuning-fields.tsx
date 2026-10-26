@@ -14,6 +14,8 @@ import { ChevronDown } from "lucide-react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import { isCodexAppServerProtocol } from "@/lib/ai/agent/external/protocol-options"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -23,8 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { tokenizeShellCommand } from "@/lib/mcp/config-transfer"
 import {
+  addAgentFormGatewayConfig,
   DEFAULT_RETRY_DELAY_MS,
   DEFAULT_RETRY_MAX_DELAY_MS,
   DEFAULT_RETRY_MAX_RETRIES,
@@ -32,6 +34,7 @@ import {
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import type { AddAgentFormState } from "@/hooks/agent/use-add-agent-form"
 import { CogniaModelPicker } from "../cognia-model-picker"
+import { RoleModelFields, type RoleModelFieldsBlocker } from "../role-model-fields"
 
 export interface ExecutionTuningFieldsProps {
   form: AddAgentFormState
@@ -152,25 +155,48 @@ export function ExecutionTuningFields({ form, collapsible = true }: ExecutionTun
 }
 
 /** The Cognia model binding, judged against the connection the form describes. */
-export function AddAgentCogniaModelField({ form }: { form: AddAgentFormState }) {
+export function AddAgentCogniaModelField({
+  form,
+  roleModelsBlocker,
+  spawnModelsSupported,
+  nativeModelControlSupported = true,
+}: {
+  form: AddAgentFormState
+  /** Set when the target (a paired Host) cannot store sub-task models yet. */
+  roleModelsBlocker?: RoleModelFieldsBlocker
+  spawnModelsSupported?: boolean
+  nativeModelControlSupported?: boolean
+}) {
   const { data, setField, shape } = form
+  const config = addAgentFormGatewayConfig(data, shape)
+  const t = useTranslations("externalAgent.settings")
   return (
-    <CogniaModelPicker
-      config={{
-        protocol: data.protocol,
-        transport: data.transport,
-        process: {
-          command: data.command || (data.autoSpawnServer ? "opencode" : ""),
-          args: tokenizeShellCommand(data.args) ?? [],
-        },
-        network:
-          data.transport !== "stdio" && !data.autoSpawnServer
-            ? { endpoint: data.endpoint }
-            : undefined,
-        metadata: { ...shape.preset?.metadata, autoSpawnServer: data.autoSpawnServer },
-      }}
-      value={data.cogniaModel}
-      onChange={(cogniaModel) => setField("cogniaModel", cogniaModel)}
-    />
+    <div className="space-y-3">
+      {isCodexAppServerProtocol(data.protocol) && (
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="codex-native-step-model-switching">{t("codexStepModelSwitching")}</Label>
+          <Switch
+            id="codex-native-step-model-switching"
+            checked={data.codexStepModelSwitching === true}
+            disabled={!nativeModelControlSupported}
+            onCheckedChange={(checked) => setField("codexStepModelSwitching", checked)}
+          />
+          <p className="text-xs text-muted-foreground">{t("codexStepModelSwitchingDesc")}</p>
+        </div>
+      )}
+      <CogniaModelPicker
+        config={config}
+        value={data.cogniaModel}
+        onChange={(cogniaModel) => setField("cogniaModel", cogniaModel)}
+      />
+      <RoleModelFields
+        config={config}
+        primary={data.cogniaModel}
+        value={data.modelRoles}
+        blocker={roleModelsBlocker}
+        spawnModelsSupported={spawnModelsSupported}
+        onChange={(modelRoles) => setField("modelRoles", modelRoles)}
+      />
+    </div>
   )
 }

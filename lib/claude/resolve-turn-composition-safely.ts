@@ -17,6 +17,7 @@ import {
   resolveTurnComposition,
   toolSurfaceFromNames,
 } from "@/lib/agent/composition/resolve-turn-composition"
+import type { PromptSurface } from "@/lib/agent/composition/digest"
 import type {
   AgentCompositionSelectionV1,
   ResolvedAgentCompositionV1,
@@ -24,7 +25,8 @@ import type {
 
 export interface SafeTurnCompositionInput {
   sessionId?: string
-  systemPrompt?: string
+  /** Every prompt field of the send, so append-only and overlay changes reach the digest. */
+  prompt?: PromptSurface
   /** `SendOptions.allowedTools` — names only; schemas are not assembled here. */
   toolNames?: readonly string[]
   executionFingerprint?: string
@@ -42,7 +44,7 @@ export async function resolveTurnCompositionSafely(
   try {
     return await resolveTurnComposition({
       sessionId: input.sessionId,
-      systemPrompt: input.systemPrompt,
+      prompt: input.prompt,
       tools: toolSurfaceFromNames(input.toolNames ?? []),
       executionFingerprint: input.executionFingerprint,
       selection: input.selection,

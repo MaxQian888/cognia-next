@@ -24,16 +24,10 @@
  */
 
 import type React from "react"
-import type { DynamicToolUIPart, ToolUIPart } from "ai"
 
 import { bareToolName } from "@/lib/chat/tool-summary"
-
-export interface ToolResultRendererProps {
-  /** The tool part, exactly as it sits in `UIMessage.parts[i]`. */
-  part: ToolUIPart | DynamicToolUIPart
-  /** Chat session this tool call belongs to, when the host knows it. */
-  sessionId?: string
-}
+import type { ToolResultRendererProps } from "@cognia/plugin-contract/lib/plugin/api/tool-result-renderers"
+export type { ToolResultRendererProps } from "@cognia/plugin-contract/lib/plugin/api/tool-result-renderers"
 
 export interface ToolResultRendererEntry {
   pluginId: string

@@ -89,9 +89,7 @@
   ],
   "isomorphic": [
     "sidecar/src/policy/permission/resolver.ts",
-    "sidecar/src/policy/shell/segments.ts",
-    "sidecar/src/providers/provider-protocol.ts",
-    "sidecar/src/providers/reasoning-effort-tables.ts"
+    "sidecar/src/policy/shell/segments.ts"
   ],
   "public": [
     "sidecar/src/shared/wire/inbound.ts",
@@ -105,8 +103,8 @@
     "sidecar/src/platform/net/egress-guard.ts",
     "sidecar/src/policy/permission/resolver.ts",
     "sidecar/src/providers/protocol-adapters/openai-compatible-variant-adapter.ts",
-    "sidecar/src/providers/provider-protocol.ts",
-    "sidecar/src/providers/reasoning-effort-tables.ts",
+    "sidecar/src/providers/siwc-fetch.ts",
+    "sidecar/src/providers/siwc-language-model.ts",
     "sidecar/src/providers/usage-normalize.ts",
     "sidecar/src/services/code-graph/languages/index.ts",
     "sidecar/src/services/code-graph/parser.ts",
@@ -127,7 +125,7 @@
     "tests/",
     "types/"
   ],
-  "legacyMjsAllowed": true,
+  "legacyMjsAllowed": false,
   "vendorIsolation": [
     {
       "package": "@anthropic-ai/claude-agent-sdk",

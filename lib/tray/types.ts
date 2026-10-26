@@ -11,32 +11,8 @@ import type {
 } from "@/lib/usage/usage-glance"
 
 import type { TrayTitleField } from "./title-format"
-
-/**
- * Native window/app actions the tray can fire directly (Rust-handled).
- * Anything not in this list goes through the slash- or command-dispatch
- * path instead.
- */
-export type TrayNativeAction =
-  | "show"
-  | "hide"
-  | "toggle-window"
-  /** Toggle the tray quick panel (`src-tauri/src/tray/panel.rs`). */
-  | "tray-panel-toggle"
-  | "new-chat"
-  | "settings"
-  | "open-logs"
-  | "open-data-folder"
-  | "copy-diagnostics"
-  | "open-docs"
-  | "report-issue"
-  | "check-updates"
-  | "toggle-autostart"
-  | "automation-kill"
-  | "pet-disable-click-through"
-  | "island-toggle"
-  | "noop"
-  | "quit"
+import type { TrayNativeAction } from "@cognia/plugin-contract/lib/tray/types"
+export type { TrayNativeAction } from "@cognia/plugin-contract/lib/tray/types"
 
 /**
  * What happens when a menu item is clicked. Mirrors `TrayActionPayload` in

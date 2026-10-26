@@ -3,13 +3,32 @@ import {
   serializeSettingsProfile,
   importSettingsProfile,
   buildResetPatch,
+  deepStripSecrets,
   SETTINGS_PROFILE_SCHEMA,
   SETTINGS_PROFILE_VERSION,
 } from "./profile-transfer"
 import { DEFAULTS } from "@/lib/db/settings"
 import type { AppSettings } from "@cognia/agent-config-types"
+import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
+import { resetKeysForSection } from "./section-keys"
 
 const NOW = "2026-06-15T00:00:00.000Z"
+
+it("strips HTTP credentials in object and JSON headers while preserving required empty reference arrays", () => {
+  expect(
+    deepStripSecrets({
+      headers: { Authorization: "Bearer token", Cookie: "session=secret", Accept: "text/plain" },
+      headersJson: JSON.stringify({ Authorization: "Bearer token", Accept: "text/plain" }),
+      secretRefs: [],
+      credentials: [],
+    })
+  ).toEqual({
+    headers: { Accept: "text/plain" },
+    headersJson: JSON.stringify({ Accept: "text/plain" }),
+    secretRefs: [],
+    credentials: [],
+  })
+})
 
 function sampleSettings(): AppSettings {
   return {
@@ -43,6 +62,34 @@ function sampleSettings(): AppSettings {
 }
 
 describe("profile-transfer export", () => {
+  it("keeps provider rotation policy but excludes credentials and host-local endpoints", () => {
+    const settings = {
+      ...DEFAULTS,
+      searchProviders: {
+        ...DEFAULTS.searchProviders!,
+        searxng: {
+          providerId: "searxng" as const,
+          enabled: true,
+          priority: 0,
+          apiKey: "secret",
+          apiKeys: ["secret2"],
+          cx: "account",
+          baseUrl: "https://private.example",
+          allowPrivateEndpoint: true,
+          apiKeyRotationStrategy: "round-robin" as const,
+          engine: "google",
+        },
+      },
+    }
+    const provider = exportSettingsProfile(settings, NOW).settings.searchProviders!.searxng
+    expect(provider).toEqual({
+      providerId: "searxng",
+      enabled: true,
+      priority: 0,
+      apiKeyRotationStrategy: "round-robin",
+      engine: "google",
+    })
+  })
   it("strips top-level secret and identity keys", () => {
     const profile = exportSettingsProfile(sampleSettings(), NOW)
     expect(profile.schema).toBe(SETTINGS_PROFILE_SCHEMA)
@@ -90,6 +137,38 @@ describe("profile-transfer export", () => {
 })
 
 describe("profile-transfer import", () => {
+  it("does not infer a reader profile when an import lacks one", () => {
+    const result = importSettingsProfile({
+      schema: SETTINGS_PROFILE_SCHEMA,
+      version: 1,
+      settings: { theme: "dark" },
+    })
+    expect(result.ok && Object.hasOwn(result.patch, "webReader")).toBe(false)
+  })
+
+  it("strips host-local provider fields even from hand-edited imports", () => {
+    const result = importSettingsProfile({
+      schema: SETTINGS_PROFILE_SCHEMA,
+      version: 1,
+      settings: {
+        searchProviders: {
+          searxng: {
+            enabled: true,
+            apiKey: "remote",
+            apiKeys: ["remote"],
+            cx: "remote",
+            baseUrl: "https://remote.example",
+            allowPrivateEndpoint: true,
+            apiKeyRotationStrategy: "round-robin",
+          },
+        },
+      },
+    })
+    expect(result.ok && result.patch.searchProviders?.searxng).toEqual({
+      enabled: true,
+      apiKeyRotationStrategy: "round-robin",
+    })
+  })
   function validJson(overrides: Record<string, unknown> = {}): string {
     return JSON.stringify({
       schema: SETTINGS_PROFILE_SCHEMA,
@@ -165,6 +244,10 @@ describe("profile-transfer import", () => {
 })
 
 describe("profile-transfer reset", () => {
+  it("resets the search section to the fresh reader recipient policy", () => {
+    const patch = buildResetPatch(resetKeysForSection("search"))
+    expect(patch.webReader).toEqual(freshInstallWebReader())
+  })
   // Section → owned keys now lives in `section-keys.ts` (tested there). This
   // suite covers the reset-patch shape only.
   it("buildResetPatch(keys) returns only those keys at default", () => {

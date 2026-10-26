@@ -1,14 +1,17 @@
 // Type contracts for the v3 backup-package format. Modeled on Cognia's
 // `lib/storage/persistence/types.ts` but stripped to cognia-next's domain
-// (no projects/knowledge/workflows/etc).
+// with additive portable authored-domain sections.
 //
 // Versioned independently of the Dexie schema so users can carry data between
 // app versions without surprise migrations: the importer reads `manifest.version`
 // and `manifest.schemaVersion` and refuses anything it doesn't understand.
 
+import type { IssueCounter } from "@/types/issues"
+import type { AuthoredContentPayload } from "./authored-content"
 import type { SessionAsset } from "@/lib/db/session-assets"
 import type { SessionAssetSourceChunk, MessageMediaBackupRow } from "./session-assets-backup"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
+import type { PromptOverrideBindingRow, PromptOverrideRevisionRow } from "@/lib/db/prompt-overrides"
 import type {
   AppSettings,
   Character,
@@ -99,7 +102,9 @@ export interface BackupManifestV3 {
  * intentionally NOT filtered out at this layer — the caller decides. The
  * importer skips writes against locally-built-in rows regardless.
  */
-export interface BackupPayloadV3 {
+export interface BackupPayloadV3 extends AuthoredContentPayload {
+  /** Natural-key issue number watermarks; never lower them on restore. */
+  issueCounters?: IssueCounter[]
   settings?: AppSettings
   characters?: Character[]
   skills?: Skill[]
@@ -148,6 +153,13 @@ export interface BackupPayloadV3 {
   chatTemplates?: ChatTemplateRow[]
   /** Document templates saved from Files or a canvas (ADR-0223). */
   documentTemplates?: DocumentTemplateRow[]
+  /**
+   * Code-owned prompt overrides (ADR-0236, schema v246): one binding per
+   * (prompt, scope, target) and its immutable revisions. Static instruction
+   * text the user wrote; restored as a unit by `applyPromptOverrideBackup`.
+   */
+  promptOverrides?: PromptOverrideBindingRow[]
+  promptOverrideRevisions?: PromptOverrideRevisionRow[]
   /**
    * Files page (ADR-0200, schema v231): favorites, folder membership and
    * "removed from Files" over artifacts, canvas documents, images and uploads,

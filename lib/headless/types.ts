@@ -62,8 +62,18 @@ export interface MediaResponse {
  */
 export const MAX_MEDIA_RESPONSE_BYTES = 10 * 1024 * 1024
 
-/** Which host processes a runtime is meant to run on. */
-export type HeadlessHost = "brain"
+/**
+ * Which host processes a runtime is meant to run on.
+ *
+ * - `brain` — the Host's own brain: every runtime that names it.
+ * - `person-brain` — one member's data partition on a multi-tenant Host
+ *   (plan §9a, `COGNIA_BRAIN_PROFILE=person`). Intentionally data-only: it
+ *   answers the member's data commands and nothing else, so it starts no
+ *   scheduler, connector, bot, plugin, account sync, orchestration proxy or
+ *   agent worker. `PERSON_BRAIN_RUNTIMES` in `./runtimes/index.ts` pins the
+ *   roster.
+ */
+export type HeadlessHost = "brain" | "person-brain"
 
 /** Teardown returned by a started runtime. */
 export type HeadlessTeardown = () => void | Promise<void>

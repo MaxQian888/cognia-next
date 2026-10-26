@@ -70,11 +70,18 @@ async function main() {
   const backend = await createMockDeepSeek({
     reply: (body: {
       model?: string
+      output_config?: { effort?: string }
       messages?: Array<{ role: string; content?: unknown }>
       tools?: Array<{ name?: string; function?: { name: string } }>
     }) => {
       if (cogniaGateway)
         assert.equal(body.model, "smoke", "The task-selected model must reach the gateway")
+      if (!pi && !opencode && !cogniaGateway)
+        assert.equal(
+          body.output_config?.effort,
+          "low",
+          "Native DSH must fold generic medium effort"
+        )
       const toolNames = new Set(body.tools?.map((tool) => tool.function?.name ?? tool.name))
       const lastUser = body.messages?.findLastIndex((message) => message.role === "user") ?? -1
       const lastText = JSON.stringify(body.messages?.[lastUser]?.content)
@@ -239,6 +246,7 @@ async function main() {
       sessionRoot: path.join(runtimeHome, "sessions"),
     },
     apiKey: "cognia-smoke-placeholder",
+    ...(!pi && !opencode && !cogniaGateway ? { reasoningEffort: "medium" } : {}),
     parentEnv: { PATH: process.env.PATH },
     nodePath: process.execPath,
     outboundGate: hasNoLeakingPiiDeep,
@@ -352,8 +360,8 @@ export default function (pi) {
   if (opencode || cogniaGateway) {
     // The gateway builder accepts saved customization, before host inheritance.
     // PATH belongs to the process host, not a saved provider customization.
-    const { PATH: inheritedPath, ...savedEnvironment } = config.process.env
-    void inheritedPath
+    const savedEnvironment: Record<string, string> = { ...config.process.env }
+    delete savedEnvironment.PATH
     agentConfig = buildGatewayTaskConfig({
       config: opencode
         ? {

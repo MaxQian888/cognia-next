@@ -1,0 +1,584 @@
+{
+  "status": {
+    "queued": "Queued",
+    "snapshotting": "Capturing",
+    "reference_running": "Running the current harness",
+    "proposing": "Proposing",
+    "probing": "Probing",
+    "composing": "Composing",
+    "evaluating": "Evaluating",
+    "awaiting_approval": "Awaiting approval",
+    "adopting": "Adopting",
+    "reflecting": "Reflecting",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "budget_exceeded": "Budget exhausted",
+    "rejected": "Kept current",
+    "rolled_back": "Rolled back",
+    "interrupted": "Interrupted"
+  },
+  "stepStatus": {
+    "planned": "Not started",
+    "pending": "Pending",
+    "running": "Running",
+    "succeeded": "Done",
+    "failed": "Failed",
+    "interrupted": "Interrupted",
+    "skipped": "Skipped"
+  },
+  "trigger": {
+    "manual": "Started by you",
+    "failure-triggered": "After a failure",
+    "background": "Background"
+  },
+  "mode": {
+    "parallel": "Parallel",
+    "sequential": "Sequential"
+  },
+  "isolation": {
+    "none": "Text only",
+    "files": "Scratch directory",
+    "git": "Git worktree"
+  },
+  "checkKind": {
+    "deliverable-file": "File exists",
+    "output-contains": "Answer contains",
+    "output-not-contains": "Answer does not contain",
+    "output-json": "Answer is JSON",
+    "max-tool-errors": "Tool errors at most",
+    "acceptance-profile": "Acceptance profile"
+  },
+  "component": {
+    "systemPrompt": "System prompt",
+    "guardrails": "Guardrails",
+    "memory": "Memory",
+    "toolGuidance": "Tool guidance",
+    "subagents": "Subagents",
+    "skills": "Skills",
+    "scripts": "Scripts",
+    "toolRules": "Tool rules"
+  },
+  "diff": {
+    "none": "These two harnesses are identical.",
+    "fileLabel": "Changes to {path}",
+    "change": {
+      "added": "Added",
+      "removed": "Removed",
+      "modified": "Changed"
+    }
+  },
+  "budget": {
+    "dimension": {
+      "cost": "Cost",
+      "tokens": "Tokens",
+      "modelCalls": "Model calls",
+      "wallTime": "Time"
+    },
+    "usedOf": "{used} of {limit}",
+    "lowerBound": "Some calls reported no price, so the cost shown is a lower bound.",
+    "work": "{rollouts} rollouts and {sessions} editor or judge sessions finished."
+  },
+  "step": {
+    "kind": {
+      "base": "Current harness, run {index}",
+      "invariant": "General edit {index}",
+      "domain": "Task-specific edit {index}",
+      "aggregate": "Combined harness {index}",
+      "compose": "Composed harness {index}",
+      "rollout": "Rollout",
+      "select": "Selection",
+      "reflect": "Reflection"
+    },
+    "rolloutOf": "Rollout of {of}"
+  },
+  "timeline": {
+    "phaseRound": "{phase} · round {round}",
+    "reused": "Reused",
+    "fellBack": "Fell back",
+    "keptBase": "No change"
+  },
+  "evidence": {
+    "delivered": "Delivered",
+    "notDelivered": "Not delivered",
+    "degraded": "Degraded run",
+    "errored": "Errored",
+    "unpriced": "Unpriced",
+    "toolCalls": "{calls} calls, {failures} failed",
+    "metric": {
+      "tokens": "Tokens in / out",
+      "cost": "Cost",
+      "latency": "Duration",
+      "tools": "Tools"
+    },
+    "checks": "Checks",
+    "checkStatus": {
+      "passed": "Passed",
+      "failed": "Failed",
+      "inconclusive": "Inconclusive"
+    },
+    "blocked": "Blocked by the probe policy",
+    "delegations": "Delegated to: {list}",
+    "externalReads": "Read from outside the machine (not reused in later runs): {list}",
+    "output": "Answer",
+    "emptyOutput": "(empty)",
+    "deliverables": "Files produced ({count})",
+    "bytes": "{bytes} bytes",
+    "truncated": "truncated",
+    "trajectory": "Full trajectory"
+  },
+  "selection": {
+    "method": "Decided by",
+    "methods": {
+      "deterministic": "the task's checks",
+      "judge": "a judge model, on anonymized evidence",
+      "tie-break": "a tie-break (cheaper, then simpler)",
+      "no-candidate": "nothing to choose: no candidate differed from the current harness"
+    },
+    "dominant": "Beat every run of the current harness: {list}",
+    "regressed": "Did worse than the current harness: {list}",
+    "unchanged": "Identical to the current harness: {list}",
+    "judge": "The judge preferred {best} ({confidence} confidence).",
+    "confidence": {
+      "high": "high",
+      "medium": "medium",
+      "low": "low"
+    }
+  },
+  "decision": {
+    "pending": "No decision yet.",
+    "adopt": "Adopt {label}",
+    "keepBase": "Keep the current harness",
+    "risk": {
+      "low": "Low risk",
+      "medium": "Medium risk",
+      "high": "High risk"
+    },
+    "scope": {
+      "task": "This task only",
+      "session": "This conversation",
+      "workspace": "This workspace",
+      "global": "Everywhere"
+    },
+    "rolledBack": "The adoption was rolled back.",
+    "adoptedByPerson": "Adopted ({scope}) with your approval.",
+    "adoptedAutomatically": "Adopted ({scope}) automatically as a low-risk change.",
+    "variantCreated": "It was written to an evolved variant, so the original agent is unchanged.",
+    "approvalNeeded": "This change needs your approval before it applies.",
+    "setWorkspaceDefault": "Also make the evolved agent this workspace's default",
+    "approve": "Approve",
+    "reject": "Keep current"
+  },
+  "reflection": {
+    "verdict": {
+      "helped": "Helped",
+      "hurt": "Hurt",
+      "noEffect": "No observed effect",
+      "confounded": "Confounded"
+    },
+    "noEdits": "The reflection attributed no edits.",
+    "retrieved": "Lessons the editors were given",
+    "retrievedVerdict": "{verdict}",
+    "dropped": "No lesson was kept: {reason}",
+    "merged": "The lesson was merged into an existing one.",
+    "stored": "The lesson was added to the library.",
+    "openLesson": "Open lesson",
+    "conflicts": "{count, plural, one {It contradicts # existing lesson.} other {It contradicts # existing lessons.}}"
+  },
+  "stepDetail": {
+    "meta": "{attempts} attempts · {tokens} tokens · {cost} · {duration}",
+    "reused": "Evidence reused from an identical earlier rollout ({from}).",
+    "fellBack": "The editor's proposal was invalid twice, so this stage kept its input.",
+    "keptBase": "The editor left the harness unchanged.",
+    "notes": "Editor notes",
+    "changesFromBase": "Changes from the current harness",
+    "snapshotMissing": "This harness version is no longer stored."
+  },
+  "compare": {
+    "notRolled": "Not rolled out yet.",
+    "delivered": "Delivered",
+    "yes": "Yes",
+    "no": "No",
+    "checks": "Checks",
+    "checksPassed": "{passed} of {total} passed",
+    "toolFailures": "Tool failures",
+    "tokens": "Tokens",
+    "cost": "Cost",
+    "nothingYet": "No candidate harness to compare yet.",
+    "base": "Current harness",
+    "chosen": "chosen",
+    "left": "Left harness",
+    "right": "Right harness",
+    "loading": "Loading harnesses…"
+  },
+  "actions": {
+    "errors": {
+      "control": {
+        "not-found": "The run no longer exists.",
+        "not-awaiting": "This run is not waiting for approval (it may have been decided elsewhere).",
+        "not-resumable": "Only an interrupted or stalled run can be resumed.",
+        "not-adopted": "This run has no adoption in effect.",
+        "busy": "Another action on this run is in progress."
+      },
+      "adoption": {
+        "no-decision": "The run has no adoption decision for this harness.",
+        "no-session": "The conversation the run started from no longer exists.",
+        "no-workspace": "The workspace the run started in no longer exists.",
+        "agent-changed": "The agent was edited after this run started; start a new run.",
+        "agent-not-found": "The agent no longer exists.",
+        "not-adopted": "This run adopted nothing.",
+        "already-rolled-back": "This adoption was already rolled back."
+      }
+    },
+    "done": {
+      "cancel": "Run cancelled.",
+      "resume": "Run resumed.",
+      "approve": "Change approved and applied.",
+      "reject": "Kept the current harness.",
+      "rollback": "Adoption rolled back."
+    },
+    "failed": {
+      "cancel": "Could not cancel the run.",
+      "resume": "Could not resume the run.",
+      "approve": "Could not apply the change.",
+      "reject": "Could not record the decision.",
+      "rollback": "Could not roll back."
+    }
+  },
+  "viewer": {
+    "loading": "Loading run…",
+    "missing": "This run no longer exists.",
+    "subtitle": "{agent} · {trigger} · {mode}, k = {k} · {created}",
+    "resume": "Resume",
+    "rollback": "Roll back",
+    "cancel": "Cancel run",
+    "stopped": "Stopped early: {reason}",
+    "interruptedHint": "The app stopped while this run worked. Resuming continues from its last finished step and spends again.",
+    "task": "Task",
+    "retrieved": "{count, plural, one {# lesson from the library was given to the editors.} other {# lessons from the library were given to the editors.}}",
+    "tabs": {
+      "timeline": "Steps",
+      "compare": "Compare",
+      "decision": "Decision",
+      "reflection": "Reflection"
+    },
+    "pickStep": "Pick a step to see its evidence.",
+    "noReflection": "The run has not reflected yet.",
+    "confirmRollbackTitle": "Roll back this adoption?",
+    "confirmRollbackBody": "The agent goes back to the harness it had before this run. Refused if the agent was edited since.",
+    "confirmCancelTitle": "Cancel this run?",
+    "confirmCancelBody": "Work in progress stops and the current harness stays. Spending so far is not refunded.",
+    "keep": "Keep"
+  },
+  "runList": {
+    "empty": "No runs yet.",
+    "open": "Open run {title}",
+    "improved": "Improved",
+    "keptCurrent": "Kept current"
+  },
+  "library": {
+    "intro": "Lessons past runs drew about which harness changes help. They are suggestions for later editors, never applied by themselves, and kept apart from Memory.",
+    "filter": "Filter lessons by status",
+    "all": "All",
+    "status": {
+      "proposed": "Proposed",
+      "verified": "Verified",
+      "rejected": "Rejected",
+      "deprecated": "Retired"
+    },
+    "confidence": {
+      "high": "High confidence",
+      "medium": "Medium confidence",
+      "low": "Low confidence"
+    },
+    "empty": "No lessons yet.",
+    "when": "When: {cue}",
+    "counts": "Retrieved {retrieved} · helped {helped} · hurt {hurt}",
+    "support": "{count, plural, one {# more run agreed} other {# more runs agreed}}",
+    "conflicts": "{count, plural, one {# conflict} other {# conflicts}}",
+    "evidence": "Evidence",
+    "applies": "Applies when: {list}",
+    "excludes": "Not when: {list}",
+    "limitations": "Known limits: {list}",
+    "enabled": "Use in new runs",
+    "reinstate": "Reinstate",
+    "retire": "Retire",
+    "delete": "Delete",
+    "openRun": "Open source run",
+    "updateFailed": "Could not update the lesson."
+  },
+  "versions": {
+    "errors": {
+      "not-found": "That version no longer exists.",
+      "other-agent": "That version belongs to another agent.",
+      "unchanged": "The agent already has this harness.",
+      "agent-changed": "The agent changed after you opened this version. Review the difference again."
+    },
+    "previewFailed": "Could not compare this version.",
+    "restored": "Version restored.",
+    "restoreFailed": "Could not restore this version.",
+    "empty": "No harness versions recorded yet. One is captured when a run starts.",
+    "origin": {
+      "captured": "Captured",
+      "candidate": "Candidate",
+      "composed": "Composed",
+      "adopted": "Adopted",
+      "restored": "Restored"
+    },
+    "inEffect": "In effect",
+    "openRun": "Open run",
+    "compare": "Compare with current",
+    "dialogTitle": "Harness version",
+    "dialogBody": "What restoring this version would change, compared with the agent's harness now. The agent's model, permissions and tools stay as they are.",
+    "loading": "Comparing…",
+    "sameAsCurrent": "The agent already has exactly this harness.",
+    "risk": {
+      "low": "Low risk",
+      "medium": "Medium risk",
+      "high": "High risk"
+    },
+    "close": "Close",
+    "restore": "Restore this version",
+    "notEditable": "This agent cannot be edited here; duplicate it first."
+  },
+  "checks": {
+    "none": "No checks: the selection will rely on a judge model. Add a check to decide on evidence.",
+    "path": "File path",
+    "pathPlaceholder": "report.md",
+    "text": "Text",
+    "textPlaceholder": "Text to look for",
+    "caseSensitive": "Match case",
+    "requiredKeys": "Required keys",
+    "requiredKeysPlaceholder": "Comma-separated keys (optional)",
+    "max": "Maximum tool errors",
+    "profile": "Acceptance profile",
+    "pickProfile": "Pick a profile",
+    "noProfiles": "This workspace has no approved acceptance profiles.",
+    "remove": "Remove check",
+    "kind": "Kind of check",
+    "add": "Add check"
+  },
+  "start": {
+    "errors": {
+      "disabled": "Harness Evolution is turned off in Settings.",
+      "trigger-not-allowed": "The current settings do not allow runs started this way.",
+      "invalid-task": "The task is incomplete or inconsistent.",
+      "no-commit": "The repository has no commit to start from.",
+      "model-unavailable": "No model can be called for one of the roles. Set one in the Harness Evolution settings.",
+      "no-session": "Conversation scope needs the conversation the run starts from.",
+      "no-workspace": "Workspace scope needs a workspace.",
+      "agent-not-found": "The agent no longer exists.",
+      "external-runtime": "This agent runs on an external runtime whose prompt and tool loop Cognia does not assemble, so its harness cannot be probed here."
+    },
+    "invalid": "The task is not ready.",
+    "launchFailed": "The run could not start.",
+    "started": "Run started.",
+    "duplicate": "An identical run is already in progress; opening it.",
+    "failed": "Could not start the run.",
+    "title": "Improve {agent}",
+    "description": "Each candidate harness is tried on this task in isolation. Nothing changes until a better harness is chosen, and wider changes wait for your approval.",
+    "taskTitle": "Title",
+    "prompt": "Request",
+    "promptPlaceholder": "The request exactly as the agent receives it",
+    "domain": "Domain",
+    "domainPlaceholder": "e.g. data/reports (groups lessons in the library)",
+    "isolation": "Where each attempt works",
+    "isolationHint": {
+      "none": "A text-only task: attempts answer without files.",
+      "files": "Each attempt gets an empty scratch directory with copies of the input files.",
+      "git": "Each attempt gets its own worktree of the repository at a fixed commit. Your working copy is never touched."
+    },
+    "repo": "Repository",
+    "repoPlaceholder": "/path/to/repository",
+    "pickRepo": "Choose repository folder",
+    "baseRef": "Base commit",
+    "relativePath": "Path inside the task",
+    "removeFile": "Remove file",
+    "addFiles": "Add input files",
+    "deliverables": "Expected files",
+    "deliverablesPlaceholder": "One path per line, e.g. report.md",
+    "checks": "Checks",
+    "mode": "Recursion",
+    "k": "Breadth (k)",
+    "kCapped": "The budget allows k = {k}.",
+    "scope": "Where an improvement applies",
+    "scopeHint": {
+      "task": "Only recorded on this run; the agent itself is not changed.",
+      "session": "Switches this conversation to an evolved variant of the agent.",
+      "workspace": "Writes an evolved variant for this workspace. Needs your approval.",
+      "global": "Changes the agent everywhere. Needs your approval."
+    },
+    "editable": "What the editors may change",
+    "maxCost": "Cost ceiling (USD)",
+    "maxWall": "Time ceiling (minutes)",
+    "networkOff": "Cut network access during probes where the sandbox supports it",
+    "useExperiences": "Give the editors relevant lessons from the library",
+    "estimate": "Estimate before starting",
+    "estimateWork": "{rollouts} rollouts, {sessions} editor sessions, {calls} model calls",
+    "estimateSpend": "About {cost} · {tokens} tokens · {time}",
+    "confidence": {
+      "based": "Based on {count} comparable runs.",
+      "few": "Based on only {count} comparable runs; treat as rough.",
+      "rough": "A rough guess: little comparable history.",
+      "none": "No comparable history: only the call counts are known."
+    },
+    "exceeds": "Over the {dimension} ceiling",
+    "budgetDimension": {
+      "maxIterations": "iteration",
+      "maxCandidates": "candidate",
+      "maxParallelRuns": "parallel run",
+      "maxModelCalls": "model call",
+      "maxTokens": "token",
+      "maxCostUsd": "cost",
+      "maxWallTimeMs": "time",
+      "maxTurnsPerRollout": "turn"
+    },
+    "estimating": "Estimating…",
+    "cancel": "Cancel",
+    "submit": "Start run"
+  },
+  "agentView": {
+    "title": "Harness Evolution",
+    "description": "Improve this agent's instructions, skills and tool rules from evidence, one task at a time.",
+    "start": "New run",
+    "blocked": {
+      "disabled": "Harness Evolution is off.",
+      "host-owned": "This device's conversations live on its host; start runs there.",
+      "no-runtime": "Runs need the desktop agent runtime, which is not available here.",
+      "external": "This agent runs on an external runtime, so its harness cannot be probed."
+    },
+    "openSettings": "Open settings",
+    "tabs": {
+      "runs": "Runs",
+      "versions": "Versions",
+      "experiences": "Lessons"
+    },
+    "emptyTitle": "No runs yet",
+    "emptyBody": "Start a run on a task this agent should do better. Every candidate is tried in isolation first."
+  },
+  "failureOffer": {
+    "runExists": "Harness Evolution is working on this failure.",
+    "viewRun": "View run",
+    "offer": "This failure looks like it comes from how {agent} is set up. Try improving its harness on this request?",
+    "improve": "Improve",
+    "dismiss": "Not now"
+  },
+  "page": {
+    "title": "Harness Evolution run",
+    "backToAgent": "Back to {name}",
+    "backToAgents": "Back to agents",
+    "noRunTitle": "No run selected",
+    "noRunBody": "Open a run from an agent's Evolution page.",
+    "desktopOnlyTitle": "Runs live on the desktop",
+    "desktopOnlyBody": "Harness Evolution runs on the desktop app, next to the agents it improves. Open this run there."
+  },
+  "settings": {
+    "title": "Harness Evolution",
+    "description": "Let agents improve their own harness (instructions, guardrails, memory, tool guidance, skills, subagents, tool rules) by trying candidates on real tasks in isolation and keeping only what the evidence supports.",
+    "enableTitle": "Turn on",
+    "enabled": "Enable Harness Evolution",
+    "enabledDescription": "Off by default. Nothing runs, and no option below applies, until this is on.",
+    "startMode": "How runs may start",
+    "startModeDescription": {
+      "disabled": "No runs start, even by hand.",
+      "manual": "Only when you start one from an agent's Evolution page.",
+      "failure-triggered": "Also offered under a turn that failed through the agent's own conduct.",
+      "background": "Also queued automatically after such a failure, and started by an hourly sweep within the limits below."
+    },
+    "startModes": {
+      "disabled": "Never",
+      "manual": "Manually",
+      "failure-triggered": "Offer after failures",
+      "background": "In the background"
+    },
+    "offHint": "Probes never touch your workspace, side effects are blocked or simulated, and changes beyond one task always wait for your approval.",
+    "defaultsTitle": "Defaults for new runs",
+    "defaultMode": "Recursion",
+    "defaultModeDescription": "Parallel tries independent edits side by side; sequential builds each round on the last.",
+    "defaultK": "Breadth (k)",
+    "defaultKDescription": "Candidates per stage. A run does 4k rollouts and 3k editor sessions.",
+    "editorChannel": "Editor channel",
+    "editorChannelDescription": {
+      "auto": "A single structured proposal when the evidence fits in one prompt; an agent session over the evidence files when it does not.",
+      "agentic": "Editors work through the evidence files as an agent session.",
+      "structured": "Editors return one structured proposal from the evidence they are given inline."
+    },
+    "editorChannels": {
+      "auto": "Automatic",
+      "agentic": "Agentic",
+      "structured": "Structured"
+    },
+    "useExperiences": "Use the experience library",
+    "useExperiencesDescription": "Give editors the most relevant lessons from earlier runs.",
+    "autoAdopt": "Auto-adopt low-risk improvements",
+    "autoAdoptDescription": "Applies only to task and conversation scope. Workspace and global changes always ask.",
+    "budgetTitle": "Budget ceilings",
+    "budgetDescription": "A run stops at the first ceiling it reaches. Each run can lower these.",
+    "budget": {
+      "maxCostUsd": {
+        "label": "Cost (USD)",
+        "description": "Spending across rollouts and model calls."
+      },
+      "maxTokens": {
+        "label": "Tokens",
+        "description": "Input plus output tokens across the run."
+      },
+      "maxModelCalls": {
+        "label": "Model calls",
+        "description": "Editor, composer, selection and reflection calls."
+      },
+      "maxWallTimeMs": {
+        "label": "Time (minutes)",
+        "description": "Wall-clock time from start to decision."
+      },
+      "maxIterations": {
+        "label": "Iterations",
+        "description": "The largest k a run may use."
+      },
+      "maxCandidates": {
+        "label": "Candidates",
+        "description": "Candidate harnesses proposed across the run (2k)."
+      },
+      "maxParallelRuns": {
+        "label": "Parallel work",
+        "description": "Rollouts and editor sessions running at once."
+      },
+      "maxTurnsPerRollout": {
+        "label": "Turns per rollout",
+        "description": "Agent turns one attempt may take."
+      }
+    },
+    "modelsTitle": "Models",
+    "modelsDescription": "Which model plays each role. Unset roles use the agent's own model.",
+    "role": {
+      "executor": "Executor",
+      "editor": "Editor",
+      "composer": "Composer",
+      "selector": "Selector",
+      "reflector": "Reflector"
+    },
+    "roleDescription": {
+      "executor": "Runs the agent on the task in every rollout.",
+      "editor": "Proposes harness edits from the evidence.",
+      "composer": "Combines the best edits into one harness.",
+      "selector": "Judges the finalists when the checks cannot decide.",
+      "reflector": "Attributes what helped and writes the lesson."
+    },
+    "agentModel": "The agent's model",
+    "searchModels": "Search models",
+    "noModels": "No models configured.",
+    "invalidModel": "No configured provider offers this model.",
+    "probeTitle": "What probes may reach",
+    "probeDescription": "MCP servers you trust to be read-only during probes. Calls to any other server are blocked.",
+    "noMcpServers": "No MCP servers configured.",
+    "pacingTitle": "Pacing",
+    "cooldown": "Failure cooldown (hours)",
+    "cooldownDescription": "After an automatic run or a dismissed offer, wait this long before offering or queuing another for the same agent.",
+    "backgroundInterval": "Background interval (hours)",
+    "backgroundIntervalDescription": "Least time between background runs being started.",
+    "backgroundRuns": "Runs per sweep",
+    "backgroundRunsDescription": "Most background runs in flight at once.",
+    "experienceCap": "Lessons kept per agent",
+    "experienceCapDescription": "The weakest lessons are evicted beyond this."
+  }
+}

@@ -59,15 +59,22 @@ const WebStatusContext = createContext<WebStatusContextValue | null>(null)
  */
 export function WebStatusProvider({
   enabled,
+  active = true,
   children,
 }: {
   enabled: boolean
+  /** Suspend status hosts while compact chrome owns the web viewport. */
+  active?: boolean
   children: ReactNode
 }) {
-  return enabled ? <EnabledWebStatusProvider>{children}</EnabledWebStatusProvider> : children
+  return enabled ? (
+    <EnabledWebStatusProvider active={active}>{children}</EnabledWebStatusProvider>
+  ) : (
+    children
+  )
 }
 
-function EnabledWebStatusProvider({ children }: { children: ReactNode }) {
+function EnabledWebStatusProvider({ active, children }: { active: boolean; children: ReactNode }) {
   const { resolved } = useBarLayout("status")
   const scopes = useMemo(() => splitStatusBarScopes(resolved), [resolved])
   const [hosts, setHosts] = useState<{ id: string; host: SessionHost }[]>([])
@@ -88,7 +95,11 @@ function EnabledWebStatusProvider({ children }: { children: ReactNode }) {
     () => ({ scopes, owner, register, globalOwner, registerGlobal }),
     [scopes, owner, register, globalOwner, registerGlobal]
   )
-  return <WebStatusContext.Provider value={value}>{children}</WebStatusContext.Provider>
+  // Deactivate the context, not the provider's ancestry: route-local state
+  // must survive handing the web viewport to the compact shell and back.
+  return (
+    <WebStatusContext.Provider value={active ? value : null}>{children}</WebStatusContext.Provider>
+  )
 }
 
 /** With no web-shell provider (Tauri, mobile, bypass routes), mounts are inert. */

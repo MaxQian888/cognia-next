@@ -32,6 +32,7 @@ import { resolveWorkspacePortEnv } from "./workspace-port-env"
 export interface SpawnedChild {
   stdin: {
     write(chunk: string): void
+    end?(): unknown
     on?(event: "error", cb: (err: Error) => void): unknown
   } | null
   stdout: NodeJS.ReadableStream | null
@@ -235,6 +236,7 @@ export function adaptBunSubprocess(child: BunSubprocessLike): SpawnedChild {
 
   return {
     stdin: {
+      ...(child.stdin.end ? { end: () => child.stdin.end!() } : {}),
       write(chunk) {
         try {
           child.stdin.write(chunk)
@@ -437,6 +439,15 @@ export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<Sid
   const spawn = opts.spawn ?? realSpawn
 
   const child = spawn(script, { cwd, env })
+  let exited = false
+  let exitCode: number | null = null
+  const cleanupEnded = new Promise<void>((resolve) => {
+    child.on("exit", (code) => {
+      exited = true
+      exitCode = code
+      resolve()
+    })
+  })
   const diagnostics = startupDiagnostics(child.stderr, env)
   const transport = new StdioTransport(toHandle(child), {
     hostRpc: opts.hostRpc ?? cliHostRpcHandlers(),
@@ -457,17 +468,49 @@ export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<Sid
   }
   diagnostics.discard()
 
-  let stopped = false
+  let shutdown: Promise<void> | undefined
   return {
     transport,
-    shutdown: async () => {
-      if (stopped) return
-      stopped = true
-      try {
-        child.kill()
-      } catch {
-        // ignore
-      }
-    },
+    shutdown: () =>
+      (shutdown ??= (async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          if (exited) {
+            if (exitCode !== 0)
+              throw new Error(`sidecar exited during cleanup with code ${exitCode}`)
+            return
+          }
+          if (!child.stdin?.end) {
+            try {
+              child.kill()
+            } catch {
+              /* already gone */
+            }
+            return
+          }
+          // EOF asks the host to finish session/process cleanup. A successful
+          // shutdown is the actual process exit, never a delay followed by kill.
+          child.stdin.end()
+          await Promise.race([
+            cleanupEnded,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("sidecar cleanup did not finish within 5 seconds")),
+                5_000
+              )
+            }),
+          ])
+          if (exitCode !== 0) throw new Error(`sidecar exited during cleanup with code ${exitCode}`)
+        } catch (error) {
+          try {
+            if (!exited) child.kill()
+          } catch {
+            /* already gone */
+          }
+          throw error
+        } finally {
+          if (timer) clearTimeout(timer)
+        }
+      })()),
   }
 }

@@ -417,6 +417,7 @@ describe("renderer Cognia tool host", () => {
   it.each([
     null,
     { ...descriptor, leaseId: "wrong" },
+    { ...descriptor, mcpServers: [{ ...descriptor.mcpServers[0], transport: "stdio" }] },
     { ...descriptor, mcpServers: [{ ...descriptor.mcpServers[0], url: "broken" }] },
     { ...descriptor, mcpServers: [{ ...descriptor.mcpServers[0], url: "https://remote.example" }] },
   ])("closes invalid startup descriptors", async (response) => {

@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UIDrawer, type A2UIDrawerComponent } from "./a2ui-drawer"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -28,6 +28,20 @@ describe("A2UIDrawer", () => {
     onAction: jest.fn(),
     onDataChange: jest.fn(),
     renderChild: jest.fn((id: string) => <span data-testid={id}>{id}</span>),
+  })
+
+  it("writes open changes to the bound surface model", () => {
+    const props = cp({
+      id: "bound",
+      component: "Drawer",
+      trigger: "Open panel",
+      children: [],
+      open: { path: "/open" },
+      title: "Panel",
+    })
+    render(<A2UIDrawer {...props} />)
+    fireEvent.click(screen.getByText("Open panel"))
+    expect(props.onDataChange).toHaveBeenCalledWith("/open", true)
   })
 
   it("renders trigger element", () => {

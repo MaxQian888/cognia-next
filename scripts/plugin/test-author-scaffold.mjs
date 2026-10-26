@@ -21,6 +21,7 @@ import { execFileSync } from "node:child_process"
 import assert from "node:assert/strict"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -98,6 +99,17 @@ try {
     }
 
     run("pnpm", ["install", "--no-frozen-lockfile", "--prefer-offline"], pluginDir)
+    const nativeVersion = execFileSync(join(pluginDir, "node_modules/.bin/tsc"), ["--version"], {
+      encoding: "utf8",
+    }).trim()
+    assert.match(nativeVersion, /^Version 7\./)
+    const compiler = createRequire(join(pluginDir, "package.json"))("typescript")
+    assert.match(compiler.version, /^7\./)
+    assert.doesNotMatch(
+      readFileSync(join(pluginDir, "pnpm-lock.yaml"), "utf8"),
+      /@typescript\/(?:typescript6|old)|typescript@6\./
+    )
+    console.log(`Toolchain verified: ${nativeVersion}; no TS6 compatibility packages`)
     run("pnpm", ["exec", "tsc", "--noEmit"], pluginDir)
     run("pnpm", ["exec", "jest", "--runInBand"], pluginDir)
     run("pnpm", ["build"], pluginDir)

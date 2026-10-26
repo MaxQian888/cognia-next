@@ -48,8 +48,8 @@ tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-clipboard-manager = { workspace = true, optional = true }
 tauri-plugin-opener = { workspace = true, optional = true }
 # The WASM component host — the compile monster this crate isolates.
-wasmtime = { version = "=49.0.1", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "=49.0.1"
+wasmtime = { version = "=49.0.4", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = "=49.0.4"
 # Component/manifest validation during install.
 wasmparser = "0.261"
 # Bounded child-process shutdown in the python host.

@@ -41,3 +41,11 @@ describe("SETTING_CONTROLS registry", () => {
     expect(SETTING_CONTROLS.length).toBeGreaterThanOrEqual(15)
   })
 })
+
+it("makes reading, Jina, distillation and web fetch findable", () => {
+  const reader = SETTING_CONTROLS.find((c) => c.id === "web-reader")
+  expect(reader).toMatchObject({ sectionId: "search", settingKey: "webReader" })
+  expect(reader?.keywords).toEqual(
+    expect.arrayContaining(["reader", "jina", "distill", "web fetch"])
+  )
+})

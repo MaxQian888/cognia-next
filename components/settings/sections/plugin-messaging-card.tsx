@@ -15,6 +15,15 @@ import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { getPluginIPC, type LibraryCallAudit } from "@/lib/plugin/messaging/ipc"
 import { getMessageBus } from "@/lib/plugin/messaging/message-bus"
 import type { IpcExposedMethodInfo } from "@/types/plugin/plugin-messaging"
@@ -181,10 +190,12 @@ export function PluginMessagingCard() {
           <p className="font-medium">{t("audit.title")}</p>
           {snapshot && snapshot.libraryCalls.length > 0 ? (
             <div className="max-h-64 overflow-auto rounded-md border">
-              <table className="w-full text-left">
-                <caption className="sr-only">{t("audit.title")}</caption>
-                <thead>
-                  <tr>
+              {/* The bordered box is the scroller (both axes), so the shared
+                  table's own horizontal scroller stays out of the way. */}
+              <Table containerClassName="overflow-x-visible" className="text-left text-xs">
+                <TableCaption className="sr-only">{t("audit.title")}</TableCaption>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
                     {(
                       [
                         "caller",
@@ -196,28 +207,28 @@ export function PluginMessagingCard() {
                         "duration",
                       ] as const
                     ).map((column) => (
-                      <th key={column} scope="col" className="px-2 py-1">
+                      <TableHead key={column} scope="col">
                         {t(`audit.${column}`)}
-                      </th>
+                      </TableHead>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {snapshot.libraryCalls.map((call, index) => (
-                    <tr key={`${call.timestamp}:${index}`}>
-                      <td className="px-2 py-1 font-mono">{call.callerId}</td>
-                      <td className="px-2 py-1 font-mono">{call.providerId}</td>
-                      <td className="px-2 py-1 font-mono">{call.method}</td>
-                      <td className="px-2 py-1">{call.version}</td>
-                      <td className="px-2 py-1">{t(`risk.${call.risk}`)}</td>
-                      <td className="px-2 py-1">{t(`audit.${call.outcome}`)}</td>
-                      <td className="px-2 py-1 tabular-nums">
+                    <TableRow key={`${call.timestamp}:${index}`}>
+                      <TableCell className="font-mono">{call.callerId}</TableCell>
+                      <TableCell className="font-mono">{call.providerId}</TableCell>
+                      <TableCell className="font-mono">{call.method}</TableCell>
+                      <TableCell>{call.version}</TableCell>
+                      <TableCell>{t(`risk.${call.risk}`)}</TableCell>
+                      <TableCell>{t(`audit.${call.outcome}`)}</TableCell>
+                      <TableCell className="tabular-nums">
                         {t("audit.durationValue", { duration: call.durationMs })}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           ) : (
             <p className="text-muted-foreground">{t("audit.empty")}</p>

@@ -37,7 +37,6 @@ import {
   BotIcon,
   ChevronDownIcon,
   PlugZapIcon,
-  PowerIcon,
   ServerCogIcon,
   SlidersHorizontalIcon,
   XIcon,
@@ -75,7 +74,6 @@ import {
 } from "@/components/mobile/external-agents/routes"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
-import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useAgentRuntimeCatalog } from "@/hooks/agent/use-agent-runtime-catalog"
 import { selectExternalAgent } from "@/lib/agent/external-agent-selection"
 import { ensureExternalAgentReady } from "@/lib/agent/ensure-external-agent-ready"
@@ -152,7 +150,6 @@ export function AgentRuntimeSelector({
   const runtimeRef = useRuntimeRefForSession(sessionId)
   const setDefaultRuntimeRef = useAgentRuntimeStore((s) => s.setRuntimeRef)
   const setSessionRuntimeRef = useAgentRuntimeStore((s) => s.setSessionRuntimeRef)
-  const setExternalEnabled = useExternalAgentStore((s) => s.setEnabled)
 
   // Writing the app default when there is no session is what a composer on the
   // new-chat surface should do: the choice seeds the conversation it starts.
@@ -167,7 +164,6 @@ export function AgentRuntimeSelector({
   const {
     runtimes,
     selected: sessionSelected,
-    externalEnabled,
     configuredExternalCount,
   } = useAgentRuntimeCatalog(providerId, sessionId)
   const selected = controlled
@@ -201,9 +197,9 @@ export function AgentRuntimeSelector({
   // default on every restart, and the registry tick that follows only
   // re-renders: it never restored the selection.
   //
-  // A LOCAL agent with no row at all is also settled: the agent was deleted, or
-  // External Agents were switched off, and either way the local list is
-  // authoritative right now. A HOST selection with no row is not, because the
+  // A LOCAL agent with no row at all is also settled: the agent was deleted,
+  // and the local list is authoritative right now. Disabled agents retain a
+  // blocked row and follow the settled-block path. A HOST selection with no row is not, because the
   // host configuration list loads asynchronously and a valid selection has no
   // row during its first frames.
   // A controlled chip names a stored default, not a live lane: a missing target
@@ -440,30 +436,8 @@ export function AgentRuntimeSelector({
               list.
             */}
             <CommandGroup forceMount>
-              {/* Three different "no agents to pick" states, each with the
-                  action that resolves it. They used to collapse into one
-                  sentence pointing at a Settings page, while the dialog that
-                  actually adds an agent sat two rows below, unmentioned. */}
-              {!externalEnabled ? (
-                <>
-                  <p className="px-2 pt-1.5 text-[10px] text-muted-foreground">
-                    {t("externalTurnedOff")}
-                  </p>
-                  <CommandItem
-                    forceMount
-                    value="enable-external"
-                    onSelect={() => {
-                      setOpen(false)
-                      setExternalEnabled(true)
-                    }}
-                    className="gap-2"
-                    data-testid="runtime-enable-external"
-                  >
-                    <PowerIcon className="size-4" />
-                    {t("enableExternal")}
-                  </CommandItem>
-                </>
-              ) : externalRows.length === 0 ? (
+              {/* Keep configuration guidance beside the management action. */}
+              {externalRows.length === 0 ? (
                 <p className="px-2 py-1.5 text-[10px] text-muted-foreground">
                   {t("externalEmpty")}
                 </p>

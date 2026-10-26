@@ -8,6 +8,10 @@ import { BotRunParkedError } from "@/lib/bot/runtime/step"
 import { pendingParks, recordPendingPark } from "@/lib/bot/runtime/host-step"
 
 import { registerBotsForPlugin, unregisterBotsForPlugin } from "./bots-bridge"
+import {
+  builtinArtifactManifest,
+  loadBuiltinArtifactExports,
+} from "@/lib/plugin/core/builtin-artifact-fixture"
 
 jest.mock("@/lib/plugin/bridge/_shared/python-backed-proxy", () => ({
   ...jest.requireActual("@/lib/plugin/bridge/_shared/python-backed-proxy"),
@@ -265,16 +269,13 @@ describe("the in-tree reference plugin crosses this bridge", () => {
   // `bots-bridge` and the bot registry shipped with no plugin exercising them.
   // Every test above builds its own manifest, so all of them would still pass
   // if the one real contribution in the tree were malformed. This is the case
-  // that reads the shipped manifest and the shipped module.
+  // that reads the shipped manifest and the shipped module: the built-in chunk
+  // the app stages, not the plugin's source.
   it("resolves the Schedule digest handler out of the real manifest and module", async () => {
-    const [schedulerManifest, schedulerModule] = await Promise.all([
-      import("@/plugins/cognia-scheduler-tools/plugin.json"),
-      import("@/plugins/cognia-scheduler-tools/src/index"),
-    ])
-    const exports = schedulerModule as unknown as Record<string, unknown>
+    const exports = await loadBuiltinArtifactExports("cognia-scheduler-tools")
 
     const result = await registerBotsForPlugin(
-      schedulerManifest.default as unknown as PluginManifest,
+      builtinArtifactManifest("cognia-scheduler-tools"),
       "builtin://cognia-scheduler-tools",
       // Exactly what `importInstalledEntry` hands back for a `builtin://`
       // root: the whole module, not a path import.

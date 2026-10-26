@@ -1,4 +1,6 @@
 import { transport } from "@/lib/tauri"
+import type { BackgroundMonitorCondition } from "@cognia/plugin-contract/lib/jobs/background-jobs"
+export type { BackgroundMonitorCondition } from "@cognia/plugin-contract/lib/jobs/background-jobs"
 
 export type BackgroundJobOwner =
   | { kind: "session"; sessionId: string }
@@ -42,20 +44,6 @@ export interface BackgroundMonitorRecord {
   detail?: string
   label?: string
 }
-
-export type BackgroundMonitorCondition =
-  | { kind: "jobExit"; jobId: string }
-  | { kind: "jobOutput"; jobId: string; pattern: string }
-  | {
-      kind: "shellPredicate"
-      command: string
-      program: string
-      args: string[]
-      cwd: string
-      env?: Record<string, string>
-      intervalMs?: number
-    }
-  | { kind: "upstream"; source: string; id: string }
 
 export async function listBackgroundJobs(
   owner?: BackgroundJobOwner

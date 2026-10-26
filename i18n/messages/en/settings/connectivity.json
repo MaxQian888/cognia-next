@@ -290,6 +290,7 @@
     "busyTitle": "The tunnel is exposing something else",
     "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for another feature. Replacing it changes what that public URL points at.",
     "busyReplace": "Replace the tunnel",
+    "busyKeep": "Keep it",
     "busyCancelled": "Left the existing tunnel running.",
     "exposing": "Exposing {localUrl}",
     "exposingOther": "This tunnel currently exposes {localUrl}, not this listener. Turn it off and on again here to point it at the companion server, or leave it for the feature using it.",

@@ -33,6 +33,10 @@ jest.mock("./search-provider-grid", () => ({
 jest.mock("./search-provider-compare", () => ({
   SearchProviderCompare: () => <div data-testid="leaf-compare" />,
 }))
+jest.mock("./web-reader-settings", () => ({
+  WebReaderSettings: () => <div data-testid="leaf-reading" />,
+}))
+
 jest.mock("./search-usage-panel", () => ({
   SearchUsagePanel: () => <div data-testid="leaf-usage" />,
 }))
@@ -49,11 +53,26 @@ describe("search-sections config", () => {
     expect(SEARCH_SECTION_PARAM).toBe("searchSection")
   })
 
-  it("defines six sections with unique ids", () => {
-    expect(SEARCH_SECTIONS).toHaveLength(6)
+  it("defines seven sections with unique ids", () => {
+    expect(SEARCH_SECTIONS).toHaveLength(7)
     const ids = SEARCH_SECTIONS.map((s) => s.id)
-    expect(new Set(ids).size).toBe(6)
-    expect(ids).toEqual(["basics", "providers", "behavior", "safety", "performance", "diagnostics"])
+    expect(new Set(ids).size).toBe(7)
+    expect(ids).toEqual([
+      "basics",
+      "providers",
+      "reading",
+      "behavior",
+      "safety",
+      "performance",
+      "diagnostics",
+    ])
+  })
+
+  it("renders the reading section", () => {
+    const Reading = SEARCH_SECTIONS.find((s) => s.id === "reading")!.Component
+    render(<Reading />)
+    expect(screen.getByTestId("leaf-reading")).toBeInTheDocument()
+    expect(isSearchSection("reading")).toBe(true)
   })
 
   it("guards valid and invalid section ids", () => {

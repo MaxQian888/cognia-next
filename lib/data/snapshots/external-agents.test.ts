@@ -12,7 +12,7 @@ describe("externalAgentsSnapshot", () => {
     expect(externalAgentsSnapshot.key).toBe(EXTERNAL_AGENTS_PERSIST_KEY)
     expect(externalAgentsSnapshot.labelKey).toBe(EXTERNAL_AGENTS_LABEL_KEY)
     expect(externalAgentsSnapshot.exposeAsDomain).toBe(true)
-    expect(EXTERNAL_AGENTS_STORE_VERSION).toBe(5)
+    expect(EXTERNAL_AGENTS_STORE_VERSION).toBe(7)
   })
 
   it("captures a real-shaped payload", () => {
@@ -30,7 +30,6 @@ describe("externalAgentsSnapshot", () => {
         agentValidity: {},
         benchmarkCapabilityMap: {},
         lastRunSnapshots: {},
-        enabled: true,
         defaultPermissionMode: "ask",
         autoConnectOnStartup: false,
         showConnectionNotifications: true,

@@ -16,11 +16,11 @@
  * validates.
  */
 
-import type { GatewayTaskBudget } from "@/types/gateway"
+import type { GatewayTaskBudget, GatewayTaskModelPlan } from "@/types/gateway"
 import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { captureRemoteGatewayTarget, acquireRemoteTaskLease } from "./remote-task-lease"
 import { getAllProviders } from "@cognia/provider-types/provider"
-import { resolveProviderProtocol } from "@/sidecar/src/providers/provider-protocol.ts"
+import { resolveProviderProtocol } from "@cognia/provider-types/provider-protocol"
 import { isAgentExecutionFlagEnabled } from "@/lib/ai/agent/execution/feature-flags"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import {
@@ -160,6 +160,7 @@ export async function mintSessionRouteTicket(
 export interface ExternalAgentGatewayRouteInput {
   providerId: string
   modelId: string
+  modelPlan?: GatewayTaskModelPlan
   accountId?: string | null
   sessionId: string
   executionFingerprint?: string
@@ -193,6 +194,7 @@ async function prepareHostGatewayRoute(input: ExternalAgentGatewayRouteInput) {
     taskId: input.sessionId,
     providerId: input.providerId,
     modelId: input.modelId,
+    ...(input.modelPlan ? { modelPlan: input.modelPlan } : {}),
     ingressProtocol: input.ingressProtocol ?? "openai-chat",
     originDeviceId: input.originDeviceId ?? null,
     ...(input.budget ? { budget: input.budget } : {}),
@@ -204,6 +206,7 @@ async function prepareHostGatewayRoute(input: ExternalAgentGatewayRouteInput) {
     secret: lease.secret,
     model: input.modelId,
     modelMetadata: lease.modelMetadata,
+    modelMetadataById: lease.modelMetadataById,
     ownerAccountId: lease.ownerAccountId,
     binding: { providerId: input.providerId, modelId: input.modelId, accountId: null },
     revoke: lease.revoke,
@@ -223,6 +226,7 @@ export async function prepareExternalAgentGatewayRoute(
   MintedSessionTicket & {
     model: string
     modelMetadata: GatewayModelMetadata
+    modelMetadataById: Record<string, GatewayModelMetadata>
     ownerAccountId: string | null
     binding: { providerId: string; modelId: string; accountId: string | null }
     revoke?: () => Promise<void>
@@ -403,66 +407,77 @@ export async function prepareExternalAgentGatewayRoute(
       throw new Error(
         "The selected provider protocol cannot serve this external agent through the gateway"
       )
-    let modelAvailable = upstream.models.includes(input.modelId)
-    // Per-provider discovery may describe a different subscription account.
-    // Resolve selected-account facts transiently, without changing the picker or
-    // another task's metadata. Unknown limits fall back to the declaration only.
-    let metadataSettings = settings
-    if (providerAccountId) {
-      metadataSettings = {
-        ...settings,
-        providerSettings: {
-          ...settings.providerSettings,
-          [input.providerId]: {
-            ...settings.providerSettings?.[input.providerId],
-            providerId: input.providerId,
-            defaultModel: input.modelId,
-            enabled: true,
-            discoveredModels: [],
-          },
-        },
-        customProviders: settings.customProviders?.map((entry) =>
-          entry.id === input.providerId ? { ...entry, discoveredModels: [] } : entry
-        ),
-      }
-      const { getSubscriptionModel } = await import("@/lib/subscription/core/model-discovery")
-      if (definition?.modelApi?.list || definition?.modelApi?.retrieve) {
-        const detail = await getSubscriptionModel({
-          definition,
-          providerAccountId,
-          model: input.modelId,
-          signal: input.signal,
-        })
-        assertCurrent()
-        if (!detail.model)
-          throw new Error("The selected subscription account does not provide this model")
-        modelAvailable = true
-        const discoveredModels = [detail.model]
+    const models = [input.modelId, ...(input.modelPlan?.additionalModels ?? [])]
+    const modelMetadataById: Record<string, GatewayModelMetadata> = Object.create(null)
+    for (const modelId of models) {
+      if (
+        input.providerId === "commandcode" &&
+        resolveProviderProtocol(input.providerId, modelId) !== upstream.protocol
+      )
+        throw new Error("Task models must use the same provider deployment protocol")
+      let modelAvailable = upstream.models.includes(modelId)
+      // Per-provider discovery may describe a different subscription account.
+      // Resolve selected-account facts transiently, without changing the picker or
+      // another task's metadata. Unknown limits fall back to the declaration only.
+      let metadataSettings = settings
+      if (providerAccountId) {
         metadataSettings = {
-          ...metadataSettings,
+          ...settings,
           providerSettings: {
-            ...metadataSettings.providerSettings,
+            ...settings.providerSettings,
             [input.providerId]: {
-              ...metadataSettings.providerSettings?.[input.providerId],
+              ...settings.providerSettings?.[input.providerId],
               providerId: input.providerId,
-              defaultModel: input.modelId,
+              defaultModel: modelId,
               enabled: true,
-              discoveredModels,
+              discoveredModels: [],
             },
           },
-          customProviders: metadataSettings.customProviders?.map((entry) =>
-            entry.id === input.providerId ? { ...entry, discoveredModels } : entry
+          customProviders: settings.customProviders?.map((entry) =>
+            entry.id === input.providerId ? { ...entry, discoveredModels: [] } : entry
           ),
         }
+        const { getSubscriptionModel } = await import("@/lib/subscription/core/model-discovery")
+        if (definition?.modelApi?.list || definition?.modelApi?.retrieve) {
+          const detail = await getSubscriptionModel({
+            definition,
+            providerAccountId,
+            model: modelId,
+            signal: input.signal,
+          })
+          assertCurrent()
+          if (!detail.model)
+            throw new Error("The selected subscription account does not provide this model")
+          modelAvailable = true
+          const discoveredModels = [detail.model]
+          metadataSettings = {
+            ...metadataSettings,
+            providerSettings: {
+              ...metadataSettings.providerSettings,
+              [input.providerId]: {
+                ...metadataSettings.providerSettings?.[input.providerId],
+                providerId: input.providerId,
+                defaultModel: modelId,
+                enabled: true,
+                discoveredModels,
+              },
+            },
+            customProviders: metadataSettings.customProviders?.map((entry) =>
+              entry.id === input.providerId ? { ...entry, discoveredModels } : entry
+            ),
+          }
+        }
       }
+      if (!modelAvailable)
+        throw new Error("The selected model is unavailable in the Cognia provider catalog")
+      const metadata = publisher.gatewayModelMetadata(metadataSettings, input.providerId, modelId)
+      if (metadata.supportsTools === false || metadata.supportsStreaming === false)
+        throw new Error(
+          `The selected model ${modelId} does not support the tools and streaming this agent requires`
+        )
+      modelMetadataById[modelId] = metadata
     }
-    if (!modelAvailable)
-      throw new Error("The selected model is unavailable in the Cognia provider catalog")
-    const modelMetadata = publisher.gatewayModelMetadata(
-      metadataSettings,
-      input.providerId,
-      input.modelId
-    )
+    const modelMetadata = modelMetadataById[input.modelId]
     // A transcript continuation gets a fresh ticket, but its sticky credential
     // lease must still name the same task/account deployment on the next turn.
     const deploymentId = `cognia-task-${encodeURIComponent(
@@ -472,8 +487,8 @@ export async function prepareExternalAgentGatewayRoute(
       ...upstream,
       id: deploymentId,
       deploymentId,
-      models: [input.modelId],
-      modelMetadata: [modelMetadata],
+      models,
+      modelMetadata: Object.values(modelMetadataById),
     }
     if (remoteScope) {
       const lease = await acquireRemoteTaskLease({
@@ -487,6 +502,7 @@ export async function prepareExternalAgentGatewayRoute(
           rotationEnabled: false,
         },
         model: input.modelId,
+        ...(input.modelPlan ? { modelPlan: input.modelPlan } : {}),
         ingressProtocol: input.ingressProtocol ?? "openai-chat",
         ...(input.budget ? { budget: input.budget } : {}),
         assertCurrent,
@@ -512,6 +528,7 @@ export async function prepareExternalAgentGatewayRoute(
         },
         model: input.modelId,
         modelMetadata,
+        modelMetadataById,
         binding: {
           providerId: input.providerId,
           modelId: input.modelId,
@@ -533,11 +550,16 @@ export async function prepareExternalAgentGatewayRoute(
         candidates: [{ deploymentId, modelId: input.modelId }],
         providerOverrides: [taskProvider],
         model: input.modelId,
-        modelBindings: Object.fromEntries(
-          [input.modelId, "primary", "fast", "powerful", "sonnet", "haiku", "opus"].map(
-            (selector) => [selector, input.modelId]
-          )
-        ),
+        modelBindings: {
+          ...Object.fromEntries(
+            [input.modelId, "primary", "fast", "powerful", "sonnet", "haiku", "opus"].map(
+              (selector) => [selector, input.modelId]
+            )
+          ),
+          ...(input.modelPlan?.modelBindings ?? {}),
+          ...Object.fromEntries(models.map((model) => [model, model])),
+        },
+        ...(input.modelPlan ? { strictSelectors: true } : {}),
         credentialAffinity: "session-sticky",
         allowAuthFailover: false,
         routePolicy: "gateway-required",
@@ -566,6 +588,7 @@ export async function prepareExternalAgentGatewayRoute(
         secret: minted.secret,
         model: input.modelId,
         modelMetadata,
+        modelMetadataById,
         ownerAccountId: ownerAccountId ?? null,
         binding: {
           providerId: input.providerId,

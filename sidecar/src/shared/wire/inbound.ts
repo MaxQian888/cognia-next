@@ -34,6 +34,8 @@ export interface SendOptions {
   subagentRuntime?: AgentSubagentRuntimeOptions
   runtimeExtensions?: AgentLocalExtensionRef[]
   toolPermissionRules?: AgentQualifiedToolPermissionRule[]
+  /** Per-server MCP tool allowlists (server key → bare tool names). */
+  mcpToolAllowlist?: Record<string, string[]>
   pluginTools?: readonly {
     name: string
     description?: string
@@ -104,13 +106,23 @@ export interface SendOptions {
     fraction?: number
     strategy?: string
     keepRecent?: number
+    keepRecentTokens?: number
     preserveSystemMessages?: boolean
     recursiveChunkSize?: number
     importanceThreshold?: number
     retainedFraction?: number
     summaryPrompt?: string
+    checkpointFormat?: "progress-v1"
     useAISummarization?: boolean
     maxSummaryTokens?: number
+    requestedMaxSummaryTokens?: number
+    checkpointTokenBudget?: number
+    checkpointTokenBudgetIsDefault?: boolean
+    postCompactionTokenBudget?: number
+    postCompactionTokenBudgetIsDefault?: boolean
+    summaryTokenBudgetIsDefault?: boolean
+    summaryInputBudget?: number
+    background?: boolean
     enableUndo?: boolean
     captureUndoSnapshot?: boolean
     summarizeToolResults?: boolean

@@ -182,11 +182,11 @@ test("committed planning follows surviving importers of a moved module in a real
 test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
   for (const file of [
     "crates/cognia-codeserver/src/proxy.rs",
-    "sidecar/codeserver-agent-ext/src/extension.mjs",
+    "sidecar/codeserver-agent-ext/src/extension.ts",
     "sidecar/vscode-ext-host/src/host.ts",
     "lib/codeserver/client.ts",
     "lib/plugin/ide/broker-runtime.ts",
-    "plugins/pro-ide-fixture/plugin.json",
+    "lib/plugin/ide/pro-ide-fixture/plugin.json",
     "scripts/gates/check-pro-ide-perf.mjs",
     "scripts/gates/pro-ide-perf-baseline.json",
     "scripts/test/run-pro-ide-e2e.mjs",
@@ -204,6 +204,15 @@ test("the Pro IDE E2E runs for its own pathway, and only for it", () => {
 })
 
 test("CI impact distinguishes an ordinary UI edit from native and independent workspace work", () => {
+  for (const file of [
+    "lib/browser/overlay.injected.js",
+    "lib/browser/extension-engine.ts",
+    "lib/browser-companion/service.ts",
+    "crates/cognia-companion/src/ws_browser_companion.rs",
+    "crates/cognia-companion-security/src/api.rs",
+    "src-tauri/src/companion_api/mod.rs",
+  ])
+    assert.equal(classifyCiImpact([file]).browserExtension, true, file)
   const ui = classifyCiImpact(["components/chat/message.tsx"])
   assert.equal(ui.frontend, true)
   for (const key of [
@@ -211,19 +220,26 @@ test("CI impact distinguishes an ordinary UI edit from native and independent wo
     "productionBuild",
     "mobile",
     "docs",
-    "web",
     "browserExtension",
     "postgres",
-    "diagnostic",
+    "cogniaServices",
   ])
     assert.equal(ui[key], false, key)
   const docs = classifyCiImpact(["docs/app/page.tsx"])
   assert.equal(docs.docs, true)
   assert.equal(docs.frontend, false)
-  const diagnostic = classifyCiImpact(["services/diagnostic-server/Cargo.toml"])
-  assert.equal(diagnostic.diagnostic, true)
-  for (const key of ["globalRust", "rust", "gateway", "postgres", "productionBuild"])
-    assert.equal(diagnostic[key], false, key)
+  for (const file of [
+    "integrations/cognia-services.json",
+    "scripts/ci/check-cognia-services.mjs",
+    "protocol/cognia-services/diagnostic-openapi.yaml",
+    "lib/diagnostic-service/types.ts",
+    "crates/cognia-tenant-auth/fixtures/grant-wire-vector.json",
+    "lib/plugin/character-pack/__fixtures__/jcs-vectors.json",
+  ])
+    assert.equal(classifyCiImpact([file]).cogniaServices, true, file)
+  const pin = classifyCiImpact(["integrations/cognia-services.json"])
+  for (const key of ["globalRust", "rust", "postgres", "frontend"])
+    assert.equal(pin[key], false, key)
   for (const file of [
     "lib/platform/client.mobile.ts",
     "components/shell.mobile.tsx",
@@ -231,7 +247,23 @@ test("CI impact distinguishes an ordinary UI edit from native and independent wo
     "next.config.ts",
   ])
     assert.equal(classifyCiImpact([file]).mobile, true, file)
-  for (const file of ["tests/e2e/browser-extension/popup.spec.ts", "playwright.config.ts"])
+  for (const file of [
+    "integrations/browser-companion.json",
+    "scripts/ci/check-browser-companion-contract.mjs",
+    "lib/browser/overlay.injected.js",
+    "lib/browser/extension-engine.ts",
+    "crates/cognia-companion-security/src/security_store.rs",
+    "src-tauri/src/companion_api/mod.rs",
+    "src-tauri/src/lib.rs",
+    "crates/cognia-server/src/main.rs",
+    "src-tauri/Cargo.toml",
+    "src-tauri/src/main.rs",
+    "crates/cognia-headless-contract/src/lib.rs",
+    "crates/cognia-cli/assets/host-command-catalog.json",
+    "protocol/companion-request-schemas.json",
+    "protocol/companion-response-schemas.json",
+    "Cargo.lock",
+  ])
     assert.equal(classifyCiImpact([file]).browserExtension, true, file)
   const packageChange = classifyCiImpact(["packages/agent/src/index.ts"])
   assert.equal(packageChange.gateway, true)
@@ -245,7 +277,6 @@ test("shared manifests, Rust graph and workflow changes conservatively fan out t
     "frontend",
     "sidecar",
     "docs",
-    "web",
     "mobile",
     "browserExtension",
     "gateway",
@@ -256,7 +287,7 @@ test("shared manifests, Rust graph and workflow changes conservatively fan out t
   const rust = classifyCiImpact(["Cargo.lock"])
   for (const key of ["globalRust", "rust", "gateway", "postgres", "productionBuild"])
     assert.equal(rust[key], true, key)
-  assert.equal(rust.diagnostic, false)
+  assert.equal(rust.cogniaServices, true)
   assert.equal(rust.frontend, false)
   assert.ok(Object.values(classifyCiImpact([".github/workflows/test.yml"])).every(Boolean))
   assert.ok(Object.values(classifyCiImpact(["scripts/ci/change-plan.mjs"])).every(Boolean))
@@ -291,7 +322,7 @@ test("embedded native inputs and shared tenant auth activate their consumers", (
   }
   assert.equal(classifyCiImpact(["crates/cognia-tenant-auth/src/lib.rs"]).postgres, true)
   assert.equal(classifyCiImpact(["tests/conformance/harness.ts"]).gateway, true)
-  assert.equal(classifyCiImpact([".cargo/config.toml"]).diagnostic, true)
+  assert.equal(classifyCiImpact(["crates/cognia-tenant-auth/src/rls.rs"]).cogniaServices, true)
   assert.ok(Object.values(classifyCiImpact(["scripts/test/coverage-changed.mjs"])).every(Boolean))
 })
 
@@ -349,6 +380,36 @@ test("selection retains discovered __tests__ files and colocated module-extensio
   assert.deepEqual(plan.testFiles, [...inventory].sort())
 })
 
+test("incremental selection retains heavy companions of changed and related unit suites", () => {
+  const unit = "components/chat/markdown-renderer.test.tsx"
+  const heavy = "components/chat/markdown-renderer.heavy.test.ts"
+  const inventory = [unit, heavy, "components/unrelated.test.tsx"]
+  for (const input of [
+    { changedFiles: ["components/chat/markdown-renderer.tsx"] },
+    { relatedTests: [unit] },
+  ]) {
+    assert.deepEqual(buildIncrementalTestPlan({ ...input, testFiles: inventory }).testFiles, [
+      heavy,
+      unit,
+    ])
+  }
+})
+
+test("Markdown process fixtures and dependency updates retain the real rendering checks", () => {
+  const heavy = "components/chat/markdown-renderer.heavy.test.ts"
+  const inventory = [heavy, "components/unrelated.test.tsx"]
+  for (const file of [
+    "tests/integration/fixtures/markdown-renderer-parity.tsx",
+    "tests/integration/fixtures/markdown-renderer-states.tsx",
+    "pnpm-lock.yaml",
+  ]) {
+    assert.deepEqual(
+      buildIncrementalTestPlan({ changedFiles: [file], testFiles: inventory }).testFiles,
+      [heavy]
+    )
+  }
+})
+
 test("dependency-only plans choose explicit critical suites and changed package contracts, not all tests", () => {
   const critical = "lib/db/messages.test.ts"
   const plan = buildIncrementalTestPlan({
@@ -377,7 +438,6 @@ test("package patches affect every Jest suite while npm configuration exercises 
       "frontend",
       "sidecar",
       "docs",
-      "web",
       "mobile",
       "browserExtension",
       "gateway",
@@ -463,6 +523,23 @@ test("plan execution uses exact paths and forbids coverage for incremental runs"
     () => buildPlannedJestArgs({ ...plan, shards: [plan.shards[0], plan.shards[0]] }, 1),
     /missing or duplicate/
   )
+})
+
+test("full CI plans retain build and PTY suites through exact-path execution", () => {
+  const testFiles = [
+    "cli/src/cli/entry.bundle.test.ts",
+    "cli/src/cli/coding-loop.bundle.test.ts",
+    "cli/src/tui/pty/conversation-driver.test.ts",
+    "cli/src/tui/pty/node-pty-harness.test.ts",
+    "cli/src/tui/pty/terminal-screen.test.ts",
+  ]
+  const plan = buildIncrementalTestPlan({ mode: "full", testFiles })
+  const selected = plan.shards.flatMap((shard) => {
+    const args = buildPlannedJestArgs(plan, shard.shard)
+    assert.equal(args.includes("--selectProjects"), false)
+    return args.slice(args.indexOf("--runTestsByPath") + 1)
+  })
+  assert.deepEqual([...selected].sort(), [...testFiles].sort())
 })
 
 test("incremental runner bounds process size, preserves failures and combines batch timings", () => {

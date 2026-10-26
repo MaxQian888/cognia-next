@@ -82,7 +82,7 @@ jobs:
           path.write_text(source)
           PY
           else
-            cp Dockerfile.cognia-server "$dockerfile"
+            cp deploy/docker/Dockerfile.cognia-server "$dockerfile"
           fi
           echo "file=$dockerfile" >> "$GITHUB_OUTPUT"
           if [[ -n "$CACHE_RUN" ]]; then
@@ -154,6 +154,9 @@ jobs:
         with:
           node-version: 26
 
+      - name: Checkout the pinned cognia-services
+        uses: ./.github/actions/checkout-cognia-services
+
       - name: Smoke full and slim runtime images
         timeout-minutes: 10
         env:
@@ -163,8 +166,8 @@ jobs:
           COGNIA_SMOKE_AGENT: "1"
         run: |
           set -euo pipefail
-          docker build -t cognia-signaling:ci services/signaling-server
-          docker build -t cognia-share:ci services/share-server
+          docker build -t cognia-signaling:ci .cache/cognia-services/services/signaling-server
+          docker build -t cognia-share:ci .cache/cognia-services/services/share-server
           export SIGNALING_IMAGE=cognia-signaling:ci SHARE_IMAGE=cognia-share:ci
           for variant in full slim; do
             export COGNIA_SERVER_IMAGE="$IMAGE-$variant"

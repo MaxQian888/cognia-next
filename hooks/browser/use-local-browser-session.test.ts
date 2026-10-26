@@ -146,6 +146,32 @@ it("closes its session and unbinds routing on unmount", async () => {
   expect(client.rpc).not.toHaveBeenCalled()
 })
 
+it("releases an event listener registered after unmount", async () => {
+  let finish!: (unlisten: () => void) => void
+  client.onEvent.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const { unmount } = renderSession()
+  unmount()
+  await act(async () => {
+    finish(unlistenEvents)
+  })
+  expect(unlistenEvents).toHaveBeenCalledTimes(1)
+  expect(client.createSession).not.toHaveBeenCalled()
+})
+
+it("ignores a frame callback after the session generation unmounts", async () => {
+  const { result, onFrame, unmount } = renderSession()
+  await waitFor(() => expect(result.current.state).toBe("ready"))
+  const late = emitFrame
+  unmount()
+  late(new Uint8Array([1]))
+  expect(onFrame).not.toHaveBeenCalled()
+})
+
 it("attaches the chosen browser for user-chrome and closes only its own tabs", async () => {
   const { result, unmount } = renderSession({
     backend: "user-chrome",

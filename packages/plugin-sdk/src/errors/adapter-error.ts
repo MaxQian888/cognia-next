@@ -5,7 +5,7 @@
  * name, same shape, so a runtime-thrown error deserializes cleanly on the
  * author side after crossing the gateway boundary.
  *
- * The code enum lives in `packages/plugin-sdk/contract/catalog.json`
+ * The code enum lives in `packages/plugin-contract/contract/catalog.json`
  * (`errorCodes[]`) and is mirrored into `contracts/generated.ts` by
  * `scripts/plugin/generate-contract.mjs`. This module re-exports the
  * canonical type as `PluginAdapterErrorCode`.

@@ -5,7 +5,7 @@
  * `manifest.terminalCompletionProviders[]` entries.
  */
 
-import type { PluginTerminalCompletionProviderDef } from "@/types/plugin/plugin-terminal-completion"
+import type { PluginTerminalCompletionProviderDef } from "@cognia/plugin-contract/types/plugin/plugin-terminal-completion"
 
 export function defineTerminalCompletionProvider(
   def: PluginTerminalCompletionProviderDef

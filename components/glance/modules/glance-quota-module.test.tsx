@@ -307,6 +307,27 @@ describe("GlanceQuotaModule", () => {
       expect(screen.getByText("work@example.com")).toBeInTheDocument()
     })
 
+    it("retains reset hints for both percentage and balance windows", () => {
+      setup([
+        makeSource({
+          windows: [
+            makeWindow("usage", { usedPct: 86, resetAt: NOW + 86_400_000 }),
+            makeWindow("balance", {
+              kind: "balance",
+              usedPct: null,
+              remaining: 1234567.89,
+              currency: "USD",
+              resetAt: NOW + 86_400_000,
+            }),
+          ],
+        }),
+      ])
+      expect(screen.getAllByText(/^resets /)).toHaveLength(2)
+      expect(screen.getByText("86% used")).toBeInTheDocument()
+      expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "86")
+      expect(screen.getByText(/1234567.89/)).toBeInTheDocument()
+    })
+
     it("shows a reset hint when the window has a reset time", () => {
       setup([makeSource({ windows: [makeWindow("w1", { resetAt: NOW + 3_600_000 })] })])
       expect(screen.getByText(/^resets /)).toBeInTheDocument()

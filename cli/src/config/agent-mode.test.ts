@@ -12,7 +12,7 @@ import {
   CLI_BUILTIN_AGENT_MODES,
   type ModeFs,
 } from "./agent-mode"
-import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
+import { BUILT_IN_AGENT_MODES } from "@/lib/agent/modes/built-ins"
 
 describe("customModeFileSchema", () => {
   it("accepts a minimal mode and rejects unknown keys", () => {

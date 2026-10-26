@@ -1,5 +1,5 @@
 import type { LlmClient } from "../llm"
-import { extractMemories } from "./extractor"
+import { extractMemories, MEMORY_EXTRACT_SYSTEM_PROMPT } from "./extractor"
 
 function client(reply: string | (() => Promise<string>)): LlmClient {
   return {
@@ -112,5 +112,28 @@ describe("extractMemories", () => {
     expect(prompt).toContain("Talked about tooling")
     expect(prompt).toContain("user: hi")
     expect(prompt).toContain("Allowed types: semantic")
+  })
+})
+
+describe("extractMemories system prompt", () => {
+  it("sends the shipped system prompt by default", async () => {
+    const llm = client('{"memories":[]}')
+    await extractMemories({ newPair, allowTypes: ["semantic"] }, llm)
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ system: MEMORY_EXTRACT_SYSTEM_PROMPT })
+    )
+  })
+
+  it("sends a host-supplied system prompt instead", async () => {
+    const llm = client('{"memories":[]}')
+    await extractMemories(
+      { newPair, allowTypes: ["semantic"], systemPrompt: "Custom extractor. STRICT JSON." },
+      llm
+    )
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ system: "Custom extractor. STRICT JSON." })
+    )
   })
 })

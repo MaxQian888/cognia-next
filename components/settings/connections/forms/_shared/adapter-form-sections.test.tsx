@@ -157,4 +157,25 @@ describe("AdapterFormSections", () => {
     )
     expect(screen.getByTestId("footer-slot")).toBeInTheDocument()
   })
+
+  it("lets the sticky footer wrap so a footer slot never pushes buttons off a phone's edge", () => {
+    render(
+      withIntl(
+        <AdapterFormSections
+          sections={makeSections()}
+          onSubmit={() => undefined}
+          dirty
+          footerSlot={<span data-testid="footer-slot">slot</span>}
+        />
+      )
+    )
+    expect(screen.getByTestId("adapter-form-footer")).toHaveClass("sticky", "flex-wrap")
+    // Cancel and Save stay together when the row wraps.
+    const actions = screen.getByTestId("adapter-form-footer-actions")
+    expect(actions).toContainElement(screen.getByRole("button", { name: /Save/i }))
+    expect(screen.getByTestId("adapter-form-footer")).toContainElement(
+      screen.getByTestId("footer-slot")
+    )
+    expect(actions).not.toContainElement(screen.getByTestId("footer-slot"))
+  })
 })

@@ -29,6 +29,12 @@ import {
   canReachModel,
   A2UIAiUnavailableError,
 } from "./ai-generate"
+import { A2UI_CREATE_APP_PROMPT, A2UI_EDIT_APP_PROMPT } from "./generate-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { isTauri } from "@/lib/tauri"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
@@ -338,5 +344,108 @@ describe("generateA2UIApp — edit", () => {
     await expect(
       generateA2UIApp({ instruction: "x", mode: "edit", surfaceId: "canvas-1" })
     ).rejects.toMatchObject({ reason: "empty" })
+  })
+})
+
+describe("generation prompts", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  const sentPrompt = () => mockRun.mock.calls[0][1]
+
+  it("sends the shipped create instruction", async () => {
+    mockRun.mockResolvedValue(capturedResult())
+    await generateA2UIApp({ instruction: "a timer", mode: "create", surfaceId: "canvas-1" })
+    expect(sentPrompt()).toBe(
+      [
+        "Build a complete, self-contained, interactive A2UI mini-app for this request: a timer",
+        'Use the a2ui-bridge tools in this order: a2ui_create_surface with surfaceId "canvas-1" and surfaceType "inline"; then a2ui_update_components with the full component tree; then a2ui_data_model_update with the initial data model. Wire buttons and inputs so the app is usable.',
+        "All user-facing labels, titles and copy MUST be in English.",
+      ].join("\n\n")
+    )
+  })
+
+  it("sends the shipped edit instruction, with and without the current tree", async () => {
+    mockRun.mockResolvedValue(capturedResult())
+    await generateA2UIApp({
+      instruction: "make it red",
+      mode: "edit",
+      surfaceId: "canvas-1",
+      language: "zh",
+      currentComponents: [{ id: "root", component: "Column" }] as never,
+    })
+    const head = [
+      'You are editing an existing A2UI mini-app (surfaceId "canvas-1").',
+      'Apply the requested change using the a2ui-bridge tools: call a2ui_update_components (and a2ui_data_model_update if data changes) on surfaceId "canvas-1". Do NOT call a2ui_create_surface — the surface already exists. Emit only the components that change; leave the rest intact.',
+    ]
+    expect(sentPrompt()).toBe(
+      [
+        ...head,
+        'Current components (JSON):\n[{"id":"root","component":"Column"}]',
+        "Change request: make it red",
+        "All user-facing labels, titles and copy MUST be in Chinese.",
+      ].join("\n\n")
+    )
+    await generateA2UIApp({ instruction: "x", mode: "edit", surfaceId: "canvas-1" })
+    expect(mockRun.mock.calls[1][1]).toBe(
+      [
+        ...head,
+        "Change request: x",
+        "All user-facing labels, titles and copy MUST be in English.",
+      ].join("\n\n")
+    )
+  })
+
+  it("sends the generating agent's published edit override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: A2UI_EDIT_APP_PROMPT.id,
+          scope: "agent",
+          targetId: "char_9",
+          revisionId: "por-a2ui-edit-agent",
+          body: "Patch {{surfaceId}} via a2ui_update_components: {{instruction}}",
+          contractVersion: A2UI_EDIT_APP_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-2",
+          promptId: A2UI_CREATE_APP_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-a2ui-create-account",
+          body: "Make {{instruction}} on {{surfaceId}} with a2ui_create_surface then a2ui_update_components.",
+          contractVersion: A2UI_CREATE_APP_PROMPT.contractVersion,
+        },
+      ])
+    )
+    mockRun.mockResolvedValue(capturedResult())
+    await generateA2UIApp({
+      instruction: "make it red",
+      mode: "edit",
+      surfaceId: "canvas-1",
+      characterId: "char_9",
+    })
+    expect(sentPrompt()).toBe("Patch canvas-1 via a2ui_update_components: make it red")
+    await generateA2UIApp({ instruction: "a clock", mode: "create", surfaceId: "canvas-2" })
+    expect(mockRun.mock.calls[1][1]).toBe(
+      "Make a clock on canvas-2 with a2ui_create_surface then a2ui_update_components."
+    )
+  })
+
+  it("does not start the turn when cancelled while the prompt resolves", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      generateA2UIApp({
+        instruction: "x",
+        mode: "edit",
+        surfaceId: "canvas-1",
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ reason: "turn-failed" })
+    expect(mockRun).not.toHaveBeenCalled()
   })
 })

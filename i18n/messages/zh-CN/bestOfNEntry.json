@@ -1,8 +1,11 @@
 {
   "description": "从同一已提交基线运行多个独立尝试，然后手动选择结果。",
   "chip": "下一次发送的 Best-of-N",
+  "label": "多方案尝试",
+  "clear": "取消下一次发送的多方案尝试",
   "off": "关闭 Best-of-N",
   "attempts": "{count} 个独立尝试",
+  "compactAttempts": "×{count}",
   "nextSend": "仅用于下一次发送",
   "title": "启动 {count} 个独立尝试",
   "base": "已提交基线：{base}",

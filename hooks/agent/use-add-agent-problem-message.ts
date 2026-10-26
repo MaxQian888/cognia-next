@@ -16,6 +16,7 @@ export function useAddAgentProblemMessage(): (problem: AddAgentFormProblem) => s
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tGateway = useTranslations("externalAgent.cogniaModel")
+  const tRoleModels = useTranslations("externalAgent.roleModels")
   return useCallback(
     (problem: AddAgentFormProblem) => {
       switch (problem) {
@@ -29,12 +30,14 @@ export function useAddAgentProblemMessage(): (problem: AddAgentFormProblem) => s
           return tSettings("commandRequired")
         case "cogniaModelInvalid":
           return tGateway("invalid")
+        case "modelRolesInvalid":
+          return tRoleModels("invalid")
         case "argumentsInvalid":
           return tSettings("argumentsInvalid")
         case "environmentInvalid":
           return tSettings("environmentInvalid")
       }
     },
-    [tGateway, tManager, tSettings]
+    [tGateway, tManager, tRoleModels, tSettings]
   )
 }

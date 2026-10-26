@@ -106,7 +106,7 @@ Rust 安装器把解压后的文件写入 `<data>/cognia/vscode-extensions/<id>`
 
 **诊断。** `DiagnosticCollection` 发送 `languages:setDiagnostics` / `clearDiagnostics`，变成 Monaco 标记。
 
-**扩展中的语言服务器。** 大多数语言扩展使用 `vscode-languageclient`，它无需修改即可运行：它的 `child_process` 即扩展的 `process:spawn`，服务器进程属于扩展自己，客户端的 provider 和诊断走上面的路径。`tests/host-languageclient.test.mjs` 在构建后的宿主上，用真实的 `vscode-languageclient` 连接 `tests/fixtures/echo-lsp.mjs`，并按未打包扩展的方式把客户端依赖复制进夹具，检查注册、服务器诊断、补全和悬停。
+**扩展中的语言服务器。** 大多数语言扩展使用 `vscode-languageclient`，它无需修改即可运行：它的 `child_process` 即扩展的 `process:spawn`，服务器进程属于扩展自己，客户端的 provider 和诊断走上面的路径。`tests/host-languageclient.test.ts` 在构建后的宿主上，用真实的 `vscode-languageclient` 连接 `tests/fixtures/echo-lsp.ts`，并按未打包扩展的方式把客户端依赖复制进夹具，检查注册、服务器诊断、补全和悬停。
 
 **语法、主题、代码片段、语言。** 贡献的语言注册到 Monaco（`contributed-languages-monaco.ts`）。主题和图标主题走主题桥。语法用于聊天和预览中的代码着色（`grammars-bridge.ts`，Shiki），不用于 Monaco 编辑器。休眠扩展的语法、主题和代码片段在它运行后才出现。
 
@@ -185,7 +185,7 @@ graph TD
 
 ## 9. 测试
 
-- **宿主**（`pnpm sidecar:vscode:test`，会先构建 `dist/`）：`tests/host-*.test.mjs` 通过 stdio 驱动构建后的 `host.js`，使用 `tests/fixtures/` 下的夹具扩展（provider、文档、窗口、终端、任务、webview、工作区、`vscode.lm`、沙箱，以及配合 `echo-lsp.mjs` 的 `vscode-languageclient`）。其余套件各测一个模块。
+- **宿主**（`pnpm sidecar:vscode:test`，会先构建 `dist/`）：`tests/host-*.test.ts` 通过 stdio 驱动构建后的 `host.js`，使用 `tests/fixtures/` 下的夹具扩展（provider、文档、窗口、终端、任务、webview、工作区、`vscode.lm`、沙箱，以及配合 `echo-lsp.ts` 的 `vscode-languageclient`）。其余套件各测一个模块。
 - **Rust**：`cargo test -p cognia-plugin-runtime --features tauri-host --lib -- vscode::` 覆盖安装、卸载、状态目录、签名与回执，以及宿主的 stderr 与退出。
 - **渲染端**：`lib/plugin/vscode-shim/` 下与插件详情组件旁的 Jest 套件。覆盖门禁为 `pnpm audit:vscode-api-coverage`。
 

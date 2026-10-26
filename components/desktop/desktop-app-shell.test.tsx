@@ -1,7 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, act } from "@testing-library/react"
+import { useEffect, useState } from "react"
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
 import { renderToString } from "react-dom/server"
 
 const logInfo = jest.fn()
@@ -57,6 +58,33 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 let platformValue: "tauri" | "mobile" | "web" = "web"
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: jest.fn(() => false) }))
+import { useIsMobile } from "@/hooks/ui/use-mobile"
+// Exercise the real default PlatformShell composition as well as the desktop
+// wrapper alone; only unrelated chrome and native services are stubbed.
+jest.mock("@/components/mobile/shell/mobile-tab-bar", () => ({
+  MobileTabBar: () => <nav aria-label="Compact tabs" />,
+  tabHref: (id: string) => `/${id}`,
+}))
+jest.mock("@/components/mobile/shell/use-mobile-tab-layout", () => ({
+  useMobileTabLayout: () => ({ resolved: { defaultLanding: "chat" } }),
+}))
+jest.mock("@/components/mobile/shell/mobile-global-search-host", () => ({
+  MobileGlobalSearchHost: () => null,
+}))
+jest.mock("@/components/mobile/offline-banner", () => ({ OfflineBanner: () => null }))
+jest.mock("@/components/mobile/automation/mobile-consent-sheet", () => ({
+  MobileConsentSheet: () => null,
+}))
+jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
+  useKeyboardInsets: () => ({ isVisible: false, keyboardHeight: 0 }),
+}))
+jest.mock("@/hooks/ui/use-keyboard-viewport-pin", () => ({ useKeyboardViewportPin: jest.fn() }))
+jest.mock("@/hooks/shell/use-unread-sessions", () => ({ useMobileUnread: () => ({ chat: 0 }) }))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: { loaded: boolean }) => unknown) =>
+    selector({ loaded: true }),
+}))
 jest.mock("@/hooks/use-platform", () => ({
   usePlatform: () => platformValue,
 }))
@@ -140,6 +168,8 @@ jest.mock("@/lib/desktop/menu-actions", () => ({
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
 import { DesktopAppShell, isShellBypassRoute } from "./desktop-app-shell"
+import { PlatformShell } from "@/components/runtime/platform-shell"
+import { PlatformShell as MobilePlatformShell } from "@/components/runtime/platform-shell.mobile"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -148,6 +178,7 @@ beforeEach(() => {
   routerReplace.mockReset()
   pathname = "/"
   platformValue = "web"
+  jest.mocked(useIsMobile).mockReturnValue(false)
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
   uiStateRef.webTitleBarEnabled = false
@@ -156,6 +187,115 @@ beforeEach(() => {
   toggleSidebarAction.mockReset()
   __resetAppRuntimeForTesting()
 })
+
+test.each([
+  [false, DesktopAppShell],
+  [true, DesktopAppShell],
+  [false, PlatformShell],
+  [true, PlatformShell],
+] as const)(
+  "keeps route state and DOM across web shell switches (initial compact: %s, shell: %p)",
+  (initialCompact, Shell) => {
+    const mounted = jest.fn()
+    const unmounted = jest.fn()
+    function StatefulRoute() {
+      const [draft, setDraft] = useState("")
+      const [open, setOpen] = useState(false)
+      useEffect(() => {
+        mounted()
+        return unmounted
+      }, [])
+      return (
+        <>
+          <input
+            aria-label="Draft"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button onClick={() => setOpen(true)}>Open editor</button>
+          {open ? <div role="dialog" aria-label="Editor" /> : null}
+        </>
+      )
+    }
+    jest.mocked(useIsMobile).mockReturnValue(initialCompact)
+    const tree = (
+      <Shell>
+        <StatefulRoute />
+      </Shell>
+    )
+    const { rerender } = render(tree)
+    const input = screen.getByRole("textbox", { name: "Draft" })
+    fireEvent.change(input, { target: { value: "Unsaved draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Open editor" }))
+    for (const compact of [!initialCompact, initialCompact, !initialCompact]) {
+      jest.mocked(useIsMobile).mockReturnValue(compact)
+      rerender(
+        <Shell>
+          <StatefulRoute />
+        </Shell>
+      )
+      expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+      expect(input).toHaveValue("Unsaved draft")
+      expect(input.isConnected).toBe(true)
+      expect(screen.getByRole("dialog", { name: "Editor" })).toBeInTheDocument()
+      expect(document.body.hasAttribute("data-app-shell")).toBe(!compact)
+      expect(Boolean(screen.queryByTestId("guild-rail-stub"))).toBe(!compact)
+      if (Shell === PlatformShell) {
+        expect(Boolean(screen.queryByRole("navigation", { name: "Compact tabs" }))).toBe(compact)
+      }
+    }
+    expect(mounted).toHaveBeenCalledTimes(1)
+    expect(unmounted).not.toHaveBeenCalled()
+  }
+)
+
+test("keeps Tauri window controls and route DOM when the viewport narrows", () => {
+  platformValue = "tauri"
+  const { rerender } = render(
+    <PlatformShell>
+      <input aria-label="Draft" />
+    </PlatformShell>
+  )
+  const input = screen.getByRole("textbox", { name: "Draft" })
+  jest.mocked(useIsMobile).mockReturnValue(true)
+  rerender(
+    <PlatformShell>
+      <input aria-label="Draft" />
+    </PlatformShell>
+  )
+  expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+  expect(screen.getByTestId("title-bar")).toBeInTheDocument()
+  expect(screen.getByTestId("status-bar")).toBeInTheDocument()
+  expect(screen.queryByRole("navigation", { name: "Compact tabs" })).toBeNull()
+})
+
+test.each([PlatformShell, MobilePlatformShell])(
+  "keeps the Capacitor route and compact chrome at every viewport width (%p)",
+  (Shell) => {
+    platformValue = "mobile"
+    const { rerender } = render(
+      <Shell>
+        <input aria-label="Draft" />
+      </Shell>
+    )
+    const input = screen.getByRole("textbox", { name: "Draft" })
+    fireEvent.change(input, { target: { value: "Native draft" } })
+    for (const compact of [true, false, true]) {
+      jest.mocked(useIsMobile).mockReturnValue(compact)
+      rerender(
+        <Shell>
+          <input aria-label="Draft" />
+        </Shell>
+      )
+      expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+      expect(input).toHaveValue("Native draft")
+      expect(screen.getByRole("navigation", { name: "Compact tabs" })).toBeInTheDocument()
+      expect(screen.queryByTestId("title-bar")).toBeNull()
+      expect(screen.queryByTestId("guild-rail-stub")).toBeNull()
+      expect(document.body.hasAttribute("data-app-shell")).toBe(false)
+    }
+  }
+)
 
 test("registers the ⌘B sidebar toggle as an app shortcut that fires the menu action", () => {
   render(

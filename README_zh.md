@@ -186,13 +186,12 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 - **浏览器与编辑器运行时**：本地桌面能力或工作区运行时处理浏览器控制，code-server 与 VS Code 扩展宿主提供编辑器能力。浏览器伴侣、移动端和 Chrome/Edge 扩展不会自带桌面进程能力。
 - **数据与协作**：客户端用 Dexie 保存本地数据及宿主状态镜像；Rust 宿主保存 SQLite 数据和持久化执行状态。共享对话使用协作服务管理成员权限和共享状态。
 
-`services/` 中的服务按部署场景分别运行，例如：
+服务按部署场景分别运行，例如：
 
 - `services/workspace-runtime/`：工作区浏览器运行时。
-- `services/signaling-server/`：WebRTC 信令服务，包含 axum 和 workers-rs 实现。
-- `services/share-server/`：分享链接服务、加密内容存储与查看器。
+- 云端与自托管服务（信令、分享链接、状态页、账号身份与同步、更新、诊断）位于 [cognia-labs/cognia-services](https://github.com/cognia-labs/cognia-services)，连同它们与应用共享的协议契约。本仓库通过 `integrations/cognia-services.json` 固定其一个版本。
 
-`web/` 是产品网站，`docs/` 是 Fumadocs 文档站，均与根目录的应用分别构建。生产打包前，应先生成正确目标的资源。
+产品官网在独立仓库 [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website) 中维护，拥有独立的开发、CI 和静态部署流程。`docs/` 仍是本仓库的 Fumadocs 文档站。生产打包前，应先生成正确目标的资源。
 
 重大架构决策记录在 [`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/) 中。当前行为应以子系统文档为入口，并核对实现和测试；ADR 用于解释架构选择的理由。
 
@@ -216,11 +215,11 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 | 移动端 IDE            | `pnpm mobile:open:ios`、`pnpm mobile:open:android`                                                      |
 | Android 开发与 APK    | `pnpm mobile:dev:android`、`pnpm mobile:build:android`、`pnpm mobile:deploy`、`pnpm mobile:deploy:fast` |
 | 文档站，端口 3001     | `pnpm docs:dev`、`pnpm docs:build`                                                                      |
-| 产品网站，端口 3002   | `pnpm web:dev`、`pnpm web:build`                                                                        |
-| Chrome/Edge 扩展      | `pnpm browser-ext:build`                                                                                |
+| 产品官网              | [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website) 中的独立开发与构建命令      |
+| Chrome/Edge 扩展      | [独立扩展仓库命令](https://github.com/cognia-labs/cognia-browser-extension#develop-and-verify)          |
 | Sidecar               | `pnpm sidecars:install`、`pnpm sidecar:start`、`pnpm sidecar:test`、`pnpm sidecars:build`               |
 | E2E                   | `pnpm test:e2e`、`pnpm test:e2e:workflows`、`pnpm test:e2e:mobile`、`pnpm test:e2e:tauri`               |
-| 仓库检查              | `pnpm audit:slots`、`pnpm i18n:build:check`、`pnpm lint:i18n`、`pnpm webrtc:smoke`                      |
+| 仓库检查              | `pnpm audit:slots`、`pnpm i18n:build:check`、`pnpm lint:i18n`、`pnpm cognia-services:check`             |
 
 完整脚本清单见 [`package.json`](./package.json)。
 
@@ -248,20 +247,22 @@ cognia-next/
 ├── packages/             共享 SDK 与业务包（agent、plugin-sdk、provider-* 等）
 ├── crates/               Rust 宿主、协议、安全与运行时实现
 ├── cli/                  cognia-agent 独立终端 / headless 智能体
-├── browser-extension/    Chrome/Edge 网页伴侣扩展
-├── web/                  产品网站（workspace 子包，端口 3002）
 ├── i18n/                  next-intl request + messages（en、zh-CN）
 ├── src-tauri/             Tauri 2 Rust 核心（axum HTTP、调度器、自动化、OCR、…）
 ├── sidecar/               Node 智能体 / 扩展宿主；独立依赖与 lockfile
 ├── mobile/                Capacitor 8 外壳（workspace 子包）
-├── docs/                  Fumadocs 站点 + ADR（workspace 子包，端口 3001）
-├── services/              独立部署的服务
-│   ├── workspace-runtime/ 工作区浏览器运行时
-│   ├── signaling-server/  WebRTC 信令汇合服务（axum + workers-rs）
-│   └── share-server/      Cloudflare Worker + Vite 查看器，承载分享链
+├── docs/                  Fumadocs 站点、ADR 与开发指南（端口 3001）
+│   └── development/      CI/CD、测试与开发流程指南
+├── deploy/                容器构建、Compose、Kubernetes 与 runner 部署
+│   └── docker/           以仓库根目录为构建上下文的 Dockerfile
+├── services/              随桌面端打包的服务
+│   └── workspace-runtime/ 工作区浏览器运行时
 ├── tests/e2e/             Playwright 套件（workflows、mobile、tauri）
 └── scripts/               构建、审计、迁移辅助
 ```
+
+文件归属、开发指南和生成产物位置见[目录指南](docs/README.md)。根目录保留
+workspace 清单、框架入口和工具配置，供现有命令自动发现。
 
 ### 配置
 
@@ -330,7 +331,7 @@ cognia-next/
 - **独立智能体 CLI**：[`cli/README.md`](./cli/README.md)
 - **智能体执行与恢复**：[`unified-agent-execution/`](./docs/content/docs/zh/subsystems/unified-agent-execution/)
 - **移动端工作流**：[`mobile/README.md`](./mobile/README.md)
-- **浏览器伴侣扩展**：[`browser-extension/`](./browser-extension/)
+- **浏览器伴侣扩展**：[cognia-labs/cognia-browser-extension](https://github.com/cognia-labs/cognia-browser-extension)
 - **插件 SDK**：[`packages/plugin-sdk/`](./packages/plugin-sdk/)
 - **工作规则**：[`CLAUDE.md`](./CLAUDE.md)
 - **外部文档**：[Tauri 2](https://tauri.app/) · [Next.js 16](https://nextjs.org/docs) · [shadcn/ui](https://ui.shadcn.com/) · [Capacitor](https://capacitorjs.com/docs) · [Fumadocs](https://fumadocs.dev/)

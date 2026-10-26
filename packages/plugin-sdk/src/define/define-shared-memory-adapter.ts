@@ -6,7 +6,7 @@
  * listChanges/delete mirror methods) against `PluginSharedMemoryAdapterDef`.
  */
 
-import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+import type { PluginSharedMemoryAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-shared-memory-adapter"
 
 export function defineSharedMemoryAdapter(
   def: PluginSharedMemoryAdapterDef

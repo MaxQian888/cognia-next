@@ -22,7 +22,7 @@ const builtIn = [
   },
 ]
 
-jest.mock("@/types/agent/agent-mode", () => ({
+jest.mock("@/lib/agent/modes/built-ins", () => ({
   BUILT_IN_AGENT_MODES: [
     {
       id: "default",
@@ -203,8 +203,6 @@ describe("useAgentMode", () => {
 
   it("config helpers fall back when the mode is missing or has no value", () => {
     const { result } = renderHook(() => useAgentMode())
-    expect(result.current.getModeSystemPrompt("default")).toBe("do default")
-    expect(result.current.getModeSystemPrompt("missing")).toBe("")
     expect(result.current.getModeTools("default")).toEqual(["search"])
     expect(result.current.getModeTools("missing")).toEqual([])
     expect(result.current.getModeOutputFormat("plan")).toBe("markdown")

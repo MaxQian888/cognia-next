@@ -147,6 +147,7 @@ async function commandDecompose(ctx: SlashContext, objective: string): Promise<P
     objective: redacted,
     sessionId,
     ...(session?.characterId ? { characterId: session.characterId } : {}),
+    ...(session?.projectId ? { workspaceId: session.projectId } : {}),
     client,
   })
   if (!input) {

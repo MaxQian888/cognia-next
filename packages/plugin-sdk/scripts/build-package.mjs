@@ -7,12 +7,11 @@ import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
 import ts from "typescript"
 import {
-  assertAuthorBuildRoot,
   assertStandaloneDeclaration,
+  withDeclarationBuildRoot,
 } from "../../../scripts/plugin/generate-author-types.mjs"
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const repoRoot = resolve(packageRoot, "../..")
 
 function runTsup(cwd, args = []) {
   const require = createRequire(import.meta.url)
@@ -78,10 +77,10 @@ export function assertDeclaredArtifacts(root = packageRoot) {
 
 export function buildPackage() {
   runTsup(packageRoot)
-  // tsup DTS treats cwd production dependencies as external even when noExternal
-  // is set. Match the existing author declaration build's verified root cwd.
-  assertAuthorBuildRoot(JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8")))
-  runTsup(repoRoot, ["--config", resolve(packageRoot, "tsup.package-types.config.ts")])
+  // Keep root workspace dependencies out of tsup's unconditional DTS externals.
+  withDeclarationBuildRoot((cwd) =>
+    runTsup(cwd, ["--config", resolve(packageRoot, "tsup.package-types.config.ts")])
+  )
   assertDeclaredArtifacts()
 }
 

@@ -278,6 +278,7 @@ export async function tryAutoModeDecision(
         // mid-turn steer bumps it, so a verdict reached under the instruction
         // the user just redirected away from is never reused.
         contextKey: evt.sessionId,
+        promptContext: { sessionId: evt.sessionId },
       }),
       new Promise<null>((resolve) => {
         setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)
@@ -999,7 +1000,8 @@ export async function handleEvent(
           evt.toolName || call?.name || "",
           call?.input ?? {},
           evt.result,
-          evt.sessionId
+          evt.sessionId,
+          { isError: evt.isError, ...(frame.turnId ? { turnId: frame.turnId } : {}) }
         )
         updatedToolOutput = post.modifiedResult
       } catch {

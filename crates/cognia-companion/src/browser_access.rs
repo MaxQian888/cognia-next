@@ -70,7 +70,9 @@ static SUBMISSIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Mirror the saved switch. Called on server start, on save, and on stop.
 pub fn set_submissions_enabled(enabled: bool) {
-    SUBMISSIONS_ENABLED.store(enabled, Ordering::Relaxed);
+    super::ws_browser_companion::update_browser_authorization(enabled, || {
+        SUBMISSIONS_ENABLED.store(enabled, Ordering::Relaxed)
+    });
 }
 
 /// Whether a browser submission may be accepted right now.
@@ -307,7 +309,11 @@ fn save_and_apply_to(
     config: BrowserAccessConfig,
 ) -> Result<BrowserAccessConfig, String> {
     let saved = save(data_dir, config)?;
-    switch.store(saved.listener_enabled(), Ordering::Relaxed);
+    if std::ptr::eq(switch, &SUBMISSIONS_ENABLED) {
+        set_submissions_enabled(saved.listener_enabled());
+    } else {
+        switch.store(saved.listener_enabled(), Ordering::Relaxed);
+    }
     Ok(saved)
 }
 

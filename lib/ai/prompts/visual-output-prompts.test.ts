@@ -1,4 +1,20 @@
-import { buildVisualOutputSection } from "./visual-output-prompts"
+import {
+  buildVisualOutputSection,
+  VISUAL_OUTPUT_DOCK_PROMPT,
+  VISUAL_OUTPUT_FRAME_PROMPT,
+  VISUAL_OUTPUT_PROMPTS,
+} from "./visual-output-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { validatePromptBody } from "@/lib/prompts/template"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
 
 describe("buildVisualOutputSection", () => {
   const inApp = { artifacts: "tools" as const, a2ui: true }
@@ -166,5 +182,62 @@ describe("buildVisualOutputSection", () => {
       expect(buildVisualOutputSection(imThread)).not.toContain("fenced `chart`")
       expect(buildVisualOutputSection(inApp)).not.toContain("fenced `chart`")
     })
+  })
+})
+
+describe("visual-output prompts in the Prompt Center", () => {
+  const inApp = { artifacts: "tools" as const, a2ui: true }
+
+  it("ships definitions that satisfy their own contract, with unique ids", () => {
+    for (const def of VISUAL_OUTPUT_PROMPTS) {
+      expect({ id: def.id, issues: validatePromptBody(def, def.defaultBody) }).toEqual({
+        id: def.id,
+        issues: [],
+      })
+    }
+    expect(new Set(VISUAL_OUTPUT_PROMPTS.map((def) => def.id)).size).toBe(
+      VISUAL_OUTPUT_PROMPTS.length
+    )
+  })
+
+  it("sends a published route wording only where that route is offered", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: VISUAL_OUTPUT_DOCK_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-visual-dock",
+          body: "- Charts go in the dock via `artifact_create`.",
+          contractVersion: VISUAL_OUTPUT_DOCK_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const section = buildVisualOutputSection(inApp)!
+    expect(section).toContain("- Charts go in the dock via `artifact_create`.")
+    expect(section).not.toContain("Never hand-draw a chart as SVG")
+    // A channel without the dock never receives the dock route, reworded or not.
+    expect(buildVisualOutputSection({ artifacts: "disabled", a2ui: true })).not.toContain(
+      "artifact_create"
+    )
+  })
+
+  it("applies a workspace override of the frame only with that workspace in context", () => {
+    const snapshot = buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: VISUAL_OUTPUT_FRAME_PROMPT.id,
+        scope: "workspace",
+        targetId: "ws-1",
+        revisionId: "por-visual-frame-ws",
+        body: "## Show it\n{{channelRules}}",
+        contractVersion: VISUAL_OUTPUT_FRAME_PROMPT.contractVersion,
+      },
+    ])
+    const scoped = buildVisualOutputSection(inApp, { context: { workspaceId: "ws-1" }, snapshot })!
+    expect(scoped.startsWith("## Show it\n- **Quantitative**")).toBe(true)
+    const unscoped = buildVisualOutputSection(inApp, { snapshot })!
+    expect(unscoped.startsWith("## Choosing how to show something")).toBe(true)
   })
 })

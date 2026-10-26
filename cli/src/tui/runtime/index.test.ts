@@ -1,7 +1,9 @@
 /**
  * @jest-environment node
  */
+jest.mock("../../agent/agents-run-dispatch", () => ({ buildAgentsRunDispatch: jest.fn() }))
 import { runRuntimeRequest, type RuntimeImpl } from "./index"
+import * as manualDispatch from "../../agent/agents-run-dispatch"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { RuntimeRequest } from "../commands/types"
 import type { TuiAction } from "../state/types"
@@ -119,6 +121,43 @@ const run = (req: RuntimeRequest, h: ReturnType<typeof harness>) =>
   runRuntimeRequest(req, h.deps, h.impl)
 
 describe("runRuntimeRequest", () => {
+  it.each(["agents", "plan"] as const)(
+    "routes the owned transport preparation and identity into %s manual dispatch",
+    async (feature) => {
+      const h = harness()
+      const prepare = jest.fn(async () => {})
+      h.deps.prepareForSubagent = prepare
+      const gate = jest.fn(async () => ({ decision: "allow" as const }))
+      h.deps.requestSubagentPermission = gate
+      const awaitApprovals = jest.fn(async () => {})
+      h.deps.awaitSubagentApprovals = awaitApprovals
+      const child = jest.fn(async () => ({ text: "complete" }))
+      const factory = jest.mocked(manualDispatch.buildAgentsRunDispatch).mockReturnValue(child)
+      const controller = jest.fn()
+      if (feature === "agents") h.impl.agentsDispatch = controller
+      else h.impl.planExplore = controller
+      try {
+        await run({ feature, action: feature === "agents" ? "run" : "explore", arg: "task" }, h)
+        expect(factory).toHaveBeenCalledWith(
+          expect.objectContaining({
+            prepare,
+            gate,
+            awaitApprovals,
+            sessionId: "s1",
+            home: "/home",
+            signal: h.deps.signal,
+          })
+        )
+        expect(controller).toHaveBeenCalledWith(
+          "task",
+          expect.objectContaining({ dispatchAgent: child, sessionId: "s1", home: "/home" })
+        )
+      } finally {
+        factory.mockReset()
+      }
+    }
+  )
+
   it.each(["limits", "provider"] as const)(
     "routes the live backend identity into %s quota reads",
     async (feature) => {

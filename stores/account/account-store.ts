@@ -8,6 +8,11 @@ import {
   generateAccountId,
 } from "@/lib/accounts/account-db"
 import { AccountRegistryError } from "@/lib/accounts/account-types"
+import {
+  AccountRegistryBootError,
+  readAccountRegistryForBoot,
+  type AccountRegistryBootErrorCode,
+} from "@/lib/accounts/registry-boot-read"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import { withAccountProvisioningLock } from "@/lib/accounts/provisioning-lock"
 import {
@@ -175,6 +180,8 @@ export interface AccountStoreState {
   loading: boolean
   locked: boolean
   error: string | null
+  /** A failed registry boot read must never be treated as an empty registry. */
+  bootFailure: { code: AccountRegistryBootErrorCode } | null
   pendingRecoveryKey: string | null
   /**
    * Whose key `pendingRecoveryKey` is. Acknowledging it may delete a stored
@@ -337,6 +344,7 @@ const DEFAULT_STATE = {
   loading: false,
   locked: false,
   error: null,
+  bootFailure: null,
   pendingRecoveryKey: null,
   pendingRecoveryKeyAccountId: null,
   autoUnlockFailure: null,
@@ -745,21 +753,19 @@ export function createAccountStore(
         // `unlockedAccountId` from scratch, which locked the app out from
         // under someone who was using it.
         if (get().loading) return
-        if (get().loaded && (!get().error || get().unlockedAccountId)) return
-        set({ loading: true, error: null, autoUnlockFailure: null })
+        if (get().loaded && !get().bootFailure && (!get().error || get().unlockedAccountId)) return
+        set({ loading: true, error: null, bootFailure: null, autoUnlockFailure: null })
         let desktopBootstrapAttempted = false
         try {
-          let [accounts, registryState] = await Promise.all([
-            dependencies.registry.listAccounts(),
-            dependencies.registry.getState(),
-          ])
+          let [accounts, registryState] = await readAccountRegistryForBoot(dependencies.registry)
           let desktopLocalAccountId: string | null = null
           if (isDeviceLocalAccountEnabled()) {
             desktopLocalAccountId = await withAccountProvisioningLock(
               deviceLocalAccountId(),
               async () => {
-                const current = await dependencies.registry.listAccounts()
-                const currentState = await dependencies.registry.getState()
+                const [current, currentState] = await readAccountRegistryForBoot(
+                  dependencies.registry
+                )
                 const selected = current.find(
                   (record) => record.id === currentState.activeAccountId
                 )
@@ -797,10 +803,7 @@ export function createAccountStore(
               }
             )
             if (desktopLocalAccountId) {
-              ;[accounts, registryState] = await Promise.all([
-                dependencies.registry.listAccounts(),
-                dependencies.registry.getState(),
-              ])
+              ;[accounts, registryState] = await readAccountRegistryForBoot(dependencies.registry)
             }
           }
           // A password profile whose owner chose "unlock automatically on this
@@ -814,10 +817,7 @@ export function createAccountStore(
               rememberedAccountId = await openRememberedAccount(selected)
               // A rejected or missing secret turned the option off in the
               // registry, so the list this boot publishes must say so too.
-              ;[accounts, registryState] = await Promise.all([
-                dependencies.registry.listAccounts(),
-                dependencies.registry.getState(),
-              ])
+              ;[accounts, registryState] = await readAccountRegistryForBoot(dependencies.registry)
             }
           }
           const e2eAutoUnlockAccountId = resolveE2EAutoUnlockTarget(
@@ -847,17 +847,14 @@ export function createAccountStore(
               devLocalAccountId = await withAccountProvisioningLock(
                 DEV_LOCAL_ACCOUNT_ID,
                 async () => {
-                  const current = await dependencies.registry.listAccounts()
+                  const [current] = await readAccountRegistryForBoot(dependencies.registry)
                   return current.some((record) => record.id === DEV_LOCAL_ACCOUNT_ID)
                     ? openDevLocalAccount()
                     : provisionDevLocalAccount()
                 }
               )
               if (devLocalAccountId) {
-                ;[accounts, registryState] = await Promise.all([
-                  dependencies.registry.listAccounts(),
-                  dependencies.registry.getState(),
-                ])
+                ;[accounts, registryState] = await readAccountRegistryForBoot(dependencies.registry)
               }
             } else if (resolveDevLocalUnlockTarget(accounts, registryState.activeAccountId)) {
               devLocalAccountId = await openDevLocalAccount()
@@ -886,9 +883,11 @@ export function createAccountStore(
             loading: false,
             locked: computeLocked(accounts, activeAccountId, unlockedAccountId),
             error: null,
+            bootFailure: null,
             accountRevision: state.accountRevision,
           }))
         } catch (error) {
+          let bootFailureCode = error instanceof AccountRegistryBootError ? error.code : null
           if (desktopBootstrapAttempted) {
             const rollbackFailures = await rollbackNativeAccountActivation(deviceLocalAccountId())
             try {
@@ -897,12 +896,13 @@ export function createAccountStore(
               rollbackFailures.push(rollbackError)
             }
             try {
-              const [accounts, registryState] = await Promise.all([
-                dependencies.registry.listAccounts(),
-                dependencies.registry.getState(),
-              ])
+              const [accounts, registryState] = await readAccountRegistryForBoot(
+                dependencies.registry
+              )
               set({ accounts, activeAccountId: registryState.activeAccountId })
             } catch (registryError) {
+              if (registryError instanceof AccountRegistryBootError)
+                bootFailureCode = registryError.code
               rollbackFailures.push(registryError)
             }
             set({ unlockedAccountId: null, locked: true })
@@ -913,7 +913,10 @@ export function createAccountStore(
               )
             }
           }
-          set({ loaded: true })
+          set({
+            loaded: true,
+            ...(bootFailureCode ? { bootFailure: { code: bootFailureCode }, locked: true } : {}),
+          })
           throw setFailure(error)
         }
       },

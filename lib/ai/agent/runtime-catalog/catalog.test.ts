@@ -37,7 +37,7 @@ function hostRecord(overrides: Partial<ExternalAgentConfigRecord> = {}): Externa
   } as ExternalAgentConfigRecord
 }
 
-const base = { externalEnabled: false, externalAgents: [], runtimeSupportsExternalAgents: true }
+const base = { externalAgents: [], runtimeSupportsExternalAgents: true }
 
 describe("deriveBuiltinAdapter", () => {
   it("answers the Anthropic SDK for anthropic and for an unset provider", () => {
@@ -72,15 +72,14 @@ describe("listAgentRuntimes", () => {
     })
   })
 
-  it("contributes no external rows while the master switch is off", () => {
+  it("offers configured agents without a global availability gate", () => {
     const rows = listAgentRuntimes({ ...base, externalAgents: [agent()] })
-    expect(rows.map((row) => row.key)).toEqual(["builtin"])
+    expect(rows.map((row) => row.key)).toEqual(["builtin", "external:a1"])
   })
 
   it("sorts external rows by name and carries the protocol badge", () => {
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent({ id: "a2", name: "Zed" }), agent({ id: "a1", name: "Codex" })],
     })
     expect(rows.map((row) => row.key)).toEqual(["builtin", "external:a1", "external:a2"])
@@ -91,7 +90,6 @@ describe("listAgentRuntimes", () => {
     const describeWarning = jest.fn(() => "stale")
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent({ enabled: false })],
       describeWarning,
     })
@@ -103,7 +101,6 @@ describe("listAgentRuntimes", () => {
   it("carries a warning for a runnable agent", () => {
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent()],
       describeWarning: () => "needs sign-in",
     })
@@ -119,7 +116,6 @@ describe("listAgentRuntimes", () => {
     // agent selection on every launch and was told to install the desktop app.
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent()],
       runtimeSupportsExternalAgents: { ok: false, reason: "manifest-missing" },
     })
@@ -130,7 +126,6 @@ describe("listAgentRuntimes", () => {
     // them: the row still refuses, but the selection behind it is not rewritten.
     const notGranted = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent()],
       runtimeSupportsExternalAgents: { ok: false, reason: "not-granted" },
     })
@@ -141,7 +136,6 @@ describe("listAgentRuntimes", () => {
   it("runs an agent through a paired host that can start the process", () => {
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent()],
       runtimeSupportsExternalAgents: { ok: true, via: "remote" },
     })
@@ -155,7 +149,6 @@ describe("listAgentRuntimes", () => {
     // agents with nothing to choose between them.
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
       hostConfigs: [
         hostRecord({
@@ -185,7 +178,6 @@ describe("listAgentRuntimes", () => {
   it("keeps the local lane for a shell that can start the process itself", () => {
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
       hostConfigs: [
         hostRecord({
@@ -216,7 +208,6 @@ describe("listAgentRuntimes", () => {
     // disable a row that works.
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
       hostConfigs: [
         hostRecord({
@@ -240,7 +231,6 @@ describe("listAgentRuntimes", () => {
   it("leaves unrelated agents on both sides alone", () => {
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [agent({ id: "local_codex", name: "Codex" })],
       hostConfigs: [
         hostRecord({
@@ -265,7 +255,6 @@ describe("listAgentRuntimes", () => {
   it("names the preset each external row was created from", () => {
     const rows = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       externalAgents: [
         agent({ id: "a1", name: "Codex", metadata: { preset: "codex-app-server" } }),
         // A plugin-registered preset the static table does not know is still
@@ -299,7 +288,6 @@ describe("listAgentRuntimes", () => {
 
     const merged = listAgentRuntimes({
       ...base,
-      externalEnabled: true,
       // The local copy lost its metadata; the host record still carries it.
       externalAgents: [agent({ id: "local_codex", name: "Codex", protocol: "codex-app-server" })],
       hostConfigs: [hostRecord({ config: hostConfig })],

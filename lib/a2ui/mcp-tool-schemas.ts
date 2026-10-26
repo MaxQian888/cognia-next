@@ -12,6 +12,7 @@ import type { AgentId, McpServer } from "@cognia/agent-config-types"
 
 export const A2UI_BRIDGE_SERVER_ID = "builtin:a2ui-bridge"
 export const A2UI_BRIDGE_SERVER_NAME = "a2ui-bridge"
+// Bridge package version; this does not declare official protocol compatibility.
 export const A2UI_BRIDGE_VERSION = "0.9.0"
 
 /** Path placeholder resolved by `lib/claude/agents/*` adapters at projection. */
@@ -74,7 +75,7 @@ export const A2UI_BRIDGE_TOOLS: readonly A2UIToolSchema[] = [
   {
     name: "a2ui_update_components",
     description:
-      "Replace the components tree on an existing surface. Components must follow the A2UI v0.9 schema.",
+      "Upsert components by id on an existing surface; omitted components remain. Uses Cognia legacy descriptors, not the official A2UI envelope. Alert uses message; Table uses columns (key/header) and data; Chart uses chartType/data/xKey/yKeys.",
     inputSchema: {
       type: "object",
       required: ["surfaceId", "components"],

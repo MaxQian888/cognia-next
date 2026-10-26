@@ -751,7 +751,12 @@ mod tests {
         let bytes = std::fs::read(&out_path).unwrap();
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let mut names: Vec<String> = (0..archive.len())
-            .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+            .filter_map(|i| {
+                archive
+                    .by_index(i)
+                    .ok()
+                    .map(|e| e.name().unwrap().into_owned())
+            })
             .collect();
         names.sort();
         assert_eq!(names, vec!["dist/index.js", "plugin.json"]);
@@ -996,6 +1001,6 @@ mod tests {
         #[cfg(unix)]
         assert_eq!(lsp.unix_mode().unwrap() & 0o777, 0o755);
         #[cfg(not(unix))]
-        assert_eq!(lsp.name(), "servers/lsp.mjs");
+        assert_eq!(lsp.name().unwrap().as_ref(), "servers/lsp.mjs");
     }
 }

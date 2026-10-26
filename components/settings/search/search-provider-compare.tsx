@@ -18,7 +18,7 @@ import { searchWithAppSettings } from "@/lib/search/configured-search"
 import {
   type SearchProviderType,
   SEARCH_PROVIDERS,
-  isProviderConfigured,
+  getProviderState,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@cognia/web-search/types"
 import type { SearchResponse } from "@cognia/web-search/types"
@@ -28,6 +28,7 @@ const log = createLogger("settings.search.compare")
 
 export function SearchProviderCompare() {
   const tc = useTranslations("providerCompare")
+  const ts = useTranslations("searchSettings")
   const [query, setQuery] = useState("")
   const [providerA, setProviderA] = useState<SearchProviderType>("tavily")
   const [providerB, setProviderB] = useState<SearchProviderType>("brave")
@@ -39,14 +40,14 @@ export function SearchProviderCompare() {
   const settings = useSettingsStore((s) => s.settings)
   const providerSettings = settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
 
-  const configuredProviders = Object.entries(providerSettings)
-    .filter(([id]) =>
-      isProviderConfigured(id as SearchProviderType, providerSettings[id as SearchProviderType])
-    )
-    .map(([id]) => id)
+  const configuredProviders = (Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]).filter(
+    (id) => getProviderState(id, providerSettings[id]) === "configured"
+  )
+  const selectedProvidersReady =
+    configuredProviders.includes(providerA) && configuredProviders.includes(providerB)
 
   const handleCompare = async () => {
-    if (!query.trim() || loading) return
+    if (!query.trim() || loading || !selectedProvidersReady) return
     setLoading(true)
     setError(null)
     setResultA(null)
@@ -88,7 +89,7 @@ export function SearchProviderCompare() {
         bResults: b.results.length,
       })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Comparison failed")
+      setError(e instanceof Error ? e.message : tc("failed"))
       log.error("compare_failed", e, { providerA, providerB })
     } finally {
       setLoading(false)
@@ -116,9 +117,15 @@ export function SearchProviderCompare() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {configuredProviders.map((id) => (
-                <SelectItem key={id} value={id} className="text-xs">
-                  {SEARCH_PROVIDERS[id as SearchProviderType]?.name}
+              {(Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]).map((id) => (
+                <SelectItem
+                  key={id}
+                  value={id}
+                  className="text-xs"
+                  disabled={!configuredProviders.includes(id)}
+                >
+                  {SEARCH_PROVIDERS[id].name} —{" "}
+                  {ts(`states.${getProviderState(id, providerSettings[id])}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -131,9 +138,15 @@ export function SearchProviderCompare() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {configuredProviders.map((id) => (
-                <SelectItem key={id} value={id} className="text-xs">
-                  {SEARCH_PROVIDERS[id as SearchProviderType]?.name}
+              {(Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]).map((id) => (
+                <SelectItem
+                  key={id}
+                  value={id}
+                  className="text-xs"
+                  disabled={!configuredProviders.includes(id)}
+                >
+                  {SEARCH_PROVIDERS[id].name} —{" "}
+                  {ts(`states.${getProviderState(id, providerSettings[id])}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -143,7 +156,7 @@ export function SearchProviderCompare() {
 
       <Button
         onClick={handleCompare}
-        disabled={!query.trim() || loading}
+        disabled={!query.trim() || loading || !selectedProvidersReady}
         size="sm"
         className="w-full"
       >
@@ -155,7 +168,11 @@ export function SearchProviderCompare() {
         {tc("compare")}
       </Button>
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p role="status" aria-live="polite" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
 
       {(resultA || resultB) && (
         <div className="grid grid-cols-1 gap-3 pt-2 border-t sm:grid-cols-2">

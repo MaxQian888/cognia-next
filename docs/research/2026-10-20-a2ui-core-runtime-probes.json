@@ -1,0 +1,131 @@
+{
+  "scope": "Actual ingress code with recording store stub; actual extracted capture/reducer functions with history and legacy migration stubbed; no model/UI execution",
+  "cases": [
+    {
+      "name": "ACP missing surfaceId",
+      "parserAccepted": false,
+      "acpHandled": true,
+      "forwarded": 1
+    },
+    {
+      "name": "ACP JSON null",
+      "threw": false
+    },
+    {
+      "name": "IPC invalid components array",
+      "forwarded": 1,
+      "parserAccepted": false
+    },
+    {
+      "name": "Named root with child first",
+      "storeRoot": "app",
+      "captureRoot": "label"
+    },
+    {
+      "name": "Named root after child-only patch",
+      "storeRoot": "app",
+      "captureRoot": "label"
+    },
+    {
+      "name": "Nested merge parity",
+      "store": {
+        "user": {
+          "name": "Grace",
+          "email": "ada@example.test"
+        }
+      },
+      "capture": {
+        "user": {
+          "name": "Grace"
+        }
+      }
+    },
+    {
+      "name": "Toolbar-style reconciliation of component-only edit",
+      "capturedData": {},
+      "finalData": {},
+      "lostOriginalFields": true
+    },
+    {
+      "name": "MCP create/components/data sequence without custom surfaceReady",
+      "rootPresent": true,
+      "surfaceReady": false
+    }
+  ],
+  "basePromptNameCoverage": {
+    "catalogTypes": 68,
+    "mentioned": [
+      "Text",
+      "Button",
+      "TextField",
+      "TextArea",
+      "Select",
+      "Checkbox",
+      "Radio",
+      "RadioGroup",
+      "Slider",
+      "Card",
+      "Row",
+      "Column",
+      "List",
+      "Chart",
+      "Table",
+      "Progress",
+      "Badge",
+      "Alert",
+      "RichOutput",
+      "Toggle"
+    ],
+    "unmentioned": [
+      "DatePicker",
+      "TimePicker",
+      "DateTimePicker",
+      "Image",
+      "Dialog",
+      "Divider",
+      "Spacer",
+      "Link",
+      "Icon",
+      "ComparisonCards",
+      "StepperShell",
+      "MockupFrame",
+      "WidgetStatus",
+      "Switch",
+      "Loading",
+      "Error",
+      "Empty",
+      "Animation",
+      "InteractiveGuide",
+      "Avatar",
+      "Tooltip",
+      "Skeleton",
+      "Spinner",
+      "Toast",
+      "Combobox",
+      "DropdownMenu",
+      "ContextMenu",
+      "Popover",
+      "HoverCard",
+      "Breadcrumb",
+      "Carousel",
+      "Drawer",
+      "Sheet",
+      "ScrollArea",
+      "Pagination",
+      "Sidebar",
+      "InputOTP",
+      "ToggleGroup",
+      "ButtonGroup",
+      "InputGroup",
+      "Collapsible",
+      "Tabs",
+      "Accordion",
+      "FormGroup",
+      "AcademicAnalysis",
+      "AcademicSearchResults",
+      "Markdown",
+      "Tree"
+    ],
+    "note": "Lexical name audit only; name mention does not prove complete schema guidance, and other optional context can add instructions"
+  }
+}

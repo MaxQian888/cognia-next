@@ -1,27 +1,4 @@
-/**
- * Google Workspace OAuth for the document provider — INSTALLED-APP LOOPBACK
- * flow with PKCE.
- *
- * Why not the device flow the Drive *backup* destination uses: Google restricts
- * "OAuth 2.0 for TV and Limited-Input Devices" to a fixed scope list — email,
- * openid, profile, `drive.appdata`, `drive.file` and the YouTube scopes. None
- * of the read scopes this provider needs are on it, so a device-code connection
- * physically cannot read a document the user already owns.
- *
- * That leaves the installed-app flow, whose only permitted redirect for a
- * Desktop client is a loopback address — hence the Rust
- * `/oauth/docs/google/callback` route on the connectors server, and hence the
- * whole provider being desktop-only.
- *
- *   1. `beginGoogleDocsAuth`    → ensure the loopback listener, mint PKCE +
- *                                 state, persist them, return the consent URL
- *   2. user consents in their browser; Google redirects to the loopback route,
- *      which bounces `cognia://docs-provider/oauth/google?code=…&state=…`
- *   3. `completeGoogleDocsAuth` → validate state, exchange the code, persist
- *                                 tokens, record the granted scopes
- *   4. `getGoogleAccessToken`   → silent refresh when the token is near expiry
- */
-
+/** Installed-app PKCE flow; credential transitions and revocation belong to the host. */
 import {
   CODE_CHALLENGE_METHOD,
   computeCodeChallenge,
@@ -32,25 +9,22 @@ import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 import { DocsProviderError } from "@/lib/docs-providers/types"
 import {
   GOOGLE_DOCS_SCOPE_STRING,
-  clearGoogleConnection,
   getGoogleClientSecret,
   getGoogleDocsSettings,
-  loadGoogleTokens,
-  saveGoogleTokens,
-  updateGoogleDocsSettings,
   type GoogleOAuthTokens,
 } from "./config"
 import {
-  clearGoogleOAuthPending,
-  getGoogleOAuthPending,
-  setGoogleOAuthPending,
-} from "./oauth-pending"
+  googleState,
+  type GoogleDisconnectOutcome as HostDisconnectOutcome,
+  type GoogleConnectionState,
+} from "./state"
 import { googleHttp, parseJson, type GoogleHttpFn } from "./http"
+import { mapGoogleStatus } from "./api"
+import { setGoogleOAuthPending } from "./oauth-pending"
 
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 export const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-export const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
 /** Refresh when fewer than this many ms of validity remain. */
 export const REFRESH_SKEW_MS = 60_000
@@ -59,86 +33,77 @@ export const REFRESH_SKEW_MS = 60_000
 export const GOOGLE_CALLBACK_PATH = "/oauth/docs/google/callback"
 
 const FORM_HEADERS = { "Content-Type": "application/x-www-form-urlencoded" }
-
+let authorizationVersion = 0
+let connectionVersion = 0
+let refreshing:
+  { version: number; connection: string; promise: Promise<GoogleOAuthTokens> } | undefined
 export interface GoogleAuthDeps {
   http?: GoogleHttpFn
   now?: () => number
-  /** Test seam — overrides the loopback-server bootstrap. */
   ensureServer?: (port: number) => Promise<string>
 }
-
-function form(body: Record<string, string>): string {
-  return Object.entries(body)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join("&")
+function form(values: Record<string, string>) {
+  return new URLSearchParams(values).toString()
 }
-
-/**
- * `google:<nonce>` — namespaced so the deep-link router can tell this apart
- * from a connector's `lark:<adapterId>:<nonce>` state.
- */
+function assertCurrent(value: boolean) {
+  if (!value) throw new DocsProviderError("notAuthorized", { reason: "connection changed" })
+}
 export function buildGoogleOAuthState(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-  return `google:${nonce}`
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return `google:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`
 }
-
-/**
- * Step 1 — prepare the consent URL.
- *
- * Returns the URL for the caller to open; it deliberately does not open it,
- * mirroring `beginLarkOAuth` — only the caller knows whether a browser is
- * reachable on this host.
- */
-export async function beginGoogleDocsAuth(
-  deps: GoogleAuthDeps = {}
-): Promise<{ authorizeUrl: string; redirectUri: string }> {
+async function credentials() {
   const settings = await getGoogleDocsSettings()
   const clientId = settings.clientId?.trim()
-  if (!clientId) {
-    throw new DocsProviderError("notConfigured", { field: "clientId" })
-  }
+  if (!clientId) throw new DocsProviderError("notConfigured", { field: "clientId" })
   const clientSecret = await getGoogleClientSecret()
-  if (!clientSecret) {
-    throw new DocsProviderError("notConfigured", { field: "clientSecret" })
-  }
-
-  const ensure = deps.ensureServer ?? connectorsEnsureServer
+  if (!clientSecret) throw new DocsProviderError("notConfigured", { field: "clientSecret" })
+  return { clientId, clientSecret }
+}
+export async function beginGoogleDocsAuth(deps: GoogleAuthDeps = {}) {
+  const version = ++authorizationVersion
+  const reserved = await googleState({ action: "begin" })
+  const { clientId } = await credentials()
   let bound: string
   try {
-    bound = await ensure(CONNECTORS_SERVER_PORT)
+    bound = await (deps.ensureServer ?? connectorsEnsureServer)(CONNECTORS_SERVER_PORT)
   } catch (err) {
     throw new DocsProviderError("hostUnsupported", {
       reason: err instanceof Error ? err.message : String(err),
     })
   }
-  const port = bound.split(":").pop() ?? String(CONNECTORS_SERVER_PORT)
-  // Google matches loopback redirects on host+path and ignores the port, but we
-  // send the real one so the redirect actually lands.
-  const redirectUri = `http://127.0.0.1:${port}${GOOGLE_CALLBACK_PATH}`
-
+  const redirectUri = `http://127.0.0.1:${bound.split(":").pop()}${GOOGLE_CALLBACK_PATH}`
   const codeVerifier = generateCodeVerifier()
   const codeChallenge = await computeCodeChallenge(codeVerifier)
   const state = buildGoogleOAuthState()
-  await setGoogleOAuthPending({ state, codeVerifier, redirectUri }, deps.now?.() ?? Date.now())
-
-  const query = form({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: "code",
-    scope: GOOGLE_DOCS_SCOPE_STRING,
-    state,
-    code_challenge: codeChallenge,
-    code_challenge_method: CODE_CHALLENGE_METHOD,
-    // Required for a refresh token: Google only issues one on the FIRST consent
-    // unless the app explicitly asks to be prompted again.
-    access_type: "offline",
-    prompt: "consent",
-  })
-  return { authorizeUrl: `${GOOGLE_AUTH_URL}?${query}`, redirectUri }
+  assertCurrent(version === authorizationVersion)
+  // The host waits for every revoke before publishing this new pending attempt.
+  await setGoogleOAuthPending(
+    { state, codeVerifier, redirectUri },
+    deps.now?.() ?? Date.now(),
+    reserved.state.authorization
+  )
+  const current = (await googleState({ action: "snapshot" })).state
+  assertCurrent(
+    version === authorizationVersion &&
+      current.authorization === reserved.state.authorization &&
+      current.pending?.state === state
+  )
+  return {
+    redirectUri,
+    authorizeUrl: `${GOOGLE_AUTH_URL}?${form({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: GOOGLE_DOCS_SCOPE_STRING,
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: CODE_CHALLENGE_METHOD,
+      access_type: "offline",
+      prompt: "consent",
+    })}`,
+  }
 }
-
 interface TokenResponse {
   access_token?: string
   refresh_token?: string
@@ -148,126 +113,112 @@ interface TokenResponse {
   error?: string
   error_description?: string
 }
-
 function tokensFrom(
-  parsed: TokenResponse,
+  parsed: TokenResponse | null,
   now: number,
-  previousRefreshToken?: string
+  previous?: string
 ): GoogleOAuthTokens | null {
-  if (!parsed.access_token) return null
+  if (!parsed || typeof parsed.access_token !== "string" || !parsed.access_token) return null
   return {
     accessToken: parsed.access_token,
-    refreshToken: parsed.refresh_token ?? previousRefreshToken,
+    refreshToken: parsed.refresh_token ?? previous,
     expiresAt: now + (parsed.expires_in ?? 3600) * 1000,
     scope: parsed.scope,
     tokenType: parsed.token_type,
   }
 }
-
-/**
- * Step 3 — exchange the authorization code.
- *
- * `state` is validated against the durable pending record (the CSRF check that
- * survives an app restart) and the record is cleared whether or not the
- * exchange succeeds, so a code can never be replayed against it.
- */
 export async function completeGoogleDocsAuth(
   input: { code?: string; state?: string; error?: string; errorDescription?: string },
   deps: GoogleAuthDeps = {}
 ): Promise<GoogleOAuthTokens> {
-  const http = deps.http ?? googleHttp
+  const version = authorizationVersion
   const now = deps.now ?? Date.now
-
-  const pending = await getGoogleOAuthPending(now())
-  if (input.error) {
-    await clearGoogleOAuthPending()
-    throw new DocsProviderError("notAuthorized", {
-      reason: input.errorDescription ?? input.error,
-    })
-  }
-  if (!pending || !input.state || input.state !== pending.state) {
-    await clearGoogleOAuthPending()
-    throw new DocsProviderError("notAuthorized", { reason: "oauth state mismatch" })
-  }
-  if (!input.code) {
-    await clearGoogleOAuthPending()
+  const http = deps.http ?? googleHttp
+  const claim = await googleState({ action: "claim", state: input.state ?? "", now: now() })
+  assertCurrent(version === authorizationVersion)
+  if (input.error)
+    throw new DocsProviderError("notAuthorized", { reason: input.errorDescription ?? input.error })
+  if (!input.code || !claim.pending)
     throw new DocsProviderError("notAuthorized", { reason: "missing authorization code" })
-  }
-
-  const settings = await getGoogleDocsSettings()
-  const clientId = settings.clientId?.trim()
-  const clientSecret = await getGoogleClientSecret()
-  if (!clientId || !clientSecret) {
-    await clearGoogleOAuthPending()
-    throw new DocsProviderError("notConfigured")
-  }
-
-  let response
-  try {
-    response = await http({
-      url: GOOGLE_TOKEN_URL,
-      method: "POST",
-      headers: FORM_HEADERS,
-      body: form({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: input.code,
-        code_verifier: pending.codeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: pending.redirectUri,
-      }),
-    })
-  } finally {
-    await clearGoogleOAuthPending()
-  }
-
+  const { clientId, clientSecret } = await credentials()
+  assertCurrent(version === authorizationVersion)
+  const response = await http({
+    url: GOOGLE_TOKEN_URL,
+    method: "POST",
+    headers: FORM_HEADERS,
+    body: form({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code: input.code,
+      code_verifier: claim.pending.codeVerifier,
+      grant_type: "authorization_code",
+      redirect_uri: claim.pending.redirectUri,
+    }),
+  })
+  assertCurrent(version === authorizationVersion)
   const parsed = parseJson<TokenResponse>(response.body)
-  const tokens = parsed ? tokensFrom(parsed, now()) : null
-  if (!tokens) {
+  const tokens = response.status >= 200 && response.status < 300 ? tokensFrom(parsed, now()) : null
+  if (!tokens)
     throw new DocsProviderError("notAuthorized", {
       reason:
         parsed?.error_description ?? parsed?.error ?? `Google returned HTTP ${response.status}`,
     })
-  }
-  await saveGoogleTokens(tokens)
-
-  const email = await fetchAccountEmail(tokens.accessToken, http).catch(() => undefined)
-  await updateGoogleDocsSettings((current) => ({
-    ...current,
-    connected: Boolean(tokens.refreshToken),
-    accountEmail: email ?? current.accountEmail,
-    grantedScopes: tokens.scope ?? current.grantedScopes,
-  })).catch(() => undefined)
-  return tokens
-}
-
-async function fetchAccountEmail(
-  accessToken: string,
-  http: GoogleHttpFn
-): Promise<string | undefined> {
-  const response = await http({
+  const email = await http({
     url: GOOGLE_USERINFO_URL,
     method: "GET",
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${tokens.accessToken}` },
   })
-  const parsed = parseJson<{ email?: string }>(response.body)
-  return parsed?.email
+    .then((response) => parseJson<{ email?: string }>(response.body)?.email)
+    .catch(() => undefined)
+  assertCurrent(version === authorizationVersion)
+  ++connectionVersion
+  const committed = await googleState({
+    action: "commit",
+    authorization: claim.state.authorization,
+    tokens,
+    accountEmail: email,
+  })
+  const current = await googleState({ action: "snapshot" })
+  assertCurrent(
+    version === authorizationVersion && current.state.connection === committed.state.connection
+  )
+  return tokens
 }
-
-/** Exchange the stored refresh token for a fresh access token. */
 export async function refreshGoogleTokens(deps: GoogleAuthDeps = {}): Promise<GoogleOAuthTokens> {
-  const http = deps.http ?? googleHttp
-  const now = deps.now ?? Date.now
-  const stored = await loadGoogleTokens()
-  if (!stored?.refreshToken) {
-    throw new DocsProviderError("notAuthorized", { reason: "no refresh token" })
+  const version = connectionVersion
+  const initial = (await googleState({ action: "snapshot" })).state
+  assertCurrent(version === connectionVersion)
+  return refreshForState(version, initial, deps)
+}
+function refreshForState(
+  version: number,
+  initial: GoogleConnectionState,
+  deps: GoogleAuthDeps
+): Promise<GoogleOAuthTokens> {
+  assertCurrent(version === connectionVersion)
+  if (refreshing?.version === version && refreshing.connection === initial.connection)
+    return refreshing.promise
+  const promise = refreshCurrent(version, deps, initial)
+  const owner = { version, connection: initial.connection, promise }
+  refreshing = owner
+  const finish = () => {
+    if (refreshing === owner) refreshing = undefined
   }
-  const settings = await getGoogleDocsSettings()
-  const clientId = settings.clientId?.trim()
-  const clientSecret = await getGoogleClientSecret()
-  if (!clientId || !clientSecret) throw new DocsProviderError("notConfigured")
-
-  const response = await http({
+  void promise.then(finish, finish)
+  return promise
+}
+async function refreshCurrent(
+  version: number,
+  deps: GoogleAuthDeps,
+  initial: GoogleConnectionState
+) {
+  const now = deps.now ?? Date.now
+  const stored = initial.tokens
+  if (!stored?.refreshToken)
+    throw new DocsProviderError("notAuthorized", { reason: "no refresh token" })
+  const { clientId, clientSecret } = await credentials()
+  assertCurrent(version === connectionVersion)
+  const response = await (deps.http ?? googleHttp)({
     url: GOOGLE_TOKEN_URL,
     method: "POST",
     headers: FORM_HEADERS,
@@ -278,96 +229,60 @@ export async function refreshGoogleTokens(deps: GoogleAuthDeps = {}): Promise<Go
       grant_type: "refresh_token",
     }),
   })
+  assertCurrent(version === connectionVersion)
   const parsed = parseJson<TokenResponse>(response.body)
-  const tokens = parsed ? tokensFrom(parsed, now(), stored.refreshToken) : null
+  const tokens =
+    response.status >= 200 && response.status < 300
+      ? tokensFrom(parsed, now(), stored.refreshToken)
+      : null
   if (!tokens) {
-    // A refresh that fails with `invalid_grant` means the user revoked access
-    // or the token aged out. Surface it as "reconnect", never as a network blip.
+    if (parsed?.error === "invalid_grant") {
+      await googleState({ action: "invalidate", connection: initial.connection })
+      ++connectionVersion
+    } else if (response.status === 429 || response.status >= 500) throw mapGoogleStatus(response)
     throw new DocsProviderError("notAuthorized", {
       reason:
         parsed?.error_description ?? parsed?.error ?? `Google returned HTTP ${response.status}`,
     })
   }
-  await saveGoogleTokens(tokens)
+  const committed = await googleState({ action: "refresh", connection: initial.connection, tokens })
+  const current = await googleState({ action: "snapshot" })
+  assertCurrent(
+    version === connectionVersion && current.state.connection === committed.state.connection
+  )
   return tokens
 }
-
-/** Outcome of a disconnect, for the caller to report honestly. */
-export type GoogleDisconnectOutcome =
-  /** Google confirmed the grant is gone. */
-  | { revoked: true }
-  /** Nothing was stored — local state was already clean. */
-  | { revoked: false; reason: "not-connected" }
-  /** Local state is cleared, but the grant may still stand at Google. */
-  | { revoked: false; reason: string }
-
-/**
- * Disconnect Google Docs: revoke the grant at Google, then drop local state.
- *
- * Clearing the keyring alone only makes the connection invisible — the refresh
- * token stays valid on Google's side, so "Disconnect" left a live grant behind
- * and the user had to go find it in their Google account settings. Revoking the
- * refresh token invalidates the whole grant (Google cascades to the access
- * tokens minted from it).
- *
- * Revocation is best-effort by design: the local clear MUST happen even when
- * the network call fails, or a user offline (or with an already-dead token)
- * could never disconnect. The outcome says which of the two happened so the UI
- * can tell the user to finish the job at Google when it matters. An already
- * invalid token answers HTTP 400 `invalid_token`, which is success for our
- * purposes — the grant is gone either way.
- */
+export type GoogleDisconnectOutcome = HostDisconnectOutcome
 export async function disconnectGoogleDocs(
-  deps: GoogleAuthDeps = {}
+  _deps: GoogleAuthDeps = {}
 ): Promise<GoogleDisconnectOutcome> {
-  const http = deps.http ?? googleHttp
-  const stored = await loadGoogleTokens()
-  if (!stored) {
-    await clearGoogleConnection()
-    return { revoked: false, reason: "not-connected" }
-  }
-  // Revoking the refresh token takes the access tokens with it; when only an
-  // access token was ever issued, revoking that is all there is to revoke.
-  const token = stored.refreshToken ?? stored.accessToken
-  let outcome: GoogleDisconnectOutcome
-  try {
-    const response = await http({
-      url: GOOGLE_REVOKE_URL,
-      method: "POST",
-      headers: FORM_HEADERS,
-      body: form({ token }),
-    })
-    if (response.status >= 200 && response.status < 300) {
-      outcome = { revoked: true }
-    } else {
-      const parsed = parseJson<{ error?: string; error_description?: string }>(response.body)
-      outcome =
-        parsed?.error === "invalid_token"
-          ? { revoked: true }
-          : {
-              revoked: false,
-              reason:
-                parsed?.error_description ??
-                parsed?.error ??
-                `Google returned HTTP ${response.status}`,
-            }
-    }
-  } catch (err) {
-    outcome = { revoked: false, reason: err instanceof Error ? err.message : String(err) }
-  }
-  await clearGoogleConnection()
-  return outcome
+  ++authorizationVersion
+  ++connectionVersion
+  const reply = await googleState({ action: "disconnect" })
+  if (!reply.outcome) throw new Error("Google disconnect returned no outcome")
+  return reply.outcome
 }
-
-/**
- * The token to use right now, refreshing silently when it is about to expire.
- * Throws `notConfigured` when the user never connected.
- */
-export async function getGoogleAccessToken(deps: GoogleAuthDeps = {}): Promise<string> {
-  const now = deps.now ?? Date.now
-  const stored = await loadGoogleTokens()
-  if (!stored) throw new DocsProviderError("notConfigured")
-  if (stored.expiresAt - now() > REFRESH_SKEW_MS) return stored.accessToken
-  const refreshed = await refreshGoogleTokens(deps)
-  return refreshed.accessToken
+export async function getGoogleAccessToken(deps: GoogleAuthDeps = {}) {
+  const version = connectionVersion
+  const initial = (await googleState({ action: "snapshot" })).state
+  if (!initial.tokens) throw new DocsProviderError("notConfigured")
+  assertCurrent(version === connectionVersion)
+  if (initial.tokens.expiresAt - (deps.now?.() ?? Date.now()) > REFRESH_SKEW_MS)
+    return initial.tokens.accessToken
+  try {
+    return (await refreshForState(version, initial, deps)).accessToken
+  } catch (err) {
+    // Another window may have refreshed the SAME connection. Never substitute
+    // credentials from a later authorization or a disconnect/reconnect cycle.
+    if (err instanceof DocsProviderError && err.params?.reason === "connection changed") {
+      const latest = (await googleState({ action: "snapshot" })).state
+      if (
+        latest.authorization === initial.authorization &&
+        latest.tokens &&
+        latest.tokens.expiresAt - (deps.now?.() ?? Date.now()) > REFRESH_SKEW_MS
+      )
+        return latest.tokens.accessToken
+    }
+    throw err
+  }
 }

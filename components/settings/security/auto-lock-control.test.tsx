@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
+import { render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -46,12 +47,14 @@ describe("AutoLockControl", () => {
     render(<AutoLockControl />)
     const select = screen.getByTestId("account-auto-lock-select") as HTMLSelectElement
     expect(select.value).toBe("0")
-    expect(select.querySelectorAll("option")).toHaveLength(AUTO_LOCK_OPTIONS.length)
+    expect(getNativeSelect(select).querySelectorAll("option")).toHaveLength(
+      AUTO_LOCK_OPTIONS.length
+    )
   })
 
-  it("persists a chosen interval", () => {
+  it("persists a chosen interval", async () => {
     render(<AutoLockControl />)
-    fireEvent.change(screen.getByTestId("account-auto-lock-select"), { target: { value: "15" } })
+    await selectOption(screen.getByTestId("account-auto-lock-select"), "15")
     expect(saveMock).toHaveBeenCalledWith({ accountAutoLockMinutes: 15 })
   })
 

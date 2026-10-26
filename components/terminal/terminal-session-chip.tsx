@@ -22,6 +22,11 @@
 import * as React from "react"
 import { useTranslations } from "next-intl"
 
+import {
+  keepOpenWhileNestedDialogFocused,
+  useConfirmDialog,
+  type ConfirmDialogOptions,
+} from "@/components/shared/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { projectRoster } from "@/lib/terminal/collaboration/roster"
@@ -118,6 +123,25 @@ export function TerminalSessionChip({
   const [open, setOpen] = React.useState(false)
   const [collapsed, setCollapsed] = React.useState(false)
   const [hovered, setHovered] = React.useState(false)
+  const rootRef = React.useRef<HTMLDivElement>(null)
+  const focusTerminalOnCloseRef = React.useRef(false)
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
+
+  // xterm's hidden input sits in the sibling terminal container. A control
+  // decision, made or cancelled, hands the keyboard straight back to it.
+  const terminalInput = React.useCallback(
+    () =>
+      rootRef.current?.parentElement?.querySelector<HTMLElement>(
+        "textarea.xterm-helper-textarea"
+      ) ?? null,
+    []
+  )
+  const decideControl = async (options: ConfirmDialogOptions, act: () => void) => {
+    const confirmed = await confirm({ ...options, restoreFocus: terminalInput })
+    focusTerminalOnCloseRef.current = true
+    setOpen(false)
+    if (confirmed) act()
+  }
 
   // Live session facts, reactively.
   //
@@ -202,7 +226,7 @@ export function TerminalSessionChip({
   const canRelease = controlState.role === "controller" && info?.currentController != null
 
   return (
-    <div className="pointer-events-none absolute right-2 top-1 z-30 flex justify-end">
+    <div ref={rootRef} className="pointer-events-none absolute right-2 top-1 z-30 flex justify-end">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
@@ -237,6 +261,16 @@ export function TerminalSessionChip({
           align="end"
           className="w-72 space-y-2 text-xs"
           data-testid="terminal-session-chip-details"
+          onFocusOutside={keepOpenWhileNestedDialogFocused}
+          onCloseAutoFocus={(event) => {
+            if (!focusTerminalOnCloseRef.current) return
+            focusTerminalOnCloseRef.current = false
+            const input = terminalInput()
+            if (input) {
+              event.preventDefault()
+              input.focus()
+            }
+          }}
         >
           <p className="font-medium">{t("chipDetails")}</p>
           {row ? <p className="text-muted-foreground">{host.description}</p> : null}
@@ -283,10 +317,17 @@ export function TerminalSessionChip({
               variant="outline"
               className="h-7 w-full text-[11px]"
               data-testid="terminal-chip-take-control"
-              onClick={() => {
-                if (!window.confirm(t("takeoverConfirm"))) return
-                void getLiveSession(sessionId)?.takeControl()
-              }}
+              onClick={() =>
+                void decideControl(
+                  {
+                    title: t("takeoverConfirmTitle"),
+                    description: t("takeoverConfirm"),
+                    confirmLabel: t("takeControl"),
+                    testid: "terminal-chip-take-control-confirm",
+                  },
+                  () => void getLiveSession(sessionId)?.takeControl()
+                )
+              }
             >
               {t("takeControl")}
             </Button>
@@ -298,16 +339,24 @@ export function TerminalSessionChip({
               variant="outline"
               className="h-7 w-full text-[11px]"
               data-testid="terminal-chip-release-control"
-              onClick={() => {
-                if (!window.confirm(t("releaseConfirm"))) return
-                void getLiveSession(sessionId)?.releaseControl()
-              }}
+              onClick={() =>
+                void decideControl(
+                  {
+                    title: t("releaseConfirmTitle"),
+                    description: t("releaseConfirm"),
+                    confirmLabel: t("releaseControl"),
+                    testid: "terminal-chip-release-control-confirm",
+                  },
+                  () => void getLiveSession(sessionId)?.releaseControl()
+                )
+              }
             >
               {t("releaseControl")}
             </Button>
           ) : null}
         </PopoverContent>
       </Popover>
+      {confirmDialog}
     </div>
   )
 }

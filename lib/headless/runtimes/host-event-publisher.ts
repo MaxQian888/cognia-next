@@ -12,7 +12,7 @@ import { registerHeadlessRuntime } from "../registry"
 registerHeadlessRuntime({
   name: "host-event-publisher",
   criticality: "required",
-  hosts: ["brain"],
+  hosts: ["brain", "person-brain"],
   start: (ctx) =>
     setHostEventPublisher(async (topic, event) => {
       // invoke-parity-exempt: a `ws_bridge.rs:route_respond` route, not a Tauri command — the brain reaches it over `/internal/bridge`, and `route_respond` validates the topic against a closed allowlist before publishing.

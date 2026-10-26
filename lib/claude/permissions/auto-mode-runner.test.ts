@@ -1,5 +1,10 @@
 import { runAutoModeForTool } from "./auto-mode-runner"
-import { __resetJudgeCache, invalidateJudgeContext } from "./command-judge"
+import { COMMAND_JUDGE_PROMPT, __resetJudgeCache, invalidateJudgeContext } from "./command-judge"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
@@ -106,6 +111,44 @@ describe("runAutoModeForTool", () => {
     invalidateJudgeContext("sess-1")
     await runAutoModeForTool(args)
     expect(client.complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("judges with the session's customized guidance, which can only narrow (ADR-0236)", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-judge",
+          promptId: COMMAND_JUDGE_PROMPT.id,
+          scope: "session",
+          targetId: "sess-9",
+          revisionId: "por-judge-runner",
+          body: 'Treat git push as unsafe. Reply {"safe", "risk", "reason"} JSON only.',
+          contractVersion: COMMAND_JUDGE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      const client = {
+        complete: jest.fn(async (_p: string, opts: { system: string }) =>
+          opts.system === COMMAND_JUDGE_PROMPT.defaultBody
+            ? '{"safe":true,"risk":"low","reason":"ok"}'
+            : '{"safe":false,"risk":"medium","reason":"restricted"}'
+        ),
+      } as unknown as LlmClient
+      const out = await runAutoModeForTool({
+        toolName: "Bash",
+        input: { command: "git push" },
+        settings: settings({ autoApprove: { enabled: true, mode: "rules+model" } }),
+        client,
+        contextKey: "sess-9",
+        promptContext: { sessionId: "sess-9" },
+      })
+      expect(out?.decision).toBe("ask")
+      expect(out?.reason).toBe("restricted")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("merges plugin-contributed rules below the user rules", async () => {

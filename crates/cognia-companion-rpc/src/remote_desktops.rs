@@ -65,7 +65,7 @@ async fn dispatch_with(
     if !COMMANDS.contains(&name) {
         return Err(RemoteDesktopError::new("remote_desktop_unknown_command"));
     }
-    if caller.scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(caller.scope) {
         return Err(RemoteDesktopError::new("remote_desktop_forbidden"));
     }
     let lease = args.as_object_mut().and_then(|object| {

@@ -54,6 +54,15 @@ export function buildEngineDeps(ctx: PluginContext, options: BuildDepsOptions = 
     // The engine's progress cards and cancellation text, in the user's
     // language, from the plugin's own i18n bundle.
     text: (key, params) => ctx.i18n.t(key, params),
+    // The user's Prompt Center edit of each instruction, for this session's
+    // workspace. A failed resolution falls back to the default (see
+    // `systemPromptFor`), so it never stops a run.
+    prompt: async (id) =>
+      (
+        await ctx.prompts.resolve(id, {
+          ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+        })
+      ).text,
     ...(options.signal ? { signal: options.signal } : {}),
   }
 }

@@ -1,7 +1,7 @@
 //! The request authorization chain — ADR-0149 §8.
 //!
 //! Decision 11 of ADR-0149 says a new service adopts the grant pattern
-//! `services/diagnostic-server` proved rather than inventing another one. This
+//! `cognia-services/services/diagnostic-server` proved rather than inventing another one. This
 //! is that chain, with the one thing that service could not have: a person.
 //!
 //! ```text
@@ -40,6 +40,38 @@ pub enum AuthError {
     Forbidden,
     #[error("storage unavailable: {0}")]
     Store(#[from] StoreError),
+}
+
+/// The same rule is checked on HTTP snapshots and again on locked standing.
+/// Neither a removed actor nor an ordinary member may manage org membership.
+pub(crate) fn authorize_org_role_mutation(
+    actor: Option<cognia_tenant_auth::OrgRole>, current: Option<cognia_tenant_auth::OrgRole>,
+    requested: Option<cognia_tenant_auth::OrgRole>,
+) -> Result<(), StoreError> {
+    use cognia_tenant_auth::OrgRole;
+    if actor == Some(OrgRole::Owner)
+        || (actor == Some(OrgRole::Admin) && current != Some(OrgRole::Owner) && requested != Some(OrgRole::Owner)) {
+        Ok(())
+    } else { Err(StoreError::Forbidden) }
+}
+
+/// Workspace maintainers may manage lower workspace roles; org managers may
+/// also change maintainers. Resolve current standing before applying that rule.
+pub(crate) fn authorize_workspace_role_mutation(
+    actor_org: Option<cognia_tenant_auth::OrgRole>,
+    actor_workspace: Option<cognia_tenant_auth::WorkspaceRole>,
+    current: Option<cognia_tenant_auth::WorkspaceRole>,
+    requested: Option<cognia_tenant_auth::WorkspaceRole>,
+) -> Result<(), StoreError> {
+    use cognia_tenant_auth::{OrgRole, WorkspaceRole};
+    let access = resolve_workspace_access(actor_org, actor_workspace);
+    if !access.is_some_and(|access| access.allows(WorkspaceCapability::Manage)) {
+        return Err(StoreError::Forbidden);
+    }
+    if actor_org.is_some_and(OrgRole::can_traverse_workspaces)
+        || (current != Some(WorkspaceRole::Maintainer) && requested != Some(WorkspaceRole::Maintainer)) {
+        Ok(())
+    } else { Err(StoreError::Forbidden) }
 }
 
 /// Who is making this request, and what they may do on its target.
@@ -180,6 +212,25 @@ mod tests {
     use cognia_tenant_auth::{OrgId, OrgRole, UserId, WorkspaceRole};
 
     use crate::store::InMemoryStore;
+
+    #[test]
+    fn mutation_rules_reject_missing_or_demoted_managers_and_protect_owners() {
+        for actor in [None, Some(OrgRole::Member)] {
+            assert!(matches!(authorize_org_role_mutation(actor, Some(OrgRole::Member), Some(OrgRole::Member)), Err(StoreError::Forbidden)));
+        }
+        assert!(authorize_org_role_mutation(Some(OrgRole::Owner), Some(OrgRole::Owner), None).is_ok());
+        assert!(authorize_org_role_mutation(Some(OrgRole::Admin), Some(OrgRole::Member), None).is_ok());
+        for (target, requested) in [(Some(OrgRole::Owner), None), (Some(OrgRole::Member), Some(OrgRole::Owner))] {
+            assert!(matches!(authorize_org_role_mutation(Some(OrgRole::Admin), target, requested), Err(StoreError::Forbidden)));
+        }
+        for role in [None, Some(WorkspaceRole::Member), Some(WorkspaceRole::Viewer)] {
+            assert!(matches!(authorize_workspace_role_mutation(Some(OrgRole::Member), role, Some(WorkspaceRole::Member), None), Err(StoreError::Forbidden)));
+        }
+        assert!(authorize_workspace_role_mutation(None, Some(WorkspaceRole::Maintainer), Some(WorkspaceRole::Viewer), Some(WorkspaceRole::Member)).is_ok());
+        assert!(matches!(authorize_workspace_role_mutation(Some(OrgRole::Member), Some(WorkspaceRole::Maintainer), Some(WorkspaceRole::Maintainer), None), Err(StoreError::Forbidden)));
+        assert!(matches!(authorize_workspace_role_mutation(Some(OrgRole::Member), Some(WorkspaceRole::Maintainer), Some(WorkspaceRole::Viewer), Some(WorkspaceRole::Maintainer)), Err(StoreError::Forbidden)));
+        assert!(authorize_workspace_role_mutation(Some(OrgRole::Admin), None, Some(WorkspaceRole::Maintainer), None).is_ok());
+    }
 
     fn ada() -> UserId {
         UserId::parse("usr_aaaaaaaaaaaaaaaaaaaaaaaa").unwrap()

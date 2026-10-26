@@ -1,0 +1,94 @@
+---
+title: Editable prompts
+description: Declare your plugin's model-facing instructions as Prompt Center slots with ctx.prompts, and send the user's edit of them.
+---
+
+# Editable prompts
+
+The wording a plugin sends to a model is part of its product, and users want to
+tune it: a stricter evaluator, a report in a house style, an answer in a
+different register. `ctx.prompts` lets a plugin hand that wording to the
+**Prompt Center** (Settings → Prompts, ADR-0236) without giving up control of
+what its code depends on.
+
+## Declare, then resolve
+
+```ts
+import type { PluginContext, PluginPromptDeclaration } from "@cognia/plugin-sdk"
+
+const PROMPTS = [
+  {
+    id: "outline",
+    title: "Report outline",
+    description: "Plans the sections of a report.",
+    defaultBody: "You are a research lead planning a report on {{topic}}.",
+    variables: [{ name: "topic", required: true, maxChars: 500 }],
+    requiredFragments: ["report"],
+    outputContract: 'The user message asks for {"title","sections"} JSON.',
+    group: "knowledge",
+  },
+] as const satisfies readonly PluginPromptDeclaration[]
+
+export function activate(ctx: PluginContext) {
+  ctx.prompts.register(PROMPTS)
+}
+
+async function outline(ctx: PluginContext, topic: string, sessionId?: string) {
+  const { text } = await ctx.prompts.resolve("outline", {
+    values: { topic },
+    sessionId,
+  })
+  return ctx.ai.chat({ messages: [{ role: "system", content: text } /* … */] })
+}
+```
+
+- `register` turns each declaration into a slot with the id
+  `plugin:<your plugin id>/<id>`. It returns `{ promptIds, unregister }`; the
+  host also drops your slots when the plugin is disabled.
+- `resolve` returns `{ text, source }`: the user's published override for the
+  chat's workspace (pass `sessionId`) or for their account, else your
+  `defaultBody`. `{{name}}` placeholders are filled from `values`, each value
+  clipped to its `maxChars`.
+
+You can only declare and resolve ids under your own namespace. Neither method
+needs a permission: the text goes nowhere until you send it through a gated API
+such as `ctx.ai.chat`.
+
+## What is editable, and what is not
+
+Declare only the **instruction**. Keep in code anything your parser or the run
+depends on: JSON shapes the user message asks for, today's date, the reply
+locale, retrieved content. A user edit replaces the declared body and nothing
+else.
+
+| Field               | Meaning                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| `defaultBody`       | Your text, exactly as you send it with no override. It must pass its own contract or registration fails. |
+| `variables`         | Placeholders a body may use. A `required` one must stay in every override.                          |
+| `requiredFragments` | Text every override must keep verbatim because your code relies on it.                              |
+| `contractVersion`   | Bump it when variables, fragments or the output contract change; older overrides stop applying.     |
+| `maxChars`          | Budget for a body, at most 32,000.                                                                  |
+| `group`             | Where the slot is listed; `agents` when omitted.                                                    |
+
+The host assigns everything that carries authority: the slot is an ordinary
+template, overridable for the account or a workspace, used from the next call.
+A plugin cannot mark its prompt as protocol or approval-sensitive, and cannot
+widen where it applies.
+
+## Safety and fallback
+
+- An override is checked against your declaration when the user publishes it
+  (variables, fragments, budget, personal data) and again when it is resolved.
+  One that no longer fits, for example after you bumped `contractVersion`, is
+  skipped and your default is sent.
+- If `resolve` fails (an older host, a slot you never registered), fall back to
+  your own default rather than stopping the run.
+- Overrides outlive your plugin. While it is disabled the Prompt Center lists
+  them as unavailable, keeps them in exports, and applies them again when the
+  plugin returns with a compatible contract.
+
+## Subagents need nothing extra
+
+The prompt of every subagent you contribute through `subagents` is already a
+slot (`plugin:<id>/subagent.<subagent id>`), overridable for the account. The
+rest of the definition (tools, disallowed tools, effort, model) stays yours.

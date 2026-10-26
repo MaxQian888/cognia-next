@@ -380,21 +380,17 @@ registerHeadlessRuntime({
   criticality: "optional",
   hosts: ["brain"],
   start: async () => {
-    const RETENTION_DAYS = 90
-    const [{ getTodaysCostByProvider, localDayString, pruneProviderCostOlderThan }, usage, store] =
-      await Promise.all([
-        import("@/lib/db/provider-cost-daily"),
-        import("@/lib/db/session-usage"),
-        import("@/stores/settings/provider-cost-mirror-store"),
-      ])
+    const [{ getTodaysCostByProvider, localDayString }, store] = await Promise.all([
+      import("@/lib/db/provider-cost-daily"),
+      import("@/stores/settings/provider-cost-mirror-store"),
+    ])
     // Same best-effort semantics as the desktop initializer.
     await getTodaysCostByProvider()
       .then((totals) =>
         store.useProviderCostMirrorStore.getState().hydrate(totals, localDayString())
       )
       .catch(() => {})
-    await pruneProviderCostOlderThan(RETENTION_DAYS).catch(() => {})
-    await usage.pruneSessionUsageOlderThan(RETENTION_DAYS).catch(() => {})
+    // The storage-retention runtime owns the atomic daily usage/cost prune.
   },
 })
 

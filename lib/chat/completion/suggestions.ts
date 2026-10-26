@@ -15,6 +15,8 @@ import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { clipPredictionContext, type GhostMessage } from "./ghost-prompt"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
 
 /** How many suggestions to request / surface. */
 export const DEFAULT_SUGGESTION_COUNT = 3
@@ -33,6 +35,8 @@ export interface SuggestionDeps {
   count?: number
   /** Preserve transport failures for callers that expose a retry state. */
   propagateErrors?: boolean
+  /** Session, workspace and agent the suggestions are for (ADR-0236). */
+  promptContext?: PromptResolutionContext
 }
 
 export interface StarterContext {
@@ -44,21 +48,55 @@ export interface FollowUpContext {
   recentMessages: readonly GhostMessage[]
 }
 
-const STARTER_SYSTEM = [
-  "You suggest opening messages a user could send to an AI assistant to get",
-  "started. Produce short, concrete, ready-to-send prompts (under 120 chars",
-  "each), varied in topic. Output ONLY a JSON array of strings.",
-].join(" ")
+const SUGGESTION_OUTPUT_CONTRACT =
+  "A JSON array of strings; each entry is trimmed, unquoted, de-duplicated and dropped above 200 characters."
 
-const FOLLOWUP_SYSTEM = [
-  "You suggest natural follow-up messages the user might send next, given the",
-  "conversation so far. Each must be a short, ready-to-send message from the",
-  "user's point of view (under 120 chars), building on the last assistant",
-  "reply. Match the language and register of the user's recent messages, including",
-  "Chinese and mixed-language conversations. Do not invent unfinished work.",
-  "Return [] when there is no clear useful next step or the request is complete.",
-  "Output ONLY a JSON array of strings.",
-].join(" ")
+export const STARTER_SUGGESTIONS_PROMPT = definePrompt({
+  id: "completion.suggestions.starter",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "completion",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent"],
+  activation: "next-operation",
+  // The reply is parsed as JSON; a body that stops asking for it yields no suggestions.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ["JSON"],
+  outputContract: SUGGESTION_OUTPUT_CONTRACT,
+  consumers: ["lib/chat/completion/suggestions.ts"],
+  defaultBody: [
+    "You suggest opening messages a user could send to an AI assistant to get",
+    "started. Produce short, concrete, ready-to-send prompts (under 120 chars",
+    "each), varied in topic. Output ONLY a JSON array of strings.",
+  ].join(" "),
+})
+
+export const FOLLOW_UP_SUGGESTIONS_PROMPT = definePrompt({
+  id: "completion.suggestions.follow-up",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "completion",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "agent", "session"],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ["JSON"],
+  outputContract: SUGGESTION_OUTPUT_CONTRACT,
+  consumers: ["lib/chat/completion/suggestions.ts"],
+  defaultBody: [
+    "You suggest natural follow-up messages the user might send next, given the",
+    "conversation so far. Each must be a short, ready-to-send message from the",
+    "user's point of view (under 120 chars), building on the last assistant",
+    "reply. Match the language and register of the user's recent messages, including",
+    "Chinese and mixed-language conversations. Do not invent unfinished work.",
+    "Return [] when there is no clear useful next step or the request is complete.",
+    "Output ONLY a JSON array of strings.",
+  ].join(" "),
+})
 
 /** Parse + clean a model reply into at most `count` usable suggestions. */
 function parseSuggestions(raw: string, count: number): string[] {
@@ -103,8 +141,11 @@ export async function suggestStarters(
   ].join("\n")
   let raw: string
   try {
+    const system = (
+      await resolvePromptAsync(STARTER_SUGGESTIONS_PROMPT, { context: deps.promptContext })
+    ).text
     raw = await deps.client.complete(prompt, {
-      system: STARTER_SYSTEM,
+      system,
       temperature: 0.8,
       maxTokens: 512,
       abortSignal: deps.signal,
@@ -139,8 +180,11 @@ export async function suggestFollowUps(
   ].join("\n")
   let raw: string
   try {
+    const system = (
+      await resolvePromptAsync(FOLLOW_UP_SUGGESTIONS_PROMPT, { context: deps.promptContext })
+    ).text
     raw = await deps.client.complete(prompt, {
-      system: FOLLOWUP_SYSTEM,
+      system,
       temperature: 0.7,
       maxTokens: 512,
       abortSignal: deps.signal,

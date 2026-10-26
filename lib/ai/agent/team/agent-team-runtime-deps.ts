@@ -24,7 +24,7 @@ import { parseProposedPlan } from "./plan-parse"
 import {
   buildLeadReviewPrompt,
   leadReviewVerdictSchema,
-  LEAD_REVIEW_SYSTEM_PROMPT,
+  LEAD_REVIEW_PROMPT,
   type LeadReviewVerdict,
 } from "./squad/lead-review"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
@@ -36,12 +36,33 @@ import {
 } from "./pr-feedback/resolvers"
 import { buildLeadExecutionConfig, readAppSettings } from "./squad/lead-execution"
 import type { AppSettings } from "@cognia/agent-config-types"
+import { resolvePrompt, resolvePromptAsync } from "@/lib/prompts/resolve"
+import { loadPromptOverrideSnapshot, type PromptOverrideSnapshot } from "@/lib/prompts/snapshot"
+import {
+  LEAD_PLANNING_PROMPT,
+  LEAD_PLANNING_SYSTEM_PROMPT,
+  TEAMMATE_TASK_PROMPT,
+  teamPromptContext,
+} from "./team-prompts"
 
-/** Build the prompt sent to a teammate for a specific task. */
+export interface TeamPromptResolveOptions {
+  /**
+   * The snapshot the calling step froze (ADR-0236), so every prompt the step
+   * sends reads the same revision set. Omitted, the loaded one is read.
+   */
+  snapshot?: PromptOverrideSnapshot | null
+}
+
+/**
+ * Build the prompt sent to a teammate for a specific task. Synchronous: the
+ * dispatch builds it inside its teammate-claim callback, so the step resolves
+ * against the snapshot it froze before dispatching.
+ */
 export function buildTeammatePrompt(
   team: AgentTeam,
   teammate: AgentTeammate,
-  task: AgentTeamTask
+  task: AgentTeamTask,
+  options: TeamPromptResolveOptions = {}
 ): string {
   const role = teammate.description?.trim() || teammate.config?.specialization || "general teammate"
   const briefing = teammate.spawnPrompt?.trim()
@@ -50,26 +71,29 @@ export function buildTeammatePrompt(
   const expected = task.expectedOutput?.trim()
     ? `\nExpected output:\n${task.expectedOutput.trim()}\n`
     : ""
-  return [
-    `You are ${teammate.name}, a teammate on the "${team.name}" team.`,
-    `Your role: ${role}.${briefing}`,
-    "",
-    `Team goal:\n${team.task}`,
-    "",
-    `Your assigned task — "${task.title}":`,
-    task.description,
-    expected,
-    "Produce the deliverable directly. Be concise, structured, and concrete.",
-    "If you cannot complete the task, explain why in one short paragraph.",
-  ].join("\n")
+  return resolvePrompt(TEAMMATE_TASK_PROMPT, {
+    context: teamPromptContext(team),
+    ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+    values: {
+      teammateName: teammate.name,
+      teamName: team.name,
+      role,
+      briefing,
+      teamGoal: team.task,
+      taskTitle: task.title,
+      taskDescription: task.description,
+      expectedOutput: expected,
+    },
+  }).text
 }
 
-/** Build the planning prompt for the team lead. */
-export function buildLeadPlanningPrompt(
+/** Build the planning prompt for the team lead, resolved for this planning step. */
+export async function buildLeadPlanningPrompt(
   team: AgentTeam,
   workers: AgentTeammate[],
-  feedback: string | undefined
-): string {
+  feedback: string | undefined,
+  options: TeamPromptResolveOptions = {}
+): Promise<string> {
   const roster =
     workers.length > 0
       ? workers
@@ -81,28 +105,20 @@ export function buildLeadPlanningPrompt(
   const reviewer = feedback?.trim()
     ? `\nThe previous plan was rejected. Reviewer feedback:\n${feedback.trim()}\n\nRevise the plan accordingly.\n`
     : ""
-  return [
-    `You are ${team.name}'s lead.`,
-    `Team goal:\n${team.task}`,
-    "",
-    `Available teammates (${workers.length}):`,
-    roster,
-    reviewer,
-    "Produce a plan inside a single ```json fenced block with this shape:",
-    "```json",
-    "{",
-    '  "summary": "one-sentence overview",',
-    '  "steps": [',
-    '    { "title": "...", "description": "...", "assignTo": "<teammate name or any>" }',
-    "  ]",
-    "}",
-    "```",
-    "Keep steps to 3–6 items. Each step should be actionable and self-contained.",
-  ].join("\n")
+  return (
+    await resolvePromptAsync(LEAD_PLANNING_PROMPT, {
+      context: teamPromptContext(team),
+      ...(options.snapshot !== undefined ? { snapshot: options.snapshot } : {}),
+      values: {
+        teamName: team.name,
+        teamGoal: team.task,
+        workerCount: String(workers.length),
+        roster,
+        reviewerFeedback: reviewer,
+      },
+    })
+  ).text
 }
-
-const LEAD_SYSTEM_PROMPT =
-  "You are a planning lead. Always respond with a single ```json fenced block matching the requested shape. Do not add prose around the block."
 
 export interface BuildAgentTeamRuntimeDepsOptions {
   /** Override `executeAgent` for testing. */
@@ -215,14 +231,28 @@ export function buildAgentTeamRuntimeDeps(
       .getState()
       .getTeammates(team.id)
       .filter((m) => m.role === "teammate")
+    // Resolved once per planning step (ADR-0236): both prompts of the step read
+    // one snapshot, so an edit published mid-step lands on the next one whole.
+    const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
+    const prompt = await buildLeadPlanningPrompt(team, workers, feedback, {
+      snapshot: promptSnapshot,
+    })
+    // The shipped planning persona is the last fallback; it is only resolved
+    // when neither the lead nor the team configures a system prompt.
+    const persona =
+      lead.config?.systemPrompt?.trim() ||
+      team.config?.defaultSystemPrompt?.trim() ||
+      resolvePrompt(LEAD_PLANNING_SYSTEM_PROMPT, {
+        context: teamPromptContext(team),
+        snapshot: promptSnapshot,
+      }).text
+    signal.throwIfAborted()
     const planText = await runLeadTurn({
       team,
       lead,
-      prompt: buildLeadPlanningPrompt(team, workers, feedback),
+      prompt,
       systemPrompt: [
-        lead.config?.systemPrompt?.trim() ||
-          team.config?.defaultSystemPrompt?.trim() ||
-          LEAD_SYSTEM_PROMPT,
+        persona,
         opts.entryPersona?.systemPrompt.trim()
           ? `IM entry persona (${opts.entryPersona.name}):\n${opts.entryPersona.systemPrompt.trim()}`
           : "",
@@ -296,7 +326,10 @@ export function buildAgentTeamRuntimeDeps(
       }),
       // The reviewer's role overrides any persona the lead carries: a lead whose
       // systemPrompt says "you build features" must still review as a reviewer.
-      systemPrompt: LEAD_REVIEW_SYSTEM_PROMPT,
+      // Resolved per review step (ADR-0236): the step is the adoption point.
+      systemPrompt: (
+        await resolvePromptAsync(LEAD_REVIEW_PROMPT, { context: teamPromptContext(team) })
+      ).text,
       phase: "review",
       signal,
     })

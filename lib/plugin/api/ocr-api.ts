@@ -23,45 +23,19 @@ import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { registerOcrProvider, getSharedOcrRegistry } from "@/lib/ocr/registry"
 import type { OcrProvider } from "@/types/ocr"
 import type { OcrInput, OcrResult } from "@/types/ocr"
-import type { PluginOcrRegistration } from "@/types/plugin/plugin-ocr"
 import { extract } from "@/lib/ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import { loadUserOcrSettings } from "@/lib/ocr/user-settings"
 import { ocrScreen } from "@/lib/automation/ocr-screen"
 import { handleOcrSlashCommand, type SlashOcrResult } from "@/lib/slash-commands/actions/ocr"
 import { detectPlatform } from "@/lib/platform/detect"
+import type { PluginOcrAPI } from "@cognia/plugin-contract/lib/plugin/api/ocr-api"
+export type { PluginOcrAPI } from "@cognia/plugin-contract/lib/plugin/api/ocr-api"
 
 // Track which provider ids each plugin has registered so we can drop them
 // all on plugin disable without leaning on the registry's plugin-aware
 // helpers (which don't exist — the OCR registry predates plugin lifecycle).
 const ownedByPlugin = new Map<string, Set<string>>()
-
-export interface PluginOcrAPI {
-  /**
-   * Register a custom OCR provider. The given `providerId` is prefixed with
-   * the plugin id before reaching the underlying registry. Returns a handle
-   * with an `unregister()` method (idempotent — the host also auto-cleans
-   * on plugin disable).
-   *
-   * Throws if the plugin has already registered a provider with the same
-   * unprefixed id.
-   */
-  registerProvider(provider: OcrProvider): PluginOcrRegistration
-  /** Snapshot of provider ids this plugin has registered. */
-  listRegistered(): string[]
-  /** Every provider currently available to the shared host router. */
-  listAvailableProviders(): string[]
-  /** Whether at least one provider is available for extraction. */
-  isReady(): boolean
-  /** Extract from a blob or data URL through the host's settings, credentials, and caches. */
-  extract(input: OcrInput): Promise<OcrResult>
-  /** Desktop file-path extraction with a host-owned filesystem resolver. */
-  extractFile(path: string, options?: Omit<OcrInput, "source">): Promise<OcrResult>
-  /** Capture the screen and OCR it through the native automation path. */
-  extractScreen(options?: { languages?: string[] }): Promise<OcrResult>
-  /** Execute the canonical `/ocr` parser and result projection. */
-  runSlashCommand(argv: string): Promise<SlashOcrResult>
-}
 
 interface PluginOcrRuntime {
   listAvailableProviders(): string[]

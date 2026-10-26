@@ -31,6 +31,8 @@ use crate::canvas::{
     CanvasCommentRecord, CanvasDocumentRecord, CanvasUpdateRecord, CanvasVersionRecord,
 };
 use crate::store::{PgStore, StoreError};
+use crate::admission::{self, Requirement};
+use crate::rollout::FeatureKey;
 
 /// The largest single Yjs update the plane accepts, matching the CHECK
 /// constraint in migration 0010. A legitimate keystroke-level update is a few
@@ -126,6 +128,7 @@ pub struct CanvasCatchUp {
 
 #[async_trait]
 pub trait CanvasStore: Send + Sync {
+    async fn admit_document_write(&self, org: &str, document: &str) -> Result<(), StoreError>;
     async fn create_document(
         &self,
         input: NewCanvasDocument,
@@ -227,8 +230,8 @@ pub trait CanvasStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-struct MemoryDocument {
-    record: CanvasDocumentRecord,
+pub(crate) struct MemoryDocument {
+    pub(crate) record: CanvasDocumentRecord,
     snapshot: Option<Vec<u8>>,
     updates: Vec<(CanvasUpdateRecord, Vec<u8>)>,
     comments: Vec<CanvasCommentRecord>,
@@ -238,6 +241,7 @@ struct MemoryDocument {
 impl Default for CanvasDocumentRecord {
     fn default() -> Self {
         Self {
+            contract_version: admission::COLLAB_PROTOCOL_VERSION as i32,
             id: String::new(),
             org_id: String::new(),
             workspace_id: String::new(),
@@ -255,10 +259,14 @@ impl Default for CanvasDocumentRecord {
 
 #[derive(Default)]
 pub struct InMemoryCanvasStore {
-    documents: Arc<RwLock<HashMap<String, MemoryDocument>>>,
+    tables: Arc<RwLock<crate::store::Tables>>,
 }
 
 impl InMemoryCanvasStore {
+    pub(crate) fn from_tables(tables: Arc<RwLock<crate::store::Tables>>) -> Self { Self { tables } }
+    fn documents(&self) -> parking_lot::MappedRwLockReadGuard<'_, HashMap<String, MemoryDocument>> {
+        parking_lot::RwLockReadGuard::map(self.tables.read(), |t| &t.canvas)
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -291,11 +299,16 @@ fn conflict(record: &CanvasDocumentRecord) -> StoreError {
 
 #[async_trait]
 impl CanvasStore for InMemoryCanvasStore {
+    async fn admit_document_write(&self, org: &str, document: &str) -> Result<(), StoreError> {
+        admission::memory_canvas(&self.tables.read(), org, document, Requirement::Write)
+    }
     async fn create_document(
         &self,
         input: NewCanvasDocument,
     ) -> Result<CanvasDocumentRecord, StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory(&tables, FeatureKey::CanvasCollaboration, &input.org_id, &input.workspace_id, admission::COLLAB_PROTOCOL_VERSION as i32, Requirement::New)?;
+        let documents = &mut tables.canvas;
         if let Some(existing) = documents.values().find(|doc| {
             doc.record.org_id == input.org_id
                 && doc.record.created_by_user_id == input.created_by_user_id
@@ -304,6 +317,7 @@ impl CanvasStore for InMemoryCanvasStore {
             return Ok(existing.record.clone());
         }
         let record = CanvasDocumentRecord {
+            contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: input.id.clone(),
             org_id: input.org_id,
             workspace_id: input.workspace_id,
@@ -331,7 +345,7 @@ impl CanvasStore for InMemoryCanvasStore {
         org_id: &str,
         workspace_id: &str,
     ) -> Result<Vec<CanvasDocumentRecord>, StoreError> {
-        let documents = self.documents.read();
+        let documents = self.documents();
         let mut rows: Vec<CanvasDocumentRecord> = documents
             .values()
             .filter(|doc| doc.record.org_id == org_id && doc.record.workspace_id == workspace_id)
@@ -347,7 +361,7 @@ impl CanvasStore for InMemoryCanvasStore {
         workspace_id: &str,
         document_id: &str,
     ) -> Result<CanvasDocumentRecord, StoreError> {
-        let documents = self.documents.read();
+        let documents = self.documents();
         documents
             .get(document_id)
             .filter(|doc| doc.record.org_id == org_id && doc.record.workspace_id == workspace_id)
@@ -360,7 +374,7 @@ impl CanvasStore for InMemoryCanvasStore {
         org_id: &str,
         document_id: &str,
     ) -> Result<String, StoreError> {
-        let documents = self.documents.read();
+        let documents = self.documents();
         documents
             .get(document_id)
             .filter(|doc| doc.record.org_id == org_id)
@@ -372,7 +386,9 @@ impl CanvasStore for InMemoryCanvasStore {
         &self,
         input: RenameCanvasDocument,
     ) -> Result<CanvasDocumentRecord, StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, &input.org_id, &input.document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(&input.document_id)
             .filter(|doc| doc.record.org_id == input.org_id)
@@ -392,7 +408,9 @@ impl CanvasStore for InMemoryCanvasStore {
     }
 
     async fn delete_document(&self, org_id: &str, document_id: &str) -> Result<(), StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, org_id, document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         match documents.get(document_id) {
             Some(doc) if doc.record.org_id == org_id => {
                 documents.remove(document_id);
@@ -409,7 +427,9 @@ impl CanvasStore for InMemoryCanvasStore {
         if input.payload.is_empty() || input.payload.len() > MAX_UPDATE_BYTES {
             return Err(StoreError::Policy("update payload out of range".into()));
         }
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, &input.org_id, &input.document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(&input.document_id)
             .filter(|doc| doc.record.org_id == input.org_id)
@@ -443,7 +463,7 @@ impl CanvasStore for InMemoryCanvasStore {
         since_sequence: i64,
         limit: i64,
     ) -> Result<CanvasCatchUp, StoreError> {
-        let documents = self.documents.read();
+        let documents = self.documents();
         let doc = documents
             .get(document_id)
             .filter(|doc| doc.record.org_id == org_id)
@@ -482,7 +502,9 @@ impl CanvasStore for InMemoryCanvasStore {
         if input.payload.is_empty() || input.payload.len() > MAX_UPDATE_BYTES {
             return Err(StoreError::Policy("snapshot payload out of range".into()));
         }
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, &input.org_id, &input.document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(&input.document_id)
             .filter(|doc| doc.record.org_id == input.org_id)
@@ -508,7 +530,9 @@ impl CanvasStore for InMemoryCanvasStore {
         &self,
         input: NewCanvasComment,
     ) -> Result<CanvasCommentRecord, StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, &input.org_id, &input.document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(&input.document_id)
             .filter(|doc| doc.record.org_id == input.org_id)
@@ -541,7 +565,7 @@ impl CanvasStore for InMemoryCanvasStore {
         org_id: &str,
         document_id: &str,
     ) -> Result<Vec<CanvasCommentRecord>, StoreError> {
-        let documents = self.documents.read();
+        let documents = self.documents();
         let doc = documents
             .get(document_id)
             .filter(|doc| doc.record.org_id == org_id)
@@ -558,7 +582,9 @@ impl CanvasStore for InMemoryCanvasStore {
         resolved: Option<bool>,
         now: i64,
     ) -> Result<CanvasCommentRecord, StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, org_id, document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(document_id)
             .filter(|doc| doc.record.org_id == org_id)
@@ -584,7 +610,9 @@ impl CanvasStore for InMemoryCanvasStore {
         document_id: &str,
         comment_id: &str,
     ) -> Result<(), StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, org_id, document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(document_id)
             .filter(|doc| doc.record.org_id == org_id)
@@ -601,7 +629,9 @@ impl CanvasStore for InMemoryCanvasStore {
         &self,
         input: NewCanvasVersion,
     ) -> Result<CanvasVersionRecord, StoreError> {
-        let mut documents = self.documents.write();
+        let mut tables = self.tables.write();
+        admission::memory_canvas(&tables, &input.org_id, &input.document_id, Requirement::Write)?;
+        let documents = &mut tables.canvas;
         let doc = documents
             .get_mut(&input.document_id)
             .filter(|doc| doc.record.org_id == input.org_id)
@@ -631,7 +661,7 @@ impl CanvasStore for InMemoryCanvasStore {
         org_id: &str,
         document_id: &str,
     ) -> Result<Vec<CanvasVersionRecord>, StoreError> {
-        let documents = self.documents.read();
+        let documents = self.documents();
         let doc = documents
             .get(document_id)
             .filter(|doc| doc.record.org_id == org_id)
@@ -647,10 +677,11 @@ impl CanvasStore for InMemoryCanvasStore {
 // ---------------------------------------------------------------------------
 
 const DOCUMENT_COLUMNS: &str = "id, org_id, workspace_id, title, language, created_by_user_id, \
-     created_at, updated_at, revision, next_sequence, snapshot_sequence";
+     created_at, updated_at, revision, next_sequence, snapshot_sequence, contract_version";
 
 fn document_from_row(row: &tokio_postgres::Row) -> Result<CanvasDocumentRecord, StoreError> {
     Ok(CanvasDocumentRecord {
+        contract_version: row.get("contract_version"),
         id: row.get("id"),
         org_id: row.get("org_id"),
         workspace_id: row.get("workspace_id"),
@@ -709,12 +740,18 @@ fn db(error: impl std::fmt::Display) -> StoreError {
 
 #[async_trait]
 impl CanvasStore for PgStore {
+    async fn admit_document_write(&self, org: &str, document: &str) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, org).await?;
+        self.admit_canvas(&tx, org, document, Requirement::Write).await
+    }
     async fn create_document(
         &self,
         input: NewCanvasDocument,
     ) -> Result<CanvasDocumentRecord, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit(&tx, FeatureKey::CanvasCollaboration, &input.org_id, &input.workspace_id, admission::COLLAB_PROTOCOL_VERSION as i32, Requirement::New).await?;
         if let Some(row) = tx
             .query_opt(
                 &format!(
@@ -733,8 +770,8 @@ impl CanvasStore for PgStore {
                 &format!(
                     "INSERT INTO canvas_documents \
                      (id, org_id, workspace_id, title, language, created_by_user_id, \
-                      created_at, updated_at, created_operation_id, last_operation_id) \
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8) RETURNING {DOCUMENT_COLUMNS}"
+                      created_at, updated_at, created_operation_id, last_operation_id, contract_version) \
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8,$9) RETURNING {DOCUMENT_COLUMNS}"
                 ),
                 &[
                     &input.id,
@@ -745,6 +782,7 @@ impl CanvasStore for PgStore {
                     &input.created_by_user_id,
                     &input.created_at,
                     &input.operation_id,
+                    &(admission::COLLAB_PROTOCOL_VERSION as i32),
                 ],
             )
             .await
@@ -828,6 +866,7 @@ impl CanvasStore for PgStore {
         } = input;
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &org_id).await?;
+        self.admit_canvas(&tx, &org_id, &document_id, Requirement::Write).await?;
         let existing = tx
             .query_opt(
                 &format!(
@@ -872,6 +911,7 @@ impl CanvasStore for PgStore {
     async fn delete_document(&self, org_id: &str, document_id: &str) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_canvas(&tx, org_id, document_id, Requirement::Write).await?;
         // Updates, comments and versions go with it through ON DELETE CASCADE.
         let deleted = tx
             .execute(
@@ -896,6 +936,7 @@ impl CanvasStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_canvas(&tx, &input.org_id, &input.document_id, Requirement::Write).await?;
         // `FOR UPDATE` serialises sequence allocation against every other
         // writer on this document. Two peers typing at once take the lock in
         // turn and get 42 and 43, rather than both reading 41 and colliding on
@@ -1013,6 +1054,7 @@ impl CanvasStore for PgStore {
         }
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_canvas(&tx, &input.org_id, &input.document_id, Requirement::Write).await?;
         let existing = tx
             .query_opt(
                 &format!(
@@ -1064,6 +1106,7 @@ impl CanvasStore for PgStore {
     ) -> Result<CanvasCommentRecord, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_canvas(&tx, &input.org_id, &input.document_id, Requirement::Write).await?;
         if let Some(row) = tx
             .query_opt(
                 "SELECT id, document_id, anchor, head, body, author_user_id, resolved, \
@@ -1141,6 +1184,7 @@ impl CanvasStore for PgStore {
     ) -> Result<CanvasCommentRecord, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_canvas(&tx, org_id, document_id, Requirement::Write).await?;
         let row = tx
             .query_opt(
                 "UPDATE canvas_comments SET body=COALESCE($4,body), \
@@ -1165,6 +1209,7 @@ impl CanvasStore for PgStore {
     ) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
+        self.admit_canvas(&tx, org_id, document_id, Requirement::Write).await?;
         let deleted = tx
             .execute(
                 "DELETE FROM canvas_comments WHERE org_id=$1 AND document_id=$2 AND id=$3",
@@ -1185,6 +1230,7 @@ impl CanvasStore for PgStore {
     ) -> Result<CanvasVersionRecord, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        self.admit_canvas(&tx, &input.org_id, &input.document_id, Requirement::Write).await?;
         if let Some(row) = tx
             .query_opt(
                 "SELECT id, document_id, label, content, author_user_id, created_at \

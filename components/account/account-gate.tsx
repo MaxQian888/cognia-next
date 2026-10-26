@@ -61,6 +61,7 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
   const locked = useAccountStore((state) => state.locked)
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
   const storeError = useAccountStore((state) => state.error)
+  const bootFailure = useAccountStore((state) => state.bootFailure)
   const pendingRecoveryKey = useAccountStore((state) => state.pendingRecoveryKey)
   const autoUnlockFailure = useAccountStore((state) => state.autoUnlockFailure)
   const createAccount = useAccountStore((state) => state.createAccount)
@@ -104,6 +105,51 @@ export function AccountGate({ children, guestView }: AccountGateProps) {
     // shared "Preparing your workspace" so the hand-over to the next owner
     // (recovery / onboarding gates, then the shell) reads as one screen.
     return <PageLoading variant="workspace" milestone="accounts" allowReload />
+  }
+
+  if (bootFailure) {
+    // A failed read says nothing about which accounts exist. Keep creation
+    // and account activation behind a successful retry, including stale rows
+    // left by an earlier attempt.
+    if (onShareViewer && readShareAsGuest) return <>{guestView}</>
+    return (
+      <GateShell>
+        <section className="flex w-full max-w-sm flex-col gap-4">
+          <h1 className="text-lg font-semibold">{t("registryFailureTitle")}</h1>
+          <ErrorText>
+            {t(
+              bootFailure.code === "registry-timeout"
+                ? "registryTimeoutDescription"
+                : "registryUnavailableDescription"
+            )}
+          </ErrorText>
+          <Button
+            disabled={submitting}
+            onClick={async () => {
+              setSubmitting(true)
+              try {
+                await useAccountStore.getState().load()
+              } catch {
+                // The store records the next localized boot failure. Never
+                // turn a registry diagnostic into raw on-screen prose.
+              } finally {
+                setSubmitting(false)
+              }
+            }}
+          >
+            {t("retryRegistry")}
+          </Button>
+          <Button variant="outline" onClick={() => window.location.reload()}>
+            {t("reloadWindow")}
+          </Button>
+          {onShareViewer ? (
+            <Button variant="outline" onClick={() => setReadShareAsGuest(true)}>
+              {t("shareGuestAction")}
+            </Button>
+          ) : null}
+        </section>
+      </GateShell>
+    )
   }
 
   // Mobile now provisions its encrypted local workspace during account boot.

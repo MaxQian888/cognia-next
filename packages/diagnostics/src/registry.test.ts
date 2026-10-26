@@ -14,6 +14,11 @@ const RETRY_KINDS = new Set<DiagnosticAction["kind"]>([
 ])
 
 describe("DIAGNOSTIC_CODES", () => {
+  it("keeps the org-scope configuration boundary non-retryable", () => {
+    expect(isDiagnosticCode("orgScopeUnavailable")).toBe(true)
+    expect(DIAGNOSTIC_CODES.orgScopeUnavailable.retryable).toBe(false)
+    expect(DIAGNOSTIC_CODES.orgScopeUnavailable.severity).toBe("info")
+  })
   it("gives every code at least one thing the user can do", () => {
     const dead = DIAGNOSTIC_CODE_IDS.filter((code) => DIAGNOSTIC_CODES[code].actions.length === 0)
     expect(dead).toEqual([])

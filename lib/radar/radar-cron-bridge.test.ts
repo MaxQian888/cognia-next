@@ -21,10 +21,13 @@ jest.mock("@/lib/scheduler/scheduler-db", () => ({
 }))
 jest.mock("@/lib/scheduler/cron-parser", () => ({ validateCronExpression: jest.fn() }))
 const mockArmRadar = jest.fn()
+const mockCreateRadar = jest.fn()
+const mockDeleteRadar = jest.fn()
 jest.mock("@/lib/scheduler/task-scheduler", () => ({
   getTaskScheduler: () => ({
     updateTask: (...args: unknown[]) => mockArmRadar(...args),
-    deleteTask: (id: string) => schedulerDb.deleteTask(id),
+    createTask: mockCreateRadar,
+    deleteTask: mockDeleteRadar,
   }),
 }))
 
@@ -52,10 +55,10 @@ describe("syncRadarCronToScheduler", () => {
     db.getTask.mockResolvedValue(null)
     const r = await syncRadarCronToScheduler({ mode: "daily" })
     expect(r.action).toBe("created")
-    expect(db.createTask).toHaveBeenCalledWith(
+    expect(mockCreateRadar).toHaveBeenCalledWith(
       expect.objectContaining({ id: RADAR_REPORT_TASK_ID, type: "radar-report" })
     )
-    expect(mockArmRadar).toHaveBeenCalledWith(RADAR_REPORT_TASK_ID, {})
+    expect(mockArmRadar).not.toHaveBeenCalled()
   })
 
   it("deletes on off when a row exists", async () => {

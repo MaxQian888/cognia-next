@@ -1,3 +1,6 @@
+import type { ImageReference } from "@cognia/plugin-contract/lib/project-environment/image-reference"
+export type { ImageReference } from "@cognia/plugin-contract/lib/project-environment/image-reference"
+
 /**
  * OCI image references, parsed exactly as `crates/cognia-environment/src/image.rs`
  * parses them (ADR-0182).
@@ -36,14 +39,6 @@ export class ImageReferenceError extends Error {
     this.kind = kind
     this.value = value
   }
-}
-
-export interface ImageReference {
-  registry: string
-  repository: string
-  tag?: string
-  /** Lowercased `sha256:<hex>`. */
-  digest?: string
 }
 
 export function parseImageReference(input: string): ImageReference {

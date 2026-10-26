@@ -670,3 +670,24 @@ describe("auth config version 4 (issuer kind)", () => {
     expect(authConfigIssuerKind({ oidc: { ...oidc, issuerKind: 4 as never } })).toBe("logto")
   })
 })
+
+describe("auth config execution availability", () => {
+  const config = {
+    deploymentMode: "single-user",
+    hostId: "host",
+    signaling: { url: "wss://signal.example", iceServers: [] },
+  }
+
+  it("accepts old Hosts and both execution states additively", () => {
+    expect(parseCompanionAuthConfig(config).execution).toBeUndefined()
+    for (const execution of ["available", "unavailable"] as const) {
+      expect(parseCompanionAuthConfig({ ...config, execution }).execution).toBe(execution)
+    }
+  })
+
+  it("refuses malformed execution states", () => {
+    for (const execution of [null, false, "enabled", "unknown"]) {
+      expect(() => parseCompanionAuthConfig({ ...config, execution })).toThrow("malformed")
+    }
+  })
+})

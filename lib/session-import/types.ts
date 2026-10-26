@@ -13,121 +13,24 @@
 // (`lib/claude/subagent-importers/`) rather than the in-memory `ChatImporter`
 // (single-JSON-blob, closed format union) — see ADR-0062.
 
-import type { ImportedConversation } from "@/lib/data/importers/types"
-import type { VendorRoots } from "@/lib/agent-roots"
 import type {
   CanonicalSession,
   SessionLossReport,
 } from "@cognia/agent-config-types/canonical-session"
-
-/** A single file the user picked (or that a scan materialized). */
-export interface PickedSessionFile {
-  /** Basename, e.g. "rollout-2025-01-03-uuid.jsonl". */
-  name: string
-  /** Absolute path on desktop; may be a synthetic id in web/picker mode. */
-  path: string
-  /** UTF-8 contents. */
-  content: string
-}
-
-/**
- * Minimal filesystem surface the adapters need. Superset of
- * {@link import("@/lib/memory/external/types").ExternalFs} — adds the content
- * reads the memory discovery layer never needed. The real implementation wraps
- * `lib/file/file-operations.ts`; tests inject a fake.
- */
-export interface SessionFs {
-  exists(path: string): Promise<boolean>
-  readDir(path: string): Promise<string[]>
-  /**
-   * OPTIONAL directory entries with their file-type flag. When present,
-   * `walkFiles` uses it instead of a `stat` call per entry — on desktop each
-   * `stat` is a separate Tauri IPC, so the entry form turns an O(entries)
-   * round-trip walk into O(dirs). `isFile` may be undefined (e.g. symlinks),
-   * which tells the walker to fall back to `stat` for that entry only.
-   */
-  readDirEntries?(path: string): Promise<Array<{ name: string; isFile?: boolean }>>
-  stat(path: string): Promise<{ size: number; isFile: boolean }>
-  readTextFile(path: string): Promise<string>
-}
-
-/** Everything an adapter needs to scan / parse. */
-export interface SessionScanInput {
-  fs: SessionFs
-  /** OS home dir, no trailing separator (from `resolveHome`). Empty in web mode. */
-  home: string
-  /**
-   * Resolved per-vendor config/data roots, honouring `$CLAUDE_CONFIG_DIR`,
-   * `$CODEX_HOME` and `$XDG_*` (see `lib/agent-roots/`). Adapters must prefer
-   * these over deriving `<home>/.codex` themselves. Optional so existing
-   * callers (and tests) that only have a home dir keep working — adapters fall
-   * back to the home-relative default when it's absent.
-   */
-  roots?: VendorRoots
-  /**
-   * Files the user hand-picked (web / picker fallback). When present, adapters
-   * should parse these instead of walking the filesystem. Undefined on a
-   * desktop auto-scan.
-   */
-  pickedFiles?: PickedSessionFile[]
-}
-
-/** Opaque handle identifying one listed session, understood by its own adapter. */
-export interface SessionRef {
-  /** Adapter id that produced this ref. */
-  sourceId: string
-  /** The upstream session id (stable — drives dedupe on re-import). */
-  originalSessionId: string
-  /** Where the session lives on disk (file path, dir, or db row key). */
-  locator: string
-}
-
-/** A listed-but-not-yet-imported session shown in the picker. */
-export interface SessionSummary {
-  ref: SessionRef
-  /** Display title (first user turn, truncated). */
-  title: string
-  /** Owning source, for grouping / badges. */
-  sourceId: string
-  /** Number of visible turns (approximate — for the row subtitle). */
-  messageCount: number
-  /** Epoch ms of the last activity (sort key). */
-  updatedAt: number
-  /** Optional source-derived content revision for timestamp-preserving updates. */
-  watchRevision?: string
-  /** Working directory the session ran in, when the source records it. */
-  cwd?: string
-  /** Upstream format/runtime version this summary was verified against. */
-  sourceVersion?: string
-  /** Optional source-derived relationship/lifecycle preview for the picker. */
-  relationKind?: import("@cognia/agent-config-types/canonical-session").CanonicalSessionRelationKind
-  lifecycleStatus?: import("@cognia/agent-config-types/canonical-session").CanonicalSessionLifecycleStatus
-  /**
-   * Upstream parent session id when the source records one (Codex's
-   * `parent_thread_id`/`forked_from_id`). Lets a scan filter child sessions
-   * out of the top-level list WITHOUT a full `parseSession` per file — the
-   * previous Codex scan re-read and re-parsed every rollout just to learn
-   * this one field.
-   */
-  parentNativeSessionId?: string
-}
-
-/** Likelihood a batch of picked files came from this source (auto-detect). */
-export type SessionDetectVerdict = "match" | "maybe" | "no"
-
-export interface ImportedSessionGraphNode {
-  conversation: ImportedConversation
-  session: CanonicalSession
-  loss: SessionLossReport
-}
-
-/** Rich, loss-aware result used by built-ins that preserve session relationships. */
-export interface ImportedSessionGraph {
-  rootCanonicalSessionId: string
-  sourceRevision?: string
-  sourceVersion?: string
-  nodes: ImportedSessionGraphNode[]
-}
+import type { SessionRef } from "@cognia/plugin-contract/lib/session-import/types"
+export type {
+  AgentSessionSourceAdapter,
+  ImportedSessionGraph,
+  ImportedSessionGraphNode,
+  PickedSessionFile,
+  SessionDetectVerdict,
+  SessionFs,
+  SessionRef,
+  SessionScanInput,
+  SessionSummary,
+  UsageScanBatch,
+  UsageScanQuery,
+} from "@cognia/plugin-contract/lib/session-import/types"
 
 /** A selected session that could not be parsed; retained for an actionable result. */
 export interface SessionImportFailure {
@@ -150,161 +53,6 @@ export interface SessionImportDetail {
 }
 
 /* ── Usage scanning (ADR-0165 Phase 0) ────────────────────────────────── */
-
-/**
- * What one incremental usage scan is allowed to do.
- *
- * The bounds are the whole point. A usage scan runs on a foreground open or an
- * explicit refresh, against corpora that can be gigabytes, on the main thread
- * of a desktop app. Everything here exists so a scan can stop cleanly and
- * resume, rather than block the UI or be abandoned half-written.
- */
-export interface UsageScanQuery {
-  /** Ignore sessions whose last activity predates this instant. */
-  sinceMs?: number
-  /** Hard ceiling on rows returned in one batch. */
-  maxRows?: number
-  /** Hard ceiling on locators visited in one batch. */
-  maxSessions?: number
-  /** Cooperative cancellation. A scan MUST honour it between locators. */
-  signal?: AbortSignal
-}
-
-/** One bounded slice of a source's usage history. */
-export interface UsageScanBatch {
-  /**
-   * Rows in canonical shape, already stamped with `sourceId` /
-   * `sourceSessionId` / `imported: true`. Never partial money: a locator either
-   * contributes all of its rows or none of them.
-   */
-  rows: import("@/lib/db/session-usage").SessionUsageRow[]
-  /**
-   * Opaque resume point, or `null` when the source was read to the end. Only
-   * a `null` cursor licenses deleting rows for sessions that vanished.
-   */
-  cursor: string | null
-  /** Locators read successfully / skipped after a read or parse failure. */
-  parsed: number
-  failed: number
-  /** True when a bound (rows, sessions, or abort) ended the batch early. */
-  truncated: boolean
-  /**
-   * Coarse, non-identifying reason the batch degraded. Never a path, never an
-   * OS message: this value reaches a durable table and the tray.
-   */
-  degradedReason?: "root-missing" | "read-failed" | "aborted" | "budget"
-  /**
-   * Digest of the locator set observed (sizes and timestamps, never content).
-   * A changed fingerprint is what forbids the next scan from shortcutting.
-   */
-  fingerprint?: string
-}
-
-/**
- * A source of importable agent session histories. First-party sources
- * (claude-code / codex / opencode) are static; plugins contribute more through
- * `registerSessionSource` (see `registry.ts`).
- */
-export interface AgentSessionSourceAdapter {
-  /** Stable id: "claude-code" | "codex" | "opencode" | "<pluginId>:<x>". */
-  id: string
-  /** Human label for the source tab. */
-  displayName: string
-  /** i18n suffix under `settings.sessionImport.sources.<labelKey>`. */
-  labelKey: string
-  /** Upstream release/format last verified by checked-in fixtures. */
-  verifiedVersion?: string
-  /** ISO date of the evidence pass backing `verifiedVersion`. */
-  verifiedAt?: string
-  /** File extensions the picker accepts for this source (".jsonl", ".db"). */
-  acceptedExtensions: string[]
-  /**
-   * Absolute roots this source scans on a desktop auto-scan. `roots` carries
-   * the environment-aware per-vendor directories (`lib/agent-roots/`); when it
-   * is absent the adapter falls back to the conventional home-relative path.
-   * Empty array = this source has no filesystem scan (picker only).
-   */
-  scanRoots(home: string, roots?: VendorRoots): string[]
-  /**
-   * DECLARED dormancy: this source has no machine-wide history location, so it
-   * can only ever be reached through the file picker — the desktop auto-scan
-   * and the fs-watch live sync do not apply to it and never will.
-   *
-   * Aider is the shipping case: it appends to a per-repository
-   * `.aider.chat.history.md`, so there is nothing to walk from `$HOME`. Before
-   * this flag the fact was inferable only from `scanRoots()` happening to
-   * return `[]`, which the UI could not distinguish from "this agent is not
-   * installed" — so Aider silently never appeared in a scan and nothing said
-   * why. Declaring it lets the dialog name these sources (see
-   * `sessionImport.pickerOnly`), which is the difference between a documented
-   * limitation and a feature that looks broken.
-   *
-   * An adapter that sets this MUST return `[]` from `scanRoots`.
-   */
-  pickerOnly?: boolean
-  /**
-   * Heuristic used by `detectSourceForFiles` to pick the source for a batch of
-   * hand-picked files. Path hints (e.g. ".codex/sessions") are the usual tell.
-   */
-  detect(files: PickedSessionFile[]): SessionDetectVerdict
-  /** List the sessions available from a scan (or from `input.pickedFiles`). */
-  listSessions(input: SessionScanInput): Promise<SessionSummary[]>
-  /** Parse ONE listed session into the canonical conversation shape. */
-  parseSession(ref: SessionRef, input: SessionScanInput): Promise<ImportedConversation>
-  /**
-   * Optional rich parser. When present it is authoritative and `parseSession`
-   * remains only the backwards-compatible plugin/legacy surface.
-   *
-   * `opts.singleFile` narrows the call to the ref's own artifact: the fs-watch
-   * live-sync path sets it so one changed transcript does NOT trigger a
-   * corpus-wide scan+parse (Codex's graph build walks every rollout to find
-   * children — fine once per import run, fatal per fs event). Adapters
-   * without cross-session enrichment may ignore it.
-   */
-  parseGraph?(
-    ref: SessionRef,
-    input: SessionScanInput,
-    opts?: { singleFile?: boolean }
-  ): Promise<ImportedSessionGraph>
-  /**
-   * OPTIONAL incremental usage scan (ADR-0165).
-   *
-   * When present it is authoritative and the generic driver in
-   * `lib/session-import/usage-scan.ts` steps aside. Implement it when a source
-   * can produce token/cost rows WITHOUT materializing `StoredMessage[]`, which
-   * is what the generic fallback has to do: a full `parseSession` per locator,
-   * then a throwaway allocation of every message just to read the usage blobs
-   * hanging off a handful of them.
-   *
-   * Contract: emit bounded batches, honour `query.signal` between locators,
-   * and return a `null` cursor ONLY when the source was read to the end.
-   */
-  scanUsage?(
-    input: SessionScanInput,
-    query: UsageScanQuery,
-    cursor?: string | null
-  ): Promise<UsageScanBatch>
-  /**
-   * OPTIONAL cheap summary of one file's raw content — a single pass that pulls
-   * only title / count / timestamps / cwd WITHOUT building any `StoredMessage`,
-   * resolving the DAG, or reconstructing subagents (all of which `parseSession`
-   * does and the scan throws away). When a per-file source implements this, the
-   * desktop scan uses it instead of a full parse, so listing a large history
-   * costs O(bytes) parse instead of O(bytes) parse + O(messages) allocation.
-   *
-   * Returns `null` for a file that yields no importable session (empty/corrupt).
-   * Sources whose history isn't a set of standalone files (e.g. OpenCode's
-   * single SQLite DB) leave this undefined and keep their own `listSessions`.
-   */
-  summarizeFile?(content: string, locator: string): SessionSummary | null
-  /**
-   * OPTIONAL bidirectional codec (ADR-0090 Phase 8): converts this source's
-   * parsed conversations into the runtime-neutral `CanonicalSession` (with an
-   * honest loss report), and MAY declare a `materialize` capability for the
-   * reverse direction. Absent = honest import-only source.
-   */
-  codec?: import("./codec-types").SessionCodec
-}
 
 /** Phase of an in-flight import, for progress reporting. */
 export type ImportPhase = "parsing" | "writing"

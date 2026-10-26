@@ -4,10 +4,8 @@ packages:
   # root from recursive commands unless --include-workspace-root is passed.
   - .
   - docs
-  - web
   - mobile
   - cli
-  - browser-extension
   - packages/*
   - services/workspace-runtime
 
@@ -38,8 +36,8 @@ patchedDependencies:
 # declare broader ranges or have not yet published a compatible patch release.
 overrides:
   # Workspace peer-only packages must share the host React runtime and types.
-  react: "19.3.0"
-  react-dom: "19.3.0"
+  react: "19.3.1"
+  react-dom: "19.3.1"
   "@types/react": "19.3.0"
   "@types/react-dom": "19.3.0"
   motion: "13.4.4"
@@ -50,23 +48,30 @@ overrides:
   # `{ expand }`. A graph-wide override therefore crashes the still-supported
   # minimatch 3/5/9 consumers before ESLint can load. Pin the latest maintenance
   # line compatible with each parent API instead.
-  "minimatch@3.1.5>brace-expansion": "1.1.18"
-  "minimatch@5.1.9>brace-expansion": "2.1.4"
-  "minimatch@9.0.9>brace-expansion": "2.1.4"
-  "minimatch@10.2.6>brace-expansion": "5.0.9"
+  "minimatch@3.1.5>brace-expansion": "1.1.21"
+  "minimatch@5.1.9>brace-expansion": "2.1.7"
+  "minimatch@9.0.9>brace-expansion": "2.1.7"
+  "minimatch@10.2.6>brace-expansion": "5.0.12"
   mermaid: "12.0.0"
   pdfjs-dist: "6.3.289"
-  shell-quote: "1.10.0"
+  shell-quote: "1.11.0"
   tmp: "0.2.7"
   dompurify: "^3.4.12"
   esbuild: "^0.28.1"
   postcss: "^8.5.10"
-  sharp: "^0.35.3"
+  sharp: "^0.35.5"
   tar: "^7.5.19"
-  undici: "^7.28.0"
+  undici: "^7.29.1"
   uuid: "^11.1.1"
   valibot: "^1.4.2"
   vite-tsconfig-paths: "^6.1.1"
+  "@xmldom/xmldom@>=0.7 <0.9": "^0.8.15"
+  "katex@<0.18.2": "0.18.2"
+  linkify-it: "^5.0.2"
+  lodash-es: "^4.18.1"
+  source-map-js: "^1.2.2"
+  "vite@>=8.0.0 <=8.1.5": "8.1.6"
+  webpack-dev-middleware: "^7.4.5"
 
   # Single-copy floors for the AI SDK family. Six workspace packages declare these
   # as peers with a bare `*` (`packages/{provider-core,provider-embedding,rag,
@@ -112,9 +117,6 @@ catalog:
 # packages whose scripts are informational or unnecessary at install time.
 allowBuilds:
   "@parcel/watcher": true
-  # WXT's postinstall generates the .wxt/ type surface the extension
-  # workspace compiles against; without it `tsc` there sees no entrypoints.
-  wxt: true
   "@swc/core": true
   core-js: false
   core-js-pure: false
@@ -164,8 +166,16 @@ minimumReleaseAgeExclude:
   - "@ai-sdk/togetherai@3.0.64"
   - "@ai-sdk/xai@5.0.15"
   - "@ai-sdk/typesafe-ai@3.0.13"
+  # Exact root-only compiler pins include verified memory compaction fixes.
+  - "@typescript/typescript-darwin-arm64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-darwin-x64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-linux-arm64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-linux-arm@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-linux-x64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-win32-arm64@7.1.0-dev.20261019.1"
+  - "@typescript/typescript-win32-x64@7.1.0-dev.20261019.1"
 
-# `pnpm audit` is a BLOCKING gate (CI_CD.md, supply-chain group), so every entry
+# `pnpm audit` is a BLOCKING gate (docs/development/CI_CD.md, supply-chain group), so every entry
 # here has to name the advisory and say why no safe upgrade exists. The
 # `audit:deps` script mirrors these ids as `--ignore` flags because JSON cannot
 # carry the reason, and `scripts/ci/workflow-contract.test.mjs` keeps the two

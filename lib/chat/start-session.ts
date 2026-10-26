@@ -389,7 +389,7 @@ async function applyCharacterDefaultRuntime(sessionId: string, characterId: stri
   const resolution = await applyAgentRuntimeToSession(sessionId, agent, {
     hasLocalExternalAgent: (agentId) => {
       const external = useExternalAgentStore.getState()
-      return external.enabled && external.agents[agentId]?.enabled === true
+      return external.agents[agentId]?.enabled === true
     },
     getHostConfig: getRemoteHostConfig,
     setSessionRuntimeRef: (id, ref) =>

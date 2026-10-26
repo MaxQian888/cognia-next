@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 
 import { loggers } from "@cognia/logging"
 import { useAccountStore } from "@/stores/account/account-store"
+import { markStartupReactReady } from "@/lib/boot/startup-recovery"
 
 const log = loggers.shell
 
@@ -24,6 +25,8 @@ export function AccountStoreInitializer() {
   const loadedStore = useRef<typeof useAccountStore | null>(null)
 
   useEffect(() => {
+    // React can now own progress and account-read errors, even if load stalls.
+    markStartupReactReady()
     if (loadedStore.current === useAccountStore) return
     loadedStore.current = useAccountStore
     void useAccountStore

@@ -26,7 +26,7 @@ LaTeX 项目的受控智能体工作台。每次编辑都落在内容寻址的�
 | `PATH` 上的 `tectonic`（已验证 0.17.0，例如 `brew install tectonic`） | 编译——唯一的 LaTeX 引擎                     |
 | 约 3 GB 磁盘                                                          | 预置的离线 Tectonic 资源包                  |
 | macOS arm64 + Xcode 命令行工具（`swiftc`）                            | 页面渲染、文本提取与页面审阅                |
-| Pi ≥ 0.85.1                                                           | 仅安装到 Pi 和托管 Pi 智能体时需要          |
+| Pi ≥ 1.0.2                                                            | 仅安装到 Pi 和托管 Pi 智能体时需要          |
 
 仅限桌面端：插件的工具会启动宿主进程，因此在浏览器、移动端和无头外壳中被禁用。
 
@@ -40,7 +40,7 @@ pnpm exec node plugins/pi-latex-workbench/build.mjs
 ```
 
 它会生成 `plugins/pi-latex-workbench/dist/index.js` 和
-`plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.0.zip`。清单的
+`plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.1.zip`。清单的
 `main` 是 `dist/index.js`，属于被 git 忽略的构建产物，所以在构建运行之前插件无法
 加载——这也是从 GitHub URL 安装行不通的原因（仓库里没有 `dist/index.js`）。随后
 用以下两种方式之一安装到正在运行的 Cognia 桌面实例：
@@ -48,7 +48,7 @@ pnpm exec node plugins/pi-latex-workbench/build.mjs
 - **Cognia CLI**（安装 ZIP；CLI 会解析相对路径）：
 
   ```bash
-  cognia plugin install plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.0.zip --json
+  cognia plugin install plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.1.zip --json
   ```
 
 - **加载本地目录**：在 **插件** 面板工具栏中使用 **加载本地目录…**，选择
@@ -67,12 +67,13 @@ pnpm exec node plugins/pi-latex-workbench/build.mjs
    确切的命令后，Cognia 会在插件的 `vendor/` 目录中、不经 shell 运行：
 
    ```bash
-   npm install --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund
+   npm run prepare:plugin
    ```
 
-   它只安装 `ajv`/`ajv-formats` 并链接工作台自己的包。`--omit=peer` 让
-   `@earendil-works/pi-*` 和 `typebox` 不进入包内，这是 Pi 的要求（Pi 会映射到它
-   自己的副本）。`latexwb_*` 工具同样依赖这一步。
+   该步骤调用随包提供的准备程序，以 `npm ci --omit=dev --omit=peer --ignore-scripts`
+   安装锁定依赖、关闭可执行文件链接，再将工作区链接复制为普通目录。
+   发现其他符号链接会直接失败，上游锁文件保持不变。
+   Pi 宿主包与 `typebox` 不进入插件，由 Pi 映射到自己的副本；`latexwb_*` 工具也依赖这一步。
 
 2. **预置工具链与渲染器**（宿主命令——约 2.9 GB 的下载超过工具调用 600 秒的上限，
    因此没有工具提供它）。在插件的安装目录中执行：
@@ -222,3 +223,5 @@ node plugins/pi-latex-workbench/scripts/sync-vendor.mjs --upstream <checkout> --
 （`"license": "UNLICENSED"`）。在本插件——或任何包含 `vendor/` 的产物——发布到
 本仓库之外之前，必须与上游所有者（Arxtect）确认分发条款。详见
 [VENDOR.md](VENDOR.md)。
+
+已验证 Cognia 内置 Pi 1.0.2 和 Pi 1.3.0；开发依赖固定为 1.3.0。准备过程使用普通 ESM 入口引用原样源码，使 Node 在没有工作区软链接的情况下也能加载 TypeScript。

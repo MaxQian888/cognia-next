@@ -9,13 +9,28 @@
  */
 
 import { hasNoLeakingPii } from "@cognia/redact"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import type { ExecutionStep, ErrorAdvisory, AiShellContext } from "./types"
 
-/** System prompt for error diagnosis. */
-export function buildErrorAdvisorSystemPrompt(): string {
-  return `You are a terminal error diagnosis assistant. Given a failed command and its output, explain what went wrong and suggest a fix.
+export const AI_SHELL_ERROR_ADVISOR_PROMPT = definePrompt({
+  id: "developer.ai-shell.error-advisor",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ['"diagnosis"', '"suggestedFix"', '"retryAfterFix"'],
+  outputContract:
+    "Return a JSON object with diagnosis (string), suggestedFix (string or null), and retryAfterFix (boolean). The suggested fix requires user acceptance before execution.",
+  consumers: ["lib/terminal/ai-shell/error-advisor.ts"],
+  defaultBody: `You are a terminal error diagnosis assistant. Given a failed command and its output, explain what went wrong and suggest a fix.
 
 RULES:
 1. Be concise — one or two sentences for diagnosis.
@@ -28,7 +43,12 @@ RESPONSE FORMAT — respond with ONLY a JSON object (no markdown fences):
   "diagnosis": "Brief explanation of what went wrong",
   "suggestedFix": "fix command" or null,
   "retryAfterFix": true/false
-}`
+}`,
+})
+
+/** Resolve diagnosis instructions for the next error advisory. */
+export function buildErrorAdvisorSystemPrompt(): string {
+  return resolvePrompt(AI_SHELL_ERROR_ADVISOR_PROMPT).text
 }
 
 /** Build the user prompt for error diagnosis. */
@@ -101,7 +121,7 @@ export async function getErrorAdvisory(
   const prompt = buildErrorAdvisorPrompt(step, context)
 
   // PII gate
-  if (!isPiiSafe(prompt)) return null
+  if (!isPiiSafe(`${system}\n\n${prompt}`)) return null
 
   try {
     const rawText = await client.complete(prompt, {

@@ -64,6 +64,10 @@ describe("useExternalAgentStore CRUD", () => {
   })
 
   it("persists a Cognia account binding through edits and clears it explicitly", () => {
+    const modelRoles = {
+      version: 1 as const,
+      slots: { "subagent.default": { kind: "inherit-primary" as const } },
+    }
     const cogniaModel = {
       providerId: "plugin:kimi:subscription",
       modelId: "kimi-for-coding",
@@ -75,12 +79,21 @@ describe("useExternalAgentStore CRUD", () => {
       transport: "stdio",
       process: { command: "pi", args: ["--mode", "rpc"] },
       cogniaModel,
+      modelRoles,
     })
     expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toEqual(cogniaModel)
+    expect(useExternalAgentStore.getState().getAgent(id)!.modelRoles).toEqual(modelRoles)
+    useExternalAgentStore.getState().updateAgent(id, { modelRoles })
+    expect(useExternalAgentStore.getState().getAgent(id)!.modelRoles).toEqual(modelRoles)
+    useExternalAgentStore.getState().updateAgent(id, { modelRoles: null })
+    expect(useExternalAgentStore.getState().getAgent(id)!.modelRoles).toBeUndefined()
+    useExternalAgentStore.getState().updateAgent(id, { modelRoles })
+
     useExternalAgentStore.getState().updateAgent(id, { name: "Renamed" })
     expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toEqual(cogniaModel)
     useExternalAgentStore.getState().updateAgent(id, { cogniaModel: null })
     expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toBeNull()
+    expect(useExternalAgentStore.getState().getAgent(id)!.modelRoles).toBeUndefined()
   })
 
   it("gives a new configuration its own state root and keeps lineage and limits", () => {
@@ -213,11 +226,10 @@ describe("useExternalAgentStore settings toggles", () => {
     reset()
   })
 
-  it("setEnabled / setAutoConnectOnStartup / setShowConnectionNotifications mutate flags", () => {
-    useExternalAgentStore.getState().setEnabled(false)
+  it("connection preferences mutate without a global availability flag", () => {
     useExternalAgentStore.getState().setAutoConnectOnStartup(true)
     useExternalAgentStore.getState().setShowConnectionNotifications(false)
-    expect(useExternalAgentStore.getState().enabled).toBe(false)
+    expect(useExternalAgentStore.getState()).not.toHaveProperty("enabled")
     expect(useExternalAgentStore.getState().autoConnectOnStartup).toBe(true)
     expect(useExternalAgentStore.getState().showConnectionNotifications).toBe(false)
   })
@@ -1117,4 +1129,46 @@ describe("replaceAgentConfig", () => {
     ).not.toThrow()
     expect(store().getAgent("missing")).toBeUndefined()
   })
+})
+
+it("retains role overrides when adding from a preset", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const id = useExternalAgentStore
+    .getState()
+    .addAgentFromPreset("codex", { cogniaModel: { providerId: "p", modelId: "m" }, modelRoles })!
+  expect(useExternalAgentStore.getState().getAgent(id)?.modelRoles).toEqual(modelRoles)
+})
+
+it("retains nonsecret model roles in import/export and drops orphaned roles", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const id = useExternalAgentStore.getState().addAgent({
+    name: "Bound",
+    protocol: "codex-app-server",
+    transport: "stdio",
+    cogniaModel: { providerId: "p", modelId: "m" },
+    modelRoles,
+  })
+  const exported = useExternalAgentStore
+    .getState()
+    .exportAgents()
+    .find((agent) => agent.id === id)!
+  expect(exported.modelRoles).toEqual(modelRoles)
+  useExternalAgentStore.getState().importAgents([
+    { ...exported, id: "imported" },
+    { ...exported, id: "native-import", cogniaModel: null },
+  ])
+  expect(useExternalAgentStore.getState().getAgent("imported")?.modelRoles).toEqual(modelRoles)
+  expect(useExternalAgentStore.getState().getAgent("native-import")?.modelRoles).toBeUndefined()
+  expect(() =>
+    useExternalAgentStore
+      .getState()
+      .importAgents([{ ...exported, id: "bad-import", modelRoles: { version: 2 } as never }])
+  ).toThrow(/model role/)
+  expect(useExternalAgentStore.getState().getAgent("bad-import")).toBeUndefined()
 })

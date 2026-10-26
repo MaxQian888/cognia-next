@@ -18,12 +18,19 @@
 
 import { useEffect, useId, useState, type Ref } from "react"
 import { useTranslations } from "next-intl"
-import { AlertTriangleIcon, FolderOpenIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  FolderIcon,
+  FolderOpenIcon,
+} from "lucide-react"
 
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { toast } from "@/components/ui/sonner"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { StateIsolationField } from "@/components/agent/external-agent/add-agent/state-isolation-field"
 import {
@@ -44,6 +51,8 @@ import {
 import { revealItemInDir } from "@/lib/native/opener"
 import { formatBytes } from "@/lib/storage/usage"
 import { isTauri } from "@/lib/tauri"
+import { writeClipboardText } from "@/lib/tauri/clipboard"
+import { cn } from "@/lib/utils"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 import type { ExternalAgentStateIsolation } from "@/types/agent/external-agent"
 
@@ -104,28 +113,57 @@ function StateFolderRow({ agentId }: { agentId: string }) {
   }
   const { info } = folder
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="state-folder">
-      <code
-        className="min-w-0 flex-1 basis-48 break-all rounded bg-muted px-1.5 py-0.5 text-xs"
-        title={info.path}
-      >
+    <div
+      role="group"
+      aria-label={t("folderLabel")}
+      className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/60 bg-muted/30 p-3"
+      data-testid="state-folder"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+            <FolderIcon className="size-3.5 text-muted-foreground" aria-hidden />
+            {t("folderLabel")}
+          </span>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {info.exists ? formatBytes(info.bytes) : t("folderNotCreated")}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="touch-hit size-7 text-muted-foreground"
+            aria-label={t("folderCopy")}
+            title={t("folderCopy")}
+            onClick={async () => {
+              try {
+                await writeClipboardText(info.path)
+                toast.success(t("folderCopied"))
+              } catch {
+                toast.error(t("folderCopyFailed"))
+              }
+            }}
+          >
+            <CopyIcon className="size-3.5" aria-hidden />
+          </Button>
+          {isTauri() && info.exists ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="touch-hit h-7 gap-1 px-2 text-xs"
+              onClick={() => void revealItemInDir(info.path)}
+              data-testid="state-folder-reveal"
+            >
+              <FolderOpenIcon className="size-3.5" aria-hidden />
+              {t("folderReveal")}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <code className="min-w-0 select-all break-all text-xs leading-5 text-muted-foreground">
         {info.path}
       </code>
-      <span className="text-xs text-muted-foreground tabular-nums">
-        {info.exists ? formatBytes(info.bytes) : t("folderNotCreated")}
-      </span>
-      {isTauri() && info.exists ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="touch-hit h-7 gap-1 px-2 text-xs"
-          onClick={() => void revealItemInDir(info.path)}
-          data-testid="state-folder-reveal"
-        >
-          <FolderOpenIcon className="size-3.5" aria-hidden />
-          {t("folderReveal")}
-        </Button>
-      ) : null}
     </div>
   )
 }
@@ -193,73 +231,91 @@ export function AgentInstanceSection({
         </p>
       ) : null}
 
-      <div className="grid gap-1.5">
-        <Label htmlFor={limitId}>{t("sessionLimit")}</Label>
-        <Input
-          ref={sessionLimitRef}
-          id={limitId}
-          type="number"
-          inputMode="numeric"
-          min={1}
-          step={1}
-          value={draftSessionLimit}
-          placeholder={t("sessionLimitUnlimited")}
-          onChange={(event) => onDraftSessionLimitChange(event.target.value)}
-          aria-describedby={`${limitId}-hint`}
-          className="max-w-40"
-          data-testid="instance-session-limit"
-        />
-        <p id={`${limitId}-hint`} className="text-xs text-muted-foreground">
-          {t("sessionLimitHint")}
-        </p>
-      </div>
+      <div className="@container/instance-options">
+        <div
+          className={cn("grid gap-5", siblings.length > 0 && "@xl/instance-options:grid-cols-2")}
+        >
+          <div className="grid content-start gap-2">
+            <Label htmlFor={limitId}>{t("sessionLimit")}</Label>
+            <Input
+              ref={sessionLimitRef}
+              id={limitId}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={draftSessionLimit}
+              placeholder={t("sessionLimitUnlimited")}
+              onChange={(event) => onDraftSessionLimitChange(event.target.value)}
+              aria-describedby={`${limitId}-hint`}
+              className="max-w-40"
+              data-testid="instance-session-limit"
+            />
+            <p id={`${limitId}-hint`} className="text-xs text-muted-foreground">
+              {t("sessionLimitHint")}
+            </p>
+          </div>
 
-      {siblings.length > 0 ? (
-        <div className="space-y-2" data-testid="instance-siblings">
-          <p className="text-xs font-medium text-muted-foreground">
-            {t("siblings", { count: siblings.length })}
-          </p>
-          <ul className="divide-y divide-border/60">
-            {siblings.map((sibling) => {
-              const differences = instanceDifferences(sibling, agent).map((difference) => ({
-                key: difference.key,
-                value: difference.value,
-              }))
-              return (
-                <li key={sibling.id}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenAgent(sibling.id)}
-                    className="touch-hit flex w-full min-w-0 items-start gap-2 px-0 py-2 text-left hover:bg-accent/50"
-                    data-testid={`instance-sibling-${sibling.id}`}
-                  >
-                    <BrandIcon
-                      id={
-                        isFromPreset(sibling) ??
-                        findRuntimeForConfig(sibling)?.runtimeId ??
-                        sibling.name
-                      }
-                      label={sibling.name}
-                      size={18}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="break-all text-sm">{sibling.name}</span>
-                        <StateIsolationBadge config={sibling} className="h-4 px-1 text-[10px]" />
-                      </span>
-                      {differences.length > 0 ? (
-                        <InstanceTraitChips traits={differences} max={4} className="mt-0.5" />
-                      ) : (
-                        <span className="text-xs text-muted-foreground">{t("siblingSame")}</span>
-                      )}
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          {siblings.length > 0 ? (
+            <div
+              className="min-w-0 border-t border-border/60 pt-4 @xl/instance-options:border-t-0 @xl/instance-options:border-l @xl/instance-options:pt-0 @xl/instance-options:pl-5"
+              data-testid="instance-siblings"
+            >
+              <p className="mb-2 text-sm font-medium">
+                {t("siblings", { count: siblings.length })}
+              </p>
+              <ul className="divide-y divide-border/60">
+                {siblings.map((sibling) => {
+                  const differences = instanceDifferences(sibling, agent).map((difference) => ({
+                    key: difference.key,
+                    value: difference.value,
+                  }))
+                  return (
+                    <li key={sibling.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenAgent(sibling.id)}
+                        className="touch-hit flex w-full min-w-0 items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        data-testid={`instance-sibling-${sibling.id}`}
+                      >
+                        <BrandIcon
+                          id={
+                            isFromPreset(sibling) ??
+                            findRuntimeForConfig(sibling)?.runtimeId ??
+                            sibling.name
+                          }
+                          label={sibling.name}
+                          size={18}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <span className="break-all text-sm">{sibling.name}</span>
+                            <StateIsolationBadge
+                              config={sibling}
+                              className="h-4 px-1 text-[10px]"
+                            />
+                          </span>
+                          {differences.length > 0 ? (
+                            <InstanceTraitChips traits={differences} max={4} className="mt-0.5" />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              {t("siblingSame")}
+                            </span>
+                          )}
+                        </span>
+                        <ChevronRightIcon
+                          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                          aria-hidden
+                        />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
     </SettingsBlock>
   )
 }

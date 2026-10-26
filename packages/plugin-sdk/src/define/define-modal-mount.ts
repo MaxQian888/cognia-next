@@ -4,7 +4,7 @@
  * Pure typesafety pass-through for `manifest.modalMounts[]` entries.
  */
 
-import type { PluginModalMountDef } from "@/types/plugin/plugin-modal"
+import type { PluginModalMountDef } from "@cognia/plugin-contract/types/plugin/plugin-modal"
 
 export function defineModalMount(def: PluginModalMountDef): PluginModalMountDef {
   return def

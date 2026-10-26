@@ -18,17 +18,78 @@ import type { MemoryConfig, MemoryProvenance, MemoryScope, MemoryType } from "@/
 import { assessSalience } from "@/lib/memory/extract/salience"
 import {
   extractMemories,
+  MEMORY_EXTRACT_SYSTEM_PROMPT,
   type ExtractMemoriesInput,
   type MemoryCandidate,
 } from "@/lib/memory/extract/extractor"
 import {
   consolidate,
+  CONSOLIDATE_DECIDE_SYSTEM_PROMPT,
   sameMemoryNamespace,
   type ConsolidateDeps,
   type ConsolidateInput,
   type ConsolidationOp,
 } from "@/lib/memory/consolidate/consolidator"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
+
+/**
+ * The per-turn extractor's system prompt (ADR-0236). Account scope only: the
+ * extract step receives the redacted turn and nothing that names its
+ * workspace. The JSON shape the parser reads is asked for in the user prompt,
+ * which stays code-owned.
+ */
+export const MEMORY_EXTRACT_PROMPT = definePrompt({
+  id: "knowledge.memory.extract",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The reply is parsed as JSON; a reply that is not JSON extracts nothing.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ["JSON"],
+  outputContract:
+    "Sent as the system prompt of the per-turn extraction; the reply is parsed as JSON `memories` and a parse failure extracts nothing.",
+  consumers: ["lib/memory/write/run-memory-extraction.ts"],
+  defaultBody: MEMORY_EXTRACT_SYSTEM_PROMPT,
+})
+
+/**
+ * The consolidation judge's system prompt (ADR-0236), shared by every write
+ * path that consolidates (per-turn extraction, deliberate stores, episodic
+ * distill, project mining). Account scope only, like the extractor.
+ */
+export const MEMORY_CONSOLIDATE_PROMPT = definePrompt({
+  id: "knowledge.memory.consolidate",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // The verdict is parsed as JSON; an unusable one takes the failure mode.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ["JSON"],
+  outputContract:
+    "Sent as the system prompt of the ADD/UPDATE/DELETE/CONFLICT/NOOP judge; the reply is parsed as JSON `op`/`targetId`/`mergedText`, and an unusable verdict adds the candidate (or quarantines it where the caller fails closed).",
+  consumers: [
+    "lib/memory/write/run-memory-extraction.ts",
+    "lib/memory/write/run-project-mining.ts",
+  ],
+  defaultBody: CONSOLIDATE_DECIDE_SYSTEM_PROMPT,
+})
+
+/** The consolidation judge's system prompt for one consolidation. */
+export async function resolveConsolidateSystemPrompt(): Promise<string> {
+  return (await resolvePromptAsync(MEMORY_CONSOLIDATE_PROMPT)).text
+}
 
 export interface RunMemoryExtractionInput {
   rollingSummary?: string
@@ -234,7 +295,15 @@ export async function buildAutoExtractionDeps(
   }
 
   return {
-    extract: (eInput) => extractMemories(eInput, client),
-    consolidate: (cInput) => consolidate(cInput, consolidateDeps),
+    extract: async (eInput) =>
+      extractMemories(
+        { ...eInput, systemPrompt: (await resolvePromptAsync(MEMORY_EXTRACT_PROMPT)).text },
+        client
+      ),
+    consolidate: async (cInput) =>
+      consolidate(cInput, {
+        ...consolidateDeps,
+        decideSystemPrompt: await resolveConsolidateSystemPrompt(),
+      }),
   }
 }

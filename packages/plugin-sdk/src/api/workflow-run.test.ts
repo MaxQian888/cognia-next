@@ -2,7 +2,7 @@ import * as sdk from "./workflow-run"
 import {
   WORKFLOW_RUNNER_TOOL_DEFINITION,
   WORKFLOW_RUNNER_TOOL_NAME,
-} from "@/lib/workflow/publish/runner-tool"
+} from "@cognia/plugin-contract/lib/workflow/publish/runner-tool"
 
 describe("plugin-sdk: api/workflow-run", () => {
   it("shares the host's dependency-free runner definition", () => {

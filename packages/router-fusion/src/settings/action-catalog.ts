@@ -29,6 +29,7 @@ import {
 } from "../config/types"
 import type { ActionConfig, ExecutionMode } from "../contracts/schemas"
 import { MoneyError, usdToMicrousd } from "../money/microusd"
+import { SELECTABLE_ROLE_PROMPT_VERSIONS } from "../prompts/roles"
 import { canonicalHash } from "../util/sha256"
 import type { ActionOverride, RouterFusionSettings } from "./settings"
 
@@ -76,6 +77,7 @@ export type ActionDraftIssue =
   | { field: "mode"; code: "MODE_NOT_EDITABLE" }
   | { field: "roles"; code: "ROLE_MISSING" | "ROLE_UNKNOWN" | "ALIAS_EMPTY"; role: string }
   | { field: "verifier_profile"; code: "PROFILE_NOT_ALLOWED" }
+  | { field: "prompt_version"; code: "PROMPT_VERSION_NOT_ALLOWED" }
   | { field: "runCapUsd"; code: "CAP_INVALID" }
   | { field: "panel_size"; code: "PANEL_C_REQUIRED" | "LIMIT_INVALID" }
 
@@ -143,6 +145,11 @@ export function validateActionDraft(
     !EDITABLE_PROFILES_BY_MODE[action.mode].includes(action.verifier_profile as VerifierProfile)
   ) {
     issues.push({ field: "verifier_profile", code: "PROFILE_NOT_ALLOWED" })
+  }
+  // The shipped roles-1 or the user's own role texts (`roles-1-custom`); a
+  // materialized `roles-1-custom@…` is a snapshot's, never a saved action's.
+  if (!SELECTABLE_ROLE_PROMPT_VERSIONS.includes(action.prompt_version)) {
+    issues.push({ field: "prompt_version", code: "PROMPT_VERSION_NOT_ALLOWED" })
   }
   return issues
 }

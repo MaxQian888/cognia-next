@@ -8,7 +8,7 @@ import { makeAiSdkAdapter } from "./ai-sdk-adapter.ts"
 import { makeCodeAdapter } from "./code-adapter.ts"
 import type { CodeAdapterBridge } from "./code-adapter.ts"
 import { makeOpenAiCompatVariantAdapter } from "./openai-compatible-variant-adapter.ts"
-import { BUILTIN_PROTOCOL_NAMES } from "../provider-protocol.ts"
+import { BUILTIN_PROTOCOL_NAMES } from "@cognia/provider-types/provider-protocol"
 import type { CodeAdapterSpec, OpenAiCompatibleVariantSpec, ProtocolAdapter } from "./types.ts"
 import type { SiwcNativeCall } from "../siwc-fetch.ts"
 

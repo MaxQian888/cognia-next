@@ -544,36 +544,42 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
   if (webToolDepsOverride) return webToolDepsOverride()
   try {
     const { useSettingsStore } = await import("@/stores/settings")
+    const [
+      { readerPolicyFromSettings },
+      { currentWebScope, webAuthorityRevision },
+      { getFetchCache },
+    ] = await Promise.all([
+      import("@/lib/web/reader/reader-settings"),
+      import("@/lib/web/web-scope"),
+      import("@/lib/web/fetch-cache"),
+    ])
+    // Capture settings and authority together, after lazy imports can yield to
+    // an account switch. Never bind departing credentials to the new scope.
     const s = useSettingsStore.getState().settings
+    const scope = currentWebScope()
+    // The operation runs under the settings it was planned with. If the user
+    // turns web tools, a reader or a provider off — or changes a key — while
+    // it is in flight, the next outbound stage, cache hit or publish sees a
+    // different authority and stops.
+    const plannedAuthority = webAuthorityRevision(s)
+    const activeScope = () =>
+      webAuthorityRevision(useSettingsStore.getState().settings) === plannedAuthority
+        ? currentWebScope()
+        : `${currentWebScope()}\u0000revoked`
     const deps: WebToolRunDeps = {
       enabled: s?.webTools?.enabled ?? true,
-      searchMaxResults: s?.searchMaxResults,
-      // Provider settings, fallback and retry counts are NOT forwarded: the
-      // canonical executor below reads them straight off the same settings
-      // store, and a second copy here would drift from the policy that runs.
-      // Forward the user's Settings → Search defaults so the agent honors them
-      // (previously only provider + maxResults reached the search service).
-      searchOptions: {
-        ...(s?.defaultSearchType ? { searchType: s.defaultSearchType } : {}),
-        ...(s?.defaultSearchDepth ? { searchDepth: s.defaultSearchDepth } : {}),
-        ...(s?.defaultSearchRecency ? { recency: s.defaultSearchRecency } : {}),
-        ...(s?.defaultSearchCountry ? { country: s.defaultSearchCountry } : {}),
-        ...(s?.defaultSearchLanguage ? { language: s.defaultSearchLanguage } : {}),
-        // Domain sources are resolved by the canonical executor. Forwarding
-        // the legacy default here as a request override would replace the
-        // user's selected Wikipedia/arXiv/GitHub/Stack Overflow hard filter.
-        ...(s?.defaultExcludeDomains?.length ? { excludeDomains: s.defaultExcludeDomains } : {}),
-        ...(typeof s?.defaultIncludeAnswer === "boolean"
-          ? { includeAnswer: s.defaultIncludeAnswer }
-          : {}),
-        ...(s?.defaultIncludeRawContent != null
-          ? { includeRawContent: s.defaultIncludeRawContent }
-          : {}),
-      },
+      readerPolicy: readerPolicyFromSettings(s),
+      credentialFor: (id) => s?.searchProviders?.[id]?.apiKey?.trim() || undefined,
+      scope,
+      activeScope,
+      cache: getFetchCache(),
+      // The plain browser cannot reach these readers across arbitrary origins.
+      // Vendor APIs remain eligible; their own transport reports CORS failures.
+      hostReachable: { jina: false, fxtwitter: false, platform: false },
+      transportCancels: true,
       sourceVerification: s?.sourceVerificationSettings,
-      // SSRF guard opt-out + always-distill isolation, from Settings → Search.
+      // Private-target permission remains independent of Reader selection.
       allowPrivateHosts: s?.webTools?.allowPrivateHosts === true,
-      alwaysDistill: s?.webTools?.alwaysDistill === true,
     }
     // The executor owns the shared result cache (it calls `getSearchCache()`
     // and applies the user's TTL / size config itself), so there is no second
@@ -586,12 +592,19 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
     if (configuredSearchProviders(s?.searchProviders, s?.defaultSearchProvider).length > 0) {
       const { searchWithAppSettings } = await import("@/lib/search/configured-search")
       deps.searchExecutor = (query, options) =>
-        searchWithAppSettings(query, { options, useCache: s?.searchCacheEnabled !== false })
+        searchWithAppSettings(query, {
+          settings: s ?? undefined,
+          options,
+          signal: options.signal,
+          scope: deps.scope,
+          activeScope,
+          useCache: s?.searchCacheEnabled !== false,
+        })
     }
     // Query-focused web_fetch extraction — when the model passes a `prompt`, the
-    // page is distilled to just the relevant content via the cheap utility
-    // model. Best-effort: if no model resolves (web mode without a key) the dep
-    // is omitted and web_fetch returns the full (truncated) page text instead.
+    // page is distilled via the cheap utility model. When no model resolves,
+    // required Reader policy fails closed; optional extraction can return text
+    // with the core's degradation metadata.
     try {
       const { buildUtilityLlmClient } = await import("@/lib/ai/generation/utility-client")
       const { buildFetchExtractor } = await import("@/lib/web/web-tools-core")
@@ -604,18 +617,9 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
     } catch {
       // No renderer LLM stack available — skip query-focused extraction.
     }
-    // Short TTL cache so a repeated GET of the same URL in one turn isn't
-    // re-fetched and re-billed.
-    try {
-      const { getFetchCache } = await import("@/lib/web/fetch-cache")
-      deps.cache = getFetchCache()
-    } catch {
-      // Cache is optional.
-    }
-    // CORS-free outbound fetch so web_fetch (plus the platform scrapers and the
-    // Jina fallback) can reach arbitrary hosts: native CapacitorHttp on mobile,
-    // the Rust `proxy_http_request` on desktop, plain fetch in the browser. The
-    // Jina fallback is only enabled where a CORS-free bridge exists.
+    // Native transports reach readers without browser CORS restrictions:
+    // CapacitorHttp on mobile, Rust proxy_http_request on desktop. Browser
+    // fetch keeps the reachability limits declared above.
     try {
       const { isCapacitor } = await import("@/lib/platform/detect")
       const { isTauri } = await import("@/lib/native/utils")
@@ -626,8 +630,11 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
             method: init?.method,
             headers: init?.headers,
             body: typeof init?.body === "string" ? init.body : undefined,
+            signal: init?.signal,
           })) as typeof fetch
-        deps.jinaFallback = true
+        deps.hostReachable = {}
+        // CapacitorHttp only cancels the JS wait, not the native request.
+        deps.transportCancels = false
       } else if (isTauri()) {
         const { createProxyFetch } = await import("@/lib/network/proxy-fetch")
         const base = createProxyFetch()
@@ -636,9 +643,10 @@ export async function resolveWebToolDeps(): Promise<WebToolRunDeps> {
         const blockPrivateHosts = deps.allowPrivateHosts !== true
         deps.fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) =>
           base(input, { ...init, blockPrivateHosts })) as typeof fetch
-        deps.jinaFallback = true
+        deps.hostReachable = {}
+        deps.transportCancels = true
       }
-      // Browser: leave fetchImpl unset (global fetch, CORS-limited); Jina off.
+      // Browser: global fetch and the explicit CORS-limited reachability above.
     } catch {
       // No native fetch bridge — fall back to global fetch.
     }
@@ -705,7 +713,11 @@ export async function handlePluginToolExec(
       const webDeps = hostDeps.resolveWebToolDeps
         ? await hostDeps.resolveWebToolDeps()
         : await resolveWebToolDeps()
-      const result = await runWebBuiltinTool(request.name, request.args, webDeps)
+      const signal =
+        request.abortSignal && webDeps.signal
+          ? AbortSignal.any([request.abortSignal, webDeps.signal])
+          : (request.abortSignal ?? webDeps.signal)
+      const result = await runWebBuiltinTool(request.name, request.args, { ...webDeps, signal })
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Promoted editor built-in — read_active_editor (Pro IDE → agent) ────
@@ -1040,7 +1052,10 @@ export async function handlePluginToolExec(
         return { ...baseResponse, result: assertSafePluginToolResult(result) }
       }
       const { runAskUser } = await import("@/stores/agent/ask-user-store")
-      const result = await runAskUser(request.args, { sessionId: request.sessionId })
+      const result = await runAskUser(request.args, {
+        sessionId: request.sessionId,
+        ...(request.abortSignal ? { signal: request.abortSignal } : {}),
+      })
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }
     // ── Nested dispatch — `dispatch_agent` ─────────────────────────────────

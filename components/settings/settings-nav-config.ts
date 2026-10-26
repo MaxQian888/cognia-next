@@ -54,10 +54,12 @@ import {
   CloudIcon,
   CircleUserIcon,
   ClipboardCheckIcon,
+  DnaIcon,
   KeyboardIcon,
   RadarIcon,
   CableIcon,
   DownloadCloudIcon,
+  TextQuoteIcon,
 } from "lucide-react"
 
 import {
@@ -65,6 +67,8 @@ import {
   type CapabilityId,
   type HostProfile,
 } from "@/lib/platform/capabilities"
+import type { SettingsSectionId } from "@cognia/plugin-contract/components/settings/settings-nav-config"
+export type { SettingsSectionId } from "@cognia/plugin-contract/components/settings/settings-nav-config"
 
 export type SettingsGroup =
   | "account"
@@ -79,76 +83,6 @@ export type SettingsGroup =
   | "workspace"
   | "privacy"
   | "system"
-
-export type SettingsSectionId =
-  | "general"
-  | "account"
-  | "profile"
-  | "api-key"
-  | "providers"
-  | "ai-connections"
-  | "model-catalog"
-  | "ocr"
-  | "subscription"
-  | "ccswitch"
-  | "agents"
-  | "agent-modes"
-  | "agent-runtime"
-  | "squads"
-  | "eval"
-  | "hooks"
-  | "fleet"
-  | "workspace-trust"
-  | "slash-commands"
-  | "tools"
-  | "search"
-  | "appearance"
-  | "sidebar"
-  | "discover"
-  | "terminal"
-  | "source-control"
-  | "speech"
-  | "media-generation"
-  | "characters"
-  | "skills"
-  | "subagents"
-  | "teams"
-  | "presets"
-  | "chatTemplates"
-  | "artifacts"
-  | "canvas"
-  | "shortcuts"
-  | "conversation"
-  | "notifications"
-  | "memory"
-  | "mcp"
-  | "a2ui"
-  | "plugins"
-  | "connections"
-  | "services"
-  | "data"
-  | "workflows"
-  | "scheduled-tasks"
-  | "goals"
-  | "pet"
-  | "webhooks"
-  | "gateway"
-  | "external-bridge"
-  | "connectivity"
-  | "network"
-  | "logs"
-  | "diagnostics"
-  | "usage-cost"
-  | "desktop"
-  | "automation"
-  | "lsp"
-  | "pro-ide"
-  | "sandbox"
-  | "image-catalog"
-  | "remote-sandboxes"
-  | "security"
-  | "about"
-  | "updates"
 
 export interface NavItem {
   id: SettingsSectionId
@@ -374,6 +308,18 @@ export const SETTINGS_NAV: NavItem[] = [
     group: "agents",
     icon: ClipboardCheckIcon,
   },
+  {
+    id: "harness-evolution",
+    labelKey: "harnessEvolution",
+    descriptionKey: "harnessEvolution",
+    group: "agents",
+    icon: DnaIcon,
+    // ADR-0237: probes run the agent through the desktop sidecar, and runs,
+    // snapshots and the experience library are device-local tables; the
+    // engine's boot wiring (live tool rules, approvals, recovery) is part of
+    // the desktop-only initializers.
+    profiles: ["desktop"],
+  },
   // === Tools & Capabilities ===
   {
     id: "tools",
@@ -464,6 +410,17 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "chatTemplates",
     group: "authoring",
     icon: FileCode2Icon,
+  },
+  {
+    id: "prompts",
+    labelKey: "prompts",
+    descriptionKey: "prompts",
+    group: "authoring",
+    icon: TextQuoteIcon,
+    // ADR-0236 R2: prompts are managed where their store lives. A paired
+    // client mirrors the host read-only and has no prompt write channel; the
+    // CLI and headless hosts use `cognia-agent prompts` and profiles.
+    profiles: ["desktop", "web-standalone"],
   },
   {
     id: "hooks",
@@ -1284,6 +1241,27 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
   characters: ["persona", "agent"],
   skills: ["skill", "instruction", "prompt", "kit"],
   teams: ["multi-agent", "round-robin", "supervisor"],
+  prompts: [
+    "prompt",
+    "prompts",
+    "prompt center",
+    "system prompt",
+    "built-in prompt",
+    "override",
+    "template",
+    "instructions",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "persona",
+    "judge",
+    "profile",
+    "提示词",
+    "系统提示词",
+    "内置提示词",
+    "覆盖",
+    "模板",
+    "指令",
+  ],
   chatTemplates: [
     "chat template",
     "chat templates",
@@ -1552,6 +1530,20 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "agent team",
     "团队",
     "多代理",
+  ],
+  "harness-evolution": [
+    "harness",
+    "harness evolution",
+    "self-improving",
+    "evolve",
+    "propose probe compose",
+    "experience library",
+    "agent improvement",
+    "rollback",
+    "演化",
+    "自我改进",
+    "经验库",
+    "智能体优化",
   ],
   eval: [
     "eval",

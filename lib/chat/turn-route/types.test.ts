@@ -26,8 +26,8 @@ describe("isTurnRoute", () => {
 })
 
 describe("readTurnRoute", () => {
-  it("reads the route a user message was sent with", () => {
-    expect(readTurnRoute({ turnRoute: codex, mentions: [] })).toEqual(codex)
+  it.each([codex, member])("reads the route a user message was sent with (%j)", (route) => {
+    expect(readTurnRoute({ turnRoute: route, mentions: [] })).toEqual(route)
   })
 
   it("reads a malformed or absent route as no route", () => {

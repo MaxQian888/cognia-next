@@ -1,9 +1,12 @@
 import {
   coherenceMessages,
   decideActionMessages,
+  DEEP_RESEARCH_PROMPTS,
+  defaultSystemPrompt,
   draftAnswerMessages,
   evaluateMessages,
   outlineMessages,
+  systemPromptFor,
 } from "./prompts"
 
 describe("decideActionMessages", () => {
@@ -110,5 +113,59 @@ describe("freshness anchoring", () => {
     ]) {
       expect(msgs[0].content).toContain(`Today is ${today}`)
     }
+  })
+})
+
+describe("editable instructions", () => {
+  it("declares one slot per instruction, each default meeting its own fragments", () => {
+    const ids = DEEP_RESEARCH_PROMPTS.map((prompt) => prompt.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const prompt of DEEP_RESEARCH_PROMPTS) {
+      expect(prompt.title.trim()).not.toBe("")
+      for (const fragment of "requiredFragments" in prompt ? prompt.requiredFragments : []) {
+        expect(prompt.defaultBody).toContain(fragment)
+      }
+      // A stray `{{` would make the host refuse the whole declaration.
+      expect(prompt.defaultBody).not.toContain("{{")
+    }
+  })
+
+  it("sends the declared default as the instruction, unchanged", () => {
+    expect(
+      decideActionMessages("ws", true)[0].content.startsWith(defaultSystemPrompt("decide-action"))
+    ).toBe(true)
+    expect(outlineMessages("t", "l")[0].content.startsWith(defaultSystemPrompt("outline"))).toBe(
+      true
+    )
+    expect(coherenceMessages("t", "x", "b")[0].content).toBe(defaultSystemPrompt("coherence"))
+    expect(draftAnswerMessages("q", "e", true)[0].content).toContain(
+      `${defaultSystemPrompt("draft-answer")} ${defaultSystemPrompt("draft-answer-budget")}\nToday is`
+    )
+    expect(
+      evaluateMessages("q", "a", "e")[0].content.startsWith(defaultSystemPrompt("evaluate"))
+    ).toBe(true)
+  })
+
+  it("keeps the date and locale lines and the user message when the instruction is edited", () => {
+    const msgs = decideActionMessages("WS", false, "zh-CN", "Pick one move.")
+    expect(msgs[0].content).toMatch(
+      /^Pick one move\.\nToday is \d{4}-\d{2}-\d{2}\.\nRespond in the user's locale: zh-CN\.$/
+    )
+    expect(msgs[1].content).toContain("may NOT answer")
+    expect(
+      draftAnswerMessages("q", "e", true, undefined, "Answer.", "Commit now.")[0].content
+    ).toMatch(/^Answer\. Commit now\.\nToday is/)
+  })
+
+  it("resolves through the host, and falls back to the default when it cannot", async () => {
+    await expect(systemPromptFor("outline")).resolves.toBe(defaultSystemPrompt("outline"))
+    await expect(systemPromptFor("outline", async () => "Edited outline.")).resolves.toBe(
+      "Edited outline."
+    )
+    await expect(
+      systemPromptFor("outline", async () => {
+        throw new Error("not registered")
+      })
+    ).resolves.toBe(defaultSystemPrompt("outline"))
   })
 })

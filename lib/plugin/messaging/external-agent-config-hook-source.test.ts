@@ -43,19 +43,19 @@ it("shares one feed between installs and stops only when the last one is release
   const first = installExternalAgentConfigHookSource()
   const second = installExternalAgentConfigHookSource()
   await flush()
-  useExternalAgentStore.getState().setEnabled(false)
+  useExternalAgentStore.getState().setShowConnectionNotifications(false)
   await flush()
   // Two installs, one subscription: the event is not fired twice.
   expect(mockDispatch).toHaveBeenCalledTimes(1)
 
   first()
   first() // releasing twice is a no-op
-  useExternalAgentStore.getState().setEnabled(true)
+  useExternalAgentStore.getState().setShowConnectionNotifications(true)
   await flush()
   expect(mockDispatch).toHaveBeenCalledTimes(2)
 
   second()
-  useExternalAgentStore.getState().setEnabled(false)
+  useExternalAgentStore.getState().setShowConnectionNotifications(false)
   await flush()
   expect(mockDispatch).toHaveBeenCalledTimes(2)
 })

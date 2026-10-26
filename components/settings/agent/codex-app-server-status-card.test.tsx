@@ -45,10 +45,10 @@ const messages = {
   },
 }
 
-function renderCard() {
+function renderCard(connected = true) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <CodexAppServerStatusCard agentId="a1" connected />
+      <CodexAppServerStatusCard agentId="a1" connected={connected} />
     </NextIntlClientProvider>
   )
 }
@@ -63,6 +63,45 @@ beforeEach(() => {
 })
 
 describe("CodexAppServerStatusCard", () => {
+  it("keeps a disconnected agent quiet even if a previous snapshot is still present", () => {
+    hookValue.status = {
+      mcpServers: [{ name: "previous-server" }],
+      skills: [{ name: "previous-skill" }],
+      account: { email: "previous@example.com" },
+    }
+    renderCard(false)
+    expect(screen.getByRole("heading", { name: "Codex app-server" })).toBeInTheDocument()
+    expect(
+      screen.getByText(messages.externalAgent.settings.codexAppServer.notConnected)
+    ).toBeVisible()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    expect(screen.queryByText("previous@example.com")).not.toBeInTheDocument()
+    expect(screen.queryByText("previous-server")).not.toBeInTheDocument()
+    expect(screen.queryByText("previous-skill")).not.toBeInTheDocument()
+  })
+
+  it("associates each status label with its value in compact definition rows", () => {
+    hookValue.status = {
+      mcpServers: [{ name: "fs" }],
+      skills: [{ name: "review" }],
+      account: { type: "chatgpt", email: "reviewer@example.com" },
+      rateLimits: { primary: { usedPercent: 42 } },
+      configRequirements: null,
+    }
+    renderCard()
+    for (const [label, value] of [
+      ["Account", "reviewer@example.com"],
+      ["Usage", "42% used"],
+      ["Managed policy", "This Codex declares no managed limits."],
+      ["MCP servers", "fs"],
+      ["Skills", "review"],
+    ]) {
+      expect(screen.getByText(label, { selector: "dt" }).nextElementSibling).toHaveTextContent(
+        value
+      )
+    }
+  })
+
   it("renders a not-connected hint when unavailable", () => {
     hookValue.available = false
     renderCard()
@@ -92,6 +131,10 @@ describe("CodexAppServerStatusCard", () => {
     hookValue.loading = true
     renderCard()
     expect(screen.getByTestId("codex-app-server-refresh")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Refresh status" })).toHaveAttribute(
+      "aria-busy",
+      "true"
+    )
   })
 
   it("renders servers without status and disabled skills with key fallbacks", () => {

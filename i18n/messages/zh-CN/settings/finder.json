@@ -28,7 +28,8 @@
     "ttsEnabled": "文本转语音",
     "ttsProvider": "语音提供方",
     "webTools": "网页工具",
-    "workingDir": "默认工作目录"
+    "workingDir": "默认工作目录",
+    "webReader": "网页阅读与蒸馏"
   },
   "triggerAria": "查找设置"
 }

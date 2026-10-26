@@ -11,6 +11,7 @@ import {
 import { useSessionNeedsYou } from "@/hooks/chat/use-session-needs-you"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { useChatStore } from "@/stores/chat"
+import { useUIStore } from "@/stores/ui/ui-store"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -67,6 +68,7 @@ jest.mock("@/components/chat/session-settings-sheet", () => ({
 }))
 
 const session = { id: "s1", title: "T", createdAt: 1 } as unknown as ChatSession
+const originalRect = HTMLElement.prototype.getBoundingClientRect
 
 function setActive(id: string | null) {
   jest
@@ -93,7 +95,16 @@ beforeEach(() => {
   jest.mocked(useSessionNeedsYou).mockReturnValue({ items: [], jumpMessageId: null })
   setActive("s1")
   useSummaryCardRuntime.setState({ placement: {}, hidden: {} })
+  jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement
+  ) {
+    return this.getAttribute("data-slot") === "chat-surface-stage"
+      ? ({ width: stageWidth, height: 800 } as DOMRect)
+      : originalRect.call(this)
+  })
 })
+
+afterEach(() => jest.restoreAllMocks())
 
 describe("on a stage too narrow to float", () => {
   it("opens the card as a popover under the button", async () => {
@@ -119,6 +130,23 @@ describe("on a stage too narrow to float", () => {
 })
 
 describe("on a stage with room beside the chat column", () => {
+  it("updates floating placement in the sidebar commit before resize observers", () => {
+    renderWorkspace(1600)
+    const collapsed = useUIStore.getState().sidebarCollapsed
+    const host = screen.getByTestId("session-summary-stage-host")
+    expect(screen.getByTestId("card-float")).toBeInTheDocument()
+    stageWidth = 1300
+
+    act(() => useUIStore.setState({ sidebarCollapsed: !collapsed }))
+
+    expect(screen.queryByTestId("card-float")).not.toBeInTheDocument()
+    expect(screen.getByTestId("session-summary-stage-host")).toBe(host)
+    expect(screen.getByTestId("session-summary-trigger")).toHaveAttribute("aria-expanded", "false")
+    stageWidth = 1600
+    act(() => useUIStore.setState({ sidebarCollapsed: collapsed }))
+    expect(screen.getByTestId("card-float").parentElement).toBe(host)
+  })
+
   it("floats the card on the stage without being asked", () => {
     renderWorkspace(1600)
     const card = screen.getByTestId("card-float")

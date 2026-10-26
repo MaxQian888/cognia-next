@@ -91,7 +91,12 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
   if (!message.type || typeof message.type !== "string") {
     return null
   }
-  if (typeof message.surfaceId !== "string" || !isSafeDataModelKey(message.surfaceId)) return null
+  if (
+    typeof message.surfaceId !== "string" ||
+    !message.surfaceId.trim() ||
+    !isSafeDataModelKey(message.surfaceId)
+  )
+    return null
 
   switch (message.type) {
     case "createSurface":
@@ -179,6 +184,31 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
  */
 export function parseA2UIMessage(json: unknown): A2UIServerMessage | null {
   return validateMessage(json)
+}
+
+/** Validate every message accepted by a transport, including connector callbacks. */
+export function parseA2UIDispatchMessage(json: unknown): A2UIDispatchMessage | null {
+  const serverMessage = parseA2UIMessage(json)
+  if (serverMessage) return serverMessage
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null
+  const message = json as Record<string, unknown>
+  if (
+    message.type !== "connectorAction" ||
+    typeof message.surfaceId !== "string" ||
+    !message.surfaceId.trim() ||
+    !isSafeDataModelKey(message.surfaceId) ||
+    !["button", "select", "checkbox", "input", "submit", "dismiss", "platform_specific"].includes(
+      message.actionType as string
+    ) ||
+    ["componentId", "value", "triggerId", "conversationKey"].some(
+      (key) => message[key] !== undefined && typeof message[key] !== "string"
+    ) ||
+    (message.platform !== undefined &&
+      !["telegram", "discord", "slack", "lark", "onebot"].includes(message.platform as string)) ||
+    (message.payload !== undefined && !isA2UIDataModel(message.payload))
+  )
+    return null
+  return message as unknown as A2UIConnectorActionMessage
 }
 
 /**

@@ -8,7 +8,7 @@ description: "The public `/status` page measures the official hosted relay (`sig
 **Status:** Accepted
 **Date:** 2026-10-02
 **Related:** [ADR-0170](./0170-cognia-relay-and-connectivity-center) (relay and connectivity center), [ADR-0021](./0021-webrtc-datachannel-wan-transport) (WebRTC/WAN transport), [ADR-0037](./0037-public-share-links) (public standalone Worker pattern), [ADR-0092](./0092-official-website-workspace) (static public sites)
-**Plan:** [`docs/plans/2026-10-02-signaling-public-status-implementation.md`](https://github.com/MaxQian888/cognia-next/blob/dev/docs/plans/2026-10-02-signaling-public-status-implementation.md)
+**Plan:** [`docs/plans/2026-10-02-signaling-public-status-implementation.md`](https://github.com/cognia-labs/cognia-services/blob/main/docs/plans/2026-10-02-signaling-public-status-implementation.md)
 
 ## Context
 

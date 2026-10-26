@@ -1553,6 +1553,7 @@ mod tests {
     impl AutomationBackend for ChatAppBackend {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
+                operations: OperationCapabilities::default(),
                 platform: Platform::Unsupported,
                 has_uia: false,
                 has_input_sim: false,
@@ -1788,6 +1789,7 @@ mod tests {
     impl AutomationBackend for PanickingBackend {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
+                operations: OperationCapabilities::default(),
                 platform: self.platform,
                 has_uia: false,
                 has_input_sim: false,
@@ -1863,6 +1865,7 @@ mod tests {
     impl AutomationBackend for StateFixtureBackend {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
+                operations: OperationCapabilities::default(),
                 platform: Platform::Macos,
                 has_uia: false,
                 has_input_sim: true,
@@ -1904,6 +1907,29 @@ mod tests {
         }
         fn read_tree(&self, _r: Option<ElementRef>, _o: TreeOpts) -> Result<Vec<ElementInfo>> {
             Ok(vec![self.get_focus()?])
+        }
+        fn read_application_tree(
+            &self,
+            app: &crate::automation::session::ResolvedApplication,
+            opts: TreeOpts,
+        ) -> Result<Vec<ElementInfo>> {
+            assert_eq!(app.process_id, 42);
+            self.read_tree(None, opts)
+        }
+        fn screenshot_application(
+            &self,
+            app: &crate::automation::session::ResolvedApplication,
+            _hint: Option<&ElementInfo>,
+            opts: ScreenshotOpts,
+        ) -> Result<crate::automation::backend::ApplicationScreenshot> {
+            assert_eq!(app.process_id, 42);
+            Ok(crate::automation::backend::ApplicationScreenshot {
+                screenshot: self.screenshot(opts)?,
+                window_id: Some(1),
+                display_id: Some("main".into()),
+                logical_bounds: self.get_focus()?.bounding_rect.unwrap(),
+                scale_factor: 2.0,
+            })
         }
         fn find(&self, _l: &Locator) -> Result<Option<ElementRef>> {
             Ok(None)

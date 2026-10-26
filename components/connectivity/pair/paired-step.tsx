@@ -11,6 +11,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 
+import { useChoiceDialog } from "@/components/shared/confirm-dialog"
 import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
 import { DiscoverHelp } from "./discover-help"
 import { NotificationPermissionCta } from "@/components/mobile/notifications/notification-permission-cta"
@@ -20,7 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useBiometricBlockReason } from "@/hooks/use-biometric-block-reason"
-import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { useBiometricGuard, type GuardOutcome } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { usePlatform } from "@/hooks/use-platform"
@@ -77,6 +78,7 @@ export function PairedStep({
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [smoke, setSmoke] = useState<SmokeResults>({ rpc: undefined, ws: undefined })
   const [signOutError, setSignOutError] = useState<string | null>(null)
+  const { choose: chooseFallback, dialog: fallbackDialog } = useChoiceDialog()
 
   const onRefresh = useCallback(async () => {
     setHealthState("checking")
@@ -128,33 +130,52 @@ export function PairedStep({
 
   const onSignOut = useCallback(async () => {
     setSignOutError(null)
-    const performSignOut = async () => {
+
+    // Settle what will be removed — and, when other Hosts are saved, which one
+    // takes over — before the biometric prompt, so the person authenticates a
+    // decision they have already made. Cancelling the choice is not an error.
+    let plan: { accountId: string; hostId: string; fallbackHostId?: string } | null
+    try {
       const accountId =
         getActiveRuntimeTargetContext()?.accountId ??
         (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : null)
       if (!accountId) throw new Error(t("accountContextMissing"))
       const book = companionCredentialBook()
       const [active, hosts] = await Promise.all([book.getActive(accountId), book.list(accountId)])
-      if (!active) return
-      const alternatives = hosts.filter((host) => host.hostId !== active.hostId)
-      let fallbackHostId: string | undefined
-      if (alternatives.length > 0) {
-        const choices = alternatives.map((host) => host.hostId).join(", ")
-        const selected = window.prompt(
-          t("signOutFallbackPrompt", { choices }),
-          alternatives[0].hostId
-        )
-        if (!selected) throw new Error(t("signOutFallbackRequired"))
+      plan = active ? { accountId, hostId: active.hostId } : null
+      const alternatives = active ? hosts.filter((host) => host.hostId !== active.hostId) : []
+      if (plan && alternatives.length > 0) {
+        const selected = await chooseFallback({
+          title: t("signOutFallbackTitle"),
+          description: t("signOutFallbackDescription"),
+          fieldLabel: t("signOutFallbackField"),
+          confirmLabel: t("signOutFallbackConfirm"),
+          destructive: true,
+          options: alternatives.map((host) => ({
+            value: host.hostId,
+            label: host.label || host.hostId,
+            description: host.hostId,
+          })),
+          testid: "pair-signout-fallback",
+        })
+        if (!selected) return
         if (!alternatives.some((host) => host.hostId === selected)) {
           throw new Error(t("signOutFallbackInvalid"))
         }
-        fallbackHostId = selected
+        plan = { ...plan, fallbackHostId: selected }
       }
+    } catch (err) {
+      setSignOutError(err instanceof Error ? err.message : String(err))
+      return
+    }
+
+    const performSignOut = async () => {
+      if (!plan) return
       await removeCompanionHost({
-        accountId,
-        hostId: active.hostId,
+        accountId: plan.accountId,
+        hostId: plan.hostId,
         platform: platform === "web" ? "web" : "mobile",
-        ...(fallbackHostId ? { fallbackHostId } : {}),
+        ...(plan.fallbackHostId ? { fallbackHostId: plan.fallbackHostId } : {}),
       })
     }
 
@@ -169,14 +190,20 @@ export function PairedStep({
       return
     }
 
-    const out = await guard(
-      {
-        reason: t("signOutReason"),
-        title: t("signOutTitle"),
-        description: t("signOutDescription"),
-      },
-      performSignOut
-    )
+    let out: GuardOutcome<void>
+    try {
+      out = await guard(
+        {
+          reason: t("signOutReason"),
+          title: t("signOutTitle"),
+          description: t("signOutDescription"),
+        },
+        performSignOut
+      )
+    } catch (err) {
+      setSignOutError(err instanceof Error ? err.message : String(err))
+      return
+    }
     if (out.kind === "blocked") {
       if (out.reason !== "cancelled") {
         setSignOutError(t("biometricFailed", { reason: blockReason(out.reason) }))
@@ -184,7 +211,7 @@ export function PairedStep({
       return
     }
     onAfterSignOut()
-  }, [blockReason, guard, onAfterSignOut, platform, requireBiometricForSignOut, t])
+  }, [blockReason, chooseFallback, guard, onAfterSignOut, platform, requireBiometricForSignOut, t])
 
   // Explicit label — `constructor.name` gets mangled by production minifiers.
   // Duck-typed on `onTierChange` (CompanionTransport-only) like the
@@ -251,6 +278,7 @@ export function PairedStep({
       <p className="text-center text-[11px] text-muted-foreground/80">
         {t("transportLabel")}: <code className="font-mono">{transportName}</code>
       </p>
+      {fallbackDialog}
     </section>
   )
 }

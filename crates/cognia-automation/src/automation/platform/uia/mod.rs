@@ -8,7 +8,9 @@
 use uiautomation::types::TreeScope;
 use uiautomation::UIAutomation;
 
-use crate::automation::backend::{AutomationBackend, SelectionPreflight};
+use crate::automation::backend::{ApplicationScreenshot, AutomationBackend, SelectionPreflight};
+use crate::automation::platform::shared::tree_shape::{self, TreeBudget};
+use crate::automation::session::{AppLocator, ResolvedApplication};
 use crate::automation::types::*;
 
 mod element;
@@ -29,6 +31,92 @@ pub struct UiaBackend {
 }
 
 impl UiaBackend {
+    fn application_window(
+        &self,
+        app: &ResolvedApplication,
+        hint: Option<u32>,
+    ) -> Result<xcap::Window> {
+        let windows = xcap::Window::all().map_err(native_error)?;
+        let candidates: Vec<_> = windows
+            .iter()
+            .filter_map(|window| {
+                Some(crate::automation::backend::ApplicationWindow {
+                    id: window.id().ok()?,
+                    process_id: window.pid().ok()?,
+                    focused: window.is_focused().unwrap_or(false),
+                    minimized: window.is_minimized().unwrap_or(true),
+                })
+            })
+            .collect();
+        let selected = crate::automation::backend::select_application_window(
+            &candidates,
+            app.process_id,
+            hint,
+        )?;
+        windows
+            .into_iter()
+            .find(|window| window.id().ok() == Some(selected))
+            .ok_or(AutomationError::StaleElement)
+    }
+
+    fn require_foreground_element(&self, element: &uiautomation::UIElement) -> Result<()> {
+        use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOT};
+        if element.is_offscreen().unwrap_or(true) {
+            return Err(AutomationError::StaleElement);
+        }
+        let rect = element.get_bounding_rectangle().map_err(native_error)?;
+        let walker = self
+            .automation
+            .get_control_view_walker()
+            .map_err(native_error)?;
+        let mut current = element.clone();
+        for _ in 0..64 {
+            if let Ok(handle) = current.get_native_window_handle() {
+                let hwnd: windows::Win32::Foundation::HWND = handle.into();
+                if !hwnd.0.is_null() {
+                    let target = unsafe { GetAncestor(hwnd, GA_ROOT) };
+                    let foreground = unsafe { GetForegroundWindow() };
+                    if !target.0.is_null() && target == foreground {
+                        let mut bounds = windows::Win32::Foundation::RECT::default();
+                        unsafe {
+                            windows::Win32::UI::WindowsAndMessaging::GetWindowRect(
+                                foreground,
+                                &mut bounds,
+                            )
+                        }
+                        .map_err(native_error)?;
+                        crate::automation::platform::shared::pointer::foreground_center(
+                            1,
+                            Some(1),
+                            true,
+                            Rect {
+                                x: rect.get_left(),
+                                y: rect.get_top(),
+                                width: rect.get_right() - rect.get_left(),
+                                height: rect.get_bottom() - rect.get_top(),
+                            },
+                            Some(Rect {
+                                x: bounds.left,
+                                y: bounds.top,
+                                width: bounds.right - bounds.left,
+                                height: bounds.bottom - bounds.top,
+                            }),
+                        )?;
+                        return Ok(());
+                    }
+                    break;
+                }
+            }
+            let Ok(parent) = walker.get_parent(&current) else {
+                break;
+            };
+            current = parent;
+        }
+        Err(AutomationError::PermissionDenied {
+            reason: "coordinate fallback requires the target window to be foreground".into(),
+        })
+    }
+
     pub fn new() -> std::result::Result<Self, String> {
         let automation =
             UIAutomation::new().map_err(|e| format!("UIAutomation::new failed: {e}"))?;
@@ -41,7 +129,7 @@ impl UiaBackend {
     }
 }
 
-fn process_name(pid: u32) -> Option<String> {
+fn process_path(pid: u32) -> Option<String> {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
@@ -62,11 +150,21 @@ fn process_name(pid: u32) -> Option<String> {
     };
     let _ = unsafe { CloseHandle(handle) };
     result.ok()?;
-    let path = String::from_utf16(&buffer[..len as usize]).ok()?;
+    String::from_utf16(&buffer[..len as usize]).ok()
+}
+
+fn process_name(pid: u32) -> Option<String> {
+    let path = process_path(pid)?;
     std::path::Path::new(&path)
         .file_stem()
         .and_then(|value| value.to_str())
         .map(str::to_string)
+}
+
+fn native_error(error: impl std::fmt::Display) -> AutomationError {
+    AutomationError::BackendError {
+        message: error.to_string(),
+    }
 }
 
 fn web_document_url(control_type: Option<&str>, value: &str) -> Option<String> {
@@ -80,6 +178,27 @@ fn web_document_url(control_type: Option<&str>, value: &str) -> Option<String> {
 impl AutomationBackend for UiaBackend {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
+            operations: OperationCapabilities {
+                app_sessions: true,
+                window_op: true,
+                element_click: true,
+                element_scroll: true,
+                invoke_patterns: vec![
+                    "invoke",
+                    "toggle",
+                    "value",
+                    "selectionItem",
+                    "rangeValue",
+                    "expandCollapse",
+                    "scrollItem",
+                    "window",
+                    "transform",
+                    "text",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            },
             platform: Platform::Windows,
             has_uia: true,
             has_input_sim: true,
@@ -98,6 +217,184 @@ impl AutomationBackend for UiaBackend {
                     message: format!("get_focused_element: {e}"),
                 })?;
         Ok(element_info(&self.cache, &elt))
+    }
+
+    fn list_applications(&self) -> Result<Vec<ResolvedApplication>> {
+        let windows = xcap::Window::all().map_err(native_error)?;
+        let mut apps = std::collections::BTreeMap::new();
+        for window in windows {
+            let Ok(pid) = window.pid() else { continue };
+            apps.entry(pid).or_insert_with(|| ResolvedApplication {
+                bundle_id: None,
+                path: process_path(pid),
+                display_name: process_name(pid)
+                    .or_else(|| window.app_name().ok())
+                    .unwrap_or_else(|| pid.to_string()),
+                process_id: pid,
+            });
+        }
+        Ok(apps.into_values().collect())
+    }
+
+    fn resolve_application(
+        &self,
+        locator: &AppLocator,
+        allow_launch: bool,
+    ) -> Result<ResolvedApplication> {
+        if matches!(locator, AppLocator::BundleId { .. }) {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
+        let resolve = || -> Result<Option<ResolvedApplication>> {
+            let matches: Vec<_> = self
+                .list_applications()?
+                .into_iter()
+                .filter(|app| match locator {
+                    AppLocator::Path { path } => app
+                        .path
+                        .as_ref()
+                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(path)),
+                    AppLocator::DisplayName { display_name } => {
+                        app.display_name.eq_ignore_ascii_case(display_name)
+                    }
+                    AppLocator::BundleId { .. } => false,
+                })
+                .collect();
+            match matches.len() {
+                0 => Ok(None),
+                1 => Ok(matches.into_iter().next()),
+                _ => Err(AutomationError::BackendError {
+                    message: "application locator is ambiguous; choose an executable path".into(),
+                }),
+            }
+        };
+        if let Some(app) = resolve()? {
+            return Ok(app);
+        }
+        if !allow_launch {
+            return Err(AutomationError::ElementNotFound);
+        }
+        let AppLocator::Path { path } = locator else {
+            return Err(AutomationError::UnsupportedPlatform);
+        };
+        if !std::path::Path::new(path).is_absolute() || !std::path::Path::new(path).is_file() {
+            return Err(AutomationError::BackendError {
+                message: "application path must be an existing absolute executable".into(),
+            });
+        }
+        let mut child = std::process::Command::new(path)
+            .spawn()
+            .map_err(native_error)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(app) = resolve()? {
+                // Reap the launcher asynchronously without terminating the app.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return Ok(app);
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Err(AutomationError::ElementNotFound)
+    }
+
+    fn read_application_tree(
+        &self,
+        app: &ResolvedApplication,
+        opts: TreeOpts,
+    ) -> Result<Vec<ElementInfo>> {
+        let window = self.application_window(app, None)?;
+        let hwnd = windows::Win32::Foundation::HWND(
+            window.id().map_err(native_error)? as usize as *mut std::ffi::c_void
+        );
+        let root = self
+            .automation
+            .element_from_handle(hwnd.into())
+            .map_err(native_error)?;
+        if root.get_process_id().ok() != Some(app.process_id) {
+            return Err(AutomationError::StaleElement);
+        }
+        let condition = self
+            .automation
+            .create_true_condition()
+            .map_err(native_error)?;
+        let title = window.title().ok();
+        let tree = tree_shape::walk_tree(
+            &root,
+            TreeBudget::from_opts(opts.max_depth),
+            &|element| {
+                let mut info = element_info(&self.cache, element);
+                info.process_name = Some(app.display_name.clone());
+                info.window_title = title.clone();
+                info
+            },
+            &|element, limit| {
+                element
+                    .find_all(TreeScope::Children, &condition)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .take(limit)
+                    .collect()
+            },
+        );
+        Ok(vec![tree])
+    }
+
+    fn screenshot_application(
+        &self,
+        app: &ResolvedApplication,
+        window_hint: Option<&ElementInfo>,
+        opts: ScreenshotOpts,
+    ) -> Result<ApplicationScreenshot> {
+        if opts.region.is_some() {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
+        let hint_id = match window_hint {
+            Some(info) => {
+                let element = self
+                    .cache
+                    .get(&info.element_ref)
+                    .ok_or(AutomationError::StaleElement)?;
+                let handle = element.get_native_window_handle().map_err(native_error)?;
+                let hwnd: windows::Win32::Foundation::HWND = handle.into();
+                if hwnd.0.is_null() {
+                    return Err(AutomationError::StaleElement);
+                }
+                Some(hwnd.0 as usize as u32)
+            }
+            None => None,
+        };
+        let window = self.application_window(app, hint_id)?;
+        let bounds = Rect {
+            x: window.x().map_err(native_error)?,
+            y: window.y().map_err(native_error)?,
+            width: i32::try_from(window.width().map_err(native_error)?).unwrap_or(i32::MAX),
+            height: i32::try_from(window.height().map_err(native_error)?).unwrap_or(i32::MAX),
+        };
+        if bounds.width <= 0 || bounds.height <= 0 || window.is_minimized().map_err(native_error)? {
+            return Err(AutomationError::BackendError {
+                message: "target window is minimized or empty".into(),
+            });
+        }
+        let shot = screenshot::capture_window(&window, &opts)?;
+        Ok(ApplicationScreenshot {
+            screenshot: shot,
+            window_id: Some(u64::from(window.id().map_err(native_error)?)),
+            display_id: window
+                .current_monitor()
+                .ok()
+                .and_then(|monitor| monitor.id().ok())
+                .map(|id| id.to_string()),
+            logical_bounds: bounds,
+            // Windows input and xcap bounds are both physical desktop pixels.
+            scale_factor: 1.0,
+        })
     }
 
     fn read_tree(&self, root: Option<ElementRef>, opts: TreeOpts) -> Result<Vec<ElementInfo>> {
@@ -140,6 +437,9 @@ impl AutomationBackend for UiaBackend {
     }
 
     fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()> {
+        if opts.modifier.is_some() {
+            return Err(AutomationError::UnsupportedPlatform);
+        }
         // Resolve effective click count: explicit `count` wins; otherwise
         // `double: true` means 2, anything else means 1. Triple-click only
         // round-trips reliably through the coordinate path, so we bypass
@@ -156,7 +456,7 @@ impl AutomationBackend for UiaBackend {
                     .get(&element_ref)
                     .ok_or(AutomationError::StaleElement)?;
 
-                if count == 1 {
+                if crate::automation::platform::shared::pointer::native_click_eligible(&opts) {
                     // UIA Pattern-first click strategy. `useNative` defaults
                     // to true: try Invoke → Toggle → SelectionItem; on miss,
                     // fall back to a coordinate click at the bounding-rect
@@ -166,9 +466,6 @@ impl AutomationBackend for UiaBackend {
                         if let Ok(true) = pattern::try_pattern_click(&elt) {
                             return Ok(());
                         }
-                    }
-                    if elt.click().is_ok() {
-                        return Ok(());
                     }
                 }
 
@@ -182,9 +479,12 @@ impl AutomationBackend for UiaBackend {
                         })?;
                 let cx = (rect.get_left() + rect.get_right()) / 2;
                 let cy = (rect.get_top() + rect.get_bottom()) / 2;
-                input::click_point_multi(cx, cy, count)
+                self.require_foreground_element(&elt)?;
+                input::click_point_multi(cx, cy, count, opts.button.unwrap_or(MouseButton::Left))
             }
-            ClickTarget::Point { x, y } => input::click_point_multi(x, y, count),
+            ClickTarget::Point { x, y } => {
+                input::click_point_multi(x, y, count, opts.button.unwrap_or(MouseButton::Left))
+            }
         }
     }
 
@@ -372,6 +672,7 @@ impl AutomationBackend for UiaBackend {
                         })?;
                 let cx = (rect.get_left() + rect.get_right()) / 2;
                 let cy = (rect.get_top() + rect.get_bottom()) / 2;
+                self.require_foreground_element(&elt)?;
                 input::scroll_at(Point { x: cx, y: cy }, opts)
             }
             ScrollTarget::Point { x, y } => input::scroll_at(Point { x, y }, opts),

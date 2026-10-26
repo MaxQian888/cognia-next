@@ -28,13 +28,13 @@ const promptKey = (p: CcswitchPrompt) => `${p.kind ?? ""}:${p.id}`
 export function CcswitchPromptsTab() {
   const t = useTranslations("ccswitch")
   const tabReady = isTauri()
-  const { data: status } = useCcswitchStatus(tabReady)
+  const { data: status, error: statusError } = useCcswitchStatus(tabReady)
   const {
     data: prompts,
     loading,
     error,
     refresh,
-  } = useCcswitchPrompts(tabReady && status?.exists === true)
+  } = useCcswitchPrompts(tabReady && status?.exists === true && !status.error)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [importing, setImporting] = useState(false)
@@ -89,10 +89,10 @@ export function CcswitchPromptsTab() {
 
   if (loading) return <Skeleton className="h-32 w-full" />
 
-  if (error) {
+  if (error || statusError || status?.error) {
     return (
       <SettingsAlert variant="destructive" title={t("prompts.errorTitle")}>
-        {error}
+        {error ?? statusError ?? status?.error}
       </SettingsAlert>
     )
   }

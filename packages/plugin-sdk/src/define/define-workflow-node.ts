@@ -20,7 +20,7 @@
  *   })
  */
 
-import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
+import type { PluginNodeDef } from "@cognia/plugin-contract/types/plugin/plugin-workflow"
 
 export function defineWorkflowNode(node: PluginNodeDef): PluginNodeDef {
   return node

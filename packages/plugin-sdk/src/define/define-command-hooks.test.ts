@@ -1,6 +1,6 @@
 /** `defineCommandHooks` is a typesafety pass-through for `manifest.commandHooks`. */
 
-import type { HooksConfig } from "@/lib/claude/hooks"
+import type { HooksConfig } from "@cognia/plugin-contract/lib/claude/hooks"
 
 import { defineCommandHooks } from "./define-command-hooks"
 

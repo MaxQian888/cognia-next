@@ -13,7 +13,8 @@
     "open:android": "cap open android",
     "add:ios": "node scripts/add-ios.mjs",
     "add:android": "cap add android",
-    "patch:ios": "node scripts/configure-ios-project.mjs"
+    "patch:ios": "node scripts/configure-ios-project.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@capacitor-mlkit/barcode-scanning": "^8.2.1",
@@ -22,6 +23,7 @@
     "@capacitor/browser": "^8.0.4",
     "@capacitor/camera": "^8.2.4",
     "@capacitor/clipboard": "^8.0.1",
+    "@capacitor/core": "^8.5.2",
     "@capacitor/device": "^8.0.3",
     "@capacitor/dialog": "^8.0.1",
     "@capacitor/filesystem": "^8.1.4",
@@ -46,6 +48,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
-    "@capacitor/core": "^8.5.2"
+    "jszip": "^3.10.2",
+    "typescript": "7.0.2"
   }
 }

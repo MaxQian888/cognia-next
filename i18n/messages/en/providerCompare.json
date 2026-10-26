@@ -6,5 +6,6 @@
   "providerB": "Provider B",
   "query": "Query",
   "queryPlaceholder": "Type a query…",
-  "title": "Compare providers"
+  "title": "Compare providers",
+  "failed": "Comparison failed"
 }

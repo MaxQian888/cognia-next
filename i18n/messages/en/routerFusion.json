@@ -330,6 +330,15 @@
         "code_fixture": "The change must pass the project's approved test command in a sandbox, which produces the report it is judged by."
       },
       "profileDormant": "Needs a runtime verifier, which arrives in a later release; the router does not choose this action until then.",
+      "promptVersion": "Role prompts",
+      "promptVersionValue": {
+        "shipped": "Shipped (roles-1)",
+        "custom": "Prompt Center"
+      },
+      "promptVersionDesc": {
+        "shipped": "Runs the role prompts that ship with Cognia. Built-in actions always use these.",
+        "custom": "Runs the Router Fusion role prompts from Settings → Authoring → Prompts. Each run uses the text published when it starts, and every published edit gives this action's runs a new identity."
+      },
       "runCap": "Run cap (USD)",
       "runCapDesc": "Leave empty to use the {mode} cap of ${cap}.",
       "panelSize": "Panel size",
@@ -350,7 +359,8 @@
         "PROFILE_NOT_ALLOWED": "This check is not available for this mode.",
         "CAP_INVALID": "Enter a dollar amount with at most six decimal places.",
         "PANEL_C_REQUIRED": "A panel of three needs the Panel member C role.",
-        "LIMIT_INVALID": "A panel has two or three members."
+        "LIMIT_INVALID": "A panel has two or three members.",
+        "PROMPT_VERSION_NOT_ALLOWED": "Choose the shipped role prompts or the Prompt Center's."
       },
       "add": {
         "title": "Add an action",

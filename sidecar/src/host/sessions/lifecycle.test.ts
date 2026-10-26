@@ -6,6 +6,7 @@ import {
   makeWrappedEmit,
   envelopeEmitterParams,
   restartReason,
+  createSessionSendQueue,
   routeSendIntoLiveLoop,
   routeRestore,
   routeClose,
@@ -413,7 +414,239 @@ test("restartReason: the implicit anthropic default never reads as a provider ch
   assert.equal(restartReason(explicit, { cwd: "/x", provider: "anthropic" }), null)
 })
 
-test("a live loop is handed this send's turn id and ledger stamp before the prompt", () => {
+test("a retained loop applies the routed model before admitting its next prompt", async () => {
+  let acknowledge!: () => void
+  const pending = new Promise<void>((resolve) => {
+    acknowledge = resolve
+  })
+  const order: unknown[] = []
+  let model = "fast-model"
+  const loop = {
+    multiTurn: true,
+    sendOptions: { provider: "openai", model },
+    q: {
+      active: false,
+      setModel: async (next: string) => {
+        order.push(["switch", next])
+        await pending
+        model = next
+      },
+    },
+    pushUserMessage: (prompt: unknown) => order.push(["prompt", prompt, model]),
+  }
+  const options = { provider: "openai", model: "powerful-model" }
+  assert.equal(restartReason(loop, options), null)
+  const send = routeSendIntoLiveLoop(loop, options, "hard prompt")
+  assert.deepEqual(order, [["switch", "powerful-model"]])
+  assert.equal(loop.sendOptions.model, "fast-model")
+  acknowledge()
+  await send
+  assert.deepEqual(order, [
+    ["switch", "powerful-model"],
+    ["prompt", "hard prompt", "powerful-model"],
+  ])
+  assert.equal(loop.sendOptions.model, "powerful-model")
+})
+
+test("a rejected routed model never admits the next prompt or changes session metadata", async () => {
+  const failure = new Error("model refused")
+  const pushed: unknown[] = []
+  const loop = {
+    turnRef: { id: "previous-turn" },
+    sendOptions: { provider: "openai", model: "fast-model" },
+    q: {
+      setModel: async () => {
+        throw failure
+      },
+    },
+    pushUserMessage: (prompt: unknown) => pushed.push(prompt),
+  }
+  await assert.rejects(
+    async () =>
+      routeSendIntoLiveLoop(loop, { model: "powerful-model", turnId: "next-turn" }, "hard prompt"),
+    failure
+  )
+  assert.deepEqual(pushed, [])
+  assert.equal(loop.turnRef.id, "previous-turn")
+  assert.equal(loop.sendOptions.model, "fast-model")
+})
+
+test("a loop without live model controls refuses a changed routed model", async () => {
+  const pushed: unknown[] = []
+  await assert.rejects(
+    async () =>
+      routeSendIntoLiveLoop(
+        { sendOptions: { model: "fast-model" }, pushUserMessage: (prompt) => pushed.push(prompt) },
+        { model: "powerful-model" },
+        "hard prompt"
+      ),
+    /live model switch is unavailable/
+  )
+  assert.deepEqual(pushed, [])
+})
+
+test("an unchanged or omitted routed model needs no live model control", async () => {
+  const pushed: unknown[] = []
+  const loop = {
+    sendOptions: { model: "fast-model" },
+    pushUserMessage: (prompt: unknown) => pushed.push(prompt),
+  }
+  await routeSendIntoLiveLoop(loop, { model: "fast-model" }, "unchanged")
+  await routeSendIntoLiveLoop(loop, undefined, "omitted")
+  assert.deepEqual(pushed, ["unchanged", "omitted"])
+})
+
+test("a retired runtime cannot receive a prompt after its model switch finishes", async () => {
+  let acknowledge!: () => void
+  const pending = new Promise<void>((resolve) => {
+    acknowledge = resolve
+  })
+  const pushed: unknown[] = []
+  const loop: HostSession = {
+    multiTurn: true,
+    sendOptions: { model: "fast-model" },
+    q: { setModel: () => pending },
+    pushUserMessage: (prompt) => pushed.push(prompt),
+  }
+  const replacement: HostSession = { multiTurn: true, turnPending: true }
+  const sessions = new Map([["s1", loop]])
+  const send = routeSendIntoLiveLoop(
+    loop,
+    { model: "powerful-model" },
+    "stale",
+    () => sessions.get("s1") === loop
+  )
+  routeClose(sessions, { sessionId: "s1" })
+  sessions.set("s1", replacement)
+  acknowledge()
+  assert.equal(await send, false)
+  assert.deepEqual(pushed, [])
+  assert.equal(sessions.get("s1"), replacement)
+})
+
+test("a retired runtime's failed model switch leaves its replacement intact", async () => {
+  let reject!: (reason: Error) => void
+  const pending = new Promise<void>((_resolve, fail) => {
+    reject = fail
+  })
+  const pushed: unknown[] = []
+  const loop: HostSession = {
+    sendOptions: { model: "fast-model" },
+    q: { setModel: () => pending },
+    pushUserMessage: (prompt) => pushed.push(prompt),
+  }
+  const sessions = new Map([["s1", loop]])
+  const send = routeSendIntoLiveLoop(
+    loop,
+    { model: "powerful-model" },
+    "stale",
+    () => sessions.get("s1") === loop
+  )
+  sessions.set("s1", {})
+  reject(new Error("retired switch rejected"))
+  assert.equal(await send, false)
+  assert.deepEqual(pushed, [])
+  assert.notEqual(sessions.get("s1"), loop)
+})
+
+test("prompt admission marks a turn busy before the async runtime consumes it", async () => {
+  const loop: HostSession = { multiTurn: true, q: { active: false }, pushUserMessage: () => {} }
+  await routeSendIntoLiveLoop(loop, undefined, "queued")
+  assert.equal(restartReason(loop), "turn still active")
+  for (const error of [undefined, "interrupted"]) {
+    loop.turnPending = true
+    const sessions = new Map([["s1", loop]])
+    makeWrappedEmit(
+      () => {},
+      sessions,
+      "s1",
+      () => loop
+    )({ type: "session_ended", sessionId: "s1", error })
+    assert.equal(loop.turnPending, false)
+    assert.equal(restartReason(loop), null)
+  }
+})
+
+test("same-session preparations recheck busy state after the prior prompt is admitted", async () => {
+  const prepare = createSessionSendQueue()
+  let acknowledge!: () => void
+  const pending = new Promise<void>((resolve) => {
+    acknowledge = resolve
+  })
+  let model = "original"
+  const pushed: unknown[] = []
+  const loop: HostSession = {
+    multiTurn: true,
+    sendOptions: { model },
+    q: {
+      active: false,
+      setModel: async (next) => {
+        await pending
+        model = next
+      },
+    },
+    pushUserMessage: (prompt) => pushed.push([prompt, model]),
+  }
+  let secondReason: string | null | undefined
+  const first = prepare("s1", async () => {
+    await routeSendIntoLiveLoop(loop, { model: "first" }, "first prompt")
+  })
+  const second = prepare("s1", async () => {
+    secondReason = restartReason(loop, { model: "second" })
+    if (!secondReason) await routeSendIntoLiveLoop(loop, { model: "second" }, "second prompt")
+  })
+  assert.equal(secondReason, undefined)
+  acknowledge()
+  await Promise.all([first, second])
+  assert.equal(secondReason, "turn still active")
+  assert.deepEqual(pushed, [["first prompt", "first"]])
+  assert.equal(model, "first")
+})
+
+test("send preparation queues are independent per session and recover after failure", async () => {
+  const prepare = createSessionSendQueue()
+  let acknowledge!: () => void
+  const pending = new Promise<void>((resolve) => {
+    acknowledge = resolve
+  })
+  const order: string[] = []
+  const first = prepare("s1", async () => {
+    await pending
+    order.push("first")
+  })
+  await prepare("s2", async () => {
+    order.push("independent")
+  })
+  assert.deepEqual(order, ["independent"])
+  const failure = new Error("preparation refused")
+  const failed = prepare("s1", async () => {
+    throw failure
+  })
+  const recovered = prepare("s1", async () => {
+    order.push("recovered")
+  })
+  const rejection = assert.rejects(failed, failure)
+  acknowledge()
+  await Promise.all([first, rejection, recovered])
+  assert.deepEqual(order, ["independent", "first", "recovered"])
+})
+
+test("a superseded loop's terminal event cannot clear the replacement's pending turn", () => {
+  const previous: HostSession = { multiTurn: true, turnPending: true }
+  const next: HostSession = { multiTurn: true, turnPending: true }
+  const sessions = new Map([["s1", previous]])
+  const emitPrevious = makeWrappedEmit(
+    () => {},
+    sessions,
+    "s1",
+    () => previous
+  )
+  sessions.set("s1", next)
+  emitPrevious({ type: "session_ended", sessionId: "s1" })
+  assert.equal(next.turnPending, true)
+})
+
+test("a live loop is handed this send's turn id and ledger stamp before the prompt", async () => {
   const order: unknown[] = []
   const loop = {
     turnRef: { id: "turn-1" },
@@ -423,7 +656,7 @@ test("a live loop is handed this send's turn id and ledger stamp before the prom
   }
   const ledger = { runId: "run-2", mode: "per_call" }
   const remoteExecutionContext = { originDeviceId: "device-a", sessionId: "s", generation: 2 }
-  routeSendIntoLiveLoop(loop, { turnId: "turn-2", ledger, remoteExecutionContext }, "again")
+  await routeSendIntoLiveLoop(loop, { turnId: "turn-2", ledger, remoteExecutionContext }, "again")
   assert.equal(loop.turnRef.id, "turn-2")
   assert.deepEqual(order, [
     ["ledger", ledger, remoteExecutionContext],
@@ -434,17 +667,17 @@ test("a live loop is handed this send's turn id and ledger stamp before the prom
   // than keeping the previous turn's run. A host-started send carries no
   // device context, and the loop must not keep the previous device's either.
   order.length = 0
-  routeSendIntoLiveLoop(loop, { turnId: "turn-3" }, "third")
+  await routeSendIntoLiveLoop(loop, { turnId: "turn-3" }, "third")
   assert.deepEqual(order, [
     ["ledger", undefined, undefined],
     ["prompt", "third"],
   ])
 })
 
-test("a loop with no ledger seam still takes the prompt", () => {
+test("a loop with no ledger seam still takes the prompt", async () => {
   const pushed: unknown[] = []
   // No turnRef either: a dispatcher that predates both seams.
-  routeSendIntoLiveLoop({ pushUserMessage: (p) => pushed.push(p) }, undefined, "hi")
+  await routeSendIntoLiveLoop({ pushUserMessage: (p) => pushed.push(p) }, undefined, "hi")
   assert.deepEqual(pushed, ["hi"])
 })
 

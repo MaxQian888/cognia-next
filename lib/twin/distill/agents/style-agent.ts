@@ -10,7 +10,8 @@
 
 import { extractJson, type LlmClient } from "../llm"
 import { selectStyleCandidates } from "../heuristics/style-prefilter"
-import { applyTemplate, STYLE_AGENT_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { STYLE_AGENT_PROMPT } from "../prompts"
 import type { StyleSample, TwinChunk } from "@/types/twin"
 
 export interface StyleAgentInput {
@@ -62,9 +63,13 @@ export async function runStyleAgent(
   const chunks = filtered.slice(0, cap)
   if (chunks.length === 0) return { samples: [] }
 
-  const prompt = applyTemplate(STYLE_AGENT_PROMPT, {
-    chunks: formatChunksForPrompt(chunks),
-  })
+  const prompt = (
+    await resolvePromptAsync(STYLE_AGENT_PROMPT, {
+      values: {
+        chunks: formatChunksForPrompt(chunks),
+      },
+    })
+  ).text
 
   const response = await llm.complete(prompt, { temperature: 0, maxTokens: 4000 })
   const parsed = extractJson<{ samples?: RawStyleSample[] }>(response)

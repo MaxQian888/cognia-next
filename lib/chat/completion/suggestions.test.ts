@@ -2,8 +2,14 @@ import {
   suggestStarters,
   suggestFollowUps,
   DEFAULT_SUGGESTION_COUNT,
+  FOLLOW_UP_SUGGESTIONS_PROMPT,
   MAX_SUGGESTION_LEN,
+  STARTER_SUGGESTIONS_PROMPT,
 } from "./suggestions"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 
 function stubClient(reply: string | ((prompt: string) => string)): {
@@ -175,5 +181,66 @@ describe("default PII gate", () => {
     const { client } = stubClient('["go"]')
     const res = await suggestStarters({ characterName: "Helper" }, { client })
     expect(res).toEqual(["go"])
+  })
+})
+
+describe("customized suggestion prompts (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("uses the agent's starter override and the session's follow-up override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-1",
+          promptId: STARTER_SUGGESTIONS_PROMPT.id,
+          scope: "agent",
+          targetId: "char-1",
+          revisionId: "por-1",
+          body: "Suggest data questions. Output a JSON array.",
+          contractVersion: STARTER_SUGGESTIONS_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-2",
+          promptId: FOLLOW_UP_SUGGESTIONS_PROMPT.id,
+          scope: "session",
+          targetId: "s-1",
+          revisionId: "por-2",
+          body: "Suggest next steps as a JSON array.",
+          contractVersion: FOLLOW_UP_SUGGESTIONS_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const starter = stubClient('["a"]')
+    await suggestStarters(
+      {},
+      { client: starter.client, isPiiSafe: safe, promptContext: { agentId: "char-1" } }
+    )
+    expect(starter.calls[0].system).toBe("Suggest data questions. Output a JSON array.")
+
+    const followUp = stubClient('["b"]')
+    await suggestFollowUps(
+      { recentMessages: [{ role: "assistant", text: "done" }] },
+      { client: followUp.client, isPiiSafe: safe, promptContext: { sessionId: "s-1" } }
+    )
+    expect(followUp.calls[0].system).toBe("Suggest next steps as a JSON array.")
+  })
+
+  it("falls back to the shipped text when an override drops the JSON contract", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: STARTER_SUGGESTIONS_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por",
+          body: "Suggest a few prompts, one per line.",
+          contractVersion: STARTER_SUGGESTIONS_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const { client, calls } = stubClient('["a"]')
+    await suggestStarters({}, { client, isPiiSafe: safe })
+    expect(calls[0].system).toBe(STARTER_SUGGESTIONS_PROMPT.defaultBody)
   })
 })

@@ -60,8 +60,8 @@ describe("searchLarkDocs", () => {
     })
 
     expect(await searchLarkDocs(api, "q", 10)).toEqual([
-      { providerId: "lark", kind: "doc", id: "doccnA", title: "New doc" },
-      { providerId: "lark", kind: "doc", id: "doccnB", title: "Legacy doc" },
+      { providerId: "lark", kind: "doc", sourceType: "docx", id: "doccnA", title: "New doc" },
+      { providerId: "lark", kind: "doc", sourceType: "doc", id: "doccnB", title: "Legacy doc" },
       { providerId: "lark", kind: "sheet", id: "shtcnC", title: "Sheet" },
       { providerId: "lark", kind: "bitable", id: "bascnD", title: "Base" },
     ])
@@ -79,7 +79,7 @@ describe("searchLarkDocs", () => {
     })
 
     expect(await searchLarkDocs(api, "q", 10)).toEqual([
-      { providerId: "lark", kind: "doc", id: "doccnG", title: "doccnG" },
+      { providerId: "lark", kind: "doc", sourceType: "docx", id: "doccnG", title: "doccnG" },
     ])
   })
 

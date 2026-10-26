@@ -2,6 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, @next/next/no-img-element */
 
+import { NativeSelect } from "@/components/ui/native-select"
 import { useEffect, useMemo, useRef, useState } from "react"
 import DOMPurify from "dompurify"
 import {
@@ -16,7 +17,9 @@ import {
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,6 +99,7 @@ export function TaskResourcesPanel({
   const [sensitiveAuthorized, setSensitiveAuthorized] = useState(false)
   const [runPreview, setRunPreview] = useState(false)
   const [loading, setLoading] = useState(false)
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
   const [previewLoading, setPreviewLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -341,7 +345,16 @@ export function TaskResourcesPanel({
         const message = reason instanceof Error ? reason.message : String(reason)
         if (
           message.includes("task workspace ledger capacity exceeded:") &&
-          window.confirm(t("irreversibleApplyConfirm"))
+          (await confirm({
+            title: t("irreversibleApplyConfirmTitle"),
+            description: t("irreversibleApplyConfirm"),
+            details: selectionPath ? (
+              <p className="truncate font-mono text-xs text-muted-foreground">{selectionPath}</p>
+            ) : undefined,
+            confirmLabel: t("irreversibleApplyConfirmAction"),
+            destructive: true,
+            testid: "task-resources-irreversible-apply-confirm",
+          }))
         ) {
           outcome = await applyTaskWorkspace(selectedRunId, selection, true)
         } else {
@@ -513,56 +526,60 @@ export function TaskResourcesPanel({
     </Tabs>
   )
   const runSelect = (
-    <select
+    <NativeSelect
       aria-label={t("runFilter")}
       value={selectedRunId}
       onChange={(event) => setSelectedRunId(event.target.value)}
-      className={cn(selectClass, mobile && "flex-1")}
+      className={selectClass}
+      wrapperClassName={mobile ? "min-w-0 flex-1" : undefined}
     >
       {runs.map((run) => (
         <option key={run.runId} value={run.runId}>
           {run.agentId} · {run.state}
         </option>
       ))}
-    </select>
+    </NativeSelect>
   )
   const filterSelects = (
     <>
-      <select
+      <NativeSelect
         aria-label={t("originFilter")}
         value={origin}
         onChange={(event) => setOrigin(event.target.value)}
         className={selectClass}
+        wrapperClassName={mobile ? "min-w-0 w-full" : undefined}
       >
         <option value="all">{t("allOrigins")}</option>
         <option value="agent">{t("agent")}</option>
         <option value="user">{t("user")}</option>
         <option value="unknown">{t("unknown")}</option>
-      </select>
-      <select
+      </NativeSelect>
+      <NativeSelect
         aria-label={t("statusFilter")}
         value={status}
         onChange={(event) => setStatus(event.target.value)}
         className={selectClass}
+        wrapperClassName={mobile ? "min-w-0 w-full" : undefined}
       >
         <option value="all">{t("allStatuses")}</option>
         <option value="created">{t("created")}</option>
         <option value="modified">{t("modified")}</option>
         <option value="deleted">{t("deleted")}</option>
         <option value="renamed">{t("renamed")}</option>
-      </select>
-      <select
+      </NativeSelect>
+      <NativeSelect
         aria-label={t("captureFilter")}
         value={captureClass}
         onChange={(event) => setCaptureClass(event.target.value)}
         className={selectClass}
+        wrapperClassName={mobile ? "min-w-0 w-full" : undefined}
       >
         <option value="all">{t("allCaptureClasses")}</option>
         <option value="source">{t("sourceFiles")}</option>
         <option value="generated">{t("generatedFiles")}</option>
-      </select>
+      </NativeSelect>
       {view === "timeline" && (
-        <select
+        <NativeSelect
           aria-label={t("timeFilter")}
           value={timeRange}
           onChange={(event) => {
@@ -570,12 +587,13 @@ export function TaskResourcesPanel({
             setTimeFilterNow(Date.now())
           }}
           className={selectClass}
+          wrapperClassName={mobile ? "min-w-0 w-full" : undefined}
         >
           <option value="all">{t("allTime")}</option>
           <option value="5m">{t("lastFiveMinutes")}</option>
           <option value="1h">{t("lastHour")}</option>
           <option value="24h">{t("lastDay")}</option>
-        </select>
+        </NativeSelect>
       )}
     </>
   )
@@ -868,11 +886,21 @@ export function TaskResourcesPanel({
                       <LockKeyholeIcon className="size-6" />
                       <p>{t("sensitiveDescription")}</p>
                       <Button
-                        onClick={() => {
-                          if (window.confirm(t("sensitiveConfirm"))) {
-                            setSensitiveAuthorized(true)
-                            void loadSelected(true)
-                          }
+                        onClick={async () => {
+                          const authorized = await confirm({
+                            title: t("sensitiveConfirmTitle"),
+                            description: t("sensitiveConfirm"),
+                            details: (
+                              <p className="truncate font-mono text-xs text-muted-foreground">
+                                {selected.path}
+                              </p>
+                            ),
+                            confirmLabel: t("authorizeOnce"),
+                            testid: "task-resources-sensitive-confirm",
+                          })
+                          if (!authorized) return
+                          setSensitiveAuthorized(true)
+                          void loadSelected(true)
                         }}
                       >
                         {t("authorizeOnce")}
@@ -914,12 +942,11 @@ export function TaskResourcesPanel({
                           </div>
                           {selectedPatchFile.hunks.map((hunk) => (
                             <label key={hunk.id} className="flex items-center gap-2 py-1 text-xs">
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={selectedHunks.includes(hunk.id)}
-                                onChange={(event) =>
+                                onCheckedChange={(checked) =>
                                   setSelectedHunks((current) =>
-                                    event.target.checked
+                                    checked === true
                                       ? [...current, hunk.id]
                                       : current.filter((id) => id !== hunk.id)
                                   )
@@ -979,6 +1006,7 @@ export function TaskResourcesPanel({
           </div>
         </div>
       )}
+      {confirmDialog}
     </div>
   )
 }

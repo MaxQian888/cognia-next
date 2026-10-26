@@ -83,7 +83,7 @@ test("SDK publication consumes a verified same-run host and requires both smoke 
   assert.match(steps[fallback].run, /cli:smoke:bun/)
   assert.match(steps[fallback].run, /agent:host:package/)
   assert.match(steps[prepare].run, /sidecar:webclone:build/)
-  assert.match(steps[prepare].run, /build-browser-builtin-plugins\.mjs/)
+  assert.match(steps[prepare].run, /stage-plugin-artifacts\.mjs/)
   assert.match(steps[prepare].run, /release-agent-host\.mjs env/)
   for (const index of [locate, download, restore, fallback, prepare, smoke, pack, publish]) {
     assert.equal(steps[index]["continue-on-error"], undefined)

@@ -24,10 +24,11 @@ jest.mock("@/lib/db/outbound-jobs", () => {
   return {
     ...real,
     markSending: jest.fn((id: string) => real.markSending(id)),
-    listDueNow: jest.fn(() => real.listDueNow()),
+    listDueNow: jest.fn((...args: Parameters<typeof real.listDueNow>) => real.listDueNow(...args)),
   }
 })
-import { getDb, __resetDbForTesting } from "@/lib/db/schema"
+import { getDb } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import {
   enqueueOutbound,
@@ -49,6 +50,7 @@ import {
   MAX_ACTIVE_PLATFORM_SENDS,
   sanitizeOutboundTuning,
   startOutboundRunner,
+  type OutboundRunnerOptions,
 } from "./outbound-runner"
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
@@ -108,8 +110,7 @@ async function enqueue(adapterId: string, conversationKey: string, idempotencyKe
 }
 
 /**
- * Run the runner for a bounded time and return a stop function.
- * Uses a very short poll interval.
+ * Start the real runner with a short idle ceiling and explicit lifecycle cleanup.
  */
 function createRunner(
   adapters: Map<string, PlatformAdapter>,
@@ -117,26 +118,49 @@ function createRunner(
     now?: () => number
     jitter?: () => number
     onDelivered?: (conversationKey: string) => void
+    onSchedulerState?: OutboundRunnerOptions["onSchedulerState"]
   }
 ): { promise: Promise<void>; stop: () => void } {
   const controller = new AbortController()
-  const promise = startOutboundRunner({
+  let laneCount = 0
+  let settleLanes: (() => void) | undefined
+  const running = startOutboundRunner({
     adapters,
     pollIntervalMs: 1,
     signal: controller.signal,
     now: options?.now,
     jitter: options?.jitter ?? (() => 0),
     onDelivered: options?.onDelivered,
+    onSchedulerState: (state) => {
+      laneCount = state.laneCount
+      if (laneCount === 0) settleLanes?.()
+      options?.onSchedulerState?.(state)
+    },
   })
-  return {
-    promise,
-    stop: () => controller.abort(),
-  }
+  const promise = running.finally(async () => {
+    if (laneCount === 0) return
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      await new Promise<void>((resolve, reject) => {
+        settleLanes = resolve
+        timeout = setTimeout(() => reject(new Error("Outbound lanes did not settle")), 5_000)
+      })
+    } finally {
+      clearTimeout(timeout)
+    }
+  })
+  const stop = () => controller.abort()
+  dbFixture.registerCleanup(async () => {
+    stop()
+    await promise
+  })
+  return { promise, stop }
 }
 
 /**
- * Run the runner for a single poll cycle.
- * Uses a very short poll interval and aborts after all queued jobs finish.
+ * Wait for real work to settle, including its DB writes and audits, then stop.
+ * The first nonempty batch is published before lanes are created, so only an
+ * empty batch or a previously active lane becoming idle signals completion.
  */
 async function runOnce(
   adapters: Map<string, PlatformAdapter>,
@@ -146,18 +170,42 @@ async function runOnce(
     onDelivered?: (conversationKey: string) => void
   }
 ): Promise<void> {
-  const { promise, stop } = createRunner(adapters, options)
-  // Give the runner a few ticks to pick and process
-  await new Promise<void>((resolve) => setTimeout(resolve, 80))
-  stop()
-  await promise
+  let sawLane = false
+  let finish!: () => void
+  const settled = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const { promise, stop } = createRunner(adapters, {
+    ...options,
+    onSchedulerState: (state) => {
+      sawLane ||= state.laneCount > 0
+      if (state.laneCount === 0 && (sawLane || state.dueBatchSize === 0)) finish()
+    },
+  })
+  try {
+    await Promise.race([
+      settled,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("Outbound runner did not settle")), 5_000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+    stop()
+    await promise
+  }
 }
 
 // ── setup ─────────────────────────────────────────────────────────────────────
 
+const dbFixture = createDbTestFixture({ seeded: false })
+
+beforeAll(() => dbFixture.initialize())
+afterAll(() => dbFixture.dispose())
+
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
+  await dbFixture.restore()
   __resetAdapterRuntimeStateForTesting()
   mockConnectorDecision.mockReset()
   mockConnectorDecision.mockResolvedValue({ action: "allow" })
@@ -526,16 +574,7 @@ describe("outbound-runner — circuit breaker open", () => {
 
     await runOnce(adapters)
 
-    // The poll loop aborts after 80 ms, but the per-conversation lane keeps
-    // processing in-flight jobs asynchronously. Poll until all 3 jobs reach a
-    // terminal state instead of relying on a fixed wall-clock window — the
-    // 80 ms ceiling is tight enough to flake under jest worker contention.
-    let jobs: OutboundJobRow[] = []
-    for (let i = 0; i < 50; i++) {
-      jobs = await getDb().outboundQueue.toArray()
-      if (jobs.length === 3 && jobs.every((j) => j.status === "deadlettered")) break
-      await new Promise<void>((r) => setTimeout(r, 20))
-    }
+    const jobs = await getDb().outboundQueue.toArray()
 
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.deadlettered")).toBe(true)
@@ -749,7 +788,7 @@ describe("outbound-runner — adapter availability", () => {
 
 describe("outbound-runner — max attempts", () => {
   it("dead-letters after 5 failed attempts", async () => {
-    let t = 0
+    let t = Date.now()
     const adapterId = "a_maxattempts"
     const adapter = makeAdapter(adapterId, async () => ({
       ok: false,
@@ -760,34 +799,22 @@ describe("outbound-runner — max attempts", () => {
 
     await enqueue(adapterId, `telegram:${adapterId}:chat`, "ikey_max")
 
-    // Run attempts 1-4: each marks the job "failed" with a backoff nextAttemptAt.
-    // Advance t past backoff each time so pickNextDue picks it again.
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const { promise, stop } = createRunner(adapters, { now, jitter: () => 0 })
-      await new Promise<void>((resolve) => setTimeout(resolve, 80))
-      stop()
-      await promise
-      t += 65_000 // advance past max backoff (60 000) for the next retry
+    t = Date.now()
+    // Every pass makes exactly one real attempt. The delegating listDueNow
+    // mock forwards the injected clock, so future retries stay deferred.
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      await runOnce(adapters, { now, jitter: () => 0 })
+      const [job] = await getDb().outboundQueue.toArray()
+      expect(job.status).toBe("failed")
+      expect(job.attempts).toBe(attempt)
+      expect(job.nextAttemptAt).toBeGreaterThan(t)
+      expect(adapter.send).toHaveBeenCalledTimes(attempt)
+      t += 65_000 // advance beyond the maximum 60-second backoff
     }
 
-    // 5th attempt: job.attempts will be 4 when picked (0-indexed), check >= 5 on entry
-    // Actually attempts is incremented on markSending, so after 4 runs attempts=4.
-    // On the 5th pick, attempts=4 < MAX_ATTEMPTS=5 → markSending (attempts=5),
-    // then the adapter fails → markFailed with nextAttemptAt in future.
-    // On the 6th pick, attempts=5 >= MAX_ATTEMPTS=5 → deadletter.
-    // So we need one more advance + run.
-    const { promise: p5, stop: stop5 } = createRunner(adapters, { now, jitter: () => 0 })
-    await new Promise<void>((resolve) => setTimeout(resolve, 80))
-    stop5()
-    await p5
-
-    t += 65_000
-
-    // 6th pick: attempts >= MAX_ATTEMPTS → deadletter
-    const { promise: p6, stop: stop6 } = createRunner(adapters, { now, jitter: () => 0 })
-    await new Promise<void>((resolve) => setTimeout(resolve, 80))
-    stop6()
-    await p6
+    // The sixth pick deadletters the exhausted job without a sixth send.
+    await runOnce(adapters, { now, jitter: () => 0 })
+    expect(adapter.send).toHaveBeenCalledTimes(5)
 
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs[0].status).toBe("deadlettered")
@@ -805,33 +832,24 @@ describe("outbound-runner — idempotency cache", () => {
     const adapters = new Map([[adapterId, adapter]])
     const key = crypto.randomUUID()
 
-    // Use a persistent runner so the idempotency LRU cache survives across
-    // the two enqueue calls.
-    const controller = new AbortController()
-    const promise = startOutboundRunner({
-      adapters,
-      pollIntervalMs: 1,
-      signal: controller.signal,
-      jitter: () => 0,
-    })
+    // Keep the runner alive so the second job exercises its in-memory LRU.
+    const { promise, stop } = createRunner(adapters)
+    try {
+      await enqueue(adapterId, `telegram:${adapterId}:chat`, key)
+      await waitForJobs((rows) => rows.length === 1 && rows[0].status === "sent")
+      expect(callCount).toBe(1)
 
-    // Enqueue the first job and wait for it to be sent
-    await enqueue(adapterId, `telegram:${adapterId}:chat`, key)
-    await new Promise<void>((resolve) => setTimeout(resolve, 80))
-    expect(callCount).toBe(1)
+      await enqueue(adapterId, `telegram:${adapterId}:chat`, key)
+      const jobs = await waitForJobs(
+        (rows) => rows.length === 2 && rows.every((job) => job.status === "sent")
+      )
 
-    // Enqueue a second job with the SAME idempotency key
-    await enqueue(adapterId, `telegram:${adapterId}:chat`, key)
-    await new Promise<void>((resolve) => setTimeout(resolve, 80))
-
-    controller.abort()
-    await promise
-
-    // adapter.send should NOT be called again — idempotency cache hit
-    expect(callCount).toBe(1)
-
-    const jobs = await getDb().outboundQueue.toArray()
-    expect(jobs.every((j) => j.status === "sent")).toBe(true)
+      expect(callCount).toBe(1)
+      expect(jobs.every((job) => job.status === "sent")).toBe(true)
+    } finally {
+      stop()
+      await promise
+    }
   })
 })
 
@@ -849,12 +867,9 @@ describe("ConversationLane — FIFO ordering", () => {
     lane.enqueue(async () => {
       results.push(2)
     })
-    lane.enqueue(async () => {
+    await lane.enqueue(async () => {
       results.push(3)
     })
-
-    // Wait for the lane to drain
-    await new Promise<void>((r) => setTimeout(r, 50))
     expect(results).toEqual([1, 2, 3])
   })
 
@@ -866,11 +881,9 @@ describe("ConversationLane — FIFO ordering", () => {
       results.push("a")
       throw new Error("boom")
     })
-    lane.enqueue(async () => {
+    await lane.enqueue(async () => {
       results.push("b")
     })
-
-    await new Promise<void>((r) => setTimeout(r, 50))
     expect(results).toEqual(["a", "b"])
   })
 })
@@ -934,18 +947,8 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
 
     await runOnce(adapters)
 
-    // The poll loop aborts after 80 ms, but the per-conversation lanes keep
-    // processing in-flight jobs asynchronously. Poll until all 4 jobs reach a
-    // terminal state instead of relying on the fixed wall-clock window — the
-    // 80 ms ceiling flakes under jest worker contention.
-    let jobs: OutboundJobRow[] = []
-    let sentJobs: OutboundJobRow[] = []
-    for (let i = 0; i < 50; i++) {
-      jobs = await getDb().outboundQueue.toArray()
-      sentJobs = jobs.filter((j) => j.status === "sent")
-      if (sentJobs.length === 4) break
-      await new Promise<void>((r) => setTimeout(r, 20))
-    }
+    const jobs = await getDb().outboundQueue.toArray()
+    const sentJobs = jobs.filter((job) => job.status === "sent")
 
     expect(sentJobs.length).toBe(4)
 
@@ -1241,10 +1244,10 @@ async function waitForJobs(
   let jobs: OutboundJobRow[] = []
   for (let i = 0; i < 50; i++) {
     jobs = await getDb().outboundQueue.toArray()
-    if (predicate(jobs)) break
+    if (predicate(jobs)) return jobs
     await new Promise<void>((r) => setTimeout(r, 20))
   }
-  return jobs
+  throw new Error(`Outbound queue condition did not settle: ${JSON.stringify(jobs)}`)
 }
 
 describe("outbound-runner — structural scheduler budgets", () => {
@@ -1844,7 +1847,7 @@ describe("outbound-runner — row-evidence dedupe", () => {
 
 describe("outbound-runner — breaker defer + recovery", () => {
   it("delivers a breaker-deferred job once the cooldown elapses (recovery)", async () => {
-    let t = 1_000_000
+    let t = Date.now()
     const now = () => t
     const adapterId = "a_brk_recover"
     await seedInstance(adapterId, { outboundTuning: { breakerMinEvents: 1 } })
@@ -1864,6 +1867,7 @@ describe("outbound-runner — breaker defer + recovery", () => {
     await new Promise<void>((r) => setTimeout(r, 2))
     await enqueue(adapterId, `telegram:${adapterId}:chat`, "k_rec_2")
 
+    t = Date.now()
     const { promise, stop } = createRunner(adapters, { now })
     try {
       await waitForJobs(
@@ -1977,17 +1981,21 @@ describe("outbound-runner — cross-pass FIFO ordering", () => {
     const olderRetryAt = Date.now() + 60_000
     await markFailed(older.id, "network", "boom", olderRetryAt)
 
+    const drainsBefore = (listDueNow as jest.Mock).mock.calls.length
     const { promise, stop } = createRunner(new Map([[adapterId, adapter]]))
     try {
-      // The newer job must NOT deliver while the older one is unresolved —
-      // it is pushed out to the blocker's retry time instead.
+      // Resolve the true conversation head across two real drain passes.
+      // The newer due row remains pending while its older sibling is deferred;
+      // the scheduler skips that blocked head without rewriting the newer row.
       const blocked = (
-        await waitForJobs((rows) => {
-          const b = rows.find((j) => j.id === newer.id)
-          return !!b && b.nextAttemptAt >= olderRetryAt
-        })
-      ).find((j) => j.id === newer.id)
+        await waitForJobs(
+          (rows) =>
+            (listDueNow as jest.Mock).mock.calls.length >= drainsBefore + 2 &&
+            rows.some((job) => job.id === newer.id && job.status === "pending")
+        )
+      ).find((job) => job.id === newer.id)
       expect(blocked?.status).toBe("pending")
+      expect(blocked?.nextAttemptAt).toBe(newer.nextAttemptAt)
       expect(adapter.send).not.toHaveBeenCalled()
 
       // The older sibling dead-letters → the lane unblocks; make the newer
@@ -2059,18 +2067,32 @@ describe("outbound-runner — drain error visibility", () => {
       throw new Error("dexie exploded")
     })
     try {
-      // pollIntervalMs 1 → dozens of failing drain passes in 120 ms.
-      await runOnce(new Map())
+      const failuresBefore = (listDueNow as jest.Mock).mock.calls.length
+      const { promise, stop } = createRunner(new Map())
+      try {
+        for (let i = 0; i < 100; i++) {
+          if ((listDueNow as jest.Mock).mock.calls.length >= failuresBefore + 3) break
+          await new Promise<void>((resolve) => setTimeout(resolve, 10))
+        }
+        expect((listDueNow as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(
+          failuresBefore + 3
+        )
+      } finally {
+        stop()
+        await promise
+      }
       expect(errorSpy.mock.calls.some((c) => String(c[0]).includes("drain pass failed"))).toBe(true)
       const audits = await listRecent(RUNNER_AUDIT_ID)
       const drainAudits = audits.filter(
         (a) => a.kind === "adapter.error" && a.reason === "drain_failed"
       )
-      // Many passes failed, but the audit is throttled to once per minute.
+      // At least three passes failed, but the audit is throttled to once per minute.
       expect(drainAudits).toHaveLength(1)
       expect(drainAudits[0].message).toContain("dexie exploded")
     } finally {
-      ;(listDueNow as jest.Mock).mockImplementation(() => realListDueNow())
+      ;(listDueNow as jest.Mock).mockImplementation((...args: Parameters<typeof listDueNow>) =>
+        realListDueNow(...args)
+      )
       errorSpy.mockRestore()
     }
   })

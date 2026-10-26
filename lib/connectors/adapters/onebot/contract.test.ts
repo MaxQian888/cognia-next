@@ -437,7 +437,7 @@ describe("OneBot adapter contract suite", () => {
       mockListen.mockImplementation(bus.listenImpl)
       const { adapter } = await setupAdapter(bus, "ob-hist-g")
 
-      // Each command returns a 2-message page; the second returns empty to stop.
+      // A full page must advance the cursor; the second returns empty to stop.
       let call = 0
       mockOnebotSend.mockImplementation(async (_adapterId: string, payload: string) => {
         const c = JSON.parse(payload) as {
@@ -447,34 +447,21 @@ describe("OneBot adapter contract suite", () => {
         }
         expect(c.action).toBe("get_group_msg_history")
         call++
+        expect(c.params.message_seq).toBe(call === 1 ? undefined : 11)
         const messages =
           call === 1
-            ? [
-                {
-                  time: 1700000100,
-                  self_id: 100000,
-                  post_type: "message",
-                  message_type: "group",
-                  message_id: 11,
-                  message_seq: 11,
-                  group_id: 300001,
-                  user_id: 200001,
-                  sender: { user_id: 200001, nickname: "Alice" },
-                  message: [{ type: "text", data: { text: "older-1" } }],
-                },
-                {
-                  time: 1700000200,
-                  self_id: 100000,
-                  post_type: "message",
-                  message_type: "group",
-                  message_id: 12,
-                  message_seq: 12,
-                  group_id: 300001,
-                  user_id: 200001,
-                  sender: { user_id: 200001, nickname: "Alice" },
-                  message: [{ type: "text", data: { text: "older-2" } }],
-                },
-              ]
+            ? Array.from({ length: 20 }, (_, index) => ({
+                time: 1700000100 + index,
+                self_id: 100000,
+                post_type: "message",
+                message_type: "group",
+                message_id: 11 + index,
+                message_seq: 11 + index,
+                group_id: 300001,
+                user_id: 200001,
+                sender: { user_id: 200001, nickname: "Alice" },
+                message: [{ type: "text", data: { text: `older-${index + 1}` } }],
+              }))
             : []
         setTimeout(() => {
           bus.trigger(
@@ -489,7 +476,7 @@ describe("OneBot adapter contract suite", () => {
         collected.push(ev.plainText)
       }
 
-      expect(collected).toEqual(["older-1", "older-2"])
+      expect(collected).toEqual(Array.from({ length: 20 }, (_, index) => `older-${index + 1}`))
       expect(call).toBe(2) // first page yields, second page empties → stops
 
       await adapter.stop()

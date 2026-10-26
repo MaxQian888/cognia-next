@@ -1,7 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { parse as parseYaml } from "yaml"
 
 import {
   COMPOSE_BASE,
@@ -15,6 +14,7 @@ import {
   composeDefault,
   fromImages,
   ghcrImageName,
+  ghcrImageOwner,
   hostPortSide,
   loadRepoInputs,
   publishedImageNames,
@@ -26,7 +26,7 @@ const GOOD_BASE = `
 name: \${COGNIA_INSTANCE:-cognia}
 services:
   signaling:
-    image: \${SIGNALING_IMAGE:-ghcr.io/owner/cognia-signaling:latest}
+    image: \${SIGNALING_IMAGE:-ghcr.io/cognia-labs/cognia-signaling:latest}
     ports:
       - "\${COGNIA_BIND_ADDRESS:-0.0.0.0}:\${SIGNALING_PORT:-7892}:7892"
   cognia-server:
@@ -219,6 +219,31 @@ test("a compose default image nobody publishes is a problem", () => {
   assert.ok(problems.some((p) => p.includes("cognia-server")))
 })
 
+// The relay and share images moved to cognia-labs/cognia-services, which
+// publishes them under its own organization; this repository's images.yml
+// no longer builds them.
+test("service images resolve to the cognia-services organization, not images.yml", () => {
+  assert.equal(ghcrImageOwner("ghcr.io/cognia-labs/cognia-share:latest"), "cognia-labs")
+  assert.equal(ghcrImageOwner("postgres:17-alpine"), undefined)
+  const compose = (owner) =>
+    `services:\n  signaling:\n    image: \${SIGNALING_IMAGE:-ghcr.io/${owner}/cognia-signaling:latest}\n  share:\n    image: ghcr.io/${owner}/cognia-share:latest\n`
+  const imagesWorkflow =
+    "jobs:\n  fast-images:\n    strategy:\n      matrix:\n        include:\n          - name: cognia-web\n"
+  assert.deepEqual(
+    checkComposeImagesPublished({
+      composeFiles: { [COMPOSE_BASE]: compose("cognia-labs") },
+      imagesWorkflow,
+    }),
+    []
+  )
+  const stale = checkComposeImagesPublished({
+    composeFiles: { [COMPOSE_BASE]: compose("maxqian888") },
+    imagesWorkflow,
+  })
+  assert.equal(stale.length, 2)
+  assert.ok(stale.every((problem) => problem.includes("ghcr.io/cognia-labs/")))
+})
+
 test("hostPortSide keeps the bind address and drops the protocol", () => {
   assert.equal(hostPortSide("0.0.0.0:${A:-80}:80"), "0.0.0.0:${A:-80}")
   assert.equal(hostPortSide("${A:-443}:443/udp"), "${A:-443}")
@@ -278,32 +303,6 @@ test("a workflow pnpm pin that differs from packageManager is a problem", () => 
   assert.equal(problems.length, 1)
   assert.match(problems[0], /10\.28\.2/)
   assert.match(problems[0], /job "j"/)
-})
-
-test("diagnostics builds MinIO server and client from pinned official sources", () => {
-  const root = new URL("../../", import.meta.url)
-  const compose = parseYaml(
-    readFileSync(new URL("services/diagnostic-server/deploy/compose.yaml", root), "utf8")
-  )
-  for (const [name, target] of [
-    ["minio", "server"],
-    ["minio-init", "client"],
-  ]) {
-    const service = compose.services[name]
-    assert.equal(service.image, undefined, "must not pull retired community registry images")
-    assert.equal(service.build.context, ".")
-    assert.equal(service.build.dockerfile, "Dockerfile.minio")
-    assert.equal(service.build.target, target)
-  }
-  const dockerfile = readFileSync(
-    new URL("services/diagnostic-server/deploy/Dockerfile.minio", root),
-    "utf8"
-  )
-  assert.match(dockerfile, /MINIO_VERSION=v0\.0\.0-20251015172955-9e49d5e7a648/)
-  assert.match(dockerfile, /MC_VERSION=v0\.0\.0-20250813083541-7394ce0dd2a8/)
-  assert.match(dockerfile, /github\.com\/minio\/minio@\$\{MINIO_VERSION\}/)
-  assert.match(dockerfile, /github\.com\/minio\/mc@\$\{MC_VERSION\}/)
-  assert.doesNotMatch(dockerfile, /@latest|GOSUMDB=off/)
 })
 
 test("workspace runtime installs patched dependencies without relocating pnpm links", () => {

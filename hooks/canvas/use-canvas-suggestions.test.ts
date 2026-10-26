@@ -63,6 +63,12 @@ jest.mock("@cognia/logging", () => ({
 }))
 
 import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { CANVAS_REVIEW_PROMPT } from "@/lib/canvas/ai/suggestion-prompts"
+import {
   useCanvasSuggestions,
   normalizeConfidence,
   sliceContextWindow,
@@ -267,6 +273,65 @@ describe("useCanvasSuggestions", () => {
     expect(generateObjectMock.mock.calls[0][0].system as string).toContain(
       "expert code/text editing assistant"
     )
+  })
+
+  it("renders the suggestion cap into the shipped prompt", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate(
+        { documentId: "doc", language: "ts", content: "x" },
+        { maxSuggestions: 3 }
+      )
+    })
+    expect(generateObjectMock.mock.calls[0][0].system).toBe(
+      `You are an expert code/text editing assistant. Given a document and the user's
+current cursor / selection context, propose AT MOST 3 concise, mechanical suggestions
+that improve correctness, readability, or style.
+
+Quote \`originalText\` verbatim from the document and give the 1-based line range it
+covers. \`confidence\` is how sure you are the change is correct and wanted.
+If no useful suggestion exists, return an empty list.`
+    )
+  })
+
+  it("resolves the review prompt in the canvas document's session", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: CANVAS_REVIEW_PROMPT.id,
+          scope: "session",
+          targetId: "s-1",
+          revisionId: "por-canvas-review-session",
+          body: "Report up to {{N}} security findings: originalText -> suggestedText.",
+          contractVersion: CANVAS_REVIEW_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      generateObjectMock.mockResolvedValue({ object: { suggestions: [] } })
+      const { result } = renderHook(() => useCanvasSuggestions())
+      await act(async () => {
+        await result.current.generate(
+          { documentId: "doc", language: "ts", content: "x" },
+          { mode: "review", promptContext: { sessionId: "s-1", workspaceId: "ws-1" } }
+        )
+      })
+      expect(generateObjectMock.mock.calls[0][0].system).toBe(
+        "Report up to 5 security findings: originalText -> suggestedText."
+      )
+      await act(async () => {
+        await result.current.generate(
+          { documentId: "doc", language: "ts", content: "x" },
+          { mode: "review", promptContext: { sessionId: "s-2" } }
+        )
+      })
+      expect(generateObjectMock.mock.calls[1][0].system).toContain("meticulous reviewer")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("forwards an abort signal so a long review can be cancelled", async () => {

@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import type { TerminalControlState, TerminalReplayGap } from "@/lib/terminal/types"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -62,7 +63,6 @@ beforeEach(() => {
   registry.takeControl.mockReset().mockResolvedValue(undefined)
   registry.releaseControl.mockReset().mockResolvedValue(undefined)
   registry.listeners.clear()
-  jest.spyOn(window, "confirm").mockReturnValue(true)
 })
 
 afterEach(() => {
@@ -151,25 +151,53 @@ describe("TerminalSessionChip", () => {
     expect(screen.getByTestId("terminal-session-chip")).toHaveAttribute("data-collapsed", "false")
   })
 
-  it("offers take-control to a viewer and honours a declined confirm", () => {
-    renderChip({ controlState: viewer })
-    fireEvent.click(screen.getByTestId("terminal-session-chip"))
+  /** The chip as it is mounted: beside the terminal container with xterm's input. */
+  function renderBesideTerminal(props: Partial<React.ComponentProps<typeof TerminalSessionChip>>) {
+    return render(
+      <div>
+        <div data-testid="terminal-instance">
+          <textarea className="xterm-helper-textarea" aria-label="terminal input" />
+        </div>
+        <TerminalSessionChip
+          sessionId="s-1"
+          controlState={controller}
+          replayGap={null}
+          {...props}
+        />
+      </div>
+    )
+  }
 
-    jest.spyOn(window, "confirm").mockReturnValue(false)
-    fireEvent.click(screen.getByTestId("terminal-chip-take-control"))
+  it("offers take-control to a viewer and honours a declined confirm", async () => {
+    const user = userEvent.setup()
+    renderBesideTerminal({ controlState: viewer })
+    await user.click(screen.getByTestId("terminal-session-chip"))
+    await user.click(screen.getByTestId("terminal-chip-take-control"))
+    const dialog = await screen.findByTestId("terminal-chip-take-control-confirm")
+    expect(dialog).toHaveAttribute("role", "alertdialog")
+    // The details popover stays open underneath the question.
+    expect(screen.getByTestId("terminal-session-chip-details")).toBeInTheDocument()
+    await user.click(within(dialog).getByTestId("terminal-chip-take-control-confirm-cancel"))
     expect(registry.takeControl).not.toHaveBeenCalled()
+    // Cancelling hands the keyboard back to the terminal, not to the chip.
+    await waitFor(() => expect(screen.getByLabelText("terminal input")).toHaveFocus())
 
-    jest.spyOn(window, "confirm").mockReturnValue(true)
-    fireEvent.click(screen.getByTestId("terminal-chip-take-control"))
-    expect(registry.takeControl).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByTestId("terminal-session-chip"))
+    await user.click(screen.getByTestId("terminal-chip-take-control"))
+    await user.click(await screen.findByTestId("terminal-chip-take-control-confirm-confirm"))
+    await waitFor(() => expect(registry.takeControl).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByLabelText("terminal input")).toHaveFocus())
   })
 
-  it("offers release-control to the controller — the first UI to call it", () => {
+  it("offers release-control to the controller — the first UI to call it", async () => {
+    const user = userEvent.setup()
     registry.info = sessionInfo({ currentController: "local" })
-    renderChip({ controlState: controller })
-    fireEvent.click(screen.getByTestId("terminal-session-chip"))
-    fireEvent.click(screen.getByTestId("terminal-chip-release-control"))
-    expect(registry.releaseControl).toHaveBeenCalledTimes(1)
+    renderBesideTerminal({ controlState: controller })
+    await user.click(screen.getByTestId("terminal-session-chip"))
+    await user.click(screen.getByTestId("terminal-chip-release-control"))
+    expect(registry.releaseControl).not.toHaveBeenCalled()
+    await user.click(await screen.findByTestId("terminal-chip-release-control-confirm-confirm"))
+    await waitFor(() => expect(registry.releaseControl).toHaveBeenCalledTimes(1))
   })
 
   it("hides release-control when nobody holds the lease", () => {

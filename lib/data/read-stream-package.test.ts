@@ -2,10 +2,10 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDb } from "@/lib/db/schema"
 import { putSessionAsset, getSessionAsset } from "@/lib/db/session-assets"
 import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
-import { buildBackupStream } from "./build-stream"
+import { buildBackupStream, buildBackupSections } from "./build-stream"
 import { buildBackupPackage, BackupRequiresStreamError } from "./build-package"
 import { readStreamPackage } from "./read-stream-package"
-import { createBackupStream } from "./stream-format"
+import { createBackupStream, type BackupStreamSection } from "./stream-format"
 import { applyBackupPackage } from "./apply-package"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -13,6 +13,66 @@ const fixture = createDbTestFixture()
 beforeAll(fixture.initialize)
 beforeEach(fixture.restore)
 afterAll(fixture.dispose)
+
+it("sessions-only streaming never exports a new session whose organizational parents were not emitted", async () => {
+  const sections: BackupStreamSection[] = []
+  for await (const section of buildBackupSections(
+    { includeSessions: true, includeApiKey: false, includeCoreData: false },
+    { storage: null }
+  )) {
+    sections.push(section)
+    if (section.section === "sessionFolders") {
+      const date = new Date("2026-10-21T00:00:00.000Z")
+      await getDb().table("projects").put({
+        id: "late-project",
+        name: "Late",
+        roots: [],
+        knowledgeBase: [],
+        sessionIds: [],
+        sessionCount: 0,
+        messageCount: 0,
+        createdAt: date,
+        updatedAt: date,
+        lastAccessedAt: date,
+      })
+      await getDb().sessionFolders.put({
+        id: "late-folder",
+        projectId: "late-project",
+        name: "Late",
+        order: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await getDb().sessions.put({
+        id: "late-organized",
+        kind: "direct",
+        title: "Late",
+        projectId: "late-project",
+        folderId: "late-folder",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
+  }
+  const restored = await readStreamPackage(
+    createBackupStream({
+      manifest: {
+        traceId: "late-parents",
+        exportedAt: "2026-10-21T00:00:00.000Z",
+        appVersion: "test",
+        backend: "web-dexie",
+        sourceSchemaVersion: getDb().verno,
+      },
+      sections: (async function* () {
+        yield* sections
+      })(),
+    })
+  )
+  const late = restored.pkg.payload.sessions?.find((session) => session.id === "late-organized")
+  expect(late).toBeDefined()
+  expect(late?.projectId).toBeUndefined()
+  expect(late?.folderId).toBeUndefined()
+})
 
 it("restores encrypted stream metadata and binary attachments through the atomic package importer", async () => {
   await getDb().sessions.put({
@@ -148,4 +208,69 @@ it("rejects oversized sources in string-only share and remote packages before re
   await expect(
     buildBackupPackage({ includeSessions: true, includeApiKey: false })
   ).rejects.toBeInstanceOf(BackupRequiresStreamError)
+})
+
+test("excludes messages created after their parent session section was exported", async () => {
+  const db = getDb()
+  await db.sessions.put({
+    id: "before",
+    title: "Existing session",
+    kind: "direct",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  let inserted = false
+  async function* interleavedSections(): AsyncIterable<BackupStreamSection> {
+    for await (const section of buildBackupSections({
+      includeSessions: true,
+      includeApiKey: false,
+      includeCoreData: false,
+      includeSettings: false,
+      includePlugins: false,
+      includeLocalStorage: false,
+    })) {
+      yield section
+      if (section.section === "sessions" && !inserted) {
+        inserted = true
+        // Models normal user writes while the exporter waits for its next section.
+        await db.sessions.put({
+          id: "late",
+          title: "Created during backup",
+          kind: "direct",
+          createdAt: 2,
+          updatedAt: 2,
+        })
+        await db.messages.put({
+          id: "late-message",
+          sessionId: "late",
+          role: "user",
+          parts: [{ type: "text", text: "Typed during backup" }],
+          createdAt: 2,
+        })
+      }
+    }
+  }
+  const restored = await readStreamPackage(
+    createBackupStream({
+      manifest: {
+        traceId: "concurrent-audit",
+        exportedAt: "2026-10-21T00:00:00.000Z",
+        appVersion: "audit",
+        backend: "web-dexie",
+        sourceSchemaVersion: db.verno,
+      },
+      sections: interleavedSections(),
+    })
+  )
+  expect(restored.pkg.payload.sessions?.map((row) => row.id)).toEqual(["before"])
+  expect(restored.pkg.payload.messages ?? []).toEqual([])
+  await db.messages.clear()
+  await db.sessions.clear()
+  await applyBackupPackage(
+    restored.pkg,
+    { mergeStrategy: "overwrite", includeSessions: true, includeApiKey: false },
+    { ...restored.extras, storage: null, projectMcp: async () => [] }
+  )
+  expect(await db.messages.get("late-message")).toBeUndefined()
+  expect(await db.sessions.get("late")).toBeUndefined()
 })

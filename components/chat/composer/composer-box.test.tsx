@@ -5,7 +5,7 @@ import type { ReactElement } from "react"
 import { createRef } from "react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { ComposerBox, type ComposerBoxProps } from "./composer-box"
+import { ComposerBox, composerNoticeVars, type ComposerBoxProps } from "./composer-box"
 import { resolveComposerSkin, type ComposerSkinId } from "@/lib/chat/composer-skin"
 
 // The box is presentational, but its children are not: the attach menus, the
@@ -124,6 +124,47 @@ function render(ui: ReactElement) {
 function box() {
   return document.querySelector("[data-composer-layout]") as HTMLElement
 }
+
+describe("composer notice geometry", () => {
+  it.each([
+    ["classic", 18, 8],
+    ["airy", 22, 8],
+    ["dense", 14, 5],
+    ["full", 22, 7],
+    ["focus", 21, 8],
+    ["sharp", 14, 0],
+  ] as const)("aligns notices with the %s input", (id, inset, radius) => {
+    const skin = resolveComposerSkin({ skin: id }, { isMobile: false })
+    expect(composerNoticeVars(skin, skin.compactLayout)).toEqual({
+      "--composer-notice-inset": `${inset}px`,
+      "--composer-notice-radius": `${radius}px`,
+    })
+  })
+
+  it("follows compact Classic's actual padding and attachment position", () => {
+    const skin = resolveComposerSkin({ skin: "classic" }, { isMobile: true })
+    expect(composerNoticeVars(skin, true)["--composer-notice-inset"]).toBe("18px")
+    expect(composerNoticeVars(skin, true, { isMobile: true })["--composer-notice-inset"]).toBe(
+      "22px"
+    )
+    expect(
+      composerNoticeVars(skin, true, { isMobile: true, nativeShell: true })[
+        "--composer-notice-inset"
+      ]
+    ).toBe("28px")
+  })
+
+  it("honours custom square corners and wide padding", () => {
+    const skin = resolveComposerSkin(
+      { skin: "airy", skinOverrides: { radiusPx: 0, padXPx: 24 } },
+      { isMobile: false }
+    )
+    expect(composerNoticeVars(skin, skin.compactLayout)).toEqual({
+      "--composer-notice-inset": "30px",
+      "--composer-notice-radius": "0px",
+    })
+  })
+})
 
 describe("ComposerBox — arrangement", () => {
   it("renders the textarea with the caller's placeholder", () => {

@@ -28,7 +28,7 @@ import type { LogtoClientConfig } from "@/lib/logto/client"
 
 export const OFFICIAL_ISSUER_DEFAULT = "https://id.cognia.cn/api/auth"
 export const OFFICIAL_AUDIENCE_DEFAULT = "https://sync.cognia.cn"
-/** The account sync Worker (ADR-0215 phase 2, `services/sync-server`). */
+/** The account sync Worker (ADR-0215 phase 2, `cognia-services/services/sync-server`). */
 export const OFFICIAL_SYNC_URL_DEFAULT = "https://sync.cognia.cn"
 /** Desktop, phone and CLI: a public PKCE client with native redirects. */
 export const OFFICIAL_NATIVE_CLIENT_ID = "cognia-app"

@@ -83,7 +83,7 @@ jest.mock("@/lib/ai/media/provider-generation", () => ({
   generateProviderImage: jest.fn(),
 }))
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       defaultProvider: "openai",
@@ -100,8 +100,8 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-const mockUseSettingsStoreGetState = jest.requireMock("@/stores").useSettingsStore
-  .getState as jest.Mock
+const mockUseSettingsStoreGetState = jest.requireMock("@/stores/settings/settings-store")
+  .useSettingsStore.getState as jest.Mock
 
 class MockOffscreenCanvas {
   public width: number
@@ -1018,6 +1018,36 @@ describe("Media Registry", () => {
 
       expect(removeRequest.body.get("prompt")).toContain("Remove the background")
       expect(enhanceRequest.body.get("prompt")).toContain("restore")
+    })
+
+    it("sends the account's Prompt Center override for background removal", async () => {
+      const { __setPromptOverrideSnapshotForTests, buildPromptOverrideSnapshot } =
+        await import("@/lib/prompts/snapshot")
+      const { __resetPromptVerdictsForTests } = await import("@/lib/prompts/resolve")
+      const { REMOVE_BACKGROUND_PROMPT } = await import("@/lib/chat/image-edit/prompts")
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob",
+            promptId: REMOVE_BACKGROUND_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-remove-background-media-api",
+            body: "Isolate the subject on transparency.",
+            contractVersion: REMOVE_BACKGROUND_PROMPT.contractVersion,
+          },
+        ])
+      )
+      try {
+        mockImageEditResponse()
+        const api = createMediaAPI(testPluginId, {} as never)
+        await api.ai.removeBackground(createTestImageData())
+        const removeRequest = (proxyFetch as jest.Mock).mock.calls[0][1] as { body: FormData }
+        expect(removeRequest.body.get("prompt")).toBe("Isolate the subject on transparency.")
+      } finally {
+        __setPromptOverrideSnapshotForTests(null)
+        __resetPromptVerdictsForTests()
+      }
     })
 
     it("routes variation and inpaint requests with prompt and mask payloads", async () => {

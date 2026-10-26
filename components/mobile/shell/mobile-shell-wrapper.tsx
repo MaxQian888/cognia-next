@@ -129,24 +129,6 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     )
   }, [compactShell, pathname])
 
-  // Desktop pass-through: skip the compact-only providers (OfflineBanner,
-  // tab bar) and the `min-h-[100dvh]` viewport reservation so
-  // `DesktopAppShell` owns the entire layout. The thin wrapper div is kept so
-  // existing tests / dev tools can still locate the shell.
-  if (!compactShell) {
-    return (
-      <div
-        data-testid="mobile-shell-wrapper"
-        className={cn("contents", className)}
-        data-platform={platform}
-        data-compact-shell="false"
-        data-tab-bar-visible="false"
-      >
-        {children}
-      </div>
-    )
-  }
-
   const mergedBadges: Partial<Record<TabId, number>> = {
     ...(badges ?? {}),
     chat: (badges?.chat ?? 0) + unreadCounts.chat,
@@ -163,13 +145,15 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
       data-testid="mobile-shell-wrapper"
       className={cn("contents", className)}
       data-platform={platform}
-      data-compact-shell="true"
+      data-compact-shell={compactShell ? "true" : "false"}
       data-tab-bar-visible={showTabBar ? "true" : "false"}
-      data-full-viewport={fullViewport ? "true" : "false"}
-      data-keyboard-visible={keyboard.isVisible ? "true" : "false"}
+      data-full-viewport={compactShell ? String(fullViewport) : undefined}
+      data-keyboard-visible={compactShell ? String(keyboard.isVisible) : undefined}
     >
       <div
         className={cn(
+          // Keep the route at this same React position at every width. Only
+          // the compact owner gives this container a layout box.
           // A viewport-owning route is sized to what is VISIBLE while the
           // keyboard is open: `--visual-viewport-height` is the measured
           // `visualViewport.height`, published by the keyboard store only
@@ -178,9 +162,11 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
           // WebView (Capacitor), the browser overlaying it (PWA / iOS) — and
           // unlike `100dvh` it cannot lag a frame resize. Closed, the var is
           // unset and the column is `100dvh` as before.
-          fullViewport
-            ? "flex h-[var(--visual-viewport-height,100dvh)] flex-col overflow-hidden"
-            : "min-h-[100dvh]",
+          !compactShell
+            ? "contents"
+            : fullViewport
+              ? "flex h-[var(--visual-viewport-height,100dvh)] flex-col overflow-hidden"
+              : "min-h-[100dvh]",
           showTabBar && !keyboard.isVisible
             ? "pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
             : null
@@ -199,6 +185,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         // zoom, a late viewport restore) swapped the 56px + inset reserve for
         // a few pixels and left the last row of every page under the bar.
         style={
+          compactShell &&
           !fullViewport &&
           keyboard.keyboardHeight > 0 &&
           (keyboard.isVisible || !showTabBar)
@@ -206,13 +193,13 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
             : undefined
         }
       >
-        <OfflineBanner />
+        {compactShell ? <OfflineBanner /> : null}
         {/* The mobile half of the mount in `DesktopAppShell` — the first-run
           residual notice (ADR-0122). A row of the shell's own column, like the
           offline banner beside it, so it reads as chrome at the top of the
           screen instead of a strip appended below a `min-h-[100dvh]` page
           where nobody scrolls to find it. Self-hides on chrome-free routes. */}
-        <FinishSetupBar />
+        {compactShell ? <FinishSetupBar /> : null}
         {children}
       </div>
       {/* Native only. The automation HITL prompt answers an OS-level consent
@@ -224,16 +211,16 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
           renders only on `/`, while the terminal at `/me/terminal` is one of
           the two places a file link is clicked. Self-gating on its own store,
           so an unopened viewer costs nothing. */}
-      <FileViewerDialog />
+      {compactShell ? <FileViewerDialog /> : null}
       {/* Same reason as the file viewer above: the compact shell never
           reaches `DesktopAppShell`, and the palette that asks for these is
           mounted on every route here. */}
-      <WorkspaceDialogHost />
+      {compactShell ? <WorkspaceDialogHost /> : null}
       {/* Same reasoning for the unified global search (ADR-0129): ⌘K and the
           `command-palette-request` seam must answer on `/settings`, `/inbox`
           and `/me/*` too. The host renders nothing on `/`, where
           `AppShellMobile` mounts the picker-aware palette instead. */}
-      <MobileGlobalSearchHost />
+      {compactShell ? <MobileGlobalSearchHost /> : null}
       {showTabBar ? <MobileTabBar badges={mergedBadges} keyboardHidden={keyboard.isVisible} /> : null}
     </div>
   )

@@ -186,7 +186,14 @@ describe("usePetScheduledReminder", () => {
   })
 })
 
-it.each(["provider-diagnostics-refresh", "connection:presence:refresh"] as const)(
+it.each([
+  "provider-diagnostics-refresh",
+  "connection:presence:refresh",
+  "github-issue-sync",
+  "files-trash-purge",
+  "harness-evolution-sweep",
+  "connection:housekeeping:clock",
+] as const)(
   "does not remind for legacy maintenance task %s without an explicit opt-in",
   async (type) => {
     const notifyDue = jest.fn().mockResolvedValue(true)

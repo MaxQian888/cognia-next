@@ -18,7 +18,7 @@
  *   })
  */
 
-import type { CustomImporter } from "@/types/plugin/plugin"
+import type { CustomImporter } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineImporter<T = unknown>(importer: CustomImporter<T>): CustomImporter<T> {
   return importer

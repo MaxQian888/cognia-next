@@ -697,11 +697,10 @@ function RailMoreButton({
           style={railEdgeStyle(overlaySide)}
         />
       ) : null}
-      {pending ? (
-        <Spinner className="relative size-[18px]" />
-      ) : (
-        <EllipsisIcon className="relative size-[18px]" />
-      )}
+      <span className="relative flex items-center justify-center">
+        <EllipsisIcon className={cn(RAIL_ICON_CLASS, pending && "invisible")} />
+        {pending ? <Spinner className={cn(RAIL_ICON_CLASS, "absolute inset-0 m-auto")} /> : null}
+      </span>
       {hasBadge ? (
         <span
           aria-hidden
@@ -817,7 +816,13 @@ function RailButtonBase({
             />
           ) : null}
           <span className="relative flex items-center justify-center">
-            {pending ? <Spinner className={RAIL_ICON_CLASS} /> : children}
+            {/* Keep artwork and avatars in flow so loading cannot resize the slot. */}
+            <span className={cn("flex items-center justify-center", pending && "invisible")}>
+              {children}
+            </span>
+            {pending ? (
+              <Spinner className={cn(RAIL_ICON_CLASS, "absolute inset-0 m-auto")} />
+            ) : null}
           </span>
           {showBadge ? (
             // Corner pill, outside the icon's optical square so it never sits

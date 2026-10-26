@@ -2,6 +2,11 @@ import { AutoOrchestrationPiiError, planAutoOrchestration } from "./auto-orchest
 import { EMPTY_CAPABILITY_CATALOG, gatherCapabilityCatalog } from "./capability-catalog"
 import { gatherTwinRoster } from "./twin-roster"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { DECOMPOSE_TASKS_PROMPT } from "./decompose-tasks"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 
 jest.mock("./capability-catalog", () => {
   const actual = jest.requireActual("./capability-catalog")
@@ -250,5 +255,49 @@ describe("planAutoOrchestration", () => {
       client: stagedClient({ assess: '{"recommendedPattern":"manager_worker"}' }),
     })
     expect(ensemble.executor?.kind).toBe("ensemble")
+  })
+})
+
+describe("planAutoOrchestration prompt snapshot (ADR-0236)", () => {
+  afterEach(() => __setPromptOverrideSnapshotForTests(null))
+
+  it("plans every stage against one snapshot, even if a publish lands mid-run", async () => {
+    const overrideOf = (body: string) =>
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: DECOMPOSE_TASKS_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: `por-${body.length}`,
+          body,
+          contractVersion: DECOMPOSE_TASKS_PROMPT.contractVersion,
+        },
+      ])
+    __setPromptOverrideSnapshotForTests(
+      overrideOf('Plan tiny steps. {"tasks": [{"assignedTo": 0, "dependencies": []}]}')
+    )
+    const systems: string[] = []
+    await planAutoOrchestration({
+      objective: "Ship the release notes",
+      catalog: EMPTY_CAPABILITY_CATALOG,
+      twinRoster: [],
+      now: () => NOW,
+      client: {
+        complete: async (_prompt, options) => {
+          systems.push(options?.system ?? "")
+          // A publish between the first stage and the last.
+          if (systems.length === 1) {
+            __setPromptOverrideSnapshotForTests(
+              overrideOf(
+                'Plan huge steps instead. {"tasks": [{"assignedTo": 0, "dependencies": []}]}'
+              )
+            )
+          }
+          return "{}"
+        },
+      },
+    })
+    expect(systems.at(-1)).toContain("Plan tiny steps.")
   })
 })

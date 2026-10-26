@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { A2UICombobox, type A2UIComboboxComponent } from "./a2ui-combobox"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -35,6 +35,46 @@ describe("A2UICombobox", () => {
     onAction: jest.fn(),
     onDataChange: jest.fn(),
     renderChild: jest.fn(),
+  })
+
+  it("keeps options closed until opened and filters by their labels", async () => {
+    const props = cp({
+      id: "search",
+      component: "Combobox",
+      options: [
+        { value: "us", label: "United States" },
+        { value: "cn", label: "China" },
+      ],
+      value: { path: "/country" },
+      label: "Country",
+      searchPlaceholder: "Find country",
+    })
+    render(<A2UICombobox {...props} />)
+    expect(screen.queryByRole("option")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("combobox", { name: "Country" }))
+    const input = await screen.findByPlaceholderText("Find country")
+    fireEvent.change(input, { target: { value: "China" } })
+    await waitFor(() =>
+      expect(screen.queryByRole("option", { name: "United States" })).not.toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole("option", { name: "China" }))
+    expect(props.onDataChange).toHaveBeenCalledWith("/country", "cn")
+  })
+
+  it("disables the trigger and prevents opening", () => {
+    render(
+      <A2UICombobox
+        {...cp({
+          id: "disabled",
+          component: "Combobox",
+          options: [{ value: "x", label: "Option" }],
+          value: "",
+          disabled: true,
+          label: "Locked",
+        })}
+      />
+    )
+    expect(screen.getByRole("combobox", { name: "Locked" })).toBeDisabled()
   })
 
   it("renders with placeholder", () => {

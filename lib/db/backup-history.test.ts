@@ -20,6 +20,20 @@ beforeEach(dbFixture.restore)
 afterAll(dbFixture.dispose)
 
 describe("appendBackupHistory", () => {
+  it("persists the explicit producer separately from scheduled type and destination", async () => {
+    const row = await appendBackupHistory({
+      completedAt: 100,
+      type: "scheduled",
+      success: true,
+      encryption: "auto-key",
+      producer: "interval",
+      destination: "local",
+    })
+    expect(await getDb().backupHistory.get(row.id)).toMatchObject({
+      producer: "interval",
+      destination: "local",
+    })
+  })
   it("inserts a row, fills schemaVersion, and returns it", async () => {
     const row = await appendBackupHistory({
       completedAt: 100,

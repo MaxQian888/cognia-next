@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { SandboxPreviewLinksPanel } from "./sandbox-preview-links-panel"
 import { useSandboxPreviewLinks } from "@/hooks/sandbox/use-sandbox-preview-links"
@@ -58,13 +59,17 @@ it("creates a local-owner lease-offset preview and limits expiry choices to an h
     { kind: "localOwner" }
   )
   const choices = screen.getByRole("combobox", { name: en.previews.expiry }) as HTMLSelectElement
-  expect([...choices.options].map((option) => Number(option.value))).toEqual([300, 900, 1800, 3600])
+  expect([...getNativeSelect(choices).options].map((option) => Number(option.value))).toEqual([
+    300, 900, 1800, 3600,
+  ])
 })
 
-it("shares with a paired desktop and lists phones and browsers as inert", () => {
+it("shares with a paired desktop and lists phones and browsers as inert", async () => {
   render(<SandboxPreviewLinksPanel projectId="p" targets={[target]} />)
   const audience = screen.getByRole("combobox", { name: en.previews.audience }) as HTMLSelectElement
-  expect([...audience.options].map((option) => [option.value, option.disabled])).toEqual([
+  expect(
+    [...getNativeSelect(audience).options].map((option) => [option.value, option.disabled])
+  ).toEqual([
     ["localOwner", false],
     ["device:desk", false],
     ["device:phone", true],
@@ -74,10 +79,10 @@ it("shares with a paired desktop and lists phones and browsers as inert", () => 
     "paired-mobile-preview"
   )
   // A manipulated DOM cannot pick a device without the native relay.
-  fireEvent.change(audience, { target: { value: "device:phone" } })
+  fireEvent.change(getNativeSelect(audience), { target: { value: "device:phone" } })
   fireEvent.click(screen.getByRole("button", { name: en.previews.create }))
   expect(create).toHaveBeenLastCalledWith(expect.anything(), { kind: "localOwner" })
-  fireEvent.change(audience, { target: { value: "device:desk" } })
+  await selectOption(audience, "device:desk")
   expect(screen.getByText(en.previews.pairedHelp)).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: en.previews.create }))
   expect(create).toHaveBeenLastCalledWith(expect.anything(), {
@@ -108,15 +113,19 @@ it("shows a paired grant's device and offers no local copy or open", () => {
   expect(screen.getByRole("button", { name: en.previews.revoke })).toBeEnabled()
 })
 
-it("marks numeric fallback inert and never emits it even if the DOM selection is manipulated", () => {
+it("marks numeric fallback inert and never emits it even if the DOM selection is manipulated", async () => {
   render(<SandboxPreviewLinksPanel projectId="p" targets={[target]} />)
-  expect(screen.getByRole("option", { name: en.previews.loopbackOrigin })).toBeDisabled()
+  expect(
+    screen.getByRole("option", { hidden: true, name: en.previews.loopbackOrigin })
+  ).toBeDisabled()
   expect(screen.getByText(en.previews.originHelp)).toHaveAttribute(
     "data-dormant",
     "numeric-preview-origin"
   )
-  fireEvent.change(screen.getByLabelText(en.previews.origin), { target: { value: "loopback" } })
-  fireEvent.change(screen.getByLabelText(en.previews.addressing), { target: { value: "fixed" } })
+  fireEvent.change(getNativeSelect(screen.getByLabelText(en.previews.origin)), {
+    target: { value: "loopback" },
+  })
+  await selectOption(screen.getByLabelText(en.previews.addressing), "fixed")
   fireEvent.click(screen.getByRole("button", { name: en.previews.create }))
   expect(create).toHaveBeenCalledWith(
     expect.objectContaining({ originMode: "localhost", port: { kind: "fixed", port: 20002 } }),

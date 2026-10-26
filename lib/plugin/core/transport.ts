@@ -9,7 +9,7 @@ import {
   PLUGIN_GATEWAY_CLIENT_VERSION,
   PLUGIN_PROTOCOL_VERSION,
   PLUGIN_SDK_VERSION,
-} from "@/packages/plugin-sdk/src/contracts/generated"
+} from "@cognia/plugin-contract/contracts/generated"
 
 async function invokePluginHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   // Always use the shared transport: it resolves to Tauri locally and to the
@@ -207,7 +207,7 @@ export function isIdempotentPluginApi(api: string): boolean {
       loggers.ipc?.warn?.(
         `[plugin-transport] "${api}" has no contract entry; treating it as ` +
           `non-idempotent (no retry). Declare it under \`wireOps\` in ` +
-          `packages/plugin-sdk/contract/catalog.json to get retry behaviour back.`
+          `packages/plugin-contract/contract/catalog.json to get retry behaviour back.`
       )
     }
     return false

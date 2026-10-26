@@ -81,9 +81,18 @@ interface PendingRun {
 }
 const pendingRuns = new Map<string, PendingRun>()
 
+/**
+ * Abort controllers for external runs in flight, keyed by delegationId.
+ * `cancelDelegation` aborts through here: the signal handed to
+ * `ExternalAgentManager.execute` is what makes the manager cancel the agent's
+ * session, so a cancel that only flipped the record left the agent running.
+ */
+const externalRunControllers = new Map<string, AbortController>()
+
 /** Test-only: drop all stashed pending runs so suites start clean. */
 export function __resetPendingDelegationRunsForTesting(): void {
   pendingRuns.clear()
+  externalRunControllers.clear()
 }
 
 /**
@@ -100,6 +109,16 @@ function runBackgroundDelegation(
 ): Promise<TeamDelegationRecord | undefined> {
   const store = useAgentTeamStore.getState()
   const hooks = getPluginLifecycleHooks()
+  // `cancelDelegation` settles the record itself. A twin delegation cancelled
+  // while its persona was still loading reaches here with no agent registered
+  // for the cancel to stop, so it must not start; a run that ends after the
+  // cancel only releases its agent, without a second complete hook.
+  const isCancelled = () =>
+    useAgentTeamStore.getState().delegations[delegationId]?.status === "cancelled"
+  if (isCancelled()) {
+    pendingRuns.delete(delegationId)
+    return Promise.resolve(useAgentTeamStore.getState().delegations[delegationId])
+  }
   const signal = getBackgroundAgentManager().registerAgent(agentId, {
     label: `team-delegation:${delegationId}`,
     kind: "team-delegation",
@@ -108,13 +127,21 @@ function runBackgroundDelegation(
   return (async (): Promise<TeamDelegationRecord | undefined> => {
     try {
       const result = await executeAgent(prompt, { systemPrompt, abortSignal: signal })
+      if (isCancelled()) {
+        getBackgroundAgentManager().finishAgent(agentId, { text: result.text })
+        return useAgentTeamStore.getState().delegations[delegationId]
+      }
       const finalStatus: TeamDelegationStatus = signal.aborted ? "cancelled" : "completed"
       store.updateDelegationStatus(delegationId, finalStatus, result.text)
       getBackgroundAgentManager().finishAgent(agentId, { text: result.text })
       hooks.dispatchOnTeamDelegationComplete({ delegationId, status: finalStatus })
     } catch (err) {
-      const status: TeamDelegationStatus = signal.aborted ? "cancelled" : "failed"
       const message = err instanceof Error ? err.message : String(err)
+      if (isCancelled()) {
+        getBackgroundAgentManager().finishAgent(agentId, { error: message })
+        return useAgentTeamStore.getState().delegations[delegationId]
+      }
+      const status: TeamDelegationStatus = signal.aborted ? "cancelled" : "failed"
       store.updateDelegationStatus(delegationId, status, message)
       getBackgroundAgentManager().finishAgent(agentId, { error: message })
       hooks.dispatchOnTeamDelegationComplete({ delegationId, status })
@@ -138,12 +165,20 @@ function runExternalDelegation(
   sourceTeamId: string,
   timeoutMs: number = DEFAULT_DELEGATION_TIMEOUT_MS
 ): Promise<TeamDelegationRecord | undefined> {
+  // One signal for both ways a run ends early: the watchdog and a cancel.
+  const controller = new AbortController()
+  externalRunControllers.set(delegationId, controller)
+  let timedOut = false
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  timeoutSignal.addEventListener("abort", () => {
+    timedOut = true
+    controller.abort(timeoutSignal.reason)
+  })
+  // `cancelDelegation` already settled the record; whatever the run returns
+  // afterwards (an abort error, or a result that raced the cancel) is dropped.
+  const cancelled = () => controller.signal.aborted && !timedOut
+  const current = () => useAgentTeamStore.getState().delegations[delegationId]
   return (async (): Promise<TeamDelegationRecord | undefined> => {
-    let timedOut = false
-    const timeoutSignal = AbortSignal.timeout(timeoutMs)
-    timeoutSignal.addEventListener("abort", () => {
-      timedOut = true
-    })
     try {
       const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
       const workingDirectory = useAgentTeamStore.getState().teams[sourceTeamId]?.config?.workingDir
@@ -151,11 +186,13 @@ function runExternalDelegation(
       // environment (ADR-0224 A8); a refusal fails the delegation.
       const { placeDispatchedAgent } = await import("@/lib/sandbox/host-agent-placement")
       await placeDispatchedAgent(targetAgentId, workingDirectory, getExternalAgentManager())
+      if (cancelled()) return current()
       const result = await getExternalAgentManager().execute(targetAgentId, prompt, {
         systemPrompt,
         ...(workingDirectory ? { workingDirectory } : {}),
-        signal: timeoutSignal,
+        signal: controller.signal,
       })
+      if (cancelled()) return current()
       if (!result.success) {
         return settleTeamDelegation(
           delegationId,
@@ -165,10 +202,12 @@ function runExternalDelegation(
       }
       return settleTeamDelegation(delegationId, "completed", result.finalResponse ?? "")
     } catch (err) {
+      if (cancelled()) return current()
       const message = err instanceof Error ? err.message : String(err)
       return settleTeamDelegation(delegationId, timedOut ? "timeout" : "failed", message)
     } finally {
       pendingRuns.delete(delegationId)
+      externalRunControllers.delete(delegationId)
     }
   })()
 }
@@ -753,12 +792,20 @@ export function delegateToTeam(input: DelegateToTeamInput): {
   return { delegation, completionPromise }
 }
 
+/**
+ * Settle a self-running delegation once. A record that is already `cancelled`
+ * stays so: the run it aborted (an external agent, a target team) still
+ * returns afterwards, and that late result must neither overwrite the cancel
+ * nor fire a second complete hook.
+ */
 function settleTeamDelegation(
   delegationId: string,
   status: "completed" | "failed" | "cancelled" | "timeout",
   result?: string
 ): TeamDelegationRecord {
   const store = useAgentTeamStore.getState()
+  const existing = store.delegations[delegationId]
+  if (existing?.status === "cancelled") return existing
   store.updateDelegationStatus(delegationId, status, result)
   getPluginLifecycleHooks().dispatchOnTeamDelegationComplete({ delegationId, status })
   return useAgentTeamStore.getState().delegations[delegationId]
@@ -767,22 +814,16 @@ function settleTeamDelegation(
 /**
  * Settle an external delegation once the external runtime returns. The
  * external manager / UI calls this when the run completes; we update the
- * store and fire `onTeamDelegationComplete`.
+ * store and fire `onTeamDelegationComplete`. A cancelled delegation stays
+ * cancelled, as with a self-running delegation's own settle.
  */
 export function completeExternalDelegation(
   delegationId: string,
   status: "completed" | "failed" | "cancelled" | "timeout",
   result?: string
 ): TeamDelegationRecord | undefined {
-  const store = useAgentTeamStore.getState()
-  const current = store.delegations[delegationId]
-  if (!current) return undefined
-  store.updateDelegationStatus(delegationId, status, result)
-  getPluginLifecycleHooks().dispatchOnTeamDelegationComplete({
-    delegationId,
-    status,
-  })
-  return useAgentTeamStore.getState().delegations[delegationId] ?? current
+  if (!useAgentTeamStore.getState().delegations[delegationId]) return undefined
+  return settleTeamDelegation(delegationId, status, result)
 }
 
 /**
@@ -831,9 +872,10 @@ export function approveDelegation(delegationId: string): TeamDelegationRecord | 
 }
 
 /**
- * Cancel an in-flight delegation. Aborts the background-agent signal when
- * applicable, transitions status to `cancelled`. Fires the complete hook
- * so consumers can clean up.
+ * Cancel an in-flight delegation. Aborts the run behind it (the background or
+ * twin agent, the external agent's session, or the target team), transitions
+ * status to `cancelled` and fires the complete hook so consumers can clean up.
+ * The aborted run's own late settle is ignored (`settleTeamDelegation`).
  */
 export function cancelDelegation(delegationId: string): TeamDelegationRecord | undefined {
   const store = useAgentTeamStore.getState()
@@ -843,6 +885,8 @@ export function cancelDelegation(delegationId: string): TeamDelegationRecord | u
   // Drop any stashed run params so a cancelled (esp. deferred) delegation can
   // never be re-dispatched by a later approval.
   pendingRuns.delete(delegationId)
+  // External runs are `sub_agent` records; their controller stops the agent.
+  externalRunControllers.get(delegationId)?.abort(new Error("team delegation cancelled"))
   if (current.targetType === "background" && current.targetId) {
     getBackgroundAgentManager().cancelAgent(current.targetId)
   } else if (current.targetType === "twin" && current.targetId) {

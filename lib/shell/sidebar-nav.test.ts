@@ -118,14 +118,14 @@ describe("getSidebarCatalog", () => {
     const ids = getSidebarCatalog("mobile", runtime).map((item) => item.id)
 
     expect(ids).not.toContain("source-control")
-    expect(ids).not.toContain("browser")
+    expect(ids).toContain("browser")
   })
 
   it("drops desktop-only items on web too (ADR-0059 F5 — no dead ends in a browser)", () => {
     const cat = getSidebarCatalog("web")
     const ids = cat.map((c) => c.id)
     expect(ids).not.toContain("source-control")
-    expect(ids).not.toContain("browser")
+    expect(ids).toContain("browser")
     expect(ids).not.toContain("pet")
     expect(ids).toContain("workflows")
   })

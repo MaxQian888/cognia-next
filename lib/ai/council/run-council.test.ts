@@ -12,11 +12,23 @@ import {
   formatCouncillorResults,
   parseConfidence,
   renderCouncilReport,
-  COUNCIL_SYNTHESIS_SYSTEM,
+  COUNCIL_SYNTHESIS_PROMPT,
   type CouncilOptions,
   type RunCouncilDeps,
   type RunPromptInput,
 } from "./run-council"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
+const COUNCIL_SYNTHESIS_SYSTEM = COUNCIL_SYNTHESIS_PROMPT.defaultBody
 
 /** Fake runPrompt: councillor aliases echo a canned line; the synthesizer
  *  (identified by the synthesis system prompt) returns a report. */
@@ -139,6 +151,33 @@ describe("runCouncil", () => {
     await runCouncil({ ...baseOpts, synthesisInstructions: "Be terse." }, deps)
     const synthCall = calls.find((c) => c.systemPrompt)
     expect(synthCall?.systemPrompt).toMatch(/Additional guidance:\nBe terse\./)
+  })
+
+  it("sends the shipped synthesis prompt when nothing is published", async () => {
+    const { deps, calls } = makeDeps()
+    await runCouncil(baseOpts, deps)
+    expect(calls.find((c) => c.systemPrompt)?.systemPrompt).toBe(COUNCIL_SYNTHESIS_SYSTEM)
+  })
+
+  it("synthesizes with a published override and still appends caller guidance", async () => {
+    const body = "Merge the answers. End with Confidence: unanimous|majority|split."
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: COUNCIL_SYNTHESIS_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-council-synthesis",
+          body,
+          contractVersion: COUNCIL_SYNTHESIS_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const { deps, calls } = makeDeps()
+    await runCouncil({ ...baseOpts, synthesisInstructions: "Be terse." }, deps)
+    const synthCall = calls.find((c) => c.systemPrompt)
+    expect(synthCall?.systemPrompt).toBe(`${body}\n\nAdditional guidance:\nBe terse.`)
   })
 
   it("validates required input", async () => {

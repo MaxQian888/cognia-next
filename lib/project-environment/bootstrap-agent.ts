@@ -483,7 +483,9 @@ export function assertBootstrapEnvironment(
   environment: Pick<
     ProjectEnvironment,
     "bootstrapAgent" | "variables" | "keyringReferences" | "setupScript"
-  >
+  >,
+  /** The system prompt that will be sent; the environment's own by default. */
+  systemPrompt: string | undefined = environment.bootstrapAgent?.systemPrompt
 ): void {
   const agent = environment.bootstrapAgent
   if (!agent) return
@@ -493,7 +495,7 @@ export function assertBootstrapEnvironment(
   // Keep all OS variants comfortably below macOS ARG_MAX and Linux's per-
   // variable limit, including UTF-8 text and JSON escaping overhead.
   const configs = [undefined, "macos", "linux", "windows"].map((os) =>
-    bootstrapConfig(environment, agent, os as ProjectEnvironmentOs | undefined)
+    bootstrapConfig(environment, agent, systemPrompt, os as ProjectEnvironmentOs | undefined)
   )
   const configBytes = configs.reduce(
     (total, config) => total + new TextEncoder().encode(JSON.stringify(config)).byteLength,
@@ -538,6 +540,7 @@ function bootstrapLimits(value: ProjectEnvironmentBootstrapAgent) {
 function bootstrapConfig(
   environment: Pick<ProjectEnvironment, "setupScript" | "keyringReferences">,
   agent: ProjectEnvironmentBootstrapAgent,
+  systemPrompt: string | undefined,
   os?: ProjectEnvironmentOs
 ) {
   const limits = bootstrapLimits(agent)
@@ -553,7 +556,7 @@ function bootstrapConfig(
       requestTimeoutSecs: Math.min(60, limits.totalTimeoutSecs),
       ...agent.modelOptions,
     },
-    ...(agent.systemPrompt !== undefined ? { systemPrompt: agent.systemPrompt } : {}),
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     ...(agent.context !== undefined ? { context: agent.context } : {}),
     ...(agent.tools !== undefined ? { tools: agent.tools } : {}),
     ...(agent.reuse !== undefined ? { reuse: agent.reuse } : {}),
@@ -575,20 +578,27 @@ function quoteSh(value: string): string {
  */
 export function prepareBootstrapExecution(
   environment: ProjectEnvironment,
-  force = false
+  force = false,
+  /**
+   * The system prompt to send, as `resolveBootstrapSystemPrompt` chose it.
+   * Defaults to the environment's own; `undefined` lets the runtime use its
+   * shipped text.
+   */
+  systemPrompt: string | undefined = environment.bootstrapAgent?.systemPrompt
 ): {
   script: ProjectEnvironmentScript
   variables: Record<string, string>
   timeoutSecs: number
 } {
-  assertBootstrapEnvironment(environment)
+  // Checked with the prompt actually sent: an override counts toward the size limit.
+  assertBootstrapEnvironment(environment, systemPrompt)
   const agent = environment.bootstrapAgent
   if (!agent?.enabled) throw new BootstrapAgentValidationError("task")
   const limits = bootstrapLimits(agent)
   const runtime = agent.runtime ?? "native"
   const binary = agent.binary ?? BOOTSTRAP_RUNTIME_BINARIES[runtime]
   const config = (os?: ProjectEnvironmentOs) =>
-    JSON.stringify(bootstrapConfig(environment, agent, os))
+    JSON.stringify(bootstrapConfig(environment, agent, systemPrompt, os))
   const forceArg = force ? " --force" : ""
   const executable = runtime === "bash" ? `bash ${quoteSh(binary)}` : quoteSh(binary)
   const powershell = (name: string, unix: boolean) => {

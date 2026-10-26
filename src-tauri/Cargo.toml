@@ -60,10 +60,10 @@ serde = { workspace = true, features = ["derive"] }
 # `companion_api::output_registry` generates a `Derived` row from the type.
 schemars.workspace = true
 # Shared signaling wire protocol (ADR-0021). Single source of truth for the
-# frame/envelope types, also consumed by the standalone signaling-server and
-# its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
+# frame/envelope types, also consumed by the signaling server and its
+# Cloudflare Worker in cognia-labs/cognia-services. The desktop peer (companion_api::signaling) keeps its
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
-cognia-signaling-core = { path = "../services/signaling-server/core" }
+cognia-signaling-core.workspace = true
 # ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
 cognia-core = { path = "../crates/cognia-core", features = ["rt", "signal"] }
 # ADR-0067 Tier B prep — secret_store/keyring_secrets/api_key foundation.
@@ -250,7 +250,8 @@ thiserror.workspace = true
 # `cli_bridge` (and similar small modules) can use Result<T> + Context
 # without inventing a per-module error enum.
 anyhow.workspace = true
-tauri-plugin-updater = "2"
+# Upstream ZIP 9 security fix; return to crates.io once a fixed release is published.
+tauri-plugin-updater = { version = "2.14.0", git = "https://github.com/tauri-apps/plugins-workspace", rev = "11211c30e71796cd737280303244552bb7f70797" }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-process = "2"

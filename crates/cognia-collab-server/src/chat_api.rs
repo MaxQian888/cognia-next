@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::api::AppState;
 use crate::auth::{authorize_workspace, verify_grant};
 use crate::chat::{
-    authorize_session_action, SessionAction, SessionEvent, SessionRole, SessionStatus,
+    authorize_session_action, can_change_member_role, SessionAction, SessionEvent, SessionRole, SessionStatus,
 };
 use crate::chat_store::{
     ChatAttachment, ChatSessionInvite, NewBreakGlassGrant, NewChatApprovalRequest,
@@ -24,14 +24,16 @@ use crate::chat_store::{
 };
 use crate::socket_hub::{Channels, Expiring, TicketBook};
 use crate::store::{AuthorizationAuditEvent, StoreError};
-use cognia_tenant_auth::{OrgRole, WorkspaceCapability, WorkspaceRole};
+use cognia_tenant_auth::{OrgRole, WorkspaceCapability};
+#[cfg(test)]
+use cognia_tenant_auth::WorkspaceRole;
 
 const SOCKET_TICKET_TTL_MS: i64 = 30_000;
 const LEASE_TOKEN_TTL_MS: i64 = 5 * 60_000;
 const LEASE_HEARTBEAT_TTL_MS: i64 = 90_000;
 const ATTACHMENT_TICKET_TTL_MS: i64 = 60_000;
 pub(crate) const MAX_ATTACHMENT_BYTES: i64 = 52_428_800;
-const SHARED_CHAT_PROTOCOL_VERSION: u32 = 2;
+const SHARED_CHAT_PROTOCOL_VERSION: u32 = crate::admission::COLLAB_PROTOCOL_VERSION;
 const MAX_PENDING_TICKETS: usize = 8_192;
 
 #[derive(Debug, Clone)]
@@ -122,7 +124,7 @@ impl ChatHub {
             .consume_if(value, now, |ticket| ticket.action == action)
     }
 
-    fn revoke_user_tickets(&self, session_id: &str, user_id: &str) {
+    pub(crate) fn revoke_user_tickets(&self, session_id: &str, user_id: &str) {
         self.tickets
             .revoke(|ticket| ticket.session_id == session_id && ticket.user_id == user_id);
         self.attachment_tickets
@@ -323,6 +325,7 @@ impl IntoResponse for ChatFailure {
                 StatusCode::GONE,
                 serde_json::json!({"error":"expired or revoked"}),
             ),
+            Self::Store(StoreError::FeatureUnavailable(decision)) => return crate::admission::response(decision),
             Self::Store(StoreError::Policy(reason)) => (
                 StatusCode::FORBIDDEN,
                 serde_json::json!({"error":"forbidden","reason":reason}),
@@ -335,7 +338,11 @@ impl IntoResponse for ChatFailure {
                 )
             }
         };
-        (status, Json(body)).into_response()
+        let mut response = (status, Json(body)).into_response();
+        if status == StatusCode::NOT_FOUND {
+            response.headers_mut().insert("cache-control", "private, no-store".parse().expect("static header"));
+        }
+        response
     }
 }
 
@@ -345,6 +352,8 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
+/// Legacy 426 floor: RFC 9110 §15.5.22 describes protocol upgrades; plan
+/// A18 records this version-header use as a known wire-compatibility deviation.
 pub(crate) fn require_shared_chat_protocol(headers: &HeaderMap) -> Result<(), ChatFailure> {
     let protocol_version = headers
         .get("x-cognia-collab-protocol")
@@ -787,15 +796,8 @@ async fn enforce_member_role_ceiling(
         .membership(org_id, user_id, Some(workspace_id))
         .await
         .map_err(ChatFailure::Store)?;
-    let allowed = matches!(standing.org_role, Some(OrgRole::Owner | OrgRole::Admin))
-        || match standing.workspace_role {
-            Some(WorkspaceRole::Maintainer) => true,
-            Some(WorkspaceRole::Member) => {
-                matches!(role, SessionRole::Viewer | SessionRole::Member)
-            }
-            Some(WorkspaceRole::Viewer) => role == SessionRole::Viewer,
-            None => false,
-        };
+    let allowed = cognia_tenant_auth::membership::resolve_workspace_access(standing.org_role, standing.workspace_role)
+        .is_some_and(|standing| crate::chat::session_role_rank(role) <= crate::chat::session_role_rank(crate::chat::session_grant_role_ceiling(standing)));
     if allowed {
         Ok(())
     } else {
@@ -847,6 +849,7 @@ async fn put_member(
             body.role,
             body.approver,
             body.guest,
+            &actor.user_id,
             (state.now)(),
         )
         .await
@@ -911,6 +914,7 @@ async fn patch_member(
             body.role,
             body.approver,
             body.guest,
+            &actor.user_id,
             (state.now)(),
         )
         .await
@@ -921,14 +925,6 @@ async fn patch_member(
             .sender(&session_id)
             .send(policy_event(&session_id, &user_id, (state.now)()));
     Ok(Json(member))
-}
-fn can_change_member_role(
-    actor: SessionRole,
-    existing: Option<SessionRole>,
-    requested: SessionRole,
-) -> bool {
-    actor == SessionRole::Owner
-        || (existing != Some(SessionRole::Owner) && requested != SessionRole::Owner)
 }
 
 fn member_removal_action(actor_user_id: &str, target_user_id: &str) -> SessionAction {
@@ -960,7 +956,7 @@ async fn remove_member(
     }
     state
         .chat_store
-        .remove_member(&org_id, &session_id, &user_id, (state.now)())
+        .remove_member(&org_id, &session_id, &user_id, &actor.user_id, (state.now)())
         .await
         .map_err(ChatFailure::Store)?;
     state.chat_hub.revoke_user_tickets(&session_id, &user_id);
@@ -1746,6 +1742,9 @@ async fn stream_events(
     if ticket.org_id != org_id || ticket.session_id != session_id {
         return Err(ChatFailure::Hidden);
     }
+    if state.chat_store.effective_member(&org_id, &session_id, &ticket.user_id).await.map_err(ChatFailure::Store)?.is_none() {
+        return Err(ChatFailure::Hidden);
+    }
     state.chat_metrics.stream_connected();
     let sender = state.chat_hub.sender(&session_id);
     Ok(ws
@@ -1753,14 +1752,29 @@ async fn stream_events(
         .on_upgrade(move |socket| stream_loop(socket, state, ticket, sender.subscribe()))
         .into_response())
 }
+async fn stream_visible(state: &AppState, ticket: &SocketTicket) -> bool {
+    state.chat_store.visible_session(&ticket.org_id, &ticket.session_id, &ticket.user_id)
+        .await.ok().flatten().is_some()
+}
+
 async fn stream_loop(
     mut socket: WebSocket,
     state: AppState,
     ticket: SocketTicket,
     mut receiver: broadcast::Receiver<SessionEvent>,
 ) {
+    let tick_period = std::time::Duration::from_secs(5);
+    let mut standing_tick = tokio::time::interval_at(tokio::time::Instant::now() + tick_period, tick_period);
+    standing_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         let event = tokio::select! {
+            _ = standing_tick.tick() => {
+                if !stream_visible(&state, &ticket).await {
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
+                }
+                continue;
+            }
             incoming = socket.recv() => {
                 match incoming {
                     None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
@@ -2659,6 +2673,9 @@ async fn issue_attachment_ticket(
         .get_attachment(org_id, session_id, attachment_id)
         .await
         .map_err(ChatFailure::Store)?;
+    if action == AttachmentTicketAction::Upload {
+        state.chat_store.admit_session_write(org_id, session_id).await.map_err(ChatFailure::Store)?;
+    }
     if action == AttachmentTicketAction::Upload && attachment.status != "pending" {
         return Err(ChatFailure::Store(StoreError::Conflict(
             serde_json::to_value(&attachment).unwrap_or_default(),
@@ -2749,6 +2766,9 @@ async fn authorize_attachment_ticket(
     };
     if !authorize_session_action(Some(&pair.1), permission, pair.0.policy_revision).allowed {
         return Err(ChatFailure::Forbidden);
+    }
+    if action == AttachmentTicketAction::Upload {
+        state.chat_store.admit_session_write(org_id, &ticket.session_id).await.map_err(ChatFailure::Store)?;
     }
     let attachment = state
         .chat_store
@@ -2944,6 +2964,7 @@ mod tests {
     fn ordinary_posts_bind_the_author_and_only_explicit_imports_preserve_roles() {
         use super::*;
         let mut session = crate::chat::SharedSession {
+            contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: "session".into(),
             org_id: "org".into(),
             workspace_id: "workspace".into(),
@@ -3069,8 +3090,12 @@ mod tests {
         )
         .unwrap();
         let grant = format!("Bearer {}", signer.sign(&claims).unwrap());
+        let store = crate::store::InMemoryStore::new();
+        for id in [user.as_str(), "another-owner"] {
+            store.add_org_member(org, id, OrgRole::Owner);
+        }
         let state = AppState::new(
-            Arc::new(crate::store::InMemoryStore::new()),
+            Arc::new(store),
             signer,
             Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
         );
@@ -3106,6 +3131,7 @@ mod tests {
                     role,
                     false,
                     guest,
+                    "another-owner",
                     2,
                 )
                 .await
@@ -3164,6 +3190,7 @@ mod tests {
                 SessionRole::Member,
                 false,
                 false,
+                ADA,
                 2,
             )
             .await
@@ -3233,11 +3260,15 @@ mod tests {
         use std::time::Duration;
 
         let store = crate::store::InMemoryStore::new();
+        store.add_workspace(NOTICE_ORG, "workspace", "Workspace");
         for (user, name) in [(ADA, "Ada"), (BOB, "Bob"), (CY, "Cy")] {
             store.add_user(user, name);
             store.add_org_member(NOTICE_ORG, user, OrgRole::Member);
             store.add_workspace_member(NOTICE_ORG, "workspace", user, WorkspaceRole::Member);
         }
+        store.add_workspace_member(NOTICE_ORG, "workspace", ADA, WorkspaceRole::Maintainer);
+        store.add_user("usr_authorization_admin", "Organization manager");
+        store.add_org_member(NOTICE_ORG, "usr_authorization_admin", OrgRole::Owner);
         let signer = cognia_tenant_auth::grant::GrantSigner::new(&[9; 32]).unwrap();
         let mut state = AppState::new(
             Arc::new(store),
@@ -3372,6 +3403,7 @@ mod tests {
                     role,
                     approver,
                     false,
+                    ADA,
                     2,
                 )
                 .await
@@ -3501,6 +3533,127 @@ mod tests {
         server.abort();
         assert!(finished.is_ok(), "idle socket retained its server task");
         assert_eq!(sender.receiver_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_manager_cannot_assign_creator_ownership_to_a_plain_workspace_writer() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let (state, grant) = notification_fixture().await;
+        let app = crate::router(state);
+        for (resource, role, expected) in [
+            ("members", "owner", StatusCode::FORBIDDEN),
+            ("members", "member", StatusCode::CREATED),
+            ("invites", "maintainer", StatusCode::FORBIDDEN),
+            ("invites", "member", StatusCode::CREATED),
+        ] {
+            let body = serde_json::json!({"userId":BOB, "targetUserId":BOB, "role":role, "expiresAt":60_010});
+            let request = Request::builder().method("POST").uri(format!("/v1/orgs/{NOTICE_ORG}/chat-sessions/session/{resource}"))
+                .header("authorization", grant(ADA)).header("x-cognia-collab-protocol", "2").header("content-type", "application/json")
+                .body(Body::from(body.to_string())).unwrap();
+            assert_eq!(app.clone().oneshot(request).await.unwrap().status(), expected, "{resource}/{role}");
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_writer_can_import_history_and_activate_the_session_they_created() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let (state, grant) = notification_fixture().await;
+        let app = crate::router(state.clone());
+        let send = |method: &str, path: String, body: serde_json::Value| Request::builder()
+            .method(method).uri(path).header("authorization", grant(BOB))
+            .header("x-cognia-collab-protocol", "2").header("content-type", "application/json")
+            .body(Body::from(body.to_string())).unwrap();
+        let response = app.clone().oneshot(send("POST", format!("/v1/orgs/{NOTICE_ORG}/workspaces/workspace/chat-sessions"),
+            serde_json::json!({"title":"Import", "importing":true, "operationId":"writer-create"}))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let session: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        let id = session["id"].as_str().unwrap();
+        let response = app.clone().oneshot(send("POST", format!("/v1/orgs/{NOTICE_ORG}/chat-sessions/{id}/events"),
+            serde_json::json!({"kind":"message.created", "operationId":"writer-import", "payload":{"messageId":"history", "role":"assistant", "parts":[{"type":"text","text":"Imported"}], "imported":true}}))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let response = app.oneshot(send("PATCH", format!("/v1/orgs/{NOTICE_ORG}/chat-sessions/{id}"),
+            serde_json::json!({"status":"active", "baseRevision":session["revision"], "operationId":"writer-activate"}))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let (session, member) = state.chat_store.visible_session(NOTICE_ORG, id, BOB).await.unwrap().unwrap();
+        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(member.role, SessionRole::Owner);
+    }
+
+    fn revocation_context() -> crate::store::AuthorizationContext {
+        crate::store::AuthorizationContext {
+            actor_user_id: "usr_authorization_admin".into(), reason: "offboard".into(), request_id: "request".into(),
+            grant_id: None, source: serde_json::json!({}), now: 10,
+        }
+    }
+
+    #[tokio::test]
+    async fn standing_mutation_handlers_revoke_tickets_and_publish_membership_after_commit() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        for mutation in ["offboard", "remove", "demote"] {
+            let (state, grant) = notification_fixture().await;
+            state.store.set_org_member(NOTICE_ORG, ADA, OrgRole::Owner, revocation_context()).await.unwrap();
+            state.chat_store.put_member(NOTICE_ORG, "session", "workspace", BOB, SessionRole::Member, false, false, ADA, 2).await.unwrap();
+            let ticket = state.chat_hub.issue_ticket(SocketTicket { org_id: NOTICE_ORG.into(), session_id: "session".into(), user_id: BOB.into(), expires_at: SOCKET_TICKET_TTL_MS + 10 }).unwrap();
+            let attachment_ticket = state.chat_hub.issue_attachment_ticket(AttachmentTicket { org_id: NOTICE_ORG.into(), session_id: "session".into(), user_id: BOB.into(), attachment_id: "attachment".into(), action: AttachmentTicketAction::Download, expires_at: ATTACHMENT_TICKET_TTL_MS + 10 }).unwrap();
+            let path = if mutation == "offboard" { format!("/v1/orgs/{NOTICE_ORG}/members/{BOB}") } else { format!("/v1/orgs/{NOTICE_ORG}/workspaces/workspace/members/{BOB}") };
+            let body = if mutation == "demote" { Body::from(r#"{"role":"viewer","reason":"demote"}"#) } else { Body::empty() };
+            let request = Request::builder().method(if mutation == "demote" { "PATCH" } else { "DELETE" }).uri(path)
+                .header("authorization", grant(ADA)).header("content-type", "application/json").body(body).unwrap();
+            let mut feed = state.feed_hub.subscribe_for_test(NOTICE_ORG);
+            let response = crate::router(state.clone()).oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{mutation}");
+            assert_eq!(feed.try_recv().unwrap(), crate::feed::FeedFrame::membership(BOB, if mutation == "offboard" { None } else { Some("workspace") }));
+            assert!(state.chat_hub.consume_ticket(&ticket, 10).is_none());
+            assert!(state.chat_hub.consume_attachment_ticket(&attachment_ticket, AttachmentTicketAction::Download, 10).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn offboarded_grant_cannot_read_post_attach_claim_or_approve() {
+        let (state, grant) = notification_fixture().await;
+        state.chat_store.put_member(NOTICE_ORG, "session", "workspace", BOB, SessionRole::Member, true, false, ADA, 2).await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", grant(BOB).parse().unwrap());
+        headers.insert("x-cognia-collab-protocol", "2".parse().unwrap());
+        assert!(visible(&state, &headers, NOTICE_ORG, "session", SessionAction::Post).await.is_ok());
+        state.store.offboard_org_member(NOTICE_ORG, BOB, revocation_context()).await.unwrap();
+        // The signed grant is unchanged and unexpired throughout this check.
+        for action in [SessionAction::Read, SessionAction::Post, SessionAction::AttachmentRead, SessionAction::AttachmentWrite, SessionAction::StartRun, SessionAction::ApproveHighRisk] {
+            assert!(matches!(visible(&state, &headers, NOTICE_ORG, "session", action).await, Err(ChatFailure::Hidden)));
+        }
+        assert!(create_stream_ticket(State(state.clone()), Path((NOTICE_ORG.into(), "session".into())), headers.clone()).await.is_err());
+        assert!(issue_attachment_ticket(&state, &headers, NOTICE_ORG, "session", "attachment", AttachmentTicketAction::Download).await.is_err());
+        let ticket = SocketTicket { org_id: NOTICE_ORG.into(), session_id: "session".into(), user_id: BOB.into(), expires_at: i64::MAX };
+        assert!(!stream_visible(&state, &ticket).await);
+    }
+
+    #[tokio::test]
+    async fn idle_stream_closes_on_standing_tick_without_an_event() {
+        use futures_util::StreamExt;
+        let (state, _) = notification_fixture().await;
+        state.chat_store.put_member(NOTICE_ORG, "session", "workspace", BOB, SessionRole::Member, false, false, ADA, 2).await.unwrap();
+        let stream_state = state.clone();
+        let app = Router::new().route("/stream", get(move |ws: WebSocketUpgrade| {
+            let state = stream_state.clone();
+            async move {
+                let receiver = state.chat_hub.sender("session").subscribe();
+                ws.on_upgrade(move |socket| stream_loop(socket, state, SocketTicket {
+                    org_id: NOTICE_ORG.into(), session_id: "session".into(), user_id: BOB.into(), expires_at: i64::MAX,
+                }, receiver))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}/stream")).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        state.store.offboard_org_member(NOTICE_ORG, BOB, revocation_context()).await.unwrap();
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(6), socket.next()).await;
+        server.abort();
+        assert!(matches!(closed, Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))))));
     }
 
     #[test]

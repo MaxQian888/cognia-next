@@ -7,6 +7,9 @@
   // otherwise fail the production build. `pnpm typecheck` still uses the root
   // tsconfig and keeps type-checking stories.
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": ".cache/typescript/build.tsbuildinfo"
+  },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
@@ -18,16 +21,12 @@
     "**/*.mts"
   ],
   "exclude": [
-    "browser-extension",
+    ".cache",
     "node_modules",
     "docs",
     "web",
     "mobile",
     "sidecar",
-    "services/identity-server",
-    "services/share-server",
-    "services/sync-server",
-    "services/status-server",
     "out",
     "dist",
     ".next",

@@ -7,7 +7,10 @@
  *   src-tauri/src/**  crates/<crate>/src/** →  foo.rs  needs  #[cfg(test)]
  *
  * A Rust file that only declares modules and re-exports (`mod x;`,
- * `pub use y::*;`) has no behavior to test and is not gated.
+ * `pub use y::*;`) has no behavior to test and is not gated. Neither is a
+ * TypeScript file whose every statement re-exports another module
+ * (`export * from "…"`), such as the host's boundary shims onto a package:
+ * the test belongs beside the module that owns the behavior.
  *
  * Excluded by the rule itself: `components/ui/` (shadcn) and
  * `components/ai-elements/` (vendored).
@@ -40,27 +43,11 @@ import { dirname, join } from "node:path"
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 export const BASELINE_FILE = join(REPO_ROOT, "scripts", "gates", "colocated-test-baseline.json")
 
-/**
- * Roots the rule covers, verbatim from CLAUDE.md hard rule 3, plus the same
- * three roots inside the marketing workspace (ADR-0092 §11). `web/app/` follows
- * the product `app/` precedent — tests are written, but page files are not
- * gated — and `web/content/` is data whose en/zh parity `tsc` already proves.
- */
+/** Product and in-repository workspace roots covered by the co-located-test rule. */
 export const TS_ROOTS = [
   "components/",
   "hooks/",
   "lib/",
-  "web/components/",
-  "web/hooks/",
-  "web/lib/",
-  // The browser extension's own three roots (ADR-0154). Its entrypoints under
-  // `browser-extension/src/app/` are excluded for the same reason `web/app/`
-  // is: they are the thin shells that hand the real `chrome.*` surface to code
-  // that takes it as a parameter, and everything worth asserting lives on the
-  // other side of that seam.
-  "browser-extension/src/components/",
-  "browser-extension/src/hooks/",
-  "browser-extension/src/lib/",
   // The Deep Research plugin ships the same co-located-test discipline its
   // jest collectCoverageFrom entry already assumes; without a root here the
   // gate cannot see an untested engine file.
@@ -68,22 +55,17 @@ export const TS_ROOTS = [
   // The Impeccable plugin keeps its lifecycle entry and bundle-integrity
   // suite co-located; same contract as the other first-party plugin roots.
   "plugins/impeccable/src/",
+  // Config Governance (ADR-0238): its engine, runtime and view tabs each keep
+  // a co-located suite.
+  "plugins/config-governance/src/",
   // The Pi LaTeX Workbench plugin: its lifecycle entry and the Pi glue it
   // loads into hosted sessions. Its `vendor/` upstream snapshot is not
   // authored here and stays outside every gated root.
   "plugins/pi-latex-workbench/src/",
   "plugins/pi-latex-workbench/pi/",
 ]
-/**
- * Carve-outs the rule names explicitly.
- *
- * `web/components/ui/` needs its own entry rather than riding on
- * `components/ui/`: the match is `file.startsWith(root)`, so the marketing
- * workspace's shadcn copies never match the product path. Without it every
- * generated shadcn file would demand a hand-written test, which is the same
- * bargain the product tree already declined.
- */
-export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/", "web/components/ui/"]
+/** Vendored UI remains outside the authored-source test requirement. */
+export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/"]
 export const RUST_ROOT = "src-tauri/src/"
 /**
  * Workspace crates carry the same rule (ADR-0196): code that moves out of
@@ -142,6 +124,28 @@ export function rustIsDeclarationOnly(source) {
 }
 
 /**
+ * Does this TypeScript source only re-export other modules
+ * (`export * from "x"`, `export { a, type B } from "x"`)? Such a shim forwards
+ * to the module that owns the behavior, and that module's test pins it. Pure.
+ *
+ * @param {string} source
+ * @returns {boolean}
+ */
+export function tsIsReexportOnly(source) {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
+  const statement =
+    /^\s*export\s+(?:type\s+)?(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+(["'])[^"'\n]+\1\s*;?/
+  let rest = code
+  if (rest.trim() === "") return false
+  while (rest.trim() !== "") {
+    const match = rest.match(statement)
+    if (!match) return false
+    rest = rest.slice(match[0].length)
+  }
+  return true
+}
+
+/**
  * The co-located test paths that would satisfy the rule for a source file.
  * Pure.
  * @param {string} file
@@ -178,7 +182,7 @@ export function rustSplitTestModules(file, source) {
  * Compute the current violation list. Pure — I/O is injected.
  *
  * @param {string[]} files every tracked repo-relative path
- * @param {{ has: (p: string) => boolean, readRust: (p: string) => string }} io
+ * @param {{ has: (p: string) => boolean, readRust: (p: string) => string, readTs?: (p: string) => string }} io
  * @returns {string[]} sorted violating paths
  */
 export function findViolations(files, io) {
@@ -191,7 +195,9 @@ export function findViolations(files, io) {
   for (const file of files) {
     if (rustTestModules.has(file)) continue
     if (isGatedTsSource(file)) {
-      if (!expectedTestPaths(file).some((p) => io.has(p))) violations.push(file)
+      if (expectedTestPaths(file).some((p) => io.has(p))) continue
+      if (io.readTs && tsIsReexportOnly(io.readTs(file))) continue
+      violations.push(file)
     } else if (isGatedRustSource(file)) {
       const source = io.readRust(file)
       if (!rustHasInlineTests(source) && !rustIsDeclarationOnly(source)) violations.push(file)
@@ -284,16 +290,14 @@ export function writeBaseline(violations, file = BASELINE_FILE) {
 export function main(argv = []) {
   const files = listTrackedFiles()
   const known = new Set(files)
-  const io = {
-    has: (p) => known.has(p),
-    readRust: (p) => {
-      try {
-        return readFileSync(join(REPO_ROOT, p), "utf8")
-      } catch {
-        return ""
-      }
-    },
+  const read = (p) => {
+    try {
+      return readFileSync(join(REPO_ROOT, p), "utf8")
+    } catch {
+      return ""
+    }
   }
+  const io = { has: (p) => known.has(p), readRust: read, readTs: read }
 
   const violations = findViolations(files, io)
 

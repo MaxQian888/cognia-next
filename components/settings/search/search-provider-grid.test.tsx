@@ -72,6 +72,7 @@ import { SearchProviderGrid } from "./search-provider-grid"
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset())
   mockLogInfo.mockReset()
+  ;(testProviderKeyPool as jest.Mock).mockReset()
   settings = {
     searchProviders: {
       tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
@@ -94,9 +95,9 @@ describe("SearchProviderGrid", () => {
     expect(screen.queryByTestId("card-brave")).not.toBeInTheDocument()
   })
 
-  it("renders all 10 cards by default", () => {
+  it("renders all 13 cards by default", () => {
     render(<SearchProviderGrid />)
-    expect(screen.getAllByTestId(/card-/)).toHaveLength(10)
+    expect(screen.getAllByTestId(/card-/)).toHaveLength(13)
   })
 
   it("shows noMatchingProviders message when none match", () => {
@@ -181,4 +182,30 @@ describe("SearchProviderGrid", () => {
     expect(screen.getByTestId("card-serper")).toBeInTheDocument()
     expect(screen.queryByTestId("card-tavily")).not.toBeInTheDocument()
   })
+})
+
+it("does not test on mount or when retired / unconfigured, but tests endpoint auth on click", async () => {
+  settings = {
+    searchProviders: {
+      bing: { providerId: "bing", apiKey: "stored-key", enabled: true },
+      searxng: {
+        providerId: "searxng",
+        apiKey: "",
+        enabled: false,
+        baseUrl: "https://search.example.com",
+      },
+    },
+  }
+  ;(testProviderKeyPool as jest.Mock).mockResolvedValue([{ index: 0, ok: true, keyHint: "" }])
+  render(<SearchProviderGrid />)
+  expect(testProviderKeyPool).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText("test-bing"))
+  expect(testProviderKeyPool).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByText("test-searxng"))
+  await waitFor(() =>
+    expect(testProviderKeyPool).toHaveBeenCalledWith(
+      "searxng",
+      expect.objectContaining({ baseUrl: "https://search.example.com", apiKey: "" })
+    )
+  )
 })

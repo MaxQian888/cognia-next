@@ -41,7 +41,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "jest --config jest.config.cjs --runInBand",
+    "test": "pnpm typecheck && jest --config jest.config.cjs --runInBand",
     "pack:test": "node scripts/pack-test.mjs",
     "smoke": "node scripts/process-smoke.mjs"
   },
@@ -51,5 +51,9 @@
   },
   "engines": {
     "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.16.13",
+    "@swc/jest": "^0.2.39"
   }
 }

@@ -33,6 +33,46 @@ Never claim Tauri verification from `pnpm dev`, jsdom, or a browser-only
 Playwright run. Keep the Windows WebView2 CDP suite for Chromium-specific E2E;
 this bridge supplies cross-platform real-webview debugging.
 
+## Multiple independent agents
+
+Use `launch --shared --no-watch` for concurrent agents. The owner alone runs
+launch/stop, attach, sessions, revoke and recover. Each agent receives its own
+private descriptor and uses `--client`; never distribute the root endpoint file.
+
+```bash
+rtk node scripts/tauri/agent-debug.mjs launch --shared --no-watch
+rtk node scripts/tauri/agent-debug.mjs attach --output .cache/tauri-agent-debug/agent-a.json --can-write --idle-timeout 300000
+rtk node scripts/tauri/agent-debug.mjs lease acquire --client .cache/tauri-agent-debug/agent-a.json
+rtk node scripts/tauri/agent-debug.mjs snapshot --client .cache/tauri-agent-debug/agent-a.json
+rtk node scripts/tauri/agent-debug.mjs act '<own-latest-ref>' click --client .cache/tauri-agent-debug/agent-a.json
+rtk node scripts/tauri/agent-debug.mjs lease release --client .cache/tauri-agent-debug/agent-a.json
+rtk node scripts/tauri/agent-debug.mjs detach --client .cache/tauri-agent-debug/agent-a.json
+```
+
+An explicit lease groups commands; renew every 5 seconds during long workflows.
+Without one, each mutation acquires/releases automatically. Independent readers
+may overlap; one writer covers the whole app, including different windows. Refs
+belong to one session/window/document and expire after 60 seconds. Snapshot again
+after writer acquisition or another writer's changes. Default session idle TTL
+is 5 minutes (configurable 1 second–30 minutes); requests refresh it and later
+requests reclaim expired sessions and renderer refs. Unknown execution or held
+input remains quarantined across client death and lease expiry.
+
+Owner `sessions` lists sanitized metadata. `revoke <clientSessionId>` immediately
+invalidates credentials and refs; an unsettled/dirty session requires recovery.
+Owner `recover` replaces **all current webview documents**, retires all clients
+and verifies fresh settled documents/input cleanup before reopening admission.
+The native app PID stays unchanged; unsaved renderer state can be lost and
+persisted/external effects remain. Inspect effects, attach new clients and take
+new snapshots. Failed/cancelled recovery stays closed and can be retried. Never
+replay an unknown mutation automatically.
+
+Launch/stop serialize through an OS-owned workspace mutex. A crash before child
+registration leaves a durable startup intent and fails closed, including stop;
+inspect the recorded log/processes before resolving that record. Do not delete
+it merely because its launcher died. Shared arbitrary evaluate/callbacks,
+persistent dialog/network overrides and parallel window writers stay disabled.
+
 ## Fast command loop
 
 ```bash
@@ -58,7 +98,7 @@ a multi-step script or translating an existing Playwright test. Import
 `connectTauriPage` from `scripts/tauri/agent-debug-client.mjs`; do not recreate
 bridge discovery, authentication, polling, or locator strictness.
 
-Use raw `page.evaluate` only for state inspection or a capability the semantic
+In legacy single-client mode, use raw `page.evaluate` only for state inspection or a capability the semantic
 API cannot express. It executes with renderer privileges and exists only behind
 the explicit `agent-debug` feature.
 
@@ -109,3 +149,5 @@ trusted input, video, or response interception. Unsupported behavior must raise
 Report the exact real-shell flow, platform, window label, assertions observed,
 console/network/native-log outcome, screenshot path, and whether the tracked
 process stopped cleanly. State any blocked gate explicitly.
+
+Real native stability acceptance requires an unlocked desktop with advancing animation frames. The harness checks frames before writes and keeps the normal actionability checks. Recovery requires stable old and new helper realm identities; an unresponsive or unreachable page stays fail-closed.

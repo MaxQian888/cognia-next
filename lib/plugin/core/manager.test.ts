@@ -6212,6 +6212,39 @@ describe("PluginManager", () => {
       expect(activate).toHaveBeenCalledTimes(1)
     })
 
+    it("registers the native plugin before activation can read secrets", async () => {
+      const plugin = createTypedPlugin("native-secrets", "frontend")
+      plugin.source = "dev"
+      plugin.manifest.engines = { cognia: ">=0.1.0" }
+      plugin.manifest.permissions = ["secrets:read"]
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      let registered = false
+      mockInvoke.mockImplementation(async (command, args) => {
+        if (
+          command === "plugin_set_status" &&
+          args &&
+          "status" in args &&
+          args.status === "installed"
+        )
+          registered = true
+        if (command === "plugin_api_request" && !registered) throw new Error("plugin not loaded")
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const activate = jest.fn(async () => {
+        await mockInvoke("plugin_api_request", { pluginId: plugin.manifest.id, api: "secrets:get" })
+      })
+      const loader = (manager as unknown as { loader: { load: jest.Mock; isLoaded: jest.Mock } })
+        .loader
+      loader.load = jest.fn(async () => ({ manifest: plugin.manifest, activate }))
+      loader.isLoaded = jest.fn(() => false)
+      await manager.loadPlugin(plugin.manifest.id)
+      expect(activate).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_status", {
+        pluginId: plugin.manifest.id,
+        status: "loaded",
+      })
+    })
+
     it("registers manifest i18n and extensions before activate", async () => {
       const plugin = createTypedPlugin("surface-plugin", "frontend")
       plugin.source = "dev"
@@ -6313,6 +6346,10 @@ describe("PluginManager", () => {
 
       await expect(manager.loadPlugin(plugin.manifest.id)).rejects.toThrow("activate failed")
 
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_status", {
+        pluginId: plugin.manifest.id,
+        status: "error",
+      })
       expect(dispose).toHaveBeenCalledTimes(1)
       expect(manager.getPluginContext(plugin.manifest.id)).toBeUndefined()
       expect(loader.isLoaded(plugin.manifest.id)).toBe(false)

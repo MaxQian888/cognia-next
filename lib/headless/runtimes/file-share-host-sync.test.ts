@@ -54,7 +54,7 @@ it("syncs the brain's own account against its own server", async () => {
   const deps = mockCreate.mock.calls[0]![0]
   // No host id: off the desktop that is the brain's one transport, its server.
   expect(deps.target).toEqual({})
-  expect(deps.accountId()).toBe("local_acct_headless")
+  expect(deps.localAccountId()).toBe("local_acct_headless")
   expect(start).toHaveBeenCalledTimes(1)
 })
 

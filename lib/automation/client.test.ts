@@ -343,6 +343,14 @@ describe("desktop client", () => {
     expect(mockCall).toHaveBeenCalledWith("desktop_pick_session_cancel", { args: { ctx: {} } })
   })
 
+  it("consentPending reads the broker snapshot without sending a response", async () => {
+    const events = [{ id: "pending-1", timeoutMs: 500 }]
+    mockCall.mockResolvedValue(events)
+    await expect(desktop.consentPending()).resolves.toBe(events)
+    expect(mockCall).toHaveBeenCalledTimes(1)
+    expect(mockCall).toHaveBeenCalledWith("automation_consent_pending", {})
+  })
+
   it("consentRespond forwards the broker reply", async () => {
     mockCall.mockResolvedValueOnce(undefined)
     await desktop.consentRespond({

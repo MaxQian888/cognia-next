@@ -15,6 +15,7 @@ jest.mock("@/stores/settings", () => ({
 
 let mockProtocol: string | undefined = "openai"
 jest.mock("@cognia/provider-types/built-in-provider-catalog", () => ({
+  ...jest.requireActual("@cognia/provider-types/built-in-provider-catalog"),
   getBuiltInProviderProtocol: () => mockProtocol,
 }))
 
@@ -191,6 +192,18 @@ describe("CompactionSettings", () => {
       expect.objectContaining({
         compaction: expect.objectContaining({ messageCountThreshold: 40 }),
       })
+    )
+  })
+
+  it("keeps tool-result clipping disabled when zero is entered", () => {
+    mockSettings = { defaultProvider: "openai", compaction: { maxToolResultTokens: 800 } }
+    render(<CompactionSettings />)
+    const input = screen.getByLabelText("toolResultCap.label")
+    expect(input).toHaveAttribute("min", "0")
+    fireEvent.change(input, { target: { value: "0" } })
+    fireEvent.blur(input)
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({ compaction: expect.objectContaining({ maxToolResultTokens: 0 }) })
     )
   })
 

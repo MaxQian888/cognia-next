@@ -34,8 +34,8 @@ import {
 import type { ExportOptions } from "@/lib/data/types"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory, type BackupHistoryEncryption } from "@/lib/db/backup-history"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
-import { getSettings, saveSettings } from "@/lib/db/settings"
+import { saveSettings } from "@/lib/db/settings"
+import { getDb } from "@/lib/db/schema"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
 import { loggers } from "@cognia/logging"
 import { dispatchBackupDestination, remoteLegsFor } from "@/lib/data/destinations"
@@ -143,6 +143,11 @@ export async function executeBackupTask(
   execution: TaskExecution,
   _signal: AbortSignal
 ): Promise<ExecutorResult> {
+  const db = getDb()
+  const assertActive = () => {
+    _signal.throwIfAborted()
+    if (getDb() !== db) throw new Error("backup_owner_changed")
+  }
   const payload = (task.payload ?? {}) as Partial<BackupTaskPayload>
   const destination = payload.destination
 
@@ -170,6 +175,7 @@ export async function executeBackupTask(
     if (wantsLocal(destination)) {
       const host = await resolveBackupHostFilesystem()
       const dir = host ? await host.resolveBackupDir() : null
+      assertActive()
       if (!host || !dir) {
         const error = host
           ? "Local backup skipped — no backup directory is configured on this host (Settings → Data → Auto backup directory)."
@@ -180,8 +186,14 @@ export async function executeBackupTask(
         output.local = { skipped: true, error }
       } else {
         const passphrase = await getDefaultBackupPassphrase()
+        assertActive()
         if (!passphrase) throw new Error("Auto-key not available on this runtime.")
-        const filename = defaultExportFileName(new Date(), "encrypted")
+        // A different payload/request must retain its own generation, even on the
+        // same day and in the interval producer's configured directory.
+        const filename = defaultExportFileName(new Date(), "encrypted").replace(
+          ".enc.cbk",
+          `-cron-${encodeURIComponent(task.id)}-${encodeURIComponent(execution.id)}.enc.cbk`
+        )
         const target = host.join(dir, filename)
         const written = await writeEncryptedLocalBackup(
           host.filesystem,
@@ -190,6 +202,7 @@ export async function executeBackupTask(
           passphrase,
           _signal
         )
+        assertActive()
         basePackage = written.basePackage
         await appendBackupHistory({
           completedAt: Date.now(),
@@ -199,11 +212,13 @@ export async function executeBackupTask(
           sizeBytes: written.sizeBytes,
           filename,
           destination: "local",
+          producer: "cron",
         })
         output.local = { target, sizeBytes: written.sizeBytes, filename }
       }
     }
 
+    assertActive()
     if (remoteLegs.length > 0) {
       const syncPass = getSyncPassphrase()
       if (!syncPass) {
@@ -226,7 +241,9 @@ export async function executeBackupTask(
           const meta = { filename, exportedAt: pkg.manifest.exportedAt, sizeBytes: body.length }
           let anyRemoteSucceeded = false
           for (const leg of remoteLegs) {
-            const result = await dispatchBackupDestination(leg, body, meta)
+            assertActive()
+            const result = await dispatchBackupDestination(leg, body, meta, assertActive)
+            assertActive()
             if (result.ok) {
               anyRemoteSucceeded = true
               await appendBackupHistory({
@@ -237,9 +254,10 @@ export async function executeBackupTask(
                 sizeBytes: body.length,
                 filename,
                 destination: leg,
+                producer: "cron",
               })
               output[leg] = { target: result.target, sizeBytes: body.length, filename }
-              if (leg === "webdav") await stampWebdavLastSync()
+              if (leg === "webdav") await stampWebdavLastSync(assertActive)
             } else {
               const error =
                 result.error ??
@@ -267,6 +285,7 @@ export async function executeBackupTask(
             return { success: false, output, error: first.error ?? "Remote upload failed." }
           }
         } catch (error) {
+          assertActive()
           const message = error instanceof Error ? error.message : String(error)
           for (const leg of remoteLegs) {
             await safelyAppendFailure(message, "passphrase", leg)
@@ -278,8 +297,6 @@ export async function executeBackupTask(
       }
     }
 
-    await stampBackupScheduleLastRun(task.id)
-
     log.info("Scheduler backup task complete", {
       taskId: task.id,
       executionId: execution.id,
@@ -289,6 +306,8 @@ export async function executeBackupTask(
 
     return { success: true, output }
   } catch (err) {
+    if (getDb() !== db || _signal.aborted)
+      return { success: false, error: "backup_owner_changed_or_cancelled" }
     const error = err instanceof Error ? err.message : String(err)
     await safelyAppendFailure(error, "auto-key", destination)
     log.error("Scheduler backup task failed", { taskId: task.id, error })
@@ -296,32 +315,18 @@ export async function executeBackupTask(
   }
 }
 
-/**
- * Stamp `backupAutoSchedule.lastRunAt` so cross-device sync (and the in-app
- * "next run at" indicator) can derive recency without walking `backupHistory`.
- * Best-effort; a failure here doesn't undo the backup itself.
- */
-async function stampBackupScheduleLastRun(taskId: string): Promise<void> {
-  try {
-    const settings = await getSettings()
-    const current: BackupAutoSchedule = settings.backupAutoSchedule ?? DEFAULT_BACKUP_AUTO_SCHEDULE
-    await saveSettings({
-      backupAutoSchedule: { ...current, lastRunAt: new Date().toISOString() },
-    })
-  } catch (err) {
-    log.warn("Failed to stamp backupAutoSchedule.lastRunAt", {
-      taskId,
-      error: err instanceof Error ? err.message : String(err),
-    })
-  }
-}
-
 /** Stamp `webdavSync.lastSyncAt` after a successful upload. Best-effort. */
-async function stampWebdavLastSync(): Promise<void> {
+async function stampWebdavLastSync(assertActive: () => void): Promise<void> {
   try {
-    const settings = await getSettings()
-    const current = settings.webdavSync ?? {}
-    await saveSettings({ webdavSync: { ...current, lastSyncAt: new Date().toISOString() } })
+    assertActive()
+    const db = getDb()
+    await saveSettings(
+      (current) => {
+        assertActive()
+        return { webdavSync: { ...current.webdavSync, lastSyncAt: new Date().toISOString() } }
+      },
+      { mirrorToHost: false, scope: { db, assertActive } }
+    )
   } catch {
     // Non-fatal.
   }

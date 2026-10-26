@@ -55,9 +55,7 @@ export interface ExternalRuntimeConnection {
 }
 
 export interface ExternalRuntimeConnections {
-  /** The External Agents master switch. */
-  externalEnabled: boolean
-  /** Locally configured agents, whether or not the switch is on. */
+  /** Locally configured agents, including disabled configurations. */
   configuredCount: number
   rows: ExternalRuntimeConnection[]
   /** Rows that can take a turn right now (connected locally, or ready on the host). */
@@ -97,7 +95,6 @@ function stateOf(
 export function deriveExternalRuntimeConnections(input: {
   runtimes: readonly AgentRuntimeDescriptor[]
   connectionStatus: Record<string, ExternalAgentConnectionStatus | undefined>
-  externalEnabled: boolean
   configuredCount: number
 }): ExternalRuntimeConnections {
   const rows = input.runtimes
@@ -115,7 +112,6 @@ export function deriveExternalRuntimeConnections(input: {
       }
     })
   return {
-    externalEnabled: input.externalEnabled,
     configuredCount: input.configuredCount,
     rows,
     workingCount: rows.filter((row) => row.state === "connected" || row.state === "ready").length,
@@ -123,14 +119,13 @@ export function deriveExternalRuntimeConnections(input: {
 }
 
 export function useExternalRuntimeConnections(): ExternalRuntimeConnections {
-  const { runtimes, externalEnabled, configuredExternalCount } = useAgentRuntimeCatalog()
+  const { runtimes, configuredExternalCount } = useAgentRuntimeCatalog()
   const connectionStatus = useExternalAgentStore((s) => s.connectionStatus)
   // `runtimes` is rebuilt on every render by design (see the catalog hook), so
   // memoizing on it would never hit, and the derivation is a handful of rows.
   return deriveExternalRuntimeConnections({
     runtimes,
     connectionStatus,
-    externalEnabled,
     configuredCount: configuredExternalCount,
   })
 }

@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UICollapsible, type A2UICollapsibleComponent } from "./a2ui-collapsible"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -28,6 +28,25 @@ describe("A2UICollapsible", () => {
     onAction: jest.fn(),
     onDataChange: jest.fn(),
     renderChild: jest.fn((id: string) => <span data-testid={id}>{id}</span>),
+  })
+
+  it("follows external open updates and writes user toggles to the binding", () => {
+    const props = cp({
+      id: "bound",
+      component: "Collapsible",
+      title: "Bound details",
+      children: ["body"],
+      open: false,
+    })
+    const { rerender } = render(<A2UICollapsible {...props} />)
+    expect(screen.queryByText("body")).not.toBeInTheDocument()
+    rerender(<A2UICollapsible {...props} component={{ ...props.component, open: true }} />)
+    expect(screen.getByText("body")).toBeInTheDocument()
+    rerender(
+      <A2UICollapsible {...props} component={{ ...props.component, open: { path: "/expanded" } }} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Bound details" }))
+    expect(props.onDataChange).toHaveBeenCalledWith("/expanded", true)
   })
 
   it("renders title", () => {

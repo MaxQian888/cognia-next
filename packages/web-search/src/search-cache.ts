@@ -31,6 +31,20 @@ export interface SearchCacheKeyOptions extends SearchOptions {
    * the key digests them so editing an override busts entries it produced.
    */
   providerDefaults?: Record<string, Partial<SearchOptions> | undefined>
+  /**
+   * Runtime/account scope the response belongs to (opaque). Entries never
+   * cross scopes, so a profile or account switch cannot serve the previous
+   * owner's results.
+   */
+  scope?: string
+  /**
+   * Opaque revision of everything else that changes which providers may serve
+   * and how: eligible provider ids, engines, endpoints, credential digests,
+   * policy-contract version. Never a raw key.
+   */
+  policyRevision?: string
+  /** Strict-pin flag: a pinned no-fallback request must not reuse a fallback-served entry. */
+  allowFallback?: boolean
 }
 
 /** Order-independent serialization so equivalent defaults hash identically. */
@@ -95,18 +109,43 @@ export function generateSearchCacheKey(
     options?.safeSearch || "moderate",
     options?.preferredProviders?.join(",") || "",
     providerDefaultsDigest(options?.providerDefaults),
+    options?.engine?.trim() || "",
+    options?.safeSearchRequired === true ? "req" : "",
+    options?.allowFallback === false ? "pin" : "",
+    options?.scope ?? "",
+    options?.policyRevision ?? "",
   ]
 
   const keyString = keyParts.join("|")
 
+  // Two independent 32-bit hashes: the key now separates scopes and policy
+  // revisions, so a single 32-bit collision would be a cross-scope hit.
   let hash = 0
+  let fnv = 0x811c9dc5
   for (let i = 0; i < keyString.length; i++) {
     const char = keyString.charCodeAt(i)
     hash = (hash << 5) - hash + char
     hash = hash & hash
+    fnv = Math.imul(fnv ^ char, 0x01000193)
   }
 
-  return `search:${Math.abs(hash).toString(36)}`
+  return `search:${Math.abs(hash).toString(36)}${(fnv >>> 0).toString(36)}`
+}
+
+/**
+ * Opaque, non-reversible digest of a secret for cache/revision identity. Not a
+ * security hash — it only has to change when the secret changes and never
+ * reveal it.
+ */
+export function opaqueDigest(value: string): string {
+  let a = 0x811c9dc5
+  let b = 5381
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    a = Math.imul(a ^ c, 0x01000193)
+    b = ((b << 5) + b + c) | 0
+  }
+  return `${(a >>> 0).toString(36)}${(b >>> 0).toString(36)}`
 }
 
 /**

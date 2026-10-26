@@ -24,14 +24,15 @@ jest.mock("./user-action", () => {
 })
 
 const releaseTurn = jest.fn()
-const rememberTurn = jest.fn()
+const abortIfUndriven = jest.fn()
 jest.mock("./abandoned-turns", () => ({
   releaseOpenBundleTurn: (...args: unknown[]) => releaseTurn(...args),
-  rememberOpenBundleTurn: (...args: unknown[]) => rememberTurn(...args),
+  abortBundleTurnIfUndriven: (...args: unknown[]) => abortIfUndriven(...args),
 }))
 
 import { boundApprovalScopeTurnIds, closeApprovalScopeForTurn } from "./user-action"
-import { openWorkspaceBundleTurnLease } from "./run-lease"
+import { createHash } from "node:crypto"
+import { __setReconcileReadWaitForTests, openWorkspaceBundleTurnLease } from "./run-lease"
 
 describe("openWorkspaceBundleTurnLease", () => {
   beforeEach(() => {
@@ -361,33 +362,65 @@ describe("a lease settle that does not land", () => {
 describe("a begin whose answer was lost", () => {
   const bundle = { bundleId: "bundle-1", leases: [] }
   const input = {
-    taskId: "task-1",
+    taskId: "task:connector:s1",
     sessionId: "session-1",
-    runId: "run-1",
+    runId: "run:connector:s1:t1",
+    executionRunId: "run:connector:s1:t1",
     turnId: "connector-turn-1",
+    attemptId: "a1",
     agentId: "lark",
     agentKind: "connector",
     workspaceRoot: "/aliases/app",
   }
+  const suffix = (workspaceId: string) =>
+    createHash("sha256").update(workspaceId).digest("hex").slice(0, 12)
+
+  /** A turn as the host stores it for `request`, scoped per workspace. */
+  function hostTurn(
+    request: { taskId: string; runId: string } = input,
+    over: Record<string, unknown> = {}
+  ) {
+    return {
+      bundleTurnId: "connector-turn-1",
+      bundleId: "bundle-1",
+      primaryLogicalRootId: "app",
+      settledAt: null,
+      runs: ["workspace-app", "workspace-docs"].map((workspaceId) => ({
+        workspaceId,
+        logicalRootIds: [workspaceId],
+        run: {
+          taskId: `${request.taskId}:${suffix(workspaceId)}`,
+          runId: `${request.runId}:${suffix(workspaceId)}`,
+          turnId: "connector-turn-1",
+          agentId: "lark",
+          agentKind: "connector",
+          executionRunId: "run:connector:s1:t1",
+          attemptId: "a1",
+        },
+      })),
+      ...over,
+    }
+  }
+
   let close: jest.Mock
+  let restoreWait: () => void
 
   beforeEach(() => {
     jest.clearAllMocks()
     close = jest.fn()
     openScope.mockResolvedValue({ close })
-    abortBundleTurn.mockResolvedValue({ resources: [] })
+    abortIfUndriven.mockResolvedValue(true)
     beginBundleTurn.mockRejectedValue(new Error("companion request dropped"))
+    restoreWait = __setReconcileReadWaitForTests(async () => undefined)
   })
 
-  it("aborts the turn the host committed, before closing the approval scope", async () => {
-    getBundleTurn.mockResolvedValue({
-      bundleTurnId: "connector-turn-1",
-      bundleId: "bundle-1",
-      settledAt: null,
-    })
-    abortBundleTurn.mockImplementation(async () => {
+  afterEach(() => restoreWait())
+
+  it("aborts this request's committed turn, before closing the approval scope", async () => {
+    getBundleTurn.mockResolvedValue(hostTurn())
+    abortIfUndriven.mockImplementation(async () => {
       expect(close).not.toHaveBeenCalled()
-      return { resources: [] }
+      return true
     })
 
     await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow(
@@ -395,35 +428,72 @@ describe("a begin whose answer was lost", () => {
     )
 
     expect(getBundleTurn).toHaveBeenCalledWith("connector-turn-1")
-    expect(abortBundleTurn).toHaveBeenCalledWith("connector-turn-1")
+    expect(abortIfUndriven).toHaveBeenCalledWith("connector-turn-1")
     expect(close).toHaveBeenCalledTimes(1)
-    expect(rememberTurn).not.toHaveBeenCalled()
   })
 
-  it("leaves alone a turn the host never opened, already settled, or opened on another bundle", async () => {
-    for (const found of [
-      null,
-      { bundleTurnId: "connector-turn-1", bundleId: "bundle-1", settledAt: 5 },
-      { bundleTurnId: "connector-turn-1", bundleId: "bundle-2", settledAt: null },
-    ]) {
-      getBundleTurn.mockResolvedValueOnce(found)
-      await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
-    }
-    expect(abortBundleTurn).not.toHaveBeenCalled()
-    expect(rememberTurn).not.toHaveBeenCalled()
+  // The reported repro: the id is held by a different task/run's live turn.
+  it("never aborts a turn that holds the same id for another task or run", async () => {
+    getBundleTurn.mockResolvedValue(
+      hostTurn({ taskId: "task:connector:other", runId: "run:connector:other:t1" })
+    )
+
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
+
+    expect(abortIfUndriven).not.toHaveBeenCalled()
   })
 
-  it("hands the id to the reclaim path when the host cannot be asked", async () => {
+  it("does not even look when the host refused on identity", async () => {
+    beginBundleTurn.mockRejectedValueOnce(
+      new Error("bundleTurnId is already owned by another workspace bundle: connector-turn-1")
+    )
+    getBundleTurn.mockResolvedValue(hostTurn())
+
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
+
+    expect(getBundleTurn).not.toHaveBeenCalled()
+    expect(abortIfUndriven).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["missing", null],
+    ["settled", hostTurn(input, { settledAt: 5 })],
+    ["on another bundle", hostTurn(input, { bundleId: "bundle-2" })],
+    ["on another primary root", hostTurn(input, { primaryLogicalRootId: "docs" })],
+  ])("leaves a turn alone when it is %s", async (_label, found) => {
+    getBundleTurn.mockResolvedValue(found)
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
+    expect(abortIfUndriven).not.toHaveBeenCalled()
+  })
+
+  it("leaves a turn alone when another attempt or agent owns it", async () => {
+    const other = hostTurn()
+    other.runs[1].run.attemptId = "a2"
+    getBundleTurn.mockResolvedValue(other)
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow()
+    expect(abortIfUndriven).not.toHaveBeenCalled()
+  })
+
+  it("retries the read-back, then gives up without aborting anything", async () => {
     getBundleTurn.mockRejectedValue(new Error("host unreachable"))
 
     await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow(
       "companion request dropped"
     )
 
-    expect(rememberTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ bundleTurnId: "connector-turn-1", sessionId: "session-1" })
+    expect(getBundleTurn).toHaveBeenCalledTimes(3)
+    expect(abortIfUndriven).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it("still reports the begin failure when the cleanup itself fails", async () => {
+    getBundleTurn.mockResolvedValue(hostTurn())
+    abortIfUndriven.mockRejectedValue(new Error("abort refused"))
+
+    await expect(openWorkspaceBundleTurnLease(bundle, "app", input)).rejects.toThrow(
+      "companion request dropped"
     )
-    expect(releaseTurn).toHaveBeenCalledWith("connector-turn-1")
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
   it("does not reconcile a busy refusal or a begin without a caller turn id", async () => {
@@ -433,6 +503,5 @@ describe("a begin whose answer was lost", () => {
     await expect(openWorkspaceBundleTurnLease(bundle, "app", withoutTurnId)).rejects.toThrow()
 
     expect(getBundleTurn).not.toHaveBeenCalled()
-    expect(rememberTurn).not.toHaveBeenCalled()
   })
 })

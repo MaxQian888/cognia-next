@@ -1,36 +1,34 @@
 ---
 name: dexie-migration
-description: Add a new Dexie schema version to lib/db/schema.ts safely. Use whenever a change needs a new table, index, or data backfill in the IndexedDB schema — covers version claiming, upgrade callbacks, and the test updates the repo requires.
+description: Change the Dexie (IndexedDB) schema in lib/db/schema.ts safely. Use whenever a change needs a new table, index, or dropped table — covers the version bump, the concurrent-claim check, the governance catalog, and the test updates the repo requires.
 ---
 
-# Dexie Schema Migration
+# Dexie Schema Change
 
-`lib/db/schema.ts` is the single authority. Versions are append-only and
-monotonic; shipped version blocks are immutable.
+`lib/db/schema.ts` declares the whole store set once, as `CURRENT_SCHEMA` at
+`CURRENT_SCHEMA_VERSION`, on top of a frozen `SCHEMA_V240` baseline.
 
 ## Workflow
 
-1. **Find the current highest version** — search `this.version(` in
-   `lib/db/schema.ts` and take the last block. Do NOT trust memory, docs, or
-   CLAUDE.md for the number; they lag.
-2. **Check for concurrent claims.** Other agents/branches routinely take the
-   next number (this has happened repeatedly: v66, v69 were both lost to
-   concurrent work). Before claiming, also check `rtk git diff dev -- lib/db/schema.ts`
-   and any sibling branch you know is in flight. If a collision is plausible,
-   claim N+1 and note why.
-3. **Append a new `this.version(N)` block.**
-   - New tables/indexes: `.stores({ ... })` listing ONLY changed tables
-     (Dexie merges unchanged ones).
-   - Data backfill / reshaping: chain `.upgrade(async (tx) => { ... })`.
-     Upgrade callbacks must be idempotent-safe and handle records created by
-     every earlier version.
-   - Never edit an existing version block — even to "fix" it. Add a new one.
-4. **Update `lib/db/schema.test.ts`** in the same change: the version-number
-   assertion, plus tests for any upgrade callback (seed old-shape records,
-   open at N, assert the new shape).
-5. **Update consumers** (`lib/db/*.ts` table accessors, types) and their
-   co-located tests. Coverage stays ≥90%.
-6. **Verify**: `rtk pnpm test -- lib/db` and `rtk tsc`.
+1. **Read the current version** from `CURRENT_SCHEMA_VERSION` in
+   `lib/db/schema.ts`. Docs and memory lag; the constant is the only source.
+2. **Check for concurrent claims.** Other sessions and branches take the next
+   number too. Before claiming, check `git diff dev -- lib/db/schema.ts` and
+   any sibling branch you know is in flight; if a collision is plausible,
+   claim N+1 and say why.
+3. **Edit `CURRENT_SCHEMA` and bump `CURRENT_SCHEMA_VERSION`.** An edit without
+   a bump is silently ignored on existing databases. Drop a table by setting
+   it to `null`, never by deleting the key. Add a new table to
+   `CORE_TABLE_NAMES` in `lib/data-governance/table-catalog.ts`, then run
+   `pnpm db:governance:write`.
+4. **Data backfills:** CLAUDE.md says local data is not migrated, but
+   `schema.ts` still carries three `.upgrade()` steps (v240–v242). Ask the
+   user before adding a new backfill.
+5. **Update `lib/db/schema.test.ts`** in the same change (the version
+   assertion and any shape tests).
+6. **Update consumers** (`lib/db/*.ts` table accessors, types) and their
+   co-located tests.
+7. **Verify**: `pnpm test -- lib/db` and `pnpm typecheck`.
 
 ## Notes
 

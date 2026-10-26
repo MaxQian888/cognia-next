@@ -1,5 +1,6 @@
 import type { LlmClient } from "../llm"
 import {
+  PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT,
   PROJECT_PROMPT_VERSION,
   extractProjectClaims,
   type ExtractProjectClaimsInput,
@@ -365,5 +366,17 @@ describe("extractProjectClaims", () => {
     // here is the reminder. v3 validates actual citation anchors and the
     // bounded claim schema instead of relying only on prompt instructions.
     expect(PROJECT_PROMPT_VERSION).toBe("project-v4")
+  })
+})
+
+describe("extractProjectClaims system prompt", () => {
+  it("sends the shipped system prompt by default and a host-supplied one when given", async () => {
+    const llm = clientReturning({ claims: [] })
+    await extractProjectClaims({ messages: WINDOW }, llm)
+    await extractProjectClaims({ messages: WINDOW }, llm, { systemPrompt: "Custom miner." })
+    expect(jest.mocked(llm.complete).mock.calls.map((call) => call[1]?.system)).toEqual([
+      PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT,
+      "Custom miner.",
+    ])
   })
 })

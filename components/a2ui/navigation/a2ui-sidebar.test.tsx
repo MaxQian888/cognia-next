@@ -45,6 +45,19 @@ describe("A2UISidebar", () => {
     renderChild: jest.fn(),
   })
 
+  it("renders a configured navigation icon", () => {
+    render(
+      <A2UISidebar
+        {...cp({
+          id: "icons",
+          component: "Sidebar",
+          groups: [{ id: "group", items: [{ id: "one", label: "One", icon: "Star" }] }],
+        })}
+      />
+    )
+    expect(screen.getByRole("button", { name: "One" }).querySelector("svg")).toBeInTheDocument()
+  })
+
   it("renders nav items", () => {
     render(
       <A2UISidebar

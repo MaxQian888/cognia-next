@@ -65,13 +65,14 @@ describe("protocol vocabulary", () => {
       "codex-app-server",
       "codex-siwc-app-server",
       "dsh-sdk",
+      "opencode",
       "opencode-v2",
       "pi-rpc",
     ])
   })
 
   it("keeps legacy protocols readable but never selectable", () => {
-    expect(LEGACY_EXTERNAL_AGENT_PROTOCOLS).toContain("opencode")
+    expect(isSelectableExternalAgentProtocol("opencode")).toBe(true)
     expect(isSelectableExternalAgentProtocol("opencode-v2")).toBe(true)
     for (const legacy of LEGACY_EXTERNAL_AGENT_PROTOCOLS) {
       expect(isLegacyExternalAgentProtocol(legacy)).toBe(true)

@@ -248,13 +248,13 @@
         },
         {
           "path": "runtime/pnpm-lock.yaml",
-          "bytes": 10293,
-          "sha256": "611186a8d5f6bbfa321d845c694fa5a16401361a3fef9a55e37d8b7ae24ee27a"
+          "bytes": 10322,
+          "sha256": "48afdca2884b3335862e68be4d0ff1e0f78ae22d0238bd8037ee9e7467227a46"
         },
         {
           "path": "runtime/pnpm-workspace.yaml",
-          "bytes": 401,
-          "sha256": "b4b4012329ee05c1bc846a2ee84580e7e5d28610c1a410cdc8329d689f2aa4be"
+          "bytes": 432,
+          "sha256": "cc9181cc194a34eb07f0b4a5da745d26980eb8a99b599fe6adcdfbc7ba13cf18"
         },
         {
           "path": "runtime/probe.mjs",

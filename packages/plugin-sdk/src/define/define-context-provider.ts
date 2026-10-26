@@ -16,7 +16,7 @@
 import type {
   PluginContextProvider,
   PluginContextProviderDef,
-} from "@/types/plugin/plugin-context-provider"
+} from "@cognia/plugin-contract/types/plugin/plugin-context-provider"
 
 export function defineContextProvider(provider: PluginContextProvider): PluginContextProvider
 export function defineContextProvider(provider: PluginContextProviderDef): PluginContextProviderDef

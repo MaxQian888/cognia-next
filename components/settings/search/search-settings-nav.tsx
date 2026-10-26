@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import {
   SEARCH_PROVIDERS,
-  isProviderConfigured,
+  getProviderState,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@cognia/web-search/types"
 import { SEARCH_SECTIONS, type SearchSectionId } from "./search-sections"
@@ -25,8 +25,12 @@ export function SearchSettingsNav({ active, onSelect }: SearchSettingsNavProps) 
   )
 
   const total = Object.keys(SEARCH_PROVIDERS).length
-  const enabledCount = Object.values(searchProviders).filter(
-    (p) => p.enabled && isProviderConfigured(p.providerId, p)
+  const enabledCount = Object.keys(SEARCH_PROVIDERS).filter(
+    (id) =>
+      getProviderState(
+        id as keyof typeof SEARCH_PROVIDERS,
+        searchProviders[id as keyof typeof SEARCH_PROVIDERS]
+      ) === "configured"
   ).length
 
   return (

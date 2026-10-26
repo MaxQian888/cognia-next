@@ -396,7 +396,7 @@ export interface ResolvedAgentCompositionV1 {
   autonomy: AutonomyLevel
   orchestrationRef?: string
   runtimeBindingRef?: string
-  /** SHA-256 of the final system prompt. */
+  /** SHA-256 of the send's whole prompt surface (base, appended sections, SDK overlay). */
   promptDigest: string
   /** SHA-256 of the ordered `(name, schema, visibility)` tool list. */
   toolDigest: string

@@ -8,6 +8,17 @@ import type { PetEvent } from "@/types/pet"
 describe("schedulerMessageToPetEvent", () => {
   const base = { type: "execution-update", executionId: "e1", taskName: "T" }
 
+  it.each(["running", "completed", "failed"])("ignores silent maintenance %s", (status) => {
+    expect(
+      schedulerMessageToPetEvent({
+        ...base,
+        taskId: "maintenance",
+        status,
+        silentMaintenance: true,
+      })
+    ).toBeNull()
+  })
+
   it("maps a running execution to scheduledRunStarting", () => {
     expect(schedulerMessageToPetEvent({ ...base, taskId: "t1", status: "running" })).toEqual({
       source: "scheduler",

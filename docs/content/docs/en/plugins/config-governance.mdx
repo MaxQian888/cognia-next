@@ -1,0 +1,56 @@
+---
+title: "Config Governance"
+description: "Audit your agent's instruction files, agent files, Skills, characters, templates and prompt overrides, see which rules are actually followed, enforce the ones that are not, and check that a change helped."
+---
+
+# Config Governance
+
+The built-in `config-governance` plugin (`plugins/config-governance/`, [ADR-0238](../adr/0238-agent-configuration-is-governed-by-evidence)) answers three questions about every rule your agent loads:
+
+1. **Should it exist?** The audit finds dated, brittle, conflicting and stale rules.
+2. **Is it followed?** The adherence check replays rules over your past sessions.
+3. **Did changing it help?** Verify compares adherence and eval results before and after a change.
+
+Open it from the rail (**Config Governance**), the command palette, or `/governance` in a chat.
+
+## Audit
+
+**Overview → Run audit** reads every surface of the chosen workspace: instruction files (`CLAUDE.md`, `AGENTS.md` and their layers), agent files under `.claude/agents`, Skills, characters, templates, custom modes, presets, workspace instructions and prompt overrides. Shipped prompts you never changed are skipped unless you turn on **Audit shipped prompts**.
+
+For each surface the plugin checks the paths and package scripts it names against the repository, dates each line from version control, and looks for the patterns of Anthropic's prompt-audit method (shouted emphasis, thinking scaffolds, workarounds for older models, history narrative, trigger lists, oversized Skills). Then one model call per surface judges the text for your **target model**, and one more compares rules from different files that rule on the same point.
+
+The model's answer is checked before it is shown: a finding must name a known pattern, cite lines that exist and quote text that is on them. Text that cannot be redacted is never sent; that surface gets the local checks only.
+
+## Findings
+
+Each finding shows where it is, the quoted evidence, the pattern, why, the confidence and the proposed action. Confident edits come with a diff.
+
+- **Select suggested edits** picks the ordinary edits. Conflict and stale-fact edits are marked **Pick yourself**: they depend on text anyone with commit access can write, so you select them one by one.
+- **Apply selected** writes each surface through its owner. You confirm every surface's change before it is written; a surface that changed since the audit is refused.
+- **Keep this rule** records that a rule should stay; kept findings leave the counts and the reports.
+- **Open in Prompt Center** opens the surface with its editor and revision history.
+
+## Adherence
+
+**Derive checks** turns your rules about tool use into checks (one model call): something that must never happen, must follow, or must come first, within the turn or the session. Rules about tone or judgment are reported as not checkable.
+
+**Replay sessions** runs the checks over your recent sessions locally, with no model call. For each rule you see how often it applied and was followed, sample calls, and whether it breaks more often late in long sessions — a sign that its position, not its wording, needs to change. Mark a sample **Not a match** when the check misread it; labels apply on the next replay.
+
+## Enforcement
+
+A rule that is not followed can be enforced in a workspace's sessions or in every session:
+
+- **Remind** lets the call run and appends the rule to the tool's result.
+- **Block** stops the call and tells the agent why. A "must follow" rule cannot block a call that has not happened yet, so it reminds instead.
+
+Turn off **Run enforcement rules** in the plugin's settings to pause all of them.
+
+## Verify
+
+For each applied change, **Compare** replays the same checks over sessions created before the change and since. **Eval A/B** runs an eval dataset in the workspace before a change (baseline) and after it (candidate). Each comparison says when there is not enough data to tell.
+
+## Drift check and privacy
+
+A weekly **Configuration drift check** re-audits without a model call and tells you when a surface changed or a referenced path or script disappeared. It is paused until you resume it in the scheduler.
+
+Settings that can hold secrets — hooks, MCP servers, permission rules — are summarized by the app (event, tool, pattern, an executable's name). The plugin never reads their contents and never sends them to a model.

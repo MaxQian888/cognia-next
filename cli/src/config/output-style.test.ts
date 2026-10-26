@@ -1,5 +1,12 @@
 import { OUTPUT_STYLES } from "./schema"
 import { composeSystemPrompt, outputStyleInstruction } from "./output-style"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1, PromptScope } from "@/lib/prompts/types"
+import { CLI_OUTPUT_STYLE_PROMPTS } from "@/lib/agent/prompts/cli-prompts"
 
 describe("outputStyleInstruction", () => {
   it("returns null for default / undefined", () => {
@@ -36,5 +43,55 @@ describe("composeSystemPrompt", () => {
   it("returns undefined when neither a base nor a style applies", () => {
     expect(composeSystemPrompt(undefined, "default")).toBeUndefined()
     expect(composeSystemPrompt("", undefined)).toBeUndefined()
+  })
+})
+
+function publishOverride(
+  def: PromptDefinitionV1,
+  body: string,
+  revisionId: string,
+  scope: PromptScope = "account",
+  targetId = ""
+): void {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: `pob-${revisionId}`,
+        promptId: def.id,
+        scope,
+        targetId,
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+describe("output style Prompt Center overrides", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("appends a published account override instead of the shipped style", () => {
+    publishOverride(CLI_OUTPUT_STYLE_PROMPTS.concise, "Output style: Terse. One line.", "por-os-1")
+    expect(composeSystemPrompt("Base.", "concise")).toBe("Base.\n\nOutput style: Terse. One line.")
+  })
+
+  it("applies a workspace override only for the workspace mounting the cwd", () => {
+    publishOverride(
+      CLI_OUTPUT_STYLE_PROMPTS.learning,
+      "Output style: Socratic.",
+      "por-os-2",
+      "workspace",
+      "ws-1"
+    )
+    expect(outputStyleInstruction("learning", { workspaceId: "ws-1" })).toBe(
+      "Output style: Socratic."
+    )
+    expect(outputStyleInstruction("learning", { workspaceId: "ws-2" })).toBe(
+      CLI_OUTPUT_STYLE_PROMPTS.learning.defaultBody
+    )
   })
 })

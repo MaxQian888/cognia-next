@@ -681,7 +681,7 @@ function packTest(target) {
           dependencies: {
             ...Object.fromEntries([...tarballs].map(([name, file]) => [name, `file:${file}`])),
             ...Object.fromEntries(peerDeps.map((name) => [name, installed(name)])),
-            typescript: installed("typescript"),
+            typescript: installed("@typescript/native"),
             "@types/node": installed("@types/node"),
           },
         },

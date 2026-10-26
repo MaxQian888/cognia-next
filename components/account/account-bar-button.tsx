@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { LockKeyholeIcon, SettingsIcon, UserRoundIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { keepOpenWhileNestedDialogFocused } from "@/components/shared/confirm-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
@@ -60,7 +61,13 @@ export function AccountBarButton({ className }: { className?: string }) {
             )}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={4} className="w-64 p-1">
+        <PopoverContent
+          align="end"
+          sideOffset={4}
+          className="w-64 p-1"
+          // The runtime-target section confirms Host removal in a dialog.
+          onFocusOutside={keepOpenWhileNestedDialogFocused}
+        >
           <div className="px-2 py-1.5 text-xs text-muted-foreground">
             {activeAccount ? activeAccount.displayName : t("noActive")}
           </div>

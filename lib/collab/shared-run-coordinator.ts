@@ -33,6 +33,8 @@ import { resolveSharedAttachmentParts, uploadMessageAttachments } from "./shared
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
 const HEARTBEAT_INTERVAL_MS = 30_000
+/** `LEASE_HEARTBEAT_TTL_MS` in crates/cognia-collab-server/src/chat_api.rs. */
+const LEASE_HEARTBEAT_TTL_MS = 90_000
 
 /**
  * How many times the 1s `updates` tick may retry a terminal run before giving
@@ -77,6 +79,9 @@ interface ActiveSharedRun {
   /** The scheduler that armed `heartbeat`. Cancelling with any other one leaks it. */
   cancel: typeof globalThis.clearInterval
   leaseLost: boolean
+  /** When the server last accepted a heartbeat (or granted the lease). */
+  lastHeartbeatAt: number
+  now: () => number
   onLeaseLost?: () => void
 }
 
@@ -96,6 +101,25 @@ export interface SharedRunCoordinatorDeps {
   getDeviceId?: () => Promise<string | null>
   setInterval?: typeof globalThis.setInterval
   clearInterval?: typeof globalThis.clearInterval
+  now?: () => number
+}
+
+/**
+ * Whether a failed heartbeat means the lease is gone.
+ *
+ * Any answer from the server (401/403/404/409, i.e. revoked standing, a
+ * replaced holder or an expired lease) is a fence: the run must stop now. A
+ * transport failure or a 5xx says nothing about the lease, so it is tolerated
+ * while the server's heartbeat TTL can still be renewed by the next beat;
+ * once it cannot, the server has expired the lease anyway.
+ */
+export function heartbeatFailureLosesLease(
+  error: unknown,
+  lastHeartbeatAt: number,
+  now: number
+): boolean {
+  if (error instanceof CollabError && error.status < 500 && error.status !== 429) return true
+  return lastHeartbeatAt + LEASE_HEARTBEAT_TTL_MS <= now + HEARTBEAT_INTERVAL_MS
 }
 
 function assertCurrentDatabase(db: CogniaDB): void {
@@ -191,6 +215,9 @@ export async function recoverSharedSessionRun(
     updates: undefined as never,
     cancel: globalThis.clearInterval,
     leaseLost: false,
+    // Recovery only finishes the run; it never heartbeats.
+    lastHeartbeatAt: Date.now(),
+    now: Date.now,
   }
   activeRuns.set(session.id, active)
   await finishSharedSessionRun(session.id, journal.terminalStatus ?? "failed")
@@ -573,6 +600,8 @@ export async function beginSharedSessionRun(
     heartbeat: undefined as never,
     cancel,
     leaseLost: false,
+    lastHeartbeatAt: (deps.now ?? Date.now)(),
+    now: deps.now ?? Date.now,
   }
   active.approvalBridge = new SharedApprovalBridge({
     client: active.client,
@@ -635,8 +664,12 @@ export async function beginSharedSessionRun(
         deviceId: active.deviceId,
         token: active.token,
       })
-      .catch(() => {
+      .then(() => {
+        active.lastHeartbeatAt = active.now()
+      })
+      .catch((error: unknown) => {
         if (active.leaseLost) return
+        if (!heartbeatFailureLosesLease(error, active.lastHeartbeatAt, active.now())) return
         active.leaseLost = true
         cancel(active.heartbeat)
         active.onLeaseLost?.()

@@ -58,8 +58,9 @@ jest.mock("@/lib/fleet/execution-workers", () => ({
   listExecutionWorkers: () => listWorkersImpl(),
 }))
 
+const sandboxConnections: never[] = []
 jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
-  useSandboxConnections: () => ({ connections: [] }),
+  useSandboxConnections: () => ({ connections: sandboxConnections }),
 }))
 
 jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
@@ -183,6 +184,32 @@ describe("useDeviceRows", () => {
         expect.objectContaining({ tier: "microvm", available: true }),
         expect.objectContaining({ tier: "container", available: true }),
       ])
+    )
+  })
+
+  it("updates container availability when every other row input stays unchanged", async () => {
+    const { result, rerender } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const previousRows = result.current.rows
+    rerender()
+    expect(result.current.rows).toBe(previousRows)
+
+    runtimeAvailability = {
+      ...runtimeAvailability,
+      container: { ...runtimeAvailability.container, available: true },
+    }
+    rerender()
+    expect(result.current.rows[0]?.runtime.shellTiers).toEqual(
+      expect.arrayContaining([expect.objectContaining({ tier: "container", available: true })])
+    )
+
+    runtimeAvailability = {
+      ...runtimeAvailability,
+      container: { ...runtimeAvailability.container, available: false },
+    }
+    rerender()
+    expect(result.current.rows[0]?.runtime.shellTiers).toEqual(
+      expect.arrayContaining([expect.objectContaining({ tier: "container", available: false })])
     )
   })
 

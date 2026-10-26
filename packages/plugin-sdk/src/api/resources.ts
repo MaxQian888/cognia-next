@@ -16,4 +16,4 @@
  * governed context is the only runtime door to the host inventory.
  */
 
-export type { PluginResourcesAPI } from "@/lib/plugin/api/resources-api"
+export type { PluginResourcesAPI } from "@cognia/plugin-contract/lib/plugin/api/resources-api"

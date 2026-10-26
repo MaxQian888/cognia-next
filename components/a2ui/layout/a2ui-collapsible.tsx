@@ -1,6 +1,6 @@
 "use client"
 
-import React, { memo } from "react"
+import React, { memo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type {
@@ -9,6 +9,7 @@ import type {
   A2UIStringOrPath,
   A2UIBooleanOrPath,
 } from "@/types/a2ui/schema"
+import { getBindingPath } from "@/lib/a2ui/data-model"
 import { useA2UIData } from "../a2ui-context"
 
 export interface A2UICollapsibleComponent extends A2UIBaseComponent {
@@ -21,14 +22,22 @@ export interface A2UICollapsibleComponent extends A2UIBaseComponent {
 export const A2UICollapsible = memo(function A2UICollapsible({
   component,
   renderChild,
+  onDataChange,
 }: A2UIComponentProps<A2UICollapsibleComponent>) {
   const { resolveString, resolveBoolean } = useA2UIData()
   const title = resolveString(component.title)
-  const open = component.open ? resolveBoolean(component.open) : undefined
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = component.open !== undefined ? resolveBoolean(component.open) : internalOpen
+  const path = getBindingPath(component.open)
 
   return (
     <Collapsible
-      defaultOpen={open ?? false}
+      open={open}
+      onOpenChange={(value) => {
+        if (path) onDataChange(path, value)
+        else setInternalOpen(value)
+      }}
+      disabled={resolveBoolean(component.disabled ?? false, false)}
       className={cn("space-y-2", component.className)}
       style={component.style as React.CSSProperties}
     >

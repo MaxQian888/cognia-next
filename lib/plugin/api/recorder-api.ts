@@ -3,7 +3,6 @@ import {
   getRecorderAvailability,
   setRecorderAvailability,
   subscribeRecorderAvailability,
-  type RecorderAvailability,
 } from "@/lib/skills/recording/recorder-availability"
 import {
   onRecordEvent,
@@ -21,42 +20,9 @@ import {
   recordStop,
   recordUndoLast,
 } from "@/lib/skills/recording/recorder-client"
-import type {
-  AssetId,
-  AssetPayload,
-  CaptureTarget,
-  RecordEvent,
-  RecordPreflight,
-  RecordStartArgs,
-  RecordStatus,
-  RecordingBundle,
-  RecordingId,
-  RecoverableBundle,
-} from "@/lib/skills/recording/types"
-import type { RecorderEntrySource } from "@/lib/skills/recording/state-machine"
 import { openRecorder, recorderStatusSnapshot } from "@/stores/skills/recorder-store"
-
-export interface PluginRecorderAPI {
-  publishAvailability(): () => void
-  getAvailability(): RecorderAvailability
-  subscribeAvailability(listener: () => void): () => void
-  preflight(): Promise<RecordPreflight>
-  listCaptureTargets(): Promise<CaptureTarget[]>
-  start(args: RecordStartArgs): Promise<RecordStatus>
-  pause(): Promise<RecordStatus>
-  resume(): Promise<RecordStatus>
-  undoLast(): Promise<RecordStatus>
-  stop(): Promise<RecordingBundle>
-  interrupt(): Promise<void>
-  status(): Promise<RecordStatus>
-  listRecoverable(): Promise<RecoverableBundle[]>
-  loadBundle(recordingId: RecordingId): Promise<RecordingBundle>
-  readAsset(recordingId: RecordingId, assetId: AssetId): Promise<AssetPayload>
-  deleteBundle(recordingId: RecordingId): Promise<void>
-  onEvent(handler: (event: RecordEvent) => void): () => void
-  open(source: RecorderEntrySource): void
-  statusSnapshot(): { recording: boolean; phase: string; stepCount: number }
-}
+import type { PluginRecorderAPI } from "@cognia/plugin-contract/lib/plugin/api/recorder-api"
+export type { PluginRecorderAPI } from "@cognia/plugin-contract/lib/plugin/api/recorder-api"
 
 export function createRecorderAPI(pluginId: string): PluginRecorderAPI {
   return {

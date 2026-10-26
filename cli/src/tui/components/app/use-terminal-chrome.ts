@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useInsertionEffect, useMemo, useRef } from "react"
 import type { Dispatch } from "react"
 import type { TuiAction } from "../../state/types"
 import {
@@ -110,7 +110,10 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
   // enter keeps the first frame on screen while still owning enter/exit for live
   // `/layout` toggles (and for tests, which render App directly with no pre-enter).
   const altScreenActive = useRef(Boolean(altScreenPreEntered) && fullscreen)
-  useEffect(() => {
+  // Ink paints in resetAfterCommit, before layout/passive effects. Switch
+  // buffers in the mutation phase so entering cannot wipe that new frame.
+  // This effect only writes terminal modes; it never schedules React updates.
+  useInsertionEffect(() => {
     if (!fullscreen) return
     if (!altScreenActive.current) {
       enterAltScreen(screen)
@@ -127,9 +130,7 @@ export function useTerminalChrome(opts: TerminalChromeOptions): void {
     }
     // `mouseMode` / `mouseDrag` are intentionally NOT deps: the initial
     // application is gated by `altScreenActive`, and live changes go through
-    // `applyEffect` so a re-enter never re-issues CLEAR_HOME. eslint-disable to
-    // keep the effect enter-once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `applyEffect` so a re-enter never re-issues CLEAR_HOME.
   }, [fullscreen, screen])
 
   // Dynamic terminal title: reflect the live session state in the window / tab

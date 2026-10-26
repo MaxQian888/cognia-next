@@ -165,6 +165,7 @@ pub mod shutdown;
 // resolves unchanged.
 pub use cognia_skills as skills;
 mod provider_diagnostics;
+mod magpie;
 mod subscription;
 pub mod task_workspace;
 // ADR-0067 Tier C — extracted alongside `logging`; re-aliased so
@@ -504,6 +505,9 @@ pub fn run() {
         // first request and can legitimately take longer than the 8s grace;
         // measuring from process boot exposed the still-unpainted black webview.
         .on_page_load(|webview, payload| {
+            #[cfg(all(feature = "agent-debug", desktop))]
+            webview.state::<webview_watchdog::RendererLifecycle>()
+                .record_page_url(webview.label(), payload.url().as_str());
             if payload.event() == tauri::webview::PageLoadEvent::Started {
                 webview
                     .state::<webview_watchdog::RendererLifecycle>()
@@ -797,6 +801,7 @@ pub fn run() {
             provider_diagnostics::provider_diagnostics_migrate_balance_token,
             provider_diagnostics::provider_diagnostics_clear_balance_token,
             provider_diagnostics::provider_diagnostics_run_balance_script,
+            magpie::magpie_gateway_port,
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
@@ -1481,6 +1486,7 @@ pub fn run() {
             proxy_config::commands::network_interface_counters,
             proxy_config::commands::network_latency_probe,
             proxy_config::commands::proxy_http_request,
+            proxy_config::commands::proxy_http_prepare,
             proxy_config::commands::proxy_http_cancel,
             proxy_config::stream::proxy_http_stream_open,
             proxy_config::stream::proxy_http_stream_ack,
@@ -1502,6 +1508,7 @@ pub fn run() {
             connectors::commands::connectors_keyring_delete,
             connectors::commands::connectors_keyring_list,
             connectors::commands::connectors_http_request,
+            connectors::commands::connectors_google_docs_auth,
             connectors::commands::connectors_ws_open,
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
@@ -1749,6 +1756,7 @@ pub fn run() {
             automation::commands::automation_kill_switch_engaged,
             automation::commands::automation_kill_switch,
             automation::commands::automation_consent_respond,
+            automation::commands::automation_consent_pending,
             // ADR-0153 — the desktop operator answers a paired device's
             // escalation from their own screen. The `_rpc` arms in
             // rpc/native_tools.rs are invisible to the renderer, which
@@ -2056,6 +2064,35 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn secondary_windows_allow_only_the_notification_startup_query() {
+        // The global notification plugin injects this query into each webview.
+        for raw in [
+            include_str!("../capabilities/pet.json"),
+            include_str!("../capabilities/island.json"),
+            include_str!("../capabilities/tray-panel.json"),
+            include_str!("../capabilities/usage-dock.json"),
+            include_str!("../capabilities/chat-copilot.json"),
+            include_str!("../capabilities/selection-toolbar.json"),
+            include_str!("../capabilities/recorder-controller.json"),
+        ] {
+            let capability: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let notification_permissions: Vec<_> = capability["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|permission| permission.starts_with("notification:"))
+                .collect();
+            assert_eq!(
+                notification_permissions,
+                ["notification:allow-is-permission-granted"],
+                "{}",
+                capability["identifier"]
+            );
+        }
+    }
+
     #[test]
     fn native_worker_recovery_precedes_the_main_only_boot_guard() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();

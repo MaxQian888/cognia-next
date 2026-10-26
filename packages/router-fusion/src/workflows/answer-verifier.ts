@@ -17,6 +17,7 @@
 
 import type { Message, VerificationReport } from "../contracts/schemas"
 import type { VerifierProfile } from "../config/types"
+import type { RolePromptProfile } from "../prompts/roles"
 import {
   parseJsonDocument,
   verifySchemaFixture,
@@ -54,6 +55,8 @@ export interface AnswerVerificationInput {
   reserveMicrousd: number
   transportAttempts: number
   deadlineAt: number
+  /** The role text the run pinned; the shipped roles-1 when absent. */
+  rolePrompts?: RolePromptProfile
   signal: AbortSignal
 }
 
@@ -130,6 +133,7 @@ async function reviewByModel(
     signal: input.signal,
     request: {
       messages: roleMessages("reviewer", {
+        profile: input.rolePrompts,
         contract: taskContract(input.messages),
         material: [
           untrustedBlock("the answer under review", input.text),

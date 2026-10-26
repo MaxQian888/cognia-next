@@ -12,7 +12,7 @@ You analyze the testing and quality assurance infrastructure of cognia-next. Foc
 - Rust tests — `#[cfg(test)]` modules and `src-tauri/tests/` integration tests
 - Sidecar tests — `node --test` tests under sidecar/
 - E2E tests — Playwright suites under `tests/e2e/` (workflows, mobile, tauri)
-- Coverage configuration — `jest.config.ts` thresholds, exclusions
+- Coverage configuration — `scripts/test/coverage-thresholds.json` thresholds, `jest.config.ts` exclusions
 - Test utilities — `jest.setup.ts`, `__mocks__/`, `fake-indexeddb`
 - Quality scripts — `scripts/gates/` audit tools
 
@@ -27,7 +27,7 @@ You analyze the testing and quality assurance infrastructure of cognia-next. Foc
 
 ## Key Files
 
-- `jest.config.ts` — Jest configuration, coverage thresholds
+- `jest.config.ts` — Jest configuration; thresholds in `scripts/test/coverage-thresholds.json`
 - `jest.setup.ts` — Global test setup
 - `playwright.config.ts` — E2E configuration
 - `tests/e2e/` — E2E test structure
@@ -35,6 +35,6 @@ You analyze the testing and quality assurance infrastructure of cognia-next. Foc
 
 ## Commands
 
-- Count test files: `Get-ChildItem -Recurse -Filter "*.test.*" | Measure-Object`
-- Check coverage thresholds in jest.config.ts
-- List E2E specs: `Get-ChildItem tests/e2e -Recurse -Filter "*.spec.ts"`
+- Count test files: `rg --files -g "*.test.*" | wc -l`
+- Check coverage thresholds in scripts/test/coverage-thresholds.json
+- List E2E specs: `rg --files tests/e2e -g "*.spec.ts"`

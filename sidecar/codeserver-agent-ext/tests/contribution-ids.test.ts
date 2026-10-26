@@ -1,0 +1,88 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import {
+  assertManagedContributionIds,
+  collectContributionIds,
+  findOccupiedContributionIds,
+  managedIdPrefix,
+} from "../src/contribution-ids.ts"
+
+test("collects stable global ids across declarative contribution families", () => {
+  assert.deepEqual(
+    collectContributionIds({
+      commands: [{ command: "cognia.acme.run" }],
+      views: { explorer: [{ id: "cognia.acme.results" }] },
+      customEditors: [{ viewType: "cognia.acme.editor" }],
+      languageModelTools: [{ name: "cognia_acme_inspect" }],
+    }),
+    [
+      { kind: "command", id: "cognia.acme.run" },
+      { kind: "view", id: "cognia.acme.results" },
+      { kind: "customEditor", id: "cognia.acme.editor" },
+      { kind: "languageModelTool", id: "cognia_acme_inspect" },
+    ]
+  )
+})
+
+test("generation rejects ids outside the plugin namespace and duplicate ids", () => {
+  assert.throws(
+    () =>
+      assertManagedContributionIds("acme", {
+        commands: [{ command: "cognia.other.run" }],
+      }),
+    /IDE_PROXY_ID_OUTSIDE_NAMESPACE/
+  )
+  assert.throws(
+    () =>
+      assertManagedContributionIds("acme", {
+        commands: [{ command: "cognia.acme.run" }, { command: "cognia.acme.run" }],
+      }),
+    /IDE_PROXY_ID_DUPLICATE/
+  )
+})
+
+test("activation reports ids occupied by another extension", () => {
+  const vscode = {
+    extensions: {
+      all: [
+        {
+          id: "native.other",
+          packageJSON: {
+            contributes: { commands: [{ command: "cognia.acme.run" }] },
+          },
+        },
+        {
+          id: "cognia-managed.proxy-acme",
+          packageJSON: {
+            contributes: { commands: [{ command: "cognia.acme.run" }] },
+          },
+        },
+      ],
+    },
+  }
+  assert.deepEqual(
+    findOccupiedContributionIds(
+      vscode,
+      { contributions: { commands: [{ command: "cognia.acme.run" }] } },
+      "cognia-managed.proxy-acme"
+    ),
+    [{ kind: "command", id: "cognia.acme.run", extensionId: "native.other" }]
+  )
+})
+
+test("language model tools take the underscore namespace VS Code accepts", () => {
+  assert.equal(managedIdPrefix("acme.tools", "command"), "cognia.acme.tools.")
+  assert.equal(managedIdPrefix("acme.tools", "languageModelTool"), "cognia_acme_tools_")
+  assert.equal(managedIdPrefix("acme.tools", "language-model-tool"), "cognia_acme_tools_")
+  assert.doesNotThrow(() =>
+    assertManagedContributionIds("acme", { languageModelTools: [{ name: "cognia_acme_inspect" }] })
+  )
+  assert.throws(
+    () =>
+      assertManagedContributionIds("acme", {
+        languageModelTools: [{ name: "cognia.acme.inspect" }],
+      }),
+    /IDE_PROXY_ID_OUTSIDE_NAMESPACE/
+  )
+})

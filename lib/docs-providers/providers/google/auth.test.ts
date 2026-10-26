@@ -2,37 +2,23 @@ jest.mock("./config", () => ({
   ...jest.requireActual("./config"),
   getGoogleClientSecret: jest.fn(),
   getGoogleDocsSettings: jest.fn(),
-  loadGoogleTokens: jest.fn(),
-  saveGoogleTokens: jest.fn(),
-  updateGoogleDocsSettings: jest.fn(),
-  clearGoogleConnection: jest.fn(),
-}))
-jest.mock("./oauth-pending", () => ({
-  setGoogleOAuthPending: jest.fn(),
-  getGoogleOAuthPending: jest.fn(),
-  clearGoogleOAuthPending: jest.fn(),
 }))
 jest.mock("@/lib/connectors/tauri/commands", () => ({ connectorsEnsureServer: jest.fn() }))
-
+import { createGoogleDocsTestHost, GOOGLE_STATE_KEY } from "@/lib/testing/google-docs-host"
+import { __setGoogleStatePortForTests } from "./state"
+import type { GoogleConnectionState } from "./state"
 import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 import {
-  clearGoogleConnection,
   getGoogleClientSecret,
   getGoogleDocsSettings,
   loadGoogleTokens,
-  saveGoogleTokens,
-  updateGoogleDocsSettings,
+  type GoogleOAuthTokens,
 } from "./config"
-import {
-  clearGoogleOAuthPending,
-  getGoogleOAuthPending,
-  setGoogleOAuthPending,
-} from "./oauth-pending"
+import { getGoogleOAuthPending, type GoogleOAuthPending } from "./oauth-pending"
 import type { GoogleHttpFn, GoogleHttpRequest } from "./http"
 import {
   GOOGLE_AUTH_URL,
   GOOGLE_CALLBACK_PATH,
-  GOOGLE_REVOKE_URL,
   GOOGLE_TOKEN_URL,
   REFRESH_SKEW_MS,
   beginGoogleDocsAuth,
@@ -42,17 +28,17 @@ import {
   getGoogleAccessToken,
   refreshGoogleTokens,
 } from "./auth"
-
 const clientSecretMock = getGoogleClientSecret as jest.Mock
 const settingsMock = getGoogleDocsSettings as jest.Mock
-const loadTokensMock = loadGoogleTokens as jest.Mock
-const saveTokensMock = saveGoogleTokens as jest.Mock
-const updateSettingsMock = updateGoogleDocsSettings as jest.Mock
-const setPendingMock = setGoogleOAuthPending as jest.Mock
-const getPendingMock = getGoogleOAuthPending as jest.Mock
-const clearPendingMock = clearGoogleOAuthPending as jest.Mock
-const clearConnectionMock = clearGoogleConnection as jest.Mock
-
+let host: ReturnType<typeof createGoogleDocsTestHost>
+let values: Map<string, string>
+const record = (): GoogleConnectionState => JSON.parse(values.get(GOOGLE_STATE_KEY)!)
+function seedTokens(tokens: GoogleOAuthTokens | null) {
+  values.set(GOOGLE_STATE_KEY, JSON.stringify({ ...record(), tokens }))
+}
+function seedPending(pending: GoogleOAuthPending | null) {
+  values.set(GOOGLE_STATE_KEY, JSON.stringify({ ...record(), pending, claimed: false }))
+}
 const REDIRECT = `http://127.0.0.1:${CONNECTORS_SERVER_PORT}${GOOGLE_CALLBACK_PATH}`
 
 function httpWith(responses: Array<{ status?: number; body: string }>) {
@@ -66,13 +52,28 @@ function httpWith(responses: Array<{ status?: number; body: string }>) {
   return { http, calls }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks()
+  jest.spyOn(Date, "now").mockReturnValue(1000)
+  values = new Map()
+  host = createGoogleDocsTestHost({
+    load: async (key) => values.get(key) ?? null,
+    save: async (key, value) => {
+      values.set(key, value)
+    },
+    delete: async (key) => {
+      values.delete(key)
+    },
+  })
+  __setGoogleStatePortForTests(host.call)
   settingsMock.mockResolvedValue({ clientId: "cid" })
   clientSecretMock.mockResolvedValue("csec")
-  updateSettingsMock.mockResolvedValue({})
-  saveTokensMock.mockResolvedValue(undefined)
-  clearConnectionMock.mockResolvedValue(undefined)
+  await beginGoogleDocsAuth({ ensureServer: async () => `127.0.0.1:${CONNECTORS_SERVER_PORT}` })
+  jest.clearAllMocks()
+})
+afterEach(() => {
+  __setGoogleStatePortForTests(null)
+  jest.restoreAllMocks()
 })
 
 describe("buildGoogleOAuthState", () => {
@@ -109,10 +110,12 @@ describe("beginGoogleDocsAuth", () => {
   it("persists the verifier, state and redirect for the completion step", async () => {
     const { authorizeUrl } = await beginGoogleDocsAuth({ ensureServer })
     const state = new URL(authorizeUrl).searchParams.get("state")
-    expect(setPendingMock).toHaveBeenCalledWith(
-      expect.objectContaining({ state, redirectUri: REDIRECT, codeVerifier: expect.any(String) }),
-      expect.any(Number)
-    )
+    expect(await getGoogleOAuthPending()).toMatchObject({
+      state,
+      redirectUri: REDIRECT,
+      codeVerifier: expect.any(String),
+      ts: 1000,
+    })
   })
 
   it("uses the port the loopback listener actually bound", async () => {
@@ -143,7 +146,7 @@ describe("beginGoogleDocsAuth", () => {
         },
       })
     ).rejects.toMatchObject({ code: "hostUnsupported" })
-    expect(setPendingMock).not.toHaveBeenCalled()
+    expect(await getGoogleOAuthPending()).toBeNull()
   })
 })
 
@@ -151,7 +154,7 @@ describe("completeGoogleDocsAuth", () => {
   const PENDING = { state: "google:abc", codeVerifier: "ver", redirectUri: REDIRECT, ts: 0 }
 
   it("exchanges the code, replaying the verifier and redirect", async () => {
-    getPendingMock.mockResolvedValue(PENDING)
+    seedPending(PENDING)
     const { http, calls } = httpWith([
       {
         body: JSON.stringify({
@@ -178,13 +181,13 @@ describe("completeGoogleDocsAuth", () => {
       scope: "s",
       tokenType: undefined,
     })
-    expect(saveTokensMock).toHaveBeenCalledWith(tokens)
-    expect(updateSettingsMock).toHaveBeenCalled()
-    expect(clearPendingMock).toHaveBeenCalled()
+    expect(await loadGoogleTokens()).toEqual(tokens)
+    expect(record().accountEmail).toBe("a@b.c")
+    expect(await getGoogleOAuthPending()).toBeNull()
   })
 
   it("records the granted scopes and account email for the settings card", async () => {
-    getPendingMock.mockResolvedValue(PENDING)
+    seedPending(PENDING)
     const { http } = httpWith([
       {
         body: JSON.stringify({ access_token: "at", refresh_token: "rt", scope: "drive.readonly" }),
@@ -192,20 +195,17 @@ describe("completeGoogleDocsAuth", () => {
       { body: JSON.stringify({ email: "a@b.c" }) },
     ])
     await completeGoogleDocsAuth({ code: "abc", state: "google:abc" }, { http, now: () => 0 })
-    const patch = updateSettingsMock.mock.calls[0][0] as (c: object) => Record<string, unknown>
-    expect(patch({})).toMatchObject({
-      connected: true,
+    expect(record()).toMatchObject({
       accountEmail: "a@b.c",
-      grantedScopes: "drive.readonly",
+      tokens: { refreshToken: "rt", scope: "drive.readonly" },
     })
   })
 
   it("marks the connection unconnected when Google issued no refresh token", async () => {
-    getPendingMock.mockResolvedValue(PENDING)
+    seedPending(PENDING)
     const { http } = httpWith([{ body: JSON.stringify({ access_token: "at" }) }, { body: "{}" }])
     await completeGoogleDocsAuth({ code: "abc", state: "google:abc" }, { http, now: () => 0 })
-    const patch = updateSettingsMock.mock.calls[0][0] as (c: object) => Record<string, unknown>
-    expect(patch({})).toMatchObject({ connected: false })
+    expect(record().tokens?.refreshToken).toBeUndefined()
   })
 
   it.each([
@@ -213,37 +213,42 @@ describe("completeGoogleDocsAuth", () => {
     ["a state mismatch", { ...PENDING }, { code: "c", state: "google:other" }],
     ["a missing state", { ...PENDING }, { code: "c" }],
     ["a missing code", { ...PENDING }, { state: "google:abc" }],
-  ])("refuses on %s and clears the pending record", async (_label, pending, input) => {
-    getPendingMock.mockResolvedValue(pending)
+  ])("refuses on %s without consuming a different attempt", async (_label, pending, input) => {
+    seedPending(pending)
     const { http } = httpWith([])
     await expect(completeGoogleDocsAuth(input, { http })).rejects.toMatchObject({
       code: "notAuthorized",
     })
-    expect(clearPendingMock).toHaveBeenCalled()
-    expect(saveTokensMock).not.toHaveBeenCalled()
+    if (pending && "state" in input && input.state === pending.state)
+      expect(await getGoogleOAuthPending()).toBeNull()
+    else expect(await getGoogleOAuthPending()).toEqual(pending)
+    expect(await loadGoogleTokens()).toBeNull()
   })
 
   it("surfaces a user denial with Google's own description", async () => {
-    getPendingMock.mockResolvedValue(PENDING)
+    seedPending(PENDING)
     const { http } = httpWith([])
     await expect(
-      completeGoogleDocsAuth({ error: "access_denied", errorDescription: "user said no" }, { http })
+      completeGoogleDocsAuth(
+        { state: PENDING.state, error: "access_denied", errorDescription: "user said no" },
+        { http }
+      )
     ).rejects.toMatchObject({ code: "notAuthorized", params: { reason: "user said no" } })
   })
 
   it("clears the pending record even when the token endpoint throws", async () => {
-    getPendingMock.mockResolvedValue(PENDING)
+    seedPending(PENDING)
     const http: GoogleHttpFn = async () => {
       throw new Error("offline")
     }
     await expect(
       completeGoogleDocsAuth({ code: "c", state: "google:abc" }, { http })
     ).rejects.toThrow("offline")
-    expect(clearPendingMock).toHaveBeenCalled()
+    expect(await getGoogleOAuthPending()).toBeNull()
   })
 
   it("reports the token endpoint's error rather than a generic failure", async () => {
-    getPendingMock.mockResolvedValue(PENDING)
+    seedPending(PENDING)
     const { http } = httpWith([
       {
         status: 400,
@@ -258,7 +263,7 @@ describe("completeGoogleDocsAuth", () => {
 
 describe("refreshGoogleTokens", () => {
   it("carries the previous refresh token forward when Google omits it", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "old", refreshToken: "rt", expiresAt: 0 })
+    seedTokens({ accessToken: "old", refreshToken: "rt", expiresAt: 0 })
     const { http, calls } = httpWith([
       { body: JSON.stringify({ access_token: "new", expires_in: 60 }) },
     ])
@@ -268,7 +273,7 @@ describe("refreshGoogleTokens", () => {
   })
 
   it("reports a revoked grant as reconnect-required, not as a network blip", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "old", refreshToken: "rt", expiresAt: 0 })
+    seedTokens({ accessToken: "old", refreshToken: "rt", expiresAt: 0 })
     const { http } = httpWith([
       {
         status: 400,
@@ -282,7 +287,7 @@ describe("refreshGoogleTokens", () => {
   })
 
   it("refuses when there is no refresh token to spend", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "old", expiresAt: 0 })
+    seedTokens({ accessToken: "old", expiresAt: 0 })
     await expect(refreshGoogleTokens({ http: httpWith([]).http })).rejects.toMatchObject({
       code: "notAuthorized",
     })
@@ -291,14 +296,14 @@ describe("refreshGoogleTokens", () => {
 
 describe("getGoogleAccessToken", () => {
   it("reuses a token that is comfortably valid", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "at", expiresAt: 10 * REFRESH_SKEW_MS })
+    seedTokens({ accessToken: "at", expiresAt: 10 * REFRESH_SKEW_MS })
     const { http, calls } = httpWith([])
     expect(await getGoogleAccessToken({ http, now: () => 0 })).toBe("at")
     expect(calls).toHaveLength(0)
   })
 
   it("refreshes inside the skew window", async () => {
-    loadTokensMock.mockResolvedValue({
+    seedTokens({
       accessToken: "at",
       refreshToken: "rt",
       expiresAt: REFRESH_SKEW_MS,
@@ -310,7 +315,7 @@ describe("getGoogleAccessToken", () => {
   })
 
   it("reports notConfigured when the user never connected", async () => {
-    loadTokensMock.mockResolvedValue(null)
+    seedTokens(null)
     await expect(getGoogleAccessToken({ http: httpWith([]).http })).rejects.toMatchObject({
       code: "notConfigured",
     })
@@ -318,80 +323,53 @@ describe("getGoogleAccessToken", () => {
 })
 
 describe("disconnectGoogleDocs", () => {
-  it("revokes the refresh token at Google before clearing local state", async () => {
-    loadTokensMock.mockResolvedValue({
-      accessToken: "at",
-      refreshToken: "rt",
-      expiresAt: Date.now() + 60_000,
-    })
-    const { http, calls } = httpWith([{ body: "" }])
-
-    await expect(disconnectGoogleDocs({ http })).resolves.toEqual({ revoked: true })
-
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(GOOGLE_REVOKE_URL)
-    expect(calls[0].method).toBe("POST")
-    // The refresh token is the one that carries the grant; revoking it takes
-    // every access token minted from it with it.
-    expect(calls[0].body).toBe("token=rt")
-    expect(clearConnectionMock).toHaveBeenCalled()
+  it("clears local state and asks the host to revoke the refresh token", async () => {
+    seedTokens({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
+    host.revoke = jest.fn(async () => ({ revoked: true }))
+    await expect(disconnectGoogleDocs()).resolves.toEqual({ revoked: true })
+    expect(host.revoke).toHaveBeenCalledWith("rt")
+    expect(await loadGoogleTokens()).toBeNull()
   })
-
   it("revokes the access token when no refresh token was ever issued", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "at", expiresAt: Date.now() + 60_000 })
-    const { calls, http } = httpWith([{ body: "" }])
-
-    await expect(disconnectGoogleDocs({ http })).resolves.toEqual({ revoked: true })
-    expect(calls[0].body).toBe("token=at")
+    seedTokens({ accessToken: "at", expiresAt: 0 })
+    host.revoke = jest.fn(async () => ({ revoked: true }))
+    await expect(disconnectGoogleDocs()).resolves.toEqual({ revoked: true })
+    expect(host.revoke).toHaveBeenCalledWith("at")
   })
-
-  it("treats an already-invalid token as revoked", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
-    const { http } = httpWith([{ status: 400, body: JSON.stringify({ error: "invalid_token" }) }])
-
-    // The grant is gone either way — reporting a failure here would push the
-    // user to go hunt for something that is not there.
-    await expect(disconnectGoogleDocs({ http })).resolves.toEqual({ revoked: true })
-    expect(clearConnectionMock).toHaveBeenCalled()
+  it("preserves the host's already-invalid-token success result", async () => {
+    seedTokens({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
+    host.revoke = async () => ({ revoked: true })
+    await expect(disconnectGoogleDocs()).resolves.toEqual({ revoked: true })
+    expect(await loadGoogleTokens()).toBeNull()
   })
-
-  it("still clears local state when Google rejects the revocation", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
-    const { http } = httpWith([
-      { status: 500, body: JSON.stringify({ error_description: "backend error" }) },
-    ])
-
-    await expect(disconnectGoogleDocs({ http })).resolves.toEqual({
+  it("still clears local state when the host reports rejected revocation", async () => {
+    seedTokens({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
+    host.revoke = async () => ({ revoked: false, reason: "backend error" })
+    await expect(disconnectGoogleDocs()).resolves.toEqual({
       revoked: false,
       reason: "backend error",
     })
-    // Refusing to disconnect locally would strand a user whose token Google
-    // will not accept.
-    expect(clearConnectionMock).toHaveBeenCalled()
+    expect(await loadGoogleTokens()).toBeNull()
   })
-
   it("still clears local state when the request itself throws", async () => {
-    loadTokensMock.mockResolvedValue({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
-    const http = jest.fn(async () => {
+    seedTokens({ accessToken: "at", refreshToken: "rt", expiresAt: 0 })
+    host.revoke = async () => {
       throw new Error("offline")
-    })
-
-    await expect(disconnectGoogleDocs({ http })).resolves.toEqual({
+    }
+    await expect(disconnectGoogleDocs()).resolves.toMatchObject({
       revoked: false,
-      reason: "offline",
+      reason: expect.stringContaining("offline"),
     })
-    expect(clearConnectionMock).toHaveBeenCalled()
+    expect(await loadGoogleTokens()).toBeNull()
   })
-
-  it("skips the network call when nothing is stored", async () => {
-    loadTokensMock.mockResolvedValue(null)
-    const { http, calls } = httpWith([])
-
-    await expect(disconnectGoogleDocs({ http })).resolves.toEqual({
+  it("skips revocation when nothing is stored", async () => {
+    seedTokens(null)
+    host.revoke = jest.fn()
+    await expect(disconnectGoogleDocs()).resolves.toEqual({
       revoked: false,
       reason: "not-connected",
     })
-    expect(calls).toHaveLength(0)
-    expect(clearConnectionMock).toHaveBeenCalled()
+    expect(host.revoke).not.toHaveBeenCalled()
+    expect(await getGoogleOAuthPending()).toBeNull()
   })
 })

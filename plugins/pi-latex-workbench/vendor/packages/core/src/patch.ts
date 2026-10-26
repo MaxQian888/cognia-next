@@ -38,13 +38,14 @@ import { requireCapability } from "./capabilities.ts";
 import type { RequestContext } from "./context.ts";
 import {
   analyzeProtectedChanges,
+  classifyRole,
   collectProjectMacros,
   collectProjectUsedMacros,
+  findAnchor,
   isAdditiveChange,
   type ByteRange,
-} from "./protect.ts";
+} from "@latexwb/latex-kit";
 import { grantApproval } from "./approvals.ts";
-import { classifyRole } from "./import.ts";
 import { isValidProjectPath } from "./paths.ts";
 
 export const PATCH_LIMITS = {
@@ -203,19 +204,6 @@ function decodeText(bytes: Uint8Array): string | null {
 // text-anchored replace → byte-range edit (ADR-0007)
 // ---------------------------------------------------------------------------
 
-/** 1-based line number of a UTF-16 index. */
-function lineOf(text: string, index: number): number {
-  let line = 1;
-  for (let i = text.indexOf("\n"); i !== -1 && i < index; i = text.indexOf("\n", i + 1)) line += 1;
-  return line;
-}
-
-function allIndexes(text: string, needle: string): number[] {
-  const out: number[] = [];
-  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) out.push(i);
-  return out;
-}
-
 /**
  * Resolve every `replace` operation against the BASE snapshot into the
  * equivalent byte-range `edit` operation (with the base file's sha256), so
@@ -245,38 +233,13 @@ function resolveReplaceOperations(
     }
     const edits = op.edits.map((edit, n) => {
       const where = `replace edit #${n + 1} on ${p}`;
-      const hits = allIndexes(text, edit.oldText);
-      if (hits.length === 0) {
-        const squash = (s: string) => s.replace(/\s+/g, " ").trim();
-        const loose = squash(text).includes(squash(edit.oldText));
-        const crlf = text.includes("\r\n") && !edit.oldText.includes("\r\n") && edit.oldText.includes("\n");
-        throw new WorkbenchError(
-          ERROR_CODES.INVALID_REQUEST,
-          `${where}: oldText not found in the base snapshot` +
-            (crlf ? " (the file uses CRLF line endings)" : "") +
-            (loose ? " — a whitespace-insensitive match exists; re-read the file and copy the exact text including line breaks" : " — re-read the current source; it may have changed or the text was paraphrased"),
-        );
+      // Anchor matching (and its explanatory failure messages) is the pure
+      // latex-kit findAnchor; every failure is an INVALID_REQUEST here.
+      const found = findAnchor(text, edit.oldText, edit.occurrence);
+      if (!found.ok) {
+        throw new WorkbenchError(ERROR_CODES.INVALID_REQUEST, `${where}: ${found.message}`);
       }
-      let index: number;
-      if (edit.occurrence !== undefined) {
-        if (edit.occurrence > hits.length) {
-          throw new WorkbenchError(
-            ERROR_CODES.INVALID_REQUEST,
-            `${where}: occurrence ${edit.occurrence} requested but oldText occurs ${hits.length} time(s)`,
-          );
-        }
-        index = hits[edit.occurrence - 1] as number;
-      } else if (hits.length > 1) {
-        const lines = hits.slice(0, 10).map((i) => lineOf(text, i));
-        throw new WorkbenchError(
-          ERROR_CODES.INVALID_REQUEST,
-          `${where}: oldText is ambiguous — it occurs ${hits.length} times (lines ${lines.join(", ")}${hits.length > 10 ? ", …" : ""}); ` +
-            "include more surrounding text to make it unique, or set occurrence (1-based)",
-        );
-      } else {
-        index = hits[0] as number;
-      }
-      const startByte = utf8Bytes(text.slice(0, index)).length;
+      const startByte = utf8Bytes(text.slice(0, found.index)).length;
       return {
         startByte,
         endByte: startByte + utf8Bytes(edit.oldText).length,

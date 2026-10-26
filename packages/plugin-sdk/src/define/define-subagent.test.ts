@@ -2,7 +2,7 @@
 
 import { defineSubagent } from "./define-subagent"
 import { defineTool } from "./define-tool"
-import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import type { PluginSubagentDef } from "@cognia/plugin-contract/types/plugin/plugin-subagent"
 
 describe("defineSubagent", () => {
   it("returns the same object reference passed in", () => {
@@ -85,4 +85,24 @@ describe("defineSubagent", () => {
       }).tools
     ).toEqual(["query_logs", "Read"])
   })
+})
+
+it("validates role models on public definitions", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  const def = {
+    id: "coder",
+    name: "Coder",
+    description: "code",
+    prompt: "go",
+    externalPresetId: "codex",
+    cogniaModel: { providerId: "p", modelId: "m" },
+    modelRoles,
+  }
+  expect(defineSubagent(def).modelRoles).toEqual(modelRoles)
+  expect(() => defineSubagent({ ...def, modelRoles: { version: 2 } as never })).toThrow(
+    /model role/
+  )
 })

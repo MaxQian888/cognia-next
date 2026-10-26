@@ -9,6 +9,9 @@ import type { ResolvedCatalogImage } from "@/lib/project-environment/catalog-ent
 import type { CatalogEntryRecord, CatalogRows } from "@/lib/project-environment/environment-client"
 import en from "@/i18n/messages/en/settings/imageCatalog.json"
 
+const useIsMobileMock = jest.fn(() => false)
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => useIsMobileMock() }))
+
 const toastSuccess = jest.fn()
 jest.mock("sonner", () => ({ toast: { success: (...args: unknown[]) => toastSuccess(...args) } }))
 
@@ -90,7 +93,10 @@ function renderEditor(overrides: Partial<ImageCatalogEntryEditorProps> = {}) {
 
 const field = (label: string) => screen.getByLabelText(label)
 
-beforeEach(() => toastSuccess.mockReset())
+beforeEach(() => {
+  toastSuccess.mockReset()
+  useIsMobileMock.mockReset().mockReturnValue(false)
+})
 
 describe("adding an image", () => {
   it("starts at the deployment floor with its first usable size", () => {
@@ -307,5 +313,105 @@ describe("editing an image", () => {
         existing
       )
     )
+  })
+})
+
+describe("the draft and the responsive shell", () => {
+  function baseProps(overrides: Partial<ImageCatalogEntryEditorProps> = {}) {
+    return {
+      open: true,
+      onOpenChange: jest.fn(),
+      facts,
+      busy: false,
+      inspect: jest.fn(async () => resolved),
+      save: jest.fn(async () => ({ ok: true as const })),
+      ...overrides,
+    } satisfies ImageCatalogEntryEditorProps
+  }
+
+  it("keeps the actions in the pinned footer, outside the scrolling body", () => {
+    renderEditor()
+    const footer = screen.getByTestId("image-catalog-editor-footer")
+    expect(footer).toContainElement(screen.getByRole("button", { name: en.editor.save }))
+    expect(screen.getByTestId("image-catalog-editor-body")).toContainElement(field(en.editor.id))
+  })
+
+  it("keeps typed and resolved values when the window crosses the phone breakpoint", async () => {
+    const props = baseProps()
+    const view = render(<ImageCatalogEntryEditor {...props} />)
+    expect(screen.getByTestId("image-catalog-editor-dialog")).toBeInTheDocument()
+    fireEvent.change(field(en.editor.id), { target: { value: "node-22" } })
+    fireEvent.change(field(en.editor.label), { target: { value: "Node 22" } })
+    fireEvent.change(field(en.editor.image), { target: { value: "ghcr.io/acme/dev:22" } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.editor.resolve }))
+    })
+
+    // The shell swaps from Dialog to Drawer, remounting every field.
+    useIsMobileMock.mockReturnValue(true)
+    view.rerender(<ImageCatalogEntryEditor {...props} />)
+    expect(screen.getByTestId("image-catalog-editor-drawer")).toBeInTheDocument()
+    expect(field(en.editor.id)).toHaveValue("node-22")
+    expect(field(en.editor.label)).toHaveValue("Node 22")
+    expect(field(en.editor.image)).toHaveValue("ghcr.io/acme/dev:22")
+    expect(screen.getByTestId("resolved-image")).toHaveTextContent(DIGEST)
+
+    // And back again.
+    useIsMobileMock.mockReturnValue(false)
+    view.rerender(<ImageCatalogEntryEditor {...props} />)
+    expect(field(en.editor.label)).toHaveValue("Node 22")
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.editor.save }))
+    })
+    expect(props.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "node-22", label: "Node 22", image: resolved }),
+      undefined
+    )
+    expect(props.inspect).toHaveBeenCalledTimes(1)
+  })
+
+  it("starts from the entry as saved after a cancelled edit is reopened", () => {
+    const existing = record()
+    const props = baseProps({ existing })
+    const view = render(<ImageCatalogEntryEditor {...props} />)
+    fireEvent.change(field(en.editor.label), { target: { value: "Abandoned" } })
+    view.rerender(<ImageCatalogEntryEditor {...props} open={false} />)
+    view.rerender(<ImageCatalogEntryEditor {...props} open />)
+    expect(field(en.editor.label)).toHaveValue("Node 22")
+  })
+
+  it("starts over when a different entry is opened", () => {
+    const props = baseProps({ existing: record() })
+    const view = render(<ImageCatalogEntryEditor {...props} />)
+    fireEvent.change(field(en.editor.label), { target: { value: "Edited" } })
+    view.rerender(
+      <ImageCatalogEntryEditor {...props} existing={record({ id: "py-3", label: "Python 3" })} />
+    )
+    expect(screen.getByRole("heading", { name: "Edit Python 3" })).toBeInTheDocument()
+    expect(field(en.editor.id)).toHaveValue("py-3")
+    expect(field(en.editor.label)).toHaveValue("Python 3")
+  })
+
+  it("drops a registry answer that arrives after the editor was reopened", async () => {
+    let answer: (image: ResolvedCatalogImage) => void = () => {}
+    const props = baseProps({
+      inspect: jest.fn(
+        () =>
+          new Promise<ResolvedCatalogImage>((resolve) => {
+            answer = resolve
+          })
+      ),
+    })
+    const view = render(<ImageCatalogEntryEditor {...props} />)
+    fireEvent.change(field(en.editor.image), { target: { value: "ghcr.io/acme/dev:22" } })
+    fireEvent.click(screen.getByRole("button", { name: en.editor.resolve }))
+    view.rerender(<ImageCatalogEntryEditor {...props} open={false} />)
+    view.rerender(<ImageCatalogEntryEditor {...props} open />)
+    await act(async () => answer(resolved))
+    expect(field(en.editor.image)).toHaveValue("")
+    expect(screen.queryByTestId("resolved-image")).not.toBeInTheDocument()
+    // The earlier session's pending lookup does not leave this one "resolving".
+    fireEvent.change(field(en.editor.image), { target: { value: "ghcr.io/acme/dev:23" } })
+    expect(screen.getByRole("button", { name: en.editor.resolve })).toBeEnabled()
   })
 })

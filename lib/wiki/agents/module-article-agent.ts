@@ -9,7 +9,8 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { moduleToSlug } from "../file-walker"
-import { moduleArticlePrompt, WIKI_SYSTEM_VOICE } from "../prompts"
+import { moduleArticlePrompt, WIKI_SYSTEM_VOICE_PROMPT } from "../prompts"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import type { CodeChunk, ModuleArticleDraft, ModuleSectionDraft, ModuleStat } from "../types"
 import type { WikiSourceRef } from "@/types/wiki"
 
@@ -41,7 +42,7 @@ export async function runModuleArticleAgent(
   })
 
   const responseMd = await deps.llm.complete(prompt, {
-    system: WIKI_SYSTEM_VOICE,
+    system: (await resolvePromptAsync(WIKI_SYSTEM_VOICE_PROMPT)).text,
     maxTokens: MAX_OUTPUT_TOKENS,
     temperature: 0,
   })

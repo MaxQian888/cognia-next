@@ -19,6 +19,20 @@ const send = (overrides: Record<string, unknown> = {}): SendOptions => ({
   ...overrides,
 })
 
+test("Namespace consent and retry deadlines cannot be bypassed through warm startup or claims", async () => {
+  const { pool: warm, spawned } = pool()
+  for (const claudeAgentSdk of [
+    { version: 1 as const, sandbox: { enabled: true, allowNestedUserNamespaces: true } },
+    { version: 1 as const, unattendedRetry: { maxWaitMs: 60000 } },
+  ]) {
+    const options = send({ claudeAgentSdk })
+    assert.match(unpoolableReason(options)!, /per-invocation/)
+    assert.match((await warm.prewarm(options))!, /per-invocation/)
+    assert.equal(warm.claim(options), null)
+  }
+  assert.equal(spawned.length, 0)
+})
+
 function fakeWarm() {
   const state = { closed: false, queried: false }
   return {

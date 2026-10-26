@@ -28,12 +28,7 @@ import type {
   Locator,
   UiStateRevision,
 } from "@cognia/plugin-sdk"
-import type {
-  ModelContentBlock,
-  MouseButton,
-  Rect,
-  ZoomedRegion,
-} from "@cognia/plugin-sdk/api/automation"
+import type { ModelContentBlock, Rect, ZoomedRegion } from "@cognia/plugin-sdk/api/automation"
 import {
   actionRequestSchema,
   appLocatorSchema,
@@ -159,9 +154,30 @@ const WAIT_SCHEMA = {
   },
 } as const
 
+const OCR_STATE_SCHEMA = {
+  type: "object",
+  required: ["sessionId", "lineageId", "revision", "turnToken", "surface"],
+  properties: {
+    sessionId: { type: "string" },
+    lineageId: { type: "string" },
+    revision: { type: "integer", minimum: 1 },
+    turnToken: { type: "string" },
+    surface: {
+      type: "object",
+      required: ["pixelWidth", "pixelHeight"],
+      properties: {
+        pixelWidth: { type: "integer", minimum: 1 },
+        pixelHeight: { type: "integer", minimum: 1 },
+      },
+    },
+  },
+} as const
+
 const FIND_TEXT_SCHEMA = {
   type: "object",
+  required: ["state"],
   properties: {
+    state: OCR_STATE_SCHEMA,
     query: {
       type: "string",
       description:
@@ -174,8 +190,9 @@ const FIND_TEXT_SCHEMA = {
 
 const CLICK_TEXT_SCHEMA = {
   type: "object",
-  required: ["query"],
+  required: ["query", "state"],
   properties: {
+    state: OCR_STATE_SCHEMA,
     query: { type: "string" },
     occurrence: {
       type: "integer",
@@ -203,11 +220,12 @@ const WAIT_DESCRIPTION =
 const FIND_TEXT_DESCRIPTION =
   "Locate on-screen text by OCR and get its screen coordinates. Use when the accessibility " +
   "tree has no node for what you can see — canvas, games, remote desktop, custom-drawn " +
-  "controls. Captures the primary monitor, not the app window."
+  "controls. Pass state from get_app_state; OCR reads only that revision’s app frame."
 
 const CLICK_TEXT_DESCRIPTION =
   "Locate on-screen text by OCR and click it. Same fallback role as find_text: reach for it " +
-  "only when query_elements cannot see the target."
+  "only when query_elements cannot see the target. Pass state from get_app_state. " +
+  "If its token expires during OCR, re-read app state and repeat OCR; never reuse the old token."
 
 const GET_APP_STATE_DESCRIPTION =
   "Read a fresh app-bound AX tree revision and matching screenshot. Returns the screenshot " +
@@ -241,8 +259,8 @@ const SURFACE_GUIDANCE =
   "When a control is too small to identify confidently, zoom into that region and read it again " +
   "rather than guessing a coordinate. When the accessibility tree has no node for something you " +
   "can plainly see — canvas, games, remote desktop, custom-drawn controls — fall back to " +
-  "find_text / click_text, which locate text by OCR on the primary monitor rather than within " +
-  "the app window. Use wait after an action that animates or loads, then re-read state."
+  "find_text / click_text, which locate text by OCR within the current app revision. Supply " +
+  "state from get_app_state. Use wait after an action that animates or loads, then re-read state."
 
 /**
  * Split a `UiStateRevision` into an MCP tool result whose screenshot is a real
@@ -453,7 +471,8 @@ function buildPluginTools(
         parametersSchema: FIND_TEXT_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (args, context) => {
-        const input = args as unknown as { query?: string; languages?: string[] }
+        const input = args as unknown as Parameters<PluginContext["automation"]["findText"]>[0]
+        if (!input.state) throw new Error("find_text requires state from get_app_state")
         return automation.findText(input, origin(context))
       },
     }),
@@ -468,13 +487,8 @@ function buildPluginTools(
         parametersSchema: CLICK_TEXT_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (args, context) => {
-        const input = args as unknown as {
-          query: string
-          occurrence?: number
-          button?: MouseButton
-          doubleClick?: boolean
-          languages?: string[]
-        }
+        const input = args as unknown as Parameters<PluginContext["automation"]["clickText"]>[0]
+        if (!input.state) throw new Error("click_text requires state from get_app_state")
         return automation.clickText(input, origin(context))
       },
     }),
@@ -513,7 +527,8 @@ export function describeComputerUse(
   }
   const state = (on: boolean) => t(on ? "slash.cu.state.on" : "slash.cu.state.off")
   const tree = caps.hasA11yTree || caps.hasUia
-  const usable = tree && caps.hasInputSim && caps.hasScreenshot
+  const usable =
+    tree && caps.hasInputSim && caps.hasScreenshot && caps.operations?.appSessions !== false
   const lines = [
     t(usable ? "slash.cu.ready" : "slash.cu.limited", { platform: caps.platform }),
     "",
@@ -624,6 +639,8 @@ const definition = definePlugin({
     // synthesizes the MCP server from `SendOptions.pluginTools`, which is
     // populated by `buildPluginToolsManifest()` from the plugin store. The
     // runtime unregisters them on deactivate.
+    // Registration is target-neutral: a host without local app support may
+    // route this turn to a remote desktop that supports the same tools.
     for (const tool of buildPluginTools(ctx.automation)) ctx.agent.registerTool(tool)
 
     // Comparative surface guidance — steers the model to the right tool family

@@ -348,6 +348,12 @@ export async function startProviderDiagnosticJob(
           bounded.cleanup()
         }
         await recordSample(sample)
+        if (sample.capability === "probe" && sample.status === "completed") {
+          // Boot preserves authentication pauses. Only explicit successful
+          // manual evidence resumes the corresponding reachability source.
+          const { resumeProviderReachabilityRefresh } = await import("./refresh")
+          await resumeProviderReachabilityRefresh(sample.providerId)
+        }
         job.completedCount += 1
         job.estimatedCostUsd = (job.estimatedCostUsd ?? 0) + (sample.metrics?.estimatedCostUsd ?? 0)
         if ((job.estimatedCostUsd ?? 0) > preferences.maxEstimatedCostUsd) {

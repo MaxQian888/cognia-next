@@ -274,10 +274,21 @@ export function interactiveOutboundCommands(overrides: OutboundApprovalDeps = {}
   )
 }
 
+/**
+ * Interactive commands a person partition serves without a Host admin lease:
+ * the interactive arms of `personHostStateCommands` in
+ * `protocol/host-surface-policy.json`. The Host exempts them there, and its
+ * lease issue waits for a person at the Host, which a member's own data never
+ * has, so asking would hold the row forever.
+ */
+const PERSON_PARTITION_UNLEASED = new Set(["host_state_submit"])
+
 function requiresApproval(command: string, deps: Required<OutboundApprovalDeps>): boolean {
   if (deps.getCommandDescriptor(command)?.approval !== "interactive") return false
-  const target = deps.getRuntimeSnapshot().target
-  return target?.kind === "companion"
+  const snapshot = deps.getRuntimeSnapshot()
+  if (snapshot.host?.personPartition === true && PERSON_PARTITION_UNLEASED.has(command))
+    return false
+  return snapshot.target?.kind === "companion"
 }
 
 /**

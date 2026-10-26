@@ -12,6 +12,7 @@ import {
   offboardFromOrg,
   removeFromWorkspace,
   revokeInvitation,
+  transferOrgOwnership,
   type MembershipAdminClient,
 } from "./membership-admin"
 import { CollabError } from "./client"
@@ -35,6 +36,7 @@ function stubClient(overrides: Partial<MembershipAdminClient> = {}) {
     setWorkspaceMember: jest.fn(async () => undefined),
     removeWorkspaceMember: jest.fn(async () => undefined),
     setOrgMemberRole: jest.fn(async () => undefined),
+    transferOrgOwnership: jest.fn(async () => undefined),
     offboardOrgMember: jest.fn(async () => undefined),
     ...overrides,
   }
@@ -101,6 +103,23 @@ describe("membership administration", () => {
     })
     expect(client.offboardOrgMember).toHaveBeenCalledWith(ORG, "usr_cleo", "left")
     expect(refresh).toHaveBeenCalledTimes(4)
+    expect(refresh).toHaveBeenCalledWith("acct_a")
+  })
+
+  it("transfers ownership in one server call and then refreshes", async () => {
+    const client = stubClient()
+    const refresh = jest.fn(async () => null)
+    await transferOrgOwnership(
+      context(client),
+      { toUserId: "usr_cleo", previousOwnerRole: "admin", reason: "handing over" },
+      { refresh }
+    )
+    expect(client.transferOrgOwnership).toHaveBeenCalledWith(ORG, {
+      toUserId: "usr_cleo",
+      previousOwnerRole: "admin",
+      reason: "handing over",
+    })
+    expect(client.setOrgMemberRole).not.toHaveBeenCalled()
     expect(refresh).toHaveBeenCalledWith("acct_a")
   })
 

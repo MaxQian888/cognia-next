@@ -1,5 +1,7 @@
 "use client"
 
+import { waitForModelSelection } from "@/lib/chat/model-selection"
+
 import { withWorkbenchMessageContext } from "@/lib/context-workbench/provider-context"
 
 import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
@@ -1708,6 +1710,22 @@ export function useClaudeChat() {
         }
       }
 
+      const modelSelectionReady = async () => {
+        try {
+          await waitForModelSelection(sessionId)
+          return true
+        } catch (error) {
+          store
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(error, { source: "chat", meta: { sessionId } })
+            )
+          rejectSend(error)
+          return false
+        }
+      }
+      if (!(await modelSelectionReady())) return
       const sharedTarget = await getSession(sessionId)
       // A paused project runs nothing (ADR-0204): no brief, report, nudge or
       // typed message starts a turn in its coordinator or threads until the
@@ -2080,6 +2098,7 @@ export function useClaudeChat() {
         }
       }
 
+      if (!(await modelSelectionReady())) return
       let session = await getSession(sessionId)
       assertSessionWritable(session, "send-message")
       // The lane THIS turn runs on, decided once. An addressed turn resolves
@@ -4814,7 +4833,10 @@ export function useClaudeChat() {
 
           const { resolvedMcpServerMapToAcpConfigs } =
             await import("@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers")
-          const externalMcpServers = resolvedMcpServerMapToAcpConfigs(sendOptions.mcpServers)
+          const externalMcpServers = resolvedMcpServerMapToAcpConfigs(
+            sendOptions.mcpServers,
+            sendOptions
+          )
           let sandboxToolHostLeaseIds: string[] | undefined
           let externalContinuationContext: string | undefined
           // A Cognia binding no retained task serves starts a new task, and
@@ -6573,16 +6595,18 @@ export function useClaudeChat() {
           },
         ])
       } else {
-        await approveTool(
+        const approvalArgs = [
           approval.sessionId,
           approval.requestId,
           decision === "allow_always" ? "allow" : decision,
-          ...(options?.updatedInput
-            ? ([denialMessage, options.updatedInput] as const)
-            : denialMessage
-              ? ([denialMessage] as const)
-              : ([] as const))
-        )
+        ] as const
+        if (options?.updatedInput) {
+          await approveTool(...approvalArgs, denialMessage, options.updatedInput)
+        } else if (denialMessage) {
+          await approveTool(...approvalArgs, denialMessage)
+        } else {
+          await approveTool(...approvalArgs)
+        }
       }
       // The receipt asserts the backend received the decision, so it is written
       // only after either dispatch path succeeds. A failure leaves the approval

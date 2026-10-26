@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { gitBranches } from "@/lib/git/commands"
@@ -103,17 +104,19 @@ it("previews conflicts and overlaps, and integrates with a local target ref and 
   const { integrate } = setup("published", host)
   await screen.findByTestId("integration-analysis")
   expect(screen.getByTestId("integration-target")).toHaveValue("main")
-  expect(screen.queryByRole("option", { name: "origin/main" })).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole("option", { hidden: true, name: "origin/main" })
+  ).not.toBeInTheDocument()
   expect(screen.getByText("conflict.ts")).toBeInTheDocument()
   expect(screen.getByText("shared.ts")).toBeInTheDocument()
   expect(screen.getByRole("note")).toHaveTextContent("integrate.overlapOnly")
   expect(host.analyzeIntegration).toHaveBeenCalledWith(["cs-1", "cs-2"], "refs/heads/main")
-  await userEvent.selectOptions(screen.getByTestId("integration-target"), "release")
+  await selectOption(screen.getByTestId("integration-target"), "release")
   await waitFor(() =>
     expect(host.analyzeIntegration).toHaveBeenLastCalledWith(["cs-1", "cs-2"], "refs/heads/release")
   )
-  await userEvent.selectOptions(screen.getByTestId("integration-strategy"), "rebase")
-  await userEvent.selectOptions(screen.getByTestId("integration-conflict-policy"), "stop")
+  await selectOption(screen.getByTestId("integration-strategy"), "rebase")
+  await selectOption(screen.getByTestId("integration-conflict-policy"), "stop")
   await userEvent.click(screen.getByTestId("integration-submit"))
   await waitFor(() =>
     expect(integrate).toHaveBeenCalledWith({
@@ -194,7 +197,7 @@ it("ignores stale analysis when the branch changes", async () => {
   )
   setup("published", host)
   await waitFor(() => expect(host.analyzeIntegration).toHaveBeenCalledTimes(1))
-  await userEvent.selectOptions(screen.getByTestId("integration-target"), "release")
+  await selectOption(screen.getByTestId("integration-target"), "release")
   await screen.findByTestId("integration-analysis")
   await act(async () =>
     resolveOld({

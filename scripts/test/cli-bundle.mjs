@@ -5,6 +5,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { hashFile, listPackagedFiles } from "../build/verify-agent-host-package.mjs"
+import { ensureTestBundle } from "../build/test-bundle-cache.mjs"
 
 const MANIFEST = ".cache/jest/cli-bundle.json"
 const ARCHIVE = ".cache/jest/cli-bundle.tar"
@@ -74,24 +75,25 @@ function verifyPayload(directory, manifest) {
   }
 }
 
-function build(root, outdir) {
+function preparePlugins(root) {
   // The coding tools are generated plugins. A cold checkout must build them
   // before esbuild embeds their catalog and --js-only stages their chunks.
-  execFileSync(
-    process.execPath,
-    [path.join(root, "scripts/build/build-browser-builtin-plugins.mjs")],
-    {
-      cwd: root,
-      stdio: "inherit",
-      timeout: 200_000,
-    }
-  )
+  execFileSync(process.execPath, [path.join(root, "scripts/build/stage-plugin-artifacts.mjs")], {
+    cwd: root,
+    stdio: "inherit",
+    timeout: 200_000,
+  })
+}
+
+function build(root, outdir, inputsFile) {
+  if (!inputsFile) preparePlugins(root)
   execFileSync(
     process.execPath,
     [
       path.join(root, "scripts/build/build-cli.mjs"),
       "--js-only",
       ...(outdir ? ["--outdir", outdir] : []),
+      ...(inputsFile ? ["--inputs-file", inputsFile] : []),
     ],
     { cwd: root, stdio: "inherit", timeout: 200_000 }
   )
@@ -161,19 +163,33 @@ export function restoreCliBundle(root, planFile, shard) {
   }
 }
 
-export function ensureCliBundle(root, manifestFile = process.env.COGNIA_JEST_CLI_BUNDLE) {
+export async function ensureCliBundle(root, manifestFile = process.env.COGNIA_JEST_CLI_BUNDLE) {
   if (!manifestFile) {
-    build(root)
-    return
+    return ensureTestBundle({
+      root,
+      kind: "cli",
+      entryName: "cognia-agent.mjs",
+      key: "cli-js-only-v1",
+      prepare: () => preparePlugins(root),
+      build(outdir) {
+        const inputsFile = path.join(outdir, "..", "inputs.json")
+        build(root, outdir, inputsFile)
+        return {
+          inputs: JSON.parse(fs.readFileSync(inputsFile, "utf8")),
+          extraFiles: [fileURLToPath(import.meta.url)],
+        }
+      },
+    })
   }
   verifyPayload(path.join(root, BUNDLE_DIR), readManifest(root, manifestFile))
   console.log("CLI bundle: verified prepared artifact; no rebuild")
+  return path.join(root, BUNDLE_DIR, "cognia-agent.mjs")
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, planFile, shard, ...extra] = process.argv.slice(2)
   const root = process.cwd()
-  if (command === "ensure" && !planFile) ensureCliBundle(root)
+  if (command === "ensure" && !planFile) console.log(await ensureCliBundle(root))
   else if (command === "prepare" && planFile && !shard) prepareCliBundle(root, planFile)
   else if (command === "required" && planFile && shard && !extra.length) {
     const required = cliBundleRequired(root, planFile, shard)

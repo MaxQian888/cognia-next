@@ -26,18 +26,22 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { CollabClient, type CollabAccountMembership } from "@/lib/collab/client"
-import { adoptOrganization } from "@/lib/identity/cloud-sign-in-flow"
-import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
+import { type CollabAccountMembership } from "@/lib/collab/client"
+import { type CloudSessionState } from "@/lib/identity/cloud-session"
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
-import { discoverDeployment, type DeploymentDiscovery } from "@/lib/identity/deployment-discovery"
+import { type DeploymentDiscovery } from "@/lib/identity/deployment-discovery"
 import { issuerIdentities } from "@/lib/identity/issuer-identities"
 import { isOfficialIssuer } from "@/lib/identity/official-deployment"
 import { externalProviderFor } from "@/lib/identity/link-signed-in-identities"
+import {
+  loadOrgSwitchSnapshot,
+  switchOrganization,
+  type OrgSwitchDeps,
+  type OrgSwitchSnapshot,
+} from "@/lib/identity/org-switch"
 import { requestCloudSignIn } from "@/lib/identity/sign-in-request"
 import { signOutFromLogto, signOutLeftTokensLive } from "@/lib/logto/app-session"
 import { openUrl } from "@/lib/native/opener"
-import { createPlatformFetch } from "@/lib/network/platform-fetch"
 import { forgetOfflineChoice } from "@/components/account/cloud-sign-in-gate"
 import { CloudDeploymentCard } from "@/components/settings/companion/cloud-deployment-card"
 import { OfficialAccountDeletion } from "@/components/account/manage/official-account-deletion"
@@ -46,14 +50,7 @@ import { useAccountStore } from "@/stores/account/account-store"
 
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
-export interface AccountIdentityTabDeps {
-  readState?: (localAccountId: string) => Promise<CloudSessionState>
-  discover?: () => Promise<DeploymentDiscovery>
-  listMemberships?: (
-    serviceUrl: string,
-    accessToken: string
-  ) => Promise<{ memberships: CollabAccountMembership[] }>
-  adopt?: typeof adoptOrganization
+export interface AccountIdentityTabDeps extends OrgSwitchDeps {
   signOut?: (
     localAccountId: string
   ) => Promise<{ endSessionUrl?: string | null; tokensLive: boolean }>
@@ -65,15 +62,6 @@ export interface AccountIdentityTabDeps {
 export interface AccountIdentityTabProps {
   account: LocalAccountRecord
   deps?: AccountIdentityTabDeps
-}
-
-async function defaultListMemberships(serviceUrl: string, accessToken: string) {
-  const client = new CollabClient({
-    baseUrl: serviceUrl,
-    accessToken: async () => accessToken,
-    fetchImpl: createPlatformFetch(),
-  })
-  return client.accountMemberships()
 }
 
 async function defaultSignOut(localAccountId: string) {
@@ -95,33 +83,18 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
   const [membershipsError, setMembershipsError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const depsRef = useRef(deps)
+  const snapshotRef = useRef<OrgSwitchSnapshot | null>(null)
   useEffect(() => {
     depsRef.current = deps
   })
 
   const load = useCallback(async () => {
-    const d = depsRef.current
-    const [next, found] = await Promise.all([
-      (d.readState ?? ((id: string) => readCloudSessionState({ localAccountId: id })))(account.id),
-      (d.discover ?? (() => discoverDeployment({ localAccountId: account.id })))(),
-    ])
-    setState(next)
-    setDiscovery(found)
-    if (next.status === "active" && found.status === "ready" && found.collaborationServiceUrl) {
-      try {
-        const answer = await (d.listMemberships ?? defaultListMemberships)(
-          found.collaborationServiceUrl,
-          next.session.accessToken
-        )
-        setMemberships(answer.memberships)
-        setMembershipsError(null)
-      } catch (cause) {
-        setMemberships(null)
-        setMembershipsError(cause instanceof Error ? cause.message : String(cause))
-      }
-    } else {
-      setMemberships(null)
-    }
+    const snapshot = await loadOrgSwitchSnapshot(account.id, depsRef.current)
+    snapshotRef.current = snapshot
+    setState(snapshot.state)
+    setDiscovery(snapshot.discovery)
+    setMemberships(snapshot.memberships)
+    setMembershipsError(snapshot.membershipsError)
   }, [account.id])
 
   useEffect(() => {
@@ -129,19 +102,11 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
   }, [load])
 
   const switchTo = async (membership: CollabAccountMembership) => {
-    if (state?.status !== "active" || discovery?.status !== "ready") return
+    const snapshot = snapshotRef.current
+    if (snapshot?.state.status !== "active" || snapshot.discovery.status !== "ready") return
     setBusy(true)
     try {
-      await (depsRef.current.adopt ?? adoptOrganization)(
-        discovery,
-        state.session,
-        {
-          orgId: membership.orgId,
-          logtoOrganizationId: membership.logtoOrganizationId ?? "",
-          userId: membership.userId,
-        },
-        { localAccountId: account.id }
-      )
+      await switchOrganization(snapshot, membership, account.id, depsRef.current)
       toast.success(t("switched", { org: membership.orgName }))
       await load()
     } catch (cause) {

@@ -246,8 +246,6 @@
   },
   "signOutDescription": "You'll need to scan the QR again to reconnect.",
   "signOutFallbackInvalid": "Choose one of the saved fallback Hosts.",
-  "signOutFallbackPrompt": "Enter the fallback Host id ({choices}).",
-  "signOutFallbackRequired": "A fallback Host is required before removing the active Host.",
   "signOutReason": "Confirm sign out",
   "signOutTitle": "Sign out",
   "step": {
@@ -292,5 +290,9 @@
     "storageNotice": "The device credential is kept in this browser's localStorage: anyone with access to this browser profile — or a script injected into this origin — could use it. Pair from a trusted device and sign out when you're done.",
     "storageNoticeTitle": "Credential stays in this browser",
     "title": "Connect to your server"
-  }
+  },
+  "signOutFallbackTitle": "Choose a replacement Host",
+  "signOutFallbackDescription": "This Host is the active one. Pick the saved Host this device should switch to after signing out.",
+  "signOutFallbackField": "Replacement Host",
+  "signOutFallbackConfirm": "Sign out"
 }

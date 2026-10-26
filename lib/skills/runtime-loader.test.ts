@@ -4,6 +4,7 @@ import {
   builtInCatalogResources,
   loadSkillForSession,
   loadSkillResourceForSession,
+  registerSkillLoadContext,
   releaseSkillLoadContext,
 } from "./runtime-loader"
 import { getCatalogSkill, loadBuiltInSkillContent } from "./built-in-catalog"
@@ -353,5 +354,51 @@ describe("session-scoped skill runtime loader", () => {
       )
     ).resolves.toMatchObject({ ok: false, code: "not_found" })
     releaseSkillLoadContext("seeded-diagram")
+  })
+})
+
+describe("registerSkillLoadContext with in-memory resources (ADR-0237)", () => {
+  const overlay: Skill = {
+    id: "harness:snap-1:csv-report",
+    slug: "csv-report",
+    name: "csv-report",
+    description: "Probe-only skill",
+    content: "Run `scripts/summarize.py`.",
+    status: "enabled",
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  const overlayResources: SkillResource[] = [
+    {
+      id: "harness:snap-1:csv-report:r0",
+      skillId: overlay.id,
+      kind: "script",
+      name: "summarize.py",
+      path: "scripts/summarize.py",
+      content: "print('hi')",
+      encoding: "utf-8",
+      inline: false,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ]
+
+  afterEach(() => releaseSkillLoadContext("probe-session"))
+
+  it("serves a probe skill's resources without touching the library, by id or slug", async () => {
+    registerSkillLoadContext("probe-session", {
+      skills: [overlay],
+      resourcesBySkillId: new Map([[overlay.id, overlayResources]]),
+    })
+    await expect(
+      loadSkillResourceForSession("probe-session", "csv-report", "scripts/summarize.py")
+    ).resolves.toMatchObject({ ok: true, content: "print('hi')" })
+    await expect(
+      loadSkillResourceForSession("probe-session", overlay.id, "scripts/summarize.py")
+    ).resolves.toMatchObject({ ok: true })
+    await expect(loadSkillForSession("probe-session", "csv-report")).resolves.toMatchObject({
+      ok: true,
+      resources: [{ path: "scripts/summarize.py" }],
+    })
   })
 })

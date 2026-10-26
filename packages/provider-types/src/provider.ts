@@ -571,7 +571,7 @@ export type ApiProtocol = BuiltInApiProtocol | (string & {})
  * Google's family `gemini`; here it is `google`, plus `mistral`/`cohere` (which
  * have no custom-provider picker entry but are dispatchable). The
  * renderer→execution bridge is `normalizeProtocol` in
- * `sidecar/src/providers/provider-protocol.ts` (gemini → google),
+ * `./provider-protocol.ts` (gemini → google),
  * guarded by `protocol-adapter-spec.parity.test.ts`. Defined here so the two
  * resolvers (`lib/ai/provider-consumption.ts`,
  * `packages/provider-core/.../provider-persistence.ts`) share one definition.

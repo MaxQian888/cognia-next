@@ -4,6 +4,9 @@
 
 import { render } from "@testing-library/react"
 import { StrictMode } from "react"
+import { markStartupReactReady } from "@/lib/boot/startup-recovery"
+
+jest.mock("@/lib/boot/startup-recovery", () => ({ markStartupReactReady: jest.fn() }))
 
 const mockLoad = jest.fn(async () => undefined)
 const mockWarn = jest.fn()
@@ -35,10 +38,21 @@ beforeAll(async () => {
 beforeEach(() => {
   mockLoad.mockClear()
   mockWarn.mockClear()
+  jest.mocked(markStartupReactReady).mockClear()
   mockStore = makeStore(mockLoad)
 })
 
 describe("AccountStoreInitializer", () => {
+  it("hands startup recovery to React before waiting for the account registry", () => {
+    const pendingLoad = jest.fn(() => new Promise<undefined>(() => {}))
+    mockStore = makeStore(pendingLoad)
+    render(<AccountStoreInitializer />)
+    expect(markStartupReactReady).toHaveBeenCalledTimes(1)
+    expect(jest.mocked(markStartupReactReady).mock.invocationCallOrder[0]).toBeLessThan(
+      pendingLoad.mock.invocationCallOrder[0]
+    )
+  })
+
   it("calls the account store load() once on mount", () => {
     render(<AccountStoreInitializer />)
     expect(mockLoad).toHaveBeenCalledTimes(1)

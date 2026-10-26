@@ -10,6 +10,10 @@ const writeTextFileMock = jest.fn(async () => undefined)
 const readDirMock = jest.fn(async () => [{ name: "a.enc.cbk" }, { name: "b.txt" }])
 const removeMock = jest.fn(async () => undefined)
 const mkdirMock = jest.fn(async () => undefined)
+const mockWriteStream = jest.fn(async (..._args: unknown[]) => 1)
+jest.mock("@/lib/files/file-bridge", () => ({
+  writeBackupStreamFile: (...args: unknown[]) => mockWriteStream(...args),
+}))
 jest.mock(
   "@tauri-apps/plugin-fs",
   () => ({
@@ -43,6 +47,16 @@ afterEach(() => {
 })
 
 describe("resolveBackupHostFilesystem", () => {
+  it("forwards the owner/cancellation check to the native commit boundary", async () => {
+    tauriValue = true
+    const host = await resolveBackupHostFilesystem()
+    const source = (async function* () {
+      yield new Uint8Array([1])
+    })()
+    const assertActive = jest.fn()
+    await host!.filesystem.writeStream!("/target", source, assertActive)
+    expect(mockWriteStream).toHaveBeenCalledWith("/target", source, assertActive)
+  })
   it("returns null on hosts without a filesystem", async () => {
     expect(await resolveBackupHostFilesystem()).toBeNull()
   })

@@ -27,6 +27,8 @@ import type {
 } from "./types"
 import type { InputVariable } from "./input-variables"
 import type { RecordedStepView, StepEdits } from "./step-model"
+import type { RecorderEntrySource } from "@cognia/plugin-contract/lib/skills/recording/state-machine"
+export type { RecorderEntrySource } from "@cognia/plugin-contract/lib/skills/recording/state-machine"
 
 export type RecorderPhase =
   | "idle"
@@ -77,15 +79,6 @@ export function stageForPhase(phase: RecorderPhase): RecorderStage {
       return "review"
   }
 }
-
-export type RecorderEntrySource =
-  | "toolbar"
-  | "palette"
-  | "slash-command"
-  | "shortcut"
-  | "plugin-command"
-  | "recovery"
-  | "session-suggestion"
 
 export interface RecorderError {
   /** Stable code; the renderer maps it to localized copy. */

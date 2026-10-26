@@ -23,6 +23,32 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Skills use a device-local setting, even when the database is redirected.
+/// CC Switch v4 stores this at ~/.cc-switch/settings.json, not in SQLite.
+pub fn ccswitch_skills_root(data_dir: Option<&std::path::Path>) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let settings = std::fs::read_to_string(home.join(".cc-switch/settings.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    Some(skills_root_for(data_dir?, &home, settings.as_ref()))
+}
+
+fn skills_root_for(
+    data_dir: &std::path::Path,
+    home: &std::path::Path,
+    settings: Option<&serde_json::Value>,
+) -> PathBuf {
+    if settings
+        .and_then(|s| s.get("skillStorageLocation"))
+        .and_then(|s| s.as_str())
+        == Some("unified")
+    {
+        home.join(".agents/skills")
+    } else {
+        data_dir.join("skills")
+    }
+}
+
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -48,12 +74,6 @@ pub enum CcswitchResolutionSource {
 pub struct ResolvedCcswitchDb {
     pub path: PathBuf,
     pub source: CcswitchResolutionSource,
-}
-
-/// Legacy convenience wrapper for callers that just need the path. Prefer
-/// `resolve_ccswitch_db()` so the source label flows to the renderer.
-pub fn ccswitch_db_path(manual_override: Option<&str>) -> Option<PathBuf> {
-    resolve_ccswitch_db(manual_override).map(|r| r.path)
 }
 
 /// Full resolution including the source label. Honours the priority chain:
@@ -125,18 +145,16 @@ fn override_from_ccswitch_store() -> Option<PathBuf> {
     if !store_path.is_file() {
         return None;
     }
-    let raw = std::fs::read_to_string(&store_path).ok()?;
+    read_redirect(&store_path)
+}
+
+fn read_redirect(store_path: &std::path::Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(store_path).ok()?;
     if raw.trim().is_empty() {
         return None;
     }
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    // tauri-plugin-store wraps the raw key/value map in {values: {...}} on
-    // disk — both shapes are tolerated. (Different plugin versions ship
-    // different envelopes; older versions wrote the flat shape.)
-    let inner: &serde_json::Value = v.get("values").unwrap_or(&v);
-    let pointer = inner
-        .get("app_config_dir_override")
-        .and_then(|x| x.as_str())?;
+    let pointer = v.get("app_config_dir_override").and_then(|x| x.as_str())?;
     let trimmed = pointer.trim();
     if trimmed.is_empty() {
         return None;
@@ -155,14 +173,14 @@ fn override_from_ccswitch_store() -> Option<PathBuf> {
 /// This is in cc-switch's Tauri app config dir, NOT inside `~/.cc-switch/`.
 ///
 /// Per Tauri's defaults:
-///   - macOS:   ~/Library/Application Support/com.farion1231.cc-switch/app_paths.json
-///   - Windows: %APPDATA%\com.farion1231.cc-switch\app_paths.json
-///   - Linux:   ~/.config/com.farion1231.cc-switch/app_paths.json
+///   - macOS:   ~/Library/Application Support/com.ccswitch.desktop/app_paths.json
+///   - Windows: %APPDATA%\com.ccswitch.desktop\app_paths.json
+///   - Linux:   ~/.config/com.ccswitch.desktop/app_paths.json
 fn ccswitch_app_paths_file() -> Option<PathBuf> {
     let config_dir = dirs::config_dir()?;
     Some(
         config_dir
-            .join("com.farion1231.cc-switch")
+            .join("com.ccswitch.desktop")
             .join("app_paths.json"),
     )
 }
@@ -271,13 +289,6 @@ mod tests {
     }
 
     #[test]
-    fn ccswitch_db_path_returns_just_the_path() {
-        let _g = scoped_env("CC_SWITCH_HOME", None);
-        let path = ccswitch_db_path(None).expect("home dir resolvable on test host");
-        assert!(path.ends_with("cc-switch.db"));
-    }
-
-    #[test]
     fn expand_tilde_handles_unix_and_windows_separators() {
         let home = dirs::home_dir().unwrap();
         assert_eq!(expand_tilde("~/foo"), home.join("foo"));
@@ -287,48 +298,44 @@ mod tests {
     }
 
     #[test]
-    fn override_from_store_parses_flat_envelope() {
-        // Use a fake config_dir by routing cc-switch's app_paths.json into a
-        // temp dir via the home redirect. We can't actually mock dirs::config_dir
-        // here, so this test exercises the parser shape via direct fn use.
+    fn reads_current_flat_redirect_and_rejects_obsolete_envelope() {
         let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("redirected");
-        fs::create_dir_all(&target).unwrap();
         let store = tmp.path().join("app_paths.json");
-        let flat = serde_json::json!({
-            "app_config_dir_override": target.to_string_lossy()
-        });
-        fs::write(&store, serde_json::to_string(&flat).unwrap()).unwrap();
-
-        // Inline the parsing logic to verify the envelope handling shape:
-        let raw = fs::read_to_string(&store).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        let inner = v.get("values").unwrap_or(&v);
-        let pointer = inner
-            .get("app_config_dir_override")
-            .and_then(|x| x.as_str());
-        assert!(pointer.is_some());
+        let data = tmp.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(
+            &store,
+            serde_json::json!({"app_config_dir_override": data}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(read_redirect(&store), Some(data.clone()));
+        fs::write(
+            &store,
+            serde_json::json!({"values": {"app_config_dir_override": data}}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(read_redirect(&store), None);
+        fs::write(&store, "{invalid").unwrap();
+        assert_eq!(read_redirect(&store), None);
     }
 
     #[test]
-    fn override_from_store_parses_wrapped_envelope() {
-        let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("redirected");
-        fs::create_dir_all(&target).unwrap();
-        let store = tmp.path().join("app_paths.json");
-        let wrapped = serde_json::json!({
-            "values": {
-                "app_config_dir_override": target.to_string_lossy()
-            }
-        });
-        fs::write(&store, serde_json::to_string(&wrapped).unwrap()).unwrap();
-
-        let raw = fs::read_to_string(&store).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        let inner = v.get("values").unwrap_or(&v);
-        let pointer = inner
-            .get("app_config_dir_override")
-            .and_then(|x| x.as_str());
-        assert!(pointer.is_some());
+    fn current_skill_storage_follows_device_local_setting() {
+        let data = std::path::Path::new("/redirected");
+        let home = std::path::Path::new("/home/user");
+        assert_eq!(skills_root_for(data, home, None), data.join("skills"));
+        assert_eq!(
+            skills_root_for(
+                data,
+                home,
+                Some(&serde_json::json!({"skillStorageLocation":"unified"}))
+            ),
+            home.join(".agents/skills")
+        );
+    }
+    #[test]
+    fn redirect_store_uses_the_current_upstream_bundle_identifier() {
+        let path = ccswitch_app_paths_file().unwrap();
+        assert!(path.ends_with("com.ccswitch.desktop/app_paths.json"));
     }
 }

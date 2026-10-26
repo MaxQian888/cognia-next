@@ -32,6 +32,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use futures_util::{future::poll_fn, Sink, SinkExt};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,17 @@ use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, Instant};
 
 const HELLO_VERSION: u32 = 1;
+const AGENT_PROFILE: &str = "agent-safe-v1";
+
+/// Legacy clients may continue receiving status hints, but only the frozen
+/// cancellation-safe profile can receive agent operations.
+fn negotiated_profile(features: &[String]) -> Option<&'static str> {
+    features
+        .iter()
+        .any(|feature| feature == AGENT_PROFILE)
+        .then_some(AGENT_PROFILE)
+}
+
 /// A screenshot answer or a `set_files` payload is the largest frame; both are
 /// bounded by the attachment ceiling (10 MiB) once base64 is accounted for.
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -187,10 +199,13 @@ enum CloseReason {
     /// reconnect as soon as the Host is back, so this closes with 1001, never
     /// the 1008 a browser waits out as "your authorization changed".
     HostStopping,
+    /// Retire the connection so a fast revoke/regrant cannot revive old work.
+    AuthorizationChanged,
 }
 
 struct Connection {
     connection_id: String,
+    authorization_revision: Option<String>,
     connected_at: u64,
     extension_version: String,
     features: Vec<String>,
@@ -202,7 +217,13 @@ struct Connection {
 
 struct Queued {
     text: String,
+    operation: Option<QueuedOperation>,
     _permit: OwnedSemaphorePermit,
+}
+
+struct QueuedOperation {
+    id: String,
+    expires_at: Instant,
 }
 
 type ConnectionKey = (String, String);
@@ -269,6 +290,7 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
             }
         };
     let connection_id = uuid::Uuid::new_v4().to_string();
+    let agent_profile = negotiated_profile(&features);
     let (sender, mut outgoing) = mpsc::channel::<Queued>(MAX_QUEUE_FRAMES);
     let (shutdown, mut shutdown_rx) = watch::channel(None::<CloseReason>);
     let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, OperationError>>>>> =
@@ -277,6 +299,7 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
         (tenant_id.clone(), device_id.clone()),
         Connection {
             connection_id: connection_id.clone(),
+            authorization_revision: None,
             connected_at: unix_time_millis(),
             extension_version,
             features,
@@ -292,6 +315,7 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
         "v": HELLO_VERSION,
         "connectionId": connection_id,
         "driveAllowed": has_capability(&tenant_id, &device_id, DRIVE_CAPABILITY),
+        "agentProfile": agent_profile,
     })
     .to_string();
     if socket.send(Message::Text(welcome.into())).await.is_err() {
@@ -313,8 +337,15 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
             queued = outgoing.recv() => {
                 match queued {
                     Some(queued) => {
-                        if socket.send(Message::Text(queued.text.into())).await.is_err() {
+                        if poll_fn(|cx| std::pin::Pin::new(&mut socket).poll_ready(cx)).await.is_err() {
                             break;
+                        }
+                        let sent = dispatch_queued(&tenant_id, &device_id, &connection_id, queued,
+                            |text| std::pin::Pin::new(&mut socket).start_send(Message::Text(text.into())));
+                        match sent {
+                            Err(_) => break,
+                            Ok(true) => if socket.flush().await.is_err() { break; },
+                            Ok(false) => {},
                         }
                     }
                     None => break,
@@ -374,6 +405,11 @@ async fn handle_socket(mut socket: WebSocket, tenant_id: String, device_id: Stri
                 let stopping = *shutdown_rx.borrow();
                 if let Some(reason) = stopping {
                     close_for(&mut socket, reason).await;
+                    break;
+                }
+                if !connection_authorization_current(&tenant_id, &device_id, &connection_id) {
+                    fail_pending(&pending, "browser_drive_revoked");
+                    close_with(&mut socket, CLOSE_POLICY_VIOLATION, "browser authorization changed").await;
                     break;
                 }
                 if !has_capability(&tenant_id, &device_id, SOCKET_CAPABILITY) {
@@ -441,8 +477,29 @@ async fn receive_hello(socket: &mut WebSocket) -> Result<(String, Vec<String>), 
     }
 }
 
-fn install(key: ConnectionKey, connection: Connection) {
-    let previous = CONNECTIONS.write().insert(key, connection);
+fn authorization_revision(tenant_id: &str, device_id: &str) -> Option<String> {
+    super::security_store::security_store()?
+        .device_authorization_revision(tenant_id, device_id)
+        .ok()
+        .flatten()
+}
+
+fn connection_authorization_current(tenant_id: &str, device_id: &str, connection_id: &str) -> bool {
+    let connections = CONNECTIONS.read();
+    connections
+        .get(&(tenant_id.into(), device_id.into()))
+        .is_some_and(|connection| {
+            connection.connection_id == connection_id
+                && connection.authorization_revision.is_some()
+                && connection.authorization_revision == authorization_revision(tenant_id, device_id)
+        })
+}
+
+fn install(key: ConnectionKey, mut connection: Connection) {
+    let mut connections = CONNECTIONS.write();
+    connection.authorization_revision = authorization_revision(&key.0, &key.1);
+    let previous = connections.insert(key, connection);
+    drop(connections);
     if let Some(previous) = previous {
         let _ = previous.shutdown.send(Some(CloseReason::Replaced));
         fail_pending(&previous.pending, "browser_extension_replaced");
@@ -493,6 +550,7 @@ fn enqueue(
     sender: &mpsc::Sender<Queued>,
     queue_bytes: &Arc<Semaphore>,
     text: String,
+    operation: Option<QueuedOperation>,
 ) -> Result<(), OperationError> {
     if text.len() > MAX_FRAME_BYTES {
         return Err(OperationError::new(
@@ -512,6 +570,7 @@ fn enqueue(
     sender
         .try_send(Queued {
             text,
+            operation,
             _permit: permit,
         })
         .map_err(|_| {
@@ -520,6 +579,110 @@ fn enqueue(
                 "the browser is not keeping up",
             )
         })
+}
+
+fn dispatch_queued<E>(
+    tenant_id: &str,
+    device_id: &str,
+    connection_id: &str,
+    queued: Queued,
+    send: impl FnOnce(String) -> Result<(), E>,
+) -> Result<bool, E> {
+    // The synchronous send commit shares the registry lock with grant changes
+    // and connection replacement. No parking_lot guard crosses an await.
+    let connections = CONNECTIONS.read();
+    let Some(connection) = connections.get(&(tenant_id.to_string(), device_id.to_string())) else {
+        return Ok(false);
+    };
+    if connection.connection_id != connection_id || connection.shutdown.borrow().is_some() {
+        return Ok(false);
+    }
+    let Some(revision) = connection.authorization_revision.as_deref() else {
+        return Ok(false);
+    };
+    let Some(store) = super::security_store::security_store() else {
+        return Ok(false);
+    };
+    if authorization_revision(tenant_id, device_id).as_deref() != Some(revision) {
+        fail_pending(&connection.pending, "browser_drive_revoked");
+        let _ = connection
+            .shutdown
+            .send(Some(CloseReason::AuthorizationChanged));
+        return Ok(false);
+    }
+    let text = queued.text;
+    if let Some(operation) = queued.operation {
+        if !super::browser_access::submissions_enabled()
+            || !has_capability(tenant_id, device_id, SOCKET_CAPABILITY)
+        {
+            fail_pending(&connection.pending, "browser_submissions_disabled");
+            return Ok(false);
+        }
+        if !has_capability(tenant_id, device_id, DRIVE_CAPABILITY) {
+            fail_pending(&connection.pending, "browser_drive_revoked");
+            return Ok(false);
+        }
+        let mut pending = connection.pending.lock();
+        if pending
+            .get(&operation.id)
+            .is_none_or(|waiter| waiter.is_closed())
+        {
+            pending.remove(&operation.id);
+            return Ok(false);
+        }
+        // Operations are generated locally by call(); preserve their payload
+        // while subtracting time already spent in the outbound queue.
+        let mut frame: Value = serde_json::from_str(&text).expect("queued operation JSON");
+        let result =
+            store.with_device_authorization_revision(tenant_id, device_id, revision, || {
+                // Acquiring the cross-process transaction may itself consume time.
+                let remaining = operation
+                    .expires_at
+                    .saturating_duration_since(Instant::now())
+                    .as_millis();
+                if remaining == 0 {
+                    return None;
+                }
+                frame["deadlineMs"] =
+                    serde_json::json!(u64::try_from(remaining).unwrap_or(u64::MAX));
+                let text = frame.to_string();
+                if Instant::now() >= operation.expires_at
+                    || pending
+                        .get(&operation.id)
+                        .is_none_or(|waiter| waiter.is_closed())
+                {
+                    return None;
+                }
+                Some(send(text))
+            });
+        if matches!(&result, Ok(Some(None))) {
+            if let Some(waiter) = pending.remove(&operation.id) {
+                let _ = waiter.send(Err(OperationError::new(
+                    "browser_operation_timeout",
+                    "The queued browser operation expired",
+                )));
+            }
+            return Ok(false);
+        }
+        drop(pending);
+        return match result {
+            Ok(Some(Some(result))) => {
+                result?;
+                Ok(true)
+            }
+            _ => {
+                fail_pending(&connection.pending, "browser_drive_revoked");
+                let _ = connection
+                    .shutdown
+                    .send(Some(CloseReason::AuthorizationChanged));
+                Ok(false)
+            }
+        };
+    }
+    let result = send(text);
+    drop(connections);
+    result?;
+    Ok(true)
 }
 
 /// Run one operation in a connected browser and wait for its answer.
@@ -554,9 +717,18 @@ pub async fn call(
     }
     let id = uuid::Uuid::new_v4().to_string();
     let timeout = timeout.min(MAX_OPERATION_TIMEOUT);
+    let expires_at = Instant::now() + timeout;
     let (waiter, answer) = oneshot::channel();
     let pending = {
         let connections = CONNECTIONS.read();
+        // A revoke/regrant cannot race the initial check and insert old work
+        // after the revocation has drained this connection's waiters.
+        if !has_capability(tenant_id, device_id, DRIVE_CAPABILITY) {
+            return Err(OperationError::new(
+                "browser_drive_forbidden",
+                "Browser driving permission ended",
+            ));
+        }
         let connection = connections
             .get(&(tenant_id.to_string(), device_id.to_string()))
             .ok_or_else(|| {
@@ -565,6 +737,20 @@ pub async fn call(
                     "the browser is not connected to this Host",
                 )
             })?;
+        if connection.authorization_revision.is_none()
+            || connection.authorization_revision != authorization_revision(tenant_id, device_id)
+        {
+            return Err(OperationError::new(
+                "browser_extension_disconnected",
+                "Browser authorization changed; reconnect required",
+            ));
+        }
+        if negotiated_profile(&connection.features).is_none() {
+            return Err(OperationError::new(
+                "browser_protocol_incompatible",
+                "Update the browser extension: the cancellation-safe agent profile is required",
+            ));
+        }
         let pending = Arc::clone(&connection.pending);
         {
             let mut guard = pending.lock();
@@ -584,7 +770,15 @@ pub async fn call(
             "deadlineMs": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
         })
         .to_string();
-        if let Err(error) = enqueue(&connection.sender, &connection.queue_bytes, frame) {
+        if let Err(error) = enqueue(
+            &connection.sender,
+            &connection.queue_bytes,
+            frame,
+            Some(QueuedOperation {
+                id: id.clone(),
+                expires_at,
+            }),
+        ) {
             pending.lock().remove(&id);
             return Err(error);
         }
@@ -613,7 +807,7 @@ pub fn notify_status(tenant_id: &str, device_id: &str) {
     let connections = CONNECTIONS.read();
     if let Some(connection) = connections.get(&(tenant_id.to_string(), device_id.to_string())) {
         let frame = serde_json::json!({ "t": "status", "at": unix_time_millis() }).to_string();
-        let _ = enqueue(&connection.sender, &connection.queue_bytes, frame);
+        let _ = enqueue(&connection.sender, &connection.queue_bytes, frame, None);
     }
 }
 
@@ -653,6 +847,14 @@ async fn close_for(socket: &mut WebSocket, reason: CloseReason) {
         }
         CloseReason::HostStopping => {
             close_with(socket, CLOSE_GOING_AWAY, "the Host is stopping").await
+        }
+        CloseReason::AuthorizationChanged => {
+            close_with(
+                socket,
+                CLOSE_POLICY_VIOLATION,
+                "browser authorization changed",
+            )
+            .await
         }
     }
 }
@@ -700,6 +902,8 @@ pub struct PairedBrowser {
     pub created_at: i64,
     pub connected: bool,
     pub extension_version: Option<String>,
+    pub connected_at: Option<u64>,
+    pub features: Vec<String>,
     pub drive_allowed: bool,
 }
 
@@ -715,20 +919,29 @@ pub fn paired_browsers(tenant_id: &str) -> Result<Vec<PairedBrowser>, String> {
         .into_iter()
         .map(|device| {
             let connection = connections.get(&(tenant_id.to_string(), device.device_id.clone()));
-            PairedBrowser {
-                drive_allowed: device
-                    .capabilities
-                    .iter()
-                    .any(|capability| capability == DRIVE_CAPABILITY),
-                connected: connection.is_some(),
-                extension_version: connection.map(|c| c.extension_version.clone()),
-                device_id: device.device_id,
-                display_name: device.display_name,
-                status: device.status,
-                created_at: device.created_at,
-            }
+            paired_browser(device, connection)
         })
         .collect())
+}
+
+fn paired_browser(
+    device: super::security_store::DeviceSummary,
+    connection: Option<&Connection>,
+) -> PairedBrowser {
+    PairedBrowser {
+        drive_allowed: device
+            .capabilities
+            .iter()
+            .any(|capability| capability == DRIVE_CAPABILITY),
+        connected: connection.is_some(),
+        extension_version: connection.map(|c| c.extension_version.clone()),
+        connected_at: connection.map(|c| c.connected_at),
+        features: connection.map(|c| c.features.clone()).unwrap_or_default(),
+        device_id: device.device_id,
+        display_name: device.display_name,
+        status: device.status,
+        created_at: device.created_at,
+    }
 }
 
 /// Grant or revoke `browser.drive` for one paired browser, leaving the rest of
@@ -737,26 +950,67 @@ pub fn set_drive_allowed(tenant_id: &str, device_id: &str, allowed: bool) -> Res
     if device_id.trim().is_empty() {
         return Err("device_id is required".to_string());
     }
-    let store = super::security_store::security_store()
-        .ok_or_else(|| "companion security store is unavailable".to_string())?;
-    let mut capabilities = store
-        .capability_snapshot(tenant_id, device_id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "paired browser is unknown or revoked".to_string())?;
-    capabilities.retain(|capability| capability != DRIVE_CAPABILITY);
-    if allowed {
-        capabilities.push(DRIVE_CAPABILITY.to_string());
+    update_device_authorization(tenant_id, device_id, || {
+        let store = super::security_store::security_store()
+            .ok_or_else(|| "companion security store is unavailable".to_string())?;
+        let mut capabilities = store
+            .capability_snapshot(tenant_id, device_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "paired browser is unknown or revoked".to_string())?;
+        capabilities.retain(|capability| capability != DRIVE_CAPABILITY);
+        if allowed {
+            capabilities.push(DRIVE_CAPABILITY.to_string());
+        }
+        store
+            .replace_device_capabilities(
+                tenant_id,
+                "local-trust-root",
+                device_id,
+                &capabilities,
+                unix_time_secs(),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })
+}
+
+/// Serialize every capability mutation with the synchronous outbound commit.
+/// Retiring the old connection also fences a fast revoke/regrant and generic
+/// device-capability updates that would otherwise be missed by the 1s poll.
+pub(crate) fn update_device_authorization<T, E>(
+    tenant_id: &str,
+    device_id: &str,
+    update: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    let connections = CONNECTIONS.write();
+    let before = authorization_revision(tenant_id, device_id);
+    let result = update()?;
+    if before != authorization_revision(tenant_id, device_id) {
+        if let Some(connection) = connections.get(&(tenant_id.to_string(), device_id.to_string())) {
+            fail_pending(&connection.pending, "browser_drive_revoked");
+            if connection.shutdown.borrow().is_none() {
+                let _ = connection
+                    .shutdown
+                    .send(Some(CloseReason::AuthorizationChanged));
+            }
+        }
     }
-    store
-        .replace_device_capabilities(
-            tenant_id,
-            "local-trust-root",
-            device_id,
-            &capabilities,
-            unix_time_secs(),
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(result)
+}
+
+pub(crate) fn update_browser_authorization(enabled: bool, update: impl FnOnce()) {
+    let connections = CONNECTIONS.write();
+    update();
+    if !enabled {
+        for connection in connections.values() {
+            fail_pending(&connection.pending, "browser_submissions_disabled");
+            if connection.shutdown.borrow().is_none() {
+                let _ = connection
+                    .shutdown
+                    .send(Some(CloseReason::AuthorizationChanged));
+            }
+        }
+    }
 }
 
 /// Run one operation in a paired browser (the `ExtensionBrowserEngine`'s transport).
@@ -872,6 +1126,7 @@ pub fn rpc_notify_status(device_id: &str) {
 /// request, the Owner's grant, the browser's connection, or the page.
 pub fn operation_error_response(error: OperationError) -> RpcFailure {
     let (status, retryable) = match error.code.as_str() {
+        "browser_protocol_incompatible" => (StatusCode::PRECONDITION_FAILED, false),
         "browser_operation_unknown" | "browser_operation_wrong_command" => {
             (StatusCode::BAD_REQUEST, false)
         }
@@ -898,6 +1153,124 @@ pub fn operation_error_response(error: OperationError) -> RpcFailure {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn real_socket_dispatches_a_result_and_closes_on_authorization_change() {
+        use futures_util::{FutureExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as ClientMessage;
+
+        let (_scope, _store) = store_with_browser("tenant-real", "browser-real");
+        set_drive_allowed("tenant-real", "browser-real", true).unwrap();
+        let previous = super::super::browser_access::submissions_enabled();
+        super::super::browser_access::set_submissions_enabled(true);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = axum::Router::new().route(
+            "/socket",
+            axum::routing::get(|ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(|socket| {
+                    handle_socket(socket, "tenant-real".into(), "browser-real".into())
+                })
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, router).await });
+        let outcome = std::panic::AssertUnwindSafe(async {
+            let (mut browser, _) =
+                tokio_tungstenite::connect_async(format!("ws://{address}/socket"))
+                    .await
+                    .unwrap();
+            browser
+                .send(ClientMessage::Text(
+                    serde_json::json!({"t":"hello","v":1,"features":[AGENT_PROFILE]})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            let welcome = tokio::time::timeout(Duration::from_secs(2), browser.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let welcome: Value = serde_json::from_str(welcome.to_text().unwrap()).unwrap();
+            assert_eq!(welcome["agentProfile"], AGENT_PROFILE);
+            let peer = async {
+                loop {
+                    let frame = tokio::time::timeout(Duration::from_secs(2), browser.next())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap();
+                    let frame: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+                    if frame["t"] != "op" {
+                        continue;
+                    }
+                    assert!(frame["deadlineMs"].as_u64().unwrap() <= 1000);
+                    browser
+                        .send(ClientMessage::Text(
+                            serde_json::json!({"t":"result","id":frame["id"],"ok":true,"value":42})
+                                .to_string()
+                                .into(),
+                        ))
+                        .await
+                        .unwrap();
+                    break;
+                }
+            };
+            let (result, ()) = tokio::join!(
+                call(
+                    "tenant-real",
+                    "browser-real",
+                    "get_page",
+                    Value::Null,
+                    Duration::from_secs(1)
+                ),
+                peer
+            );
+            assert_eq!(result.unwrap(), serde_json::json!(42));
+            set_drive_allowed("tenant-real", "browser-real", false).unwrap();
+            loop {
+                let frame = tokio::time::timeout(Duration::from_secs(2), browser.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                if let ClientMessage::Close(reason) = frame {
+                    assert_eq!(u16::from(reason.unwrap().code), CLOSE_POLICY_VIOLATION);
+                    break;
+                }
+            }
+        })
+        .catch_unwind()
+        .await;
+        server.abort();
+        let _ = server.await;
+        CONNECTIONS
+            .write()
+            .remove(&("tenant-real".into(), "browser-real".into()));
+        super::super::browser_access::set_submissions_enabled(previous);
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
+    fn published_contract_pins_the_host_profile_and_operations() {
+        let contract: Value = serde_json::from_str(include_str!(
+            "../../../packages/companion-client/src/browser-agent-protocol.json"
+        ))
+        .unwrap();
+        assert_eq!(contract["envelopeVersion"], HELLO_VERSION);
+        assert_eq!(contract["agentProfile"], AGENT_PROFILE);
+        assert_eq!(contract["operations"], serde_json::json!(OPERATIONS));
+        assert_eq!(negotiated_profile(&["agent-v1".into()]), None);
+        assert_eq!(negotiated_profile(&[]), None);
+        assert_eq!(negotiated_profile(&["agent-safe-v2".into()]), None);
+        assert_eq!(
+            negotiated_profile(&[AGENT_PROFILE.into()]),
+            Some(AGENT_PROFILE)
+        );
+    }
+
     fn test_connection(
         connection_id: &str,
     ) -> (
@@ -910,6 +1283,7 @@ mod tests {
         (
             Connection {
                 connection_id: connection_id.to_string(),
+                authorization_revision: None,
                 connected_at: 1,
                 extension_version: "0.2.0".to_string(),
                 features: vec!["drive".to_string()],
@@ -921,6 +1295,30 @@ mod tests {
             receiver,
             shutdown_rx,
         )
+    }
+
+    #[test]
+    fn paired_browser_projects_live_handshake_metadata_and_clears_it_offline() {
+        let device = super::super::security_store::DeviceSummary {
+            device_id: "browser".into(),
+            display_name: "Chrome".into(),
+            role: "browser".into(),
+            status: "active".into(),
+            user_id: None,
+            created_at: 1,
+            updated_at: 1,
+            capabilities: vec![],
+        };
+        let (connection, _rx, _shutdown) = test_connection("metadata");
+        let live = paired_browser(device.clone(), Some(&connection));
+        assert_eq!(live.connected_at, Some(1));
+        assert_eq!(live.features, vec!["drive"]);
+        assert_eq!(live.extension_version.as_deref(), Some("0.2.0"));
+        let offline = paired_browser(device, None);
+        assert!(!offline.connected);
+        assert_eq!(offline.connected_at, None);
+        assert!(offline.features.is_empty());
+        assert_eq!(offline.extension_version, None);
     }
 
     #[test]
@@ -978,10 +1376,11 @@ mod tests {
     fn the_queue_refuses_rather_than_blocks_when_the_browser_stalls() {
         let (sender, _receiver) = mpsc::channel(1);
         let budget = Arc::new(Semaphore::new(MAX_QUEUE_BYTES));
-        enqueue(&sender, &budget, "a".to_string()).unwrap();
-        let refused = enqueue(&sender, &budget, "b".to_string()).unwrap_err();
+        enqueue(&sender, &budget, "a".to_string(), None).unwrap();
+        let refused = enqueue(&sender, &budget, "b".to_string(), None).unwrap_err();
         assert_eq!(refused.code, "browser_extension_backpressure");
-        let oversized = enqueue(&sender, &budget, "x".repeat(MAX_FRAME_BYTES + 1)).unwrap_err();
+        let oversized =
+            enqueue(&sender, &budget, "x".repeat(MAX_FRAME_BYTES + 1), None).unwrap_err();
         assert_eq!(oversized.code, "browser_operation_too_large");
     }
 
@@ -1081,9 +1480,45 @@ mod tests {
         assert!(unknown.contains("unknown or revoked"), "{unknown}");
     }
 
+    #[tokio::test]
+    async fn legacy_profile_is_refused_before_queueing_an_operation() {
+        let (_scope, _store) = store_with_browser("tenant-profile", "browser-profile");
+        set_drive_allowed("tenant-profile", "browser-profile", true).unwrap();
+        let previous = super::super::browser_access::submissions_enabled();
+        super::super::browser_access::set_submissions_enabled(true);
+        let (mut connection, mut frames, _shutdown) = test_connection("legacy-profile");
+        connection.features = vec!["agent-v1".into()];
+        let pending = Arc::clone(&connection.pending);
+        install(
+            ("tenant-profile".into(), "browser-profile".into()),
+            connection,
+        );
+        let result = call(
+            "tenant-profile",
+            "browser-profile",
+            "navigate",
+            Value::Null,
+            Duration::from_millis(1),
+        )
+        .await;
+        remove("tenant-profile", "browser-profile", "legacy-profile");
+        super::super::browser_access::set_submissions_enabled(previous);
+        assert_eq!(result.unwrap_err().code, "browser_protocol_incompatible");
+        assert!(
+            frames.try_recv().is_err(),
+            "a legacy extension must receive no operation"
+        );
+        assert!(pending.lock().is_empty(), "no waiter should be installed");
+    }
+
     #[test]
     fn a_failed_operation_keeps_its_code_and_says_whose_problem_it_is() {
         let cases = [
+            (
+                "browser_protocol_incompatible",
+                StatusCode::PRECONDITION_FAILED,
+                false,
+            ),
             ("browser_operation_unknown", StatusCode::BAD_REQUEST, false),
             ("browser_operation_wrong_command", StatusCode::BAD_REQUEST, false),
             ("browser_operation_too_large", StatusCode::PAYLOAD_TOO_LARGE, false),
@@ -1103,6 +1538,251 @@ mod tests {
             assert_eq!(body.message, "why");
             assert_eq!(body.retryable, retryable, "{code}");
         }
+    }
+
+    #[test]
+    fn dequeue_refuses_revoked_replaced_expired_and_abandoned_operations() {
+        let (_scope, store) = store_with_browser("tenant-dequeue", "browser-dequeue");
+        let previous = super::super::browser_access::submissions_enabled();
+        super::super::browser_access::set_submissions_enabled(true);
+        for event in [
+            "revoke",
+            "regrant",
+            "external-regrant",
+            "suspend-resume",
+            "disable-enable",
+            "replace",
+            "expire",
+            "abandon",
+        ] {
+            set_drive_allowed("tenant-dequeue", "browser-dequeue", true).unwrap();
+            let (connection, mut frames, _shutdown) = test_connection("before-dequeue");
+            let (waiter, answer) = oneshot::channel();
+            let mut answer = Some(answer);
+            connection.pending.lock().insert("op".into(), waiter);
+            enqueue(
+                &connection.sender,
+                &connection.queue_bytes,
+                serde_json::json!({"t":"op","id":"op","deadlineMs":120000}).to_string(),
+                Some(QueuedOperation {
+                    id: "op".into(),
+                    expires_at: Instant::now() + Duration::from_secs(5),
+                }),
+            )
+            .unwrap();
+            install(
+                ("tenant-dequeue".into(), "browser-dequeue".into()),
+                connection,
+            );
+            let mut queued = frames.try_recv().unwrap();
+            match event {
+                "external-regrant" => {
+                    let caps = store
+                        .capability_snapshot("tenant-dequeue", "browser-dequeue")
+                        .unwrap()
+                        .unwrap();
+                    let without_drive: Vec<_> = caps
+                        .iter()
+                        .filter(|capability| capability.as_str() != DRIVE_CAPABILITY)
+                        .cloned()
+                        .collect();
+                    store
+                        .replace_device_capabilities(
+                            "tenant-dequeue",
+                            "cli",
+                            "browser-dequeue",
+                            &without_drive,
+                            200,
+                        )
+                        .unwrap();
+                    store
+                        .replace_device_capabilities(
+                            "tenant-dequeue",
+                            "cli",
+                            "browser-dequeue",
+                            &caps,
+                            200,
+                        )
+                        .unwrap();
+                }
+                "suspend-resume" => {
+                    store
+                        .suspend_device("tenant-dequeue", "cli", "browser-dequeue", true, 200)
+                        .unwrap();
+                    store
+                        .resume_device("tenant-dequeue", "cli", "browser-dequeue", 200)
+                        .unwrap();
+                }
+                "disable-enable" => {
+                    super::super::browser_access::set_submissions_enabled(false);
+                    super::super::browser_access::set_submissions_enabled(true);
+                }
+                "revoke" | "regrant" => {
+                    set_drive_allowed("tenant-dequeue", "browser-dequeue", false).unwrap();
+                    if event == "regrant" {
+                        set_drive_allowed("tenant-dequeue", "browser-dequeue", true).unwrap();
+                    }
+                }
+                "replace" => {
+                    let (newer, _rx, _shutdown) = test_connection("after-dequeue");
+                    install(("tenant-dequeue".into(), "browser-dequeue".into()), newer);
+                }
+                "expire" => {
+                    queued.operation.as_mut().unwrap().expires_at =
+                        Instant::now() - Duration::from_secs(1)
+                }
+                "abandon" => drop(answer.take()),
+                _ => unreachable!(),
+            }
+            let mut sent = Vec::new();
+            let result = dispatch_queued(
+                "tenant-dequeue",
+                "browser-dequeue",
+                "before-dequeue",
+                queued,
+                |text| {
+                    sent.push(text);
+                    Ok::<_, ()>(())
+                },
+            )
+            .unwrap();
+            remove(
+                "tenant-dequeue",
+                "browser-dequeue",
+                if event == "replace" {
+                    "after-dequeue"
+                } else {
+                    "before-dequeue"
+                },
+            );
+            if result {
+                super::super::browser_access::set_submissions_enabled(previous);
+                panic!("{event} operation was sent: {sent:?}");
+            }
+            assert!(sent.is_empty(), "{event}");
+        }
+        super::super::browser_access::set_submissions_enabled(previous);
+    }
+
+    #[test]
+    fn dequeue_sends_only_the_remaining_deadline_budget() {
+        let (_scope, _store) = store_with_browser("tenant-budget", "browser-budget");
+        set_drive_allowed("tenant-budget", "browser-budget", true).unwrap();
+        let previous = super::super::browser_access::submissions_enabled();
+        super::super::browser_access::set_submissions_enabled(true);
+        let (connection, mut frames, _shutdown) = test_connection("budget");
+        let (waiter, _answer) = oneshot::channel();
+        connection.pending.lock().insert("op".into(), waiter);
+        enqueue(
+            &connection.sender,
+            &connection.queue_bytes,
+            serde_json::json!({"t":"op","id":"op","deadlineMs":120000}).to_string(),
+            Some(QueuedOperation {
+                id: "op".into(),
+                expires_at: Instant::now() + Duration::from_secs(5),
+            }),
+        )
+        .unwrap();
+        install(
+            ("tenant-budget".into(), "browser-budget".into()),
+            connection,
+        );
+        let mut sent = Vec::new();
+        let result = dispatch_queued(
+            "tenant-budget",
+            "browser-budget",
+            "budget",
+            frames.try_recv().unwrap(),
+            |text| {
+                sent.push(text);
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
+        remove("tenant-budget", "browser-budget", "budget");
+        super::super::browser_access::set_submissions_enabled(previous);
+        assert!(result);
+        let value: Value = serde_json::from_str(&sent[0]).unwrap();
+        assert!(value["deadlineMs"].as_u64().unwrap() <= 5000, "{value}");
+        assert!(value["deadlineMs"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn dequeue_rechecks_abandonment_after_waiting_for_an_external_writer() {
+        let _scope = StoreScope(super::super::security_store::test_guard());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("security.sqlite");
+        let store = super::super::security_store::SecurityStore::open(&path).unwrap();
+        let challenge = store.issue_challenge("tenant-lock", 100, 600).unwrap();
+        let enrollment = store
+            .create_browser_enrollment("tenant-lock", "root", 100, 600)
+            .unwrap();
+        store
+            .register_browser_device(
+                "tenant-lock",
+                &enrollment,
+                &challenge.id,
+                &challenge.nonce,
+                "browser-lock",
+                "Chrome",
+                "pem",
+                "lock-thumb",
+                "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+                100,
+            )
+            .unwrap();
+        super::super::security_store::install_security_store(Some(store));
+        set_drive_allowed("tenant-lock", "browser-lock", true).unwrap();
+        let previous = super::super::browser_access::submissions_enabled();
+        super::super::browser_access::set_submissions_enabled(true);
+        let (connection, mut frames, _shutdown) = test_connection("lock");
+        let pending = Arc::clone(&connection.pending);
+        let (waiter, answer) = oneshot::channel();
+        pending.lock().insert("op".into(), waiter);
+        enqueue(
+            &connection.sender,
+            &connection.queue_bytes,
+            serde_json::json!({"t":"op","id":"op","deadlineMs":5000}).to_string(),
+            Some(QueuedOperation {
+                id: "op".into(),
+                expires_at: Instant::now() + Duration::from_secs(5),
+            }),
+        )
+        .unwrap();
+        install(("tenant-lock".into(), "browser-lock".into()), connection);
+        let queued = frames.try_recv().unwrap();
+        let mut writer = rusqlite::Connection::open(path).unwrap();
+        let tx = writer
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let dispatched = std::thread::spawn(move || {
+            dispatch_queued("tenant-lock", "browser-lock", "lock", queued, |_| {
+                Ok::<_, ()>(())
+            })
+            .unwrap()
+        });
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while !pending.is_locked() && std::time::Instant::now() < until {
+            std::thread::yield_now();
+        }
+        let reached_commit = pending.is_locked();
+        // WAL allows the initial authorization reads. The writer holds the
+        // IMMEDIATE transaction while dispatch owns pending and waits to commit.
+        std::thread::sleep(Duration::from_millis(50));
+        drop(answer);
+        tx.commit().unwrap();
+        let sent = dispatched.join().unwrap();
+        remove("tenant-lock", "browser-lock", "lock");
+        super::super::browser_access::set_submissions_enabled(previous);
+        assert!(
+            reached_commit,
+            "dispatch did not reach its pending-call guard"
+        );
+        assert!(
+            !sent,
+            "an operation abandoned during the write-lock wait was sent"
+        );
+        assert!(pending.lock().is_empty());
     }
 
     #[tokio::test]

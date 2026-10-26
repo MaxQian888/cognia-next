@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { DecisionProvider, DecisionResult } from "@/types/decisions"
@@ -77,7 +78,7 @@ describe("DecisionProviderCard", () => {
     const select = screen.getByLabelText("provider.label") as HTMLSelectElement
     expect(select.value).toBe("")
     expect(screen.getByText("provider.noneHint")).toBeInTheDocument()
-    const options = Array.from(select.options).map((o) => o.textContent)
+    const options = Array.from(getNativeSelect(select).options).map((o) => o.textContent)
     // Built-in is i18n'd; the plugin label resolves through the plugin bundle key.
     expect(options).toEqual([
       "provider.none",
@@ -88,9 +89,8 @@ describe("DecisionProviderCard", () => {
   })
 
   it("saves the selected provider", async () => {
-    const user = userEvent.setup()
     render(<DecisionProviderCard />)
-    await user.selectOptions(screen.getByLabelText("provider.label"), "laya:laya-local")
+    await selectOption(screen.getByLabelText("provider.label"), "laya:laya-local")
     expect(save).toHaveBeenCalledWith({ decisions: { providerId: "laya:laya-local" } })
   })
 
@@ -122,7 +122,7 @@ describe("DecisionProviderCard", () => {
     expect(screen.getByText("http.problems.no_url")).toBeInTheDocument()
     // A custom URL is not a model anyone measured on the copilot's questions.
     expect(screen.getByText("traits.copilotNotValidated")).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText("http.preset"), "bocha")
+    await selectOption(screen.getByLabelText("http.preset"), "bocha")
     expect(save).toHaveBeenLastCalledWith({
       decisions: { providerId: "builtin:decisions-http", http: { preset: "bocha" } },
     })
@@ -157,7 +157,7 @@ describe("DecisionProviderCard", () => {
     }
     render(<DecisionProviderCard />)
     await user.type(screen.getByLabelText("http.key"), "old-provider-secret")
-    await user.selectOptions(screen.getByLabelText("http.preset"), "openai")
+    await selectOption(screen.getByLabelText("http.preset"), "openai")
     expect(save).toHaveBeenLastCalledWith({
       decisions: { providerId: "builtin:decisions-http", http: { preset: "openai" } },
     })
@@ -263,9 +263,8 @@ describe("DecisionProviderCard", () => {
 })
 
 it("persists the displayed default endpoint when first selecting the remote provider", async () => {
-  const user = userEvent.setup()
   render(<DecisionProviderCard />)
-  await user.selectOptions(screen.getByLabelText("provider.label"), "builtin:decisions-http")
+  await selectOption(screen.getByLabelText("provider.label"), "builtin:decisions-http")
   expect(save).toHaveBeenCalledWith({
     decisions: { providerId: "builtin:decisions-http", http: { preset: "openrouter" } },
   })

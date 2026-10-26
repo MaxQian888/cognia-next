@@ -155,6 +155,9 @@ export const LineDiffView = memo(function LineDiffView({
   "aria-label": ariaLabel,
   "data-testid": testId = "line-diff-view",
 }: LineDiffViewProps) {
+  "use no memo"
+  // TanStack Virtual's mutable instance is incompatible with compiler memoization.
+  // Keep the existing manual memoization until the virtualizer supports the compiler.
   const t = useTranslations("diffView")
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const findInputRef = useRef<HTMLInputElement | null>(null)
@@ -219,6 +222,7 @@ export const LineDiffView = memo(function LineDiffView({
     return { digits: Math.max(2, String(maxNum).length), maxWidth: widest, numbered: maxNum > 0 }
   }, [rows, wraps])
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- This view explicitly opts out of compiler memoization above; keep the mutable virtualizer reactive.
   const virtualizer = useVirtualizer({
     count: viewRows.length,
     getScrollElement: () => scrollRef.current,

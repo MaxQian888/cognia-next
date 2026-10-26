@@ -435,7 +435,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 245
+export const CURRENT_SCHEMA_VERSION = 247
 
 /**
  * The immutable cumulative v240 schema baseline.
@@ -1053,12 +1053,33 @@ const MANAGED_DESKTOP_DELETION_SCHEMA = {
   managedDesktopDeletionOutbox: "id, phase, createdAt, ownerAccountId",
 }
 
+// v246 — code-owned prompt overrides (ADR-0236): one binding per
+// (prompt, scope, target) and its immutable revisions. `lib/db/prompt-overrides.ts`.
+const PROMPT_OVERRIDE_SCHEMA = {
+  promptOverrides: "&id, promptId, &[promptId+scope+targetId], updatedAt",
+  promptOverrideRevisions: "&id, bindingId, promptId, createdAt",
+}
+
+// v247 — Harness Evolution (ADR-0237): content-addressed harness snapshots,
+// evolution runs and their steps (rollouts with evidence, editor stages), and
+// the experience library. `lib/db/harness-evolution.ts`.
+const HARNESS_EVOLUTION_SCHEMA = {
+  harnessSnapshots: "&id, characterId, contentHash, [characterId+createdAt], createdAt",
+  harnessEvolutionRuns:
+    "&id, characterId, status, dedupeKey, projectId, sessionId, [characterId+createdAt], updatedAt",
+  harnessEvolutionSteps: "&id, runId, cacheKey, updatedAt",
+  harnessExperiences:
+    "&id, characterId, scope, validationStatus, domain, projectId, sourceRunId, updatedAt",
+}
+
 export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
   ...SESSION_LIST_SOURCE_SCHEMA,
   bestOfNRuns: "&id, parentSessionId, parentMessageId, updatedAt",
   ...MANAGED_DESKTOP_DELETION_SCHEMA,
+  ...PROMPT_OVERRIDE_SCHEMA,
+  ...HARNESS_EVOLUTION_SCHEMA,
 }
 
 let databaseConnectionSequence = 0
@@ -1076,6 +1097,14 @@ interface LegacyRemoteControlRunStatusRow {
 
 export class CogniaDB extends Dexie {
   bestOfNRuns!: Table<import("@/types/best-of-n").BestOfNRunSummary, string>
+  // v246 — code-owned prompt overrides (ADR-0236).
+  promptOverrides!: Table<import("./prompt-overrides").PromptOverrideBindingRow, string>
+  promptOverrideRevisions!: Table<import("./prompt-overrides").PromptOverrideRevisionRow, string>
+  // v247 — Harness Evolution (ADR-0237).
+  harnessSnapshots!: Table<import("@/types/harness/snapshot").HarnessSnapshotV1, string>
+  harnessEvolutionRuns!: Table<import("@/types/harness/evolution").HarnessEvolutionRun, string>
+  harnessEvolutionSteps!: Table<import("@/types/harness/evolution").HarnessEvolutionStep, string>
+  harnessExperiences!: Table<import("@/types/harness/experience").HarnessExperience, string>
   readonly connectionOwner: string
   readonly connectionId: string
   private readonly connectionCreatedAt: number
@@ -1628,6 +1657,24 @@ export class CogniaDB extends Dexie {
 
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)
+    this.use({
+      stack: "dbcore",
+      name: "DocumentReadTransactionLifetime",
+      level: -1,
+      create: (down) => ({
+        ...down,
+        transaction: (stores, mode, options) => {
+          const transaction = down.transaction(stores, mode, options) as IDBTransaction
+          if (mode === "readonly") {
+            _documentReadTransactions.add(transaction)
+            const settled = () => _documentReadTransactions.delete(transaction)
+            transaction.addEventListener("complete", settled, { once: true })
+            transaction.addEventListener("abort", settled, { once: true })
+          }
+          return transaction
+        },
+      }),
+    })
     if (name.startsWith("cognia-account-")) {
       this.use(createEncryptedContentMiddleware(name))
     }
@@ -2028,6 +2075,8 @@ export type {
 
 let _db: CogniaDB | null = null
 const _knownConnections = new Map<string, Set<CogniaDB>>()
+const _documentReadTransactions = new Set<IDBTransaction>()
+let _pageHideListening = false
 let _seedPromise: Promise<void> | null = null
 let _activeDatabaseName: string | null = null
 let _yieldChannel: BroadcastChannel | null = null
@@ -2039,12 +2088,39 @@ const _reportedConnectionOwners = new Map<string, Set<string>>()
 let _stopBlockedRetry: (() => void) | null = null
 
 function registerKnownConnection(database: CogniaDB): void {
+  // The headless brain shims `window` as Node's global, which has no event
+  // target and never sees `pagehide`; only a real document registers.
+  if (
+    !_pageHideListening &&
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function"
+  ) {
+    // Capture runs before Dexie's BFCache close listener unregisters handles.
+    window.addEventListener("pagehide", closeDocumentConnections, true)
+    _pageHideListening = true
+  }
   let connections = _knownConnections.get(database.name)
   if (!connections) {
     connections = new Set()
     _knownConnections.set(database.name, connections)
   }
   connections.add(database)
+}
+
+function closeDocumentConnections(): void {
+  // close() alone waits for readers whose crypto awaits cannot resume in a
+  // frozen document. Include retired handles' readers too. Leave readwrite
+  // transactions and existing exit-save handlers free to finish their writes.
+  for (const transaction of _documentReadTransactions) {
+    try {
+      transaction.abort()
+    } catch {
+      // A committed transaction can still be awaiting its completion event.
+    }
+  }
+  _documentReadTransactions.clear()
+  const databases = [..._knownConnections.values()].flatMap((connections) => [...connections])
+  for (const database of databases) database.close({ disableAutoOpen: false })
 }
 
 function unregisterKnownConnection(database: CogniaDB): void {
@@ -2530,6 +2606,8 @@ export function whenSeeded(): Promise<void> {
  * — production code must never call this.
  */
 export function __resetDbForTesting(): void {
+  if (_pageHideListening) window.removeEventListener("pagehide", closeDocumentConnections, true)
+  _pageHideListening = false
   _activeDatabaseName = null
   closeCachedDb()
   try {

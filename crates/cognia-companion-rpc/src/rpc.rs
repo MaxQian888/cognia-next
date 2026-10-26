@@ -351,6 +351,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     // keyring names are deprecated compatibility aliases.
     "secret_store_get",
     "secret_store_set",
+    "connectors_google_docs_auth",
     "secret_store_delete",
     "keyring_secret_get",
     "keyring_secret_set",
@@ -558,6 +559,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     // ADR-0224 A6 — secrets a paired device keeps on this host. The writes
     // are `approval: interactive` in the manifest; the load is service-only.
     "host_secret_list",
+    "org_model_credential_list",
+    "org_model_credential_set",
+    "org_model_credential_delete",
+    "org_agent_policy_get",
+    "org_agent_policy_set",
     "host_provider_credential_set",
     "host_provider_credential_delete",
     "host_git_credential_set",
@@ -1329,6 +1335,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "browser_press_key",
     "browser_scroll",
     "browser_evaluate",
+    "browser_recording_control",
+    "browser_recording_ref",
     "browser_read_console",
     "browser_read_network",
     "browser_back",
@@ -1423,6 +1431,8 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    "org_model_credential_list",
+    "org_agent_policy_get",
     "task_workspace_canonical_root",
     "best_of_n_get",
     "best_of_n_list",
@@ -1843,6 +1853,8 @@ const CONTROL_COMMANDS: &[&str] = &[
     "browser_press_key",
     "browser_scroll",
     "browser_evaluate",
+    "browser_recording_control",
+    "browser_recording_ref",
     "browser_back",
     "browser_forward",
     "browser_reload",
@@ -2268,7 +2280,7 @@ fn is_control_command(name: &str) -> bool {
 #[cfg(test)]
 fn is_control_authorized(name: &str, device_id: &str, scope: Option<&str>) -> bool {
     !is_control_command(name)
-        || (scope == Some("service")
+        || (cognia_companion::jwt::is_service_scope(scope)
             && matches!(
                 name,
                 "terminal_exec"
@@ -2710,6 +2722,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // future runtime credentials) in the already-installed server store.
     "secret_store_get",
     "secret_store_set",
+    "connectors_google_docs_auth",
     "secret_store_delete",
     "keyring_secret_get",
     "keyring_secret_set",
@@ -2897,7 +2910,7 @@ fn is_agent_control_authorized(name: &str, device_id: &str, scope: Option<&str>)
     if !is_agent_control_command(name) {
         return true;
     }
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         return true;
     }
     canonical_device_capability(device_id, name)
@@ -3149,7 +3162,7 @@ pub async fn rpc_handler(
     // SERVICE_ONLY_COMMANDS", which stopped being true two waves ago and is
     // exactly the kind of stale claim a reader trusts. The `signaling::dispatch`
     // path threads the scope and carries the mirrored gate.
-    if is_service_only_command(&name) && ctx.scope != "service" {
+    if is_service_only_command(&name) && !cognia_companion::jwt::is_service_scope(Some(ctx.scope.as_ref())) {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
         ));
@@ -3165,7 +3178,7 @@ pub async fn rpc_handler(
     // same question as whether it can change anything.
     let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
-    if ctx.scope != "service" {
+    if !cognia_companion::jwt::is_service_scope(Some(ctx.scope.as_ref())) {
         let class = if matches!(
             name.as_str(),
             "plugin_media_read_chunk" | "plugin_media_close_transfer"
@@ -3418,7 +3431,7 @@ fn authorize_workspace_root(
 /// remote control (`workspace.write`), which could reach the same bytes
 /// through a terminal or a write anyway. A chat-only paired device cannot.
 fn sensitive_reads_allowed(device_id: &str, scope: Option<&str>) -> bool {
-    scope == Some("service") || canonical_device_has_capability(device_id, "workspace.write")
+    cognia_companion::jwt::is_service_scope(scope) || canonical_device_has_capability(device_id, "workspace.write")
 }
 
 fn authorize_sensitive_resource(
@@ -3726,7 +3739,7 @@ pub(super) async fn dispatch(
     // the WebRTC `signaling::dispatch` path (both funnel through here), so the
     // elevated capability is enforced regardless of transport. Baseline chat
     // and read-only sync are not in `CONTROL_COMMANDS`, so they pass through.
-    if STEP_UP_COMMANDS.contains(&name) && scope != Some("service") {
+    if STEP_UP_COMMANDS.contains(&name) && !cognia_companion::jwt::is_service_scope(scope) {
         let admin_lease = args
             .get("adminLease")
             .or_else(|| args.get("admin_lease"))
@@ -3738,7 +3751,7 @@ pub(super) async fn dispatch(
     // Service-scope gate, mirrored from `rpc_handler` so the WebRTC
     // `signaling::dispatch` path (which is always device-scoped — it passes
     // `scope: None`) can never reach the RCE-grade arms either.
-    if is_service_only_command(name) && scope != Some("service") {
+    if is_service_only_command(name) && !cognia_companion::jwt::is_service_scope(scope) {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",
         ));
@@ -3980,5 +3993,21 @@ fn changeset_and_integration_commands_have_matching_remote_control_classificatio
         assert_eq!(is_control_command(command), !read_only, "{command}");
         assert!(!is_service_only_command(command), "{command}");
         assert!(filesystem::COMMANDS.contains(&command), "{command}");
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn p6a_org_commands_have_matching_generated_and_service_dispatch_descriptors() {
+    for command in cognia_companion::org_policy::COMMANDS {
+        assert!(KNOWN_COMMANDS.contains(command));
+        assert!(known_commands().contains(command), "regenerate the companion API contract for {command}");
+        assert!(service_plane::COMMANDS.contains(command));
+        assert!(!is_service_only_command(command));
+        let descriptor = cognia_companion::command_manifest::descriptor(command).unwrap();
+        assert_eq!(descriptor.capability, cognia_companion::org_policy::CAPABILITY);
+        assert_eq!(descriptor.approval == cognia_companion::command_manifest::CommandApproval::Interactive,
+            cognia_companion::org_policy::is_write(command));
+        assert_eq!(READ_ONLY_COMMANDS_SET.contains(command), !cognia_companion::org_policy::is_write(command));
     }
 }

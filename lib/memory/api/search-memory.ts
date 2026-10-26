@@ -18,8 +18,10 @@
  * diagnostics-style reads that should not perturb decay.
  */
 
-import type { Memory, MemoryType } from "@/types/memory/memory"
+import type { MemoryType } from "@/types/memory/memory"
 import type { TrustedMemoryCaller } from "@cognia/memory/types/caller"
+import type { ExternalMemoryHit } from "@cognia/plugin-contract/lib/memory/api/search-memory"
+export type { ExternalMemoryHit } from "@cognia/plugin-contract/lib/memory/api/search-memory"
 
 export interface SearchMemoriesExternalInput {
   query: string
@@ -39,14 +41,6 @@ export interface SearchMemoriesExternalInput {
    * later or already forgotten are excluded. Lexical only; never bumps access.
    */
   asOf?: number
-}
-
-export interface ExternalMemoryHit {
-  memory: Memory
-  /** Normalized fused relevance in [0,1]. */
-  relevance: number
-  /** Combined multi-factor score. */
-  score: number
 }
 
 export type SearchMemoriesExternalResult =

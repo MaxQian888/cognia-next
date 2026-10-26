@@ -22,6 +22,7 @@ export interface TurnDispatchParams {
   config: ResolvedConfig
   home: string
   gate: PermissionResponder
+  awaitApprovals?: () => Promise<void>
   resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
   resolveSubagentGate?: (actorRef: string) => PermissionResponder
   signal?: AbortSignal
@@ -43,6 +44,7 @@ export function registerTurnSubagentContext(params: TurnDispatchParams): () => v
     home: params.home,
     cwd: session.cwd,
     gate: params.gate,
+    ...(params.awaitApprovals ? { awaitApprovals: params.awaitApprovals } : {}),
     ...(params.resolveSubagentOptions
       ? { resolveSubagentOptions: params.resolveSubagentOptions }
       : {}),

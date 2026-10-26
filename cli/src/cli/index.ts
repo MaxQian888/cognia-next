@@ -12,6 +12,7 @@ import { handoffCommand as defaultHandoff, resumeCommand as defaultResume } from
 import { chatCommand as defaultChat } from "./chat"
 import { logtoCommand as defaultLogto } from "./logto-command"
 import { accountSyncCommand as defaultAccountSync } from "./account-sync-command"
+import { promptsCommand as defaultPrompts } from "./prompts-command"
 import { larkCommand as defaultLark } from "./lark-command"
 import { evalCommand as defaultEval } from "./eval-command"
 import { durabilityCommand as defaultDurability } from "./durability-command"
@@ -74,6 +75,12 @@ Usage:
                      enroll this host in account sync (preview; COGNIA_ACCOUNT_SYNC=1);
                      sign in first with \`cognia-agent logto login\`
   cognia-agent config <get|set|path>
+  cognia-agent prompts <list|show|set|reset|export|import> [id|file]
+                     [--scope account|workspace|agent|session] [--target id]
+                     [--file f] [--output f] [--map scope:from=to[,…]] [--yes]
+                     [--group g] [--modified] [--json]
+                     the Prompt Center's prompt overrides in this CLI's store;
+                     --scope workspace defaults to the workspace mounting the cwd
                      config set agentBackends.<backend>.piExtensionPolicy
                        isolated|global|trusted-project
                        Pi only: how much of your own Pi stack a Cognia session
@@ -161,6 +168,7 @@ export interface MainDeps {
   chat?: typeof defaultChat
   logto?: typeof defaultLogto
   accountSync?: typeof defaultAccountSync
+  prompts?: typeof defaultPrompts
   serve?: typeof defaultServe
   lark?: typeof defaultLark
   eval?: typeof defaultEval
@@ -245,6 +253,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.logto ?? defaultLogto)(args, { out })
     case "account-sync":
       return (deps.accountSync ?? defaultAccountSync)(args, { out })
+    case "prompts":
+      return (deps.prompts ?? defaultPrompts)(args, { out })
     case "serve":
       return (deps.serve ?? defaultServe)(args, { out })
     case "lark":

@@ -18,7 +18,6 @@
 import { useMemo } from "react"
 
 import { buildRouteTargets, type MentionTarget } from "@/lib/agent-team/runtime-targets"
-import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 import type { AgentRuntimeDescriptor } from "@/lib/ai/agent/runtime-catalog/types"
 import { runtimeRefKey } from "@/lib/ai/agent/runtime-catalog/types"
 import { descriptorForRef, resolveRouteLane } from "@/lib/chat/turn-route/resolve"
@@ -29,7 +28,6 @@ import { useAgentRuntimeCatalog } from "@/hooks/agent/use-agent-runtime-catalog"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { selectTeammates, selectTeams } from "@/stores/agent/agent-team-store/selectors"
-import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -98,8 +96,6 @@ export function useRouteTargets({
   const teams = useAgentTeamStore(selectTeams)
   const teammates = useAgentTeamStore(selectTeammates)
   const activeProjectId = useProjectStore((state) => state.activeProjectId)
-  const externalEnabled = useExternalAgentStore((state) => state.enabled)
-  const storedAgents = useExternalAgentStore((state) => state.agents)
   const liveRef = useRuntimeRefForSession(sessionId)
   const { runtimes } = useAgentRuntimeCatalog(providerId, sessionId)
 
@@ -135,14 +131,6 @@ export function useRouteTargets({
     reservedKey,
   ])
 
-  const configuredPresetIds = useMemo(
-    () =>
-      Object.values(storedAgents ?? {})
-        .map((agent) => externalAgentPresetIdOf(agent))
-        .filter((presetId): presetId is string => !!presetId),
-    [storedAgents]
-  )
-
   const options = useMemo<readonly RouteOption[]>(() => {
     if (targets.length === 0) return EMPTY.options
     const context = {
@@ -150,15 +138,13 @@ export function useRouteTargets({
       currentRef,
       teams,
       teammates,
-      externalEnabled,
-      configuredPresetIds,
     }
     return targets.map((target) => {
       const lane = resolveRouteLane(routeForTarget(target).target, context)
       const descriptor = lane.ok ? descriptorForRef(stableRuntimes, lane.runtimeRef) : undefined
       return descriptor ? { target, lane, descriptor } : { target, lane }
     })
-  }, [targets, stableRuntimes, currentRef, teams, teammates, externalEnabled, configuredPresetIds])
+  }, [targets, stableRuntimes, currentRef, teams, teammates])
 
   return enabled ? { targets, options } : EMPTY
 }

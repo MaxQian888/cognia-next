@@ -2,6 +2,7 @@
 import "fake-indexeddb/auto"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { listBackupHistory } from "@/lib/db/backup-history"
+import { getSettings, saveSettings } from "@/lib/db/settings"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { executeBackupTask, __TESTING__ } from "./backup-executor"
 
@@ -132,6 +133,35 @@ beforeEach(async () => {
 })
 
 describe("executeBackupTask", () => {
+  it("keeps different cron requests as distinct files without stamping interval progress", async () => {
+    await saveSettings(
+      {
+        backupAutoSchedule: {
+          enabled: true,
+          intervalDays: 7,
+          retainCount: 3,
+          dirPath: "/interval",
+          lastRunAt: "2026-10-01T00:00:00.000Z",
+        },
+      },
+      { mirrorToHost: false }
+    )
+    const task = makeTask({ backupType: "settings", destination: "local" })
+    const first = await executeBackupTask(task, makeExecution(), new AbortController().signal)
+    const second = await executeBackupTask(
+      { ...task, id: "other-task" },
+      { ...makeExecution(), id: "other-execution" },
+      new AbortController().signal
+    )
+    expect(first.success).toBe(true)
+    expect(second.success).toBe(true)
+    expect((first.output?.local as { filename: string }).filename).not.toBe(
+      (second.output?.local as { filename: string }).filename
+    )
+    expect((await listBackupHistory()).every((row) => row.producer === "cron")).toBe(true)
+    expect((await getSettings()).backupAutoSchedule?.lastRunAt).toBe("2026-10-01T00:00:00.000Z")
+    expect((await getSettings()).backupAutoSchedule?.lastLocalRun).toBeUndefined()
+  })
   it("writes an encrypted backup, records success in history, and returns the path", async () => {
     const task = makeTask({ backupType: "full", destination: "local" })
     const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
@@ -196,7 +226,8 @@ describe("executeBackupTask", () => {
     expect(dispatchMock).toHaveBeenCalledWith(
       "webdav",
       expect.any(String),
-      expect.objectContaining({ filename: expect.stringMatching(/^cognia-backup-.*\.enc\.cbk$/) })
+      expect.objectContaining({ filename: expect.stringMatching(/^cognia-backup-.*\.enc\.cbk$/) }),
+      expect.any(Function)
     )
     // webdav-only never touches the disk.
     expect(writeTextFileMock).not.toHaveBeenCalled()

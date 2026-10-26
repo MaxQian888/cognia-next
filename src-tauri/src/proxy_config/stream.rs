@@ -43,7 +43,7 @@ use tokio::sync::Notify;
 
 use cognia_net::request_cancellation::RequestCancellationRegistry;
 
-use super::commands::host_is_private;
+use cognia_net::guarded_http::{host_is_private, redirect_policy as parse_redirect};
 
 /// How many delivered-but-unacknowledged body bytes may be outstanding before
 /// the reader pauses.
@@ -211,15 +211,6 @@ fn cancellations() -> &'static RequestCancellationRegistry {
 // Commands
 // ---------------------------------------------------------------------------
 
-fn parse_redirect(mode: Option<&str>) -> Result<reqwest::redirect::Policy, String> {
-    Ok(match mode.unwrap_or("follow") {
-        "follow" => reqwest::redirect::Policy::limited(10),
-        "manual" => reqwest::redirect::Policy::none(),
-        "error" => reqwest::redirect::Policy::custom(|attempt| attempt.error("redirect blocked")),
-        value => return Err(format!("invalid redirect mode: {value}")),
-    })
-}
-
 /// Open a streaming request and return its response head.
 ///
 /// Resolves once the origin has answered with status and headers — before a
@@ -240,16 +231,20 @@ pub async fn proxy_http_stream_open(
         ));
     }
 
-    let mut builder =
-        reqwest::Client::builder().redirect(parse_redirect(input.redirect.as_deref())?);
-    if let Some(ms) = input.connect_timeout_ms {
-        builder = builder.connect_timeout(Duration::from_millis(ms));
-    }
-    if let Some(ms) = input.read_timeout_ms {
-        builder = builder.read_timeout(Duration::from_millis(ms));
-    }
-    let (builder, _route) = super::apply_reqwest_policy(builder, &input.url)
-        .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))?;
+    let make_builder = |url: &str| {
+        let mut builder =
+            reqwest::Client::builder().redirect(parse_redirect(input.redirect.as_deref())?);
+        if let Some(ms) = input.connect_timeout_ms {
+            builder = builder.connect_timeout(Duration::from_millis(ms));
+        }
+        if let Some(ms) = input.read_timeout_ms {
+            builder = builder.read_timeout(Duration::from_millis(ms));
+        }
+        super::apply_reqwest_policy(builder, url)
+            .map(|(builder, _route)| builder)
+            .map_err(|error| serde_json::to_string(&error).unwrap_or_else(|_| error.to_string()))
+    };
+    let builder = make_builder(&input.url)?;
     let client = builder
         .build()
         .map_err(|error| format!("client build failed: {error}"))?;
@@ -298,13 +293,19 @@ pub async fn proxy_http_stream_open(
             finish(&input.request_id, generation);
             return Err("request cancelled".to_string());
         }
-        result = request.send() => result,
+        result = cognia_net::guarded_http::send(
+            request,
+            input.block_private,
+            input.redirect.as_deref(),
+            make_builder,
+            input.connect_timeout_ms.map(Duration::from_millis),
+        ) => result,
     };
     let response = match response {
         Ok(response) => response,
         Err(error) => {
             finish(&input.request_id, generation);
-            return Err(format!("request failed: {}", error.without_url()));
+            return Err(error);
         }
     };
 
@@ -437,6 +438,29 @@ pub fn proxy_http_stream_cancel(request_id: String) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn guarded_stream_open_refuses_private_hosts_without_leaking_registrations() {
+        for url in [
+            "http://169.254.169.254/",
+            "http://localhost/",
+            "http://[::ffff:127.0.0.1]/",
+        ] {
+            let request_id = format!("blocked-stream-{url}");
+            let input = serde_json::from_value(serde_json::json!({
+                "requestId": request_id,
+                "url": url,
+                "blockPrivate": true,
+            }))
+            .unwrap();
+            let error = proxy_http_stream_open(input, Channel::new(|_| Ok(())))
+                .await
+                .unwrap_err();
+            assert!(error.starts_with("refusing to fetch a private/loopback address"));
+            assert!(!proxy_http_stream_cancel(request_id.clone()));
+            assert!(!windows().lock().unwrap().contains_key(&request_id));
+        }
+    }
 
     #[test]
     fn redirect_modes_mirror_the_buffered_bridge() {

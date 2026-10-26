@@ -280,7 +280,7 @@ mod tests {
 
     fn fixtures() -> Fixtures {
         serde_json::from_str(include_str!(
-            "../../../packages/plugin-sdk/contract/path-fixtures.json"
+            "../../../packages/plugin-contract/contract/path-fixtures.json"
         ))
         .unwrap()
     }

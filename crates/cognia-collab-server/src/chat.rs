@@ -39,6 +39,63 @@ impl SessionRole {
     }
 }
 
+/// Read-time standing preserves ownership acquired by creating a session.
+/// Every workspace writer may own their session; viewers are read-only.
+pub fn session_read_role_ceiling(
+    standing: cognia_tenant_auth::membership::EffectiveWorkspaceAccess,
+) -> SessionRole {
+    use cognia_tenant_auth::WorkspaceRole;
+    match standing.role {
+        WorkspaceRole::Maintainer | WorkspaceRole::Member => SessionRole::Owner,
+        WorkspaceRole::Viewer => SessionRole::Viewer,
+    }
+}
+
+/// Grant-time standing limits roles assigned to someone by another manager.
+/// Unlike a creator's ownership, a grant to a plain writer stops at Member.
+/// Org owner/admin traversal resolves to Maintainer before reaching this rule.
+pub fn session_grant_role_ceiling(
+    standing: cognia_tenant_auth::membership::EffectiveWorkspaceAccess,
+) -> SessionRole {
+    use cognia_tenant_auth::WorkspaceRole;
+    match standing.role {
+        WorkspaceRole::Maintainer => SessionRole::Owner,
+        WorkspaceRole::Member => SessionRole::Member,
+        WorkspaceRole::Viewer => SessionRole::Viewer,
+    }
+}
+
+pub fn can_change_member_role(actor: SessionRole, existing: Option<SessionRole>, requested: SessionRole) -> bool {
+    actor == SessionRole::Owner
+        || (existing != Some(SessionRole::Owner) && requested != SessionRole::Owner)
+}
+
+pub fn cap_session_member(
+    mut member: SessionMembership,
+    standing: Option<cognia_tenant_auth::membership::EffectiveWorkspaceAccess>,
+) -> Option<SessionMembership> {
+    if member.guest {
+        return Some(member);
+    }
+    let ceiling = session_read_role_ceiling(standing?);
+    if session_role_rank(member.role) > session_role_rank(ceiling) {
+        member.role = ceiling;
+    }
+    if member.role == SessionRole::Viewer {
+        member.approver = false;
+    }
+    Some(member)
+}
+
+pub fn session_role_rank(role: SessionRole) -> u8 {
+    match role {
+        SessionRole::Viewer => 0,
+        SessionRole::Member => 1,
+        SessionRole::Maintainer => 2,
+        SessionRole::Owner => 3,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionAction {
     Discover,
@@ -135,6 +192,7 @@ pub struct SessionMembership {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedSession {
+    pub contract_version: i32,
     pub id: String,
     pub org_id: String,
     pub workspace_id: String,
@@ -256,6 +314,43 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    #[test]
+    fn read_and_grant_ceilings_distinguish_creator_ownership_from_assigned_roles() {
+        use cognia_tenant_auth::{membership::resolve_workspace_access, OrgRole, WorkspaceRole};
+        for (workspace, read, grant) in [
+            (WorkspaceRole::Maintainer, SessionRole::Owner, SessionRole::Owner),
+            (WorkspaceRole::Member, SessionRole::Owner, SessionRole::Member),
+            (WorkspaceRole::Viewer, SessionRole::Viewer, SessionRole::Viewer),
+        ] {
+            let standing = resolve_workspace_access(Some(OrgRole::Member), Some(workspace)).unwrap();
+            assert_eq!(session_read_role_ceiling(standing), read);
+            assert_eq!(session_grant_role_ceiling(standing), grant);
+        }
+        for org in [OrgRole::Owner, OrgRole::Admin] {
+            let standing = resolve_workspace_access(Some(org), Some(WorkspaceRole::Viewer)).unwrap();
+            assert_eq!(session_read_role_ceiling(standing), SessionRole::Owner);
+            assert_eq!(session_grant_role_ceiling(standing), SessionRole::Owner);
+        }
+    }
+
+    #[test]
+    fn current_workspace_standing_caps_non_guests_and_never_changes_session_guests() {
+        use cognia_tenant_auth::{membership::resolve_workspace_access, OrgRole, WorkspaceRole};
+        let member = SessionMembership {
+            session_id: "session".into(), user_id: "user".into(), role: SessionRole::Maintainer,
+            approver: true, guest: false, display_name: None, created_at: 1, updated_at: 1,
+        };
+        assert!(cap_session_member(member.clone(), None).is_none());
+        for (workspace, expected) in [(WorkspaceRole::Maintainer, SessionRole::Maintainer), (WorkspaceRole::Member, SessionRole::Maintainer), (WorkspaceRole::Viewer, SessionRole::Viewer)] {
+            let effective = cap_session_member(member.clone(), resolve_workspace_access(Some(OrgRole::Member), Some(workspace))).unwrap();
+            assert_eq!(effective.role, expected);
+            assert_eq!(effective.approver, expected != SessionRole::Viewer);
+        }
+        let guest = SessionMembership { role: SessionRole::Member, approver: false, guest: true, ..member.clone() };
+        assert_eq!(cap_session_member(guest.clone(), None), Some(guest));
+        assert_eq!(cap_session_member(member.clone(), resolve_workspace_access(Some(OrgRole::Admin), Some(WorkspaceRole::Viewer))), Some(member));
     }
 
     #[test]

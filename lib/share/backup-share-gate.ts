@@ -51,6 +51,23 @@ export const BACKUP_SHARE_DOMAINS: readonly BackupShareDomain[] = [
  * placed: the report can never silently skip part of the package.
  */
 export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDomain> = {
+  projects: "sessions",
+  sessionFolders: "sessions",
+  workflowFolders: "library",
+  workflows: "library",
+  workflowVersions: "library",
+  labels: "library",
+  issueProjects: "library",
+  issueCycles: "library",
+  issues: "library",
+  issueEvents: "library",
+  issueCounters: "library",
+  agentTeams: "library",
+  agentTeammates: "library",
+  agentTeamTasks: "library",
+  knowledgeBases: "retrieval",
+  knowledgeBaseSources: "retrieval",
+  knowledgeNotes: "retrieval",
   settings: "settings",
   providerProfileStore: "settings",
   ttsProviderKeys: "settings",
@@ -83,6 +100,9 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   skillResources: "library",
   teams: "library",
   promptPresets: "library",
+  // Customized built-in prompts (ADR-0236): user-authored template text.
+  promptOverrides: "library",
+  promptOverrideRevisions: "library",
   chatTemplates: "library",
   documentTemplates: "library",
   templateDefinitions: "library",
@@ -213,6 +233,11 @@ export function scanBackupForShare(pkg: BackupPackageV3 | EncryptedEnvelopeV1): 
           )
       }
   }
+  for (const [index, source] of (pkg.payload.knowledgeBaseSources ?? []).entries()) {
+    if (source.contentEncoding === "base64" && typeof source.content === "string") {
+      binaryHashes.add(`knowledge-source:${source.id ?? index}`)
+    }
+  }
   const uninspectedAttachments = binaryHashes.size
   const leavesByDomain = new Map<BackupShareDomain, string[]>()
   const payload = (pkg.payload ?? {}) as Record<string, unknown>
@@ -220,7 +245,14 @@ export function scanBackupForShare(pkg: BackupPackageV3 | EncryptedEnvelopeV1): 
     if (value === undefined || binaryFields.has(field)) continue
     const domain = domainOf(field) ?? "settings"
     const bucket = leavesByDomain.get(domain) ?? []
-    collectStringLeaves(value, bucket)
+    if (field === "knowledgeBaseSources" && Array.isArray(value)) {
+      for (const source of value) {
+        if (source && typeof source === "object" && source.contentEncoding === "base64") {
+          const { content: _content, ...metadata } = source
+          collectStringLeaves(metadata, bucket)
+        } else collectStringLeaves(source, bucket)
+      }
+    } else collectStringLeaves(value, bucket)
     if (bucket.length > 0) leavesByDomain.set(domain, bucket)
   }
 

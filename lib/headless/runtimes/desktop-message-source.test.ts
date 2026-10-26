@@ -44,9 +44,12 @@ function makeBridge() {
   return { bridge, listeners, invocations }
 }
 
-function makeCtx(bridge: RuntimeBridge): HeadlessRuntimeContext {
+function makeCtx(
+  bridge: RuntimeBridge,
+  host: HeadlessRuntimeContext["host"] = "brain"
+): HeadlessRuntimeContext {
   return {
-    host: "brain",
+    host,
     localAccountId: "local_acct_a",
     bridge,
     notifyDbWrite: () => undefined,
@@ -94,6 +97,37 @@ describe("desktop-message-source headless smoke", () => {
     expect(writeResponse).toBeDefined()
     expect(writeResponse!.args.requestId).toBe("rid-w1")
 
+    await result.stop()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("serves data but never the orchestration proxy in a person brain", async () => {
+    jest.resetModules()
+    const registry = await import("../registry")
+    registry.__resetHeadlessRuntimesForTesting()
+    await import("./desktop-message-source")
+    const { bootstrapHeadlessRuntimes: bootstrap } = await import("../bootstrap")
+    const { bridge, listeners, invocations } = makeBridge()
+    const result = await bootstrap(makeCtx(bridge, "person-brain"))
+    expect(result.failed).toEqual([])
+    expect(result.started).toContain("desktop-message-source")
+    expect(listeners.has("companion://message-send-request")).toBe(true)
+    expect(listeners.has("companion://desktop-write-request")).toBe(true)
+    expect(listeners.has("orchestration-proxy:exec")).toBe(false)
+    // The installer must carry the trusted profile, not merely omit the proxy.
+    listeners.get("companion://desktop-write-request")!({
+      payload: { requestId: "p5d-profile", command: "host_state_status", payload: {} },
+    })
+    for (
+      let tick = 0;
+      tick < 50 && !invocations.some((item) => item.args.requestId === "p5d-profile");
+      tick++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(invocations.find((item) => item.args.requestId === "p5d-profile")?.args.error).toBe(
+      "host_state_partition_mismatch"
+    )
     await result.stop()
     expect(listeners.size).toBe(0)
   })

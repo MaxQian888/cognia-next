@@ -22,7 +22,12 @@ import { renderCsvSections, type CsvSection } from "@/lib/docs-providers/csv"
 import { DocsProviderError, type RemoteDocRef } from "@/lib/docs-providers/types"
 import { columnLetters } from "@/lib/docs-providers/providers/lark/a1"
 import { googleDocUrl } from "./url"
-import { parseJson, type GoogleHttpFn, type GoogleHttpResponse } from "./http"
+import {
+  parseJson,
+  throwIfGoogleRequestAborted,
+  type GoogleHttpFn,
+  type GoogleHttpResponse,
+} from "./http"
 
 export const DRIVE_API = "https://www.googleapis.com/drive/v3"
 export const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
@@ -42,7 +47,9 @@ export interface GoogleApiContext {
 
 /** Map a Google HTTP failure onto the provider taxonomy. */
 export function mapGoogleStatus(response: GoogleHttpResponse): DocsProviderError {
-  const parsed = parseJson<{ error?: { message?: string; status?: string } }>(response.body)
+  const parsed = parseJson<{
+    error?: { message?: string; status?: string; errors?: Array<{ reason?: string }> }
+  }>(response.body)
   const reason = parsed?.error?.message ?? `Google returned HTTP ${response.status}`
   switch (response.status) {
     case 401:
@@ -50,7 +57,13 @@ export function mapGoogleStatus(response: GoogleHttpResponse): DocsProviderError
     case 403:
       // Google uses 403 for both "no access to this file" and quota exhaustion;
       // the machine-readable status disambiguates.
-      return parsed?.error?.status === "RESOURCE_EXHAUSTED"
+      return parsed?.error?.status === "RESOURCE_EXHAUSTED" ||
+        (Array.isArray(parsed?.error?.errors) &&
+          parsed.error.errors.some((entry) =>
+            ["userRateLimitExceeded", "rateLimitExceeded", "dailyLimitExceeded"].includes(
+              entry?.reason ?? ""
+            )
+          ))
         ? new DocsProviderError("rateLimited", { reason })
         : new DocsProviderError("noPermission", { reason })
     case 404:
@@ -62,12 +75,20 @@ export function mapGoogleStatus(response: GoogleHttpResponse): DocsProviderError
   }
 }
 
-async function call(ctx: GoogleApiContext, url: string): Promise<GoogleHttpResponse> {
+async function request(ctx: GoogleApiContext, url: string): Promise<GoogleHttpResponse> {
+  throwIfGoogleRequestAborted(ctx.signal)
   const response = await ctx.http({
     url,
     method: "GET",
     headers: { Authorization: `Bearer ${ctx.accessToken}` },
+    signal: ctx.signal,
   })
+  throwIfGoogleRequestAborted(ctx.signal)
+  return response
+}
+
+async function call(ctx: GoogleApiContext, url: string): Promise<GoogleHttpResponse> {
+  const response = await request(ctx, url)
   if (response.status >= 400) throw mapGoogleStatus(response)
   return response
 }
@@ -158,11 +179,7 @@ export interface GoogleDocRead {
 export async function exportGoogleDoc(ctx: GoogleApiContext, id: string): Promise<GoogleDocRead> {
   const url = (mime: string) =>
     `${DRIVE_API}/files/${encodeURIComponent(id)}/export?mimeType=${encodeURIComponent(mime)}&supportsAllDrives=true`
-  const response = await ctx.http({
-    url: url(DOC_EXPORT_MIME),
-    method: "GET",
-    headers: { Authorization: `Bearer ${ctx.accessToken}` },
-  })
+  const response = await request(ctx, url(DOC_EXPORT_MIME))
   if (response.status < 400) return { text: response.body, format: "markdown" }
   if (response.status !== 400) throw mapGoogleStatus(response)
   const fallback = await call(ctx, url(DOC_EXPORT_FALLBACK_MIME))

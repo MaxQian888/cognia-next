@@ -101,7 +101,6 @@ function MobileDetail({
   allAgents,
   readiness,
   isConnecting,
-  masterEnabled,
   onConnect,
   onDisconnect,
   onEdit,
@@ -289,8 +288,7 @@ function MobileDetail({
     label: tReadiness(retry ? "actions.retry" : "actions.connect"),
     onRun: onConnect,
     busy: isConnecting,
-    disabled: !masterEnabled || readiness.state === "disabled" || readiness.state === "blocked",
-    disabledReason: !masterEnabled ? t("inspectorMasterDisabled") : undefined,
+    disabled: readiness.state === "disabled" || readiness.state === "blocked",
   })
   const hasVerdict = Boolean(agent.lifecycleStatus && agent.lifecycleStatus !== "ready")
   if (hasVerdict) {

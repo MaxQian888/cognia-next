@@ -55,6 +55,12 @@ import "@/lib/workflow/nodes/built-ins"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 import { __resetFusionScopesForTesting } from "@/lib/router-fusion/gate/explicit-run"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { CLASSIFY_NODE_PROMPT, EXTRACT_NODE_PROMPT } from "./executors"
 
 function makeCtx(params: Record<string, unknown>): StepExecutionContext {
   return {
@@ -516,5 +522,78 @@ describe("ai.prompt — Router + Fusion action", () => {
     const out = await run("ai.prompt", { userPrompt: "hi" })
     expect(out.completion).toBe("[ai.prompt stub] hi")
     expect(runAgentsWorkflowsFusionMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("ai.classify / ai.extract shipped instructions (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  const explicit = { provider: "openai", model: "gpt", apiKey: "k" }
+
+  function systemOfLastCall(): string {
+    const call = completeMock.mock.calls[completeMock.mock.calls.length - 1]
+    return (call[1] as { system?: string }).system ?? ""
+  }
+
+  it("sends the shipped classifier and extractor wording around the node's config", async () => {
+    completeMock.mockResolvedValueOnce("urgent")
+    await run("ai.classify", {
+      ...explicit,
+      input: "x",
+      labels: ["urgent", "normal"],
+      hint: "tickets",
+    })
+    expect(systemOfLastCall()).toBe(
+      "You are a strict text classifier. Return EXACTLY ONE of the following labels with no extra text:\n- urgent\n- normal\n\nGuidance: tickets"
+    )
+    completeMock.mockResolvedValueOnce('{"name":"Bob"}')
+    await run("ai.extract", { ...explicit, input: "Bob", schema: { name: "string" } })
+    expect(systemOfLastCall()).toBe(
+      'Extract data from the user message. Reply with ONLY a JSON object matching this shape:\n{\n  "name": string\n}'
+    )
+  })
+
+  it("applies the run workspace's published overrides", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-classify",
+          promptId: CLASSIFY_NODE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-node-classify",
+          body: "Answer with one label only:\n{{labels}}{{guidance}}",
+          contractVersion: CLASSIFY_NODE_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-extract",
+          promptId: EXTRACT_NODE_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-node-extract",
+          body: "Return JSON with:\n{{fields}}",
+          contractVersion: EXTRACT_NODE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const classify = getExecutor("ai.classify" as never, 1)!
+    completeMock.mockResolvedValueOnce("normal")
+    const result = await classify.execute({
+      ...makeCtx({ ...explicit, input: "x", labels: ["urgent", "normal"] }),
+      projectId: "ws-1",
+    })
+    expect(systemOfLastCall()).toBe("Answer with one label only:\n- urgent\n- normal")
+    expect(result.decision).toBe("normal")
+
+    completeMock.mockResolvedValueOnce("urgent")
+    await run("ai.classify", { ...explicit, input: "x", labels: ["urgent", "normal"] })
+    expect(systemOfLastCall()).toContain("You are a strict text classifier.")
+
+    completeMock.mockResolvedValueOnce('{"name":"Bob"}')
+    await run("ai.extract", { ...explicit, input: "Bob", schema: { name: "string" } })
+    expect(systemOfLastCall()).toBe('Return JSON with:\n  "name": string')
   })
 })

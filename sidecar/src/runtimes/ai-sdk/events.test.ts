@@ -320,6 +320,46 @@ test("raw-analysis provenance prevents reasoning from entering stream or sealed 
   assert.deepEqual(adapter.sealAssistant(), [])
 })
 
+test("hidden reasoning and large streamed arguments retain payload-free activity", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const hidden = adapter.handle({
+    type: "reasoning-delta",
+    text: "PRIVATE_ANALYSIS_".repeat(1000),
+    providerMetadata: { cognia: { reasoningSource: "raw-analysis" } },
+  })
+  assert.ok(hidden.some((m) => m.event?.type === "ping"))
+  assert.ok(!JSON.stringify(hidden).includes("PRIVATE_ANALYSIS"))
+  assert.deepEqual(adapter.sealAssistant(), [])
+  adapter.handle({ type: "tool-input-start", id: "patch-1", toolName: "apply_patch" })
+  const input = JSON.stringify({ patch: "LARGE_PRIVATE_ARGUMENT_".repeat(5000) })
+  for (const delta of [input.slice(0, 100), input.slice(100)]) {
+    const progress = adapter.handle({ type: "tool-input-delta", id: "patch-1", delta })
+    assert.deepEqual(
+      progress.map((m) => m.event?.type),
+      ["ping"]
+    )
+    assert.ok(JSON.stringify(progress).length < 300, "activity size must not grow with input")
+    assert.ok(!JSON.stringify(progress).includes("LARGE_PRIVATE_ARGUMENT"))
+  }
+  const ended = adapter.handle({ type: "tool-input-end", id: "patch-1" })
+  const block = ended
+    .find((m) => m.type === "assistant")!
+    .message!.content.find((b) => b.type === "tool_use")!
+  assert.deepEqual(block.input, JSON.parse(input), "finalized arguments remain exact")
+})
+
+test("empty hidden chunks do not fabricate activity", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const hidden = adapter.handle({
+    type: "reasoning-delta",
+    text: "",
+    providerMetadata: { cognia: { reasoningSource: "raw-analysis" } },
+  })
+  assert.ok(!hidden.some((m) => m.event?.type === "ping"))
+  adapter.handle({ type: "tool-input-start", id: "patch-1", toolName: "apply_patch" })
+  assert.deepEqual(adapter.handle({ type: "tool-input-delta", id: "patch-1", delta: "" }), [])
+})
+
 test("v6 tool-result reads `output`", () => {
   const adapter = createEventAdapter(baseCtx())
   const out = adapter.handle({ type: "tool-result", toolCallId: "c1", output: "done" })
@@ -760,6 +800,16 @@ test("tool-result with isError flag round-trips", () => {
   })
   const userMsg = out.find((m) => m.type === "user")
   assert.equal(userMsg!.message!.content[0]!.is_error, true)
+})
+
+test("finish() marks a budget stop incomplete while preserving usage", () => {
+  const adapter = createEventAdapter(baseCtx())
+  const result = adapter
+    .finish({ budgetExhausted: true, usage: { promptTokens: 12, completionTokens: 7 } })
+    .find((event) => event.type === "result")
+  assert.equal(result?.subtype, "error_max_turns")
+  assert.equal(result?.is_error, true)
+  assert.equal(result?.usage?.input_tokens, 12)
 })
 
 test("finish() emits a result message with mapped usage tokens", () => {

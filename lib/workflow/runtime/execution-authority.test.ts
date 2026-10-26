@@ -35,6 +35,8 @@ describe("ExecutionAuthority", () => {
       workflowId: workflow.id,
       status: "waiting",
       triggerKind: "trigger.manual",
+      triggerPayload: {},
+      workflowSnapshot: workflow,
       startedAt: 1,
     })
     await expect(

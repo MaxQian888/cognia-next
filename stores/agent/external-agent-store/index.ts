@@ -6,7 +6,6 @@ export {
   selectBenchmarkCapabilityMap,
   selectActiveAgentId,
   selectDelegationRules,
-  selectEnabled,
   selectDefaultPermissionMode,
   selectConnectedAgents,
   selectEnabledAgents,

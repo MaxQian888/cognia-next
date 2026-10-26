@@ -290,7 +290,7 @@ export function controlPreflight(
 /**
  * Drive a live session's SDK `Query` control method and reply with a
  * `control_response` correlated by `requestId`. The allowlist and the
- * param→positional mapping live in `dispatch/control.mjs`, generated from
+ * param→positional mapping live in `src/host/control/control.ts`, generated from
  * `protocol/agent-control-methods.json`.
  *
  * These methods are streaming-input-only and Anthropic-path only, so the

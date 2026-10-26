@@ -11,6 +11,7 @@ jest.mock("sonner", () => {
     warning: jest.fn(),
     info: jest.fn(),
     loading: jest.fn(),
+    dismiss: jest.fn(),
   })
   return { toast: m }
 })
@@ -56,6 +57,27 @@ describe("A2UIToast", () => {
     t.warning.mockClear()
     t.info.mockClear()
     t.loading.mockClear()
+  })
+
+  it("updates the same toast and dismisses it when its component is removed", () => {
+    const props = cp({ id: "stable", component: "Toast", message: "Loading", variant: "loading" })
+    const { rerender, unmount } = render(<A2UIToast {...props} />)
+    expect(toast.loading).toHaveBeenLastCalledWith(
+      "Loading",
+      expect.objectContaining({ id: 'a2ui:["t","stable"]' })
+    )
+    rerender(
+      <A2UIToast
+        {...props}
+        component={{ ...props.component, message: "Loaded", variant: "success" }}
+      />
+    )
+    expect(toast.success).toHaveBeenLastCalledWith(
+      "Loaded",
+      expect.objectContaining({ id: 'a2ui:["t","stable"]' })
+    )
+    unmount()
+    expect(toast.dismiss).toHaveBeenCalledWith('a2ui:["t","stable"]')
   })
 
   it("calls sonner toast with message", () => {

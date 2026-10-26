@@ -26,17 +26,38 @@ import type { Character } from "@cognia/agent-config-types"
 import { materializeVariantProfile } from "@cognia/agent-config-types/agent-variant"
 import type { AgentTeam, AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
 import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
+import { resolvePrompt } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
 /** Stable synthetic character id for a teammate. Never looked up in the DB. */
 export function teammateCharacterId(teammate: Pick<AgentTeammate, "id">): string {
   return `__teammate__:${teammate.id}`
 }
 
-const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
-  "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
+/**
+ * The canned identity a teammate runs as when nothing more specific names one
+ * (ADR-0236). Editable; it is the last fallback of {@link teammateSystemPrompt}.
+ */
+export const DEFAULT_TEAMMATE_IDENTITY_PROMPT = definePrompt({
+  id: "team.teammate.default-identity",
+  contractVersion: 1,
+  kind: "role",
+  group: "team",
+  operation: "replace-template",
+  scopes: ["account", "workspace"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app", "cli"],
+  maxChars: 8_000,
+  outputContract:
+    "A teammate's system prompt when the dispatch, the teammate, its backing agent and the team all leave it unset.",
+  consumers: ["lib/ai/agent/team/teammate/teammate-character.ts"],
+  defaultBody:
+    "You are a focused, helpful agent teammate. Stay on-task and produce concrete output.",
+})
 
 export interface TeammateCharacterInput {
-  team: Pick<AgentTeam, "name" | "config">
+  team: Pick<AgentTeam, "name" | "config"> & Partial<Pick<AgentTeam, "projectId">>
   teammate: AgentTeammate
   resolvedCaps: ResolvedCapabilities
   /** Absolute repo path the teammate's tools are scoped to. */
@@ -59,9 +80,14 @@ export function teammateBaseAgentId(resolvedCaps: ResolvedCapabilities): string 
 /**
  * A teammate's system prompt. Most specific first: the dispatch's own prompt,
  * the teammate's, the backing agent's, the team default, then the canned one.
+ *
+ * Synchronous because the turn router projects a member's persona inside a
+ * sync function; the canned identity resolves from the loaded override
+ * snapshot (the app-wide initializer keeps it loaded), and only when it is
+ * actually the prompt in use.
  */
 export function teammateSystemPrompt(input: {
-  team: Pick<AgentTeam, "config">
+  team: Pick<AgentTeam, "config"> & Partial<Pick<AgentTeam, "projectId">>
   teammate: Pick<AgentTeammate, "config">
   baseAgent?: Pick<Character, "systemPrompt">
   override?: string
@@ -71,7 +97,9 @@ export function teammateSystemPrompt(input: {
     input.teammate.config?.systemPrompt?.trim() ||
     input.baseAgent?.systemPrompt?.trim() ||
     input.team.config?.defaultSystemPrompt?.trim() ||
-    DEFAULT_TEAMMATE_SYSTEM_PROMPT
+    resolvePrompt(DEFAULT_TEAMMATE_IDENTITY_PROMPT, {
+      context: input.team.projectId ? { workspaceId: input.team.projectId } : {},
+    }).text
   )
 }
 

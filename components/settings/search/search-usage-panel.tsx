@@ -10,6 +10,8 @@ import { useSettingsStore } from "@/stores/settings"
 import {
   SEARCH_PROVIDERS,
   createDefaultSearchUsageStats,
+  getProviderState,
+  DEFAULT_SEARCH_PROVIDER_SETTINGS,
   type SearchProviderType,
 } from "@cognia/web-search/types"
 import { createLogger } from "@cognia/logging"
@@ -18,12 +20,16 @@ const log = createLogger("settings.search.usage")
 
 export function SearchUsagePanel() {
   const tu = useTranslations("searchUsage")
+  const ts = useTranslations("searchSettings")
+  const providers = useSettingsStore(
+    (s) => s.settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
+  )
   const stats = useSettingsStore(
     (s) => s.settings?.searchUsageStats ?? createDefaultSearchUsageStats()
   )
   const resetStats = useSettingsStore((s) => s.resetSearchUsageStats)
 
-  const providerIds = Object.keys(stats) as SearchProviderType[]
+  const providerIds = Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]
 
   const totalSearches = useMemo(
     () => providerIds.reduce((sum, id) => sum + (stats[id]?.searchCount ?? 0), 0),
@@ -59,9 +65,7 @@ export function SearchUsagePanel() {
 
   const sortedProviders = useMemo(
     () =>
-      [...providerIds]
-        .filter((id) => (stats[id]?.searchCount ?? 0) > 0)
-        .sort((a, b) => (stats[b]?.searchCount ?? 0) - (stats[a]?.searchCount ?? 0)),
+      [...providerIds].sort((a, b) => (stats[b]?.searchCount ?? 0) - (stats[a]?.searchCount ?? 0)),
     [stats, providerIds]
   )
 
@@ -117,42 +121,44 @@ export function SearchUsagePanel() {
                 </div>
               </div>
             </div>
-
-            <div className="space-y-2">
-              {sortedProviders.map((id) => {
-                const count = stats[id]?.searchCount ?? 0
-                const errors = stats[id]?.errorCount ?? 0
-                const lastUsed = stats[id]?.lastUsedAt
-                return (
-                  <div key={id} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium">{SEARCH_PROVIDERS[id]?.name}</span>
-                        <Badge variant="secondary" className="text-[10px] px-1 py-0">
-                          {count}
-                        </Badge>
-                        {errors > 0 && (
-                          <Badge variant="destructive" className="text-[10px] px-1 py-0">
-                            {tu("errCount", { count: errors })}
-                          </Badge>
-                        )}
-                      </div>
-                      <span className="text-muted-foreground flex items-center gap-1">
-                        {lastUsed && (
-                          <>
-                            <Clock className="h-2.5 w-2.5" />
-                            {new Date(lastUsed).toLocaleDateString()}
-                          </>
-                        )}
-                      </span>
-                    </div>
-                    <Progress value={(count / maxProviderCount) * 100} className="h-1.5" />
-                  </div>
-                )
-              })}
-            </div>
           </>
         )}
+        <div className="space-y-2">
+          {sortedProviders.map((id) => {
+            const count = stats[id]?.searchCount ?? 0
+            const errors = stats[id]?.errorCount ?? 0
+            const lastUsed = stats[id]?.lastUsedAt
+            return (
+              <div key={id} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium">{SEARCH_PROVIDERS[id]?.name}</span>
+                    <Badge variant="outline" className="text-[10px] px-1 py-0">
+                      {ts(`states.${getProviderState(id, providers[id])}`)}
+                    </Badge>
+                    <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                      {count}
+                    </Badge>
+                    {errors > 0 && (
+                      <Badge variant="destructive" className="text-[10px] px-1 py-0">
+                        {tu("errCount", { count: errors })}
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    {lastUsed && (
+                      <>
+                        <Clock className="h-2.5 w-2.5" />
+                        {new Date(lastUsed).toLocaleDateString()}
+                      </>
+                    )}
+                  </span>
+                </div>
+                <Progress value={(count / maxProviderCount) * 100} className="h-1.5" />
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

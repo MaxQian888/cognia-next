@@ -68,6 +68,14 @@ describe("resolveBrowserBackend", () => {
 })
 
 describe("resolveDesktopBackend", () => {
+  it("honors the lightweight web choice while remote Chromium remains reachable", () => {
+    const web = inputs({ tauri: false, remoteBrowserEnabled: true, webCompanionTarget: true })
+    expect(resolveDesktopBackend(web, "web-fallback")).toMatchObject({
+      backend: "web-fallback",
+      remoteReachable: true,
+    })
+    expect(resolveDesktopBackend(web, "remote").backend).toBe("remote")
+  })
   const reachable = inputs({ remoteBrowserEnabled: true, remoteHostActive: true })
 
   it("keeps the embedded webview as the default while nothing is installed", () => {
@@ -152,9 +160,9 @@ describe("resolveDesktopBackend", () => {
     })
   })
 
-  it("leaves non-desktop shells to the plain resolver", () => {
+  it("ignores desktop-only choices on the web while allowing the lightweight preview", () => {
     const web = inputs({ tauri: false, remoteBrowserEnabled: true, webCompanionTarget: true })
-    expect(resolveDesktopBackend(web, "embedded")).toMatchObject({ backend: "remote" })
+    expect(resolveDesktopBackend(web, "embedded")).toMatchObject({ backend: "web-fallback" })
     expect(resolveDesktopBackend(web, "local-chromium")).toMatchObject({ backend: "remote" })
   })
 })

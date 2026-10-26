@@ -300,6 +300,87 @@ describe("mintSessionRouteTicket", () => {
 describe("required external agent gateway leases", () => {
   const input = { providerId: "anthropic", modelId: "claude-opus-5", sessionId: "task-a" } as const
 
+  it("freezes multiple models on one deployment with exact bindings and per-model facts", async () => {
+    const provider = {
+      ...snapshot().providers[0],
+      apiKey: "default-key",
+      models: [input.modelId, "child"],
+    }
+    enrichedMock.mockResolvedValue({ ...snapshot(), providers: [provider] })
+    modelMetadataMock.mockImplementation((_settings, _provider, id) => ({
+      id,
+      contextLength: id === "child" ? 32000 : 128000,
+    }))
+    const result = await prepareExternalAgentGatewayRoute({
+      ...input,
+      modelPlan: { additionalModels: ["child"], modelBindings: { haiku: "child" } },
+    })
+    const request = mintMock.mock.calls[0][0]
+    expect(request.strictSelectors).toBe(true)
+    expect(request.candidates).toHaveLength(1)
+    expect(request.allowAuthFailover).toBe(false)
+    expect(request.providerOverrides[0].models).toEqual([input.modelId, "child"])
+    expect(request.modelBindings).toMatchObject({
+      haiku: "child",
+      child: "child",
+      primary: input.modelId,
+      [input.modelId]: input.modelId,
+    })
+    expect(result.modelMetadataById.child.contextLength).toBe(32000)
+  })
+
+  it.each(["missing", "no-tools"])(
+    "refuses an ineligible additional model (%s) before mint",
+    async (kind) => {
+      if (kind === "no-tools") {
+        enrichedMock.mockResolvedValue({
+          ...snapshot(),
+          providers: [
+            { ...snapshot().providers[0], apiKey: "default-key", models: [input.modelId, "child"] },
+          ],
+        })
+        modelMetadataMock.mockImplementation((_settings, _provider, id) => ({
+          id,
+          supportsTools: id !== "child",
+        }))
+      }
+      await expect(
+        prepareExternalAgentGatewayRoute({
+          ...input,
+          modelPlan: { additionalModels: ["child"], modelBindings: {} },
+        })
+      ).rejects.toThrow()
+      expect(mintMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("checks selected-account discovery separately for every plan model", async () => {
+    subscriptionDefinitionMock.mockReturnValue({
+      id: "anthropic",
+      authMode: "api-key",
+      modelApi: { retrieve: {} },
+    })
+    credentialMock.mockResolvedValue({
+      apiKey: "account-key",
+      baseURL: "https://api.example.test/v1",
+    })
+    modelDetailMock.mockImplementation(async ({ model }) => ({
+      model: model === input.modelId ? { id: model, name: model } : undefined,
+    }))
+    await expect(
+      prepareExternalAgentGatewayRoute({
+        ...input,
+        accountId: "selected",
+        modelPlan: { additionalModels: ["child"], modelBindings: {} },
+      })
+    ).rejects.toThrow("does not provide")
+    expect(modelDetailMock.mock.calls.map(([request]) => request.model)).toEqual([
+      input.modelId,
+      "child",
+    ])
+    expect(mintMock).not.toHaveBeenCalled()
+  })
+
   it("keeps the sticky deployment across revoked per-turn tickets without reusing execution authority", async () => {
     const first = await prepareExternalAgentGatewayRoute(input)
     const firstRequest = mintMock.mock.calls[0][0]

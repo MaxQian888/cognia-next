@@ -8,7 +8,7 @@
 // `requiresApproval: false`, which puts them in READ_ONLY_TOOL_NAMES and
 // auto-allows them in plan mode, dontAsk, and headless. Since the sidecar's own
 // `process.env` carries ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN
-// (`sidecar/dispatch/subprocess-env.mjs`), the flag was an ungated credential
+// (`sidecar/src/runtimes/claude-agent-sdk/subprocess-env.ts`), the flag was an ungated credential
 // read. It is removed rather than gated: handing raw secrets to the model also
 // contradicts the repo-wide PII redaction gate that fronts every LLM call.
 

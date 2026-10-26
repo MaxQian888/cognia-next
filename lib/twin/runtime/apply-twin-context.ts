@@ -37,6 +37,7 @@ import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { vectorCollectionName } from "../ingest/persist"
 import { reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { generateHypotheticalAnswer, generateStepBackQuery } from "@cognia/rag/query-expansion"
+import { loadExpansionPromptRenderers } from "@/lib/ai/retrieval/expansion-prompts"
 import { formatCitations, type Citation } from "@cognia/rag/citation-formatter"
 import { applySystemPromptTemplate, type AppliedTemplate } from "./system-prompt-template"
 import { selectFewShotSamples } from "./few-shot-selector"
@@ -52,6 +53,7 @@ import {
   sameEmbeddingModel,
 } from "./twin-embedding"
 import { loadTwinEmbeddingPlan, type TwinEmbeddingPlan } from "./twin-embedding-status"
+import { loadPromptOverrideSnapshot } from "@/lib/prompts/snapshot"
 
 export interface TwinRuntimeEmbeddingConfig {
   provider: RagEmbeddingProvider
@@ -357,10 +359,16 @@ export async function applyTwinContext(
       if (settings.enableQueryExpansion && deps.expansion) {
         if (hasNoLeakingPii(userMessage)) {
           try {
+            // The expansion wording is a Prompt Center slot, overridable per twin.
+            const renderers = await loadExpansionPromptRenderers({ agentId: character.id })
             const expandedText =
               deps.expansion.strategy === "stepback"
-                ? await generateStepBackQuery(userMessage, deps.expansion.model)
-                : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
+                ? await generateStepBackQuery(userMessage, deps.expansion.model, {
+                    renderPrompt: renderers.stepBack,
+                  })
+                : await generateHypotheticalAnswer(userMessage, deps.expansion.model, {
+                    renderPrompt: renderers.hyde,
+                  })
             if (expandedText.trim().length > 0) {
               const expEmbedding = (
                 await embed(expandedText, twinEmbedding, deps.vectorBackend ?? "native")
@@ -554,7 +562,12 @@ export async function applyTwinContext(
         }).map((s) => s.sample)
       : []
 
+  // The template scaffolding resolves against the twin's character (ADR-0236);
+  // an unreadable snapshot means the shipped scaffolding, never a failed turn.
+  const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
   const applied = applySystemPromptTemplate({
+    promptContext: { agentId: character.id },
+    promptSnapshot,
     baseSystemPrompt: character.systemPrompt,
     twinName: character.name || character.twinId,
     voiceSummary: profile?.voiceSummary,

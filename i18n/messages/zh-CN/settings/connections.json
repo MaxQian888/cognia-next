@@ -1458,7 +1458,7 @@
   "permissionsEditor": {
     "builtInSkills": "内置 Skills 上限",
     "cancel": "取消",
-    "confirmImpact": "保存此权限上限？它可能阻止该适配器全部会话中的 Skill 和主机能力。",
+    "confirmImpact": "它可能阻止该适配器全部会话中的 Skill 和主机能力。",
     "conversationGrantRequired": "Adapter 只能限制此能力上限；每个会话仍需显式授权。",
     "hitl": "写入类 Skill 需要 HITL",
     "hitlHelp": "会话设置可覆盖此默认值；破坏性 Skill 始终需要审批。",
@@ -1477,7 +1477,8 @@
     "save": "保存",
     "skillHelp": "使用逗号分隔 Skill ID 或通配符。留空表示 Adapter 不追加限制；会话显式空白名单仍会阻止全部 Skill。",
     "skillPlaceholder": "lark.calendar.*, lark.task.list",
-    "title": "权限"
+    "title": "权限",
+    "confirmImpactTitle": "保存此权限上限？"
   },
   "qqOfficial": {
     "adapterCreated": "已添加 QQ 官方机器人",

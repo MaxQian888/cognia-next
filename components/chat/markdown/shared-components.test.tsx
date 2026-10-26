@@ -818,6 +818,13 @@ describe("MarkdownInlineCode", () => {
       column: 2,
     })
   })
+
+  it("never links a path when file links are off", () => {
+    render(
+      <MarkdownInlineCode linkFiles={false}>/Users/someone/repo/.env.local</MarkdownInlineCode>
+    )
+    expect(screen.getByText("/Users/someone/repo/.env.local").closest("button")).toBeNull()
+  })
 })
 
 describe("numeric table columns (ADR-0218)", () => {

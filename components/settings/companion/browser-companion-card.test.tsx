@@ -5,6 +5,7 @@ import "fake-indexeddb/auto"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ dateTime: (value: number) => new Date(value).toISOString() }),
   useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
     values ? `${namespace}.${key}:${Object.values(values).join(",")}` : `${namespace}.${key}`,
 }))

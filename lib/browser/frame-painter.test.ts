@@ -50,6 +50,76 @@ function fakeCanvas() {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("createFramePainter", () => {
+  it("rechecks frame eligibility after decoding and reports only a painted frame", async () => {
+    const { canvas, drawImage } = fakeCanvas()
+    const pending = deferred<ImageBitmap>()
+    const bitmap = fakeBitmap(800, 600, 1)
+    let eligible = true
+    const onPaint = jest.fn()
+    const painter = createFramePainter(
+      () => canvas,
+      () => pending.promise,
+      {
+        canPaint: () => eligible,
+        onPaint,
+      }
+    )
+    painter.paint(frame(1))
+    eligible = false
+    pending.resolve(bitmap)
+    await flush()
+    expect(drawImage).not.toHaveBeenCalled()
+    expect(onPaint).not.toHaveBeenCalled()
+    expect(bitmap.close).toHaveBeenCalledTimes(1)
+  })
+
+  it("updates frame metadata only after a successful draw", async () => {
+    const { canvas, drawImage } = fakeCanvas()
+    const onPaint = jest.fn()
+    const painter = createFramePainter(
+      () => canvas,
+      async () => fakeBitmap(800, 600, 1),
+      {
+        onPaint,
+      }
+    )
+    const next = frame(1)
+    painter.paint(next)
+    await flush()
+    expect(onPaint).toHaveBeenCalledWith(next)
+    expect(onPaint.mock.invocationCallOrder[0]).toBeGreaterThan(
+      drawImage.mock.invocationCallOrder[0]
+    )
+  })
+
+  it.each(["missing context", "failed draw"])(
+    "does not report a painted frame after %s",
+    async (failure) => {
+      const canvas = document.createElement("canvas")
+      Object.defineProperty(canvas, "getContext", {
+        value: () =>
+          failure === "missing context"
+            ? null
+            : {
+                drawImage: () => {
+                  throw new Error("draw failed")
+                },
+              },
+      })
+      const bitmap = fakeBitmap(800, 600, 1)
+      const onPaint = jest.fn()
+      const painter = createFramePainter(
+        () => canvas,
+        async () => bitmap,
+        { onPaint }
+      )
+      painter.paint(frame(1))
+      await flush()
+      expect(onPaint).not.toHaveBeenCalled()
+      expect(bitmap.close).toHaveBeenCalledTimes(1)
+    }
+  )
+
   it("paints at the bitmap's own resolution", async () => {
     const { canvas, drawImage } = fakeCanvas()
     const bitmap = fakeBitmap(1600, 1200, 1)

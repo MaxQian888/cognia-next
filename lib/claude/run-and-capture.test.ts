@@ -271,6 +271,23 @@ describe("runAndCaptureAssistantReply", () => {
     expect(usageEvent?.usage.inputTokens).toBe(1000)
   })
 
+  it.each(["error_max_turns", "error_max_budget_usd"])(
+    "retains an empty budget stop (%s) instead of replacing it with no_assistant_text",
+    async (subtype) => {
+      const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+        timeoutMs: 1_000,
+      })
+      await flushUntilSubscribed()
+      fire({
+        type: "event",
+        sessionId: SESSION,
+        event: { type: "result", subtype, is_error: true },
+      } as unknown as ClaudeEvent)
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "", resultSubtype: subtype })
+    }
+  )
+
   it("returns structured output from an in-stream SDK result without requiring prose", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
     await flushUntilSubscribed()
@@ -552,6 +569,77 @@ describe("runAndCaptureAssistantReply", () => {
     })
   })
 
+  it("preserves bounded completed tool evidence on interruption without a written summary", async () => {
+    const ac = new AbortController()
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      signal: ac.signal,
+      timeoutMs: 1_000,
+      preserveBudgetEvidence: true,
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(toolUseEventWithId("done-read", "read", { file_path: "/completed.ts" }))
+    fire(
+      userToolResultEvent("done-read", [
+        { type: "text", text: "DONE_FACT; NEXT_FILE=/remaining.ts" },
+        { type: "image", source: { data: "DO_NOT_RETAIN_IMAGE_BYTES" } },
+      ])
+    )
+    ac.abort()
+    fire(sessionEnded())
+    const error = await promise.catch((e) => e)
+    expect(error).toMatchObject({ code: "aborted" })
+    expect(error.partial.continuationContext).toContain("DONE_FACT")
+    expect(error.partial.continuationContext).toContain("NEXT_FILE=/remaining.ts")
+    expect(error.partial.continuationContext).not.toContain("DO_NOT_RETAIN_IMAGE_BYTES")
+  })
+
+  it.each([true, false])(
+    "retains opted-in evidence when the aborted sidecar never terminates (preserve=%s)",
+    async (preserveBudgetEvidence) => {
+      jest.useFakeTimers()
+      try {
+        const ac = new AbortController()
+        const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+          signal: ac.signal,
+          timeoutMs: 10_000,
+          preserveBudgetEvidence,
+        }).catch((error) => error)
+        await flushUntilSubscribed()
+        await flushMicrotasks()
+        fire(assistantEvent("partial findings"))
+        fire(toolUseEventWithId("done-read", "read", { file_path: "/completed.ts" }))
+        fire(userToolResultEvent("done-read", "DONE_FACT; NEXT_FILE=/remaining.ts"))
+        fire({
+          type: "event",
+          sessionId: SESSION,
+          event: {
+            type: "system",
+            subtype: "compact_boundary",
+            compact_metadata: { continuation_summary: "CHECKPOINT: completed first page" },
+          },
+        } as unknown as ClaudeEvent)
+        ac.abort()
+        expect(unlistenMock).not.toHaveBeenCalled()
+        await jest.advanceTimersByTimeAsync(1_000)
+        const error = await promise
+        expect(error).toMatchObject({ code: "aborted", partial: { text: "partial findings" } })
+        if (preserveBudgetEvidence) {
+          expect(error.partial.continuationContext).toContain("DONE_FACT")
+          expect(error.partial.continuationContext).toContain("NEXT_FILE=/remaining.ts")
+          expect(error.partial.continuationContext).toContain("CHECKPOINT: completed first page")
+        } else {
+          expect(error.partial.continuationContext).toBeUndefined()
+        }
+        expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+        expect(unlistenMock).toHaveBeenCalledTimes(1)
+        expect(jest.getTimerCount()).toBe(0)
+      } finally {
+        jest.useRealTimers()
+      }
+    }
+  )
+
   it("rejects synchronously when signal is already aborted", async () => {
     const ac = new AbortController()
     ac.abort()
@@ -587,6 +675,27 @@ describe("runAndCaptureAssistantReply", () => {
   })
 
   // ── Idle (read) watchdog ──────────────────────────────────────────────
+  it("keeps an active unbounded run alive beyond five minutes with idle protection enabled", async () => {
+    jest.useFakeTimers()
+    try {
+      const promise = runAndCaptureAssistantReply(SESSION, "long research", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 120_000,
+      })
+      await flushUntilSubscribed()
+      fire(assistantEvent("started"))
+      for (let minute = 1; minute <= 6; minute++) {
+        jest.advanceTimersByTime(60_000)
+        fire(assistantEvent(`progress ${minute}`))
+      }
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      fire(sessionEnded())
+      await expect(promise).resolves.toMatchObject({ text: "progress 6" })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   const idlePermissionRequest = (): ClaudeEvent =>
     ({
       type: "permission_request",
@@ -638,6 +747,46 @@ describe("runAndCaptureAssistantReply", () => {
   })
 
   // ── Turn correlation (stale-event isolation) ──────────────────────────
+  it("payload-free progress survives canonical preference but genuine silence still times out", async () => {
+    jest.useFakeTimers()
+    subscribeAgentEventsMock.mockResolvedValue(jest.fn())
+    try {
+      const events: CaptureStreamEvent[] = []
+      const promise = runAndCaptureAssistantReply(SESSION, "write a large patch", undefined, {
+        timeoutMs: 0,
+        idleTimeoutMs: 100,
+        onEvent: (event) => events.push(event),
+        onCanonicalEvent: () => {},
+      }).catch((error) => error)
+      await flushUntilSubscribed()
+      await flushMicrotasks(20)
+      expect(subscribeAgentEventsMock).toHaveBeenCalled()
+      const turnId = (sendPromptMock.mock.calls.at(-1)?.[2] as { turnId: string }).turnId
+      const ping = (sessionId = SESSION, turn = turnId) =>
+        fire({
+          type: "event",
+          sessionId,
+          turnId: turn,
+          event: { type: "stream_event", event: { type: "ping" } },
+        } as unknown as ClaudeEvent)
+      for (let i = 0; i < 4; i++) {
+        ping()
+        await jest.advanceTimersByTimeAsync(60)
+      }
+      expect(interruptSessionMock).not.toHaveBeenCalled()
+      expect(events).toEqual([])
+      ping("other-session")
+      ping(SESSION, "previous-turn")
+      await jest.advanceTimersByTimeAsync(50)
+      expect(await promise).toMatchObject({ code: "session_error" })
+      expect(interruptSessionMock).toHaveBeenCalledWith(SESSION)
+      expect(unlistenMock).toHaveBeenCalledTimes(1)
+    } finally {
+      subscribeAgentEventsMock.mockReset()
+      jest.useRealTimers()
+    }
+  })
+
   // Read back the turn id this capture stamped on its own send.
   const stampedTurnId = (): string => {
     const opts = sendPromptMock.mock.calls.at(-1)?.[2] as { turnId?: string } | undefined
@@ -1250,6 +1399,67 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.a2uiSurfaces["sfc"].dataModel).toEqual({ name: "Alice", age: 31 })
   })
 
+  it("deep-merges captured data without losing nested siblings and honors replacement", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "nested",
+        data: { profile: { name: "Ada", email: "a@example.test" }, draft: "keep" },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "nested",
+        data: { profile: { name: "Grace" } },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "replace",
+        data: { old: true },
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "replace",
+        data: { fresh: true },
+        merge: false,
+      })
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaces.nested.dataModel).toEqual({
+      profile: { name: "Grace", email: "a@example.test" },
+      draft: "keep",
+    })
+    expect(result.a2uiSurfaces.replace.dataModel).toEqual({ fresh: true })
+  })
+
+  it("preserves a named captured root across child-first batches and child-only patches", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_update_components", {
+        surfaceId: "named",
+        components: [
+          { id: "label", component: "Text", text: "before" },
+          { id: "app", component: "Column", children: ["label"] },
+        ],
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_update_components", {
+        surfaceId: "named",
+        components: [{ id: "label", component: "Text", text: "after" }],
+      })
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaces.named.rootId).toBe("app")
+    expect(result.a2uiSurfaces.named.components.label).toMatchObject({ text: "after" })
+  })
+
   it("a2ui_delete_surface removes from accumulator and order", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
     await Promise.resolve()
@@ -1730,6 +1940,346 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.text).toBe("")
   })
 
+  it("retains bounded tool evidence when research hits its budget without a written summary", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      timeoutMs: 1_000,
+      preserveBudgetEvidence: true,
+    })
+    await Promise.resolve()
+    for (let index = 0; index < 35; index++) {
+      const id = `read-${index}`
+      fire(toolUseEventWithId(id, "read", { file_path: `/chapter-${index}` }))
+      fire(
+        userToolResultEvent(id, [
+          { type: "text", text: `FACT_${index}; NEXT_FILE=/chapter-${index + 1}` },
+          { type: "image", source: { data: "DO_NOT_RETAIN_IMAGE_BYTES" } },
+        ])
+      )
+    }
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain("FACT_0;")
+    expect(result.budgetContinuationContext).toContain("FACT_34;")
+    expect(result.budgetContinuationContext).toContain("NEXT_FILE=/chapter-35")
+    expect(result.budgetContinuationContext).toContain("omitted")
+    expect(result.budgetContinuationContext).not.toContain("FACT_1;")
+    expect(result.budgetContinuationContext).not.toContain("DO_NOT_RETAIN_IMAGE_BYTES")
+    expect(result.budgetContinuationContext!.length).toBeLessThan(70_000)
+  })
+
+  it("keeps a useful result excerpt even when the tool input exceeds the evidence limit", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      timeoutMs: 1_000,
+      preserveBudgetEvidence: true,
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("large", "search", { query: "x".repeat(10_000) }))
+    fire(userToolResultEvent("large", "OBSERVED_RESULT " + "y".repeat(10_000)))
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain("OBSERVED_RESULT")
+    expect(result.budgetContinuationContext).toContain("truncated")
+    expect(result.budgetContinuationContext!.length).toBeLessThan(2300)
+  })
+
+  it("keeps unsummarized source bodies within the retained budget and retires checkpointed tool results", async () => {
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "research",
+      {
+        compaction: { enabled: true, postCompactionTokenBudget: 5000 },
+      },
+      { timeoutMs: 1000, preserveBudgetEvidence: true }
+    )
+    await flushUntilSubscribed()
+    fire(toolUseEventWithId("covered", "read", { file_path: "/covered.ts" }))
+    fire(userToolResultEvent("covered", "OLD_RAW_SOURCE ".repeat(300)))
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          continuation_summary: "COMMITTED_BEHAVIOR covered.ts:1",
+          continuation_summary_chars: 31,
+          continuation_tool_result_ids: ["covered"],
+          post_compaction_token_budget: 5000,
+          projected_input_tokens: 4000,
+          post_tokens: 2000,
+        },
+      },
+    } as unknown as ClaudeEvent)
+    fire(toolUseEventWithId("tail", "read", { file_path: "/tail.ts" }))
+    fire(
+      userToolResultEvent(
+        "tail",
+        "heading ".repeat(300) + "UNCOMMITTED_MIDDLE_BEHAVIOR" + " footer".repeat(300)
+      )
+    )
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain("COMMITTED_BEHAVIOR")
+    expect(result.budgetContinuationContext).toContain("UNCOMMITTED_MIDDLE_BEHAVIOR")
+    expect(result.budgetContinuationContext).not.toContain("OLD_RAW_SOURCE")
+    expect(result.budgetContinuationContext).toContain('"file_path":"/covered.ts"')
+    expect(result.budgetContinuationContext).toContain('"checkpointed":true')
+    expect(result.budgetContinuationContext!.length).toBeLessThan(12000)
+  })
+
+  it("keeps the aggregate continuation bounded by an explicit retained cap", async () => {
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "research",
+      {
+        compaction: { enabled: true, postCompactionTokenBudget: 1000 },
+      },
+      { timeoutMs: 1000, preserveBudgetEvidence: true }
+    )
+    await flushUntilSubscribed()
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          continuation_summary: "VERIFIED_STATE",
+          post_compaction_token_budget: 10000,
+        },
+      },
+    } as unknown as ClaudeEvent)
+    for (const id of ["FIRST", "MIDDLE", "LATEST"]) {
+      fire(toolUseEventWithId(id, "read", { file_path: `/${id}.ts` }))
+      fire(userToolResultEvent(id, `${id}_HEADING` + " body".repeat(350) + `${id}_FOOTER`))
+    }
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain("FIRST_HEADING")
+    expect(result.budgetContinuationContext).toContain("LATEST_FOOTER")
+    expect(result.budgetContinuationContext).toContain("omitted")
+    expect(result.budgetContinuationContext).toContain("truncated")
+    expect(result.budgetContinuationContext).not.toContain("MIDDLE_HEADING")
+    expect(result.budgetContinuationContext!.length).toBeLessThan(4000)
+  })
+
+  it("restores executed-read headers after an omitted raw result is covered by a checkpoint", async () => {
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "research",
+      {
+        compaction: { enabled: true, postCompactionTokenBudget: 1000 },
+      },
+      { timeoutMs: 1000, preserveBudgetEvidence: true }
+    )
+    await flushUntilSubscribed()
+    for (const id of ["FIRST", "MIDDLE", "LATEST"]) {
+      fire(toolUseEventWithId(id, "read", { file_path: `/${id}.ts` }))
+      fire(userToolResultEvent(id, `${id}_RAW` + " body".repeat(190)))
+    }
+    fire(toolUseEventWithId("MIDDLE", "read", { file_path: "/MIDDLE.ts" }))
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          continuation_summary: "FIRST and MIDDLE established findings",
+          continuation_tool_result_ids: ["FIRST", "MIDDLE"],
+          post_compaction_token_budget: 1000,
+        },
+      },
+    } as unknown as ClaudeEvent)
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain(
+      '"file_path":"/MIDDLE.ts"},"failed":false,"checkpointed":true'
+    )
+    expect(result.budgetContinuationContext).not.toContain("MIDDLE_RAW")
+    expect(result.budgetContinuationContext).not.toContain("omitted")
+    expect(result.budgetContinuationContext).toContain("LATEST_RAW")
+  })
+
+  it("keeps both the source heading and footer continuation path in a bounded long read", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      timeoutMs: 1_000,
+      preserveBudgetEvidence: true,
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("long-read", "read", { file_path: "/source.ts" }))
+    fire(
+      userToolResultEvent(
+        "long-read",
+        "VERIFIED_SOURCE_HEADING\n" +
+          "source body\n".repeat(3000) +
+          "\nSOURCE_FACT: complete page\nNEXT_FILE=/unread-source.ts"
+      )
+    )
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain("VERIFIED_SOURCE_HEADING")
+    expect(result.budgetContinuationContext).toContain("SOURCE_FACT: complete page")
+    expect(result.budgetContinuationContext).toContain("NEXT_FILE=/unread-source.ts")
+    expect(result.budgetContinuationContext).toContain("truncated")
+    expect(result.budgetContinuationContext!.length).toBeLessThan(2300)
+  })
+
+  it("carries the latest compacted research checkpoint into budget continuation without tool output", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      timeoutMs: 1_000,
+      preserveBudgetEvidence: true,
+    })
+    await flushUntilSubscribed()
+    for (const checkpoint of [
+      "OUTDATED_CHECKPOINT",
+      "SOURCE_FACT: verified guard; pending: cancellation; alice@example.com " +
+        "x".repeat(100_000),
+    ]) {
+      fire({
+        type: "event",
+        sessionId: SESSION,
+        event: {
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: { continuation_summary: checkpoint },
+        },
+      } as unknown as ClaudeEvent)
+    }
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain("SOURCE_FACT: verified guard")
+    expect(result.budgetContinuationContext).toContain("pending: cancellation")
+    expect(result.budgetContinuationContext).toContain("untrusted")
+    expect(result.budgetContinuationContext).toContain("truncated")
+    expect(result.budgetContinuationContext).not.toContain("OUTDATED_CHECKPOINT")
+    expect(result.budgetContinuationContext).not.toContain("alice@example.com")
+    expect(result.budgetContinuationContext!.length).toBeLessThan(34_000)
+  })
+
+  it("retains the middle of an adaptive checkpoint larger than the legacy character cap", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      timeoutMs: 1000,
+      preserveBudgetEvidence: true,
+    })
+    await flushUntilSubscribed()
+    const checkpoint = "x".repeat(20000) + "EXACT_MIDDLE_EVIDENCE" + "y".repeat(20000)
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { continuation_summary: checkpoint, checkpoint_token_budget: 16000 },
+      },
+    } as unknown as ClaudeEvent)
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain(checkpoint)
+    expect(result.budgetContinuationContext).not.toContain("checkpoint truncated")
+  })
+
+  it("keeps a valid near-cap checkpoint including its serialized wrapper on budget stop", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+      timeoutMs: 1000,
+      preserveBudgetEvidence: true,
+    })
+    await flushUntilSubscribed()
+    const raw = `<research-progress>${JSON.stringify({
+      goal: "Inspect code",
+      constraints: [],
+      items: [{ id: "work", status: "done", summary: "", evidence: [] }],
+    })}</research-progress>`
+    const progress = raw.replace('"summary":""', `"summary":"${"x".repeat(1201 - raw.length)}"`)
+    expect(progress).toHaveLength(1201)
+    const checkpoint = `<conversation-summary v="1">\nSummary of earlier conversation (compacted to save context):\n${progress}\n</conversation-summary>`
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          continuation_summary: checkpoint,
+          continuation_summary_chars: checkpoint.length,
+          checkpoint_token_budget: 300,
+        },
+      },
+    } as unknown as ClaudeEvent)
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: { type: "result", subtype: "error_max_turns", is_error: true },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.budgetContinuationContext).toContain(checkpoint)
+    expect(result.budgetContinuationContext).not.toContain("checkpoint truncated")
+  })
+
+  it.each([
+    [true, "success"],
+    [false, "error_max_turns"],
+  ] as const)(
+    "omits continuation evidence with opt-in=%s and subtype=%s",
+    async (preserveBudgetEvidence, subtype) => {
+      const promise = runAndCaptureAssistantReply(SESSION, "research", undefined, {
+        timeoutMs: 1_000,
+        preserveBudgetEvidence,
+      })
+      await Promise.resolve()
+      fire(toolUseEventWithId("read", "read", { file_path: "/chapter" }))
+      fire(userToolResultEvent("read", "PRIVATE_RESULT"))
+      fire({
+        type: "event",
+        sessionId: SESSION,
+        event: { type: "result", subtype, is_error: subtype !== "success" },
+      } as unknown as ClaudeEvent)
+      fire(sessionEnded())
+      expect((await promise).budgetContinuationContext).toBeUndefined()
+    }
+  )
+
   const toolUseEventWithId = (
     id: string,
     name: string,
@@ -1843,6 +2393,24 @@ describe("runAndCaptureAssistantReply", () => {
     fire(sessionEnded())
     await promise
     expect(toolResultDecisionMock).toHaveBeenCalledWith(SESSION, "rev_1", "redacted:web_fetch")
+  })
+
+  it("tells the global post-tool interceptors the call's outcome and turn", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", { turnId: "turn-7" } as never, {
+      timeoutMs: 1_000,
+    })
+    await Promise.resolve()
+    fire(toolUseEventWithId("tu_e", "Bash", { command: "ls" }))
+    fire(toolResultReview("rev_e", "tu_e", "Bash", "ENOENT", true))
+    await Promise.resolve()
+    await Promise.resolve()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(postToolUseMock).toHaveBeenCalledWith("Bash", { command: "ls" }, "ENOENT", SESSION, {
+      isError: true,
+      turnId: "turn-7",
+    })
   })
 
   it("correlates input from the originating tool_use into the review responder", async () => {

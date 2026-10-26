@@ -35,7 +35,7 @@ import {
   openAiEffortValuesForModel,
   geminiThinkingLevelsForModel,
   compatibleEffortValuesForModel,
-} from "../../../../sidecar/src/providers/reasoning-effort-tables.ts"
+} from "@cognia/provider-types/reasoning-effort-tables"
 
 /**
  * A reasoning tier as the APP names it. Superset of any single provider's

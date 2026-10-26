@@ -7,9 +7,9 @@ Use this as a discovery map. Always verify the selected files exist and reflect 
 | Need | Start here |
 |---|---|
 | Global working/testing rules | `AGENTS.md`, `CLAUDE.md`, nearest nested instructions |
-| Product architecture | `README.md`, `CONTEXT.md`, `WORKFLOW.md` |
-| Build and CI | `package.json`, `pnpm-workspace.yaml`, `Cargo.toml`, `.github/workflows/`, `CI_CD.md` |
-| Testing | `TESTING.md`, `jest.config.ts`, `playwright.config.ts`, `tests/e2e/README.md` |
+| Product architecture | `README.md`, `CONTEXT.md`, `docs/development/WORKFLOW.md` |
+| Build and CI | `package.json`, `pnpm-workspace.yaml`, `Cargo.toml`, `.github/workflows/`, `docs/development/CI_CD.md` |
+| Testing | `docs/development/TESTING.md`, `jest.config.ts`, `playwright.config.ts`, `tests/e2e/README.md` |
 | ADRs | `docs/content/docs/en/adr/` and matching `docs/content/docs/zh/adr/` |
 | Current proposals/remediation | `docs/plans/` |
 | Historical evidence | `docs/plans/archive/`, only with explicit date/status |

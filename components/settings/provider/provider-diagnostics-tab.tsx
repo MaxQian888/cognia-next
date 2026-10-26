@@ -135,6 +135,7 @@ export function ProviderDiagnosticsTab({
     balances,
     legacyBalanceProjection,
     endpointChanges,
+    refreshStates,
     remoteStatus,
     remoteHistory,
     stale,
@@ -379,7 +380,11 @@ export function ProviderDiagnosticsTab({
       await refreshRemoteStatus()
       return
     }
-    await refreshProviderBalanceSources([source])
+    const [snapshot] = await refreshProviderBalanceSources([source])
+    if (snapshot && !snapshot.failure) {
+      const { resumeProviderBalanceRefresh } = await import("@/lib/provider-diagnostics/refresh")
+      await resumeProviderBalanceRefresh(source)
+    }
   }
 
   async function setPrimaryBalance(sourceId: string): Promise<void> {
@@ -520,6 +525,44 @@ export function ProviderDiagnosticsTab({
       )}
 
       <SettingsStack>
+        <details className="rounded-md border p-3 text-xs">
+          <summary className="cursor-pointer font-medium">{t("maintenance.title")}</summary>
+          <p className="mt-2 text-muted-foreground">{t("maintenance.description")}</p>
+          {!refreshStates?.length ? (
+            <p className="mt-2">{t("maintenance.unknown")}</p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {refreshStates.map((state) => (
+                <li key={state.sourceId}>
+                  <code>{state.sourceId}</code>
+                  {" · "}
+                  {t(`maintenance.status.${state.status}`)}
+                  {state.lastOutcome && (
+                    <span>
+                      {" · "}
+                      {t(`maintenance.outcome.${state.lastOutcome}`)}
+                    </span>
+                  )}
+                  <p className="text-muted-foreground">
+                    {t("maintenance.times", {
+                      attempt: state.lastAttemptAt
+                        ? new Date(state.lastAttemptAt).toLocaleString()
+                        : t("maintenance.never"),
+                      success: state.lastSuccessAt
+                        ? new Date(state.lastSuccessAt).toLocaleString()
+                        : t("maintenance.never"),
+                      next:
+                        state.status === "paused-auth"
+                          ? t("maintenance.manualRetry")
+                          : new Date(state.nextDueAt).toLocaleString(),
+                      failures: state.consecutiveFailures,
+                    })}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
         <SummarySection
           providerName={providerName}
           latestSample={latestSample}

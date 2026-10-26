@@ -173,7 +173,6 @@ describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
     // backends would produce choices that cannot spawn.
     const nonExecutable = [
       "custom",
-      "opencode-server",
       "opencode-remote",
       "opencode-v2-service",
       "deepseek-harness-readonly",
@@ -195,9 +194,9 @@ describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
     )
   })
 
-  it("enables the current OpenCode service and retires V1 presets", () => {
+  it("enables local V1, ACP and V2 while retaining the attached-server guidance", () => {
     expect(EXTERNAL_AGENT_PRESETS["opencode-v2-service"]?.supportTier).toBe("executable")
-    expect(EXTERNAL_AGENT_PRESETS["opencode-server"]?.supportTier).toBe("documented-only")
+    expect(EXTERNAL_AGENT_PRESETS["opencode-server"]?.supportTier).toBe("executable")
     expect(EXTERNAL_AGENT_PRESETS["opencode-remote"]?.supportTier).toBe("documented-only")
   })
 
@@ -227,7 +226,7 @@ describe("getAvailablePresets", () => {
   it("offers the current service and ACP as runnable choices", () => {
     expect(getAvailablePresets()).toContain("opencode-v2-service")
     expect(getRunnablePresets()).toContain("opencode-v2-service")
-    expect(getRunnablePresets()).not.toContain("opencode-server")
+    expect(getRunnablePresets()).toContain("opencode-server")
     expect(getRunnablePresets()).not.toContain("opencode-remote")
     expect(getRunnablePresets()).toContain("opencode-acp")
   })

@@ -32,6 +32,7 @@ import {
 import {
   chatMarkdownSanitizeSchema,
   chatMarkdownUrlTransform,
+  untrustedMarkdownUrlTransform,
 } from "@/components/chat/markdown/rendering-policy"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 import { ChatLink } from "@/components/chat/markdown/chat-link"
@@ -135,6 +136,12 @@ const baseRemarkPlugins: RemarkPlugins = [
 const mathRemarkPlugins: RemarkPlugins = [...baseRemarkPlugins, remarkMath]
 const rehypePlugins: RehypePlugins = [
   rehypeRaw,
+  [rehypeSanitize, chatMarkdownSanitizeSchema],
+  rehypeMarkdownHeadingIds,
+]
+// Without rehype-raw, react-markdown drops HTML in the source: no element
+// (and no allow-listed `style`) from a third party reaches the DOM.
+const rehypePluginsWithoutRawHtml: RehypePlugins = [
   [rehypeSanitize, chatMarkdownSanitizeSchema],
   rehypeMarkdownHeadingIds,
 ]
@@ -269,6 +276,17 @@ export interface MarkdownRendererProps {
   projectRoot?: string | null
   /** Optional owner override, used when opening a file must first mount an editor tab. */
   onOpenProjectFile?: (target: ProjectFileReference) => void
+  /**
+   * Markdown written by a third party (an inbound IM message or card), not
+   * by the user or the assistant. Raw HTML is dropped instead of parsed (the
+   * sanitize schema keeps `style` on `div` / `span`, enough for a sender to
+   * overlay the app), ```a2ui fences show as code instead of mutating A2UI
+   * surfaces, links are limited to web / mail targets
+   * (`untrustedMarkdownUrlTransform`), paths in code never become file links,
+   * and math is off (`$5 and $10`, an escaped `\[x\]` are text). Defaults to
+   * `false`.
+   */
+  untrusted?: boolean
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -276,7 +294,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   className,
   markdown,
   enableMermaid = markdown?.mermaid ?? true,
-  enableMath = markdown?.math ?? true,
+  enableMath: requestedMath = markdown?.math ?? true,
   enableDiff = markdown?.diff ?? true,
   enableCharts = markdown?.charts ?? true,
   enableAlerts = true,
@@ -294,7 +312,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   rhythm = "chat",
   projectRoot,
   onOpenProjectFile,
+  untrusted = false,
 }: MarkdownRendererProps) {
+  // A third party's `$5 and $10` or escaped `\[x\]` is not LaTeX.
+  const enableMath = untrusted ? false : requestedMath
   const remarkPlugins = enableMath ? mathRemarkPlugins : baseRemarkPlugins
 
   const processedContent = useMemo(() => {
@@ -320,8 +341,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         codeTheme: resolveChatCodeTheme(codeThemeId),
         messageId,
         isStreaming,
-        projectRoot,
-        onOpenProjectFile,
+        // A third party must not open files in the user's project.
+        projectRoot: untrusted ? undefined : projectRoot,
+        onOpenProjectFile: untrusted ? undefined : onOpenProjectFile,
+        untrusted,
       }),
     [
       enableMermaid,
@@ -342,6 +365,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       isStreaming,
       projectRoot,
       onOpenProjectFile,
+      untrusted,
     ]
   )
 
@@ -351,9 +375,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        rehypePlugins={untrusted ? rehypePluginsWithoutRawHtml : rehypePlugins}
         components={components}
-        urlTransform={chatMarkdownUrlTransform}
+        urlTransform={untrusted ? untrustedMarkdownUrlTransform : chatMarkdownUrlTransform}
       >
         {processedContent}
       </ReactMarkdown>
@@ -382,6 +406,7 @@ interface BuildComponentsOptions {
   isStreaming: boolean
   projectRoot?: string | null
   onOpenProjectFile?: (target: ProjectFileReference) => void
+  untrusted: boolean
 }
 
 // Language classes and terminal newlines can also appear on inline HTML code.
@@ -410,6 +435,7 @@ function buildComponents(
     isStreaming,
     projectRoot,
     onOpenProjectFile,
+    untrusted,
   } = opts
 
   return {
@@ -460,7 +486,11 @@ function buildComponents(
 
       if (!isBlock) {
         return (
-          <MarkdownInlineCode projectRoot={projectRoot} onOpenProjectFile={onOpenProjectFile}>
+          <MarkdownInlineCode
+            projectRoot={projectRoot}
+            onOpenProjectFile={onOpenProjectFile}
+            linkFiles={!untrusted}
+          >
             {children}
           </MarkdownInlineCode>
         )
@@ -490,7 +520,7 @@ function buildComponents(
         )
       }
 
-      if (language === "a2ui") {
+      if (language === "a2ui" && !untrusted) {
         return (
           <div className="not-typeset">
             <SafeA2UIBlock content={codeContent} messageId={messageId} />

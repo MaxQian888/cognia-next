@@ -15,6 +15,7 @@ function Bar() {
   const start = useTitleBarOutletRef("start")
   const center = useTitleBarOutletRef("center")
   const end = useTitleBarOutletRef("end")
+  const sessionActions = useTitleBarOutletRef("sessionActions")
   const actions = useTitleBarOutletRef("actions")
   const projected = useTitleBarProjectionState()
   return (
@@ -22,6 +23,7 @@ function Bar() {
       <div ref={start} data-testid="outlet-start" />
       <div ref={center} data-testid="outlet-center" />
       <div ref={end} data-testid="outlet-end" />
+      <div ref={sessionActions} data-testid="outlet-sessionActions" />
       <div ref={actions} data-testid="outlet-actions" />
     </div>
   )
@@ -31,7 +33,7 @@ function ColumnHeader({
   zone,
   active,
 }: {
-  zone: "start" | "center" | "end" | "actions"
+  zone: "start" | "center" | "end" | "sessionActions" | "actions"
   active?: boolean
 }) {
   const outlet = useTitleBarProjection(zone, { active })
@@ -67,10 +69,42 @@ describe("title-bar outlets", () => {
     expect(screen.getByTestId("outlet-actions")).toContainElement(
       screen.getByTestId("header-actions")
     )
-    expect(projectedState()).toEqual({ start: false, center: false, end: false, actions: true })
+    expect(projectedState()).toEqual({
+      start: false,
+      center: false,
+      end: false,
+      sessionActions: false,
+      actions: true,
+    })
   })
+  it("projects session actions independently of column and pane actions", () => {
+    const { rerender } = render(
+      <Shell>
+        <TitleBarProjectionScope enabled>
+          <ColumnHeader zone="sessionActions" />
+        </TitleBarProjectionScope>
+      </Shell>
+    )
+    expect(screen.getByTestId("outlet-sessionActions")).toContainElement(
+      screen.getByTestId("header-sessionActions")
+    )
+    expect(projectedState()).toEqual({
+      start: false,
+      center: false,
+      end: false,
+      sessionActions: true,
+      actions: false,
+    })
+    rerender(
+      <Shell>
+        <TitleBarProjectionScope enabled>{null}</TitleBarProjectionScope>
+      </Shell>
+    )
+    expect(projectedState().sessionActions).toBe(false)
+  })
+
   it("names the structural and independent action zones", () => {
-    expect(TITLE_BAR_ZONES).toEqual(["start", "center", "end", "actions"])
+    expect(TITLE_BAR_ZONES).toEqual(["start", "center", "end", "sessionActions", "actions"])
   })
 
   it("draws inline when there is no provider at all (the mobile shell)", () => {
@@ -101,7 +135,13 @@ describe("title-bar outlets", () => {
     expect(screen.getByTestId("outlet-center")).toContainElement(
       screen.getByTestId("header-center")
     )
-    expect(projectedState()).toEqual({ start: false, center: true, end: false, actions: false })
+    expect(projectedState()).toEqual({
+      start: false,
+      center: true,
+      end: false,
+      sessionActions: false,
+      actions: false,
+    })
   })
 
   it("lets a nested scope switch projection back off (the rail's mobile Sheet)", () => {
@@ -203,6 +243,7 @@ describe("title-bar outlets", () => {
       start: false,
       center: false,
       end: false,
+      sessionActions: false,
       actions: false,
     })
   })

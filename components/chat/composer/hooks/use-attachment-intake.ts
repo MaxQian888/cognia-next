@@ -62,6 +62,8 @@ interface TextInputApi {
 export interface AcceptFilesOptions {
   /** Prevent async preparation from staging files after the destination leaves. */
   isCurrent?: () => boolean
+  /** Last authoritative identity check; no await follows it before add(). */
+  beforeCommit?: () => Promise<boolean>
   /**
    * Citations carried by particular files: a picked remote document cites the
    * document it was fetched from. Keyed by the `File` handed in, so only a file
@@ -72,6 +74,7 @@ export interface AcceptFilesOptions {
 }
 
 export interface UseAttachmentIntakeOptions {
+  destinationKey?: string
   attachments: AttachmentsApi
   /**
    * Where a staged file's citation is announced, immediately before
@@ -97,6 +100,7 @@ export interface UseAttachmentIntakeOptions {
 }
 
 export function useAttachmentIntake({
+  destinationKey,
   attachments,
   attachmentCitations,
   textInput,
@@ -116,6 +120,23 @@ export function useAttachmentIntake({
   // scan animation would misdescribe a document.
   const [preparingImageCount, setPreparingImageCount] = useState(0)
   const attachmentFileCountRef = useRef(attachments.files.length)
+  const destinationGeneration = useRef(0)
+  useEffect(() => {
+    destinationGeneration.current += 1
+    return () => {
+      destinationGeneration.current += 1
+    }
+  }, [destinationKey])
+  const captureDestination = useCallback(() => {
+    const generation = destinationGeneration.current
+    const textarea = textareaRef.current
+    const root = textarea?.closest("[data-composer-root]")
+    const session = root?.getAttribute("data-composer-session")
+    return () =>
+      destinationGeneration.current === generation &&
+      textareaRef.current === textarea &&
+      root?.getAttribute("data-composer-session") === session
+  }, [textareaRef])
   useEffect(() => {
     attachmentFileCountRef.current = attachments.files.length
   }, [attachments.files])
@@ -147,6 +168,8 @@ export function useAttachmentIntake({
           audio: acceptMotion,
           ...(acceptMotion ? { motion: { maxSourceBytes: COMPOSER_VIDEO_SOURCE_MAX_BYTES } } : {}),
         })
+        if (options.isCurrent && !options.isCurrent()) return []
+        if (options.beforeCommit && !(await options.beforeCommit())) return []
         if (options.isCurrent && !options.isCurrent()) return []
         if (prepared.unsupportedCount > 0) {
           toast.warning(tAttach("unsupported", { count: prepared.unsupportedCount }))
@@ -266,7 +289,7 @@ export function useAttachmentIntake({
     })
   }, [isDesktop, t, textareaRef])
 
-  const stageRemoteDoc = useRemoteDocStaging({ acceptFiles })
+  const stageRemoteDoc = useRemoteDocStaging({ acceptFiles, captureDestination })
 
   // Mobile "+" menu → fold every pick (camera / album multi-pick / files)
   // into the same acceptFiles gate the paperclip input uses, so the size /

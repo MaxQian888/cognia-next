@@ -101,6 +101,7 @@ function harness(
       return result()
     })
   const send = jest.fn(sendImpl)
+  const prepareForSubagent = jest.fn(async () => {})
   const close = jest.fn(async () => {})
   const setPermissionMode = jest.fn(async () => {})
   const listThinkingLevels = jest.fn(async () => ["medium", "high", "max"])
@@ -110,6 +111,7 @@ function harness(
     resolveExecution = params.onResolvedExecutionSpec
     return {
       sessionId: "s",
+      prepareForSubagent,
       send,
       close,
       setPermissionMode,
@@ -158,6 +160,7 @@ function harness(
   )
   return {
     actions,
+    prepareForSubagent,
     send,
     close,
     setPermissionMode,
@@ -177,6 +180,67 @@ function harness(
     unmount,
   }
 }
+
+it("prepares manual subagents on the owned cold session without a main turn", async () => {
+  const h = harness()
+  try {
+    await h.api().prepareForSubagent!()
+    await h.api().prepareForSubagent!()
+    expect(h.create).toHaveBeenCalledTimes(1)
+    expect(h.prepareForSubagent).toHaveBeenCalledTimes(2)
+    expect(h.send).not.toHaveBeenCalled()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(h.api().prepareForSubagent!(controller.signal)).rejects.toThrow()
+    expect(h.prepareForSubagent).toHaveBeenCalledTimes(2)
+  } finally {
+    h.unmount()
+  }
+})
+
+it("routes manual child approvals through the UI and clears only the cancelled permission overlay", async () => {
+  const h = harness()
+  try {
+    const controller = new AbortController()
+    let pending: Promise<unknown>
+    await act(async () => {
+      pending = h.api().requestSubagentPermission!(
+        { toolName: "plugin_probe", input: {} } as never,
+        controller.signal
+      )
+      await Promise.resolve()
+    })
+    expect(h.actions).toContainEqual(
+      expect.objectContaining({
+        type: "OVERLAY_OPEN",
+        overlay: expect.objectContaining({ kind: "permission" }),
+      })
+    )
+    await act(async () => {
+      controller.abort()
+      await pending
+    })
+    await expect(pending!).resolves.toMatchObject({ decision: "deny" })
+    expect(h.actions).toContainEqual({ type: "OVERLAY_CLOSE", ifKind: "permission" })
+  } finally {
+    h.unmount()
+  }
+})
+
+it("rebuilds prepared parent options when permission mode changes before its first turn", async () => {
+  const h = harness()
+  try {
+    await h.api().prepareForSubagent!()
+    await h.api().switchMode("plan")
+    expect(h.close).toHaveBeenCalledTimes(1)
+    await h.api().prepareForSubagent!()
+    expect(h.create).toHaveBeenCalledTimes(2)
+    expect(jest.mocked(h.create).mock.lastCall?.[0].config.permissionMode).toBe("plan")
+    expect(h.setPermissionMode).not.toHaveBeenCalled()
+  } finally {
+    h.unmount()
+  }
+})
 
 function nativeSpec(): ResolvedAgentExecutionSpec {
   return {
@@ -1367,6 +1431,42 @@ describe("useAgentSession", () => {
     await act(async () => {
       await h.api().close()
     })
+  })
+
+  it("drains the interrupted send before closing and fences queued sends", async () => {
+    let finish!: () => void
+    let signal!: AbortSignal
+    const h = harness({
+      sendImpl: async (_prompt, options) => {
+        signal = options.signal!
+        return await new Promise((resolve) => {
+          finish = () => resolve(result())
+        })
+      },
+    })
+    let running!: Promise<unknown>
+    let queued!: Promise<unknown>
+    act(() => {
+      running = h.api().send("active")
+      queued = h.api().send("must not start")
+    })
+    await waitFor(() => expect(h.send).toHaveBeenCalledTimes(1))
+    let closing!: Promise<void>
+    act(() => {
+      closing = h.api().close()
+    })
+    expect(signal.aborted).toBe(true)
+    expect(h.close).not.toHaveBeenCalled()
+    await act(async () => {
+      finish()
+      await Promise.all([running, queued, closing])
+    })
+    expect(h.send).toHaveBeenCalledTimes(1)
+    expect(h.close).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await h.api().send("after shutdown")
+    })
+    expect(h.send).toHaveBeenCalledTimes(1)
   })
 
   it("restores the last completed edit after closing without listing checkpoints", async () => {

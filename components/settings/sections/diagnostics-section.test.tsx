@@ -1,7 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("./diagnostic-service-card", () => ({
   DiagnosticServiceCard: () => <div data-testid="diagnostic-service-stub" />,
@@ -55,9 +56,10 @@ it("links to the Crash reports channel instead of listing reports itself", () =>
   expect(CRASH_REPORTS_HREF).toBe("/logs?channel=incidents")
 })
 
-it("switches to the system tab with the system cards", () => {
+it("switches to the system tab with the system cards", async () => {
+  const user = userEvent.setup()
   render(<DiagnosticsSection />)
-  fireEvent.click(screen.getByRole("tab", { name: "System" }))
+  await user.click(screen.getByRole("tab", { name: "System" }))
   expect(screen.getByTestId("developer-flags-stub")).toBeInTheDocument()
   expect(screen.getByTestId("sandbox-audit-stub")).toBeInTheDocument()
   expect(screen.getByTestId("sidecar-restart-stub")).toBeInTheDocument()
@@ -65,10 +67,34 @@ it("switches to the system tab with the system cards", () => {
   expect(screen.queryByTestId("crash-reports-link-card")).not.toBeInTheDocument()
 })
 
-it("returns to the native reports tab after visiting the system tab", () => {
+it("returns to the native reports tab after visiting the system tab", async () => {
+  const user = userEvent.setup()
   render(<DiagnosticsSection />)
-  fireEvent.click(screen.getByRole("tab", { name: "System" }))
-  fireEvent.click(screen.getByRole("tab", { name: "Native reports" }))
+  await user.click(screen.getByRole("tab", { name: "System" }))
+  await user.click(screen.getByRole("tab", { name: "Native reports" }))
   expect(screen.getByTestId("crash-reports-link-card")).toBeInTheDocument()
   expect(screen.queryByTestId("sandbox-audit-stub")).not.toBeInTheDocument()
+})
+
+// Shared Tabs: a roving tab stop, arrow keys move focus and selection together, and
+// each tab names the panel it controls.
+it("moves selection with the arrow keys and associates tabs with their panels", async () => {
+  const user = userEvent.setup()
+  render(<DiagnosticsSection />)
+  const nativeTab = screen.getByRole("tab", { name: "Native reports" })
+  const systemTab = screen.getByRole("tab", { name: "System" })
+  const panel = screen.getByRole("tabpanel")
+  expect(nativeTab).toHaveAttribute("aria-controls", panel.id)
+  expect(panel).toHaveAttribute("aria-labelledby", nativeTab.id)
+
+  act(() => nativeTab.focus())
+  await user.keyboard("{ArrowRight}")
+  expect(systemTab).toHaveFocus()
+  expect(nativeTab).toHaveAttribute("tabindex", "-1")
+  expect(systemTab).toHaveAttribute("aria-selected", "true")
+  expect(screen.getByTestId("sandbox-audit-stub")).toBeInTheDocument()
+
+  await user.keyboard("{ArrowLeft}")
+  expect(nativeTab).toHaveFocus()
+  expect(nativeTab).toHaveAttribute("aria-selected", "true")
 })

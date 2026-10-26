@@ -36,6 +36,7 @@ const RESET = {
   collapsedFolderIds: [] as string[],
   barItems: { ...DEFAULT_BAR_ITEMS },
   findOpen: false,
+  predictionSetupHintHidden: false,
 }
 
 describe("useUIStore", () => {
@@ -244,6 +245,16 @@ describe("useUIStore", () => {
   })
 
   describe("persistence partialize", () => {
+    it("restores the prediction setup hint opt-out after rehydration", async () => {
+      useUIStore.getState().hidePredictionSetupHint()
+      const saved = window.localStorage.getItem("cognia-ui")!
+      expect(JSON.parse(saved).state.predictionSetupHintHidden).toBe(true)
+      useUIStore.setState({ predictionSetupHintHidden: false })
+      window.localStorage.setItem("cognia-ui", saved)
+      await useUIStore.persist.rehydrate()
+      expect(useUIStore.getState().predictionSetupHintHidden).toBe(true)
+    })
+
     it("persists only the safe-to-restore fields", () => {
       const { result } = renderHook(() => useUIStore())
       act(() => {
@@ -264,6 +275,7 @@ describe("useUIStore", () => {
       expect(parsed.state).toEqual({
         selectedGuild: { kind: "team", teamId: "t1" },
         scratchpadCollapsed: { ts1: true },
+        predictionSetupHintHidden: false,
         sidebarCollapsed: false,
         sidebarTeamsCollapsed: false,
         sidebarWidth: 256,

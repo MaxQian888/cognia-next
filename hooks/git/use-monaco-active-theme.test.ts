@@ -21,7 +21,7 @@ jest.mock("@/lib/canvas/themes/cognia-active-theme", () => ({
 jest.mock("@/lib/themes", () => ({
   resolveActiveThemeColors: (...args: unknown[]) => resolveActiveThemeColors(...args),
 }))
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
     selector({ colorTheme: "default", activeCustomThemeId: null, customThemes: [] }),
 }))

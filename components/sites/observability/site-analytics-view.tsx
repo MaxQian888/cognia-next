@@ -38,6 +38,14 @@ import { StatCard } from "@/components/observability/stat-card"
 import { Surface } from "@/components/surface/surface"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import { CHART_MARGINS, TOOLTIP_STYLE } from "@/lib/observability/chart-config"
 import { formatBytesCompact, formatPercent } from "@/lib/observability/format-utils"
@@ -242,34 +250,40 @@ function SiteAnalyticsTable({ view }: { view: SiteAnalyticsView }) {
   const t = useTranslations("sites")
   return (
     <Surface layer="raised" radius="panel" className="overflow-hidden border">
-      <table className="w-full text-xs" data-testid="site-analytics-table">
-        <thead className="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-3 py-1.5 text-left font-medium">
+      <Table className="text-xs" data-testid="site-analytics-table">
+        <TableHeader className="bg-muted/40 text-[10px] tracking-wide uppercase">
+          <TableRow className="hover:bg-transparent">
+            <TableHead scope="col" className="px-3 text-muted-foreground">
               {t("observability.analytics.date")}
-            </th>
-            <th className="px-3 py-1.5 text-right font-medium">
+            </TableHead>
+            <TableHead scope="col" className="px-3 text-right text-muted-foreground">
               {t("observability.analytics.requests")}
-            </th>
-            <th className="px-3 py-1.5 text-right font-medium">
+            </TableHead>
+            <TableHead scope="col" className="px-3 text-right text-muted-foreground">
               {t("observability.analytics.errors")}
-            </th>
-            <th className="px-3 py-1.5 text-right font-medium">
+            </TableHead>
+            <TableHead scope="col" className="px-3 text-right text-muted-foreground">
               {t("observability.analytics.subrequests")}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {view.worker.points.map((point) => (
-            <tr key={point.date} className="border-t">
-              <td className="px-3 py-1.5 font-mono">{point.date}</td>
-              <td className="px-3 py-1.5 text-right font-mono tabular-nums">{point.requests}</td>
-              <td className="px-3 py-1.5 text-right font-mono tabular-nums">{point.errors}</td>
-              <td className="px-3 py-1.5 text-right font-mono tabular-nums">{point.subrequests}</td>
-            </tr>
+            <TableRow key={point.date}>
+              <TableCell className="px-3 font-mono">{point.date}</TableCell>
+              <TableCell className="px-3 text-right font-mono tabular-nums">
+                {point.requests}
+              </TableCell>
+              <TableCell className="px-3 text-right font-mono tabular-nums">
+                {point.errors}
+              </TableCell>
+              <TableCell className="px-3 text-right font-mono tabular-nums">
+                {point.subrequests}
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </Surface>
   )
 }

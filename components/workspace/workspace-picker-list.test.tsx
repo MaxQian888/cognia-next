@@ -160,6 +160,30 @@ describe("WorkspacePickerList", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
 
+  it("identifies the current workspace and preserves full long names and paths", () => {
+    const name = "An unusually long project name for the title bar"
+    const path = "/workspace/a/long/path/that/cannot/fit/on/a/single/picker/row"
+    seed(1)
+    act(() =>
+      useProjectStore.setState({
+        projects: [
+          {
+            ...useProjectStore.getState().projects[0],
+            name,
+            roots: [{ id: "r0", path, isPrimary: true }],
+          },
+        ],
+      })
+    )
+    render(<Harness />)
+    expect(screen.getByRole("button", { name: new RegExp(`^${name}`) })).toHaveAttribute(
+      "aria-current",
+      "true"
+    )
+    expect(screen.getByTitle(name)).toHaveTextContent(name)
+    expect(screen.getByTitle(path)).toHaveTextContent(path)
+  })
+
   it("switches the active workspace and tells the container to close", () => {
     seed(2)
     const onSwitched = jest.fn()

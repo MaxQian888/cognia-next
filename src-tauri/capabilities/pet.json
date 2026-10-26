@@ -5,6 +5,7 @@
   "windows": ["pet", "pet-popup"],
   "permissions": [
     "core:default",
+    "notification:allow-is-permission-granted",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:webview:default",

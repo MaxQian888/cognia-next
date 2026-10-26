@@ -234,6 +234,7 @@
     "undoSuccess": "Conversation restored"
   },
   "composer": {
+    "contextRegion": "Composer context and notices",
     "ariaAttachImage": "Attach files",
     "ariaMessage": "Message",
     "ariaSend": "Send",
@@ -544,6 +545,7 @@
       "confirmTitle": "Add large folder?"
     },
     "followUps": {
+      "dontShowAgain": "Don't show again",
       "unavailable": "Predictions need an assistance model or an enabled Agent fallback in Chat settings.",
       "error": "Could not generate a prediction.",
       "configure": "Configure",
@@ -840,7 +842,6 @@
       "blocked": "{runtime} can't run here",
       "blockedDetail": "{runtime} can't run here: {detail}",
       "busy": "Wait for the current reply to finish before addressing @{handle}.",
-      "disabled": "External agents are turned off.",
       "emptyPrompt": "Add a message after @{handle}.",
       "memberMissing": "@{handle} is no longer in a Squad.",
       "memberRuntime": "{name} runs on {runtime}, which isn't available here.",

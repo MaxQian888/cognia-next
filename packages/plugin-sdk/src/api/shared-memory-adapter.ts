@@ -16,11 +16,11 @@ export {
   getSharedMemoryAdapterEntry,
   listSharedMemoryAdapterIds,
   listSharedMemoryAdapterEntries,
-} from "@/lib/plugin/registries/shared-memory-adapter-registry"
+} from "@cognia/plugin-contract/lib/plugin/registries/shared-memory-adapter-registry"
 
-export type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+export type { PluginSharedMemoryAdapterDef } from "@cognia/plugin-contract/types/plugin/plugin-shared-memory-adapter"
 
-export type { SharedMemoryAdapterChangeSet } from "@/types/plugin/plugin-shared-memory-adapter"
+export type { SharedMemoryAdapterChangeSet } from "@cognia/plugin-contract/types/plugin/plugin-shared-memory-adapter"
 
 /** The host's shared-memory row shape an adapter reads and writes. */
-export type { SharedMemoryEntry } from "@/types/agent/agent-team"
+export type { SharedMemoryEntry } from "@cognia/plugin-contract/types/agent/agent-team"

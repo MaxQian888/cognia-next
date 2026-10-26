@@ -13,4 +13,4 @@
 
 export { defineAgentTool } from "../define/define-agent-tool"
 
-export type { PluginAgentToolInput } from "@/types/plugin/plugin-agent-sdk"
+export type { PluginAgentToolInput } from "@cognia/plugin-contract/types/plugin/plugin-agent-sdk"

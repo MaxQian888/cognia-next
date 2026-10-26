@@ -14,6 +14,13 @@ import {
   RateCardSchema,
   type ActionConfig,
 } from "../contracts/schemas"
+import {
+  CUSTOM_ROLE_PROMPT_VERSION,
+  ROLE_PROMPT_FILES,
+  customRolePromptVersion,
+  isMaterializedCustomRoleVersion,
+  type RolePromptProfile,
+} from "../prompts/roles"
 import { canonicalHash } from "../util/sha256"
 import {
   DELEGATE_LIMIT_CEILINGS,
@@ -325,12 +332,79 @@ export function computeActionHash(
   })
 }
 
+/** A supplied custom profile must be complete and carry the version its own text hashes to. */
+function validateRolePrompts(profile: RolePromptProfile, issues: ConfigIssue[]): void {
+  const roles = Object.keys(ROLE_PROMPT_FILES).sort()
+  const present = Object.keys(profile.prompts ?? {}).sort()
+  const complete =
+    roles.length === present.length &&
+    roles.every(
+      (role, i) =>
+        present[i] === role &&
+        typeof profile.prompts[role as keyof typeof ROLE_PROMPT_FILES] === "string"
+    )
+  if (!complete) {
+    issues.push({
+      pointer: "/rolePrompts/prompts",
+      message: `custom role prompts must name exactly the roles ${roles.join(", ")}`,
+    })
+    return
+  }
+  if (
+    !isMaterializedCustomRoleVersion(profile.version) ||
+    customRolePromptVersion(profile.prompts) !== profile.version
+  ) {
+    issues.push({
+      pointer: "/rolePrompts/version",
+      message: "the version does not match the custom role prompts it names",
+    })
+  }
+}
+
+/**
+ * Bind every action that selects the user's role texts to the materialized
+ * version this snapshot carries, so its hash covers the exact text (ROUTE-05).
+ * Returns whether any action runs them.
+ */
+function bindCustomRolePrompts(input: FusionConfigInput, issues: ConfigIssue[]): boolean {
+  const profile = input.rolePrompts
+  if (profile) validateRolePrompts(profile, issues)
+  let used = false
+  input.policy.actions?.forEach((action, index) => {
+    const at = pointer("policy", "actions", index, "prompt_version")
+    if (action.prompt_version === CUSTOM_ROLE_PROMPT_VERSION) {
+      if (!profile) {
+        issues.push({
+          pointer: at,
+          message: `${CUSTOM_ROLE_PROMPT_VERSION} needs the custom role prompts this snapshot runs`,
+        })
+        return
+      }
+      action.prompt_version = profile.version
+      used = true
+    } else if (isMaterializedCustomRoleVersion(action.prompt_version)) {
+      if (action.prompt_version !== profile?.version) {
+        issues.push({
+          pointer: at,
+          message: `custom role prompts ${action.prompt_version} are not in this snapshot`,
+        })
+        return
+      }
+      used = true
+    }
+  })
+  return used
+}
+
 export function compileFusionConfig(rawInput: FusionConfigInput): CompiledFusionConfig {
   // The snapshot is frozen; clone first so the caller's objects stay mutable.
   const input = structuredClone(rawInput)
   const issues: ConfigIssue[] = []
   const policyParse = PolicyConfigSchema.safeParse(input.policy)
   if (!policyParse.success) issues.push(...zodIssues("/policy", policyParse.error.issues))
+  const usesCustomRolePrompts = bindCustomRolePrompts(input, issues)
+  // Carried only when an action runs them, so an unused edit changes no digest.
+  const rolePrompts = usesCustomRolePrompts ? input.rolePrompts : undefined
 
   const deploymentsById = validateRegistry(input.registry, issues)
 
@@ -402,6 +476,7 @@ export function compileFusionConfig(rawInput: FusionConfigInput): CompiledFusion
     registry: input.registry,
     extensions: input.extensions,
     environment: input.environment,
+    rolePrompts,
   })
   return deepFreeze({
     policy: input.policy,
@@ -410,6 +485,7 @@ export function compileFusionConfig(rawInput: FusionConfigInput): CompiledFusion
     deploymentsById,
     rateCardsById,
     environment: input.environment,
+    ...(rolePrompts ? { rolePrompts } : {}),
     digest,
   })
 }

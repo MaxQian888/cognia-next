@@ -15,6 +15,8 @@ import type { StandaloneAnswerDeps } from "@cognia/web-search/standalone-answer"
 const runCoreMock = jest.fn()
 
 jest.mock("@cognia/web-search/standalone-answer", () => ({
+  STANDALONE_ANSWER_SYSTEM_PROMPT: jest.requireActual("@cognia/web-search/standalone-answer")
+    .STANDALONE_ANSWER_SYSTEM_PROMPT,
   runStandaloneSearchAnswer: (...args: unknown[]) => runCoreMock(...args),
   StandaloneSearchError: class StandaloneSearchError extends Error {},
   buildAnswerPrompt: jest.fn(),
@@ -43,6 +45,13 @@ jest.mock("@/lib/search/configured-search", () => ({
 }))
 
 import { runStandaloneSearchAnswer } from "./standalone-answer"
+import { STANDALONE_SEARCH_ANSWER_PROMPT } from "./standalone-answer-prompt"
+import { STANDALONE_ANSWER_SYSTEM_PROMPT } from "@cognia/web-search/standalone-answer"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
 import { loadRouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
 import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
@@ -236,5 +245,45 @@ describe("lib/search/standalone-answer ledger seam", () => {
     expect(generateTextImpl).toHaveBeenCalledWith(
       expect.objectContaining({ maxOutputTokens: 900, maxRetries: 0 })
     )
+  })
+})
+
+describe("lib/search/standalone-answer system prompt (Prompt Center)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("passes the shipped system prompt with no override", async () => {
+    __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", []))
+    await runStandaloneSearchAnswer({ query: "hello" })
+    expect(capturedDeps().systemPrompt).toBe(STANDALONE_ANSWER_SYSTEM_PROMPT)
+  })
+
+  it("passes a published override to the synthesis call", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-search-answer",
+          promptId: STANDALONE_SEARCH_ANSWER_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-search-answer-1",
+          body: "Answer from the numbered sources only, citing [n].",
+          contractVersion: STANDALONE_SEARCH_ANSWER_PROMPT.contractVersion,
+        },
+      ])
+    )
+    await runStandaloneSearchAnswer({ query: "hello" })
+    expect(capturedDeps().systemPrompt).toBe("Answer from the numbered sources only, citing [n].")
+  })
+
+  it("stops before searching when the caller aborted while the prompt resolved", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      runStandaloneSearchAnswer({ query: "hello", signal: controller.signal })
+    ).rejects.toThrow()
+    expect(runCoreMock).not.toHaveBeenCalled()
   })
 })

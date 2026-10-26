@@ -30,21 +30,16 @@ import {
   registerContextProvider,
   unregisterContextProvidersByPlugin,
 } from "@/lib/plugin/registries/context-provider-registry"
-
-export interface ContextProvidersBridgeError {
-  pluginId: string
-  providerId: string
-  message: string
-}
-
-export interface ContextProvidersBridgeResult {
-  registered: number
-  errors: ContextProvidersBridgeError[]
-}
-
-export interface ContextProvidersBridgeOptions {
-  importer?: (entry: string) => Promise<Record<string, unknown>>
-}
+import type {
+  ContextProvidersBridgeError,
+  ContextProvidersBridgeOptions,
+  ContextProvidersBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/context-providers-bridge"
+export type {
+  ContextProvidersBridgeError,
+  ContextProvidersBridgeOptions,
+  ContextProvidersBridgeResult,
+} from "@cognia/plugin-contract/lib/plugin/bridge/context-providers-bridge"
 
 const DEFAULT_IMPORTER: NonNullable<ContextProvidersBridgeOptions["importer"]> = (entry) =>
   import(/* @vite-ignore */ /* webpackIgnore: true */ entry)

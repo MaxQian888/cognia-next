@@ -14,9 +14,8 @@ import type {
   UsageStatus,
   UsageWindow,
 } from "@/types/subscription"
-
-/** Three-step severity for a utilization gauge. */
-export type UsageLevel = "ok" | "warn" | "crit"
+import type { UsageLevel } from "@cognia/plugin-contract/lib/subscription/anthropic/usage-analytics"
+export type { UsageLevel } from "@cognia/plugin-contract/lib/subscription/anthropic/usage-analytics"
 
 /** One point on the utilization trend chart. Values are whole percents (0-100). */
 export interface UtilizationPoint {

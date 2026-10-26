@@ -37,6 +37,19 @@ pub type DispatchResult = Result<Value, (StatusCode, Json<RpcError>)>;
 /// What the app adds to every companion server it runs.
 #[async_trait::async_trait]
 pub trait CompanionRuntime: Send + Sync + 'static {
+    /// Host-owned durable state directory. An unwired runtime cannot create
+    /// or resolve multi-tenant execution bindings; no renderer path is used.
+    fn execution_binding_root(&self, _state: &SharedState) -> Option<std::path::PathBuf> { None }
+
+    /// Operator-owned registration boundary, never a request argument.
+    fn execution_workspace_base(&self, _state: &SharedState) -> Option<std::path::PathBuf> {
+        std::env::var_os("COGNIA_WORKSPACE_ROOTS_DIR").filter(|value| !value.is_empty()).map(Into::into)
+    }
+
+    /// Reconcile records whose backend process was already reaped. Called
+    /// only before multi-tenant creation; single-user dispatch does no IO.
+    async fn prune_execution_bindings(&self, _state: &SharedState) -> Result<(), cognia_problem::Problem> { Ok(()) }
+
     /// The remote Pro IDE relay (`/ide/relay/{relay_id}[/{*tail}]`), mounted
     /// behind device access.
     fn ide_relay_routes(&self) -> Router<SharedState>;
@@ -264,6 +277,24 @@ pub mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p4_unwired_runtime_has_no_execution_binding_root() {
+        let state = Arc::new(crate::CompanionState {
+            secret: parking_lot::RwLock::new(vec![0; 32]),
+            deny_list: Arc::new(crate::deny_list::DenyList::new()),
+            renderer: None, runtime: unwired(),
+            idempotency: Arc::new(crate::idempotency::IdempotencyCache::new()),
+            event_bus: crate::event_bus::EventBus::new(),
+            sync_bridge: crate::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge: crate::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge: crate::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: crate::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::push::PushTokenRegistry::new(),
+        });
+        assert!(unwired().execution_binding_root(&state).is_none());
+    }
 
     /// `/healthz` serializes this struct as-is, so its field names are wire
     /// contract. (The slot itself is exercised by `cognia_server::brain`'s tests;

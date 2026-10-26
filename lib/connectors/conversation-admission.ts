@@ -13,6 +13,8 @@ import type { InboundActivationPolicy } from "@/types/connectors/policy"
 import { getSession } from "@/lib/db/sessions"
 import { resolveRoomSettings } from "@/lib/chat/room/settings"
 import type { RoomReplyMode } from "@/lib/chat/room/types"
+import type { ConversationAdmissionReason } from "@cognia/plugin-contract/lib/connectors/conversation-admission"
+export type { ConversationAdmissionReason } from "@cognia/plugin-contract/lib/connectors/conversation-admission"
 
 export const DEFAULT_TOPIC_ACTIVATION_TTL_MS = 24 * 60 * 60 * 1_000
 
@@ -37,15 +39,6 @@ export function resolveActivationTtlMs(
     DEFAULT_TOPIC_ACTIVATION_TTL_MS
   )
 }
-
-export type ConversationAdmissionReason =
-  | "at_mention_required"
-  | "at_direct_only"
-  | "delivery_unverified"
-  | "topic_activation_required"
-  | "topic_activation_expired"
-  /** The bound room's `replyMode` is `asleep` (ADR-0177 batch 3). */
-  | "room_asleep"
 
 export interface ConversationAdmissionDecision {
   allowed: boolean

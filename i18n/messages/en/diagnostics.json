@@ -440,6 +440,30 @@
     "projectPaused": {
       "hint": "This project is paused, so its coordinator and threads don't run. Resume the project to continue.",
       "label": "Project paused"
+    },
+    "hostDataUnavailable": {
+      "label": "Not available on this shared Host",
+      "hint": "This Host is shared by an organization, and it doesn't keep chats, files and other personal data separate per member yet. Use your own device or the shared workspace for this until that ships."
+    },
+    "executionUnavailable": {
+      "label": "Running work is unavailable on this Host",
+      "hint": "This Host can't run this here: it is in control-plane-only mode, has no sandbox isolation, or the work would run inside the Host itself, which a shared Host never allows. Ask the Host's administrator if you expected it to work."
+    },
+    "workspaceUnresolved": {
+      "label": "No workspace for this request",
+      "hint": "A shared Host only runs work inside a workspace it can verify. Start it from a workspace you belong to; work that wasn't started that way can't be continued here."
+    },
+    "modelAccessUnavailable": {
+      "label": "No model access on this shared Host",
+      "hint": "Your data on a shared Host has no AI model configured, so this can't generate a reply here yet. It will work once the organization's model access is available to members."
+    },
+    "partitionWorkspaceUnavailable": {
+      "label": "No workspaces in your personal space",
+      "hint": "On a shared Host, your conversations live in your own personal space, which isn't linked to the Host's workspaces, so this one can't be moved into a workspace here."
+    },
+    "orgScopeUnavailable": {
+      "label": "Needs an organization Host",
+      "hint": "Organization settings such as shared model keys and allowed agents only exist on a Host that serves an organization. This Host serves one person, so there is nothing to configure here."
     }
   },
   "detail": {

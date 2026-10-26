@@ -2,6 +2,7 @@ import type { PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 
 import definition, { manifest as moduleManifest } from "./index"
 import manifestJson from "../plugin.json"
+import { DEEP_RESEARCH_PROMPTS } from "./engine/prompts"
 import { DEEP_RESEARCH_SKILL } from "./skill"
 import { DEEP_RESEARCH_TOOL } from "./tool"
 
@@ -20,6 +21,7 @@ function ctx(): PluginContext {
     logger: { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() },
     agent: { registerTool: jest.fn(), registerSkill: jest.fn() },
     i18n: { t },
+    prompts: { register: jest.fn(), resolve: jest.fn() },
   } as unknown as PluginContext
 }
 
@@ -136,6 +138,12 @@ describe("activate", () => {
     )
     expect(Object.hasOwn(agent.registerTool.mock.calls[0][0], "pluginId")).toBe(false)
     expect(agent.registerSkill).not.toHaveBeenCalled()
+  })
+
+  it("declares every system instruction as a Prompt Center slot", () => {
+    const c = ctx()
+    definition.activate(c)
+    expect(c.prompts.register).toHaveBeenCalledWith(DEEP_RESEARCH_PROMPTS)
   })
 
   it("declares /research and handles it via the returned hook", async () => {

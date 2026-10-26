@@ -144,7 +144,6 @@ const team = await ctx.agent.runTeam("team-id", { ultracode: true })
 
 在 Bot 运行之外（无 `runId`），`runExternalAgent(presetOrAgentId, prompt, opts)`：
 
-- 外部智能体总开关关闭时拒绝；
 - 对**已配置**的智能体：拒绝已禁用的配置，或 `lifecycle.assessReadiness` 结论不是 `ready` 的配置（错误中给出原因代码），并通过 `lifecycle.connect` 注册，使启动携带该配置自己的 keyring 凭据；
 - 对**预设**：创建临时实例，先检查其就绪状态，运行结束时（无论成功失败）用 `manager.removeAgent` 移除；
 - 通过 `deriveExternalSessionPermission` 将 `opts.permissionMode` 收敛到目标自身的默认值 —— 配置的 `defaultPermissionMode`（未设置时取全局默认），临时预设实例取全局默认。插件只能要得更少，不能更多；

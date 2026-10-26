@@ -18,7 +18,7 @@
  *   }))
  */
 
-import type { PluginAuthProvider } from "@/lib/plugin/api/auth-api"
+import type { PluginAuthProvider } from "@cognia/plugin-contract/lib/plugin/api/auth-api"
 
 export function defineAuthProvider(provider: PluginAuthProvider): PluginAuthProvider {
   return provider

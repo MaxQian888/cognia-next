@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("@/components/ui/dialog")
@@ -154,10 +155,11 @@ it("shows Chromium, downloads, profile and vault summaries, and refreshes the mi
 })
 
 it("saves the default engine and the Chrome to attach", async () => {
-  mockSettings = { browserDefaultBackend: "user-chrome" }
+  mockSettings = { browserDefaultBackend: "user-chrome", browserUserChromeBrowser: "edge" }
   ;(useLocalBrowser as jest.Mock).mockReturnValue(
     localState({
       userChrome: [
+        { browser: "edge", label: "Edge", userDataDir: "/e", available: true, reason: null },
         {
           browser: "chrome",
           label: "Google Chrome",
@@ -176,13 +178,13 @@ it("saves the default engine and the Chrome to attach", async () => {
     })
   )
   await renderSettings()
-  fireEvent.change(screen.getByLabelText("Default engine"), { target: { value: "local-chromium" } })
+  await selectOption(screen.getByLabelText("Default engine"), "local-chromium")
   expect(mockSave).toHaveBeenCalledWith({ browserDefaultBackend: "local-chromium" })
   const browserSelect = screen.getByRole("combobox", { name: "Browser to attach" })
-  expect(Array.from((browserSelect as HTMLSelectElement).options).map((o) => o.value)).toEqual([
-    "chrome",
-  ])
-  fireEvent.change(browserSelect, { target: { value: "chrome" } })
+  expect(
+    Array.from(getNativeSelect(browserSelect as HTMLSelectElement).options).map((o) => o.value)
+  ).toEqual(["edge", "chrome"])
+  await selectOption(browserSelect, "chrome")
   expect(mockSave).toHaveBeenCalledWith({ browserUserChromeBrowser: "chrome" })
 })
 

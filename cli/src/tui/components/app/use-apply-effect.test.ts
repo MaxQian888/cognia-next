@@ -100,6 +100,25 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
 const run = (deps: ApplyEffectDeps) => renderHook(() => useApplyEffect(deps)).result.current
 
 describe("useApplyEffect", () => {
+  it("passes the owning session preparation into manual agent runtime commands", async () => {
+    const deps = buildDeps()
+    deps.agent.prepareForSubagent = jest.fn(async () => {})
+    deps.agent.awaitSubagentApprovals = jest.fn(async () => {})
+    deps.agent.requestSubagentPermission = jest.fn(async () => ({ decision: "allow" as const }))
+    run(deps)({
+      kind: "runtime",
+      runtime: { feature: "agents", action: "run", arg: "Explore research" },
+    })
+    await flush()
+    expect(runRuntimeRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ feature: "agents" }),
+      expect.objectContaining({
+        prepareForSubagent: deps.agent.prepareForSubagent,
+        requestSubagentPermission: deps.agent.requestSubagentPermission,
+        awaitSubagentApprovals: deps.agent.awaitSubagentApprovals,
+      })
+    )
+  })
   it("does not send refinement if the backend cannot enter read-only plan mode", async () => {
     const deps = buildDeps()
     jest.mocked(deps.agent.switchMode).mockRejectedValueOnce(new Error("mode unavailable"))
@@ -240,6 +259,33 @@ describe("useApplyEffect", () => {
     )
   })
 
+  it("hands the owner a runtime promise that includes final persistence", async () => {
+    let finish!: () => void
+    runRuntimeRequestMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const tracked = jest.fn()
+    const deps = buildDeps({ trackRuntimeWork: tracked })
+    run(deps)({
+      kind: "runtime",
+      runtime: { feature: "agents", action: "run", arg: "Explore task" },
+    })
+    expect(tracked).toHaveBeenCalledTimes(1)
+    let settled = false
+    void tracked.mock.calls[0][0].then(() => {
+      settled = true
+    })
+    await flush()
+    expect(settled).toBe(false)
+    finish()
+    await tracked.mock.calls[0][0]
+    expect(deps.persistDb).toHaveBeenCalled()
+    expect(settled).toBe(true)
+  })
+
   it("does NOT invalidate the session for a read-only /mcp action (panel open)", async () => {
     const deps = buildDeps()
     run(deps)({ kind: "runtime", runtime: { feature: "mcp", action: "panel" } })
@@ -349,12 +395,26 @@ describe("useApplyEffect", () => {
     })
   })
 
-  it("sends an analysis prompt when there is a failed command", () => {
+  it("sends an analysis prompt when there is a failed command", async () => {
     const deps = buildDeps({
       takeLastFailedBash: jest.fn(() => ({ command: "false", output: "boom", exitCode: 1 })),
     })
     run(deps)({ kind: "analyzeBash" })
-    expect(deps.agent.send).toHaveBeenCalled()
+    await flush()
+    expect(deps.agent.send).toHaveBeenCalledWith(
+      expect.stringContaining("The following shell command failed (exit code 1).")
+    )
+  })
+
+  it("sends the framed review prompt for a review effect", async () => {
+    const deps = buildDeps()
+    run(deps)({ kind: "review", base: "dev" })
+    await flush()
+    expect(deps.agent.send).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Perform a thorough code review of the changes on this branch versus `dev`"
+      )
+    )
   })
 
   it("live-applies + persists a theme, and repaints the scrollback (scrollback mode)", () => {

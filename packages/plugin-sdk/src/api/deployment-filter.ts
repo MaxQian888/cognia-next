@@ -1,23 +1,18 @@
 /**
  * Plugin SDK — `deployment-filter` capability surface.
  *
- * Re-exports the authoring helper, manifest bridge, and provider-routing
- * deployment-filter overlay registry used by plugin-contributed pre-call
- * filters.
+ * Exports the authoring helper and the provider-routing deployment-filter
+ * overlay registry used by plugin-contributed pre-call filters. The host
+ * registers manifest-declared filters itself.
  */
 
 export { defineDeploymentFilter } from "../define/define-deployment-filter"
-
-export {
-  registerDeploymentFiltersForPlugin,
-  unregisterDeploymentFiltersForPlugin,
-} from "@/lib/plugin/bridge/deployment-filters-bridge"
 
 export type {
   DeploymentFiltersBridgeError,
   DeploymentFiltersBridgeOptions,
   DeploymentFiltersBridgeResult,
-} from "@/lib/plugin/bridge/deployment-filters-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/deployment-filters-bridge"
 
 export {
   DEFAULT_FILTER_CHAIN,
@@ -33,7 +28,7 @@ export type {
   PluginDeploymentFilterDef,
   PluginDeploymentFilterFactory,
   PluginDeploymentFilterLike,
-} from "@/types/plugin/plugin-deployment-filter"
+} from "@cognia/plugin-contract/types/plugin/plugin-deployment-filter"
 
 export type {
   DeploymentCandidate,

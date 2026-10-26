@@ -79,6 +79,28 @@ pub fn capture_primary(opts: &ScreenshotOpts) -> Result<Screenshot> {
     })
 }
 
+/// Capture the selected window only; callers pin ownership and geometry.
+#[cfg(target_os = "windows")]
+pub fn capture_window(window: &xcap::Window, opts: &ScreenshotOpts) -> Result<Screenshot> {
+    let image = window
+        .capture_image()
+        .map_err(|error| AutomationError::BackendError {
+            message: format!("window capture failed: {error}"),
+        })?;
+    let format = opts.format.unwrap_or_default();
+    let mut bytes = Vec::new();
+    encode(&image, format, &mut bytes)?;
+    Ok(Screenshot {
+        bytes: general_purpose::STANDARD.encode(&bytes),
+        width: image.width(),
+        height: image.height(),
+        captured_at: chrono::Utc::now().timestamp_millis(),
+        format,
+        source_width: None,
+        source_height: None,
+    })
+}
+
 /// Capture a region given in global desktop units (see `desktop_space`):
 /// logical points on macOS, physical pixels on Windows and Linux.
 ///

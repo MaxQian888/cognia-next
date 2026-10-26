@@ -139,6 +139,12 @@ export type {
 export type { PluginOcrAPI } from "./ocr-api"
 export type { PluginDecisionsAPI } from "./decisions-api"
 export type {
+  PluginPromptRegistration,
+  PluginPromptResolveOptions,
+  PluginPromptsAPI,
+  PluginResolvedPrompt,
+} from "./prompts-api"
+export type {
   PluginCharacterPackRegistration,
   PluginCharacterPacksAPI,
 } from "./character-packs-api"

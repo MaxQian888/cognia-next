@@ -290,6 +290,7 @@
     "busyTitle": "隧道正在暴露别的东西",
     "busyBody": "本应用只运行一个 cloudflared 进程。它正为另一功能把 {localUrl} 暴露在 {publicUrl}。替换后，这个公网地址会指向别处。",
     "busyReplace": "替换隧道",
+    "busyKeep": "保留",
     "busyCancelled": "保留了现有隧道。",
     "exposing": "正在暴露 {localUrl}",
     "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是本监听器。在这里关掉再打开即可指向伴侣服务器，或留给正在使用它的功能。",

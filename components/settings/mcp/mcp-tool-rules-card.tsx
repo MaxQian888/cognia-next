@@ -1,5 +1,6 @@
 "use client"
 
+import { NativeSelect } from "@/components/ui/native-select"
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -315,7 +316,7 @@ export function McpToolRulesCard({ server }: Props) {
                           </p>
                         )}
                       </div>
-                      <select
+                      <NativeSelect
                         className="max-w-36 rounded-md border bg-background px-1.5 py-1 text-xs"
                         aria-label={t("policyAria", { name: tool.name })}
                         value={policy ?? "default"}
@@ -325,7 +326,7 @@ export function McpToolRulesCard({ server }: Props) {
                         <option value="default">{t("policyDefault")}</option>
                         <option value="ask">{t("policyAsk")}</option>
                         <option value="deny">{t("policyDeny")}</option>
-                      </select>
+                      </NativeSelect>
                     </div>
                   )
                 })

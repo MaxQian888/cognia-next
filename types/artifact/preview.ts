@@ -1,17 +1,5 @@
 /**
- * Artifact preview type definitions
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/artifact/preview` working.
  */
-
-import type { ReactNode } from "react"
-
-export interface PreviewErrorBoundaryProps {
-  children: ReactNode
-  fallback?: ReactNode
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void
-  errorMessage?: string
-}
-
-export interface PreviewErrorBoundaryState {
-  hasError: boolean
-  error: Error | null
-}
+export * from "@cognia/plugin-contract/types/artifact/preview"

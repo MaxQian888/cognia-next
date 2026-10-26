@@ -136,7 +136,28 @@ class SchedulerDatabase {
    * Update an existing task
    */
   async updateTask(task: ScheduledTask): Promise<void> {
-    await this.tasks.put(serializeTask(task))
+    await this.tasks.update(task.id, serializeTask(task))
+  }
+
+  /** Atomically patch only promotion metadata, preserving live task state. */
+  async setTaskPromotion(
+    taskId: string,
+    promotion: ScheduledTask["promotion"],
+    accepts: (current: ScheduledTask) => boolean
+  ): Promise<ScheduledTask | null> {
+    return this.transaction("rw", [this.tasks], async () => {
+      const stored = await this.tasks.get(taskId)
+      if (!stored) return null
+      const current = deserializeTask(stored)
+      if (!accepts(current)) return null
+      const updated = { ...current, promotion, updatedAt: new Date() }
+      const serialized = serializeTask(updated)
+      await this.tasks.update(taskId, {
+        promotion: serialized.promotion,
+        updatedAt: serialized.updatedAt,
+      })
+      return updated
+    })
   }
 
   /**
@@ -203,6 +224,32 @@ class SchedulerDatabase {
       }
       await this.tasks.put(claimed)
       return deserializeTask(claimed)
+    })
+  }
+
+  /** Advance or expire a persisted slot without overwriting concurrent edits or recreating a deleted task. */
+  async advanceTaskSchedule(
+    taskId: string,
+    expectedRunAt: Date,
+    nextRunAt: Date | undefined,
+    terminalReason?: ScheduledTask["lastTerminalReason"],
+    status: "active" | "expired" = "active"
+  ): Promise<ScheduledTask | null> {
+    return this.transaction("rw", this.tasks, async () => {
+      const row = await this.tasks.get(taskId)
+      if (!row || row.status !== "active" || row.nextRunAt !== expectedRunAt.toISOString()) {
+        return null
+      }
+      const now = new Date().toISOString()
+      const updated: DBScheduledTask = {
+        ...row,
+        status,
+        nextRunAt: nextRunAt?.toISOString(),
+        updatedAt: now,
+        ...(terminalReason ? { lastTerminalReason: terminalReason, lastTerminalAt: now } : {}),
+      }
+      await this.tasks.put(updated)
+      return deserializeTask(updated)
     })
   }
 

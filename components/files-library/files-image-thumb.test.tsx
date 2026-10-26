@@ -22,8 +22,12 @@ beforeEach(() => {
 
 it("shows the thumbnail and releases it on unmount", async () => {
   acquire.mockResolvedValue({ url: "blob:thumb" })
-  const { unmount } = render(<FilesImageThumb hash="h1" alt="Shot" />)
-  expect(screen.getByTestId("files-image-loading")).toBeInTheDocument()
+  const { unmount } = render(<FilesImageThumb hash="h1" alt="Shot" className="size-12 rounded" />)
+  const pending = screen.getByTestId("files-image-loading")
+  // The shared Skeleton: its marker keeps the pulse under reduced motion.
+  expect(pending).toHaveAttribute("data-slot", "skeleton")
+  expect(pending).toHaveAttribute("aria-hidden", "true")
+  expect(pending).toHaveClass("size-12", "rounded", "bg-muted")
   const img = await screen.findByTestId("files-image")
   expect(img).toHaveAttribute("src", "blob:thumb")
   expect(img).toHaveAttribute("alt", "Shot")

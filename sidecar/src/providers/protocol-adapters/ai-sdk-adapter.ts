@@ -1,6 +1,6 @@
 // Built-in protocol adapter: wraps the historical `@ai-sdk/*` execution path
 // behind the ProtocolAdapter seam. Behavior is intentionally byte-identical
-// to the pre-seam `ai-sdk.mjs` inline code — `ai-sdk.test.mjs` is the canary
+// to the pre-seam `runtimes/ai-sdk/index.ts` inline code — `runtimes/ai-sdk/index.test.ts` is the canary
 // and must pass without edits.
 
 // Endpoint-family knowledge (provider→protocol map + Responses-vs-Chat decision)
@@ -16,9 +16,12 @@ import {
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
   resolveProviderProtocol,
-} from "../provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import { buildBedrockProviderOptions } from "../bedrock.ts"
-import { resolvePerplexityEndpoint, withPerplexityAgentFetch } from "../perplexity-agent.ts"
+import {
+  resolvePerplexityEndpoint,
+  withPerplexityAgentFetch,
+} from "@cognia/provider-types/perplexity-agent"
 import { withSiwcStreamingGeneration } from "../siwc-language-model.ts"
 import {
   createSiwcFetch,
@@ -38,8 +41,8 @@ import {
   claude55CapabilitiesForModel,
   compatibleEffortValuesForModel,
   normalizeCompatibleEffort,
-} from "../reasoning-effort-tables.ts"
-import type { LanguageModelMiddleware, ProviderMetadata } from "ai"
+} from "@cognia/provider-types/reasoning-effort-tables"
+import type { JSONValue, LanguageModelMiddleware, ProviderMetadata } from "ai"
 import type {
   AdapterResult,
   NormalizedRequest,
@@ -51,7 +54,7 @@ import type {
 type ProviderModel = Parameters<(typeof import("ai"))["wrapLanguageModel"]>[0]["model"]
 
 /** Per-provider `providerOptions`: provider key → its option block. */
-export type ProviderOptionsMap = Record<string, Record<string, unknown>>
+export type ProviderOptionsMap = Record<string, Record<string, JSONValue>>
 
 /** Everything `buildModel` needs to construct one provider model. */
 export interface ModelSettings {
@@ -567,7 +570,7 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
         ((await import("ai")).streamText as unknown as (args: Record<string, unknown>) => unknown)
       // System content must travel in the top-level instructions option — AI SDK
       // 7 rejects `{ role: "system" }` inside `messages` by default. Splitting
-      // here (rather than in `dispatch/ai-sdk.mjs`, which builds the flat
+      // here (rather than in `src/runtimes/ai-sdk/index.ts`, which builds the flat
       // conversation) keeps compaction and tool-pairing operating on the combined
       // array. Anthropic cacheControl breakpoints ride along per-message.
       const streamArgs: Record<string, unknown> = {
@@ -657,6 +660,11 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
       // run to completion and keep billing).
       if (req.abortSignal) streamArgs.abortSignal = req.abortSignal
       if (req.prepareStep) streamArgs.prepareStep = req.prepareStep
+      if (req.captureRequestMessages)
+        streamArgs.include = {
+          ...(streamArgs.include as Record<string, unknown> | undefined),
+          requestMessages: true,
+        }
       // Router + Fusion ledgered call (ADR-0188): one reservation, one request.
       // Only set by the dispatcher for a reserved call, so it overrides a
       // provider-configured `modelParams.maxRetries` exactly then and never else.
@@ -706,7 +714,7 @@ export function makeAiSdkAdapter(protocol: string, nativeCall?: SiwcNativeCall):
       // explicitly instead, and keep `fullStream` as the name of OUR contract:
       // `types.ts` AdapterResult, `code-adapter.ts` and
       // `openai-compatible-variant-adapter.ts` all produce that field, and
-      // `event-adapter.mjs` consumes it. This is the one place the SDK's name
+      // `runtimes/ai-sdk/events.ts` consumes it. This is the one place the SDK's name
       // and the internal name have to meet.
       const result = (await withTraceparent(req.traceparent, () =>
         streamTextFn(streamArgs)

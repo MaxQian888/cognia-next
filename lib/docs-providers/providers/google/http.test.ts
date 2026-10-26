@@ -66,3 +66,43 @@ describe("parseJson", () => {
     expect(parseJson("<html>")).toBeNull()
   })
 })
+
+describe("request cancellation", () => {
+  it("does not dispatch a pre-aborted native request", async () => {
+    isTauriMock.mockReturnValue(true)
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      googleHttp({ url: "https://x", method: "GET", signal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(connectorsHttpMock).not.toHaveBeenCalled()
+  })
+
+  it("forwards an active cancellation to fetch", async () => {
+    const controller = new AbortController()
+    let fetchSignal: AbortSignal | null | undefined
+    const original = globalThis.fetch
+    globalThis.fetch = jest.fn(async (_url, init) => {
+      fetchSignal = init?.signal
+      controller.abort()
+      return { status: 200, headers: new Map(), text: async () => "late" } as unknown as Response
+    })
+    try {
+      await expect(
+        googleHttp({ url: "https://x", method: "GET", signal: controller.signal })
+      ).rejects.toMatchObject({ name: "AbortError" })
+      expect(fetchSignal?.aborted).toBe(true)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it("releases the native caller on abort even while the native bridge is pending", async () => {
+    isTauriMock.mockReturnValue(true)
+    connectorsHttpMock.mockReturnValue(new Promise(() => undefined))
+    const controller = new AbortController()
+    const request = googleHttp({ url: "https://x", method: "GET", signal: controller.signal })
+    controller.abort()
+    await expect(request).rejects.toMatchObject({ name: "AbortError" })
+  })
+})

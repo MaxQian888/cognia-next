@@ -140,16 +140,30 @@ function number(value: unknown): number | undefined {
 }
 
 /** Input counters are disjoint in v4: cache tokens contribute to prompt totals. */
-function mapUsage(raw: unknown): ExternalAgentTokenUsage | undefined {
+function mapUsage(raw: unknown, committed = false): ExternalAgentTokenUsage | undefined {
   if (!record(raw)) return undefined
+  const inputTokens = number(raw.inputTokens)
+  const outputTokens = number(raw.outputTokens)
   const cacheReadTokens = number(raw.cacheReadTokens) ?? 0
   const cacheWriteTokens = number(raw.cacheWriteTokens) ?? 0
-  const promptTokens = (number(raw.inputTokens) ?? 0) + cacheReadTokens + cacheWriteTokens
-  const completionTokens = number(raw.outputTokens) ?? 0
+  const promptTokens = (inputTokens ?? 0) + cacheReadTokens + cacheWriteTokens
+  const completionTokens = outputTokens ?? 0
   return {
     promptTokens,
+    promptTokensIncludeCache: true,
     completionTokens,
     totalTokens: number(raw.totalTokens) ?? promptTokens + completionTokens,
+    // Only committed output enters the conversation. This request's measured
+    // prompt + output sizes the window; billing may sum many calls and retries.
+    ...(committed &&
+    inputTokens !== undefined &&
+    inputTokens >= 0 &&
+    outputTokens !== undefined &&
+    outputTokens >= 0 &&
+    cacheReadTokens >= 0 &&
+    cacheWriteTokens >= 0
+      ? { contextTokens: promptTokens + completionTokens }
+      : {}),
     ...(raw.cacheReadTokens === undefined ? {} : { cacheReadTokens }),
     ...(raw.cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
     ...(raw.reasoningTokens === undefined
@@ -262,7 +276,12 @@ export function translateDshNotification(notification: unknown): DshCodecResult 
           progress(`assistant/content:${JSON.stringify(block)}`)
         else throw new DshVersionDriftError(`assistant/content:${string(block.type) ?? "unknown"}`)
       }
-      events.push({ type: "message_end", ...base, messageId, tokenUsage: mapUsage(data.usage) })
+      events.push({
+        type: "message_end",
+        ...base,
+        messageId,
+        tokenUsage: mapUsage(data.usage, true),
+      })
       break
     }
     case "assistant/attempt": {
@@ -360,8 +379,23 @@ export function translateDshNotification(notification: unknown): DshCodecResult 
     case "step/end":
     case "session/end-seed":
       break
+    case "request/context": {
+      const capacity = number(data.contextWindow)
+      // Capacity is safe session metadata; request contents and occupancy are
+      // separate facts. A new model without capacity must clear the old one.
+      events.push({
+        type: "session_info_update",
+        ...base,
+        metadata: {
+          modelContextWindow:
+            capacity !== undefined && Number.isSafeInteger(capacity) && capacity > 0
+              ? capacity
+              : null,
+        },
+      })
+      break
+    }
     case "request/header":
-    case "request/context":
     case "system/message":
     case "user/message":
     case "agent/inbox/spliced":

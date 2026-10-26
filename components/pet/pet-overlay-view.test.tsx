@@ -534,7 +534,7 @@ describe("PetOverlayView", () => {
       const box = screen.getByTestId("pet-overlay-pet")
       const index = observe.mock.calls.findIndex(([target]) => target === box)
       expect(index).toBeGreaterThanOrEqual(0)
-      const observer = observe.mock.instances[index]
+      const observer: MutationObserver = observe.mock.contexts[index]
       const disconnect = jest.spyOn(observer, "disconnect")
       const anchor = screen.getByTestId("pet-bubble").parentElement
       expect(anchor).toHaveStyle({ bottom: "100px" })

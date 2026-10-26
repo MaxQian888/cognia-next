@@ -30,6 +30,7 @@ function createPage({
   native = false,
   existingAccount = false,
   blocked = false,
+  autoProvision = false,
 } = {}) {
   const reset = jest.fn(async () => {})
   const setSettings = jest.fn(async () => {})
@@ -64,6 +65,8 @@ function createPage({
       options?: { timeout: number }
     ) => {
       if (options?.timeout === 45_000 && existingAccount && !blocked)
+        fixtureWindow.__cogniaPluginRuntimeReady = true
+      if (options?.timeout === 30_000 && autoProvision)
         fixtureWindow.__cogniaPluginRuntimeReady = true
       if (argument?.databaseName === "cognia-account-registry") {
         seeded = true
@@ -143,6 +146,17 @@ test("an already unlocked runtime keeps its account and document", async () => {
   await ensureAppMounted(page)
   expect(goto).not.toHaveBeenCalled()
   expect(waitForFunction).toHaveBeenCalledTimes(1)
+})
+
+test("a dev account that finishes boot after the first snapshot does not wait for a creation form or reseed", async () => {
+  const { page, goto, waitForAccountForm } = createPage({ autoProvision: true })
+  waitForAccountForm.mockRejectedValueOnce(new Error("The dev account bypassed the creation form"))
+  await ensureAppMounted(page)
+  expect(goto).not.toHaveBeenCalled()
+  expect(page.evaluate).not.toHaveBeenCalledWith(expect.any(Function), {
+    accountId: "acct_e2e_seed_account",
+    databaseName: "cognia-account-registry",
+  })
 })
 
 test("ordinary feature resets establish completed onboarding without choosing mobile runtime mode", async () => {

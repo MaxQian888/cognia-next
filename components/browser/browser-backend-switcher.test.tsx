@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("@/lib/tauri/clipboard", () => ({ writeClipboardText: jest.fn() }))
@@ -79,7 +80,9 @@ describe("selectedBackend", () => {
   it("shows an explicit choice over the fallback", () => {
     expect(selectedBackend(decision(), "local-chromium")).toBe("local-chromium")
     expect(selectedBackend(decision({ backend: "remote" }), null)).toBe("remote")
-    expect(selectedBackend(decision({ backend: "web-fallback" }), "web-fallback")).toBe("embedded")
+    expect(selectedBackend(decision({ backend: "web-fallback" }), "web-fallback")).toBe(
+      "web-fallback"
+    )
   })
 })
 
@@ -102,10 +105,24 @@ describe("pickUserChromeCandidate", () => {
 })
 
 describe("BrowserBackendSwitcher", () => {
+  it("selects the web fallback using its actual backend value", async () => {
+    const { onPreferenceChange } = renderSwitcher({
+      local: local({ supported: false }),
+      decision: decision({ backend: "web-fallback", remoteReachable: true }),
+    })
+    const select = screen.getByRole("combobox", { name: "Browser engine" })
+    expect(
+      Array.from(getNativeSelect(select as HTMLSelectElement).options).map((o) => o.value)
+    ).toEqual(["web-fallback", "remote"])
+    await selectOption(select, "remote")
+    expect(onPreferenceChange).toHaveBeenCalledWith("remote")
+  })
   it("lists the desktop engines and hides the cloud one when unreachable", () => {
     renderSwitcher()
     const select = screen.getByRole("combobox", { name: "Browser engine" })
-    const labels = Array.from((select as HTMLSelectElement).options).map((o) => o.textContent)
+    const labels = Array.from(getNativeSelect(select as HTMLSelectElement).options).map(
+      (o) => o.textContent
+    )
     expect(labels).toEqual([
       "Built-in preview",
       "Local Chromium (not installed)",
@@ -119,17 +136,18 @@ describe("BrowserBackendSwitcher", () => {
       decision: decision({ remoteReachable: true }),
     })
     const select = screen.getByRole("combobox", { name: "Browser engine" }) as HTMLSelectElement
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(["embedded", "remote"])
+    expect(Array.from(getNativeSelect(select).options).map((o) => o.value)).toEqual([
+      "web-fallback",
+      "remote",
+    ])
   })
 
-  it("reports the chosen engine", () => {
+  it("reports the chosen engine", async () => {
     const { onPreferenceChange } = renderSwitcher({
       decision: decision({ localReachable: true }),
       local: local({ status: { ...STATUS, installed: true } }),
     })
-    fireEvent.change(screen.getByRole("combobox", { name: "Browser engine" }), {
-      target: { value: "local-chromium" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Browser engine" }), "local-chromium")
     expect(onPreferenceChange).toHaveBeenCalledWith("local-chromium")
   })
 
@@ -205,7 +223,7 @@ describe("BrowserBackendSwitcher", () => {
     expect(state.discoverUserChrome).toHaveBeenCalled()
   })
 
-  it("lets the user pick among installed browsers and explains the consent prompt", () => {
+  it("lets the user pick among installed browsers and explains the consent prompt", async () => {
     const { onUserChromeBrowserChange } = renderSwitcher({
       preference: "user-chrome",
       decision: decision({ userChromeReachable: true }),
@@ -213,9 +231,7 @@ describe("BrowserBackendSwitcher", () => {
         userChrome: [chrome(), chrome({ browser: "edge", label: "Microsoft Edge" })],
       }),
     })
-    fireEvent.change(screen.getByRole("combobox", { name: "Browser to attach" }), {
-      target: { value: "edge" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Browser to attach" }), "edge")
     expect(onUserChromeBrowserChange).toHaveBeenCalledWith("edge")
     expect(screen.getByText(/asks you to allow each connection/)).toBeInTheDocument()
   })

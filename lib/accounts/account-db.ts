@@ -1,6 +1,7 @@
-import Dexie, { type Table } from "dexie"
+import Dexie, { type Table, type Transaction } from "dexie"
 
 import type { QuickUnlockEnrollment } from "./quick-unlock/types"
+import type { AccountRegistryBootSnapshot } from "./registry-boot-read"
 
 import {
   ACCOUNT_REGISTRY_STATE_ID,
@@ -135,6 +136,33 @@ export function encryptedAccountDatabaseName(localAccountId: string): string {
 
 export class LocalAccountRegistry {
   constructor(private readonly db: CogniaAccountRegistryDB = new CogniaAccountRegistryDB()) {}
+
+  async readBootSnapshot(signal: AbortSignal): Promise<AccountRegistryBootSnapshot> {
+    // A boot attempt owns this connection and transaction exclusively. Closing
+    // a timed-out open must not close a newer attempt or an unlocked account's
+    // registry connection. No schema or user data is deleted by cancellation.
+    const bootDb = new CogniaAccountRegistryDB(this.db.name)
+    const registry = new LocalAccountRegistry(bootDb)
+    let transaction: Transaction | undefined
+    const cancel = () => {
+      if (transaction?.active) transaction.abort()
+      bootDb.close()
+    }
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      signal.throwIfAborted()
+      await bootDb.open()
+      signal.throwIfAborted()
+      return await bootDb.transaction("rw", bootDb.accounts, bootDb.state, async (current) => {
+        transaction = current
+        signal.throwIfAborted()
+        return Promise.all([registry.listAccounts(), registry.getState()])
+      })
+    } finally {
+      signal.removeEventListener("abort", cancel)
+      bootDb.close()
+    }
+  }
 
   async getState(): Promise<AccountRegistryState> {
     return this.ensureState()

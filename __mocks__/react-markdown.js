@@ -302,7 +302,7 @@ function ReactMarkdown({
   // captured for integration-order assertions; this mock does not execute the
   // remark/rehype pipeline itself.
   remarkPlugins = [],
-  rehypePlugins: _h,
+  rehypePlugins = [],
   ..._rest
 }) {
   const els = parseMarkdown(children, components)
@@ -319,6 +319,7 @@ function ReactMarkdown({
       hidden: true,
       "data-testid": "react-markdown-config",
       "data-remark-order": remarkOrder,
+      "data-rehype-count": String(rehypePlugins.length),
     }),
     ...els
   )

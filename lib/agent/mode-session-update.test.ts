@@ -13,12 +13,9 @@ const builtIn: AgentModeConfig = {
 }
 
 describe("buildAgentModeSessionUpdate", () => {
-  it("returns id + systemPrompt for a built-in mode without overrides", () => {
+  it("returns only the id for a built-in mode without overrides", () => {
     const update = buildAgentModeSessionUpdate(builtIn)
-    expect(update).toEqual<AgentModeSessionFields>({
-      agentModeId: "general",
-      systemPrompt: "You are helpful.",
-    })
+    expect(update).toEqual<AgentModeSessionFields>({ agentModeId: "general" })
     expect(update.model).toBeUndefined()
     expect(update.temperature).toBeUndefined()
     expect(update.maxTokens).toBeUndefined()

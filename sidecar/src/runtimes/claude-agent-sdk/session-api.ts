@@ -8,7 +8,7 @@ import type { SessionStore } from "@anthropic-ai/claude-agent-sdk"
 //   out: { type: "session_api", requestId, method, params }
 //   in:  { type: "session_api_response", requestId, ok, result?, error? }
 //
-// The allowlist is the same defence as `control.mjs`: a malformed or hostile
+// The allowlist is the same defence as `control.ts`: a malformed or hostile
 // frame must never reflectively reach an arbitrary SDK export. Everything here
 // is pure routing + validation, so it is unit-testable without a live SDK — the
 // actual functions are injected.

@@ -22,6 +22,8 @@ import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { defaultShareBaseUrl, resolveShareEndpoint } from "@/lib/share/config"
 import {
   loadShare,
@@ -181,16 +183,15 @@ function Body({
         <Centered>
           <h1 className="text-xl font-semibold">{t("confirmTitle")}</h1>
           <p className="text-sm text-muted-foreground">{t("confirmBody")}</p>
-          <button
+          <Button
             type="button"
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             onClick={async () => {
               onState({ status: "loading" })
               onState(await openShare(state.request))
             }}
           >
             {t("confirmSubmit")}
-          </button>
+          </Button>
         </Centered>
       )
     case "passphrase-pending":
@@ -254,21 +255,16 @@ function PassphraseGate({
           if (value) onSubmit(value)
         }}
       >
-        <input
+        <Input
           type="password"
           aria-label={t("passphraseLabel")}
+          aria-invalid={wrong || undefined}
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={t("passphrasePlaceholder")}
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm"
         />
-        <button
-          type="submit"
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          {t("passphraseSubmit")}
-        </button>
+        <Button type="submit">{t("passphraseSubmit")}</Button>
       </form>
       {wrong ? <p className="text-sm text-destructive">{t("passphraseWrong")}</p> : null}
     </div>

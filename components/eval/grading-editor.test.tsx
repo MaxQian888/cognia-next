@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -46,9 +47,9 @@ describe("GradingEditor", () => {
     return onChange
   }
 
-  it("switches mode", () => {
+  it("switches mode", async () => {
     const onChange = setup({ mode: "exact" })
-    fireEvent.change(screen.getByLabelText("mode"), { target: { value: "numeric" } })
+    await selectOption(screen.getByLabelText("mode"), "numeric")
     expect(onChange).toHaveBeenCalledWith({ mode: "numeric" })
   })
 

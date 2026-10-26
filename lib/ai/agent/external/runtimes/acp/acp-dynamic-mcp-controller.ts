@@ -3,6 +3,8 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { z } from "zod"
 
 import { resolveMcpRuntimeCredential } from "@/lib/mcp/credential-resolver"
+import { gatewayDenial } from "@/lib/mcp/policy"
+import { fingerprintMcpDefinition } from "@/lib/mcp/server-definition"
 import { openMcpClient, type OpenedMcp } from "@/lib/mcp/transport"
 import type {
   AcpConnectMcpRequest,
@@ -17,7 +19,20 @@ import type {
 
 interface DynamicMcpConnection {
   sessionId: string
+  serverId: string
+  /** Definition the client was opened against (see `definitionKey`). */
+  definition: string
   opened: OpenedMcp
+}
+
+/**
+ * Identity of a saved definition: revision, credential version and the
+ * executable/endpoint shape. An open client is bound to the definition it
+ * dialled, so a later edit (even one re-reviewed and trusted) must not be
+ * judged on the open client's behalf.
+ */
+function definitionKey(server: McpServer): string {
+  return `${server.revision ?? 1}:${server.credentialVersion ?? 0}:${fingerprintMcpDefinition(server)}`
 }
 
 interface DynamicMcpControllerDeps {
@@ -74,7 +89,12 @@ export class CogniaAcpDynamicMcpController implements AcpDynamicMcpHostControlle
         ...(notification.params ? { params: notification.params } : {}),
       })
     }
-    this.connections.set(connectionId, { sessionId: context.sessionId, opened })
+    this.connections.set(connectionId, {
+      sessionId: context.sessionId,
+      serverId: server.id,
+      definition: definitionKey(server),
+      opened,
+    })
     return { connectionId }
   }
 
@@ -89,6 +109,7 @@ export class CogniaAcpDynamicMcpController implements AcpDynamicMcpHostControlle
     if (!hasNoLeakingPiiDeep({ method: request.method, params: request.params })) {
       throw new Error("MCP-over-ACP payload was blocked by the PII egress gate")
     }
+    await this.authorize(request, connection)
     const message = {
       method: request.method,
       ...(request.params ? { params: request.params } : {}),
@@ -104,6 +125,49 @@ export class CogniaAcpDynamicMcpController implements AcpDynamicMcpHostControlle
       throw new Error("MCP client does not support raw requests")
     }
     return connection.opened.client.request(message, z.unknown(), { signal: context.signal })
+  }
+
+  /**
+   * The connection outlives `connect`'s policy check, so every message is
+   * judged against the server as the Registry holds it now: a disabled,
+   * blocked or deleted server ends the connection, and a `tools/call` for a
+   * tool a saved rule denies is refused.
+   */
+  private async authorize(
+    request: AcpMessageMcpRequest | AcpMessageMcpNotification,
+    connection: DynamicMcpConnection
+  ): Promise<void> {
+    const getServer =
+      this.deps.getServer ??
+      (async (serverId: string) => (await import("@/lib/db/mcp-servers")).getMcpServer(serverId))
+    const server = await getServer(connection.serverId)
+    const params = (request.params ?? {}) as { name?: unknown }
+    const toolCall = request.method === "tools/call" && typeof params.name === "string"
+    const denial = !server
+      ? ({
+          message: `MCP server ${connection.serverId} is no longer configured`,
+          revoke: "server",
+        } as const)
+      : definitionKey(server) !== connection.definition
+        ? ({
+            message: `MCP server ${server.name} changed since this connection opened; reconnect`,
+            revoke: "server",
+          } as const)
+        : gatewayDenial(
+            {
+              server,
+              surface: "agent-sync",
+              interactive: false,
+              toolName: toolCall ? (params.name as string) : request.method,
+            },
+            toolCall
+          )
+    if (!denial) return
+    if (denial.revoke) {
+      this.connections.delete(request.connectionId)
+      await connection.opened.close().catch(() => undefined)
+    }
+    throw new Error(denial.message)
   }
 
   async disconnect(

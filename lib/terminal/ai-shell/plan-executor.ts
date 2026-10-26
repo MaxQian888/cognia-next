@@ -2,7 +2,7 @@
  * Plan executor for the AI Shell.
  *
  * Runs an execution plan step by step — writes each command to the PTY,
- * waits for the command to complete (via OSC 633 events or timeout fallback),
+ * waits for a real command completion event (or fails on timeout),
  * records the exit code, and pauses on failure for user decision.
  *
  * Design notes:
@@ -24,12 +24,17 @@ import type {
 /** Default per-step timeout in ms. */
 export const DEFAULT_STEP_TIMEOUT_MS = 60_000
 
+/** Bounded wait for a real command-end after requesting a foreground interrupt. */
+export const INTERRUPT_ACK_TIMEOUT_MS = 2_000
+
 /** Result from executing a single step. */
 export interface StepResult {
   index: number
   status: StepStatus
   exitCode: number | null
   outputSnippet: string | null
+  /** No real completion was observed; writing further input may be unsafe. */
+  unconfirmed?: boolean
 }
 
 /** Result from running the entire plan. */
@@ -65,41 +70,74 @@ export async function executeStep(
 
   return new Promise<StepResult>((resolve) => {
     let settled = false
+    let interrupting: StepStatus | null = null
+    let interruptAccepted = false
+    let completionSeen = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let unsubCommandEnd: (() => void) | null = null
     let unsubAbort: (() => void) | null = null
 
-    const settle = (status: StepStatus, exitCode: number | null) => {
+    const finish = (status: StepStatus, exitCode: number | null) => {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
       unsubCommandEnd?.()
       unsubAbort?.()
       const outputSnippet = status === "failed" ? session.getRecentOutput(20) : null
-      resolve({ index: step.index, status, exitCode, outputSnippet })
+      resolve({
+        index: step.index,
+        status,
+        exitCode,
+        outputSnippet,
+        ...(status === "failed" && !completionSeen ? { unconfirmed: true } : {}),
+      })
     }
 
-    // Arm the command-end listener before writing to avoid race
-    unsubCommandEnd = session.onCommandEnd((exitCode) => {
-      settle(exitCode === 0 ? "succeeded" : "failed", exitCode)
-    })
+    const interrupt = (status: StepStatus) => {
+      if (settled || interrupting) return
+      interrupting = status
+      if (timer) clearTimeout(timer)
+      unsubAbort?.()
+      // Sending ETX requests a foreground interrupt without destroying the
+      // shell. Retain completion observation: transport acceptance alone does
+      // not establish that the process stopped (it may ignore SIGINT).
+      timer = setTimeout(() => finish("failed", null), INTERRUPT_ACK_TIMEOUT_MS)
+      Promise.resolve()
+        .then(() => session.write("\u0003"))
+        .then(
+          () => {
+            interruptAccepted = true
+            if (completionSeen) finish(status, null)
+          },
+          () => finish("failed", null)
+        )
+    }
 
-    // Abort handler
+    unsubCommandEnd = session.onCommandEnd((exitCode) => {
+      completionSeen = true
+      if (interrupting) {
+        if (interruptAccepted) finish(interrupting, null)
+      } else {
+        finish(exitCode === 0 ? "succeeded" : "failed", exitCode)
+      }
+    })
+    if (settled) {
+      unsubCommandEnd()
+      return
+    }
+
     if (signal) {
-      const onAbort = () => settle("cancelled", null)
+      const onAbort = () => interrupt("cancelled")
       signal.addEventListener("abort", onAbort, { once: true })
       unsubAbort = () => signal.removeEventListener("abort", onAbort)
     }
 
-    // Timeout fallback
-    timer = setTimeout(() => {
-      // If we hit the timeout, treat it as a failure — the command is likely
-      // stuck or the shell didn't emit OSC 633 command_end.
-      settle("failed", null)
-    }, timeoutMs)
-
-    // Write the command to the PTY (with \r to submit)
-    session.write(step.command + "\r")
+    timer = setTimeout(() => interrupt("failed"), timeoutMs)
+    try {
+      Promise.resolve(session.write(step.command + "\r")).catch(() => finish("failed", null))
+    } catch {
+      finish("failed", null)
+    }
   })
 }
 
@@ -122,15 +160,20 @@ export async function executePlan(
   const signal = options?.signal
   const results: StepResult[] = []
 
-  for (const step of plan.steps) {
+  for (const [position, step] of plan.steps.entries()) {
     // Check abort before each step
     if (signal?.aborted) {
       results.push({ index: step.index, status: "cancelled", exitCode: null, outputSnippet: null })
       onProgress?.(step.index, "cancelled", null, null)
       // Mark remaining steps as cancelled
-      for (let i = step.index + 1; i < plan.steps.length; i++) {
-        results.push({ index: i, status: "cancelled", exitCode: null, outputSnippet: null })
-        onProgress?.(i, "cancelled", null, null)
+      for (const remaining of plan.steps.slice(position + 1)) {
+        results.push({
+          index: remaining.index,
+          status: "cancelled",
+          exitCode: null,
+          outputSnippet: null,
+        })
+        onProgress?.(remaining.index, "cancelled", null, null)
       }
       break
     }
@@ -157,16 +200,26 @@ export async function executePlan(
     // On failure, stop execution (caller decides what to do)
     if (result.status === "failed") {
       // Mark remaining steps as pending (not cancelled — user may retry)
-      for (let i = step.index + 1; i < plan.steps.length; i++) {
-        results.push({ index: i, status: "pending", exitCode: null, outputSnippet: null })
+      for (const remaining of plan.steps.slice(position + 1)) {
+        results.push({
+          index: remaining.index,
+          status: "pending",
+          exitCode: null,
+          outputSnippet: null,
+        })
       }
       break
     }
 
     if (result.status === "cancelled") {
-      for (let i = step.index + 1; i < plan.steps.length; i++) {
-        results.push({ index: i, status: "cancelled", exitCode: null, outputSnippet: null })
-        onProgress?.(i, "cancelled", null, null)
+      for (const remaining of plan.steps.slice(position + 1)) {
+        results.push({
+          index: remaining.index,
+          status: "cancelled",
+          exitCode: null,
+          outputSnippet: null,
+        })
+        onProgress?.(remaining.index, "cancelled", null, null)
       }
       break
     }
@@ -181,7 +234,7 @@ export async function executePlan(
     completedSteps,
     totalSteps: plan.steps.length,
     allSucceeded: completedSteps === plan.steps.length,
-    firstFailedStep: firstFailed,
+    firstFailedStep: firstFailed === -1 ? -1 : results[firstFailed].index,
     steps: results,
   }
 }

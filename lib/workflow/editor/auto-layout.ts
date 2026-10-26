@@ -10,6 +10,10 @@
  */
 
 import type { RFWorkflowEdge, RFWorkflowNode } from "./react-flow-converter"
+import type { AutoLayoutDirection } from "@cognia/plugin-contract/lib/workflow/editor/auto-layout"
+import { ELK_DIRECTIONS } from "@cognia/plugin-contract/lib/workflow/editor/auto-layout"
+export { ELK_DIRECTIONS } from "@cognia/plugin-contract/lib/workflow/editor/auto-layout"
+export type { AutoLayoutDirection } from "@cognia/plugin-contract/lib/workflow/editor/auto-layout"
 
 interface ElkNodeShape {
   id: string
@@ -43,16 +47,6 @@ const DEFAULT_LAYOUT_OPTIONS = {
 
 const DEFAULT_NODE_WIDTH = 220
 const DEFAULT_NODE_HEIGHT = 80
-
-/** Editor-facing flow directions mapped onto elkjs' `elk.direction` values. */
-export const ELK_DIRECTIONS = {
-  LR: "RIGHT",
-  RL: "LEFT",
-  TB: "DOWN",
-  BT: "UP",
-} as const
-
-export type AutoLayoutDirection = keyof typeof ELK_DIRECTIONS
 
 export interface AutoLayoutOptions {
   /** Flow direction. Omit for the project default (LR / `RIGHT`). */

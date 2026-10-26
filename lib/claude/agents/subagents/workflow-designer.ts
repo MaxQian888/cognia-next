@@ -69,5 +69,4 @@ export const workflowDesignerAgent: AgentDefinition = {
     "mcp__cognia-plugin-tools__wf_select_nodes",
     "mcp__cognia-plugin-tools__wf_focus_viewport",
   ],
-  maxTurns: 20,
 }

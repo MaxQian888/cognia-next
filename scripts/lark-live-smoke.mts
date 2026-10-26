@@ -180,9 +180,14 @@ const { probeBotIdentity } = await import("../lib/connectors/adapters/lark/whoam
 const { larkTenantRequest } = await import("../lib/connectors/adapters/lark/http")
 const { getTenantAccessToken } = await import("../lib/connectors/adapters/lark/auth")
 const { getDb } = await import("../lib/db/schema")
-const eventMod = await import("../types/connectors/event")
-type AnyEvent = import("../types/connectors/event").NormalizedInboundEvent
-type OutboundReq = import("../types/connectors/outbound").OutboundRequest
+// The contract module itself, not the `types/connectors/event` shim: tsx loads
+// the shim as CommonJS, and its `export *` re-exports are invisible to this ESM
+// file's named lookup (see scripts/build/dev-cli.mjs).
+const eventMod = await import("../packages/plugin-contract/src/types/connectors/event")
+type AnyEvent =
+  import("../packages/plugin-contract/src/types/connectors/event").NormalizedInboundEvent
+type OutboundReq =
+  import("../packages/plugin-contract/src/types/connectors/outbound").OutboundRequest
 
 const creds = { appId: APP_ID, appSecret: APP_SECRET }
 

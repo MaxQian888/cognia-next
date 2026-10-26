@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UIToggleGroup, type A2UIToggleGroupComponent } from "./a2ui-toggle-group"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -35,6 +35,21 @@ describe("A2UIToggleGroup", () => {
     onAction: jest.fn(),
     onDataChange: jest.fn(),
     renderChild: jest.fn(),
+  })
+
+  it("blocks interaction when the whole group is disabled", () => {
+    const props = cp({
+      id: "locked",
+      component: "ToggleGroup",
+      options: [{ value: "a", label: "Locked option" }],
+      value: { path: "/selected" },
+      disabled: true,
+    })
+    render(<A2UIToggleGroup {...props} />)
+    const option = screen.getByRole("button", { name: "Locked option" })
+    expect(option).toBeDisabled()
+    fireEvent.click(option)
+    expect(props.onDataChange).not.toHaveBeenCalled()
   })
 
   it("renders options", () => {

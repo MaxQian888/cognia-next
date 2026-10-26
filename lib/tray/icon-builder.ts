@@ -1,4 +1,4 @@
-// Renderer-side tray-icon rasterizer.
+// Renderer-side character tray-icon rasterizer with status and usage badges.
 //
 // We reuse four Lucide icons verbatim by inlining their SVG path data
 // (license: ISC, see `node_modules/lucide-react/LICENSE`). Inlining sidesteps
@@ -9,7 +9,7 @@
 // EXACTLY; if you want to upgrade the visual, copy the new `d` strings from
 // `node_modules/lucide-react/dist/esm/icons/<name>.mjs`.
 //
-// Pipeline: `state → iconNode → SVG string → offscreen canvas → PNG bytes →
+// Pipeline: `character + state badge → offscreen canvas → PNG bytes →
 // invoke("tray_register_icon")`. Rust caches the bytes keyed by state and
 // `tray_set_icon_state` swaps them without any further IPC round-trip.
 
@@ -20,6 +20,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 import type { TrayIconState } from "./types"
+import characterIcon from "@/src-tauri/icons/128x128.png"
 
 /** One node in a Lucide iconNode: `[tagName, attrsByName]`. */
 type LucideNode = [string, Record<string, string | number>]
@@ -126,11 +127,12 @@ export interface TrayIconBadge {
   color: string
 }
 
-/** Rasterize the given SVG string to PNG bytes via an offscreen canvas. */
+/** Composite the character, an optional SVG status badge and the usage readout. */
 export async function rasterizeSvgToPng(
   svg: string,
   size: number,
-  badge?: TrayIconBadge
+  badge?: TrayIconBadge,
+  showStatus = true
 ): Promise<Uint8Array> {
   if (typeof document === "undefined") {
     throw new Error("rasterizeSvgToPng requires a DOM (document undefined)")
@@ -138,7 +140,7 @@ export async function rasterizeSvgToPng(
   const blob = new Blob([svg], { type: "image/svg+xml" })
   const url = URL.createObjectURL(blob)
   try {
-    const image = await loadImage(url)
+    const [character, image] = await Promise.all([loadImage(characterIcon.src), loadImage(url)])
     const canvas = document.createElement("canvas")
     canvas.width = size
     canvas.height = size
@@ -148,7 +150,17 @@ export async function rasterizeSvgToPng(
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = "high"
     ctx.clearRect(0, 0, size, size)
-    ctx.drawImage(image, 0, 0, size, size)
+    // Keep the same full-color character used by the native bootstrap icon.
+    // State is a small corner badge, never a replacement for the app identity.
+    ctx.drawImage(character, 0, 0, size, size)
+    if (showStatus) {
+      const statusSize = size * 0.45
+      ctx.fillStyle = "#ffffff"
+      ctx.beginPath()
+      ctx.roundRect(size - statusSize, 0, statusSize, statusSize, statusSize * 0.2)
+      ctx.fill()
+      ctx.drawImage(image, size - statusSize, 0, statusSize, statusSize)
+    }
     if (badge) drawBadge(ctx, size, badge)
     return await canvasToPng(canvas)
   } finally {
@@ -162,10 +174,7 @@ export async function rasterizeSvgToPng(
  * Tray icons render at ~16-32 px, so the text is clamped to 3 glyphs —
  * anything longer would be unreadable at that size.
  *
- * On macOS the icon is applied as a template image (alpha mask), so the
- * badge shows as a solid knockout rather than the status color — usable,
- * but the `title` taskbar mode is the better fit there (the settings UI
- * says so).
+ * The native icon stays full-color on every platform, including macOS.
  */
 export function drawBadge(ctx: CanvasRenderingContext2D, size: number, badge: TrayIconBadge): void {
   const text = badge.text.replace(/%$/, "").slice(0, 3)
@@ -213,10 +222,7 @@ async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
  * Render every tray-icon state and push the resulting PNG bytes to Rust.
  * Idempotent — Rust caches by state, so calling this twice is safe.
  *
- * `color` defaults to opaque black, which works for:
- *   - Windows / Linux tray icons (visible against any tray background)
- *   - macOS template icons (the OS auto-inverts the alpha mask via
- *     `set_icon_as_template(true)`)
+ * `color` controls only the small status glyph; the character keeps its colors.
  *
  * `size` defaults to 32 — sufficient resolution for 100 % DPI down to 200 %.
  * The OS scales as needed.
@@ -236,7 +242,7 @@ export async function rasterizeAndRegisterTrayIcons({
         // flips; Rust re-applies the current state's raster on registration
         // (`tray_register_icon`), so no extra `tray_set_icon_state` call is
         // needed for the swap to take effect.
-        const png = await rasterizeSvgToPng(svg, size, badge)
+        const png = await rasterizeSvgToPng(svg, size, badge, state !== "idle")
         await invoke("tray_register_icon", { state, pngBytes: Array.from(png) })
       } catch (err) {
         loggers.tray.warn("tray icon raster failed", { state, error: String(err) })

@@ -3,7 +3,7 @@ import {
   normalizePluginRelativePath,
   resolvePluginPath,
 } from "./plugin-path"
-import fixtures from "@/packages/plugin-sdk/contract/path-fixtures.json"
+import fixtures from "@/packages/plugin-contract/contract/path-fixtures.json"
 
 describe("plugin path confinement", () => {
   it.each(fixtures.invalid)("rejects an unsafe plugin-relative path: %s", (entry) => {

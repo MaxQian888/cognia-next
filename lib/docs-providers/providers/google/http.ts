@@ -22,6 +22,9 @@ export interface GoogleHttpRequest {
   headers?: Record<string, string>
   body?: string
   timeoutMs?: number
+  /** Fetch aborts I/O. Native abort prevents dispatch or releases the caller;
+   * the bridge has no cancel IPC, so dispatched native I/O retains its timeout. */
+  signal?: AbortSignal
 }
 
 export interface GoogleHttpResponse {
@@ -47,7 +50,10 @@ function lowerHeaders(
 }
 
 async function fetchTransport(request: GoogleHttpRequest): Promise<GoogleHttpResponse> {
+  throwIfGoogleRequestAborted(request.signal)
   const controller = new AbortController()
+  const abort = () => controller.abort(request.signal?.reason)
+  request.signal?.addEventListener("abort", abort, { once: true })
   const timer = setTimeout(() => controller.abort(), request.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   try {
     const response = await fetch(request.url, {
@@ -56,29 +62,72 @@ async function fetchTransport(request: GoogleHttpRequest): Promise<GoogleHttpRes
       body: request.body,
       signal: controller.signal,
     })
+    const body = await response.text()
+    throwIfGoogleRequestAborted(controller.signal)
     return {
       status: response.status,
       headers: lowerHeaders(response.headers as unknown as Iterable<[string, string]>),
-      body: await response.text(),
+      body,
     }
   } finally {
     clearTimeout(timer)
+    request.signal?.removeEventListener("abort", abort)
   }
 }
 
-async function tauriTransport(request: GoogleHttpRequest): Promise<GoogleHttpResponse> {
-  const response = await connectorsHttpRequest({
-    url: request.url,
-    method: request.method,
-    headers: request.headers,
-    body: request.body,
-    timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+/** Preserve the caller's AbortSignal reason without creating a transport error. */
+export function throwIfGoogleRequestAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("Request aborted", "AbortError")
+}
+
+/** Stop waiting without cancelling work (such as a shared token refresh). */
+export async function withGoogleRequestAbort<T>(
+  signal: AbortSignal | undefined,
+  operation: () => Promise<T>
+): Promise<T> {
+  throwIfGoogleRequestAborted(signal)
+  if (!signal) return operation()
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", abort)
+    const abort = () => {
+      cleanup()
+      reject(signal.reason ?? new DOMException("Request aborted", "AbortError"))
+    }
+    signal.addEventListener("abort", abort, { once: true })
+    try {
+      void operation().then(
+        (result) => {
+          cleanup()
+          if (signal.aborted) return abort()
+          resolve(result)
+        },
+        (err: unknown) => {
+          cleanup()
+          reject(err)
+        }
+      )
+    } catch (err) {
+      cleanup()
+      reject(err)
+    }
   })
-  return {
-    status: response.status,
-    headers: lowerHeaders(response.headers ?? {}),
-    body: response.body ?? "",
-  }
+}
+
+async function tauriTransport(request: GoogleHttpRequest): Promise<GoogleHttpResponse> {
+  return withGoogleRequestAbort(request.signal, async () => {
+    const response = await connectorsHttpRequest({
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    })
+    return {
+      status: response.status,
+      headers: lowerHeaders(response.headers ?? {}),
+      body: response.body ?? "",
+    }
+  })
 }
 
 /** Pick the transport for the local host. */

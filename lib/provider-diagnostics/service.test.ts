@@ -1,5 +1,10 @@
 import type { ProviderDiagnosticTarget } from "@cognia/provider-types"
 
+jest.mock("./refresh", () => ({
+  resumeProviderReachabilityRefresh: jest.fn(async () => undefined),
+}))
+import { resumeProviderReachabilityRefresh } from "./refresh"
+
 import {
   cancelProviderDiagnosticJob,
   cancelProviderDiagnosticTarget,
@@ -82,6 +87,40 @@ describe("startProviderDiagnosticJob spend ceiling", () => {
 })
 
 describe("startProviderDiagnosticJob", () => {
+  it("resumes an authentication-paused reachability clock only after a successful manual probe", async () => {
+    jest.mocked(resumeProviderReachabilityRefresh).mockClear()
+    await startProviderDiagnosticJob(
+      {
+        providerId: "openai",
+        mode: "quick",
+        capability: "probe",
+        targets: [{ ...target("probe"), capability: "probe", billable: false }],
+      },
+      {
+        executeSample: async () => ({ metrics: { totalDurationMs: 1 } }),
+        recordJob: async (job) => job,
+        recordSample: async (sample) => sample,
+      }
+    )
+    expect(resumeProviderReachabilityRefresh).toHaveBeenCalledWith("openai")
+    jest.mocked(resumeProviderReachabilityRefresh).mockClear()
+    await startProviderDiagnosticJob(
+      {
+        providerId: "openai",
+        mode: "quick",
+        capability: "probe",
+        targets: [{ ...target("bad-probe"), capability: "probe", billable: false }],
+      },
+      {
+        executeSample: async () => {
+          throw new Error("401")
+        },
+        recordJob: async (job) => job,
+        recordSample: async (sample) => sample,
+      }
+    )
+    expect(resumeProviderReachabilityRefresh).not.toHaveBeenCalled()
+  })
   it("runs warm-up plus three measured samples in precise mode and persists every outcome", async () => {
     const jobs: string[] = []
     const samples: Array<{ targetId: string; sampleRole: string }> = []

@@ -1,30 +1,21 @@
 /**
  * Plugin SDK — `workspace-backend` capability surface.
  *
- * Re-exports the authoring helper, manifest bridge, plugin context API, and
- * host workspace-backend registry used by plugin-contributed execution
- * backends.
+ * Exports the authoring helper, the types of `ctx.workspace`, and the host
+ * workspace-backend registry used by plugin-contributed execution backends.
+ * The host builds `ctx.workspace` and registers manifest-declared backends
+ * itself.
  */
 
 export { defineWorkspaceBackend } from "../define/define-workspace-backend"
-
-export {
-  registerWorkspaceBackendsForPlugin,
-  unregisterWorkspaceBackendsForPlugin,
-} from "@/lib/plugin/bridge/workspace-backend-bridge"
 
 export type {
   WorkspaceBackendBridgeError,
   WorkspaceBackendBridgeOptions,
   WorkspaceBackendBridgeResult,
-} from "@/lib/plugin/bridge/workspace-backend-bridge"
+} from "@cognia/plugin-contract/lib/plugin/bridge/workspace-backend-bridge"
 
-export {
-  clearWorkspaceBackendsForPluginContext,
-  createWorkspaceAPI,
-} from "@/lib/plugin/api/workspace-api"
-
-export type { PluginWorkspaceAPI } from "@/lib/plugin/api/workspace-api"
+export type { PluginWorkspaceAPI } from "@cognia/plugin-contract/lib/plugin/api/workspace-api"
 
 export {
   clearWorkspaceBackendsForPlugin,
@@ -34,12 +25,12 @@ export {
   registerWorkspaceBackend,
   subscribeWorkspaceBackendRegistry,
   unregisterWorkspaceBackend,
-} from "@/lib/github/workspace-backend-registry"
+} from "@cognia/plugin-contract/lib/github/workspace-backend-registry"
 
 export type {
   WorkspaceBackendRegistration,
   WorkspaceBackendRegistryEvent,
-} from "@/lib/github/workspace-backend-registry"
+} from "@cognia/plugin-contract/lib/github/workspace-backend-registry"
 
 export type {
   PluginWorkspaceBackendDef,
@@ -47,4 +38,4 @@ export type {
   PluginWorkspaceBackendFactoryContext,
   PluginWorkspaceBackendRegistration,
   WorkspaceProvider,
-} from "@/types/plugin/plugin-workspace-backend"
+} from "@cognia/plugin-contract/types/plugin/plugin-workspace-backend"

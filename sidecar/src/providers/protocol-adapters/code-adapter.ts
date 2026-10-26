@@ -12,7 +12,7 @@
 //                       { type: "protocol_adapter_done",  sessionId, execId, usage? }
 //                       { type: "protocol_adapter_error", sessionId, execId, error }
 //
-// Each `chunk` is an AI-SDK-fullStream-shaped event, so `event-adapter.mjs`
+// Each `chunk` is an AI-SDK-fullStream-shaped event, so `runtimes/ai-sdk/events.ts`
 // stays the single normalizer no matter which adapter served the turn.
 
 import { randomUUID } from "node:crypto"

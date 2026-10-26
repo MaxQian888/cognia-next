@@ -65,7 +65,7 @@ import { BrowserNavigationControls } from "@/components/browser/browser-navigati
 import {
   BrowserToolbar,
   addressDisplayParts,
-  toolbarTier,
+  COMPACT_TOOLBAR_PX,
 } from "@/components/browser/browser-toolbar"
 import { BrowserToolsDock } from "@/components/browser/browser-tools-dock"
 import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
@@ -83,7 +83,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useElementSelection } from "@/hooks/browser/use-element-selection"
-import { useElementWidth } from "@/hooks/use-element-width"
+import { useElementWidthFits } from "@/hooks/use-element-width-fits"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import {
   useLocalBrowserSession,
   type LocalSessionState,
@@ -97,6 +98,12 @@ import type { LocalChromiumEngine, LocalEngineBackend } from "@/lib/browser/loca
 import type { BrowserPageSummary } from "@/lib/browser/session-types"
 import type { LocalBrowserDialog as LocalBrowserDialogState } from "@/lib/browser/shared-local-browser"
 import { createFramePainter, type FramePainter } from "@/lib/browser/frame-painter"
+import {
+  createLocalViewportScheduler,
+  type LocalViewport,
+  type LocalViewportResult,
+} from "@/lib/browser/local-viewport-scheduler"
+import type { RemoteBrowserFrame } from "@/lib/browser/remote-stream"
 import {
   createLocalInputQueue,
   type LocalBrowserInput,
@@ -166,6 +173,9 @@ interface FrameCanvas {
   canvasRef: RefObject<HTMLCanvasElement | null>
   frameSizeRef: RefObject<{ width: number; height: number }>
   drawFrame: (bytes: Uint8Array) => void
+  resetPage: () => void
+  requestViewport: (viewport: LocalViewport) => void
+  applyViewport: (viewport: LocalViewport, result: LocalViewportResult | void) => void
 }
 
 const DETAIL_LEVELS: readonly OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
@@ -185,28 +195,93 @@ function useFrameCanvas(): FrameCanvas {
   const frameSizeRef = useRef({ width: 1, height: 1 })
   // Made on the first frame and dropped on unmount (a remount makes another).
   const painterRef = useRef<FramePainter | null>(null)
-  useEffect(
-    () => () => {
+  const activeRef = useRef(false)
+  const viewportRef = useRef<{
+    width: number
+    height: number
+    ready: boolean
+    after: number
+  } | null>(null)
+  const candidateRef = useRef<RemoteBrowserFrame | null>(null)
+  const resetPage = useCallback(() => {
+    painterRef.current?.dispose()
+    painterRef.current = null
+    viewportRef.current = null
+    candidateRef.current = null
+    frameSizeRef.current = { width: 1, height: 1 }
+    if (canvasRef.current) {
+      canvasRef.current.style.opacity = "0"
+      canvasRef.current.style.pointerEvents = "none"
+      canvasRef.current.dataset.viewportReady = "false"
+    }
+  }, [])
+  useEffect(() => {
+    activeRef.current = true
+    return () => {
+      activeRef.current = false
       painterRef.current?.dispose()
       painterRef.current = null
-    },
-    []
-  )
-  const drawFrame = useCallback((bytes: Uint8Array) => {
-    let frame
-    try {
-      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-      frame = decodeRemoteBrowserFrame(buffer as ArrayBuffer)
-    } catch {
-      return
+      candidateRef.current = null
     }
-    // The header describes CSS input coordinates; the bitmap carries the
-    // Retina pixels Chromium rendered at its launch density.
-    frameSizeRef.current = { width: frame.width, height: frame.height }
-    painterRef.current ??= createFramePainter(() => canvasRef.current)
+  }, [])
+  const paint = useCallback((frame: RemoteBrowserFrame) => {
+    if (!activeRef.current) return
+    painterRef.current ??= createFramePainter(() => canvasRef.current, undefined, {
+      canPaint: (next) => {
+        const viewport = viewportRef.current
+        return (
+          !!viewport?.ready &&
+          next.width === viewport.width &&
+          next.height === viewport.height &&
+          next.sequence > viewport.after
+        )
+      },
+      onPaint: (next) => {
+        frameSizeRef.current = { width: next.width, height: next.height }
+        if (canvasRef.current) {
+          canvasRef.current.style.opacity = "1"
+          canvasRef.current.style.pointerEvents = "auto"
+          canvasRef.current.dataset.viewportReady = "true"
+        }
+      },
+    })
     painterRef.current.paint(frame)
   }, [])
-  return { canvasRef, frameSizeRef, drawFrame }
+  const requestViewport = useCallback((viewport: LocalViewport) => {
+    viewportRef.current = { ...viewport, ready: false, after: viewportRef.current?.after ?? -1 }
+    candidateRef.current = null
+  }, [])
+  const applyViewport = useCallback(
+    (viewport: LocalViewport, result: LocalViewportResult | void) => {
+      const current = viewportRef.current
+      if (!current || current.width !== viewport.width || current.height !== viewport.height) return
+      current.ready = true
+      if (typeof result?.frameSequence === "number") current.after = result.frameSequence
+      const candidate = candidateRef.current
+      candidateRef.current = null
+      if (candidate) paint(candidate)
+    },
+    [paint]
+  )
+  const drawFrame = useCallback(
+    (bytes: Uint8Array) => {
+      let frame
+      try {
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+        frame = decodeRemoteBrowserFrame(buffer as ArrayBuffer)
+      } catch {
+        return
+      }
+      if (!activeRef.current) return
+      const viewport = viewportRef.current
+      if (!viewport || frame.width !== viewport.width || frame.height !== viewport.height) return
+      // The only fresh damage frame can beat the viewport RPC response.
+      if (!viewport.ready) candidateRef.current = frame
+      else paint(frame)
+    },
+    [paint]
+  )
+  return { canvasRef, frameSizeRef, drawFrame, resetPage, requestViewport, applyViewport }
 }
 
 export function LocalChromiumPreview(props: LocalChromiumPreviewProps) {
@@ -286,12 +361,11 @@ function LocalPreviewBody({
   const screenshotT = useTranslations("browser.screenshot")
   const dialogT = useTranslations("browserLocal.dialog")
 
-  const { canvasRef, frameSizeRef } = canvas
+  const { canvasRef, frameSizeRef, resetPage, requestViewport, applyViewport } = canvas
   const viewportRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
   const navigationAttemptRef = useRef(0)
-  const resizeQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   const { engine, sessionId, pages, activePageId, state, refreshPages } = session
   // The user's input goes out in order, coalesced while one event is in
@@ -381,8 +455,8 @@ function LocalPreviewBody({
     [engine]
   )
   const [detailLevel] = useState(storedDetailLevel)
-  const toolbarWidth = useElementWidth(toolbarRef)
-  const railPlacement = toolbarTier(toolbarWidth) === "compact" ? "bottom" : "side"
+  const toolbarFits = useElementWidthFits(toolbarRef, COMPACT_TOOLBAR_PX)
+  const railPlacement = toolbarFits ? "side" : "bottom"
   const devtools = useBrowserDevtools({
     poll: useMemo(
       () =>
@@ -411,58 +485,30 @@ function LocalPreviewBody({
     [browserT]
   )
 
+  useIsomorphicLayoutEffect(resetPage, [sessionId, shownPageId, resetPage])
+
   // Resize the page itself, rather than letterboxing a fixed desktop viewport.
   // Measure the available box, independently of the frame's intrinsic size.
   useEffect(() => {
     const element = viewportRef.current
     if (!ready || session.dialog || !sessionId || !shownPageId || !element) return
-    let disposed = false
-    let inFlight = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    type Viewport = {
-      width: number
-      height: number
-      deviceScaleFactor: number
-      fitToWidth: boolean
-    }
-    let desired: Viewport | null = null
-    let applied: Viewport | null = null
-
-    const flush = async () => {
-      if (disposed || inFlight || !desired) return
-      const viewport = desired
-      if (
-        applied?.width === viewport.width &&
-        applied.height === viewport.height &&
-        applied.deviceScaleFactor === viewport.deviceScaleFactor
-      )
-        return
-      inFlight = true
-      try {
-        // Keep the queue across tab changes: switching away and back must not
-        // let an older request finish after the new tab's current dimensions.
-        const resize = resizeQueueRef.current.then(async () => {
-          if (!disposed) {
-            await localBrowser.rpc("browser.emulate", { sessionId, pageId: shownPageId, viewport })
-          }
-        })
-        resizeQueueRef.current = resize.catch(() => undefined)
-        await resize
-        applied = viewport
-      } catch (error) {
-        if (!disposed) fail(error)
-      } finally {
-        inFlight = false
-        // A drag may have changed size while the runtime was still resizing.
-        // Only the latest pending measurement is sent after that call settles.
-        if (!disposed && desired && desired !== viewport) void flush()
-      }
-    }
+    const scheduler = createLocalViewportScheduler({
+      sessionId,
+      resize: (viewport, synchronizeFrame) =>
+        localBrowser.rpc<LocalViewportResult>("browser.emulate", {
+          sessionId,
+          pageId: shownPageId,
+          viewport,
+          ...(synchronizeFrame ? { synchronizeFrame: true } : {}),
+        }),
+      onRequest: requestViewport,
+      onApplied: applyViewport,
+      onError: fail,
+    })
     const measure = () => {
-      clearTimeout(timer)
       const { clientWidth: width, clientHeight: height } = element
       if (width <= 0 || height <= 0) {
-        desired = null
+        scheduler.update(null)
         return
       }
       const next = {
@@ -471,13 +517,7 @@ function LocalPreviewBody({
         deviceScaleFactor: Math.max(0.5, Math.min(4, window.devicePixelRatio || 1)),
         fitToWidth,
       }
-      if (
-        desired?.width !== next.width ||
-        desired.height !== next.height ||
-        desired.deviceScaleFactor !== next.deviceScaleFactor
-      )
-        desired = next
-      timer = setTimeout(() => void flush(), 100)
+      scheduler.update(next)
     }
     const observer = new ResizeObserver(measure)
     observer.observe(element)
@@ -496,13 +536,21 @@ function LocalPreviewBody({
     window.addEventListener("resize", measure)
     measure()
     return () => {
-      disposed = true
-      clearTimeout(timer)
+      scheduler.dispose()
       observer.disconnect()
       densityQuery.removeEventListener("change", densityChanged)
       window.removeEventListener("resize", measure)
     }
-  }, [ready, sessionId, shownPageId, session.dialog, fitToWidth, fail])
+  }, [
+    ready,
+    sessionId,
+    shownPageId,
+    session.dialog,
+    fitToWidth,
+    fail,
+    requestViewport,
+    applyViewport,
+  ])
 
   const go = useCallback(
     async (input: string) => {
@@ -850,6 +898,7 @@ function LocalPreviewBody({
           >
             <canvas
               ref={canvasRef}
+              style={{ opacity: 0, pointerEvents: "none" }}
               tabIndex={0}
               role="application"
               aria-label={t("canvas")}

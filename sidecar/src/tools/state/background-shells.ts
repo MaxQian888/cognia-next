@@ -76,13 +76,14 @@ export interface BgShellRegistry {
   waitForOutput(id: string, opts?: ReadOptions & { waitMs?: number }): Promise<ReadResult>
   kill(id: string, signal?: NodeJS.Signals | number): KillResult
   killByPid(pid: number): KillByPidResult
-  killAll(): void
+  killAll(): Promise<void>
   list(): BgShellSummary[]
 }
 
 /** Create a fresh per-session background-shell registry. */
 export function createBgShellRegistry(): BgShellRegistry {
   const shells = new Map<string, BgShellEntry>()
+  let disposing: Promise<void> | undefined
 
   function spawnBackground({
     command,
@@ -92,10 +93,11 @@ export function createBgShellRegistry(): BgShellRegistry {
     isWin,
     env,
   }: SpawnBackgroundOptions): BgShellEntry {
+    if (disposing) throw new Error("background shell registry is closing")
     const id = randomUUID()
     const child = spawn(shell, shellArgs, {
       cwd,
-      // `env` carries the PowerShell-scrubbed environment when bash.mjs supplies
+      // `env` carries the PowerShell-scrubbed environment when bash.ts supplies
       // it; undefined (legacy callers / tests) inherits the parent process env.
       ...(env ? { env } : {}),
       windowsHide: true,
@@ -243,17 +245,52 @@ export function createBgShellRegistry(): BgShellRegistry {
     return { ok: true, exitCode: entry.exitCode }
   }
 
-  function killAll() {
-    for (const entry of shells.values()) {
-      if (entry.status !== "exited") {
-        try {
-          signalEntry(entry)
-        } catch {
-          // best effort
-        }
-      }
-    }
+  function killAll(): Promise<void> {
+    if (disposing) return disposing
+    const pending = [...shells.values()]
+      .filter((entry) => entry.status !== "exited")
+      .map(
+        (entry) =>
+          new Promise<void>((resolve, reject) => {
+            let timer: ReturnType<typeof setTimeout>
+            const finish = (error?: Error) => {
+              clearTimeout(timer)
+              entry.child.removeListener("close", closed)
+              if (error) reject(error)
+              else resolve()
+            }
+            const closed = () => finish()
+            entry.child.once("close", closed)
+            timer = setTimeout(() => {
+              try {
+                signalEntry(entry, "SIGKILL")
+              } catch {
+                /* process may already be reaping */
+              }
+              timer = setTimeout(
+                () => finish(new Error(`background shell ${entry.id} did not exit`)),
+                1_000
+              )
+            }, 1_000)
+            try {
+              signalEntry(entry)
+            } catch {
+              // The group may already be exiting while its close event is
+              // queued. Only that event proves cleanup; the deadline still
+              // rejects if signalling genuinely failed to terminate it.
+            }
+          })
+      )
     shells.clear()
+    disposing = Promise.allSettled(pending).then((results) => {
+      const errors = results.filter((result) => result.status === "rejected")
+      if (errors.length)
+        throw new AggregateError(
+          errors.map((result) => result.reason),
+          "background shell cleanup failed"
+        )
+    })
+    return disposing
   }
 
   function list(): BgShellSummary[] {

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { useEffect, useState, type DependencyList } from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ChatSession } from "@cognia/agent-config-types"
 
@@ -360,6 +360,25 @@ describe("<GoalsMobileBody />", () => {
     await user.clear(screen.getByTestId("mobile-goals-search"))
     await user.type(screen.getByTestId("mobile-goals-search"), "zzz")
     expect(screen.getByText("No goals match your filters.")).toBeInTheDocument()
+  })
+
+  it("renders the chosen section as the panel its tab controls", async () => {
+    const user = userEvent.setup()
+    await renderBody()
+    const overviewTab = screen.getByTestId("mobile-goals-section-overview")
+    const overview = screen.getByTestId("mobile-goals-overview")
+    expect(overview).toHaveAttribute("role", "tabpanel")
+    expect(overviewTab).toHaveAttribute("aria-controls", overview.id)
+
+    act(() => overviewTab.focus())
+    await user.keyboard("{ArrowRight}")
+    const history = screen.getByTestId("mobile-goals-history")
+    expect(history).toHaveAttribute("role", "tabpanel")
+    expect(screen.getByTestId("mobile-goals-section-history")).toHaveFocus()
+    expect(screen.getByTestId("mobile-goals-section-history")).toHaveAttribute(
+      "aria-controls",
+      history.id
+    )
   })
 
   it("switches to the Analytics section over every goal", async () => {

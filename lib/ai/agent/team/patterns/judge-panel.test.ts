@@ -5,16 +5,32 @@ import {
   type TeamRunContext,
 } from "../team-run-context"
 import type { StepExecutionContext } from "@/types/workflow/visual"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import { JUDGE_ATTEMPT_PROMPT, JUDGE_SCORE_PROMPT } from "./pattern-prompts"
 
 const dispatchStructuredMock = jest.fn()
 jest.mock("../teammate/structured-dispatch", () => ({
   dispatchStructured: (...a: unknown[]) => dispatchStructuredMock(...a),
 }))
 
+/** The team's project for the next context; set by the Prompt Center tests. */
+let teamProjectId: string | undefined
+
+afterEach(() => {
+  teamProjectId = undefined
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
 function makeCtx(params: Record<string, unknown>) {
   registerTeamRunContext({
     runId: "run1",
     teamId: "team1",
+    team: { name: "Team", ...(teamProjectId ? { projectId: teamProjectId } : {}) },
     concurrency: { get: () => 8 },
   } as unknown as TeamRunContext)
   return {
@@ -89,5 +105,43 @@ describe("pattern.judge-panel", () => {
   it("throws when angles are missing", async () => {
     const ctx = makeCtx({ objective: "x", angles: [] })
     await expect(judgePanelNode.execute(ctx)).rejects.toThrow(/angles/)
+  })
+})
+
+describe("pattern.judge-panel — Prompt Center (ADR-0236)", () => {
+  it("sends the project's customized attempt and judge wording", async () => {
+    teamProjectId = "ws-1"
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-attempt",
+          promptId: JUDGE_ATTEMPT_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-pattern-judge-attempt",
+          body: "Try {{objective}} as {{angle}}.",
+          contractVersion: JUDGE_ATTEMPT_PROMPT.contractVersion,
+        },
+        {
+          bindingId: "pob-judge",
+          promptId: JUDGE_SCORE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-pattern-judge-score",
+          body: "Score for {{objective}} ({{angle}}): {{content}}",
+          contractVersion: JUDGE_SCORE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    dispatchStructuredMock
+      .mockResolvedValueOnce({ value: { angle: "mvp", content: "plan A" } })
+      .mockResolvedValueOnce({ value: { score: 7, rationale: "ok" } })
+
+    await judgePanelNode.execute(
+      makeCtx({ objective: "ship it", angles: ["mvp"], judgesPerAttempt: 1 })
+    )
+
+    expect(dispatchStructuredMock.mock.calls[0][1].prompt).toBe("Try ship it as mvp.")
+    expect(dispatchStructuredMock.mock.calls[1][1].prompt).toBe("Score for ship it (mvp): plan A")
   })
 })

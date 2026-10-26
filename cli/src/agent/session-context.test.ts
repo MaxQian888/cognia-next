@@ -74,6 +74,7 @@ function makeAssembler(
     resolveAgents: async () => [],
     resolveAgentMode: async () => null,
     fetchTwin: async () => null,
+    primePromptOverrides: async () => ({}),
     ...overrides,
   })
 }
@@ -451,5 +452,38 @@ describe("twin content helpers", () => {
 
   it("returns the content untouched for an empty block", () => {
     expect(prependTextBlock("hi", "")).toBe("hi")
+  })
+})
+
+describe("Prompt Center overrides (ADR-0236)", () => {
+  it("primes overrides for the cwd and resolves slots against the workspace mounting it", async () => {
+    const prime = jest.fn(async () => ({ workspaceId: "ws-1" }))
+    let seen: { promptWorkspaceId?: string; systemPrompt?: string } = {}
+    await makeAssembler({
+      primePromptOverrides: prime,
+      resolveOptions: async (ctx) => {
+        seen = {
+          promptWorkspaceId: ctx.promptWorkspaceId,
+          systemPrompt: ctx.session?.systemPrompt,
+        }
+        return { systemPrompt: "sys", model: "claude-x" } as SendOptions
+      },
+    }).resolveSession()
+    expect(prime).toHaveBeenCalledWith("/work")
+    expect(seen.promptWorkspaceId).toBe("ws-1")
+  })
+
+  it("does not open the store for overrides after it was found unsafe", async () => {
+    const prime = jest.fn(async () => ({}))
+    await makeAssembler({
+      primePromptOverrides: prime,
+      resolveSkillIds: () => ["skill-a"],
+      ensureDb: async () => {
+        throw new CliDbSnapshotError("corrupt", "/home/u/.cognia/db.json", "/x.bak")
+      },
+    })
+      .resolveSession()
+      .catch(() => undefined)
+    expect(prime).not.toHaveBeenCalled()
   })
 })

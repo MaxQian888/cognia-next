@@ -28,7 +28,7 @@ In all three, approvals come from you, never from a model.
 | `tectonic` on `PATH` (verified 0.17.0, e.g. `brew install tectonic`)     | builds — the only LaTeX engine                            |
 | ~3 GB disk                                                               | the provisioned offline Tectonic bundle                   |
 | macOS arm64 + Xcode Command Line Tools (`swiftc`)                        | page rendering, text extraction and page review           |
-| Pi ≥ 0.85.1                                                              | installing into Pi and hosted Pi agents only              |
+| Pi ≥ 1.0.2                                                               | installing into Pi and hosted Pi agents only              |
 
 Desktop only: the plugin is blocked in the browser, mobile and headless
 shells because its tools spawn host processes.
@@ -43,7 +43,7 @@ pnpm exec node plugins/pi-latex-workbench/build.mjs
 ```
 
 That writes `plugins/pi-latex-workbench/dist/index.js` and
-`plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.0.zip`. The
+`plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.1.zip`. The
 manifest's `main` is `dist/index.js`, which is gitignored build output, so the
 plugin cannot load until that build has run — which is also why installing
 from a GitHub URL does not work (the repository carries no `dist/index.js`).
@@ -52,7 +52,7 @@ Then install it into a running Cognia desktop instance in one of two ways:
 - **Cognia CLI** (installs the ZIP; the CLI resolves a relative path):
 
   ```bash
-  cognia plugin install plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.0.zip --json
+  cognia plugin install plugins/pi-latex-workbench/dist/cognia-pi-latex-workbench-0.1.1.zip --json
   ```
 
 - **Load unpacked**: in **Plugins**, use the toolbar's **Load unpacked…** and
@@ -73,13 +73,14 @@ These run on your machine, outside any agent:
    runs, without a shell, inside the plugin's `vendor/` directory:
 
    ```bash
-   npm install --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund
+   npm run prepare:plugin
    ```
 
-   It installs only `ajv`/`ajv-formats` and links the workbench's own
-   packages. `--omit=peer` keeps `@earendil-works/pi-*` and `typebox` out of
-   the package, as Pi requires (Pi maps them to its own copies). The
-   `latexwb_*` tools need this step too.
+   The checked-in helper runs `npm ci --omit=dev --omit=peer --ignore-scripts`
+   with binary links disabled, then copies npm's workspace links into ordinary
+   directories. It refuses unexpected links and preserves the upstream lockfile.
+   Pi host packages and `typebox` stay out of the plugin; Pi maps them to its own
+   copies. The `latexwb_*` tools need this step too.
 
 2. **Provision the toolchain and renderer** (host commands — the ~2.9 GB
    download exceeds the 600 s limit of a tool call, so no tool offers it).
@@ -238,3 +239,5 @@ plugin claims no license (`"license": "UNLICENSED"`). Distribution terms must
 be confirmed with the upstream owner (Arxtect) before the plugin — or any
 artifact containing `vendor/` — is published outside this repository. See
 [VENDOR.md](VENDOR.md).
+
+Compatibility verified with Pi 1.0.2 (Cognia bundle) and 1.3.0; development dependencies pin 1.3.0. Runtime preparation adds regular ESM bridges to the unchanged source so Node can load TypeScript without workspace symlinks.

@@ -61,6 +61,8 @@ export function isVerificationScript(name) {
  * @type {Record<string, string>}
  */
 export const EXEMPTIONS = {
+  "sidecar:packages:typecheck":
+    "nested sidecar source/test contracts — invoked by registered sidecar:typecheck and each package test command",
   // --- the runner itself ---
   "check:all": "the gate runner; running it as a gate would recurse",
 
@@ -102,6 +104,11 @@ export const EXEMPTIONS = {
 
   // --- test runners owned by .github/workflows/test.yml, not by this registry ---
   test: "jest suite — owned by test.yml",
+  "test:unit": "jest lane helper — its node/jsdom projects are covered by test.yml's full plan",
+  "test:heavy":
+    "jest lane helper — its heavy/build/pty projects are covered by test.yml's full plan",
+  "test:build": "jest lane helper — its build project is covered by test.yml's full plan",
+  "test:pty": "jest lane helper — its pty project is covered by test.yml's full plan",
   "test:changed": "jest dev helper — owned by test.yml",
   "test:watch": "interactive jest — never runs unattended",
   "test:coverage": "jest coverage — owned by test.yml",
@@ -118,13 +125,11 @@ export const EXEMPTIONS = {
   "cli:test:conversation:real":
     "opt-in live model/PTY smoke — requires an explicit backend, a built CLI, and real provider credentials; spends tokens, so cannot run in the unattended gate matrix. Its deterministic harness tests run in scripts:test:ci",
   "cli:test:conversation": "Jest CLI conversation subset — included by test.yml in the cli project",
-  "update:worker:test":
-    "standalone Worker vitest suite — owned by the update-server matrix entry in share-server.yml",
-  "update:worker:typecheck":
-    "standalone Worker typecheck — owned by the update-server matrix entry in share-server.yml",
+  "cognia-services:check":
+    "pinned external service contract — owned by test.yml's cognia-services job",
+  "cognia-services:test":
+    "service extraction contract tests — owned by test.yml's cognia-services job",
   "test:e2e": "playwright — owned by test.yml",
-  "test:e2e:browser-ext":
-    "playwright browser-extension lane — owned by test.yml's e2e-browser-extension job. Not in the gate matrix: it launches a full Chromium per test with --load-extension, which the gate runner has no browser install for",
   "test:e2e:build": "playwright fixture build — owned by test.yml",
   "test:e2e:changed": "playwright dev helper — owned by test.yml",
   "test:e2e:install": "playwright browser install — setup, not a gate",
@@ -153,6 +158,10 @@ export const EXEMPTIONS = {
   "sidecars:test": "aggregate sidecar suite — owned by test.yml",
 
   // --- per-script self-tests, all covered by a scripts:test:* aggregate ---
+  "host:archive:test":
+    "covered by scripts:test:build via scripts/build/package-host-archive.test.mjs",
+  "update:catalog:test": "covered by scripts:test:ci via scripts/release/update-catalog.test.mjs",
+  "test:config": "covered by scripts:test:ci via scripts/test/jest-config.test.mjs",
   "check:all:test": "covered by scripts:test:gates",
   "audit:command-parity:test": "covered by scripts:test:gates",
   "audit:plugin-externals:test": "covered by scripts:test:gates",

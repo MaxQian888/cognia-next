@@ -1,3 +1,4 @@
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const mockSettingsSave = jest.fn()
@@ -111,9 +112,7 @@ it("saves global reading enablement and strategy while preserving other current 
     }))
   })
   fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
-  fireEvent.change(screen.getByTestId("knowledge-reading-strategy"), {
-    target: { value: "hybrid" },
-  })
+  await selectOption(screen.getByTestId("knowledge-reading-strategy"), "hybrid")
   await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(2))
   expect(useSettingsStore.getState().settings).toMatchObject({
     locale: "zh-CN",
@@ -167,9 +166,7 @@ it("queues rapid saves and commits an optional summary provider without dropping
   render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
   fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
   await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(1))
-  fireEvent.change(screen.getByTestId("knowledge-reading-strategy"), {
-    target: { value: "keyword" },
-  })
+  await selectOption(screen.getByTestId("knowledge-reading-strategy"), "keyword")
   const provider = screen.getByTestId("knowledge-reading-summary-provider")
   fireEvent.change(provider, { target: { value: " navigation-provider " } })
   fireEvent.blur(provider)
@@ -194,9 +191,7 @@ it("reports a failed settings write and continues queued edits and retries", asy
   mockSettingsSave.mockRejectedValueOnce(new Error("storage unavailable"))
   render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
   fireEvent.click(screen.getByTestId("knowledge-reading-enabled"))
-  fireEvent.change(screen.getByTestId("knowledge-reading-strategy"), {
-    target: { value: "hybrid" },
-  })
+  await selectOption(screen.getByTestId("knowledge-reading-strategy"), "hybrid")
   await waitFor(() => expect(mockSettingsSave).toHaveBeenCalledTimes(2))
   expect(mockToastError).toHaveBeenCalledWith(expect.any(String))
   expect(useSettingsStore.getState().settings?.knowledgeReading).toMatchObject({
@@ -319,7 +314,7 @@ it("uses the canonical file-format catalog for extensions and selectable formats
   expect(fileInput).toHaveAttribute("accept", expect.stringContaining(".yaml"))
 
   fireEvent.click(screen.getByRole("combobox", { name: "Source format" }))
-  expect(screen.queryByRole("option", { name: "Git repo" })).toBeNull()
+  expect(screen.queryByRole("option", { hidden: true, name: "Git repo" })).toBeNull()
   fireEvent.keyDown(document, { key: "Escape" })
 
   const file = new File(["plain note"], "note.txt", { type: "text/plain" })
@@ -486,7 +481,7 @@ it("supports an explicit importer format and clears a removed library selection"
   const { rerender } = render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
   await screen.findByText("No sources imported into this Knowledge Base.")
   fireEvent.click(screen.getByRole("combobox", { name: "Source format" }))
-  fireEvent.click(await screen.findByRole("option", { name: "ChatGPT export" }))
+  fireEvent.click(await screen.findByRole("option", { hidden: true, name: "ChatGPT export" }))
   const file = new File(["{}"], "export.json")
   Object.defineProperty(file, "text", { value: jest.fn(async () => "{}") })
   fireEvent.change(screen.getByLabelText("Source file"), { target: { files: [file] } })

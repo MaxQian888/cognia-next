@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { IntegrationsHub } from "./integrations-hub"
 
@@ -189,12 +190,12 @@ describe("IntegrationsHub webhook delivery", () => {
     mockConfigureRepoWebhook.mockResolvedValue({ status: "created", hookId: 1, events: [] })
     render(<IntegrationsHub />)
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
-      target: { value: "acc-gh" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Account" }), "acc-gh")
     fireEvent.click(await screen.findByRole("button", { name: "Discover" }))
-    await screen.findByRole("option", { name: "acme/app" })
-    fireEvent.change(screen.getByLabelText("Repository"), { target: { value: "acme/app" } })
+    await waitFor(() =>
+      expect(getNativeSelect(screen.getByLabelText("Repository"))).toHaveTextContent("acme/app")
+    )
+    await selectOption(screen.getByLabelText("Repository"), "acme/app")
     fireEvent.click(screen.getByRole("checkbox", { name: "Issue closed" }))
     fireEvent.change(screen.getByLabelText("Webhook secret (required when ingress is enabled)"), {
       target: { value: "shh" },
@@ -233,9 +234,7 @@ describe("IntegrationsHub webhook delivery", () => {
     mockEntries = [GITHUB_ENTRY]
     mockAccounts = [githubAccount()]
     render(<IntegrationsHub />)
-    fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
-      target: { value: "acc-gh" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Account" }), "acc-gh")
     fireEvent.click(screen.getByRole("checkbox", { name: "Issue closed" }))
     fireEvent.change(screen.getByLabelText("Public webhook URL (tunnel or reverse proxy)"), {
       target: { value: "http://192.168.1.2:8080" },
@@ -254,9 +253,7 @@ describe("IntegrationsHub webhook delivery", () => {
     mockGetAccount.mockResolvedValue(account)
     mockCreateSubscription.mockResolvedValue({})
     render(<IntegrationsHub />)
-    fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
-      target: { value: "acc-gh" },
-    })
+    await selectOption(screen.getByRole("combobox", { name: "Account" }), "acc-gh")
     fireEvent.click(screen.getByRole("checkbox", { name: "Issue closed" }))
     fireEvent.change(screen.getByLabelText("Webhook secret (required when ingress is enabled)"), {
       target: { value: "shh" },
@@ -294,11 +291,9 @@ describe("IntegrationsHub", () => {
     expect(sections).toEqual(["Accounts", "Subscriptions", "Approvals and jobs", "Audit"])
   })
 
-  it("guides authentication configuration instead of asking for raw provider IDs", () => {
+  it("guides authentication configuration instead of asking for raw provider IDs", async () => {
     render(<IntegrationsHub />)
-    fireEvent.change(screen.getByLabelText("Integration"), {
-      target: { value: "demo-delivery:demo" },
-    })
+    await selectOption(screen.getByLabelText("Integration"), "demo-delivery:demo")
     expect(screen.getByRole("button", { name: /Token Recommended/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Advanced token Advanced/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Token Recommended/ }))
@@ -306,14 +301,12 @@ describe("IntegrationsHub", () => {
     expect(screen.queryByPlaceholderText("Auth provider ID")).not.toBeInTheDocument()
   })
 
-  it("offers the enterprise server field and says that leaving it empty is fine", () => {
+  it("offers the enterprise server field and says that leaving it empty is fine", async () => {
     // ADR-0176. The one field here where blank is the common, correct answer.
     // A bare label cannot say so, and a user who types github.com into it has
     // been given a worse account than one who left it alone.
     render(<IntegrationsHub />)
-    fireEvent.change(screen.getByLabelText("Integration"), {
-      target: { value: "demo-delivery:demo" },
-    })
+    await selectOption(screen.getByLabelText("Integration"), "demo-delivery:demo")
     fireEvent.click(screen.getByRole("button", { name: /Token Recommended/ }))
 
     const field = screen.getByLabelText("Enterprise server URL")
@@ -413,12 +406,10 @@ describe("IntegrationsHub", () => {
     expect(screen.getByRole("button", { name: "Validate and add" })).toBeDisabled()
   })
 
-  it("names the authentication step only once an integration is picked", () => {
+  it("names the authentication step only once an integration is picked", async () => {
     render(<IntegrationsHub />)
     expect(screen.queryByText("Authentication method")).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText("Integration"), {
-      target: { value: "demo-delivery:demo" },
-    })
+    await selectOption(screen.getByLabelText("Integration"), "demo-delivery:demo")
     expect(screen.getByText("Authentication method")).toBeInTheDocument()
   })
 })

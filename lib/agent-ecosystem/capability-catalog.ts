@@ -18,6 +18,7 @@ import type {
   AgentPresetCapabilityRefinement,
   AgentProtocolCapabilityRow,
 } from "@cognia/agent-contracts/ecosystem"
+import type { ExternalAgentCapabilityCell } from "@cognia/agent-contracts/external-agent-capability"
 import { DSH_CAPABILITIES } from "@cognia/agent-dsh/manifest"
 import { OPENCODE_CAPABILITIES } from "@cognia/agent-opencode/manifest"
 import { PI_CAPABILITIES } from "@cognia/agent-pi/manifest"
@@ -93,8 +94,9 @@ export function mergeIntegrationCapabilityRows(
   ]
   merged.capabilityIds = capabilityIds
   for (const row of Object.values(merged.protocols)) {
+    const capabilities: Record<string, ExternalAgentCapabilityCell | undefined> = row.capabilities
     for (const id of capabilityIds) {
-      row.capabilities[id] ??= { level: "unknown", evidence: "none" }
+      capabilities[id] ??= { level: "unknown", evidence: "none" }
     }
   }
   for (const [preset, refinement] of refinements) {

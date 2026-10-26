@@ -77,10 +77,11 @@ impl DataPlane {
     pub fn pick(state: &SharedState) -> Option<Self> {
         if let Some(socket) = super::ws_bridge::socket_bridge_transport_for_state(state) {
             return Some(DataPlane::Bridge {
-                bridge: Arc::clone(&state.desktop_messages_bridge),
+                bridge: super::ws_bridge::messages_bridge(state),
                 transport: socket,
             });
         }
+        if super::person_partition::current().is_some() { return None; }
         if let Some(renderer) = state.renderer.as_ref() {
             return Some(DataPlane::Bridge {
                 bridge: Arc::clone(&state.desktop_messages_bridge),

@@ -29,7 +29,7 @@ services:
     entrypoint:
       - sh
       - -ec
-      - export DB_URL="postgres://postgres:$$(cat /run/secrets/logto_db_password)@logto-postgres:5432/logto"; npm run cli db seed -- --swe; exec npm start
+      - export NODE_OPTIONS="$${NODE_OPTIONS:-} --import=/etc/logto/cognia-mail/preload.mjs"; export DB_URL="postgres://postgres:$$(cat /run/secrets/logto_db_password)@logto-postgres:5432/logto"; npm run cli db seed -- --swe; exec npm start
     environment:
       DB_URL: ""
       PORT: "3301"
@@ -44,6 +44,9 @@ services:
       - "127.0.0.1:3301:3301"
       - "127.0.0.1:3302:3302"
     secrets: [logto_db_password]
+    volumes:
+      - ./logto-mail/preload.mjs:/etc/logto/cognia-mail/preload.mjs:ro
+      - ./logto-mail/client.mjs:/etc/logto/packages/connectors/connector-http-email/lib/cognia-client.mjs:ro
     networks:
       logto-data: {}
       default:

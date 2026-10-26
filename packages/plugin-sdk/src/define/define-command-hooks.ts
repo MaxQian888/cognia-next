@@ -25,7 +25,7 @@
  *   })
  */
 
-import type { HooksConfig } from "@/lib/claude/hooks"
+import type { HooksConfig } from "@cognia/plugin-contract/lib/claude/hooks"
 
 export function defineCommandHooks(config: HooksConfig): HooksConfig {
   return config

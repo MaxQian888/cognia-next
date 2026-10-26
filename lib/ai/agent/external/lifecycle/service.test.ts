@@ -1194,3 +1194,38 @@ describe("runtime bindings", () => {
     expect(runtimeHost.uninstall).not.toHaveBeenCalled()
   })
 })
+
+describe("model role input validation", () => {
+  it("refuses malformed create/update input before store or runtime mutation", async () => {
+    const { service, manager, store } = build({}, [stdioConfig()])
+    const modelRoles = { version: 2 } as never
+    await expect(
+      service.createConfig({ name: "bad", protocol: "acp", transport: "stdio", modelRoles })
+    ).rejects.toThrow(/model role/)
+    await expect(service.updateConfig("agent-1", { modelRoles })).rejects.toThrow(/model role/)
+    expect(manager.calls).toEqual([])
+    expect(store.getAgent("agent-1")?.modelRoles).toBeUndefined()
+  })
+})
+
+it("re-registers Cognia binding and role edits so admission reads the saved plan", async () => {
+  const { service, manager } = build({}, [
+    stdioConfig({ cogniaModel: { providerId: "p", modelId: "primary" } }),
+  ])
+  await service.connect("agent-1")
+  manager.calls.length = 0
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+  await service.updateConfig("agent-1", { modelRoles })
+  expect(manager.calls).toEqual(["removeAgent:agent-1", "addAgent:agent-1"])
+  expect(manager.addAgent).toHaveBeenLastCalledWith(expect.objectContaining({ modelRoles }), {})
+  manager.calls.length = 0
+  await service.updateConfig("agent-1", { cogniaModel: null })
+  expect(manager.calls).toEqual(["removeAgent:agent-1", "addAgent:agent-1"])
+  expect(manager.addAgent).toHaveBeenLastCalledWith(
+    expect.objectContaining({ cogniaModel: null }),
+    {}
+  )
+})

@@ -8,4 +8,4 @@ export type {
   SlashCommandDefinition,
   SlashCommandHandler,
   SlashCommandResult,
-} from "@/lib/slash-commands/registry"
+} from "@cognia/plugin-contract/lib/slash-commands/registry"

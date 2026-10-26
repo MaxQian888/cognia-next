@@ -23,7 +23,7 @@ import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
  * SubAgent whose `name` appears in this set. Default subset matches
  * the Workflow Copilot specialists (kept in sync with
  * `WORKFLOW_COPILOT_SUBAGENT_NAMES` in
- * lib/claude/agents/workflow-copilot-prompt.ts).
+ * lib/workflow/editor/copilot-prompts.ts).
  */
 const DEFAULT_TRACKED_NAMES = [
   "workflow-designer",

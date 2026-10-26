@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Harness Evolution (ADR-0237, off by default): agents can now improve their own instructions, guardrails, memory, tool guidance, skills, subagents and tool rules from evidence. Turn it on in Settings → Harness Evolution, then start a run from an agent's new Evolve page: candidate harnesses are proposed, tried on the task in isolated probes, combined and compared against the current harness under a cost, token, call and time budget shown before anything is spent and live while it runs. The run viewer shows every step's evidence, a side-by-side comparison of any two harnesses, the selection and its risk, and what the reflection learned; changes beyond one task wait for your approval and can be rolled back. A separate Experience Library keeps the lessons runs draw (never mixed into Memory), version history lets you compare and restore any earlier harness, adopted tool rules apply live, and in failure-triggered or background mode a turn that fails through the agent's own conduct offers (or queues) a run on the failed request.

@@ -28,13 +28,15 @@
  * re-render counter) tracks the same answer the composer's own hook does.
  */
 
-import type * as HostEffortSurface from "@/lib/ai/effort-surface-session"
+import type { EffortSurface } from "@cognia/plugin-contract/lib/ai/effort-surface"
+import type { EffortSessionColumns } from "@cognia/plugin-contract/lib/ai/effort-surface-session"
 import { PluginAdapterError } from "../errors/adapter-error"
 
-type EffortSurfaceHost = Pick<
-  typeof HostEffortSurface,
-  "effortSurfaceForSession" | "subscribeEffortSurface"
->
+/** What the host binds: `lib/ai/effort-surface-session`'s two readers. */
+interface EffortSurfaceHost {
+  effortSurfaceForSession(session: EffortSessionColumns | null | undefined): EffortSurface
+  subscribeEffortSurface(sessionId: string | undefined, listener: () => void): () => void
+}
 let host: EffortSurfaceHost | undefined
 
 /** Host loader seam; never exposed through the evaluated plugin module. */
@@ -59,4 +61,7 @@ export const subscribeEffortSurface: EffortSurfaceHost["subscribeEffortSurface"]
   sessionId,
   listener
 ) => requireHost().subscribeEffortSurface(sessionId, listener)
-export type { EffortSurface, EffortSurfaceInput } from "@/lib/ai/effort-surface"
+export type {
+  EffortSurface,
+  EffortSurfaceInput,
+} from "@cognia/plugin-contract/lib/ai/effort-surface"

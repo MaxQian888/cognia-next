@@ -77,6 +77,12 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: { subagentNesting: { enabled: nestingEnabled } } }),
 }))
 
+const templateRolesInvalid = jest.fn((..._args: unknown[]) => false)
+jest.mock("./template-cognia-model-fields", () => ({
+  TemplateCogniaModelFields: () => <div data-testid="template-cognia-model-fields" />,
+  templateModelRolesInvalid: (...args: unknown[]) => templateRolesInvalid(...args),
+}))
+
 import { TemplatePanel } from "./template-panel"
 
 const tpl = (over: Partial<SubAgentTemplate> & { id: string }): SubAgentTemplate => ({
@@ -305,6 +311,28 @@ describe("editing lifecycle", () => {
       expect(screen.getByTestId("unsaved-bar")).toHaveAttribute("data-status", "dirty")
     )
     expect(updateTemplate).not.toHaveBeenCalled()
+  })
+
+  it("refuses to save sub-task models the dispatch would refuse, judged over the pinned config", async () => {
+    templates.mine = tpl({
+      id: "mine",
+      name: "My Fork",
+      config: { externalPresetId: "claude-code", externalAgentConfigId: "strict" },
+    })
+    templateRolesInvalid.mockReturnValue(true)
+    render(<TemplatePanel templateId="mine" onNavigate={onNavigate} />)
+    await userEvent.type(screen.getByTestId("editor-name"), "!")
+    await userEvent.click(screen.getByTestId("unsaved-bar-save"))
+    await waitFor(() =>
+      expect(screen.getByTestId("unsaved-bar")).toHaveAttribute("data-status", "dirty")
+    )
+    expect(updateTemplate).not.toHaveBeenCalled()
+    expect(templateRolesInvalid).toHaveBeenCalledWith(
+      expect.objectContaining({ externalAgentConfigId: "strict" }),
+      mockExternalAgents.strict,
+      expect.anything()
+    )
+    templateRolesInvalid.mockReturnValue(false)
   })
 
   it("trims the name on save", async () => {

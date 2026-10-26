@@ -151,6 +151,27 @@ export async function listMcpServersByPlugin(pluginId: string): Promise<McpServe
     .toArray()
 }
 
+/**
+ * Tear down the runtime gateway's warm connections to a server that can no
+ * longer run (disabled, blocked, re-opened for review, deleted). Every gateway
+ * operation re-checks policy anyway; this stops an idle lease from keeping a
+ * revoked server's process or remote session alive. Best-effort: CLI and
+ * tests may run without the gateway.
+ */
+async function releaseMcpServerLeases(id: string): Promise<void> {
+  try {
+    const { defaultMcpRuntimeGateway } = await import("@/lib/mcp/runtime-gateway")
+    await defaultMcpRuntimeGateway.closeServer(id)
+  } catch {
+    // No live gateway in this runtime.
+  }
+}
+
+function canRun(server: Pick<McpServer, "enabled" | "trust">): boolean {
+  const state = server.trust?.state ?? "legacy"
+  return server.enabled && (state === "trusted" || state === "legacy")
+}
+
 export async function updateMcpServer(
   id: string,
   patch: Partial<
@@ -247,6 +268,7 @@ export async function updateMcpServer(
       await enqueueSyncJobs(affectedApps, next.revision ?? 1, renamed ? [prev.name] : [])
     }
   )
+  if (canRun(prev) && !canRun(next)) await releaseMcpServerLeases(id)
   wakeSyncCoordinator()
 }
 
@@ -273,6 +295,7 @@ export async function reviewMcpServer(id: string, trusted: boolean): Promise<voi
     await db.mcpServerSummaries.put(toMcpServerSummary(next, knownTools))
     await enqueueSyncJobs(next.appsEnabled, next.revision ?? 1)
   })
+  if (!trusted) await releaseMcpServerLeases(id)
   wakeSyncCoordinator()
 }
 
@@ -318,6 +341,7 @@ export async function deleteMcpServer(id: string): Promise<void> {
       await enqueueSyncJobs(prev.appsEnabled, prev.revision ?? 1, [prev.name])
     }
   )
+  await releaseMcpServerLeases(id)
   wakeSyncCoordinator()
 }
 
@@ -594,6 +618,7 @@ export type McpImportStrategy = "skip" | "duplicate" | "overwrite"
 
 export interface McpImportDraft {
   name: string
+  displayName?: string
   transport: McpTransport
   config: McpServerConfig
 }
@@ -655,6 +680,7 @@ export async function bulkImportMcpServers(
       if (collision && strategy === "overwrite") {
         let next: McpServer = {
           ...collision,
+          displayName: draft.displayName?.trim() || collision.displayName,
           transport: draft.transport,
           config: draft.config,
           revision: (collision.revision ?? 1) + 1,
@@ -673,7 +699,7 @@ export async function bulkImportMcpServers(
       let next: McpServer = {
         id: newId(),
         name,
-        displayName: name,
+        displayName: draft.displayName?.trim() || name,
         schemaVersion: 1,
         revision: 1,
         credentialVersion: 0,

@@ -1,0 +1,806 @@
+{
+  "accepted": true,
+  "date": "2026-10-21",
+  "provider_endpoint": "https://api.deepseek.com",
+  "model": "deepseek-flash",
+  "initial_step_budget": 22,
+  "continuation_step_budget": 32,
+  "linked_document_count": 25,
+  "earlier_documents_moved_before_resume": 20,
+  "results": [
+    {
+      "agent": "Explore",
+      "initial_requests": 22,
+      "initial_successful_http": 22,
+      "initial_reads": 22,
+      "initial_terminal": "error_max_turns",
+      "resume_requests": 4,
+      "resume_reads": 3,
+      "resume_terminal": "success",
+      "resume_first_request_has_prior_fact": true,
+      "final_report_has_prior_fact": true,
+      "final_report": "[Explore (resumed)]\nCHAIN_COMPLETE\n\nFIRST_FACT: FACT_1_a402f1b8a0\nLAST_FACT: FACT_25_b991e2bd3b\n\n## Explore evidence digest\n\n**Deliverable:** All 25 chapters were read from the linked design-document chain in order; chapter 25 terminates with \"End of chain. No further chapter.\"\n\n**Structure verified**\n- Every chapter is a 3-line markdown file with this exact schema:\n  1. `Design chapter N of 25.`\n  2. `Verified fact: FACT_N_<12-hex>`\n  3. `Next chapter: <absolute path>` — replaced in chapter 25 by `End of chain. No further chapter.`\n- Pattern is a strict singly-linked list: each chapter's link is the only pointer to its successor; filenames are opaque 16-hex-char names with no discoverable ordering, so sequential reads were required.\n- Chapters were read one per step, exactly one `read` per model step, with no listing/globbing/searching and no batched calls. A CHECKPOINT line (completed count, FIRST_FACT, LAST_FACT, NEXT_FILE) preceded every read.\n\n**Chapter-by-chapter facts (all verified from the cited paths)**\n\n| Ch | File | Fact |\n|---|---|---|\n| 1 | `.../Explore/3b6dd07d171af727.md` | FACT_1_a402f1b8a0 |\n| 2 | `.../Explore/7c772cb1f4f975e9.md` | FACT_2_605a582bbb |\n| 3 | `.../Explore/7d496f2d8050b2ae.md` | FACT_3_282948f753 |\n| 4 | `.../Explore/f7302e3e2876a815.md` | FACT_4_c1fe16595f |\n| 5 | `.../Explore/7ae0d767e27797dc.md` | FACT_5_f630f7d4d5 |\n| 6 | `.../Explore/7d7f19de49714d8f.md` | FACT_6_97a1634048 |\n| 7 | `.../Explore/97feeb49c9434c67.md` | FACT_7_9b195049d9 |\n| 8 | `.../Explore/02aefcf7571d6118.md` | FACT_8_dd6617125c |\n| 9 | `.../Explore/2c502e275288a92c.md` | FACT_9_2792c48108 |\n| 10 | `.../Explore/2bfd57fe974f4e2f.md` | FACT_10_37dc067a47 |\n| 11 | `.../Explore/04cab245a6c75595.md` | FACT_11_77e05a2bea |\n| 12 | `.../Explore/379a6e264d7b5137.md` | FACT_12_28c0179417 |\n| 13 | `.../Explore/c84f9086df57a7fb.md` | FACT_13_d060ba462c |\n| 14 | `.../Explore/cc0af0f7eb9581c1.md` | FACT_14_6d1761c548 |\n| 15 | `.../Explore/c724ff0093a5caec.md` | FACT_15_5e14245b75 |\n| 16 | `.../Explore/f909e4bd80b71dde.md` | FACT_16_0b50070006 |\n| 17 | `.../Explore/dedd3363e94b1148.md` | FACT_17_3d366f8b50 |\n| 18 | `.../Explore/2c453db389a95790.md` | FACT_18_3c7d7427c4 |\n| 19 | `.../Explore/58e579d248c357ff.md` | FACT_19_ea068fb919 |\n| 20 | `.../Explore/cae674097cf789f4.md` | FACT_20_ba59ebb149 |\n| 21 | `.../Explore/a1d14473e2513544.md` | FACT_21_e481e5ece5 |\n| 22 | `.../Explore/ec2b0e1484277d32.md` | FACT_22_57b918304d |\n| 23 | `.../Explore/f21b29a233c64800.md` | FACT_23_357d82d49a |\n| 24 | `.../Explore/bf7b8dfac88b0e61.md` | FACT_24_f9278c0a53 |\n| 25 | `.../Explore/989790bf9dc1bd99.md` | FACT_25_b991e2bd3b |\n\n**Resume point used:** continued from recorded CHECKPOINT 22 → NEXT_FILE `f21b29a233c64800.md`; chapters 1–22 were not re-read in this session (their facts above come from the recorded findings). No gaps, no dead links, no branch points; chain length matched the declared 25 exactly. All work is complete and verified.",
+      "initial_report_sha256": "c49246e12ed46cafd75fc4e50ffe05f016200fad536af846ad86753e29d66d82",
+      "prior_fact": "FACT_1_a402f1b8a0",
+      "last_fact": "FACT_25_b991e2bd3b",
+      "initial_distinct_reads": 22,
+      "continuation_did_not_reread_completed_files": true
+    },
+    {
+      "agent": "Plan",
+      "initial_requests": 22,
+      "initial_successful_http": 22,
+      "initial_reads": 22,
+      "initial_terminal": "error_max_turns",
+      "resume_requests": 4,
+      "resume_reads": 3,
+      "resume_terminal": "success",
+      "resume_first_request_has_prior_fact": true,
+      "final_report_has_prior_fact": true,
+      "final_report": "[Plan (resumed)]\nCHAIN_COMPLETE\n\n**FIRST_FACT:** `FACT_1_fdab72b8d9`\n**LAST_FACT:** `FACT_25_f23f5194f0`\n\n## Chain status\n\n| Chapter | File (basename) | Verified fact |\n|---|---|---|\n| 1 | `56e465923f9b1a09.md` | `FACT_1_fdab72b8d9` |\n| 2 | `f4ab8306597ee4bc.md` | `FACT_2_34ba55d6eb` |\n| 3 | `52dba2d50b5836d9.md` | `FACT_3_6dfe1f792f` |\n| 4 | `504bdecb8958a4ba.md` | `FACT_4_a787e852df` |\n| 5 | `343be296f8f1e0f4.md` | `FACT_5_98660dcb8f` |\n| 6 | `e687de70e15e8165.md` | `FACT_6_1fb7f9be3a` |\n| 7 | `082d34b5eb886af7.md` | `FACT_7_d3e260d666` |\n| 8 | `c759b889d1b28a88.md` | `FACT_8_dfaccb5bf6` |\n| 9 | `ac8ebdc0d17ae116.md` | `FACT_9_33ded59c0a` |\n| 10 | `18cb4f19344b1e38.md` | `FACT_10_9fd5c0a1b3` |\n| 11 | `9c913b04781312a0.md` | `FACT_11_2d74bfe0c4` |\n| 12 | `d5650e3359ac5a97.md` | `FACT_12_3c3babc473` |\n| 13 | `7db1de4fe05f88ea.md` | `FACT_13_1065437aa8` |\n| 14 | `10af1dab4b1ea547.md` | `FACT_14_29afb5f75e` |\n| 15 | `b75aa3c3cbd9b2a9.md` | `FACT_15_fbfa262637` |\n| 16 | `1a6b49d78421b00e.md` | `FACT_16_f6364abd47` |\n| 17 | `84e6d32e7200213d.md` | `FACT_17_bb430751ef` |\n| 18 | `af33f9d0d64999c0.md` | `FACT_18_c9e00066cb` |\n| 19 | `f44cbc0f319b25b7.md` | `FACT_19_6bb952e957` |\n| 20 | `63cb0bd01755598d.md` | `FACT_20_2285e71b89` |\n| 21 | `b4dfea244ad071f8.md` | `FACT_21_95f69d457c` |\n| 22 | `77f34578b8391323.md` | `FACT_22_d0186be931` |\n| 23 | `9bb71cb959472fd7.md` | `FACT_23_51a09f0af0` |\n| 24 | `1dd87e9de41ee77d.md` | `FACT_24_675e19ee32` |\n| 25 | `b862032a3fdaa6ed.md` | `FACT_25_f23f5194f0` (End of chain) |\n\nAll 25 links traversed in order; the final chapter has no successor.\n\n## Three-step implementation plan\n\n**Caveat (verified):** every chapter file contains only a chapter index, a single opaque `Verified fact:` token, and the next-link — no prose requirements, APIs, or file paths. The plan below therefore covers implementing the one structural invariant the chain actually encodes (ordered traversal of 25 nodes, each holding exactly one fact, terminating at chapter 25) rather than inventing product behavior.\n\n1. **Node model + ordered store** — define a chapter record `{ index, fact, nextPath }` and a store seeded from the 25 `(index, fact)` pairs above; reject any record whose `index` is outside `1..25` or whose `fact` is empty.\n2. **Link-walking reader** — implement the traversal as a strict single-successor walk: start at chapter 1 (`56e465923f9b1a09.md`), assert each read yields `nextPath` for `index+1`, and assert chapter 25 terminates with `End of chain`. Fail loudly on a missing link, a skipped index, or a successor at index 25.\n3. **Verification** — a test that walks the chain and asserts exactly 25 facts collected, `facts.first === \"FACT_1_fdab72b8d9\"`, `facts.last === \"FACT_25_f23f5194f0\"`, and 24 successor hops; plus a negative test that a truncated chain raises an error.\n\n**Uncertain:** whether the opaque `FACT_*` tokens correspond to real symbols in `/Users/bytedance/Project/cognia-next`. Mapping step 1's store onto real code would need a source that assigns those tokens to concrete files, which the chain does not provide.",
+      "initial_report_sha256": "8779a760aefdabd1d43e6b5770f83bfa44bf30ce826d80440cab0a6cc420315e",
+      "prior_fact": "FACT_1_fdab72b8d9",
+      "last_fact": "FACT_25_f23f5194f0",
+      "initial_distinct_reads": 22,
+      "continuation_did_not_reread_completed_files": true
+    }
+  ],
+  "uninterrupted_completion": {
+    "accepted": true,
+    "model": "deepseek-flash",
+    "budget": 256,
+    "chain_length": 25,
+    "scope": "Same 25 short synthetic linked documents; dispatch-to-return wall clock, excluding bundle and sidecar bootstrap; one sample per agent, sequential runs.",
+    "results": [
+      {
+        "agent": "Explore",
+        "started_at": "2026-10-21T11:05:23.108Z",
+        "elapsed_ms": 74609,
+        "model_requests": 26,
+        "successful_http_responses": 26,
+        "ordered_distinct_reads": 25,
+        "terminal": "success",
+        "resumed": false,
+        "first_fact": "FACT_1_9abac052f5",
+        "last_fact": "FACT_25_cfa2a1e597",
+        "final_report": "[Explore]\n**CHAIN_COMPLETE** — 25/25 chapters read in order, one `read` per step, no listing/globbing/batching.\n\n**FIRST_FACT:** `FACT_1_9abac052f5`\n**LAST_FACT:** `FACT_25_cfa2a1e597`\n\n## Evidence digest (Explore)\n\n**Chain structure (verified):** Every chapter file is a 3-line stub with a fixed shape — declaration line, one `Verified fact:` line, one pointer line. Chapter 25 terminates with `End of chain. No further chapter.` No chapter contained anything beyond those three lines, so the digest is the topology, not prose.\n\n**Traversal order (path → fact):**\n\n| # | File (basename) | Fact |\n|---|---|---|\n| 1 | `304e82d5fdeead56.md` | `FACT_1_9abac052f5` |\n| 2 | `68fbfd33d09932c2.md` | `FACT_2_c9024dc1ce` |\n| 3 | `f98e5ce4a18803e2.md` | `FACT_3_97e6f02328` |\n| 4 | `b333ae774273e868.md` | `FACT_4_2aa2b62e63` |\n| 5 | `bf350a6aa3f811aa.md` | `FACT_5_013b81b195` |\n| 6 | `650184babb203a4d.md` | `FACT_6_3822465193` |\n| 7 | `7f180c55497b8108.md` | `FACT_7_8459dead75` |\n| 8 | `7fc0bc9d7f9d6c29.md` | `FACT_8_937af123fd` |\n| 9 | `a2467849aa33857d.md` | `FACT_9_98d39aaf3e` |\n| 10 | `de7684a09bdc6e87.md` | `FACT_10_d0172abb66` |\n| 11 | `ec22a28fb59ffbf2.md` | `FACT_11_709d4358c6` |\n| 12 | `0c7d2b780360dc7f.md` | `FACT_12_158c81650d` |\n| 13 | `0a650e0867817bb3.md` | `FACT_13_4ef46003f9` |\n| 14 | `9d1849fca33a5ac8.md` | `FACT_14_c9f2a843d4` |\n| 15 | `fdc0bf578ce3fcc9.md` | `FACT_15_621664852a` |\n| 16 | `5f1d8e2ee23908fe.md` | `FACT_16_b3187dd302` |\n| 17 | `2a16006900cd56e8.md` | `FACT_17_4c1b815e50` |\n| 18 | `0dde02832e41fca0.md` | `FACT_18_65c480059d` |\n| 19 | `2bb3f746f20db08a.md` | `FACT_19_e9519488ec` |\n| 20 | `09576e9011223c71.md` | `FACT_20_cbd0c1dcdf` |\n| 21 | `b1cef8e62da408f2.md` | `FACT_21_d3fd65aad8` |\n| 22 | `cc039a44f4777006.md` | `FACT_22_b64a2f1004` |\n| 23 | `6f03a8cb2abe66ca.md` | `FACT_23_91e3983f43` |\n| 24 | `778a4cc2eb088ecb.md` | `FACT_24_37ebcbe3a1` |\n| 25 | `e30219b6d6df43e1.md` | `FACT_25_cfa2a1e597` |\n\nAll paths resolve against `/Users/bytedance/Project/cognia-next/.cache/builtin-agent-live/completion-1/Explore/`.\n\n**Gaps / surprises (stated plainly):**\n- **No design content exists.** Despite the \"design document\" framing, no chapter carries architecture, rationale, or code references — nothing to cite as `file:line`. Facts 1–25 are opaque tokens with no semantics recoverable from the chain.\n- **Filename is not derivable from content.** Each 16-hex-char basename is unlinked to its chapter number or fact token, confirming sequential-only traversal was the only viable method.\n- **Integrity check passes:** chapter numbers are monotonic 1→25 with no repeats or skips; fact suffixes are unique (`9abac052f5` … `cfa2a1e597`), and numbering in the token matches the declared chapter in all 25 cases.\n- **No tooling note:** the `mcp__cognia-tools__read` tool named in the task was not exposed in this session's tool set; the equivalent `read` tool was used for every step, one call per model step as required."
+      },
+      {
+        "agent": "Plan",
+        "started_at": "2026-10-21T11:06:37.724Z",
+        "elapsed_ms": 42912,
+        "model_requests": 26,
+        "successful_http_responses": 26,
+        "ordered_distinct_reads": 25,
+        "terminal": "success",
+        "resumed": false,
+        "first_fact": "FACT_1_e71e614f65",
+        "last_fact": "FACT_25_39f29cc8ed",
+        "final_report": "[Plan]\nCHAIN_COMPLETE\n\n**FIRST_FACT:** `FACT_1_e71e614f65`\n**LAST_FACT:** `FACT_25_39f29cc8ed`\n\n## Chain traversal evidence\n\n| # | File | Fact |\n|---|---|---|\n| 1 | `36af6b00ca0b9d15.md` | FACT_1_e71e614f65 |\n| 2 | `12ec49ceeda18a7b.md` | FACT_2_4af3a9ea47 |\n| 3 | `faf9271a274ad7dd.md` | FACT_3_f96f38e1cb |\n| 4 | `5297bae67867553f.md` | FACT_4_f84eb75703 |\n| 5 | `d727ef971836d3fa.md` | FACT_5_af8a77106a |\n| 6 | `a378eae5bffeec8b.md` | FACT_6_add23a698d |\n| 7 | `9e7bf3861d978f05.md` | FACT_7_025ac6a501 |\n| 8 | `fb3a598ec479291f.md` | FACT_8_e5d4e0d64c |\n| 9 | `b0e1d1c4428b16b5.md` | FACT_9_d8cb5f32c5 |\n| 10 | `a674adf47d371501.md` | FACT_10_36751ce2f7 |\n| 11 | `20f8af917adc23b6.md` | FACT_11_2992df52fd |\n| 12 | `25c3ddef1723726d.md` | FACT_12_38e429fbd9 |\n| 13 | `bc299174aebd6170.md` | FACT_13_ce493fbdd0 |\n| 14 | `c3f2974fb8ed7676.md` | FACT_14_c7a9dd1d3b |\n| 15 | `7fdde12c78ef60cb.md` | FACT_15_6100fe98de |\n| 16 | `d0b9fa0a7602149c.md` | FACT_16_44f679a35f |\n| 17 | `f9f7ed9ab48094b0.md` | FACT_17_a7c1e79ea9 |\n| 18 | `5a51aadd60885955.md` | FACT_18_e56656c069 |\n| 19 | `d905151f1eb5f8e2.md` | FACT_19_9545994c82 |\n| 20 | `53e1f4b1ba2fc0b6.md` | FACT_20_cd7f091339 |\n| 21 | `cd7bc98906261bb9.md` | FACT_21_54e4b0a049 |\n| 22 | `3f3a4a61f7b50717.md` | FACT_22_2a64a05332 |\n| 23 | `557e4f70b47309ae.md` | FACT_23_4ee654985a |\n| 24 | `27beca0c6a4aaee5.md` | FACT_24_1cfeaddba2 |\n| 25 | `e10f49d300d829de.md` | FACT_25_39f29cc8ed |\n\nTraversal used one `read` per step, 25 reads total, no directory listing, glob, or grep. Each chapter carried exactly three lines: a chapter index, one `Verified fact:` token, and a `Next chapter:` absolute path — chapter 25 terminating with `End of chain. No further chapter.` Every `Next chapter:` path I followed named an existing file whose own index matched the position it was fetched at, so the chain is internally consistent with no cycles or skips.\n\n## Plan — three steps\n\n**Caveat up front:** the chain carries verification tokens only. No chapter states a requirement, a file path, a symbol, an API, or a data model. A plan cannot be derived from payload that isn't there, so the three steps below are the plan for *this* task — faithfully recording and validating the chain — plus the handoff needed before any code work could begin. I did not invent code paths to fill the gap.\n\n1. **Persist the traversal record.** Write the table above, the two endpoint facts, and the checkpoint discipline (one read per step, checkpoint before each, filename revealed only by its predecessor) into the task's working notes, so the digest is re-derivable if this context is lost. Verify by re-reading any two rows' files and confirming the tokens match.\n\n2. **Assert endpoint integrity.** Confirm `FACT_1_e71e614f65` appears only in chapter 1 and `FACT_25_39f29cc8ed` only in chapter 25, and that all 25 tokens are distinct and follow the `FACT_<n>_<10-hex>` form with `<n>` matching the chapter index. All 25 already satisfy this on inspection; any duplicate would indicate a mis-linked chapter and must be surfaced, not silently accepted.\n\n3. **Verification.** Mark the chain complete and report `CHAIN_COMPLETE`, `FIRST_FACT` and `LAST_FACT` verbatim. This completes the delegated task as specified.\n\n**What this does not deliver, and why:** if the dispatcher expected an implementation plan for an actual feature, the design documents were not populated — they contain placeholder facts rather than prose. The correct next move is to regenerate the chapters with real content, then re-run this traversal. Building from the tokens alone would mean fabricating the requirements, which I have deliberately avoided; treat step 3 as the boundary of what the evidence supports."
+      }
+    ]
+  },
+  "repository_research": {
+    "measurement_validated": true,
+    "base_commit_at_start": "7253c531be951e1545819a1ac5f05fee36801835",
+    "source_scope": "Actual shared modified cognia-next checkout. CLI dispatch and sidecar executed; desktop/headless behavior researched from source only. No fixed call count, free search/read batching. Plan received the completed Explore report. Each uses the normal default256-step budget and a20-minute experiment timeout.",
+    "results": [
+      {
+        "agent": "Explore",
+        "elapsed_ms": 430196,
+        "model_requests": 159,
+        "http_status_counts": {
+          "200": 159
+        },
+        "tool_calls": 279,
+        "tool_counts": {
+          "ls": 23,
+          "bash": 1,
+          "grep": 193,
+          "read": 61,
+          "glob": 1
+        },
+        "failed_tool_counts": {
+          "bash": 1,
+          "grep": 3
+        },
+        "read_calls": 61,
+        "successful_read_calls": 61,
+        "unique_successfully_read_files": null,
+        "model_terminal": "success",
+        "harness_exit_code": 1,
+        "source_citations": {
+          "count": 72,
+          "unique_referenced_files": 59,
+          "currently_missing_paths": ["lib/agent-tasks/goal-headless-runner.ts"],
+          "out_of_range_lines": []
+        },
+        "final_report": "[Explore]\n# 内置 Explore/Plan 长任务执行链调查报告（只读，未运行任何测试、未修改文件）\n\n> 调查范围限于 `app/ components/ hooks/ lib/ stores/ types/ cli/src/ sidecar/src/ packages/*/src/ src-tauri/src/` 与相关 manifest。以下所有行号均来自当前 checkout。术语约定：**已配置预算**＝启动时写死的上限；**剩余共享预算**＝`used/limit` 派生的可继续量。\n\n---\n\n## 一、确认事实（代码级）\n\n### 1. 内置 agent 目录与工具策略\n\n| 事实 | 证据 |\n|---|---|\n| Explore/Plan 定义在共享目录，`toolPolicy: read-only`，**没有 `maxTurns`** | `lib/agent/builtin-catalog/catalog.ts:193-212`、`:256-265`（read-only 由 `readOnlyBuiltinToolNames()` 派生） |\n| `BuiltinAgentEntry.maxTurns` 是可选字段，\"Omitted means the runtime's own default\" | `lib/agent/builtin-catalog/types.ts:59-60` |\n| Catalog 回归测试断言**所有**内置条目 `maxTurns === undefined`（含四个 workflow agent） | `lib/agent/builtin-catalog/catalog.test.ts:20-26` |\n| 四个 workflow agent 现在也没有 `maxTurns` | `lib/claude/agents/subagents/workflow-*.ts` 内无 `maxTurns`；`catalog.ts:170-180` 仅在定义存在时透传 |\n| Explore/Plan 只出现在 `dispatch` 与 `cli` 两个 surface，**不进任何 session 的 SDK `agents` map** | `catalog.ts:199,209`；`lib/claude/agents/subagents/index.ts:183-197`（direct 只 union 插件/模板，不含内置） |\n| 只读工具面由风险元数据派生，非手写 | `lib/settings/builtin-tools.ts:129-139`；CLI 副本 `cli/src/agent/tool-suppression.ts:43-56` |\n| Dispatch 能力门：plan 模式或 ai-sdk rail 或已开启 nesting 才暴露 `dispatch_agent`；已派生子 agent 若无 dispatchContext 则永不暴露 | `lib/claude/build-options.ts:1116-1181`，`:1161-1166` |\n\n**结论**：目录层\"角色写死轮数\"确已不存在（与 `docs/evidence/2026-10-21-builtin-agent-budgets.md:17,50` 的 O1/V1 记录一致）。但下述运行时默认值仍在起作用。\n\n---\n\n### 2. 三种 shell 的入口 → provider 调用链\n\n#### A. 桌面 / Renderer\n```\nchat 发送: hooks/chat/use-claude-chat-controller.ts\n  → lib/claude/ipc.ts:130 sendPrompt(\"claude_send\"|\"agent_send\")\n  → sidecar(runtimes/registry.ts:21-42 → ai-sdk 或 claude-agent-sdk)\ndispatch_agent(模型工具):\n  lib/claude/agents/dispatch-agent-tool.ts:1-14 (四种 mode: single/parallel/collect/resume)\n  → lib/claude/agents/dispatch-agent-handler.ts:91 runDispatchAgentTool\n  → dispatch-core.ts:62 runDispatchFanout（并发策略，budget 有限时串行）\n  → dispatch-run.ts:258 startDispatchRun\n      resolveCaller:154-196（depth / tokenBudget / deadlineMs / permission ceiling）\n      → lib/plugin/agent-sdk/dispatch.ts:202 预算门\n      → :272 executeAgentTurnFromRenderer\n      → lib/ai/agent/execution/agent-execution-service.ts:212 runAgentRail\n      → lib/ai/agent/agent-executor.ts:517 runToolEnabledStandalone\n      → build-options.resolveSendOptions\n      → run-and-capture.ts:698（preserveBudgetEvidence:700 → 仅 isDispatchedSubagent）\n      → ipc → sidecar\n```\n- Anthropic 路径还存在**另一条不经过以上预算规范化的 rail**：SDK 原生 `Task`，由 `opts.agents` 注入（`build-options.ts:5220-5286`、`lib/claude/sdk-subagent-bridge.ts`）。\n\n#### B. CLI\n```\ncognia-agent run/-p: cli/src/cli/run-command.ts:224-239\n  → cli/src/agent/run.ts:90 runHeadlessTurn（maxTurns→maxSteps:98）\n  → cli/src/agent/runtime/unified-runtime.ts:615 buildSession（maxSteps→config.aiSdkMaxSteps:620-625）\n  → cli/src/agent/session-runner.ts:652（config.aiSdkMaxSteps 下发 sidecar）\nTUI chat: cli/src/tui/hooks/useAgentSession.tsx:748-767（timeoutMs: 0）\nCLI dispatch_agent: cli/src/agent/subagent-dispatch.ts:91\n  → cli/src/agent/subagent-runner.ts:182 runCliSubagent\n  → capture({ timeoutMs: 0, preserveBudgetEvidence: true, idleTimeoutMs: 300_000 }:290-320)\n/agents run: cli/src/agent/agents-run-dispatch.ts:57 → runCliSubagent\n/plan explore: cli/src/tui/runtime/plan-controller.ts:15,233-235 → exploreAgent/planAgent\n```\n\n#### C. Headless\n```\nCLI serve + Agent RPC: cli/src/agent/rpc/runtime-service.ts:869 \"turn/run\"\n  → :1899-1903 透传 timeoutMs / idleTimeoutMs / maxSteps\n  → 悬空恢复参数白名单 :2568-2572（仅这四项）\n@cognia/agent client: packages/agent/src/types.ts:224-231 RunOptions{timeoutMs,idleTimeoutMs,maxSteps}\n  → packages/agent/src/client.ts:483-487\nGoal 长循环: lib/agent-tasks/goal-headless-runner.ts:271-275（hardCap = maxTurns+5）\n            lib/goal/turn-driver.ts:200-210 / lib/goal/exit-conditions.ts\nLoop 长循环: lib/loop/runtime.ts:55-60, lib/loop/turn-driver.ts:93-114\nlib/headless/* 只有常驻 runtime 注册表（types.ts:119-131），本身不含 agent turn 预算逻辑\n```\n\n---\n\n### 3. 预算 / 超时定义与优先级（核心表）\n\n| 机制 | 作用域 | 定义位置 | 默认值 | 优先级 / 行为 |\n|---|---|---|---|---|\n| **ai-sdk 单轮 agentic 步数** | 一个 user turn（可跨多 leg） | `sidecar/src/runtimes/ai-sdk/index.ts:509-534` | **256** | `maxTurns` > `aiSdkMaxSteps` > 256；再由 `@agent` overlay 的 `maxTurns` **只降不升**（`:532-534`） |\n| 每 leg 步数 STEP_CHUNK | 单个 `streamText` leg | `index.ts:158-168, 525` | **16** | `aiSdkStepChunk` 可调；leg 返回 `tool-calls` 则续 leg |\n| 触顶终态 | — | `index.ts:1423-1432`（可见提示）+ `events.ts:670-688` | — | 结果 subtype = `error_max_turns`，并写一条\"research incomplete\"文本 |\n| Anthropic `maxTurns` | 单次 SDK 调用 | `sidecar/src/runtimes/claude-agent-sdk/options.ts:157` | **未设置＝SDK 自循环无上限** | 由 `SendOptions.maxTurns` 决定 |\n| 渲染层 `opts.maxTurns` 来源 | 桌面 | `lib/claude/build-options.ts:1557-1563`（agent/session executionPolicy）、`:1605-1607`（capability grant） | 未设置 | 校验仅允许 1–100：`lib/agent/agent-profile-policy.ts:69-80` |\n| 桌面 executor 对显式 maxSteps 的夹取 | 桌面 | `lib/ai/agent/agent-executor.ts:464-466` | `clamp(1,100)` | 显式预算上限 100 |\n| `aiSdkMaxSteps` 桌面下发 | 桌面 | **无**（`build-options.ts` 从不设置） | 侧车兜底 256 | 桌面无 settings/UI 入口（`components/` 与 `lib/` 无匹配） |\n| CLI `aiSdkMaxSteps` | CLI | `cli/src/config/schema.ts:1205,1520` | **256** | `--max-turns` → `config.aiSdkMaxSteps`（`run-command.ts:127-130`） |\n| 子 agent 显式 `maxTurns` | 桌面+CLI | 桌面 `lib/plugin/agent-sdk/dispatch.ts:311`；CLI `cli/src/agent/subagent-runner.ts:242-249` | 未设置 | 有则作为 `maxSteps`/`sendOptions.maxTurns`，**优先于**默认值 |\n| **USD 预算** | 单次调用 | `build-options.ts:4995-5001`（goal `maxBudgetUsd`）→ `options.ts:158-161` | 无 | 与 turn 预算取 `Math.min` |\n| **子树 token 预算** | renderer dispatch 子树 | `lib/claude/agents/dispatch-budget.ts:35-87` | `subagentNesting.tokenBudget ?? 0`（0=无限） | 仅在 **dispatch 边界**与 **retry 前**判定 `level === \"critical\"`（95%）：`lib/plugin/agent-sdk/dispatch.ts:202-213`、`dispatch-retry.ts:71-75` |\n| **Team run 预算（token + USD）** | team run tree | `lib/ai/agent/execution/run-budget-governor.ts:97-120,161-207`；limit 来自 `agent-team-runtime.ts:812-819` | `team.config.tokenBudget ?? 0` | `allocate(child)` 共享根池，**无 per-child cap**（`:104-107`）；`isExhausted()` 只被测试与 dispatch 门使用 |\n| 上下文压缩阈值 | 上下文窗口 | `lib/claude/usage.ts:34-41`；镜像 `sidecar/src/context/compaction.ts:29-37` | 0.835 × 窗口 / 128k 兜底 | 侧车软阈值 0.8×、硬阈值 1×（`compaction.ts:835-836`）；CLI 另有 0.85（`cli/src/agent/auto-compact.ts:15-23`） |\n| **墙钟超时（capture）** | 桌面 dispatch / executor | `lib/claude/run-and-capture.ts:678, 961` | **5 分钟**（传 `0` 才关闭） | 桌面 dispatch 只在有子树 deadline 时才传 `timeoutMs`（`dispatch.ts:242-244, 314`）→ **默认落回 5 分钟** |\n| 子树 deadline | renderer dispatch | `dispatch-run.ts:105-123,192` | `subagentNesting.timeoutMs ?? 0`（0=无） | 绝对时刻向下传，子级换算剩余：`dispatch.ts:242-244` |\n| CLI 交互/子 agent 墙钟 | CLI | `useAgentSession.tsx:767`、`subagent-runner.ts:299` | **关闭（0）** | 显式禁用 |\n| 空闲看门狗（capture） | capture | `run-and-capture.ts:557, 961-962, 1031-1037` | 默认 0（关闭）；CLI 交互 60s / 子 agent 300s | 首个事件后才武装；工具执行/审批期间暂停 |\n| 侧车流空闲 | sidecar 流 | `sidecar/src/providers/stream-watchdog.ts:16`、`ai-sdk/index.ts:1113-1120` | **5 分钟** | 工具执行中挂起 |\n| 只读工具单次执行 | 工具 | `sidecar/src/tools/middleware/read-only-timeout.ts:27` | **120s** | `0` 关闭；两个 rail 共用 |\n| CLI `subagentStreamIdleTimeoutMs` | CLI 子 agent | `schema.ts:1218-1228,1522` | **300s** | 覆盖 `streamIdleTimeoutMs` |\n| Teammate 单任务 | team | `dispatch-teammate.ts:87,886-893` | **600s** | `AbortSignal.timeout` 与 caller signal 合并 |\n| Goal 循环 | goal | `lib/goal/runtime.ts:123-130` | 20 轮 / 200k token / 30min / 3 次判官失败 | pre-judge 退出顺序 `lib/goal/turn-driver.ts:200-210` |\n| Loop 循环 | loop | `lib/loop/runtime.ts:55-60`；`turn-driver.ts:93-114` | 100 迭代 / 1M token / 7 天过期 | 硬退出按 迭代→token→过期 |\n| `dispatch_agent({collect,timeoutMs})` | 收集窗口 | `dispatch-agent-tool.ts:57-61` | 上限 30 分钟 | 超窗返回 pending |\n\n**\"已配置\" vs \"剩余\"** 的区别现状：\n- 只有 `BudgetGuard.status()`（`lib/claude/agents/dispatch-budget.ts:68-73` 间接）与 `governor.totals()`（`run-budget-governor.ts:188-206`）真正计算 `used/limit`。\n- `dispatch-retry.ts:73` 用**剩余 wall-clock** 与退避时间比较；`dispatch.ts:242-244` 用剩余 deadline 换算子级 `timeoutMs`。\n- **没有任何 `remaining` 数值被喂进 provider 循环**：ai-sdk 的 `maxStepsBudget` 是 turn 起点的固定总步数（`index.ts:526-534`），跨 turn 不结转；压缩用的是\"上下文已用量 vs 窗口\"，不是 token 预算。\n- 子树 token guard 是**内存 Map**（`dispatch-budget.ts:29`）；崩溃/重载后归零，`redispatch.ts:95-96` 明确承认\"其丢失不能重置预算\"只对无副作用情形成立。\n\n---\n\n### 4. 终态传播\n\n| 环节 | 行为 | 证据 |\n|---|---|---|\n| 侧车 ai-sdk 触顶 | `result.subtype = error_max_turns`，`is_error: true` | `runtimes/ai-sdk/events.ts:670-688` |\n| 侧车 Anthropic 终态 | 策略性上限**不算 provider failure**，按数据透传 | `runtimes/claude-agent-sdk/result-terminal.ts:26-31, 101-138` |\n| 规范 canonical 事件 | 非 success → `failure{code: failureCodeFromResult}`，预算类 `retryable: undefined` | `sidecar/src/host/events/canonical/result.ts:71-90` |\n| 渲染层统一映射 | `error_max_turns|error_max_budget_usd` → `errorEnvelope.code=\"budget-exhausted\"`, `retryable:false`，正文追加\"incomplete + resume 建议\" | `lib/claude/agents/dispatch-error.ts:82-101` |\n| executor 汇总 | `budgetContinuationContext` 拼进 `text`，`finishReason` 映射为 `error_max_*` | `lib/ai/agent/agent-executor.ts:808-815` |\n| CLI dispatch | 同函数复用，`incomplete = code === \"budget-exhausted\"` | `cli/src/agent/subagent-dispatch.ts:358-398` |\n| journal 投影 | 失败行保留 `partialText` 作 `resultText`，错误另存 | `lib/background-tasks/renderer-subagent-registry.ts:88-100` |\n| 自动重试 | 预算耗尽**不重试** | `dispatch-retry.ts:74`；`dispatch-run.ts:148-167` 测试 |\n| 中止（用户取消） | `cancelled` 终态，不算失败；保留已产出 | `dispatch-run.ts:403-412`；CLI `subagent-dispatch.ts:351-353` |\n\n---\n\n### 5. 中断 / 显式续跑\n\n| 事实 | 证据 |\n|---|---|\n| 每次 dispatch 都有 `AbortController`（前台后台皆然），可被 UI/registry 取消 | `dispatch-run.ts:262-287` |\n| 后台 run 进入可收集 registry + journal；前台只 journal | `dispatch-run.ts:466-552`；`renderer-subagent-registry.ts:129-168` |\n| **前台 CLI** 只在预算耗尽时补写 journal 行，使 `resume` 对前后台一致 | `cli/src/agent/subagent-dispatch.ts:355-396`；`subagent-background-tasks.ts:182-190` |\n| 续跑语义 = 重新派发原 prompt + 上次结果，**不是原生会话重放** | `lib/background-tasks/completion-delivery.ts:103-118`（注释明说） |\n| 渲染层 resume | `dispatch-agent-handler.ts:141-201`，写入 `resumedByRunId` 溯源 |\n| CLI resume | `cli/src/agent/subagent-dispatch.ts:469-500`（owner 作用域） |\n| 崩溃自动续跑 | `lib/background-tasks/redispatch.ts:145-158`，`DEFAULT_MAX_AUTO_RESUME_ATTEMPTS` 上限；仅 `autoResumeInterrupted` 开启时 |\n| Headless turn 级恢复 | durable `suspendedTurn` + `resumableTurnParams`（只保留 timeout/idle/maxSteps/diagnostics） | `cli/src/agent/rpc/runtime-service.ts:1864-1873, 2568-2572` |\n\n**保留的\"部分发现\"有明确边界**：`run-and-capture.ts:1020-1027, 1524-1537, 1795-1814` — 第一条 + 最近 31 条工具结果，每条 ≤2048 字符，input 单独截断，排除图像/文档二进制与隐藏推理；仅在 `preserveBudgetEvidence` 且确实触顶时生成。桌面由 `isDispatchedSubagent` 打开（`agent-executor.ts:700`），CLI 子 agent 恒定打开（`subagent-runner.ts:300`）。\n\n---\n\n### 6. 压缩与循环守卫\n\n| 机制 | 行为 | 证据 |\n|---|---|---|\n| ai-sdk 手动 agent loop | 每 leg 之间 `maybeCompact`，leg 大小 16 步以控制重发开销 | `index.ts:928-967, 1006-1011, 1394-1421` |\n| 压缩触发 | `compaction.enabled===false` 或 `trigger===\"manual\"` 关闭；0.8× 预备、1× 强制 | `sidecar/src/runtimes/ai-sdk/compaction.ts:800-820, 835-836` |\n| 消息数触发 | `trigger===\"message-count\"` + 阈值 | 同上 `:803-812` |\n| 压缩策略 | strategy / optical / sliding-window / undo 快照 | `compaction.ts:304-799`；`sidecar/src/context/strategies.ts` |\n| 压缩后恢复指令 | 首个跨边界 turn 追加 recovery prompt | `build-options.ts:4969-4975` |\n| 中断后配对修复 | `sanitizeToolMessagePairs` 防止 dangling tool_call | `index.ts:969-977` |\n| **Doom-loop 守卫** | 同一 tool+同一 input 第 3 次 → **强制审批**（不终止）；LRU 512；每 turn 重置 | `sidecar/src/policy/doom-loop.ts:12-20,37-63`；`index.ts:496-503, 775-778, 817-858` |\n| 未知 finishReason | 只有产出新内容才继续，最多 3 次 | `index.ts:85-89, 1404-1412` |\n| 传输失败重试 | 输出前最多 2 次 | `index.ts:81-83` |\n| 卡死工具 | 空闲看门狗在工具执行期间挂起，避免误杀 | `index.ts:1108-1120`；`run-and-capture.ts:1031-1037` |\n\n**注意**：不存在\"语义级无进度检测\"（重复相同**结果**、无新增文件/事实）——只有重复**调用**触发审批，循环不会被自动终止。\n\n---\n\n## 二、关键判断（回答\"现在到底会不会被截断\"）\n\n1. **桌面 Explore/Plan 的实际截断是\"时间\"而非\"步数\"**：内置条目无 `maxTurns`，`agent-executor` 不下发 `maxSteps`，`build-options` 不设 `opts.maxTurns`；因此 Anthropic 路径由 SDK 自循环（无上限），ai-sdk 路径由侧车 256 步兜底。但两条 rail 都经 `run-and-capture`，**未传 `timeoutMs` 时默认 5 分钟墙钟**（`run-and-capture.ts:961`），而桌面 dispatch 只有配置了 `subagentNesting.timeoutMs` 才会传（`dispatch.ts:242-244,314` + `dispatch-run.ts:192`）。默认配置下（`timeoutMs: 0`）→ **5 分钟硬杀**。\n2. **CLI Explore/Plan 的截断是 256 步、无墙钟**：子 agent 显式 `timeoutMs: 0`（`subagent-runner.ts:299`），步数来自 `config.aiSdkMaxSteps=256`（`schema.ts:1520`）。\n3. **桌面 ai-sdk 的 256 步不可配置**：渲染层从不设置 `aiSdkMaxSteps`（全仓库仅 CLI/sidecar/packages 出现），因此它不是产品策略，而是侧车兜底值。\n4. **显式预算还存在 1–100 的硬夹取**（`agent-executor.ts:465`、`agent-profile-policy.ts:70`），任何\"更大的显式上限\"在此路径会被静默压到 100。\n5. **续跑不会继承剩余预算**：续跑是新的 dispatch，`resolveCaller` 重新读 settings 并新建/复用子树 guard；文档也承认\"显式续跑获得新的 turn 预算\"（`docs/evidence/2026-10-21-builtin-agent-budgets.md:80`）。\n6. **两套记账并存且单位不同**：dispatch 侧是 token（`dispatch-budget.ts`），team 侧是 token+USD（`run-budget-governor.ts`）；CLI 明确\"没有 token 预算记账\"（`cli/src/agent/subagent-dispatch.ts:66-73`）。\n\n---\n\n## 三、设计建议（供 planning agent 使用，未实施）\n\n1. **统一\"完成策略\"对象，而不是继续加角色级常量**：`{ maxSteps?, maxTokens?, maxBudgetUsd?, wallClockMs?, idleMs?, source }`，三 shell 共用同一 resolver，产出可观测的 `effectiveLimits` + `remaining`。落点：`build-options.resolveSendOptions` / `subagent-runner` / `unified-runtime.buildSession`。\n2. **优先修掉默认 5 分钟墙钟**（这是当前真正的\"任意截断\"）：让桌面 dispatch 像 CLI 一样显式传 `timeoutMs: 0`，或把 `subagentNesting.timeoutMs` 的 0 语义改为\"无墙钟\"并显式透传（`dispatch.ts:242-244` 目前把 `undefined` 留给了 capture 默认值）。同时为 `run-and-capture.ts:961` 的默认值补一条回归测试。\n3. **把 256 变成显式、可配置、可继承的策略**：桌面需补 `aiSdkMaxSteps` 的 settings 入口与下发（`build-options`），并明确\"未配置时的语义是无上限还是有记录的安全兜底\"，避免\"侧车隐式默认\"继续充当产品策略。\n4. **放宽/去除 100 的夹取**，或在 `agent-executor.ts:464-466` 与 `agent-profile-policy.ts:69-72` 改为按策略校验（当前两处规则不一致：一处夹取、一处抛错）。\n5. **把\"剩余共享预算\"接入循环**：dispatch 层已有 `used/limit`，可在每 leg 前查询并把\"剩余\"作为 `maxSteps` 上限传递；或至少在触顶时常量 `error_max_turns` 之外补充 `reason: \"steps\" | \"tokens\" | \"usd\" | \"wall-clock\"`、`stepsUsed`、`remaining`、`resumable`。\n6. **终态可区分**：`dispatch-error.ts:82-101` 现在把所有预算触顶压成一句 `budget-exhausted`；建议保留 subtype/reason，避免 UI 无法区分\"步数到了\"和\"钱到了\"。\n7. **续跑携带进度而非仅结论**：现有 `budgetContinuationContext` 已做工具证据；建议再加 `stepsUsed`、已完成子目标、未完成清单的结构化字段，使续跑可判断\"还剩多少\"，而不是靠模型重读。\n8. **无进度保护补齐**：保留 doom-loop 审批（不要改成终止），另加结果级指纹（相同 tool 结果的连续重复计数）与\"距离上次新增证据的步数\"阈值，触顶时以独立终态 `no-progress` 结束并可续跑。\n9. **崩溃后预算不丢**：把子树 `used` 落到 journal（`dispatch-budget.ts` 目前是内存 Map），避免 reload 后预算归零；`redispatch.ts:95-96` 的假设需要随之更新。\n10. **压缩与步数解耦**：明确压缩摘要调用是否计入 `maxStepsBudget`（现在侧车用 ledger side-call，`compaction.ts:320-321`，未见对 `stepsUsed` 的扣减——见缺口）。\n\n---\n\n## 四、测试覆盖与缺口\n\n**已有覆盖（仅阅读代码判断，未执行）**\n\n| 主题 | 测试 |\n|---|---|\n| 内置条目无 `maxTurns` | `lib/agent/builtin-catalog/catalog.test.ts:20-26` |\n| CLI 投影无 `maxTurns` + 只读白名单 | `cli/src/agent/builtin-agents.test.ts:47-76` |\n| >20 步可继续 | `sidecar/src/runtimes/ai-sdk/index.test.ts:2972-3005` |\n| 触顶可见提示 + `error_max_turns` | 同上 `:3007-3044` |\n| `maxTurns` 胜过 `aiSdkMaxSteps` | 同上 `:3079-3110` |\n| `@agent` 夹取预算 | 同上 `:1068-1104` |\n| leg 续跑 / 未知 finish 继续且有界 | 同上 `:2937-2970, 1800-1878` |\n| 预算触顶规范化 + resume 句柄 | `lib/claude/agents/dispatch-error.test.ts:119-129`；`dispatch-run.test.ts:148-167, 486-504` |\n| 后台 collect/resume（两种 subtype） | `lib/claude/agents/dispatch-agent-handler.test.ts:393-460` |\n| 工具证据边界（首条+最近31、2048、二进制排除、opt-out） | `lib/claude/run-and-capture.test.ts:1811-1884` |\n| CLI 子 agent 续跑证据拼接 | `cli/src/agent/subagent-runner.test.ts:56-70` |\n| 子树 token guard（95%、0=无限、有限预算串行） | `lib/claude/agents/dispatch-budget.test.ts:31-74`；`dispatch-agent-handler.test.ts:567-571` |\n| governor 共享根池 / extendLimit | `lib/ai/agent/execution/run-budget-governor.test.ts:18-80` |\n| 压缩触发/undo/强制 | `sidecar/src/runtimes/ai-sdk/index.test.ts:2124-2460` |\n| 中断不破坏下一轮配对 | 同上 `:3244-...` |\n| CLI 墙钟关闭 | `cli/src/tui/hooks/useAgentSession.test.tsx:369-379` |\n| 侧车空闲超时 = 5min | `sidecar/src/providers/stream-watchdog.test.ts:90-92` |\n\n**缺口（明确未覆盖）**\n\n1. **没有测试覆盖 `run-and-capture` 的 5 分钟默认墙钟**：`DEFAULT_TIMEOUT_MS` 在测试里从未被断言；dispatch 测试全部 mock `dispatchSubagent`，`nesting()` 固定 `timeoutMs: 0`（`dispatch-run.test.ts:129-132`），因此\"桌面默认 5 分钟\"这条路径零覆盖。\n2. **没有端到端长时（>5min）Explore/Plan 测试**；仓库证据只有 74.6s / 42.9s 实测（`docs/reports/2026-10-21-builtin-agent-budget-live.md`、evidence `O6/M2`），无法暴露墙钟问题。\n3. **没有测试断言桌面不会/会下发 `aiSdkMaxSteps`**（即 256 兜底是否为预期行为），也没有 settings UI 层测试。\n4. **CLI 与桌面预算同构性无 parity 测试**（CLI 无 token 记账，只有并发上限 8：`subagent-dispatch.ts:73,507-511`）。\n5. **没有 per-child token 上限测试**——governor 明确不做 per-child cap（`run-budget-governor.ts:104-107`）。\n6. **没有\"剩余预算传入循环\"的测试**（因为尚无此实现）。\n7. **没有结果级 no-progress 检测**的任何测试或实现；doom-loop 只测审批路径。\n8. **压缩摘要调用是否消耗步数/预算未测**。\n9. **崩溃/重载后子树预算重置**未测（内存 Map）。\n10. `docs/evidence/2026-10-21-builtin-agent-budgets.md:53` 自述 V4（typecheck/static-export）**blocked**，全仓 integration gate 未通过。\n\n---\n\n## 五、未解决 / 未能确认\n\n1. **压缩 side-call 与步数预算的关系**：`sidecar/src/runtimes/ai-sdk/compaction.ts:320-321` 有 `ledgerSideCalls`，但我未追踪其是否影响 `stepsUsed` / `maxStepsBudget`（`index.ts:1392, 1413`）。需后续确认\"压缩是否偷偷吃掉步数\"。\n2. **Anthropic SDK 原生 `Task` rail 的预算**：它不经过 `dispatch-error.normalizeDispatchBudgetResult`，也未接入 `dispatch-budget`；长任务在该路径上的截断语义（是否 `error_max_turns`、能否 resume）未逐行确认。\n3. **Rust 侧（`src-tauri`、`crates/*`）是否有独立 watchdog/timeout 影响长 run**：仅粗查，未见与 agent turn 预算相关项；`crates/` 不在本次许可的深读范围。\n4. **`/plan explore` 在 TUI 是否传任何预算**：`plan-controller.ts` 只解析 def，未显式传 budget；预算实际来自 `config.aiSdkMaxSteps`，但未看到专门断言。\n5. 我**没有执行任何测试或构建**；上文所有\"通过/失败\"均引用仓库内既有文档，未独立复现。",
+        "collector_issue": "Initial tool snapshots were counted before arguments finalized; reads[] is invalid. Read-call totals were independently recovered by tool name and correlated successful result IDs. Model and tool-call counts are unaffected. Collector was corrected before Plan."
+      },
+      {
+        "agent": "Plan",
+        "elapsed_ms": 247486,
+        "model_requests": 48,
+        "http_status_counts": {
+          "200": 48
+        },
+        "tool_calls": 139,
+        "tool_counts": {
+          "read": 79,
+          "grep": 54,
+          "glob": 5,
+          "ls": 1
+        },
+        "failed_tool_counts": {
+          "read": 2,
+          "grep": 2
+        },
+        "read_calls": 79,
+        "successful_read_calls": 77,
+        "unique_successfully_read_files": 51,
+        "model_terminal": "success",
+        "harness_exit_code": 0,
+        "source_citations": {
+          "count": 71,
+          "unique_referenced_files": 46,
+          "currently_missing_paths": [],
+          "out_of_range_lines": []
+        },
+        "final_report": "[Plan]\n# Cognia 内置 Explore/Plan 长任务执行链——只读核查与分阶段设计\n\n调查方式：仅阅读源码与测试（未运行任何命令、未执行测试、未修改文件）。下文行号均来自当前 checkout。对 Explore digest 的引用均重新核对；纠正项集中列在第三节。\n\n---\n\n## 一、结论先行（当前真实行为，不是提案）\n\n| Shell / 入口 | 步数上限（默认） | 墙钟上限（默认） | 空闲上限 | 谁在截断 |\n|---|---|---|---|---|\n| 桌面 `dispatch_agent(\"Explore\"/\"Plan\")` | Anthropic rail：无（`maxTurns` 未设置）；ai-sdk rail：侧车 256 | **5 分钟**（`dispatch.ts` 未传 `timeoutMs` → capture 默认值） | capture 0（关闭）；侧车流 5 分钟 | **墙钟**，且失败为 `session_error`，不可续跑语义 |\n| 桌面 TUI/chat 主回合（被派生的父） | ai-sdk 256 / Anthropic 无 | 无（UI 流式路径不经 capture 默认值） | 侧车 5 分钟 | 侧车步数（仅 ai-sdk） |\n| CLI 交互 TUI `useAgentSession` | `config.aiSdkMaxSteps=256` | 显式 `0`（关闭） | 交互 60s / 子 agent 300s | 步数（仅 ai-sdk） |\n| CLI 子 agent（`dispatch_agent` / `/agents run` / `/plan explore`） | 256（继承 config） | 显式 `0`（关闭） | 300s | 步数（仅 ai-sdk） |\n| CLI 一次性 `cognia-agent run`（父回合） | 256 | **5 分钟**（`--timeout` 未给 → `timeoutMs: undefined` → capture 默认值） | 60s | 墙钟会把派发中的 Explore 一起打断 |\n| Headless `turn/run`（`packages/agent`） | 256 | **5 分钟**（`timeoutMs` 未传 → capture 默认值） | 侧车 5 分钟 | 墙钟 |\n\n一句话：**当前并不存在\"Explore/Plan 被角色级轮数写死\"的问题；真正的任意截断是 `run-and-capture` 的 5 分钟默认墙钟，其次才是 ai-sdk 的 256 步侧车兜底。** 而\"无进度保护\"目前只有 doom-loop 的强制审批，没有任何终止语义。\n\n---\n\n## 二、已核实事实（代码级）\n\n### 2.1 目录与工具策略\n\n- Explore/Plan 条目：`lib/agent/builtin-catalog/catalog.ts:193-212`；`toolPolicy: { kind: \"read-only\" }`；`surfaces: [\"dispatch\",\"cli\"]`；**无 `maxTurns`**。\n- `maxTurns` 可选、注释写明\"Omitted means the runtime's own default\"：`lib/agent/builtin-catalog/types.ts:59-60`。\n- 只读工具面由风险元数据派生：`catalog.ts:256-265`（`resolveBuiltinToolPolicy` → `readOnlyBuiltinToolNames()`）。\n- 回归测试硬断言所有内置条目 `maxTurns === undefined`：`lib/agent/builtin-catalog/catalog.test.ts:20-26`。\n- CLI 投影同样不写死：`cli/src/agent/builtin-agents.ts:38-56`、`:95-101`；测试 `cli/src/agent/builtin-agents.test.ts:47-50`。\n- Explore/Plan 不进任何 session 的 SDK `agents` map：`lib/claude/agents/subagents/index.ts:180-211`（`\"direct\"` 只 union 插件条目 + 非内置模板）。\n- `dispatch_agent` 暴露门（plan 模式 / ai-sdk rail / nesting 开启）：`lib/claude/build-options.ts:1134-1181`，叶子子 agent 永不暴露（`:1161-1166`）。\n\n### 2.2 执行适配器与预算优先级\n\n**ai-sdk 侧车（单一权威点）**：`sidecar/src/runtimes/ai-sdk/index.ts:509-534`\n\n```\nmaxTurns (>0)  ▸  aiSdkMaxSteps (>0)  ▸  256\n再由 `@agent` overlay 的 maxTurns 只降不升（:224-227, :534）\n```\n\n- 每 leg 16 步：`:525`（`resolveStepChunk`，`:166-168`）；leg 续跑、触顶退出：`:1006-1011`、`:1380-1421`。\n- 触顶提示：`:1423-1432`；终态 subtype：`sidecar/src/runtimes/ai-sdk/events.ts:670-688`（`error_max_turns` + `is_error: true`）。\n\n**桌面渲染层**：\n- `build-options.ts` **从不设置 `aiSdkMaxSteps`**（全仓 grep 仅 CLI/sidecar/packages 命中）。\n- `opts.maxTurns` 仅来自两处：`build-options.ts:1561-1563`（agent/session executionPolicy）、`:1606-1607`（capability grant）。\n- 执行器把显式 `maxSteps` 静默夹到 1..100：`lib/ai/agent/agent-executor.ts:464-466`；这是被测试认可的行为：`lib/ai/agent/agent-executor.test.ts:1093-1111`（`maxSteps: 250` → grant `maxTurns: 100`）。\n- 政策校验另一套规则（抛错而非夹取）：`lib/agent/agent-profile-policy.ts:69-73`。\n- 子 agent 显式 `maxTurns` → `maxSteps`：`lib/plugin/agent-sdk/dispatch.ts:311`。\n\n**CLI**：\n- `--max-turns` → `config.aiSdkMaxSteps`：`cli/src/cli/run-command.ts:127-130`；config 默认 256：`cli/src/config/schema.ts:1205, 1520`。\n- `runHeadlessTurn` 的 `maxTurns` → `maxSteps`：`cli/src/agent/run.ts:90-115`（`:98`）。\n- `maxSteps` → `config.aiSdkMaxSteps`：`cli/src/agent/runtime/unified-runtime.ts:621-625`。\n- `session-runner` 把 config 落到 `sendOptions.aiSdkMaxSteps`：`cli/src/agent/session-runner.ts:648-654`。\n- 子 agent：`def.maxTurns` 优先，否则继承 config：`cli/src/agent/subagent-runner.ts:242-249`。\n\n**关键不一致（digest 未点明）**：CLI/headless 的 `maxSteps` **只写 `aiSdkMaxSteps`，从不写 `sendOptions.maxTurns`**。因此 Anthropic rail 上 `RunOptions.maxSteps` 是 no-op（`cli/src/agent/session-runner.ts:648-654` 无 `maxTurns` 赋值；`packages/agent/src/types.ts:224-231` 只暴露 `maxSteps`）。跨 rail 的显式步数预算目前不等价。\n\n### 2.3 墙钟 / 空闲 / 工具超时（真正的默认截断）\n\n- capture 默认墙钟 **5 分钟**：`lib/claude/run-and-capture.ts:678`（`DEFAULT_TIMEOUT_MS`）、`:961`（`cap?.timeoutMs ?? DEFAULT_TIMEOUT_MS`）。\n- 墙钟触发即 `interruptSession` + `session_error`：`:1077-1095`。\n- capture 空闲默认 **0（关闭）**：`:962`；空闲触发为 `session_error`：`:1294-1310`。\n- 桌面派发只有存在子树 deadline 才传 `timeoutMs`：`lib/plugin/agent-sdk/dispatch.ts:242-244, :314`；而 deadline 只在 `subagentNesting.timeoutMs > 0` 时产生：`lib/claude/agents/dispatch-run.ts:192`、`:109-114`。\n  → **默认配置（`timeoutMs: 0`）下，桌面 Explore/Plan 走 capture 默认 5 分钟。**\n- CLI 子 agent 显式关闭墙钟并设 300s 空闲：`cli/src/agent/subagent-runner.ts:290-320`（`:299`、`:306-307`）。\n- CLI TUI 主回合显式关闭墙钟：`cli/src/tui/hooks/useAgentSession.tsx:759-767`；测试 `cli/src/tui/hooks/useAgentSession.test.tsx:369-379`。\n- CLI 一次性 `run` 未给 `--timeout` → `timeoutMs: undefined`：`cli/src/cli/run-command.ts:227-238`，经 `cli/src/agent/session-runner.ts:815-824` 原样传入 capture → **落回 5 分钟**。\n- Headless `turn/run` 未传 `timeoutMs` → `cli/src/agent/rpc/runtime-service.ts:1899-1903` 不传 → 同样落回 5 分钟。\n- 侧车流空闲 5 分钟：`sidecar/src/providers/stream-watchdog.ts:16`、`:44-47`。\n- 只读工具单次 120s：`sidecar/src/runtimes/ai-sdk/index.ts` 中 `toolExecutionTimeoutMs` 下发（`:658-663` in `session-runner`；默认值 `cli/src/config/schema.ts:1521`）。\n- `collect` 的 30 分钟是**阻塞等待窗口**，不是运行上限：`lib/claude/agents/dispatch-agent-tool.ts:56-61`。\n\n### 2.4 共享父/子资源记账\n\n- 子树 token guard：`lib/claude/agents/dispatch-budget.ts:29`（**内存 Map**）、`:35-47`、`:68-87`（critical 门）、`:83-87`（有限预算 → 串行）。\n- 阈值来自团队 core：`lib/ai/agent/team/gates/budget-guard.ts:61-92`（warn 0.8 / crit 0.95，`limit<=0` 永远 ok）。\n- 记账写入点：`lib/plugin/agent-sdk/dispatch.ts:356-364`（每 run 结束后 `add`）。\n- 预算根：顶层为 `dispatch:<sessionId>`（`dispatch-run.ts:183-184`），嵌套为 `ctx.budgetRootRunId`（`:175`）。\n- 团队侧独立账本（token + USD，无 per-child cap）：`lib/ai/agent/execution/run-budget-governor.ts:97-120`、`:161-183`。\n- **没有任何 remaining 值进入 provider 循环**：ai-sdk 的 `maxStepsBudget` 是 turn 起点的固定总步数（`index.ts:526-534`），跨 turn 不结转；`dispatch-budget` 只在派发前和重试前查询（`dispatch.ts:202-213`、`dispatch-retry.ts:65-76`）。\n- 崩溃/重载后 guard 归零，且代码注释只对无副作用情形成立：`lib/background-tasks/redispatch.ts:94-96`。\n- 续跑 nuance：`getOrCreateDispatchBudget` 对同一 budget root **复用**已有 guard（`dispatch-budget.ts:35-47`），所以同 session 内显式续跑**继承剩余 token 预算**；但 turn/step 预算确实是新的，换 session 或重载则 token 也重置。\n\n### 2.5 终态传播\n\n- 预算类停止不算 provider 失败（Anthropic rail）：`sidecar/src/runtimes/claude-agent-sdk/result-terminal.ts:26-31`。\n- 统一映射为 `budget-exhausted` + `finishReason: \"error\"` + 续跑句柄：`lib/claude/agents/dispatch-error.ts:82-102`。\n- 两条 shell 都依赖 `finishReason === \"error\"` + `errorEnvelope`：`dispatch-run.ts:385-392`、`cli/src/agent/subagent-dispatch.ts:358-398`、`lib/background-tasks/renderer-subagent-registry.ts:88-100`。\n- 取消是 `cancelled`，不是失败：`dispatch-run.ts:383-384, 403-412`；CLI `subagent-dispatch.ts:351-353`。\n- 预算耗尽不自动重试：`dispatch-retry.ts:74`。\n- 墙钟/空闲错误文本（\"did not end within\" / \"stream idle for\"）经 `classifyProviderErrorInfo` 落为 `unknown` → `retryable: false`（`lib/claude/agents/dispatch-error.ts:53-60` + `packages/provider-routing/src/error-classifier.ts:75-94`），因此不会因超时产生重试风暴。\n\n### 2.6 已保存的发现与显式续跑\n\n- 证据池：首条 + 最近 31 条、每条 ≤2048 字符、排除二进制/推理：`lib/claude/run-and-capture.ts:1021-1027`、`:1783-1813`；仅在 `budgetExhausted` 且 `preserveBudgetEvidence` 时生成（`:1524-1537`）。\n- 桌面由 `isDispatchedSubagent` 打开：`lib/ai/agent/agent-executor.ts:700`；CLI 子 agent 恒开：`subagent-runner.ts:300`。\n- 合入结果文本：`agent-executor.ts:809`、`subagent-runner.ts:334`。\n- 续跑 = 重新派发\"原 prompt + 上次结果\"，非会话重放：`lib/background-tasks/completion-delivery.ts:103-118`；渲染层 `dispatch-agent-handler.ts:141-201`；CLI `subagent-dispatch.ts:469-500`。\n- 对话快照只在 CLI 父会话侧被消费：`cli/src/agent/session-runner.ts:792-794, 904`；渲染层子任务的 journal 只有 `text/usage/error`（`renderer-subagent-registry.ts:95-99`），**没有子会话 transcript**。\n- Headless 悬挂回合恢复参数白名单只有四项：`cli/src/agent/rpc/runtime-service.ts:2568-2574`。\n\n### 2.7 压缩与循环守卫\n\n- 每 leg 前压缩：`sidecar/src/runtimes/ai-sdk/index.ts:956-967`；阈值 0.8× / 1×：`sidecar/src/runtimes/ai-sdk/compaction.ts:800-820`。\n- **压缩不消耗步数**：压缩 side-call 走 ledger（`compaction.ts:497`、`:622`，`logicalStepId: compact:N / optical:N`），而 `stepsUsed` 只在 leg 结束时累加（`index.ts:940, 1413-1414`）。digest 的\"未确认\"项在此闭合：压缩吃 token/上下文，不吃步数。\n- Doom-loop 只强制审批、不终止：`sidecar/src/policy/doom-loop.ts:1-8, 12-20, 31-65`。\n- 未知 finishReason 有界续跑 3 次：`index.ts:85-89, 1404-1412`。\n- **不存在结果级无进度检测**：相同工具+相同输入第 3 次只触发审批；在 `--yes`/bypass 下审批被自动放行，等于**没有刹车**。\n\n---\n\n## 三、对 Explore digest 的纠错与补充\n\n1. **不成立：\"CLI Explore/Plan 的截断是 256 步、无墙钟\"**。子 agent 自身确实 `timeoutMs: 0`（`subagent-runner.ts:299`），但父回合不是：`cognia-agent run` 未给 `--timeout` 时经 `session-runner.ts:821` 传 `undefined`，capture 落回 5 分钟（`run-and-capture.ts:961`）。父超时会对父 session `interruptSession`，子 run 可能成为孤儿。TUI 交互回合是唯一真正 0 墙钟的 CLI 路径（`useAgentSession.tsx:767`）。\n2. **需限定：\"1–100 硬夹取会让任何更大的显式上限静默压到 100\"**。仅桌面 grant 路径（`agent-executor.ts:464-466`），且只在 `config.maxSteps` 为数字时触发；CLI 的 `sendOptions.maxTurns = def.maxTurns`（`subagent-runner.ts:244-246`）**没有任何 1..100 校验**。所以是 shell 相关，不是全局规则。\n3. **需补充：`maxSteps` 在 Anthropic rail 是 no-op**（见 2.2）。\"显式预算\"目前只对 ai-sdk 生效；这会让\"尊重显式限制\"在两条 rail 上含义不同。\n4. **digest 未决项已闭合：压缩不吃步数**（见 2.7）。\n5. **需修正：\"续跑不会继承剩余预算\"**。同一 budget root（同 chat session）内续跑**复用** guard，剩余 token 预算会继承；重置只发生在换 session 或 renderer 重载（内存 Map）。被重置的是 step/turn 预算。\n6. **表述偏差：`collect` 的 30 分钟是等待窗口**，不应被当成任务运行上限。\n7. **数字/来源未独立复现**：digest 引用的 `docs/evidence/2026-10-21-builtin-agent-budgets.md`、`docs/reports/...` 与 74.6s/42.9s 实测、V4 blocked 等，我未运行也未复核；本文不据此下结论。\n8. digest 说 `dispatch-run.ts:148-167` 是测试，实为 `lib/claude/agents/dispatch-run.test.ts:148-168`（路径笔误）。\n\n---\n\n## 四、设计建议（推荐方案，分阶段）\n\n### 4.0 核心取舍\n\n- **不要新增角色级常量**，而是引入一个共享的\"完成策略（completion policy）\"对象，三 shell 共用同一 resolver 与同一套 provenance。\n- **保留 `finishReason` 兼容层**（`error` / `cancelled` / `rejected`），只**增量**添加 `reason`、`budget`、`resumable`，避免破坏 `dispatch-run.ts:385-392`、`cli/src/agent/subagent-dispatch.ts:365`、`renderer-subagent-registry.ts:91-99` 的分支。\n- **先撤默认墙钟，再做无步数上限**：无进度守卫上线前，撤掉步数/墙钟会放大失控风险；因此顺序是 观测 → 墙钟 → 无进度 → 无步数上限 → 剩余预算 → 续跑。\n\n### 4.1 显式预算 vs 剩余共享预算（目标语义）\n\n| 概念 | 作用域 | 现值/来源 | 目标语义 |\n|---|---|---|---|\n| `maxSteps`（explicit） | 单 run | `def.maxTurns`、grant、`RunOptions.maxSteps` | 显式值**必须**压过一切默认；两条 rail 同义（Anthropic 走 `maxTurns`） |\n| 步数默认 | 单 turn | ai-sdk 256；Anthropic 无 | long-running 档：**无上限**；bounded 档：保留 256 但标注为\"平台兜底\"并可在 UI 看到 |\n| `configuredTokens` | 子树（顶层 session） | `subagentNesting.tokenBudget`（0=无限） | 配置值，不变 |\n| `remainingTokens` | 子树 | 仅 `guard.status()` 内部计算，未进循环 | 派发起点计算 `limit - used`，作为**本 run 的硬上限**下发给侧车，leg 间强制 |\n| `maxBudgetUsd` | 单 run | goal / grant | 不变，SDK 强制 |\n| 墙钟 | 单 run | capture 默认 5 分钟 | **仅显式**（`--timeout`、`subagentNesting.timeoutMs`）；默认无 |\n| 空闲 | 单 run | 桌面 0 / CLI 60s / CLI 子 agent 300s / 侧车 300s | 定位为\"停顿检测\"，不是资源预算；子 agent 默认 300s |\n| 无进度 | 单 run | 无 | 语义守卫：连续重复结果 / 距上次新证据的步数，独立于步数上限 |\n\n要点：**剩余共享预算必须换算成\"本 run 的显式配置\"，而不是在循环里读另一个进程的内存。** 侧车无法访问渲染层 guard，因此只能由渲染层在派发时把 `remaining` 冻结成本 run 的 `tokenBudget`。\n\n---\n\n## 五、分阶段实施计划\n\n### Stage 0｜可观测性先行（行为不变）\n\n**目的**：让\"为什么停\"可诊断，为后续阶段提供断言点。\n\n- 新模块 `lib/agent/completion/completion-policy.ts`（纯函数，无 Dexie/React；CLI 已按同一方式跨包引用 `lib/`，见 `cli/src/agent/builtin-agents.ts:31`）：\n  - 类型 `CompletionLimits { maxSteps?, maxTokens?, maxBudgetUsd?, wallClockMs?, idleMs?, noProgress? }`\n  - `resolveCompletionPolicy({ catalogEntry, def, sessionPolicy, config, settings, remaining })` → `{ profile, effective, provenance }`\n  - `describeCompletion(...)` → 一段模型可读文本（终态提示用）\n- `lib/claude/agents/dispatch-budget.ts`：新增 `remainingTokens(rootRunId)`（基于 `guard.status()`），不改 threshold。\n- `lib/claude/agents/dispatch-run.ts:453-464`：`journalMeta` 增加 `budget: { configuredTokens, usedTokens, remainingTokens, maxSteps, maxStepsSource }`。\n- `types/plugin/plugin-agent-sdk.ts`：`PluginDispatchErrorEnvelope` 增可选 `reason?: \"steps\"|\"tokens\"|\"usd\"|\"wall-clock\"|\"idle\"|\"no-progress\"` 与 `budget?`。\n- `sidecar/src/runtimes/ai-sdk/events.ts:670-688`：`finish()` 接受 `budgetReason`、`stepsUsed`、`maxSteps`，附加到 result 对象（增量字段）。\n- `lib/claude/run-and-capture.ts:1564-1577`：把 result 上的预算字段透出到 `RunAndCaptureResult`。\n\n**不变量**：`finishReason`、`errorEnvelope.code` 取值不变；只是新增字段。\n**验证**：新增 `lib/agent/completion/completion-policy.test.ts`（provenance 优先级表驱动）；`dispatch-run.test.ts` 断言 journal 元数据；`run-and-capture.test.ts` 断言新增字段透出。\n\n### Stage 1｜撤掉派发子 agent 的隐式 5 分钟墙钟（最高优先级、最小改动）\n\n- `lib/plugin/agent-sdk/dispatch.ts:242-244, :314`\n  - 无 `deadlineMs` 时传 `timeoutMs: 0`（与 `cli/src/agent/subagent-runner.ts:299` 对齐），而不是省略。\n  - 同时传 `idleTimeoutMs`（建议 300_000，镜像 `cli/src/config/schema.ts:1522`），否则撤掉墙钟后桌面子 agent 只剩侧车 5 分钟流空闲这一层保护（`stream-watchdog.ts:16`）。\n- `lib/claude/agents/dispatch-run.ts:192`：把 `subagentNesting.timeoutMs` 的 `0` 明确定义为\"无墙钟\"，并在 `ResolvedCaller` 里区分 `deadlineMs?: number` 的\"未配置\"与\"配置为无限\"（当前两者都落成 `undefined`）。\n- `lib/claude/run-and-capture.ts:961`：Stage 1 暂不改默认值，只让\"派发子 agent\"显式覆盖；避免一次性影响 connector/headless。\n- **验证**：`dispatch.test.ts` 断言无 deadline 时 capture 收到 `timeoutMs: 0` + `idleTimeoutMs: 300000`；`run-and-capture.test.ts` 增一条\"默认值不再作用于派发子 agent\"的回归用例（用 fake timers 推进 6 分钟，断言不中断）。\n\n### Stage 2｜结果级无进度保护（无步数上限的前置条件）\n\n- 新模块 `sidecar/src/policy/no-progress.ts`（与 `doom-loop.ts` 同风格、纯函数）：\n  - 输入：`(toolName, inputDigest, resultDigest, producedNewEvidence)`；\n  - 输出：`\"continue\" | \"trip\"`；策略 `{ repeatResults: 3, stallSteps: 60 }`（显式、可覆盖）。\n  - 指纹：工具名 + 稳定化 input + **结果摘要**（排除时间戳/随机 id 噪声）；仅统计非空结果。\n  - 豁免：`bash_output` / 轮询类工具（结果天然重复）按\"是否出现新内容\"判定，而非\"是否相同\"。\n- 接入 `sidecar/src/runtimes/ai-sdk/index.ts`（leg 内 tool-result 处，参考 `:775-778, 817-858` 的 gate 位置）：触发时以独立终态结束，追加可见说明（与 `:1423-1432` 同格式）。\n- Anthropic rail 无 leg 循环可挂，改在 `lib/claude/run-and-capture.ts` 的 `tool-result` 事件处做镜像守卫（复用同一纯函数；`sidecar/` 不能 import `lib/`，因此实现两份、用一份共用测试向量保证一致，模式同 `lib/claude/usage.ts:26-33` 的镜像注释）。\n- 终态：`finishReason: \"error\"` + `errorEnvelope.code: \"no-progress\"`、`reason: \"no-progress\"`、`retryable: false`、`resumable: true`。\n- **保留 doom-loop 审批语义**（`doom-loop.ts:1-8`），不改成终止；但要在 bypass 模式下由 no-progress 兜底。\n\n**边界**：审批等待期间与工具执行期间必须暂停计数（复用 `run-and-capture.ts:1096-1108` 与 `:1031-1037` 的暂停机制）；图片重投影续 leg（`index.ts:1405-1408`）不得算作停滞；并行工具调用按\"全部结束后合并计数\"。\n**验证**：`sidecar/src/policy/no-progress.test.ts` + `sidecar/src/runtimes/ai-sdk/index.test.ts` 新增\"重复同一 grep 3 次 → no-progress 终态\"、\"交替工具但有新证据 → 继续\"、\"审批等待 10 分钟不触发\"；`run-and-capture.test.ts` 镜像用例。\n\n### Stage 3｜显式\"无步数上限\"通道（三 shell 一致）\n\n- `lib/agent/builtin-catalog/types.ts`：新增 `completion?: \"inherit\" | \"long-running\"`（默认 inherit）。Explore/Plan/Code Reviewer 设 `\"long-running\"`；`General Purpose` 与四个 workflow agent 保持 `inherit`（避免静默改变其行为）。\n- `lib/agent/builtin-catalog/catalog.ts:170-179, :193-212`：投影该字段；`catalog.test.ts:20-26` 同步扩写为\"显式声明\"而非\"全部 undefined\"。\n- `packages/plugin-contract/src/types/plugin/plugin-subagent.ts`：`PluginSubagentDef` 增 `completion?`（桌面 `lib/plugin/agent-sdk/dispatch.ts:311` 与 CLI `subagent-runner.ts:244-249` 都读它）。\n- `packages/agent-config-types/src/claude-agent-sdk-options.ts`（SendOptions）新增布尔 `unboundedSteps?: true`（**不要复用数字 0**：`maxTurns` 已有\"0=未设\"语义，`index.ts:527` 的 `> 0` 判断会被撞车）。\n- `sidecar/src/runtimes/ai-sdk/index.ts:526-534`：\n  ```ts\n  const base = maxTurns>0 ? maxTurns\n             : sendOptions.unboundedSteps ? Infinity\n             : aiSdkMaxSteps>0 ? aiSdkMaxSteps : 256\n  const maxStepsBudget = agentMaxTurns ? Math.min(base, agentMaxTurns) : base\n  ```\n  `perLegCap` 的 `Math.min(STEP_CHUNK, Infinity - stepsUsed)` 天然成立（`:1011`）。\n- 桌面：`lib/plugin/agent-sdk/dispatch.ts:311` 与 `lib/ai/agent/agent-executor.ts:464-466` 需要让 \"unbounded\" 绕过 1..100 夹取（建议新增 `stepPolicy?: \"bounded\"|\"unbounded\"`，而不是把 `maxSteps=0` 塞进 grant）。\n- CLI：`cli/src/agent/subagent-runner.ts:242-249` 透传；`cli/src/agent/session-runner.ts:648-654` 透传；`cli/src/agent/discover-agents.ts:136-151` 允许 frontmatter 声明。\n- Headless：`packages/agent/src/types.ts:224-231` + `client.ts:477-492` + `runtime-service.ts:1899-1904, 2568-2574`（恢复白名单必须包含新字段，否则悬挂恢复会丢预算语义）。\n- **同时修跨 rail 语义**：让 `maxSteps` 在 Anthropic rail 也生效（写入 `sendOptions.maxTurns`），否则\"尊重显式限制\"只在 ai-sdk 成立。\n\n**不变量**：显式 `maxTurns` 永远压过一切（`index.ts:526-534`，测试 `index.test.ts:3079-3110`）；`@agent` overlay 只降不升。\n**验证**：`sidecar/src/runtimes/ai-sdk/index.test.ts` 新增\"unboundedSteps 跑 500 leg 不触顶\"（用 `aiSdkStepChunk: 1` 的既有模式，参考 `:2972-3005`）；`catalog.test.ts`、`cli/src/agent/builtin-agents.test.ts`、`lib/plugin/agent-sdk/dispatch.test.ts`、`cli/src/agent/subagent-runner.test.ts:335-356`、`agent-executor.test.ts:1093-1111` 相应更新。\n\n### Stage 4｜剩余共享预算进入循环\n\n- 派发起点：`dispatch-run.ts:184` 与 `:154-196` 计算 `remaining = limit>0 ? limit-used : Infinity`，经 `dispatch.ts` 新增 `_remainingTokens` → `agent-executor` → `resolveSendOptions` 写成 `sendOptions.tokenBudget`（仅当有限）。\n- 侧车：`sidecar/src/runtimes/ai-sdk/index.ts` 在 leg 之间（`:1006-1011` 附近）用已结算 usage 校验 `tokenBudget`；触发时以 `reason: \"tokens\"` 结束并附可见提示。Anthropic rail 只能在 capture 侧按 `usage` 事件事后判定（SDK 不暴露 mid-loop hook），需在文档中明确这一能力差异。\n- 持久化：`lib/db/background-tasks` 记录 `budgetRoot/limit/used`，`getOrCreateDispatchBudget` 支持 rehydrate；相应更新 `redispatch.ts:94-96` 的注释与假设。\n- **边界**：有限预算下 fan-out 已串行（`dispatch-agent-handler.ts:112-113`），无步数上限后单个 child 可能吃光整池 → Stage 4 是 Stage 3 的必要配套，不可颠倒。\n- **验证**：`dispatch-budget.test.ts` 增 `remainingTokens`；`dispatch-run.test.ts` 断言下发的 `_remainingTokens`；sidecar 新增\"leg 间 tokenBudget 触发 → reason=tokens\"；`run-budget-governor.test.ts` 不受影响（不同账本）。\n\n### Stage 5｜续跑携带进度 + headless/CLI 默认值对齐\n\n- 结构化续跑：`lib/background-tasks/completion-delivery.ts:109-118` 的 `frameResumePrompt` 增加 `limits`、`stepsUsed`、`remaining`、`findings`（有界）；journal 行新增 `findings` 字段，仍走既有 PII 门禁（参考 `agent-executor.ts:620-628`）。\n- 可选：把 `conversationSnapshot`（已由 `run-and-capture.ts:1573` 产出）按大小上限落到 journal，使续跑可\"重放\"而非\"重读\"；需 PII 门禁与截断策略，风险较高，建议独立评审。\n- 默认值收口：`run-and-capture.ts:961` 的 `DEFAULT_TIMEOUT_MS` 改为 0（无墙钟），一切墙钟必须显式：`--timeout`（`run-command.ts:227-238`）、`RunOptions.timeoutMs`（`packages/agent/src/types.ts:226`）、`subagentNesting.timeoutMs`（`dispatch-run.ts:192`）。同时确保 headless 默认开启 idle（`streamIdleTimeoutMs`）。\n- 设置面：桌面目前**没有任何 `aiSdkMaxSteps` 入口**（`components/` 无命中）；若保留 bounded 档的 256，需要在 `components/settings/subagents/subagent-nesting-card.tsx`（当前只管 `timeoutMs`/`tokenBudget`，见 `:41-63`）暴露\"步数上限\"，否则 256 仍是不可见的产品策略。\n\n---\n\n## 六、完成 / 阻塞 / 取消语义（目标状态机）\n\n| 状态 | `finishReason` | `errorEnvelope.code` | `reason` | 可重试 | 可续跑 | 保留发现 |\n|---|---|---|---|---|---|---|\n| 正常完成 | 无（success） | — | — | — | 可选 | 是 |\n| 显式步数触顶 | `error` | `budget-exhausted` | `steps` | 否 | 是 | 是 |\n| 显式 token / USD 触顶 | `error` | `budget-exhausted` | `tokens`/`usd` | 否 | 是 | 是 |\n| 显式墙钟 / 空闲 | `error` | `budget-exhausted` 或新增 `wall-clock` | `wall-clock`/`idle` | 否 | 是 | 是 |\n| 无进度 | `error` | `no-progress`（新增） | `no-progress` | 否 | 是 | 是 |\n| 子树预算/深度/策略拒绝（未启动） | `rejected` | `rejection-*` / `budget-exhausted` | — | 否 | 可按策略 | 不适用 |\n| 用户取消 | `cancelled` | `aborted` | — | 否 | 是 | 是 |\n| Provider/宿主故障 | `error` | 分类结果 | — | 按分类 | 是 | 部分 |\n\n**必须保留的分支不变量**：`finishReason === \"error\"` + `errorEnvelope` 仍表示\"未完成\"，`cancelled` 仍不进入失败统计（`dispatch-run.ts:383-392`、`cli/src/agent/subagent-dispatch.ts:351-398`、`renderer-subagent-registry.ts:91-99`）。\n\n---\n\n## 七、验证矩阵（测试文件 × 场景）\n\n| 场景 | 主要测试文件 | 现状 | 需新增/修改 |\n|---|---|---|---|\n| 内置条目无写死轮数 | `lib/agent/builtin-catalog/catalog.test.ts:20-26` | 有（断言全部 undefined） | 改为断言 `completion` 声明；long-running 条目无 `maxTurns` |\n| CLI 投影无 `maxTurns` | `cli/src/agent/builtin-agents.test.ts:47-50` | 有 | 增 `completion` 投影 |\n| 显式 `maxTurns` 压过 `aiSdkMaxSteps` | `sidecar/src/runtimes/ai-sdk/index.test.ts:3079-3110` | 有 | 保留；增 `unboundedSteps` 与之互斥的用例 |\n| >20 步续跑 / 触顶提示 | `index.test.ts:2972-3005`、`:3007-3044` | 有 | 保留 |\n| `aiSdkMaxSteps` 触顶 | `index.test.ts:3046-3077` | 有 | 保留 |\n| **capture 5 分钟默认墙钟** | `lib/claude/run-and-capture.test.ts` | **零覆盖**（所有用例都显式传 `timeoutMs`，见 `:673, :690, :703-706, :903-905`） | 新增默认值回归（fake timers 推进 >5min） |\n| **桌面派发不落回默认墙钟** | `lib/plugin/agent-sdk/dispatch.test.ts`、`dispatch-run.test.ts` | **零覆盖**（`dispatch-run.test.ts:129-133` 固定 `timeoutMs: 0` 且 mock 掉 dispatch） | 新增断言 `timeoutMs: 0` + `idleTimeoutMs` |\n| **CLI 一次性 run 默认墙钟** | `cli/src/agent/run.test.ts`、`session-runner.test.ts` | **零覆盖** | 新增：未传 timeout 时 capture 收到 0/或显式值 |\n| **Headless `turn/run` 默认墙钟** | `cli/src/agent/rpc/runtime-service.test.ts` | **零覆盖** | 新增 |\n| `maxSteps` 跨 rail 生效 | `cli/src/agent/session-runner.test.ts` | **零覆盖**（只断言 `aiSdkMaxSteps`） | 新增 Anthropic rail `maxTurns` 断言 |\n| 显式 250 被夹到 100 | `lib/ai/agent/agent-executor.test.ts:1093-1111` | 有（视作预期） | Stage 3 改语义后必须同步改写 |\n| 子 agent 显式 `maxTurns`/继承 | `cli/src/agent/subagent-runner.test.ts:335-356` | 有 | 增 `completion` 分支 |\n| 定义无 cap 时不写 `maxSteps` | `lib/plugin/agent-sdk/dispatch.test.ts:162-165` | 有 | 保留 |\n| 预算停止不重试 + 续跑句柄 | `lib/claude/agents/dispatch-run.test.ts:148-168` | 有 | 增 `reason` 字段断言 |\n| 子树 deadline / token 拒绝重试 | `dispatch-run.test.ts:468-503` | 有 | 保留 |\n| 预算 envelope 与续跑句柄 | `lib/claude/agents/dispatch-error.test.ts` | 有（digest 引用 :119-129，未复核具体行） | 增 `reason`/`no-progress` |\n| 共享根池 / extendLimit | `lib/ai/agent/execution/run-budget-governor.test.ts` | 有（digest 引用 :18-80，未复核） | 保留；增 `remaining` 快照 |\n| 工具证据边界 | `lib/claude/run-and-capture.test.ts`（digest 称 :1811-1884，未复核） | 有 | 保留 |\n| CLI 续跑证据 | `cli/src/agent/subagent-runner.test.ts:54-71` | 有 | 保留 |\n| TUI 墙钟关闭 | `cli/src/tui/hooks/useAgentSession.test.tsx:369-379` | 有 | 保留 |\n| 侧车流空闲 5 分钟 | `sidecar/src/providers/stream-watchdog.test.ts:91` | 有 | 保留 |\n| **无进度守卫** | 无 | **零实现/零覆盖** | 新增 `sidecar/src/policy/no-progress.test.ts` + 两 rail 集成用例 |\n| **per-child 预算** | 无 | 零覆盖（`run-budget-governor.ts:104-107` 明确不做） | Stage 4 视需要 |\n| **重载后预算不丢** | 无 | 零覆盖（内存 Map） | Stage 4 新增 |\n| **压缩不吃步数** | 无 | 零覆盖 | Stage 3 增一条断言（leg 内压缩后 `stepsUsed` 不变） |\n| 端到端长时（>5min） | `scripts/smoke/builtin-agent-budget-live.ts`（存在，预算 22/32） | 未见长时场景 | 用 fake timers/可注入时钟，而非真实 5 分钟 |\n\n---\n\n## 八、未解决 / 未能确认\n\n1. **Anthropic SDK 原生 `Task` rail 的预算语义**：`sendOptions.agents` 注入路径（`build-options.ts` 与 `lib/claude/sdk-subagent-bridge.ts`）不走 `dispatch-error.normalizeDispatchBudgetResult`，也不进 `dispatch-budget`。该 rail 上长任务的触顶与续跑语义未逐行确认（digest 同样标记为未决）。\n2. **Anthropic rail 的 token 预算强制能力**：SDK 不暴露 leg 级 hook，只能事后按 `usage` 判定；\"剩余预算进入循环\"在该 rail 上只能近似，需产品确认是否接受。\n3. **`subagentRuntime` / 外部 agent preset**：`dispatch.ts:215-233` 直接转交外部 CLI，本文的预算/无进度设计不覆盖；外部 runtime 的超时语义未核查。\n4. **Rust 侧（`src-tauri/src`、`crates/*`）**：粗查未见 agent turn 预算相关项（仅 `proxy_config/commands.rs` 有 `timeoutMs` 字段），但 `crates/` 不在许可深读范围，不能断言无独立 watchdog。\n5. **`collect` 30 分钟窗口与无步数上限的交互**：一个长时间 run 的 `collect` 会返回 pending，需要 UI/模型层确认这是可接受的产品行为。\n6. **设置面缺位**：桌面无 `aiSdkMaxSteps` 入口（已 grep 确认），若最终保留 bounded 档的 256，需要决定是暴露设置还是改语义为 unbounded。\n7. **文档证据未复核**：`docs/evidence/2026-10-21-builtin-agent-budgets.md` 的 O1/V1/O6/M2 与\"V4 blocked\"结论均未独立验证。\n8. **未执行任何测试/构建**：以上\"有覆盖/无覆盖\"均基于源码阅读，非运行结果。"
+      }
+    ]
+  },
+  "desktop_subagent_timeout": {
+    "implementation": "Dispatched shared-executor runs omit no wall-clock default: timeoutMs defaults to 0, with explicit timeout and AbortSignal preserved; independent idle guards unchanged. Expired subtree deadlines are refused before native/external execution.",
+    "acceptance_scope": "Standalone runAgentRail / actual sidecar / DeepSeek / repository file tools; no Tauri launch or UI acceptance.",
+    "focused_tests": {
+      "suites": 7,
+      "passed": 430
+    },
+    "typecheck": "skipped at user request; previous interrupted process is not a passed check",
+    "interrupted_activity": {
+      "outcome": "interrupted before terminal result; activity proof only",
+      "evidence_path": ".cache/builtin-agent-live/renderer-long-1/evidence.json",
+      "model_requests_started": 132,
+      "model_requests_http_200_recorded": 131,
+      "model_requests_without_recorded_status": 1,
+      "tool_attempts": 193,
+      "successful_reads": 123,
+      "tool_activity_span_ms": 506604,
+      "tool_attempts_after_300000ms": 121,
+      "read_attempts_after_300000ms": 95
+    },
+    "unavailable_tool_probe": {
+      "outcome": "stopped by operator after native CodeGraph did not return in standalone host",
+      "evidence_path": ".cache/builtin-agent-live/renderer-long-2/evidence.json"
+    },
+    "file_tools_completion": {
+      "outcome": "error_max_turns; incomplete, not a naturally completed acceptance",
+      "evidence_path": ".cache/builtin-agent-live/renderer-long-3/evidence.json",
+      "elapsed_ms": 503983,
+      "recorded_model_requests": 258,
+      "recorded_tool_attempts": 320,
+      "recorded_read_attempts": 229,
+      "successful_reads": 228,
+      "tool_activity_span_ms": 502490,
+      "tool_attempts_after_300000ms": 136,
+      "caveat": "Standalone host RPC defects caused every grep attempt to fail. Activity exceeded five minutes; the model exhausted its 256-step budget. The host-marker correction and compression optimization have not been reaccepted."
+    },
+    "compaction_optimization": {
+      "status": "implemented; CLI/sidecar execution continuity and selected source-fact retention accepted",
+      "updated": "2026-10-22",
+      "research_report": "docs/reports/2026-10-21-agent-compaction-comparison.md",
+      "live_reacceptance": {
+        "accepted": true,
+        "scope": "actual CLI dispatch, sidecar, file tools, journal and authorized DeepSeek endpoint; no Tauri UI",
+        "evidence": ".cache/builtin-agent-live/code-compaction-9/evidence.json",
+        "recovered_from": ".cache/builtin-agent-live/code-compaction-8",
+        "recovery": "Reuse completed Explore and capped Plan; actual explicit resume of the same persisted Plan record",
+        "test_overrides": {
+          "first_step_budget": 10,
+          "resume_step_budget": 256,
+          "trigger": "message-count",
+          "message_count_threshold": 12,
+          "keep_recent_tokens": 1500,
+          "step_chunk": 4
+        },
+        "phases": {
+          "Explore-code-capped": {
+            "name": "Explore-code-capped",
+            "startedAt": "2026-10-21T15:35:22.807Z",
+            "elapsedMs": 42236,
+            "results": ["error_max_turns"],
+            "resolvedCompaction": {
+              "inputBudget": 934464,
+              "summaryInputBudget": 983616,
+              "maxSummaryTokens": 16384,
+              "keepRecentTokens": 1500
+            },
+            "reusedFrom": "/Users/bytedance/Project/cognia-next/.cache/builtin-agent-live/code-compaction-8",
+            "requests": 11,
+            "primaryRequests": 10,
+            "summaryRequests": 1,
+            "tools": 27,
+            "reads": 9,
+            "compactions": 1,
+            "checkpoints": 1,
+            "incrementalSummaries": 0,
+            "missingPrior": 0,
+            "badHTTP": 0,
+            "summaryFinish": ["stop"],
+            "primaryRequestsMissingFact": 1,
+            "lastToolMs": 36214
+          },
+          "Explore-code-resumed": {
+            "name": "Explore-code-resumed",
+            "startedAt": "2026-10-21T15:36:05.047Z",
+            "elapsedMs": 394359,
+            "results": ["success"],
+            "resolvedCompaction": {
+              "inputBudget": 934464,
+              "summaryInputBudget": 983616,
+              "maxSummaryTokens": 16384,
+              "keepRecentTokens": 1500
+            },
+            "reusedFrom": "/Users/bytedance/Project/cognia-next/.cache/builtin-agent-live/code-compaction-8",
+            "requests": 51,
+            "primaryRequests": 42,
+            "summaryRequests": 9,
+            "tools": 101,
+            "reads": 32,
+            "compactions": 9,
+            "checkpoints": 9,
+            "incrementalSummaries": 8,
+            "missingPrior": 0,
+            "badHTTP": 0,
+            "summaryFinish": ["stop"],
+            "primaryRequestsMissingFact": 0,
+            "lastToolMs": 335421
+          },
+          "Plan-code-capped": {
+            "name": "Plan-code-capped",
+            "startedAt": "2026-10-21T15:42:39.405Z",
+            "elapsedMs": 31925,
+            "results": ["error_max_turns"],
+            "resolvedCompaction": {
+              "inputBudget": 934464,
+              "summaryInputBudget": 983616,
+              "maxSummaryTokens": 16384,
+              "keepRecentTokens": 1500
+            },
+            "reusedFrom": "/Users/bytedance/Project/cognia-next/.cache/builtin-agent-live/code-compaction-8",
+            "requests": 11,
+            "primaryRequests": 10,
+            "summaryRequests": 1,
+            "tools": 18,
+            "reads": 6,
+            "compactions": 1,
+            "checkpoints": 1,
+            "incrementalSummaries": 0,
+            "missingPrior": 0,
+            "badHTTP": 0,
+            "summaryFinish": ["stop"],
+            "primaryRequestsMissingFact": 2,
+            "lastToolMs": 25093
+          },
+          "Plan-code-resumed": {
+            "name": "Plan-code-resumed",
+            "startedAt": "2026-10-21T15:48:37.196Z",
+            "elapsedMs": 591929,
+            "results": ["success"],
+            "resolvedCompaction": {
+              "inputBudget": 934464,
+              "summaryInputBudget": 983616,
+              "maxSummaryTokens": 16384,
+              "keepRecentTokens": 1500
+            },
+            "requests": 93,
+            "primaryRequests": 77,
+            "summaryRequests": 16,
+            "tools": 130,
+            "reads": 52,
+            "compactions": 16,
+            "checkpoints": 16,
+            "incrementalSummaries": 15,
+            "missingPrior": 0,
+            "badHTTP": 0,
+            "summaryFinish": ["stop"],
+            "primaryRequestsMissingFact": 0,
+            "lastToolMs": 543068
+          }
+        },
+        "all_requests": 166,
+        "all_http_200": true,
+        "summary_requests": 27,
+        "all_summary_finish_reason_stop": true,
+        "incremental_requests_with_prior_checkpoint": 23,
+        "resumed_primary_requests_with_fact": 119,
+        "source_fact": "if (Object.keys(value).length === 0) return {}"
+      },
+      "behavior": [
+        "Empty workspace.portEnv is valid in standalone host; malformed allocations rejected",
+        "Provider-specific output reservations with explicit limits preserved",
+        "Default-only summary cap min(16384, output ceiling, context window / 4); provenance survives retries",
+        "No default summary-side clipping of tool results; explicit caps remain",
+        "Incremental AI summaries receive prior checkpoints as background and new source separately",
+        "Truncated, failed, oversized, unpaired or nonshrinking replacements do not publish",
+        "Budget-stop report retains bounded redacted checkpoint plus existing tool evidence for explicit resume"
+      ],
+      "focused_checks": {
+        "jest_suites": 6,
+        "jest_tests": 725,
+        "sidecar_files": 7,
+        "sidecar_tests": 123,
+        "runtime_integration_files": 1,
+        "runtime_integration_tests": 108,
+        "total_tests": 956,
+        "scoped_eslint": "passed",
+        "scoped_prettier": "passed",
+        "i18n_build_check_lint": "passed",
+        "typecheck": "skipped by explicit user instruction",
+        "coverage": "not requested; not run",
+        "tauri": "not launched",
+        "credential_scan": {
+          "files": 48438,
+          "exact_current_credential_copies": 0,
+          "scope": "task live/research caches, smoke script and related reports; exact environment value, not an all-secrets audit"
+        }
+      },
+      "answer_quality": "Raw model reports retain known unread ranges, mistaken paths and unverified proposals. Execution acceptance is not an exhaustive semantic audit or approval of those proposals.",
+      "limitations": [
+        "Forced compaction stress is not default 1M-window cadence",
+        "Tool errors retained: invalid regex, missing paths, invalid grep context and denied unavailable bash; not all tool calls successful",
+        "No controlled performance comparison with earlier broken-host 256-step trace",
+        "Continuation restores bounded evidence, not full native state",
+        "No native UI or other-provider live acceptance",
+        "No commit or deployment"
+      ]
+    }
+  },
+  "progress_checkpoint_fix": {
+    "date": "2026-10-22",
+    "implemented": true,
+    "accepted": false,
+    "status": "local regression/default flow passed; v4.1 shim stress Plan reached explicit20-minute test timeout without final plan; convergence remains open",
+    "user_decision": "先交付修复，压力验收待补",
+    "checks": {
+      "main_tests": 606,
+      "sidecar_tests": 174,
+      "total_tests": 780,
+      "scoped_eslint": "passed",
+      "scoped_prettier": "passed",
+      "diff_whitespace": "passed",
+      "typecheck": "skipped by user instruction",
+      "tauri": "not launched",
+      "coverage": "not requested/not run"
+    },
+    "behavior": [
+      "Stable original workstream IDs; done cannot regress or disappear",
+      "All statuses preserve established facts/evidence; remaining is separate and clears at completion",
+      "Bounded deterministic recursive merge and one current state replace stale pending lists",
+      "Plan resolved checkpoint triggers tool-free delivery; explicit/custom/non-AI/nontext opt-outs preserved",
+      "Generated merged checkpoint PII-gated before publication",
+      "Plan acceptance reuses actual Explore output; independent search RPC premise removed"
+    ],
+    "live_results": {
+      "checkpoint-default-2": {
+        "profile": "default",
+        "phases": [
+          {
+            "name": "Explore-default",
+            "requests": 56,
+            "primary_requests": 56,
+            "summary_requests": 0,
+            "elapsed_ms": 170565,
+            "tools": 104,
+            "reads": 37,
+            "compactions": 0,
+            "checkpoints": 0,
+            "results": ["success"],
+            "http_statuses": {
+              "200": 56
+            },
+            "missing_fact_after_observed": 0,
+            "state_regressions": [],
+            "duplicate_read_inputs": 0,
+            "failed_tools": [
+              {
+                "name": "bash",
+                "input": {
+                  "command": "ls /Users/bytedance/Project/cognia-next"
+                }
+              },
+              {
+                "name": "bash",
+                "input": {
+                  "command": "wc -l /Users/bytedance/Project/cognia-next/sidecar/src/platform/process/exec.ts /Users/bytedance/Project/cognia-next/cli/src/agent/subagent-runner.ts /Users/bytedance/Project/cognia-next/cli/src/agent/subagent-dispatch.ts /Users/bytedance/Project/cognia-next/lib/claude/run-and-capture.ts /Users/bytedance/Project/cognia-next/lib/claude/provider-attempt-options.ts /Users/bytedance/Project/cognia-next/sidecar/src/context/progress-checkpoint.ts /Users/bytedance/Project/cognia-next/sidecar/src/runtimes/ai-sdk/compaction.ts"
+                }
+              },
+              {
+                "name": "grep",
+                "input": {
+                  "pattern": "export function frameResumePrompt|function frameResumePrompt|frameResumePrompt",
+                  "path": "/Users/bytedance/Project/cognia-next/lib/background-tasks/completion-delivery.ts",
+                  "output_mode": "content",
+                  "context": 25
+                }
+              },
+              {
+                "name": "grep",
+                "input": {
+                  "pattern": "DEFAULT_COMPRESSION_SETTINGS",
+                  "path": "/Users/bytedance/Project/cognia-next/packages/agent-config-types/src/compression.ts",
+                  "output_mode": "content",
+                  "context": 30
+                }
+              }
+            ],
+            "max_primary_input_tokens": 186849
+          },
+          {
+            "name": "Plan-default",
+            "requests": 3,
+            "primary_requests": 3,
+            "summary_requests": 0,
+            "elapsed_ms": 32180,
+            "tools": 8,
+            "reads": 8,
+            "compactions": 0,
+            "checkpoints": 0,
+            "results": ["success"],
+            "http_statuses": {
+              "200": 3
+            },
+            "missing_fact_after_observed": 0,
+            "state_regressions": [],
+            "duplicate_read_inputs": 0,
+            "failed_tools": [],
+            "max_primary_input_tokens": 23911
+          }
+        ]
+      },
+      "checkpoint-stress-2": {
+        "profile": "stress",
+        "phases": [
+          {
+            "name": "Explore-stress",
+            "requests": 19,
+            "primary_requests": 10,
+            "summary_requests": 9,
+            "elapsed_ms": 208551,
+            "tools": 28,
+            "reads": 17,
+            "compactions": 6,
+            "checkpoints": 6,
+            "results": [],
+            "http_statuses": {
+              "200": 17,
+              "402": 2
+            },
+            "missing_fact_after_observed": 0,
+            "state_regressions": [],
+            "duplicate_read_inputs": 0,
+            "failed_tools": [
+              {
+                "name": "bash",
+                "input": {
+                  "command": "ls /Users/bytedance/Project/cognia-next/sidecar/src/tools/builtin/core-files/"
+                }
+              }
+            ],
+            "max_primary_input_tokens": 49145
+          }
+        ]
+      }
+    },
+    "pressure_blocker": "DeepSeek Insufficient Balance; 17 HTTP200 +2 HTTP402, 6 published checkpoints retained progress; Explore incomplete and pressure Plan not run",
+    "follow_up": "Reuse checkpoint-default-2/Explore-default.txt through COGNIA_LIVE_EXPLORE_REPORT with stress profile when balance is available; command prepared, not run",
+    "boundaries": [
+      "Default profile did not cross token compaction threshold",
+      "Partial stress retention is not natural-completion acceptance",
+      "Raw model recommendations not independently approved",
+      "No causal speedup claim against old task; no commit/deployment"
+    ]
+  },
+  "v41_local_proxy_reacceptance": {
+    "model": "ark-deepseek-v4.1-flash",
+    "endpoint": "http://127.0.0.1:8787/v1",
+    "discoveredContext": 936000,
+    "discoveredMaxOutput": 64000,
+    "resolvedInputBudget": 872000,
+    "resolvedSummaryInputBudget": 919616,
+    "summaryOutputCap": 16384,
+    "sdkVersions": {
+      "ai": "7.0.128",
+      "@ai-sdk/deepseek": "3.0.59",
+      "@ai-sdk/openai": "4.0.84"
+    },
+    "proxyKeyPersisted": false,
+    "runs": [
+      {
+        "run": "checkpoint-v41-plan-stress-1",
+        "profile": "stress",
+        "api": "chat",
+        "requests": 1,
+        "httpStatuses": [200],
+        "elapsedMs": 2772,
+        "compactions": 0,
+        "checkpoints": 0,
+        "observedToolEvents": 4,
+        "successfulToolResults": 0,
+        "accepted": false,
+        "rejection": "tool_calls[].type is empty string"
+      },
+      {
+        "run": "checkpoint-v41-plan-stress-2",
+        "profile": "stress",
+        "api": "responses",
+        "requests": 1,
+        "httpStatuses": [200],
+        "elapsedMs": 2829,
+        "compactions": 0,
+        "checkpoints": 0,
+        "observedToolEvents": 3,
+        "successfulToolResults": 0,
+        "accepted": false,
+        "rejection": "response.output_item.added item.arguments absent"
+      },
+      {
+        "run": "checkpoint-v41-plan-default-1",
+        "profile": "default",
+        "api": "responses",
+        "requests": 1,
+        "httpStatuses": [200],
+        "elapsedMs": 3406,
+        "compactions": 0,
+        "checkpoints": 0,
+        "observedToolEvents": 4,
+        "successfulToolResults": 0,
+        "accepted": false,
+        "rejection": "response.output_item.added item.arguments absent"
+      }
+    ],
+    "result": "blocked by stream-schema incompatibility before compaction; HTTP200 is not successful Agent execution",
+    "productionCodeChanged": false,
+    "typecheck": "skipped",
+    "tauri": "not launched",
+    "proxyStopped": false
+  },
+  "v41_test_stream_compatibility": {
+    "date": "2026-10-22",
+    "scope": "test-script-only, explicit opt-in",
+    "flag": "COGNIA_LIVE_STREAM_COMPAT=1",
+    "normalizations": [
+      "omit Chat delta tool_calls[].type only when exactly empty string",
+      "initialize only omitted Responses function_call added arguments to empty string"
+    ],
+    "preserves": [
+      "actual argument fragments",
+      "existing arguments",
+      "final results",
+      "upstream errors",
+      "unknown malformed fields"
+    ],
+    "checks": {
+      "fixtures": "5 passed; 3 failed with previous pass-through",
+      "scoped_eslint": "passed",
+      "bundle": "passed",
+      "typecheck": "skipped by user",
+      "tauri": "not launched"
+    },
+    "responses_sdk_roundtrip": {
+      "model": "ark-deepseek-v4.1-flash",
+      "api": "responses",
+      "streamCompatibility": "observed-tool-fields-v1",
+      "requests": 2,
+      "statuses": [200, 200],
+      "executions": 1,
+      "repairs": {
+        "responses-missing-start-arguments": 1
+      },
+      "output": "OK",
+      "accepted": true
+    },
+    "default_plan": {
+      "run": "checkpoint-v41-plan-default-compat-1",
+      "accepted": true,
+      "main": 7,
+      "tools": 15,
+      "reads": 12,
+      "elapsedMs": 38625,
+      "compactions": 0
+    },
+    "interrupted_runs": [
+      "checkpoint-v41-plan-stress-compat-1",
+      "checkpoint-v41-plan-responses-compat-1"
+    ],
+    "interruption": "ENOSPC; not acceptance passes; preserved raw logs, removed only four task-owned regenerable old bundle directories",
+    "stress_plan": {
+      "run": "checkpoint-v41-plan-stress-compat-2",
+      "accepted": false,
+      "api": "chat",
+      "compatibility": "observed-tool-fields-v1",
+      "mainCalls": 29,
+      "summaryAttempts": 29,
+      "httpStatuses": {
+        "200": 58
+      },
+      "toolCalls": 65,
+      "readCalls": 42,
+      "successfulToolResults": 63,
+      "failedTools": [
+        {
+          "name": "grep",
+          "input": {
+            "pattern": "READ_ONLY_TOOL_NAMES",
+            "path": "/Users/bytedance/Project/cognia-next/sidecar/src/tool-catalog/catalog.ts",
+            "output_mode": "content",
+            "context": 20
+          }
+        },
+        {
+          "name": "grep",
+          "input": {
+            "pattern": "READ_ONLY_TOOL_NAMES",
+            "path": "/Users/bytedance/Project/cognia-next/sidecar/src/tool-catalog",
+            "output_mode": "content",
+            "context": 12,
+            "head_limit": 40
+          }
+        }
+      ],
+      "publishedCompactions": 3,
+      "observedCheckpoints": 3,
+      "elapsedMs": 1200022,
+      "repairs": {
+        "chat-empty-tool-type": 3062
+      },
+      "allPrimaryInputsRetainSourceFact": true,
+      "checkpointRegressionsOrFactEvidenceLosses": 0,
+      "exactDuplicateReadArguments": 0,
+      "fullyPreviouslyRequestedReadRanges": [
+        {
+          "file": "lib/claude/run-and-capture.ts",
+          "requested": [1514, 1553]
+        },
+        {
+          "file": "cli/src/agent/subagent-runner.ts",
+          "requested": [230, 338]
+        }
+      ],
+      "rangeAuditBoundary": "Successful tool-event requests; assumes default read limit2000 and current file line count; not revision/content proof",
+      "lastStatuses": [
+        ["search-env", "done"],
+        ["execution-budget", "done"],
+        ["continuation", "pending"],
+        ["compaction", "done"]
+      ],
+      "lastSummaryCharacters": [
+        ["search-env", 1332],
+        ["execution-budget", 1210],
+        ["continuation", 5797],
+        ["compaction", 2200]
+      ],
+      "result": "explicit 20-minute test timeout; output interrupted; no final Plan; not a pass"
+    },
+    "evidence_persistence": "write temporary then rename; failures remain failures; previous JSON not truncated by a failed temporary write",
+    "status": "transport fixed; default passed; pressure interrupted at explicit 20-minute boundary, not accepted",
+    "accepted": false,
+    "transport_accepted": true,
+    "final_metrics": [
+      {
+        "run": "checkpoint-v41-plan-default-compat-1",
+        "accepted": true,
+        "api": "chat",
+        "compatibility": "observed-tool-fields-v1",
+        "mainCalls": 7,
+        "summaryAttempts": 0,
+        "httpStatuses": {
+          "200": 7
+        },
+        "toolCalls": 15,
+        "readCalls": 12,
+        "successfulToolResults": 15,
+        "failedTools": [],
+        "publishedCompactions": 0,
+        "observedCheckpoints": 0,
+        "elapsedMs": 38625,
+        "repairs": {
+          "chat-empty-tool-type": 726
+        },
+        "allPrimaryInputsRetainSourceFact": true,
+        "checkpointRegressionsOrFactEvidenceLosses": 0,
+        "exactDuplicateReadArguments": 0,
+        "fullyPreviouslyRequestedReadRanges": [],
+        "rangeAuditBoundary": "Successful tool-event requests; assumes default read limit2000 and current file line count; not revision/content proof",
+        "lastStatuses": [],
+        "lastSummaryCharacters": [],
+        "result": "natural completion"
+      },
+      {
+        "run": "checkpoint-v41-plan-stress-compat-2",
+        "accepted": false,
+        "api": "chat",
+        "compatibility": "observed-tool-fields-v1",
+        "mainCalls": 29,
+        "summaryAttempts": 29,
+        "httpStatuses": {
+          "200": 58
+        },
+        "toolCalls": 65,
+        "readCalls": 42,
+        "successfulToolResults": 63,
+        "failedTools": [
+          {
+            "name": "grep",
+            "input": {
+              "pattern": "READ_ONLY_TOOL_NAMES",
+              "path": "/Users/bytedance/Project/cognia-next/sidecar/src/tool-catalog/catalog.ts",
+              "output_mode": "content",
+              "context": 20
+            }
+          },
+          {
+            "name": "grep",
+            "input": {
+              "pattern": "READ_ONLY_TOOL_NAMES",
+              "path": "/Users/bytedance/Project/cognia-next/sidecar/src/tool-catalog",
+              "output_mode": "content",
+              "context": 12,
+              "head_limit": 40
+            }
+          }
+        ],
+        "publishedCompactions": 3,
+        "observedCheckpoints": 3,
+        "elapsedMs": 1200022,
+        "repairs": {
+          "chat-empty-tool-type": 3062
+        },
+        "allPrimaryInputsRetainSourceFact": true,
+        "checkpointRegressionsOrFactEvidenceLosses": 0,
+        "exactDuplicateReadArguments": 0,
+        "fullyPreviouslyRequestedReadRanges": [
+          {
+            "file": "lib/claude/run-and-capture.ts",
+            "requested": [1514, 1553]
+          },
+          {
+            "file": "cli/src/agent/subagent-runner.ts",
+            "requested": [230, 338]
+          }
+        ],
+        "rangeAuditBoundary": "Successful tool-event requests; assumes default read limit2000 and current file line count; not revision/content proof",
+        "lastStatuses": [
+          ["search-env", "done"],
+          ["execution-budget", "done"],
+          ["continuation", "pending"],
+          ["compaction", "done"]
+        ],
+        "lastSummaryCharacters": [
+          ["search-env", 1332],
+          ["execution-budget", 1210],
+          ["continuation", 5797],
+          ["compaction", 2200]
+        ],
+        "result": "explicit 20-minute test timeout; output interrupted; no final Plan; not a pass"
+      }
+    ],
+    "wiring_review": "Independent read-only review found no issue in opt-in forwarding/repair counters/failure preservation",
+    "exact_credential_scan": {
+      "files": 1996,
+      "copies": 0,
+      "scope": "current proxy credential plus original environment DeepSeek credential, task cache/reports/source"
+    },
+    "limitations": [
+      "3 published states retain original IDs/facts/evidence without regressions, but continuation stays pending at5797 characters",
+      "2 reads request ranges already covered by earlier successful requests; not all repetition eliminated",
+      "2 tool errors are model-selected nonexistent catalog paths, not empty-overlay infrastructure errors",
+      "One summary rejected for empty text with finish reason other",
+      "All58 HTTP200 responses do not imply successful/completed summaries",
+      "No v4.1 budget-exhaustion/resume acceptance in these runs",
+      "Default raw model description of only two extra reads differs from12 observed read calls"
+    ]
+  }
+}

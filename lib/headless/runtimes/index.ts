@@ -81,6 +81,12 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - `document-database-lifetime` — browser/mobile renderer-only pagehide
+ *   cleanup, installed by CogniaDB construction. Abandoned readonly snapshot
+ *   transactions belong to the document; a headless host has no document.
+ * - `startup-recovery` — pre-hydration browser error listeners, watchdog and
+ *   DOM reload panel. The root renderer layout owns installation and the
+ *   account initializer owns its React handoff; a headless host has no document.
  * - `chatgpt-siwc` — desktop-only, on-demand native OAuth callbacks,
  *   Responses idle sweepers and app-server loopback listeners. Native SIWC
  *   commands own their deadlines and cancellation; account locking revokes
@@ -218,4 +224,13 @@ import "./bots"
 import "./router-fusion"
 import "./account-sync"
 
-export {}
+/**
+ * Every runtime a person brain starts (`HeadlessHost` "person-brain", plan
+ * §9a). Data only; a runtime added to this list widens what one member's
+ * partition process does on a shared Host, so it needs the same review.
+ */
+export const PERSON_BRAIN_RUNTIMES = [
+  "host-event-publisher",
+  "desktop-sync-source",
+  "desktop-message-source",
+] as const

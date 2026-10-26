@@ -9,7 +9,7 @@
  * `ctx.configuration`.
  */
 
-import type { PluginConfigSchema } from "@/types/plugin"
+import type { PluginConfigSchema } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineConfiguration(schema: PluginConfigSchema): PluginConfigSchema {
   return schema

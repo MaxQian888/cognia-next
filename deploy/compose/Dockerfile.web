@@ -4,7 +4,7 @@
 ## Stage 1 builds the Next.js static export (`pnpm build`, output "export")
 ## with the SAME Node major and the SAME pinned pnpm the repository requires
 ## (`engines.node` / `packageManager` in package.json) — the brain-builder
-## stage of Dockerfile.cognia-server uses the identical recipe. Stage 2 is
+## stage of deploy/docker/Dockerfile.cognia-server uses the identical recipe. Stage 2 is
 ## Caddy serving `out/` and reverse-proxying the canonical API/WS/signaling
 ## paths (see Caddyfile).
 ##
@@ -68,19 +68,15 @@ COPY package.json ./
 COPY packages ./packages
 COPY docs/package.json ./docs/package.json
 COPY mobile/package.json ./mobile/package.json
-COPY web/package.json ./web/package.json
 COPY cli/package.json ./cli/package.json
 COPY services/workspace-runtime/package.json ./services/workspace-runtime/package.json
-# WXT's workspace postinstall needs its configuration and entrypoints, and
-# its tsconfig extends the root one.
 COPY tsconfig.json ./
-COPY browser-extension ./browser-extension
 COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
 RUN pnpm install --frozen-lockfile --offline
 # The sidecar is its own pnpm workspace, and the only place `@cognia/*` are
 # linked from: prebuild's build-sidecar-linked-packages resolves them there.
 # Hide the root workspace for this install so sidecar/pnpm-workspace.yaml owns
-# its build approvals, as Dockerfile.cognia-server does.
+# its build approvals, as deploy/docker/Dockerfile.cognia-server does.
 COPY sidecar/package.json sidecar/pnpm-lock.yaml sidecar/pnpm-workspace.yaml ./sidecar/
 RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
     if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \

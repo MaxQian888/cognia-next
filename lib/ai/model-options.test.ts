@@ -416,12 +416,14 @@ describe("resolveModelMeta", () => {
       supportsVision: false,
       supportsTemperature: false,
     })
-    const settings = {
+    const settings: Record<string, UserProviderSettings> = {
       "baseline-provider": {
         providerId: "baseline-provider",
+        enabled: true,
+        defaultModel: "model",
         discoveredModels: [{ id: "model", contextLength: 131072, supportsVision: false }],
       },
-    } as Record<string, UserProviderSettings>
+    }
     expect(resolveModelMeta("baseline-provider", "model", settings)).toMatchObject({
       contextLength: 131072,
       supportsVision: false,

@@ -48,13 +48,18 @@ export function useSkillAi(): UseSkillAi {
     }
     const sessionId = `skill-ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     sessionIdRef.current = sessionId
-    const system = buildAiSystemPrompt()
-    const userPrompt = buildAiUserPrompt(intent, {
-      name: current.name,
-      description: current.description,
-      content: current.content,
-      validationErrors: current.validationErrors,
-    })
+    // Resolved (ADR-0236) while the listener attaches; the timeout below
+    // covers the resolution too.
+    const prompts = Promise.all([
+      buildAiSystemPrompt(),
+      buildAiUserPrompt(intent, {
+        name: current.name,
+        description: current.description,
+        content: current.content,
+        validationErrors: current.validationErrors,
+      }),
+    ])
+    prompts.catch(() => undefined)
 
     let resolve!: (value: string | null) => void
     let reject!: (err: unknown) => void
@@ -111,6 +116,7 @@ export function useSkillAi(): UseSkillAi {
     })
 
     try {
+      const [system, userPrompt] = await prompts
       await sendPrompt(sessionId, userPrompt, {
         appendSystemPrompt: system,
         maxTurns: 1,

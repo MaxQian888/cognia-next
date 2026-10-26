@@ -665,9 +665,11 @@ const HOST_CATEGORIES = [
     skill: "cognia-host-system",
     // `glance_` is here: a paired phone leasing the desktop's glance snapshot
     // (ADR-0225 §7) is observing the host, the way `perf_` leases are, not
-    // driving an agent or a session.
+    // driving an agent or a session. `org_` is org administration on a
+    // multi-tenant Host (model credentials, agent policy): host settings an
+    // org owner/admin holds, not agent work.
     pattern:
-      /^(app_|backup_|companion_|device_|external_bridge_|glance_|host_|keyring_|langfuse_|logs_|perf_|secret_|sync_)/,
+      /^(app_|backup_|companion_|device_|external_bridge_|glance_|host_|keyring_|langfuse_|logs_|org_|perf_|secret_|sync_)/,
   },
 ]
 

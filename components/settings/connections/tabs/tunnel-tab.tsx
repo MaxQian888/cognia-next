@@ -18,7 +18,7 @@
  * install guide for this OS.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -34,6 +34,17 @@ import {
   XCircleIcon,
 } from "lucide-react"
 import { TunnelInstallGuide } from "@/components/connectivity/tunnel-install-guide"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -104,7 +115,14 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
   const [busy, setBusy] = useState(false)
   const [notInstalled, setNotInstalled] = useState(false)
   const [probing, setProbing] = useState(false)
-  const [conflict, setConflict] = useState<TunnelInfo | null>(null)
+  // The tunnel that refused the start. `open` is kept apart from it so the
+  // dialog still names that host while it animates out.
+  const [conflict, setConflict] = useState<{ current: TunnelInfo; open: boolean } | null>(null)
+  const closeConflict = () => setConflict((prev) => (prev ? { ...prev, open: false } : prev))
+  // The conflict dialog opens from an async answer rather than a Trigger, so
+  // focus goes back by hand to whichever power button is on screen afterwards.
+  const startRef = useRef<HTMLButtonElement>(null)
+  const stopRef = useRef<HTMLButtonElement>(null)
 
   // Probe the current tunnel state on mount + every 3 s so the panel
   // reflects external changes (e.g. another window started the tunnel).
@@ -167,10 +185,10 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
       const result = await startTunnel(defaultLocalUrl, undefined, { replace })
       if (result.kind === "started") {
         setInfo(result.info)
-        setConflict(null)
+        closeConflict()
         toast.success(t("started"))
       } else if (result.kind === "busy") {
-        setConflict(result.current)
+        setConflict({ current: result.current, open: true })
       } else if (result.kind === "not_installed") {
         setNotInstalled(true)
         toast.error(t("notInstalled"))
@@ -190,7 +208,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
     try {
       await stopTunnel()
       setInfo(null)
-      setConflict(null)
+      closeConflict()
       toast.success(t("stopped"))
     } finally {
       setBusy(false)
@@ -255,6 +273,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
                 type="button"
                 size="sm"
                 variant="outline"
+                ref={stopRef}
                 onClick={() => void onStop()}
                 disabled={busy || !desktop}
                 data-testid="tunnel-stop"
@@ -271,6 +290,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
             <Button
               type="button"
               size="sm"
+              ref={startRef}
               onClick={() => void onStart(false)}
               disabled={busy || !desktop}
               data-testid="tunnel-start"
@@ -300,43 +320,66 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
               testid="tunnel-install-guide"
             />
           )}
-          {conflict && (
-            <div
-              role="alertdialog"
-              aria-label={t("busyTitle")}
-              className="space-y-2 rounded-md border border-amber-300 bg-amber-50/40 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/20"
+          {/*
+            Replacing the one shared cloudflared child repoints a public URL a
+            paired device may be using, so it is a modal decision. It stays
+            open while the replacement runs and closes once it lands; a
+            second refusal re-renders it with the host that refused.
+          */}
+          <AlertDialog
+            open={conflict?.open === true}
+            onOpenChange={(next) => {
+              if (!next && !busy) closeConflict()
+            }}
+          >
+            <AlertDialogContent
               data-testid="tunnel-conflict"
+              aria-busy={busy}
+              onCloseAutoFocus={(event) => {
+                const target = stopRef.current ?? startRef.current
+                if (target?.isConnected) {
+                  event.preventDefault()
+                  target.focus()
+                }
+              }}
             >
-              <p className="flex items-start gap-2 text-xs font-medium">
-                <ShieldAlertIcon className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
-                {t("busyTitle")}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {t("busyBody", { localUrl: conflict.localUrl, publicUrl: conflict.publicUrl })}
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => void onStart(true)}
-                  disabled={busy}
-                  data-testid="tunnel-conflict-replace"
-                >
-                  {t("busyReplace")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setConflict(null)}
-                  disabled={busy}
-                  data-testid="tunnel-conflict-keep"
-                >
-                  {t("busyKeep")}
-                </Button>
-              </div>
-            </div>
-          )}
+              {conflict ? (
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogMedia className="bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                      <ShieldAlertIcon aria-hidden />
+                    </AlertDialogMedia>
+                    <AlertDialogTitle>{t("busyTitle")}</AlertDialogTitle>
+                    <AlertDialogDescription className="wrap-anywhere">
+                      {t("busyBody", {
+                        localUrl: conflict.current.localUrl,
+                        publicUrl: conflict.current.publicUrl,
+                      })}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={busy} data-testid="tunnel-conflict-keep">
+                      {t("busyKeep")}
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      disabled={busy}
+                      onClick={(event) => {
+                        // Stay open while it runs: success clears the
+                        // conflict, a failure leaves the question standing.
+                        event.preventDefault()
+                        void onStart(true)
+                      }}
+                      data-testid="tunnel-conflict-replace"
+                    >
+                      {busy ? <LoaderIcon className="animate-spin" aria-hidden /> : null}
+                      {t("busyReplace")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </>
+              ) : null}
+            </AlertDialogContent>
+          </AlertDialog>
           {reach.block && (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-xs text-muted-foreground dark:border-amber-800 dark:bg-amber-950/20">
               <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />

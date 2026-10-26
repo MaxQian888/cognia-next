@@ -257,10 +257,48 @@ test("rejects a create patch with no hunk instead of writing an empty file", asy
   try {
     const res = await tool.handler({ patch: "--- /dev/null\n+++ bad.txt\n+hello\n" }, {})
     assert.equal(res.isError, true)
+    assert.equal(res._meta?.["cognia/failure"]?.kind, "invalid-args")
+    assert.equal(res._meta?.["cognia/failure"]?.effects, "none")
     assert.match(textOf(res), /has no hunk/)
     assert.match(textOf(res), /No changes were written/)
     await assert.rejects(fsp.stat(path.join(dir, "bad.txt")), { code: "ENOENT" })
   } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("a commit failure reports partial effects instead of claiming rollback", async (t) => {
+  const dir = await tmp()
+  const write = fsp.writeFile.bind(fsp)
+  const tool = asCallable(createApplyPatchTool({ cwd: dir, readTracker: createReadTracker() }))
+  try {
+    t.mock.method(fsp, "writeFile", async (...args: Parameters<typeof fsp.writeFile>) => {
+      if (String(args[0]).endsWith("second.txt"))
+        throw Object.assign(new Error("read-only file system"), { code: "EROFS" })
+      return write(...args)
+    })
+    const patch = [
+      "--- /dev/null",
+      "+++ first.txt",
+      "@@ -0,0 +1 @@",
+      "+first",
+      "--- /dev/null",
+      "+++ second.txt",
+      "@@ -0,0 +1 @@",
+      "+second",
+      "",
+    ].join("\n")
+    const res = await tool.handler({ patch }, {})
+    assert.equal(res.isError, true)
+    assert.equal(res._meta?.["cognia/failure"]?.effects, "partial")
+    assert.equal(res._meta?.["cognia/failure"]?.kind, "permission-denied")
+    assert.equal(res._meta?.["cognia/failure"]?.retryable, false)
+    assert.match(textOf(res), /first\.txt/)
+    assert.match(textOf(res), /second\.txt/)
+    assert.doesNotMatch(textOf(res), /No changes were written/)
+    assert.equal(await fsp.readFile(path.join(dir, "first.txt"), "utf8"), "first\n")
+  } finally {
+    t.mock.restoreAll()
     await fsp.rm(dir, { recursive: true, force: true })
   }
 })

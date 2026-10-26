@@ -66,7 +66,11 @@ export function useStarterSuggestions(
       if (!client) return
       const result = await suggestStarters(
         { characterName: persona?.name, characterDescription: persona?.description },
-        { client, signal: ac.signal }
+        {
+          client,
+          signal: ac.signal,
+          promptContext: { workspaceId: session?.projectId, agentId: session?.characterId },
+        }
       )
       if (active && !ac.signal.aborted) setStarters(result)
     })()

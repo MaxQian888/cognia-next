@@ -27,11 +27,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cognia/provider-types": "workspace:*",
     "@cognia/provider-core": "workspace:*",
-    "@cognia/vector": "workspace:*"
+    "@cognia/provider-types": "workspace:*",
+    "@cognia/vector": "workspace:*",
+    "nanoid": "^6.0.2"
   },
   "engines": {
     "node": ">=26.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.4",
+    "tsup": "^8.5.1"
   }
 }

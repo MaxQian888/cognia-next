@@ -8,7 +8,6 @@ export const initialState: ExternalAgentState = {
   lastRunSnapshots: {},
   activeAgentId: null,
   delegationRules: [],
-  enabled: true,
   defaultPermissionMode: "default",
   autoConnectOnStartup: false,
   showConnectionNotifications: true,

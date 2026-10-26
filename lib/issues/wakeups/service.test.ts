@@ -28,9 +28,15 @@ jest.mock("@/lib/scheduler/write-authority", () => ({
 }))
 
 import { createDbTestFixture } from "@/lib/db/test-fixture"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 import { createIssueProject } from "@/lib/db/issue-projects"
 import { createIssue } from "@/lib/db/issues"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { CHILDREN_DONE_INSTRUCTION_PROMPT } from "./model"
 import {
   IssueWakeupWriteError,
   childrenDoneWakeupId,
@@ -318,6 +324,41 @@ describe("the parent's children-done rule", () => {
       },
     })
     expect((task?.payload as { once?: boolean }).once).toBeUndefined()
+    // The shipped instruction, frozen into the rule as it is written.
+    expect((task?.payload as { instruction?: string }).instruction).toBe(
+      CHILDREN_DONE_INSTRUCTION_PROMPT.defaultBody
+    )
+    expect(task?.description).toBe(CHILDREN_DONE_INSTRUCTION_PROMPT.defaultBody)
+  })
+
+  // Resolution happens when the payload is built: a workspace's published
+  // instruction is what a new rule in that workspace persists.
+  it("persists the workspace's Prompt Center instruction when the rule is written", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: CHILDREN_DONE_INSTRUCTION_PROMPT.id,
+          scope: "workspace",
+          targetId: "w1",
+          revisionId: "por-children-done-w1",
+          body: "  Sub-issues landed. Integrate them and close the parent.  ",
+          contractVersion: CHILDREN_DONE_INSTRUCTION_PROMPT.contractVersion,
+        },
+      ])
+    )
+    try {
+      const parent = await makeIssue()
+      expect(await ensureChildrenDoneWakeup(parent.id)).toBe("created")
+      const task = await schedulerDb.getTask(childrenDoneWakeupId(parent.id))
+      expect((task?.payload as { instruction?: string }).instruction).toBe(
+        "Sub-issues landed. Integrate them and close the parent."
+      )
+      expect(task?.description).toBe("Sub-issues landed. Integrate them and close the parent.")
+    } finally {
+      __setPromptOverrideSnapshotForTests(null)
+      __resetPromptVerdictsForTests()
+    }
   })
 
   it("is skipped for a finished parent", async () => {

@@ -76,9 +76,14 @@ import {
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
 } from "@/lib/ai/agent/external/config/presets"
 import {
+  getSubagent,
   registerSubagent,
   unregisterSubagentsByPlugin,
 } from "@/lib/plugin/registries/subagent-registry"
+import {
+  registerPluginSubagentPrompt,
+  unregisterPluginSubagentPrompts,
+} from "@/lib/prompts/plugin-subagent-prompts"
 import {
   refreshAllTemplateWarnings,
   registerAgentTeamTemplate,
@@ -344,11 +349,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     registerEntry: (def, ctx) => {
       const bound = replacePluginRootTokens(def, ctx.installRoot ?? "")
       registerSubagent(bound.id, bound, ctx)
+      // Its prompt becomes a Prompt Center slot only when this plugin's entry
+      // won the id (first-wins-cross-plugin).
+      if (ctx.pluginId && getSubagent(bound.id) === bound) {
+        registerPluginSubagentPrompt(ctx.pluginId, bound)
+      }
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
     },
     unregisterAllByPlugin: (pluginId) => {
       const n = unregisterSubagentsByPlugin(pluginId)
+      unregisterPluginSubagentPrompts(pluginId)
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
       return n

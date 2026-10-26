@@ -29,6 +29,7 @@ export function schedulerMessageToPetEvent(msg: unknown): PetEventInput | null {
   if (!msg || typeof msg !== "object") return null
   const m = msg as Record<string, unknown>
   if (m.type !== "execution-update") return null
+  if (m.silentMaintenance === true) return null
   if (typeof m.taskId !== "string") return null
   const taskId = m.taskId
   const meta: Record<string, unknown> =

@@ -163,6 +163,30 @@ test("coverage source manifest stays synchronized with Jest", () => {
   assert.deepEqual(manifest.coveragePathIgnorePatterns, configuredIgnores)
 })
 
+test("filterCollectedSources resolves rootDir ignores without dropping nested source directories", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "merge-cov-[root]-"))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const files = ["src/feature.ts", "dist/generated.ts", "app/dist/helper.ts"]
+  const map = libCoverage.createCoverageMap({})
+  for (const file of files) {
+    const absolute = join(root, file)
+    mkdirSync(join(absolute, ".."), { recursive: true })
+    writeFileSync(absolute, "")
+    map.merge(fileCov(absolute, 1, 1))
+  }
+  filterCollectedSources(map, {
+    cwd: root,
+    sources: {
+      collectCoverageFrom: ["**/*.ts"],
+      coveragePathIgnorePatterns: ["<rootDir>/dist/"],
+    },
+  })
+  assert.deepEqual(
+    map.files().sort(),
+    [join(root, "src/feature.ts"), join(root, "app/dist/helper.ts")].sort()
+  )
+})
+
 test("checkGroup enforces percent and negative (max-uncovered) thresholds", () => {
   const map = libCoverage.createCoverageMap(fileCov("/x/a.ts", 3, 4)) // 75% stmts
   const summary = map.fileCoverageFor("/x/a.ts").toSummary()

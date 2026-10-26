@@ -603,6 +603,21 @@ pub async fn connectors_lark_upload_image(
     super::lark_upload::upload_image(&access_token, &source_url, image_type.as_deref()).await
 }
 
+/// Google document credentials are owned by this host, shared by every WebView.
+#[cfg(feature = "tauri-host")]
+#[tauri::command]
+pub async fn connectors_google_docs_auth(
+    app: tauri::AppHandle,
+    input: super::google_docs_auth::Input,
+) -> Result<super::google_docs_auth::Reply, String> {
+    use tauri::Emitter;
+    let notify = std::sync::Arc::new(move || {
+        // Reload signal only; never put credentials or account metadata on events.
+        let _ = app.emit(super::google_docs_auth::CHANGED_EVENT, ());
+    });
+    super::google_docs_auth::execute_with_notify(input, notify).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

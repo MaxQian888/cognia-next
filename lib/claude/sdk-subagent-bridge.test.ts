@@ -5,6 +5,7 @@
 import { applySdkSubagentBridge, __resetSdkSubagentBridge } from "./sdk-subagent-bridge"
 import { requestCancelSubagentRun } from "./agents/subagent-cancel-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import type { SDKTaskStartedMessage } from "@cognia/agent-config-types"
 
 const SID = "chat-1"
 
@@ -12,7 +13,7 @@ function node(taskId: string) {
   return useSubagentRuntimeStore.getState().subAgents[taskId]
 }
 
-function started(over: Record<string, unknown> = {}) {
+function started(over: Partial<SDKTaskStartedMessage> = {}): SDKTaskStartedMessage {
   return {
     type: "system",
     subtype: "task_started",
@@ -24,7 +25,7 @@ function started(over: Record<string, unknown> = {}) {
     uuid: "u",
     session_id: "sdk",
     ...over,
-  } as never
+  }
 }
 
 beforeEach(() => {

@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -108,9 +109,7 @@ describe("ImportDialog — file source", () => {
     // could never match an imported case.
     renderDialog()
     await loadCsv()
-    fireEvent.change(screen.getByLabelText("import.mapping.splitColumn"), {
-      target: { value: "split" },
-    })
+    await selectOption(screen.getByLabelText("import.mapping.splitColumn"), "split")
     fireEvent.click(screen.getByText('import.action:{"count":2}'))
     await waitFor(() => expect(bulkAddCases).toHaveBeenCalled())
     expect(casesOf(0).map((c) => c.split)).toEqual(["test", "test"])
@@ -119,9 +118,7 @@ describe("ImportDialog — file source", () => {
   it("applies a literal split when the source has no split column", async () => {
     renderDialog()
     await loadCsv()
-    fireEvent.change(screen.getByLabelText("import.mapping.splitLiteral"), {
-      target: { value: "validation" },
-    })
+    await selectOption(screen.getByLabelText("import.mapping.splitLiteral"), "validation")
     fireEvent.click(screen.getByText('import.action:{"count":2}'))
     await waitFor(() => expect(bulkAddCases).toHaveBeenCalled())
     expect(casesOf(0).every((c) => c.split === "validation")).toBe(true)
@@ -130,7 +127,7 @@ describe("ImportDialog — file source", () => {
   it("stamps the grading rule onto the cases and remembers it on the dataset", async () => {
     renderDialog()
     await loadCsv()
-    fireEvent.change(screen.getByLabelText("mode"), { target: { value: "numeric" } })
+    await selectOption(screen.getByLabelText("mode"), "numeric")
     fireEvent.change(screen.getByLabelText("pattern"), { target: { value: "####\\s*(\\d+)" } })
     fireEvent.click(screen.getByText('import.action:{"count":2}'))
     await waitFor(() => expect(bulkAddCases).toHaveBeenCalled())
@@ -160,9 +157,7 @@ describe("ImportDialog — file source", () => {
     expect(optsOf(0).upsertBySourceId).toBe(false)
 
     bulkAddCases.mockClear()
-    fireEvent.change(screen.getByLabelText("import.mapping.idColumn"), {
-      target: { value: "rid" },
-    })
+    await selectOption(screen.getByLabelText("import.mapping.idColumn"), "rid")
     fireEvent.click(screen.getByText('import.action:{"count":2}'))
     await waitFor(() => expect(bulkAddCases).toHaveBeenCalled())
     expect(optsOf(0).upsertBySourceId).toBe(true)
@@ -222,7 +217,7 @@ describe("ImportDialog — HuggingFace source", () => {
     await probe()
     // The select is bound by index into the discovered split list.
     expect(screen.getByLabelText("import.hf.split")).toHaveValue("1")
-    expect(screen.getByLabelText("import.hf.split")).toHaveDisplayValue("main / test")
+    expect(screen.getByLabelText("import.hf.split")).toHaveTextContent("main / test")
     expect(screen.getByLabelText("import.file.inputColumn")).toHaveValue("question")
   })
 
@@ -276,7 +271,7 @@ describe("ImportDialog — HuggingFace source", () => {
     importHuggingFace.mockResolvedValue({ cases: [], skipped: [] })
     renderDialog()
     await probe()
-    fireEvent.change(screen.getByLabelText("import.hf.split"), { target: { value: "0" } })
+    await selectOption(screen.getByLabelText("import.hf.split"), "0")
     fireEvent.click(screen.getByText('import.actionHf:{"count":200}'))
     await waitFor(() => expect(importHuggingFace).toHaveBeenCalled())
     expect(importHuggingFace.mock.calls[0][0]).toBe(
@@ -369,9 +364,7 @@ describe("ImportDialog — foreign source", () => {
   it("parses an OpenAI-Evals export as JSONL, not JSON", async () => {
     renderDialog()
     fireEvent.click(screen.getByText("import.tabs.foreign"))
-    fireEvent.change(screen.getByLabelText("import.foreign.format"), {
-      target: { value: "openai-evals" },
-    })
+    await selectOption(screen.getByLabelText("import.foreign.format"), "openai-evals")
     fireEvent.change(screen.getByLabelText("import.foreign.pick"), {
       target: {
         files: [
@@ -444,9 +437,7 @@ describe("ImportDialog — chrome", () => {
     // fields may be dropped on the way to Dexie.
     renderDialog()
     fireEvent.click(screen.getByText("import.tabs.foreign"))
-    fireEvent.change(screen.getByLabelText("import.foreign.format"), {
-      target: { value: "langsmith" },
-    })
+    await selectOption(screen.getByLabelText("import.foreign.format"), "langsmith")
     fireEvent.change(screen.getByLabelText("import.foreign.pick"), {
       target: {
         files: [
@@ -532,10 +523,8 @@ describe("ImportDialog — chrome", () => {
       target: { files: [textFile("cases.json", '[{"q":"only question"},{"q":"b","a":"4"}]')] },
     })
     await waitFor(() => expect(screen.getByTestId("mapping")).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText("import.file.expectedColumn"), {
-      target: { value: "q" },
-    })
-    fireEvent.change(screen.getByLabelText("mode"), { target: { value: "numeric" } })
+    await selectOption(screen.getByLabelText("import.file.expectedColumn"), "q")
+    await selectOption(screen.getByLabelText("mode"), "numeric")
     expect(screen.getByTestId("grading-extraction")).toBeInTheDocument()
   })
 
@@ -546,7 +535,7 @@ describe("ImportDialog — chrome", () => {
       target: { files: [textFile("cases.json", '[{"q":"2+2","a":4}]')] },
     })
     await waitFor(() => expect(screen.getByTestId("mapping")).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText("mode"), { target: { value: "numeric" } })
+    await selectOption(screen.getByLabelText("mode"), "numeric")
     expect(screen.getByTestId("grading-extraction")).toHaveTextContent('{"value":"4"}')
   })
 

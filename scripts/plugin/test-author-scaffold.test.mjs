@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { parse } from "yaml"
 import ts from "typescript"
 
@@ -28,6 +29,26 @@ const TS_TEMPLATES = [
   { dir: "cognia-plugin-template-glance", module: "glance" },
 ]
 
+test("standalone templates use native TypeScript and an API-independent Jest transformer", () => {
+  const require = createRequire(import.meta.url)
+  for (const { dir } of TS_TEMPLATES) {
+    const manifest = JSON.parse(
+      readFileSync(new URL(`../../crates/${dir}/package.json`, import.meta.url), "utf8")
+    )
+    assert.match(manifest.devDependencies.typescript, /^7\./)
+    assert.equal(manifest.devDependencies["@typescript/native"], undefined)
+    assert.equal(manifest.devDependencies["ts-jest"], undefined)
+    assert.ok(manifest.devDependencies["@swc/core"])
+    assert.ok(manifest.devDependencies["@swc/jest"])
+    const config = require(`../../crates/${dir}/jest.config.cjs`)
+    const [transformer, options] = config.transform["^.+\\.tsx?$"]
+    assert.equal(transformer, "@swc/jest")
+    assert.deepEqual(options.jsc.parser, { syntax: "typescript", tsx: true })
+    assert.equal(options.jsc.transform.react.runtime, "automatic")
+    assert.equal(options.module.type, "commonjs")
+  }
+})
+
 test("the acceptance run covers every TypeScript template kind", () => {
   const source = readFileSync(new URL("./test-author-scaffold.mjs", import.meta.url), "utf8")
   assert.match(source, /const KINDS = \["ts", "glance"\]/)
@@ -45,7 +66,7 @@ test("standalone scaffold declares its native build policy and Rust embeds it", 
     )
     const workspace = parse(policy)
     assert.deepEqual(workspace.packages, ["."])
-    for (const dependency of ["esbuild", "unrs-resolver", "@parcel/watcher"])
+    for (const dependency of ["esbuild", "unrs-resolver", "@parcel/watcher", "@swc/core"])
       assert.equal(workspace.allowBuilds[dependency], true)
     assert.ok(generator.includes(`content: ${module}::PNPM_WORKSPACE.into()`))
   }

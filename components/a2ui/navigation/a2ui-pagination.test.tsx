@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UIPagination, type A2UIPaginationComponent } from "./a2ui-pagination"
 import type { A2UIComponentProps } from "@/types/a2ui/schema"
 
@@ -14,7 +14,7 @@ jest.mock("../a2ui-context", () => ({
   }),
   useA2UIData: () => ({
     resolveString: (v: unknown) => (typeof v === "string" ? v : ""),
-    resolveNumber: (v: unknown) => (typeof v === "number" ? v : 0),
+    resolveNumber: (v: unknown) => (typeof v === "number" ? v : 1),
     resolveBoolean: (v: unknown) => (typeof v === "boolean" ? v : false),
     resolveArray: <T,>(v: unknown, d: T[] = []) => (Array.isArray(v) ? v : d),
   }),
@@ -28,6 +28,20 @@ describe("A2UIPagination", () => {
     onAction: jest.fn(),
     onDataChange: jest.fn(),
     renderChild: jest.fn(),
+  })
+
+  it("writes the selected page and preserves its action", () => {
+    const props = cp({
+      id: "bound",
+      component: "Pagination",
+      currentPage: { path: "/page" },
+      totalPages: 5,
+      pageChangeAction: "page",
+    })
+    render(<A2UIPagination {...props} />)
+    fireEvent.click(screen.getByText("2"))
+    expect(props.onDataChange).toHaveBeenCalledWith("/page", 2)
+    expect(props.onAction).toHaveBeenCalledWith("page", { page: 2 })
   })
 
   it("renders page numbers", () => {

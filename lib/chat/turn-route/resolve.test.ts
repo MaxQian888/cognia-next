@@ -77,8 +77,6 @@ function ctx(overrides: Partial<RouteResolutionContext> = {}): RouteResolutionCo
     currentRef: { kind: "builtin" },
     teams: {},
     teammates: {},
-    externalEnabled: true,
-    configuredPresetIds: [],
     ...overrides,
   }
 }
@@ -202,12 +200,22 @@ describe("resolveRouteLane — @codex", () => {
     })
   })
 
-  it("says the switch is off when a Codex is configured but hidden", () => {
+  it("refuses a disabled Codex instead of falling back to the builtin engine", () => {
     const lane = resolveRouteLane(
       CODEX,
-      ctx({ externalEnabled: false, configuredPresetIds: ["codex-app-server"] })
+      ctx({
+        runtimes: [
+          BUILTIN,
+          external("cx", "codex-app-server", { blockedReason: "Agent is disabled." }),
+        ],
+      })
     )
-    expect(lane).toEqual({ ok: false, reason: "disabled", runtime: "codex" })
+    expect(lane).toEqual({
+      ok: false,
+      reason: "blocked",
+      detail: "Agent is disabled.",
+      runtime: "codex",
+    })
   })
 
   it("says nothing is configured when no Codex exists anywhere", () => {

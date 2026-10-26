@@ -11,7 +11,7 @@
  * primary action with different fields works here too.
  */
 
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { ArrowUpIcon, ChevronDownIcon } from "lucide-react"
 
@@ -64,12 +64,23 @@ export function TrayPanelDelegateBar({
         : undefined
 
   // Grow with the content up to a few lines, then scroll.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
-    el.style.height = "auto"
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
-  }, [text])
+    const resize = () => {
+      el.style.height = "auto"
+      el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
+    }
+    resize()
+    let width = el.getBoundingClientRect().width
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === width) return
+      width = entry.contentRect.width
+      resize()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [text, inline?.id])
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus()
@@ -90,10 +101,14 @@ export function TrayPanelDelegateBar({
     inline?.kind === "text" || (inline?.kind === "textarea" && inline.submitOnEnter === true)
 
   return (
-    <div className="shrink-0 border-t px-2.5 pb-1.5 pt-2" data-testid="tray-panel-primary">
+    <div
+      className="@container/composer shrink-0 border-t px-2.5 pb-1.5 pt-2"
+      data-testid="tray-panel-primary"
+    >
       <div
         className={cn(
-          "flex items-end gap-1.5 rounded-[10px] bg-muted py-1.5 pl-2.5 pr-1.5",
+          "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-1.5 rounded-[10px] bg-muted py-1.5 pl-2.5 pr-1.5",
+          options.length > 0 && "@min-[400px]/composer:grid-cols-[minmax(0,1fr)_auto_auto]",
           inline && invalid.has(inline.id) && "ring-1 ring-destructive"
         )}
       >
@@ -113,10 +128,20 @@ export function TrayPanelDelegateBar({
               event.preventDefault()
               void runner.run(action)
             }}
-            className="max-h-[100px] min-h-5 flex-1 resize-none bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground"
+            className={cn(
+              "max-h-[100px] min-h-5 w-full min-w-0 resize-none bg-transparent py-0.5 text-[13px] leading-5 outline-none placeholder:text-muted-foreground",
+              options.length > 0 && "col-span-2 @min-[400px]/composer:col-span-1"
+            )}
           />
         ) : (
-          <span className="flex-1 py-0.5 text-[13px] text-muted-foreground">{label}</span>
+          <span
+            className={cn(
+              "min-w-0 break-words py-0.5 text-[13px] text-muted-foreground",
+              options.length > 0 && "col-span-2 @min-[400px]/composer:col-span-1"
+            )}
+          >
+            {label}
+          </span>
         )}
         {options.length > 0 ? (
           <Popover>
@@ -124,7 +149,8 @@ export function TrayPanelDelegateBar({
               <button
                 type="button"
                 aria-label={t("delegate.optionsLabel")}
-                className="inline-flex max-w-32 shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                title={chip}
+                className="inline-flex min-w-0 max-w-full justify-self-end items-center gap-0.5 rounded-md px-1.5 py-1 text-[11.5px] text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 @min-[400px]/composer:max-w-40"
               >
                 <span className="truncate">→ {chip}</span>
                 <ChevronDownIcon aria-hidden className="size-3 shrink-0" />
@@ -153,7 +179,7 @@ export function TrayPanelDelegateBar({
           {busy ? <Spinner className="size-3.5" /> : <ArrowUpIcon className="size-3.5" />}
         </button>
       </div>
-      {error ? <p className="mt-1 px-1 text-xs text-destructive">{error}</p> : null}
+      {error ? <p className="mt-1 break-words px-1 text-xs text-destructive">{error}</p> : null}
     </div>
   )
 }

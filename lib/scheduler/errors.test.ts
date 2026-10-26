@@ -35,6 +35,13 @@ describe("SchedulerError", () => {
   })
 
   describe("factories", () => {
+    it("timingDriverFailed preserves native operation and non-Error rejection diagnostics", () => {
+      const error = SchedulerError.timingDriverFailed("arm", "IPC denied")
+      expect(error.code).toBe("TIMING_DRIVER_FAILED")
+      expect(error.details).toEqual({ operation: "arm" })
+      expect(error.cause).toEqual(new Error("IPC denied"))
+      expect(error.message).toContain("IPC denied")
+    })
     it("taskNotFound() builds the correct error", () => {
       const err = SchedulerError.taskNotFound("task-1")
       expect(err.code).toBe("TASK_NOT_FOUND")

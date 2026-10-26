@@ -23,7 +23,17 @@ import {
   simulateWebviewRuntime,
   truncatedStreamModel,
 } from "@/lib/ai/webview-stream-fixtures"
-import { buildAgentBoundContext, executeAgent, runCompletionRail } from "./agent-executor"
+import {
+  buildAgentBoundContext,
+  EXECUTOR_FALLBACK_PROMPT,
+  executeAgent,
+  runCompletionRail,
+} from "./agent-executor"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
 
 const mockPlanRoute = jest.fn()
 const mockApplyCircuitBreakerSettings = jest.fn()
@@ -117,6 +127,8 @@ jest.mock("@/lib/claude/provider-attempt-options", () => ({
 }))
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+  // Read by the Prompt Center when it validates a published override.
+  hasNoLeakingPii: () => true,
 }))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
@@ -796,6 +808,28 @@ describe("executeAgent", () => {
       })
     })
 
+    it.each(["error_max_turns", "error_max_budget_usd"])(
+      "preserves the incomplete sidecar result %s",
+      async (resultSubtype) => {
+        mockRunAndCapture.mockResolvedValue({
+          text: "partial findings",
+          messageId: "m1",
+          a2uiSurfaces: {},
+          a2uiSurfaceOrder: [],
+          resultSubtype,
+          budgetContinuationContext: "Recorded tool evidence: FACT_FIRST",
+        })
+        const result = await executeAgent("research", {
+          toolsEnabled: true,
+          isDispatchedSubagent: true,
+        })
+        expect(result.finishReason).toBe(resultSubtype)
+        expect(result.text).toContain("partial findings")
+        expect(result.text).toContain("FACT_FIRST")
+        expect(mockRunAndCapture.mock.calls[0][3]).toMatchObject({ preserveBudgetEvidence: true })
+      }
+    )
+
     it("routes through the sidecar and reports channel='sidecar', toolsAvailable=true", async () => {
       const result = await executeAgent("do work", { toolsEnabled: true, systemPrompt: "be terse" })
       expect(result.channel).toBe("sidecar")
@@ -981,6 +1015,23 @@ describe("executeAgent", () => {
       expect(mockResolveSendOptions.mock.calls[1][0]).not.toHaveProperty("isDispatchedSubagent")
     })
 
+    it("preserves the dispatched role identity for checkpoint delivery policy", async () => {
+      await executeAgent("x", {
+        toolsEnabled: true,
+        isDispatchedSubagent: true,
+        approvalRoute: {
+          parentSessionId: "parent",
+          runId: "child",
+          subagentId: "Plan",
+          backgrounded: false,
+        },
+      })
+      expect(mockRunAndCapture.mock.calls[0][2]).toMatchObject({
+        agentKind: "subagent",
+        agentRef: "Plan",
+      })
+    })
+
     it("routes a cross-provider run via the session's providerOverride", async () => {
       await executeAgent("x", { toolsEnabled: true, provider: "anthropic" })
       const ctx = mockResolveSendOptions.mock.calls[0][0]
@@ -1018,6 +1069,34 @@ describe("executeAgent", () => {
       await executeAgent("x", { toolsEnabled: true })
       const ctx = mockResolveSendOptions.mock.calls[0][0]
       expect(ctx.character?.systemPrompt).toMatch(/helpful agent/i)
+      expect(ctx.character?.systemPrompt).toBe(EXECUTOR_FALLBACK_PROMPT.defaultBody)
+    })
+
+    it("uses the published fallback, and a caller's own prompt still wins over it", async () => {
+      __setPromptOverrideSnapshotForTests(
+        buildPromptOverrideSnapshot("test-db", [
+          {
+            bindingId: "pob",
+            promptId: EXECUTOR_FALLBACK_PROMPT.id,
+            scope: "account",
+            targetId: "",
+            revisionId: "por-executor-fallback",
+            body: "You are a terse automation agent.",
+            contractVersion: EXECUTOR_FALLBACK_PROMPT.contractVersion,
+          },
+        ])
+      )
+      try {
+        await executeAgent("x", { toolsEnabled: true })
+        expect(mockResolveSendOptions.mock.calls[0][0].character?.systemPrompt).toBe(
+          "You are a terse automation agent."
+        )
+        await executeAgent("x", { toolsEnabled: true, systemPrompt: "scoped" })
+        expect(mockResolveSendOptions.mock.calls[1][0].character?.systemPrompt).toBe("scoped")
+      } finally {
+        __setPromptOverrideSnapshotForTests(null)
+        __resetPromptVerdictsForTests()
+      }
     })
 
     it("resolves an existing character by id", async () => {
@@ -1109,6 +1188,42 @@ describe("executeAgent", () => {
       await executeAgent("x", { toolsEnabled: true, timeoutMs: 1234 })
       const capArg = mockRunAndCapture.mock.calls[0][3]
       expect(capArg).toMatchObject({ timeoutMs: 1234 })
+    })
+
+    it("disables the implicit wall-clock limit for dispatched subagents", async () => {
+      await executeAgent("research a large codebase", {
+        toolsEnabled: true,
+        isDispatchedSubagent: true,
+      })
+      expect(mockRunAndCapture.mock.calls[0][3]).toMatchObject({ timeoutMs: 0 })
+    })
+
+    it("keeps the capture default for callers that are not dispatched subagents", async () => {
+      await executeAgent("x", { toolsEnabled: true })
+      expect(mockRunAndCapture.mock.calls[0][3]).not.toHaveProperty("timeoutMs")
+    })
+
+    it.each([1234, 0])("preserves an explicit subagent timeout of %s", async (timeoutMs) => {
+      await executeAgent("x", { toolsEnabled: true, isDispatchedSubagent: true, timeoutMs })
+      expect(mockRunAndCapture.mock.calls[0][3]).toMatchObject({ timeoutMs })
+    })
+
+    it("preserves cancellation and stream-idle protection for an unbounded subagent", async () => {
+      const controller = new AbortController()
+      mockResolveSendOptions.mockResolvedValue({
+        model: "claude",
+        streamIdleTimeoutMs: 45_000,
+      } as never)
+      await executeAgent("x", {
+        toolsEnabled: true,
+        isDispatchedSubagent: true,
+        abortSignal: controller.signal,
+      })
+      expect(mockRunAndCapture.mock.calls[0][2]).toMatchObject({ streamIdleTimeoutMs: 45_000 })
+      expect(mockRunAndCapture.mock.calls[0][3]).toMatchObject({
+        timeoutMs: 0,
+        signal: controller.signal,
+      })
     })
 
     it("appends system + structured instruction onto sendOptions.appendSystemPrompt", async () => {

@@ -56,7 +56,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(386)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(392)
     db.close()
   })
 
@@ -150,6 +150,25 @@ describe("DataTableCatalog", () => {
   })
 
   it("binds every portable table to a versioned backup field", () => {
+    expect(PORTABLE_BACKUP_BINDINGS).toMatchObject({
+      projects: "projects",
+      sessionFolders: "sessionFolders",
+      workflowFolders: "workflowFolders",
+      workflows: "workflows",
+      workflowVersions: "workflowVersions",
+      knowledgeBases: "knowledgeBases",
+      knowledgeBaseSources: "knowledgeBaseSources",
+      knowledgeNotes: "knowledgeNotes",
+      labels: "labels",
+      issueProjects: "issueProjects",
+      issueCycles: "issueCycles",
+      issues: "issues",
+      issueEvents: "issueEvents",
+      issueCounters: "issueCounters",
+      agentTeams: "agentTeams",
+      agentTeammates: "agentTeammates",
+      agentTeamTasks: "agentTeamTasks",
+    })
     expect(new Set(Object.keys(PORTABLE_BACKUP_BINDINGS))).toEqual(PORTABLE_BACKUP_TABLES)
     expect(PORTABLE_BACKUP_BINDINGS.contextComments).toBe("contextComments")
     expect(PORTABLE_BACKUP_BINDINGS.providerProfiles).toBe("providerProfileStore")
@@ -170,6 +189,7 @@ describe("DataTableCatalog", () => {
       "memoryGovernance",
       "notificationDelivery",
       "ocrResults",
+      "usageHistory",
       "retrievalControl",
       "workflowAppData",
       "siteArtifacts",

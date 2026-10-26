@@ -74,6 +74,39 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
   listAgentTeamEvidence: (...args: unknown[]) => listAgentTeamEvidence(...args),
 }))
 
+import {
+  REVIEW_REVISION_REQUEST_PROMPT,
+  TEAMMATE_UPSTREAM_RESULTS_PROMPT,
+} from "@/lib/ai/agent/team/team-prompts"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import type { PromptDefinitionV1 } from "@/lib/prompts/types"
+
+/** Publish one workspace-scoped override of `def` (ADR-0236). */
+function publishWorkspaceOverride(def: PromptDefinitionV1, body: string, revisionId: string) {
+  __setPromptOverrideSnapshotForTests(
+    buildPromptOverrideSnapshot("test-db", [
+      {
+        bindingId: "pob",
+        promptId: def.id,
+        scope: "workspace",
+        targetId: "ws-1",
+        revisionId,
+        body,
+        contractVersion: def.contractVersion,
+      },
+    ])
+  )
+}
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
+
 const trigger: TriggerEvent = { workflowId: "wf", kind: "trigger.manual", payload: {}, originAt: 1 }
 
 function ctx(
@@ -268,6 +301,27 @@ describe("dispatchTeamTask", () => {
     expect(dispatchTeammate.mock.calls[0][1].prompt({ id: "m" })).toBe("base prompt")
     expect(result.output).toMatchObject({ text: "notes", access: "read", taskKind: "code" })
   })
+
+  it("heads upstream results with the project's customized wording, from one frozen snapshot (ADR-0236)", async () => {
+    publishWorkspaceOverride(
+      TEAMMATE_UPSTREAM_RESULTS_PROMPT,
+      "Prior results:",
+      "por-upstream-results"
+    )
+    const scopedTeam = { id: "team-1", projectId: "ws-1" }
+    getTeamRunContext.mockReturnValue({ team: scopedTeam })
+    readDependencyResults.mockReturnValue([{ taskId: "dep", value: "found it" }])
+    dispatchTeammate.mockResolvedValue({ text: "done", teammateId: "m", teammateName: "M" })
+
+    await dispatchTeamTask(ctx({ teamId: "team-1", taskId: "t1", dependencies: ["dep"] }))
+
+    expect(dispatchTeammate.mock.calls[0][1].prompt({ id: "m" })).toBe(
+      "Prior results:\n\n### dep\nfound it\n\n\nbase prompt"
+    )
+    // The teammate prompt is built against the same snapshot the step froze.
+    const [, , , options] = buildTeammatePrompt.mock.calls[0]
+    expect(options.snapshot?.byPrompt.has(TEAMMATE_UPSTREAM_RESULTS_PROMPT.id)).toBe(true)
+  })
 })
 
 describe("reviewTeamTask", () => {
@@ -410,6 +464,23 @@ describe("reviewTeamTask", () => {
       previousFeedback: "add tests",
     })
     expect(result.output).toMatchObject({ text: "v2", verdict: "approved", revisions: 1 })
+  })
+
+  it("asks for the revision with the project's customized wording (ADR-0236)", async () => {
+    publishWorkspaceOverride(
+      REVIEW_REVISION_REQUEST_PROMPT,
+      "Fix {{taskTitle}}: {{feedback}}",
+      "por-revision-request"
+    )
+    const teamCtx = reviewCtx({ team: { config: {}, projectId: "ws-1" } })
+    teamCtx.runLeadReview
+      .mockResolvedValueOnce({ verdict: "changes_requested", feedback: "add tests" })
+      .mockResolvedValueOnce({ verdict: "approved", feedback: "good" })
+    dispatchTeammate.mockResolvedValue({ text: "v2", teammateId: "mate", teammateName: "Mate" })
+
+    await reviewTeamTask(ctx({ ...params, maxRevisions: 2 }, upstream))
+
+    expect(dispatchTeammate.mock.calls[0][1].prompt).toBe("Fix Build: add tests")
   })
 
   it("fails the task when the revision budget runs out", async () => {

@@ -42,6 +42,8 @@
     "node": ">=20.19.0"
   },
   "devDependencies": {
-    "@cognia/redact": "workspace:*"
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.4",
+    "tsup": "^8.5.1"
   }
 }

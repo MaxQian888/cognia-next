@@ -19,7 +19,23 @@ if (typeof globalThis.TextDecoder === "undefined") {
   Object.defineProperty(globalThis, "TextDecoder", { value: NodeTextDecoder })
 }
 
-import { deriveKey, encrypt, decrypt } from "./crypto-helpers"
+jest.mock("@/lib/data/backup-key", () => ({
+  getInstallEncryptionPassphrase: jest.fn(async () => "durable-install-root"),
+  getDefaultBackupPassphrase: jest.fn(() => {
+    throw new Error("Backup key must not encrypt live plugin state")
+  }),
+}))
+
+import { deriveKey, deriveInstallKey, encrypt, decrypt } from "./crypto-helpers"
+
+it("derives live plugin encryption from the persistent install root with plugin isolation", async () => {
+  const ciphertext = await encrypt("saved plugin state", await deriveInstallKey("plugin-a"))
+  await expect(decrypt(ciphertext, await deriveInstallKey("plugin-a"))).resolves.toBe(
+    "saved plugin state"
+  )
+  await expect(decrypt(ciphertext, await deriveInstallKey("plugin-b"))).rejects.toThrow()
+  await expect(decrypt(ciphertext, await deriveKey("plugin-a"))).rejects.toThrow()
+})
 
 describe("crypto-helpers", () => {
   describe("deriveKey", () => {

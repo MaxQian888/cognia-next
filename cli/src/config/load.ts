@@ -21,6 +21,7 @@ import fs from "node:fs"
 import {
   cliConfigFileSchema,
   CLI_SEARCH_PROVIDER_IDS,
+  searchConfigSchema,
   RESOLVER_PROTOCOLS,
   credentialsFileSchema,
   DEFAULT_RESOLVED_CONFIG,
@@ -211,6 +212,9 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     devPlugins: layer.devPlugins ?? acc.devPlugins,
     devPluginsDir: layer.devPluginsDir ?? acc.devPluginsDir,
     webTools: layer.webTools ?? acc.webTools,
+    preferCogniaSearch: layer.preferCogniaSearch ?? acc.preferCogniaSearch,
+    preferCogniaFetch: layer.preferCogniaFetch ?? acc.preferCogniaFetch,
+    webReader: layer.webReader ?? acc.webReader,
     skillTool: layer.skillTool ?? acc.skillTool,
     slashCommandTool: layer.slashCommandTool ?? acc.slashCommandTool,
     subagentModels: layer.subagentModels
@@ -308,8 +312,23 @@ function envLayer(env: Record<string, string | undefined>): CliConfigFile {
   const searchProviders: NonNullable<CliSearchConfig["providers"]> = {}
   for (const providerId of CLI_SEARCH_PROVIDER_IDS) {
     const envId = providerId.toUpperCase().replaceAll("-", "_")
-    const apiKey = env[`COGNIA_SEARCH_${envId}_API_KEY`]?.trim()
+    const apiKey = (
+      env[`COGNIA_SEARCH_${envId}_API_KEY`] ??
+      (providerId === "deepseek"
+        ? env.DEEPSEEK_API_KEY
+        : providerId === "tinyfish"
+          ? env.TINYFISH_API_KEY
+          : undefined)
+    )?.trim()
     if (apiKey) searchProviders[providerId] = { apiKey }
+  }
+  const searxngBaseUrl = (env.COGNIA_SEARCH_SEARXNG_BASE_URL ?? env.SEARXNG_BASE_URL)?.trim()
+  if (searxngBaseUrl) {
+    // Env is validated too: malformed endpoint addresses must not disappear.
+    const endpoint = searchConfigSchema.parse({
+      providers: { searxng: { baseUrl: searxngBaseUrl } },
+    })
+    searchProviders.searxng = { ...searchProviders.searxng, ...endpoint.providers?.searxng }
   }
   const googleCx = env.COGNIA_SEARCH_GOOGLE_CX?.trim()
   if (googleCx) {

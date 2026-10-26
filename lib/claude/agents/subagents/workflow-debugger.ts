@@ -37,5 +37,4 @@ export const workflowDebuggerAgent: AgentDefinition = {
     "mcp__cognia-plugin-tools__wf_get_validation_errors",
     "mcp__cognia-plugin-tools__wf_get_last_run",
   ],
-  maxTurns: 10,
 }

@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { SiwcConnections } from "./siwc-connections"
@@ -95,7 +96,7 @@ it("keeps same-email registrations distinct and requires explicit model and rout
   fireEvent.click(within(rows[1]).getByRole("button", { name: "models" }))
   const select = await within(rows[1]).findByRole("combobox", { name: "model" })
   expect(within(rows[1]).getByRole("button", { name: "enableChat" })).toBeDisabled()
-  fireEvent.change(select, { target: { value: "gpt-test" } })
+  await selectOption(select, "gpt-test")
   fireEvent.click(within(rows[1]).getByRole("button", { name: "enableChat" }))
   await waitFor(() =>
     expect(execution.configureSiwcChatConnection).toHaveBeenCalledWith(
@@ -130,8 +131,12 @@ it("lists only catalog entries with the documented list visibility", async () =>
   const row = await screen.findByRole("article")
   fireEvent.click(within(row).getByRole("button", { name: "models" }))
   const select = await within(row).findByRole("combobox", { name: "model" })
-  expect(within(select).getByRole("option", { name: "Public model" })).toBeInTheDocument()
-  expect(within(select).queryByRole("option", { name: "Internal model" })).not.toBeInTheDocument()
+  expect(
+    within(getNativeSelect(select)).getByRole("option", { hidden: true, name: "Public model" })
+  ).toBeInTheDocument()
+  expect(
+    within(getNativeSelect(select)).queryByRole("option", { hidden: true, name: "Internal model" })
+  ).not.toBeInTheDocument()
 })
 
 it("cancels a pending native login on unmount in its original scope", async () => {

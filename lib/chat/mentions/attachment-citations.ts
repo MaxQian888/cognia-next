@@ -166,7 +166,7 @@ export function remoteDocCitation(
 ): ContextRef {
   return {
     kind: "doc",
-    id: `${item.providerId}:${item.doc.id}`,
+    id: `${item.providerId}:${item.doc.accountBinding && item.providerId !== "lark" && item.providerId !== "google" ? `${encodeURIComponent(item.doc.accountBinding.accountId)}:` : ""}${item.doc.id}`,
     label: resolvedTitle || item.doc.title,
     raw: item.doc.url ?? `@${item.providerId}:${item.doc.id}`,
   }

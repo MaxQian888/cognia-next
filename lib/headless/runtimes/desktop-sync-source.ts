@@ -15,7 +15,7 @@ import { registerHeadlessRuntime } from "../registry"
 registerHeadlessRuntime({
   name: "desktop-sync-source",
   criticality: "required",
-  hosts: ["brain"],
+  hosts: ["brain", "person-brain"],
   start: async (ctx) => {
     // The board projection (store → `agentTeamBoard`, v104) must run wherever
     // the sync source answers pulls, or the brain would serve an empty board.

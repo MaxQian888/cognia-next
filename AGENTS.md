@@ -1,120 +1,61 @@
-# Repository Guidelines
+# Cognia repository instructions
 
-## Working Rules (hard requirements)
+These project-specific requirements supplement inherited instructions. Use the repository configuration and package manifests as the source of truth for membership, versions, and commands.
 
-These project rules override any default behavior to the contrary.
+## Project boundaries
 
-1. **Research before implementing.** Before writing new code, grep `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. New files require justification that no existing module can be extended.
-2. **No simplifications.** Implement the full behavior the task requires. No stubs, `// TODO later`, abbreviated happy paths, or stripped error handling/validation/edge cases. If you genuinely can't finish, stop and surface the blocker instead of silently shipping less.
-3. **Every component ships with a unit test.** New or edited files under `components/**`, `hooks/**`, `lib/**`, `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) need co-located `*.test.ts(x)` or in-file `#[cfg(test)]` tests in the same change. **Coverage is opt-in**: do not run `pnpm test:coverage` or enforce any coverage threshold unless the user explicitly asks for it.
-4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `next-intl` (`useTranslations` / `getTranslations`) and add keys to the matching split source files under **both** `i18n/messages/en/**` and `i18n/messages/zh-CN/**`. **Never edit `i18n/messages/en.json` or `i18n/messages/zh-CN.json` directly** — they are generated artifacts. Run `pnpm i18n:build` after editing split sources, then run `pnpm i18n:build:check` and `pnpm lint:i18n` to confirm freshness and parity. Aria labels, placeholders, toasts, and error messages count.
-5. **Language convention.** Internal narration (status updates, commit messages, code comments, plans) is in **English**. Clarifying questions to the user are in **Chinese** — identifiers, paths, and Conventional Commit prefixes stay English even inside Chinese sentences.
+- The main app uses Next.js 16, React 19, TypeScript, and Tailwind CSS v4. Its production build is a static export in `out/`, shared by the browser and Tauri; Capacitor uses the mobile build variant. Do not introduce dependencies on a runtime Next.js server into exported functionality.
+- `pnpm-workspace.yaml` defines the JavaScript workspaces: the root app, `docs/`, `mobile/`, `cli/`, `packages/*`, and `services/workspace-runtime/` (the other services live in cognia-labs/cognia-services, pinned by `integrations/cognia-services.json`). Install workspace dependencies from the repository root. Independently managed sidecars and services may have their own manifests and lockfiles. The browser extension lives in `cognia-labs/cognia-browser-extension`.
+- `Cargo.toml` defines the Rust workspace containing `src-tauri/` and shared crates. Place new Rust logic in the lowest-layer crate that can own it, following `scripts/gates/rust-architecture.json`; keep desktop integration in the Tauri shell.
+- Main-app code lives in `app/`, `components/`, `hooks/`, `lib/`, and `stores/`; static assets live in `public/`. Follow the existing App Router file conventions. The main development server uses port 3000; docs development uses port 3001.
+- Keep contributor guides in `docs/development/` and repository-root-context Dockerfiles in `deploy/docker/`. Keep their Docker build context at the repository root; update CI, Compose, gates, and links when moving build inputs. See [the directory guide](docs/README.md) for ownership.
+- Keep local caches and verification output under `.cache/` when the tool supports an explicit output path. TypeScript's API/build caches use `.cache/typescript/`; the native CLI typecheck uses `.cache/typecheck/`.
 
-## Project Structure & Module Organization
+## Implementation constraints
 
-This is a **pnpm monorepo** (`pnpm-workspace.yaml`) with two packages:
+- Before adding code, inspect existing implementations in the affected modules or workspaces and the relevant ADRs. Use the navigation tools available in the session. New files require an explanation of why an existing module cannot be extended.
+- Import existing UI primitives directly from `components/ui/` and `components/ai-elements/`. Check the actual directories before invoking component scaffolding; do not reinstall an existing component or maintain a fixed component-count assumption.
+- `TooltipProvider` is already supplied by `components/runtime/app-runtime.tsx`; reuse the existing runtime provider instead of adding another wrapper.
 
-| Package  | Root    | Port | Build output                                   |
-| -------- | ------- | ---- | ---------------------------------------------- |
-| Main app | `/`     | 3000 | `out/` (static export for Tauri)               |
-| Docs     | `docs/` | 3001 | `docs/.next/` (server mode, deploy separately) |
+## Tests and i18n
 
-Run `pnpm install` from repo root — single `pnpm-lock.yaml` covers all packages.
+- New or edited source files under `components/**`, `hooks/**`, `lib/**`, and `src-tauri/src/**` require co-located unit tests in the same change, except the two component directories excluded below. TypeScript tests use `*.test.ts` or `*.test.tsx` beside the source; do not put unit tests in separate `__tests__/` or `tests/` directories. Rust unit tests belong in an in-file `#[cfg(test)]` module; Rust integration tests may live in `src-tauri/tests/`.
+- Do not add new unit-test files under `components/ui/` or `components/ai-elements/`. These directories remain excluded from Jest coverage; existing tests there do not authorize expanding that exception.
+- Use the repository's Jest entry point, `pnpm test`, for unit tests and Playwright for E2E. Root scripts wrap the runners and handle repository-specific setup; do not substitute a default Vitest workflow.
+- Coverage is opt-in for local task execution: do not run coverage commands or enforce coverage thresholds unless the user explicitly requests a coverage check. When requested, retain the ≥90% target for lines, branches, and functions, prioritizing `lib/`, `hooks/`, `stores/`, and `src-tauri/src/`. `pnpm test:coverage` runs sharded Jest coverage and merges the results.
+- Distinguish that requested target from existing automated gates: `scripts/test/coverage-thresholds.json` defines per-path Jest thresholds; full-mode PR CI separately checks changed files at 90% per metric. Local opt-in does not disable CI policy, and Jest coverage does not measure Rust. Do not silently lower either a requested target or an existing gate.
+- Wire user-facing strings in `.tsx` through `next-intl` (`useTranslations` / `getTranslations`). Aria labels, placeholders, toasts, and error messages count. Add matching keys to split source files under both `i18n/messages/en/**` and `i18n/messages/zh-CN/**`.
+- Never directly edit generated `i18n/messages/en.json` or `i18n/messages/zh-CN.json`. After editing split sources, run `pnpm i18n:build`, `pnpm i18n:build:check`, and `pnpm lint:i18n`. The lint has a legacy baseline; also review newly added strings and keys, and do not refresh the baseline to conceal new findings.
 
-### Main app (`/`)
+## Development and verification entry points
 
-- `app/` Next.js App Router (routes: `page.tsx`, `layout.tsx`, global styles in `globals.css`).
-- `components/ui/` shadcn/ui components — **do not add test files here**. All 57 components are pre-installed (see list below).
-- `lib/` Shared utilities (e.g., `lib/utils.ts`).
-- `hooks/` Shared hooks (e.g., `hooks/use-mobile.ts`).
-- `public/` Static assets (SVGs, icons).
-- `src-tauri/` Tauri desktop wrapper (Rust code, config, icons).
-- Root configs: `next.config.ts`, `tsconfig.json`, `eslint.config.mjs`, `postcss.config.mjs`, `components.json`.
+Run commands from the repository root unless a workspace is explicitly selected. `package.json` owns the current scripts and lifecycle preparation; the table lists common entry points rather than duplicating their implementation.
 
-### Docs site (`docs/`)
+| Commands                                                  | Purpose                                                          |
+| --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `pnpm dev` / `pnpm build`                                 | Main-app development / production static export                  |
+| `pnpm lint` / `pnpm lint:fix`                             | ESLint checks / fixes; the lint gate permits no warnings         |
+| `pnpm format:check` / `pnpm format`                       | Prettier checks / formatting                                     |
+| `pnpm typecheck`                                          | Repository type checks, including sidecar preparation and checks |
+| `pnpm test` / `pnpm test:watch`                           | Jest unit tests / watch mode                                     |
+| `pnpm test:e2e`                                           | Playwright E2E tests                                             |
+| `pnpm lint:static-export`                                 | Static-export compatibility checks                               |
+| `pnpm tauri dev` / `pnpm tauri build` / `pnpm tauri info` | Tauri development / packaging / environment information          |
+| `pnpm docs:dev` / `pnpm docs:build`                       | Docs development / production static export                      |
+| `pnpm --filter docs typecheck`                            | Generate Fumadocs sources and type-check the docs workspace      |
 
-- `docs/app/` Next.js App Router for Fumadocs.
-- `docs/lib/source.ts` Fumadocs content loader — import as `@/lib/source`.
-- `docs/source.config.ts` Content collection config (points to `content/docs/`).
-- `docs/content/docs/` MDX files + `meta.json` sidebar config.
-- `docs/.source/` **Auto-generated** at dev/build time (gitignored). Contains `collections/server` module.
-- `docs/postcss.config.mjs` + Tailwind v4 CSS in `docs/app/global.css`.
+## Docs workspace
 
-**Critical docs import rules:**
+- Docs uses Fumadocs and exports to `docs/out/`; `docs/.next/` is a build directory, not the deployment artifact. Deploy docs separately from the main app. The `docs:start` static-preview mismatch is tracked in [the separate issue note](docs/reports/2026-10-20-docs-static-preview-mismatch.md); do not present that command as a working production server.
+- `docs/app/` contains routes, `docs/content/docs/` contains MDX and sidebar `meta.json` files, and `docs/source.config.ts` defines the content collection. Docs styles use `docs/app/global.css` and `docs/postcss.config.mjs`.
+- Within the docs workspace, import the loader from `@/lib/source` (`docs/lib/source.ts`), never `@/app/source`. Import `RootProvider` from `fumadocs-ui/provider/next`, not `fumadocs-ui/provider`. Docs has its own `@/*` alias scope.
+- `docs/.source/` is generated and gitignored. The `collections/*` alias in `docs/tsconfig.json` resolves `collections/server` to `docs/.source/server`. For resolution failures, inspect both generation and alias configuration; `pnpm --filter docs typecheck` generates the collection before checking types. Do not assume every such error means the directory is missing.
 
-- Always `import { source } from "@/lib/source"` — never `@/app/source`.
-- Always `import { RootProvider } from "fumadocs-ui/provider/next"` — not `fumadocs-ui/provider`.
-- `collections/server` resolves via tsconfig path alias to `docs/.source/server`. TypeScript errors here mean `.source/` hasn't been generated yet — run `pnpm docs:dev` once.
+## Security and PR requirements
 
-### Installed shadcn/ui Components
-
-All components are pre-installed in `components/ui/`. Import directly — do **not** run `shadcn add` for these:
-
-`accordion` · `alert` · `alert-dialog` · `aspect-ratio` · `avatar` · `badge` · `breadcrumb` · `button` · `button-group` · `calendar` · `card` · `carousel` · `chart` · `checkbox` · `collapsible` · `combobox` · `command` · `context-menu` · `dialog` · `direction` · `drawer` · `dropdown-menu` · `empty` · `field` · `form` · `hover-card` · `input` · `input-group` · `input-otp` · `item` · `kbd` · `label` · `menubar` · `native-select` · `navigation-menu` · `pagination` · `popover` · `progress` · `radio-group` · `resizable` · `scroll-area` · `select` · `separator` · `sheet` · `sidebar` · `skeleton` · `slider` · `sonner` · `spinner` · `switch` · `table` · `tabs` · `textarea` · `toggle` · `toggle-group` · `tooltip`
-
-`TooltipProvider` is already mounted in `app/layout.tsx` — no extra wrapper needed.
-
-## Build, Test, and Development Commands
-
-```bash
-# Main app (port 3000)
-pnpm dev              # Start Next.js dev server
-pnpm build            # Build for production (outputs to out/)
-pnpm lint             # Run ESLint
-pnpm lint:fix         # Auto-fix ESLint issues
-pnpm format           # Format with Prettier
-pnpm format:check     # Check formatting without writing
-pnpm typecheck        # TypeScript --noEmit
-
-# Testing
-pnpm test             # Run Jest tests
-pnpm test:watch       # Run tests in watch mode
-pnpm test:coverage    # Run tests with coverage report
-
-# Desktop (Tauri)
-pnpm tauri dev        # Dev mode with hot reload
-pnpm tauri build      # Build desktop installer
-pnpm tauri info       # Check Tauri environment
-
-# Docs site (port 3001) — pnpm workspace package at docs/
-pnpm docs:dev         # Start Fumadocs dev server (also generates docs/.source/)
-pnpm docs:build       # Build docs for production
-pnpm docs:start       # Start docs production server
-
-# Add shadcn/ui components (main app only)
-pnpm dlx shadcn@latest add <component-name>
-```
-
-## Coding Style & Naming Conventions
-
-- Language: TypeScript with React 19 and Next.js 16.
-- Linting: `eslint.config.mjs` is the source of truth; keep code warning-free.
-- Styling: Tailwind CSS v4 (utility-first). Co-locate minimal component-specific styles.
-- Components: PascalCase names/exports; files in `components/ui/` mirror export names.
-- Routes: Next app files are lowercase (`page.tsx`, `layout.tsx`).
-- Code: camelCase variables/functions; hooks start with `use*`.
-
-## Testing Guidelines
-
-- **Coverage is opt-in**: do **not** run `pnpm test:coverage` or enforce a coverage threshold by default. Only when the user explicitly requests a coverage check does the ≥90% target (lines, branches, functions) apply.
-- **TypeScript / TSX tests**: co-locate next to the source file as `xxx.test.ts` or `xxx.test.tsx` (e.g., `lib/avatar.ts` → `lib/avatar.test.ts`, `components/chat/message.tsx` → `components/chat/message.test.tsx`). Do **not** place unit tests in a separate `__tests__/` or `tests/` directory.
-- **Rust tests**: write unit tests inside the same `.rs` file using a `#[cfg(test)] mod tests { ... }` block. Integration tests may still live in `src-tauri/tests/`.
-- Test runner: Jest is configured (`pnpm test`, `pnpm test:watch`, `pnpm test:coverage`). For e2e, prefer Playwright.
-- When coverage is requested, prioritize `lib/`, `hooks/`, `stores/`, and `src-tauri/src/` for full coverage.
-- **Never add test files inside `components/ui/` or `components/ai-elements/`** — those are vendored components (shadcn/ui and ai-elements respectively) and are excluded from coverage thresholds.
-
-## Commit & Pull Request Guidelines
-
-- Prefer Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `ci:`.
-- Link issues in the footer: `Closes #123`.
-- PRs should include: brief scope/intent, screenshots for UI changes, validation steps, and pass `pnpm lint`.
-- Keep changes focused; avoid unrelated refactors.
-
-## Security & Configuration Tips
-
-- Use `.env.local` for secrets; do not commit `.env*` files.
-- Only expose safe client values via `NEXT_PUBLIC_*`.
-- Tauri: minimize capabilities in `src-tauri/tauri.conf.json`; avoid broad filesystem access.
+- Use `.env.local` for local secrets and do not commit `.env*` files. Only safe client-visible values may use `NEXT_PUBLIC_*`.
+- Keep Tauri permissions narrow. Review `src-tauri/capabilities/*.json` as well as security configuration in `src-tauri/tauri.conf.json`; avoid broad filesystem access.
+- PRs require a brief scope and intent, validation steps/results, screenshots for UI changes, and a passing `pnpm lint`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

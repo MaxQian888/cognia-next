@@ -21,8 +21,12 @@ let activeMessages: ScheduledBackupMessages | null = null
 function tauriBackupFilesystem(): BackupFilesystem | null {
   if (!isTauri()) return null
   return {
-    async writeStream(path, source) {
-      return (await import("@/lib/files/file-bridge")).writeBackupStreamFile(path, source)
+    async writeStream(path, source, assertActive) {
+      return (await import("@/lib/files/file-bridge")).writeBackupStreamFile(
+        path,
+        source,
+        assertActive
+      )
     },
     async writeTextFile(path, contents) {
       const { writeTextFile } = await import("@tauri-apps/plugin-fs")

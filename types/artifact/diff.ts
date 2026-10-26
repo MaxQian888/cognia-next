@@ -1,17 +1,5 @@
 /**
- * Diff-related type definitions for artifact version comparison
+ * Moved to `@cognia/plugin-contract`, which owns the plugin contract types.
+ * This re-export keeps host imports of `@/types/artifact/diff` working.
  */
-
-export type DiffLineType = "added" | "removed" | "unchanged"
-
-export interface DiffLine {
-  type: DiffLineType
-  content: string
-  oldLineNum?: number
-  newLineNum?: number
-}
-
-export interface DiffStats {
-  added: number
-  removed: number
-}
+export * from "@cognia/plugin-contract/types/artifact/diff"

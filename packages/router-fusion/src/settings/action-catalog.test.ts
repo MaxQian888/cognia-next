@@ -35,6 +35,24 @@ describe("validateActionDraft", () => {
     }
   })
 
+  it("lets an action of the user's own run roles-1 or the Prompt Center's role text, nothing else", () => {
+    expect(draftActionFor("panel", "my_panel").prompt_version).toBe("roles-1")
+    expect(validateActionDraft(custom({ prompt_version: "roles-1-custom" }), [])).toEqual([])
+    for (const prompt_version of ["roles-2", "roles-1-custom@0123456789abcdef", ""]) {
+      expect(validateActionDraft(custom({ prompt_version }), [])).toContainEqual({
+        field: "prompt_version",
+        code: "PROMPT_VERSION_NOT_ALLOWED",
+      })
+    }
+    // A persisted action is kept only with a version it may select.
+    expect(
+      sanitizeCustomAction(custom({ id: "my_panel", prompt_version: "roles-1-custom" }), [])
+    ).toMatchObject({ prompt_version: "roles-1-custom" })
+    expect(sanitizeCustomAction(custom({ id: "my_panel", prompt_version: "roles-9" }), [])).toBe(
+      null
+    )
+  })
+
   it("refuses an id that is malformed or already taken", () => {
     expect(validateActionDraft(custom({ id: "X" }), [])).toContainEqual({
       field: "id",

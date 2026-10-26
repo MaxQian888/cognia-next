@@ -1,23 +1,8 @@
-import type { CallContext } from "@/lib/automation/client"
 import { getMicrovmExec, setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import type {
-  MicrovmExecAdapter,
-  MicrovmExecPayload,
-  MicrovmResult,
-  SandboxRuntimeRef,
-} from "@cognia/plugin-sdk/api/sandbox"
-
-export interface PluginSandboxAPI {
-  readonly hostFallbackRuntimeRef: SandboxRuntimeRef
-  registerMicrovmAdapter(adapter: MicrovmExecAdapter): () => void
-  activeRefForSession(sessionId: string | null | undefined): SandboxRuntimeRef | undefined
-  decorateComputerUseContext(ref: SandboxRuntimeRef, base: CallContext): Promise<CallContext>
-  execute(ref: SandboxRuntimeRef, payload: MicrovmExecPayload): Promise<MicrovmResult>
-  clampRequest<T extends MicrovmExecPayload["request"]>(ref: SandboxRuntimeRef, request: T): T
-  assertWritablePath(ref: SandboxRuntimeRef, path: string, label?: string): void
-}
+import type { PluginSandboxAPI } from "@cognia/plugin-contract/lib/plugin/api/sandbox-api"
+export type { PluginSandboxAPI } from "@cognia/plugin-contract/lib/plugin/api/sandbox-api"
 
 /**
  * The sandbox capability is process-global: `registerMicrovmAdapter` replaces

@@ -212,23 +212,37 @@ pub(crate) async fn spawn_streaming_node(
     Ok((child, stdin, BufReader::new(stdout)))
 }
 
-/// Spawn an inline-echo Node process for streaming tests (same framing as the
-/// real sidecar). Returns `Err(())` when `node` is not on `PATH`.
+/// Spawn an inline Node responder for streaming tests (same framing as the
+/// real sidecar). Notifications are echoed back as-is; a request with an `id`
+/// is answered with `{"result":{"method","protocolVersion","params"}}`,
+/// preceded by a `notifications/progress` when it carried
+/// `params._meta.progressToken`. Returns `Err(())` when `node` is not on `PATH`.
 #[allow(dead_code)] // used only in #[cfg(test)] blocks across the crate
 pub(crate) async fn spawn_streaming_echo() -> Result<(Child, ChildStdin, BufReader<ChildStdout>), ()>
 {
-    let echo_script = concat!(
-        "process.stdin.setEncoding('utf8');",
-        "let b='';",
-        "process.stdin.on('data',d=>{",
-        "b+=d;",
-        "let i;",
-        "while((i=b.indexOf('\\n'))>=0){",
-        "process.stdout.write(b.slice(0,i+1));",
-        "b=b.slice(i+1);",
-        "}",
-        "});"
-    );
+    let echo_script = r#"
+process.stdin.setEncoding('utf8');
+let b = '';
+const out = (m) => process.stdout.write(JSON.stringify(m) + '\n');
+process.stdin.on('data', (d) => {
+  b += d;
+  let i;
+  while ((i = b.indexOf('\n')) >= 0) {
+    const line = b.slice(0, i);
+    b = b.slice(i + 1);
+    let m;
+    try { m = JSON.parse(line); } catch { continue; }
+    if (m.id === undefined || m.id === null) { out(m); continue; }
+    if (!m.method) continue;
+    const params = m.params || {};
+    const token = params._meta && params._meta.progressToken;
+    if (token !== undefined) {
+      out({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: 1 } });
+    }
+    out({ jsonrpc: '2.0', id: m.id, result: { method: m.method, protocolVersion: params.protocolVersion, params } });
+  }
+});
+"#;
     let mut child = Command::new("node")
         .args(["-e", echo_script])
         .stdin(std::process::Stdio::piped())

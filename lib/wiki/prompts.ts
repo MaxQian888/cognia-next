@@ -6,6 +6,7 @@
  * `ModuleArticleAgent` and `IndexPageAgent`.
  */
 
+import { definePrompt } from "@/lib/prompts/types"
 import type { CodeChunk, ModuleStat } from "./types"
 
 /**
@@ -13,12 +14,27 @@ import type { CodeChunk, ModuleStat } from "./types"
  * format (concise structured Markdown), and the no-go list (no marketing
  * fluff, no commentary on the prompt).
  */
-export const WIKI_SYSTEM_VOICE =
-  "You are documenting a TypeScript codebase for downstream LLM coding agents (Claude Code, Cursor, Cline). " +
-  "Your output goes directly into a wiki those agents will RAG-retrieve to understand the code. " +
-  "Write in concise, structural Markdown — short headings, bullet lists for enumerations, code references " +
-  "as `path/to/file.ts:line`. No marketing language, no apologies, no meta-commentary about your task. " +
-  "Every claim must be grounded in the source provided; do not invent helpers, types, or APIs that aren't shown."
+export const WIKI_SYSTEM_VOICE_PROMPT = definePrompt({
+  id: "knowledge.wiki.voice",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "knowledge",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  risk: "ordinary",
+  hosts: ["app"],
+  maxChars: 8_000,
+  outputContract:
+    "Markdown article or index page; the agents split it into sections and collect [[slug]] links from it.",
+  consumers: ["lib/wiki/agents/module-article-agent.ts", "lib/wiki/agents/index-page-agent.ts"],
+  defaultBody:
+    "You are documenting a TypeScript codebase for downstream LLM coding agents (Claude Code, Cursor, Cline). " +
+    "Your output goes directly into a wiki those agents will RAG-retrieve to understand the code. " +
+    "Write in concise, structural Markdown — short headings, bullet lists for enumerations, code references " +
+    "as `path/to/file.ts:line`. No marketing language, no apologies, no meta-commentary about your task. " +
+    "Every claim must be grounded in the source provided; do not invent helpers, types, or APIs that aren't shown.",
+})
 
 /**
  * Build the user prompt for `ModuleArticleAgent`. Caller passes the

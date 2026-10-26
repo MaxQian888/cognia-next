@@ -176,11 +176,15 @@ describe("ConnectorBus workflow trigger fan-out", () => {
       targetDeliveredByUs: true,
     })
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
-    const [arg] = dispatchTriggerMock.mock.calls[0] as [
-      { kind: string; workflowId: string; occurrenceKey?: string },
-    ]
-    expect(arg.kind).toBe("trigger.connector.system")
-    expect(arg.workflowId).toBe("wf_react")
+    const [arg] = dispatchTriggerMock.mock.calls[0] as [{ occurrenceKey?: string }]
+    expect(arg).toEqual({
+      kind: "trigger.connector.system",
+      workflowId: "wf_react",
+      triggerId: "n1",
+      payload: evt,
+      originAt: expect.any(Number),
+      binding: { adapterId, conversationKey },
+    })
     // A gesture's id is the adapter's construction and nothing deduplicates
     // it, so the run is not keyed: a second identical reaction is its own run.
     expect(arg.occurrenceKey).toBeUndefined()
@@ -287,16 +291,37 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     expect(row?.message).toContain("subscription index corrupted")
   })
 
-  it("survives a workflow dispatch failure without breaking the bus", async () => {
+  it("audits a workflow failure, dispatches its siblings and drains the next inbound turn", async () => {
     const adapterId = await seedAutoAdapter()
-    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf_oops", nodeId: "n", params: {} }])
-    dispatchTriggerMock.mockRejectedValue(new Error("orchestrator down"))
+    findMatchingWorkflowsMock.mockReturnValue([
+      { workflowId: "wf_oops", nodeId: "n", params: {} },
+      { workflowId: "wf_ok", nodeId: "n_ok", params: {} },
+    ])
+    dispatchTriggerMock
+      .mockRejectedValueOnce(new Error("orchestrator down"))
+      .mockResolvedValue(undefined)
 
     await expect(
       getBus().dispatchInboundFull(privateEvent(adapterId, "msg_2"))
     ).resolves.toBeUndefined()
+    await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_3"))
     await getBus().flushInboundTurns()
-    expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
+    expect(
+      dispatchTriggerMock.mock.calls.map(([arg]) => [arg.workflowId, arg.payload.messageId])
+    ).toEqual([
+      ["wf_oops", "msg_2"],
+      ["wf_ok", "msg_2"],
+      ["wf_oops", "msg_3"],
+      ["wf_ok", "msg_3"],
+    ])
+    const audits = await getDb().connectorAudit.where("adapterId").equals(adapterId).toArray()
+    expect(audits.filter((row) => row.reason === "workflow_dispatch_failed")).toEqual([
+      expect.objectContaining({
+        kind: "adapter.error",
+        message: "orchestrator down",
+        fields: { workflowId: "wf_oops", nodeId: "n" },
+      }),
+    ])
   })
 
   // The point of B3: a slow inbound-subscribed workflow must not hold the
@@ -306,15 +331,21 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     const adapterId = await seedAutoAdapter()
     findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf_slow", nodeId: "n", params: {} }])
     let releaseWorkflow: (() => void) | undefined
+    let signalStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve
+    })
     dispatchTriggerMock.mockImplementation(
       () =>
         new Promise<void>((resolve) => {
           releaseWorkflow = resolve
+          signalStarted?.()
         })
     )
 
     await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_slow"))
     // Pipeline already resolved while the workflow is still suspended.
+    await started
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
     releaseWorkflow?.()
     await getBus().flushInboundTurns()

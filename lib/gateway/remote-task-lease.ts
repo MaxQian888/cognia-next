@@ -1,4 +1,4 @@
-import type { GatewayTaskBudget } from "@/types/gateway"
+import type { GatewayTaskBudget, GatewayTaskModelPlan } from "@/types/gateway"
 import {
   getActiveRemoteEndpoint,
   getActiveRemoteTransport,
@@ -6,7 +6,10 @@ import {
 } from "@/lib/tauri/transport-routing"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { activeHostFeatureManifest } from "@/stores/remote-host/remote-host-store"
-import { supportsHostFeatureOperation } from "@/lib/platform/host-feature-manifest"
+import {
+  hostSupportsExternalAgentModelPlans,
+  supportsHostFeatureOperation,
+} from "@/lib/platform/host-feature-manifest"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 import { isPrivateIpv4 } from "@/lib/connectivity/local-ip"
 import type { GatewayRoutingSnapshot } from "@/types/gateway"
@@ -70,6 +73,7 @@ export async function acquireRemoteTaskLease(input: {
   taskId: string
   provider: Provider
   model: string
+  modelPlan?: GatewayTaskModelPlan
   ingressProtocol: string
   budget?: GatewayTaskBudget
   assertCurrent: () => void
@@ -77,6 +81,8 @@ export async function acquireRemoteTaskLease(input: {
   subscribeAuthority?: (listener: () => void) => () => void
   onDisposed?: () => void
 }) {
+  if (input.modelPlan && hostSupportsExternalAgentModelPlans(activeHostFeatureManifest()) !== true)
+    throw new Error("This Host does not support external agent model plans; update the Host")
   const url = new URL(input.provider.baseUrl)
   if (
     url.protocol !== "https:" ||
@@ -119,6 +125,7 @@ export async function acquireRemoteTaskLease(input: {
         taskId: input.taskId,
         provider: input.provider,
         model: input.model,
+        ...(input.modelPlan ? { modelPlan: input.modelPlan } : {}),
         ingressProtocol: input.ingressProtocol,
         ...(input.budget ? { budget: input.budget } : {}),
       },

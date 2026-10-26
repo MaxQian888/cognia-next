@@ -1,4 +1,6 @@
 /**
+ * @cognia-host-integration-test
+ *
  * First-party plugin regression sweep — PR-A backlog item.
  *
  * Walks every `plugins/*\/plugin.json` and:
@@ -150,6 +152,9 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // webview body is an inline HTML string that has no sane home in raw JSON);
   // the merged manifest is what validates at enable — pinned by the plugin's
   // own index.test.ts.
+  // The playbook skill rides the `definePluginManifest` overlay in
+  // src/index.tsx, the same arrangement as deep-research below.
+  "config-governance": ["field_missing:skills"],
   "context-inspector": ["field_missing:context-panel", "field_missing:webview"],
   // `tools` is declared in the manifest now (so `deep_research` is discoverable
   // before activation); the playbook skill rides the `definePluginManifest`

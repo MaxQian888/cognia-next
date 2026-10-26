@@ -1,3 +1,4 @@
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 /**
  * @jest-environment jsdom
  */
@@ -48,7 +49,9 @@ describe("<DiscoverPreferences />", () => {
     })
     render(<DiscoverPreferences />)
     const select = screen.getByTestId("discover-landing-select")
-    const values = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"))
+    const values = Array.from(getNativeSelect(select).querySelectorAll("option")).map((o) =>
+      o.getAttribute("value")
+    )
     expect(values).toContain("") // auto
     expect(values).toContain("favorites")
     expect(values).toContain("characters")
@@ -58,25 +61,22 @@ describe("<DiscoverPreferences />", () => {
   })
 
   it("persists a chosen landing category", async () => {
-    const user = userEvent.setup()
     render(<DiscoverPreferences />)
-    await user.selectOptions(screen.getByTestId("discover-landing-select"), "characters")
+    await selectOption(screen.getByTestId("discover-landing-select"), "characters")
     expect(lastPatch().discoverDefaults).toEqual(
       expect.objectContaining({ landingCategory: "characters" })
     )
   })
 
   it("persists the auto landing by dropping the key", async () => {
-    const user = userEvent.setup()
     render(<DiscoverPreferences />)
-    await user.selectOptions(screen.getByTestId("discover-landing-select"), "")
+    await selectOption(screen.getByTestId("discover-landing-select"), "")
     expect(lastPatch().discoverDefaults?.landingCategory).toBeUndefined()
   })
 
   it("persists a chosen default view", async () => {
-    const user = userEvent.setup()
     render(<DiscoverPreferences />)
-    await user.selectOptions(screen.getByTestId("discover-view-select"), "compact")
+    await selectOption(screen.getByTestId("discover-view-select"), "compact")
     expect(lastPatch().discoverDefaults).toEqual(expect.objectContaining({ view: "compact" }))
   })
 

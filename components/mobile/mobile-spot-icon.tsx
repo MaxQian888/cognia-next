@@ -90,6 +90,7 @@ export const MOBILE_SPOT_ICON_NAMES = [
   "sandbox",
   "image-catalog",
   "updates",
+  "harness-evolution",
 ] as const
 
 export type MobileSpotIconName = (typeof MOBILE_SPOT_ICON_NAMES)[number]

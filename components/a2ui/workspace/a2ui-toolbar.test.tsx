@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import enMessages from "@/i18n/messages/en.json"
+import type { A2UIDispatchMessage, A2UIUpdateDataModelMessage } from "@/types/a2ui/schema"
 
 const undo = jest.fn()
 const redo = jest.fn()
@@ -35,6 +36,22 @@ jest.mock("@/stores/a2ui", () => ({
     { getState: () => storeState }
   ),
 }))
+
+jest.mock("@/lib/db/a2ui-surfaces", () => ({
+  listSurfaces: jest.fn(async () => []),
+  upsertSurface: jest.fn(async () => {}),
+  deleteSurface: jest.fn(async () => {}),
+}))
+
+jest.mock("@/stores/settings", () => {
+  const state = { settings: { a2uiPersistenceLimit: 20 } }
+  return {
+    useSettingsStore: Object.assign(
+      (selector: (value: typeof state) => unknown) => selector(state),
+      { getState: () => state }
+    ),
+  }
+})
 
 const generateA2UIApp = jest.fn()
 jest.mock("@/lib/a2ui/ai-generate", () => ({
@@ -78,7 +95,7 @@ jest.mock("@/lib/share/client", () => {
 
 import { A2UIWorkspaceProvider } from "./a2ui-workspace-context"
 import { A2UIToolbar } from "./a2ui-toolbar"
-import { A2UIAiUnavailableError } from "@/lib/a2ui/ai-generate"
+import { A2UIAiUnavailableError, streamDispatchToStore } from "@/lib/a2ui/ai-generate"
 import { toast } from "sonner"
 
 const AI_RESULT = {
@@ -113,6 +130,7 @@ describe("A2UIToolbar", () => {
     replaceSurfaceContent.mockReturnValue(true)
     updateComponents.mockReset()
     updateDataModel.mockReset()
+    ;(streamDispatchToStore as jest.Mock).mockReset()
     generateA2UIApp.mockReset()
     generateA2UIApp.mockResolvedValue(AI_RESULT)
     saveApp.mockReset()
@@ -124,6 +142,9 @@ describe("A2UIToolbar", () => {
     ;(toast.info as jest.Mock).mockReset()
     storeState.undoStacks = { sx: [{ id: "s1" }] }
     storeState.redoStacks = {}
+    storeState.surfaces = {
+      sx: { components: { root: { id: "root" }, header: { id: "header" } } },
+    }
   })
 
   it("renders without crashing and shows the action buttons (smoke)", () => {
@@ -270,8 +291,121 @@ describe("A2UIToolbar", () => {
       })
     )
     expect(updateComponents).toHaveBeenCalledWith("sx", AI_RESULT.components)
-    expect(updateDataModel).toHaveBeenCalledWith("sx", AI_RESULT.dataModel, false)
+    expect(updateDataModel).not.toHaveBeenCalled()
     expect(toast.success).toHaveBeenCalled()
+  })
+
+  describe("AI edit data preservation", () => {
+    const initialData = {
+      profile: { name: "Ada", email: "ada@example.test" },
+      draft: "Keep this draft",
+    }
+
+    it.each<{
+      name: string
+      updates: A2UIUpdateDataModelMessage[]
+      capturedData: Record<string, unknown>
+      expectedData: Record<string, unknown>
+    }>([
+      {
+        name: "preserves existing form values for a component-only edit",
+        updates: [],
+        capturedData: {},
+        expectedData: initialData,
+      },
+      {
+        name: "preserves untouched values when an edit streams a nested data patch",
+        updates: [
+          {
+            type: "dataModelUpdate",
+            surfaceId: "sx",
+            data: { profile: { name: "Grace" } },
+            merge: true,
+          },
+        ],
+        capturedData: { profile: { name: "Grace" } },
+        expectedData: {
+          profile: { name: "Grace", email: "ada@example.test" },
+          draft: "Keep this draft",
+        },
+      },
+      {
+        name: "respects an explicit data replacement streamed by the edit",
+        updates: [
+          {
+            type: "dataModelUpdate",
+            surfaceId: "sx",
+            data: { profile: { name: "Grace" } },
+            merge: false,
+          },
+        ],
+        capturedData: { profile: { name: "Grace" } },
+        expectedData: { profile: { name: "Grace" } },
+      },
+    ])("$name", async ({ updates, capturedData, expectedData }) => {
+      const { useA2UIStore: realStore } =
+        jest.requireActual<typeof import("@/stores/a2ui")>("@/stores/a2ui")
+      realStore.setState(realStore.getInitialState(), true)
+      realStore.getState().createSurface("sx", "inline")
+      realStore.getState().updateComponents("sx", [
+        { id: "root", component: "Column", children: ["header"] },
+        { id: "header", component: "Text", text: "Original heading" },
+      ])
+      realStore.getState().updateDataModel("sx", initialData, false)
+      storeState.surfaces = realStore.getState().surfaces
+      updateComponents.mockImplementation(realStore.getState().updateComponents)
+      updateDataModel.mockImplementation(realStore.getState().updateDataModel)
+      ;(streamDispatchToStore as jest.Mock).mockImplementation((message: A2UIDispatchMessage) =>
+        realStore.getState().processMessage(message)
+      )
+      const editedHeader = { id: "header", component: "Text" as const, text: "Updated heading" }
+      generateA2UIApp.mockImplementationOnce(
+        async ({ onDispatch }: { onDispatch: (message: A2UIDispatchMessage) => void }) => {
+          onDispatch({ type: "updateComponents", surfaceId: "sx", components: [editedHeader] })
+          for (const update of updates) onDispatch(update)
+          return { ...AI_RESULT, components: [editedHeader], dataModel: capturedData }
+        }
+      )
+      renderToolbar()
+
+      fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
+      fireEvent.change(screen.getByPlaceholderText("Describe what you want to change..."), {
+        target: { value: "change the heading" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Apply edit" }))
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith("AI edit applied"))
+      const surface = realStore.getState().surfaces.sx
+      expect(surface.components.header).toEqual(editedHeader)
+      expect(surface.dataModel).toEqual(expectedData)
+      realStore.getState().deleteSurface("sx")
+    })
+  })
+
+  it("reports partial changes when generation fails after dispatching an edit", async () => {
+    generateA2UIApp.mockImplementationOnce(
+      async ({ onDispatch }: { onDispatch: (message: A2UIDispatchMessage) => void }) => {
+        onDispatch({
+          type: "updateComponents",
+          surfaceId: "sx",
+          components: [{ id: "header", component: "Text", text: "Partial heading" }],
+        })
+        throw new A2UIAiUnavailableError("turn-failed")
+      }
+    )
+    renderToolbar()
+    fireEvent.click(screen.getByRole("button", { name: "AI Generate" }))
+    fireEvent.change(screen.getByPlaceholderText("Describe what you want to change..."), {
+      target: { value: "change heading" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Apply edit" }))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "AI stopped after applying part of the change. Review the current draft before retrying."
+      )
+    )
+    expect(streamDispatchToStore).toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it("edit mode toasts an error and leaves the surface untouched when AI is unavailable", async () => {
@@ -310,7 +444,8 @@ describe("A2UIToolbar", () => {
     expect(createShareLink).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({ kind: "a2ui", title: "My App" }),
-      })
+      }),
+      undefined
     )
   })
 })

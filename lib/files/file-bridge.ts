@@ -175,6 +175,21 @@ export async function pickDirectory(title?: string): Promise<string | null> {
   return Array.isArray(picked) ? (picked[0] ?? null) : picked
 }
 
+/**
+ * Pick host files and return their absolute paths without reading them
+ * (Tauri only; `[]` on cancel or off-desktop). Each pick registers the
+ * file's folder for raw reads, as every dialog pick does, for callers that
+ * read the bytes later (a task's input files copied into each rollout).
+ */
+export async function pickFilePaths(opts: PickFilesOptions = {}): Promise<string[]> {
+  if (!isTauri()) return []
+  const picked = await open({ multiple: !!opts.multiple, directory: false, filters: opts.filters })
+  if (!picked) return []
+  const paths = Array.isArray(picked) ? picked : [picked]
+  for (const path of paths) await registerDialogPathInRust(path)
+  return paths
+}
+
 export interface PickedBinaryFile {
   /** Filename only (basename), for fallback name derivation. */
   name: string
@@ -355,33 +370,40 @@ export async function pickStreamFiles(opts: PickFilesOptions = {}): Promise<Pick
 /** Write each encoded record immediately; failed output is removed, never reported as a backup. */
 export async function writeBackupStreamFile(
   path: string,
-  source: AsyncIterable<Uint8Array>
+  source: AsyncIterable<Uint8Array>,
+  assertActive: () => void = () => undefined
 ): Promise<number> {
-  const fs = await import("@tauri-apps/plugin-fs")
-  const { invoke } = await import("@tauri-apps/api/core")
-  const temporaryPath = await invoke<string>("backup_stream_temporary_path", { path })
-  const handle = await fs.open(temporaryPath, { write: true, createNew: true, mode: 0o600 })
-  let total = 0
-  let closed = false
-  try {
-    for await (const bytes of source) {
-      let offset = 0
-      while (offset < bytes.byteLength) {
-        const written = await handle.write(bytes.subarray(offset))
-        if (written <= 0) throw new Error("Backup file write made no progress")
-        offset += written
-        total += written
+  const { normalizedBackupPath, withBackupLock } = await import("@/lib/data/backup-write-lock")
+  return withBackupLock(`sink:${normalizedBackupPath(path)}`, async () => {
+    assertActive()
+    const fs = await import("@tauri-apps/plugin-fs")
+    const { invoke } = await import("@tauri-apps/api/core")
+    const temporaryPath = await invoke<string>("backup_stream_temporary_path", { path })
+    const handle = await fs.open(temporaryPath, { write: true, createNew: true, mode: 0o600 })
+    let total = 0
+    let closed = false
+    try {
+      for await (const bytes of source) {
+        let offset = 0
+        while (offset < bytes.byteLength) {
+          const written = await handle.write(bytes.subarray(offset))
+          assertActive()
+          if (written <= 0) throw new Error("Backup file write made no progress")
+          offset += written
+          total += written
+        }
       }
+      await handle.close()
+      closed = true
+      assertActive()
+      await fs.rename(temporaryPath, path)
+      return total
+    } catch (error) {
+      if (!closed) await handle.close().catch(() => undefined)
+      await fs.remove(temporaryPath).catch(() => undefined)
+      throw error
     }
-    await handle.close()
-    closed = true
-    await fs.rename(temporaryPath, path)
-    return total
-  } catch (error) {
-    if (!closed) await handle.close().catch(() => undefined)
-    await fs.remove(temporaryPath).catch(() => undefined)
-    throw error
-  }
+  })
 }
 
 /** Browsers retain immutable Blob parts instead of joining a potentially gigabyte-sized string. */

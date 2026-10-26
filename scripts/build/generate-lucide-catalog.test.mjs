@@ -4,7 +4,11 @@ import * as lucideExports from "lucide-react"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { buildLucideCatalog, serializeLucideCatalog } from "./generate-lucide-catalog.mjs"
+import {
+  buildLucideCatalog,
+  lucideCatalogNames,
+  serializeLucideCatalog,
+} from "./generate-lucide-catalog.mjs"
 
 test("buildLucideCatalog sorts exports and preserves SVG node data", () => {
   const icon = (className, iconNode) => ({
@@ -24,6 +28,10 @@ test("buildLucideCatalog sorts exports and preserves SVG node data", () => {
   assert.deepEqual(catalog.exportNames, { Alpha: "Alpha", AlphaIcon: "Alpha" })
   assert.equal(serializeLucideCatalog(catalog).endsWith("\n"), true)
   assert.deepEqual(catalog.entries.Alpha.iconNode, [["circle", { cx: 1, cy: 1, r: 1 }]])
+  assert.deepEqual(lucideCatalogNames(catalog), {
+    iconNames: ["Alpha", "Zebra"],
+    exportNames: { Alpha: "Alpha", AlphaIcon: "Alpha" },
+  })
 })
 
 test("buildLucideCatalog rejects exports without iconNode", () => {

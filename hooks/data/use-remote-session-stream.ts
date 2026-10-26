@@ -590,16 +590,19 @@ export function useRemoteSessionStream(
           }
           return
         }
-        await approveTool(
+        const approvalArgs = [
           approval.sessionId,
           approval.requestId,
           decision === "allow_always" ? "allow" : decision,
-          ...(options?.updatedInput
-            ? ([reason ? denialMessageForModel(reason) : undefined, options.updatedInput] as const)
-            : reason
-              ? ([denialMessageForModel(reason)] as const)
-              : ([] as const))
-        )
+        ] as const
+        const message = reason ? denialMessageForModel(reason) : undefined
+        if (options?.updatedInput) {
+          await approveTool(...approvalArgs, message, options.updatedInput)
+        } else if (message) {
+          await approveTool(...approvalArgs, message)
+        } else {
+          await approveTool(...approvalArgs)
+        }
         setPendingApproval(null)
       } catch (err) {
         if (isControlForbidden(err)) {

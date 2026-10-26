@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { selectOption } from "@/lib/testing/select-option"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { TraceSummary } from "@/lib/ai/eval/trace-summary"
 import type { TraceAnnotationRow } from "@/lib/db/trace-annotations"
@@ -152,14 +153,14 @@ describe("TraceAnnotationPanel", () => {
     expect(screen.getByText("annotate.savedAsCase")).toBeInTheDocument()
   })
 
-  it("switches the target dataset via the picker", () => {
+  it("switches the target dataset via the picker", async () => {
     traces = [trace("t1")]
     datasets = [
       { id: "d1", name: "DS1", capability: "c", version: 1, createdAt: 0, updatedAt: 0 },
       { id: "d2", name: "DS2", capability: "c", version: 1, createdAt: 0, updatedAt: 0 },
     ]
     render(<TraceAnnotationPanel />)
-    fireEvent.change(screen.getByLabelText("annotate.pickDataset"), { target: { value: "d2" } })
+    await selectOption(screen.getByLabelText("annotate.pickDataset"), "d2")
     expect(screen.getByLabelText("annotate.pickDataset")).toHaveValue("d2")
   })
 

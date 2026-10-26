@@ -205,6 +205,7 @@ export function createToolPermissionGate({
         pluginAccess,
         perCallApproval,
         toolPermissionRules: sendOptions?.toolPermissionRules,
+        mcpToolAllowlist: sendOptions?.mcpToolAllowlist,
         profile,
         pluginClasses,
         sandboxAttested,

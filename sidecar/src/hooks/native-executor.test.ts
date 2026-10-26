@@ -41,10 +41,40 @@ test("native hook executor installs only its PII boundary and constrains prompt 
   })
   assert.deepEqual(outcome, { output: '{"additionalContext":"approved"}' })
   assert.deepEqual(calls[0]!.options.settingSources, [])
+  assert.equal(calls[0]!.options.sandbox?.allowNestedUserNamespaces, false)
   assert.deepEqual(Object.keys(calls[0]!.options.hooks!), ["PostToolUse", "PostToolUseFailure"])
   assert.deepEqual(calls[0]!.options.allowedTools, [])
   assert.equal(calls[0]!.options.maxTurns, 1)
   assert.match(calls[0]!.prompt, /hook-origin depth="1"/)
+})
+
+test("native hook invocations cannot inherit the root or ambient retry watchdog", async () => {
+  const calls: NativeHookQueryInput[] = []
+  const prior = process.env.CLAUDE_CODE_RETRY_WATCHDOG
+  process.env.CLAUDE_CODE_RETRY_WATCHDOG = "1"
+  try {
+    for (const env of [
+      undefined,
+      {
+        CLAUDE_CODE_RETRY_WATCHDOG: "1",
+        CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS: "60000",
+        PATH: "/usr/bin",
+      },
+    ]) {
+      await createNativeHookExecutor({
+        env,
+        queryFn: fakeQuery([{ type: "result", subtype: "success", result: "{}" }], calls),
+      })({ type: "prompt", prompt: "Review" }, "{}")
+    }
+    for (const call of calls) {
+      assert.equal(call.options.env!.CLAUDE_CODE_RETRY_WATCHDOG, undefined)
+      assert.equal(call.options.env!.CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS, undefined)
+      assert.equal(call.options.sandbox!.allowNestedUserNamespaces, false)
+    }
+  } finally {
+    if (prior === undefined) delete process.env.CLAUDE_CODE_RETRY_WATCHDOG
+    else process.env.CLAUDE_CODE_RETRY_WATCHDOG = prior
+  }
 })
 
 test("native hook executor redacts handler configuration before the nested model call", async () => {

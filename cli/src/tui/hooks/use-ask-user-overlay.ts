@@ -21,7 +21,7 @@ import type { Overlay, TuiAction } from "../state/types"
 
 export interface AskUserOverlayApi {
   /** Settle the active prompt with the user's answer and close the overlay. */
-  resolve: (answer: AskUserAnswer) => void
+  resolve: (answer: AskUserAnswer, requestId?: string) => void
 }
 
 export function useAskUserOverlay(
@@ -32,17 +32,21 @@ export function useAskUserOverlay(
   const resolveActive = useAskUserStore((s) => s.resolveActive)
 
   useEffect(() => {
-    if (active && overlayKind === "none") {
-      dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "askUser", request: active.request } })
+    if (active && (overlayKind === "none" || overlayKind === "askUser")) {
+      dispatch({
+        type: "OVERLAY_OPEN",
+        overlay: { kind: "askUser", request: active.request, requestId: active.id },
+      })
     } else if (!active && overlayKind === "askUser") {
       dispatch({ type: "OVERLAY_CLOSE" })
     }
   }, [active, overlayKind, dispatch])
 
   const resolve = useCallback(
-    (answer: AskUserAnswer) => {
+    (answer: AskUserAnswer, requestId?: string) => {
+      if (requestId && useAskUserStore.getState().active?.id !== requestId) return
       resolveActive(answer)
-      dispatch({ type: "OVERLAY_CLOSE" })
+      dispatch({ type: "OVERLAY_CLOSE", ifKind: "askUser" })
     },
     [resolveActive, dispatch]
   )

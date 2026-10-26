@@ -25,6 +25,7 @@ const messages = {
       toggle: "Toggle AI Shell",
       inputPlaceholder: "Describe what you want to do…",
       send: "Send",
+      close: "Close AI Shell",
       context: { branch: "Branch", cwd: "CWD", shell: "Shell" },
       plan: {
         title: "Execution Plan",
@@ -199,6 +200,26 @@ describe("AiShellPanel", () => {
     fireEvent.change(input, { target: { value: "deploy" } })
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true })
 
+    expect(actions.submit).not.toHaveBeenCalled()
+  })
+
+  it("offers cancellation while generating before a plan exists", () => {
+    const actions = makeActions()
+    renderPanel(makeState({ generating: true }), actions)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(actions.cancel).toHaveBeenCalled()
+  })
+
+  it("does not submit when Enter is delivered during generation", () => {
+    const actions = makeActions()
+    const view = renderPanel(makeState(), actions)
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "deploy" } })
+    view.rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <AiShellPanel state={makeState({ generating: true })} actions={actions} />
+      </NextIntlClientProvider>
+    )
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
     expect(actions.submit).not.toHaveBeenCalled()
   })
 

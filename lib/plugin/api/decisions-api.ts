@@ -23,31 +23,13 @@ import { toDecisionProviderInfo, type DecisionRegistry } from "@/lib/decisions/r
 import { runDecision, type RunDecisionOptions } from "@/lib/decisions/run-decision"
 import { createPluginSystemLogger } from "@/lib/plugin/core/logger"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import type { DecisionProviderInfo, DecisionRequest, DecisionResult } from "@/types/decisions"
+import type { DecisionResult } from "@/types/decisions"
 import type {
   PluginDecisionProviderInput,
   PluginDecisionRegistration,
 } from "@/types/plugin/plugin-decisions"
-
-export interface PluginDecisionsAPI {
-  /**
-   * Answer typed questions through the user's selected provider (or an
-   * explicit installed one). Never throws for provider problems — the result
-   * carries a typed error instead. Requires `decisions:run`.
-   */
-  decide(
-    request: DecisionRequest,
-    options?: { providerId?: string; signal?: AbortSignal }
-  ): Promise<DecisionResult>
-  /** Every installed provider, as plain data. */
-  listProviders(): DecisionProviderInfo[]
-  /** The provider selected in settings, or `null` when none is. */
-  getSelectedProviderId(): Promise<string | null>
-  /** Add a provider as `<pluginId>:<id>`. Requires `decisions:provide`. */
-  registerProvider(provider: PluginDecisionProviderInput): PluginDecisionRegistration
-  /** Prefixed ids of the providers this plugin registered. */
-  listRegistered(): string[]
-}
+import type { PluginDecisionsAPI } from "@cognia/plugin-contract/lib/plugin/api/decisions-api"
+export type { PluginDecisionsAPI } from "@cognia/plugin-contract/lib/plugin/api/decisions-api"
 
 export interface PluginDecisionsRuntime {
   registry: () => DecisionRegistry

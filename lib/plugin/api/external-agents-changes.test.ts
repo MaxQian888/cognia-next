@@ -16,7 +16,6 @@ function snapshot(
     agents: {},
     connectionStatus: {},
     delegationRules: NO_RULES,
-    enabled: true,
     defaultPermissionMode: "default",
     autoConnectOnStartup: false,
     showConnectionNotifications: true,
@@ -61,7 +60,6 @@ describe("diffExternalAgentState", () => {
   })
 
   it.each([
-    ["enabled", false],
     ["defaultPermissionMode", "plan"],
     ["autoConnectOnStartup", true],
     ["showConnectionNotifications", false],
@@ -103,7 +101,7 @@ describe("subscribeExternalAgentChanges", () => {
     await flush()
     expect(events).toEqual([{ type: "config-added", agentId: id }])
     dispose()
-    useExternalAgentStore.getState().setEnabled(false)
+    useExternalAgentStore.getState().setShowConnectionNotifications(false)
     await flush()
     expect(events).toHaveLength(1)
   })

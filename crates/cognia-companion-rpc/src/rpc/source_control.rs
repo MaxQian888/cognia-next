@@ -205,7 +205,7 @@ fn prepare_workspace_ref_args(
     mut args: Value,
     scope: Option<&str>,
 ) -> Result<(Value, Option<RemoteGitTarget>), (StatusCode, Json<RpcError>)> {
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         return Ok((args, None));
     }
     let Some(workspace_ref) = optional::<HostWorkspaceRef>(&args, "workspaceRef")? else {
@@ -306,7 +306,7 @@ fn prepare_remote_args(
     account_id: Option<&str>,
     scope: Option<&str>,
 ) -> Result<(Value, Option<RemoteGitTarget>), (StatusCode, Json<RpcError>)> {
-    if scope == Some("service") || name == "git_workspace_list" {
+    if cognia_companion::jwt::is_service_scope(scope) || name == "git_workspace_list" {
         return Ok((args, None));
     }
     let object = args

@@ -12,7 +12,11 @@
  *    `HookPriority` type alias, sandbox execution result)
  */
 
-export type { PluginCommandContext, PluginCommandResult, PluginHooks } from "@/types/plugin/plugin"
+export type {
+  PluginCommandContext,
+  PluginCommandResult,
+  PluginHooks,
+} from "@cognia/plugin-contract/types/plugin/plugin"
 
 export type {
   // Domain-specific hook event shapes
@@ -55,10 +59,10 @@ export type {
   HookPriority,
   HookRegistrationOptions,
   HookSandboxExecutionResult,
-} from "@/types/plugin/plugin-hooks"
+} from "@cognia/plugin-contract/types/plugin/plugin-hooks"
 /** Labels an `onConnectorInbound` hook may attach via `{ action: "annotate", labels }` (ADR-0194). */
 export type {
   InboundLabel,
   InboundLabelInput,
   InboundLabelSeverity,
-} from "@/types/connectors/inbound-label"
+} from "@cognia/plugin-contract/types/connectors/inbound-label"

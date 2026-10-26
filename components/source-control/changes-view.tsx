@@ -360,6 +360,9 @@ function WindowedChanges({
   renderHeader: (group: GitStatusGroup) => ReactNode
   renderItem: (group: GitStatusGroup, change: GitFileChange) => ReactNode
 }) {
+  "use no memo"
+  // TanStack Virtual's mutable instance is incompatible with compiler memoization.
+  // Keep this windowed list uncompiled until the virtualizer supports the compiler.
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const entries = useMemo<FlatEntry[]>(() => {
     const out: FlatEntry[] = []
@@ -373,6 +376,7 @@ function WindowedChanges({
     return out
   }, [status, expandedGroups])
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- This list explicitly opts out of compiler memoization above; keep the mutable virtualizer reactive.
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,

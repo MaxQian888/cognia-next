@@ -35,7 +35,8 @@
     "pasteHint": "输入关键词，或粘贴文档链接。",
     "searching": "搜索中…",
     "title": "云端文档",
-    "truncated": "「{title}」内容过大，已截断。"
+    "truncated": "「{title}」内容过大，已截断。",
+    "incomplete": "「{title}」的部分内容未能读取，请查看附件中的说明。"
   },
   "reach": {
     "block": {
@@ -63,6 +64,7 @@
     "description": "在聊天中用 @ 引用飞书与 Google 文档。",
     "desktopOnly": "仅桌面端可用。",
     "disconnect": "断开连接",
+    "disconnectFailed": "未能完成断开连接：{reason}",
     "disconnectNotRevoked": "已在本地断开，但向 Google 吊销失败（{reason}）。请到 Google 账号的第三方访问设置里移除 Cognia 以彻底完成。",
     "disconnectRevoked": "已断开连接，Google 侧的授权也已吊销。",
     "disconnecting": "正在断开…",

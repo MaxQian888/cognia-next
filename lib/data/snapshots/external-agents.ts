@@ -1,5 +1,5 @@
 // Snapshot for the external-agent registry persisted at
-// `localStorage["cognia-external-agents"]` (Zustand persist v5). This carries
+// `localStorage["cognia-external-agents"]` (Zustand persist v7). This carries
 // every agent the user has wired up — ClaudeCode, Cursor, Cline, Codex,
 // Gemini, Roo Code, VS Code, Windsurf, Claude Desktop — so that a "backup →
 // restore" round-trip leaves them all intact.
@@ -11,7 +11,7 @@ export const EXTERNAL_AGENTS_LABEL_KEY = "externalAgents"
 
 /** Persist version expected by the live store. Imported indirectly via
  * `createGenericSnapshotModule` so we can detect drift in the migrate hook. */
-export const EXTERNAL_AGENTS_STORE_VERSION = 5
+export const EXTERNAL_AGENTS_STORE_VERSION = 7
 
 export const externalAgentsSnapshot = createGenericSnapshotModule({
   key: EXTERNAL_AGENTS_PERSIST_KEY,

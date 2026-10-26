@@ -227,17 +227,40 @@ describe("restoreState", () => {
     expect(await source.db.tables[0].toArray()).toEqual([{ id: "a" }])
   })
 
-  it("refuses to restore across a schema version change", async () => {
+  it("refuses a checkpoint written by a newer build", async () => {
     const source = makeSource("CogniaDB", 141)
     const state: DurabilityState = {
       sequence: 0,
       dbs: {
-        CogniaDB: { schema: { version: 99, tables: ["sessions"] }, rows: { sessions: {} } },
+        CogniaDB: { schema: { version: 142, tables: ["sessions"] }, rows: { sessions: {} } },
       },
     }
     await expect(restoreState([source], state)).rejects.toThrow(
       expect.objectContaining({ code: "checkpoint-schema-mismatch" })
     )
+  })
+
+  // The rule `lib/db/storage-layout.ts` and the snapshot store already apply:
+  // an additive bump (here 141 → 142 adding `mediaPacks`) must not strand the
+  // data, which is what every person partition hit at schema 247 → 248.
+  it("restores a checkpoint an older build wrote, as a forward move", async () => {
+    const source = makeSource("CogniaDB", 142)
+    source.db.tables.push(new FakeTable("mediaPacks"))
+    const state: DurabilityState = {
+      sequence: 0,
+      dbs: {
+        CogniaDB: {
+          schema: { version: 141, tables: ["droppedTable", "messages", "sessions"] },
+          rows: {
+            sessions: { [encodeKey("a")]: { id: "a" } },
+            droppedTable: { [encodeKey("gone")]: { id: "gone" } },
+          },
+        },
+      },
+    }
+    await restoreState([source], state)
+    expect(await source.db.tables[0].toArray()).toEqual([{ id: "a" }])
+    expect(await source.db.tables[2].toArray()).toEqual([])
   })
 
   it("skips databases the state does not mention", async () => {
@@ -594,6 +617,38 @@ describe("openDurabilityStore", () => {
     expect(await revived.db.tables[2].toArray()).toEqual([{ id: "kept-plugin-row" }])
     expect(reopened.sequence()).toBe(7)
     await reopened.close()
+  })
+
+  it("boots a newer build on an older checkpoint and re-pins it at the new version", async () => {
+    const source = makeSource("CogniaDB", 141)
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    await source.db.commit("sessions", { type: "put", values: [{ id: "kept" }] })
+    await store.compact()
+    await store.close()
+
+    const upgraded = makeSource("CogniaDB", 142)
+    upgraded.db.tables.push(new FakeTable("mediaPacks"))
+    const reopened = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [upgraded],
+    })
+    expect(await upgraded.db.tables[0].toArray()).toEqual([{ id: "kept" }])
+    await reopened.close()
+
+    // Pinned at 142: rolling back to the 141 build is now a newer checkpoint.
+    await expect(
+      openDurabilityStore({
+        home,
+        accountId: "acct",
+        getSources: async () => [makeSource("CogniaDB", 141)],
+      })
+    ).rejects.toThrow(expect.objectContaining({ code: "checkpoint-schema-mismatch" }))
   })
 
   it("lifts a database to the version its plugin tables were persisted at before restoring", async () => {

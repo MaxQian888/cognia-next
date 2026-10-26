@@ -1,12 +1,22 @@
 import type { LlmClient, LlmClientCallOptions } from "@/lib/twin/distill/llm"
 import {
-  EXPLAIN_SYSTEM_PROMPT,
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  SELECTION_EXPLAIN_PROMPT,
+  SELECTION_TRANSLATE_PROMPT,
   clampSelectionContext,
   promptLanguageName,
   runSelectionAction,
-  translateSystemPrompt,
   type RunSelectionActionInput,
 } from "./run-selection-action"
+
+afterEach(() => {
+  __setPromptOverrideSnapshotForTests(null)
+  __resetPromptVerdictsForTests()
+})
 
 type Call = { prompt: string; options: LlmClientCallOptions | undefined }
 
@@ -62,7 +72,7 @@ describe("explain", () => {
     )
     expect(outcome).toEqual({ kind: "result", text: "It caches the result.", parts: 1 })
     const [call] = client.calls
-    expect(call!.options?.system).toBe(EXPLAIN_SYSTEM_PROMPT)
+    expect(call!.options?.system).toBe(SELECTION_EXPLAIN_PROMPT.defaultBody)
     expect(call!.prompt).toContain("Surrounding message, for reference only")
     expect(call!.prompt).toContain("Passage to explain:\n\nmemoize the selector")
     expect(call!.prompt).toContain("Write the explanation in Simplified Chinese.")
@@ -103,7 +113,10 @@ describe("translate", () => {
       input({ action: "translate", language: "French", client })
     )
     expect(outcome).toMatchObject({ kind: "result", text: "Mémoïser le sélecteur" })
-    expect(client.calls[0]!.options?.system).toBe(translateSystemPrompt("French"))
+    expect(client.calls[0]!.options?.system).toBe(
+      SELECTION_TRANSLATE_PROMPT.defaultBody.replace("{{language}}", "French")
+    )
+    expect(client.calls[0]!.options?.system).toMatch(/^You translate a passage .* into French\. /)
     expect(client.calls[0]!.prompt).toBe(
       "Passage to translate into French:\n\nmemoize the selector"
     )
@@ -290,5 +303,56 @@ describe("promptLanguageName", () => {
 
   it("returns a tag it cannot name as the tag", () => {
     expect(promptLanguageName("not a tag!")).toBe("not a tag!")
+  })
+})
+
+describe("Prompt Center overrides", () => {
+  it("sends a published session override of the explain prompt for that conversation only", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: SELECTION_EXPLAIN_PROMPT.id,
+          scope: "session",
+          targetId: "s-1",
+          revisionId: "por-selection-explain",
+          body: "Explain it like a pirate.",
+          contractVersion: SELECTION_EXPLAIN_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const inSession = completeClient(() => "Arr.")
+    await runSelectionAction(input({ client: inSession, promptContext: { sessionId: "s-1" } }))
+    expect(inSession.calls[0]!.options?.system).toBe("Explain it like a pirate.")
+
+    const elsewhere = completeClient(() => "x")
+    await runSelectionAction(input({ client: elsewhere, promptContext: { sessionId: "s-2" } }))
+    expect(elsewhere.calls[0]!.options?.system).toBe(SELECTION_EXPLAIN_PROMPT.defaultBody)
+  })
+
+  it("renders the target language into a translate override", async () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob",
+          promptId: SELECTION_TRANSLATE_PROMPT.id,
+          scope: "workspace",
+          targetId: "ws-1",
+          revisionId: "por-selection-translate",
+          body: "Into {{language}}, formally.",
+          contractVersion: SELECTION_TRANSLATE_PROMPT.contractVersion,
+        },
+      ])
+    )
+    const client = completeClient(() => "Bonjour")
+    await runSelectionAction(
+      input({
+        action: "translate",
+        language: "French",
+        client,
+        promptContext: { sessionId: "s-1", workspaceId: "ws-1" },
+      })
+    )
+    expect(client.calls[0]!.options?.system).toBe("Into French, formally.")
   })
 })

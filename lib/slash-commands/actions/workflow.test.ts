@@ -2,8 +2,14 @@
  * @jest-environment jsdom
  */
 import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
   WORKFLOW_COPILOT_DISPATCH_EVENT,
   WORKFLOW_SLASH_COMMANDS,
+  WORKFLOW_SLASH_PROMPTS,
   buildWorkflowSlashPrompt,
   dispatchWorkflowSlashAction,
   parseDelegateArgs,
@@ -231,6 +237,48 @@ describe("buildWorkflowSlashPrompt", () => {
     expect(prompt).toMatch(/workflow-debugger/)
     expect(prompt).toMatch(/Task/)
     expect(prompt).toMatch(/why is the cron node not firing/)
+  })
+})
+
+describe("workflow slash Prompt Center entries (ADR-0236)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  it("renders the shipped delegate message byte-for-byte", () => {
+    expect(
+      buildWorkflowSlashPrompt({ kind: "delegate", alias: "debugger", task: "check {{x}}" })
+    ).toBe(
+      [
+        "/delegate debugger check {{x}}",
+        "",
+        "Please delegate to the `workflow-debugger` subagent via the `Task` tool. The user's task is:",
+        "",
+        "check {{x}}",
+        "",
+        "Summarize the subagent's reply in your own voice once it completes. Don't repeat the specialist's tool output verbatim.",
+      ].join("\n")
+    )
+  })
+
+  it("sends a published override with the user's text rendered in", () => {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-refactor",
+          promptId: WORKFLOW_SLASH_PROMPTS.refactor.id,
+          scope: "account",
+          targetId: "",
+          revisionId: "por-slash-refactor",
+          body: "/refactor {{description}}\nUse workflow-refactorer; keep behavior.",
+          contractVersion: WORKFLOW_SLASH_PROMPTS.refactor.contractVersion,
+        },
+      ])
+    )
+    expect(buildWorkflowSlashPrompt({ kind: "refactor", description: "add retry" })).toBe(
+      "/refactor add retry\nUse workflow-refactorer; keep behavior."
+    )
   })
 })
 

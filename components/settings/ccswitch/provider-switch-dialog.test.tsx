@@ -11,6 +11,7 @@ const planMock = jest.fn()
 const applyMock = jest.fn()
 jest.mock("@/lib/ccswitch/switch", () => ({
   planSwitch: (...args: unknown[]) => planMock(...args),
+  canSwitchProvider: jest.requireActual("@/lib/ccswitch/switch").canSwitchProvider,
   applySwitch: (...args: unknown[]) => applyMock(...args),
 }))
 
@@ -26,6 +27,7 @@ import type { CcswitchProvider } from "@/types/ccswitch"
 
 const provider: CcswitchProvider = {
   id: "p1",
+  kind: "claude",
   name: "Kimi K2",
   apiKey: "sk-moon",
   baseUrl: "https://api.moonshot.cn",
@@ -40,7 +42,7 @@ const samplePlan = {
     baseUrlBefore: undefined,
     baseUrlAfter: "https://api.moonshot.cn",
     activeProviderIdBefore: undefined,
-    activeProviderIdAfter: "ccswitch:p1",
+    activeProviderIdAfter: "ccswitch:claude:p1",
     restartSidecar: true,
     useSubscription: false,
   },
@@ -144,4 +146,64 @@ describe("ProviderSwitchDialog", () => {
     // The dialog header still renders (Radix), but no plan diff section appears.
     expect(screen.queryByText("dialog.cogniaSection")).toBeNull()
   })
+})
+
+it("surfaces an apply error and keeps the switch available to retry", async () => {
+  applyMock.mockRejectedValue(new Error("write failed"))
+  renderDialog()
+  const confirm = await screen.findByRole("button", { name: "dialog.confirm" })
+  await waitFor(() => expect(confirm).toBeEnabled())
+  fireEvent.click(confirm)
+  expect(await screen.findByRole("alert")).toHaveTextContent("dialog.applyFailed")
+  expect(confirm).toBeEnabled()
+})
+
+it("does not label failed subscription activation as an applied switch", async () => {
+  applyMock.mockResolvedValue({
+    cogniaApplied: false,
+    agentResults: [],
+    subscription: { activated: false, error: "none-found" },
+  })
+  renderDialog()
+  const confirm = await screen.findByRole("button", { name: "dialog.confirm" })
+  await waitFor(() => expect(confirm).toBeEnabled())
+  fireEvent.click(confirm)
+  expect(await screen.findByText("dialog.cogniaNotApplied")).toBeInTheDocument()
+  expect(screen.queryByText("dialog.cogniaApplied")).not.toBeInTheDocument()
+})
+
+it("offers only compatible propagation targets and drops obsolete saved selections", async () => {
+  renderDialog({ initialAgents: ["codex", "gemini", "claude-code"] })
+  await screen.findByText("dialog.cogniaSection")
+  expect(screen.queryByText("agents.codex")).not.toBeInTheDocument()
+  expect(screen.queryByText("agents.gemini")).not.toBeInTheDocument()
+  expect(screen.getByText("agents.opencode")).toBeInTheDocument()
+  expect(planMock.mock.calls.at(-1)![1].agents).toEqual(["claude-code"])
+})
+it("passes previous relay headers into restart planning", async () => {
+  const customHeaders = { "anthropic-beta": "context-1m-test" }
+  getSettingsMock.mockResolvedValue({ providerSettings: { anthropic: { customHeaders } } })
+  renderDialog()
+  await waitFor(() =>
+    expect(planMock).toHaveBeenCalledWith(
+      provider,
+      expect.anything(),
+      expect.objectContaining({ customHeaders })
+    )
+  )
+})
+it("previews OpenCode's credential-only propagation limitation", async () => {
+  planMock.mockReturnValue({
+    ...samplePlan,
+    agentChanges: [
+      {
+        agentId: "opencode",
+        unsupported: false,
+        targetPath: "~/.local/share/opencode/auth.json",
+        envUpdates: [],
+      },
+    ],
+  })
+  renderDialog({ initialAgents: ["opencode"] })
+  expect(await screen.findByText("dialog.baseUrlNotPropagated")).toBeInTheDocument()
 })

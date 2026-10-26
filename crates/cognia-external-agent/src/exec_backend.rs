@@ -190,7 +190,8 @@ pub trait ExecBackend: Send + Sync + 'static {
     async fn get_info(&self, id: &str) -> Result<Value, String>;
     async fn set_running(&self, id: &str) -> Result<(), String>;
     async fn set_failed(&self, id: &str) -> Result<(), String>;
-    /// `"local-process"` | `"container"` — for logs and healthz.
+    /// Backend name for logs and healthz (including `"disabled"` when the
+    /// operator selected control-plane-only execution).
     fn kind(&self) -> &'static str;
 
     /// Remove execution resources this process did not create but owns —
@@ -229,6 +230,30 @@ pub trait ExecBackend: Send + Sync + 'static {
 /// T1 backend: local tokio processes via the existing manager
 /// (`command_resolver` + `proc_group` untouched).
 pub struct LocalProcessBackend(pub Arc<ExternalAgentProcessManager>);
+
+/// Control-plane-only execution boundary. Unlike a local backend, this owns
+/// no process manager and cannot launch work even through a non-RPC caller.
+#[derive(Default)]
+pub struct DisabledExecBackend;
+
+pub const EXECUTION_ISOLATION_UNAVAILABLE: &str = "execution_isolation_unavailable";
+
+#[async_trait]
+impl ExecBackend for DisabledExecBackend {
+    async fn spawn(&self, _: ExternalAgentSpawnConfig, _: Arc<dyn ExternalAgentEventSink>) -> Result<String, String> {
+        Err(EXECUTION_ISOLATION_UNAVAILABLE.into())
+    }
+    async fn send(&self, _: &str, _: &str) -> Result<(), String> { Err(EXECUTION_ISOLATION_UNAVAILABLE.into()) }
+    async fn kill(&self, _: &str) -> Result<(), String> { Ok(()) }
+    async fn kill_all(&self) -> Result<(), String> { Ok(()) }
+    async fn status(&self, _: &str) -> Option<ExternalAgentProcessState> { None }
+    async fn list(&self) -> Vec<String> { Vec::new() }
+    async fn is_running(&self, _: &str) -> Result<bool, String> { Ok(false) }
+    async fn get_info(&self, _: &str) -> Result<Value, String> { Err(EXECUTION_ISOLATION_UNAVAILABLE.into()) }
+    async fn set_running(&self, _: &str) -> Result<(), String> { Err(EXECUTION_ISOLATION_UNAVAILABLE.into()) }
+    async fn set_failed(&self, _: &str) -> Result<(), String> { Err(EXECUTION_ISOLATION_UNAVAILABLE.into()) }
+    fn kind(&self) -> &'static str { "disabled" }
+}
 
 impl LocalProcessBackend {
     pub fn new() -> Arc<Self> {
@@ -309,6 +334,11 @@ pub async fn spawn_with_events(
     emitter: Arc<dyn AgentEventEmitter>,
     mut config: ExternalAgentSpawnConfig,
 ) -> Result<String, String> {
+    // Refuse before optional runtime payload/placement handling can choose a
+    // different error or suggest a fallback on a control-plane-only Host.
+    if backend.kind() == "disabled" {
+        return Err(EXECUTION_ISOLATION_UNAVAILABLE.into());
+    }
     // A sandboxed agent runs in a container even when the host's own path is
     // local processes, so it gets none of the local-only payloads.
     let runs_locally = config.sandbox.is_none() && backend.kind() == "local-process";
@@ -414,6 +444,33 @@ mod tests {
     use super::test_support::RecordingAgentEmitter;
     use super::*;
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn disabled_backend_cannot_spawn_send_or_report_live_work_and_needs_no_runtime() {
+        let backend = DisabledExecBackend;
+        let emitter = RecordingAgentEmitter::new();
+        let config = ExternalAgentSpawnConfig {
+            id: "disabled".into(), command: "/bin/sh".into(), args: vec!["-c".into(), "exit 0".into()],
+            env: HashMap::new(), cwd: None, framing: Default::default(),
+            sandbox_policy: Default::default(), sandbox: None,
+        };
+        assert_eq!(backend.spawn(config.clone(), EmitterEventSink::new(emitter.clone())).await.unwrap_err(), EXECUTION_ISOLATION_UNAVAILABLE);
+        assert_eq!(backend.send("disabled", "run").await.unwrap_err(), EXECUTION_ISOLATION_UNAVAILABLE);
+        let mut managed = config;
+        managed.env.insert(crate::gateway_task::PAYLOAD_ENV.into(), "{}".into());
+        assert_eq!(spawn_with_events(&backend, emitter.clone(), managed).await.unwrap_err(), EXECUTION_ISOLATION_UNAVAILABLE);
+        assert!(backend.status("disabled").await.is_none());
+        assert!(backend.list().await.is_empty());
+        assert!(!backend.is_running("disabled").await.unwrap());
+        assert!(backend.get_info("disabled").await.is_err());
+        assert!(backend.set_running("disabled").await.is_err());
+        assert!(backend.set_failed("disabled").await.is_err());
+        backend.kill("disabled").await.unwrap();
+        backend.kill_all().await.unwrap();
+        assert!(backend.reap_orphans().await.unwrap().is_empty());
+        assert_eq!(backend.kind(), "disabled");
+        assert!(emitter.events().is_empty());
+    }
 
     // ── Shape locks (C3 contract — do not "fix" these without bumping the
     //    protocol on the TS side) ─────────────────────────────────────────────
@@ -568,6 +625,7 @@ mod tests {
             sandbox_policy: Default::default(),
             sandbox: Some(
                 crate::sandbox_routing_backend::SandboxPlacement::Container {
+                    binding: None,
                     hosted_tool_host_lease_ids: Vec::new(),
                     provider: None,
                     workspace: None,

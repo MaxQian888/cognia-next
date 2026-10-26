@@ -173,7 +173,8 @@
     ]
   },
   "scripts": {
-    "build": "node build.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "build": "node build.mts",
+    "test": "pnpm run typecheck && node --test tests/*.test.ts",
+    "typecheck": "pnpm --dir ../.. exec tsc -p sidecar/codeserver-agent-ext/tsconfig.json"
   }
 }

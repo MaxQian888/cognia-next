@@ -355,6 +355,10 @@ interface UIState {
   openFind: () => void
   closeFind: () => void
 
+  /** Local opt-out for prediction setup guidance; predictions stay enabled. */
+  predictionSetupHintHidden: boolean
+  hidePredictionSetupHint: () => void
+
   /**
    * Per-team-session collapsed state for the Shared notes (scratchpad) panel
    * in the right rail. Default expanded; persisted so the choice sticks.
@@ -584,6 +588,9 @@ export const useUIStore = create<UIState>()(
       openFind: () => set({ findOpen: true }),
       closeFind: () => set({ findOpen: false }),
 
+      predictionSetupHintHidden: false,
+      hidePredictionSetupHint: () => set({ predictionSetupHintHidden: true }),
+
       scratchpadCollapsed: {},
       setScratchpadCollapsed: (sessionId, collapsed) =>
         set((s) => ({
@@ -706,6 +713,7 @@ export const useUIStore = create<UIState>()(
       partialize: (s) => ({
         selectedGuild: s.selectedGuild,
         scratchpadCollapsed: s.scratchpadCollapsed,
+        predictionSetupHintHidden: s.predictionSetupHintHidden,
         // The user's value: a fold the row budget borrowed is not a preference.
         sidebarCollapsed: s.sidebarCollapsed && !s.sidebarAutoCollapsed,
         sidebarTeamsCollapsed: s.sidebarTeamsCollapsed,

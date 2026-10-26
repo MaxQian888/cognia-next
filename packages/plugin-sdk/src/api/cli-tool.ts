@@ -4,7 +4,7 @@ import type {
   PluginCliArgvToken,
   PluginCliCwdPolicy,
   PluginCliOutputParse,
-} from "@/types/plugin/plugin-cli-tool"
+} from "@cognia/plugin-contract/types/plugin/plugin-cli-tool"
 
 export { defineCliTool } from "../define/define-cli-tool"
 export type {
@@ -13,7 +13,7 @@ export type {
   PluginCliCwdPolicy,
   PluginCliOutputParse,
   PluginCliToolDef,
-} from "@/types/plugin/plugin-cli-tool"
+} from "@cognia/plugin-contract/types/plugin/plugin-cli-tool"
 
 export class CliTemplateError extends Error {
   constructor(message: string) {

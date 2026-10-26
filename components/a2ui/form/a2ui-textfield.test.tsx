@@ -3,6 +3,7 @@
  */
 
 import React from "react"
+import { A2UIInputGroupContext } from "./a2ui-input-group"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { A2UITextField } from "./a2ui-textfield"
 import type { A2UITextFieldComponent, A2UIComponentProps } from "@/types/a2ui/schema"
@@ -153,4 +154,20 @@ describe("A2UITextField", () => {
     render(<A2UITextField {...createProps(component)} />)
     expect(screen.getByText("This field is required")).toBeInTheDocument()
   })
+})
+
+it("uses a compound input control when rendered inside InputGroup", () => {
+  const { container } = render(
+    <A2UIInputGroupContext.Provider value={true}>
+      <A2UITextField
+        component={{ id: "grouped", component: "TextField", value: "", label: "Grouped field" }}
+        surfaceId="s"
+        dataModel={{}}
+        onDataChange={jest.fn()}
+        onAction={jest.fn()}
+        renderChild={() => null}
+      />
+    </A2UIInputGroupContext.Provider>
+  )
+  expect(container.querySelector("[data-slot='input-group-control']")).toBeInTheDocument()
 })

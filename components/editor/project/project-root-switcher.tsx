@@ -44,6 +44,7 @@ export function ProjectRootSwitcher({
       }
     >
       <NativeSelect
+        native
         value={rootKey}
         onChange={(event) => onSelect(event.target.value)}
         wrapperClassName="w-full"

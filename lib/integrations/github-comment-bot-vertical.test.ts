@@ -33,12 +33,10 @@ import { publishIntegrationEvent, recoverIntegrationEventProjections } from "./e
 import { drainIntegrationActionJobs } from "./action-runner"
 import { respondRunApproval } from "@/lib/execution/run-approvals"
 import { installExecutionRunControlHandlers } from "@/lib/execution/control-handlers"
-import * as delivery from "@/plugins/github-delivery/src/index"
 import {
-  createGithubCommentBot,
-  githubCommentBotDef,
-  manifest as commentBotManifest,
-} from "@/plugins/github-comment-bot/src/index"
+  builtinArtifactManifest,
+  loadBuiltinArtifactExports,
+} from "@/lib/plugin/core/builtin-artifact-fixture"
 import {
   AUTHOR,
   fakeGithub,
@@ -47,10 +45,14 @@ import {
   REPOSITORY,
   REPOSITORY_ID,
   routeFake,
-  translate,
-  TRIGGER,
   type FakeGithub,
-} from "@/plugins/github-comment-bot/src/comment-bot.test-helpers"
+} from "@cognia/github-bot-kit/testing"
+import type {
+  IntegrationEventEnvelope,
+  PluginIntegrationDef,
+} from "@/types/plugin/plugin-integration"
+import type { BotHandlerV1 } from "@/types/bot/run"
+import type { RegisterIntegrationDefinitionsInput } from "./registry"
 import type { PluginContext } from "@/types/plugin"
 import type { PluginBotDef } from "@/types/plugin/plugin-bot"
 
@@ -71,7 +73,44 @@ jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
   },
 }))
 
-const PLUGIN_ID = commentBotManifest.id
+const PLUGIN_ID = "github-comment-bot"
+const TRIGGER = "@cognia-bot"
+
+/** GitHub Delivery's entry exports, from the built-in chunk the app ships. */
+interface GithubDeliveryExports {
+  manifest: { id: string }
+  githubIntegration: PluginIntegrationDef
+  /** GitHub Delivery normalizes one webhook into exactly one envelope, synchronously. */
+  normalizeGithub: (
+    ...args: Parameters<NonNullable<RegisterIntegrationDefinitionsInput["normalizers"]>[string]>
+  ) => IntegrationEventEnvelope
+  listGithubResources: NonNullable<RegisterIntegrationDefinitionsInput["resourceProviders"]>[string]
+  checkGithubHealth: NonNullable<
+    RegisterIntegrationDefinitionsInput["accountStatusProviders"]
+  >[string]
+  [handler: string]: unknown
+}
+
+// Both plugins come from the chunks the app ships, not from plugin source.
+let delivery: GithubDeliveryExports
+let githubCommentBotDef: unknown
+let createGithubCommentBot: (context: PluginContext) => BotHandlerV1
+/** `ctx.i18n.t` over the shipped plugin's own en bundle, as the host resolves it. */
+let translate: (key: string, params?: Record<string, string | number>) => string
+
+beforeAll(async () => {
+  delivery = (await loadBuiltinArtifactExports("github-delivery")) as GithubDeliveryExports
+  const commentBot = await loadBuiltinArtifactExports(PLUGIN_ID)
+  githubCommentBotDef = commentBot.githubCommentBotDef
+  createGithubCommentBot = commentBot.createGithubCommentBot as typeof createGithubCommentBot
+  const en =
+    (builtinArtifactManifest(PLUGIN_ID).i18n?.locales?.en as Record<string, string> | undefined) ??
+    {}
+  translate = (key, params) =>
+    (en[key] ?? key).replace(/\{(\w+)\}/g, (_, name: string) =>
+      String(params?.[name] ?? `{${name}}`)
+    )
+})
 
 interface RecordedRequest {
   method: string

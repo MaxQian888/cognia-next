@@ -10,6 +10,7 @@ export type ToolContentBlock =
 export type ToolFailureMeta = {
   kind: ToolFailureKind
   retryable: boolean
+  effects?: "none" | "unknown" | "partial"
 }
 
 /**
@@ -46,7 +47,7 @@ export function toolText(
     ...(opts.failure
       ? {
           _meta: {
-            "cognia/failure": { kind: opts.failure.kind, retryable: opts.failure.retryable },
+            "cognia/failure": { ...opts.failure },
           },
         }
       : {}),
@@ -67,12 +68,19 @@ export function toolText(
 export function toolError(
   err: unknown,
   contextLabel?: string,
-  opts: { kind?: ToolFailureKind } = {}
+  opts: { kind?: ToolFailureKind; effects?: ToolFailureMeta["effects"] } = {}
 ): ToolResult {
   const failure = classifyToolFailure(err, opts)
-  return toolText(renderFailureForModel(failure, contextLabel), {
+  const effects = opts.effects
+  const effectGuidance =
+    effects && effects !== "none"
+      ? `\nExecution effects: ${effects}. Inspect the affected state before retrying; do not assume rollback or repeat a non-idempotent action blindly.`
+      : effects === "none"
+        ? "\nExecution effects: none."
+        : ""
+  return toolText(renderFailureForModel(failure, contextLabel) + effectGuidance, {
     isError: true,
-    failure: { kind: failure.kind, retryable: failure.retryable },
+    failure: { kind: failure.kind, retryable: failure.retryable, ...(effects ? { effects } : {}) },
   })
 }
 

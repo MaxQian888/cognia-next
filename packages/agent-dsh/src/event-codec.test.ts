@@ -13,6 +13,36 @@ const assistant = (content: unknown[], usage?: unknown) =>
   frame("assistant/message", { message: { id: "a", content }, usage, stream: [] })
 
 describe("current DeepSeek Harness session format 4", () => {
+  it("projects only the request's context capacity as session metadata", () => {
+    expect(
+      translateDshNotification(
+        frame("request/context", {
+          provider: "cognia",
+          model: "large",
+          contextWindow: 1_000_000,
+          private: "reasoning replay",
+        })
+      ).events
+    ).toEqual([
+      {
+        type: "session_info_update",
+        sessionId: "s",
+        timestamp: new Date(1234),
+        metadata: { modelContextWindow: 1_000_000 },
+      },
+    ])
+  })
+  it.each([undefined, 0, -1, NaN, Infinity, 1.5, "1000000"])(
+    "clears unknown or invalid context capacity (%s) without inventing usage",
+    (contextWindow) => {
+      expect(translateDshNotification(frame("request/context", { contextWindow })).events).toEqual([
+        expect.objectContaining({
+          type: "session_info_update",
+          metadata: { modelContextWindow: null },
+        }),
+      ])
+    }
+  )
   it.each([
     ["job/registered", { jobId: "job-1" }],
     ["job/settled", { jobId: "job-1" }],
@@ -63,6 +93,7 @@ describe("current DeepSeek Harness session format 4", () => {
     expect(events.at(-1)).toMatchObject({
       tokenUsage: {
         promptTokens: 33,
+        promptTokensIncludeCache: true,
         completionTokens: 5,
         totalTokens: 38,
         cacheReadTokens: 20,
@@ -77,6 +108,19 @@ describe("current DeepSeek Harness session format 4", () => {
   it("does not fabricate accounting when the provider omitted it", () => {
     expect(translateDshNotification(assistant([])).events.at(-1)).toMatchObject({
       tokenUsage: undefined,
+    })
+  })
+  it("separates committed request occupancy from inclusive billed prompt tokens", () => {
+    const events = translateDshNotification(
+      assistant([], { inputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 3, outputTokens: 2 })
+    ).events
+    expect(events.at(-1)).toMatchObject({
+      tokenUsage: {
+        promptTokens: 33,
+        completionTokens: 2,
+        totalTokens: 35,
+        contextTokens: 35,
+      },
     })
   })
   it.each([
@@ -270,7 +314,6 @@ describe("current DeepSeek Harness session format 4", () => {
   it("does not expose request provenance or system input as output", () => {
     for (const type of [
       "request/header",
-      "request/context",
       "system/message",
       "user/message",
       "agent/inbox/spliced",

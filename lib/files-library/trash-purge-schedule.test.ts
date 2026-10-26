@@ -92,9 +92,19 @@ describe("schedule install", () => {
         type: FILES_TRASH_PURGE_TASK_TYPE,
         trigger: { type: "interval", intervalMs: FILES_TRASH_PURGE_INTERVAL_MS },
         tags: [FILES_TRASH_PURGE_TASK_TAG],
+        notification: expect.objectContaining({
+          channels: ["none"],
+          onError: false,
+          dueReminder: false,
+        }),
       })
     )
-    mockGetAllTasks.mockResolvedValueOnce([{ type: FILES_TRASH_PURGE_TASK_TYPE }])
+    mockGetAllTasks.mockResolvedValueOnce([
+      {
+        type: FILES_TRASH_PURGE_TASK_TYPE,
+        notification: { channels: ["none"], dueReminder: false },
+      },
+    ])
     await installFilesTrashPurgeSchedule()
     expect(mockCreateTask).toHaveBeenCalledTimes(1)
   })

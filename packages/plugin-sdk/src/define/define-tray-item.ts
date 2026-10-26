@@ -11,7 +11,7 @@
  * `"tray"` surface instead.
  */
 
-import type { PluginTrayItemInput } from "@/types/plugin/plugin"
+import type { PluginTrayItemInput } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineTrayItem(item: PluginTrayItemInput): PluginTrayItemInput {
   return item

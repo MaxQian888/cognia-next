@@ -246,8 +246,6 @@
   },
   "signOutDescription": "退出后需重新扫码配对才能再次连接。",
   "signOutFallbackInvalid": "请选择一个已保存的备用 Host。",
-  "signOutFallbackPrompt": "请输入备用 Host ID（{choices}）。",
-  "signOutFallbackRequired": "移除活动 Host 前必须选择备用 Host。",
   "signOutReason": "确认退出当前配对",
   "signOutTitle": "退出登录",
   "step": {
@@ -292,5 +290,9 @@
     "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
     "storageNoticeTitle": "凭据保存在此浏览器中",
     "title": "连接到服务器"
-  }
+  },
+  "signOutFallbackTitle": "选择替代 Host",
+  "signOutFallbackDescription": "当前正在使用此 Host。请选择退出登录后此设备要切换到的已保存 Host。",
+  "signOutFallbackField": "替代 Host",
+  "signOutFallbackConfirm": "退出登录"
 }

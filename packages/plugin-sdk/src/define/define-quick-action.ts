@@ -8,7 +8,7 @@
  * target (`command` or `slash`).
  */
 
-import type { PluginQuickActionDef } from "@/types/plugin"
+import type { PluginQuickActionDef } from "@cognia/plugin-contract/types/plugin/index"
 
 export function defineQuickAction(def: PluginQuickActionDef): PluginQuickActionDef {
   return def

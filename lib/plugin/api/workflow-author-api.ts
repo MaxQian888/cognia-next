@@ -1,32 +1,7 @@
 /** Host-governed workflow authoring and execution façade for plugins. */
 
-import type { Viewport } from "@xyflow/react"
-
-import type { PluginToolDef } from "@/types/plugin"
-import type { WorkflowNodeData, WorkflowNodeKind } from "@/types/workflow/visual"
-import type { VisualWorkflow, WorkflowTriggeredFrom } from "@/types/workflow/visual"
-import type {
-  CallbackActorScope,
-  ConnectorCallbackBindingKind,
-} from "@/types/connectors/interaction"
-import type { A2UISegmentContent } from "@/types/connectors/segment"
-import type { RFWorkflowEdge, RFWorkflowNode } from "@/lib/workflow/editor/react-flow-converter"
-import type { NodeValidationResult } from "@/lib/workflow/nodes/validate-params"
-import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
-import type { ProposalOp } from "@/lib/workflow/editor/proposal-types"
-import type { ProposalPayload } from "@/lib/workflow/editor/proposal-store"
-import type { AutoLayoutDirection } from "@/lib/workflow/editor/auto-layout"
-import type { ExplainedLastRun, ExplainedValidation } from "@/lib/workflow/runtime/error-explainer"
-import type {
-  CopilotSlotValues,
-  MaterializeResult,
-  WorkflowCopilotTemplate,
-} from "@/lib/workflow/copilot-templates"
+import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
-import type { FindWorkflowByNameResult, WorkflowSummary } from "@/lib/workflow/library/lookup"
-import type { RunWorkflowInput, RunWorkflowResult } from "@/lib/workflow/runtime/orchestrator"
-import type { RunWorkflowTypedResult } from "@/lib/workflow/publish/run-workflow-typed-tool"
-import type { WorkflowWaitEvent } from "@/types/workflow/waitpoint"
 
 import { getEditorStore, listEditorStores } from "@/lib/workflow/editor/store-registry"
 import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
@@ -59,135 +34,20 @@ import {
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { buildApprovalSurface } from "@/lib/connectors/a2ui-bridge/workflow-to-a2ui"
 import { createWorkflowWaitEvent, emitWorkflowWaitEvent } from "@/lib/db/workflow-waitpoints"
-
-export interface PluginWorkflowEditorSnapshot {
-  workflowId: string
-  workflow: VisualWorkflow
-  baseWorkflow: VisualWorkflow
-  nodes: RFWorkflowNode[]
-  edges: RFWorkflowEdge[]
-  viewport: Viewport
-  selectedNodeIds: string[]
-  selectedEdgeIds: string[]
-  runStatusByStepId: Record<string, string>
-  validationByStepId: Record<string, NodeValidationResult>
-  lastRunByStepId: Record<string, LastRunSummary>
-}
-
-export type PluginWorkflowEditorResolution =
-  | { ok: true; editor: PluginWorkflowEditorSnapshot }
-  | { ok: false; reason: "not-open"; requestedId?: string }
-  | { ok: false; reason: "ambiguous"; openIds: string[] }
-
-export type PluginWorkflowEditorCommand =
-  | {
-      kind: "add-node"
-      nodeKind: WorkflowNodeKind
-      position: { x: number; y: number }
-      overrides?: Partial<WorkflowNodeData>
-    }
-  | { kind: "remove-nodes"; ids: string[] }
-  | { kind: "remove-edges"; ids: string[] }
-  | {
-      kind: "connect"
-      source: string
-      target: string
-      sourceHandle?: string
-      targetHandle?: string
-    }
-  | { kind: "update-edge"; id: string; patch: Record<string, unknown> }
-  | { kind: "update-node"; id: string; patch: Partial<WorkflowNodeData> }
-  | { kind: "revalidate-node"; id: string }
-  | { kind: "apply-proposal"; ops: ReadonlyArray<ProposalOp>; expectedRevision?: string }
-  | { kind: "set-nodes"; nodes: RFWorkflowNode[] }
-  | { kind: "group-nodes"; ids: string[] }
-  | { kind: "select-nodes"; ids: string[] }
-  | { kind: "set-viewport"; viewport: Viewport }
-  | { kind: "pulse-node"; id: string; durationMs: number }
-
-export type PluginWorkflowEditorMutationResult =
-  | { kind: "add-node"; nodeId: string }
-  | { kind: "connect"; edgeId: string | null }
-  | { kind: "update-edge"; updated: boolean }
-  | { kind: "revalidate-node"; validation: NodeValidationResult }
-  | {
-      kind: "apply-proposal"
-      applied: number
-      firstError?: string
-      stale?: boolean
-      currentRevision?: string
-    }
-  | { kind: "group-nodes"; groupId: string | null }
-  | {
-      kind: Exclude<
-        PluginWorkflowEditorCommand["kind"],
-        | "add-node"
-        | "connect"
-        | "update-edge"
-        | "revalidate-node"
-        | "apply-proposal"
-        | "group-nodes"
-      >
-    }
-
-export interface StageWorkflowProposalInput {
-  proposalId: string
-  workflowId: string
-  summary: string
-  ops: ReadonlyArray<ProposalOp>
-  baseRevision: string
-}
-
-export interface EmitPluginWorkflowWaitEventInput {
-  key: string
-  correlationId?: string
-  source: string
-  data?: unknown
-}
-
-export interface RecordPluginWorkflowCallbackInput {
-  adapterId: string
-  actionId: string
-  kind: ConnectorCallbackBindingKind
-  surfaceId: string
-  componentId?: string
-  conversationKey?: string
-  payload: Record<string, unknown>
-  actorScope: CallbackActorScope
-  allowedActions?: string[]
-}
-
-export interface PluginWorkflowAuthorAPI {
-  resolveEditor(workflowId?: string): PluginWorkflowEditorResolution
-  mutateEditor(
-    workflowId: string,
-    command: PluginWorkflowEditorCommand
-  ): PluginWorkflowEditorMutationResult
-  stageProposal(input: StageWorkflowProposalInput): ProposalPayload
-  autoLayoutEditor(workflowId: string, direction?: AutoLayoutDirection): Promise<number>
-  explainEditorValidation(workflowId: string): ExplainedValidation[]
-  explainEditorLastRun(workflowId: string): ExplainedLastRun
-  listCopilotTemplates(): readonly WorkflowCopilotTemplate[]
-  materializeCopilotTemplate(templateId: string, slots: CopilotSlotValues): MaterializeResult
-  listNodeCatalog(): readonly NodeCatalogEntry[]
-  getNodeCatalogEntry(kind: string): NodeCatalogEntry
-  refreshTemplateWarnings(): void
-  runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowResult>
-  executeRunWorkflowTyped(args: Record<string, unknown>): Promise<RunWorkflowTypedResult>
-  getRunnerToolDefinition(): { name: string; definition: PluginToolDef }
-  listWorkflowSummaries(limit?: number): Promise<WorkflowSummary[]>
-  findWorkflowByName(name: string): Promise<FindWorkflowByNameResult>
-  findWorkflowById(workflowId: string): Promise<WorkflowSummary | undefined>
-  resolveTriggerOrigin(sessionId?: string): Promise<WorkflowTriggeredFrom | null>
-  approvalActorScope(triggeredFrom: WorkflowTriggeredFrom): CallbackActorScope
-  recordCallbackBinding(input: RecordPluginWorkflowCallbackInput): Promise<void>
-  buildApprovalSurface(input: {
-    bindingId: string
-    workflowName: string
-    summary?: string
-  }): A2UISegmentContent
-  emitWaitEvent(input: EmitPluginWorkflowWaitEventInput): Promise<WorkflowWaitEvent>
-}
+import type {
+  PluginWorkflowAuthorAPI,
+  PluginWorkflowEditorSnapshot,
+} from "@cognia/plugin-contract/lib/plugin/api/workflow-author-api"
+export type {
+  EmitPluginWorkflowWaitEventInput,
+  PluginWorkflowAuthorAPI,
+  PluginWorkflowEditorCommand,
+  PluginWorkflowEditorMutationResult,
+  PluginWorkflowEditorResolution,
+  PluginWorkflowEditorSnapshot,
+  RecordPluginWorkflowCallbackInput,
+  StageWorkflowProposalInput,
+} from "@cognia/plugin-contract/lib/plugin/api/workflow-author-api"
 
 function snapshotEditor(workflowId: string): PluginWorkflowEditorSnapshot | undefined {
   const store = getEditorStore(workflowId)

@@ -49,12 +49,15 @@
 //! destroy server-side search, notification and aggregation, and it would not
 //! even be self-consistent, since ADR-0054 already states the local Dexie
 //! database is not encrypted at rest. Protection here is per-tenant KMS
-//! envelopes plus row-level security, the design `services/diagnostic-server`
+//! envelopes plus row-level security, the design `cognia-services/services/diagnostic-server`
 //! already proved. The zero-knowledge share links of ADR-0037 remain a separate
 //! capability and are untouched.
 
+pub(crate) mod admission;
 pub mod api;
 pub mod auth;
+pub mod capabilities_api;
+pub mod service_credentials;
 pub mod canvas;
 pub mod canvas_api;
 pub mod canvas_store;
@@ -69,10 +72,12 @@ pub mod field_merge;
 pub mod file_sharing;
 pub mod logto_management;
 pub mod model;
+pub mod rollout;
 pub mod notifications;
 pub mod session_files;
 pub mod socket_hub;
 pub mod store;
+pub mod standing_audit;
 
 pub use api::{router, AppState};
 pub use store::{InMemoryStore, OperatorBootstrap, PgStore, Store};

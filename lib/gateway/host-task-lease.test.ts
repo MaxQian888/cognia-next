@@ -1,3 +1,4 @@
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 const mockCall = jest.fn()
 jest.mock("@/lib/tauri", () => ({
   transport: { call: (...args: unknown[]) => mockCall(...args) },
@@ -36,6 +37,41 @@ describe("acquireHostTaskLease", () => {
   })
   afterEach(() => {
     jest.useRealTimers()
+  })
+
+  it("refuses a model plan before preparing a lease on an old Host", async () => {
+    mockCall.mockResolvedValueOnce({})
+    await expect(
+      acquireHostTaskLease({
+        ...input,
+        modelPlan: { additionalModels: ["child"], modelBindings: {} },
+      })
+    ).rejects.toThrow("does not support external agent model plans")
+    expect(mockCall).toHaveBeenCalledTimes(1)
+    expect(mockCall).toHaveBeenCalledWith("host_feature_manifest")
+  })
+
+  it("negotiates plan support, forwards the plan and returns each model's own metadata", async () => {
+    const modelPlan = { additionalModels: ["child"], modelBindings: { haiku: "child" } }
+    mockCall
+      .mockResolvedValueOnce(buildLocalHostFeatureManifest({ platform: "headless" }))
+      .mockResolvedValueOnce(
+        prepared({
+          modelMetadataById: {
+            "stub-model": { id: "stub-model", contextLength: 64000 },
+            child: { id: "child", supportsReasoning: true, contextLength: 32000 },
+          },
+        })
+      )
+    const lease = await acquireHostTaskLease({ ...input, modelPlan })
+    expect(mockCall.mock.calls[1][1].request.modelPlan).toEqual(modelPlan)
+    expect(lease.modelMetadataById.child).toEqual({
+      id: "child",
+      supportsReasoning: true,
+      contextLength: 32000,
+    })
+    mockCall.mockResolvedValue(true)
+    await lease.revoke()
   })
 
   it("asks cognia-server for a lease by provider id only and never sends a credential", async () => {

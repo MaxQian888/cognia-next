@@ -11,6 +11,7 @@ import type {
   A2UIComponentProps,
   A2UIWidgetMetadata,
 } from "@/types/a2ui/schema"
+import { Validator, type Schema } from "jsonschema"
 import { routeRichOutputProfile } from "./output-profiles"
 
 /**
@@ -490,8 +491,15 @@ export function validateComponent(
     errors.push(`Unknown component type: ${component.component}`)
   }
 
-  // Additional type-specific validation could be added here
-  // based on JSON Schema from catalog entry
+  const entry = getComponent(component.component, catalogId)
+  if (entry?.schema) {
+    try {
+      const result = new Validator().validate(component, entry.schema as Schema)
+      errors.push(...result.errors.map((error) => `${error.property}: ${error.name}`))
+    } catch {
+      errors.push("Component schema could not be evaluated")
+    }
+  }
 
   return {
     valid: errors.length === 0,

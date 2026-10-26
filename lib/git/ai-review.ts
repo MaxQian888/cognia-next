@@ -13,6 +13,8 @@
 import { clampDiff } from "@/lib/git/ai-commit"
 import { extractJson } from "@/lib/twin/distill/llm"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 import type { GitFileChange, HunkFindingSeverity } from "@/types/git"
 
 export interface DiffReviewConfig {
@@ -42,19 +44,48 @@ export interface ReviewFinding {
 
 const SEVERITIES: readonly HunkFindingSeverity[] = ["info", "warning", "critical"]
 
-export function buildReviewSystemPrompt(config: DiffReviewConfig): string {
-  const lines = [
+export const DIFF_REVIEW_PROMPT = definePrompt({
+  id: "developer.diff-review",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "developer",
+  operation: "replace-template",
+  scopes: ["account"],
+  activation: "next-operation",
+  // Findings are parsed as a JSON array keyed by hunk number.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 8_000,
+  requiredFragments: ['"hunk"', '"severity"', '"note"'],
+  outputContract:
+    'A JSON array of {"hunk", "severity", "note"}; unknown severities and out-of-range hunks are dropped. The source-control "Additional instructions" setting is appended after this text.',
+  consumers: ["lib/git/ai-review.ts"],
+  defaultBody: [
     "You are a concise, senior code reviewer examining a single file's diff.",
     "The diff is split into numbered hunks. Review each hunk for real problems: bugs, logic errors, security issues, resource leaks, missing error handling, or clear style/maintainability concerns.",
     "Output ONLY a JSON array (no markdown fences, no prose) of findings:",
     '[{"hunk": <1-based number>, "severity": "info"|"warning"|"critical", "note": "<one short sentence>"}]',
     "Rules: at most one finding per hunk (the most important). Omit hunks that look fine — return [] when nothing is worth flagging. Keep each note under 200 characters, specific, and actionable. Never invent issues not visible in the diff.",
     'Use "critical" only for correctness/security bugs, "warning" for likely problems, "info" for minor suggestions.',
-  ]
+  ].join("\n"),
+})
+
+/** The base instructions plus the user's appended review instructions, if any. */
+export function buildReviewSystemPrompt(
+  config: DiffReviewConfig,
+  base: string = DIFF_REVIEW_PROMPT.defaultBody
+): string {
   const extra = config.customInstructions?.trim()
-  if (extra) lines.push(`Additional instructions: ${extra}`)
-  return lines.join("\n")
+  return extra ? `${base}\nAdditional instructions: ${extra}` : base
 }
+
+/**
+ * Which base text a review sends. The interactive diff review resolves the
+ * Prompt Center slot (ADR-0236). A changeset review agent folds findings into
+ * an approval verdict (ADR-0227), so it pins the shipped text: a customized
+ * prompt must not be able to talk a gate into "clean".
+ */
+export type DiffReviewPromptPolicy = "customizable" | "shipped"
 
 export function buildReviewUserPrompt(input: BuildReviewInput): string {
   const body = input.hunks
@@ -147,11 +178,16 @@ function reviewMaxTokens(hunkCount: number): number {
  */
 export async function generateDiffReview(
   input: BuildReviewInput,
-  client: Pick<LlmClient, "complete">
+  client: Pick<LlmClient, "complete">,
+  options: { promptPolicy?: DiffReviewPromptPolicy } = {}
 ): Promise<ReviewFinding[]> {
   if (input.hunks.length === 0) return []
+  const base =
+    options.promptPolicy === "shipped"
+      ? DIFF_REVIEW_PROMPT.defaultBody
+      : (await resolvePromptAsync(DIFF_REVIEW_PROMPT)).text
   const text = await client.complete(buildReviewUserPrompt(input), {
-    system: buildReviewSystemPrompt(input.config),
+    system: buildReviewSystemPrompt(input.config, base),
     temperature: 0.2,
     maxTokens: reviewMaxTokens(input.hunks.length),
   })

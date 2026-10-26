@@ -18,6 +18,26 @@ import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 const NO_ENV = { names: [], values: {} }
 
+it("round-trips experimental native model control without losing other Codex options", () => {
+  const config = {
+    id: "codex",
+    name: "Codex",
+    enabled: true,
+    protocol: "codex-app-server",
+    transport: "stdio",
+    process: { command: "codex", args: ["app-server"] },
+    codexOptions: { sandboxMode: "readOnly", stepModelSwitching: true },
+  } as ExternalAgentConfig
+  const seeded = addAgentFormFromConfig(config)
+  expect(seeded.data.codexStepModelSwitching).toBe(true)
+  const changed = { ...seeded.data, codexStepModelSwitching: false }
+  expect(buildCreateExternalAgentInput(changed).codexOptions).toEqual({ stepModelSwitching: false })
+  expect(addAgentFormPatch(config, changed).codexOptions).toEqual({
+    sandboxMode: "readOnly",
+    stepModelSwitching: false,
+  })
+})
+
 function form(patch: Partial<AddAgentFormData>): AddAgentFormData {
   return { ...DEFAULT_ADD_AGENT_FORM_DATA, ...patch }
 }
@@ -142,6 +162,49 @@ describe("validateAddAgentForm", () => {
     expect(validateAddAgentForm(data, "", NO_ENV)).toBe("cogniaModelInvalid")
   })
 
+  it("refuses sub-task models the runtime cannot run, and accepts valid ones", () => {
+    const claude = addAgentFormForPreset(DEFAULT_ADD_AGENT_FORM_DATA, "claude-code")!.data
+    const cogniaModel = { providerId: "gateway", modelId: "big" }
+    const valid = form({
+      ...claude,
+      name: "Claude",
+      cogniaModel,
+      modelRoles: {
+        version: 1,
+        slots: {
+          "tier.haiku": { kind: "cognia", binding: { providerId: "gateway", modelId: "small" } },
+        },
+      },
+    })
+    expect(validateAddAgentForm(valid, "claude-code", NO_ENV)).toBeNull()
+    expect(
+      validateAddAgentForm(
+        {
+          ...valid,
+          modelRoles: {
+            version: 1,
+            slots: {
+              "tier.haiku": { kind: "cognia", binding: { providerId: "other", modelId: "small" } },
+            },
+          },
+        },
+        "claude-code",
+        NO_ENV
+      )
+    ).toBe("modelRolesInvalid")
+    expect(
+      validateAddAgentForm(
+        {
+          ...valid,
+          modelRoles: { version: 1, slots: { "aux.small": { kind: "inherit-primary" } } },
+        },
+        "claude-code",
+        NO_ENV
+      )
+    ).toBe("modelRolesInvalid")
+    expect(CONNECTION_PROBLEMS.has("modelRolesInvalid")).toBe(true)
+  })
+
   it("files every problem except the name under the connection settings", () => {
     expect(CONNECTION_PROBLEMS.has("nameRequired")).toBe(false)
     expect(CONNECTION_PROBLEMS.has("commandRequired")).toBe(true)
@@ -227,6 +290,39 @@ describe("buildCreateExternalAgentInput", () => {
       buildCreateExternalAgentInput(form({ name: "A", command: "aider", protocol: "aider-cli" }))
         .defaultPermissionMode
     ).toBe("plan")
+  })
+})
+
+describe("sub-task models on the form", () => {
+  const modelRoles = {
+    version: 1 as const,
+    slots: { "subagent.default": { kind: "inherit-primary" as const } },
+  }
+
+  it("stores them only beside a Cognia binding", () => {
+    const base = form({ name: "A", command: "npx", modelRoles })
+    expect(buildCreateExternalAgentInput(base).modelRoles).toBeUndefined()
+    expect(
+      buildCreateExternalAgentInput({ ...base, cogniaModel: { providerId: "p", modelId: "m" } })
+        .modelRoles
+    ).toEqual(modelRoles)
+  })
+
+  it("round-trips through a stored configuration and its edit patch", () => {
+    const config = {
+      id: "saved",
+      name: "A",
+      enabled: true,
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "npx" },
+      cogniaModel: { providerId: "p", modelId: "m" },
+      modelRoles,
+    } as ExternalAgentConfig
+    const seeded = addAgentFormFromConfig(config).data
+    expect(seeded.modelRoles).toEqual(modelRoles)
+    expect(addAgentFormPatch(config, seeded).modelRoles).toEqual(modelRoles)
+    expect(addAgentFormPatch(config, { ...seeded, cogniaModel: null }).modelRoles).toBeUndefined()
   })
 })
 

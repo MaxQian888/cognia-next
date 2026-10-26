@@ -89,9 +89,6 @@ export const SCAN_ROOTS = [
   "src-tauri/src",
   "stores",
   "types",
-  "web/components",
-  "web/hooks",
-  "web/lib",
 ]
 
 /** Never scanned: build output, vendored trees, and dependency directories. */

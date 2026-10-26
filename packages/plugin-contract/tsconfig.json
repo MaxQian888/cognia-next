@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    // tsup's .d.ts emit runs a standalone tsc that can't share the root's
+    // incremental build-info file, and rollup-plugin-dts injects a baseUrl that
+    // TS 6.x flags as deprecated. Scope both overrides to this package's build.
+    "incremental": false,
+    "ignoreDeprecations": "6.0",
+    // A child tsconfig's `paths` REPLACES the parent's. The `@/*` mapping stays
+    // only while files listed in scripts/plugin/sdk-standalone-baseline.json
+    // still reference host source; it goes when that baseline is empty and this
+    // package joins `pnpm build:packages`.
+    "paths": {
+      "@/*": ["../../*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

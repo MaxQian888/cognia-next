@@ -13,7 +13,7 @@ import {
 import { TimeoutError } from "@cognia/primitives"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
-import catalog from "@/packages/plugin-sdk/contract/catalog.json"
+import catalog from "@/packages/plugin-contract/contract/catalog.json"
 import type { PluginManifest } from "@/types/plugin"
 import { getPermissionGuard } from "../security/permission-guard"
 

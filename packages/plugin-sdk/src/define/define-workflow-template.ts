@@ -19,7 +19,7 @@
  *   })
  */
 
-import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
+import type { PluginWorkflowTemplateDef } from "@cognia/plugin-contract/types/plugin/plugin-workflow-template"
 
 export function defineWorkflowTemplate(def: PluginWorkflowTemplateDef): PluginWorkflowTemplateDef {
   return def

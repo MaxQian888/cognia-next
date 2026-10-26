@@ -41,6 +41,7 @@ export type GithubUploadResult =
   | { ok: false; error: string; code?: "not-configured" | "no-token" | "public-repo" | "http" }
 
 export interface GithubDestinationDeps {
+  assertActive?: () => void
   http?: BackupHttpFn
   now?: () => number
   /** Skip the settings read; used by "verify" from the settings card. */
@@ -237,7 +238,14 @@ export async function uploadSnapshotToGithub(
   meta: SnapshotMeta,
   deps: GithubDestinationDeps = {}
 ): Promise<GithubUploadResult> {
-  const http = deps.http ?? backupHttpRequest
+  const assertActive = deps.assertActive ?? (() => undefined)
+  assertActive()
+  const http: BackupHttpFn = async (request) => {
+    assertActive()
+    const response = await (deps.http ?? backupHttpRequest)(request)
+    assertActive()
+    return response
+  }
   const settings = await getBackupDestinationsSettings()
   const config = deps.config ?? resolveGithubBackupConfig(settings.github)
   if (!config)
@@ -282,18 +290,23 @@ export async function uploadSnapshotToGithub(
     if (!latest.ok) return { ok: false, code: "http", error: latest.error }
 
     await pruneSnapshots(config, token, http, branch)
-    await updateBackupDestinationsSettings((current) => ({
-      ...current,
-      github: current.github
-        ? { ...current.github, lastSyncAt: stamp, lastVerifiedVisibility: "private" }
-        : current.github,
-    })).catch(() => undefined)
+    await updateBackupDestinationsSettings(
+      (current) => ({
+        ...current,
+        github: current.github
+          ? { ...current.github, lastSyncAt: stamp, lastVerifiedVisibility: "private" }
+          : current.github,
+      }),
+      assertActive
+    ).catch(() => undefined)
+    assertActive()
     return {
       ok: true,
       remotePath: `${config.repoFullName}:${snapshotPath}`,
       commitSha: snapshot.commitSha,
     }
   } catch (err) {
+    assertActive()
     const error = err instanceof Error ? err.message : String(err)
     log.error("github_upload_failed", undefined, { error })
     return { ok: false, code: "http", error }

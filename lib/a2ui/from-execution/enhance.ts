@@ -17,14 +17,37 @@ import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { loggers } from "@cognia/logging"
+import { resolvePromptAsync } from "@/lib/prompts/resolve"
+import { definePrompt } from "@/lib/prompts/types"
 
-const SYSTEM_PROMPT =
-  "You are a concise analyst. Given a digest of an automated execution " +
-  "(a workflow run or a chat conversation), write a short executive summary " +
-  "for a teammate who did not watch it run. Respond with STRICT JSON only, no " +
-  'markdown fences, shaped: {"title": string, "summary": string, "insights": string[]}. ' +
-  "`summary` is 1-3 sentences. `insights` is 0-4 short bullet strings (bottlenecks, " +
-  "failures, notable outputs). Do not invent facts not present in the digest."
+/**
+ * The analyst instructions for the executive summary (ADR-0236). Resolved in
+ * the source chat and its workspace when the page is built from a chat.
+ */
+export const EXECUTION_ENHANCE_PROMPT = definePrompt({
+  id: "generation.a2ui.enhance-execution",
+  contractVersion: 1,
+  kind: "feature-template",
+  group: "generation",
+  operation: "replace-template",
+  scopes: ["account", "workspace", "session"],
+  activation: "next-operation",
+  // The reply is parsed as JSON for these keys.
+  risk: "protocol",
+  hosts: ["app"],
+  maxChars: 4_000,
+  requiredFragments: ['"title"', '"summary"', '"insights"'],
+  outputContract:
+    'Parsed as JSON {"title", "summary", "insights"} into a summary Card on the interactive page; a reply that is not JSON is used whole as the summary, and an empty one leaves the page without it.',
+  consumers: ["lib/a2ui/from-execution/enhance.ts"],
+  defaultBody:
+    "You are a concise analyst. Given a digest of an automated execution " +
+    "(a workflow run or a chat conversation), write a short executive summary " +
+    "for a teammate who did not watch it run. Respond with STRICT JSON only, no " +
+    'markdown fences, shaped: {"title": string, "summary": string, "insights": string[]}. ' +
+    "`summary` is 1-3 sentences. `insights` is 0-4 short bullet strings (bottlenecks, " +
+    "failures, notable outputs). Do not invent facts not present in the digest.",
+})
 
 export interface ExecutionPageEnhancement {
   /** A refined human title for the page (may be empty). */
@@ -99,8 +122,20 @@ export async function enhanceExecutionPage(
   if (!client) return null
 
   try {
+    const session = args.session
+    const system = (
+      await resolvePromptAsync(EXECUTION_ENHANCE_PROMPT, {
+        context: session
+          ? {
+              sessionId: session.id,
+              ...(session.projectId ? { workspaceId: session.projectId } : {}),
+            }
+          : {},
+      })
+    ).text
+    if (args.abortSignal?.aborted) return null
     const response = await client.complete(safeDigest, {
-      system: SYSTEM_PROMPT,
+      system,
       temperature: 0,
       maxTokens: 400,
       abortSignal: args.abortSignal,

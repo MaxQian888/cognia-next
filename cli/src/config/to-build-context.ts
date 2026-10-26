@@ -42,6 +42,7 @@ import type {
   SessionKind,
 } from "@cognia/agent-config-types"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+import { freshInstallWebReader } from "@/lib/web/reader/reader-settings"
 import { normalizeSearchProviderHealthSettings } from "@cognia/web-search/types"
 
 import { resolveBuiltinProcessSandbox } from "../runtime/sandbox/builtin-process-sandbox"
@@ -101,6 +102,12 @@ export interface ToBuildContextParams {
    * start (bound to one dispatcher), so it leaves this off.
    */
   routingPromptText?: string
+  /**
+   * The workspace mounting the cwd, resolved by the caller when Prompt Center
+   * overrides are loaded (`primeCliPromptOverrides`), so a workspace-scoped
+   * override applies to the base prompt and the build-options prompt slots.
+   */
+  promptWorkspaceId?: string
   /** Injected clock for deterministic tests; defaults to `Date.now()`. */
   now?: number
 }
@@ -208,9 +215,17 @@ export function buildSearchAppSettings(config: ResolvedConfig): Partial<AppSetti
       {
         providerId: id,
         apiKey: provider.apiKey ?? "",
-        enabled: provider.enabled ?? Boolean(provider.apiKey),
+        enabled:
+          provider.enabled ??
+          (!["deepseek", "tinyfish", "searxng"].includes(id) && Boolean(provider.apiKey)),
         priority: provider.priority ?? index + 1,
         ...(provider.cx ? { cx: provider.cx } : {}),
+        ...(provider.engine ? { engine: provider.engine } : {}),
+        ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
+        ...(provider.allowPrivateEndpoint !== undefined
+          ? { allowPrivateEndpoint: provider.allowPrivateEndpoint }
+          : {}),
+        ...(provider.model ? { model: provider.model } : {}),
         ...(provider.defaultOptions ? { defaultOptions: provider.defaultOptions } : {}),
       },
     ])
@@ -283,7 +298,8 @@ export function buildCliSession(
   config: ResolvedConfig,
   now: number,
   sessionKind: SessionKind = "direct",
-  agentMode?: AgentModeConfig | null
+  agentMode?: AgentModeConfig | null,
+  promptWorkspaceId?: string
 ): ChatSession {
   const model = resolveActiveModel(config)
   // Forward the thinking level as `effort` only when the resolved model
@@ -320,12 +336,14 @@ export function buildCliSession(
           cwd: config.cwd,
           now,
           permissionMode,
+          ...(promptWorkspaceId ? { workspaceId: promptWorkspaceId } : {}),
           // Named so the shell section can say WHOSE sandbox is refusing a
           // command: with an external backend the shell is that agent's, and a
           // refusal is not something Cognia can widen or the model can retry.
           ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
         }),
-      config.outputStyle
+      config.outputStyle,
+      promptWorkspaceId ? { workspaceId: promptWorkspaceId } : {}
     ),
     workingDir: config.cwd,
     permissionMode,
@@ -349,15 +367,26 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
           cwd: config.cwd,
           now,
           permissionMode: config.permissionMode,
+          ...(params.promptWorkspaceId ? { workspaceId: params.promptWorkspaceId } : {}),
           ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
         }),
-      config.outputStyle
+      config.outputStyle,
+      params.promptWorkspaceId ? { workspaceId: params.promptWorkspaceId } : {}
     ),
     permissionMode: config.permissionMode,
     builtinTools: config.builtinTools,
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
-    webTools: { enabled: config.webTools !== false },
+    webTools: {
+      enabled: config.webTools !== false,
+      ...(config.preferCogniaSearch !== undefined
+        ? { preferCogniaSearch: config.preferCogniaSearch }
+        : {}),
+      ...(config.preferCogniaFetch !== undefined
+        ? { preferCogniaFetch: config.preferCogniaFetch }
+        : {}),
+    },
+    webReader: config.webReader ?? freshInstallWebReader(),
     // The same three rungs the desktop reads off AppSettings. Feeding them here
     // rather than inventing a CLI-specific gate means `resolveSendOptions`
     // applies one ladder: the session and character rungs above still win, the
@@ -403,7 +432,14 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
       : {}),
   } as unknown as AppSettings
 
-  const session = buildCliSession(sessionId, config, now, params.sessionKind, params.agentMode)
+  const session = buildCliSession(
+    sessionId,
+    config,
+    now,
+    params.sessionKind,
+    params.agentMode,
+    params.promptWorkspaceId
+  )
 
   // A character shim carries the allowed-tools whitelist through the same
   // union logic the desktop uses. systemPrompt still comes from the session
@@ -435,6 +471,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     },
     character,
     appSettings,
+    ...(params.promptWorkspaceId ? { promptWorkspaceId: params.promptWorkspaceId } : {}),
     agentMode: params.agentMode ?? null,
     preloadedMcpServers: params.mcpServers ?? [],
     ...(params.ephemeralSkillIds?.length ? { ephemeralSkillIds: params.ephemeralSkillIds } : {}),

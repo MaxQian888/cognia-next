@@ -111,6 +111,10 @@ export type CommandEffect =
   /** Ask the agent to diagnose the last failed `!command` (`/analyze`). The App
    * holds the captured command + output and builds the prompt. */
   | { kind: "analyzeBash" }
+  /** Ask the agent for a structured code review (`/review [base]`). The App
+   * builds the prompt, because it primes the Prompt Center overrides the review
+   * instruction resolves against before the session's first turn has. */
+  | { kind: "review"; base: string }
   /** Kill a live `!command` run — foreground or backgrounded — by cell id
    * (`/bashes kill`). The App owns the AbortController registry. */
   | { kind: "bashKill"; id: string }

@@ -17,15 +17,15 @@
  */
 
 export { defineConnector } from "../define/define-connector"
-export { buildA2UICapabilityMatrix } from "@/types/connectors/capability"
+export { buildA2UICapabilityMatrix } from "@cognia/plugin-contract/types/connectors/capability"
 
-export type { PluginConnectorDef } from "@/types/plugin"
-export type { PlatformAdapter } from "@/types/connectors"
+export type { PluginConnectorDef } from "@cognia/plugin-contract/types/plugin/index"
+export type { PlatformAdapter } from "@cognia/plugin-contract/types/connectors/index"
 export type {
   PluginAdapterContext,
   PluginAdapterFactory as AdapterFactory,
-} from "@/types/connectors/plugin-adapter"
-export type { ConnectorRuntimeCapabilityMatrix } from "@/types/connectors/runtime-capability"
+} from "@cognia/plugin-contract/types/connectors/plugin-adapter"
+export type { ConnectorRuntimeCapabilityMatrix } from "@cognia/plugin-contract/types/connectors/runtime-capability"
 export type {
   RunActivitySnapshot,
   RunPresentationCapabilities,
@@ -34,4 +34,4 @@ export type {
   RunPresentationRef,
   RunPresentationTarget,
   RunProjectionSnapshot,
-} from "@/types/execution/run"
+} from "@cognia/plugin-contract/types/execution/run"

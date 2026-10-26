@@ -27,7 +27,10 @@ pub(super) fn bind_authority(
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let account_id = account_id.ok_or_else(|| RpcError::forbidden("account scope is required"))?;
     let grants = caller_device_grants(account_id, device_id);
-    let namespace = caller_account_namespace(account_id)?;
+    let namespace = match cognia_companion::person_partition::current() {
+        Some(partition) => partition.account_id,
+        None => caller_account_namespace(account_id)?,
+    };
     bind_authority_values(args, &namespace, opaque_host_id(state), device_id, grants)
 }
 
@@ -75,12 +78,51 @@ fn bind_authority_values(
         "callerDeviceGrants".to_string(),
         Value::Array(grants.into_iter().map(Value::String).collect()),
     );
+    // A partition marker is authoritative only in this task-local scope.
+    // Legacy payloads stay byte-identical; a marker on a non-person brain is
+    // refused by that brain's trusted profile rather than selecting a policy.
+    if cognia_companion::person_partition::current().is_some() {
+        map.insert("callerPartition".to_string(), Value::Bool(true));
+    }
     Ok(args)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn p5d_authority_binds_partition_account_and_preserves_legacy_wire() {
+        use cognia_companion::security_store::{install_security_store, test_guard, SecurityStore};
+        let _guard = test_guard();
+        install_security_store(Some(SecurityStore::in_memory().unwrap()));
+        let binding = cognia_companion::host_identity::bind_local_account_from_operator("local_acct_a").unwrap();
+        let state = super::super::tests::test_state();
+        let input = serde_json::json!({"runtimeTargetId":"local-host"});
+        let legacy = bind_authority(input.clone(), &state, Some(&binding.remote_tenant_id), "device-a").unwrap();
+        let expected = serde_json::json!({
+            "runtimeTargetId":"local-host", "callerAccountId":"local_acct_a",
+            "authoritativeHostId":opaque_host_id(&state), "callerDeviceId":"device-a", "callerDeviceGrants":[],
+        });
+        assert_eq!(serde_json::to_vec(&legacy).unwrap(), serde_json::to_vec(&expected).unwrap());
+        assert!(legacy.get("callerPartition").is_none());
+        let partition = cognia_companion::person_partition::PersonPartition::new("org-a".into(), "user-a".into());
+        cognia_companion::person_partition::scope(Some(partition.clone()), async {
+            let bound = bind_authority(serde_json::json!({"callerAccountId":"spoof", "callerPartition":false,
+                "callerEventStreams":[{"leaseId":"verified-stream", "state":"ready"}]}), &state,
+                Some(&binding.remote_tenant_id), "device-a").unwrap();
+            assert_eq!(bound["callerAccountId"], partition.account_id);
+            assert_eq!(bound["callerPartition"], true);
+            assert_eq!(bound["authoritativeHostId"], legacy["authoritativeHostId"]);
+            assert_eq!(bound["callerDeviceId"], "device-a");
+            assert_eq!(bound["callerEventStreams"], serde_json::json!([{"leaseId":"verified-stream", "state":"ready"}]));
+            assert_eq!(bound["callerDeviceGrants"], legacy["callerDeviceGrants"]);
+        }).await;
+        let spoof = bind_authority(serde_json::json!({"callerPartition":true}), &state, Some(&binding.remote_tenant_id), "device-a").unwrap();
+        assert_eq!(spoof["callerPartition"], true); // non-person TS adapter refuses it
+        install_security_store(None);
+        cognia_companion::host_identity::unbind_local_account();
+    }
 
     #[test]
     fn tenant_scope_resolves_only_its_bound_local_account() {

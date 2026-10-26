@@ -1,5 +1,16 @@
 /** @jest-environment node */
-import { runProjectMining, projectClaimEvidenceHash } from "./run-project-mining"
+import {
+  MEMORY_PROJECT_EXTRACT_PROMPT,
+  projectClaimEvidenceHash,
+  resolveProjectExtractPrompt,
+  runProjectMining,
+} from "./run-project-mining"
+import { PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT } from "@cognia/memory/extract/project-extractor"
+import { __resetPromptVerdictsForTests } from "@/lib/prompts/resolve"
+import {
+  __setPromptOverrideSnapshotForTests,
+  buildPromptOverrideSnapshot,
+} from "@/lib/prompts/snapshot"
 import type { RunProjectMiningDeps, RunProjectMiningInput } from "./run-project-mining"
 import type { ProjectClaimCandidate } from "@cognia/memory/extract/project-extractor"
 import type { ConsolidateInput, ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
@@ -339,7 +350,8 @@ describe("runProjectMining consolidation", () => {
         messages: expect.arrayContaining([
           expect.objectContaining({ id: "m2", toolResultIndices: [1] }),
         ]),
-      })
+      }),
+      expect.any(String)
     )
   })
 
@@ -372,5 +384,63 @@ describe("projectClaimEvidenceHash", () => {
     expect(
       projectClaimEvidenceHash(claim({ evidence: [{ kind: "message", sourceId: "m1" }] }))
     ).not.toBe(a)
+  })
+})
+
+describe("project extractor prompt (Prompt Center)", () => {
+  afterEach(() => {
+    __setPromptOverrideSnapshotForTests(null)
+    __resetPromptVerdictsForTests()
+  })
+
+  function publish(body: string, revisionId: string): void {
+    __setPromptOverrideSnapshotForTests(
+      buildPromptOverrideSnapshot("test-db", [
+        {
+          bindingId: "pob-project-extract",
+          promptId: MEMORY_PROJECT_EXTRACT_PROMPT.id,
+          scope: "account",
+          targetId: "",
+          revisionId,
+          body,
+          contractVersion: MEMORY_PROJECT_EXTRACT_PROMPT.contractVersion,
+        },
+      ])
+    )
+  }
+
+  it("resolves the shipped prompt and version with no override", async () => {
+    __setPromptOverrideSnapshotForTests(buildPromptOverrideSnapshot("test-db", []))
+    await expect(resolveProjectExtractPrompt()).resolves.toEqual({
+      systemPrompt: PROJECT_CLAIM_EXTRACT_SYSTEM_PROMPT,
+      promptVersion: "project-v4",
+    })
+  })
+
+  it("sends a published override and stamps its revision onto the rows", async () => {
+    publish("Mine project facts. Return STRICT JSON only.", "por-project-extract-1")
+    const d = deps({ extractorIdentity: { provider: "anthropic", model: "claude-haiku" } })
+    await runProjectMining(input(), d)
+    expect(d.extract).toHaveBeenCalledWith(
+      expect.anything(),
+      "Mine project facts. Return STRICT JSON only."
+    )
+    expect(d.consolidateCalls[0]!.candidates[0]!.projectClaim?.extractor).toEqual({
+      provider: "anthropic",
+      model: "claude-haiku",
+      promptVersion: "project-v4+override:por-project-extract-1",
+    })
+  })
+
+  it("uses an injected resolver when one is given", async () => {
+    const d = deps({
+      resolveExtractPrompt: async () => ({ systemPrompt: "custom", promptVersion: "v-test" }),
+      extractorIdentity: { provider: "anthropic", model: "claude-haiku" },
+    })
+    await runProjectMining(input(), d)
+    expect(d.extract).toHaveBeenCalledWith(expect.anything(), "custom")
+    expect(d.consolidateCalls[0]!.candidates[0]!.projectClaim?.extractor?.promptVersion).toBe(
+      "v-test"
+    )
   })
 })

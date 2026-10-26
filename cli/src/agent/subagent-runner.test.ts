@@ -1,6 +1,8 @@
 /**
  * @jest-environment node
  */
+import type { PluginToolDispatchDeps } from "../plugin/plugin-tool-dispatch"
+import type { PluginToolExecRequest } from "@/lib/claude/plugin-tool-ipc"
 import { runCliSubagent, type RunCliSubagentDeps } from "./subagent-runner"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { SendOptions } from "@cognia/agent-config-types"
@@ -9,6 +11,7 @@ import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { createPermissionGate } from "./permission-gate"
+import { loadSkillResourceForSession } from "@/lib/skills/runtime-loader"
 
 // Mock the live-sidecar default collaborators so the "no injected deps" path —
 // where runCliSubagent falls back to them — is exercisable without a sidecar.
@@ -17,6 +20,7 @@ jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({ provider: "opencode-go" })),
 }))
 jest.mock("@/lib/claude/run-and-capture", () => ({
+  RunAndCaptureError: jest.requireActual("@/lib/claude/run-and-capture").RunAndCaptureError,
   runAndCaptureAssistantReply: jest.fn(async () => ({
     text: "from default capture",
     messageId: "m",
@@ -25,6 +29,30 @@ jest.mock("@/lib/claude/run-and-capture", () => ({
   })),
 }))
 jest.mock("@/lib/claude/ipc", () => ({ closeSession: jest.fn(async () => undefined) }))
+jest.mock("../plugin/plugin-tool-dispatch", () => ({
+  subscribePluginToolDispatch: jest.fn(async () => jest.fn()),
+}))
+jest.mock("./configured-plugin-tool-handle", () => ({
+  makeConfiguredCliPluginToolHandle: jest.fn(() =>
+    jest.fn(async (request) => ({
+      type: "plugin_tool_response",
+      sessionId: request.sessionId,
+      toolUseId: request.toolUseId,
+      result: "child tool result",
+    }))
+  ),
+}))
+jest.mock("./cli-host-runtime", () => ({
+  bindCliSessionHostRuntime: jest.fn(() => jest.fn()),
+}))
+jest.mock("../plugin/plugin-runtime", () => ({
+  ensurePluginRuntime: jest.fn(async () => ({ ok: true })),
+}))
+jest.mock("../db/bootstrap", () => ({
+  ensureCliDb: jest.fn(async () => undefined),
+  cliStoreMayHoldRows: () => false,
+  CliDbSnapshotError: class extends Error {},
+}))
 
 function cfg(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
@@ -51,6 +79,335 @@ function captureResult(overrides: Partial<RunAndCaptureResult> = {}): RunAndCapt
 }
 
 describe("runCliSubagent", () => {
+  it("drains a nested child host call before releasing its session", async () => {
+    const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+    const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+      "./configured-plugin-tool-handle"
+    )
+    let finish!: () => void
+    const pendingWrite = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    makeConfiguredCliPluginToolHandle.mockReturnValueOnce(
+      jest.fn(async () => {
+        await pendingWrite
+        return { result: "saved" }
+      })
+    )
+    let started!: () => void
+    const accepted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let hostCall!: Promise<unknown>
+    const deps = setupDeps()
+    deps.capture = async (id) => {
+      const handle = subscribePluginToolDispatch.mock.calls.at(-1)[0].handle
+      hostCall = handle({ sessionId: id, toolUseId: "nested", name: "dispatch_agent", args: {} })
+      await new Promise((resolve) => setImmediate(resolve))
+      started()
+      return captureResult()
+    }
+    const run = runCliSubagent(def(), "go", "parent", deps)
+    await accepted
+    expect(deps.closeSession).not.toHaveBeenCalled()
+    finish()
+    await Promise.all([run, hostCall])
+    expect(deps.closeSession).toHaveBeenCalledTimes(1)
+  })
+  it("returns completed evidence from a cancelled child capture and still retires its session", async () => {
+    const controller = new AbortController()
+    const { RunAndCaptureError } = jest.requireActual("@/lib/claude/run-and-capture")
+    const deps = { ...setupDeps(), signal: controller.signal }
+    deps.capture = async () => {
+      controller.abort()
+      throw new RunAndCaptureError("cancelled", "aborted", {
+        partial: {
+          text: "partial report",
+          continuationContext: "DONE_FACT; NEXT_FILE=/remaining.ts",
+        },
+      })
+    }
+    await expect(runCliSubagent(def(), "go", "parent", deps)).resolves.toMatchObject({
+      finishReason: "interrupted",
+      text: expect.stringContaining("DONE_FACT"),
+    })
+    expect(deps.closeSession).toHaveBeenCalledTimes(1)
+  })
+  it.each([false, true])(
+    "waits for shared approvals before a child host call (cancel=%s)",
+    async (cancel) => {
+      const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+      const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+        "./configured-plugin-tool-handle"
+      )
+      let bridge: { handle: (r: unknown) => Promise<unknown> }
+      subscribePluginToolDispatch.mockImplementationOnce(async (value: PluginToolDispatchDeps) => {
+        bridge = value as typeof bridge
+        return jest.fn()
+      })
+      let release!: () => void
+      const approved = new Promise<void>((resolve) => (release = resolve))
+      const controller = new AbortController()
+      const deps = { ...setupDeps(), signal: controller.signal, awaitApprovals: () => approved }
+      deps.capture = async (id) => {
+        const execute = makeConfiguredCliPluginToolHandle.mock.results.at(-1).value
+        const pending = bridge.handle({ sessionId: id, toolUseId: "host", args: {} })
+        await Promise.resolve()
+        expect(execute).not.toHaveBeenCalled()
+        if (cancel) controller.abort()
+        else release()
+        await expect(pending).resolves.toMatchObject(
+          cancel ? { error: expect.stringMatching(/cancel/i) } : { result: "child tool result" }
+        )
+        expect(execute).toHaveBeenCalledTimes(cancel ? 0 : 1)
+        return captureResult()
+      }
+      await runCliSubagent(def(), "go", "parent", deps)
+      release()
+    }
+  )
+  it("finishes every child teardown even when detaching the bridge throws", async () => {
+    const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+    const { bindCliSessionHostRuntime } = jest.requireMock("./cli-host-runtime")
+    subscribePluginToolDispatch.mockResolvedValueOnce(() => {
+      throw new Error("detach failed")
+    })
+    const unregister = jest.fn()
+    const deps = { ...setupDeps(), nesting: { manifest: null, register: jest.fn(), unregister } }
+    await expect(runCliSubagent(def(), "go", "parent", deps)).resolves.toMatchObject({
+      text: "reviewed",
+    })
+    expect(unregister).toHaveBeenCalledWith("parent::sub-cancel-test")
+    expect(deps.closeSession).toHaveBeenCalledWith("parent::sub-cancel-test")
+    expect(bindCliSessionHostRuntime.mock.results.at(-1).value).toHaveBeenCalledTimes(1)
+    await expect(
+      loadSkillResourceForSession("parent::sub-cancel-test", "skill", "reference.md")
+    ).resolves.toMatchObject({ ok: false, code: "missing_context" })
+  })
+  it("advertises scoped child skills and releases their resource context on completion", async () => {
+    const deps = setupDeps()
+    const scope = {
+      sessionId: "parent::sub-cancel-test",
+      turnId: "parent::sub-cancel-test:t0",
+      attemptId: "parent::sub-cancel-test:t0:a0",
+    }
+    deps.resolveOptions = async (ctx) => {
+      ctx.onResolvedSkillLoadScope?.({
+        allowedSkillIds: ["child-skill"],
+        explicitSkillIds: [],
+        allowDisabledSkillIds: [],
+      })
+      return {}
+    }
+    deps.resolveSkillIds = () => ["child-skill"]
+    deps.resolveLoadableSkills = async () => [{ id: "child-skill", name: "Workflow" }]
+    const resources = {
+      listResources: async () => [
+        {
+          id: "r",
+          skillId: "child-skill",
+          path: "references/node-types.md",
+          name: "test",
+          kind: "reference" as const,
+          content: "CHILD_SKILL_RESOURCE",
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      recordUsage: async () => undefined,
+    }
+    deps.capture = async (_id, _prompt, options) => {
+      expect(options!.pluginTools?.map((t) => t.name)).toEqual(
+        expect.arrayContaining(["load_skill", "load_skill_resource"])
+      )
+      const loaded = await loadSkillResourceForSession(
+        scope,
+        "child-skill",
+        "references/node-types.md",
+        0,
+        100,
+        resources
+      )
+      expect(loaded.ok ? loaded.content : loaded).toBe("CHILD_SKILL_RESOURCE")
+      await expect(
+        loadSkillResourceForSession(
+          scope,
+          "builtin:ocr",
+          "references/node-types.md",
+          0,
+          100,
+          resources
+        )
+      ).resolves.toMatchObject({ ok: false, code: "out_of_scope" })
+      await expect(
+        loadSkillResourceForSession(
+          { ...scope, attemptId: "stale" },
+          "child-skill",
+          "references/node-types.md",
+          0,
+          100,
+          resources
+        )
+      ).resolves.toMatchObject({ ok: false, code: "stale_context" })
+      return captureResult()
+    }
+    await runCliSubagent(def(), "go", "parent", deps)
+    await expect(
+      loadSkillResourceForSession(
+        scope,
+        "child-skill",
+        "references/node-types.md",
+        0,
+        100,
+        resources
+      )
+    ).resolves.toMatchObject({ ok: false, code: "missing_context" })
+  })
+
+  it("closes and releases a child when subscribing its tool bridge fails", async () => {
+    const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+    const { bindCliSessionHostRuntime } = jest.requireMock("./cli-host-runtime")
+    subscribePluginToolDispatch.mockRejectedValueOnce(new Error("bridge unavailable"))
+    const deps = setupDeps()
+    await expect(runCliSubagent(def(), "go", "parent", deps)).rejects.toThrow("bridge unavailable")
+    expect(deps.capture).not.toHaveBeenCalled()
+    expect(deps.closeSession).toHaveBeenCalledWith("parent::sub-cancel-test")
+    expect(bindCliSessionHostRuntime.mock.results.at(-1).value).toHaveBeenCalledTimes(1)
+  })
+
+  it("aborts a pending child host call without cancelling a sibling bridge", async () => {
+    const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+    const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+      "./configured-plugin-tool-handle"
+    )
+    const bridges = new Map()
+    const disposers = new Map()
+    subscribePluginToolDispatch.mockImplementation(async (value: PluginToolDispatchDeps) => {
+      bridges.set(value.sessionId, value)
+      const dispose = jest.fn()
+      disposers.set(value.sessionId, dispose)
+      return dispose
+    })
+    makeConfiguredCliPluginToolHandle.mockImplementationOnce(
+      () => async (request: PluginToolExecRequest) => {
+        await new Promise<void>((resolve) =>
+          request.abortSignal!.addEventListener("abort", () => resolve(), { once: true })
+        )
+        return { error: "cancelled" }
+      }
+    )
+    const controller = new AbortController()
+    let began: () => void
+    const started = new Promise<void>((resolve) => (began = resolve))
+    const first = runCliSubagent(def(), "go", "parent", {
+      ...setupDeps(),
+      mintId: () => "one",
+      signal: controller.signal,
+      capture: async (id) => {
+        const pending = bridges.get(id).handle({ sessionId: id, toolUseId: "same", args: {} })
+        began()
+        await pending
+        return captureResult()
+      },
+    })
+    await started
+    await runCliSubagent(def(), "sibling", "parent", {
+      ...setupDeps(),
+      mintId: () => "two",
+      capture: async (id) => {
+        controller.abort()
+        await first
+        expect(disposers.get(id)).not.toHaveBeenCalled()
+        expect(
+          await bridges.get(id).handle({ sessionId: id, toolUseId: "same", args: {} })
+        ).toMatchObject({ result: "child tool result" })
+        return captureResult()
+      },
+    })
+    expect(disposers.get("parent::sub-one")).toHaveBeenCalledTimes(1)
+    expect(disposers.get("parent::sub-two")).toHaveBeenCalledTimes(1)
+    subscribePluginToolDispatch.mockImplementation(async () => jest.fn())
+  })
+  it("owns an exact-id plugin bridge and child host config until capture settles", async () => {
+    const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+    const { bindCliSessionHostRuntime } = jest.requireMock("./cli-host-runtime")
+    const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+      "./configured-plugin-tool-handle"
+    )
+    subscribePluginToolDispatch.mockClear()
+    bindCliSessionHostRuntime.mockClear()
+    makeConfiguredCliPluginToolHandle.mockClear()
+    const deps = setupDeps()
+    let bridge: { sessionId: string; handle: (request: unknown) => Promise<unknown> }
+    const unsubscribe = jest.fn()
+    subscribePluginToolDispatch.mockImplementationOnce(async (value: PluginToolDispatchDeps) => {
+      bridge = value as typeof bridge
+      return unsubscribe
+    })
+    deps.capture = async (id, _prompt, options) => {
+      expect(bridge.sessionId).toBe(id)
+      expect(bindCliSessionHostRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/work", model: "child-model" }),
+        id
+      )
+      expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "child-model" })
+      )
+      const request = {
+        sessionId: id,
+        toolUseId: "tool-1",
+        toolName: "plugin_probe",
+        args: {},
+        turnId: options!.turnId,
+      }
+      expect(await bridge.handle(request)).toMatchObject({ result: "child tool result" })
+      expect(await bridge.handle({ ...request, turnId: "stale" })).toMatchObject({
+        error: expect.stringMatching(/inactive|cancel/i),
+      })
+      expect(unsubscribe).not.toHaveBeenCalled()
+      return captureResult()
+    }
+    await runCliSubagent(def({ model: "child-model" }), "go", "parent", deps)
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(bindCliSessionHostRuntime.mock.results.at(-1).value).toHaveBeenCalledTimes(1)
+    expect(
+      await bridge!.handle({ sessionId: bridge!.sessionId, toolUseId: "late", args: {} })
+    ).toMatchObject({ error: expect.stringMatching(/inactive|cancel/i) })
+  })
+
+  it("releases the child bridge and host binding when capture throws", async () => {
+    const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
+    const { bindCliSessionHostRuntime } = jest.requireMock("./cli-host-runtime")
+    const unsubscribe = jest.fn()
+    subscribePluginToolDispatch.mockResolvedValueOnce(unsubscribe)
+    const deps = setupDeps()
+    deps.capture = jest.fn(async () => {
+      throw new Error("capture failed")
+    })
+    await expect(runCliSubagent(def(), "go", "parent", deps)).rejects.toThrow("capture failed")
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(bindCliSessionHostRuntime.mock.results.at(-1).value).toHaveBeenCalledTimes(1)
+    expect(deps.closeSession).toHaveBeenCalledWith("parent::sub-cancel-test")
+  })
+  it("carries observed tool evidence into the incomplete subagent report", async () => {
+    const deps = setupDeps()
+    const capture = jest.fn().mockResolvedValue(
+      captureResult({
+        text: "budget reached",
+        resultSubtype: "error_max_turns",
+        budgetContinuationContext: "Recorded tool evidence: FACT_FIRST; NEXT_FILE=/chapter-23",
+      })
+    )
+    const result = await runCliSubagent(def(), "research", "parent", {
+      ...deps,
+      capture,
+      closeSession: jest.fn(async () => undefined),
+    })
+    expect(result.text).toContain("FACT_FIRST")
+    expect(result.text).toContain("NEXT_FILE=/chapter-23")
+    expect(capture.mock.calls[0][3]).toMatchObject({ preserveBudgetEvidence: true })
+  })
+
   function setupDeps(): RunCliSubagentDeps {
     return {
       config: cfg(),
@@ -334,6 +691,7 @@ describe("runCliSubagent", () => {
 
     await runCliSubagent(def(), "go", "p", base)
     expect((capture.mock.calls[1][2] as SendOptions).aiSdkMaxSteps).toBe(200)
+    expect((capture.mock.calls[1][2] as SendOptions).maxTurns).toBeUndefined()
   })
 
   it("runs with no wall-clock and the generous subagent idle window", async () => {
@@ -635,5 +993,37 @@ describe("runCliSubagent, definition fidelity", () => {
     }
     await runCliSubagent(def(), "go", "parent", deps)
     expect(seen[1]).toContain("`dispatch_agent`")
+  })
+})
+
+describe("runCliSubagent Prompt Center overrides (ADR-0236)", () => {
+  it("resolves the child's prompt slots against the workspace mounting its cwd", async () => {
+    let seen: BuildOptionsContext | undefined
+    const prime = jest.fn(async () => ({ workspaceId: "ws-9" }))
+    await runCliSubagent(def(), "task", "parent", {
+      config: cfg(),
+      home: "/h",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set(),
+      disabledMcpTools: new Set(),
+      primePromptOverrides: prime,
+      resolveOptions: async (ctx) => {
+        seen = ctx
+        return {} as SendOptions
+      },
+      resolveHooks: () => undefined,
+      capture: jest.fn(async () => ({
+        text: "ok",
+        messageId: "m",
+        a2uiSurfaces: {},
+        a2uiSurfaceOrder: [],
+      })) as unknown as RunCliSubagentDeps["capture"],
+      closeSession: jest.fn(async () => undefined),
+      mintId: () => "p",
+    })
+    expect(prime).toHaveBeenCalledWith("/work")
+    expect(seen?.promptWorkspaceId).toBe("ws-9")
   })
 })

@@ -10,7 +10,7 @@ import {
 } from "@/lib/i18n/plugin-i18n-registry"
 
 // Mock stores and i18n config
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       language: "en",

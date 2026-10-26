@@ -5,12 +5,18 @@
  * `InboundA2UIBlock` can be persisted onto `StoredMessage.metadata`
  * for the Inbox renderer to pick up. Adapters that don't have a mapper
  * or whose payload doesn't produce any rich structure return `null`
- * and the bus falls through to plaintext rendering.
+ * and the bus falls through to plaintext rendering. The edit path calls it
+ * again with the new revision, so a stored block never outlives its text.
  */
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { InboundA2UIBlock } from "./inbound-a2ui-types"
+import {
+  inboundA2UIBlockToPlainText,
+  isTextOnlyInboundA2UIBlock,
+  sanitizeInboundA2UIBlock,
+} from "./inbound-a2ui-normalize"
 import { slackInboundToA2UI } from "../slack/inbound-to-a2ui"
 import { larkInboundToA2UI } from "../lark/inbound-to-a2ui"
 import { discordInboundToA2UI } from "../discord/inbound-to-a2ui"
@@ -38,6 +44,44 @@ export function projectInboundToA2UI(
   // hands an object. Only reject nullish payloads here and let each mapper
   // validate its own shape (the try/catch below contains any surprise).
   if (rawPayload == null) return null
+  const projected = runMapper(platform, rawPayload, segments)
+  // Re-validate what the mapper produced: it is persisted and rendered later,
+  // outside this try/catch, so a malformed node must not survive to React.
+  const block = sanitizeInboundA2UIBlock(projected)
+  if (!block) return null
+  // A frame around nothing but the very text the parts already hold adds no
+  // structure; the ordinary parts render it. A text-only block that says
+  // something else (Slack's `text` fallback differs from its blocks, a long
+  // card outgrows its capped mirror, mrkdwn was converted) is kept.
+  if (segments && isTextOnlyInboundA2UIBlock(block)) {
+    const fallback = segments
+      .map((seg) => (seg.type === "text" ? seg.text : seg.type === "markdown" ? seg.md : ""))
+      .join("\n")
+    if (sameProse(inboundA2UIBlockToPlainText(block), fallback)) return null
+  }
+  return block
+}
+
+/**
+ * Same text with the same line structure. Trailing spaces (Markdown hard
+ * breaks, which the transcript adds to IM text itself) and runs of spaces
+ * do not count; a line or paragraph break the fallback lacks does.
+ */
+function sameProse(a: string, b: string): boolean {
+  const lines = (text: string) =>
+    text
+      .replace(/[ \t]+$/gm, "")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  return lines(a) === lines(b)
+}
+
+function runMapper(
+  platform: PlatformKind,
+  rawPayload: unknown,
+  segments: MessageSegment[] | undefined
+): InboundA2UIBlock | null {
   try {
     switch (platform) {
       case "slack":

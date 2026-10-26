@@ -30,7 +30,7 @@
 import {
   normalizeProtocol,
   resolveProviderProtocol,
-} from "@/sidecar/src/providers/provider-protocol.ts"
+} from "@cognia/provider-types/provider-protocol"
 import type { AgentRuntimeAdapterId } from "@cognia/agent-config-types/agent-execution"
 import { COMPOSER_MAX_ATTACHMENT_BYTES } from "../prepare"
 

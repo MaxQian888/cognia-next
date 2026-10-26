@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 import { Trash2Icon, DownloadIcon, FilterIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +46,7 @@ export function AutomationAuditTable() {
   const [loading, setLoading] = useState(true)
   const [surfaceFilter, setSurfaceFilter] = useState<SurfaceFilter>("all")
   const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>("all")
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -56,11 +58,11 @@ export function AutomationAuditTable() {
       })
       setRows(r)
     } catch (err) {
-      toast.error("Failed to load audit log", { description: String(err) })
+      toast.error(t("loadFailed"), { description: String(err) })
     } finally {
       setLoading(false)
     }
-  }, [surfaceFilter, decisionFilter])
+  }, [surfaceFilter, decisionFilter, t])
 
   useEffect(() => {
     let cancelled = false
@@ -82,15 +84,22 @@ export function AutomationAuditTable() {
   }, [rows])
 
   async function handleClear() {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm("Clear the entire automation audit log? This cannot be undone.")
-    ) {
+    const confirmed = await confirm({
+      title: t("clearConfirm.title"),
+      description: t("clearConfirm.description"),
+      confirmLabel: t("clearConfirm.action"),
+      destructive: true,
+      testid: "automation-audit-clear-confirm",
+    })
+    if (!confirmed) return
+    try {
+      await clearAuditLog()
+    } catch (err) {
+      toast.error(t("clearFailed"), { description: String(err) })
       return
     }
-    await clearAuditLog()
     await reload()
-    toast.success("Audit log cleared")
+    toast.success(t("cleared"))
   }
 
   function handleExport() {
@@ -248,6 +257,7 @@ export function AutomationAuditTable() {
           </>
         )}
       </CardContent>
+      {confirmDialog}
     </Card>
   )
 }

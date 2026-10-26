@@ -493,6 +493,8 @@ describe("Permission API", () => {
       "ai:chat",
       "ai:embed",
       "agent:control",
+      "agent-config:read",
+      "agent-config:write",
       "builtin-skills:invoke",
       "agent:dispatch-external",
       "agent:external:read",

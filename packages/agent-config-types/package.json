@@ -28,12 +28,21 @@
   },
   "dependencies": {
     "@cognia/agent": "workspace:*",
-    "@cognia/agent-contracts": "workspace:*"
+    "@cognia/agent-contracts": "workspace:*",
+    "@cognia/memory": "workspace:*",
+    "@cognia/provider-types": "workspace:*",
+    "@cognia/router-fusion": "workspace:*",
+    "@cognia/web-search": "workspace:*"
   },
   "peerDependencies": {
     "ai": "*"
   },
   "engines": {
     "node": ">=26.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.4",
+    "tsup": "^8.5.1"
   }
 }

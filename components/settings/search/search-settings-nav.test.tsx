@@ -23,9 +23,9 @@ beforeEach(() => {
 })
 
 describe("SearchSettingsNav", () => {
-  it("renders all six section buttons", () => {
+  it("renders all seven section buttons", () => {
     render(<SearchSettingsNav active="basics" onSelect={jest.fn()} />)
-    expect(screen.getAllByRole("button")).toHaveLength(6)
+    expect(screen.getAllByRole("button")).toHaveLength(7)
     expect(screen.getByText("nav.basics")).toBeInTheDocument()
     expect(screen.getByText("nav.diagnostics")).toBeInTheDocument()
   })
@@ -39,14 +39,14 @@ describe("SearchSettingsNav", () => {
   it("shows the configured/total badge on the providers item", () => {
     render(<SearchSettingsNav active="basics" onSelect={jest.fn()} />)
     // tavily is enabled+configured, brave is not → 1 of 10 providers.
-    expect(screen.getByText("1/10")).toBeInTheDocument()
+    expect(screen.getByText("1/13")).toBeInTheDocument()
   })
 
   it("highlights the providers item and its badge when active", () => {
     render(<SearchSettingsNav active="providers" onSelect={jest.fn()} />)
     const providers = screen.getByText("nav.providers").closest("button")
     expect(providers).toHaveAttribute("aria-current", "page")
-    expect(screen.getByText("1/10")).toBeInTheDocument()
+    expect(screen.getByText("1/13")).toBeInTheDocument()
   })
 
   it("calls onSelect with the clicked section id", () => {
@@ -55,4 +55,11 @@ describe("SearchSettingsNav", () => {
     fireEvent.click(screen.getByText("nav.providers"))
     expect(onSelect).toHaveBeenCalledWith("providers")
   })
+})
+
+it("exposes Reading navigation", () => {
+  const onSelect = jest.fn()
+  render(<SearchSettingsNav active="reading" onSelect={onSelect} />)
+  fireEvent.click(screen.getByText("nav.reading"))
+  expect(onSelect).toHaveBeenCalledWith("reading")
 })

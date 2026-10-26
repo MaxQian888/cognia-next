@@ -1,0 +1,74 @@
+# Build, gates, and CI script failure repairs — 2026-10-20
+
+This follow-up repairs the remaining failures from the test-resource investigation. It preserves existing behavioral assertions, source coverage, thresholds, default script selection, and account isolation. Measurements and source fingerprints are in [the accompanying data](./2026-10-20-build-gates-ci-failure-repairs-data.json).
+
+The initial reproduction used the real package scripts with their existing bounded Node test runner. Build had 4 failures out of 438 tests, gates had 4 out of 866, and CI had 2 out of 522. No tests were skipped. The working tree already contained unrelated changes; every repair was reviewed against a snapshot taken before this task's edits.
+
+## Root causes and repairs
+
+| Failing check                    | Confirmed cause                                                                                                                                                                    | Repair and preserved obligation                                                                                                                                                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sidecar linked-package inventory | `@cognia/agent-contracts` was a linked dependency but absent from the bundler source aliases.                                                                                      | Add its exact and wildcard aliases. Keep compiled runtime package resolution unchanged.                                                                                                                                                                                        |
+| Root analysis preparation        | The test required the literal `tsc --noEmit`, while the root script already used the native compiler launcher with the same no-emit option.                                        | Accept either legitimate launcher while retaining sidecar preparation order, `--noEmit`, and the existing knip assertion.                                                                                                                                                      |
+| Scheduled task contracts         | `harness-evolution-sweep` already existed in the domain type and executor registry, but both request and response enum authorities omitted it.                                     | Add the existing type to both schema authorities and regenerate all affected contracts with the existing generator. Keep the enum closed.                                                                                                                                      |
+| Browser socket tickets           | The assertion selected `oneOf[1]`, which became the remote-desktop variant after another variant was added.                                                                        | Find variants by their discriminators. Retain all browser/session/enum assertions and add real Ajv positive and negative validation for browser, remote-desktop, and unbound channels.                                                                                         |
+| Co-located tests                 | Existing usage hint and spend-hook implementations lacked their required co-located suites.                                                                                        | Add ten cases for empty/loading states, advisory display, thresholds, token fallback, cost aggregation, unpriced turns, subscription changes, and idle behavior. Production usage logic is unchanged.                                                                          |
+| Docker build contract            | A test expected an outer 8 GiB `NODE_OPTIONS`, even though the package build script already sets 16 GiB and overrides an outer value.                                              | Check the actual Docker invocation and effective package build command. Preserve CI mode and static-generation concurrency assertions. No Docker or heap configuration changed.                                                                                                |
+| Gate ownership registry          | Host-archive self-tests were already in the build aggregate but lacked ownership metadata; release-catalog tests were outside the CI aggregate.                                    | Record the existing build ownership and add `scripts/release/*.test.mjs` to the existing CI aggregate before recording that ownership.                                                                                                                                         |
+| Identity vocabulary              | Exact wire exceptions no longer matched the cipher snapshot and queue fence/deduplication code. Fixing those anchors exposed additional bare identity names.                       | Review exact occurrences, qualify internal local/provider variables, and retain serialized/persisted `accountId` fields with exact justified exceptions. No identity baseline expansion.                                                                                       |
+| Feishu workflow inventory        | Identity Server, Sync Server, and Server image benchmark workflows existed but were absent from notification policy and workflow-run subscriptions.                                | Register their real file names and display names. Preserve opt-in delivery, trusted-checkout, read-only permission, and durable-claim checks. No notification was sent.                                                                                                        |
+| Coverage manifest equality       | Jest omitted the existing GitHub Bot Kit source scope, while the manifest omitted Jest's root `dist` ignore. The standalone merger also treated `<rootDir>` as literal regex text. | Restore the package source scope in Jest, synchronize the root-only ignore, and escape/substitute the root in the merger. A failing-then-passing regression preserves nested `app/dist` source and handles regex characters in the root path. All thresholds remain unchanged. |
+
+The scheduler repair intentionally refreshes the generated catalog identity to `6317b639d7254781f97b958eb5d96930561f37b9f4cc1a61c573256aa42d87d3` across TypeScript, Rust, catalog, AsyncAPI, and bridge fixtures. The existing generator reports **941 remote commands and 114 classified routes**, and its freshness check passes. No command, endpoint, executor, or authentication check was removed.
+
+## Additional checks reached after the original failures
+
+Root typechecking exposed two test-only errors: a `never`-cast diagnostic could not be spread, and a test imported `DiffLine` from a module that did not export it. The diagnostic fixture now satisfies `CogniaDiagnostic`, and the type import comes from its existing public type authority. All six harness assertions still pass.
+
+The restored sidecar source alias then exposed unchecked-index inference errors in two `agent-contracts` modules. A tuple assertion follows the existing exact-length split check; a permission-rule map now declares its tuple return type. Both modules emit byte-identical JavaScript before and after the repair, and their existing 49 tests pass. Root and all chained sidecar typechecks pass.
+
+The zero-warning lint gate initially reported 81 errors and 4,856 warnings. All errors and 4,852 warnings came from a generated staged Office plugin bundle. ESLint now excludes only `src-tauri/resources/plugins/**/dist/**`, consistent with the existing authored-plugin bundle exclusions. An ESLint API check confirms that authored `plugins/cognia-office/src/index.ts` remains included.
+
+The other four warnings were reviewed individually:
+
+- Remove an unused socket-close callback argument without changing cleanup or reconnection logic.
+- Add the missing `runtimeAvailability.container.available` memo dependency. A new behavioral regression first failed because a false-to-true availability change left the row stale; it now checks both directions and preserves row identity when inputs do not change. Stabilizing the connection mock prevents unrelated rerenders from hiding the defect.
+- Keep the two TanStack Virtual instances reactive. Each owning function explicitly opts out of automatic compiler memoization, with one documented, call-specific `react-hooks/incompatible-library` exception. Manual memoization, virtualizer configuration, row measurement, rendering, and scrolling calls remain unchanged. The current app does not enable React Compiler; emitted JavaScript matches the previous output after removing the inert directive. No lint rule was disabled globally.
+
+The compiler decision follows the installed Next.js `reactCompiler` guide and React's primary documentation for [the directive](https://react.dev/reference/react-compiler/directives/use-no-memo) and [the incompatible-library rule](https://react.dev/reference/eslint-plugin-react-hooks/lints/incompatible-library). The rule still reports the library call despite the directive, so the two exact call-site exceptions document the accepted library constraint.
+
+## Verification and measurements
+
+The first complete post-repair runs passed **438/438 build**, **866/866 gates**, and **541/541 CI** tests, with zero skips. The increased CI count includes the existing release-catalog tests and the additional coverage-merger regression. Default concurrency controls and all existing CI checks remain selected.
+
+| Script                    | Before: passed/total | After: passed/total | Wall time before → after | Peak process-tree RSS before → after |
+| ------------------------- | -------------------- | ------------------- | ------------------------ | ------------------------------------ |
+| `pnpm scripts:test:build` | 434/438              | 438/438             | 79.167 → 73.997 s        | 3,065.7 → 2,675.9 MiB                |
+| `pnpm scripts:test:gates` | 862/866              | 866/866             | 11.524 → 12.624 s        | 2,069.9 → 2,097.8 MiB                |
+| `pnpm scripts:test:ci`    | 520/522              | 541/541             | 49.621 → 47.569 s        | 1,331.0 → 1,312.6 MiB                |
+
+These are single sequential runs in a warm shared working tree. RSS is sampled every 200 ms and summed across the command's descendant processes. The measurements establish actual resource observations and successful execution; they do not establish a statistically significant speedup. In particular, the gates run increased slightly in time and memory, and the CI test population increased.
+
+The final build repeat passed **438/438** in **72.292 s**, peaking at **2,699.9 MiB**. The final CI repeat passed **541/541** in **49.976 s**, peaking at **1,330.7 MiB**. The final gates repeat encountered a concurrent co-location change described below. All repeat results are retained in the data file rather than selecting only the fastest runs.
+
+Focused runtime verification passed **420 tests across 20 suites**: 277 account/cipher/queue/file-share/usage cases, six harness cases, 49 agent-contract cases, and 88 device-row/virtualized-view/browser-socket cases. The missing memo dependency and rootDir coverage filtering were both checked with failing-then-passing reproductions.
+
+Additional completed checks:
+
+- `pnpm typecheck`: exit 0 after these repairs, including the root and chained sidecar projects; a later shared-tree repeat was blocked by the concurrent change described below.
+- `pnpm lint`: exit 0 with the existing zero-warning requirement.
+- `pnpm lint:i18n` and `pnpm i18n:sort:check`: exit 0; no translation sources changed.
+- `node scripts/build/gen-companion-api.mjs --check`: exit 0.
+- `node scripts/gates/check-identity-vocabulary.mjs`: exit 0; no new baseline entries.
+- Scoped whitespace review: exit 0. Newly introduced formatting regressions were corrected without reformatting pre-existing generated output.
+- Read-only test-gap, wiring, PII/account-isolation, and i18n audits found no outstanding issue in this task's changes.
+
+## Shared-tree recheck and limits
+
+After the first fully passing script runs, a separate in-progress change created `lib/agent-config/` source files that were absent from the initial status snapshot. The final gates repeat therefore passed **865/866**, with its sole failure in the live co-located-test inventory. Direct rechecks initially reported six gaps, then five, then one as the concurrent change added its tests. The latest remaining gap is `lib/agent-config/types.ts`, which requires `lib/agent-config/types.test.ts` under the existing policy. These files are outside this task's changes. That test must be completed and `pnpm scripts:test:gates` rerun before claiming the entire current shared tree is green. No baseline was enlarged or test skipped to conceal this.
+
+The later full `pnpm typecheck` repeat also reached newly created files from that same concurrent workstream and returned exit 2 with nine errors: one duplicate `exists` property in `lib/agent-config/references.test.ts`, and eight permission-vocabulary errors for `agent-config:read` / `agent-config:write` in `lib/plugin/api/agent-config-api.ts`. Those files were absent from the task-start snapshot and were not edited by this task. The earlier full typecheck and the unchanged fingerprints of this task's 46 code/config/test files are retained separately from this latest shared-tree result. These concurrent feature errors must be resolved before claiming the entire current workspace passes typechecking.
+
+This is local script, type, lint, and focused unit verification. It does not represent a full Next.js static export, Docker image build, native Tauri packaging, real browser scrolling/layout acceptance, provider invocation, Feishu delivery, or a remote CI run. The virtualizer suites use jsdom layout stubs; the emitted-code comparison does not replace a production build. Coverage source scope and thresholds were retained, but no actual coverage collection was requested or performed.
+
+Raw logs, resource samples, and before snapshots are under `.cache/test-gate-failure-fixes-2026-10-20/`. The accompanying JSON retains compact results and source hashes so the report remains useful after local caches are cleaned. No commit, push, deployment, or unrelated working-tree cleanup was performed.

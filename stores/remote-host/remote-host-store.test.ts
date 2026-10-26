@@ -2,6 +2,9 @@
  * @jest-environment jsdom
  */
 
+jest.mock("@/lib/pet/window-role", () => ({ isMainAppWindow: jest.fn(() => true) }))
+import { isMainAppWindow } from "@/lib/pet/window-role"
+
 const mockSaveRemoteHostCredential = jest.fn(async (..._args: unknown[]) => undefined)
 const mockLoadRemoteHostCredential = jest.fn(async (..._args: unknown[]) => null)
 const mockClearRemoteHostCredential = jest.fn(async (..._args: unknown[]) => undefined)
@@ -94,6 +97,7 @@ const fakeRemote: Transport = {
 }
 
 beforeEach(() => {
+  jest.mocked(isMainAppWindow).mockReturnValue(true)
   window.localStorage.clear()
   mockSaveRemoteHostCredential.mockClear()
   mockLoadRemoteHostCredential.mockReset().mockResolvedValue(null)
@@ -861,6 +865,73 @@ describe("connection state is session evidence (ADR-0224 A4)", () => {
 })
 
 describe("boot with a persisted host", () => {
+  it("only lets the main window clear persisted host metadata", async () => {
+    window.localStorage.setItem("cognia-remote-hosts", "saved-host-metadata")
+    jest.mocked(isMainAppWindow).mockReturnValue(false)
+    await useRemoteHostStore.persist.clearStorage()
+    expect(window.localStorage.getItem("cognia-remote-hosts")).toBe("saved-host-metadata")
+    jest.mocked(isMainAppWindow).mockReturnValue(true)
+    await useRemoteHostStore.persist.clearStorage()
+    expect(window.localStorage.getItem("cognia-remote-hosts")).toBeNull()
+  })
+
+  it("hydrates public host metadata in overlays without loading native credentials", async () => {
+    jest.mocked(isMainAppWindow).mockReturnValue(false)
+    window.localStorage.setItem(
+      "cognia-remote-hosts",
+      JSON.stringify({
+        version: 3,
+        state: {
+          hosts: [
+            {
+              id: "overlay-host",
+              label: "Mini",
+              addedAt: 1,
+              connectionState: "ready",
+              config: makeConfig({ devicePrivateKeyJwk: undefined }),
+            },
+          ],
+        },
+      })
+    )
+    await useRemoteHostStore.persist.rehydrate()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(useRemoteHostStore.getState().hosts[0]).toMatchObject({
+      id: "overlay-host",
+      label: "Mini",
+      connectionState: "disconnected",
+    })
+    expect(mockLoadRemoteHostCredential).not.toHaveBeenCalled()
+  })
+
+  it("does not clear legacy host credentials while an overlay imports the store", async () => {
+    jest.mocked(isMainAppWindow).mockReturnValue(false)
+    window.localStorage.setItem(
+      "cognia-remote-hosts",
+      JSON.stringify({
+        version: 1,
+        state: {
+          hosts: [
+            {
+              id: "legacy-overlay",
+              label: "Mini",
+              addedAt: 1,
+              connectionState: "ready",
+              config: makeConfig(),
+            },
+          ],
+        },
+      })
+    )
+    await useRemoteHostStore.persist.rehydrate()
+    expect(mockClearRemoteHostCredential).not.toHaveBeenCalled()
+    expect(JSON.parse(window.localStorage.getItem("cognia-remote-hosts")!).version).toBe(1)
+    jest.mocked(isMainAppWindow).mockReturnValue(true)
+    await useRemoteHostStore.persist.rehydrate()
+    expect(mockClearRemoteHostCredential).toHaveBeenCalledWith("legacy-overlay")
+    expect(JSON.parse(window.localStorage.getItem("cognia-remote-hosts")!).version).toBe(3)
+  })
+
   /**
    * Synchronous storage rehydrates inside `create()`, before the store
    * constant is assigned. Hydrating credentials right there threw "Cannot

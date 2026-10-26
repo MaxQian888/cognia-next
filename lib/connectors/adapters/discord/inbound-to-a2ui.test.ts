@@ -11,11 +11,11 @@ describe("discordInboundToA2UI", () => {
       embeds: [{ title: "Release v1.0", description: "Ships tonight" }],
     })
     expect(out!.body).toEqual([
-      { kind: "text", text: "Hello @here" },
+      { kind: "text", text: "Hello @here", format: "markdown" },
       {
         kind: "card",
         title: "Release v1.0",
-        children: [{ kind: "text", text: "Ships tonight" }],
+        children: [{ kind: "text", text: "Ships tonight", format: "markdown" }],
       },
     ])
   })
@@ -35,8 +35,8 @@ describe("discordInboundToA2UI", () => {
     expect((out!.body[0] as { children: unknown[] }).children).toContainEqual({
       kind: "list",
       children: [
-        { kind: "text", text: "Version: 1.0" },
-        { kind: "text", text: "Status: Green" },
+        { kind: "text", text: "Version: 1.0", format: "markdown" },
+        { kind: "text", text: "Status: Green", format: "markdown" },
       ],
     })
   })
@@ -93,5 +93,43 @@ describe("discordInboundToA2UI", () => {
     const p = { content: "x", embeds: [] }
     const out = discordInboundToA2UI(p)
     expect(out!.raw).toBe(p)
+  })
+
+  it("unwraps the gateway dispatch the parser stores as event.raw", () => {
+    const out = discordInboundToA2UI({
+      op: 0,
+      t: "MESSAGE_CREATE",
+      d: {
+        content: "hi",
+        components: [
+          { type: 1, components: [{ type: 2, label: "Docs", url: "https://x.test", style: 5 }] },
+        ],
+      },
+    } as never)
+    expect(out?.body).toEqual([
+      { kind: "text", text: "hi", format: "markdown" },
+      {
+        kind: "row",
+        children: [
+          {
+            kind: "button",
+            label: "Docs",
+            url: "https://x.test",
+            actionId: undefined,
+            style: "default",
+          },
+        ],
+      },
+    ])
+    expect(discordInboundToA2UI({ op: 0, t: "MESSAGE_CREATE" } as never)).toBeNull()
+  })
+
+  it("keeps mention tokens verbatim and preserves line breaks", () => {
+    const out = discordInboundToA2UI({ content: "<@123> in <#456>\nbye", embeds: [{ title: "E" }] })
+    expect(out?.body[0]).toEqual({
+      kind: "text",
+      text: "<@123> in <#456>  \nbye",
+      format: "markdown",
+    })
   })
 })

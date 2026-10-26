@@ -1,4 +1,7 @@
 /** @jest-environment jsdom */
+import "fake-indexeddb/auto"
+import { getDb } from "@/lib/db/schema"
+import { getSettings } from "@/lib/db/settings"
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn(async () => ({ providerSettings: {} })),
@@ -12,6 +15,9 @@ import type { ProviderDiagnosticsRefreshState } from "@cognia/provider-types"
 
 import {
   installProviderDiagnosticsRefreshSchedule,
+  ensureProviderDiagnosticsRefreshStates,
+  resumeProviderReachabilityRefresh,
+  resumeProviderBalanceRefresh,
   nextProviderDiagnosticsRefreshState,
   providerDiagnosticsNotificationTransition,
   registerProviderDiagnosticsRefreshExecutor,
@@ -26,7 +32,105 @@ const STATE: ProviderDiagnosticsRefreshState = {
   consecutiveFailures: 0,
 }
 
+it.each(["paused-auth", "scheduled"] as const)(
+  "preserves %s state, backoff and notification cooldown across boot",
+  async (status) => {
+    const table = getDb().providerDiagnosticsRefreshState
+    await table.clear()
+    jest.mocked(getSettings).mockResolvedValue({
+      providerSettings: { stepfun: { enabled: true } },
+    } as never)
+    const paused: ProviderDiagnosticsRefreshState = {
+      ...STATE,
+      sourceId: "provider-reachability:stepfun",
+      status,
+      nextDueAt: status === "paused-auth" ? Number.MAX_SAFE_INTEGER : Date.now() + 7_200_000,
+      retryAfterMs: 7_200_000,
+      consecutiveFailures: 4,
+      lastNotificationAt: 100,
+      lastNotifiedReason: "authentication",
+    }
+    await table.put(paused)
+    await ensureProviderDiagnosticsRefreshStates()
+    await ensureProviderDiagnosticsRefreshStates()
+    expect(await table.get(paused.sourceId)).toEqual(paused)
+    jest.mocked(getSettings).mockResolvedValue({ providerSettings: {} } as never)
+    await table.clear()
+  }
+)
+
 describe("provider diagnostics refresh clock", () => {
+  it("resumes only a manually verified balance credential, retaining other authentication pauses", async () => {
+    const table = getDb().providerDiagnosticsRefreshState
+    await table.clear()
+    await table.bulkPut([
+      { ...STATE, status: "paused-auth", nextDueAt: Number.MAX_SAFE_INTEGER },
+      {
+        ...STATE,
+        sourceId: "provider-reachability:stepfun",
+        status: "paused-auth",
+        nextDueAt: Number.MAX_SAFE_INTEGER,
+      },
+    ])
+    await resumeProviderBalanceRefresh({
+      id: "stepfun:other:adapter",
+      providerId: "stepfun",
+      credentialId: "other",
+      kind: "official",
+    } as never)
+    expect((await table.get(STATE.sourceId))?.status).toBe("paused-auth")
+    await resumeProviderBalanceRefresh({
+      id: "stepfun:primary:adapter",
+      providerId: "stepfun",
+      credentialId: "primary",
+      kind: "official",
+    } as never)
+    expect(await table.get(STATE.sourceId)).toMatchObject({
+      status: "scheduled",
+      lastOutcome: "succeeded",
+      consecutiveFailures: 0,
+    })
+    expect((await table.get("provider-reachability:stepfun"))?.status).toBe("paused-auth")
+    await table.clear()
+  })
+  it("reports source outcomes separately from orchestration attempts and ignores observer errors", async () => {
+    const putState = jest.fn(async () => undefined)
+    const outcomes = [
+      {},
+      { code: "capability-unsupported" },
+      { code: "authentication" },
+      { code: "network" },
+    ]
+    const result = await runProviderDiagnosticsRefreshClock({
+      now: () => 1000,
+      isOnline: () => true,
+      isVaultAvailable: () => true,
+      listDueStates: async () => outcomes.map((_, i) => ({ ...STATE, sourceId: `s${i}` })),
+      putState,
+      runFreeSource: jest.fn(async () => outcomes.shift() as never),
+      getThreshold: async () => undefined,
+      notifyTransition: async () => {
+        throw new Error("observer failed")
+      },
+    })
+    expect(result).toMatchObject({
+      attempted: 4,
+      succeeded: 1,
+      refreshed: 1,
+      skipped: 1,
+      blocked: 1,
+      failed: 1,
+    })
+    expect(putState).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "s0", lastSuccessAt: 1000, lastOutcome: "succeeded" })
+    )
+    expect(putState).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "s1", lastOutcome: "skipped" })
+    )
+    expect(putState).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "s2", lastOutcome: "blocked" })
+    )
+  })
   it("honors Retry-After and exponential backoff capped at 24 hours", () => {
     expect(
       nextProviderDiagnosticsRefreshState(STATE, {
@@ -70,7 +174,16 @@ describe("provider diagnostics refresh clock", () => {
       runFreeSource,
     })
 
-    expect(result).toEqual({ scanned: 1, refreshed: 0, paused: 1 })
+    expect(result).toMatchObject({
+      scanned: 1,
+      refreshed: 0,
+      paused: 1,
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+      blocked: 1,
+      skipped: 0,
+    })
     expect(putState).toHaveBeenCalledWith(expect.objectContaining({ status: "paused-offline" }))
     expect(runFreeSource).not.toHaveBeenCalled()
   })
@@ -100,7 +213,14 @@ describe("provider diagnostics refresh clock", () => {
       runFreeSource,
     })
 
-    expect(result.refreshed).toBe(1)
+    expect(result).toMatchObject({
+      attempted: 1,
+      refreshed: 0,
+      succeeded: 0,
+      failed: 0,
+      blocked: 1,
+      skipped: 0,
+    })
     expect(putState).toHaveBeenLastCalledWith(expect.objectContaining({ status: "paused-auth" }))
   })
 
@@ -200,29 +320,63 @@ describe("diagnostics schedule reminders", () => {
     await installProviderDiagnosticsRefreshSchedule()
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        notification: expect.objectContaining({ dueReminder: false, onError: true }),
+        notification: expect.objectContaining({ dueReminder: false, onError: false }),
       })
     )
   })
 
-  it("migrates only an unspecified reminder while keeping failure preferences", async () => {
+  it("migrates an unspecified reminder while keeping explicit desktop failure preferences", async () => {
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     const updateTask = jest.fn().mockResolvedValue(undefined)
     jest.mocked(getTaskScheduler).mockReturnValue({
       getAllTasks: async () => [
-        { id: "legacy", type: "provider-diagnostics-refresh", notification: { onError: true } },
         {
-          id: "opted-in",
+          id: "legacy",
           type: "provider-diagnostics-refresh",
-          notification: { dueReminder: true },
+          notification: { channels: ["desktop"], onError: true },
         },
       ],
       updateTask,
     } as never)
     await installProviderDiagnosticsRefreshSchedule()
     expect(updateTask).toHaveBeenCalledTimes(1)
-    expect(updateTask).toHaveBeenCalledWith("legacy", {
-      notification: { onError: true, dueReminder: false },
-    })
+    expect(updateTask).toHaveBeenCalledWith("legacy", { notification: { dueReminder: false } })
   })
+
+  it("keeps an explicit due reminder opt-in", async () => {
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    const updateTask = jest.fn().mockResolvedValue(undefined)
+    jest.mocked(getTaskScheduler).mockReturnValue({
+      getAllTasks: async () => [
+        {
+          id: "opted-in",
+          type: "provider-diagnostics-refresh",
+          notification: { channels: ["desktop"], onError: true, dueReminder: true },
+        },
+      ],
+      updateTask,
+    } as never)
+    await installProviderDiagnosticsRefreshSchedule()
+    expect(updateTask).not.toHaveBeenCalled()
+  })
+})
+
+it("resumes only the manually verified reachability source without resetting balance pauses", async () => {
+  const table = getDb().providerDiagnosticsRefreshState
+  await table.clear()
+  const reachability = {
+    ...STATE,
+    sourceId: "provider-reachability:stepfun",
+    status: "paused-auth" as const,
+    nextDueAt: Number.MAX_SAFE_INTEGER,
+  }
+  const balance = { ...STATE, status: "paused-auth" as const, nextDueAt: Number.MAX_SAFE_INTEGER }
+  await table.bulkPut([reachability, balance])
+  await resumeProviderReachabilityRefresh("stepfun")
+  expect(await table.get(reachability.sourceId)).toMatchObject({
+    status: "scheduled",
+    consecutiveFailures: 0,
+  })
+  expect(await table.get(balance.sourceId)).toEqual(balance)
+  await table.clear()
 })

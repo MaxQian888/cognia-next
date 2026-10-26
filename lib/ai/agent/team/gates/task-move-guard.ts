@@ -22,17 +22,15 @@
  */
 
 import type { AgentTeamTask, TeamStatus, TeamTaskStatus } from "@/types/agent/agent-team"
+import type { TaskMoveDenial } from "@cognia/plugin-contract/lib/ai/agent/team/gates/task-move-guard"
+export type {
+  TaskMoveDenial,
+  TaskMoveError,
+} from "@cognia/plugin-contract/lib/ai/agent/team/gates/task-move-guard"
 
-/** Why a move was denied — keyed for i18n at the UI layer. */
-export type TaskMoveDenial =
-  | "blocked-column" // blocked is dependency-derived, read-only
-  | "runtime-owned" // claimed/in_progress touched while the run is active
-  | "illegal-transition" // not in the human-owned transition set
+// not in the human-owned transition set
 
 export type TaskMoveVerdict = { allowed: true } | { allowed: false; reason: TaskMoveDenial }
-
-/** Store/RPC-level move failure: a guard denial or a missing task. */
-export type TaskMoveError = TaskMoveDenial | "task-not-found"
 
 /** Team statuses during which the runtime owns claimed/in_progress tasks. */
 const RUNTIME_ACTIVE_TEAM_STATUSES: ReadonlySet<TeamStatus> = new Set(["planning", "executing"])

@@ -13,7 +13,7 @@
  *   })
  */
 
-import type { PluginGuardrail } from "@/types/plugin/plugin-agent-guardrails"
+import type { PluginGuardrail } from "@cognia/plugin-contract/types/plugin/plugin-agent-guardrails"
 
 export function defineGuardrail(guardrail: PluginGuardrail): PluginGuardrail {
   return guardrail

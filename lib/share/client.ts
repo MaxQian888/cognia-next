@@ -20,12 +20,7 @@ import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { generateShareKey, encodeShareKey } from "./keys"
 import { encryptSharePayloadWithMaterial, prepareShareKeyMaterial } from "./crypto"
 import { resolveShareEndpoint, type ShareEndpoint } from "./config"
-import {
-  prepareShareFileEntry,
-  uploadShareBlob,
-  type ShareBlobSource,
-  type ShareFileDescriptor,
-} from "./blobs"
+import { prepareShareFileEntry, uploadShareBlob } from "./blobs"
 import { checkShareSelectionLimits, type ShareSelectionLimitViolation } from "./file-selection"
 import {
   recordSharedLink,
@@ -41,6 +36,17 @@ import type {
   SharePayload,
   ShareStats,
 } from "./types"
+import type {
+  CreateShareFile,
+  CreateShareInput,
+  CreatedShare,
+} from "@cognia/plugin-contract/lib/share/client"
+export type {
+  CreateShareFile,
+  CreateShareInput,
+  CreateShareProgress,
+  CreatedShare,
+} from "@cognia/plugin-contract/lib/share/client"
 
 /** Raised when the upload bearer secret hasn't been configured yet. */
 export class ShareNotConfiguredError extends Error {
@@ -116,12 +122,6 @@ export class ShareFilesUploadError extends Error {
   }
 }
 
-/** One file to carry: what the manifest says about it, and how to read it. */
-export interface CreateShareFile extends ShareFileDescriptor {
-  /** Opened twice: once to hash, once to upload. */
-  open: () => Promise<ShareBlobSource>
-}
-
 /**
  * What an entry point hands the share dialog: the payload, and any files it
  * produced itself (media a transcript could not inline).
@@ -131,42 +131,6 @@ export interface ShareBuild {
   attachments: CreateShareFile[]
   /** Media references whose bytes were gone, named in the payload without a link. */
   unavailableMedia?: number
-}
-
-/** Where a file share's creation is. Bytes are plaintext bytes. */
-export interface CreateShareProgress {
-  phase: "hashing" | "uploading"
-  /** Index into `files`. */
-  fileIndex: number
-  fileCount: number
-  path: string
-  /** Bytes of this phase done across all files. */
-  done: number
-  total: number
-}
-
-export interface CreateShareInput {
-  payload: SharePayload
-  ttlSeconds?: number
-  maxViews?: number
-  burnAfterRead?: boolean
-  /** Optional extra passphrase, shared out-of-band (never in the URL). */
-  passphrase?: string
-  /** Local owner namespace used to authorize domain-specific revocation. */
-  ownerScope?: string
-  /** Files the share carries (ADR-0222). Policy is the caller's: see `lib/filespace/share-files.ts`. */
-  files?: CreateShareFile[]
-  /** The conversation the share is made from, recorded beside the link. */
-  sessionId?: string
-  onProgress?: (progress: CreateShareProgress) => void
-  signal?: AbortSignal
-}
-
-export interface CreatedShare {
-  code: string
-  /** Full shareable URL including the `#fragment` key. */
-  url: string
-  expiresAt?: number
 }
 
 async function readError(res: Response): Promise<string> {

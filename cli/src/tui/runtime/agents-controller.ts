@@ -7,6 +7,7 @@ import nodeFs from "node:fs/promises"
 import path from "node:path"
 
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
+import { normalizeDispatchBudgetResult } from "@/lib/claude/agents/dispatch-error"
 import { serializeMarkdownAgent } from "@/lib/claude/agents/markdown-agents"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
@@ -26,6 +27,7 @@ import {
   cancelCliBackgroundRun,
   hasCliBackgroundRun,
   startCliBackgroundRun,
+  recordCliIncompleteForegroundRun,
   type CliBackgroundRunInfo,
 } from "../../agent/subagent-background-tasks"
 import {
@@ -265,6 +267,37 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
       ...(match.def.color ? { color: match.def.color } : {}),
     })
     let settled = false
+    const runId = liveId ?? (deps.mintRunId ?? defaultMintRunId)()
+    const interrupted = async (evidence = "") => {
+      const partial = `Subagent "${id}" interrupted.\nTask/research incomplete: cancelled before completion.\n${evidence}`
+      const summary = `${partial}\nResume with dispatch_agent({resume:"${runId}"}).`
+      settleLiveSubagent(live, "interrupted")
+      if (!liveId) {
+        try {
+          await recordCliIncompleteForegroundRun(
+            runId,
+            {
+              kind: "subagent",
+              subagentId: id,
+              prompt,
+              sessionId: owner,
+              host: "cli",
+              startedAt: Date.now(),
+              toolsEnabled: true,
+              ...(deps.home ? { home: deps.home } : {}),
+            },
+            summary,
+            "interrupted"
+          )
+        } catch (error) {
+          return {
+            outcome: "error" as const,
+            summary: `${partial}\n[Could not save continuation: ${errorMessage(error)}]`,
+          }
+        }
+      }
+      return { outcome: "interrupted" as const, summary }
+    }
     try {
       const result = await run(match.def, prompt, {
         cwd: deps.cwd,
@@ -273,10 +306,8 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
           if (!settled && !signal?.aborted) applyLiveSubagentEvent(live, event)
         },
       })
-      if (signal?.aborted) {
-        settleLiveSubagent(live, "interrupted")
-        return { outcome: "interrupted", summary: `Subagent "${id}" interrupted.` }
-      }
+      if (signal?.aborted || result.finishReason === "interrupted")
+        return await interrupted(result.finishReason === "interrupted" ? result.text : "")
       // A nesting guard can refuse a dispatch (depth/cycle) by returning a result
       // with `rejection` set rather than throwing: surface it as an error end.
       if (result.rejection) {
@@ -290,14 +321,53 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
       // so the run reads like a delegated agent's result, not just a wall of text.
       const meta: string[] = []
       if (result.usage?.totalTokens) meta.push(`${result.usage.totalTokens} tok`)
-      if (result.finishReason && result.finishReason !== "end_turn") meta.push(result.finishReason)
+      if (result.finishReason && !["end_turn", "success"].includes(result.finishReason))
+        meta.push(result.finishReason)
       const suffix = meta.length > 0 ? `  (${meta.join(" · ")})` : ""
-      settleLiveSubagent(live, "done")
-      return { outcome: "done", summary: `Subagent "${id}"${suffix}:\n${result.text}` }
+      const normalized = normalizeDispatchBudgetResult({
+        text: result.text,
+        finishReason: result.finishReason,
+        runId,
+        channel: "sidecar",
+        toolsAvailable: true,
+      })
+      const incomplete = normalized.errorEnvelope?.code === "budget-exhausted"
+      const summary = `Subagent "${id}"${suffix}:\n${normalized.text}`
+      if (incomplete && !liveId) {
+        try {
+          await recordCliIncompleteForegroundRun(
+            runId,
+            {
+              kind: "subagent",
+              subagentId: id,
+              prompt,
+              sessionId: owner,
+              host: "cli",
+              startedAt: Date.now(),
+              toolsEnabled: true,
+              ...(deps.home ? { home: deps.home } : {}),
+            },
+            summary
+          )
+        } catch (error) {
+          settleLiveSubagent(live, "error")
+          const partial = normalizeDispatchBudgetResult({
+            text: result.text,
+            finishReason: result.finishReason,
+            channel: "sidecar",
+            toolsAvailable: true,
+          })
+          return {
+            outcome: "error",
+            summary: `Subagent "${id}":\n${partial.text}\n[Could not save continuation: ${errorMessage(error)}]`,
+          }
+        }
+      }
+      settleLiveSubagent(live, incomplete ? "error" : "done")
+      return { outcome: incomplete ? "error" : "done", summary }
     } catch (err) {
       if (signal?.aborted) {
-        settleLiveSubagent(live, "interrupted")
-        return { outcome: "interrupted", summary: `Subagent "${id}" interrupted.` }
+        return await interrupted()
       }
       settleLiveSubagent(live, "error")
       return { outcome: "error", summary: `Subagent "${id}" failed: ${errorMessage(err)}` }

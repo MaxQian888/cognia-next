@@ -329,5 +329,21 @@
   "workspaceRow": "Workspace",
   "chatTemplatesRow": "Chat templates",
   "templatesRow": "Template catalog",
-  "petRow": "Pet"
+  "petRow": "Pet",
+  "searchProviders": {
+    "retired": "Retired on {date}; stored credentials are preserved.",
+    "legacy": "Legacy: closed to new customers; service ends {date}.",
+    "endpointAria": "{name} endpoint URL",
+    "endpointPlaceholder": "https://search.example.org",
+    "endpointDocs": "Endpoint documentation:",
+    "allowPrivateEndpoint": "Allow private / HTTP endpoint",
+    "endpointIssues": {
+      "missing": "Enter a SearXNG endpoint URL. No API key is needed.",
+      "invalid-url": "Enter an absolute endpoint URL.",
+      "unsupported-scheme": "Use an HTTPS URL, or HTTP for an explicitly allowed private host.",
+      "embedded-credentials": "Remove embedded credentials from the endpoint URL.",
+      "query-or-fragment": "Remove query parameters and fragments from the endpoint URL.",
+      "insecure-public-endpoint": "Public endpoints must use HTTPS."
+    }
+  }
 }

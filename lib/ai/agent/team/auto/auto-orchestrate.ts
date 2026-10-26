@@ -26,6 +26,7 @@ import { gatherCapabilityCatalog, EMPTY_CAPABILITY_CATALOG } from "./capability-
 import { gatherTwinRoster } from "./twin-roster"
 import { chooseExecutor, type ConsensusSignal } from "./dispatch-executor"
 import type { AutoOrchestrationProposal, CapabilityCatalog, TwinRosterEntry } from "./types"
+import { loadPromptOverrideSnapshot } from "@/lib/prompts/snapshot"
 
 export class AutoOrchestrationPiiError extends Error {
   constructor() {
@@ -111,11 +112,15 @@ export async function planAutoOrchestration(
     }
   }
 
-  // 3. Stages.
+  // 3. Stages. One Prompt Center snapshot for the whole run (ADR-0236): a
+  // publish that lands mid-plan cannot give the roster and the task DAG
+  // instructions from different revisions.
+  const promptSnapshot = await loadPromptOverrideSnapshot().catch(() => null)
   const assessed = await assessRouting({
     objective,
     catalog,
     client: input.client,
+    promptSnapshot,
     signal: input.signal,
     now: input.now,
   })
@@ -132,6 +137,7 @@ export async function planAutoOrchestration(
     maxRoster: input.maxRoster,
     twinRoster,
     signal: input.signal,
+    promptSnapshot,
   })
   const tasks = await decomposeTasks({
     objective,
@@ -139,6 +145,7 @@ export async function planAutoOrchestration(
     assessment,
     client: input.client,
     signal: input.signal,
+    promptSnapshot,
   })
 
   // Choose the concrete executor from the (possibly operator-overridden)

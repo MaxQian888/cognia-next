@@ -14,14 +14,8 @@ import {
   withoutEnvironmentScopedVerdicts,
 } from "@/lib/ai/agent/external/canonical-contract"
 
-/**
- * Bumped to 6 so `migrate` runs once against stores written before
- * `withoutEnvironmentScopedVerdicts` existed. Those hold a `transport_blocked`
- * verdict taken in a browser, and the panel prefers a stored verdict to the
- * live gate, so without this pass the agent keeps reporting that it needs the
- * desktop app on a machine that has since paired a Host.
- */
-const EXTERNAL_AGENT_STORE_VERSION = 6
+/** Version 7 replaces the legacy global off flag with per-agent disabled states. */
+const EXTERNAL_AGENT_STORE_VERSION = 7
 
 type PersistedExternalAgentState = Partial<
   Pick<
@@ -32,7 +26,6 @@ type PersistedExternalAgentState = Partial<
     | "agentValidity"
     | "benchmarkCapabilityMap"
     | "lastRunSnapshots"
-    | "enabled"
     | "defaultPermissionMode"
     | "autoConnectOnStartup"
     | "showConnectionNotifications"
@@ -111,8 +104,16 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
       version: EXTERNAL_AGENT_STORE_VERSION,
       storage: persistLocalStorage(),
       migrate: (persistedState) => {
-        const state = (persistedState ?? {}) as PersistedExternalAgentState
+        const { enabled: legacyEnabled, ...state } = (persistedState ??
+          {}) as PersistedExternalAgentState & { enabled?: boolean }
         const agents = migratePersistedAgents(state.agents) ?? {}
+        // Preserve the intent of a saved global off state without keeping a
+        // hidden master gate or launching previously suspended agents.
+        if (legacyEnabled === false) {
+          for (const [id, agent] of Object.entries(agents)) {
+            if (agent) agents[id] = { ...agent, enabled: false }
+          }
+        }
         const normalizedValidity = Object.entries(state.agentValidity ?? {}).reduce<
           Record<string, ExternalAgentStore["agentValidity"][string]>
         >((acc, [agentId, snapshot]) => {
@@ -150,7 +151,6 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
         agentValidity: withoutEnvironmentScopedVerdicts(state.agentValidity),
         benchmarkCapabilityMap: state.benchmarkCapabilityMap,
         lastRunSnapshots: state.lastRunSnapshots,
-        enabled: state.enabled,
         defaultPermissionMode: state.defaultPermissionMode,
         autoConnectOnStartup: state.autoConnectOnStartup,
         showConnectionNotifications: state.showConnectionNotifications,

@@ -109,7 +109,7 @@ pub(super) fn authorize_task_spawn(
     if !config.env.contains_key("COGNIA_GATEWAY_TASK_CONFIG") {
         return Ok(None);
     }
-    if scope == Some("service") {
+    if cognia_companion::jwt::is_service_scope(scope) {
         return authorize_host_task_spawn(state, host, config);
     }
     let mut payload: Value = serde_json::from_str(&config.env["COGNIA_GATEWAY_TASK_CONFIG"])
@@ -305,6 +305,7 @@ fn provider_capabilities(gateway: &GatewayState) -> Value {
                     "credentialPool": pool,
                     "keysOnCooldown": on_cooldown,
                     "models": models,
+                    "modelMetadataById": provider.model_metadata.iter().map(|m| (m.id.clone(), m.clone())).collect::<std::collections::BTreeMap<_, _>>(),
                 })
             })
             .collect();
@@ -437,7 +438,7 @@ pub(super) async fn dispatch(
         // the RPC in either direction. Service scope only (rpc.rs), and
         // checked again here because the lease spends the Host's credential.
         "agent_gateway_host_task_prepare" => {
-            if scope != Some("service") {
+            if !cognia_companion::jwt::is_service_scope(scope) {
                 return Err(RpcError::forbidden(
                     "Host gateway tasks are prepared by the Host itself",
                 ));
@@ -475,7 +476,7 @@ pub(super) async fn dispatch(
             Ok(result)
         }
         "agent_gateway_host_task_renew" | "agent_gateway_host_task_revoke" => {
-            if scope != Some("service") {
+            if !cognia_companion::jwt::is_service_scope(scope) {
                 return Err(RpcError::forbidden(
                     "Host gateway tasks are controlled by the Host itself",
                 ));
@@ -850,6 +851,25 @@ mod tests {
         .await
         .expect_err("an unknown name must be refused, not answered");
         assert_eq!(error.code, "unknown_command");
+    }
+
+    #[test]
+    fn provider_capabilities_carry_each_models_own_reasoning_metadata() {
+        let gateway = GatewayState::new();
+        gateway.try_set_snapshot(serde_json::from_value(serde_json::json!({
+            "providers": [{"id":"p", "protocol":"openai", "baseUrl":"https://example.test/v1", "enabled":true,
+                "models":["parent", "child"], "modelMetadata":[{"id":"parent", "supportsReasoning":false}, {"id":"child", "supportsReasoning":true}]}],
+            "generatedAtMs":1
+        })).unwrap()).unwrap();
+        let capabilities = provider_capabilities(&gateway);
+        assert_eq!(
+            capabilities["providers"][0]["modelMetadataById"]["child"]["supportsReasoning"],
+            true
+        );
+        assert_eq!(
+            capabilities["providers"][0]["modelMetadataById"]["parent"]["supportsReasoning"],
+            false
+        );
     }
 
     /// Before the first profile lands there is no snapshot, and both

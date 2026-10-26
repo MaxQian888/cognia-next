@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("a rustls crypto provider was already installed"))?;
     let args = Args::parse();
     validate(&args)?;
-    let store = PgStore::connect(&args.database_url, 2).await?;
+    let store = PgStore::connect_admin(&args.database_url, 2).await?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis() as i64;

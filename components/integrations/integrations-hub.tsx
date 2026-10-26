@@ -1,5 +1,6 @@
 "use client"
 
+import { NativeSelect } from "@/components/ui/native-select"
 import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -564,7 +565,7 @@ export function IntegrationsHub() {
                       every control at once. */}
                     <fieldset disabled={!platformSupported} className="contents">
                       <Label htmlFor="integration-definition">{t("accounts.integration")}</Label>
-                      <select
+                      <NativeSelect
                         id="integration-definition"
                         className="h-9 rounded-md border bg-background px-3 text-sm"
                         value={selectedKey}
@@ -583,7 +584,7 @@ export function IntegrationsHub() {
                             {definition.label}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                       <Input
                         aria-label={t("accounts.label")}
                         placeholder={t("accounts.label")}
@@ -666,7 +667,7 @@ export function IntegrationsHub() {
                           >
                             {t("accounts.discoverInstallations")}
                           </Button>
-                          <select
+                          <NativeSelect
                             aria-label={t("accounts.installation")}
                             className="h-9 rounded-md border bg-background px-3 text-sm"
                             value={authConfiguration.installationId ?? ""}
@@ -687,7 +688,7 @@ export function IntegrationsHub() {
                                 {installation.label}
                               </option>
                             ))}
-                          </select>
+                          </NativeSelect>
                         </>
                       )}
                       {selectedStrategy?.type === "app" && (
@@ -835,7 +836,7 @@ export function IntegrationsHub() {
                 ) : (
                   <form className="grid gap-3" onSubmit={addSubscription}>
                     <fieldset disabled={!platformSupported} className="contents">
-                      <select
+                      <NativeSelect
                         aria-label={t("subscriptions.account")}
                         className="h-9 rounded-md border bg-background px-3 text-sm"
                         value={subscriptionAccountId}
@@ -852,7 +853,7 @@ export function IntegrationsHub() {
                             {account.label}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                       {resourceKind && (
                         <>
                           <div className="flex gap-2">
@@ -866,7 +867,7 @@ export function IntegrationsHub() {
                               {t("subscriptions.discover")}
                             </Button>
                           </div>
-                          <select
+                          <NativeSelect
                             aria-label={t("subscriptions.repository")}
                             className="h-9 rounded-md border bg-background px-3 text-sm"
                             value={resourceId}
@@ -878,7 +879,7 @@ export function IntegrationsHub() {
                                 {resource.name}
                               </option>
                             ))}
-                          </select>
+                          </NativeSelect>
                           {resourceCursor && (
                             <Button
                               type="button"
@@ -933,7 +934,7 @@ export function IntegrationsHub() {
                             <span>{t("subscriptions.deliverToInbox")}</span>
                           </Label>
                           {inboxEnabled && (
-                            <select
+                            <NativeSelect
                               aria-label={t("subscriptions.projection")}
                               className="h-9 rounded-md border bg-background px-3 text-sm"
                               value={projectionId}
@@ -953,7 +954,7 @@ export function IntegrationsHub() {
                                   </option>
                                 )
                               })}
-                            </select>
+                            </NativeSelect>
                           )}
                         </>
                       )}

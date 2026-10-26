@@ -34,7 +34,7 @@ import {
   type KeyringRef,
 } from "@/lib/keyring"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
-import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+import { getInstallEncryptionPassphrase } from "@/lib/data/backup-key"
 import { isTauri } from "@/lib/tauri"
 
 import type { LogtoSession, LogtoSessionMetadata } from "./client"
@@ -94,7 +94,7 @@ let webPassphraseProvisioned = false
  */
 async function ensureWebPassphrase(): Promise<void> {
   if (isTauri() || webPassphraseProvisioned) return
-  const passphrase = await getDefaultBackupPassphrase()
+  const passphrase = await getInstallEncryptionPassphrase()
   if (passphrase) {
     setWebKeyringPassphrase(passphrase)
     webPassphraseProvisioned = true

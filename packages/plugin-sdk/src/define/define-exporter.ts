@@ -18,7 +18,7 @@
  *   })
  */
 
-import type { CustomExporter } from "@/types/plugin/plugin"
+import type { CustomExporter } from "@cognia/plugin-contract/types/plugin/plugin"
 
 export function defineExporter(exporter: CustomExporter): CustomExporter {
   return exporter
