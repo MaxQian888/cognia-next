@@ -3157,8 +3157,9 @@ mod tests {
         assert!(replay.iter().any(|frame| frame.event_type == "external-agent://stdout"));
         for frame in replay {
             assert_eq!(frame.partition_account_id.as_deref(), Some(a.account_id.as_str()));
-            assert!(frame.visible_to(&format!("brain-{}",a.account_id)));
-            assert!(!frame.visible_to("__service__")); assert!(!frame.visible_to(&format!("brain-{}",b.account_id)));
+            let visible = |device: String, tenant: &str| cognia_companion::person_chat::person_connection_visible(&frame, &device, Some(tenant));
+            assert!(visible(format!("brain-{}",a.account_id), &a.account_id));
+            assert!(!visible("__service__".into(), "operator")); assert!(!visible(format!("brain-{}",b.account_id), &b.account_id));
         }
         person_scope(Some(a.clone()), with_execution_admission(Some(decision), dispatch("kill_external_agent", serde_json::json!({"agentId":"p6d-agent"}),
             &state, &host, &format!("brain-{}",a.account_id), Some(&a.account_id), Some("person-brain")))).await.unwrap();

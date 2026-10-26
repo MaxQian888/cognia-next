@@ -181,21 +181,37 @@ impl EventBus {
         self.publish_targeted(event_type, payload, Some(device_id), Some(account_id))
     }
 
+    /// Replayable partition-wide notification. Delivery still rechecks current
+    /// person standing; no per-device frame is needed for an invalidation.
+    pub fn publish_person(
+        &self,
+        event_type: String,
+        payload: Value,
+        account_id: String,
+    ) -> EventFrame {
+        self.publish_targeted(event_type, payload, None, Some(account_id))
+    }
+
     fn publish_targeted(&self, event_type: String, payload: Value, destination: Option<String>, partition_account_id: Option<String>) -> EventFrame {
         let seq = self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let ts_ms = now_ms();
         register_remote_pending_request(&payload);
 
-        let frame = EventFrame {
-            partition_account_id,
-            event_type,
-            seq,
-            target_device_id: destination.or_else(|| payload
+        let target_device_id = if partition_account_id.is_some() {
+            destination
+        } else {
+            destination.or_else(|| payload
                 .get("remoteExecutionContext")
                 .and_then(Value::as_object)
                 .and_then(|context| context.get("originDeviceId"))
                 .and_then(Value::as_str)
-                .map(str::to_owned)),
+                .map(str::to_owned))
+        };
+        let frame = EventFrame {
+            partition_account_id,
+            event_type,
+            seq,
+            target_device_id,
             payload,
             ts_ms,
         };

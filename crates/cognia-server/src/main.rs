@@ -642,30 +642,23 @@ fn spawn_headless_push_triggers(shared: cognia_companion::SharedState) {
             else {
                 continue;
             };
-            if frame.partition_account_id.is_some() {
-                if let Some(device) = frame.target_device_id.as_deref() {
-                    if !cognia_companion::person_partition::event_visible(&frame, device, None) { continue; }
-                    let person = cognia_companion::security_store::security_store()
-                        .and_then(|store| store.person_for_account_device(device).ok().flatten());
-                    if let Some(person) = person {
-                        let person = cognia_companion::person_partition::PersonPartition::new(person.org_id.to_string(), person.user_id.to_string());
-                        let registry = shared.push_tokens.for_account(&person.account_id);
-                        let data = frame.payload.as_object().cloned().unwrap_or_default();
-                        let payload = cognia_companion::push::PushPayload {
-                            title: Some("cognia".into()), body: Some(cognia_companion::push_triggers::push_body_for_channel(channel, &data)),
-                            data: cognia_companion::push_triggers::push_data_for_channel(channel, &data),
-                        };
-                        for provider in [cognia_companion::push::PushProvider::Fcm, cognia_companion::push::PushProvider::Apns, cognia_companion::push::PushProvider::Hms] {
-                            if let Some(dispatcher) = cognia_companion::push_dispatchers().for_provider(provider) {
-                                if registry.get(device).is_some_and(|record| record.provider == provider) {
-                                    registry.dispatch_to_device(device, &payload, dispatcher.as_ref()).await;
-                                }
-                            }
-                        }
+            if let Some(account) = frame.partition_account_id.as_deref() {
+                // A partition event is never a Host broadcast: it wakes only
+                // the person's own devices, whatever its destination says.
+                if !cognia_companion::push::is_partition_account_id(account) { continue; }
+                let registry = shared.push_tokens.for_account(account);
+                let devices = cognia_companion::person_partition::push_devices(&frame, &registry);
+                if devices.is_empty() { continue; }
+                let data = frame.payload.as_object().cloned().unwrap_or_default();
+                let payload = cognia_companion::push::PushPayload {
+                    title: Some("cognia".into()), body: Some(cognia_companion::push_triggers::push_body_for_channel(channel, &data)),
+                    data: cognia_companion::push_triggers::push_data_for_channel(channel, &data),
+                };
+                for provider in [cognia_companion::push::PushProvider::Fcm, cognia_companion::push::PushProvider::Apns, cognia_companion::push::PushProvider::Hms] {
+                    if let Some(dispatcher) = cognia_companion::push_dispatchers().for_provider(provider) {
+                        registry.broadcast_to_offline_targets(provider, &payload, dispatcher.as_ref(), Some(&devices)).await;
                     }
                 }
-                // A partition event without a destination is never a Host
-                // broadcast, even if a future producer forgets its audience.
                 continue;
             }
             let raw = frame.payload.to_string();

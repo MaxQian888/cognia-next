@@ -2085,7 +2085,9 @@ async function personsChat(person, owner) {
  */
 /**
  * Watch one person's `/ws/events` for `transcript://live`, which a client
- * must ask for by name, and keep every frame until `stop()`.
+ * must ask for by name, and keep every frame until `stop()`. `closed` names a
+ * close the smoke did not ask for: the Host dropping the socket mid-turn
+ * (a lagged subscriber is closed, and live frames are never replayed).
  */
 async function personsLiveWatch(person) {
   const base = person.auth.baseUrl ?? PERSONS_SERVER_URL
@@ -2135,7 +2137,15 @@ async function personsLiveWatch(person) {
     subscribed?.channels?.includes("transcript://live"),
     `${person.subject} subscribes to transcript://live by name (got ${JSON.stringify(subscribed)})`
   )
-  return { frames, stop: () => ws.close() }
+  const watch = { frames, closed: null, stopped: false, stop: () => {} }
+  ws.addEventListener("close", (event) => {
+    if (!watch.stopped) watch.closed = `${event.code}${event.reason ? ` ${event.reason}` : ""}`
+  })
+  watch.stop = () => {
+    watch.stopped = true
+    ws.close()
+  }
+  return watch
 }
 
 /** The text of a reply's parts, as a reader sees it. */
@@ -2198,7 +2208,7 @@ async function personsAgent(person, owner, other) {
       settled?.keyframe === true,
     `${person.subject}'s agent reply streams to their device as live frames (got ${frames
       .map((frame) => `${frame.seq}:${frame.state}${frame.keyframe ? "*" : ""}`)
-      .join(" ")})`
+      .join(" ")}${live.closed ? `; the Host closed the socket mid-turn: ${live.closed}` : ""})`
   )
   check(
     Boolean(settled) &&

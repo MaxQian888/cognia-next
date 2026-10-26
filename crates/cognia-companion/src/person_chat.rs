@@ -92,9 +92,10 @@ pub fn person_event_session(payload: &Value) -> Option<&str> {
         .or_else(|| payload.get("event").and_then(person_event_session))
 }
 
-/// Stamp audiences at publication, before the replay buffer. One targeted
-/// frame for the owning brain and one per currently bound OIDC device. All
-/// transports still recheck device standing at delivery (including replay).
+/// Stamp the partition at publication, before the replay buffer: one frame
+/// per event, which every transport delivers only to the person's own brain
+/// and the devices bound to them at delivery (`person_partition::
+/// event_visible`), live and on replay alike.
 pub fn person_publish(bus: &crate::event_bus::EventBus, channel: &str, payload: &Value) {
     if let Some(person) = person_event_session(payload).and_then(|session| PERSON_SESSIONS.observe(session)) {
         person_publish_to(bus, channel, payload, &person);
@@ -103,10 +104,13 @@ pub fn person_publish(bus: &crate::event_bus::EventBus, channel: &str, payload: 
 
 /// Also used by the gateway's Host-stamped member-ticket audience, before a
 /// first agent_send binds the session. Brain-supplied payloads cannot call it.
+///
+/// Never one frame per device: every frame crosses the one shared broadcast
+/// channel and replay buffer, so a copy per device the person ever paired
+/// turned each streamed chunk into dozens of frames, overflowed the channel
+/// and closed every subscriber on the Host, whoever's they were.
 pub fn person_publish_to(bus: &crate::event_bus::EventBus, channel: &str, payload: &Value, person: &PersonPartition) {
-    let devices = crate::security_store::security_store()
-        .and_then(|store| store.person_devices(&person.org_id, &person.user_id).ok()).unwrap_or_default();
-    person_publish_audience(bus, channel, payload, person, devices);
+    bus.publish_person(channel.into(), payload.clone(), person.account_id.clone());
 }
 /// A member brain's live in-flight reply (`transcript://live`): one frame for
 /// the person's partition, never replayed. Delivery resolves the audience to
@@ -115,13 +119,6 @@ pub fn person_publish_to(bus: &crate::event_bus::EventBus, channel: &str, payloa
 /// subscribes to it.
 pub fn person_publish_live(bus: &crate::event_bus::EventBus, channel: &str, payload: &Value, person: &PersonPartition) {
     bus.publish_person_ephemeral(channel.into(), payload.clone(), person.account_id.clone());
-}
-fn person_publish_audience(bus: &crate::event_bus::EventBus, channel: &str, payload: &Value,
-    person: &PersonPartition, devices: Vec<String>) {
-    bus.publish_person_to(channel.into(), payload.clone(), format!("brain-{}", person.account_id), person.account_id.clone());
-    for device in devices {
-        bus.publish_person_to(channel.into(), payload.clone(), device, person.account_id.clone());
-    }
 }
 
 /// Apply before serializing replay/live frames. The service sidecar exception
@@ -145,6 +142,59 @@ pub fn person_connection_visible(frame: &crate::event_bus::EventFrame, device: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn person_events_publish_once_however_many_devices_the_person_has() {
+        use crate::security_store::{SecurityStore, VerifiedDevicePerson};
+        use cognia_tenant_auth::{OrgId, UserId};
+        let _guard = crate::security_store::test_guard();
+        let previous = crate::security_store::security_store();
+        struct Restore(Option<std::sync::Arc<SecurityStore>>);
+        impl Drop for Restore { fn drop(&mut self) { crate::security_store::install_security_store(self.0.take()); } }
+        let _restore = Restore(previous);
+        let store = SecurityStore::in_memory().unwrap();
+        let owner = VerifiedDevicePerson { org_id: OrgId::parse("org_many_devices").unwrap(), user_id: UserId::parse("usr_many_devices").unwrap() };
+        for index in 0..60 {
+            let device = format!("many-device-{index}");
+            let challenge = store.issue_challenge("many-tenant", 100, 60).unwrap();
+            store.register_oidc_device("many-tenant", &device, &owner, &challenge.id, &challenge.nonce,
+                &device, "Web", "pem", &device, "member", 101).unwrap();
+        }
+        crate::security_store::install_security_store(Some(store));
+        let person = PersonPartition::new(owner.org_id.to_string(), owner.user_id.to_string());
+        let bus = crate::event_bus::EventBus::new();
+        let channels = ["claude://message", "host-state://action", "sync://invalidate", "transcript://revision"];
+        for channel in channels {
+            person_publish_to(&bus, channel, &serde_json::json!({"sessionId":"many-devices"}), &person);
+        }
+        let crate::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else {
+            panic!("replay");
+        };
+        assert_eq!(replay.len(), channels.len(), "one frame per event, not one per device");
+        for frame in &replay {
+            assert_eq!(frame.partition_account_id.as_deref(), Some(person.account_id.as_str()));
+            assert!(frame.target_device_id.is_none());
+            assert!(person_connection_visible(frame, "many-device-0", Some("many-tenant")));
+            assert!(person_connection_visible(frame, "many-device-59", Some("many-tenant")));
+        }
+        // A request one device started is still the person's: their brain and
+        // every device hear it, not only the device it came from.
+        let request = person_publish_to_frame(&bus, &person, serde_json::json!({
+            "sessionId": "many-devices",
+            "remoteExecutionContext": {"originDeviceId": "many-device-0"},
+        }));
+        assert!(request.target_device_id.is_none());
+        let brain = format!("brain-{}", person.account_id);
+        assert!(person_connection_visible(&request, &brain, Some(&person.account_id)));
+        assert!(person_connection_visible(&request, "many-device-59", Some("many-tenant")));
+    }
+
+    fn person_publish_to_frame(bus: &crate::event_bus::EventBus, person: &PersonPartition, payload: Value) -> crate::event_bus::EventFrame {
+        let crate::event_bus::SubscribeResult::Ok { mut receiver, .. } = bus.subscribe(None, 0) else { panic!("live"); };
+        person_publish_to(bus, "claude://message", &payload, person);
+        receiver.try_recv().expect("one frame")
+    }
+
     #[tokio::test]
     async fn p6c_live_and_replay_audiences_are_owner_brain_and_current_owner_devices_only() {
         person_test_audiences(&["claude://message", "agent://event", "a2ui://dispatch", "gateway://request-outcome"]).await;
@@ -180,21 +230,24 @@ mod tests {
             person_publish(&bus, channel, &serde_json::json!({"sessionId":"p6c-audience-session","type":"text"}));
         }
         let crate::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
-        assert_eq!(replay.len(), channels.len() * 3);
-        for frame in &replay {
-            assert_eq!(receiver.try_recv().unwrap().seq, frame.seq);
-            let audience: Vec<_> = [(brain.as_str(), Some(person.account_id.as_str())),
+        assert_eq!(replay.len(), channels.len(), "one frame per event for the whole partition");
+        let audience = |frame: &crate::event_bus::EventFrame| -> Vec<&str> {
+            [(brain.as_str(), Some(person.account_id.as_str())),
                 ("p6c-owner-phone", Some("p6c-tenant")), ("p6c-owner-web", None),
                 ("p6c-other-phone", Some("p6c-tenant")), ("__service__", Some("operator")),
                 ("brain-other", Some("other"))].into_iter()
-                .filter(|(device, tenant)| person_connection_visible(frame, device, *tenant)).map(|(device, _)| device).collect();
-            assert_eq!(audience.len(), 1, "{} {:?}", frame.event_type, audience);
-            assert_eq!(Some(audience[0]), frame.target_device_id.as_deref());
+                .filter(|(device, tenant)| person_connection_visible(frame, device, *tenant)).map(|(device, _)| device).collect()
+        };
+        for frame in &replay {
+            assert_eq!(receiver.try_recv().unwrap().seq, frame.seq);
+            assert!(frame.target_device_id.is_none());
+            assert_eq!(audience(frame), vec![brain.as_str(), "p6c-owner-phone", "p6c-owner-web"], "{}", frame.event_type);
         }
         // A retained frame cannot follow a device reassigned to another person.
         store.assign_device_user("p6c-tenant", "p6c-owner-web", Some(other.user_id.as_str()), 102).unwrap();
-        assert!(replay.iter().filter(|frame| frame.target_device_id.as_deref() == Some("p6c-owner-web"))
-            .all(|frame| !person_connection_visible(frame, "p6c-owner-web", None)));
+        for frame in &replay {
+            assert_eq!(audience(frame), vec![brain.as_str(), "p6c-owner-phone"], "{}", frame.event_type);
+        }
         let unmarked = bus.publish("claude://message".into(), serde_json::json!({"sessionId":"p6c-audience-session"}));
         assert!(!person_connection_visible(&unmarked, "__service__", Some("operator")));
         let legacy = bus.publish("claude://message".into(), serde_json::json!({"sessionId":"p6c-operator-event"}));

@@ -142,6 +142,28 @@ fn event_visible_in_store(frame: &crate::event_bus::EventFrame, device: &str, te
     person.ok().flatten().is_some_and(|person| PersonPartition::new(person.org_id.to_string(), person.user_id.to_string()).account_id == account)
 }
 
+/// The devices a person-partition event may wake by push. One frame stands
+/// for every device bound to the person when it is delivered
+/// (`person_chat::person_publish_to`), so the partition's push registry is
+/// screened against that binding, as the event stream screens its sockets. A
+/// frame a producer addressed to one device stays with that device.
+pub fn push_devices(frame: &crate::event_bus::EventFrame, registry: &crate::push::PushTokenRegistry) -> Vec<String> {
+    let Some(store) = crate::security_store::security_store() else { return Vec::new(); };
+    push_devices_in_store(frame, registry, &store)
+}
+fn push_devices_in_store(frame: &crate::event_bus::EventFrame, registry: &crate::push::PushTokenRegistry,
+    store: &crate::security_store::SecurityStore) -> Vec<String> {
+    if frame.partition_account_id.is_none() { return Vec::new(); }
+    let candidates = match frame.target_device_id.as_deref() {
+        Some(device) => vec![device.to_string()],
+        None => registry.device_ids(),
+    };
+    let mut devices: Vec<String> = candidates.into_iter()
+        .filter(|device| event_visible_in_store(frame, device, None, store)).collect();
+    devices.sort();
+    devices
+}
+
 pub async fn list_handler() -> Result<axum::Json<serde_json::Value>, cognia_problem::Problem> {
     let fleet = fleet().ok_or_else(|| unavailable("host_data_unpartitioned"))?;
     fleet.list().await.map(axum::Json).map_err(|_| unavailable("person_brain_unavailable"))
@@ -228,6 +250,40 @@ mod tests {
         let legacy = bus.publish("sync://invalidate".into(), serde_json::json!({"table":"messages"}));
         assert!(event_visible(&legacy, "any-device", None));
         assert!(unavailable("person_brain_capacity").retryable);
+    }
+
+    #[test]
+    fn push_wakes_only_the_persons_currently_bound_devices() {
+        use crate::push::{PushProvider, PushTokenRecord, PushTokenRegistry};
+        use crate::security_store::{SecurityStore, VerifiedDevicePerson};
+        use cognia_tenant_auth::{OrgId, UserId};
+        let store = SecurityStore::in_memory().unwrap();
+        let ada = VerifiedDevicePerson { org_id: OrgId::parse("org_push").unwrap(), user_id: UserId::parse("usr_push_ada").unwrap() };
+        let bob = VerifiedDevicePerson { org_id: ada.org_id.clone(), user_id: UserId::parse("usr_push_bob").unwrap() };
+        for (device, person) in [("ada-phone", &ada), ("ada-tablet", &ada), ("bob-phone", &bob)] {
+            let challenge = store.issue_challenge("tenant-push", 100, 60).unwrap();
+            store.register_oidc_device("tenant-push", device, person, &challenge.id, &challenge.nonce,
+                device, "Web", "pem", device, "member", 101).unwrap();
+        }
+        let partition = PersonPartition::new(ada.org_id.to_string(), ada.user_id.to_string());
+        let registry = PushTokenRegistry::new().for_account(&partition.account_id);
+        // A token the registry kept for a device now someone else's, and one never paired.
+        for device in ["ada-phone", "ada-tablet", "bob-phone", "unpaired"] {
+            registry.register(PushTokenRecord { device_id: device.into(), provider: PushProvider::Fcm,
+                token: format!("token-{device}"), app_version: None, device_locale: None, registered_at: 1 });
+        }
+        let bus = crate::event_bus::EventBus::new();
+        let event = bus.publish_person("claude://message-added".into(), serde_json::json!({"sessionId":"s"}), partition.account_id.clone());
+        assert_eq!(push_devices_in_store(&event, &registry, &store), vec!["ada-phone", "ada-tablet"]);
+        let addressed = bus.publish_person_to("claude://message-added".into(), serde_json::json!({}), "ada-tablet".into(), partition.account_id.clone());
+        assert_eq!(push_devices_in_store(&addressed, &registry, &store), vec!["ada-tablet"]);
+        let misaddressed = bus.publish_person_to("claude://message-added".into(), serde_json::json!({}), "bob-phone".into(), partition.account_id.clone());
+        assert!(push_devices_in_store(&misaddressed, &registry, &store).is_empty());
+        // A device moved to someone else stops being woken by this partition.
+        store.assign_device_user("tenant-push", "ada-tablet", Some(bob.user_id.as_str()), 102).unwrap();
+        assert_eq!(push_devices_in_store(&event, &registry, &store), vec!["ada-phone"]);
+        let host = bus.publish("claude://message-added".into(), serde_json::json!({}));
+        assert!(push_devices_in_store(&host, &registry, &store).is_empty());
     }
 
     #[tokio::test]

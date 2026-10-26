@@ -99,6 +99,15 @@ impl PushDispatcher for NoopDispatcher {
     }
 }
 
+/// Whether `account_id` is a server-derived person partition id (`pb_` and
+/// 24 lowercase hex digits), the only form [`PushTokenRegistry::for_account`]
+/// takes as a path component.
+pub fn is_partition_account_id(account_id: &str) -> bool {
+    account_id.len() == 27
+        && account_id.starts_with("pb_")
+        && account_id[3..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// Per-device push token registry. Whether a device is currently listening
 /// in-band is NOT stored here — see [`PushTokenRegistry::has_live_event_stream`].
 pub struct PushTokenRegistry {
@@ -157,8 +166,7 @@ impl PushTokenRegistry {
     /// and JSON map remain unchanged; each person persists under their root.
     pub fn for_account(self: &Arc<Self>, account_id: &str) -> Arc<Self> {
         // Only server-derived account ids are accepted as path components.
-        assert!(account_id.len() == 27 && account_id.starts_with("pb_")
-            && account_id[3..].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        assert!(is_partition_account_id(account_id));
         let mut partitions = self.partitions.write();
         partitions.entry(account_id.into()).or_insert_with(|| {
             match self.persistence.as_ref().and_then(|path| path.ancestors().nth(3)) {
@@ -223,6 +231,12 @@ impl PushTokenRegistry {
         if let Err(err) = std::fs::write(path, json) {
             log::warn!("push-tokens write failed: {err}");
         }
+    }
+
+    /// Every device holding a token here, for a caller that knows the
+    /// event's audience and screens these against it.
+    pub fn device_ids(&self) -> Vec<String> {
+        self.inner.read().tokens.keys().cloned().collect()
     }
 
     #[allow(dead_code)] // public for the dispatcher path landing in a follow-up.
@@ -502,6 +516,22 @@ mod tests {
         let reloaded = PushTokenRegistry::with_persistence(root);
         assert!(reloaded.get("same-device").is_some());
         assert_eq!(reloaded.for_account("pb_000000000000000000000002").get("same-device").unwrap().token, "person-b");
+    }
+
+    #[test]
+    fn partition_account_ids_and_registered_devices_are_listed_exactly() {
+        assert!(is_partition_account_id("pb_0123456789abcdef01234567"));
+        for id in ["pb_0123456789ABCDEF01234567", "pb_0123", "xx_0123456789abcdef01234567", "pb_../../0123456789abcdef0"] {
+            assert!(!is_partition_account_id(id), "{id}");
+        }
+        let registry = PushTokenRegistry::new();
+        assert!(registry.device_ids().is_empty());
+        for device in ["phone", "tablet"] {
+            registry.register(PushTokenRecord { device_id: device.into(), provider: PushProvider::Fcm,
+                token: device.into(), app_version: None, device_locale: None, registered_at: 1 });
+        }
+        registry.revoke("tablet");
+        assert_eq!(registry.device_ids(), vec!["phone".to_string()]);
     }
 
     #[tokio::test]
