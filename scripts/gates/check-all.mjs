@@ -58,7 +58,7 @@
 import { spawn } from "node:child_process"
 import { appendFileSync, statSync } from "node:fs"
 import { availableParallelism } from "node:os"
-import { readChangePlan, validateChangePlan } from "../ci/change-plan.mjs"
+import { isCargoDependencyChange, readChangePlan, validateChangePlan } from "../ci/change-plan.mjs"
 
 /** Toolchains a gate can require. CI provisions these per group. */
 export const RUNTIMES = ["node", "python", "rust"]
@@ -462,7 +462,18 @@ function fullQualityReason(changePlan) {
 /** Build the exact gate selection used by both the CI matrix and execution. */
 export function buildQualityPlan(changePlan) {
   validateChangePlan(changePlan)
-  const fullReason = fullQualityReason(changePlan)
+  const cargoDependencies = isCargoDependencyChange(changePlan)
+  const fullReason = cargoDependencies ? null : fullQualityReason(changePlan)
+  const cargoGates = new Set([
+    "gates:registry",
+    "rust:fmt:check",
+    "rust:clippy",
+    "rust:deny",
+    "sdk:rust:test",
+    "audit:rust-architecture",
+    "audit:rust-architecture:deep",
+    "audit:deploy-suite",
+  ])
   const selected = []
   const skipped = []
   const selectedGates = []
@@ -470,15 +481,19 @@ export function buildQualityPlan(changePlan) {
     const affected = gate.inputs?.some((input) =>
       changePlan.changedFiles.some((path) => matchesInput(path, input))
     )
-    const reason =
-      fullReason ??
-      (!gate.inputs
-        ? "Always-on invariant (no narrowed input scope)"
-        : affected
-          ? "Changed file intersects declared inputs"
-          : "No changed file intersects declared inputs")
+    const cargoSelected = cargoDependencies && cargoGates.has(gate.script)
+    const reason = cargoDependencies
+      ? cargoSelected
+        ? "Root Cargo dependency graph changed"
+        : "No JavaScript or source inputs changed"
+      : (fullReason ??
+        (!gate.inputs
+          ? "Always-on invariant (no narrowed input scope)"
+          : affected
+            ? "Changed file intersects declared inputs"
+            : "No changed file intersects declared inputs"))
     const entry = { script: gate.script, group: gate.group, reason }
-    if (fullReason || !gate.inputs || affected) {
+    if (cargoDependencies ? cargoSelected : fullReason || !gate.inputs || affected) {
       selected.push(entry)
       selectedGates.push(gate)
     } else skipped.push(entry)

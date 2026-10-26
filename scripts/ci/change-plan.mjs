@@ -16,6 +16,18 @@ const gitExec = (command, args, cwd = process.cwd()) =>
     stdio: ["ignore", "pipe", "pipe"],
   })
 
+/** Only the root Cargo graph is narrowed; mixed, deleted and full plans retain every check. */
+export function isCargoDependencyChange(plan) {
+  return (
+    plan.mode === "incremental" &&
+    plan.deletedFiles.length === 0 &&
+    plan.changedFiles.length > 0 &&
+    plan.changedFiles.every((file) =>
+      /^(?:Cargo\.(?:toml|lock)|(?:crates\/[^/]+|src-tauri)\/Cargo\.toml)$/.test(file)
+    )
+  )
+}
+
 /** Endpoint diffs need trees, not ancestry. Local branch comparison retains merge-base semantics. */
 export function listCommittedChanges(base, head, exec = gitExec, comparison = "merge-base") {
   if (!["endpoints", "merge-base"].includes(comparison)) throw new Error("Unknown Git comparison")

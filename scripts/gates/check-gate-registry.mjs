@@ -125,10 +125,10 @@ export const EXEMPTIONS = {
   "cli:test:conversation:real":
     "opt-in live model/PTY smoke — requires an explicit backend, a built CLI, and real provider credentials; spends tokens, so cannot run in the unattended gate matrix. Its deterministic harness tests run in scripts:test:ci",
   "cli:test:conversation": "Jest CLI conversation subset — included by test.yml in the cli project",
-  "update:worker:test":
-    "standalone Worker vitest suite — owned by the update-server matrix entry in share-server.yml",
-  "update:worker:typecheck":
-    "standalone Worker typecheck — owned by the update-server matrix entry in share-server.yml",
+  "cognia-services:check":
+    "pinned external service contract — owned by test.yml's cognia-services job",
+  "cognia-services:test":
+    "service extraction contract tests — owned by test.yml's cognia-services job",
   "test:e2e": "playwright — owned by test.yml",
   "test:e2e:build": "playwright fixture build — owned by test.yml",
   "test:e2e:changed": "playwright dev helper — owned by test.yml",
