@@ -11,7 +11,8 @@
  * | authorization   | checked how                                                        |
  * | --------------- | ------------------------------------------------------------------ |
  * | `tool-call`     | the call is in `authorized-tool-calls.ts` and planned this target   |
- * | `plugin`        | one of the plugin's running, authorized calls planned this target   |
+ * | `plugin`        | one of the plugin's running, authorized calls planned this target,  |
+ * |                 | else the list of the handler Bot run it names (`botRunId`)          |
  * | `human`         | a person confirmed this very action (an IM confirm card)            |
  * | `origin-reply`  | the target is the conversation the reply answers                    |
  * | `system-notice` | the target is the conversation the card or notice belongs to        |
@@ -72,7 +73,7 @@ import {
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
-import { configuredPolicyGrants, runningBotOf } from "./configured-grants"
+import { configuredPolicyGrants, liveBotRun } from "./configured-grants"
 import {
   buildActionReviewPlanContext,
   readAppSettings,
@@ -130,7 +131,12 @@ export type OutboundAuthorization =
       createdConversation?: boolean
     }
   /** Plugin code (`ctx.connectors.enqueueSend`, `ctx.skills.invokeBuiltIn`). */
-  | { kind: "plugin"; pluginId: string }
+  | {
+      kind: "plugin"
+      pluginId: string
+      /** The handler Bot run it acts for, which lends the installation's list while it runs. */
+      botRunId?: string
+    }
   /** A person confirmed this very action: the IM confirm card of a built-in skill. */
   | { kind: "human"; actor: ActionReviewActorKind }
   | OriginReplyAuthorization
@@ -532,9 +538,9 @@ export async function planDelivery(
         c.fingerprints.includes(fingerprint)
       )
       if (call) return { action: "send", authorizedBy: jobAuthorizationOf(call) }
-      // A handler Bot of this plugin that is running may reach its
-      // installation's recipients, inside that installation's fence.
-      const bot = runningBotOf(auth.pluginId)
+      // The handler Bot run the plugin named may reach its installation's
+      // recipients, inside that installation's fence.
+      const bot = liveBotRun(auth.pluginId, auth.botRunId)
       return planUnattended(env, {
         ownerRef: `plugin:${auth.pluginId}`,
         ...(bot ? { origin: bot.origin, policyGrants: bot.policyGrants } : {}),

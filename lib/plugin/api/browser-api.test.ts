@@ -201,5 +201,24 @@ describe("plugin engine facade (ADR-0201)", () => {
     for (const method of SUBMISSION_GUARD_METHODS) {
       expect((routed as unknown as Record<string, unknown>)[method]).toBeUndefined()
     }
+
+    // A handler Bot's engine names its run, each run its own gate.
+    const forRun = thirdParty.routeEngine("https://a.test", { botRunId: "run-1" }).engine
+    expect(forRun).toBe(
+      createPluginBrowserEngineFacade(
+        gateBrowserEngine(engine, { kind: "plugin", pluginId: "acme", botRunId: "run-1" })
+      )
+    )
+    expect(forRun).not.toBe(routed)
+    await expect(
+      thirdParty.ensureLocalEngine("local-chromium", { botRunId: "run-2" })
+    ).resolves.toBe(
+      createPluginBrowserEngineFacade(
+        gateBrowserEngine(engine, { kind: "plugin", pluginId: "acme", botRunId: "run-2" })
+      )
+    )
+    expect(
+      gateBrowserEngine(engine, { kind: "plugin", pluginId: "acme", botRunId: "run-2" })
+    ).not.toBe(gateBrowserEngine(engine, { kind: "plugin", pluginId: "acme", botRunId: "run-1" }))
   })
 })

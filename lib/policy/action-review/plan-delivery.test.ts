@@ -353,15 +353,25 @@ describe("planDelivery", () => {
         ],
       }
       const end = beginBotOutboundRun("run-1", { pluginId: "p1", installation })
-      const plugin = delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin")
+      const plugin = delivery(
+        OTHER_KEY,
+        { kind: "plugin", pluginId: "p1", botRunId: "run-1" },
+        "plugin"
+      )
       await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({
         action: "send",
         authorizedBy: { policyRef: "bot:boti_1" },
       })
-      // Another plugin's code is not this Bot's.
+      // Another plugin's code is not this Bot's, nor is a call naming no run.
       await expect(
         planDelivery(
-          delivery(OTHER_KEY, { kind: "plugin", pluginId: "p2" }, "plugin"),
+          delivery(OTHER_KEY, { kind: "plugin", pluginId: "p2", botRunId: "run-1" }, "plugin"),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({ action: "draft" })
+      await expect(
+        planDelivery(
+          delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin"),
           deps(enforce)
         )
       ).resolves.toMatchObject({ action: "draft" })
@@ -371,7 +381,7 @@ describe("planDelivery", () => {
       })
     })
 
-    it("lends no installation's list while two of the plugin's installations run", async () => {
+    it("lends each named run its own installation's list, never another's", async () => {
       const listed = (id: string) => ({
         id,
         outboundRecipients: [
@@ -388,12 +398,19 @@ describe("planDelivery", () => {
       })
       const endA = beginBotOutboundRun("run-a", { pluginId: "p1", installation: listed("boti_a") })
       const endB = beginBotOutboundRun("run-b", { pluginId: "p1", installation: { id: "boti_b" } })
-      const plugin = delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin")
-      await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({ action: "draft" })
-      endB()
-      await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({
+      const as = (botRunId: string) =>
+        delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1", botRunId }, "plugin")
+      // B's code (a callback B left behind included) names B's run, not A's.
+      await expect(planDelivery(as("run-b"), deps(enforce))).resolves.toMatchObject({
+        action: "draft",
+      })
+      await expect(planDelivery(as("run-a"), deps(enforce))).resolves.toMatchObject({
         action: "send",
         authorizedBy: { policyRef: "bot:boti_a" },
+      })
+      endB()
+      await expect(planDelivery(as("run-b"), deps(enforce))).resolves.toMatchObject({
+        action: "draft",
       })
       endA()
     })
@@ -422,7 +439,7 @@ describe("planDelivery", () => {
       )
       const end = beginBotOutboundRun("run-1", { pluginId: "p1", installation })
       const decision = await planDelivery(
-        delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin"),
+        delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1", botRunId: "run-1" }, "plugin"),
         deps(enforce, { [prefix]: [`${prefix}${outboundFingerprint(OTHER)}`] })
       )
       expect(decision).toMatchObject({ action: "deny", reason: "fenced" })
@@ -510,6 +527,7 @@ describe("planDelivery: a delivery that cannot wait (immediate)", () => {
   })
 
   it("still goes when something authorized its recipient", async () => {
+    const named = { ...immediate(OTHER_KEY), authorization: { ...plugin, botRunId: "run-1" } }
     const end = beginBotOutboundRun("run-1", {
       pluginId: "p1",
       installation: {
@@ -527,7 +545,7 @@ describe("planDelivery: a delivery that cannot wait (immediate)", () => {
         ],
       },
     })
-    await expect(planDelivery(immediate(OTHER_KEY), deps(enforce))).resolves.toMatchObject({
+    await expect(planDelivery(named, deps(enforce))).resolves.toMatchObject({
       action: "send",
       authorizedBy: { policyRef: "bot:boti_1" },
     })

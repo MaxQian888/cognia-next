@@ -170,7 +170,7 @@ describe("planIntegrationWrite", () => {
       ).resolves.toMatchObject({ action: "park" })
     })
 
-    it("may reach a running handler Bot's listed repositories", async () => {
+    it("borrows no running handler Bot's list: a Bot's write names its run through binding", async () => {
       const end = beginBotOutboundRun("run-1", {
         pluginId: "p1",
         installation: {
@@ -184,24 +184,9 @@ describe("planIntegrationWrite", () => {
           ],
         },
       })
-      await expect(planIntegrationWrite(write([PR_13], plugin), deps(enforce))).resolves.toEqual({
-        action: "proceed",
-        // Inside the installation's fence: a person's refusal on it holds.
-        outbound: {
-          ownerRef: "plugin:p1",
-          rootSessionId: "bot:boti_1",
-          instructionEpoch: "bot:boti_1@0",
-        },
-        authorizedBy: {
-          receiptId: "integration:n1",
-          authority: "policy-rule",
-          grantScope: "policy",
-          policyRef: "bot:boti_1",
-        },
-        receipt: expect.objectContaining({
-          decision: expect.objectContaining({ outcome: "allow", authority: "policy-rule" }),
-        }),
-      })
+      await expect(
+        planIntegrationWrite(write([PR_13], plugin), deps(enforce))
+      ).resolves.toMatchObject({ action: "park" })
       end()
     })
 

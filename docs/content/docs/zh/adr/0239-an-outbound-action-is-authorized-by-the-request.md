@@ -252,9 +252,9 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - **插件的投递发往宿主存下的目标**（`lib/connectors/plugin-destination.ts`）。此前策略按会话键规划插件的 `enqueueSend`，而 runner 用插件自己给的引用发送，它可以指向另一个群，在飞书上还可以指向另一个人（`receiveId`）。现在插件的请求一律用宿主为该会话存下的投递目标发送（由入站消息刷新，或由 `bootstrapConversation` 生成）；`replyTo` 或 `editTargetMessageId` 必须指向宿主在该会话里见过的消息。其余情况以 `connector_delivery_destination` 拒绝。
 - **直接发送与转发都经过规划。** 插件已弃用的 `send` / `sendText`、插件的 `forwardMessage` 以及工作流节点 `action.connector.forward` 都经过 `ConnectorDeliveryGateway.sendNow` / `forward`。这类投递无法作为草稿等待，规划器按 `immediate` 处理：别的投递会被存为草稿的地方，它们被拒绝（`unapproved`，以失败结果 `connector_delivery_denied` 返回）。只给出引用的直接发送，收件人未知，没有任何授权能覆盖。影子模式下它们照旧发出，receipt 记下执行模式会拒绝。
 - **`streamReply` 无法规划。** 流式回复没有会话键，且每次更新发一帧。消息类处于执行模式时，插件的 `streamReply` 返回 `false`，即文档约定的"不支持流式"，插件随之回退到受管控的发送。
-- **handler Bot 只把名单借给一个安装的代码。** `runningBotOf` 取代了所有运行中安装名单的并集。插件的调用不带运行标识，因此只有在该插件只有一个安装在运行时才借出名单；调用随即在该安装的根与纪元下规划，其屏障生效。两个安装同时运行时，两份名单都不借出。
-- **浏览器提交。** 在 hold 安装之前就已打开的 socket，会让页面保持 `unguarded`，直到 socket 关闭或页面导航。选择文件在动作的提交窗口内执行，页面随即发出的内容会被停下。影子模式下 drain 失败不再阻塞动作。
-- **人的回答记为人的。** HostState 批准（配对设备）在解决前记下 human receipt 并提升该工具调用，写明设备。Issue Loop 把发起运行的人记为调用方（唤醒触发的不记任何人）。Issue 同步推送只有在其携带的每个本地编辑都来自人时才以人为调用方（`editedBy`、`localEditorOf`）；智能体或团队的编辑仍由策略规划。
+- **handler Bot 的名单只借给指明它的运行。** 所有运行中安装名单的并集已去掉。插件的代码由它的所有安装共用，因此一个动作只有在指明自己的运行、且宿主确认该运行仍在进行并属于该插件时才借到名单（`liveBotRun`）：`ctx.connectors.enqueueSend(…, { botRunId })`，以及浏览器引擎路由上下文或 `ensureLocalEngine` 的 `botRunId`。该动作随即在该安装的根与纪元下规划，其屏障生效。集成写入经动作的 `binding` 指明运行（`bot` 授权），因此 broker 的插件路径不借出任何名单。未指明运行的动作（包括某次运行遗留的回调）按插件自身的动作规划。
+- **浏览器提交。** 在 hold 安装之前就已打开的 socket，会让页面保持 `unguarded`，直到 socket 关闭或页面载入新文档；同文档导航（`pushState`、hash 变化）不会关闭它，页面仍为 unguarded。选择文件在动作的提交窗口内执行，页面随即发出的内容会被停下。影子模式下 drain 失败不再阻塞动作。
+- **人的回答记为人的。** HostState 批准（配对设备）在解决前记下 human receipt 并提升该工具调用，写明设备。Issue Loop 只有在运行由人发起时才以人为调用方（唤醒触发的和智能体的 `issue_run` 调用都不记任何人）。Issue 同步推送只有在其携带的每个本地编辑都来自人时才以人为调用方（`editedBy`、`localEditorOf`）；智能体或团队的编辑仍由策略规划。
 
 ### 已去除的重复
 

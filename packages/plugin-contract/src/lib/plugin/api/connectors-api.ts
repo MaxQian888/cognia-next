@@ -360,7 +360,15 @@ export interface PluginConnectorsAPI {
     adapterId: string,
     conversationKey: string,
     req: OutboundRequest,
-    opts?: { nextAttemptAt?: number }
+    opts?: {
+      nextAttemptAt?: number
+      /**
+       * The handler Bot run this send is for (`ctx.runId`). While that run
+       * lasts, the send may reach the recipients its installation lists
+       * (ADR-0239); without it, a plugin's send borrows no list.
+       */
+      botRunId?: string
+    }
   ): Promise<PluginOutboundJobInfo>
 
   // ── A2UI rich-content builder (pure, ungated) ────────────────────────────

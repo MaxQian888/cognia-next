@@ -75,6 +75,12 @@ function parseEnvelope(value) {
   return typeof value === "string" ? JSON.parse(value) : value
 }
 
+/** A URL without its fragment, so a hash change does not read as another document. */
+function urlWithoutHash(url) {
+  const hash = url.indexOf("#")
+  return hash < 0 ? url : url.slice(0, hash)
+}
+
 function pageMainFrame(page) {
   return typeof page.mainFrame === "function" ? page.mainFrame() : page.mainFrame
 }
@@ -1434,13 +1440,47 @@ export class RemoteChromiumService {
       }
       this.schedulePagesChanged(session)
     })
+    // A document load starts with a main-frame navigation request; a
+    // same-document navigation (`pushState`, a hash change) has none and
+    // keeps its sockets. The sockets open when the request starts belong to
+    // the document it replaces.
+    const isDocumentRequest = (request) =>
+      request.isNavigationRequest() && request.frame() === pageMainFrame(page)
+    page.on("request", (request) => {
+      if (!isDocumentRequest(request)) return
+      record.pendingDocument = {
+        url: urlWithoutHash(request.url()),
+        sockets: new Set(record.openSockets ?? []),
+        failed: false,
+      }
+    })
+    page.on("requestfailed", (request) => {
+      // Chromium may still commit an error page in its place.
+      if (isDocumentRequest(request) && record.pendingDocument) record.pendingDocument.failed = true
+    })
+    page.on("response", (response) => {
+      // A 204 / 205 (a refused navigation is fulfilled with 204) keeps the page.
+      if (isDocumentRequest(response.request()) && [204, 205].includes(response.status())) {
+        record.pendingDocument = undefined
+      }
+    })
     page.on("framenavigated", (frame) => {
       if (frame !== pageMainFrame(page)) return
-      // A new document closed the old one's sockets, whether or not each
-      // reported its close.
-      record.openSockets?.clear()
-      record.unrelayedSockets?.clear()
       const url = page.url()
+      const pending = record.pendingDocument
+      if (
+        pending &&
+        (url.startsWith("chrome-error:") ||
+          (!pending.failed && urlWithoutHash(url) === pending.url))
+      ) {
+        // A new document closed the old one's sockets, whether or not each
+        // reported its close.
+        for (const socket of pending.sockets) {
+          record.openSockets?.delete(socket)
+          record.unrelayedSockets?.delete(socket)
+        }
+        record.pendingDocument = undefined
+      }
       if (!url.startsWith("chrome-error:")) record.navigationUrl = url
       if (record.fitToWidth) record.fitReset = true
       this.schedulePagesChanged(session)

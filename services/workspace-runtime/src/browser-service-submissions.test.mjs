@@ -434,6 +434,15 @@ test("a socket opened before hold is installed leaves its page unguarded until i
   await service.configureSubmissionGuard("s", "hold")
   assert.equal((await service.drainSubmissions("s")).unguarded, true)
 
+  // A same-document navigation keeps the document, and its socket, open.
+  await page.evaluate(() => history.pushState({}, "", "?p=socket&moved=1"))
+  await page.evaluate(() => {
+    location.hash = "elsewhere"
+  })
+  await page.waitForFunction(() => location.hash === "#elsewhere")
+  assert.equal(await page.title(), "open")
+  assert.equal((await service.drainSubmissions("s")).unguarded, true)
+
   // A new document's socket is relayed, so the page is guarded again.
   await page.reload()
   await page.waitForFunction(() => document.title === "open")

@@ -245,6 +245,17 @@ describe("start", () => {
     ])
   })
 
+  it("names nobody for a run an agent started, whatever its origin (ADR-0239)", async () => {
+    for (const origin of ["interactive", "im"] as const) {
+      const harness = makeDeps()
+      await createGithubLoopRunAdapter(harness.deps).start(target(), {
+        by: { kind: "agent", id: "char-1" },
+        origin,
+      })
+      expect(harness.executed[0][2]).toBeUndefined()
+    }
+  })
+
   it("defaults the base branch and keeps a queued job queued", async () => {
     const executed: Array<[string, unknown]> = []
     const harness = makeDeps({

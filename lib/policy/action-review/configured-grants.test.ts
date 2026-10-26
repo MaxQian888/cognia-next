@@ -15,7 +15,7 @@ import {
   readOutboundSiteGrants,
   recipientGrant,
   recipientGrantList,
-  runningBotOf,
+  liveBotRun,
   teamDeliveryGrants,
 } from "./configured-grants"
 import {
@@ -155,44 +155,32 @@ describe("running handler Bots", () => {
 
   afterEach(() => __resetRunningBotGrantsForTesting())
 
-  it("lends a plugin its running installation's list and fence until the run ends", () => {
+  it("lends the named run's installation list and fence until the run ends", () => {
     const end = beginBotOutboundRun("run-1", {
       pluginId: "p1",
       installation: { ...installation("a"), humanRevision: 3 },
     })
-    beginBotOutboundRun("run-3", { pluginId: "p2", installation: installation("c") })
-    expect(runningBotOf("p1")).toEqual({
+    expect(liveBotRun("p1", "run-1")).toEqual({
       installationId: "a",
       policyGrants: [{ policyRef: "bot:a", fingerprints: [outboundFingerprint(CHAT)] }],
       origin: botPlanOrigin({ id: "a", humanRevision: 3 }),
     })
-    expect(runningBotOf("p2")?.installationId).toBe("c")
     end()
-    expect(runningBotOf("p1")).toBeUndefined()
+    expect(liveBotRun("p1", "run-1")).toBeUndefined()
   })
 
-  it("counts several runs of one installation as that installation", () => {
-    const endOne = beginBotOutboundRun("run-1", { pluginId: "p1", installation: installation("a") })
-    const endTwo = beginBotOutboundRun("run-2", { pluginId: "p1", installation: installation("a") })
-    expect(runningBotOf("p1")?.installationId).toBe("a")
-    endOne()
-    expect(runningBotOf("p1")?.installationId).toBe("a")
-    endTwo()
-    expect(runningBotOf("p1")).toBeUndefined()
+  it("lends each run its own installation's list, never another's", () => {
+    beginBotOutboundRun("run-a", { pluginId: "p1", installation: installation("a") })
+    beginBotOutboundRun("run-b", { pluginId: "p1", installation: { id: "b" } })
+    expect(liveBotRun("p1", "run-a")?.installationId).toBe("a")
+    expect(liveBotRun("p1", "run-b")).toMatchObject({ installationId: "b", policyGrants: [] })
   })
 
-  it("lends nothing while two installations of the plugin run, since a call names no run", () => {
+  it("lends nothing to a call that names no run, or another plugin's run", () => {
     beginBotOutboundRun("run-1", { pluginId: "p1", installation: installation("a") })
-    const endTwo = beginBotOutboundRun("run-2", { pluginId: "p1", installation: { id: "b" } })
-    expect(runningBotOf("p1")).toBeUndefined()
-    endTwo()
-    expect(runningBotOf("p1")?.installationId).toBe("a")
-  })
-
-  it("records an installation with no list, with an empty list", () => {
-    const end = beginBotOutboundRun("run-1", { pluginId: "p1", installation: { id: "a" } })
-    expect(runningBotOf("p1")).toMatchObject({ installationId: "a", policyGrants: [] })
-    end()
+    expect(liveBotRun("p1", undefined)).toBeUndefined()
+    expect(liveBotRun("p2", "run-1")).toBeUndefined()
+    expect(liveBotRun("p1", "run-unknown")).toBeUndefined()
   })
 })
 

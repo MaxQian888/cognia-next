@@ -41,6 +41,12 @@ export interface PluginBrowserRoutingContext {
    * drives its own page (ADR-0214).
    */
   chatSessionId?: string
+  /**
+   * The handler Bot run the engine acts for (`ctx.runId`). While that run
+   * lasts, what its actions submit may reach the sites its installation
+   * lists (ADR-0239); without it, a plugin's submission borrows no list.
+   */
+  botRunId?: string
 }
 
 export interface PluginBrowserAPI {
@@ -53,7 +59,13 @@ export interface PluginBrowserAPI {
   /** Create (once) or reuse the agent's local runtime session for a backend. */
   ensureLocalEngine(
     backend: "local-chromium" | "user-chrome",
-    options?: { headless?: boolean; browser?: string; chatSessionId?: string }
+    options?: {
+      headless?: boolean
+      browser?: string
+      chatSessionId?: string
+      /** As {@link PluginBrowserRoutingContext.botRunId}. */
+      botRunId?: string
+    }
   ): Promise<PluginBrowserEngine>
   /**
    * Ask the browser pane to show `url` (empty: whatever it has open) on

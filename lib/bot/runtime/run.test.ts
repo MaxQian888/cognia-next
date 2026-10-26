@@ -9,7 +9,7 @@ import type { BotEventDeliveryRow, BotInstallationRow } from "@/lib/db/bot-types
 import { getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
-import { runningBotOf } from "@/lib/policy/action-review/configured-grants"
+import { liveBotRun } from "@/lib/policy/action-review/configured-grants"
 import { outboundFingerprint } from "@/lib/policy/action-review/outbound-targets"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
@@ -127,13 +127,15 @@ describe("runBotDelivery", () => {
       },
     }
     let during: unknown
+    let runId = ""
     const outcome = await runBotDelivery({
       delivery,
       resolved: listed,
       now,
       executors: {
-        handler: jest.fn(async () => {
-          during = runningBotOf("acme")?.policyGrants
+        handler: jest.fn(async (ctx: { runId: string }) => {
+          runId = ctx.runId
+          during = liveBotRun("acme", ctx.runId)?.policyGrants
           return undefined
         }),
       },
@@ -142,7 +144,7 @@ describe("runBotDelivery", () => {
     expect(during).toEqual([
       { policyRef: "bot:boti_1", fingerprints: [outboundFingerprint(recipient)] },
     ])
-    expect(runningBotOf("acme")).toBeUndefined()
+    expect(liveBotRun("acme", runId)).toBeUndefined()
   })
 
   it("cancels execution at the policy deadline and releases its timer", async () => {

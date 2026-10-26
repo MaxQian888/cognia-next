@@ -263,11 +263,12 @@ export function createGithubLoopRunAdapter(
         },
         // A person who picked this run in the Run dialog or on an IM card
         // confirmed the write (ADR-0239 phase 2): its human receipt is the
-        // authority, and the pull request the job opens is covered by it. A
-        // wakeup is nobody's click, so it is planned as the plugin's own write.
-        context.origin === "wakeup"
-          ? undefined
-          : { kind: "person", surface: context.origin === "im" ? "issue-run-im" : "issue-run" }
+        // authority, and the pull request the job opens is covered by it. An
+        // agent's `issue_run` call starts from the same origins but is nobody's
+        // click, nor is a wakeup: those are planned as the plugin's own write.
+        context.origin !== "wakeup" && context.by.kind === "human"
+          ? { kind: "person", surface: context.origin === "im" ? "issue-run-im" : "issue-run" }
+          : undefined
       )
       // The Run dialog IS the confirmation; release the write-tier job.
       if (job.status === "awaiting_approval") job = await deps.approve(job.id)

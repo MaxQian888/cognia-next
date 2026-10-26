@@ -146,26 +146,34 @@ export function createBrowserAPI(options: CreateBrowserAPIOptions = {}): PluginB
     options.pluginId ?? (options.firstParty ? FIRST_PARTY_BROWSER_PLUGIN_ID : "unknown-plugin")
   const expose = (
     engine: BrowserEngine,
-    chatSessionId: string | undefined
+    chatSessionId: string | undefined,
+    botRunId?: string
   ): PluginBrowserEngine => {
     const asker =
       options.firstParty === true
         ? browserToolsAsker(pluginId, chatSessionId)
-        : ({ kind: "plugin", pluginId } as const)
+        : ({ kind: "plugin", pluginId, ...(botRunId ? { botRunId } : {}) } as const)
     const gated = gateBrowserEngine(engine, asker)
     return options.firstParty === true ? gated : createPluginBrowserEngineFacade(gated)
   }
   return {
     routeEngine: (url, context) => {
       const route = routeEngine(url, context)
-      return { ...route, engine: expose(route.engine, context?.chatSessionId) }
+      return {
+        ...route,
+        engine: expose(route.engine, context?.chatSessionId, context?.botRunId),
+      }
     },
     isDomainAuthorized: isBrowserDomainAuthorized,
     primeDomainGrants: primeBrowserDomainGrants,
     saveAnnotation: saveBrowserAnnotation,
     primeLocalRouting: primeLocalBrowserRouting,
     ensureLocalEngine: async (backend, localOptions) =>
-      expose(await ensureAgentLocalEngine(backend, localOptions), localOptions?.chatSessionId),
+      expose(
+        await ensureAgentLocalEngine(backend, localOptions),
+        localOptions?.chatSessionId,
+        localOptions?.botRunId
+      ),
     openPane: (url, paneOptions = {}) =>
       requestBrowserUrl(url, {
         ...(paneOptions.backend ? { backend: paneOptions.backend } : {}),

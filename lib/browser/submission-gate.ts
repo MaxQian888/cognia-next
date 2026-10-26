@@ -466,7 +466,10 @@ function askerKey(asker: BrowserSubmissionAsker): string {
     case "external-bridge":
       return `external-bridge:${asker.clientId}`
     case "plugin":
-      return `plugin:${asker.pluginId}`
+      // Each handler Bot run lends its own sites, so it gets its own gate.
+      return asker.botRunId
+        ? `plugin:${asker.pluginId}:run:${asker.botRunId}`
+        : `plugin:${asker.pluginId}`
   }
 }
 

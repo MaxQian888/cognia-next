@@ -53,7 +53,7 @@ import {
 } from "@cognia/agent-config-types/action-review"
 import type { PendingOutboundReview } from "@cognia/agent-config-types"
 
-import { configuredSiteGrants, runningBotOf } from "./configured-grants"
+import { configuredSiteGrants, liveBotRun } from "./configured-grants"
 import {
   siteTarget,
   toReviewTarget,
@@ -99,7 +99,12 @@ export type BrowserSubmissionAsker =
   /** An External Bridge client driving the browser tools from this computer. */
   | { kind: "external-bridge"; clientId: string }
   /** Another plugin's own browser use. */
-  | { kind: "plugin"; pluginId: string }
+  | {
+      kind: "plugin"
+      pluginId: string
+      /** The handler Bot run it acts for, which lends the installation's sites while it runs. */
+      botRunId?: string
+    }
 
 export interface BrowserSubmissionPlanInput {
   /** The request URL (`request`), or the page URL the action runs on (`possible`). */
@@ -276,9 +281,9 @@ async function askerPlan(asker: BrowserSubmissionAsker, deps: PlanBrowserDeps): 
       // submission is allowed once or refused.
       return { origin: {}, unattended: false, policyGrants: [] }
     case "plugin": {
-      // A handler Bot of this plugin that is running may reach its sites,
-      // inside that installation's fence.
-      const bot = runningBotOf(asker.pluginId)
+      // The handler Bot run the plugin named may reach its sites, inside
+      // that installation's fence.
+      const bot = liveBotRun(asker.pluginId, asker.botRunId)
       return {
         origin: bot?.origin ?? {},
         unattended: true,

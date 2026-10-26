@@ -438,8 +438,8 @@ const liveBotRuns = new Map<string, LiveBotRun>()
 
 /**
  * Record that a handler Bot of `pluginId` is running, until the returned
- * function is called. Every run is recorded, with or without a list, so
- * {@link runningBotOf} can tell when two installations of one plugin overlap.
+ * function is called. Keyed by run: a plugin's outbound action names the run
+ * it acts for ({@link liveBotRun}).
  */
 export function beginBotOutboundRun(
   runId: string,
@@ -473,27 +473,20 @@ export interface RunningBot {
 }
 
 /**
- * The handler Bot running for `pluginId` right now, whose installation's
- * recipients the plugin's own deliveries (`ctx.connectors`), writes and
- * submissions may reach while the run lasts.
- *
- * A plugin's call names no run, so it is attributed only when one
- * installation of the plugin is running (any number of its runs). When two
- * are, the call could be either's and neither's list is lent: the action is
- * planned as the plugin's own.
+ * The handler Bot run `runId` of `pluginId`, while it runs. A plugin's
+ * outbound action that names its run (`botRunId`) may reach the
+ * installation's recipients, inside that installation's fence. One that names
+ * no run, a run that ended, or another plugin's run borrows nothing: the
+ * plugin's code is shared by all its installations, so only the run a call
+ * names says whose list it may use.
  */
-export function runningBotOf(pluginId: string): RunningBot | undefined {
-  let found: LiveBotRun | undefined
-  for (const run of liveBotRuns.values()) {
-    if (run.pluginId !== pluginId) continue
-    if (found && found.installationId !== run.installationId) return undefined
-    found ??= run
-  }
-  if (!found) return undefined
+export function liveBotRun(pluginId: string, runId: string | undefined): RunningBot | undefined {
+  const run = runId ? liveBotRuns.get(runId) : undefined
+  if (!run || run.pluginId !== pluginId) return undefined
   return {
-    installationId: found.installationId,
-    policyGrants: [...found.lists],
-    origin: found.origin,
+    installationId: run.installationId,
+    policyGrants: [...run.lists],
+    origin: run.origin,
   }
 }
 

@@ -310,8 +310,13 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
         request: await pluginDestination(adapterId, conversationKey, req),
         source: "plugin",
         // Covered by one of this plugin's running, authorized tool calls, or
-        // planned as the plugin's own unattended send (ADR-0239).
-        authorization: { kind: "plugin", pluginId },
+        // planned as the plugin's own unattended send, with the list of the
+        // handler Bot run it names (ADR-0239).
+        authorization: {
+          kind: "plugin",
+          pluginId,
+          ...(opts?.botRunId ? { botRunId: opts.botRunId } : {}),
+        },
         ...(opts?.nextAttemptAt !== undefined ? { nextAttemptAt: opts.nextAttemptAt } : {}),
       })
       if (result.kind === "drafted") throw new ConnectorDeliveryHeldError(result.draft.id)

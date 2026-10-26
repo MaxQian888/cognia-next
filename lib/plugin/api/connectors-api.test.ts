@@ -983,6 +983,14 @@ describe("createConnectorsAPI", () => {
         expect.objectContaining({ authorization: { kind: "plugin", pluginId: PLUGIN } })
       )
 
+      // A handler Bot's send names its run, which lends its installation's list.
+      await api.enqueueSend("tg", "telegram:tg:42", req as never, { botRunId: "run-7" })
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          authorization: { kind: "plugin", pluginId: PLUGIN, botRunId: "run-7" },
+        })
+      )
+
       spy.mockResolvedValueOnce({ kind: "drafted", draft: { id: "cdr_9" } as never })
       const held = api.enqueueSend("tg", "telegram:tg:42", req as never)
       await expect(held).rejects.toBeInstanceOf(ConnectorDeliveryHeldError)

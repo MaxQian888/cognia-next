@@ -74,7 +74,6 @@ import {
   botRecipientGrants,
   botScopeGrants,
   configuredGithubGrants,
-  runningBotOf,
   type GithubGrantContext,
 } from "./configured-grants"
 import {
@@ -613,13 +612,9 @@ export async function planIntegrationWrite(
       if (call) {
         return { action: "proceed", outbound: { ownerRef }, authorizedBy: jobAuthorizationOf(call) }
       }
-      // A handler Bot of this plugin that is running may reach its
-      // installation's recipients, inside that installation's fence.
-      const bot = runningBotOf(auth.pluginId)
-      return planUnattended(env, {
-        ownerRef,
-        ...(bot ? { origin: bot.origin, policyGrants: bot.policyGrants } : {}),
-      })
+      // A handler Bot's write names its run through the action's `binding`
+      // (the `bot` authorization); the plugin's own code borrows no list.
+      return planUnattended(env, { ownerRef })
     }
     case "bot": {
       const ownerRef = `bot:${auth.installation.id}`

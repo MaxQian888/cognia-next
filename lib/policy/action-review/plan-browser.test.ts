@@ -245,21 +245,20 @@ describe("planBrowserSubmission — enforce", () => {
     })
   })
 
-  it("lets a plugin reach the sites of its running handler Bot", async () => {
+  it("lets a plugin reach the sites of the handler Bot run it names", async () => {
     const end = beginBotOutboundRun("run-1", {
       pluginId: "acme",
       installation: { id: "b1", outboundRecipients: [grant(FORMS)] as never },
     })
-    const allowed = await planBrowserSubmission(
-      submit({ kind: "plugin", pluginId: "acme" }),
-      deps(enforce())
-    )
+    const named = { kind: "plugin", pluginId: "acme", botRunId: "run-1" } as const
+    const allowed = await planBrowserSubmission(submit(named), deps(enforce()))
     expect(allowed.action).toBe("proceed")
+    // A call that names no run borrows nothing.
+    await expect(
+      planBrowserSubmission(submit({ kind: "plugin", pluginId: "acme" }), deps(enforce()))
+    ).resolves.toMatchObject({ action: "ask" })
     end()
-    const asked = await planBrowserSubmission(
-      submit({ kind: "plugin", pluginId: "acme" }),
-      deps(enforce())
-    )
+    const asked = await planBrowserSubmission(submit(named), deps(enforce()))
     expect(asked).toMatchObject({ action: "ask", ask: { unattended: true } })
   })
 
