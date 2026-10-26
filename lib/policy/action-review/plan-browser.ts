@@ -45,26 +45,22 @@
  */
 
 import {
-  ACTION_REVIEW_CONTRACT_VERSION,
   type ActionReviewActorKind,
   type ActionReviewAuthority,
-  type ActionReviewDecision,
   type ActionReviewGrant,
   type ActionReviewOutcome,
   type ActionReviewPlanOutcome,
-  type ActionReviewRequest,
 } from "@cognia/agent-config-types/action-review"
 import type { PendingOutboundReview } from "@cognia/agent-config-types"
 
-import { classifyRisk } from "@/lib/policy/risk/classify-risk"
-
-import { configuredSiteGrants, runningBotGrantsOf } from "./configured-grants"
+import { configuredSiteGrants, runningBotOf } from "./configured-grants"
 import {
   siteTarget,
   toReviewTarget,
   unknownSiteTarget,
   type OutboundTarget,
 } from "./outbound-targets"
+import { outboundReceipt, type OutboundReceipt } from "./outbound-receipt"
 import {
   buildActionReviewPlanContext,
   readAppSettings,
@@ -115,10 +111,7 @@ export interface BrowserSubmissionPlanInput {
 }
 
 /** A `browser-submission` receipt, for the caller to write. */
-export interface BrowserSubmissionReceipt {
-  request: ActionReviewRequest
-  decision: ActionReviewDecision
-}
+export type BrowserSubmissionReceipt = OutboundReceipt
 
 /** What a person is asked about one submission. */
 export interface BrowserSubmissionAsk {
@@ -208,52 +201,31 @@ export function browserSubmissionReceipt(args: {
   now: number
   requestId?: string
 }): BrowserSubmissionReceipt {
-  const requestId = args.requestId ?? `browser-submission:${crypto.randomUUID()}`
-  const risk = classifyRisk({
-    objective: "",
-    taskDescriptions: [],
-    toolIds: ["connector_send"],
-    capabilityIds: [],
-    sandboxEnabled: false,
+  return outboundReceipt({
+    requestId: args.requestId ?? `browser-submission:${crypto.randomUUID()}`,
+    origin: {
+      channel: "browser-submission",
+      scope: "browser",
+      ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+      ...(args.unattended ? { headless: true } : {}),
+      ...(args.origin.rootSessionId ? { rootSessionId: args.origin.rootSessionId } : {}),
+      ...(args.origin.instructionEpoch ? { instructionEpoch: args.origin.instructionEpoch } : {}),
+    },
+    subject: {
+      kind: "browser-submission",
+      ref: args.ownerRef,
+      title: args.operation,
+      targets: [toReviewTarget(args.target)],
+    },
+    plan: args.plan,
+    enforced: args.enforced,
+    outcome: args.outcome,
+    authority: args.authority,
+    ...(args.grant ? { grant: args.grant } : {}),
+    ...(args.actor ? { actor: { kind: args.actor } } : {}),
+    reason: args.reason,
+    now: args.now,
   })
-  const permits = args.outcome === "allow" || args.outcome === "allow_always"
-  return {
-    request: {
-      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
-      requestId,
-      origin: {
-        channel: "browser-submission",
-        scope: "browser",
-        id: requestId,
-        ...(args.sessionId ? { sessionId: args.sessionId } : {}),
-        ...(args.unattended ? { headless: true } : {}),
-        ...(args.origin.rootSessionId ? { rootSessionId: args.origin.rootSessionId } : {}),
-        ...(args.origin.instructionEpoch ? { instructionEpoch: args.origin.instructionEpoch } : {}),
-      },
-      subject: {
-        kind: "browser-submission",
-        ref: args.ownerRef,
-        title: args.operation,
-        targets: [toReviewTarget(args.target)],
-      },
-      verdict: "ask",
-      verdictExplicit: false,
-      tier: risk.tier,
-      surfaces: risk.surfaces,
-      plan: { outcome: args.plan, enforced: args.enforced },
-      requestedAt: args.now,
-    },
-    decision: {
-      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
-      requestId,
-      outcome: args.outcome,
-      authority: args.authority,
-      reason: args.reason,
-      ...(args.grant && permits ? { grant: args.grant } : {}),
-      ...(args.actor ? { actor: { kind: args.actor } } : {}),
-      decidedAt: args.now,
-    },
-  }
 }
 
 async function defaultWorkflowRunTrigger(
@@ -303,9 +275,16 @@ async function askerPlan(asker: BrowserSubmissionAsker, deps: PlanBrowserDeps): 
       // A bridge client has no request to scope a grant or a fence to: each
       // submission is allowed once or refused.
       return { origin: {}, unattended: false, policyGrants: [] }
-    case "plugin":
-      // A handler Bot of this plugin that is running may reach its sites.
-      return { origin: {}, unattended: true, policyGrants: runningBotGrantsOf(asker.pluginId) }
+    case "plugin": {
+      // A handler Bot of this plugin that is running may reach its sites,
+      // inside that installation's fence.
+      const bot = runningBotOf(asker.pluginId)
+      return {
+        origin: bot?.origin ?? {},
+        unattended: true,
+        policyGrants: bot?.policyGrants ?? [],
+      }
+    }
   }
 }
 

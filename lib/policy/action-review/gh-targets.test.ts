@@ -1,5 +1,6 @@
 import {
   commandChangesDirectory,
+  commandChangesGhEnvironment,
   commandHasGhWrite,
   dedupeGithubTargets,
   ghInvocations,
@@ -112,6 +113,31 @@ describe("a command that changes directory", () => {
     // A write that names its repository still does.
     expect(ghWriteTargets("cd ../api && gh pr comment 3 -R acme/api -b x", context)).toEqual([
       repositoryTarget("acme/api", 3),
+    ])
+  })
+})
+
+describe("a command that sets GH_REPO or GH_HOST where only the shell can read it", () => {
+  it("is recognised: export, a bare assignment, unset, source and eval", () => {
+    expect(commandChangesGhEnvironment("export GH_REPO=other/repo; gh pr create --fill")).toBe(true)
+    expect(commandChangesGhEnvironment("GH_REPO=other/repo; gh pr create --fill")).toBe(true)
+    expect(commandChangesGhEnvironment("unset GH_HOST && gh pr create")).toBe(true)
+    expect(commandChangesGhEnvironment("source .env && gh pr create")).toBe(true)
+    expect(commandChangesGhEnvironment(". ./env.sh; gh pr create")).toBe(true)
+    expect(commandChangesGhEnvironment('eval "$(cat env)"; gh pr create')).toBe(true)
+    // A gh segment's own leading assignment is read where it is written.
+    expect(commandChangesGhEnvironment("GH_REPO=o/r gh pr create")).toBe(false)
+    expect(commandChangesGhEnvironment("gh pr create --fill")).toBe(false)
+  })
+
+  it("does not put a write that names no repository on the checkout", () => {
+    const context = { localRepository: "allowed/repo" }
+    expect(ghWriteTargets("export GH_REPO=other/repo; gh pr create --fill", context)).toEqual([
+      unknownGithubTarget(),
+    ])
+    // Written on the gh segment itself, the repository is read.
+    expect(ghWriteTargets("GH_REPO=other/repo gh pr create --fill", context)).toEqual([
+      repositoryTarget("other/repo"),
     ])
   })
 })

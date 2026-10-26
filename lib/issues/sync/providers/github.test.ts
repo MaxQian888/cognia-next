@@ -505,6 +505,29 @@ describe("push", () => {
     })
   })
 
+  it("names a person's own edits as that person's write, and nobody for an agent's (ADR-0239)", async () => {
+    const execute = jest.fn(async (..._args: unknown[]) => ({ id: "job-2", status: "running" }))
+    const provider = createGithubSyncProvider({
+      resolveOctokitOrNull: async () => null,
+      execute: execute as never,
+      resolveAccount: async () => ({ id: "acct", enabled: true }) as never,
+    })
+    await provider.push!(binding(), ref, { title: "T" }, issue, {
+      idempotencyKey: "k1",
+      by: { kind: "agent" },
+      editedBy: "person",
+    })
+    await provider.push!(binding(), ref, { title: "T" }, issue, {
+      idempotencyKey: "k2",
+      by: { kind: "agent" },
+      editedBy: "automation",
+    })
+    expect(execute.mock.calls.map((call) => call[2])).toEqual([
+      { kind: "person", surface: "issue-sync" },
+      undefined,
+    ])
+  })
+
   it("reports applied when the job already completed, and refuses without an account", async () => {
     const provider = createGithubSyncProvider({
       resolveOctokitOrNull: async () => null,

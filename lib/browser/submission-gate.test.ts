@@ -51,6 +51,7 @@ function guardedEngine(
     submits?: BrowserSubmissionReport[]
     unguarded?: boolean
     configureFails?: boolean
+    drainFails?: boolean
   } = {}
 ) {
   let mode: BrowserSubmissionGuardMode = "off"
@@ -65,6 +66,7 @@ function guardedEngine(
       return { mode: next }
     }),
     drainSubmissions: jest.fn(async (waitMs = 0, pageId?: string) => {
+      if (options.drainFails) throw new Error("browser_submission_drain: runtime gone")
       if (waitMs > 0) await tick()
       const reports = queued
       queued = []
@@ -87,6 +89,7 @@ function guardedEngine(
       return { ok: true, error: null, generation: 3 }
     }),
     pressKey: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
+    setFiles: jest.fn(async () => ({ ok: true, error: null, generation: 3 })),
     evaluate: jest.fn(async () => ({ ok: true, value: 1 })),
     getPage: jest.fn(async () => ({ url: "https://forms.example.com/page", title: "Form" })),
     waitForLoad: jest.fn(async () => undefined),
@@ -164,6 +167,8 @@ describe("possible submissions", () => {
     expect(possibleSubmissionOperation("act", ["r1", "double_click", {}])).toBe("double_click")
     expect(possibleSubmissionOperation("act", ["r1", "select", { value: "x" }])).toBe("select")
     expect(possibleSubmissionOperation("drag", ["a", "b"])).toBe("drag")
+    // Choosing a file may upload it at once.
+    expect(possibleSubmissionOperation("setFiles", ["r1", ["a.pdf"]])).toBe("set_files")
     expect(possibleSubmissionOperation("pressKey", ["Enter"])).toBe("press:Enter")
     expect(possibleSubmissionOperation("pressKey", ["ctrl+Enter"])).toBe("press:ctrl+Enter")
     expect(possibleSubmissionOperation("pressKey", ["Space"])).toBe("press:Space")
@@ -340,6 +345,37 @@ describe("gateBrowserEngine", () => {
       expect(plan).toHaveBeenCalledWith(expect.objectContaining({ operation: "press:Enter" }))
       // A key that does not submit just runs.
       await expect(gated.pressKey("Tab")).resolves.toMatchObject({ ok: true })
+    })
+
+    it("lets the action run under shadow mode when the guard cannot report", async () => {
+      const engine = guardedEngine({ drainFails: true })
+      const { gateDeps, plan } = deps(SHADOW, "refuse")
+      const gated = gateBrowserEngine(asEngine(engine), chat, {}, gateDeps)
+      await expect(gated.act("r1", "click", {})).resolves.toMatchObject({ ok: true })
+      expect(engine.act).toHaveBeenCalledTimes(1)
+      expect(plan).not.toHaveBeenCalled()
+    })
+
+    it("decides before acting under enforcement when the guard cannot report", async () => {
+      const engine = guardedEngine({ drainFails: true })
+      const { gateDeps, plan } = deps(ENFORCE, "refuse")
+      const gated = gateBrowserEngine(asEngine(engine), chat, {}, gateDeps)
+      await expect(gated.act("r1", "click", {})).resolves.toMatchObject({
+        code: "outbound_refused",
+      })
+      expect(engine.act).not.toHaveBeenCalled()
+      expect(plan).toHaveBeenCalledWith(expect.objectContaining({ operation: "click" }))
+      // An action that cannot submit still runs.
+      await expect(gated.act("r1", "hover", {})).resolves.toMatchObject({ ok: true })
+    })
+
+    it("watches what choosing a file submits", async () => {
+      const engine = guardedEngine()
+      const { gateDeps } = deps(ENFORCE, "proceed")
+      const gated = gateBrowserEngine(asEngine(engine), chat, {}, gateDeps)
+      await expect(gated.setFiles("r1", ["a.pdf"])).resolves.toMatchObject({ ok: true })
+      expect(engine.drainSubmissions).toHaveBeenCalled()
+      expect(engine.setFiles).toHaveBeenCalledWith("r1", ["a.pdf"])
     })
 
     it("configures the guard once per mode", async () => {

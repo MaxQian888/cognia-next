@@ -51,3 +51,26 @@ export function lastLocalChangeAt(
   }
   return out
 }
+
+/**
+ * Who made the local edits to `fields` strictly after `since`: `person` when
+ * every one was a human actor's, else `automation` (an agent, a team, or an
+ * edit that names no actor). The sync engine's own events are not edits.
+ */
+export function localEditorOf(
+  events: readonly IssueEvent[],
+  since: number,
+  fields: ReadonlySet<IssueSyncField>
+): "person" | "automation" {
+  let edited = false
+  for (const event of events) {
+    if (event.ts <= since) continue
+    const field = EVENT_FIELD[event.kind]
+    if (!field || !fields.has(field)) continue
+    const by = (event.payload as { by?: Parameters<typeof isSyncActor>[0] }).by
+    if (isSyncActor(by)) continue
+    if (by?.kind !== "human") return "automation"
+    edited = true
+  }
+  return edited ? "person" : "automation"
+}

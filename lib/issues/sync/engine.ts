@@ -48,7 +48,7 @@ import {
   remoteFieldValue,
   type RemoteFieldValue,
 } from "./apply"
-import { lastLocalChangeAt } from "./field-clock"
+import { lastLocalChangeAt, localEditorOf } from "./field-clock"
 import type {
   IssueSyncBinding,
   IssueSyncProvider,
@@ -394,6 +394,15 @@ function addToPatch(patch: RemotePatch, field: IssueSyncField, value: RemoteFiel
   }
 }
 
+/** The synced fields a patch carries. */
+function patchFields(patch: RemotePatch): Set<IssueSyncField> {
+  return new Set(
+    (Object.keys(patch) as Array<keyof RemotePatch>).map((key): IssueSyncField =>
+      key === "cycleExternalId" ? "cycle" : key
+    )
+  )
+}
+
 async function pushPatch(
   binding: IssueSyncBinding,
   provider: IssueSyncProvider,
@@ -405,9 +414,17 @@ async function pushPatch(
 ): Promise<void> {
   if (!provider.push || Object.keys(patch).length === 0) return
   const by = syncActorFor(binding.providerId, provider.label)
+  // A person's own edits go out as that person's write; anything an agent
+  // or a team changed is left to the outbound policy (ADR-0239).
+  const editedBy = localEditorOf(
+    await listIssueEvents({ issueId: issue.id }),
+    ref.syncedAt ?? 0,
+    patchFields(patch)
+  )
   const outcome = await provider.push(binding, ref, patch, issue, {
     idempotencyKey: pushIdempotencyKey(issue.id, patch),
     by,
+    editedBy,
   })
   if (outcome.status === "queued") {
     tally.queued += 1

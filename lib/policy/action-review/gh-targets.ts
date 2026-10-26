@@ -8,7 +8,8 @@
  * a `repository` target with the PR or issue it goes to as its `thread`, or
  * {@link unknownGithubTarget} when no repository can be named. A write that
  * names none lands on the checkout: the caller passes the checkout's `origin`
- * remote as `localRepository`.
+ * remote as `localRepository`, unless the command changes directory or sets
+ * `GH_REPO` / `GH_HOST` in a way only the shell can evaluate.
  *
  * Pure, so the CLI tool host can use it. The sidecar decides the same
  * write-or-not question for its always-ask with its own copy
@@ -76,6 +77,35 @@ export interface GhTargetContext {
 
 const DIRECTORY_CHANGERS: ReadonlySet<string> = new Set(["cd", "pushd", "popd"])
 
+/** Heads that can set any variable for the commands after them. */
+const ENVIRONMENT_CHANGERS: ReadonlySet<string> = new Set(["source", ".", "eval"])
+
+/** A mention of `GH_REPO` / `GH_HOST`: an assignment, export or unset. */
+const GH_ENVIRONMENT_NAME = /\bGH_(?:REPO|HOST)\b/g
+
+function ghEnvironmentMentions(text: string): number {
+  return text.match(GH_ENVIRONMENT_NAME)?.length ?? 0
+}
+
+/**
+ * True when some segment other than a `gh` invocation's own leading
+ * assignments may change where a later `gh` writes: `export GH_REPO=o/r`, a
+ * bare `GH_REPO=o/r;`, `unset GH_HOST`, or a `source` / `eval` that could set
+ * either. The value then is not something this parser can evaluate.
+ */
+export function commandChangesGhEnvironment(command: string): boolean {
+  let inGh = 0
+  for (const segment of splitCommandSegments(command)) {
+    const peeled = peelCommandWrappers(segment.head, segment.args)
+    const head = (peeled?.head ?? segment.head).toLowerCase()
+    if (ENVIRONMENT_CHANGERS.has(head)) return true
+    if (head === "gh") inGh += ghEnvironmentMentions(segment.raw)
+  }
+  // Counted on the whole line: a segment that is only an assignment
+  // (`GH_REPO=o/r;`) is not a command, so it has no segment of its own.
+  return ghEnvironmentMentions(command) > inGh
+}
+
 /** True when some segment of the command changes the working directory. */
 export function commandChangesDirectory(command: string): boolean {
   return splitCommandSegments(command).some((segment) => {
@@ -112,7 +142,10 @@ function invocationTargets(invocation: GhInvocation, context: GhTargetContext): 
 export function ghWriteTargets(command: string, context: GhTargetContext = {}): OutboundTarget[] {
   const writes = ghInvocations(command).filter((invocation) => invocation.kind === "write")
   if (writes.length === 0) return []
-  const effective = commandChangesDirectory(command) ? {} : context
+  // Another checkout, or a repository set where this parser cannot read it:
+  // a write that names none then names no one, rather than the checkout.
+  const effective =
+    commandChangesDirectory(command) || commandChangesGhEnvironment(command) ? {} : context
   return dedupeGithubTargets(
     writes.flatMap((invocation) => invocationTargets(invocation, effective))
   )

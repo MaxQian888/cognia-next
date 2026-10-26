@@ -242,23 +242,33 @@ export function createGithubLoopRunAdapter(
           : DEFAULT_GITHUB_LOOP_BASE)
       const now = deps.now()
 
-      let job = await deps.execute(GITHUB_DELIVERY_PLUGIN_ID, {
-        integrationId: GITHUB_INTEGRATION_ID,
-        accountId: account.id,
-        actionId: "runIssueLoop",
-        input: {
-          repoFullName: ref.repoFullName,
-          issueNumber: ref.number,
-          head,
-          base,
-          title: `${issue.identifier}: ${issue.title}`,
-          ...(issue.description || context.brief
-            ? { body: withRunBrief(issue.description ?? "", context.brief) }
-            : {}),
+      let job = await deps.execute(
+        GITHUB_DELIVERY_PLUGIN_ID,
+        {
+          integrationId: GITHUB_INTEGRATION_ID,
+          accountId: account.id,
+          actionId: "runIssueLoop",
+          input: {
+            repoFullName: ref.repoFullName,
+            issueNumber: ref.number,
+            head,
+            base,
+            title: `${issue.identifier}: ${issue.title}`,
+            ...(issue.description || context.brief
+              ? { body: withRunBrief(issue.description ?? "", context.brief) }
+              : {}),
+          },
+          source: "manual",
+          idempotencyKey: `issue-run:${issue.id}:${now}`,
         },
-        source: "manual",
-        idempotencyKey: `issue-run:${issue.id}:${now}`,
-      })
+        // A person who picked this run in the Run dialog or on an IM card
+        // confirmed the write (ADR-0239 phase 2): its human receipt is the
+        // authority, and the pull request the job opens is covered by it. A
+        // wakeup is nobody's click, so it is planned as the plugin's own write.
+        context.origin === "wakeup"
+          ? undefined
+          : { kind: "person", surface: context.origin === "im" ? "issue-run-im" : "issue-run" }
+      )
       // The Run dialog IS the confirmation; release the write-tier job.
       if (job.status === "awaiting_approval") job = await deps.approve(job.id)
 

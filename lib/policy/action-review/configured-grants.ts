@@ -45,7 +45,11 @@ import type { IntegrationActionRisk } from "@/types/plugin/plugin-integration"
 import type { AgentTeamGithubDeliveryPolicy } from "@/types/agent/agent-team-runtime"
 import { consentedRepositoryPaths } from "@/lib/stack/team-policy"
 
-import type { OutboundPolicyGrantList } from "./plan-context"
+import {
+  botPlanOrigin,
+  type ActionReviewPlanOrigin,
+  type OutboundPolicyGrantList,
+} from "./plan-context"
 import { outboundFingerprint, repositoryOnHost, type OutboundTarget } from "./outbound-targets"
 
 export interface ConfiguredGrantDeps {
@@ -427,42 +431,70 @@ interface LiveBotRun {
   pluginId: string
   installationId: string
   lists: readonly OutboundPolicyGrantList[]
+  origin: ActionReviewPlanOrigin
 }
 
 const liveBotRuns = new Map<string, LiveBotRun>()
 
 /**
- * Record that a handler Bot of `pluginId` is running: until the returned
- * function is called, that plugin's own deliveries (`ctx.connectors`) may reach
- * the installation's recipients. Keyed by run, so overlapping runs of two
- * installations each count, and ending one leaves the other.
+ * Record that a handler Bot of `pluginId` is running, until the returned
+ * function is called. Every run is recorded, with or without a list, so
+ * {@link runningBotOf} can tell when two installations of one plugin overlap.
  */
 export function beginBotOutboundRun(
   runId: string,
   run: {
     pluginId: string
-    installation: { id: string; outboundRecipients?: readonly OutboundRecipientGrant[] }
+    installation: {
+      id: string
+      humanRevision?: number
+      outboundRecipients?: readonly OutboundRecipientGrant[]
+    }
   }
 ): () => void {
-  const lists = botRecipientGrants(run.installation)
-  if (lists.length === 0) return () => undefined
   liveBotRuns.set(runId, {
     pluginId: run.pluginId,
     installationId: run.installation.id,
-    lists,
+    lists: botRecipientGrants(run.installation),
+    origin: botPlanOrigin(run.installation),
   })
   return () => {
     liveBotRuns.delete(runId)
   }
 }
 
-/** The installation lists of `pluginId`'s handler Bots running right now. */
-export function runningBotGrantsOf(pluginId: string): OutboundPolicyGrantList[] {
-  const lists: OutboundPolicyGrantList[] = []
+/** The handler Bot a plugin's own outbound action is planned as. */
+export interface RunningBot {
+  installationId: string
+  /** The installation's recipient list; empty when it has none. */
+  policyGrants: OutboundPolicyGrantList[]
+  /** The installation's root and epoch, so its fence applies. */
+  origin: ActionReviewPlanOrigin
+}
+
+/**
+ * The handler Bot running for `pluginId` right now, whose installation's
+ * recipients the plugin's own deliveries (`ctx.connectors`), writes and
+ * submissions may reach while the run lasts.
+ *
+ * A plugin's call names no run, so it is attributed only when one
+ * installation of the plugin is running (any number of its runs). When two
+ * are, the call could be either's and neither's list is lent: the action is
+ * planned as the plugin's own.
+ */
+export function runningBotOf(pluginId: string): RunningBot | undefined {
+  let found: LiveBotRun | undefined
   for (const run of liveBotRuns.values()) {
-    if (run.pluginId === pluginId) lists.push(...run.lists)
+    if (run.pluginId !== pluginId) continue
+    if (found && found.installationId !== run.installationId) return undefined
+    found ??= run
   }
-  return lists
+  if (!found) return undefined
+  return {
+    installationId: found.installationId,
+    policyGrants: [...found.lists],
+    origin: found.origin,
+  }
 }
 
 export function __resetRunningBotGrantsForTesting(): void {

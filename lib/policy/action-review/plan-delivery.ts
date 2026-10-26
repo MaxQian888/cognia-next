@@ -28,6 +28,11 @@
  * A person's own send (`manual`, `draft-approved`) needs no authorization.
  * Any other source that names none is planned as unattended with no origin.
  *
+ * A delivery that cannot wait for a person (`immediate`: a plugin's direct
+ * send, a forward) is refused where another would be drafted, with the reason
+ * `unapproved`. One with no conversation key (a direct send that names only a
+ * platform reference) has an unknown recipient, which nothing authorizes.
+ *
  * ## Receipts
  *
  * - Enforce mode: every delivery the policy drafts or refuses, and every one
@@ -43,22 +48,17 @@
  */
 
 import {
-  ACTION_REVIEW_CONTRACT_VERSION,
   type ActionReviewActorKind,
   type ActionReviewAuthority,
-  type ActionReviewDecision,
   type ActionReviewGrant,
   type ActionReviewOutcome,
-  type ActionReviewPlan,
   type ActionReviewPlanOutcome,
-  type ActionReviewRequest,
 } from "@cognia/agent-config-types/action-review"
 import type {
   OutboundJobAuthorization,
   OutboundJobSource,
 } from "@cognia/plugin-contract/lib/db/connector-types"
 
-import { classifyRisk } from "@/lib/policy/risk/classify-risk"
 import { parseConversationKey } from "@/types/connectors/event"
 
 import {
@@ -72,7 +72,7 @@ import {
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
-import { configuredPolicyGrants, runningBotGrantsOf } from "./configured-grants"
+import { configuredPolicyGrants, runningBotOf } from "./configured-grants"
 import {
   buildActionReviewPlanContext,
   readAppSettings,
@@ -85,6 +85,7 @@ import {
   readOutboundAuthorizationMode,
   type OutboundAuthorizationMode,
 } from "./policy"
+import { jobAuthorizationOf, outboundReceipt, type OutboundReceipt } from "./outbound-receipt"
 import { resolveSessionRequestOrigin } from "./resolve-request-origin"
 
 /** A reply into the conversation the request came from. */
@@ -150,22 +151,27 @@ export type OutboundAuthorization =
 
 export interface DeliveryPlanInput {
   adapterId: string
+  /** Empty when the delivery names no conversation the host can check. */
   conversationKey: string
   source: OutboundJobSource
   authorization?: OutboundAuthorization
+  /**
+   * Goes out now or not at all: there is no draft to hold it in. Where the
+   * policy would draft it, it is refused (`unapproved`).
+   */
+  immediate?: boolean
 }
 
 /** A `connector-delivery` receipt, for the gateway to write. */
-export interface DeliveryReceipt {
-  request: ActionReviewRequest
-  decision: ActionReviewDecision
-}
+export type DeliveryReceipt = OutboundReceipt
 
 export type DeliveryDenyReason =
   /** A person refused this recipient for the current request. */
   | "fenced"
   /** A reply, notice or reroute named a conversation other than its own. */
   | "conversation-mismatch"
+  /** Nothing authorized its recipient, and it cannot wait for a person ({@link DeliveryPlanInput.immediate}). */
+  | "unapproved"
 
 export type DeliveryDecision =
   | { action: "send"; authorizedBy?: OutboundJobAuthorization; receipt?: DeliveryReceipt }
@@ -225,15 +231,6 @@ function deliveryTarget(input: DeliveryPlanInput): OutboundTarget {
   )
 }
 
-function fromToolCall(call: AuthorizedOutboundToolCall): OutboundJobAuthorization {
-  return {
-    receiptId: call.requestId,
-    authority: call.authority,
-    ...(call.grant ? { grantScope: call.grant.scope } : {}),
-    ...(call.grant?.policyRef ? { policyRef: call.grant.policyRef } : {}),
-  }
-}
-
 function covers(
   call: AuthorizedOutboundToolCall,
   target: OutboundTarget,
@@ -269,55 +266,31 @@ interface ReceiptArgs {
 }
 
 function receiptFor(env: PlanningEnv, args: ReceiptArgs): DeliveryReceipt {
-  const requestId = `delivery:${env.deps.newRequestId?.() ?? crypto.randomUUID()}`
-  const risk = classifyRisk({
-    objective: "",
-    taskDescriptions: [],
-    toolIds: ["connector_send"],
-    capabilityIds: [],
-    sandboxEnabled: false,
+  return outboundReceipt({
+    requestId: `delivery:${env.deps.newRequestId?.() ?? crypto.randomUUID()}`,
+    origin: {
+      channel: "connector-delivery",
+      scope: "connector",
+      ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+      // Nobody is asked at the delivery chokepoint.
+      headless: true,
+      ...(args.origin?.rootSessionId ? { rootSessionId: args.origin.rootSessionId } : {}),
+      ...(args.origin?.instructionEpoch ? { instructionEpoch: args.origin.instructionEpoch } : {}),
+    },
+    subject: {
+      kind: "connector-delivery",
+      ref: args.ownerRef ?? env.input.source,
+      targets: [toReviewTarget(env.target)],
+    },
+    plan: args.plan,
+    enforced: env.mode === "enforce",
+    outcome: args.outcome,
+    authority: args.authority,
+    ...(args.grant ? { grant: args.grant } : {}),
+    ...(args.actor ? { actor: args.actor } : {}),
+    reason: args.reason,
+    now: env.now,
   })
-  const plan: ActionReviewPlan = { outcome: args.plan, enforced: env.mode === "enforce" }
-  const permits = args.outcome === "allow" || args.outcome === "allow_always"
-  return {
-    request: {
-      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
-      requestId,
-      origin: {
-        channel: "connector-delivery",
-        scope: "connector",
-        id: requestId,
-        ...(args.sessionId ? { sessionId: args.sessionId } : {}),
-        // Nobody is asked at the delivery chokepoint.
-        headless: true,
-        ...(args.origin?.rootSessionId ? { rootSessionId: args.origin.rootSessionId } : {}),
-        ...(args.origin?.instructionEpoch
-          ? { instructionEpoch: args.origin.instructionEpoch }
-          : {}),
-      },
-      subject: {
-        kind: "connector-delivery",
-        ref: args.ownerRef ?? env.input.source,
-        targets: [toReviewTarget(env.target)],
-      },
-      verdict: "ask",
-      verdictExplicit: false,
-      tier: risk.tier,
-      surfaces: risk.surfaces,
-      plan,
-      requestedAt: env.now,
-    },
-    decision: {
-      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
-      requestId,
-      outcome: args.outcome,
-      authority: args.authority,
-      reason: args.reason,
-      ...(args.grant && permits ? { grant: args.grant } : {}),
-      ...(args.actor ? { actor: args.actor } : {}),
-      decidedAt: env.now,
-    },
-  }
 }
 
 /**
@@ -332,12 +305,18 @@ function withheld(
     draftSessionId?: string
   }
 ): DeliveryDecision {
+  if (outcome === "draft" && env.input.immediate) {
+    outcome = "deny"
+    args = { ...args, denyReason: "unapproved" }
+  }
   const what =
     outcome === "draft"
       ? "nothing authorized its recipient"
       : args.denyReason === "fenced"
         ? "a person refused its recipient for the current request"
-        : "it named a conversation other than the one it answers"
+        : args.denyReason === "unapproved"
+          ? "nothing authorized its recipient, and it cannot wait for a person"
+          : "it named a conversation other than the one it answers"
   if (env.mode === "shadow") {
     return {
       action: "send",
@@ -539,7 +518,7 @@ export async function planDelivery(
     case "tool-call": {
       const call = authorizedOutboundToolCall(auth.sessionId, auth.toolUseId, env.now)
       if (call && covers(call, env.target, auth.createdConversation)) {
-        return { action: "send", authorizedBy: fromToolCall(call) }
+        return { action: "send", authorizedBy: jobAuthorizationOf(call) }
       }
       if (!call && env.mode === "shadow") return { action: "send" }
       return planUnattended(env, {
@@ -552,13 +531,13 @@ export async function planDelivery(
       const call = runningAuthorizedToolCallsOf(`plugin:${auth.pluginId}`, env.now).find((c) =>
         c.fingerprints.includes(fingerprint)
       )
-      if (call) return { action: "send", authorizedBy: fromToolCall(call) }
+      if (call) return { action: "send", authorizedBy: jobAuthorizationOf(call) }
       // A handler Bot of this plugin that is running may reach its
-      // installation's recipients.
-      const botGrants = runningBotGrantsOf(auth.pluginId)
+      // installation's recipients, inside that installation's fence.
+      const bot = runningBotOf(auth.pluginId)
       return planUnattended(env, {
         ownerRef: `plugin:${auth.pluginId}`,
-        ...(botGrants.length > 0 ? { policyGrants: botGrants } : {}),
+        ...(bot ? { origin: bot.origin, policyGrants: bot.policyGrants } : {}),
       })
     }
     case "unattended":

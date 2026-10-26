@@ -621,6 +621,17 @@ export function createAgentRpcHostStateDispatcher(
             sessionId,
             action.action.requestId
           )
+          // A person answered on a paired device: record it as the desktop
+          // modal does, so an outbound call's delivery names that person's
+          // authorization and a refusal fences the recipient (ADR-0239).
+          const { recordChatToolApprovalDecision } =
+            await import("@/lib/policy/action-review/chat-tool-channel")
+          await recordChatToolApprovalDecision(
+            { sessionId, requestId: action.action.requestId },
+            action.action.decision,
+            undefined,
+            { kind: "device", id: action.clientId }
+          )
           try {
             await transport.call("agent_resolve_permission", {
               sessionId,

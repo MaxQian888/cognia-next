@@ -312,6 +312,36 @@ jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (...a: unknown[]) => hasNoLeakingPiiDeep(...(a as [unknown])),
 }))
 
+// Where a plugin's delivery goes: the target the host stored (ADR-0239).
+function storedTarget(conversationKey: string, ref: Record<string, unknown>) {
+  const [platform, adapterId, containerId] = conversationKey.split(":")
+  return {
+    address: { conversationKey, platform, adapterId, scopeKind: "group", containerId },
+    conversationRef: { platform, adapterId, ...ref },
+    refreshedAt: 1,
+  }
+}
+const TARGET_42 = storedTarget("telegram:tg:42", { chatId: 42 })
+const TARGET_LARK = storedTarget("lark:lk:oc_group", { channelId: "oc_group" })
+const storedTargets = new Map<string, unknown>([
+  [TARGET_42.address.conversationKey, TARGET_42],
+  [TARGET_LARK.address.conversationKey, TARGET_LARK],
+])
+jest.mock("@/lib/db/connector-conversation-state", () => ({
+  getConnectorConversationState: async (key: string) => {
+    const deliveryTarget = storedTargets.get(key)
+    return deliveryTarget ? { conversationKey: key, deliveryTarget } : undefined
+  },
+}))
+const seenMessages = new Set<string>(["telegram:tg:42#pm_seen"])
+jest.mock("@/lib/db/inbound-ledger", () => ({
+  isInboundRecorded: async (_adapter: string, id: string, _ns: string, key: string) =>
+    seenMessages.has(`${key}#${id}`),
+}))
+jest.mock("@/lib/connectors/delivered-messages", () => ({
+  wasDeliveredByUs: async () => false,
+}))
+
 const PLUGIN = "conn-plugin"
 
 describe("createConnectorsAPI", () => {
@@ -525,6 +555,79 @@ describe("createConnectorsAPI", () => {
       warn.mockRestore()
     })
 
+    it("plans a direct send as this plugin's, sent at once (ADR-0239)", async () => {
+      const { getConnectorDeliveryGateway } = await import("@/lib/connectors/delivery-gateway")
+      const spy = jest.spyOn(getConnectorDeliveryGateway(), "sendNow")
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { conv: "c1" },
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "k2" },
+      }
+      await api.send("tg", req as never)
+      // A reference only: no conversation the policy can check.
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          adapterId: "tg",
+          source: "plugin",
+          authorization: { kind: "plugin", pluginId: PLUGIN },
+          auditKind: "delivery.legacy_direct",
+        }),
+        expect.any(Function)
+      )
+      expect(spy.mock.calls[0]?.[0]).not.toHaveProperty("conversationKey")
+
+      spy.mockResolvedValueOnce({
+        ok: false,
+        error: { code: "connector_delivery_denied", message: "refused", retryable: false },
+      })
+      await expect(api.send("tg", req as never)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "connector_delivery_denied" },
+      })
+      spy.mockRestore()
+    })
+
+    it("sends a direct send that names its conversation to the stored target", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { chatId: 777 },
+        deliveryTarget: { ...TARGET_42, conversationRef: { chatId: 777 } },
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "k3" },
+      }
+      await api.send("tg", req as never)
+      expect(sendOutbound).toHaveBeenCalledWith("tg", {
+        ...req,
+        conversationRef: TARGET_42.conversationRef,
+        deliveryTarget: TARGET_42,
+      })
+    })
+
+    it("returns a direct send's bad destination or PII as a failed result", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const elsewhere = {
+        conversationRef: {},
+        deliveryTarget: storedTarget("telegram:tg:99", {}),
+        segments: [],
+        metadata: { idempotencyKey: "k4" },
+      }
+      await expect(api.send("tg", elsewhere as never)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "connector_delivery_destination", retryable: false },
+      })
+      const leaking = {
+        conversationRef: {},
+        segments: [{ type: "text", text: "mail leak@pii.example" }],
+        metadata: { idempotencyKey: "k5" },
+      }
+      await expect(api.send("tg", leaking as never)).resolves.toMatchObject({
+        ok: false,
+        error: { code: "connector_delivery_pii_rejected" },
+      })
+      expect(sendOutbound).not.toHaveBeenCalled()
+    })
+
     it("sendText wraps text into a single segment with a fresh idempotency key", async () => {
       const api = createConnectorsAPI(PLUGIN)
       await api.sendText("tg", { conv: "c1" } as never, "hello")
@@ -580,6 +683,50 @@ describe("createConnectorsAPI", () => {
         remoteRef: "rr",
       })
       expect(uploadFileOutbound).toHaveBeenCalledWith("tg", { url: "u" })
+    })
+
+    it("plans a forward as a delivery to its target conversation (ADR-0239)", async () => {
+      const { getConnectorDeliveryGateway } = await import("@/lib/connectors/delivery-gateway")
+      const spy = jest.spyOn(getConnectorDeliveryGateway(), "sendNow")
+      const api = createConnectorsAPI(PLUGIN)
+      await api.forwardMessage("tg", { messageId: "pm_1", target: "c2" })
+      await api.forwardMessage("tg", { messageId: "pm_1", target: "telegram:tg:c3" })
+      await api.forwardMessage("tg", { messageId: "pm_1", target: "telegram:sl:c4" })
+      expect(spy.mock.calls.map(([input]) => input.conversationKey)).toEqual([
+        "telegram:tg:c2",
+        "telegram:tg:c3",
+        // Another bot's key names nothing this bot can reach: unknown.
+        undefined,
+      ])
+      expect(spy.mock.calls[0]?.[0]).toMatchObject({
+        source: "plugin",
+        authorization: { kind: "plugin", pluginId: PLUGIN },
+        auditKind: "delivery.forward_direct",
+      })
+      expect(spy.mock.calls[0]?.[0]).not.toHaveProperty("segments")
+
+      spy.mockResolvedValueOnce({
+        ok: false,
+        error: { code: "connector_delivery_denied", message: "refused", retryable: false },
+      })
+      forwardOutbound.mockClear()
+      await expect(
+        api.forwardMessage("tg", { messageId: "pm_1", target: "c2" })
+      ).resolves.toMatchObject({ ok: false })
+      expect(forwardOutbound).not.toHaveBeenCalled()
+      spy.mockRestore()
+    })
+
+    it("reports no streaming while messaging is enforced, so the plugin falls back", async () => {
+      const { getConnectorDeliveryGateway } = await import("@/lib/connectors/delivery-gateway")
+      const spy = jest
+        .spyOn(getConnectorDeliveryGateway(), "allowsUnplannedStream")
+        .mockResolvedValueOnce(false)
+      const api = createConnectorsAPI(PLUGIN)
+      const req = { conversationRef: { conv: "c1" }, text: "partial reply" }
+      expect(await api.streamReply("sl", req as never)).toBe(false)
+      expect(streamReplyOutbound).not.toHaveBeenCalled()
+      spy.mockRestore()
     })
 
     it("streamReply forwards to the bus and returns its boolean", async () => {
@@ -801,7 +948,12 @@ describe("createConnectorsAPI", () => {
       expect(enqueueOutbound).toHaveBeenCalledWith({
         adapterId: "tg",
         conversationKey: "telegram:tg:42",
-        request: req,
+        // The stored target, not the plugin's own reference (ADR-0239).
+        request: {
+          ...req,
+          conversationRef: TARGET_42.conversationRef,
+          deliveryTarget: TARGET_42,
+        },
         source: "plugin",
         nextAttemptAt: 555,
       })
@@ -859,9 +1011,74 @@ describe("createConnectorsAPI", () => {
       await api.enqueueSend("lk", "lark:lk:oc_group", req as never)
       expect(hasNoLeakingPiiDeep).toHaveBeenCalledWith(req.segments)
       expect(enqueueOutbound).toHaveBeenCalledWith(
-        expect.objectContaining({ request: req, source: "plugin" })
+        expect.objectContaining({
+          request: { ...req, deliveryTarget: TARGET_LARK },
+          source: "plugin",
+        })
       )
       expect(sendOutbound).not.toHaveBeenCalled()
+    })
+
+    it("sends to the stored target, whatever reference or receive id the plugin names", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        // A Lark receive-id override would reach another person.
+        conversationRef: { platform: "lark", adapterId: "lk", receiveId: "ou_other" },
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "idem-11" },
+      }
+      await api.enqueueSend("lk", "lark:lk:oc_group", req as never)
+      const queued = enqueueOutbound.mock.calls[0]?.[0] as unknown as {
+        request: { conversationRef: unknown; deliveryTarget: unknown }
+      }
+      expect(queued.request.conversationRef).toEqual(TARGET_LARK.conversationRef)
+      expect(queued.request.deliveryTarget).toEqual(TARGET_LARK)
+    })
+
+    it.each([
+      ["a conversation the host knows nothing of", "telegram:tg:99", {}, "unknown-conversation"],
+      ["another bot's conversation key", "telegram:sl:42", {}, "invalid-key"],
+      [
+        "a delivery target of another conversation",
+        "telegram:tg:42",
+        { deliveryTarget: TARGET_LARK },
+        "target-mismatch",
+      ],
+      [
+        "a reply to another conversation's message",
+        "telegram:tg:42",
+        { replyTo: { messageId: "pm_elsewhere" } },
+        "foreign-message",
+      ],
+    ])("refuses %s before anything is queued", async (_what, key, extra, problem) => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { conv: "c1" },
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "idem-12" },
+        ...extra,
+      }
+      await expect(api.enqueueSend("tg", key, req as never)).rejects.toMatchObject({
+        code: "connector_delivery_destination",
+        problem,
+      })
+      expect(enqueueOutbound).not.toHaveBeenCalled()
+    })
+
+    it("keeps a reply to a message of the same conversation", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const req = {
+        conversationRef: { conv: "c1" },
+        segments: [{ type: "text", text: "hi" }],
+        replyTo: { messageId: "pm_seen" },
+        metadata: { idempotencyKey: "idem-13" },
+      }
+      await api.enqueueSend("tg", "telegram:tg:42", req as never)
+      expect(enqueueOutbound).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({ replyTo: { messageId: "pm_seen" } }),
+        })
+      )
     })
 
     it("rejects leaking payloads before anything reaches the queue", async () => {

@@ -214,6 +214,13 @@ export function repositoryTarget(
   }
 }
 
+/** A PR or issue number as a thread: a positive integer, or its decimal string. */
+export function threadNumber(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return String(value)
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) return value.trim()
+  return undefined
+}
+
 /**
  * A bare `owner/repo` on `host` (an account's web host, `githubWebHost`); a
  * value that already names its host, or a URL, is read as is.

@@ -116,6 +116,8 @@ jest.mock("@/hooks/chat/claude-chat-send-options", () => ({
 const sendPromptMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (...args: unknown[]) => sendPromptMock(...args),
+  peekRemoteApprovalContext: () => undefined,
+  forgetRemoteApprovalContext: () => undefined,
 }))
 
 /** Let the `applying` chain, its recovery, and the Dexie writes settle. */
@@ -3589,6 +3591,53 @@ describe("HostState Agent RPC dispatcher", () => {
     expect(abort).toHaveBeenCalledWith("session-1", "action-3")
     expect(resolveApproval).toHaveBeenCalledWith("session-1", "approval-1", "allow", "action-4")
     expect(resolveElicitation).toHaveBeenCalledWith("session-1", "ask-1", { answer: "yes" })
+  })
+
+  it("records a paired device's approval as a person's, before resolving it (ADR-0239)", async () => {
+    const {
+      rememberPlannedOutboundToolCall,
+      authorizedOutboundToolCall,
+      __resetAuthorizedToolCallsForTesting,
+    } = await import("@/lib/policy/action-review/authorized-tool-calls")
+    const tauri = (await import("@/lib/tauri")) as unknown as {
+      transport: Record<string, unknown>
+    }
+    const order: string[] = []
+    const call = jest.fn(async (command: string) => {
+      order.push(
+        `${command}:${authorizedOutboundToolCall("session-1", "use-1")?.authority ?? "none"}`
+      )
+    })
+    tauri.transport.call = call
+    try {
+      rememberPlannedOutboundToolCall({
+        sessionId: "session-1",
+        requestId: "approval-1",
+        toolUseId: "use-1",
+        toolName: "im_send",
+        fingerprints: ["fp"],
+      })
+      await createAgentRpcHostStateDispatcher()(
+        action(
+          { kind: "approval.respond", requestId: "approval-1", decision: "allow" },
+          { actionId: "action-4" }
+        )
+      )
+      // Authorized before the answer left, so the call's delivery can name it.
+      expect(order).toEqual(["agent_resolve_permission:human"])
+      expect(call).toHaveBeenCalledWith(
+        "agent_resolve_permission",
+        expect.objectContaining({
+          sessionId: "session-1",
+          requestId: "approval-1",
+          decision: "allow",
+          commandId: "action-4",
+        })
+      )
+    } finally {
+      delete tauri.transport.call
+      __resetAuthorizedToolCallsForTesting()
+    }
   })
 
   it("resolves attachment refs into real content and then frees the staged bytes", async () => {

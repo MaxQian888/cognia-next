@@ -125,6 +125,8 @@ const PAGES = {
     `<form id="f" method="post" action="/submit"><input name="q" value="x"></form><button type="button" onclick="setTimeout(function(){document.getElementById('f').submit()},1200)">Later</button>`,
   worker: (s) =>
     `<button type="button" id="t">Work</button><script>var w=new Worker(URL.createObjectURL(new Blob(["onmessage=function(){fetch('${s.a}/api',{method:'POST',body:'w'})}"],{type:'text/javascript'})));document.getElementById('t').onclick=function(){w.postMessage(1)}</script>`,
+  upload: () =>
+    `<input type="file" aria-label="Resume" onchange="fetch('/upload',{method:'POST',body:'f'})">`,
   socket: (s) =>
     `<button type="button" id="t">Chat</button><script>var ws=new WebSocket('${s.ws}');ws.onopen=function(){document.title='open'};ws.onclose=function(){document.title='closed'};document.getElementById('t').onclick=function(){ws.send('hello')}</script>`,
 }
@@ -147,7 +149,8 @@ async function realChromium(t) {
   }
 }
 
-async function localService(t) {
+/** A local service with one session `s`; `uploads` lets it attach files from `uploadsDir`. */
+async function localService(t, { uploads = false } = {}) {
   const chromium = await realChromium(t)
   if (!chromium) return null
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cognia-submissions-"))
@@ -167,7 +170,17 @@ async function localService(t) {
     fileBridge: new WorkspaceFileBridge({ workspaceRoot }),
   })
   t.after(() => service.closeAll())
-  await service.createSession({ id: "s", headless: true })
+  const uploadsDir = path.join(workspaceRoot, "uploads")
+  if (uploads) {
+    await fs.mkdir(uploadsDir)
+    await fs.writeFile(path.join(uploadsDir, "cv.txt"), "cv")
+  }
+  await service.createSession({
+    id: "s",
+    headless: true,
+    ...(uploads ? { uploadRoots: [uploadsDir] } : {}),
+  })
+  service.uploadsDir = uploadsDir
   return service
 }
 
@@ -221,6 +234,27 @@ test("hold: a form post waits for the host, then goes out once allowed", async (
   assert.equal(page.url(), `${servers.a}/submit`, "the action returns on the new document")
   assert.equal(arrivals(servers, "/submit").length, 1)
   assert.equal(arrivals(servers, "/submit")[0].body, "q=hello")
+})
+
+test("hold: what choosing a file posts at once is held as the action's submission", async (t) => {
+  const service = await localService(t, { uploads: true })
+  if (!service) return
+  const servers = await fixtureServers(t, PAGES)
+  await service.configureSubmissionGuard("s", "hold")
+  await open(service, `${servers.a}/page?p=upload`)
+  const choosing = service.setFiles("s", await refFor(service, "Resume"), [
+    path.join(service.uploadsDir, "cv.txt"),
+  ])
+  const { reports } = await service.drainSubmissions("s", { waitMs: 1000 })
+  assert.equal(reports.length, 1)
+  assert.deepEqual(
+    { url: reports[0].url, method: reports[0].method, held: reports[0].held },
+    { url: `${servers.a}/upload`, method: "POST", held: true }
+  )
+  service.resolveSubmission("s", reports[0].id, "refuse")
+  assert.equal((await choosing).ok, true, "the file was chosen")
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(arrivals(servers, "/upload").length, 0)
 })
 
 test("hold: a refused navigation leaves the page where it was", async (t) => {
@@ -384,6 +418,29 @@ test("WebSocket frames: held and relayed under hold, observed under observe", as
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   assert.equal(arrivals(observed, "/ws").length, 1)
+})
+
+test("a socket opened before hold is installed leaves its page unguarded until it closes", async (t) => {
+  const service = await localService(t)
+  if (!service) return
+  const servers = await fixtureServers(t, PAGES)
+  // Shadow mode watches frames without relaying them.
+  await service.configureSubmissionGuard("s", "observe")
+  const page = await open(service, `${servers.a}/page?p=socket`)
+  await page.waitForFunction(() => document.title === "open")
+  assert.equal((await service.drainSubmissions("s")).unguarded, false)
+
+  // Enforcement turned on: the open socket cannot be relayed any more.
+  await service.configureSubmissionGuard("s", "hold")
+  assert.equal((await service.drainSubmissions("s")).unguarded, true)
+
+  // A new document's socket is relayed, so the page is guarded again.
+  await page.reload()
+  await page.waitForFunction(() => document.title === "open")
+  for (let i = 0; i < 40 && (await service.drainSubmissions("s")).unguarded; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.equal((await service.drainSubmissions("s")).unguarded, false)
 })
 
 test("closing the session refuses what it held", async (t) => {

@@ -1,6 +1,9 @@
 const mockEnqueueAuthorized = jest.fn()
+const mockForwardGoverned = jest.fn()
 jest.mock("@/lib/connectors/delivery-gateway", () => ({
+  CONNECTOR_DELIVERY_DENIED_CODE: "connector_delivery_denied",
   enqueueAuthorized: (...args: unknown[]) => mockEnqueueAuthorized(...args),
+  forwardGoverned: (...args: unknown[]) => mockForwardGoverned(...args),
 }))
 const mockWorkflowRun = jest.fn()
 jest.mock("@/lib/db/schema", () => ({
@@ -75,5 +78,58 @@ describe("action.connector.send and the outbound policy (ADR-0239)", () => {
     })
     expect(output).toMatchObject({ draftId: "cdr_1", heldAsDraft: true, delivered: false })
     expect(output).not.toHaveProperty("jobId")
+  })
+})
+
+describe("action.connector.forward and the outbound policy (ADR-0239)", () => {
+  const ctx = {
+    params: { adapterId: "bot-a", messageId: "om_1", targetConversationKey: "lark:bot-a:oc_2" },
+    runId: "run-1",
+    stepId: "step-2",
+    workflowId: "wf-1",
+    trigger: { payload: {} },
+    upstream: {},
+  }
+  const forward = () =>
+    getExecutor("action.connector.forward" as never, 1)!.execute(ctx as never) as Promise<{
+      output: Record<string, unknown>
+    }>
+
+  beforeEach(() => {
+    mockForwardGoverned.mockReset()
+    mockWorkflowRun.mockReset()
+  })
+
+  it("plans the forward in the run's origin, as the workflow's", async () => {
+    mockWorkflowRun.mockResolvedValue(undefined)
+    mockForwardGoverned.mockResolvedValue({ ok: true, platformMessageId: "om_f" })
+
+    const { output } = await forward()
+
+    expect(mockForwardGoverned).toHaveBeenCalledWith({
+      adapterId: "bot-a",
+      forward: { messageId: "om_1", target: "lark:bot-a:oc_2" },
+      source: "workflow",
+      authorization: {
+        kind: "unattended",
+        ownerRef: "workflow:wf-1",
+        origin: { rootSessionId: "workflow-run:run-1", instructionEpoch: "workflow-run:run-1" },
+      },
+      auditFields: { workflowId: "wf-1", runId: "run-1", nodeId: "step-2" },
+    })
+    expect(output).toMatchObject({ forwarded: true, platformMessageId: "om_f" })
+  })
+
+  it("fails a refused forward without retrying it", async () => {
+    mockWorkflowRun.mockResolvedValue(undefined)
+    mockForwardGoverned.mockResolvedValue({
+      ok: false,
+      error: { code: "connector_delivery_denied", message: "refused", retryable: false },
+    })
+
+    await expect(forward()).rejects.toMatchObject({
+      retryable: false,
+      message: expect.stringContaining("connector_delivery_denied"),
+    })
   })
 })

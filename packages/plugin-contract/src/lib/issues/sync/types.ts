@@ -160,7 +160,17 @@ export interface IssueSyncProvider {
     ref: IssueExternalRef,
     patch: RemotePatch,
     issue: Issue,
-    context: { idempotencyKey: string; by: IssueActor }
+    context: {
+      idempotencyKey: string
+      by: IssueActor
+      /**
+       * Who made the local edits the patch carries (ADR-0239): `person` when
+       * every one was a person's, else `automation`. A provider that writes
+       * through the integration broker names a person's edit as the person's
+       * own write, and leaves an automation's to the outbound policy.
+       */
+      editedBy?: "person" | "automation"
+    }
   ): Promise<PushOutcome>
   /** Create the remote counterpart of a local issue. Manual, never automatic. */
   create?(binding: IssueSyncBinding, issue: Issue): Promise<IssueExternalRef>

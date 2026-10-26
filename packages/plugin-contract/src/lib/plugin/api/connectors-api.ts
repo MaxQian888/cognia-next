@@ -240,12 +240,23 @@ export interface PluginConnectorsAPI {
   // ── Outbound mutations (connectors:send, DANGEROUS) ──────────────────────
   /**
    * Send a fully-formed request directly for one compatibility cycle.
-   * @deprecated Use {@link enqueueSend}; this bypasses queue governance and emits a waiver audit.
+   *
+   * The outbound policy (ADR-0239) plans it first, and it is sent at once or
+   * not at all: there is no draft to hold it in. A request whose
+   * `deliveryTarget` names its conversation goes to the target the host
+   * stored for that conversation, whatever its `conversationRef` says. One
+   * that names only a `conversationRef` has a recipient nobody can check:
+   * under enforcement it is refused. A refusal, a destination the host
+   * cannot send to, and a PII rejection are failed results
+   * (`connector_delivery_denied`, `connector_delivery_destination`,
+   * `connector_delivery_pii_rejected`).
+   * @deprecated Use {@link enqueueSend}; this bypasses the queue and emits a waiver audit.
    */
   send(adapterId: string, req: OutboundRequest): Promise<OutboundResult>
   /**
-   * Convenience direct-send retained for one compatibility cycle.
-   * @deprecated Use {@link enqueueSend}; this bypasses queue governance and emits a waiver audit.
+   * Convenience direct-send retained for one compatibility cycle. It names
+   * only a reference, so under enforcement it is refused (see {@link send}).
+   * @deprecated Use {@link enqueueSend}; this bypasses the queue and emits a waiver audit.
    */
   sendText(
     adapterId: string,
@@ -272,7 +283,12 @@ export interface PluginConnectorsAPI {
   removeReaction(adapterId: string, messageId: string, reactionId: string): Promise<OutboundResult>
   /**
    * Forward a message (or merge-forward several) to another conversation.
-   * `unsupported` when the platform has no forward API.
+   * `input.target` is a conversation key of this adapter or a bare platform
+   * chat id. `unsupported` when the platform has no forward API.
+   *
+   * The outbound policy (ADR-0239) plans it as a delivery to the target, and
+   * it cannot wait for a person: under enforcement a forward nothing
+   * authorized is a failed result with `code: "connector_delivery_denied"`.
    */
   forwardMessage(adapterId: string, input: ForwardMessageInput): Promise<OutboundResult>
   /** Pin a message to the top of a conversation (when the platform supports it). */
@@ -311,7 +327,11 @@ export interface PluginConnectorsAPI {
    * platform-side streaming (e.g. WeCom). `req.text` is the full accumulated
    * reply so far, not a delta. Resolves `true` when streamed, `false` when
    * the adapter is missing or the platform has no streaming surface — so the
-   * plugin can fall back to {@link send}.
+   * plugin can fall back to {@link enqueueSend}.
+   *
+   * A stream cannot be planned by the outbound policy (ADR-0239), so while
+   * messaging is enforced it always resolves `false` and the fallback send is
+   * what is planned.
    */
   streamReply(adapterId: string, req: StreamReplyRequest): Promise<boolean>
   /**
@@ -321,6 +341,13 @@ export interface PluginConnectorsAPI {
    * (`hasNoLeakingPiiDeep`) — the queue path is not otherwise scanned;
    * rejected payloads throw. Jobs are tagged `source: "plugin"` for the
    * inbox provenance badge / audit trail.
+   *
+   * It is sent to the delivery target the host stored for `conversationKey`
+   * (refreshed by its inbound messages, or minted by
+   * {@link bootstrapConversation}), never to `req.conversationRef` or
+   * `req.deliveryTarget`; a `replyTo` or `editTargetMessageId` must name a
+   * message of the same conversation. Otherwise the call rejects with
+   * `code: "connector_delivery_destination"` and nothing is queued.
    *
    * The host's outbound policy (ADR-0239) plans the delivery first. It goes
    * when a tool call of this plugin that a person or policy allowed covers

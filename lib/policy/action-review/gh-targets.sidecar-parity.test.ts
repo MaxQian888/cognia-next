@@ -1,10 +1,15 @@
 /**
- * The sidecar decides which shell `gh` invocations write to GitHub with its
- * own copy of the host's tables, because it cannot import the host's packages
- * (ADR-0239 phase 2). If they drifted, a `gh` write could run past the
- * always-ask under a spelling only the host recognised. This pins the tables,
- * the per-invocation verdicts and the shell tool names equal.
+ * The sidecar decides which shell `gh` invocations write to GitHub with a
+ * generated copy of the host's classifier, because it cannot import the
+ * host's packages (ADR-0239 phase 2). If the copy went stale, a `gh` write
+ * could run past the always-ask under a spelling only the host recognised.
+ * This pins the copy to its source, and the per-invocation verdicts (which
+ * also depend on each side's own shell parsing) and the shell tool names
+ * equal.
  */
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
 import * as sidecar from "../../../sidecar/src/policy/shell/gh-writes.ts"
 
 import * as host from "@cognia/plugin-contract/lib/claude/permissions/gh-command"
@@ -13,14 +18,23 @@ import { ghInvocations, SHELL_TOOL_NAMES, shellCommandOf } from "./gh-targets"
 
 const sorted = (set: ReadonlySet<string>) => [...set].sort()
 
-describe("gh writes: host and sidecar tables", () => {
+describe("gh writes: the sidecar's generated classifier", () => {
+  it("is the host's source, regenerated", async () => {
+    const generator = (await import("../../../scripts/build/gen-sidecar-gh-command.mjs")) as {
+      GH_COMMAND_SOURCE: string
+      GH_COMMAND_SIDECAR_COPY: string
+      sidecarGhCommand: (source: string) => string
+    }
+    const root = join(__dirname, "..", "..", "..")
+    const source = readFileSync(join(root, generator.GH_COMMAND_SOURCE), "utf8")
+    const copy = readFileSync(join(root, generator.GH_COMMAND_SIDECAR_COPY), "utf8")
+    // Stale? Run `node scripts/build/gen-sidecar-gh-command.mjs`.
+    expect(copy).toBe(generator.sidecarGhCommand(source))
+  })
+
   it.each([
     ["read commands", host.GH_READ_COMMANDS, sidecar.GH_READ_COMMANDS],
     ["local commands", host.GH_LOCAL_COMMANDS, sidecar.GH_LOCAL_COMMANDS],
-    ["groups", host.GH_GROUPS, sidecar.GH_GROUPS],
-    ["nested groups", host.GH_NESTED, sidecar.GH_NESTED],
-    ["value flags", host.GH_VALUE_FLAGS, sidecar.GH_VALUE_FLAGS],
-    ["api body flags", host.GH_API_BODY_FLAGS, sidecar.GH_API_BODY_FLAGS],
     ["shell tools", SHELL_TOOL_NAMES, sidecar.SHELL_TOOL_NAMES],
   ])("%s are equal", (_name, a, b) => {
     expect(sorted(a)).toEqual(sorted(b))
@@ -29,6 +43,8 @@ describe("gh writes: host and sidecar tables", () => {
 
 const COMMANDS = [
   "gh",
+  "gh api repos/o/r/issues/1/lock -X PUT --jq -XGET",
+  "gh extension exec gh-x",
   "gh --version",
   "gh pr",
   "gh pr view 12",

@@ -102,7 +102,7 @@ function run(over: Partial<IssueRun> = {}): IssueRun {
 }
 
 function makeDeps(over: Partial<GithubLoopRunAdapterDeps> = {}) {
-  const executed: Array<[string, unknown]> = []
+  const executed: Array<[string, unknown, unknown?]> = []
   const approved: string[] = []
   const cancelled: string[] = []
   const runs: Parameters<GithubLoopRunAdapterDeps["createRun"]>[0][] = []
@@ -111,8 +111,8 @@ function makeDeps(over: Partial<GithubLoopRunAdapterDeps> = {}) {
   const deps: GithubLoopRunAdapterDeps = {
     isAvailable: () => true,
     resolveAccount: async () => account,
-    execute: async (pluginId, input) => {
-      executed.push([pluginId, input])
+    execute: async (pluginId, input, caller) => {
+      executed.push([pluginId, input, caller])
       return job()
     },
     approve: async (id) => {
@@ -229,6 +229,20 @@ describe("start", () => {
       now: 99,
     })
     expect(result.id).toBe("run-new")
+  })
+
+  it("names the person who started the run as the write's caller, and nobody for a wakeup (ADR-0239)", async () => {
+    const callers: unknown[] = []
+    for (const origin of ["interactive", "im", "wakeup"] as const) {
+      const harness = makeDeps()
+      await createGithubLoopRunAdapter(harness.deps).start(target(), { by: HUMAN, origin })
+      callers.push(harness.executed[0][2])
+    }
+    expect(callers).toEqual([
+      { kind: "person", surface: "issue-run" },
+      { kind: "person", surface: "issue-run-im" },
+      undefined,
+    ])
   })
 
   it("defaults the base branch and keeps a queued job queued", async () => {

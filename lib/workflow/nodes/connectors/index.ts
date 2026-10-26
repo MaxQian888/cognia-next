@@ -1,6 +1,10 @@
 import { registerNodeExecutor } from "../registry"
 import { guardWorkflowEgress, WorkflowPiiBlockedError } from "@/lib/workflow/runtime/egress-guard"
-import { enqueueAuthorized as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
+import {
+  CONNECTOR_DELIVERY_DENIED_CODE,
+  enqueueAuthorized as enqueueOutbound,
+  forwardGoverned,
+} from "@/lib/connectors/delivery-gateway"
 import { createDraft } from "@/lib/db/connector-drafts"
 import { nonRetryable } from "../shared/executor-support"
 
@@ -307,8 +311,9 @@ registerNodeExecutor({
 
 // ── action.connector.forward ──────────────────────────────────────────────
 // Forward a single message, or merge-forward several as one combined card,
-// to another conversation via the live adapter (bus.forwardOutbound).
-// Immediate op — no outbound queue.
+// to another conversation via the live adapter. Immediate op — no outbound
+// queue — so the outbound policy plans it as a delivery that cannot wait
+// (ADR-0239): a forward nothing authorized is refused, not drafted.
 registerNodeExecutor({
   kind: "action.connector.forward",
   typeVersion: 1,
@@ -345,15 +350,37 @@ registerNodeExecutor({
     // cannot replace that content with the redacted projection, so fail closed
     // instead of claiming redaction while the adapter sends the original.
     if (guarded.redacted) throw new WorkflowPiiBlockedError("connector")
-    const { getBus } = await import("@/lib/connectors/bus")
-    const result = await getBus().forwardOutbound(adapterId, {
-      ...(messageId ? { messageId } : {}),
-      ...(messageIds.length > 0 ? { messageIds } : {}),
-      target,
+    const [{ getDb }, { workflowRunPlanOrigin }] = await Promise.all([
+      import("@/lib/db/schema"),
+      import("@/lib/policy/action-review/plan-context"),
+    ])
+    const run = await getDb().workflowRuns.get(ctx.runId)
+    const result = await forwardGoverned({
+      adapterId,
+      forward: {
+        ...(messageId ? { messageId } : {}),
+        ...(messageIds.length > 0 ? { messageIds } : {}),
+        target,
+      },
+      source: "workflow",
+      authorization: {
+        kind: "unattended",
+        ownerRef: `workflow:${ctx.workflowId}`,
+        origin: workflowRunPlanOrigin({
+          id: ctx.runId,
+          ...(run?.triggeredBy ? { triggeredBy: run.triggeredBy } : {}),
+        }),
+      },
+      auditFields: { workflowId: ctx.workflowId, runId: ctx.runId, nodeId: ctx.stepId },
     })
     if (!result.ok) {
       const err = result.error
-      if (err && (err.code === "adapter_not_found" || err.code === "unsupported")) {
+      if (
+        err &&
+        (err.code === "adapter_not_found" ||
+          err.code === "unsupported" ||
+          err.code === CONNECTOR_DELIVERY_DENIED_CODE)
+      ) {
         throw nonRetryable(`action.connector.forward: ${err.code} — ${err.message}`)
       }
       throw new Error(err?.message ?? "forward failed")

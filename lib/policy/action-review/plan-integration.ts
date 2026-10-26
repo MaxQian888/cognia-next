@@ -54,39 +54,33 @@
  */
 
 import {
-  ACTION_REVIEW_CONTRACT_VERSION,
   type ActionReviewActorKind,
   type ActionReviewAuthority,
-  type ActionReviewDecision,
   type ActionReviewGrant,
   type ActionReviewOutcome,
   type ActionReviewPlanOutcome,
-  type ActionReviewRequest,
 } from "@cognia/agent-config-types/action-review"
 import type { PendingOutboundReview } from "@cognia/agent-config-types"
 import type { OutboundJobAuthorization } from "@cognia/plugin-contract/lib/db/connector-types"
 import type { OutboundRecipientGrant } from "@cognia/agent-config-types/action-review"
 
-import { classifyRisk } from "@/lib/policy/risk/classify-risk"
 import type {
   IntegrationActionOutbound,
   IntegrationActionRisk,
 } from "@/types/plugin/plugin-integration"
 
-import {
-  runningAuthorizedToolCallsOf,
-  type AuthorizedOutboundToolCall,
-} from "./authorized-tool-calls"
+import { runningAuthorizedToolCallsOf } from "./authorized-tool-calls"
 import {
   botRecipientGrants,
   botScopeGrants,
   configuredGithubGrants,
-  runningBotGrantsOf,
+  runningBotOf,
   type GithubGrantContext,
 } from "./configured-grants"
 import {
   outboundFingerprint,
   repositoryOnHost,
+  threadNumber,
   toReviewTarget,
   type OutboundTarget,
 } from "./outbound-targets"
@@ -99,6 +93,12 @@ import {
   type OutboundPolicyGrantList,
   type OutboundSettingsLike,
 } from "./plan-context"
+import {
+  jobAuthorizationOf,
+  outboundReceipt,
+  outboundReview,
+  type OutboundReceipt,
+} from "./outbound-receipt"
 import { sessionPlanOrigin } from "./plan-delivery"
 import {
   humanOutboundGrant,
@@ -195,10 +195,7 @@ export interface IntegrationWritePlanInput {
 }
 
 /** An `integration-action` receipt, for the caller to write. */
-export interface IntegrationReceipt {
-  request: ActionReviewRequest
-  decision: ActionReviewDecision
-}
+export type IntegrationReceipt = OutboundReceipt
 
 export type IntegrationWriteDecision =
   | {
@@ -241,12 +238,6 @@ export const OUTBOUND_FENCED_ERROR =
 export const OUTBOUND_HELD_REQUEST_ERROR =
   "outbound_held: nothing authorized this recipient, and a direct request cannot wait for a person; use an action so it can be approved"
 
-function positiveInteger(value: unknown): string | undefined {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) return String(value)
-  if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) return value.trim()
-  return undefined
-}
-
 /**
  * The PR or issue a GitHub event is about, as an origin thread: the event's
  * repository with the payload's `pull_request.number` (else `issue.number`).
@@ -268,7 +259,7 @@ export function botEventOriginThread(
   const numberOf = (key: string) => {
     const value = payload[key]
     return value && typeof value === "object"
-      ? positiveInteger((value as Record<string, unknown>).number)
+      ? threadNumber((value as Record<string, unknown>).number)
       : undefined
   }
   const thread = numberOf("pull_request") ?? numberOf("issue")
@@ -282,13 +273,7 @@ export function integrationOutboundReview(
   unauthorized: readonly OutboundTarget[],
   enforced: boolean
 ): PendingOutboundReview {
-  const view = (target: OutboundTarget) => ({
-    kind: target.kind,
-    channel: target.channel,
-    recipient: target.recipient,
-    ...(target.thread ? { thread: target.thread } : {}),
-  })
-  return { targets: targets.map(view), unauthorized: unauthorized.map(view), enforced }
+  return outboundReview(targets, unauthorized, enforced)
 }
 
 interface PlanningEnv {
@@ -323,65 +308,45 @@ export function integrationReceipt(
   }
 ): IntegrationReceipt {
   const requestId = args.requestId ?? `integration:${crypto.randomUUID()}`
-  const risk = classifyRisk({
-    objective: "",
-    taskDescriptions: [],
-    toolIds: ["connector_send"],
-    capabilityIds: [],
-    sandboxEnabled: false,
-  })
-  const permits = args.outcome === "allow" || args.outcome === "allow_always"
-  return {
-    request: {
-      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
-      requestId,
-      origin: {
-        channel: "github-delivery",
-        scope: "github",
-        id: requestId,
-        ...(args.sessionId ? { sessionId: args.sessionId } : {}),
-        // Nobody is asked at the broker; a held job is answered elsewhere.
-        headless: true,
-        ...(args.outbound.rootSessionId ? { rootSessionId: args.outbound.rootSessionId } : {}),
-        ...(args.outbound.instructionEpoch
-          ? { instructionEpoch: args.outbound.instructionEpoch }
-          : {}),
-      },
-      subject: {
-        kind: "integration-action",
-        ref: args.outbound.ownerRef,
-        title: args.operation,
-        targets: args.targets.map(toReviewTarget),
-        // Ids only, no write input: which account's list would hold these.
-        ...(args.account
-          ? {
-              input: {
-                integrationAccount: {
-                  pluginId: args.account.pluginId,
-                  accountId: args.account.accountId,
-                },
+  return outboundReceipt({
+    requestId,
+    origin: {
+      channel: "github-delivery",
+      scope: "github",
+      ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+      // Nobody is asked at the broker; a held job is answered elsewhere.
+      headless: true,
+      ...(args.outbound.rootSessionId ? { rootSessionId: args.outbound.rootSessionId } : {}),
+      ...(args.outbound.instructionEpoch
+        ? { instructionEpoch: args.outbound.instructionEpoch }
+        : {}),
+    },
+    subject: {
+      kind: "integration-action",
+      ref: args.outbound.ownerRef,
+      title: args.operation,
+      targets: args.targets.map(toReviewTarget),
+      // Ids only, no write input: which account's list would hold these.
+      ...(args.account
+        ? {
+            input: {
+              integrationAccount: {
+                pluginId: args.account.pluginId,
+                accountId: args.account.accountId,
               },
-            }
-          : {}),
-      },
-      verdict: "ask",
-      verdictExplicit: false,
-      tier: risk.tier,
-      surfaces: risk.surfaces,
-      plan: { outcome: args.plan, enforced: args.enforced },
-      requestedAt: args.now,
+            },
+          }
+        : {}),
     },
-    decision: {
-      contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
-      requestId,
-      outcome: args.outcome,
-      authority: args.authority,
-      reason: args.reason,
-      ...(args.grant && permits ? { grant: args.grant } : {}),
-      ...(args.actor ? { actor: args.actor } : {}),
-      decidedAt: args.now,
-    },
-  }
+    plan: args.plan,
+    enforced: args.enforced,
+    outcome: args.outcome,
+    authority: args.authority,
+    ...(args.grant ? { grant: args.grant } : {}),
+    ...(args.actor ? { actor: args.actor } : {}),
+    reason: args.reason,
+    now: args.now,
+  })
 }
 
 function receiptFor(env: PlanningEnv, args: ReceiptArgs): IntegrationReceipt {
@@ -394,15 +359,6 @@ function receiptFor(env: PlanningEnv, args: ReceiptArgs): IntegrationReceipt {
     requestId: `integration:${env.deps.newRequestId?.() ?? crypto.randomUUID()}`,
     ...(env.input.account ? { account: env.input.account } : {}),
   })
-}
-
-function fromToolCall(call: AuthorizedOutboundToolCall): OutboundJobAuthorization {
-  return {
-    receiptId: call.requestId,
-    authority: call.authority,
-    ...(call.grant ? { grantScope: call.grant.scope } : {}),
-    ...(call.grant?.policyRef ? { policyRef: call.grant.policyRef } : {}),
-  }
 }
 
 function coversAll(fingerprints: readonly string[], targets: readonly OutboundTarget[]): boolean {
@@ -636,7 +592,7 @@ export async function planIntegrationWrite(
         return {
           action: "proceed",
           outbound: outboundOf(ownerRef, origin),
-          authorizedBy: fromToolCall(call),
+          authorizedBy: jobAuthorizationOf(call),
         }
       }
       // In shadow mode a permission shortcut can answer the call without
@@ -655,14 +611,14 @@ export async function planIntegrationWrite(
       )
       const ownerRef = `plugin:${auth.pluginId}`
       if (call) {
-        return { action: "proceed", outbound: { ownerRef }, authorizedBy: fromToolCall(call) }
+        return { action: "proceed", outbound: { ownerRef }, authorizedBy: jobAuthorizationOf(call) }
       }
       // A handler Bot of this plugin that is running may reach its
-      // installation's recipients.
-      const botGrants = runningBotGrantsOf(auth.pluginId)
+      // installation's recipients, inside that installation's fence.
+      const bot = runningBotOf(auth.pluginId)
       return planUnattended(env, {
         ownerRef,
-        ...(botGrants.length > 0 ? { policyGrants: botGrants } : {}),
+        ...(bot ? { origin: bot.origin, policyGrants: bot.policyGrants } : {}),
       })
     }
     case "bot": {

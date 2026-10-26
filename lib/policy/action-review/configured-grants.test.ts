@@ -15,7 +15,7 @@ import {
   readOutboundSiteGrants,
   recipientGrant,
   recipientGrantList,
-  runningBotGrantsOf,
+  runningBotOf,
   teamDeliveryGrants,
 } from "./configured-grants"
 import {
@@ -26,6 +26,7 @@ import {
   repositoryTarget,
   siteTarget,
 } from "./outbound-targets"
+import { botPlanOrigin } from "./plan-context"
 
 const CHAT = conversationTarget("lark:bot-a:oc_1")!
 const MEMBER = personTarget("bot-a", "ou_1")!
@@ -152,21 +153,45 @@ describe("configuredPolicyGrants", () => {
 describe("running handler Bots", () => {
   const installation = (id: string) => ({ id, outboundRecipients: [grant(CHAT)] })
 
-  it("lends a plugin its running installations' lists until each run ends", () => {
-    const endOne = beginBotOutboundRun("run-1", { pluginId: "p1", installation: installation("a") })
-    const endTwo = beginBotOutboundRun("run-2", { pluginId: "p1", installation: installation("b") })
+  afterEach(() => __resetRunningBotGrantsForTesting())
+
+  it("lends a plugin its running installation's list and fence until the run ends", () => {
+    const end = beginBotOutboundRun("run-1", {
+      pluginId: "p1",
+      installation: { ...installation("a"), humanRevision: 3 },
+    })
     beginBotOutboundRun("run-3", { pluginId: "p2", installation: installation("c") })
-    expect(runningBotGrantsOf("p1").map((list) => list.policyRef)).toEqual(["bot:a", "bot:b"])
-    endOne()
-    expect(runningBotGrantsOf("p1").map((list) => list.policyRef)).toEqual(["bot:b"])
-    endTwo()
-    expect(runningBotGrantsOf("p1")).toEqual([])
-    expect(runningBotGrantsOf("p2").map((list) => list.policyRef)).toEqual(["bot:c"])
+    expect(runningBotOf("p1")).toEqual({
+      installationId: "a",
+      policyGrants: [{ policyRef: "bot:a", fingerprints: [outboundFingerprint(CHAT)] }],
+      origin: botPlanOrigin({ id: "a", humanRevision: 3 }),
+    })
+    expect(runningBotOf("p2")?.installationId).toBe("c")
+    end()
+    expect(runningBotOf("p1")).toBeUndefined()
   })
 
-  it("records nothing for an installation with no list", () => {
+  it("counts several runs of one installation as that installation", () => {
+    const endOne = beginBotOutboundRun("run-1", { pluginId: "p1", installation: installation("a") })
+    const endTwo = beginBotOutboundRun("run-2", { pluginId: "p1", installation: installation("a") })
+    expect(runningBotOf("p1")?.installationId).toBe("a")
+    endOne()
+    expect(runningBotOf("p1")?.installationId).toBe("a")
+    endTwo()
+    expect(runningBotOf("p1")).toBeUndefined()
+  })
+
+  it("lends nothing while two installations of the plugin run, since a call names no run", () => {
+    beginBotOutboundRun("run-1", { pluginId: "p1", installation: installation("a") })
+    const endTwo = beginBotOutboundRun("run-2", { pluginId: "p1", installation: { id: "b" } })
+    expect(runningBotOf("p1")).toBeUndefined()
+    endTwo()
+    expect(runningBotOf("p1")?.installationId).toBe("a")
+  })
+
+  it("records an installation with no list, with an empty list", () => {
     const end = beginBotOutboundRun("run-1", { pluginId: "p1", installation: { id: "a" } })
-    expect(runningBotGrantsOf("p1")).toEqual([])
+    expect(runningBotOf("p1")).toMatchObject({ installationId: "a", policyGrants: [] })
     end()
   })
 })

@@ -19,6 +19,7 @@
  */
 
 import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import { TimeoutError, withTimeout } from "@cognia/primitives"
 
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { RunApprovalOrigin } from "@/lib/execution/run-approval-push"
@@ -137,16 +138,6 @@ function answerOfDialog(result: OutboundAskResult): BrowserSubmissionAnswer {
   }
 }
 
-function boundedBy<T>(wait: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  const timeout = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(onTimeout()), ms)
-  })
-  return Promise.race([wait, timeout]).finally(() => {
-    if (timer !== null) clearTimeout(timer)
-  })
-}
-
 async function askTurn(
   turn: CapturedTurn,
   respond: NonNullable<CapturedTurn["respond"]>,
@@ -156,17 +147,14 @@ async function askTurn(
 ): Promise<BrowserSubmissionAnswer> {
   const resume = turn.holdWallClock?.() ?? (() => undefined)
   try {
-    return await boundedBy(
-      Promise.resolve(respond(browserSubmissionRequest(ask, sessionId, requestId))).then(
-        answerOfDecision,
-        (error: unknown): BrowserSubmissionAnswer => ({
-          kind: "unavailable",
-          reason: error instanceof Error ? error.message : String(error),
-        })
-      ),
+    return await withTimeout(
+      Promise.resolve(respond(browserSubmissionRequest(ask, sessionId, requestId))),
       BROWSER_SUBMISSION_ASK_MAX_MS,
-      (): BrowserSubmissionAnswer => ({ kind: "expired" })
-    )
+      "browser submission ask"
+    ).then(answerOfDecision, (error: unknown): BrowserSubmissionAnswer => {
+      if (error instanceof TimeoutError) return { kind: "expired" }
+      return { kind: "unavailable", reason: error instanceof Error ? error.message : String(error) }
+    })
   } finally {
     resume()
   }

@@ -195,6 +195,20 @@ describe("recordChatToolApprovalDecision", () => {
       decision: { outcome: "allow_always", authority: "human", actor: { kind: "local-user" } },
     })
   })
+
+  it("names the paired device a person answered on", async () => {
+    await seedRun()
+    await open()
+    await recordChatToolApprovalDecision(
+      { sessionId: SESSION, requestId: REQUEST },
+      "deny",
+      undefined,
+      { kind: "device", id: "phone-1" }
+    )
+    expect(await getActionReviewReceipt(REQUEST)).toMatchObject({
+      decision: { outcome: "deny", authority: "human", actor: { kind: "device", id: "phone-1" } },
+    })
+  })
 })
 
 it("bounds the in-flight map so an unanswered session cannot grow without limit", async () => {

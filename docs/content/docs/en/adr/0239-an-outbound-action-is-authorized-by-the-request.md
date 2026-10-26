@@ -176,8 +176,7 @@ Phase 1 shipped in twelve work packages (plan: `docs/plans/2026-10-24-adr-0239-p
 
 ### Known gaps
 
-- A plugin's deprecated direct `send` / `sendText` does not pass the delivery gateway.
-- An approval made on a paired device or through HostState does not go through the host's `approveTool`, so a tool's delivery after it is planned as unattended. The same holds for the `/lark` slash-command path.
+- An approval made through the `/lark` slash-command path does not go through the host's `approveTool`, so a tool's delivery after it is planned as unattended.
 - Under enforcement, an external-bridge digest that would need approval is drafted.
 - On a shell driving a paired Host, the switch and the report are read-only notices: the setting and the receipts live on the Host, with no remote reader yet.
 - Enforce mode has unit and integration coverage but no run on a real desktop and phone yet (an origin reply, a cross-group send, a parked approval answered on the phone, a Bot's scheduled delivery from draft to approved send).
@@ -209,7 +208,6 @@ Phase 2a, GitHub writes, shipped in ten work packages (plan: `docs/plans/2026-10
 ### Known gaps
 
 - Nothing in the app writes a capability grant yet, so the `capability-grant:<id>` source is read-only until something does.
-- Issue sync and the Issue Loop adapter call the broker without a caller, so their writes are planned as plugin writes and wait under enforcement unless an account's list holds the repository.
 - The GitHub MCP server's tools stay on the ordinary ladder, as decided.
 - Enforcement of GitHub writes has unit and integration coverage but no run on a real desktop and phone yet (a Comment Bot answering the PR it was mentioned on, an unattended write to an unlisted repository approved on the phone, a cross-repository `gh` command in chat).
 
@@ -243,6 +241,31 @@ Phase 2b, browser submissions, shipped in four work packages after a spike (plan
 - On a page a service worker controls in the person's own Chrome, the submission is decided before the action, not held.
 - An ask cannot outlast 9 minutes.
 - Enforcement of browser submissions has unit, jsdom and real-Chromium runtime coverage but no run on a real desktop yet (a held form submission on each reliable engine, approved).
+
+## Follow-up: audit fixes (2026-10-26)
+
+A read-only Codex audit of phases 1, 2a and 2b looked for bypasses and duplicate implementations. What it found, and what changed:
+
+### Bypasses closed
+
+- **`gh` classification.** `gh api` read a flag's value as the method (`-X PUT --jq -XGET` counted as a GET); every value flag's value is now consumed and only `-X` / `--method` set the method. `gh extension exec` runs extension code, so it is a write, not local. A command that changes the `gh` environment before `gh` runs (`export GH_REPO=…`, `source`, `.`, `eval`, or a `GH_REPO` / `GH_HOST` assignment outside the `gh` segment) drops the checkout fallback, so the repository is unknown rather than the checkout's. The sidecar's copy of the classifier is now generated from the host's source (`scripts/build/gen-sidecar-gh-command.mjs`, checked by `gh-targets.sidecar-parity.test.ts`) instead of maintained by hand.
+- **A plugin's delivery goes where the host stored it** (`lib/connectors/plugin-destination.ts`). The policy planned a plugin's `enqueueSend` by its conversation key, while the runner sent it with the plugin's own reference, which could name another chat or, on Lark, another person (`receiveId`). A plugin's request is now sent with the delivery target the host stored for the conversation (refreshed by its inbound messages, or minted by `bootstrapConversation`), and a `replyTo` or `editTargetMessageId` must name a message the host saw in that conversation. Anything else is refused with `connector_delivery_destination`.
+- **Direct sends and forwards are planned.** A plugin's deprecated `send` / `sendText`, a plugin's `forwardMessage` and the workflow node `action.connector.forward` go through `ConnectorDeliveryGateway.sendNow` / `forward`. These deliveries cannot wait as a draft, so the planner takes them as `immediate`: where another delivery would be drafted, they are refused (`unapproved`, returned as a failed result `connector_delivery_denied`). A direct send that names only a reference has an unknown recipient, which nothing authorizes. In shadow mode they go as before, and their receipts record that enforcement would have refused them.
+- **`streamReply` cannot be planned.** A stream has no conversation key and sends one frame per update. While messaging is enforced, a plugin's `streamReply` resolves `false`, the documented "no streaming" answer, so the plugin falls back to a governed send.
+- **A handler Bot lends its list to one installation's code only.** `runningBotOf` replaces the union of every running installation's list. A plugin's call names no run, so a list is lent only while one installation of the plugin is running. The call is then planned in that installation's root and epoch, so its fence holds. While two installations run, neither list is lent.
+- **Browser submissions.** A socket the page opened before the hold was installed leaves the page `unguarded` until it closes or the page navigates. Choosing a file runs inside the action's submission window, so what the page posts at once is held. A failed drain no longer blocks an action in shadow mode.
+- **People's answers are named as people's.** A HostState approval (a paired device) records the human receipt and promotes the tool call before it is resolved, naming the device. The Issue Loop names the person who started a run as its caller (nobody for a wakeup). An Issue sync push names a person as its caller only when every local edit it carries was a human's (`editedBy`, `localEditorOf`). An agent's or a team's edit stays planned by the policy.
+
+### Duplicates removed
+
+- The three chokepoint receipts (delivery, integration, browser) share one builder (`outbound-receipt.ts`: `outboundReceipt`, `outboundReview`, `jobAuthorizationOf`). The PR/issue number parser exists once (`threadNumber`). The browser ask uses `withTimeout` from `@cognia/primitives`.
+- Kept apart on purpose: `siteTarget` / `repositoryTarget` and the forge remote parsers (`lib/stack/forge/remote.ts`, `lib/github/host.ts`) look alike but differ where authorization depends on them (host with port against hostname, the first path segments against the last). `captured-turns.ts` and the approval registry share a lifetime but not their data. The outbound ask store and the ask-user store share a queue shape but not their safety rules.
+
+### Known gaps
+
+- A plugin's `sendUrgent` (an urgent push to named people about an existing message) is not planned.
+- In shadow mode a plugin's `streamReply` frames are not recorded.
+- A reply or edit by a plugin whose message id aged out of the inbound ledger's window is refused, even when it is in the same conversation.
 
 ## Consequences
 

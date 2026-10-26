@@ -71,12 +71,22 @@ const DRAIN_WAIT_MS = 1_000
 
 /** The engine methods whose actions the gate watches. */
 type GatedMethod =
-  "act" | "pressKey" | "drag" | "evaluate" | "back" | "forward" | "reload" | "handleDialog"
+  | "act"
+  | "pressKey"
+  | "drag"
+  | "setFiles"
+  | "evaluate"
+  | "back"
+  | "forward"
+  | "reload"
+  | "handleDialog"
 
 const GATED_METHODS: ReadonlySet<string> = new Set<GatedMethod>([
   "act",
   "pressKey",
   "drag",
+  // A file input's change handler may post the file at once.
+  "setFiles",
   "evaluate",
   "back",
   "forward",
@@ -140,6 +150,8 @@ export function possibleSubmissionOperation(method: string, args: unknown[]): st
     return POSSIBLE_SUBMISSION_ACTIONS.has(action) ? action : null
   }
   if (method === "drag") return "drag"
+  // Choosing a file may upload it at once, like a select that submits.
+  if (method === "setFiles") return "set_files"
   if (method === "pressKey") {
     const key = String(args[0] ?? "")
     return isSubmittingKey(key) ? `press:${key}` : null
@@ -389,7 +401,16 @@ function gatedEngine(engine: BrowserEngine, core: GateCore): BrowserEngine {
       return refused.length > 0 ? refusedResult(method, undefined, refused) : call()
     }
 
-    const first = await guarded.drainSubmissions(0)
+    let first: Awaited<ReturnType<SubmissionGuardedEngine["drainSubmissions"]>>
+    try {
+      first = await guarded.drainSubmissions(0)
+    } catch {
+      // The guard cannot report for this action. Shadow mode only observes,
+      // so the action runs as it would have; enforcement decides before it.
+      if (!enforce || !possible) return call()
+      const refused = await planPossible(possible)
+      return refused.length > 0 ? refusedResult(method, undefined, refused) : call()
+    }
     const drainer = drainerFor(first.pageId)
     drainer.handle(first.reports)
     if (first.unguarded && possible) {

@@ -29,7 +29,12 @@ import {
   shellCommandOf,
   type GhTargetContext,
 } from "./gh-targets"
-import { repositoryOnHost, unknownGithubTarget, type OutboundTarget } from "./outbound-targets"
+import {
+  repositoryOnHost,
+  threadNumber,
+  unknownGithubTarget,
+  type OutboundTarget,
+} from "./outbound-targets"
 
 function isGithubOperation(definition: { id: string }, action: IntegrationActionDef): boolean {
   return (
@@ -81,12 +86,6 @@ export function isGithubWriteCall(toolName: string, input: unknown): boolean {
   return command !== null && commandHasGhWrite(command)
 }
 
-function positiveInteger(value: unknown): string | undefined {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) return String(value)
-  if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) return value.trim()
-  return undefined
-}
-
 /**
  * The web host of a GitHub API root: `github.com` for `api.github.com` (and
  * when there is no root), else the root's own host, which is where a GitHub
@@ -120,7 +119,7 @@ export function githubActionTargets(
     input && typeof input === "object" && !Array.isArray(input)
       ? (input as Record<string, unknown>)
       : {}
-  const thread = positiveInteger(args.prNumber) ?? positiveInteger(args.issueNumber)
+  const thread = threadNumber(args.prNumber) ?? threadNumber(args.issueNumber)
   const pointers = (action.scopeSelectors ?? [])
     .filter((selector) => selector.kind === "repository")
     .map((selector) => selector.jsonPointer)

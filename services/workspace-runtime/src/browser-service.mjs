@@ -1142,14 +1142,22 @@ export class RemoteChromiumService {
    * `unguarded` says the guard may not see what the page sends: a service
    * worker controls a page of the person's own Chrome, whose traffic only a
    * context route sees, and a user-chrome session routes its own pages, never
-   * the person's whole browser. The host then decides before the action, as
-   * for an engine with no submission signal.
+   * the person's whole browser. A page whose WebSocket was open before the
+   * relay was installed (shadow mode switched to enforcement) is unguarded
+   * until that socket closes: its frames are not relayed. The host then
+   * decides before the action, as for an engine with no submission signal.
    */
   async drainSubmissions(sessionId, { waitMs = 0 } = {}) {
     const session = this.requireSession(sessionId)
-    const { pageId, page } = this.activeRecord(session)
+    const { pageId, page, record } = this.activeRecord(session)
     const drained = await session.submissions.drain(pageId, waitMs)
-    return { pageId, ...drained, unguarded: await this.submissionUnguarded(session, page) }
+    const unrelayed =
+      session.submissions.mode === "hold" && (record.unrelayedSockets?.size ?? 0) > 0
+    return {
+      pageId,
+      ...drained,
+      unguarded: unrelayed || (await this.submissionUnguarded(session, page)),
+    }
   }
 
   async submissionUnguarded(session, page) {
@@ -1188,6 +1196,11 @@ export class RemoteChromiumService {
   async installSubmissionSockets(session) {
     if (session.submissionSockets) return
     session.submissionSockets = true
+    // A socket already open is not relayed: until it closes, its page is
+    // unguarded and the host decides before acting there.
+    for (const record of session.pages.values()) {
+      record.unrelayedSockets = new Set(record.openSockets ?? [])
+    }
     await Promise.all(
       [...session.pages.entries()].map(([pageId, record]) =>
         this.routePageSockets(session, pageId, record.page)
@@ -1236,7 +1249,7 @@ export class RemoteChromiumService {
    * waits for the host. Frames keep their order; a refused frame closes the
    * socket (1008), since dropping it silently would let the page believe it
    * was delivered. Sockets the page opened before this was installed are not
-   * relayed.
+   * relayed; `drainSubmissions` reports their page as `unguarded`.
    */
   async routePageSockets(session, pageId, page) {
     if (typeof page.routeWebSocket !== "function") return
@@ -1396,6 +1409,13 @@ export class RemoteChromiumService {
     // Shadow mode watches WebSocket frames without relaying them; a relayed
     // socket (`routePageSockets`) reports through its own route.
     page.on("websocket", (socket) => {
+      // Open sockets, so a relay installed later knows which predate it.
+      record.openSockets ??= new Set()
+      record.openSockets.add(socket)
+      socket.on("close", () => {
+        record.openSockets?.delete(socket)
+        record.unrelayedSockets?.delete(socket)
+      })
       socket.on("framesent", () => {
         if (session.submissions.mode !== "observe" || session.submissionSockets) return
         void this.submitFrame(session, pageId, socket.url())
@@ -1416,6 +1436,10 @@ export class RemoteChromiumService {
     })
     page.on("framenavigated", (frame) => {
       if (frame !== pageMainFrame(page)) return
+      // A new document closed the old one's sockets, whether or not each
+      // reported its close.
+      record.openSockets?.clear()
+      record.unrelayedSockets?.clear()
       const url = page.url()
       if (!url.startsWith("chrome-error:")) record.navigationUrl = url
       if (record.fitToWidth) record.fitReset = true
@@ -2505,10 +2529,23 @@ export class RemoteChromiumService {
   async setFiles(sessionId, reference, relativePaths) {
     const session = this.requireSession(sessionId)
     const { pageId, record } = this.activeRecord(session)
-    const paths =
-      session.uploadRoots === null
-        ? await this.fileBridge.resolveUploads(relativePaths)
-        : await resolveLocalUploads(relativePaths, session.uploadRoots)
+    // A file input's change handler may post the file at once: what it sends
+    // is this action's submission (ADR-0239 phase 2b).
+    return this.inSubmissionWindow(
+      session,
+      pageId,
+      async () => {
+        const paths =
+          session.uploadRoots === null
+            ? await this.fileBridge.resolveUploads(relativePaths)
+            : await resolveLocalUploads(relativePaths, session.uploadRoots)
+        return this.setFilesInWindow(session, record, sessionId, pageId, reference, paths)
+      },
+      { generation: record.generation }
+    )
+  }
+
+  async setFilesInWindow(session, record, sessionId, pageId, reference, paths) {
     return this.runActionWithDialog(session, record.generation, async () => {
       const target = this.references.get(reference)
       if (

@@ -13,7 +13,19 @@ import {
   type InThreadAuthorization,
   type OutboundAuthorization,
 } from "@/lib/policy/action-review/plan-delivery"
-import type { OutboundRequest, OutboundResult, PlatformAdapter } from "@/types/connectors"
+import { readAppSettings } from "@/lib/policy/action-review/plan-context"
+import {
+  readOutboundAuthorizationMode,
+  type OutboundAuthorizationMode,
+} from "@/lib/policy/action-review/policy"
+import type {
+  ForwardMessageInput,
+  OutboundRequest,
+  OutboundResult,
+  PlatformAdapter,
+} from "@/types/connectors"
+import { buildConversationKey, parseConversationKey } from "@/types/connectors/event"
+import type { PlatformKind } from "@/types/connectors/platform-kind"
 
 export type OutboundJobInfo = OutboundJobRow
 export type { OutboundAuthorization } from "@/lib/policy/action-review/plan-delivery"
@@ -38,13 +50,16 @@ export class ConnectorDeliveryDeniedError extends Error {
     readonly source: EnqueueInput["source"],
     readonly reason: DeliveryDenyReason
   ) {
-    super(
-      reason === "fenced"
-        ? `Connector delivery from '${source}' was refused: a person refused this recipient for the current request`
-        : `Connector delivery from '${source}' was refused: it named a conversation other than the one it answers`
-    )
+    super(`Connector delivery from '${source}' was refused: ${DENY_REASON_TEXT[reason]}`)
     this.name = "ConnectorDeliveryDeniedError"
   }
+}
+
+const DENY_REASON_TEXT: Record<DeliveryDenyReason, string> = {
+  fenced: "a person refused this recipient for the current request",
+  "conversation-mismatch": "it named a conversation other than the one it answers",
+  unapproved:
+    "nothing authorized this recipient, and a delivery sent at once cannot wait for a person; queue it (ctx.connectors.enqueueSend) so it can be approved",
 }
 
 /**
@@ -85,9 +100,40 @@ export type InThreadEnqueueInput =
   | (GovernedBase & { source: HumanSource; authorization?: undefined })
   | (GovernedBase & { source: OutboundJobSource; authorization: InThreadAuthorization })
 
+/**
+ * A delivery that goes out at once instead of through the queue: a plugin's
+ * deprecated direct send, or a forward of messages already sent. It is
+ * planned like any other (`immediate`), and refused where another would be
+ * drafted, since there is no draft to hold it in.
+ */
+export interface ImmediateDeliveryInput {
+  adapterId: string
+  /** The conversation it reaches; absent when the request names only a platform reference. */
+  conversationKey?: string
+  /** What it sends, for the PII gate. Absent for a forward, which sends nothing new. */
+  segments?: OutboundRequest["segments"]
+  idempotencyKey?: string
+  source: AutomatedSource
+  authorization: OutboundAuthorization
+  /** The audit row the send leaves. */
+  auditKind: "delivery.legacy_direct" | "delivery.forward_direct"
+  auditFields?: Record<string, unknown>
+}
+
+/** The result a refused immediate delivery returns. */
+export const CONNECTOR_DELIVERY_DENIED_CODE = "connector_delivery_denied"
+
 /** Queued for the outbound runner, or held as a draft for a person to approve. */
 export type EnqueueGovernedResult =
   { kind: "queued"; job: OutboundJobRow } | { kind: "drafted"; draft: ConnectorDraftRow }
+
+/** What a withheld delivery's audit row names. */
+interface WithheldSubject {
+  adapterId: string
+  conversationKey: string
+  idempotencyKey?: string
+  source: OutboundJobSource
+}
 
 export interface ConnectorDeliveryGatewayDependencies {
   persistOne(input: EnqueueInput): Promise<OutboundJobRow>
@@ -98,6 +144,10 @@ export interface ConnectorDeliveryGatewayDependencies {
   planDelivery(input: DeliveryPlanInput): Promise<DeliveryDecision>
   createDraft(input: CreateDraftInput): Promise<ConnectorDraftRow>
   recordReceipt(receipt: DeliveryReceipt): Promise<void>
+  /** The messaging category's mode (ADR-0239). */
+  messagingMode(): Promise<OutboundAuthorizationMode>
+  /** The adapter's own forward (`bus.forwardOutbound`). */
+  forward(adapterId: string, input: ForwardMessageInput): Promise<OutboundResult>
 }
 
 async function recordDeliveryReceipt(receipt: DeliveryReceipt): Promise<void> {
@@ -120,6 +170,43 @@ const defaultDependencies: ConnectorDeliveryGatewayDependencies = {
   planDelivery: (input) => planDelivery(input),
   createDraft,
   recordReceipt: recordDeliveryReceipt,
+  messagingMode: async () => readOutboundAuthorizationMode(await readAppSettings()),
+  forward: async (adapterId, input) => {
+    const { getBus } = await import("./bus")
+    return getBus().forwardOutbound(adapterId, input)
+  },
+}
+
+/**
+ * The conversation a forward reaches. `target` is a conversation key or a
+ * bare platform chat id, the shapes the adapters accept. A key of another
+ * bot, or a bare id when the adapter's platform is unknown, names none.
+ */
+export function forwardConversationKey(
+  adapterId: string,
+  platform: PlatformKind | undefined,
+  target: string
+): string | undefined {
+  const trimmed = target.trim()
+  if (!trimmed) return undefined
+  if (trimmed.includes(":")) {
+    try {
+      const parsed = parseConversationKey(trimmed)
+      return parsed.adapterId === adapterId && parsed.remoteChatId ? trimmed : undefined
+    } catch {
+      return undefined
+    }
+  }
+  return platform ? buildConversationKey(platform, adapterId, trimmed) : undefined
+}
+
+/** A forward of messages already sent, by an automated sender. */
+export interface GovernedForwardInput {
+  adapterId: string
+  forward: ForwardMessageInput
+  source: AutomatedSource
+  authorization: OutboundAuthorization
+  auditFields?: Record<string, unknown>
 }
 
 function toPlanInput(input: GovernedEnqueueInput): DeliveryPlanInput {
@@ -190,6 +277,46 @@ export class ConnectorDeliveryGateway {
     return this.deliver(inputs)
   }
 
+  /**
+   * Whether an automated sender may stream a reply frame by frame
+   * (`streamReply`), which no plan covers: a stream has no conversation key
+   * and one frame per update, so it can be neither planned nor drafted. Under
+   * enforcement it may not, and the caller falls back to a governed send;
+   * in shadow mode it streams as before, unrecorded.
+   */
+  async allowsUnplannedStream(): Promise<boolean> {
+    try {
+      return (await this.dependencies.messagingMode()) !== "enforce"
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Forward messages to another conversation, planned as a delivery to it
+   * that cannot wait ({@link sendNow}): under enforcement a forward nothing
+   * authorized is a failed result, {@link CONNECTOR_DELIVERY_DENIED_CODE}.
+   */
+  async forward(input: GovernedForwardInput): Promise<OutboundResult> {
+    const adapter = await this.dependencies.getAdapter(input.adapterId)
+    const conversationKey = forwardConversationKey(
+      input.adapterId,
+      adapter?.meta.type,
+      input.forward.target
+    )
+    return this.sendNow(
+      {
+        adapterId: input.adapterId,
+        ...(conversationKey ? { conversationKey } : {}),
+        source: input.source,
+        authorization: input.authorization,
+        auditKind: "delivery.forward_direct",
+        ...(input.auditFields ? { auditFields: input.auditFields } : {}),
+      },
+      () => this.dependencies.forward(input.adapterId, input.forward)
+    )
+  }
+
   /** Direct wire probe. Never use this for a business send. */
   async sendDiagnostic(adapterId: string, request: OutboundRequest): Promise<OutboundResult> {
     const adapter = await this.dependencies.getAdapter(adapterId)
@@ -208,6 +335,76 @@ export class ConnectorDeliveryGateway {
         idempotencyKey: request.metadata.idempotencyKey,
         reason: result.ok ? "diagnostic_succeeded" : result.error?.code,
         fields: { governed: false, outcome: result.ok ? "succeeded" : "failed" },
+      })
+    ).catch(() => undefined)
+    return result
+  }
+
+  /**
+   * Plan an {@link ImmediateDeliveryInput} and, when the policy lets it go,
+   * run `send`. A refusal is returned as a failed result
+   * ({@link CONNECTOR_DELIVERY_DENIED_CODE}), the shape the direct callers
+   * already return; a PII rejection throws {@link ConnectorDeliveryPiiError},
+   * as a queued delivery's does.
+   */
+  async sendNow(
+    input: ImmediateDeliveryInput,
+    send: () => Promise<OutboundResult>
+  ): Promise<OutboundResult> {
+    const decision = await this.dependencies.planDelivery({
+      adapterId: input.adapterId,
+      conversationKey: input.conversationKey ?? "",
+      source: input.source,
+      authorization: input.authorization,
+      immediate: true,
+    })
+    const subject = {
+      adapterId: input.adapterId,
+      conversationKey: input.conversationKey ?? "",
+      idempotencyKey: input.idempotencyKey,
+      source: input.source,
+    }
+    if (decision.action !== "send") {
+      // `immediate` turns a draft into a refusal; a draft here is a bug.
+      const reason = decision.action === "deny" ? decision.reason : "unapproved"
+      await this.recordReceipt(decision.receipt)
+      await this.auditWithheld(subject, "outbound.denied", decision.receipt, { reason })
+      return {
+        ok: false,
+        error: {
+          code: CONNECTOR_DELIVERY_DENIED_CODE,
+          message: new ConnectorDeliveryDeniedError(input.source, reason).message,
+          retryable: false,
+        },
+      }
+    }
+    if (input.segments && !this.dependencies.piiGate(input.segments)) {
+      throw new ConnectorDeliveryPiiError(input.source)
+    }
+    if (decision.receipt) await this.recordReceipt(decision.receipt)
+    const result = await send()
+    await Promise.resolve(
+      this.dependencies.appendAudit({
+        adapterId: input.adapterId,
+        kind: input.auditKind,
+        at: Date.now(),
+        ...(input.conversationKey ? { conversationKey: input.conversationKey } : {}),
+        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+        ...(result.ok ? {} : { reason: result.error?.code }),
+        fields: {
+          ...input.auditFields,
+          source: input.source,
+          governed: true,
+          outcome: result.ok ? "succeeded" : "failed",
+          ...(decision.authorizedBy
+            ? {
+                authority: decision.authorizedBy.authority,
+                ...(decision.authorizedBy.receiptId
+                  ? { receiptId: decision.authorizedBy.receiptId }
+                  : {}),
+              }
+            : {}),
+        },
       })
     ).catch(() => undefined)
     return result
@@ -298,18 +495,20 @@ export class ConnectorDeliveryGateway {
   }
 
   private async auditWithheld(
-    input: GovernedEnqueueInput,
+    input: WithheldSubject | GovernedEnqueueInput,
     kind: "outbound.drafted" | "outbound.denied",
     receipt: DeliveryReceipt,
     fields: Record<string, unknown>
   ): Promise<void> {
+    const idempotencyKey =
+      "request" in input ? input.request.metadata.idempotencyKey : input.idempotencyKey
     await Promise.resolve(
       this.dependencies.appendAudit({
         adapterId: input.adapterId,
         kind,
         at: Date.now(),
-        conversationKey: input.conversationKey,
-        idempotencyKey: input.request.metadata.idempotencyKey,
+        ...(input.conversationKey ? { conversationKey: input.conversationKey } : {}),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
         fields: { source: input.source, receiptId: receipt.request.requestId, ...fields },
       })
     ).catch(() => undefined)
@@ -357,6 +556,11 @@ export function getConnectorDeliveryGateway(): ConnectorDeliveryGateway {
  */
 export function enqueueGoverned(input: InThreadEnqueueInput): Promise<OutboundJobInfo> {
   return getConnectorDeliveryGateway().enqueue(input)
+}
+
+/** Function seam for an automated forward ({@link ConnectorDeliveryGateway.forward}). */
+export function forwardGoverned(input: GovernedForwardInput): Promise<OutboundResult> {
+  return getConnectorDeliveryGateway().forward(input)
 }
 
 /** Function seam for an automated delivery the policy may hold as a draft. */

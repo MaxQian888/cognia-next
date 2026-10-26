@@ -1,6 +1,6 @@
 import type { IssueEvent } from "@/types/issues"
 import { syncActorFor } from "@/types/issues"
-import { lastLocalChangeAt, syncFieldOfEvent } from "./field-clock"
+import { lastLocalChangeAt, localEditorOf, syncFieldOfEvent } from "./field-clock"
 
 const HUMAN = { kind: "human" as const }
 
@@ -58,5 +58,38 @@ describe("lastLocalChangeAt", () => {
 
   it("treats the watermark as exclusive", () => {
     expect(lastLocalChangeAt([event("title_changed", 5)], 5).size).toBe(0)
+  })
+})
+
+describe("localEditorOf (ADR-0239)", () => {
+  const AGENT = { kind: "agent" as const, id: "agent-1" }
+  const fields = new Set(["title", "status"] as const)
+
+  it("is a person when every edit to the fields was a person's", () => {
+    expect(localEditorOf([event("title_changed", 5), event("status_changed", 6)], 0, fields)).toBe(
+      "person"
+    )
+  })
+
+  it("is automation when any edit to the fields was an agent's, or names nobody", () => {
+    expect(
+      localEditorOf([event("title_changed", 5), event("status_changed", 6, AGENT)], 0, fields)
+    ).toBe("automation")
+    const anonymous = { ...event("title_changed", 5), payload: { kind: "title_changed" } }
+    expect(localEditorOf([anonymous as unknown as IssueEvent], 0, fields)).toBe("automation")
+  })
+
+  it("ignores the sync engine's own events, older edits and other fields", () => {
+    const events = [
+      event("title_changed", 2, AGENT),
+      event("title_changed", 5, syncActorFor("github", "GitHub")),
+      event("priority_changed", 6, AGENT),
+      event("status_changed", 7),
+    ]
+    expect(localEditorOf(events, 3, fields)).toBe("person")
+  })
+
+  it("is automation when there is no local edit at all", () => {
+    expect(localEditorOf([], 0, fields)).toBe("automation")
   })
 })

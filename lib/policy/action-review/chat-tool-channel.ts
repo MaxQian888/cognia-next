@@ -241,7 +241,8 @@ async function resolveSessionRunId(sessionId: string): Promise<string | undefine
 }
 
 /**
- * Record a decision a PERSON made in an approval dialog.
+ * Record a decision a PERSON made in an approval dialog, here or on a paired
+ * device (a HostState `approval.respond`).
  *
  * Exists as its own helper because the modal is the one path that cannot ride
  * `approveTool`'s attribution argument: since ADR-0090 it resolves through
@@ -262,7 +263,9 @@ export async function recordChatToolApprovalDecision(
   approval: { sessionId: string; requestId: string },
   decision: "allow" | "allow_always" | "deny",
   /** For an outbound allow: `once`, or `instruction` for "allow for this request". */
-  grant?: ActionReviewGrant
+  grant?: ActionReviewGrant,
+  /** Who answered: the person at this computer, or one on a paired device. */
+  actor: { kind: ActionReviewActorKind; id?: string } = { kind: "local-user" }
 ): Promise<void> {
   if (decision === "deny") {
     forgetPlannedOutboundToolCall(approval.sessionId, approval.requestId)
@@ -277,7 +280,7 @@ export async function recordChatToolApprovalDecision(
     requestId: approval.requestId,
     outcome: decision,
     authority: "human",
-    actor: { kind: "local-user" },
+    actor,
     ...(grant ? { grant } : {}),
   })
 }

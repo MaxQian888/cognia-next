@@ -7,9 +7,11 @@ import type {
 } from "@/lib/policy/action-review/plan-delivery"
 import type { PlatformAdapter } from "@/types/connectors"
 import {
+  CONNECTOR_DELIVERY_DENIED_CODE,
   ConnectorDeliveryDeniedError,
   ConnectorDeliveryGateway,
   ConnectorDeliveryPiiError,
+  forwardConversationKey,
   queuedJob,
   type ConnectorDeliveryGatewayDependencies,
   type GovernedEnqueueInput,
@@ -82,6 +84,8 @@ function gatewayWith(overrides: Partial<ConnectorDeliveryGatewayDependencies> = 
         }) satisfies ConnectorDraftRow
     ),
     recordReceipt: jest.fn(async () => undefined),
+    messagingMode: async () => "shadow" as const,
+    forward: jest.fn(async () => ({ ok: true })),
     ...overrides,
   }
   return { gateway: new ConnectorDeliveryGateway(deps), deps }
@@ -370,5 +374,202 @@ describe("ConnectorDeliveryGateway", () => {
       ok: false,
       error: { code: "adapter_not_found", message: "missing", retryable: false },
     })
+  })
+})
+
+describe("ConnectorDeliveryGateway.sendNow (ADR-0239)", () => {
+  const plugin: OutboundAuthorization = { kind: "plugin", pluginId: "p1" }
+  const immediate = (extra: Record<string, unknown> = {}) => ({
+    adapterId: "adapter-1",
+    conversationKey: "slack:adapter-1:C1",
+    segments: [{ type: "text" as const, text: "hello" }],
+    idempotencyKey: "idem-1",
+    source: "plugin" as const,
+    authorization: plugin,
+    auditKind: "delivery.legacy_direct" as const,
+    auditFields: { pluginId: "p1" },
+    ...extra,
+  })
+
+  it("plans it as a delivery that cannot wait, then sends and audits it", async () => {
+    const { gateway, deps } = gatewayWith({
+      planDelivery: jest.fn(async (): Promise<DeliveryDecision> => ({
+        action: "send",
+        authorizedBy: { authority: "policy-rule", receiptId: "r1", grantScope: "policy" },
+        receipt: receipt("r1"),
+      })),
+    })
+    const send = jest.fn(async () => ({ ok: true, platformMessageId: "m1" }))
+
+    await expect(gateway.sendNow(immediate(), send)).resolves.toEqual({
+      ok: true,
+      platformMessageId: "m1",
+    })
+    expect(deps.planDelivery).toHaveBeenCalledWith({
+      adapterId: "adapter-1",
+      conversationKey: "slack:adapter-1:C1",
+      source: "plugin",
+      authorization: plugin,
+      immediate: true,
+    })
+    expect(deps.recordReceipt).toHaveBeenCalledWith(receipt("r1"))
+    expect(deps.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "delivery.legacy_direct",
+        conversationKey: "slack:adapter-1:C1",
+        idempotencyKey: "idem-1",
+        fields: {
+          pluginId: "p1",
+          source: "plugin",
+          governed: true,
+          outcome: "succeeded",
+          authority: "policy-rule",
+          receiptId: "r1",
+        },
+      })
+    )
+  })
+
+  it("plans a request with no conversation as one with an unknown recipient", async () => {
+    const { gateway, deps } = gatewayWith()
+    await gateway.sendNow(immediate({ conversationKey: undefined }), async () => ({ ok: true }))
+    expect(deps.planDelivery).toHaveBeenCalledWith(expect.objectContaining({ conversationKey: "" }))
+  })
+
+  it("returns a refusal as a failed result and never sends", async () => {
+    const { gateway, deps } = gatewayWith({
+      planDelivery: jest.fn(async (): Promise<DeliveryDecision> => ({
+        action: "deny",
+        reason: "unapproved",
+        receipt: receipt("r2"),
+      })),
+    })
+    const send = jest.fn(async () => ({ ok: true }))
+
+    const result = await gateway.sendNow(immediate(), send)
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: CONNECTOR_DELIVERY_DENIED_CODE,
+        message: new ConnectorDeliveryDeniedError("plugin", "unapproved").message,
+        retryable: false,
+      },
+    })
+    expect(result.error?.message).toMatch(/cannot wait for a person/)
+    expect(send).not.toHaveBeenCalled()
+    expect(deps.recordReceipt).toHaveBeenCalledWith(receipt("r2"))
+    expect(deps.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "outbound.denied",
+        fields: expect.objectContaining({ receiptId: "r2", reason: "unapproved" }),
+      })
+    )
+  })
+
+  it("PII-gates what it sends, but not a forward, which sends nothing new", async () => {
+    const { gateway } = gatewayWith({ piiGate: () => false })
+    const send = jest.fn(async () => ({ ok: true }))
+    await expect(gateway.sendNow(immediate(), send)).rejects.toBeInstanceOf(
+      ConnectorDeliveryPiiError
+    )
+    expect(send).not.toHaveBeenCalled()
+    await expect(
+      gateway.sendNow(
+        immediate({ segments: undefined, auditKind: "delivery.forward_direct" }),
+        send
+      )
+    ).resolves.toEqual({ ok: true })
+  })
+
+  it("audits a failed send with its error code", async () => {
+    const { gateway, deps } = gatewayWith()
+    await gateway.sendNow(immediate(), async () => ({
+      ok: false,
+      error: { code: "platform_4xx", message: "no", retryable: false },
+    }))
+    expect(deps.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "delivery.legacy_direct",
+        reason: "platform_4xx",
+        fields: expect.objectContaining({ outcome: "failed" }),
+      })
+    )
+  })
+})
+
+describe("ConnectorDeliveryGateway.allowsUnplannedStream (ADR-0239)", () => {
+  it("allows a stream only while messaging is not enforced", async () => {
+    await expect(
+      gatewayWith({ messagingMode: async () => "shadow" }).gateway.allowsUnplannedStream()
+    ).resolves.toBe(true)
+    await expect(
+      gatewayWith({ messagingMode: async () => "enforce" }).gateway.allowsUnplannedStream()
+    ).resolves.toBe(false)
+  })
+
+  it("fails closed when the mode cannot be read", async () => {
+    const { gateway } = gatewayWith({
+      messagingMode: async () => {
+        throw new Error("settings unavailable")
+      },
+    })
+    await expect(gateway.allowsUnplannedStream()).resolves.toBe(false)
+  })
+})
+
+describe("forwardConversationKey", () => {
+  it("reads a key of the adapter, or a bare chat id on its platform", () => {
+    expect(forwardConversationKey("bot-a", "lark", "lark:bot-a:oc_2")).toBe("lark:bot-a:oc_2")
+    expect(forwardConversationKey("bot-a", "lark", " oc_3 ")).toBe("lark:bot-a:oc_3")
+  })
+
+  it("names nothing for another bot's key, a malformed one, or an unknown platform", () => {
+    expect(forwardConversationKey("bot-a", "lark", "lark:bot-b:oc_2")).toBeUndefined()
+    expect(forwardConversationKey("bot-a", "lark", "lark:")).toBeUndefined()
+    expect(forwardConversationKey("bot-a", undefined, "oc_3")).toBeUndefined()
+    expect(forwardConversationKey("bot-a", "lark", "  ")).toBeUndefined()
+  })
+})
+
+describe("ConnectorDeliveryGateway.forward (ADR-0239)", () => {
+  const larkAdapter = { id: "bot-a", meta: { type: "lark" } } as unknown as PlatformAdapter
+  const input = {
+    adapterId: "bot-a",
+    forward: { messageId: "om_1", target: "oc_2" },
+    source: "plugin" as const,
+    authorization: { kind: "plugin", pluginId: "p1" } as OutboundAuthorization,
+    auditFields: { pluginId: "p1" },
+  }
+
+  it("plans the forward as a delivery to its target, then forwards", async () => {
+    const forward = jest.fn(async () => ({ ok: true, platformMessageId: "om_f" }))
+    const { gateway, deps } = gatewayWith({ getAdapter: () => larkAdapter, forward })
+
+    await expect(gateway.forward(input)).resolves.toEqual({ ok: true, platformMessageId: "om_f" })
+    expect(deps.planDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationKey: "lark:bot-a:oc_2", immediate: true })
+    )
+    expect(forward).toHaveBeenCalledWith("bot-a", input.forward)
+    expect(deps.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "delivery.forward_direct" })
+    )
+  })
+
+  it("never forwards what the policy refused", async () => {
+    const forward = jest.fn(async () => ({ ok: true }))
+    const { gateway } = gatewayWith({
+      getAdapter: () => larkAdapter,
+      forward,
+      planDelivery: jest.fn(async (): Promise<DeliveryDecision> => ({
+        action: "deny",
+        reason: "unapproved",
+        receipt: receipt("r3"),
+      })),
+    })
+    await expect(gateway.forward(input)).resolves.toMatchObject({
+      ok: false,
+      error: { code: CONNECTOR_DELIVERY_DENIED_CODE },
+    })
+    expect(forward).not.toHaveBeenCalled()
   })
 })

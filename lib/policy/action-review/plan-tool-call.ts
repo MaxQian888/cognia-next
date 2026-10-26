@@ -82,6 +82,7 @@ import {
   readOutboundAuthorizationMode,
   type ActionReviewPlanResult,
 } from "./policy"
+import { outboundReview } from "./outbound-receipt"
 import { projectActionReviewSettled } from "./projection"
 import { resolveSessionRequestOrigin } from "./resolve-request-origin"
 
@@ -410,17 +411,7 @@ export function outboundToolDecision(
  * PR or issue a GitHub write goes to (phase 2).
  */
 export function pendingOutboundReview(plan: OutboundToolCallPlan): PendingOutboundReview {
-  const view = (target: OutboundTarget) => ({
-    kind: target.kind,
-    channel: target.channel,
-    recipient: target.recipient,
-    ...(target.thread ? { thread: target.thread } : {}),
-  })
-  return {
-    targets: plan.targets.map(view),
-    unauthorized: plan.result.unauthorized.map(view),
-    enforced: plan.result.plan.enforced,
-  }
+  return outboundReview(plan.targets, plan.result.unauthorized, plan.result.plan.enforced)
 }
 
 export { humanOutboundGrant } from "./policy"

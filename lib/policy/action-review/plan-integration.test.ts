@@ -186,7 +186,12 @@ describe("planIntegrationWrite", () => {
       })
       await expect(planIntegrationWrite(write([PR_13], plugin), deps(enforce))).resolves.toEqual({
         action: "proceed",
-        outbound: { ownerRef: "plugin:p1" },
+        // Inside the installation's fence: a person's refusal on it holds.
+        outbound: {
+          ownerRef: "plugin:p1",
+          rootSessionId: "bot:boti_1",
+          instructionEpoch: "bot:boti_1@0",
+        },
         authorizedBy: {
           receiptId: "integration:n1",
           authority: "policy-rule",

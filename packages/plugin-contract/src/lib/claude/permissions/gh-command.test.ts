@@ -72,6 +72,8 @@ describe("classifyGhArgs: kinds", () => {
     ["copilot suggest x", "copilot"],
     ["pr frobnicate", "pr frobnicate"],
     ["-- pr create", "pr create"],
+    // An extension's code can write anything: never only local setup.
+    ["extension exec gh-x", "extension exec"],
   ])("writes: gh %s", (line, command) => {
     expect(gh(line)).toMatchObject({ kind: "write", command })
   })
@@ -150,6 +152,17 @@ describe("classifyGhArgs: gh api", () => {
     expect(gh("api -X POST repos/o/r/issues", { GH_HOST: "ghe.corp.io" }).repositories).toEqual([
       "ghe.corp.io/o/r",
     ])
+  })
+
+  it("reads a flag-shaped value as the value of the flag before it", () => {
+    // `--jq` takes `-XGET` as its filter: the request is still the PUT.
+    expect(gh("api repos/o/r/issues/1/lock -X PUT --jq -XGET")).toMatchObject({
+      kind: "write",
+      command: "api PUT",
+      repositories: ["o/r"],
+    })
+    expect(gh("api -X POST repos/o/r/issues -H -XGET").command).toBe("api POST")
+    expect(gh("api repos/o/r/issues -q -fbody=x").kind).toBe("read")
   })
 
   it("does not read an issue comment id as the thread", () => {

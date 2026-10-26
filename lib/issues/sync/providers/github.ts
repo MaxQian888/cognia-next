@@ -579,7 +579,7 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
       ref: IssueExternalRef,
       patch: RemotePatch,
       issue: Issue,
-      context: { idempotencyKey: string }
+      context: { idempotencyKey: string; editedBy?: "person" | "automation" }
     ): Promise<PushOutcome> {
       const resource = binding.resource
       if (resource.kind !== "github-repo") throw new Error("not a github-repo binding")
@@ -638,14 +638,23 @@ export function createGithubSyncProvider(deps: GithubSyncProviderDeps = {}): Iss
 
       const account = await resolveAccount(resource.repoFullName)
       if (!account) throw new MissingGithubCredentialError(resource.repoFullName)
-      const job = await execute(GITHUB_DELIVERY_PLUGIN_ID, {
+      const request = {
         integrationId: GITHUB_INTEGRATION_ID,
         accountId: account.id,
         actionId: "updateIssue",
         input,
-        source: "workflow",
+        source: "workflow" as const,
         idempotencyKey: context.idempotencyKey,
-      })
+      }
+      // A person's own board edit is that person's write to the bound
+      // repository; an agent's is planned by the outbound policy (ADR-0239).
+      const job =
+        context.editedBy === "person"
+          ? await execute(GITHUB_DELIVERY_PLUGIN_ID, request, {
+              kind: "person",
+              surface: "issue-sync",
+            })
+          : await execute(GITHUB_DELIVERY_PLUGIN_ID, request)
       return job.status === "succeeded"
         ? { status: "applied" }
         : { status: "queued", jobId: job.id }

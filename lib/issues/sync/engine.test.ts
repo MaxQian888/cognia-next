@@ -79,7 +79,12 @@ interface FakeOptions {
 }
 
 function fake(options: FakeOptions = {}) {
-  const pushes: Array<{ externalId: string; patch: RemotePatch; key: string }> = []
+  const pushes: Array<{
+    externalId: string
+    patch: RemotePatch
+    key: string
+    editedBy?: "person" | "automation"
+  }> = []
   const pulls: Array<{ since?: number; full?: boolean }> = []
   const provider: IssueSyncProvider = {
     id: "fake",
@@ -92,7 +97,12 @@ function fake(options: FakeOptions = {}) {
       return options.pull ?? { items: [], notModified: true }
     },
     push: async (_b, ref, patch, _issue, context) => {
-      pushes.push({ externalId: ref.externalId, patch, key: context.idempotencyKey })
+      pushes.push({
+        externalId: ref.externalId,
+        patch,
+        key: context.idempotencyKey,
+        ...(context.editedBy ? { editedBy: context.editedBy } : {}),
+      })
       return options.push ? options.push(patch) : { status: "applied", remoteUpdatedAt: 5_000 }
     },
   }
@@ -229,9 +239,21 @@ describe("reconcileBinding: field reconciliation", () => {
     expect(pushes).toHaveLength(1)
     expect(pushes[0].patch).toEqual({ title: "Renamed locally", dueDate: 9_999 })
     expect(pushes[0].key).toBe(pushIdempotencyKey(id, pushes[0].patch))
+    // A person made every edit it carries (ADR-0239).
+    expect(pushes[0].editedBy).toBe("person")
     const issue = (await getIssue(id))!
     expect(issue.title).toBe("Renamed locally")
     expect(issue.externalRefs?.[0]).toMatchObject({ syncedAt: T, remoteUpdatedAt: 5_000 })
+  })
+
+  it("says an agent's edit was made by automation, even beside a person's (ADR-0239)", async () => {
+    const id = await importOne()
+    await updateIssue(id, { title: "Renamed by a person" }, HUMAN)
+    await setIssueDueDate(id, 9_999, { kind: "agent", id: "agent-1" })
+    const { provider, pushes } = fake({ pull: { items: [], notModified: true } })
+    await reconcileBinding(binding(), provider, { now: () => Date.now() + 100_000 })
+    expect(pushes[0].patch).toEqual({ title: "Renamed by a person", dueDate: 9_999 })
+    expect(pushes[0].editedBy).toBe("automation")
   })
 
   it("hands a local assignee change to a provider that pushes assignees", async () => {

@@ -176,8 +176,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 
 ### 已知缺口
 
-- 插件已弃用的直接 `send` / `sendText` 不经过投递网关。
-- 在配对设备或经 HostState 做出的批准不经过宿主的 `approveTool`，其后的工具投递按无人值守判定；`/lark` 斜杠命令路径同样如此。
+- 经 `/lark` 斜杠命令路径做出的批准不经过宿主的 `approveTool`，其后的工具投递按无人值守判定。
 - 执行模式下，外部桥接需要审批的 digest 会转为草稿。
 - 本机驱动配对 Host 时，开关和报告只显示说明：设置和 receipt 都在 Host 上，尚无远程读取。
 - 执行模式已有单元与集成测试，但还没有在真实桌面和手机上跑过（一次发起线程回复、一次跨群发送、一次在手机上批准的停泊审批、一次 Bot 定时投递从草稿到批准发送）。
@@ -209,7 +208,6 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 ### 已知缺口
 
 - 应用里还没有任何地方写入能力授予，因此 `capability-grant:<id>` 来源在有写入方之前只读。
-- issue 同步与 Issue Loop 适配器调用 broker 时不带调用方，其写入按插件写入规划；执行模式下，仓库不在某个账号名单上即等待批准。
 - 按决定，GitHub MCP 服务器的工具仍走普通权限阶梯。
 - GitHub 写入的执行模式已有单元与集成测试，但还没有在真实桌面和手机上跑过（Comment Bot 回复其被提及的 PR、在手机上批准一次写到未列出仓库的无人值守写入、聊天里一次跨仓库的 `gh` 命令）。
 
@@ -243,6 +241,31 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - 用户自己 Chrome 中被 service worker 控制的页面，提交在动作前判定，而不是被挂起。
 - 一次询问最长 9 分钟。
 - 浏览器提交的执行模式有单元、jsdom 与真 Chromium 运行时测试，但还没有在真实桌面上跑过（每个可靠引擎上一次表单提交被挂起后批准）。
+
+## 后续：审计修复（2026-10-26）
+
+一次只读的 Codex 审计检查了第一期、2a 与 2b 的绕过路径和重复实现。发现的问题与改动如下：
+
+### 已封堵的绕过
+
+- **`gh` 分类。** `gh api` 曾把某个 flag 的值读成方法（`-X PUT --jq -XGET` 被算作 GET）；现在每个带值 flag 的值都被消费，只有 `-X` / `--method` 设定方法。`gh extension exec` 会执行扩展代码，因此算写入，而非本地命令。在 `gh` 运行前改变 `gh` 环境的命令（`export GH_REPO=…`、`source`、`.`、`eval`，或在 `gh` 片段之外给 `GH_REPO` / `GH_HOST` 赋值）不再回退到检出目录，仓库按未知处理。sidecar 中的分类器副本改为由宿主源码生成（`scripts/build/gen-sidecar-gh-command.mjs`，由 `gh-targets.sidecar-parity.test.ts` 校验），不再手工维护。
+- **插件的投递发往宿主存下的目标**（`lib/connectors/plugin-destination.ts`）。此前策略按会话键规划插件的 `enqueueSend`，而 runner 用插件自己给的引用发送，它可以指向另一个群，在飞书上还可以指向另一个人（`receiveId`）。现在插件的请求一律用宿主为该会话存下的投递目标发送（由入站消息刷新，或由 `bootstrapConversation` 生成）；`replyTo` 或 `editTargetMessageId` 必须指向宿主在该会话里见过的消息。其余情况以 `connector_delivery_destination` 拒绝。
+- **直接发送与转发都经过规划。** 插件已弃用的 `send` / `sendText`、插件的 `forwardMessage` 以及工作流节点 `action.connector.forward` 都经过 `ConnectorDeliveryGateway.sendNow` / `forward`。这类投递无法作为草稿等待，规划器按 `immediate` 处理：别的投递会被存为草稿的地方，它们被拒绝（`unapproved`，以失败结果 `connector_delivery_denied` 返回）。只给出引用的直接发送，收件人未知，没有任何授权能覆盖。影子模式下它们照旧发出，receipt 记下执行模式会拒绝。
+- **`streamReply` 无法规划。** 流式回复没有会话键，且每次更新发一帧。消息类处于执行模式时，插件的 `streamReply` 返回 `false`，即文档约定的"不支持流式"，插件随之回退到受管控的发送。
+- **handler Bot 只把名单借给一个安装的代码。** `runningBotOf` 取代了所有运行中安装名单的并集。插件的调用不带运行标识，因此只有在该插件只有一个安装在运行时才借出名单；调用随即在该安装的根与纪元下规划，其屏障生效。两个安装同时运行时，两份名单都不借出。
+- **浏览器提交。** 在 hold 安装之前就已打开的 socket，会让页面保持 `unguarded`，直到 socket 关闭或页面导航。选择文件在动作的提交窗口内执行，页面随即发出的内容会被停下。影子模式下 drain 失败不再阻塞动作。
+- **人的回答记为人的。** HostState 批准（配对设备）在解决前记下 human receipt 并提升该工具调用，写明设备。Issue Loop 把发起运行的人记为调用方（唤醒触发的不记任何人）。Issue 同步推送只有在其携带的每个本地编辑都来自人时才以人为调用方（`editedBy`、`localEditorOf`）；智能体或团队的编辑仍由策略规划。
+
+### 已去除的重复
+
+- 三个咽喉点（投递、集成、浏览器）的 receipt 共用一个构造器（`outbound-receipt.ts`：`outboundReceipt`、`outboundReview`、`jobAuthorizationOf`）。PR/issue 编号解析只保留一份（`threadNumber`）。浏览器询问改用 `@cognia/primitives` 的 `withTimeout`。
+- 有意保持分开的：`siteTarget` / `repositoryTarget` 与 forge 远端解析（`lib/stack/forge/remote.ts`、`lib/github/host.ts`）看起来相似，但在授权依赖的地方不同（带端口的 host 与 hostname、取前几段路径与取最后几段）。`captured-turns.ts` 与审批注册表生命周期相同而数据不同；外发询问 store 与 ask-user store 队列形状相同而安全规则不同。
+
+### 已知缺口
+
+- 插件的 `sendUrgent`（就已有消息向指定的人发加急推送）未经规划。
+- 影子模式下插件 `streamReply` 的帧不被记录。
+- 插件回复或编辑的消息 id 若已超出入站账本的窗口，即使属于同一会话也会被拒绝。
 
 ## 影响
 

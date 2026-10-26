@@ -54,9 +54,10 @@ import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { requireMethod, withScopeCapture } from "@/lib/skills/built-in/im/_helpers"
 import {
   ConnectorDeliveryHeldError,
+  ConnectorDeliveryPiiError,
   getConnectorDeliveryGateway,
 } from "@/lib/connectors/delivery-gateway"
-import { appendAudit } from "@/lib/connectors/audit"
+import { pluginDestination, PluginDestinationError } from "@/lib/connectors/plugin-destination"
 import { createA2UIBuilder } from "@/lib/connectors/a2ui-bridge/surface-builder"
 import {
   createAdapterInstance,
@@ -276,7 +277,15 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
       getBus().addReactionOutbound(adapterId, messageId, emojiType),
     removeReaction: (adapterId, messageId, reactionId) =>
       getBus().removeReactionOutbound(adapterId, messageId, reactionId),
-    forwardMessage: (adapterId, input) => getBus().forwardOutbound(adapterId, input),
+    // Planned as a delivery to the target conversation that cannot wait (ADR-0239).
+    forwardMessage: (adapterId, input) =>
+      getConnectorDeliveryGateway().forward({
+        adapterId,
+        forward: input,
+        source: "plugin",
+        authorization: { kind: "plugin", pluginId },
+        auditFields: { pluginId },
+      }),
     pinMessage: (adapterId, conversationKey, messageId) =>
       getBus().pinOutbound(adapterId, conversationKey, messageId),
     unpinMessage: (adapterId, messageId) => getBus().unpinOutbound(adapterId, messageId),
@@ -286,12 +295,19 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     setTyping: (adapterId, conversationKey, on) =>
       getBus().setTypingOutbound(adapterId, conversationKey, on),
     uploadFile: (adapterId, file) => getBus().uploadFileOutbound(adapterId, file),
-    streamReply: (adapterId, req) => getBus().streamReplyOutbound(adapterId, req),
+    // A stream can be neither planned nor drafted: under enforcement it
+    // reports "no streaming", and the plugin falls back to a governed send.
+    streamReply: async (adapterId, req) =>
+      (await getConnectorDeliveryGateway().allowsUnplannedStream())
+        ? getBus().streamReplyOutbound(adapterId, req)
+        : false,
     enqueueSend: async (adapterId, conversationKey, req, opts) => {
       const result = await getConnectorDeliveryGateway().enqueueAuthorized({
         adapterId,
         conversationKey,
-        request: req,
+        // Sent where the host stored this conversation, never to a reference
+        // of the plugin's own (ADR-0239).
+        request: await pluginDestination(adapterId, conversationKey, req),
         source: "plugin",
         // Covered by one of this plugin's running, authorized tool calls, or
         // planned as the plugin's own unattended send (ADR-0239).
@@ -421,6 +437,19 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
   )
 }
 
+/** A refusal as the failed result the direct calls return. */
+function refusedResult(error: { code: string; message: string }): OutboundResult {
+  return { ok: false, error: { code: error.code, message: error.message, retryable: false } }
+}
+
+/**
+ * The deprecated direct `send` / `sendText`: planned by the outbound policy
+ * and sent at once (ADR-0239). A request whose delivery target names its
+ * conversation goes to the target the host stored for it; one that names only
+ * a platform reference has a recipient nobody can check, so under
+ * enforcement it is refused, and in shadow mode it is sent as before and
+ * recorded.
+ */
 async function legacyDirectSend(
   pluginId: string,
   adapterId: string,
@@ -429,13 +458,36 @@ async function legacyDirectSend(
   console.warn(
     `[connectors-api] plugin ${pluginId} used deprecated direct send; migrate to ctx.connectors.enqueueSend`
   )
-  await appendAudit({
-    adapterId,
-    kind: "delivery.legacy_direct",
-    at: Date.now(),
-    idempotencyKey: request.metadata.idempotencyKey,
-    reason: "plugin_compatibility_waiver",
-    fields: { pluginId, migrationTarget: "ctx.connectors.enqueueSend" },
-  }).catch(() => undefined)
-  return getBus().sendOutbound(adapterId, request)
+  const conversationKey = request.deliveryTarget?.address.conversationKey
+  let addressed = request
+  if (conversationKey) {
+    try {
+      addressed = await pluginDestination(adapterId, conversationKey, request)
+    } catch (error) {
+      if (error instanceof PluginDestinationError) return refusedResult(error)
+      throw error
+    }
+  }
+  try {
+    return await getConnectorDeliveryGateway().sendNow(
+      {
+        adapterId,
+        ...(conversationKey ? { conversationKey } : {}),
+        segments: addressed.segments,
+        idempotencyKey: addressed.metadata.idempotencyKey,
+        source: "plugin",
+        authorization: { kind: "plugin", pluginId },
+        auditKind: "delivery.legacy_direct",
+        auditFields: {
+          pluginId,
+          reason: "plugin_compatibility_waiver",
+          migrationTarget: "ctx.connectors.enqueueSend",
+        },
+      },
+      () => getBus().sendOutbound(adapterId, addressed)
+    )
+  } catch (error) {
+    if (error instanceof ConnectorDeliveryPiiError) return refusedResult(error)
+    throw error
+  }
 }

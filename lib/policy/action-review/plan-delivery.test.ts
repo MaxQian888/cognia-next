@@ -12,7 +12,8 @@ import {
   rememberPlannedOutboundToolCall,
 } from "./authorized-tool-calls"
 import { __resetRunningBotGrantsForTesting, beginBotOutboundRun } from "./configured-grants"
-import { conversationTarget, outboundFingerprint } from "./outbound-targets"
+import { botPlanOrigin } from "./plan-context"
+import { conversationTarget, outboundFingerprint, toReviewTarget } from "./outbound-targets"
 import {
   planDelivery,
   sameChat,
@@ -369,6 +370,65 @@ describe("planDelivery", () => {
         action: "draft",
       })
     })
+
+    it("lends no installation's list while two of the plugin's installations run", async () => {
+      const listed = (id: string) => ({
+        id,
+        outboundRecipients: [
+          {
+            recipient: {
+              kind: "conversation" as const,
+              channel: OTHER.channel,
+              recipient: OTHER.recipient,
+            },
+            addedAt: 1,
+            addedBy: "local-user" as const,
+          },
+        ],
+      })
+      const endA = beginBotOutboundRun("run-a", { pluginId: "p1", installation: listed("boti_a") })
+      const endB = beginBotOutboundRun("run-b", { pluginId: "p1", installation: { id: "boti_b" } })
+      const plugin = delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin")
+      await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({ action: "draft" })
+      endB()
+      await expect(planDelivery(plugin, deps(enforce))).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: { policyRef: "bot:boti_a" },
+      })
+      endA()
+    })
+
+    it("plans a handler Bot's plugin code inside its installation's fence", async () => {
+      const installation = {
+        id: "boti_1",
+        humanRevision: 2,
+        outboundRecipients: [
+          {
+            recipient: {
+              kind: "conversation" as const,
+              channel: OTHER.channel,
+              recipient: OTHER.recipient,
+            },
+            addedAt: 1,
+            addedBy: "local-user" as const,
+          },
+        ],
+      }
+      const origin = botPlanOrigin(installation)
+      const prefix = actionReviewAuthKeyPrefix(
+        "deny",
+        origin.rootSessionId!,
+        origin.instructionEpoch!
+      )
+      const end = beginBotOutboundRun("run-1", { pluginId: "p1", installation })
+      const decision = await planDelivery(
+        delivery(OTHER_KEY, { kind: "plugin", pluginId: "p1" }, "plugin"),
+        deps(enforce, { [prefix]: [`${prefix}${outboundFingerprint(OTHER)}`] })
+      )
+      expect(decision).toMatchObject({ action: "deny", reason: "fenced" })
+      expect(decision.receipt?.request.origin.rootSessionId).toBe(origin.rootSessionId)
+      end()
+    })
   })
 
   describe("plugin", () => {
@@ -435,5 +495,57 @@ describe("planDelivery", () => {
         )
       ).resolves.toMatchObject({ action: "deny", reason: "conversation-mismatch" })
     })
+  })
+})
+
+describe("planDelivery: a delivery that cannot wait (immediate)", () => {
+  const plugin = { kind: "plugin" as const, pluginId: "p1" }
+  const immediate = (key: string) => ({ ...delivery(key, plugin, "plugin"), immediate: true })
+
+  it("is refused where another would be drafted, with its receipt", async () => {
+    const decision = await planDelivery(immediate(OTHER_KEY), deps(enforce))
+    expect(decision).toMatchObject({ action: "deny", reason: "unapproved" })
+    expect(decision.receipt?.decision).toMatchObject({ outcome: "deny" })
+    expect(decision.receipt?.decision.reason).toMatch(/cannot wait for a person/)
+  })
+
+  it("still goes when something authorized its recipient", async () => {
+    const end = beginBotOutboundRun("run-1", {
+      pluginId: "p1",
+      installation: {
+        id: "boti_1",
+        outboundRecipients: [
+          {
+            recipient: {
+              kind: "conversation" as const,
+              channel: OTHER.channel,
+              recipient: OTHER.recipient,
+            },
+            addedAt: 1,
+            addedBy: "local-user" as const,
+          },
+        ],
+      },
+    })
+    await expect(planDelivery(immediate(OTHER_KEY), deps(enforce))).resolves.toMatchObject({
+      action: "send",
+      authorizedBy: { policyRef: "bot:boti_1" },
+    })
+    end()
+  })
+
+  it("plans a delivery with no conversation as an unknown recipient, which nothing allows", async () => {
+    const decision = await planDelivery(immediate(""), deps(enforce))
+    expect(decision).toMatchObject({ action: "deny", reason: "unapproved" })
+    expect(decision.receipt?.request.subject.targets).toEqual([
+      toReviewTarget({ kind: "unknown", channel: "bot-a", recipient: "*" }),
+    ])
+  })
+
+  it("is sent in shadow mode, recording that enforcement would have refused it", async () => {
+    const decision = await planDelivery(immediate(OTHER_KEY), deps(shadow))
+    expect(decision.action).toBe("send")
+    expect(decision.receipt?.request.plan).toEqual({ outcome: "deny", enforced: false })
+    expect(decision.receipt?.decision.reason).toMatch(/would have refused it/)
   })
 })

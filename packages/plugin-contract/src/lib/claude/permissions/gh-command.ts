@@ -138,7 +138,6 @@ export const GH_LOCAL_COMMANDS: ReadonlySet<string> = new Set([
   "extension upgrade",
   "extension remove",
   "extension create",
-  "extension exec",
 ])
 
 /**
@@ -345,7 +344,7 @@ function parseArgs(tokens: readonly string[], valueFlags: ReadonlySet<string>): 
   const values = new Map<string, string[]>()
   const flags = new Set<string>()
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]
+    const token = tokens[i] ?? ""
     if (token === "--") {
       positionals.push(...tokens.slice(i + 1))
       break
@@ -395,20 +394,20 @@ function commandPath(args: readonly string[]): { path: string; rest: string[] } 
   const flags: string[] = []
   const wantsWord = (): boolean => {
     if (words.length === 0) return true
-    if (!GH_GROUPS.has(words[0])) return false
+    if (!GH_GROUPS.has(words[0] ?? "")) return false
     if (words.length === 1) return true
     return words.length === 2 && GH_NESTED.has(`${words[0]} ${words[1]}`)
   }
   let i = 0
   for (; i < args.length && wantsWord(); i++) {
-    const token = args[i]
+    const token = args[i] ?? ""
     // `gh -- pr create` still runs `pr create`: fail closed, keep reading.
     if (token === "--") continue
     if (token.startsWith("-") && token !== "-") {
       flags.push(token)
       const { flag, inline } = splitFlag(token)
       if (inline === undefined && GH_VALUE_FLAGS.has(flag) && i + 1 < args.length) {
-        flags.push(args[++i])
+        flags.push(args[++i] ?? "")
       }
       continue
     }
@@ -417,20 +416,25 @@ function commandPath(args: readonly string[]): { path: string; rest: string[] } 
   return { path: words.join(" "), rest: [...flags, ...args.slice(i)] }
 }
 
-/** The `gh api` method: the last `-X` / `--method` written, else POST with a body, else GET. */
+/**
+ * The `gh api` method: the last `-X` / `--method` written, else POST with a
+ * body, else GET. Every flag that takes a value consumes it, so a value that
+ * looks like a flag (`--jq -XGET`) is read as the value it is.
+ */
 function apiMethod(rest: readonly string[]): { method: string; sendsBody: boolean } {
   let method: string | undefined
   let sendsBody = false
   for (let i = 0; i < rest.length; i++) {
-    const token = rest[i]
+    const token = rest[i] ?? ""
     if (token === "--") break
     if (!token.startsWith("-") || token === "-") continue
     const { flag, inline } = splitFlag(token)
     if (GH_API_BODY_FLAGS.has(flag)) sendsBody = true
-    if (flag === "-X" || flag === "--method") {
-      const value = inline ?? rest[i + 1]
-      if (inline === undefined) i++
-      if (value !== undefined) method = value.toUpperCase()
+    if (!API_VALUE_FLAGS.has(flag)) continue
+    const value = inline ?? rest[i + 1]
+    if (inline === undefined) i++
+    if ((flag === "-X" || flag === "--method") && value !== undefined) {
+      method = value.toUpperCase()
     }
   }
   return { method: method ?? (sendsBody ? "POST" : "GET"), sendsBody }
@@ -486,7 +490,7 @@ export function classifyGhArgs(args: readonly string[], env: GhEnvironment = {})
     return { kind: "local", command: path, repositories: [], usesLocalRepository: false }
   }
 
-  const group = path.split(" ")[0]
+  const group = path.split(" ")[0] ?? ""
   const parsed = parseArgs(rest, GH_VALUE_FLAGS)
   const host = env.GH_HOST
   const repositories: string[] = valuesOf(parsed, "-R", "--repo").map((spec) =>
@@ -497,8 +501,8 @@ export function classifyGhArgs(args: readonly string[], env: GhEnvironment = {})
     for (const positional of parsed.positionals) {
       const url = THREAD_URL.exec(positional)
       if (url) {
-        repositories.push(url[1])
-        threads.push(url[2])
+        repositories.push(url[1] ?? "")
+        threads.push(url[2] ?? "")
       } else if (/^#?[1-9]\d*$/.test(positional)) {
         threads.push(positional.replace(/^#/, ""))
       }
