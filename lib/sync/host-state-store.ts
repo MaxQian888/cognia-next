@@ -379,6 +379,17 @@ export async function commitHostStateRuntimeProjection(
         outcome: "applied",
         mutation,
       }
+      // A title the Host gives a conversation (its first message's preview, or
+      // the model's title after the first turn) is a machine title: its own
+      // row takes it with the channel, as a replica's does from the broadcast,
+      // and auto-titling may still replace it.
+      if (mutation.kind === "session.renamed" && state.kind === "session") {
+        await db.sessions.update(state.sessionId, {
+          title: mutation.title,
+          titleAuto: true,
+          updatedAt: now,
+        })
+      }
       await Promise.all([
         db.hostStateChannels.put({
           channel: input.channel,

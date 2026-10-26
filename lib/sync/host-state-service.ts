@@ -44,6 +44,7 @@ import {
   retractOfferedHostStateActions,
 } from "@/lib/sync/host-state-offered-actions"
 import { sessionIndexChannel, sessionStateChannel } from "@cognia/agent-config-types/host-state"
+import type { HostStateTitleGenerator } from "./host-state-title"
 import type { Transport } from "@/lib/tauri/transport-types"
 import { loggers } from "@cognia/logging"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
@@ -691,6 +692,12 @@ export interface HostStateServiceOptions {
     previousProjectId: string | undefined,
     projectId: string
   ) => Promise<void>
+  /**
+   * Writes the model title a conversation gets once its first turn completes.
+   * Defaults to `createHostStateTitleGenerator()` (`host-state-title.ts`).
+   * Injectable so the channel commit can be tested without a model.
+   */
+  generateTitle?: HostStateTitleGenerator
 }
 
 export interface HostStateService {
@@ -1625,8 +1632,87 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
       const row = await getHostStateAction(generation, `runtime:${envelope.eventId}`)
       if (!row) throw new Error("host_state_ledger_missing")
       await processRow(row)
+      const settled = committed.event?.outcome === "applied" ? committed.event.mutation : undefined
+      if (
+        !committed.duplicate &&
+        settled?.kind === "turn.settled" &&
+        settled.turn === "completed"
+      ) {
+        // After the settle is out, and off this call: the title pipeline loads
+        // the model client the first time, and the turn's own settle and live
+        // frames go first.
+        const sessionId = envelope.sessionId
+        setTimeout(() => {
+          void titleAfterFirstTurn(sessionId).catch((error) => {
+            loggers.sync.warn("[host-state] model title not written", {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          })
+        }, 0)
+      }
       return committed.event
     },
+  }
+
+  /**
+   * Upgrade a conversation's preview title to a model-written one once its
+   * first turn completes (`host-state-title.ts`), in the channel, so every
+   * device and the sidebar take it as they take a rename.
+   *
+   * Only while the conversation is machine-titled: a title someone chose
+   * (`titleAuto: false`, or a channel title that is neither the placeholder
+   * nor the first message's preview) is kept, and the commit re-reads the
+   * channel so a rename that landed while the model ran wins. One per
+   * conversation: its envelope id is the session's. A failed broadcast is
+   * left for the sweep, like any committed row's.
+   */
+  async function titleAfterFirstTurn(sessionId: string): Promise<void> {
+    if (generation === null) return
+    const session = await getDb().sessions.get(sessionId)
+    if (!session || session.titleAuto === false) return
+    const channel = sessionStateChannel(options.runtimeTargetId, sessionId)
+    const { state } = await getHostStateSnapshot(channel)
+    if (state.kind !== "session") return
+    const [{ listMessages }, title] = await Promise.all([
+      import("@/lib/db/messages"),
+      import("./host-state-title"),
+    ])
+    const currentTitle = state.title ?? ""
+    const source = title.hostStateTitleSource(await listMessages(sessionId), currentTitle)
+    if (!source) return
+    const generate = options.generateTitle ?? title.createHostStateTitleGenerator()
+    const written =
+      (await generate({ session, ...source, currentTitle })) ??
+      // This process's own chat view may be titling the same conversation (a
+      // desktop Host with it open); its title lands on the row, not the
+      // channel, and is taken from there instead of asking twice.
+      (await title.deviceWrittenTitle(sessionId, source.sourceText, currentTitle))
+    if (!written || generation === null) return
+    const envelopeId = `model-title:${sessionId}`
+    const committed = await commitHostStateRuntimeProjection({
+      hostId: options.hostId,
+      hostGeneration: generation,
+      ownerId: options.ownerId,
+      channel,
+      envelopeId,
+      envelopeDigest: hostStateDigest({ sessionId, title: written }),
+      mutation: (current) =>
+        current.kind === "session" && current.title === state.title
+          ? { kind: "session.renamed", title: written, revision: current.revision + 1 }
+          : null,
+      now: now(),
+    })
+    if (!committed.event || committed.duplicate) return
+    const row = await getHostStateAction(generation, `runtime:${envelopeId}`)
+    try {
+      if (row) await processRow(row)
+    } catch (error) {
+      loggers.sync.warn("[host-state] model title left for the sweep", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   /**

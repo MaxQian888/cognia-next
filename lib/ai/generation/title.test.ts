@@ -2,6 +2,7 @@ import {
   generateConversationTitle,
   sanitizeTitle,
   MAX_TITLE_LENGTH,
+  SHORT_UTILITY_ANSWER_MAX_TOKENS,
   TITLE_CHAT_PROMPT,
   TITLE_WORK_PROMPT,
 } from "./title"
@@ -103,6 +104,15 @@ describe("generateConversationTitle", () => {
       }),
     }
     expect(await generateConversationTitle(client, { firstUserText: "hi" })).toBe("")
+  })
+
+  it("leaves a reasoning model room to answer", async () => {
+    const client = mockClient(() => "Kyoto trip")
+    await generateConversationTitle(client, { firstUserText: "plan a Kyoto trip" })
+    const opts = (client.complete as jest.Mock).mock.calls[0][1] as { maxTokens: number }
+    // Measured: a reasoning model spends ~400 hidden tokens before a title.
+    expect(opts.maxTokens).toBe(SHORT_UTILITY_ANSWER_MAX_TOKENS)
+    expect(SHORT_UTILITY_ANSWER_MAX_TOKENS).toBeGreaterThanOrEqual(1024)
   })
 
   it("uses chat framing (User / Assistant reply) by default", async () => {

@@ -17,6 +17,7 @@ import type { AppSettings, ChatSession, UtilityModelConfig } from "@cognia/agent
 import { buildAgentRoleLlmClient } from "@/lib/ai/generation/agent-role-client"
 import { generateConversationTitle } from "@/lib/ai/generation/title"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import type { LlmClient } from "@/lib/twin/distill/llm"
 
 // The placeholder vocabulary lives in a dependency-free module so the
 // conversation lists can localize it without importing this pipeline.
@@ -98,6 +99,14 @@ export interface RunTitleTaskArgs {
   /** Persist the accepted title. */
   persist: (title: string) => void | Promise<void>
   /**
+   * The client to title with, when the caller's model access is not the app's
+   * own provider keys (an org member's partition calls the org's model through
+   * a Host ticket). Called only once the feature, the source text and the PII
+   * gate have all said yes, so nothing is minted for a title never asked.
+   * Absent: the utility client the session and settings resolve to.
+   */
+  buildClient?: () => Promise<LlmClient | null>
+  /**
    * Optional deduplication key (typically the session id). When set, a second
    * concurrent call with the same key returns `null` immediately — prevents
    * redundant LLM calls during rapid session activity.
@@ -125,6 +134,7 @@ export async function runTitleTask(args: RunTitleTaskArgs): Promise<string | nul
     isStillAuto,
     persist,
     dedupKey,
+    buildClient,
   } = args
 
   // Dedup guard: bail if another call for the same key is already in flight.
@@ -136,13 +146,15 @@ export async function runTitleTask(args: RunTitleTaskArgs): Promise<string | nul
     if (!sourceText.trim()) return null
     if (!hasNoLeakingPiiDeep({ sourceText, resultText, locale, kind })) return null
 
-    const client = await buildAgentRoleLlmClient({
-      role: "utility",
-      session,
-      appSettings,
-      override,
-      featureId,
-    })
+    const client = buildClient
+      ? await buildClient()
+      : await buildAgentRoleLlmClient({
+          role: "utility",
+          session,
+          appSettings,
+          override,
+          featureId,
+        })
     if (!client) return null
 
     const title = await generateConversationTitle(client, {

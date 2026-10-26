@@ -153,6 +153,25 @@ describe("runTitleTask", () => {
     expect(persist).toHaveBeenCalledWith("Refactor message list")
   })
 
+  it("titles with the caller's client instead of resolving one", async () => {
+    const buildClient = jest.fn(async () => clientReturning("Org model title"))
+    const persist = jest.fn()
+    const out = await runTitleTask({ ...base, buildClient, persist })
+    expect(out).toBe("Org model title")
+    expect(buildClient).toHaveBeenCalledTimes(1)
+    expect(mockBuild).not.toHaveBeenCalled()
+    // Nothing is asked of the caller's client when no title may be generated.
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await runTitleTask({ ...base, buildClient, persist })
+    await runTitleTask({ ...base, override: { enabled: false }, buildClient, persist })
+    expect(buildClient).toHaveBeenCalledTimes(1)
+    // A caller with no client gets no title.
+    mockHasNoLeakingPiiDeep.mockReturnValue(true)
+    await expect(
+      runTitleTask({ ...base, buildClient: async () => null, persist: jest.fn() })
+    ).resolves.toBeNull()
+  })
+
   it("bails when the feature override is disabled", async () => {
     const persist = jest.fn()
     const out = await runTitleTask({ ...base, override: { enabled: false }, persist })

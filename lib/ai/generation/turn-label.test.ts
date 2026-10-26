@@ -1,5 +1,6 @@
 import { generateTurnLabel, MAX_LABEL_LENGTH, TURN_LABEL_PROMPT } from "./turn-label"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import { SHORT_UTILITY_ANSWER_MAX_TOKENS } from "./title"
 import {
   __setPromptOverrideSnapshotForTests,
   buildPromptOverrideSnapshot,
@@ -43,6 +44,13 @@ describe("generateTurnLabel", () => {
       }),
     }
     expect(await generateTurnLabel(client, { userText: "hi" })).toBe("")
+  })
+
+  it("leaves a reasoning model room to answer", async () => {
+    const client = mockClient(() => "Trip plan")
+    await generateTurnLabel(client, { userText: "plan a Kyoto trip" })
+    const opts = (client.complete as jest.Mock).mock.calls[0][1] as { maxTokens: number }
+    expect(opts.maxTokens).toBe(SHORT_UTILITY_ANSWER_MAX_TOKENS)
   })
 })
 

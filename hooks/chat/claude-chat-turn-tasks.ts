@@ -23,45 +23,12 @@ import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-con
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { UIMessage } from "ai"
-import {
-  stripPromptPreambleFromContent,
-  stripPromptPreambleFromParts,
-} from "@/lib/chat/prompt-preamble"
+import { stripPromptPreambleFromContent } from "@/lib/chat/prompt-preamble"
+import { extractAssistantText, extractPlainText } from "@/lib/chat/message-text"
 
-/**
- * Pull plain assistant text out of a UIMessage's parts. Used to feed the
- * artifact detector; only the rendered text content is meaningful — tool
- * calls and reasoning blocks are ignored.
- */
-export function extractAssistantText(message: UIMessage | undefined): string {
-  if (!message || message.role !== "assistant") return ""
-  return message.parts
-    .map((part) => {
-      const p = part as { type?: string; text?: string }
-      return p.type === "text" && typeof p.text === "string" ? p.text : ""
-    })
-    .filter(Boolean)
-    .join("\n")
-}
-
-/**
- * Pull plain text out of any UIMessage's `text` parts (role-agnostic).
- *
- * Without the composer's context envelope: every caller here — the generated
- * title, the timeline label, the memory extractor — is asking what the user
- * SAID. A title distilled from a referenced document, or a memory crediting the
- * user with a page of web results, is the failure that skipping it prevents.
- */
-export function extractPlainText(message: UIMessage | undefined): string {
-  if (!message) return ""
-  return stripPromptPreambleFromParts(message.parts)
-    .map((part) => {
-      const p = part as { type?: string; text?: string }
-      return p.type === "text" && typeof p.text === "string" ? p.text : ""
-    })
-    .filter(Boolean)
-    .join("\n")
-}
+// Moved to a dependency-light module so a Host's brain can read a transcript
+// without loading the chat view; re-exported for the callers that import here.
+export { extractAssistantText, extractPlainText }
 
 /**
  * Error surfaced on every in-flight session when the sidecar process dies.

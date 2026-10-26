@@ -707,6 +707,170 @@ describe("HostStateService", () => {
     await service.stop()
   })
 
+  describe("model title after the first turn", () => {
+    async function eventually(check: () => Promise<boolean>): Promise<void> {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (await check()) return
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      throw new Error("condition never held")
+    }
+
+    type Service = ReturnType<typeof createHostStateService>
+
+    async function firstTurn(
+      generateTitle: jest.Mock,
+      publish = jest.fn(async (_topic: string, _event: unknown) => undefined),
+      hooks: {
+        created?: (service: Service) => void
+        before?: (service: Service) => Promise<void>
+      } = {}
+    ) {
+      await getDb().sessions.update("session-1", { title: "New conversation" })
+      const service = createHostStateService({
+        ...scope,
+        hostId,
+        ownerId: "brain-a",
+        now: () => 100,
+        dispatchRuntime: jest.fn(async () => ({ correlationId: "turn-1" })),
+        publish,
+        generateTitle,
+      })
+      hooks.created?.(service)
+      await service.start({ now: 0, heartbeat: false })
+      await hooks.before?.(service)
+      await service.submit(
+        {
+          ...scope,
+          actions: [
+            action({
+              kind: "message.enqueue",
+              messageId: "m1",
+              text: "Say hello in five words, then tell me more",
+              attachments: [],
+            }),
+          ],
+        },
+        owner
+      )
+      const { replaceSessionTranscript: replace } = await import("@/lib/db/messages")
+      await replace("session-1", [
+        {
+          id: "m1",
+          role: "user",
+          parts: [{ type: "text", text: "Say hello in five words, then tell me more" }],
+        },
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [{ type: "text", text: "Hello there, nice to meet!" }],
+        },
+      ])
+      await service.projectRuntimeEnvelope(
+        runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-title-start")
+      )
+      await service.projectRuntimeEnvelope(
+        runtimeEnvelope({ kind: "lifecycle", phase: "ended" }, "evt-title-end")
+      )
+      return service
+    }
+
+    const titleOf = async (service: ReturnType<typeof createHostStateService>) =>
+      ((await service.snapshot({ ...scope, channel })).state as { title?: string }).title
+
+    it("names the conversation with the model's title in its channel and on the row", async () => {
+      const generateTitle = jest.fn(async () => "Friendly greeting")
+      const publish = jest.fn(async (_topic: string, _event: unknown) => undefined)
+      const service = await firstTurn(generateTitle, publish)
+      await eventually(async () => (await titleOf(service)) === "Friendly greeting")
+      expect(generateTitle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceText: "Say hello in five words, then tell me more",
+          resultText: "Hello there, nice to meet!",
+          currentTitle: "Say hello in five words, then tell me mo",
+          session: expect.objectContaining({ id: "session-1" }),
+        })
+      )
+      await expect(getDb().sessions.get("session-1")).resolves.toMatchObject({
+        title: "Friendly greeting",
+        titleAuto: true,
+      })
+      expect(publish).toHaveBeenCalledWith(
+        "host-state://action",
+        expect.objectContaining({
+          mutation: expect.objectContaining({
+            kind: "session.renamed",
+            title: "Friendly greeting",
+          }),
+        })
+      )
+
+      // A later turn is not titled again.
+      const { replaceSessionTranscript: replace } = await import("@/lib/db/messages")
+      await replace("session-1", [
+        { id: "m1", role: "user", parts: [{ type: "text", text: "Say hello" }] },
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "Hello" }] },
+        { id: "m2", role: "user", parts: [{ type: "text", text: "More" }] },
+        { id: "a2", role: "assistant", parts: [{ type: "text", text: "Sure" }] },
+      ])
+      await service.projectRuntimeEnvelope(
+        runtimeEnvelope({ kind: "lifecycle", phase: "started" }, "evt-title-start-2")
+      )
+      await service.projectRuntimeEnvelope(
+        runtimeEnvelope({ kind: "lifecycle", phase: "ended" }, "evt-title-end-2")
+      )
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(generateTitle).toHaveBeenCalledTimes(1)
+      await service.stop()
+    })
+
+    const rename = (service: Service, revision: number) =>
+      service.submit(
+        {
+          ...scope,
+          actions: [
+            action(
+              { kind: "session.rename", title: "My plan" },
+              { actionId: "action-rename", clientSeq: 9, baseRevision: revision }
+            ),
+          ],
+        },
+        owner
+      )
+
+    it("keeps a title someone chose while the model was writing one", async () => {
+      let service!: Service
+      let renamed = false
+      const generateTitle = jest.fn(async () => {
+        await rename(service, (await service.snapshot({ ...scope, channel })).revision)
+        renamed = true
+        return "Friendly greeting"
+      })
+      await firstTurn(generateTitle, undefined, { created: (created) => (service = created) })
+      await eventually(async () => renamed)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(await titleOf(service)).toBe("My plan")
+      await expect(getDb().sessions.get("session-1")).resolves.toMatchObject({
+        title: "My plan",
+        titleAuto: false,
+      })
+      await service.stop()
+    })
+
+    it("asks nothing for a conversation whose title someone chose", async () => {
+      const generateTitle = jest.fn(async () => "Friendly greeting")
+      const service = await firstTurn(generateTitle, undefined, {
+        before: async (created) => {
+          await rename(created, 0)
+        },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(generateTitle).not.toHaveBeenCalled()
+      expect(await titleOf(service)).toBe("My plan")
+      await service.stop()
+    })
+  })
+
   it("leaves a conversation's chosen title alone when its first message is queued", async () => {
     const service = createHostStateService({
       ...scope,

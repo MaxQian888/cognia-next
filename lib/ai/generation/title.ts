@@ -34,6 +34,18 @@ export interface GenerateTitleArgs {
 /** Hard ceiling on the returned title length (characters). */
 export const MAX_TITLE_LENGTH = 48
 
+/**
+ * The output budget for a short utility answer (a title, a timeline label).
+ *
+ * A cap, not a cost: a plain model stops after the ten or so tokens a title
+ * takes. A reasoning model spends its hidden reasoning from the same budget
+ * before it writes a word, and at the old caps (32, 24) it ran out first and
+ * answered nothing, so every title stayed the first message's preview. Measured
+ * 2026-10-26: `ark-deepseek-v4.1-flash` spent about 400 reasoning tokens on a
+ * one-line title, and returned no text at 32 or 256.
+ */
+export const SHORT_UTILITY_ANSWER_MAX_TOKENS = 2048
+
 const TITLE_PROMPT_SHARED = {
   contractVersion: 1,
   kind: "feature-template",
@@ -128,7 +140,7 @@ export async function generateConversationTitle(
     const text = await client.complete(prompt, {
       system: system.text,
       temperature: 0.3,
-      maxTokens: 32,
+      maxTokens: SHORT_UTILITY_ANSWER_MAX_TOKENS,
     })
     return sanitizeTitle(text)
   } catch {

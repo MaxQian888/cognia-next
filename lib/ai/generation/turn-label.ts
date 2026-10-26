@@ -15,7 +15,7 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { resolvePromptAsync } from "@/lib/prompts/resolve"
 import { definePrompt, type PromptResolutionContext } from "@/lib/prompts/types"
-import { sanitizeTitle } from "./title"
+import { SHORT_UTILITY_ANSWER_MAX_TOKENS, sanitizeTitle } from "./title"
 
 export interface GenerateTurnLabelArgs {
   userText: string
@@ -67,7 +67,7 @@ export async function generateTurnLabel(
     const text = await client.complete(prompt, {
       system: system.text,
       temperature: 0.3,
-      maxTokens: 24,
+      maxTokens: SHORT_UTILITY_ANSWER_MAX_TOKENS,
     })
     const label = sanitizeTitle(text)
     return label.length > MAX_LABEL_LENGTH ? label.slice(0, MAX_LABEL_LENGTH).trim() : label

@@ -1797,7 +1797,8 @@ async function personsFirstMessageTitle(person, seed) {
     created?.outcome === "applied",
     `${person.subject}: untitled session created (got ${JSON.stringify(created)})`
   )
-  const text = "Smoke names this   conversation from its first words, please"
+  // A topic, not a title: the model's title then reads unlike the message.
+  const text = "Explain   in one sentence why the sky looks blue at noon but red at sunset"
   const enqueue = hostStateAction(
     person.state.scope,
     person.state.status,
@@ -1825,6 +1826,38 @@ async function personsFirstMessageTitle(person, seed) {
   check(
     snapshot.body?.state?.title === expected,
     `${person.subject}: the Host names an untitled conversation from its first message (got ${JSON.stringify(snapshot.body?.state?.title)})`
+  )
+  // Once the first turn completes, the org's model writes the conversation's
+  // title (plan §9b item 18). The fixture's canned reply titles nothing worth
+  // telling apart from the preview, so only a real model is held to it.
+  if (!PERSONS_MODEL.real) {
+    skip(`${person.subject}: model-written title (needs COGNIA_SMOKE_PERSONS_PROVIDER)`)
+    return
+  }
+  let titled
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const read = await rpc(
+      "host_state_snapshot",
+      {
+        accountId: person.state.scope.accountId,
+        runtimeTargetId: person.state.scope.runtimeTargetId,
+        channel: enqueue.channel,
+      },
+      person.auth
+    )
+    titled = read.body?.state?.title
+    if (typeof titled === "string" && titled && titled !== expected) break
+    await delay(1000)
+  }
+  // Not a cut of the message: that is all the preview, or a truncation, is.
+  const typed = text.replace(/\s+/g, " ").trim().toLowerCase()
+  check(
+    typeof titled === "string" &&
+      titled.trim().length > 0 &&
+      titled !== expected &&
+      !typed.startsWith(titled.trim().toLowerCase()) &&
+      titled.length <= 80,
+    `${person.subject}: the org's model titles the conversation after its first turn (got ${JSON.stringify(titled)})`
   )
 }
 
