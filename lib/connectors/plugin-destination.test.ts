@@ -1,25 +1,9 @@
-const isInboundRecorded = jest.fn(async (..._a: unknown[]) => false)
-jest.mock("@/lib/db/inbound-ledger", () => ({
-  isInboundRecorded: (...a: unknown[]) => isInboundRecorded(...a),
+const placeMessageImpl = jest.fn()
+jest.mock("./message-placement", () => ({
+  ...jest.requireActual("./message-placement"),
+  placeMessage: (...a: unknown[]) => placeMessageImpl(...a),
 }))
-const wasDeliveredByUs = jest.fn(async (..._a: unknown[]) => false)
-jest.mock("./delivered-messages", () => ({
-  wasDeliveredByUs: (...a: unknown[]) => wasDeliveredByUs(...a),
-}))
-let storedRows: Array<{ platformMessageId: string; metadata?: unknown }> = []
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    messages: {
-      where: () => ({
-        equals: (id: string) => ({
-          toArray: async () => storedRows.filter((row) => row.platformMessageId === id),
-        }),
-      }),
-    },
-  }),
-}))
-const messageRoute = jest.fn()
-let liveAdapter: { messageRoute?: typeof messageRoute } | undefined
+const liveAdapter = { messageRoute: jest.fn() }
 jest.mock("./bus", () => ({ getBus: () => ({ getAdapter: () => liveAdapter }) }))
 jest.mock("@/lib/db/connector-conversation-state", () => ({
   getConnectorConversationState: jest.fn(),
@@ -62,7 +46,7 @@ function request(extra: Partial<OutboundRequest> = {}): OutboundRequest {
 function deps(extra: Partial<PluginDestinationDeps> = {}): Partial<PluginDestinationDeps> {
   return {
     storedTarget: async (key) => (key === KEY ? STORED : undefined),
-    messageRoute: async ({ conversationKey, messageId }) =>
+    placeMessage: async ({ conversationKey, messageId }) =>
       conversationKey !== KEY ? "unknown" : messageId === "om_here" ? "within" : "elsewhere",
     ...extra,
   }
@@ -154,7 +138,7 @@ describe("pluginDestination (ADR-0239)", () => {
           "bot-a",
           KEY,
           request({ editTargetMessageId: "om_old" }),
-          deps({ messageRoute: route })
+          deps({ placeMessage: route })
         )
       )
     ).toBe("unplaced-message")
@@ -178,78 +162,113 @@ describe("pluginDestination (ADR-0239)", () => {
   })
 })
 
-describe("pluginDestination: placing a message id (ADR-0239)", () => {
-  const stored = { storedTarget: async () => STORED }
-  const reply = (messageId: string) => request({ replyTo: { messageId } })
-
-  beforeEach(() => {
-    isInboundRecorded.mockReset().mockResolvedValue(false)
-    wasDeliveredByUs.mockReset().mockResolvedValue(false)
-    messageRoute.mockReset()
-    storedRows = []
-    liveAdapter = { messageRoute }
+describe("pluginDestination: a message that cannot be placed now (ADR-0239)", () => {
+  const unavailable = deps({
+    placeMessage: async ({ messageId }) => (messageId === "om_here" ? "within" : "unavailable"),
   })
 
-  it("places an id the ledger saw in the conversation, without asking the adapter", async () => {
-    isInboundRecorded.mockResolvedValue(true)
-    await expect(pluginDestination("bot-a", KEY, reply("om_1"), stored)).resolves.toBeDefined()
-    wasDeliveredByUs.mockResolvedValue(true)
-    isInboundRecorded.mockResolvedValue(false)
-    await expect(pluginDestination("bot-a", KEY, reply("om_2"), stored)).resolves.toBeDefined()
-    expect(isInboundRecorded).toHaveBeenCalledWith("bot-a", "om_1", "inbound", KEY)
-    expect(wasDeliveredByUs).toHaveBeenCalledWith("bot-a", KEY, "om_2")
-    expect(messageRoute).not.toHaveBeenCalled()
-  })
-
-  it("places an id aged out of the ledger by the message stored for this bot and chat", async () => {
-    storedRows = [
-      {
-        platformMessageId: "om_old",
-        // Received in a thread of the same chat.
-        metadata: { platformMessage: { adapterId: "bot-a", conversationKey: `${KEY}:omt_1` } },
-      },
-    ]
-    await expect(pluginDestination("bot-a", KEY, reply("om_old"), stored)).resolves.toBeDefined()
-    expect(messageRoute).not.toHaveBeenCalled()
-  })
-
-  it("does not count a stored message of another bot, another chat, or no recorded scope", async () => {
-    messageRoute.mockResolvedValue("unknown")
-    for (const platformMessage of [
-      { adapterId: "bot-b", conversationKey: "lark:bot-b:oc_1" },
-      { adapterId: "bot-a", conversationKey: "lark:bot-a:oc_2" },
-      {},
-    ]) {
-      storedRows = [{ platformMessageId: "om_x", metadata: { platformMessage } }]
-      expect(await problemOf(pluginDestination("bot-a", KEY, reply("om_x"), stored))).toBe(
-        "unplaced-message"
+  it("refuses it for a delivery sent at once", async () => {
+    expect(
+      await problemOf(
+        pluginDestination("bot-a", KEY, request({ replyTo: { messageId: "om_x" } }), unavailable)
       )
+    ).toBe("unplaced-message")
+  })
+
+  it("defers it to just before a queued delivery is sent", async () => {
+    const result = await pluginDestination(
+      "bot-a",
+      KEY,
+      request({ replyTo: { messageId: "om_here" }, editTargetMessageId: "om_x" }),
+      unavailable,
+      { queued: true }
+    )
+    expect(result.metadata).toEqual({
+      idempotencyKey: "k1",
+      pendingPlacement: [{ use: "edit", messageId: "om_x" }],
+    })
+    expect(result.deliveryTarget).toBe(STORED)
+  })
+
+  it("still refuses a message placed elsewhere or nowhere when queued", async () => {
+    for (const [placement, problem] of [
+      ["elsewhere", "foreign-message"],
+      ["unknown", "unplaced-message"],
+    ] as const) {
+      expect(
+        await problemOf(
+          pluginDestination(
+            "bot-a",
+            KEY,
+            request({ replyTo: { messageId: "om_x" } }),
+            deps({ placeMessage: async () => placement }),
+            { queued: true }
+          )
+        )
+      ).toBe(problem)
     }
   })
 
-  it("asks the running adapter last, and follows its answer", async () => {
-    messageRoute.mockResolvedValueOnce("within")
-    await expect(pluginDestination("bot-a", KEY, reply("om_a"), stored)).resolves.toBeDefined()
-    expect(messageRoute).toHaveBeenCalledWith("om_a", "reply", STORED.conversationRef)
-
-    messageRoute.mockResolvedValueOnce("elsewhere")
-    expect(await problemOf(pluginDestination("bot-a", KEY, reply("om_b"), stored))).toBe(
-      "foreign-message"
+  it("places and returns one copy, whatever the plugin changes while it waits", async () => {
+    let release!: () => void
+    const placed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const seen: string[] = []
+    const own = request({ replyTo: { messageId: "om_here" } })
+    const pending = pluginDestination(
+      "bot-a",
+      KEY,
+      own,
+      deps({
+        placeMessage: async ({ messageId }) => {
+          seen.push(messageId)
+          await placed
+          return messageId === "om_here" ? "within" : "elsewhere"
+        },
+      }),
+      { queued: true }
     )
-    messageRoute.mockRejectedValueOnce(new Error("network"))
-    expect(await problemOf(pluginDestination("bot-a", KEY, reply("om_c"), stored))).toBe(
-      "unplaced-message"
-    )
+    await Promise.resolve()
+    own.replyTo!.messageId = "om_foreign"
+    own.editTargetMessageId = "om_foreign"
+    own.metadata.pendingPlacement = []
+    release()
+    const result = await pending
+    expect(seen).toEqual(["om_here"])
+    expect(result.replyTo).toEqual({ messageId: "om_here" })
+    expect(result).not.toHaveProperty("editTargetMessageId")
+    expect(result.metadata).toEqual({ idempotencyKey: "k1" })
   })
 
-  it("cannot place an id when the bot is not running or cannot answer", async () => {
-    liveAdapter = undefined
-    expect(await problemOf(pluginDestination("bot-a", KEY, reply("om_d"), stored))).toBe(
-      "unplaced-message"
-    )
-    liveAdapter = {}
-    expect(await problemOf(pluginDestination("bot-a", KEY, reply("om_d"), stored))).toBe(
-      "unplaced-message"
-    )
+  it("drops a pending placement the plugin set itself", async () => {
+    const own = request({
+      metadata: { idempotencyKey: "k1", pendingPlacement: [{ use: "reply", messageId: "om_y" }] },
+    })
+    const result = await pluginDestination("bot-a", KEY, own, deps(), { queued: true })
+    expect(result.metadata).toEqual({ idempotencyKey: "k1" })
+  })
+})
+
+describe("pluginDestination: default placement (ADR-0239)", () => {
+  it("places through the running adapter on the bus", async () => {
+    placeMessageImpl.mockReset().mockResolvedValue("within")
+    await expect(
+      pluginDestination("bot-a", KEY, request({ replyTo: { messageId: "om_a" } }), {
+        storedTarget: async () => STORED,
+      })
+    ).resolves.toBeDefined()
+    const [placed, placementDeps] = placeMessageImpl.mock.calls[0] as [
+      unknown,
+      { getAdapter(id: string): Promise<unknown> },
+    ]
+    expect(placed).toEqual({
+      use: "reply",
+      messageId: "om_a",
+      adapterId: "bot-a",
+      conversationKey: KEY,
+      conversationRef: STORED.conversationRef,
+    })
+    await expect(placementDeps.getAdapter("bot-a")).resolves.toBe(liveAdapter)
   })
 })

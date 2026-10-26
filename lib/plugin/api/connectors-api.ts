@@ -329,7 +329,7 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
         conversationKey,
         // Sent where the host stored this conversation, never to a reference
         // of the plugin's own (ADR-0239).
-        request: await pluginDestination(adapterId, conversationKey, req),
+        request: await pluginDestination(adapterId, conversationKey, req, {}, { queued: true }),
         source: "plugin",
         // Covered by one of this plugin's running, authorized tool calls, or
         // planned as the plugin's own unattended send, with the list of the

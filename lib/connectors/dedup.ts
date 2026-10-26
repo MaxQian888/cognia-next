@@ -2,7 +2,8 @@
  * Inbound dedup layer — Task 28 (extended in v38 for connector callbacks).
  *
  * Delegates to `lib/db/inbound-ledger.ts:recordInbound` and schedules a lazy
- * prune every PRUNE_EVERY calls to keep the table capped at 10,000 rows.
+ * prune every PRUNE_EVERY calls to keep the windowed rows capped at 10,000
+ * (delivered-message rows have their own cap, see `pruneOldest`).
  *
  * Accepts an optional `namespace` so callers handling connector callbacks
  * (Slack block_actions, Lark card actions, Telegram callback_query,

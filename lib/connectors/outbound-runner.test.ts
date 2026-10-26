@@ -786,6 +786,113 @@ describe("outbound-runner — adapter availability", () => {
   })
 })
 
+describe("outbound-runner — pending message placement (ADR-0239)", () => {
+  async function enqueuePending(adapterId: string) {
+    return enqueueOutbound({
+      adapterId,
+      conversationKey: `telegram:${adapterId}:chat`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId, channelId: "chat" },
+        segments: [{ type: "text", text: "hello" }],
+        editTargetMessageId: "chat:42",
+        metadata: {
+          idempotencyKey: crypto.randomUUID(),
+          pendingPlacement: [{ use: "edit", messageId: "chat:42" }],
+        },
+      },
+      source: "plugin",
+    })
+  }
+
+  function placingAdapter(adapterId: string, route: () => Promise<string>) {
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "43" }))
+    const edit = jest.fn(async () => ({ ok: true, platformMessageId: "chat:42" }) as OutboundResult)
+    Object.assign(adapter, { messageRoute: jest.fn(route), edit })
+    return { adapter, edit }
+  }
+
+  it("places the target again before it sends, and sends once it is placed", async () => {
+    const adapterId = "a_place_ok"
+    const { adapter, edit } = placingAdapter(adapterId, async () => "within")
+    await enqueuePending(adapterId)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    expect(adapter.messageRoute).toHaveBeenCalledWith("chat:42", "edit", {
+      platform: "telegram",
+      adapterId,
+      channelId: "chat",
+    })
+    expect(edit).toHaveBeenCalledTimes(1)
+    expect((await getDb().outboundQueue.toArray())[0].status).toBe("sent")
+  })
+
+  it.each([
+    ["elsewhere", "destination_foreign"],
+    ["unknown", "destination_unplaced"],
+  ])("dead-letters a target placed %s without sending", async (route, reason) => {
+    const adapterId = `a_place_${route}`
+    const { adapter, edit } = placingAdapter(adapterId, async () => route)
+    await enqueuePending(adapterId)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.status).toBe("deadlettered")
+    expect(job.lastErrorCode).toBe(reason)
+    expect(edit).not.toHaveBeenCalled()
+    expect(adapter.send).not.toHaveBeenCalled()
+    const audits = await listRecent(adapterId)
+    expect(audits.some((a) => a.kind === "delivery.deadlettered" && a.reason === reason)).toBe(true)
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: reason,
+    })
+  })
+
+  it("retries later, instead of dead-lettering, while the bot is not running", async () => {
+    const adapterId = "a_place_absent"
+    await enqueuePending(adapterId)
+    const now = Date.now()
+
+    await runOnce(new Map(), { now: () => now })
+
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.status).toBe("failed")
+    expect(job.lastErrorCode).toBe("placement_unavailable")
+    expect(job.nextAttemptAt).toBeGreaterThan(now)
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId,
+      platform: "unknown",
+      outcome: "failed",
+      errorCode: "placement_unavailable",
+    })
+  })
+
+  it("retries later when the platform still cannot be asked", async () => {
+    const adapterId = "a_place_later"
+    const { adapter, edit } = placingAdapter(adapterId, async () => {
+      throw new Error("rate limited")
+    })
+    await enqueuePending(adapterId)
+    const now = Date.now()
+
+    await runOnce(new Map([[adapterId, adapter]]), { now: () => now })
+
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.status).toBe("failed")
+    expect(job.lastErrorCode).toBe("placement_unavailable")
+    expect(job.nextAttemptAt).toBeGreaterThan(now)
+    expect(edit).not.toHaveBeenCalled()
+    const audits = await listRecent(adapterId)
+    expect(
+      audits.some((a) => a.kind === "delivery.error" && a.reason === "placement_unavailable")
+    ).toBe(true)
+  })
+})
+
 describe("outbound-runner — max attempts", () => {
   it("dead-letters after 5 failed attempts", async () => {
     let t = Date.now()

@@ -44,6 +44,15 @@ export interface OutboundRequest {
      * was rerouted once (either mechanism) is never rerouted again.
      */
     balancedFromAdapterId?: string
+    /**
+     * Messages this request replies to or edits that the host could not
+     * place in its conversation when it was queued (the bot was not running,
+     * or the platform could not be asked; ADR-0239). The outbound runner
+     * places them again just before it sends, and dead-letters the job when
+     * one is in another chat or cannot be placed. Host-written: a plugin's
+     * own value is replaced when its request is accepted.
+     */
+    pendingPlacement?: Array<{ use: "reply" | "edit"; messageId: string }>
     /** Host-enforced provenance for externally delivered generated content. */
     provenance?: Array<{
       source: "digital-twin"

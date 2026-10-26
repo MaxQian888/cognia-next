@@ -1233,6 +1233,32 @@ describe("createConnectorsAPI", () => {
       )
     })
 
+    it("queues a reply the bot cannot place while it is not running, to place before it is sent", async () => {
+      const api = createConnectorsAPI(PLUGIN)
+      const running = adapters.get("tg")!
+      adapters.delete("tg")
+      try {
+        await api.enqueueSend("tg", "telegram:tg:42", {
+          conversationRef: { conv: "c1" },
+          segments: [{ type: "text", text: "hi" }],
+          replyTo: { messageId: "pm_later" },
+          metadata: { idempotencyKey: "idem-14" },
+        } as never)
+      } finally {
+        adapters.set("tg", running)
+      }
+      expect(enqueueOutbound).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({
+            replyTo: { messageId: "pm_later" },
+            metadata: expect.objectContaining({
+              pendingPlacement: [{ use: "reply", messageId: "pm_later" }],
+            }),
+          }),
+        })
+      )
+    })
+
     it("rejects leaking payloads before anything reaches the queue", async () => {
       const api = createConnectorsAPI(PLUGIN)
       const req = {

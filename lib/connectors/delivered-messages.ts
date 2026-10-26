@@ -13,9 +13,12 @@
  * (compound index `[adapterId+namespace+platformMessageId]`, Dexie v38) so no
  * new table is needed. Rows are scoped by `conversationKey` because several
  * platforms (Telegram, OneBot) only guarantee message-id uniqueness per chat.
- * The ledger's global 10k-row cap (`pruneOldest`) applies — old bot messages
- * eventually age out, which only relaxes the rule back to "not a reply to
- * the bot" (never a false positive).
+ * The rows are also how a plugin's reply to or edit of a bot message is
+ * placed in its conversation (ADR-0239, `message-placement.ts`), so they have
+ * their own 50k-row cap in `pruneOldest`, apart from the 10k window of
+ * inbound rows. Old bot messages still age out eventually: that relaxes the
+ * rule back to "not a reply to the bot" (never a false positive), and a
+ * plugin's reply to one is then placed by the platform, if it can be.
  */
 
 import { isInboundRecorded, recordInbound } from "@/lib/db/inbound-ledger"

@@ -265,7 +265,9 @@ export interface PlatformAdapter {
    * The host asks before it lets a plugin's request point at a message it
    * has no record of in that conversation (ADR-0239); `"unknown"` and an
    * absent method refuse it. Answer `"within"` only when the platform keeps
-   * the delivery in the reference's chat whatever the id says.
+   * the delivery in the reference's chat whatever the id says. Throw when
+   * the platform cannot be asked now (a network error, a rate limit): a
+   * queued delivery is then placed again just before it is sent.
    */
   messageRoute?(
     messageId: string,

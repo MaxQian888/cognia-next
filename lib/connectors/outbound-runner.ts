@@ -36,6 +36,7 @@
 
 import type { PlatformAdapter } from "@/types/connectors"
 import { createMutex, computeBackoffDelay } from "@cognia/primitives"
+import { placeMessage } from "./message-placement"
 import {
   deleteOutboundJob,
   listDueNow,
@@ -1106,7 +1107,52 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       return
     }
 
+    // ── Pending message placement (ADR-0239) ──────────────────────────────
+    // A plugin's reply or edit target that could not be placed in its
+    // conversation when the job was queued is placed now, by the same
+    // evidence (`message-placement.ts`) and the running adapter. Elsewhere
+    // or unplaceable: dead-lettered. Still unavailable, the bot not running
+    // included: retried like a network failure, so it ends at the attempt
+    // limit.
+    const pendingPlacement = request.metadata.pendingPlacement ?? []
+    const deferPlacement = async (
+      pointer: (typeof pendingPlacement)[number],
+      platform: string
+    ): Promise<void> => {
+      const message = `Cannot place ${pointer.use} target ${pointer.messageId} in ${conversationKey} yet`
+      await markFailed(
+        job.id,
+        "placement_unavailable",
+        message,
+        now +
+          computeBackoffDelay(job.attempts, {
+            baseDelayMs: BASE_BACKOFF_MS,
+            maxDelayMs: MAX_BACKOFF_MS,
+            jitter: { kind: "absolute", amountMs: jitter },
+          })
+      )
+      await appendAudit({
+        adapterId,
+        kind: "delivery.error",
+        at: now,
+        conversationKey,
+        idempotencyKey,
+        reason: "placement_unavailable",
+        message,
+      })
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform,
+        outcome: "failed",
+        errorCode: "placement_unavailable",
+      })
+    }
+
     const adapter = opts.adapters.get(adapterId)
+    if (!adapter && pendingPlacement.length > 0) {
+      await deferPlacement(pendingPlacement[0]!, "unknown")
+      return
+    }
     if (!adapter) {
       await markDeadlettered(job.id, "adapter_not_found", `Adapter ${adapterId} not registered`)
       await appendAudit({
@@ -1122,6 +1168,40 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         platform: "unknown",
         outcome: "failed",
         errorCode: "adapter_not_found",
+      })
+      return
+    }
+
+    for (const pointer of pendingPlacement) {
+      const placement = await placeMessage(
+        { ...pointer, adapterId, conversationKey, conversationRef: request.conversationRef },
+        { getAdapter: () => adapter }
+      )
+      if (placement === "within") continue
+      if (placement === "unavailable") {
+        await deferPlacement(pointer, adapter.meta.type)
+        return
+      }
+      const reason = placement === "elsewhere" ? "destination_foreign" : "destination_unplaced"
+      const message =
+        placement === "elsewhere"
+          ? `The ${pointer.use} target ${pointer.messageId} is in another chat than ${conversationKey}`
+          : `The ${pointer.use} target ${pointer.messageId} cannot be placed in ${conversationKey}`
+      await markDeadlettered(job.id, reason, message)
+      await appendAudit({
+        adapterId,
+        kind: "delivery.deadlettered",
+        at: now,
+        conversationKey,
+        idempotencyKey,
+        reason,
+        message,
+      })
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: adapter.meta.type,
+        outcome: "failed",
+        errorCode: reason,
       })
       return
     }

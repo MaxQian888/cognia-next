@@ -1295,40 +1295,89 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
    * Where a reply to or an edit of `messageId` lands (ADR-0239). Lark's reply
    * and edit endpoints are keyed by the message id alone, so the message's
    * own chat decides: read it (`GET /im/v1/messages/:id`, as message import
-   * does) and compare it with the reference's chat. A message never changes
-   * chat, so answers are cached. A reference that names a person (`ou_`,
-   * `on_`) has no chat id to compare, and a message the platform will not
-   * return is not known.
+   * does) and compare it with the reference's chat.
+   *
+   * A reference that names a person (`ou_`: a conversation bootstrapped by
+   * open id) has no chat id; its messages go to the bot's single chat with
+   * that person. A message there is placed when the person sent it and its
+   * chat is a single chat (`chat_mode: "p2p"`, `GET /im/v1/chats/:id`): a
+   * single chat holds only the bot and that person. One the bot sent there is
+   * placed by the host's own delivery records, not here.
+   *
+   * A message never changes chat, so lookups are cached. A failure Lark
+   * would let a send retry (network, 5xx, rate limit) throws, so the host
+   * places the message again before it sends; any other answer is final.
    */
-  const messageChats = new Map<string, string>()
-  const MESSAGE_CHAT_CACHE_LIMIT = 512
+  const LOOKUP_CACHE_LIMIT = 512
+  const messageFacts = new Map<string, { chatId: string; senderOpenId?: string }>()
+  const chatModes = new Map<string, string>()
+  function remember<V>(cache: Map<string, V>, key: string, value: V): V {
+    if (cache.size >= LOOKUP_CACHE_LIMIT) {
+      const oldest = cache.keys().next().value
+      if (oldest !== undefined) cache.delete(oldest)
+    }
+    cache.set(key, value)
+    return value
+  }
+  /** `undefined` when Lark gives a final no; throws when it could not be asked. */
+  async function lookup<T>(path: string, read: (resp: unknown) => T | undefined) {
+    try {
+      return read(await doRequest("GET", path))
+    } catch (err) {
+      if (larkOutboundError(err).retryable) throw err
+      return undefined
+    }
+  }
+  async function messageFactsOf(messageId: string) {
+    const cached = messageFacts.get(messageId)
+    if (cached) return cached
+    const facts = await lookup(`/im/v1/messages/${encodeURIComponent(messageId)}`, (resp) => {
+      const item = (
+        resp as {
+          data?: {
+            items?: Array<{
+              message_id?: string
+              chat_id?: string
+              sender?: { id?: string; id_type?: string }
+            }>
+          }
+        } | null
+      )?.data?.items?.[0]
+      if (!item?.chat_id || item.message_id !== messageId) return undefined
+      return {
+        chatId: item.chat_id,
+        ...(item.sender?.id_type === "open_id" && item.sender.id
+          ? { senderOpenId: item.sender.id }
+          : {}),
+      }
+    })
+    return facts ? remember(messageFacts, messageId, facts) : undefined
+  }
+  async function chatModeOf(chatId: string) {
+    const cached = chatModes.get(chatId)
+    if (cached) return cached
+    const mode = await lookup(`/im/v1/chats/${encodeURIComponent(chatId)}`, (resp) => {
+      const value = (resp as { data?: { chat_mode?: unknown } } | null)?.data?.chat_mode
+      return typeof value === "string" && value ? value : undefined
+    })
+    return mode ? remember(chatModes, chatId, mode) : undefined
+  }
   async function messageRoute(
     messageId: string,
     _use: "reply" | "edit",
     conversationRef: ConversationReference
   ): Promise<MessageRoute> {
     const refChat = String((conversationRef as Record<string, unknown>)["channelId"] ?? "")
-    if (!refChat.startsWith("oc_") || !messageId) return "unknown"
-    let chat = messageChats.get(messageId)
-    if (chat === undefined) {
-      try {
-        const resp = (await doRequest(
-          "GET",
-          `/im/v1/messages/${encodeURIComponent(messageId)}`
-        )) as { data?: { items?: Array<{ message_id?: string; chat_id?: string }> } } | null
-        const item = resp?.data?.items?.[0]
-        if (!item?.chat_id || item.message_id !== messageId) return "unknown"
-        chat = item.chat_id
-      } catch {
-        return "unknown"
-      }
-      if (messageChats.size >= MESSAGE_CHAT_CACHE_LIMIT) {
-        const oldest = messageChats.keys().next().value
-        if (oldest !== undefined) messageChats.delete(oldest)
-      }
-      messageChats.set(messageId, chat)
-    }
-    return chat === refChat ? "within" : "elsewhere"
+    const person = refChat.startsWith("ou_") ? refChat : undefined
+    if (!messageId || (!refChat.startsWith("oc_") && !person)) return "unknown"
+    const facts = await messageFactsOf(messageId)
+    if (!facts) return "unknown"
+    if (!person) return facts.chatId === refChat ? "within" : "elsewhere"
+    const mode = await chatModeOf(facts.chatId)
+    if (!mode) return "unknown"
+    // A group or topic chat is never the bot's single chat with the person.
+    if (mode !== "p2p") return "elsewhere"
+    return facts.senderOpenId === person ? "within" : "unknown"
   }
 
   /**

@@ -13,33 +13,24 @@
  * The message ids a request points at must keep it in the same chat too: on
  * Lark a reply to or an edit of a message id lands in that message's chat,
  * and an edit's composite id (`chatId:messageId`) names its own chat on
- * Telegram, Slack, Discord and Matrix. An id is placed, in this order, by:
- *
- * 1. the inbound ledger: the host received it in, or delivered it to, the
- *    conversation (a window of recent messages);
- * 2. the message the host stored when it received it (`messages`, scoped to
- *    the bot and the chat), which does not age out;
- * 3. the adapter (`PlatformAdapter.messageRoute`): where a reply or edit of
- *    that id, sent through the stored reference, lands. Lark reads the
- *    message's chat from the platform; the composite-id adapters read the id;
- *    the rest keep every delivery in the reference's chat.
- *
- * An id placed in another chat is refused (`foreign-message`), and so is one
- * nothing can place (`unplaced-message`: an adapter that is not running, or a
- * message the platform will not return).
+ * Telegram, Slack, Discord and Matrix. Each id is placed by
+ * `message-placement.ts`. One in another chat is refused (`foreign-message`),
+ * and so is one nothing can place (`unplaced-message`). One that cannot be
+ * placed now (the bot is not running here, or the platform could not be
+ * asked) is placed again just before a queued delivery is sent
+ * (`metadata.pendingPlacement`); a delivery sent at once refuses it.
  */
 
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
-import { isInboundRecorded } from "@/lib/db/inbound-ledger"
-import { getDb } from "@/lib/db/schema"
-import type { MessageRoute, OutboundRequest } from "@/types/connectors"
-import {
-  parseConversationKey,
-  type ConversationDeliveryTarget,
-  type ConversationReference,
-} from "@/types/connectors/event"
+import type { OutboundRequest } from "@/types/connectors"
+import { parseConversationKey, type ConversationDeliveryTarget } from "@/types/connectors/event"
 
-import { wasDeliveredByUs } from "./delivered-messages"
+import {
+  messagePointers,
+  placeMessage,
+  type MessagePlacement,
+  type PlaceMessageInput,
+} from "./message-placement"
 import { findSessionByConversationKey } from "./session-bindings"
 
 export type PluginDestinationProblem =
@@ -79,17 +70,8 @@ export class PluginDestinationError extends Error {
 
 export interface PluginDestinationDeps {
   storedTarget(conversationKey: string): Promise<ConversationDeliveryTarget | undefined>
-  /**
-   * Where a reply to or an edit of `messageId` through `conversationRef`
-   * lands, as the module comment orders the evidence.
-   */
-  messageRoute(input: {
-    adapterId: string
-    conversationKey: string
-    messageId: string
-    use: "reply" | "edit"
-    conversationRef: ConversationReference
-  }): Promise<MessageRoute>
+  /** Where a reply to or an edit of a message lands (`placeMessage`). */
+  placeMessage(input: PlaceMessageInput): Promise<MessagePlacement>
 }
 
 async function defaultStoredTarget(
@@ -102,71 +84,27 @@ async function defaultStoredTarget(
   return session?.platformBinding?.deliveryTarget
 }
 
-/** Whether two conversation keys name the same chat of the same bot, any thread. */
-function sameBotChat(a: string, b: string): boolean {
-  try {
-    const left = parseConversationKey(a)
-    const right = parseConversationKey(b)
-    return (
-      left.remoteChatId !== "" &&
-      left.platform === right.platform &&
-      left.adapterId === right.adapterId &&
-      left.remoteChatId === right.remoteChatId
-    )
-  } catch {
-    return false
-  }
-}
-
-/** Whether the host stored `messageId` as received in this chat of this bot. */
-async function storedInChat(
-  adapterId: string,
-  conversationKey: string,
-  messageId: string
-): Promise<boolean> {
-  const rows = await getDb().messages.where("platformMessageId").equals(messageId).toArray()
-  return rows.some((row) => {
-    const received = (row.metadata as { platformMessage?: unknown } | undefined)
-      ?.platformMessage as { adapterId?: unknown; conversationKey?: unknown } | undefined
-    // Rows from before the bot and conversation were recorded cannot be placed.
-    return (
-      received?.adapterId === adapterId &&
-      typeof received.conversationKey === "string" &&
-      sameBotChat(received.conversationKey, conversationKey)
-    )
+async function defaultPlaceMessage(input: PlaceMessageInput): Promise<MessagePlacement> {
+  return placeMessage(input, {
+    getAdapter: async (adapterId) => {
+      const { getBus } = await import("./bus")
+      return getBus().getAdapter(adapterId)
+    },
   })
-}
-
-async function defaultMessageRoute(input: {
-  adapterId: string
-  conversationKey: string
-  messageId: string
-  use: "reply" | "edit"
-  conversationRef: ConversationReference
-}): Promise<MessageRoute> {
-  const { adapterId, conversationKey, messageId } = input
-  const received = await isInboundRecorded(adapterId, messageId, "inbound", conversationKey).catch(
-    () => false
-  )
-  if (received || (await wasDeliveredByUs(adapterId, conversationKey, messageId))) {
-    return "within"
-  }
-  if (await storedInChat(adapterId, conversationKey, messageId).catch(() => false)) {
-    return "within"
-  }
-  try {
-    const { getBus } = await import("./bus")
-    const adapter = getBus().getAdapter(adapterId)
-    if (!adapter?.messageRoute) return "unknown"
-    return await adapter.messageRoute(messageId, input.use, input.conversationRef)
-  } catch {
-    return "unknown"
-  }
 }
 
 const defaultDeps: PluginDestinationDeps = {
   storedTarget: defaultStoredTarget,
-  messageRoute: defaultMessageRoute,
+  placeMessage: defaultPlaceMessage,
+}
+
+export interface PluginDestinationOptions {
+  /**
+   * The request is queued, so a message that cannot be placed now is placed
+   * again before it is sent (`metadata.pendingPlacement`). Otherwise it is
+   * refused.
+   */
+  queued?: boolean
 }
 
 /**
@@ -178,9 +116,19 @@ export async function pluginDestination(
   adapterId: string,
   conversationKey: string,
   request: OutboundRequest,
-  deps: Partial<PluginDestinationDeps> = {}
+  deps: Partial<PluginDestinationDeps> = {},
+  options: PluginDestinationOptions = {}
 ): Promise<OutboundRequest> {
-  const { storedTarget, messageRoute } = { ...defaultDeps, ...deps }
+  const { storedTarget, placeMessage: place } = { ...defaultDeps, ...deps }
+  // The plugin keeps its request object and may change it while the checks
+  // below await: check and return one copy of it, so what is placed is what
+  // is queued (Codex review). The message pointers are the fields that
+  // decide where it lands; `metadata` is rebuilt below.
+  const own: OutboundRequest = {
+    ...request,
+    metadata: { ...request.metadata },
+    ...(request.replyTo ? { replyTo: { ...request.replyTo } } : {}),
+  }
   let keyAdapter: string
   try {
     keyAdapter = parseConversationKey(conversationKey).adapterId
@@ -189,7 +137,7 @@ export async function pluginDestination(
   }
   if (keyAdapter !== adapterId) throw new PluginDestinationError("invalid-key", conversationKey)
 
-  const claimed = request.deliveryTarget?.address
+  const claimed = own.deliveryTarget?.address
   if (claimed && (claimed.conversationKey !== conversationKey || claimed.adapterId !== adapterId)) {
     throw new PluginDestinationError("target-mismatch", conversationKey)
   }
@@ -203,22 +151,31 @@ export async function pluginDestination(
     throw new PluginDestinationError("unknown-conversation", conversationKey)
   }
 
-  const pointers = [
-    { use: "reply" as const, messageId: request.replyTo?.messageId },
-    { use: "edit" as const, messageId: request.editTargetMessageId },
-  ]
-  for (const { use, messageId } of pointers) {
-    if (typeof messageId !== "string" || messageId === "") continue
-    const route = await messageRoute({
+  const pending: NonNullable<OutboundRequest["metadata"]["pendingPlacement"]> = []
+  for (const pointer of messagePointers(own)) {
+    const placement = await place({
+      ...pointer,
       adapterId,
       conversationKey,
-      messageId,
-      use,
       conversationRef: target.conversationRef,
     })
-    if (route === "elsewhere") throw new PluginDestinationError("foreign-message", conversationKey)
-    if (route !== "within") throw new PluginDestinationError("unplaced-message", conversationKey)
+    if (placement === "within") continue
+    if (placement === "elsewhere") {
+      throw new PluginDestinationError("foreign-message", conversationKey)
+    }
+    if (placement === "unavailable" && options.queued) {
+      pending.push(pointer)
+      continue
+    }
+    throw new PluginDestinationError("unplaced-message", conversationKey)
   }
 
-  return { ...request, conversationRef: target.conversationRef, deliveryTarget: target }
+  // The host writes `pendingPlacement`; a value the plugin set is dropped.
+  const { pendingPlacement: _plugin, ...metadata } = own.metadata
+  return {
+    ...own,
+    metadata: pending.length > 0 ? { ...metadata, pendingPlacement: pending } : metadata,
+    conversationRef: target.conversationRef,
+    deliveryTarget: target,
+  }
 }

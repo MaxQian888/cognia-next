@@ -1447,7 +1447,7 @@ describe("createLarkAdapter", () => {
     await expect(adapter.messageRoute!("om_gone", "reply", ref)).resolves.toBe("unknown")
   })
 
-  it("messageRoute() caches a message's chat, and cannot compare a person's reference", async () => {
+  it("messageRoute() caches a message's chat", async () => {
     mockHttp(() => ({ code: 0, data: { items: [{ message_id: "om_1", chat_id: "oc_1" }] } }))
     const adapter = makeAdapter()
     const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "oc_1" }
@@ -1461,12 +1461,96 @@ describe("createLarkAdapter", () => {
     const before = lookups()
     await expect(adapter.messageRoute!("om_1", "edit", ref)).resolves.toBe("within")
     expect(lookups()).toBe(before)
-    await expect(
-      adapter.messageRoute!("om_1", "reply", { ...ref, channelId: "ou_person" })
-    ).resolves.toBe("unknown")
   })
 
-  it("messageRoute() cannot place a message when the lookup fails", async () => {
+  it("messageRoute() places a person's message in the bot's single chat with them", async () => {
+    const chats: Record<string, string> = { oc_dm: "p2p", oc_group: "group" }
+    mockHttp((url) => {
+      const chat = /\/im\/v1\/chats\/([^/?]+)/.exec(url)?.[1]
+      if (chat) return chats[chat] ? { code: 0, data: { chat_mode: chats[chat] } } : { code: 0 }
+      const id = /\/im\/v1\/messages\/([^/?]+)/.exec(url)?.[1] ?? ""
+      const [chatId, sender] = {
+        om_mine: ["oc_dm", "ou_person"],
+        om_other: ["oc_dm", "ou_someone"],
+        om_bot: ["oc_dm", undefined],
+        om_group: ["oc_group", "ou_person"],
+        om_nomode: ["oc_unknown", "ou_person"],
+      }[id] ?? [undefined, undefined]
+      if (!chatId) return { code: 0, data: { items: [] } }
+      return {
+        code: 0,
+        data: {
+          items: [
+            {
+              message_id: id,
+              chat_id: chatId,
+              sender: sender
+                ? { id: sender, id_type: "open_id", sender_type: "user" }
+                : { id: "cli_app", id_type: "app_id", sender_type: "app" },
+            },
+          ],
+        },
+      }
+    })
+    const adapter = makeAdapter()
+    const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "ou_person" }
+    await expect(adapter.messageRoute!("om_mine", "reply", ref)).resolves.toBe("within")
+    expect(httpCallTo("/im/v1/chats/oc_dm")?.req.method).toBe("GET")
+    // The person's single chat, but not the person's message: the bot's own
+    // messages there are placed by the host's delivery records.
+    await expect(adapter.messageRoute!("om_other", "reply", ref)).resolves.toBe("unknown")
+    await expect(adapter.messageRoute!("om_bot", "edit", ref)).resolves.toBe("unknown")
+    await expect(adapter.messageRoute!("om_group", "reply", ref)).resolves.toBe("elsewhere")
+    await expect(adapter.messageRoute!("om_nomode", "reply", ref)).resolves.toBe("unknown")
+    // A chat's mode is cached like a message's chat.
+    const modeLookups = () =>
+      mockInvoke.mock.calls.filter(
+        ([cmd, args]: [string, unknown]) =>
+          cmd === "connectors_http_request" &&
+          (args as { req: { url: string } }).req.url.includes("/im/v1/chats/oc_dm")
+      ).length
+    const before = modeLookups()
+    await expect(adapter.messageRoute!("om_mine", "edit", ref)).resolves.toBe("within")
+    expect(modeLookups()).toBe(before)
+  })
+
+  it("messageRoute() cannot compare any other reference", async () => {
+    mockHttp(() => ({ code: 0, data: { items: [{ message_id: "om_1", chat_id: "oc_1" }] } }))
+    const adapter = makeAdapter()
+    for (const channelId of ["", "on_union", "cli_app"]) {
+      await expect(
+        adapter.messageRoute!("om_1", "reply", { platform: "lark", adapterId: "lark-1", channelId })
+      ).resolves.toBe("unknown")
+    }
+    expect(httpCallTo("/im/v1/messages/om_1")).toBeUndefined()
+  })
+
+  it("messageRoute() throws when Lark cannot be asked now, and does not cache it", async () => {
+    const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "oc_1" }
+    const adapter = makeAdapter()
+    const failWith = (resp: { status: number; body: unknown } | Error) =>
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "connectors_keyring_get") return null
+        if (cmd !== "connectors_http_request") return undefined
+        const url = (args as { req: { url: string } }).req.url
+        if (url.includes("tenant_access_token")) return makeTatOkResp("t-x")
+        if (resp instanceof Error) throw resp
+        return { status: resp.status, headers: {}, body: JSON.stringify(resp.body) }
+      })
+    for (const failure of [
+      new Error("connection reset"),
+      { status: 503, body: { code: 1, msg: "unavailable" } },
+      { status: 429, body: { code: 1, msg: "slow down" } },
+      { status: 400, body: { code: 99991400, msg: "frequency limit" } },
+    ]) {
+      failWith(failure)
+      await expect(adapter.messageRoute!("om_1", "reply", ref)).rejects.toBeDefined()
+    }
+    mockHttp(() => ({ code: 0, data: { items: [{ message_id: "om_1", chat_id: "oc_1" }] } }))
+    await expect(adapter.messageRoute!("om_1", "reply", ref)).resolves.toBe("within")
+  })
+
+  it("messageRoute() cannot place a message Lark refuses to return", async () => {
     mockHttp(() => ({ code: 230002, msg: "bot not in chat" }))
     await expect(
       makeAdapter().messageRoute!("om_1", "reply", {

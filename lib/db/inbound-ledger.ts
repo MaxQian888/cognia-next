@@ -19,7 +19,8 @@
  * cost is that a redelivery straddling the upgrade dedups against a key the
  * old row does not carry (a one-time, bounded double-delivery risk).
  *
- * The table is capped at 10,000 newest rows by `pruneOldest`; the cap is
+ * `pruneOldest` keeps the 10,000 newest windowed rows and, apart from them,
+ * the 50,000 newest delivered-message rows (`"outbound"`); the caps are
  * applied on demand (not per-write) so callers can batch-prune.
  */
 
@@ -27,6 +28,9 @@ import type { InboundLedgerNamespace, InboundLedgerRow } from "./connector-types
 import { getDb } from "./schema"
 
 const DEFAULT_CAP = 10_000
+/** Delivered-message rows (`"outbound"`) are capped apart; see {@link pruneOldest}. */
+const DEFAULT_DELIVERED_CAP = 50_000
+const DELIVERED_NAMESPACE: InboundLedgerNamespace = "outbound"
 
 /**
  * Compose the conversation-scoped dedup key stored in the row's
@@ -118,17 +122,38 @@ export async function recordInbound(
 }
 
 /**
- * Keep `cap` newest rows (by `receivedAt`), delete the rest.
- * Defaults to 10,000. Applied across all namespaces — the cap is global,
- * not per-namespace, matching the v18 semantics.
+ * Keep the `cap` newest windowed rows (by `receivedAt`) and the
+ * `deliveredCap` newest `"outbound"` rows, delete the rest.
+ *
+ * Windowed rows (inbound, callback, welcome) only dedupe redeliveries, so
+ * 10,000 across those namespaces is plenty. Delivered rows are what the host
+ * knows of the messages its bots sent (`delivered-messages.ts`): they let a
+ * reply to the bot be recognised and let a plugin's reply to or edit of a
+ * bot message be placed in its conversation (ADR-0239), so they are kept
+ * apart and longer, and an inbound burst cannot push them out.
  */
-export async function pruneOldest(cap = DEFAULT_CAP): Promise<void> {
+export async function pruneOldest(
+  cap = DEFAULT_CAP,
+  deliveredCap = DEFAULT_DELIVERED_CAP
+): Promise<void> {
   const db = getDb()
   const total = await db.inboundLedger.count()
-  if (total <= cap) return
-  const overflow = total - cap
-  const oldest = await db.inboundLedger.orderBy("receivedAt").limit(overflow).primaryKeys()
-  if (oldest.length > 0) {
-    await db.inboundLedger.bulkDelete(oldest as string[])
-  }
+  // Rows without a namespace (pre-v38) are not in the index: they count as windowed.
+  const delivered = await db.inboundLedger.where("namespace").equals(DELIVERED_NAMESPACE).count()
+  await dropOldest(total - delivered - cap, (row) => row.namespace !== DELIVERED_NAMESPACE)
+  await dropOldest(delivered - deliveredCap, (row) => row.namespace === DELIVERED_NAMESPACE)
+}
+
+/** Delete the `overflow` oldest rows `matches` accepts, walking from the oldest. */
+async function dropOldest(
+  overflow: number,
+  matches: (row: InboundLedgerRow) => boolean
+): Promise<void> {
+  if (overflow <= 0) return
+  const oldest = await getDb()
+    .inboundLedger.orderBy("receivedAt")
+    .filter(matches)
+    .limit(overflow)
+    .primaryKeys()
+  if (oldest.length > 0) await getDb().inboundLedger.bulkDelete(oldest as string[])
 }

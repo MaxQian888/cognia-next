@@ -145,4 +145,59 @@ describe("inbound-ledger", () => {
     await pruneOldest()
     expect(await getDb().inboundLedger.count()).toBe(5)
   })
+
+  it("pruneOldest keeps delivered-message rows apart from the inbound window", async () => {
+    const rows = [
+      ...Array.from({ length: 4 }, (_, i) => ({
+        id: `adp_1:outbound:c#d${i}`,
+        adapterId: "adp_1",
+        namespace: "outbound" as const,
+        platformMessageId: `c#d${i}`,
+        receivedAt: i,
+      })),
+      ...Array.from({ length: 6 }, (_, i) => ({
+        id: `adp_1:inbound:c#m${i}`,
+        adapterId: "adp_1",
+        namespace: "inbound" as const,
+        platformMessageId: `c#m${i}`,
+        receivedAt: 100 + i,
+      })),
+    ]
+    await getDb().inboundLedger.bulkAdd(rows)
+    // An inbound burst newer than every delivered row does not push them out.
+    await pruneOldest(3, 10)
+    const remaining = await getDb().inboundLedger.orderBy("receivedAt").toArray()
+    expect(remaining.map((r) => r.platformMessageId)).toEqual([
+      "c#d0",
+      "c#d1",
+      "c#d2",
+      "c#d3",
+      "c#m3",
+      "c#m4",
+      "c#m5",
+    ])
+  })
+
+  it("pruneOldest caps delivered-message rows on their own", async () => {
+    await getDb().inboundLedger.bulkAdd([
+      ...Array.from({ length: 5 }, (_, i) => ({
+        id: `adp_1:outbound:c#d${i}`,
+        adapterId: "adp_1",
+        namespace: "outbound" as const,
+        platformMessageId: `c#d${i}`,
+        receivedAt: 10 + i,
+      })),
+      // A legacy row without a namespace counts as windowed.
+      {
+        id: "adp_1:legacy",
+        adapterId: "adp_1",
+        platformMessageId: "legacy",
+        receivedAt: 1,
+      } as never,
+    ])
+    await pruneOldest(5, 2)
+    const remaining = await getDb().inboundLedger.orderBy("receivedAt").toArray()
+    expect(remaining.map((r) => r.platformMessageId)).toEqual(["legacy", "c#d3", "c#d4"])
+    expect(await isInboundRecorded("adp_1", "d4", "outbound", "c")).toBe(true)
+  })
 })
