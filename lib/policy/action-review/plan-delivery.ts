@@ -34,6 +34,10 @@
  * `unapproved`. One with no conversation key (a direct send that names only a
  * platform reference) has an unknown recipient, which nothing authorizes.
  *
+ * A delivery that reaches people rather than the conversation (`recipients`:
+ * an urgent push, which re-notifies members about a message already sent) is
+ * planned for those people, every one of whom must be authorized.
+ *
  * ## Receipts
  *
  * - Enforce mode: every delivery the policy drafts or refuses, and every one
@@ -166,6 +170,13 @@ export interface DeliveryPlanInput {
    * policy would draft it, it is refused (`unapproved`).
    */
   immediate?: boolean
+  /**
+   * The people it reaches, when that is not the conversation itself: an
+   * urgent push re-notifies these members about a message already in
+   * `conversationKey`. Every one must be authorized. Default: the
+   * conversation.
+   */
+  recipients?: readonly OutboundTarget[]
 }
 
 /** A `connector-delivery` receipt, for the gateway to write. */
@@ -227,32 +238,34 @@ export function sameChat(a: string, b: string): boolean {
   }
 }
 
-function deliveryTarget(input: DeliveryPlanInput): OutboundTarget {
-  return (
-    conversationTarget(input.conversationKey) ?? {
-      kind: "unknown",
-      channel: input.adapterId,
-      recipient: "*",
-    }
-  )
+function unknownRecipient(input: DeliveryPlanInput): OutboundTarget {
+  return { kind: "unknown", channel: input.adapterId, recipient: "*" }
+}
+
+function deliveryTargets(input: DeliveryPlanInput): OutboundTarget[] {
+  if (input.recipients) {
+    return input.recipients.length > 0 ? [...input.recipients] : [unknownRecipient(input)]
+  }
+  return [conversationTarget(input.conversationKey) ?? unknownRecipient(input)]
 }
 
 function covers(
   call: AuthorizedOutboundToolCall,
-  target: OutboundTarget,
+  targets: readonly OutboundTarget[],
   createdConversation: boolean | undefined
 ): boolean {
-  if (call.fingerprints.includes(outboundFingerprint(target))) return true
-  return (
-    createdConversation === true &&
-    target.kind === "conversation" &&
-    CONVERSATION_CREATING_TOOLS.has(call.toolName)
+  return targets.every(
+    (target) =>
+      call.fingerprints.includes(outboundFingerprint(target)) ||
+      (createdConversation === true &&
+        target.kind === "conversation" &&
+        CONVERSATION_CREATING_TOOLS.has(call.toolName))
   )
 }
 
 interface PlanningEnv {
   input: DeliveryPlanInput
-  target: OutboundTarget
+  targets: OutboundTarget[]
   mode: OutboundAuthorizationMode
   settings: OutboundSettingsLike
   now: number
@@ -286,7 +299,7 @@ function receiptFor(env: PlanningEnv, args: ReceiptArgs): DeliveryReceipt {
     subject: {
       kind: "connector-delivery",
       ref: args.ownerRef ?? env.input.source,
-      targets: [toReviewTarget(env.target)],
+      targets: env.targets.map(toReviewTarget),
     },
     plan: args.plan,
     enforced: env.mode === "enforce",
@@ -382,8 +395,8 @@ async function planUnattended(
     // the bot account and the conversation this delivery goes through.
     const policyGrants = [
       ...(unattended.policyGrants ?? []),
-      ...(await (env.deps.configuredGrants ?? configuredPolicyGrants)([env.target], {
-        conversationKeys: [env.input.conversationKey],
+      ...(await (env.deps.configuredGrants ?? configuredPolicyGrants)(env.targets, {
+        conversationKeys: env.input.conversationKey ? [env.input.conversationKey] : [],
       })),
     ]
     const context = await buildActionReviewPlanContext({
@@ -395,7 +408,7 @@ async function planUnattended(
       now: env.now,
       ...(env.deps.listAuthKeys ? { listAuthKeys: env.deps.listAuthKeys } : {}),
     })
-    result = planActionReview({ verdict: "ask", targets: [env.target] }, context)
+    result = planActionReview({ verdict: "ask", targets: env.targets }, context)
   } catch (error) {
     // Shadow mode changes nothing, so a planning failure must not either.
     // Under enforcement nothing was shown to authorize the recipient, so the
@@ -477,7 +490,7 @@ export async function planDelivery(
   const settings = await (deps.settings ?? readAppSettings)()
   const env: PlanningEnv = {
     input,
-    target: deliveryTarget(input),
+    targets: deliveryTargets(input),
     mode: readOutboundAuthorizationMode(settings),
     settings,
     now: deps.now?.() ?? Date.now(),
@@ -523,7 +536,7 @@ export async function planDelivery(
     }
     case "tool-call": {
       const call = authorizedOutboundToolCall(auth.sessionId, auth.toolUseId, env.now)
-      if (call && covers(call, env.target, auth.createdConversation)) {
+      if (call && covers(call, env.targets, auth.createdConversation)) {
         return { action: "send", authorizedBy: jobAuthorizationOf(call) }
       }
       if (!call && env.mode === "shadow") return { action: "send" }
@@ -533,9 +546,8 @@ export async function planDelivery(
       })
     }
     case "plugin": {
-      const fingerprint = outboundFingerprint(env.target)
       const call = runningAuthorizedToolCallsOf(`plugin:${auth.pluginId}`, env.now).find((c) =>
-        c.fingerprints.includes(fingerprint)
+        covers(c, env.targets, false)
       )
       if (call) return { action: "send", authorizedBy: jobAuthorizationOf(call) }
       // The handler Bot run the plugin named may reach its installation's

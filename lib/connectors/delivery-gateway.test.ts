@@ -5,6 +5,7 @@ import type {
   DeliveryReceipt,
   OutboundAuthorization,
 } from "@/lib/policy/action-review/plan-delivery"
+import { personTarget } from "@/lib/policy/action-review/outbound-targets"
 import type { PlatformAdapter } from "@/types/connectors"
 import {
   CONNECTOR_DELIVERY_DENIED_CODE,
@@ -86,6 +87,7 @@ function gatewayWith(overrides: Partial<ConnectorDeliveryGatewayDependencies> = 
     recordReceipt: jest.fn(async () => undefined),
     messagingMode: async () => "shadow" as const,
     forward: jest.fn(async () => ({ ok: true })),
+    sendUrgent: jest.fn(async () => ({ ok: true })),
     ...overrides,
   }
   return { gateway: new ConnectorDeliveryGateway(deps), deps }
@@ -571,5 +573,91 @@ describe("ConnectorDeliveryGateway.forward (ADR-0239)", () => {
       error: { code: CONNECTOR_DELIVERY_DENIED_CODE },
     })
     expect(forward).not.toHaveBeenCalled()
+  })
+})
+
+describe("ConnectorDeliveryGateway.urgent (ADR-0239)", () => {
+  const input = {
+    adapterId: "bot-a",
+    messageId: "om_1",
+    userIds: ["ou_a", " ou_b "],
+    via: "sms" as const,
+    conversationKey: "lark:bot-a:oc_1",
+    source: "plugin" as const,
+    authorization: { kind: "plugin", pluginId: "p1" } as OutboundAuthorization,
+    auditFields: { pluginId: "p1" },
+  }
+
+  it("plans the push as an immediate delivery to each person, then pushes", async () => {
+    const { gateway, deps } = gatewayWith()
+
+    await expect(gateway.urgent(input)).resolves.toEqual({ ok: true })
+    expect(deps.planDelivery).toHaveBeenCalledWith({
+      adapterId: "bot-a",
+      conversationKey: "lark:bot-a:oc_1",
+      source: "plugin",
+      authorization: input.authorization,
+      immediate: true,
+      recipients: [personTarget("bot-a", "ou_a"), personTarget("bot-a", "ou_b")],
+    })
+    expect(deps.sendUrgent).toHaveBeenCalledWith("bot-a", "om_1", ["ou_a", "ou_b"], "sms")
+    expect(deps.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "delivery.urgent_direct",
+        conversationKey: "lark:bot-a:oc_1",
+        fields: expect.objectContaining({
+          pluginId: "p1",
+          messageId: "om_1",
+          recipientCount: 2,
+          via: "sms",
+          governed: true,
+          outcome: "succeeded",
+        }),
+      })
+    )
+  })
+
+  it("plans a blank user id as an unknown recipient", async () => {
+    const { gateway, deps } = gatewayWith()
+    await gateway.urgent({ ...input, userIds: [" "], conversationKey: undefined })
+    expect(deps.planDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "",
+        recipients: [{ kind: "unknown", channel: "bot-a", recipient: "*" }],
+      })
+    )
+  })
+
+  it("notifies nobody when the policy refuses it", async () => {
+    const { gateway, deps } = gatewayWith({
+      planDelivery: jest.fn(async (): Promise<DeliveryDecision> => ({
+        action: "deny",
+        reason: "unapproved",
+        receipt: receipt("r4"),
+      })),
+    })
+    await expect(gateway.urgent(input)).resolves.toMatchObject({
+      ok: false,
+      error: { code: CONNECTOR_DELIVERY_DENIED_CODE, retryable: false },
+    })
+    expect(deps.sendUrgent).not.toHaveBeenCalled()
+    expect(deps.recordReceipt).toHaveBeenCalledWith(receipt("r4"))
+  })
+
+  it("reports a failed push in its audit row", async () => {
+    const { gateway, deps } = gatewayWith({
+      sendUrgent: jest.fn(async () => ({
+        ok: false,
+        error: { code: "platform_error", message: "scope", retryable: false },
+      })),
+    })
+    await expect(gateway.urgent(input)).resolves.toMatchObject({ ok: false })
+    expect(deps.appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "delivery.urgent_direct",
+        reason: "platform_error",
+        fields: expect.objectContaining({ outcome: "failed" }),
+      })
+    )
   })
 })

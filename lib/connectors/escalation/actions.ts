@@ -12,12 +12,20 @@
  *                  source: "sla-escalation" })`.
  *   - urgent     → Lark-only (`PlatformAdapter.sendUrgent`): a notice message
  *                  is enqueued through the governed gateway (source "manual",
- *                  PII fail-closed), awaited to a terminal status, then the
- *                  platform message id is escalated via `getBus()
- *                  .sendUrgentOutbound`. Any other platform → outcome
+ *                  planned by the outbound policy), awaited to a terminal
+ *                  status, then the platform message id is escalated through
+ *                  the gateway's `urgent`. Any other platform → outcome
  *                  `unsupported_platform` (INTENTIONALLY INERT — see the type
  *                  doc in `types/connectors/escalation.ts`; the editor renders
  *                  the action disabled and its test pins that).
+ *
+ * Both sends of an urgent step are planned by the outbound policy (ADR-0239)
+ * as unattended deliveries of the sweep. What a person configured in the
+ * policy is their grant: the step's target conversation for the notice, and
+ * its user ids for the push. A plugin may not widen either
+ * (`assertNoAddedUrgentReach`), so the stored policy is a person's. Anything
+ * else the policy would refuse fails the action: the push cannot wait for a
+ * person, and a notice held as a draft has no message id to push.
  *
  * PATTERN NOTE — like `IM_FAILURE_NOTICE`, the canned notice texts are inline
  * bilingual "zh / en" (this runs on the sweep, outside React).
@@ -34,7 +42,17 @@ import {
   type ConversationAssignee,
 } from "@/lib/db/conversation-overrides"
 import { waitForOutboundTerminal as waitForOutboundTerminalDb } from "@/lib/db/outbound-jobs"
-import { enqueueGoverned as enqueueGovernedGateway } from "@/lib/connectors/delivery-gateway"
+import {
+  enqueueAuthorized as enqueueAuthorizedGateway,
+  urgentGoverned as urgentGovernedGateway,
+} from "@/lib/connectors/delivery-gateway"
+import type { OutboundAuthorization } from "@/lib/policy/action-review/plan-delivery"
+import {
+  conversationTarget,
+  outboundFingerprint,
+  personTarget,
+} from "@/lib/policy/action-review/outbound-targets"
+import { resolveEscalationPolicy } from "./policy"
 import { findSessionByConversationKey as findSessionDb } from "@/lib/connectors/session-bindings"
 import { getBus as getConnectorBus } from "@/lib/connectors/bus"
 import {
@@ -76,10 +94,11 @@ export interface EscalationActionDeps {
   setAssignee?: typeof setAssigneeDb
   notifyAssignmentChanged?: typeof notifyAssignmentChangedDefault
   updateConversationConfigSection?: typeof updateConfigSectionDb
-  enqueueGoverned?: typeof enqueueGovernedGateway
+  enqueueAuthorized?: typeof enqueueAuthorizedGateway
   waitForOutboundTerminal?: typeof waitForOutboundTerminalDb
   findSessionByConversationKey?: typeof findSessionDb
-  getBus?: () => Pick<ReturnType<typeof getConnectorBus>, "getAdapter" | "sendUrgentOutbound">
+  urgentGoverned?: typeof urgentGovernedGateway
+  getBus?: () => Pick<ReturnType<typeof getConnectorBus>, "getAdapter">
 }
 
 function fail(reason: string, err?: unknown): EscalationActionOutcome {
@@ -181,6 +200,40 @@ async function runSwitchMode(
   }
 }
 
+/**
+ * What authorizes an urgent step's sends: the sweep, unattended, with the
+ * step's target conversation and user ids as the list of the person who
+ * configured the policy (the conversation's override, else the bot's default).
+ */
+export function urgentAuthorization(
+  ctx: Pick<EscalationActionContext, "adapter" | "row" | "conversationKey">,
+  targetKey: string,
+  userIds: readonly string[]
+): OutboundAuthorization {
+  const { source } = resolveEscalationPolicy(ctx.row, ctx.adapter)
+  const fingerprints = [
+    conversationTarget(targetKey),
+    ...userIds.map((id) => personTarget(ctx.adapter.id, id)),
+  ]
+    .filter((target) => target !== undefined)
+    .map(outboundFingerprint)
+  return {
+    kind: "unattended",
+    ownerRef: `sla-escalation:${ctx.conversationKey}`,
+    // A sweep answers no request: no origin thread, no fence.
+    origin: {},
+    policyGrants: [
+      {
+        policyRef:
+          source === "override"
+            ? `escalation:conversation:${ctx.conversationKey}`
+            : `escalation:adapter:${ctx.adapter.id}`,
+        fingerprints,
+      },
+    ],
+  }
+}
+
 async function runUrgent(
   ctx: EscalationActionContext,
   action: Extract<EscalationAction, { type: "urgent" }>,
@@ -202,11 +255,12 @@ async function runUrgent(
   if (!binding) return fail("no_bound_session")
   if (binding.adapterId !== ctx.adapter.id) return fail("target_adapter_mismatch")
 
-  const enqueue = deps.enqueueGoverned ?? enqueueGovernedGateway
+  const enqueue = deps.enqueueAuthorized ?? enqueueAuthorizedGateway
   const waitTerminal = deps.waitForOutboundTerminal ?? waitForOutboundTerminalDb
+  const authorization = urgentAuthorization(ctx, targetKey, userIds)
   let jobId: string
   try {
-    const job = await enqueue({
+    const result = await enqueue({
       adapterId: ctx.adapter.id,
       conversationKey: targetKey,
       request: {
@@ -224,8 +278,10 @@ async function runUrgent(
         metadata: { idempotencyKey: `sla-urgent:${ctx.conversationKey}:${ctx.stepIndex}` },
       },
       source: "manual",
+      authorization,
     })
-    jobId = job.id
+    if (result.kind === "drafted") return fail("notice_held", result.draft.id)
+    jobId = result.job.id
   } catch (err) {
     return fail("notice_enqueue_failed", err)
   }
@@ -233,12 +289,16 @@ async function runUrgent(
   if (!terminal || terminal.status !== "sent" || !terminal.platformMessageId) {
     return fail("notice_not_delivered", terminal?.lastError ?? terminal?.status ?? "timeout")
   }
-  const result = await bus.sendUrgentOutbound(
-    ctx.adapter.id,
-    terminal.platformMessageId,
+  const result = await (deps.urgentGoverned ?? urgentGovernedGateway)({
+    adapterId: ctx.adapter.id,
+    messageId: terminal.platformMessageId,
     userIds,
-    action.via
-  )
+    ...(action.via ? { via: action.via } : {}),
+    conversationKey: targetKey,
+    source: "manual",
+    authorization,
+    auditFields: { slaConversationKey: ctx.conversationKey, step: ctx.stepIndex },
+  })
   if (!result.ok) return fail(result.error?.code ?? "urgent_failed", result.error?.message)
   return { ok: true }
 }

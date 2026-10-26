@@ -14,6 +14,7 @@ import {
   type OutboundAuthorization,
 } from "@/lib/policy/action-review/plan-delivery"
 import { readAppSettings } from "@/lib/policy/action-review/plan-context"
+import { personTarget, type OutboundTarget } from "@/lib/policy/action-review/outbound-targets"
 import {
   readOutboundAuthorizationMode,
   type OutboundAuthorizationMode,
@@ -23,6 +24,7 @@ import type {
   OutboundRequest,
   OutboundResult,
   PlatformAdapter,
+  UrgentChannel,
 } from "@/types/connectors"
 import { buildConversationKey, parseConversationKey } from "@/types/connectors/event"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -110,13 +112,39 @@ export interface ImmediateDeliveryInput {
   adapterId: string
   /** The conversation it reaches; absent when the request names only a platform reference. */
   conversationKey?: string
-  /** What it sends, for the PII gate. Absent for a forward, which sends nothing new. */
+  /**
+   * The people it reaches, when that is not the conversation: an urgent push
+   * (see {@link DeliveryPlanInput.recipients}).
+   */
+  recipients?: readonly OutboundTarget[]
+  /** What it sends, for the PII gate. Absent for a forward or an urgent push, which send nothing new. */
   segments?: OutboundRequest["segments"]
   idempotencyKey?: string
-  source: AutomatedSource
+  /**
+   * Who sends it. Planned by `authorization` whatever the source: an SLA
+   * escalation's urgent push keeps the `manual` source of its notice.
+   */
+  source: OutboundJobSource
   authorization: OutboundAuthorization
   /** The audit row the send leaves. */
-  auditKind: "delivery.legacy_direct" | "delivery.forward_direct"
+  auditKind: "delivery.legacy_direct" | "delivery.forward_direct" | "delivery.urgent_direct"
+  auditFields?: Record<string, unknown>
+}
+
+/**
+ * An urgent push (加急): the platform re-notifies `userIds` about a message
+ * already sent. Planned as an immediate delivery to those people, every one
+ * of whom must be authorized.
+ */
+export interface GovernedUrgentInput {
+  adapterId: string
+  messageId: string
+  userIds: readonly string[]
+  via?: UrgentChannel
+  /** The conversation the message is in, when the caller knows it: its configured lists count. */
+  conversationKey?: string
+  source: OutboundJobSource
+  authorization: OutboundAuthorization
   auditFields?: Record<string, unknown>
 }
 
@@ -148,6 +176,13 @@ export interface ConnectorDeliveryGatewayDependencies {
   messagingMode(): Promise<OutboundAuthorizationMode>
   /** The adapter's own forward (`bus.forwardOutbound`). */
   forward(adapterId: string, input: ForwardMessageInput): Promise<OutboundResult>
+  /** The adapter's own urgent push (`bus.sendUrgentOutbound`). */
+  sendUrgent(
+    adapterId: string,
+    messageId: string,
+    userIds: string[],
+    via?: UrgentChannel
+  ): Promise<OutboundResult>
 }
 
 async function recordDeliveryReceipt(receipt: DeliveryReceipt): Promise<void> {
@@ -174,6 +209,10 @@ const defaultDependencies: ConnectorDeliveryGatewayDependencies = {
   forward: async (adapterId, input) => {
     const { getBus } = await import("./bus")
     return getBus().forwardOutbound(adapterId, input)
+  },
+  sendUrgent: async (adapterId, messageId, userIds, via) => {
+    const { getBus } = await import("./bus")
+    return getBus().sendUrgentOutbound(adapterId, messageId, userIds, via)
   },
 }
 
@@ -317,6 +356,40 @@ export class ConnectorDeliveryGateway {
     )
   }
 
+  /**
+   * Send an urgent push ({@link GovernedUrgentInput}). Under enforcement a
+   * push to anyone nothing authorized is a failed result,
+   * {@link CONNECTOR_DELIVERY_DENIED_CODE}, and nobody is notified.
+   */
+  async urgent(input: GovernedUrgentInput): Promise<OutboundResult> {
+    const userIds = input.userIds.map((id) => id.trim())
+    const recipients = userIds.map(
+      (id): OutboundTarget =>
+        personTarget(input.adapterId, id) ?? {
+          kind: "unknown",
+          channel: input.adapterId,
+          recipient: "*",
+        }
+    )
+    return this.sendNow(
+      {
+        adapterId: input.adapterId,
+        ...(input.conversationKey ? { conversationKey: input.conversationKey } : {}),
+        recipients,
+        source: input.source,
+        authorization: input.authorization,
+        auditKind: "delivery.urgent_direct",
+        auditFields: {
+          ...input.auditFields,
+          messageId: input.messageId,
+          recipientCount: userIds.length,
+          ...(input.via ? { via: input.via } : {}),
+        },
+      },
+      () => this.dependencies.sendUrgent(input.adapterId, input.messageId, userIds, input.via)
+    )
+  }
+
   /** Direct wire probe. Never use this for a business send. */
   async sendDiagnostic(adapterId: string, request: OutboundRequest): Promise<OutboundResult> {
     const adapter = await this.dependencies.getAdapter(adapterId)
@@ -357,6 +430,7 @@ export class ConnectorDeliveryGateway {
       source: input.source,
       authorization: input.authorization,
       immediate: true,
+      ...(input.recipients ? { recipients: input.recipients } : {}),
     })
     const subject = {
       adapterId: input.adapterId,
@@ -564,6 +638,11 @@ export function forwardGoverned(input: GovernedForwardInput): Promise<OutboundRe
 }
 
 /** Function seam for an automated delivery the policy may hold as a draft. */
+/** {@link ConnectorDeliveryGateway.urgent} on the shared gateway. */
+export function urgentGoverned(input: GovernedUrgentInput): Promise<OutboundResult> {
+  return getConnectorDeliveryGateway().urgent(input)
+}
+
 export function enqueueAuthorized(input: GovernedEnqueueInput): Promise<EnqueueGovernedResult> {
   return getConnectorDeliveryGateway().enqueueAuthorized(input)
 }

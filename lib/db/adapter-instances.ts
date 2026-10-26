@@ -87,17 +87,23 @@ export async function listAdapterInstancesByType(
   return getDb().adapterInstances.where("type").equals(type).toArray()
 }
 
+/** Whether a patch key writes the recipient list: the field, or a key path into it. */
+function writesRecipientList(key: string): boolean {
+  return key === "outboundRecipients" || key.startsWith("outboundRecipients.")
+}
+
 /**
  * The recipient list has its own writer ({@link setAdapterOutboundRecipients}).
  * The type keeps it out of a patch; a caller that casts past it (a plugin's
  * `updateInstance` writes whatever it is handed) is not a person either.
+ * Dexie's `update` also takes key paths (`"outboundRecipients.0"`), so those
+ * are dropped too.
  */
 function withoutRecipientList(patch: AdapterInstancePatch): AdapterInstancePatch {
-  if (!("outboundRecipients" in patch)) return patch
-  const { outboundRecipients: _dropped, ...rest } = patch as AdapterInstancePatch & {
-    outboundRecipients?: unknown
-  }
-  return rest
+  if (!Object.keys(patch).some(writesRecipientList)) return patch
+  return Object.fromEntries(
+    Object.entries(patch).filter(([key]) => !writesRecipientList(key))
+  ) as AdapterInstancePatch
 }
 
 export async function updateAdapterInstance(

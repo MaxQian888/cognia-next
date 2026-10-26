@@ -12,6 +12,7 @@ import {
   type EscalationPolicy,
   type EscalationStep,
 } from "@/types/connectors/escalation"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 
 export interface DueStep {
   /** 0-based index into `policy.steps`. */
@@ -129,4 +130,86 @@ export function validateEscalationPolicy(policy: EscalationPolicy): EscalationPo
     }
   })
   return { ok: issues.length === 0, issues }
+}
+
+/** Who and where a policy's urgent steps reach: user ids, and target conversations other than the overdue one. */
+function urgentReachOf(policy: EscalationPolicy | null | undefined): {
+  userIds: Set<string>
+  conversationKeys: Set<string>
+} {
+  const userIds = new Set<string>()
+  const conversationKeys = new Set<string>()
+  for (const step of policy?.steps ?? []) {
+    for (const action of step.actions ?? []) {
+      if (action.type !== "urgent") continue
+      for (const id of action.userIds ?? []) {
+        const trimmed = id.trim()
+        if (trimmed) userIds.add(trimmed)
+      }
+      const target = action.targetConversationKey?.trim()
+      if (target) conversationKeys.add(target)
+    }
+  }
+  return { userIds, conversationKeys }
+}
+
+/**
+ * The urgent reach `next` adds over `stored`: user ids and target
+ * conversations no urgent step of `stored` names. The sweep reads a stored
+ * policy's urgent steps as a person's grant to notify those people there
+ * (ADR-0239), so only a person may widen them; dropping some is anyone's.
+ */
+export function addedUrgentReach(
+  stored: EscalationPolicy | null | undefined,
+  next: EscalationPolicy | null | undefined
+): { userIds: string[]; conversationKeys: string[] } {
+  const before = urgentReachOf(stored)
+  const after = urgentReachOf(next)
+  return {
+    userIds: [...after.userIds].filter((id) => !before.userIds.has(id)),
+    conversationKeys: [...after.conversationKeys].filter(
+      (key) => !before.conversationKeys.has(key)
+    ),
+  }
+}
+
+/** A plugin tried to widen an escalation policy's urgent reach ({@link addedUrgentReach}). */
+export class EscalationReachError extends Error {
+  readonly code = "connector_escalation_reach"
+
+  constructor(readonly added: { userIds: string[]; conversationKeys: string[] }) {
+    super(
+      `An escalation policy's urgent steps may only be widened by a person (ADR-0239): ${[
+        added.userIds.length > 0 ? `${added.userIds.length} new user id(s)` : "",
+        added.conversationKeys.length > 0
+          ? `${added.conversationKeys.length} new target conversation(s)`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(", ")}. Ask a person to add them in Settings → Connections.`
+    )
+    this.name = "EscalationReachError"
+  }
+}
+
+/** Throws {@link EscalationReachError} when `next` widens `stored`'s urgent reach. */
+export function assertNoAddedUrgentReach(
+  stored: EscalationPolicy | null | undefined,
+  next: EscalationPolicy | null | undefined
+): void {
+  const added = addedUrgentReach(stored, next)
+  if (added.userIds.length > 0 || added.conversationKeys.length > 0) {
+    throw new EscalationReachError(added)
+  }
+}
+
+/** Resolve the policy for a row + adapter, and where it came from. */
+export function resolveEscalationPolicy(
+  row: Pick<ConversationOverrideRow, "escalation">,
+  adapter: Pick<AdapterInstanceRow, "defaultEscalation"> | undefined
+): { policy: EscalationPolicy | undefined; source: "override" | "adapter-default" | "none" } {
+  if (row.escalation) return { policy: row.escalation, source: "override" }
+  if (adapter?.defaultEscalation)
+    return { policy: adapter.defaultEscalation, source: "adapter-default" }
+  return { policy: undefined, source: "none" }
 }

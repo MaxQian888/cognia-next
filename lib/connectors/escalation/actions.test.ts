@@ -10,7 +10,10 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   updateConversationConfigSection: jest.fn(),
 }))
 jest.mock("@/lib/db/outbound-jobs", () => ({ waitForOutboundTerminal: jest.fn() }))
-jest.mock("@/lib/connectors/delivery-gateway", () => ({ enqueueGoverned: jest.fn() }))
+jest.mock("@/lib/connectors/delivery-gateway", () => ({
+  enqueueAuthorized: jest.fn(),
+  urgentGoverned: jest.fn(),
+}))
 jest.mock("@/lib/connectors/session-bindings", () => ({ findSessionByConversationKey: jest.fn() }))
 jest.mock("@/lib/connectors/bus", () => ({ getBus: jest.fn() }))
 jest.mock("@/lib/connectors/assignment/notify-assignment", () => ({
@@ -19,10 +22,12 @@ jest.mock("@/lib/connectors/assignment/notify-assignment", () => ({
 }))
 
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
+import { outboundFingerprint } from "@/lib/policy/action-review/outbound-targets"
 import {
   runEscalationAction,
   SLA_ESCALATION_NOTICE,
   URGENT_NOTICE_TIMEOUT_MS,
+  urgentAuthorization,
   type EscalationActionContext,
   type EscalationActionDeps,
 } from "./actions"
@@ -58,7 +63,7 @@ function deps(over: Partial<EscalationActionDeps> = {}): EscalationActionDeps {
     setAssignee: jest.fn(async () => undefined),
     notifyAssignmentChanged: jest.fn(async () => undefined),
     updateConversationConfigSection: jest.fn(async () => row()),
-    enqueueGoverned: jest.fn(async () => ({ id: "job-1" }) as never),
+    enqueueAuthorized: jest.fn(async () => ({ kind: "queued", job: { id: "job-1" } }) as never),
     waitForOutboundTerminal: jest.fn(async () => ({
       id: "job-1",
       status: "sent",
@@ -74,10 +79,8 @@ function deps(over: Partial<EscalationActionDeps> = {}): EscalationActionDeps {
         deliveryTarget: { kind: "chat" },
       },
     })) as never,
-    getBus: () => ({
-      getAdapter: () => ({ sendUrgent: jest.fn() }) as never,
-      sendUrgentOutbound: jest.fn(async () => ({ ok: true })),
-    }),
+    getBus: () => ({ getAdapter: () => ({ sendUrgent: jest.fn() }) as never }),
+    urgentGoverned: jest.fn(async () => ({ ok: true })),
     ...over,
   }
 }
@@ -232,19 +235,15 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
   })
 
   it("enqueues a governed notice, awaits its terminal status, then escalates the platform message id", async () => {
-    const sendUrgentOutbound = jest.fn(async () => ({ ok: true }))
-    const d = deps({
-      getBus: () => ({
-        getAdapter: () => ({ sendUrgent: jest.fn() }) as never,
-        sendUrgentOutbound,
-      }),
-    })
+    const d = deps()
     expect(await runEscalationAction(ctx(), urgent, d)).toEqual({ ok: true })
-    expect(d.enqueueGoverned).toHaveBeenCalledWith(
+    const authorization = urgentAuthorization(ctx(), "lark:adp-1:oc_1", ["ou_a", "ou_b"])
+    expect(d.enqueueAuthorized).toHaveBeenCalledWith(
       expect.objectContaining({
         adapterId: "adp-1",
         conversationKey: "lark:adp-1:oc_1",
         source: "manual",
+        authorization,
         request: expect.objectContaining({
           conversationRef: { platform: "lark", adapterId: "adp-1", chatId: "oc_1" },
           deliveryTarget: { kind: "chat" },
@@ -254,7 +253,68 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
       })
     )
     expect(d.waitForOutboundTerminal).toHaveBeenCalledWith("job-1", URGENT_NOTICE_TIMEOUT_MS)
-    expect(sendUrgentOutbound).toHaveBeenCalledWith("adp-1", "om_1", ["ou_a", "ou_b"], "sms")
+    expect(d.urgentGoverned).toHaveBeenCalledWith({
+      adapterId: "adp-1",
+      messageId: "om_1",
+      userIds: ["ou_a", "ou_b"],
+      via: "sms",
+      conversationKey: "lark:adp-1:oc_1",
+      source: "manual",
+      authorization,
+      auditFields: { slaConversationKey: "lark:adp-1:oc_1", step: 1 },
+    })
+  })
+
+  it("authorizes both sends with the configured step as the policy's list (ADR-0239)", () => {
+    // The step's target conversation, and each of its user ids on this bot.
+    const fingerprints = [
+      outboundFingerprint({ channel: "adp-1", recipient: "conv:lark:adp-1:oc_ops" }),
+      outboundFingerprint({ channel: "adp-1", recipient: "person:adp-1:ou_a" }),
+    ]
+    // The bot's default policy.
+    expect(urgentAuthorization(ctx(), "lark:adp-1:oc_ops", ["ou_a"])).toEqual({
+      kind: "unattended",
+      ownerRef: "sla-escalation:lark:adp-1:oc_1",
+      origin: {},
+      policyGrants: [{ policyRef: "escalation:adapter:adp-1", fingerprints }],
+    })
+    // The conversation's own override.
+    expect(
+      urgentAuthorization(ctx({ row: row({ escalation: { steps: [] } }) }), "lark:adp-1:oc_ops", [
+        "ou_a",
+      ])
+    ).toMatchObject({
+      policyGrants: [{ policyRef: "escalation:conversation:lark:adp-1:oc_1", fingerprints }],
+    })
+  })
+
+  it("fails the step when the notice is held as a draft, and pushes nothing", async () => {
+    const d = deps({
+      enqueueAuthorized: jest.fn(
+        async () => ({ kind: "drafted", draft: { id: "draft-1" } }) as never
+      ),
+    })
+    expect(await runEscalationAction(ctx(), urgent, d)).toEqual({
+      ok: false,
+      reason: "notice_held",
+      message: "draft-1",
+    })
+    expect(d.waitForOutboundTerminal).not.toHaveBeenCalled()
+    expect(d.urgentGoverned).not.toHaveBeenCalled()
+  })
+
+  it("fails the step with the policy's refusal of the push", async () => {
+    const d = deps({
+      urgentGoverned: jest.fn(async () => ({
+        ok: false,
+        error: { code: "connector_delivery_denied", message: "refused", retryable: false },
+      })),
+    })
+    expect(await runEscalationAction(ctx(), urgent, d)).toEqual({
+      ok: false,
+      reason: "connector_delivery_denied",
+      message: "refused",
+    })
   })
 
   it("targets another conversation when targetConversationKey is set and mentions the source key", async () => {
@@ -270,9 +330,10 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
     const d = deps({ findSessionByConversationKey: findSession as never })
     await runEscalationAction(ctx(), { ...urgent, targetConversationKey: "lark:adp-1:oc_ops" }, d)
     expect(findSession).toHaveBeenCalledWith("lark:adp-1:oc_ops")
-    expect(d.enqueueGoverned).toHaveBeenCalledWith(
+    expect(d.enqueueAuthorized).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationKey: "lark:adp-1:oc_ops",
+        authorization: urgentAuthorization(ctx(), "lark:adp-1:oc_ops", ["ou_a", "ou_b"]),
         request: expect.objectContaining({
           segments: [
             {
@@ -282,6 +343,9 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
           ],
         }),
       })
+    )
+    expect(d.urgentGoverned).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationKey: "lark:adp-1:oc_ops" })
     )
   })
 
@@ -294,16 +358,14 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
       await runEscalationAction(
         ctx(),
         urgent,
-        deps({ getBus: () => ({ getAdapter: () => undefined, sendUrgentOutbound: jest.fn() }) })
+        deps({ getBus: () => ({ getAdapter: () => undefined }) })
       )
     ).toEqual({ ok: false, reason: "adapter_offline" })
     expect(
       await runEscalationAction(
         ctx(),
         urgent,
-        deps({
-          getBus: () => ({ getAdapter: () => ({}) as never, sendUrgentOutbound: jest.fn() }),
-        })
+        deps({ getBus: () => ({ getAdapter: () => ({}) as never }) })
       )
     ).toEqual({ ok: false, reason: "unsupported_platform" })
     expect(
@@ -328,7 +390,7 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
       await runEscalationAction(
         ctx(),
         urgent,
-        deps({ enqueueGoverned: jest.fn(async () => Promise.reject(new Error("pii"))) as never })
+        deps({ enqueueAuthorized: jest.fn(async () => Promise.reject(new Error("pii"))) as never })
       )
     ).toEqual({ ok: false, reason: "notice_enqueue_failed", message: "pii" })
     expect(
@@ -355,13 +417,10 @@ describe("runEscalationAction — urgent (Lark only; inert elsewhere)", () => {
         ctx(),
         urgent,
         deps({
-          getBus: () => ({
-            getAdapter: () => ({ sendUrgent: jest.fn() }) as never,
-            sendUrgentOutbound: jest.fn(async () => ({
-              ok: false,
-              error: { code: "platform_error", message: "scope missing", retryable: false },
-            })),
-          }),
+          urgentGoverned: jest.fn(async () => ({
+            ok: false,
+            error: { code: "platform_error", message: "scope missing", retryable: false },
+          })),
         })
       )
     ).toEqual({ ok: false, reason: "platform_error", message: "scope missing" })
@@ -384,7 +443,7 @@ describe("runEscalationAction — default collaborators", () => {
     const { findSessionByConversationKey } = jest.requireMock<
       typeof import("@/lib/connectors/session-bindings")
     >("@/lib/connectors/session-bindings")
-    const { enqueueGoverned } = jest.requireMock<
+    const { enqueueAuthorized, urgentGoverned } = jest.requireMock<
       typeof import("@/lib/connectors/delivery-gateway")
     >("@/lib/connectors/delivery-gateway")
     const { waitForOutboundTerminal } =
@@ -393,14 +452,12 @@ describe("runEscalationAction — default collaborators", () => {
     ;(setAssignee as jest.Mock).mockResolvedValue(undefined)
     ;(notifyAssignmentChanged as jest.Mock).mockResolvedValue(undefined)
     ;(updateConversationConfigSection as jest.Mock).mockResolvedValue(row())
-    ;(getBus as jest.Mock).mockReturnValue({
-      getAdapter: () => ({ sendUrgent: jest.fn() }),
-      sendUrgentOutbound: jest.fn(async () => ({ ok: false })),
-    })
+    ;(getBus as jest.Mock).mockReturnValue({ getAdapter: () => ({ sendUrgent: jest.fn() }) })
+    ;(urgentGoverned as jest.Mock).mockResolvedValue({ ok: false })
     ;(findSessionByConversationKey as jest.Mock).mockResolvedValue({
       platformBinding: { adapterId: "adp-1", conversationRef: {} },
     })
-    ;(enqueueGoverned as jest.Mock).mockResolvedValue({ id: "j" })
+    ;(enqueueAuthorized as jest.Mock).mockResolvedValue({ kind: "queued", job: { id: "j" } })
     ;(waitForOutboundTerminal as jest.Mock).mockResolvedValue({
       status: "sent",
       platformMessageId: "om",
@@ -420,7 +477,7 @@ describe("runEscalationAction — default collaborators", () => {
       ok: true,
     })
     expect(updateConversationConfigSection).toHaveBeenCalled()
-    // urgent through the real seams; a bus failure without an error object
+    // urgent through the real seams; a push failure without an error object
     // maps to the generic reason.
     expect(
       await runEscalationAction(ctx(), { type: "urgent", userIds: undefined as never })

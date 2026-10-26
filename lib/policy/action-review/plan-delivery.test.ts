@@ -13,7 +13,12 @@ import {
 } from "./authorized-tool-calls"
 import { __resetRunningBotGrantsForTesting, beginBotOutboundRun } from "./configured-grants"
 import { botPlanOrigin } from "./plan-context"
-import { conversationTarget, outboundFingerprint, toReviewTarget } from "./outbound-targets"
+import {
+  conversationTarget,
+  outboundFingerprint,
+  personTarget,
+  toReviewTarget,
+} from "./outbound-targets"
 import {
   planDelivery,
   sameChat,
@@ -473,6 +478,129 @@ describe("planDelivery", () => {
           deps(enforce)
         )
       ).resolves.toMatchObject({ action: "draft", draftSessionId: "plugin:p2" })
+    })
+  })
+
+  describe("recipients (an urgent push)", () => {
+    const A = personTarget("bot-a", "ou_a")!
+    const B = personTarget("bot-a", "ou_b")!
+    function push(
+      authorization: DeliveryPlanInput["authorization"],
+      recipients: DeliveryPlanInput["recipients"] = [A, B]
+    ): DeliveryPlanInput {
+      return {
+        ...delivery(OTHER_KEY, authorization, "plugin"),
+        immediate: true,
+        recipients,
+      }
+    }
+    const listOf = (...targets: (typeof A)[]) =>
+      jest.fn(async () => [
+        { policyRef: "adapter:bot-a", fingerprints: targets.map(outboundFingerprint) },
+      ])
+
+    it("plans the people it notifies, not the conversation, with that conversation's lists", async () => {
+      const configuredGrants = listOf(A, B)
+      await expect(
+        planDelivery(
+          push({ kind: "unattended", ownerRef: "sla-escalation:k" }),
+          deps(enforce, {}, { configuredGrants })
+        )
+      ).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: { policyRef: "adapter:bot-a" },
+        receipt: { request: { subject: { targets: [toReviewTarget(A), toReviewTarget(B)] } } },
+      })
+      expect(configuredGrants).toHaveBeenCalledWith([A, B], { conversationKeys: [OTHER_KEY] })
+    })
+
+    it("refuses the push when anyone it notifies is unauthorized", async () => {
+      const decision = await planDelivery(
+        push({ kind: "unattended", ownerRef: "sla-escalation:k" }),
+        deps(enforce, {}, { configuredGrants: listOf(A) })
+      )
+      expect(decision).toMatchObject({ action: "deny", reason: "unapproved" })
+      expect(decision.receipt?.request.subject.targets).toEqual([
+        toReviewTarget(A),
+        toReviewTarget(B),
+      ])
+    })
+
+    it("counts a policy grant the sender names for each person", async () => {
+      await expect(
+        planDelivery(
+          push({
+            kind: "unattended",
+            ownerRef: "sla-escalation:k",
+            origin: {},
+            policyGrants: [
+              {
+                policyRef: "escalation:adapter:bot-a",
+                fingerprints: [A, B].map(outboundFingerprint),
+              },
+            ],
+          }),
+          deps(enforce)
+        )
+      ).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: { policyRef: "escalation:adapter:bot-a" },
+      })
+    })
+
+    it("is covered by a plugin's running call only when the call planned every person", async () => {
+      rememberPlannedOutboundToolCall({
+        sessionId: "s1",
+        requestId: "req_1",
+        toolUseId: "toolu_1",
+        toolName: "urgent",
+        fingerprints: [outboundFingerprint(A)],
+      })
+      authorizeOutboundToolCall("s1", "req_1", { authority: "policy-rule" })
+      beginOutboundToolExecution("s1", "toolu_1", "plugin:p1")
+      const plugin = { kind: "plugin", pluginId: "p1" } as const
+      await expect(planDelivery(push(plugin, [A]), deps(enforce))).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: { receiptId: "req_1" },
+      })
+      await expect(planDelivery(push(plugin, [A, B]), deps(enforce))).resolves.toMatchObject({
+        action: "deny",
+        reason: "unapproved",
+      })
+    })
+
+    it("is covered by a tool call only when the call planned every person", async () => {
+      rememberPlannedOutboundToolCall({
+        sessionId: "s1",
+        requestId: "req_1",
+        toolUseId: "toolu_1",
+        toolName: "im_urgent",
+        fingerprints: [outboundFingerprint(A), outboundFingerprint(B)],
+      })
+      authorizeOutboundToolCall("s1", "req_1", { authority: "human", grant: { scope: "once" } })
+      const call = { kind: "tool-call", sessionId: "s1", toolUseId: "toolu_1" } as const
+      await expect(planDelivery(push(call), deps(enforce))).resolves.toMatchObject({
+        action: "send",
+        authorizedBy: { receiptId: "req_1" },
+      })
+      await expect(
+        planDelivery(push(call, [A, personTarget("bot-a", "ou_c")!]), deps(enforce))
+      ).resolves.toMatchObject({ action: "deny", reason: "unapproved" })
+    })
+
+    it("treats an empty list as an unknown recipient", async () => {
+      await expect(
+        planDelivery(
+          push({ kind: "unattended", ownerRef: "x" }, []),
+          deps(enforce, {}, { configuredGrants: listOf(A, B) })
+        )
+      ).resolves.toMatchObject({ action: "deny", reason: "unapproved" })
+    })
+
+    it("sends in shadow mode, recording that enforcement would have refused it", async () => {
+      const decision = await planDelivery(push({ kind: "unattended", ownerRef: "x" }), deps(shadow))
+      expect(decision.action).toBe("send")
+      expect(decision.receipt?.request.plan).toEqual({ outcome: "deny", enforced: false })
     })
   })
 

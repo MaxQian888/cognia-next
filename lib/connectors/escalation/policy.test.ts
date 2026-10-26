@@ -1,5 +1,13 @@
 import type { EscalationPolicy } from "@/types/connectors/escalation"
-import { dueSteps, overdueMinutesAt, validateEscalationPolicy } from "./policy"
+import {
+  addedUrgentReach,
+  assertNoAddedUrgentReach,
+  dueSteps,
+  EscalationReachError,
+  overdueMinutesAt,
+  resolveEscalationPolicy,
+  validateEscalationPolicy,
+} from "./policy"
 
 const POLICY: EscalationPolicy = {
   steps: [
@@ -126,5 +134,81 @@ describe("validateEscalationPolicy", () => {
       { code: "step_minutes_invalid", step: 0 },
       { code: "step_without_actions", step: 0 },
     ])
+  })
+})
+
+describe("resolveEscalationPolicy", () => {
+  const DEFAULT: EscalationPolicy = {
+    steps: [{ afterOverdueMinutes: 0, actions: [{ type: "notify" }] }],
+  }
+
+  it("prefers the conversation's override, then the bot's default", () => {
+    const own: EscalationPolicy = { steps: [] }
+    expect(resolveEscalationPolicy({ escalation: own }, { defaultEscalation: DEFAULT })).toEqual({
+      policy: own,
+      source: "override",
+    })
+    expect(resolveEscalationPolicy({}, { defaultEscalation: DEFAULT })).toEqual({
+      policy: DEFAULT,
+      source: "adapter-default",
+    })
+    expect(resolveEscalationPolicy({}, undefined)).toEqual({ policy: undefined, source: "none" })
+  })
+})
+
+describe("addedUrgentReach (ADR-0239)", () => {
+  const urgent = (userIds: string[], targetConversationKey?: string): EscalationPolicy => ({
+    steps: [
+      {
+        afterOverdueMinutes: 10,
+        actions: [
+          { type: "notify" },
+          { type: "urgent", userIds, ...(targetConversationKey ? { targetConversationKey } : {}) },
+        ],
+      },
+    ],
+  })
+
+  it("names the user ids and target conversations the new policy adds", () => {
+    expect(addedUrgentReach(urgent(["ou_a"]), urgent(["ou_a", " ou_b "], "lark:b:oc_ops"))).toEqual(
+      { userIds: ["ou_b"], conversationKeys: ["lark:b:oc_ops"] }
+    )
+    expect(addedUrgentReach(undefined, urgent(["ou_a"]))).toEqual({
+      userIds: ["ou_a"],
+      conversationKeys: [],
+    })
+  })
+
+  it("adds nothing when the policy keeps, moves or drops what was stored", () => {
+    const stored: EscalationPolicy = {
+      steps: [...urgent(["ou_a", "ou_b"], "lark:b:oc_ops").steps, ...urgent(["ou_c"]).steps],
+    }
+    const none = { userIds: [], conversationKeys: [] }
+    expect(addedUrgentReach(stored, urgent(["ou_c", "ou_a"], "lark:b:oc_ops"))).toEqual(none)
+    expect(addedUrgentReach(stored, urgent([]))).toEqual(none)
+    expect(addedUrgentReach(stored, null)).toEqual(none)
+    expect(addedUrgentReach(stored, undefined)).toEqual(none)
+    // A step that is not urgent reaches nobody.
+    expect(
+      addedUrgentReach(undefined, {
+        steps: [{ afterOverdueMinutes: 0, actions: [{ type: "switchMode", mode: "manual" }] }],
+      })
+    ).toEqual(none)
+  })
+
+  it("assertNoAddedUrgentReach throws a coded error naming what was added", () => {
+    expect(() => assertNoAddedUrgentReach(urgent(["ou_a"]), urgent(["ou_a"]))).not.toThrow()
+    let caught: unknown
+    try {
+      assertNoAddedUrgentReach(urgent(["ou_a"]), urgent(["ou_a", "ou_b"], "lark:b:oc_ops"))
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(EscalationReachError)
+    expect(caught).toMatchObject({
+      code: "connector_escalation_reach",
+      added: { userIds: ["ou_b"], conversationKeys: ["lark:b:oc_ops"] },
+      message: expect.stringContaining("1 new user id(s), 1 new target conversation(s)"),
+    })
   })
 })

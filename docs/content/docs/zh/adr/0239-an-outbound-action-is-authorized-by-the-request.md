@@ -251,6 +251,7 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 - **`gh` 分类。** `gh api` 曾把某个 flag 的值读成方法（`-X PUT --jq -XGET` 被算作 GET）；现在每个带值 flag 的值都被消费，只有 `-X` / `--method` 设定方法。`gh extension exec` 会执行扩展代码，因此算写入，而非本地命令。在 `gh` 运行前改变 `gh` 环境的命令（`export GH_REPO=…`、`source`、`.`、`eval`，或在 `gh` 片段之外给 `GH_REPO` / `GH_HOST` 赋值）不再回退到检出目录，仓库按未知处理。sidecar 中的分类器副本改为由宿主源码生成（`scripts/build/gen-sidecar-gh-command.mjs`，由 `gh-targets.sidecar-parity.test.ts` 校验），不再手工维护。
 - **插件的投递发往宿主存下的目标**（`lib/connectors/plugin-destination.ts`）。此前策略按会话键规划插件的 `enqueueSend`，而 runner 用插件自己给的引用发送，它可以指向另一个群，在飞书上还可以指向另一个人（`receiveId`）。现在插件的请求一律用宿主为该会话存下的投递目标发送（由入站消息刷新，或由 `bootstrapConversation` 生成）；`replyTo` 或 `editTargetMessageId` 必须指向宿主在该会话里见过的消息。其余情况以 `connector_delivery_destination` 拒绝。
 - **直接发送与转发都经过规划。** 插件已弃用的 `send` / `sendText`、插件的 `forwardMessage` 以及工作流节点 `action.connector.forward` 都经过 `ConnectorDeliveryGateway.sendNow` / `forward`。这类投递无法作为草稿等待，规划器按 `immediate` 处理：别的投递会被存为草稿的地方，它们被拒绝（`unapproved`，以失败结果 `connector_delivery_denied` 返回）。只给出引用的直接发送，收件人未知，没有任何授权能覆盖。影子模式下它们照旧发出，receipt 记下执行模式会拒绝。
+- **加急推送按它通知的人规划。** 加急推送就已发出的消息再次提醒指定成员，因此规划器取它的 `recipients`（每人一个 `person:<bot>:<id>` 目标）而不是会话，且每个人都必须获得授权。插件的 `sendUrgent` 与 SLA 升级的加急步骤都经过 `ConnectorDeliveryGateway.urgent`：它按 `immediate` 规划推送，被拒绝时什么也不发（审计记为 `delivery.urgent_direct`）。`sendUrgent` 与 `enqueueSend` 一样接受 `{ botRunId }`。升级步骤的提醒消息也经过规划；此前它被当作人自己的发送，即使发往另一个会话。该步骤的两次发送都是巡检的无人值守投递，步骤中的目标会话与用户 id 就是配置该策略的人的名单（`escalation:conversation:<key>` 或 `escalation:adapter:<bot>`）。为保证这一点，插件的 `createInstance` / `updateInstance` 不能给加急步骤新增用户 id 或目标会话（`connector_escalation_reach`）；删减可以。它的 patch 也不能使用键路径（`"defaultEscalation.steps"`），否则 Dexie 的 `update` 会绕过检查直接写入；收件人名单自身的防护也会丢弃指向它内部的键路径（`"outboundRecipients.0"`）。
 - **`streamReply` 无法规划。** 流式回复没有会话键，且每次更新发一帧。消息类处于执行模式时，插件的 `streamReply` 返回 `false`，即文档约定的"不支持流式"，插件随之回退到受管控的发送。
 - **handler Bot 的名单只借给指明它的运行。** 所有运行中安装名单的并集已去掉。插件的代码由它的所有安装共用，因此一个动作只有在指明自己的运行、且宿主确认该运行仍在进行并属于该插件时才借到名单（`liveBotRun`）：`ctx.connectors.enqueueSend(…, { botRunId })`，以及浏览器引擎路由上下文或 `ensureLocalEngine` 的 `botRunId`。该动作随即在该安装的根与纪元下规划，其屏障生效。集成写入经动作的 `binding` 指明运行（`bot` 授权），因此 broker 的插件路径不借出任何名单。未指明运行的动作（包括某次运行遗留的回调）按插件自身的动作规划。
 - **浏览器提交。** 在 hold 安装之前就已打开的 socket，会让页面保持 `unguarded`，直到 socket 关闭或页面载入新文档；同文档导航（`pushState`、hash 变化）不会关闭它，页面仍为 unguarded。选择文件在动作的提交窗口内执行，页面随即发出的内容会被停下。影子模式下 drain 失败不再阻塞动作。
@@ -263,7 +264,6 @@ ADR-0070 否决了把 IM 绑定的运行当作 `external-send`：从某个线程
 
 ### 已知缺口
 
-- 插件的 `sendUrgent`（就已有消息向指定的人发加急推送）未经规划。
 - 影子模式下插件 `streamReply` 的帧不被记录。
 - 插件回复或编辑的消息 id 若已超出入站账本的窗口，即使属于同一会话也会被拒绝。
 

@@ -22,6 +22,11 @@ export type AuditKind =
   // A plugin's `ctx.connectors.forwardMessage`, planned by the outbound policy
   // (ADR-0239) and sent at once: fields: { pluginId, governed, outcome, authority? }.
   | "delivery.forward_direct"
+  // An urgent push (加急: `ctx.connectors.sendUrgent`, an SLA escalation's
+  // urgent step), planned by the outbound policy (ADR-0239) as a delivery to
+  // the people it notifies and sent at once: fields: { messageId,
+  // recipientCount, via?, source, governed, outcome, authority? }.
+  | "delivery.urgent_direct"
   | "inbound.received"
   | "inbound.deduped"
   | "inbound.policy_blocked"

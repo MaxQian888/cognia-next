@@ -299,12 +299,23 @@ export interface PluginConnectorsAPI {
    * Escalate a message to users via an urgent channel (加急: in-app / SMS /
    * phone). Requires an elevated platform scope many bots lack — a missing
    * scope surfaces as a failed result.
+   *
+   * The outbound policy (ADR-0239) plans it as a delivery to every user it
+   * notifies, and it cannot wait for a person: under enforcement a push to
+   * anyone nothing authorized (one of this plugin's running, authorized tool
+   * calls, or the list of the handler Bot run `opts.botRunId` names) is a
+   * failed result with `code: "connector_delivery_denied"`, and nobody is
+   * notified.
    */
   sendUrgent(
     adapterId: string,
     messageId: string,
     userIds: string[],
-    via?: UrgentChannel
+    via?: UrgentChannel,
+    opts?: {
+      /** The handler Bot run this push is for, as for {@link enqueueSend}. */
+      botRunId?: string
+    }
   ): Promise<OutboundResult>
   /**
    * Query who has read a message (read receipts). `null` when the adapter is
@@ -388,7 +399,13 @@ export interface PluginConnectorsAPI {
   // ── Instance management (connectors:manage, DANGEROUS) ───────────────────
   /** Create a new adapter instance configuration; returns its summary. */
   createInstance(input: PluginAdapterInstanceInput): Promise<PluginAdapterInstanceInfo>
-  /** Patch a configured instance (whitelisted fields only). */
+  /**
+   * Patch a configured instance (whitelisted fields only). A
+   * `defaultEscalation` whose urgent steps name a user id or target
+   * conversation the stored policy does not is refused (throws, `code:
+   * "connector_escalation_reach"`): those steps are a person's grant to
+   * notify those people (ADR-0239). `createInstance` refuses any.
+   */
   updateInstance(id: string, patch: PluginAdapterInstancePatch): Promise<void>
   /** Enable or disable a configured instance. */
   setInstanceEnabled(id: string, enabled: boolean): Promise<void>

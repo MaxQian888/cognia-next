@@ -58,6 +58,7 @@ import {
   getConnectorDeliveryGateway,
 } from "@/lib/connectors/delivery-gateway"
 import { pluginDestination, PluginDestinationError } from "@/lib/connectors/plugin-destination"
+import { assertNoAddedUrgentReach } from "@/lib/connectors/escalation/policy"
 import { createA2UIBuilder } from "@/lib/connectors/a2ui-bridge/surface-builder"
 import {
   createAdapterInstance,
@@ -289,8 +290,21 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     pinMessage: (adapterId, conversationKey, messageId) =>
       getBus().pinOutbound(adapterId, conversationKey, messageId),
     unpinMessage: (adapterId, messageId) => getBus().unpinOutbound(adapterId, messageId),
-    sendUrgent: (adapterId, messageId, userIds, via) =>
-      getBus().sendUrgentOutbound(adapterId, messageId, userIds, via),
+    // Planned as an immediate delivery to the people it notifies (ADR-0239).
+    sendUrgent: (adapterId, messageId, userIds, via, opts) =>
+      getConnectorDeliveryGateway().urgent({
+        adapterId,
+        messageId,
+        userIds,
+        ...(via ? { via } : {}),
+        source: "plugin",
+        authorization: {
+          kind: "plugin",
+          pluginId,
+          ...(opts?.botRunId ? { botRunId: opts.botRunId } : {}),
+        },
+        auditFields: { pluginId },
+      }),
     getReadReceipt: (adapterId, messageId) => getBus().getReadReceiptOutbound(adapterId, messageId),
     setTyping: (adapterId, conversationKey, on) =>
       getBus().setTypingOutbound(adapterId, conversationKey, on),
@@ -336,8 +350,25 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
     newIdempotencyKey: () => newIdempotencyKey(),
 
     // ── instance management ──────────────────────────────────────────────────
-    createInstance: async (input) => toInstanceInfo(await createAdapterInstance(input)),
-    updateInstance: (id, patch) => updateAdapterInstance(id, patch),
+    // A stored escalation policy's urgent steps are a person's grant to notify
+    // those people (ADR-0239): a plugin may keep or drop them, never add one.
+    createInstance: async (input) => {
+      assertNoAddedUrgentReach(undefined, input.defaultEscalation)
+      return toInstanceInfo(await createAdapterInstance(input))
+    },
+    updateInstance: async (id, patch) => {
+      // Dexie's `update` takes key paths (`"defaultEscalation.steps"`), which
+      // would write a field past the checks on it: a plugin patches whole fields.
+      const path = Object.keys(patch).find((key) => key.includes("."))
+      if (path) {
+        throw new TypeError(`updateInstance: "${path}" is a key path; patch whole fields instead`)
+      }
+      if ("defaultEscalation" in patch) {
+        const stored = await getAdapterInstance(id)
+        assertNoAddedUrgentReach(stored?.defaultEscalation, patch.defaultEscalation)
+      }
+      await updateAdapterInstance(id, patch)
+    },
     setInstanceEnabled: (id, enabled) => updateAdapterInstance(id, { enabled }),
     deleteInstance: async (id) => {
       // Resolve the row so the keyring purge knows which accounts to drop;

@@ -17,12 +17,11 @@
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance as getAdapterInstanceDb } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
-import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { appendAudit as appendAuditDefault } from "@/lib/connectors/audit"
 import { parseConversationKey } from "@/types/connectors/event"
-import type { EscalationPolicy } from "@/types/connectors/escalation"
 import { loggers } from "@cognia/logging"
-import { dueSteps, overdueMinutesAt } from "./policy"
+import { dueSteps, overdueMinutesAt, resolveEscalationPolicy } from "./policy"
 import { runEscalationAction as runEscalationActionDefault } from "./actions"
 
 export interface SweepSlaEscalationsDeps {
@@ -45,16 +44,7 @@ export interface SweepSlaEscalationsResult {
   errors: number
 }
 
-/** Resolve the policy for a row + adapter, and where it came from. */
-export function resolveEscalationPolicy(
-  row: Pick<ConversationOverrideRow, "escalation">,
-  adapter: Pick<AdapterInstanceRow, "defaultEscalation"> | undefined
-): { policy: EscalationPolicy | undefined; source: "override" | "adapter-default" | "none" } {
-  if (row.escalation) return { policy: row.escalation, source: "override" }
-  if (adapter?.defaultEscalation)
-    return { policy: adapter.defaultEscalation, source: "adapter-default" }
-  return { policy: undefined, source: "none" }
-}
+export { resolveEscalationPolicy }
 
 export async function sweepSlaEscalations(
   deps: SweepSlaEscalationsDeps = {}

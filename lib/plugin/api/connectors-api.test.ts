@@ -652,7 +652,7 @@ describe("createConnectorsAPI", () => {
       expect(deleteOutbound).toHaveBeenCalledWith("tg", "pm_1")
     })
 
-    it("reaction / forward / pin / unpin / urgent forward to the bus", async () => {
+    it("reaction / forward / pin / unpin / urgent reach the bus", async () => {
       const api = createConnectorsAPI(PLUGIN)
       expect((await api.addReaction("tg", "pm_1", "OK")).reactionId).toBe("rx_1")
       expect(addReactionOutbound).toHaveBeenCalledWith("tg", "pm_1", "OK")
@@ -714,6 +714,45 @@ describe("createConnectorsAPI", () => {
         api.forwardMessage("tg", { messageId: "pm_1", target: "c2" })
       ).resolves.toMatchObject({ ok: false })
       expect(forwardOutbound).not.toHaveBeenCalled()
+      spy.mockRestore()
+    })
+
+    it("plans an urgent push as a delivery to the people it notifies (ADR-0239)", async () => {
+      const { getConnectorDeliveryGateway } = await import("@/lib/connectors/delivery-gateway")
+      const spy = jest.spyOn(getConnectorDeliveryGateway(), "urgent")
+      const api = createConnectorsAPI(PLUGIN)
+      await api.sendUrgent("lk", "om_1", ["ou_a", "ou_b"], "phone", { botRunId: "run-1" })
+      await api.sendUrgent("lk", "om_1", ["ou_a"])
+      expect(spy.mock.calls.map(([input]) => input)).toEqual([
+        {
+          adapterId: "lk",
+          messageId: "om_1",
+          userIds: ["ou_a", "ou_b"],
+          via: "phone",
+          source: "plugin",
+          authorization: { kind: "plugin", pluginId: PLUGIN, botRunId: "run-1" },
+          auditFields: { pluginId: PLUGIN },
+        },
+        {
+          adapterId: "lk",
+          messageId: "om_1",
+          userIds: ["ou_a"],
+          source: "plugin",
+          authorization: { kind: "plugin", pluginId: PLUGIN },
+          auditFields: { pluginId: PLUGIN },
+        },
+      ])
+
+      spy.mockResolvedValueOnce({
+        ok: false,
+        error: { code: "connector_delivery_denied", message: "refused", retryable: false },
+      })
+      sendUrgentOutbound.mockClear()
+      await expect(api.sendUrgent("lk", "om_1", ["ou_c"])).resolves.toMatchObject({
+        ok: false,
+        error: { code: "connector_delivery_denied" },
+      })
+      expect(sendUrgentOutbound).not.toHaveBeenCalled()
       spy.mockRestore()
     })
 
@@ -785,6 +824,68 @@ describe("createConnectorsAPI", () => {
       expect(updateAdapterInstance).toHaveBeenCalledWith("cai_1", {
         displayName: "Renamed",
         muted: true,
+      })
+    })
+
+    it("refuses an escalation policy whose urgent steps reach anyone new (ADR-0239)", async () => {
+      const urgent = (userIds: string[], targetConversationKey?: string) => ({
+        steps: [
+          {
+            afterOverdueMinutes: 5,
+            actions: [
+              {
+                type: "urgent" as const,
+                userIds,
+                ...(targetConversationKey ? { targetConversationKey } : {}),
+              },
+            ],
+          },
+        ],
+      })
+      const api = createConnectorsAPI(PLUGIN)
+      createAdapterInstance.mockClear()
+      await expect(
+        api.createInstance({
+          type: "lark",
+          displayName: "New",
+          defaultEscalation: urgent(["ou_a"]),
+        } as never)
+      ).rejects.toMatchObject({ code: "connector_escalation_reach" })
+      expect(createAdapterInstance).not.toHaveBeenCalled()
+
+      getAdapterInstance.mockResolvedValueOnce({
+        ...INSTANCE_ROW,
+        defaultEscalation: urgent(["ou_a", "ou_b"]),
+      } as never)
+      updateAdapterInstance.mockClear()
+      await expect(
+        api.updateInstance("cai_1", {
+          defaultEscalation: urgent(["ou_a"], "lark:cai_1:oc_ops"),
+        })
+      ).rejects.toMatchObject({
+        code: "connector_escalation_reach",
+        added: { userIds: [], conversationKeys: ["lark:cai_1:oc_ops"] },
+      })
+      expect(updateAdapterInstance).not.toHaveBeenCalled()
+
+      // A key path would write into the policy past the check (Dexie `update`).
+      updateAdapterInstance.mockClear()
+      await expect(
+        api.updateInstance("cai_1", { "defaultEscalation.steps": urgent(["ou_z"]).steps } as never)
+      ).rejects.toThrow('"defaultEscalation.steps" is a key path')
+      await expect(
+        api.updateInstance("cai_1", { "outboundRecipients.0": {} } as never)
+      ).rejects.toThrow("key path")
+      expect(updateAdapterInstance).not.toHaveBeenCalled()
+
+      // Dropping what a person configured, or keeping it, is the plugin's to do.
+      getAdapterInstance.mockResolvedValueOnce({
+        ...INSTANCE_ROW,
+        defaultEscalation: urgent(["ou_a", "ou_b"]),
+      } as never)
+      await api.updateInstance("cai_1", { defaultEscalation: urgent(["ou_b"]) })
+      expect(updateAdapterInstance).toHaveBeenCalledWith("cai_1", {
+        defaultEscalation: urgent(["ou_b"]),
       })
     })
 

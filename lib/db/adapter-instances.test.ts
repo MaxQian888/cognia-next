@@ -377,6 +377,11 @@ describe("the recipient list (ADR-0239)", () => {
     expect(created).not.toHaveProperty("outboundRecipients")
     await setAdapterOutboundRecipients(created.id, [grant(created.id)])
     await updateAdapterInstance(created.id, { outboundRecipients: [] } as never)
+    // Nor by a key path into it, which Dexie's `update` would apply.
+    await updateAdapterInstance(created.id, {
+      "outboundRecipients.0": grant("x"),
+      displayName: "Renamed",
+    } as never)
     await updateAdapterConfigSection(created.id, "trigger", {
       muted: true,
       outboundRecipients: [],
@@ -384,6 +389,7 @@ describe("the recipient list (ADR-0239)", () => {
     const stored = await getAdapterInstance(created.id)
     expect(stored?.outboundRecipients).toEqual([grant(created.id)])
     expect(stored?.muted).toBe(true)
+    expect(stored?.displayName).toBe("Renamed")
   })
 
   it("reaches the Host from a paired shell", async () => {
