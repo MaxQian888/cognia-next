@@ -616,6 +616,97 @@ describe("HostStateService", () => {
     await service.stop()
   })
 
+  it("queues the first message even when its title's broadcast fails", async () => {
+    await getDb().sessions.update("session-1", { title: "New conversation" })
+    let failRename = true
+    const publish = jest.fn(async (_topic: string, event: unknown) => {
+      const mutation = (event as { mutation?: { kind: string } }).mutation
+      if (failRename && mutation?.kind === "session.renamed") throw new Error("carrier offline")
+    })
+    const dispatchRuntime = jest.fn(async () => ({ correlationId: "turn-1" }))
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime,
+      publish,
+    })
+    await service.start({ now: 0, heartbeat: false })
+    const response = await service.submit(
+      {
+        ...scope,
+        actions: [
+          action({
+            kind: "message.enqueue",
+            messageId: "m1",
+            text: "Hello there",
+            attachments: [],
+          }),
+        ],
+      },
+      owner
+    )
+    expect(response.results).toEqual([
+      expect.objectContaining({ actionId: "action-1", outcome: "applied" }),
+    ])
+    expect(dispatchRuntime).toHaveBeenCalledTimes(1)
+    const state = (await service.snapshot({ ...scope, channel })).state as {
+      title: string
+      queue: { messageId: string }[]
+    }
+    expect(state.title).toBe("Hello there")
+    expect(JSON.stringify(state)).toContain('"m1"')
+    // The title waits for the sweep, and goes out with it.
+    expect((await service.status()).pendingBroadcast).toBeGreaterThan(0)
+    failRename = false
+    await service.recover()
+    expect((await service.status()).pendingBroadcast).toBe(0)
+    await service.stop()
+  })
+
+  it("queues the first message at a revision past its rename's", async () => {
+    await getDb().sessions.update("session-1", { title: "New conversation" })
+    const publish = jest.fn(async (_topic: string, _event: unknown) => undefined)
+    const service = createHostStateService({
+      ...scope,
+      hostId,
+      ownerId: "brain-a",
+      now: () => 100,
+      dispatchRuntime: jest.fn(async () => ({ correlationId: "turn-1" })),
+      publish,
+    })
+    await service.start({ now: 0, heartbeat: false })
+    await service.submit(
+      {
+        ...scope,
+        actions: [
+          action({
+            kind: "message.enqueue",
+            messageId: "m1",
+            text: "Hello there",
+            attachments: [],
+          }),
+        ],
+      },
+      owner
+    )
+    const revisionOf = (kind: string) =>
+      publish.mock.calls
+        .map(
+          ([, event]) =>
+            event as { channel: string; mutation?: { kind: string; revision?: number } }
+        )
+        .find((event) => event.channel === channel && event.mutation?.kind === kind)?.mutation
+        ?.revision
+    const renamed = revisionOf("session.renamed")
+    expect(renamed).toBeDefined()
+    // Built from the renamed state: a client holding the rename's revision
+    // cannot pass a stale draft over the message that cleared it.
+    expect(revisionOf("message.queued")).toBe(renamed! + 1)
+    await service.stop()
+  })
+
   it("leaves a conversation's chosen title alone when its first message is queued", async () => {
     const service = createHostStateService({
       ...scope,

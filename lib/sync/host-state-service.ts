@@ -1505,8 +1505,20 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
                 partition: options.authorization === "person-partition",
               })
             : undefined
-        if (action.action.kind === "message.enqueue" && decision.mutation) {
-          await nameFromFirstMessage(action)
+        // Renamed first, so no confirmed state carries the message under the
+        // placeholder. The rename moved the channel's revision, so the queued
+        // message is built again from the state it now lands on: built from
+        // the snapshot above it would repeat the rename's revision.
+        if (
+          action.action.kind === "message.enqueue" &&
+          decision.mutation &&
+          (await nameFromFirstMessage(action))
+        ) {
+          decision = mutationForAction(
+            (await getHostStateSnapshot(action.channel)).state,
+            action,
+            now()
+          )
         }
         // The workspace the conversation is leaving, read before the commit
         // rewrites the row, for the roster relink below.
@@ -1631,11 +1643,15 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
    *
    * Read inside the commit, so a rename that landed meanwhile wins. Its id is
    * the message's action id, so a redelivered send names nothing twice.
+   *
+   * The title is never worth the message: once the rename is committed, a
+   * failed broadcast leaves its row for the sweep, as a committed action's
+   * does, and the message is still queued. True when this call renamed.
    */
-  async function nameFromFirstMessage(action: HostStateAction): Promise<void> {
-    if (generation === null || action.action.kind !== "message.enqueue") return
+  async function nameFromFirstMessage(action: HostStateAction): Promise<boolean> {
+    if (generation === null || action.action.kind !== "message.enqueue") return false
     const title = instantSessionTitle(action.action.text)
-    if (!title) return
+    if (!title) return false
     const envelopeId = `instant-title:${action.actionId}`
     const committed = await commitHostStateRuntimeProjection({
       hostId: options.hostId,
@@ -1650,9 +1666,17 @@ export function createHostStateService(options: HostStateServiceOptions): HostSt
           : null,
       now: now(),
     })
-    if (!committed.event || committed.duplicate) return
+    if (!committed.event || committed.duplicate) return false
     const row = await getHostStateAction(generation, `runtime:${envelopeId}`)
-    if (row) await processRow(row)
+    try {
+      if (row) await processRow(row)
+    } catch (error) {
+      loggers.sync.warn("[host-state] first-message title left for the sweep", {
+        actionId: action.actionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    return true
   }
 
   /**

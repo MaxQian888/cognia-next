@@ -566,6 +566,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
     - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):**
       - The persons smoke is green with the new check.
       - In the browser, Ada's new conversation went from "New conversation" to its first message's title and kept it, header and sidebar both. The transcript did not remount after the title change: the only swap is the welcome screen giving way to the chat on send.
+    - **Review fix (2026-10-26, Codex review of items 13–17):** the rename's broadcast ran unguarded before the message commit, so a broadcast failure failed the submit and lost the first message (the rename was durable, the message never written). The message's mutation was also built from the snapshot read before the rename, so it repeated the rename's revision and a client holding that revision could pass a stale `draft.replace`. Now a failed title broadcast is left for the sweep, and the message is rebuilt from the renamed state. Pinned by two tests in `host-state-service.test.ts`. The same review found no duplicated implementation in items 13–17.
     - **Known gaps:** the browser does not generate a model-written title for a HostState conversation; it keeps the 40-character preview. One smoke run in two missed the agent reply's settled live frame on a turn that finished in about a second; the rerun was green.
 
 16. **Member model menu names models (P6 follow-up, 2026-10-26).**
