@@ -3,6 +3,8 @@ import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import {
   DELIVERED_LEDGER_NAMESPACE,
+  LANDED_CHAT_LEDGER_NAMESPACE,
+  landedChatsOf,
   recordDeliveredMessage,
   wasDeliveredByUs,
 } from "./delivered-messages"
@@ -56,6 +58,29 @@ describe("delivered-messages ledger", () => {
     await expect(wasDeliveredByUs("", "c", "42")).resolves.toBe(false)
     await expect(wasDeliveredByUs("tg-1", "", "42")).resolves.toBe(false)
     await expect(wasDeliveredByUs("tg-1", "c", "")).resolves.toBe(false)
+  })
+
+  it("records the chat a delivery landed in, once per conversation and chat", async () => {
+    const person = "lark:bot-1:ou_person"
+    await recordDeliveredMessage("bot-1", person, "om_1", "oc_dm")
+    await recordDeliveredMessage("bot-1", person, "om_2", "oc_dm")
+    await recordDeliveredMessage("bot-1", "lark:bot-1:oc_group", "om_3", "oc_group")
+    await expect(landedChatsOf("bot-1", person)).resolves.toEqual(["oc_dm"])
+    await expect(landedChatsOf("bot-1", "lark:bot-1:oc_group")).resolves.toEqual(["oc_group"])
+    await expect(landedChatsOf("bot-2", person)).resolves.toEqual([])
+    const landed = await getDb()
+      .inboundLedger.where("namespace")
+      .equals(LANDED_CHAT_LEDGER_NAMESPACE)
+      .count()
+    expect(landed).toBe(2)
+    await expect(wasDeliveredByUs("bot-1", person, "om_2")).resolves.toBe(true)
+  })
+
+  it("records a landed chat without a message id, and nothing for an empty conversation", async () => {
+    await recordDeliveredMessage("bot-1", "lark:bot-1:ou_p", "", "oc_dm")
+    await expect(landedChatsOf("bot-1", "lark:bot-1:ou_p")).resolves.toEqual(["oc_dm"])
+    expect(await getDb().inboundLedger.count()).toBe(1)
+    await expect(landedChatsOf("bot-1", "")).resolves.toEqual([])
   })
 
   it("swallows storage failures on both paths", async () => {

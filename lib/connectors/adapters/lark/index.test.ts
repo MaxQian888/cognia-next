@@ -1496,9 +1496,10 @@ describe("createLarkAdapter", () => {
     const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "ou_person" }
     await expect(adapter.messageRoute!("om_mine", "reply", ref)).resolves.toBe("within")
     expect(httpCallTo("/im/v1/chats/oc_dm")?.req.method).toBe("GET")
-    // The person's single chat, but not the person's message: the bot's own
-    // messages there are placed by the host's delivery records.
-    await expect(adapter.messageRoute!("om_other", "reply", ref)).resolves.toBe("unknown")
+    // Another person's message is in their single chat with the bot.
+    await expect(adapter.messageRoute!("om_other", "reply", ref)).resolves.toBe("elsewhere")
+    // The bot's own message, in a single chat nobody wrote in: whose it is
+    // cannot be read from the chat.
     await expect(adapter.messageRoute!("om_bot", "edit", ref)).resolves.toBe("unknown")
     await expect(adapter.messageRoute!("om_group", "reply", ref)).resolves.toBe("elsewhere")
     await expect(adapter.messageRoute!("om_nomode", "reply", ref)).resolves.toBe("unknown")
@@ -1512,6 +1513,159 @@ describe("createLarkAdapter", () => {
     const before = modeLookups()
     await expect(adapter.messageRoute!("om_mine", "edit", ref)).resolves.toBe("within")
     expect(modeLookups()).toBe(before)
+  })
+
+  describe("messageRoute() for the bot's own message in a single chat (ADR-0239)", () => {
+    const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "ou_person" }
+    /** `om_bot` is the bot's, in `oc_dm` (p2p); the chat's history holds `writers`. */
+    function mockDm(writers: Array<string | undefined>, chatMode = "p2p") {
+      mockHttp((url) => {
+        if (url.includes("/im/v1/chats/")) return { code: 0, data: { chat_mode: chatMode } }
+        if (url.includes("container_id=")) {
+          const page = url.includes("page_token=") ? Number(/page_token=p(\d+)/.exec(url)![1]) : 0
+          const writer = writers[page]
+          return {
+            code: 0,
+            data: {
+              items: [
+                { sender: { id: "cli_app", id_type: "app_id", sender_type: "app" } },
+                ...(writer
+                  ? [{ sender: { id: writer, id_type: "open_id", sender_type: "user" } }]
+                  : []),
+              ],
+              has_more: page + 1 < writers.length,
+              ...(page + 1 < writers.length ? { page_token: `p${page + 1}` } : {}),
+            },
+          }
+        }
+        return {
+          code: 0,
+          data: {
+            items: [
+              {
+                message_id: "om_bot",
+                chat_id: "oc_dm",
+                sender: { id: "cli_app", id_type: "app_id", sender_type: "app" },
+              },
+            ],
+          },
+        }
+      })
+    }
+
+    it("places it in a chat the host's sends to the person landed in, without more lookups", async () => {
+      mockDm([])
+      await expect(
+        makeAdapter().messageRoute!("om_bot", "edit", ref, { landedChatIds: ["oc_dm"] })
+      ).resolves.toBe("within")
+      expect(httpCallTo("/im/v1/chats/")).toBeUndefined()
+      expect(httpCallTo("container_id=")).toBeUndefined()
+    })
+
+    it("places it elsewhere when the person's single chat is known to be another", async () => {
+      mockDm(["ou_person"])
+      await expect(
+        makeAdapter().messageRoute!("om_bot", "edit", ref, { landedChatIds: ["oc_their_dm"] })
+      ).resolves.toBe("elsewhere")
+      expect(httpCallTo("container_id=")).toBeUndefined()
+    })
+
+    it("still places a group message elsewhere whatever landed", async () => {
+      mockDm([], "group")
+      await expect(
+        makeAdapter().messageRoute!("om_bot", "reply", ref, { landedChatIds: ["oc_their_dm"] })
+      ).resolves.toBe("elsewhere")
+    })
+
+    it("reads the chat's person from who wrote there", async () => {
+      mockDm([undefined, undefined, "ou_person"])
+      const adapter = makeAdapter()
+      await expect(adapter.messageRoute!("om_bot", "reply", ref)).resolves.toBe("within")
+      const history = () =>
+        mockInvoke.mock.calls.filter(
+          ([cmd, args]: [string, unknown]) =>
+            cmd === "connectors_http_request" &&
+            (args as { req: { url: string } }).req.url.includes("container_id=oc_dm")
+        )
+      expect(history()).toHaveLength(3)
+      expect((history()[0][1] as { req: { url: string } }).req.url).toContain(
+        "sort_type=ByCreateTimeDesc"
+      )
+      // The chat's person is cached.
+      await expect(adapter.messageRoute!("om_bot", "edit", ref)).resolves.toBe("within")
+      expect(history()).toHaveLength(3)
+    })
+
+    it("places it elsewhere when another person wrote there, and cannot tell when nobody did", async () => {
+      mockDm(["ou_someone"])
+      await expect(makeAdapter().messageRoute!("om_bot", "reply", ref)).resolves.toBe("elsewhere")
+      mockDm([undefined, undefined, undefined, undefined, undefined, "ou_person"])
+      // Five pages read; the person wrote only further back.
+      await expect(makeAdapter().messageRoute!("om_bot", "reply", ref)).resolves.toBe("unknown")
+    })
+  })
+
+  it("send() reports the chat a new message to a person landed in", async () => {
+    mockHttp((url) =>
+      url.includes("receive_id_type=")
+        ? { code: 0, data: { message_id: "om_new", chat_id: "oc_dm" } }
+        : { code: 0, data: { message_id: "om_reply", chat_id: "oc_dm" } }
+    )
+    const adapter = makeAdapter()
+    const conversationRef = {
+      platform: "lark" as const,
+      adapterId: "lark-1",
+      channelId: "ou_person",
+    }
+    await expect(
+      adapter.send({
+        conversationRef,
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "k-landed" },
+      })
+    ).resolves.toMatchObject({ ok: true, platformMessageId: "om_new", platformChatId: "oc_dm" })
+    // A reply lands in its parent's chat: it says nothing of the receive id.
+    const reply = await adapter.send({
+      conversationRef,
+      segments: [{ type: "text", text: "re" }],
+      replyTo: { messageId: "om_parent" },
+      metadata: { idempotencyKey: "k-landed-reply" },
+    })
+    expect(reply.ok).toBe(true)
+    expect(reply).not.toHaveProperty("platformChatId")
+  })
+
+  it("send() does not report the chat of a message sent as the connected person", async () => {
+    const adapter = createLarkAdapter({
+      id: "lark-landed-user",
+      displayName: "As-User Bot",
+      appId: async () => "cli_landed_user",
+      appSecret: async () => "secret",
+      verificationToken: async () => "token",
+      selfBotOpenId: "ou_bot",
+      sendAsUser: true,
+      transport: "long-connection",
+    })
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "connectors_keyring_get") {
+        return (args as { credential: string }).credential === "user_token" ? "u-landed" : null
+      }
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req: { url: string } }).req.url
+      if (url.includes("tenant_access_token")) return makeTatOkResp("t-x")
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ code: 0, data: { message_id: "om_u", chat_id: "oc_user_dm" } }),
+      }
+    })
+    const result = await adapter.send({
+      conversationRef: { platform: "lark", adapterId: "lark-landed-user", channelId: "ou_person" },
+      segments: [{ type: "text", text: "hi" }],
+      metadata: { idempotencyKey: "k-landed-user" },
+    })
+    expect(result.ok).toBe(true)
+    expect(result).not.toHaveProperty("platformChatId")
   })
 
   it("messageRoute() cannot compare any other reference", async () => {
@@ -1612,6 +1766,37 @@ describe("createLarkAdapter", () => {
         expect(personCalls(`u-${botCode}`)).toBe(1)
       }
     )
+
+    it("does not take a person's message read as the connected person for the bot's single chat", async () => {
+      const id = "lark-hidden-dm"
+      mockLookups({
+        botCode: 230027,
+        userToken: "u-dm",
+        asPerson: {
+          status: 200,
+          body: {
+            code: 0,
+            data: {
+              items: [
+                {
+                  message_id: "om_1",
+                  chat_id: "oc_user_dm",
+                  sender: { id: "ou_person", id_type: "open_id", sender_type: "user" },
+                },
+              ],
+            },
+          },
+        },
+      })
+      const adapter = adapterAs(id)
+      const person = { platform: "lark" as const, adapterId: id, channelId: "ou_person" }
+      // The connected person's own single chat with that person, not the bot's.
+      await expect(adapter.messageRoute!("om_1", "reply", person)).resolves.toBe("unknown")
+      // A chat id is the same whoever reads it: a landed chat still places it.
+      await expect(
+        adapter.messageRoute!("om_1", "reply", person, { landedChatIds: ["oc_user_dm"] })
+      ).resolves.toBe("within")
+    })
 
     it("cannot place it without a connected person, or when the person cannot read it either", async () => {
       mockLookups({ botCode: 230027 })

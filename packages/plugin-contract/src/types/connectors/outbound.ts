@@ -111,6 +111,13 @@ export interface SegmentDowngrade {
 export interface OutboundResult {
   ok: boolean
   platformMessageId?: string
+  /**
+   * The platform's id of the chat a send landed in, when the platform reports
+   * one. Lark returns the single chat (`oc_…`) of a message addressed to a
+   * person by open id; the host records it so a later reply to or edit of a
+   * message in that chat can be placed in the conversation (ADR-0239).
+   */
+  platformChatId?: string
   error?: OutboundError
   downgrades?: SegmentDowngrade[]
 }

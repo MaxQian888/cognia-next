@@ -194,6 +194,17 @@ export interface ReadReceipt {
 /** What {@link PlatformAdapter.messageRoute} answers. */
 export type MessageRoute = "within" | "elsewhere" | "unknown"
 
+/** What the host knows of a conversation when it asks {@link PlatformAdapter.messageRoute}. */
+export interface MessageRouteEvidence {
+  /**
+   * Platform chat ids the host's own deliveries through this conversation
+   * landed in, as the adapter reported them ({@link OutboundResult.platformChatId}).
+   * A reference that names a person rather than a chat (a Lark open id) has
+   * its chat known only this way.
+   */
+  landedChatIds: readonly string[]
+}
+
 /** Urgent (加急) escalation channel for {@link PlatformAdapter.sendUrgent}. */
 export type UrgentChannel = "app" | "sms" | "phone"
 
@@ -268,11 +279,13 @@ export interface PlatformAdapter {
    * the delivery in the reference's chat whatever the id says. Throw when
    * the platform cannot be asked now (a network error, a rate limit): a
    * queued delivery is then placed again just before it is sent.
+   * `evidence` carries what the host recorded of the conversation.
    */
   messageRoute?(
     messageId: string,
     use: "reply" | "edit",
-    conversationRef: ConversationReference
+    conversationRef: ConversationReference,
+    evidence?: MessageRouteEvidence
   ): Promise<MessageRoute>
   /** Delete a recipient-only Lark card through its distinct ephemeral lifecycle. */
   deleteEphemeralCard?(messageId: string): Promise<void>

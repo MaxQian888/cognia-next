@@ -342,6 +342,7 @@ jest.mock("@/lib/db/inbound-ledger", () => ({
 }))
 jest.mock("@/lib/connectors/delivered-messages", () => ({
   wasDeliveredByUs: async () => false,
+  landedChatsOf: async () => [],
 }))
 
 const PLUGIN = "conn-plugin"

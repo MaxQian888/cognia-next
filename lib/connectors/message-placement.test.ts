@@ -5,6 +5,7 @@ jest.mock("@/lib/db/inbound-ledger", () => ({
 const wasDeliveredByUs = jest.fn(async (..._a: unknown[]) => false)
 jest.mock("./delivered-messages", () => ({
   wasDeliveredByUs: (...a: unknown[]) => wasDeliveredByUs(...a),
+  landedChatsOf: async () => [],
 }))
 let storedRows: Array<{ platformMessageId: string; metadata?: unknown }> = []
 jest.mock("@/lib/db/schema", () => ({
@@ -106,11 +107,25 @@ describe("placeMessage (ADR-0239)", () => {
     messageRoute.mockResolvedValueOnce("within")
     await expect(placeMessage(input("om_a", "edit"), { getAdapter })).resolves.toBe("within")
     expect(getAdapter).toHaveBeenCalledWith("bot-a")
-    expect(messageRoute).toHaveBeenCalledWith("om_a", "edit", REF)
+    expect(messageRoute).toHaveBeenCalledWith("om_a", "edit", REF, { landedChatIds: [] })
     messageRoute.mockResolvedValueOnce("elsewhere")
     await expect(placeMessage(input("om_b"), { getAdapter })).resolves.toBe("elsewhere")
     messageRoute.mockResolvedValueOnce("unknown")
     await expect(placeMessage(input("om_c"), { getAdapter })).resolves.toBe("unknown")
+  })
+
+  it("tells the adapter which chats the conversation's deliveries landed in", async () => {
+    messageRoute.mockResolvedValue("within")
+    const landed = jest.fn(async () => ["oc_dm"])
+    await placeMessage(input("om_l"), { getAdapter, landed })
+    expect(landed).toHaveBeenCalledWith("bot-a", KEY)
+    expect(messageRoute).toHaveBeenCalledWith("om_l", "reply", REF, { landedChatIds: ["oc_dm"] })
+    messageRoute.mockClear()
+    await placeMessage(input("om_m"), {
+      getAdapter,
+      landed: async () => Promise.reject(new Error("db")),
+    })
+    expect(messageRoute).toHaveBeenCalledWith("om_m", "reply", REF, { landedChatIds: [] })
   })
 
   it("cannot tell now when the bot is not running, or the platform cannot be asked", async () => {

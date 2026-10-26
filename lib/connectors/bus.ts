@@ -2054,8 +2054,13 @@ export class ConnectorBus {
       // Direct-wire sends bypass the outbound runner, so record the delivered
       // id here for the exact `reply-to-bot` rule (best-effort, never throws).
       const directTargetKey = req.deliveryTarget?.address.conversationKey
-      if (result.ok && result.platformMessageId && directTargetKey) {
-        await recordDeliveredMessage(adapterId, directTargetKey, result.platformMessageId)
+      if (result.ok && (result.platformMessageId || result.platformChatId) && directTargetKey) {
+        await recordDeliveredMessage(
+          adapterId,
+          directTargetKey,
+          result.platformMessageId ?? "",
+          result.platformChatId
+        )
       }
       return result
     } catch (error) {

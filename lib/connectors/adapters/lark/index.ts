@@ -22,6 +22,7 @@ import type {
   UrgentChannel,
   HistoryPage,
   MessageRoute,
+  MessageRouteEvidence,
   PlatformHistoryCursor,
 } from "@/types/connectors/adapter"
 import { createLarkRunPresentationDriver } from "@/lib/connectors/run-presentation/lark-driver"
@@ -823,6 +824,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     const hasTemplate = req.segments.some(
       (segment) => segment.type === "card" && isLarkResultTemplatePayload(segment.card.payload)
     )
+    let botCreated = false
     const attempt = async (useFallback: boolean) => {
       const segments = req.segments.map((segment) => {
         if (segment.type !== "card" || !isLarkResultTemplatePayload(segment.card.payload))
@@ -853,17 +855,30 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // Replies are the identity-bearing path — send as the connected user when
       // opted in. Edits / deletes / reactions stay on the bot identity (they act
       // on bot-owned messages such as live-activity / progress cards).
-      return (await doRequest(call.method, urlPath, call.payload, {
-        asUser: !editMessageId && opts.sendAsUser === true,
-      })) as { data?: { message_id?: string } } | null
+      const asUser = !editMessageId && opts.sendAsUser === true
+      // Only a new message the bot sent to a receive id lands where that id
+      // points (a person's open id: the bot's single chat with them); a reply
+      // lands in its parent's chat, and a user-sent one in the user's chat.
+      botCreated = !asUser && urlPath.startsWith("/im/v1/messages?receive_id_type=")
+      return (await doRequest(call.method, urlPath, call.payload, { asUser })) as {
+        data?: { message_id?: string; chat_id?: string }
+      } | null
     }
     // Templates render one whole card; mixed A2UI/media replies must keep
     // their surrounding content using the built-in, composable result card.
+    const landedChat = (response: Awaited<ReturnType<typeof attempt>>) =>
+      botCreated && response?.data?.chat_id ? response.data.chat_id : undefined
     if (hasTemplate && req.segments.length > 1) {
-      return { response: await attempt(true), fallbackReason: "lark_result_template_mixed_content" }
+      const response = await attempt(true)
+      return {
+        response,
+        fallbackReason: "lark_result_template_mixed_content",
+        landedChatId: landedChat(response),
+      }
     }
     try {
-      return { response: await attempt(false), fallbackReason: undefined }
+      const response = await attempt(false)
+      return { response, fallbackReason: undefined, landedChatId: landedChat(response) }
     } catch (err) {
       // 230099 confirms card creation was rejected. Never change content
       // after an ambiguous network/5xx result or an auth/rate-limit failure.
@@ -875,7 +890,12 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         err.status === 429
       )
         throw err
-      return { response: await attempt(true), fallbackReason: "lark_result_template_rejected" }
+      const response = await attempt(true)
+      return {
+        response,
+        fallbackReason: "lark_result_template_rejected",
+        landedChatId: landedChat(response),
+      }
     }
   }
 
@@ -904,7 +924,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
             : null
         })
       }
-      const { response: resp, fallbackReason } = await deliverCardRequest(req)
+      const { response: resp, fallbackReason, landedChatId } = await deliverCardRequest(req)
       // Surface the real platform message id so the outbound runner persists
       // it on the job row — downstream consumers (workflow send node output,
       // edit/reaction chains, delivery audit) need the `om_…` id, not the
@@ -922,6 +942,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       return {
         ok: true,
         ...(messageId ? { platformMessageId: messageId } : {}),
+        ...(landedChatId ? { platformChatId: landedChatId } : {}),
         ...(fallbackReason
           ? {
               downgrades: [
@@ -1306,10 +1327,14 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
    *
    * A reference that names a person (`ou_`: a conversation bootstrapped by
    * open id) has no chat id; its messages go to the bot's single chat with
-   * that person. A message there is placed when the person sent it and its
-   * chat is a single chat (`chat_mode: "p2p"`, `GET /im/v1/chats/:id`): a
-   * single chat holds only the bot and that person. One the bot sent there is
-   * placed by the host's own delivery records, not here.
+   * that person, and the bot has one with each. A message is placed there
+   * when its chat is one the host's sends to the person landed in
+   * (`evidence.landedChatIds`, from the send responses' `chat_id`), or when
+   * its chat is a single chat (`chat_mode: "p2p"`, `GET /im/v1/chats/:id`)
+   * whose person is this one: the message's sender, or else whoever wrote in
+   * the chat (its history). Another person's single chat, or a group, is
+   * elsewhere. Those chat checks hold only for what the bot itself read (a
+   * chat it is in), never for a lookup made as the connected person.
    *
    * When Lark will not show the bot the message although the bot may be in
    * its chat (the app lacks `im:message.group_msg`, needed to read a group
@@ -1325,7 +1350,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
    * places the message again before it sends; any other answer is final.
    */
   const LOOKUP_CACHE_LIMIT = 512
-  const messageFacts = new Map<string, { chatId: string; senderOpenId?: string }>()
+  const messageFacts = new Map<
+    string,
+    { chatId: string; senderOpenId?: string; readByBot: boolean }
+  >()
   const chatModes = new Map<string, string>()
   function remember<V>(cache: Map<string, V>, key: string, value: V): V {
     if (cache.size >= LOOKUP_CACHE_LIMIT) {
@@ -1335,16 +1363,26 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     cache.set(key, value)
     return value
   }
-  /** `undefined` when Lark gives a final no; throws when it could not be asked. */
-  async function lookup<T>(path: string, read: (resp: unknown) => T | undefined) {
+  /**
+   * `undefined` when Lark gives a final no; throws when it could not be
+   * asked. `asBot` tells whether the bot read it: only what the bot sees is
+   * a chat the bot is in. `botOnly` never asks as the connected person.
+   */
+  async function lookup<T>(
+    path: string,
+    read: (resp: unknown) => T | undefined,
+    botOnly = false
+  ): Promise<{ value: T; asBot: boolean } | undefined> {
     try {
-      return read(await doRequest("GET", path))
+      const value = read(await doRequest("GET", path))
+      return value === undefined ? undefined : { value, asBot: true }
     } catch (err) {
       if (larkOutboundError(err).retryable) throw err
-      if (!hiddenFromBot(err)) return undefined
+      if (botOnly || !hiddenFromBot(err)) return undefined
       noteHiddenFromBot(err)
     }
-    return lookupAsPerson(path, read)
+    const value = await lookupAsPerson(path, read)
+    return value === undefined ? undefined : { value, asBot: false }
   }
   /** Lark refused the bot a read it might grant the connected person. */
   function hiddenFromBot(err: unknown): err is LarkApiError {
@@ -1397,7 +1435,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   async function messageFactsOf(messageId: string) {
     const cached = messageFacts.get(messageId)
     if (cached) return cached
-    const facts = await lookup(`/im/v1/messages/${encodeURIComponent(messageId)}`, (resp) => {
+    const found = await lookup(`/im/v1/messages/${encodeURIComponent(messageId)}`, (resp) => {
       const item = (
         resp as {
           data?: {
@@ -1417,21 +1455,70 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           : {}),
       }
     })
-    return facts ? remember(messageFacts, messageId, facts) : undefined
+    return found
+      ? remember(messageFacts, messageId, { ...found.value, readByBot: found.asBot })
+      : undefined
   }
   async function chatModeOf(chatId: string) {
     const cached = chatModes.get(chatId)
     if (cached) return cached
-    const mode = await lookup(`/im/v1/chats/${encodeURIComponent(chatId)}`, (resp) => {
-      const value = (resp as { data?: { chat_mode?: unknown } } | null)?.data?.chat_mode
-      return typeof value === "string" && value ? value : undefined
-    })
-    return mode ? remember(chatModes, chatId, mode) : undefined
+    // As the bot only: a single chat the bot reads is one it is in.
+    const mode = await lookup(
+      `/im/v1/chats/${encodeURIComponent(chatId)}`,
+      (resp) => {
+        const value = (resp as { data?: { chat_mode?: unknown } } | null)?.data?.chat_mode
+        return typeof value === "string" && value ? value : undefined
+      },
+      true
+    )
+    return mode ? remember(chatModes, chatId, mode.value) : undefined
+  }
+  /**
+   * The person of a single chat: its only non-bot member, read from who
+   * wrote there (`GET /im/v1/messages`, newest first, a few pages).
+   */
+  const P2P_HISTORY_PAGES = 5
+  const chatPeople = new Map<string, string>()
+  async function p2pPersonOf(chatId: string) {
+    const cached = chatPeople.get(chatId)
+    if (cached) return cached
+    let pageToken: string | undefined
+    for (let page = 0; page < P2P_HISTORY_PAGES; page++) {
+      const cursor = pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : ""
+      const found = await lookup(
+        `/im/v1/messages?container_id_type=chat&container_id=${encodeURIComponent(chatId)}&sort_type=ByCreateTimeDesc&page_size=50${cursor}`,
+        (resp) => {
+          const data = (
+            resp as {
+              data?: {
+                items?: Array<{ sender?: { id?: string; id_type?: string; sender_type?: string } }>
+                has_more?: boolean
+                page_token?: string
+              }
+            } | null
+          )?.data
+          const writer = data?.items?.find(
+            (item) =>
+              item.sender?.sender_type === "user" &&
+              item.sender.id_type === "open_id" &&
+              item.sender.id
+          )?.sender?.id
+          return { writer, next: data?.has_more ? data.page_token : undefined }
+        },
+        // As the bot only: the chat must be one the bot is in.
+        true
+      )
+      if (found?.value.writer) return remember(chatPeople, chatId, found.value.writer)
+      pageToken = found?.value.next
+      if (!pageToken) return undefined
+    }
+    return undefined
   }
   async function messageRoute(
     messageId: string,
     _use: "reply" | "edit",
-    conversationRef: ConversationReference
+    conversationRef: ConversationReference,
+    evidence?: MessageRouteEvidence
   ): Promise<MessageRoute> {
     const refChat = String((conversationRef as Record<string, unknown>)["channelId"] ?? "")
     const person = refChat.startsWith("ou_") ? refChat : undefined
@@ -1439,11 +1526,23 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     const facts = await messageFactsOf(messageId)
     if (!facts) return "unknown"
     if (!person) return facts.chatId === refChat ? "within" : "elsewhere"
+    // The bot's sends to the person landed in their single chat, and the bot
+    // has one single chat with each person.
+    const landed = evidence?.landedChatIds ?? []
+    if (landed.includes(facts.chatId)) return "within"
+    // Read as the connected person, the message may be in the person's own
+    // single chat with someone else: only a chat the bot read is the bot's.
+    if (!facts.readByBot) return "unknown"
     const mode = await chatModeOf(facts.chatId)
     if (!mode) return "unknown"
     // A group or topic chat is never the bot's single chat with the person.
     if (mode !== "p2p") return "elsewhere"
-    return facts.senderOpenId === person ? "within" : "unknown"
+    if (landed.length > 0) return "elsewhere"
+    // A single chat holds the bot and one person: whoever wrote there.
+    if (facts.senderOpenId) return facts.senderOpenId === person ? "within" : "elsewhere"
+    const chatPerson = await p2pPersonOf(facts.chatId)
+    if (!chatPerson) return "unknown"
+    return chatPerson === person ? "within" : "elsewhere"
   }
 
   /**

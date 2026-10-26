@@ -21,9 +21,16 @@
  * plugin's reply to one is then placed by the platform, if it can be.
  */
 
-import { isInboundRecorded, recordInbound } from "@/lib/db/inbound-ledger"
+import { isInboundRecorded, listRecordedIds, recordInbound } from "@/lib/db/inbound-ledger"
 
 export const DELIVERED_LEDGER_NAMESPACE = "outbound" as const
+/**
+ * The platform chats deliveries through a conversation landed in, when the
+ * adapter reports one (`OutboundResult.platformChatId`). A conversation that
+ * names a person (a Lark open id) learns its chat only this way; one row per
+ * conversation and chat, never pruned.
+ */
+export const LANDED_CHAT_LEDGER_NAMESPACE = "landed-chat" as const
 
 /**
  * Record a platform message id we successfully delivered. Idempotent — a
@@ -33,13 +40,32 @@ export const DELIVERED_LEDGER_NAMESPACE = "outbound" as const
 export async function recordDeliveredMessage(
   adapterId: string,
   conversationKey: string,
-  platformMessageId: string
+  platformMessageId: string,
+  platformChatId?: string
 ): Promise<void> {
-  if (!adapterId || !conversationKey || !platformMessageId) return
+  if (!adapterId || !conversationKey) return
   try {
-    await recordInbound(adapterId, platformMessageId, DELIVERED_LEDGER_NAMESPACE, conversationKey)
+    if (platformMessageId) {
+      await recordInbound(adapterId, platformMessageId, DELIVERED_LEDGER_NAMESPACE, conversationKey)
+    }
+    if (platformChatId) {
+      await recordInbound(adapterId, platformChatId, LANDED_CHAT_LEDGER_NAMESPACE, conversationKey)
+    }
   } catch {
     /* best-effort — the delivery already succeeded */
+  }
+}
+
+/**
+ * The platform chats deliveries through `conversationKey` landed in. Never
+ * throws (a Dexie failure reads as none known).
+ */
+export async function landedChatsOf(adapterId: string, conversationKey: string): Promise<string[]> {
+  if (!adapterId || !conversationKey) return []
+  try {
+    return await listRecordedIds(adapterId, LANDED_CHAT_LEDGER_NAMESPACE, conversationKey)
+  } catch {
+    return []
   }
 }
 

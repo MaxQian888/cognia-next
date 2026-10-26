@@ -2,7 +2,7 @@
  * Tests for lib/db/inbound-ledger.ts — dedup ledger for inbound messages.
  */
 
-import { recordInbound, isInboundRecorded, pruneOldest } from "./inbound-ledger"
+import { recordInbound, isInboundRecorded, listRecordedIds, pruneOldest } from "./inbound-ledger"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 
@@ -199,5 +199,41 @@ describe("inbound-ledger", () => {
     const remaining = await getDb().inboundLedger.orderBy("receivedAt").toArray()
     expect(remaining.map((r) => r.platformMessageId)).toEqual(["legacy", "c#d3", "c#d4"])
     expect(await isInboundRecorded("adp_1", "d4", "outbound", "c")).toBe(true)
+  })
+
+  it("pruneOldest never prunes landed-chat rows", async () => {
+    await getDb().inboundLedger.bulkAdd([
+      {
+        id: "adp_1:landed-chat:k#oc_1",
+        adapterId: "adp_1",
+        namespace: "landed-chat" as const,
+        platformMessageId: "k#oc_1",
+        receivedAt: 0,
+      },
+      ...Array.from({ length: 3 }, (_, i) => ({
+        id: `adp_1:inbound:c#m${i}`,
+        adapterId: "adp_1",
+        namespace: "inbound" as const,
+        platformMessageId: `c#m${i}`,
+        receivedAt: 10 + i,
+      })),
+    ])
+    await pruneOldest(1, 1)
+    const remaining = await getDb().inboundLedger.orderBy("receivedAt").toArray()
+    expect(remaining.map((r) => r.platformMessageId)).toEqual(["k#oc_1", "c#m2"])
+  })
+
+  it("listRecordedIds reads one conversation's ids in a namespace", async () => {
+    await recordInbound("adp_1", "oc_a", "landed-chat", "lark:adp_1:ou_x")
+    await recordInbound("adp_1", "oc_b", "landed-chat", "lark:adp_1:ou_x")
+    // A key that only starts with the other one is another conversation.
+    await recordInbound("adp_1", "oc_c", "landed-chat", "lark:adp_1:ou_xy")
+    await recordInbound("adp_1", "oc_d", "outbound", "lark:adp_1:ou_x")
+    await recordInbound("adp_2", "oc_e", "landed-chat", "lark:adp_1:ou_x")
+    await expect(listRecordedIds("adp_1", "landed-chat", "lark:adp_1:ou_x")).resolves.toEqual([
+      "oc_a",
+      "oc_b",
+    ])
+    await expect(listRecordedIds("adp_1", "landed-chat", "")).resolves.toEqual([])
   })
 })

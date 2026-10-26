@@ -12,7 +12,8 @@
  *    than the inbound window);
  * 2. the message the host stored when it received it (`messages`, scoped to
  *    the bot and the chat), which does not age out;
- * 3. the running adapter (`PlatformAdapter.messageRoute`).
+ * 3. the running adapter (`PlatformAdapter.messageRoute`), told which
+ *    platform chats the host's deliveries to the conversation landed in.
  *
  * `"unavailable"` means it cannot be told now: the bot is not running here,
  * or the platform could not be asked (a network error, a rate limit). A
@@ -29,7 +30,7 @@ import { getDb } from "@/lib/db/schema"
 import type { MessageRoute, OutboundRequest, PlatformAdapter } from "@/types/connectors"
 import { parseConversationKey, type ConversationReference } from "@/types/connectors/event"
 
-import { wasDeliveredByUs } from "./delivered-messages"
+import { landedChatsOf, wasDeliveredByUs } from "./delivered-messages"
 
 /** A placement: a route, or `"unavailable"` when it cannot be told now. */
 export type MessagePlacement = MessageRoute | "unavailable"
@@ -59,6 +60,8 @@ export interface MessagePlacementDeps {
   recorded?(adapterId: string, conversationKey: string, messageId: string): Promise<boolean>
   /** Whether the host stored the message as received in this chat. Default: `messages`. */
   stored?(adapterId: string, conversationKey: string, messageId: string): Promise<boolean>
+  /** The platform chats the host's deliveries to this conversation landed in. Default: the ledger. */
+  landed?(adapterId: string, conversationKey: string): Promise<string[]>
 }
 
 /** The messages `request` replies to or edits, in that order. */
@@ -137,8 +140,16 @@ export async function placeMessage(
   }
   if (!adapter) return "unavailable"
   if (!adapter.messageRoute) return "unknown"
+  let landed: string[] = []
   try {
-    return await adapter.messageRoute(messageId, input.use, input.conversationRef)
+    landed = await (deps.landed ?? landedChatsOf)(adapterId, conversationKey)
+  } catch {
+    // None known.
+  }
+  try {
+    return await adapter.messageRoute(messageId, input.use, input.conversationRef, {
+      landedChatIds: landed,
+    })
   } catch {
     // The platform could not be asked now; a definite answer is "unknown".
     return "unavailable"

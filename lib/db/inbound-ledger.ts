@@ -20,8 +20,9 @@
  * old row does not carry (a one-time, bounded double-delivery risk).
  *
  * `pruneOldest` keeps the 10,000 newest windowed rows and, apart from them,
- * the 50,000 newest delivered-message rows (`"outbound"`); the caps are
- * applied on demand (not per-write) so callers can batch-prune.
+ * the 50,000 newest delivered-message rows (`"outbound"`), and never prunes
+ * `"landed-chat"` rows; the caps are applied on demand (not per-write) so
+ * callers can batch-prune.
  */
 
 import type { InboundLedgerNamespace, InboundLedgerRow } from "./connector-types"
@@ -31,6 +32,7 @@ const DEFAULT_CAP = 10_000
 /** Delivered-message rows (`"outbound"`) are capped apart; see {@link pruneOldest}. */
 const DEFAULT_DELIVERED_CAP = 50_000
 const DELIVERED_NAMESPACE: InboundLedgerNamespace = "outbound"
+const LANDED_NAMESPACE: InboundLedgerNamespace = "landed-chat"
 
 /**
  * Compose the conversation-scoped dedup key stored in the row's
@@ -58,6 +60,25 @@ export async function isInboundRecorded(
     .equals([adapterId, namespace, composeDedupId(platformMessageId, conversationKey)])
     .first()
   return existing !== undefined
+}
+
+/**
+ * The ids recorded in `namespace` for `conversationKey` (rows written with
+ * that key), in id order. A range over the compound index, so it reads only
+ * that conversation's rows.
+ */
+export async function listRecordedIds(
+  adapterId: string,
+  namespace: InboundLedgerNamespace,
+  conversationKey: string
+): Promise<string[]> {
+  if (!conversationKey) return []
+  const prefix = composeDedupId("", conversationKey)
+  const rows = await getDb()
+    .inboundLedger.where("[adapterId+namespace+platformMessageId]")
+    .between([adapterId, namespace, prefix], [adapterId, namespace, `${prefix}\uffff`])
+    .toArray()
+  return rows.map((row) => row.platformMessageId.slice(prefix.length))
 }
 
 /**
@@ -140,7 +161,13 @@ export async function pruneOldest(
   const total = await db.inboundLedger.count()
   // Rows without a namespace (pre-v38) are not in the index: they count as windowed.
   const delivered = await db.inboundLedger.where("namespace").equals(DELIVERED_NAMESPACE).count()
-  await dropOldest(total - delivered - cap, (row) => row.namespace !== DELIVERED_NAMESPACE)
+  // One row per conversation and chat a delivery landed in: bounded by the
+  // conversations, and needed for as long as they are.
+  const landed = await db.inboundLedger.where("namespace").equals(LANDED_NAMESPACE).count()
+  await dropOldest(
+    total - delivered - landed - cap,
+    (row) => row.namespace !== DELIVERED_NAMESPACE && row.namespace !== LANDED_NAMESPACE
+  )
   await dropOldest(delivered - deliveredCap, (row) => row.namespace === DELIVERED_NAMESPACE)
 }
 

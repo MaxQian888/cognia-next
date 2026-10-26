@@ -41,7 +41,7 @@ import {
   STALE_SENDING_GRACE_MS,
 } from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
-import { wasDeliveredByUs } from "./delivered-messages"
+import { landedChatsOf, wasDeliveredByUs } from "./delivered-messages"
 import {
   __resetAdapterRuntimeStateForTesting,
   ConversationLane,
@@ -786,6 +786,27 @@ describe("outbound-runner — adapter availability", () => {
   })
 })
 
+describe("outbound-runner — landed chat (ADR-0239)", () => {
+  it("records the chat a delivery landed in when the adapter reports one", async () => {
+    const adapterId = "a_landed"
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: true,
+      platformMessageId: "om_1",
+      platformChatId: "oc_dm",
+    }))
+    await enqueue(adapterId, `lark:${adapterId}:ou_person`)
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    await expect(landedChatsOf(adapterId, `lark:${adapterId}:ou_person`)).resolves.toEqual([
+      "oc_dm",
+    ])
+    await expect(wasDeliveredByUs(adapterId, `lark:${adapterId}:ou_person`, "om_1")).resolves.toBe(
+      true
+    )
+  })
+})
+
 describe("outbound-runner — pending message placement (ADR-0239)", () => {
   async function enqueuePending(adapterId: string) {
     return enqueueOutbound({
@@ -818,11 +839,12 @@ describe("outbound-runner — pending message placement (ADR-0239)", () => {
 
     await runOnce(new Map([[adapterId, adapter]]))
 
-    expect(adapter.messageRoute).toHaveBeenCalledWith("chat:42", "edit", {
-      platform: "telegram",
-      adapterId,
-      channelId: "chat",
-    })
+    expect(adapter.messageRoute).toHaveBeenCalledWith(
+      "chat:42",
+      "edit",
+      { platform: "telegram", adapterId, channelId: "chat" },
+      { landedChatIds: [] }
+    )
     expect(edit).toHaveBeenCalledTimes(1)
     expect((await getDb().outboundQueue.toArray())[0].status).toBe("sent")
   })

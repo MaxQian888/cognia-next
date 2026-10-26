@@ -106,9 +106,11 @@ export interface PlatformIdentityRow extends PlatformIdentity {
 /**
  * `"outbound"` is the delivered-message ledger (`lib/connectors/delivered-messages.ts`):
  * platform ids WE sent, scoped by conversation, consulted by the exact
- * `reply-to-bot` trigger rule.
+ * `reply-to-bot` trigger rule. `"landed-chat"` rows record a platform chat
+ * the host's deliveries through a conversation landed in (same module); they
+ * are never pruned.
  */
-export type InboundLedgerNamespace = "inbound" | "callback" | "welcome" | "outbound"
+export type InboundLedgerNamespace = "inbound" | "callback" | "welcome" | "outbound" | "landed-chat"
 
 export interface InboundLedgerRow {
   /** `${adapterId}:${namespace}:${platformMessageId}` (or legacy form). */
