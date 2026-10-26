@@ -756,13 +756,26 @@ describe("createConnectorsAPI", () => {
       spy.mockRestore()
     })
 
-    it("reports no streaming while messaging is enforced, so the plugin falls back", async () => {
+    it("streams through the gateway, which records it or refuses it (ADR-0239)", async () => {
       const { getConnectorDeliveryGateway } = await import("@/lib/connectors/delivery-gateway")
-      const spy = jest
-        .spyOn(getConnectorDeliveryGateway(), "allowsUnplannedStream")
-        .mockResolvedValueOnce(false)
+      const spy = jest.spyOn(getConnectorDeliveryGateway(), "streamUnplanned")
       const api = createConnectorsAPI(PLUGIN)
       const req = { conversationRef: { conv: "c1" }, text: "partial reply" }
+      expect(await api.streamReply("sl", req as never)).toBe(true)
+      expect(spy).toHaveBeenCalledWith(
+        {
+          adapterId: "sl",
+          conversationRef: { conv: "c1" },
+          source: "plugin",
+          ownerRef: `plugin:${PLUGIN}`,
+          auditFields: { pluginId: PLUGIN },
+        },
+        expect.any(Function)
+      )
+
+      // Under enforcement the gateway does not stream, so the plugin falls back.
+      spy.mockResolvedValueOnce(false)
+      streamReplyOutbound.mockClear()
       expect(await api.streamReply("sl", req as never)).toBe(false)
       expect(streamReplyOutbound).not.toHaveBeenCalled()
       spy.mockRestore()

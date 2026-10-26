@@ -14,6 +14,7 @@ import {
   ConnectorDeliveryPiiError,
   forwardConversationKey,
   queuedJob,
+  UNPLANNED_STREAM_IDLE_MS,
   type ConnectorDeliveryGatewayDependencies,
   type GovernedEnqueueInput,
   type InThreadEnqueueInput,
@@ -85,7 +86,8 @@ function gatewayWith(overrides: Partial<ConnectorDeliveryGatewayDependencies> = 
         }) satisfies ConnectorDraftRow
     ),
     recordReceipt: jest.fn(async () => undefined),
-    messagingMode: async () => "shadow" as const,
+    planStream: jest.fn(async () => ({ stream: true, receipt: receipt("stream-r") })),
+    now: () => 1_000,
     forward: jest.fn(async () => ({ ok: true })),
     sendUrgent: jest.fn(async () => ({ ok: true })),
     ...overrides,
@@ -499,23 +501,97 @@ describe("ConnectorDeliveryGateway.sendNow (ADR-0239)", () => {
   })
 })
 
-describe("ConnectorDeliveryGateway.allowsUnplannedStream (ADR-0239)", () => {
-  it("allows a stream only while messaging is not enforced", async () => {
-    await expect(
-      gatewayWith({ messagingMode: async () => "shadow" }).gateway.allowsUnplannedStream()
-    ).resolves.toBe(true)
-    await expect(
-      gatewayWith({ messagingMode: async () => "enforce" }).gateway.allowsUnplannedStream()
-    ).resolves.toBe(false)
+describe("ConnectorDeliveryGateway.streamUnplanned (ADR-0239)", () => {
+  const frame = (conversationRef: unknown = { chatId: "c1", reqId: "r1" }) => ({
+    adapterId: "bot-a",
+    conversationRef,
+    source: "plugin" as const,
+    ownerRef: "plugin:p1",
+    auditFields: { pluginId: "p1" },
   })
 
-  it("fails closed when the mode cannot be read", async () => {
+  it("does not stream under enforcement, and records nothing", async () => {
+    const stream = jest.fn(async () => true)
+    const { gateway, deps } = gatewayWith({
+      planStream: jest.fn(async () => ({ stream: false })),
+    })
+    await expect(gateway.streamUnplanned(frame(), stream)).resolves.toBe(false)
+    expect(stream).not.toHaveBeenCalled()
+    expect(deps.recordReceipt).not.toHaveBeenCalled()
+    expect(deps.planStream).toHaveBeenCalledWith({
+      adapterId: "bot-a",
+      ownerRef: "plugin:p1",
+      source: "plugin",
+    })
+  })
+
+  it("fails closed when planning fails", async () => {
+    const stream = jest.fn(async () => true)
     const { gateway } = gatewayWith({
-      messagingMode: async () => {
+      planStream: async () => {
         throw new Error("settings unavailable")
       },
     })
-    await expect(gateway.allowsUnplannedStream()).resolves.toBe(false)
+    await expect(gateway.streamUnplanned(frame(), stream)).resolves.toBe(false)
+    expect(stream).not.toHaveBeenCalled()
+  })
+
+  it("records a shadow stream once, on its first frame", async () => {
+    let now = 1_000
+    const stream = jest.fn(async () => true)
+    const { gateway, deps } = gatewayWith({ now: () => now })
+
+    await expect(gateway.streamUnplanned(frame(), stream)).resolves.toBe(true)
+    now += UNPLANNED_STREAM_IDLE_MS - 1
+    // The same reference with its keys in another order is the same stream.
+    await gateway.streamUnplanned(frame({ reqId: "r1", chatId: "c1" }), stream)
+    now += UNPLANNED_STREAM_IDLE_MS - 1
+    await gateway.streamUnplanned(frame(), stream)
+
+    expect(stream).toHaveBeenCalledTimes(3)
+    expect(deps.recordReceipt).toHaveBeenCalledTimes(1)
+    expect(deps.recordReceipt).toHaveBeenCalledWith(receipt("stream-r"))
+    expect(deps.appendAudit).toHaveBeenCalledTimes(1)
+    expect(deps.appendAudit).toHaveBeenCalledWith({
+      adapterId: "bot-a",
+      kind: "delivery.stream_unplanned",
+      at: 1_000,
+      fields: { pluginId: "p1", source: "plugin", governed: false, receiptId: "stream-r" },
+    })
+  })
+
+  it("records a new stream after a pause, and each reference on its own", async () => {
+    let now = 1_000
+    const { gateway, deps } = gatewayWith({ now: () => now })
+    const stream = async () => true
+
+    await gateway.streamUnplanned(frame(), stream)
+    await gateway.streamUnplanned(frame({ chatId: "c2", reqId: "r2" }), stream)
+    expect(deps.recordReceipt).toHaveBeenCalledTimes(2)
+    now += UNPLANNED_STREAM_IDLE_MS
+    await gateway.streamUnplanned(frame(), stream)
+    expect(deps.recordReceipt).toHaveBeenCalledTimes(3)
+  })
+
+  it("streams even when its record cannot be written", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const stream = jest.fn(async () => true)
+    const { gateway } = gatewayWith({
+      recordReceipt: jest.fn(async () => {
+        throw new Error("db closed")
+      }),
+      appendAudit: jest.fn(async () => {
+        throw new Error("db closed")
+      }),
+    })
+    await expect(gateway.streamUnplanned(frame(), stream)).resolves.toBe(true)
+    expect(stream).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("returns the adapter's own answer", async () => {
+    const { gateway } = gatewayWith()
+    await expect(gateway.streamUnplanned(frame(), async () => false)).resolves.toBe(false)
   })
 })
 

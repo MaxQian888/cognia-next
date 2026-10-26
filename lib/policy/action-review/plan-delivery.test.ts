@@ -21,6 +21,7 @@ import {
 } from "./outbound-targets"
 import {
   planDelivery,
+  planUnplannedStream,
   sameChat,
   type DeliveryPlanInput,
   type PlanDeliveryDeps,
@@ -693,5 +694,34 @@ describe("planDelivery: a delivery that cannot wait (immediate)", () => {
     expect(decision.action).toBe("send")
     expect(decision.receipt?.request.plan).toEqual({ outcome: "deny", enforced: false })
     expect(decision.receipt?.decision.reason).toMatch(/would have refused it/)
+  })
+})
+
+describe("planUnplannedStream (ADR-0239)", () => {
+  const stream = { adapterId: "bot-a", ownerRef: "plugin:p1", source: "plugin" } as const
+
+  it("refuses a stream under enforcement, recording nothing", async () => {
+    await expect(planUnplannedStream(stream, deps(enforce))).resolves.toEqual({ stream: false })
+  })
+
+  it("streams in shadow mode, recording that enforcement would not have", async () => {
+    const decision = await planUnplannedStream(stream, deps(shadow))
+    expect(decision.stream).toBe(true)
+    const receipt = decision.receipt!
+    expect(isActionReviewRequest(receipt.request)).toBe(true)
+    expect(isActionReviewDecision(receipt.decision)).toBe(true)
+    expect(receipt.request).toMatchObject({
+      requestId: "delivery:n1",
+      origin: { channel: "connector-delivery", headless: true },
+      subject: {
+        kind: "connector-delivery",
+        ref: "plugin:p1",
+        targets: [toReviewTarget({ kind: "unknown", channel: "bot-a", recipient: "*" })],
+      },
+      plan: { outcome: "deny", enforced: false },
+      requestedAt: 5_000,
+    })
+    expect(receipt.decision).toMatchObject({ outcome: "allow", authority: "policy-default" })
+    expect(receipt.decision.reason).toContain("would not have let it stream")
   })
 })

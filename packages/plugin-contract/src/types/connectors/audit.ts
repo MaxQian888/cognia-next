@@ -27,6 +27,10 @@ export type AuditKind =
   // the people it notifies and sent at once: fields: { messageId,
   // recipientCount, via?, source, governed, outcome, authority? }.
   | "delivery.urgent_direct"
+  // The first frame of a plugin's `streamReply` stream in shadow mode, which no
+  // plan covers (ADR-0239): enforcement would not let it stream. fields: {
+  // pluginId, source, governed: false, receiptId }.
+  | "delivery.stream_unplanned"
   | "inbound.received"
   | "inbound.deduped"
   | "inbound.policy_blocked"

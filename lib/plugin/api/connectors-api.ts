@@ -310,11 +310,19 @@ export function createConnectorsAPI(pluginId: string): PluginConnectorsAPI {
       getBus().setTypingOutbound(adapterId, conversationKey, on),
     uploadFile: (adapterId, file) => getBus().uploadFileOutbound(adapterId, file),
     // A stream can be neither planned nor drafted: under enforcement it
-    // reports "no streaming", and the plugin falls back to a governed send.
-    streamReply: async (adapterId, req) =>
-      (await getConnectorDeliveryGateway().allowsUnplannedStream())
-        ? getBus().streamReplyOutbound(adapterId, req)
-        : false,
+    // reports "no streaming", and the plugin falls back to a governed send;
+    // in shadow mode each stream is recorded once (ADR-0239).
+    streamReply: (adapterId, req) =>
+      getConnectorDeliveryGateway().streamUnplanned(
+        {
+          adapterId,
+          conversationRef: req.conversationRef,
+          source: "plugin",
+          ownerRef: `plugin:${pluginId}`,
+          auditFields: { pluginId },
+        },
+        () => getBus().streamReplyOutbound(adapterId, req)
+      ),
     enqueueSend: async (adapterId, conversationKey, req, opts) => {
       const result = await getConnectorDeliveryGateway().enqueueAuthorized({
         adapterId,

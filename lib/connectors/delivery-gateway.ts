@@ -4,21 +4,19 @@ import { appendAudit, type AuditEntryInput } from "./audit"
 import { enqueueOutbound, enqueueOutboundMany, type EnqueueInput } from "@/lib/db/outbound-jobs"
 import { createDraft, type CreateDraftInput } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow, OutboundJobRow, OutboundJobSource } from "@/lib/db/connector-types"
+import { stableJson } from "@/lib/account-sync/data/stable-json"
 import {
   planDelivery,
+  planUnplannedStream,
   type DeliveryDecision,
   type DeliveryDenyReason,
   type DeliveryPlanInput,
   type DeliveryReceipt,
   type InThreadAuthorization,
   type OutboundAuthorization,
+  type UnplannedStreamDecision,
 } from "@/lib/policy/action-review/plan-delivery"
-import { readAppSettings } from "@/lib/policy/action-review/plan-context"
 import { personTarget, type OutboundTarget } from "@/lib/policy/action-review/outbound-targets"
-import {
-  readOutboundAuthorizationMode,
-  type OutboundAuthorizationMode,
-} from "@/lib/policy/action-review/policy"
 import type {
   ForwardMessageInput,
   OutboundRequest,
@@ -172,8 +170,14 @@ export interface ConnectorDeliveryGatewayDependencies {
   planDelivery(input: DeliveryPlanInput): Promise<DeliveryDecision>
   createDraft(input: CreateDraftInput): Promise<ConnectorDraftRow>
   recordReceipt(receipt: DeliveryReceipt): Promise<void>
-  /** The messaging category's mode (ADR-0239). */
-  messagingMode(): Promise<OutboundAuthorizationMode>
+  /** Whether a stream no plan covers may run, and its shadow record (`planUnplannedStream`). */
+  planStream(input: {
+    adapterId: string
+    ownerRef: string
+    source: OutboundJobSource
+  }): Promise<UnplannedStreamDecision>
+  /** The clock that groups a stream's frames. */
+  now(): number
   /** The adapter's own forward (`bus.forwardOutbound`). */
   forward(adapterId: string, input: ForwardMessageInput): Promise<OutboundResult>
   /** The adapter's own urgent push (`bus.sendUrgentOutbound`). */
@@ -205,7 +209,8 @@ const defaultDependencies: ConnectorDeliveryGatewayDependencies = {
   planDelivery: (input) => planDelivery(input),
   createDraft,
   recordReceipt: recordDeliveryReceipt,
-  messagingMode: async () => readOutboundAuthorizationMode(await readAppSettings()),
+  planStream: (input) => planUnplannedStream(input),
+  now: () => Date.now(),
   forward: async (adapterId, input) => {
     const { getBus } = await import("./bus")
     return getBus().forwardOutbound(adapterId, input)
@@ -237,6 +242,22 @@ export function forwardConversationKey(
     }
   }
   return platform ? buildConversationKey(platform, adapterId, trimmed) : undefined
+}
+
+/** Frames to one reference this close together are one stream, recorded once. */
+export const UNPLANNED_STREAM_IDLE_MS = 60_000
+/** How many streams the gateway remembers at once to group their frames. */
+const TRACKED_STREAM_LIMIT = 256
+
+/** One frame of a stream no plan covers (a plugin's `streamReply`). */
+export interface UnplannedStreamInput {
+  adapterId: string
+  /** The sender's own platform reference the frame goes to: frames to the same one are one stream. */
+  conversationRef: unknown
+  source: AutomatedSource
+  /** Who sends it, as an unattended delivery's owner: `plugin:<id>`. */
+  ownerRef: string
+  auditFields?: Record<string, unknown>
 }
 
 /** A forward of messages already sent, by an automated sender. */
@@ -280,6 +301,8 @@ function toPersisted(
  */
 export class ConnectorDeliveryGateway {
   private readonly dependencies: ConnectorDeliveryGatewayDependencies
+  /** When each recent stream sent its last frame, by sender, bot and reference. */
+  private readonly streams = new Map<string, number>()
 
   constructor(dependencies: Partial<ConnectorDeliveryGatewayDependencies> = {}) {
     this.dependencies = { ...defaultDependencies, ...dependencies }
@@ -317,18 +340,69 @@ export class ConnectorDeliveryGateway {
   }
 
   /**
-   * Whether an automated sender may stream a reply frame by frame
-   * (`streamReply`), which no plan covers: a stream has no conversation key
-   * and one frame per update, so it can be neither planned nor drafted. Under
-   * enforcement it may not, and the caller falls back to a governed send;
-   * in shadow mode it streams as before, unrecorded.
+   * Send one frame of a stream (`streamReply`), which no plan covers: a
+   * stream names no conversation the host can check, and sends one frame per
+   * update, so it can be neither planned nor drafted. Under enforcement it
+   * may not: `stream` is not called, the result is `false` ("no streaming"),
+   * and the caller falls back to a governed send. In shadow mode it streams,
+   * and the first frame of each stream records a receipt saying enforcement
+   * would not have let it, plus a `delivery.stream_unplanned` audit row.
+   * Frames to the same reference less than {@link UNPLANNED_STREAM_IDLE_MS}
+   * apart are one stream. A planning failure does not stream.
    */
-  async allowsUnplannedStream(): Promise<boolean> {
+  async streamUnplanned(
+    input: UnplannedStreamInput,
+    stream: () => Promise<boolean>
+  ): Promise<boolean> {
+    let decision: UnplannedStreamDecision
     try {
-      return (await this.dependencies.messagingMode()) !== "enforce"
+      decision = await this.dependencies.planStream({
+        adapterId: input.adapterId,
+        ownerRef: input.ownerRef,
+        source: input.source,
+      })
     } catch {
       return false
     }
+    if (!decision.stream) return false
+    if (decision.receipt && this.startsStream(input)) {
+      await this.recordReceipt(decision.receipt)
+      await Promise.resolve(
+        this.dependencies.appendAudit({
+          adapterId: input.adapterId,
+          kind: "delivery.stream_unplanned",
+          at: this.dependencies.now(),
+          fields: {
+            ...input.auditFields,
+            source: input.source,
+            governed: false,
+            receiptId: decision.receipt.request.requestId,
+          },
+        })
+      ).catch(() => undefined)
+    }
+    return stream()
+  }
+
+  /** Whether this frame starts a stream, rather than continuing a recent one. */
+  private startsStream(input: UnplannedStreamInput): boolean {
+    const now = this.dependencies.now()
+    let key: string
+    try {
+      key = `${input.ownerRef}\u0000${input.adapterId}\u0000${stableJson(input.conversationRef)}`
+    } catch {
+      // A reference that cannot be serialized is never grouped.
+      return true
+    }
+    const last = this.streams.get(key)
+    // Re-inserted so the map stays ordered by last frame.
+    this.streams.delete(key)
+    this.streams.set(key, now)
+    if (this.streams.size > TRACKED_STREAM_LIMIT) {
+      const oldest = this.streams.keys().next().value
+      if (oldest !== undefined) this.streams.delete(oldest)
+    }
+    return last === undefined || now - last >= UNPLANNED_STREAM_IDLE_MS
   }
 
   /**

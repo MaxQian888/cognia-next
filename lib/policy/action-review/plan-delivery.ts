@@ -38,6 +38,12 @@
  * an urgent push, which re-notifies members about a message already sent) is
  * planned for those people, every one of whom must be authorized.
  *
+ * A stream (a plugin's `streamReply`) cannot be planned: it names no
+ * conversation the host can check, and sends one frame per update.
+ * {@link planUnplannedStream} refuses it under enforcement, and the plugin
+ * falls back to a governed send; in shadow mode it streams, and its first
+ * frame writes a receipt saying enforcement would not have let it.
+ *
  * ## Receipts
  *
  * - Enforce mode: every delivery the policy drafts or refuses, and every one
@@ -466,6 +472,54 @@ async function planUnattended(
         ...receiptArgs,
         draftSessionId: unattended.sessionId ?? origin.rootSessionId ?? unattended.ownerRef,
       })
+  }
+}
+
+/** What {@link planUnplannedStream} decides for one stream. */
+export interface UnplannedStreamDecision {
+  /** Whether it may stream: only while messaging is not enforced. */
+  stream: boolean
+  /** In shadow mode, the record that enforcement would not have let it stream. */
+  receipt?: DeliveryReceipt
+}
+
+/**
+ * Decide a stream no plan can cover (see the module comment). `ownerRef`
+ * names the sender, as an unattended delivery's does (`plugin:<id>`). Its
+ * recipient is unknown: the stream reaches whatever the sender's own
+ * platform reference names.
+ */
+export async function planUnplannedStream(
+  input: { adapterId: string; ownerRef: string; source: OutboundJobSource },
+  deps: Pick<PlanDeliveryDeps, "settings" | "now" | "newRequestId"> = {}
+): Promise<UnplannedStreamDecision> {
+  const settings = await (deps.settings ?? readAppSettings)()
+  const mode = readOutboundAuthorizationMode(settings)
+  if (mode === "enforce") return { stream: false }
+  const planInput: DeliveryPlanInput = {
+    adapterId: input.adapterId,
+    conversationKey: "",
+    source: input.source,
+    immediate: true,
+  }
+  const env: PlanningEnv = {
+    input: planInput,
+    targets: [unknownRecipient(planInput)],
+    mode,
+    settings,
+    now: deps.now?.() ?? Date.now(),
+    deps,
+  }
+  return {
+    stream: true,
+    receipt: receiptFor(env, {
+      ownerRef: input.ownerRef,
+      plan: "deny",
+      outcome: "allow",
+      authority: "policy-default",
+      reason:
+        "streamed: outbound authorization is in shadow mode; enforcement would not have let it stream (a stream names no conversation the host can check, so no plan covers it), and the sender would have fallen back to a governed send",
+    }),
   }
 }
 

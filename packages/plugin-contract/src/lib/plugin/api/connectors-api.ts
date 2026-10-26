@@ -342,7 +342,9 @@ export interface PluginConnectorsAPI {
    *
    * A stream cannot be planned by the outbound policy (ADR-0239), so while
    * messaging is enforced it always resolves `false` and the fallback send is
-   * what is planned.
+   * what is planned. In shadow mode it streams, and the first frame of each
+   * stream (frames to the same `conversationRef` within a minute of each
+   * other) records that enforcement would not have let it.
    */
   streamReply(adapterId: string, req: StreamReplyRequest): Promise<boolean>
   /**
