@@ -143,6 +143,17 @@ describe("serializeSend", () => {
     expect(call.payload["reply_in_thread"]).toBeUndefined()
   })
 
+  it("keeps a reply id in one path segment, so it cannot pick another endpoint (ADR-0239)", async () => {
+    const req = {
+      ...makeReq({ channelId: "oc_chat_001" }),
+      replyTo: { messageId: "om_1/../../messages?receive_id_type=chat_id" },
+    }
+    const escaped =
+      "/open-apis/im/v1/messages/om_1%2F..%2F..%2Fmessages%3Freceive_id_type%3Dchat_id/reply"
+    expect(new URL(serializeSend(req).url).pathname).toBe(escaped)
+    expect(new URL((await serializeOutboundAsync(req, "lark-1")).url).pathname).toBe(escaped)
+  })
+
   it("sets reply_in_thread on the /reply endpoint when a thread anchor is present", () => {
     const req = {
       ...makeReq({ channelId: "oc_chat_001", threadTs: "thr_1" }),

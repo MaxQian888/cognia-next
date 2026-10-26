@@ -3,6 +3,7 @@ jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
   recordCallbackBinding: jest.fn().mockResolvedValue(undefined),
 }))
 import {
+  discordPathId,
   serializeOutbound,
   serializeDelete,
   serializeEdit,
@@ -593,5 +594,41 @@ describe("mixed A2UI fallback", () => {
         reason: expect.stringContaining("Table"),
       },
     ])
+  })
+})
+
+describe("discordPathId (ADR-0239)", () => {
+  const TRAVERSAL = "../../222/messages/333"
+  const pathOf = (url: string) => new URL(url).pathname
+
+  it("keeps an id in one path segment, and refuses a dot segment", () => {
+    expect(discordPathId("111")).toBe("111")
+    expect(discordPathId(TRAVERSAL)).toBe("..%2F..%2F222%2Fmessages%2F333")
+    expect(() => discordPathId("..")).toThrow('cannot be ".."')
+    expect(() => discordPathId(".")).toThrow('cannot be "."')
+  })
+
+  it("keeps every message call inside the channel it names", () => {
+    const inside = "/api/v10/channels/111/messages/..%2F..%2F222%2Fmessages%2F333"
+    expect(pathOf(serializeDelete("111", TRAVERSAL).url)).toBe(inside)
+    expect(pathOf(serializeEdit("111", TRAVERSAL, "x").url)).toBe(inside)
+    expect(pathOf(serializeReaction("111", TRAVERSAL, "👍").url)).toBe(
+      `${inside}/reactions/%F0%9F%91%8D/@me`
+    )
+    expect(pathOf(serializeReactionRemoval("111", TRAVERSAL, "👍").url)).toBe(
+      `${inside}/reactions/%F0%9F%91%8D/@me`
+    )
+    expect(pathOf(serializeFetchHistory(TRAVERSAL, {}).url)).toBe(
+      "/api/v10/channels/..%2F..%2F222%2Fmessages%2F333/messages"
+    )
+  })
+
+  it("keeps a send in the channel its reference names", () => {
+    const [call] = serializeOutbound({
+      conversationRef: { platform: "discord", adapterId: "dc-1", channelId: "../../222" },
+      segments: [{ type: "text", text: "hi" }],
+      metadata: { idempotencyKey: "k" },
+    })
+    expect(pathOf(call.url)).toBe("/api/v10/channels/..%2F..%2F222/messages")
   })
 })

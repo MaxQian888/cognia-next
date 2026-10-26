@@ -154,7 +154,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
     if (threadId || privateThreadReplyAnchor(req.conversationRef)) payload["reply_in_thread"] = true
     return {
       method: "POST",
-      url: `${LARK_API_BASE}/im/v1/messages/${replyTargetId}/reply`,
+      url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(replyTargetId)}/reply`,
       payload,
     }
   }
@@ -420,7 +420,7 @@ export async function serializeOutboundAsync(
     if (threadId || privateThreadReplyAnchor(req.conversationRef)) payload["reply_in_thread"] = true
     return {
       method: "POST",
-      url: `${LARK_API_BASE}/im/v1/messages/${replyTargetId}/reply`,
+      url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(replyTargetId)}/reply`,
       payload,
     }
   }

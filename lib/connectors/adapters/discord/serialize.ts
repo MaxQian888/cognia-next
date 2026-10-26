@@ -19,6 +19,16 @@ import { DISCORD_A2UI_CAPABILITY } from "./capability"
 const DISCORD_API_BASE = "https://discord.com/api/v10"
 
 /** Resolve public composite IDs, accepting legacy bare IDs when a channel is known. */
+/**
+ * An id as one URL path segment. Escaped, so a `/` in it cannot add segments
+ * (`../../222/messages/333` would walk the request to another channel), and
+ * never a dot segment, which the client resolves even when escaped.
+ */
+export function discordPathId(id: string): string {
+  if (id === "." || id === "..") throw new Error(`A Discord id cannot be "${id}"`)
+  return encodeURIComponent(id)
+}
+
 export function splitChannelMessage(
   id: string,
   fallbackChannel?: string
@@ -371,7 +381,7 @@ function serializeSegment(
   channelId: string,
   messageReference: Record<string, unknown> | undefined
 ): SerializedDiscordCall[] {
-  const url = `${DISCORD_API_BASE}/channels/${channelId}/messages`
+  const url = `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages`
 
   switch (seg.type) {
     case "text":
@@ -500,7 +510,7 @@ export async function serializeOutboundAsync(
   const channelId = channelIdFromRef(req)
   const messageReference = buildMessageReference(req, channelId)
   const calls: SerializedDiscordCall[] = []
-  const url = `${DISCORD_API_BASE}/channels/${channelId}/messages`
+  const url = `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages`
 
   for (const seg of mergeDiscordContentSegments(req.segments)) {
     if (seg.type === "a2ui") {
@@ -576,7 +586,7 @@ function extractConversationKey(req: OutboundRequest, channelId: string): string
 export function serializeDelete(channelId: string, messageId: string): SerializedDiscordCall {
   return {
     method: "DELETE",
-    url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}`,
+    url: `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages/${discordPathId(messageId)}`,
     payload: {},
   }
 }
@@ -591,7 +601,7 @@ export function serializeEdit(
 ): SerializedDiscordCall {
   return {
     method: "PATCH",
-    url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}`,
+    url: `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages/${discordPathId(messageId)}`,
     payload: { content },
   }
 }
@@ -617,7 +627,7 @@ export function serializeFetchHistory(
   // ends in /messages?limit=...
   return {
     method: "POST",
-    url: `${DISCORD_API_BASE}/channels/${channelId}/messages?${qs.toString()}`,
+    url: `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages?${qs.toString()}`,
     payload: {},
   }
 }
@@ -642,7 +652,7 @@ export function serializeReaction(
 ): SerializedDiscordCall {
   return {
     method: "PUT",
-    url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`,
+    url: `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages/${discordPathId(messageId)}/reactions/${encodeURIComponent(emoji)}/@me`,
     payload: {},
   }
 }
@@ -658,7 +668,7 @@ export function serializeReactionRemoval(
 ): SerializedDiscordCall {
   return {
     method: "DELETE",
-    url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`,
+    url: `${DISCORD_API_BASE}/channels/${discordPathId(channelId)}/messages/${discordPathId(messageId)}/reactions/${encodeURIComponent(emoji)}/@me`,
     payload: {},
   }
 }

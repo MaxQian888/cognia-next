@@ -38,6 +38,7 @@ import {
   serializeReaction,
   serializeReactionRemoval,
   serializeFetchHistory,
+  discordPathId,
   splitChannelMessage,
 } from "./serialize"
 import { enrichDiscordInboundMedia } from "./inbound-media"
@@ -185,7 +186,7 @@ async function ackInteraction(
   data?: unknown
 ): Promise<void> {
   await connectorsHttpRequest({
-    url: `${DISCORD_API_BASE}/interactions/${interactionId}/${token}/callback`,
+    url: `${DISCORD_API_BASE}/interactions/${discordPathId(interactionId)}/${discordPathId(token)}/callback`,
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(
@@ -627,7 +628,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
       }
       await doRequest(
         "PATCH",
-        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(bareMessageId)}`,
+        `/channels/${discordPathId(channelId)}/messages/${discordPathId(bareMessageId)}`,
         {
           content,
           embeds,
@@ -658,7 +659,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     // conversationKey: "discord:<adapterId>:<channelId>[:<threadId>]"
     const parts = conversationKey.split(":")
     const channelId = parts[2]
-    await doRequest("POST", `/channels/${channelId}/typing`)
+    await doRequest("POST", `/channels/${discordPathId(channelId)}/typing`)
   }
 
   /**
@@ -780,7 +781,10 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     // messageId is "<channelId>:<msgId>" (same convention as delete/edit);
     // fall back to the conversationKey's channel when only a bare id is given.
     const [channelId, msgId] = splitChannelMessage(messageId, conversationKey.split(":")[2])
-    await doRequest("PUT", `/channels/${channelId}/messages/pins/${msgId}`)
+    await doRequest(
+      "PUT",
+      `/channels/${discordPathId(channelId)}/messages/pins/${discordPathId(msgId)}`
+    )
   }
 
   /**
@@ -790,7 +794,10 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
    */
   async function unpinMessage(messageId: string): Promise<void> {
     const [channelId, msgId] = splitChannelMessage(messageId)
-    await doRequest("DELETE", `/channels/${channelId}/messages/pins/${msgId}`)
+    await doRequest(
+      "DELETE",
+      `/channels/${discordPathId(channelId)}/messages/pins/${discordPathId(msgId)}`
+    )
   }
 
   async function refreshCredentials(): Promise<void> {

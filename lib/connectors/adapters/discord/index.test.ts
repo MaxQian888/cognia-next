@@ -377,6 +377,23 @@ describe("createDiscordAdapter", () => {
     expect(reqPayload.method).toBe("POST")
   })
 
+  it("escapes pin, unpin and typing ids in the URL path (ADR-0239)", async () => {
+    mockInvoke.mockResolvedValue(makeSendOkResp("sent-id"))
+    const adapter = makeAdapter()
+    await adapter.pinMessage!("discord:dc-1:111", "111:../../222/messages/333")
+    await adapter.unpinMessage!("111:../../222/messages/333")
+    await adapter.setTyping!("discord:dc-1:../../222", true)
+    const paths = mockInvoke.mock.calls
+      .filter(([cmd]: [string]) => cmd === "connectors_http_request")
+      .map(([, args]) => (args as { req: { method: string; url: string } }).req)
+      .map((req) => [req.method, new URL(req.url).pathname])
+    expect(paths).toEqual([
+      ["PUT", "/api/v10/channels/111/messages/pins/..%2F..%2F222%2Fmessages%2F333"],
+      ["DELETE", "/api/v10/channels/111/messages/pins/..%2F..%2F222%2Fmessages%2F333"],
+      ["POST", "/api/v10/channels/..%2F..%2F222/typing"],
+    ])
+  })
+
   it("escapes an edit's ids in the URL path, so no id can walk it to another channel", async () => {
     mockInvoke.mockResolvedValue(makeSendOkResp("sent-id"))
     const adapter = makeAdapter()
