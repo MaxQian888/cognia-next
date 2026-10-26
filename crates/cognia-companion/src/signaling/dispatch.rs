@@ -330,8 +330,14 @@ async fn run(
     // (matches the existing WS subscription default behaviour).
     use crate::event_bus::SubscribeResult;
     let now_ms = crate::signaling::envelope::now_ms();
+    // A burst past the broadcast channel refills from the replay buffer
+    // (`LiveReceiver`), so the device only resyncs when frames were dropped.
     let mut event_rx = match state.event_bus.subscribe(None, now_ms) {
-        SubscribeResult::Ok { receiver, .. } => receiver,
+        SubscribeResult::Ok {
+            receiver,
+            replay_cursor,
+            ..
+        } => crate::event_bus::LiveReceiver::new(state.event_bus.clone(), receiver, replay_cursor),
         SubscribeResult::ResyncRequired => {
             // None means "subscribe from the high-water mark", so resync
             // should be impossible here. Treat as a soft failure: log and
@@ -424,9 +430,13 @@ async fn run(
                                         crate::signaling::envelope::now_ms(),
                                     ) {
         SubscribeResult::Ok {
-            receiver, replay, ..
+            receiver, replay, replay_cursor,
         } => {
-                                            event_rx = receiver;
+                                            event_rx = crate::event_bus::LiveReceiver::new(
+                                                state.event_bus.clone(),
+                                                receiver,
+                                                replay_cursor,
+                                            );
                                             // Flush anything pending from the old
                                             // subscription before the replay burst.
                                             if let Some(pending) = batcher.drain() {
@@ -563,7 +573,7 @@ async fn run(
                     }
                     Err(RecvError::Lagged(n)) => {
                         log::warn!(
-                            "signaling::dispatch: lagged {n} frames; requiring explicit resync"
+                            "signaling::dispatch: lagged {n} frames past the replay buffer; requiring explicit resync"
                         );
                         if let Some(pending) = batcher.drain() {
                             if let Some(outbound) = outbound_for_batch(pending) {

@@ -17,11 +17,10 @@ use axum::{
 };
 use serde_json::{json, Value};
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::broadcast::Receiver;
 use tokio::time::{timeout, Duration, Instant};
 
 use super::super::acp::types::{self, rpc_error_code};
-use super::super::event_bus::{EventFrame, SubscribeResult};
+use super::super::event_bus::{LiveReceiver, SubscribeResult};
 use super::super::{
     middleware::DeviceContext,
     remote_execution::{self, ExecutionOutcome, ExecutionRequest, ExecutionTransport},
@@ -179,8 +178,14 @@ async fn handle_message_send(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
+    // A burst past the broadcast channel refills from the replay buffer
+    // instead of failing the turn.
     let receiver = match state.event_bus.subscribe(None, now_ms) {
-        SubscribeResult::Ok { receiver, .. } => receiver,
+        SubscribeResult::Ok {
+            receiver,
+            replay_cursor,
+            ..
+        } => LiveReceiver::new(state.event_bus.clone(), receiver, replay_cursor),
         SubscribeResult::ResyncRequired => {
             return Err((
                 rpc_error_code::INTERNAL_ERROR,
@@ -246,7 +251,7 @@ async fn drive_turn(
     state: &SharedState,
     host: Option<&DispatchReady>,
     ctx: &DeviceContext,
-    mut receiver: Receiver<EventFrame>,
+    mut receiver: LiveReceiver,
     context_id: &str,
     task_id: &str,
 ) -> Value {
@@ -297,7 +302,7 @@ async fn drive_turn(
                 }
             }
             Ok(Err(RecvError::Lagged(n))) => {
-                log::warn!("companion-api a2a: subscriber lagged by {n} frames; ending turn");
+                log::warn!("companion-api a2a: subscriber lagged by {n} frames past the replay buffer; ending turn");
                 interrupt(state, host, ctx, context_id).await;
                 break TurnOutcome::Failed("event stream lagged".to_string());
             }
@@ -486,7 +491,11 @@ mod tests {
         let bus = Arc::clone(&state.event_bus);
         let now_ms = 0;
         let receiver = match bus.subscribe(None, now_ms) {
-            SubscribeResult::Ok { receiver, .. } => receiver,
+            SubscribeResult::Ok {
+                receiver,
+                replay_cursor,
+                ..
+            } => LiveReceiver::new(bus.clone(), receiver, replay_cursor),
             SubscribeResult::ResyncRequired => panic!("unexpected resync"),
         };
 
@@ -526,7 +535,11 @@ mod tests {
         let state = test_state();
         let bus = Arc::clone(&state.event_bus);
         let receiver = match bus.subscribe(None, 0) {
-            SubscribeResult::Ok { receiver, .. } => receiver,
+            SubscribeResult::Ok {
+                receiver,
+                replay_cursor,
+                ..
+            } => LiveReceiver::new(bus.clone(), receiver, replay_cursor),
             SubscribeResult::ResyncRequired => panic!("unexpected resync"),
         };
         let driver = tokio::spawn({
@@ -548,7 +561,11 @@ mod tests {
         let state = test_state();
         let bus = Arc::clone(&state.event_bus);
         let receiver = match bus.subscribe(None, 0) {
-            SubscribeResult::Ok { receiver, .. } => receiver,
+            SubscribeResult::Ok {
+                receiver,
+                replay_cursor,
+                ..
+            } => LiveReceiver::new(bus.clone(), receiver, replay_cursor),
             SubscribeResult::ResyncRequired => panic!("unexpected resync"),
         };
         let driver = tokio::spawn({

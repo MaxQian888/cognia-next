@@ -369,6 +369,9 @@ async fn handle_socket(
     let mut last_client_activity = Instant::now();
     // ADR-0127 §2: per-subscriber batching lives here, in the send loop.
     let mut batcher = EventBatcher::new();
+    // A burst past the broadcast channel refills from the replay buffer
+    // instead of ending this socket (`LagRecovery`).
+    let mut recovery = super::event_bus::LagRecovery::new(replay_cursor);
 
     loop {
         if !person_live() { return; }
@@ -382,8 +385,16 @@ async fn handle_socket(
                 }
             }
 
-            // New live frame from the bus.
-            result = receiver.recv() => {
+            // New live frame from the bus (refilled frames first).
+            received = async {
+                match recovery.take_refilled() {
+                    Some(frame) => super::event_bus::Received::Refilled(frame),
+                    None => super::event_bus::Received::Live(receiver.recv().await),
+                }
+            } => {
+                let Some(result) = recovery.admit(&state.event_bus, received) else {
+                    continue;
+                };
                 match result {
                     Ok(frame) => {
                         if !person_live() { return; }
@@ -438,7 +449,9 @@ async fn handle_socket(
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        log::warn!("companion-api ws: subscriber lagged by {n} frames; closing");
+                        // Only when the replay buffer already dropped a frame
+                        // this socket missed: a refill would leave a hole.
+                        log::warn!("companion-api ws: subscriber lagged by {n} frames past the replay buffer; closing");
                         // Frames already pulled off the bus and batched are not
                         // lost with the socket — deliver them, then let the client
                         // resync from a later cursor.
@@ -720,6 +733,85 @@ mod tests {
     // Full WS wire-up is flaky on Windows (no Unix domain sockets for
     // mock streams).  Instead we test the EventBus contract that the handler
     // relies on.
+
+    #[tokio::test]
+    async fn a_burst_past_the_broadcast_channel_keeps_the_socket_and_every_frame() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+        let (state, bus) = test_state_with_bus();
+        let (token, _) = crate::jwt::issue_service_jwt(&state.secret.read(), "operator").unwrap();
+        let router = axum::Router::new()
+            .route("/internal/events", axum::routing::any(internal_ws_handler))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::middleware::require_device_jwt,
+            ))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/internal/events?token={token}"))
+                .await
+                .unwrap();
+        let ready = socket.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(ready.to_text().unwrap()).unwrap()["type"],
+            "stream_ready"
+        );
+        socket
+            .send(WsMessage::Text(
+                json!({"type":"subscribe","mode":"replace","channels":["sync://invalidate"]})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let subscribed = socket.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(subscribed.to_text().unwrap()).unwrap()["type"],
+            "subscribed"
+        );
+
+        // No await: the current-thread runtime cannot drain the socket's bus
+        // receiver until the whole burst (4× the channel) is published. Before
+        // lag recovery the socket closed here and every frame was lost.
+        let expected: Vec<u64> = (0..1024)
+            .map(|i| {
+                bus.publish("sync://invalidate".into(), json!({ "i": i })).seq
+            })
+            .collect();
+        let mut received = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while received.len() < expected.len() {
+                let message = socket.next().await.expect("socket remains open").unwrap();
+                let value: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                let frames = if value["type"] == "event_batch" {
+                    value["frames"].as_array().unwrap().clone()
+                } else {
+                    vec![value]
+                };
+                for frame in frames {
+                    assert_eq!(frame["type"], "sync://invalidate");
+                    received.push(frame["seq"].as_u64().unwrap());
+                }
+            }
+        })
+        .await
+        .expect("every frame arrives without reconnecting");
+        assert_eq!(received, expected);
+        socket.close(None).await.unwrap();
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
 
     // ── subscribe with no `since` → no replay, then live frame arrives ────────
 

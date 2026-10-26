@@ -618,7 +618,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
     - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):** before the fix, an instrumented run lost both live sockets to `subscriber lagged by 104 frames; closing` 1.3 s into the turn. After it, five full persons smokes passed the live-frame checks (`1:streaming* 2:streaming 3:settled*`, `1:streaming* … 7:settled*`), the Host logged no lagged subscriber, and socket sequence numbers advanced by 1 to 5 between Ada's frames instead of about 90. Four of the five runs passed outright.
     - **Known gaps:**
       - In one of the five runs, the org-default agent turn ended `fatal-error` with `SyntaxError: Unterminated fractional number in JSON at position 208` in the person brain: a line of agent output reached it cut short. No Host or brain path splits a line (the Rust line readers and `LineBuffer` have no cap, and the batcher never splits a frame), and fan-out does not change the brain's frame count or order. The stdout-relay work in progress tests exactly this split (`{"usage":1.` / `25,…`). Not addressed here.
-      - A burst of more than 256 frames from one producer still closes every subscriber. Fan-out was what made bursts routine. `ws.rs` still closes a lagged socket and leaves the client to resync.
+      - ~~A burst of more than 256 frames from one producer still closes every subscriber. Fan-out was what made bursts routine. `ws.rs` still closes a lagged socket and leaves the client to resync.~~ (fixed by item 22)
       - The rig's member devices are never pruned; the fix makes their count harmless rather than removing them.
 
 20. **The welcome dashboard names models (P6 follow-up, 2026-10-26; item 16's gap).**
@@ -647,6 +647,26 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
     - **Known gaps:**
       - `claude-agent-acp`'s turn usage carries `inputTokens: 0` through the gateway: the Host's member ledger charged about 16.5K tokens for a turn whose row has 45 output tokens. The row's SDK cost is the adapter's.
       - DeepSeek turns booked by the tool-less path have no price (`costKnown: false`), so their cost reads as free, as on the desktop.
+
+22. **A burst no longer ends every event stream (P6 follow-up, 2026-10-26; item 19's gap).**
+    - **Decisions:**
+      - A live subscriber that overruns the 256-frame broadcast channel refills what it missed from the bus's replay buffer (10,000 frames, 24 h) and keeps going. Refilled frames are delivered in sequence order ahead of anything live. After a refill, channel frames at or below the refill's newest sequence are skipped: they are copies of refilled frames, or ephemeral frames older than what was just delivered. So the stream stays in order and has no duplicates.
+      - The lag is still reported, with each consumer's old handling, only when the buffer has dropped a frame the subscriber missed. The bus records the highest sequence it ever evicted, by capacity or by age, so "covered" is exact rather than guessed from the oldest retained frame.
+      - Ephemeral frames (`transcript://live`, `publish_ephemeral_to`) are never retained, so a refill cannot bring them back. Their producers resend state: live transcript keyframes every 2 s, then a settled frame.
+      - Every bus consumer that gave up on a lag now refills:
+        - the device and service WebSocket (`ws.rs`), which closed;
+        - the WebRTC relay (`signaling/dispatch.rs`), which asked the device to resync;
+        - the ACP socket, which closed;
+        - A2A turns, which failed;
+        - the headless push loop, which dropped the pushes it missed.
+      - Person brains already get the non-lossy partition queue from the stdout-relay work. The WebSocket loop recovers inline, so that queue and its tests are untouched.
+    - **Surface:** `cognia_companion_bus::event_bus::{LagRecovery, Received, LiveReceiver, EventBus::frames_after}`, the `evicted_through` watermark, `retain_unexpired` returning the highest sequence it dropped, the consumers above.
+    - **Verified (2026-10-26):**
+      - `a_burst_past_the_broadcast_channel_keeps_the_socket_and_every_frame` publishes 1,024 frames to a real service socket. Every frame arrives in order with the socket open. With recovery switched off, the same test fails because the socket closes.
+      - Bus tests cover an ordered, duplicate-free refill, stale ephemeral frames, a lag past the buffer that is still reported, and a second lag while refilled frames wait.
+      - The `cognia-companion` lib suite passes, except two failures from other sessions' work (a `sourceId` response-contract mismatch, and a security-store test that passes alone).
+      - Rig (P6f, `ark-deepseek-v4.1-flash`): a full persons smoke on the rebuilt Host passed every check, including the agent live frames (`1:streaming* … 8:settled*`), with the proxy at about 50 s per call. That run had no lag, so it shows no regression; the socket test is the burst proof.
+    - **Known gaps:** a refill holds the bus's buffer lock while it copies up to 10,000 frames. That happens only on a lag.
 
 **Intentional dormancy (Rule 7).**
 

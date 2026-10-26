@@ -18,7 +18,10 @@
 //! # Design decisions
 //!
 //! - **`broadcast::channel`** (capacity 256): slow receivers lag behind and
-//!   get `RecvError::Lagged` — treated as a disconnect on the WS side.
+//!   get `RecvError::Lagged`. A live subscriber refills that gap from the
+//!   ring buffer ([`LagRecovery`], [`LiveReceiver`]) and only reports the lag
+//!   when the buffer has already dropped a frame it missed: one producer's
+//!   burst no longer ends every subscriber's stream.
 //! - **Ring buffer**: capped at [`BUFFER_CAPACITY`] entries *and* entries
 //!   older than [`RETENTION_MS`] are pruned periodically and on subscribe.
 //!   This keeps the replay window bounded in both count and time without an
@@ -147,6 +150,9 @@ pub struct EventBus {
     buffer: Mutex<VecDeque<EventFrame>>,
     seq_counter: AtomicU64,
     last_prune_ms: AtomicI64,
+    /// Highest sequence the ring buffer has dropped, by capacity or age. A
+    /// refill after a lag is exact only above it ([`EventBus::frames_after`]).
+    evicted_through: AtomicU64,
 }
 
 impl EventBus {
@@ -158,6 +164,7 @@ impl EventBus {
             buffer: Mutex::new(VecDeque::with_capacity(BUFFER_CAPACITY)),
             seq_counter: AtomicU64::new(0),
             last_prune_ms: AtomicI64::new(0),
+            evicted_through: AtomicU64::new(0),
         })
     }
 
@@ -227,11 +234,15 @@ impl EventBus {
                     .compare_exchange(last_prune, ts_ms, Ordering::Relaxed, Ordering::Relaxed)
                     .is_ok();
             if prune_due {
-                retain_unexpired(&mut buf, ts_ms);
+                if let Some(seq) = retain_unexpired(&mut buf, ts_ms) {
+                    self.evicted_through.fetch_max(seq, Ordering::Relaxed);
+                }
             }
             // Enforce capacity cap.
             if buf.len() >= BUFFER_CAPACITY {
-                buf.pop_front();
+                if let Some(evicted) = buf.pop_front() {
+                    self.evicted_through.fetch_max(evicted.seq, Ordering::Relaxed);
+                }
             }
             buf.push_back(frame.clone());
         }
@@ -327,7 +338,9 @@ impl EventBus {
             return SubscribeResult::ResyncRequired;
         }
         let mut buf = self.buffer.lock();
-        retain_unexpired(&mut buf, now_ms);
+        if let Some(seq) = retain_unexpired(&mut buf, now_ms) {
+            self.evicted_through.fetch_max(seq, Ordering::Relaxed);
+        }
 
         // Determine the oldest retained seq.
         let oldest_seq = buf.front().map(|f| f.seq);
@@ -358,6 +371,23 @@ impl EventBus {
         }
     }
 
+    /// The retained frames after `seq`, in sequence order, or `None` when the
+    /// buffer may have dropped one of them. A live subscriber that fell behind
+    /// the broadcast channel refills its gap from here ([`LagRecovery`]).
+    /// Ephemeral frames are never retained, so a refill cannot return them:
+    /// they were never meant to be replayed.
+    pub fn frames_after(&self, seq: u64) -> Option<Vec<EventFrame>> {
+        let buf = self.buffer.lock();
+        if self.evicted_through.load(Ordering::Relaxed) > seq {
+            return None;
+        }
+        let mut frames: Vec<EventFrame> =
+            buf.iter().filter(|frame| frame.seq > seq).cloned().collect();
+        // Concurrent publishers can append slightly out of sequence order.
+        frames.sort_by_key(|frame| frame.seq);
+        Some(frames)
+    }
+
     /// Current number of frames in the replay buffer (test helper).
     #[cfg(test)]
     pub fn buffer_len(&self) -> usize {
@@ -371,17 +401,161 @@ impl EventBus {
     }
 }
 
-fn retain_unexpired(buffer: &mut VecDeque<EventFrame>, at_ms: i64) {
+/// Drop expired frames; returns the highest sequence dropped, if any.
+fn retain_unexpired(buffer: &mut VecDeque<EventFrame>, at_ms: i64) -> Option<u64> {
     let general_cutoff = at_ms - RETENTION_MS;
     let request_cutoff = at_ms - REQUEST_SCOPED_RETENTION_MS;
+    let mut dropped = None;
     buffer.retain(|frame| {
-        frame.ts_ms
+        let keep = frame.ts_ms
             >= if frame.target_device_id.is_some() {
                 request_cutoff
             } else {
                 general_cutoff
-            }
+            };
+        if !keep {
+            dropped = dropped.max(Some(frame.seq));
+        }
+        keep
     });
+    dropped
+}
+
+// ---------------------------------------------------------------------------
+// Lag recovery
+// ---------------------------------------------------------------------------
+
+/// One receive, as [`LagRecovery::admit`] sees it.
+pub enum Received {
+    /// A frame a refill queued ([`LagRecovery::take_refilled`]).
+    Refilled(EventFrame),
+    /// What the broadcast receiver returned.
+    Live(Result<EventFrame, tokio::sync::broadcast::error::RecvError>),
+}
+
+/// Keeps a live subscriber going through a burst.
+///
+/// The broadcast channel holds [`BROADCAST_CAPACITY`] frames, so one producer
+/// that publishes more than that before a subscriber's next poll overruns it.
+/// Every subscriber used to end its stream on that `Lagged` (the WebSocket
+/// closed, the relay asked the device to resync, an A2A turn failed), so one
+/// busy member's agent output disconnected everyone on the Host. Instead the
+/// subscriber refills the frames it missed from the ring buffer and delivers
+/// them in order ahead of anything live. It reports the lag only when the
+/// buffer has dropped a frame the subscriber missed. Ephemeral frames (never
+/// retained) are the one thing a refill cannot bring back; their producers
+/// resend state (live transcript keyframes).
+///
+/// After a refill the channel still holds frames at or below the refill's
+/// newest sequence: copies of refilled frames, and ephemeral frames older than
+/// what was just delivered. Both are skipped, so the stream stays in order.
+///
+/// Receive with `take_refilled` first and the broadcast receiver second, then
+/// pass the result to `admit`. [`LiveReceiver`] does exactly that for a plain
+/// receiver; a loop that owns its receiver does it inline.
+pub struct LagRecovery {
+    /// Highest sequence handed to the subscriber.
+    delivered: u64,
+    backlog: VecDeque<EventFrame>,
+    /// Newest sequence any refill queued; the channel's frames at or below it
+    /// are stale.
+    refilled_through: u64,
+}
+
+impl LagRecovery {
+    /// Start after `cursor`, the last sequence the subscriber has (its
+    /// replay cursor, or the high-water mark for a live-only subscription).
+    pub fn new(cursor: u64) -> Self {
+        Self {
+            delivered: cursor,
+            backlog: VecDeque::new(),
+            refilled_through: 0,
+        }
+    }
+
+    /// The next refilled frame, which goes ahead of anything live.
+    pub fn take_refilled(&mut self) -> Option<EventFrame> {
+        self.backlog.pop_front()
+    }
+
+    /// What a receive means for the subscriber: a frame to deliver, the error
+    /// to act on, or `None` when there is nothing to deliver yet (a refill was
+    /// queued, or a stale frame arrived after one).
+    pub fn admit(
+        &mut self,
+        bus: &EventBus,
+        received: Received,
+    ) -> Option<Result<EventFrame, tokio::sync::broadcast::error::RecvError>> {
+        use tokio::sync::broadcast::error::RecvError;
+        match received {
+            Received::Refilled(frame) => {
+                self.delivered = self.delivered.max(frame.seq);
+                Some(Ok(frame))
+            }
+            Received::Live(Ok(frame)) => {
+                if frame.seq <= self.refilled_through {
+                    return None;
+                }
+                self.delivered = self.delivered.max(frame.seq);
+                Some(Ok(frame))
+            }
+            Received::Live(Err(RecvError::Lagged(skipped))) => {
+                let Some(frames) = bus.frames_after(self.delivered) else {
+                    return Some(Err(RecvError::Lagged(skipped)));
+                };
+                log::info!(
+                    "event bus: subscriber lagged by {skipped} frames; refilled {} from the replay buffer",
+                    frames.len()
+                );
+                // Anything still queued is after `delivered` too, so the
+                // refill holds it again.
+                self.backlog.clear();
+                for frame in frames {
+                    self.refilled_through = self.refilled_through.max(frame.seq);
+                    self.backlog.push_back(frame);
+                }
+                None
+            }
+            Received::Live(Err(RecvError::Closed)) => Some(Err(RecvError::Closed)),
+        }
+    }
+}
+
+/// A broadcast receiver with [`LagRecovery`]: `recv` reports `Lagged` only
+/// when the replay buffer cannot cover the gap, and is cancel-safe.
+pub struct LiveReceiver {
+    bus: Arc<EventBus>,
+    receiver: tokio::sync::broadcast::Receiver<EventFrame>,
+    recovery: LagRecovery,
+}
+
+impl LiveReceiver {
+    /// Wrap a receiver from [`EventBus::subscribe`]; `cursor` is the replay
+    /// cursor that subscription returned.
+    pub fn new(
+        bus: Arc<EventBus>,
+        receiver: tokio::sync::broadcast::Receiver<EventFrame>,
+        cursor: u64,
+    ) -> Self {
+        Self {
+            bus,
+            receiver,
+            recovery: LagRecovery::new(cursor),
+        }
+    }
+
+    /// The next frame for this subscriber.
+    pub async fn recv(&mut self) -> Result<EventFrame, tokio::sync::broadcast::error::RecvError> {
+        loop {
+            let received = match self.recovery.take_refilled() {
+                Some(frame) => Received::Refilled(frame),
+                None => Received::Live(self.receiver.recv().await),
+            };
+            if let Some(result) = self.recovery.admit(&self.bus, received) {
+                return result;
+            }
+        }
+    }
 }
 
 fn register_remote_pending_request(payload: &Value) {
@@ -883,5 +1057,134 @@ mod tests {
         let buffer = bus.buffer.lock();
         assert!(!buffer.iter().any(|frame| frame.seq == 100));
         assert!(buffer.iter().any(|frame| frame.seq == 101));
+        drop(buffer);
+        // The expired request frame is a drop a lag refill must not paper over.
+        assert!(bus.frames_after(99).is_none());
+        assert!(bus.frames_after(100).is_some());
+    }
+
+    // ── lag recovery ─────────────────────────────────────────────────────────
+
+    fn live(bus: &Arc<EventBus>) -> LiveReceiver {
+        let SubscribeResult::Ok {
+            receiver,
+            replay_cursor,
+            ..
+        } = bus.subscribe(None, now_ms())
+        else {
+            panic!("live subscription");
+        };
+        LiveReceiver::new(bus.clone(), receiver, replay_cursor)
+    }
+
+    async fn next(receiver: &mut LiveReceiver) -> Option<EventFrame> {
+        tokio::time::timeout(std::time::Duration::from_millis(50), receiver.recv())
+            .await
+            .ok()
+            .map(|result| result.expect("no lag"))
+    }
+
+    #[tokio::test]
+    async fn a_burst_beyond_the_channel_is_refilled_in_order_without_duplicates() {
+        let bus = EventBus::new();
+        bus.publish("before".into(), json!({}));
+        let mut receiver = live(&bus);
+        for i in 0..(BROADCAST_CAPACITY * 4) {
+            bus.publish("burst".into(), json!({ "i": i }));
+        }
+        for i in 0..(BROADCAST_CAPACITY * 4) {
+            let frame = next(&mut receiver).await.expect("refilled frame");
+            assert_eq!(frame.payload["i"], i);
+            assert_eq!(frame.seq, i as u64 + 2);
+        }
+        assert!(next(&mut receiver).await.is_none(), "no channel copy repeats");
+        // The stream goes on live after the refill.
+        let after = bus.publish("after".into(), json!({}));
+        assert_eq!(next(&mut receiver).await.map(|frame| frame.seq), Some(after.seq));
+    }
+
+    #[tokio::test]
+    async fn stale_ephemeral_frames_never_arrive_after_newer_refilled_ones() {
+        let bus = EventBus::new();
+        let mut receiver = live(&bus);
+        for _ in 0..(BROADCAST_CAPACITY * 2) {
+            bus.publish_person_ephemeral("transcript://live".into(), json!({}), "pb".into());
+        }
+        let kept = bus.publish("sync://invalidate".into(), json!({}));
+        for _ in 0..(BROADCAST_CAPACITY / 2) {
+            bus.publish_person_ephemeral("transcript://live".into(), json!({}), "pb".into());
+        }
+        let newest = bus.publish_person_ephemeral("transcript://live".into(), json!({}), "pb".into());
+        // The persisted frame comes back; the ephemeral ones before it are
+        // gone, and the ones after it still arrive in order.
+        let first = next(&mut receiver).await.expect("refilled frame");
+        assert_eq!(first.seq, kept.seq);
+        let mut last = first.seq;
+        while let Some(frame) = next(&mut receiver).await {
+            assert!(frame.seq > last, "in order");
+            last = frame.seq;
+        }
+        assert_eq!(last, newest.seq);
+    }
+
+    #[tokio::test]
+    async fn the_lag_is_reported_when_the_buffer_dropped_a_missed_frame() {
+        let bus = EventBus::new();
+        let mut receiver = live(&bus);
+        for i in 0..(BUFFER_CAPACITY + BROADCAST_CAPACITY) {
+            bus.publish("flood".into(), json!({ "i": i }));
+        }
+        assert!(matches!(
+            receiver.recv().await,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_second_lag_while_refilled_frames_wait_neither_repeats_nor_skips() {
+        let bus = EventBus::new();
+        let SubscribeResult::Ok {
+            mut receiver,
+            replay_cursor,
+            ..
+        } = bus.subscribe(None, now_ms())
+        else {
+            panic!("live subscription");
+        };
+        let mut recovery = LagRecovery::new(replay_cursor);
+        for i in 0..(BROADCAST_CAPACITY * 2) {
+            bus.publish("one".into(), json!({ "i": i }));
+        }
+        let mut seen = Vec::new();
+        let mut receive = |recovery: &mut LagRecovery,
+                           receiver: &mut tokio::sync::broadcast::Receiver<EventFrame>| {
+            loop {
+                let received = match recovery.take_refilled() {
+                    Some(frame) => Received::Refilled(frame),
+                    None => match receiver.try_recv() {
+                        Ok(frame) => Received::Live(Ok(frame)),
+                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                            Received::Live(Err(tokio::sync::broadcast::error::RecvError::Lagged(n)))
+                        }
+                        Err(_) => return None,
+                    },
+                };
+                if let Some(result) = recovery.admit(&bus, received) {
+                    return Some(result.expect("covered").seq);
+                }
+            }
+        };
+        for _ in 0..10 {
+            seen.push(receive(&mut recovery, &mut receiver).unwrap());
+        }
+        // A second burst lands while most of the first refill still waits.
+        for i in 0..(BROADCAST_CAPACITY * 2) {
+            bus.publish("two".into(), json!({ "i": i }));
+        }
+        while let Some(seq) = receive(&mut recovery, &mut receiver) {
+            seen.push(seq);
+        }
+        let expected: Vec<u64> = (1..=(BROADCAST_CAPACITY as u64 * 4)).collect();
+        assert_eq!(seen, expected);
     }
 }

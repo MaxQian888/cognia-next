@@ -1534,9 +1534,14 @@ async fn handle_acp_socket(
         .unwrap_or_default()
         .as_millis() as i64;
 
-    // Live subscription only — ACP has no replay cursor semantics.
+    // Live subscription only — ACP has no replay cursor semantics. A burst
+    // past the broadcast channel refills from the replay buffer.
     let mut receiver = match state.event_bus.subscribe(None, now_ms) {
-        SubscribeResult::Ok { receiver, .. } => receiver,
+        SubscribeResult::Ok {
+            receiver,
+            replay_cursor,
+            ..
+        } => crate::event_bus::LiveReceiver::new(state.event_bus.clone(), receiver, replay_cursor),
         SubscribeResult::ResyncRequired => return, // unreachable with since=None
     };
 
@@ -1604,7 +1609,7 @@ async fn handle_acp_socket(
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        log::warn!("companion-api acp: subscriber lagged by {n} frames; closing");
+                        log::warn!("companion-api acp: subscriber lagged by {n} frames past the replay buffer; closing");
                         conn.cleanup().await;
                         return;
                     }

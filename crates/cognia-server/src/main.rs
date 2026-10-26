@@ -610,27 +610,37 @@ enum ProfilesCommand {
 /// Subscribes once at the current high-water mark (no replay: a restart must
 /// not re-push last night's events) and filters on the shared
 /// `PUSH_TRIGGER_CHANNELS` table, so the two hosts cannot drift on which
-/// channels are push-worthy. A lagged receiver skips the missed frames rather
-/// than dying — the bus is bursty under a sync storm and a push is
-/// best-effort by contract.
+/// channels are push-worthy. A burst past the broadcast channel refills from
+/// the replay buffer (`LiveReceiver`); only frames the buffer already dropped
+/// are skipped, never the receiver — a push is best-effort by contract.
 fn spawn_headless_push_triggers(shared: cognia_companion::SharedState) {
     use cognia_companion::event_bus::SubscribeResult;
     use cognia_companion::push_triggers::{fan_out_push, PUSH_TRIGGER_CHANNELS};
 
     let now = chrono::Utc::now().timestamp_millis();
-    let SubscribeResult::Ok { mut receiver, .. } = shared.event_bus.subscribe(None, now) else {
+    let SubscribeResult::Ok {
+        receiver,
+        replay_cursor,
+        ..
+    } = shared.event_bus.subscribe(None, now)
+    else {
         // `since: None` anchors at the high-water mark and cannot demand a
         // resync; this arm is unreachable but must not panic if the bus ever
         // changes its mind.
         log::warn!("push triggers: event bus refused a live subscription");
         return;
     };
+    let mut receiver = cognia_companion::event_bus::LiveReceiver::new(
+        shared.event_bus.clone(),
+        receiver,
+        replay_cursor,
+    );
     tokio::spawn(async move {
         loop {
             let frame = match receiver.recv().await {
                 Ok(frame) => frame,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    log::warn!("push triggers: lagged behind the event bus by {skipped} frames");
+                    log::warn!("push triggers: lagged past the replay buffer by {skipped} frames");
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
