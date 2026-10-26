@@ -18,6 +18,7 @@
 import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { usePersonAgents } from "@/hooks/chat/use-person-agents"
 import { getDb } from "@/lib/db/schema"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 import {
@@ -31,6 +32,8 @@ import {
   EMPTY_ACTIVITY_STATS,
   type ActivityStats,
 } from "@/lib/usage/activity-stats"
+import { usageModelLabels } from "@/lib/usage/model-labels"
+import { useSettingsStore } from "@/stores/settings"
 import type { DailyUsage } from "@/types/system/usage"
 
 export interface UseActivityStats {
@@ -42,6 +45,12 @@ export interface UseActivityStats {
   daily: DailyUsage[]
   /** Per-model breakdown, descending by cost. */
   models: ModelUsageRow[]
+  /**
+   * The name to show for each model key in range (`lib/usage/model-labels.ts`):
+   * an org member's deployment name, else the app catalog's, else the id.
+   * `null` for the bucket of rows that named no model.
+   */
+  modelLabels: Readonly<Record<string, string | null>>
   /** Render-time "now" the window was cut at — pass it to the heatmap. */
   now: number
 }
@@ -66,5 +75,13 @@ export function useActivityStats(rangeDays: number): UseActivityStats {
   const daily = useMemo(() => (rows ? aggregateByDay(inRange) : []), [rows, inRange])
   const models = useMemo(() => (rows ? aggregateByModel(inRange) : []), [rows, inRange])
 
-  return { loading: rows === undefined, stats, daily, models, now }
+  const orgNames = usePersonAgents().agents?.modelNames
+  const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
+  const customProviders = useSettingsStore((s) => s.settings?.customProviders)
+  const modelLabels = useMemo(
+    () => usageModelLabels(inRange, { orgNames, providerSettings, customProviders }),
+    [inRange, orgNames, providerSettings, customProviders]
+  )
+
+  return { loading: rows === undefined, stats, daily, models, modelLabels, now }
 }

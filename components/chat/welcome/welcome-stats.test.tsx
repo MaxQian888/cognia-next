@@ -78,6 +78,7 @@ function mockHook(over: Partial<ReturnType<typeof useActivityStats>> = {}) {
         reasoningTokens: 0,
       },
     ],
+    modelLabels: {},
     now: NOW,
     ...over,
   })
@@ -119,6 +120,17 @@ describe("<WelcomeStats />", () => {
     storeState.settings = { welcomeStats: { tiles: ["longestStreak"] } }
     render(<WelcomeStats />)
     expect(screen.getByTestId("welcome-stat-longestStreak")).toHaveTextContent("9d")
+  })
+
+  it("names the top model as the model menu does, with its id on hover", () => {
+    mockHook({
+      stats: { ...STATS, topModel: "ark-deepseek-v4.1-flash" },
+      modelLabels: { "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash" },
+    })
+    render(<WelcomeStats />)
+    const tile = screen.getByTestId("welcome-stat-topModel")
+    expect(tile).toHaveTextContent("DeepSeek V4.1 Flash")
+    expect(tile.querySelector('[title="ark-deepseek-v4.1-flash"]')).not.toBeNull()
   })
 
   it("shows an em dash when there is no peak hour or top model", () => {
@@ -206,6 +218,48 @@ describe("<WelcomeStats />", () => {
       expect(screen.getByTestId("welcome-stats-models")).toBeInTheDocument()
       expect(screen.getByTestId("welcome-stats-model-claude-opus-5")).toHaveTextContent("$10.00")
       expect(screen.queryByTestId("welcome-stats-grid")).not.toBeInTheDocument()
+    })
+
+    it("names each model, keeps its id on hover, and names a turn without one", () => {
+      storeState.settings = { welcomeStats: { view: "models" } }
+      mockHook({
+        models: [
+          {
+            model: "ark-deepseek-v4.1-flash",
+            turns: 3,
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            durationMs: 0,
+            reasoningTokens: 0,
+            unpricedTurns: 0,
+          },
+          {
+            model: "(unknown)",
+            turns: 1,
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            durationMs: 0,
+            reasoningTokens: 0,
+            unpricedTurns: 0,
+          },
+        ],
+        modelLabels: { "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash", "(unknown)": null },
+      })
+      render(<WelcomeStats />)
+      const named = screen.getByTestId("welcome-stats-model-ark-deepseek-v4.1-flash")
+      expect(named).toHaveTextContent("DeepSeek V4.1 Flash")
+      expect(named).toHaveTextContent("3 turns")
+      expect(named).not.toHaveTextContent("ark-deepseek-v4.1-flash")
+      expect(named.querySelector('[title="ark-deepseek-v4.1-flash"]')).not.toBeNull()
+      const unknown = screen.getByTestId("welcome-stats-model-(unknown)")
+      expect(unknown).toHaveTextContent("Unknown model")
+      expect(unknown).toHaveTextContent("1 turn ·")
     })
 
     it("explains an empty model list", () => {

@@ -1301,7 +1301,8 @@
       "heatmap": "日历热力图",
       "models": {
         "empty": "该时间范围内没有模型用量。",
-        "turns": "{count} 轮"
+        "turns": "{count} 轮",
+        "unknown": "未知模型"
       },
       "none": "—",
       "range": {

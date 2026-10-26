@@ -8911,7 +8911,8 @@
         "heatmap": "Calendar heatmap",
         "models": {
           "empty": "No model usage in this window.",
-          "turns": "{count} turns"
+          "turns": "{count, plural, =1 {# turn} other {# turns}}",
+          "unknown": "Unknown model"
         },
         "none": "—",
         "range": {

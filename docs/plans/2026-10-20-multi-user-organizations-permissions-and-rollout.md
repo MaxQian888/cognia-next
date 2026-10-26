@@ -580,7 +580,7 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - Brain `fetchPersonAgentPolicy` and `PersonAgentsManifest.modelNames` (optional, checked when present). `personServedModels` entries carry `names`, and the model picker labels each row and the chip with them, falling back to `resolveModelDisplayName`.
       - Smoke: with `COGNIA_SMOKE_PERSONS_MODEL_NAME` set, the member's manifest must name the persons model so, and name nothing it does not serve.
     - **Verified (2026-10-26, P6f rig, `ark-deepseek-v4.1-flash`):** the rig's deployment profile gave the model "DeepSeek V4.1 Flash" (`cognia-server profiles import`, profileVersion 3). The persons smoke is green with the new check. In Ada's browser the composer chip and the menu read "DeepSeek V4.1 Flash", with the id beneath in the menu.
-    - **Known gaps:** a Host that projects its snapshot from app settings instead of the profile store names only models whose settings carry a name (`resolveModelDisplayName`). The welcome screen's usage stats still name the top model by id.
+    - **Known gaps:** a Host that projects its snapshot from app settings instead of the profile store names only models whose settings carry a name (`resolveModelDisplayName`). ~~The welcome screen's usage stats still name the top model by id.~~ Fixed by item 20.
 
 17. **Grant-bound reads wait for the Host's manifest (P6 follow-up, 2026-10-26; item 14's gap).**
     - **Decisions:**
@@ -620,6 +620,16 @@ Verified 2026-10-24 (HEAD `f78e9f1840`), code-read:
       - In one of the five runs, the org-default agent turn ended `fatal-error` with `SyntaxError: Unterminated fractional number in JSON at position 208` in the person brain: a line of agent output reached it cut short. No Host or brain path splits a line (the Rust line readers and `LineBuffer` have no cap, and the batcher never splits a frame), and fan-out does not change the brain's frame count or order. The stdout-relay work in progress tests exactly this split (`{"usage":1.` / `25,…`). Not addressed here.
       - A burst of more than 256 frames from one producer still closes every subscriber. Fan-out was what made bursts routine. `ws.rs` still closes a lagged socket and leaves the client to resync.
       - The rig's member devices are never pruned; the fix makes their count harmless rather than removing them.
+
+20. **The welcome dashboard names models (P6 follow-up, 2026-10-26; item 16's gap).**
+    - **Decisions:**
+      - The welcome dashboard (`components/chat/welcome/welcome-stats.tsx`) labels its top-model tile and its per-model rows the way the model menu labels the same models: the org deployment's name (`personAgents.modelNames`), else the app catalog's (`resolveModelDisplayName`, which reads custom-provider and discovered names from settings), else the id. The id stays the bucket key and the hover text.
+      - A usage bucket is keyed by model id only, so its provider is the one that moved most of its tokens (ties: the first by id). Turns that named no model show "Unknown model" in the reader's language instead of `(unknown)`.
+      - The Subscription → Usage tab and the session cost badge keep showing ids in monospace: they are the technical views of the same rows.
+      - In passing, the per-model turn count is an ICU plural ("1 turn", not "1 turns").
+    - **Surface:** `lib/usage/model-labels.ts` (`modelProviders`, `usageModelLabel`, `usageModelLabels`), `useActivityStats().modelLabels`, the dashboard's tile and breakdown, key `chat.empty.stats.models.unknown`.
+    - **Verified (2026-10-26, P6f rig):** a browser paired to the rig as Ada, with two usage rows seeded, read "Top model: DeepSeek V4.1 Flash" (hover `ark-deepseek-v4.1-flash`) and listed "Claude Haiku 4.5" and "DeepSeek V4.1 Flash" in the Models view. The plural string is checked by the unit test against the generated `en.json`; the running page loads its messages once and was not reloaded (a reload locks the dev vault).
+    - **Known gaps:** a member's browser records no usage rows of its own (the Host runs their turns), so a member's welcome dashboard is empty unless the device also ran local turns. Their month is shown by the composer's usage figure from `personAgents`.
 
 **Intentional dormancy (Rule 7).**
 

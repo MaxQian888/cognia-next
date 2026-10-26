@@ -10,6 +10,13 @@ jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/db/schema", () => ({
   getDb: jest.fn(() => ({ sessionUsage: { toArray: jest.fn(async () => []) } })),
 }))
+const mockPersonAgents: { agents: { modelNames?: Record<string, Record<string, string>> } | null } =
+  { agents: null }
+jest.mock("@/hooks/chat/use-person-agents", () => ({ usePersonAgents: () => mockPersonAgents }))
+const mockSettings: { settings: Record<string, unknown> | null } = { settings: null }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: typeof mockSettings) => unknown) => selector(mockSettings),
+}))
 
 import { useLiveQuery } from "dexie-react-hooks"
 import { useActivityStats } from "./use-activity-stats"
@@ -41,6 +48,8 @@ function row(overrides: Partial<SessionUsageRow> = {}): SessionUsageRow {
 beforeEach(() => {
   jest.spyOn(Date, "now").mockReturnValue(NOW)
   mockLiveQuery.mockReset()
+  mockPersonAgents.agents = null
+  mockSettings.settings = null
 })
 
 afterEach(() => {
@@ -69,6 +78,27 @@ describe("useActivityStats", () => {
     expect(result.current.stats.sessions).toBe(2)
     expect(result.current.daily).toHaveLength(2)
     expect(result.current.models.map((m) => m.model).sort()).toEqual(["opus", "sonnet"])
+  })
+
+  it("names each model as the member's org does, else as the app's catalog does", () => {
+    mockPersonAgents.agents = {
+      modelNames: { deepseek: { "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash" } },
+    }
+    mockSettings.settings = {
+      customProviders: [{ id: "my-proxy", customModelMetadata: { m1: { name: "Proxy One" } } }],
+    }
+    mockLiveQuery.mockReturnValue([
+      row({ messageId: "a", model: "ark-deepseek-v4.1-flash", providerId: "deepseek" }),
+      row({ messageId: "b", model: "m1", providerId: "my-proxy" }),
+      row({ messageId: "c", model: undefined }),
+      row({ messageId: "d", model: "old", at: at(1) }),
+    ])
+    const { result } = renderHook(() => useActivityStats(7))
+    expect(result.current.modelLabels).toEqual({
+      "ark-deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
+      m1: "Proxy One",
+      "(unknown)": null,
+    })
   })
 
   it("keeps an empty table distinct from a not-yet-loaded one", () => {

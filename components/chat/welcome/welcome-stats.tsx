@@ -89,6 +89,7 @@ function tileValue(
     number: (n: number) => string
     hour: (h: number) => string
     streak: (days: number) => string
+    model: (id: string) => string
     none: string
   }
 ): string {
@@ -110,7 +111,7 @@ function tileValue(
     case "peakHour":
       return stats.peakHour == null ? fmt.none : fmt.hour(stats.peakHour)
     case "topModel":
-      return stats.topModel ?? fmt.none
+      return stats.topModel ? fmt.model(stats.topModel) : fmt.none
   }
 }
 
@@ -122,11 +123,14 @@ function tileValue(
 function StatTile({
   label,
   value,
+  title,
   icon: Icon,
   testid,
 }: {
   label: string
   value: string
+  /** Hover text, when it says more than the value (a model's id). */
+  title?: string
   icon: LucideIcon
   testid: string
 }) {
@@ -139,7 +143,7 @@ function StatTile({
         <Icon className="size-3 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
       </span>
-      <span className="truncate text-lg font-semibold tabular-nums" title={value}>
+      <span className="truncate text-lg font-semibold tabular-nums" title={title ?? value}>
         {value}
       </span>
     </div>
@@ -151,6 +155,7 @@ function ModelBreakdown({
   models,
   emptyLabel,
   turnsLabel,
+  modelLabel,
 }: {
   models: readonly {
     model: string
@@ -162,6 +167,8 @@ function ModelBreakdown({
   }[]
   emptyLabel: string
   turnsLabel: (turns: number) => string
+  /** The model's name; its id stays the key and the hover text. */
+  modelLabel: (model: string) => string
 }) {
   const withTokens = models.map((m) => ({
     ...m,
@@ -187,7 +194,7 @@ function ModelBreakdown({
         >
           <div className="flex items-baseline justify-between gap-3 text-xs">
             <span className="truncate font-medium" title={m.model}>
-              {m.model}
+              {modelLabel(m.model)}
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {turnsLabel(m.turns)} · {formatTokens(m.tokens)} ·{" "}
@@ -285,7 +292,7 @@ export function WelcomeStats({ className }: WelcomeStatsProps) {
   const save = useSettingsStore((s) => s.save)
 
   const prefs = useMemo(() => resolveWelcomeStatsPrefs(stored), [stored])
-  const { loading, stats, daily, models, now } = useActivityStats(prefs.rangeDays)
+  const { loading, stats, daily, models, modelLabels, now } = useActivityStats(prefs.rangeDays)
 
   const numberFormat = useMemo(() => new Intl.NumberFormat(locale), [locale])
   // Locale-aware hour-of-day ("7 PM" / "19时") — no hard-coded clock format.
@@ -302,6 +309,11 @@ export function WelcomeStats({ className }: WelcomeStatsProps) {
     number: (n: number) => numberFormat.format(n),
     hour: (h: number) => hourFormat.format(new Date(2024, 0, 1, h)),
     streak: (days: number) => t("stats.dayCount", { count: days }),
+    // The org's or the catalog's name; a turn that named no model is unknown.
+    model: (id: string) => {
+      const label = modelLabels[id]
+      return label === null ? t("stats.models.unknown") : (label ?? id)
+    },
     none: t("stats.none"),
   }
 
@@ -399,6 +411,7 @@ export function WelcomeStats({ className }: WelcomeStatsProps) {
           models={models}
           emptyLabel={t("stats.models.empty")}
           turnsLabel={(turns) => t("stats.models.turns", { count: turns })}
+          modelLabel={fmt.model}
         />
       ) : (
         <div className="flex flex-col gap-3">
@@ -413,6 +426,7 @@ export function WelcomeStats({ className }: WelcomeStatsProps) {
                   testid={`welcome-stat-${id}`}
                   label={t(`stats.tiles.${id}`)}
                   value={tileValue(id, stats, fmt)}
+                  {...(id === "topModel" && stats.topModel ? { title: stats.topModel } : {})}
                   icon={TILE_ICONS[id]}
                 />
               ))}
