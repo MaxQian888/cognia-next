@@ -27,6 +27,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import { registerWeComLiveConnection, weComCredentialFingerprint } from "./live-connection"
 import { buildConversationKey, type NormalizedInboundEvent } from "@/types/connectors/event"
 import {
@@ -934,6 +935,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     stop,
     health,
     send,
+    // Every delivery goes to the reference's chat: a reply's message id never
+    // moves it, and there is no edit (ADR-0239).
+    messageRoute: conversationBoundRoute,
     streamReply,
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("wecom"),
     a2uiCapability: () => WECOM_A2UI_CAPABILITY,

@@ -23,6 +23,7 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import type { ReactionRef } from "@/types/connectors/adapter"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { QQ_OFFICIAL_A2UI_CAPABILITY, QQ_OFFICIAL_CAPS } from "./capability"
@@ -508,6 +509,9 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
     stop,
     health,
     send,
+    // Every delivery goes to the reference's chat: a reply's message id never
+    // moves it, and there is no edit (ADR-0239).
+    messageRoute: conversationBoundRoute,
     delete: deleteMessage,
     setTyping,
     addReaction,

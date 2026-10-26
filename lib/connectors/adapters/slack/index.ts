@@ -25,6 +25,7 @@ import type {
 import { createSlackRunPresentationDriver } from "@/lib/connectors/run-presentation/slack-driver"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { compositeEditRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { statFile } from "@/lib/file/file-operations"
@@ -1061,6 +1062,14 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     health,
     send,
     edit,
+    // A reply stays in the reference's channel; an edit goes to the channel
+    // its "<channel>:<ts>" composite names, else the reference's (ADR-0239).
+    messageRoute: async (messageId, use, conversationRef) =>
+      compositeEditRoute(
+        use,
+        use === "edit" ? splitChannelTs(messageId).channel || undefined : undefined,
+        String(conversationRef["channelId"] ?? "")
+      ),
     delete: deleteMessage,
     uploadFile,
     fetchHistory,

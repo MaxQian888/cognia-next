@@ -31,6 +31,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { ONEBOT_A2UI_CAPABILITY, ONEBOT_CAPS } from "./capability"
 import { parseOneBotEvent, clearVariantCache } from "./parse"
@@ -761,6 +762,9 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     stop,
     health,
     send,
+    // Every delivery goes to the reference's chat: a reply's message id never
+    // moves it, and there is no edit (ADR-0239).
+    messageRoute: conversationBoundRoute,
     delete: deleteMessage,
     refreshCredentials,
     forwardMessage,

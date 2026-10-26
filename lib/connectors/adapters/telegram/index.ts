@@ -13,6 +13,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { compositeEditRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
 import { createTelegramAlbumBuffer, type TelegramAlbumBuffer } from "./album"
@@ -1004,6 +1005,19 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     health,
     send,
     edit,
+    // A reply stays in the reference's chat; an edit goes to the chat its
+    // "chatId:messageId" composite names, else the reference's (ADR-0239).
+    messageRoute: async (messageId, use, conversationRef) => {
+      const refChat = String(conversationRef["chatId"] ?? "")
+      if (use === "reply" || !messageId.includes(":")) {
+        return compositeEditRoute(use, undefined, refChat)
+      }
+      try {
+        return compositeEditRoute(use, splitChatMessage(messageId)[0], refChat)
+      } catch {
+        return "unknown"
+      }
+    },
     delete: deleteMessage,
     setTyping,
     addReaction,

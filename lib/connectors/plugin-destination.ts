@@ -10,18 +10,34 @@
  * it is sent with the delivery target the host stored for that conversation,
  * which an inbound message refreshed or `bootstrapConversation` minted.
  *
- * The message ids a request points at must belong to the same conversation
- * too: on Lark a reply to a message id is posted into that message's chat, so
- * `replyTo` or `editTargetMessageId` naming another chat's message would also
- * reach it. An id counts when the host received it in, or delivered it to, the
- * conversation (`inboundLedger`); one that aged out of the ledger's window is
- * refused with the rest.
+ * The message ids a request points at must keep it in the same chat too: on
+ * Lark a reply to or an edit of a message id lands in that message's chat,
+ * and an edit's composite id (`chatId:messageId`) names its own chat on
+ * Telegram, Slack, Discord and Matrix. An id is placed, in this order, by:
+ *
+ * 1. the inbound ledger: the host received it in, or delivered it to, the
+ *    conversation (a window of recent messages);
+ * 2. the message the host stored when it received it (`messages`, scoped to
+ *    the bot and the chat), which does not age out;
+ * 3. the adapter (`PlatformAdapter.messageRoute`): where a reply or edit of
+ *    that id, sent through the stored reference, lands. Lark reads the
+ *    message's chat from the platform; the composite-id adapters read the id;
+ *    the rest keep every delivery in the reference's chat.
+ *
+ * An id placed in another chat is refused (`foreign-message`), and so is one
+ * nothing can place (`unplaced-message`: an adapter that is not running, or a
+ * message the platform will not return).
  */
 
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import { isInboundRecorded } from "@/lib/db/inbound-ledger"
-import type { OutboundRequest } from "@/types/connectors"
-import { parseConversationKey, type ConversationDeliveryTarget } from "@/types/connectors/event"
+import { getDb } from "@/lib/db/schema"
+import type { MessageRoute, OutboundRequest } from "@/types/connectors"
+import {
+  parseConversationKey,
+  type ConversationDeliveryTarget,
+  type ConversationReference,
+} from "@/types/connectors/event"
 
 import { wasDeliveredByUs } from "./delivered-messages"
 import { findSessionByConversationKey } from "./session-bindings"
@@ -33,8 +49,10 @@ export type PluginDestinationProblem =
   | "target-mismatch"
   /** No delivery target is stored for the conversation yet. */
   | "unknown-conversation"
-  /** A reply or edit names a message the host never saw in this conversation. */
+  /** A reply or edit names a message in another chat. */
   | "foreign-message"
+  /** A reply or edit names a message nothing can place in this chat. */
+  | "unplaced-message"
 
 const PROBLEM_TEXT: Record<PluginDestinationProblem, string> = {
   "invalid-key": "the conversation key is malformed or belongs to another bot",
@@ -42,6 +60,8 @@ const PROBLEM_TEXT: Record<PluginDestinationProblem, string> = {
   "unknown-conversation":
     "no delivery target is known for this conversation yet: it must have received a message, or be bootstrapped (ctx.connectors.bootstrapConversation)",
   "foreign-message": "it replies to or edits a message that is not from this conversation",
+  "unplaced-message":
+    "it replies to or edits a message the host cannot place in this conversation (the bot is not running, or the platform did not return the message)",
 }
 
 /** A plugin's delivery names a destination the host cannot send it to. Nothing was persisted. */
@@ -59,12 +79,17 @@ export class PluginDestinationError extends Error {
 
 export interface PluginDestinationDeps {
   storedTarget(conversationKey: string): Promise<ConversationDeliveryTarget | undefined>
-  /** Whether the host received or delivered `messageId` in this conversation. */
-  messageInConversation(
-    adapterId: string,
-    conversationKey: string,
+  /**
+   * Where a reply to or an edit of `messageId` through `conversationRef`
+   * lands, as the module comment orders the evidence.
+   */
+  messageRoute(input: {
+    adapterId: string
+    conversationKey: string
     messageId: string
-  ): Promise<boolean>
+    use: "reply" | "edit"
+    conversationRef: ConversationReference
+  }): Promise<MessageRoute>
 }
 
 async function defaultStoredTarget(
@@ -77,20 +102,71 @@ async function defaultStoredTarget(
   return session?.platformBinding?.deliveryTarget
 }
 
-async function defaultMessageInConversation(
+/** Whether two conversation keys name the same chat of the same bot, any thread. */
+function sameBotChat(a: string, b: string): boolean {
+  try {
+    const left = parseConversationKey(a)
+    const right = parseConversationKey(b)
+    return (
+      left.remoteChatId !== "" &&
+      left.platform === right.platform &&
+      left.adapterId === right.adapterId &&
+      left.remoteChatId === right.remoteChatId
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Whether the host stored `messageId` as received in this chat of this bot. */
+async function storedInChat(
   adapterId: string,
   conversationKey: string,
   messageId: string
 ): Promise<boolean> {
+  const rows = await getDb().messages.where("platformMessageId").equals(messageId).toArray()
+  return rows.some((row) => {
+    const received = (row.metadata as { platformMessage?: unknown } | undefined)
+      ?.platformMessage as { adapterId?: unknown; conversationKey?: unknown } | undefined
+    // Rows from before the bot and conversation were recorded cannot be placed.
+    return (
+      received?.adapterId === adapterId &&
+      typeof received.conversationKey === "string" &&
+      sameBotChat(received.conversationKey, conversationKey)
+    )
+  })
+}
+
+async function defaultMessageRoute(input: {
+  adapterId: string
+  conversationKey: string
+  messageId: string
+  use: "reply" | "edit"
+  conversationRef: ConversationReference
+}): Promise<MessageRoute> {
+  const { adapterId, conversationKey, messageId } = input
   const received = await isInboundRecorded(adapterId, messageId, "inbound", conversationKey).catch(
     () => false
   )
-  return received || wasDeliveredByUs(adapterId, conversationKey, messageId)
+  if (received || (await wasDeliveredByUs(adapterId, conversationKey, messageId))) {
+    return "within"
+  }
+  if (await storedInChat(adapterId, conversationKey, messageId).catch(() => false)) {
+    return "within"
+  }
+  try {
+    const { getBus } = await import("./bus")
+    const adapter = getBus().getAdapter(adapterId)
+    if (!adapter?.messageRoute) return "unknown"
+    return await adapter.messageRoute(messageId, input.use, input.conversationRef)
+  } catch {
+    return "unknown"
+  }
 }
 
 const defaultDeps: PluginDestinationDeps = {
   storedTarget: defaultStoredTarget,
-  messageInConversation: defaultMessageInConversation,
+  messageRoute: defaultMessageRoute,
 }
 
 /**
@@ -104,7 +180,7 @@ export async function pluginDestination(
   request: OutboundRequest,
   deps: Partial<PluginDestinationDeps> = {}
 ): Promise<OutboundRequest> {
-  const { storedTarget, messageInConversation } = { ...defaultDeps, ...deps }
+  const { storedTarget, messageRoute } = { ...defaultDeps, ...deps }
   let keyAdapter: string
   try {
     keyAdapter = parseConversationKey(conversationKey).adapterId
@@ -127,13 +203,21 @@ export async function pluginDestination(
     throw new PluginDestinationError("unknown-conversation", conversationKey)
   }
 
-  const messageIds = [request.replyTo?.messageId, request.editTargetMessageId].filter(
-    (id): id is string => typeof id === "string" && id !== ""
-  )
-  for (const messageId of messageIds) {
-    if (!(await messageInConversation(adapterId, conversationKey, messageId))) {
-      throw new PluginDestinationError("foreign-message", conversationKey)
-    }
+  const pointers = [
+    { use: "reply" as const, messageId: request.replyTo?.messageId },
+    { use: "edit" as const, messageId: request.editTargetMessageId },
+  ]
+  for (const { use, messageId } of pointers) {
+    if (typeof messageId !== "string" || messageId === "") continue
+    const route = await messageRoute({
+      adapterId,
+      conversationKey,
+      messageId,
+      use,
+      conversationRef: target.conversationRef,
+    })
+    if (route === "elsewhere") throw new PluginDestinationError("foreign-message", conversationKey)
+    if (route !== "within") throw new PluginDestinationError("unplaced-message", conversationKey)
   }
 
   return { ...request, conversationRef: target.conversationRef, deliveryTarget: target }

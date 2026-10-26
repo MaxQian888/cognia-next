@@ -20,6 +20,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -365,6 +366,9 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     stop,
     health,
     send,
+    // Every delivery goes to the reference's chat: a reply's message id never
+    // moves it, and there is no edit (ADR-0239).
+    messageRoute: conversationBoundRoute,
     setTyping,
     refreshCredentials,
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("wechat-oa"),

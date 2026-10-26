@@ -17,6 +17,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { buildConversationKey } from "@/types/connectors/event"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
@@ -515,6 +516,9 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       return { state: healthState, reason: healthReason, lastActivityAt }
     },
     send,
+    // Every delivery goes to the reference's chat: a reply's message id never
+    // moves it, and there is no edit (ADR-0239).
+    messageRoute: conversationBoundRoute,
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("wechat-personal"),
     a2uiCapability: () => WECHAT_PERSONAL_A2UI_CAPABILITY,
   }

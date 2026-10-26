@@ -377,6 +377,23 @@ describe("createDiscordAdapter", () => {
     expect(reqPayload.method).toBe("POST")
   })
 
+  it("escapes an edit's ids in the URL path, so no id can walk it to another channel", async () => {
+    mockInvoke.mockResolvedValue(makeSendOkResp("sent-id"))
+    const adapter = makeAdapter()
+    await adapter.edit!("../../222/messages/333", {
+      conversationRef: { platform: "discord", adapterId: "dc-1", channelId: "111" },
+      segments: [{ type: "text", text: "hello" }],
+      metadata: { idempotencyKey: "escape" },
+    })
+    const patch = mockInvoke.mock.calls
+      .filter(([cmd]: [string]) => cmd === "connectors_http_request")
+      .map(([, args]) => (args as { req: { method: string; url: string } }).req)
+      .find((req) => req.method === "PATCH")
+    expect(new URL(patch!.url).pathname).toBe(
+      "/api/v10/channels/111/messages/..%2F..%2F222%2Fmessages%2F333"
+    )
+  })
+
   it("round-trips a sent message through edit, reactions, pin and delete", async () => {
     mockInvoke.mockResolvedValue(makeSendOkResp("sent-id"))
     const adapter = makeAdapter()
@@ -1383,4 +1400,26 @@ it("rejects opaque cards before sending earlier media", async () => {
   })
   expect(result.error).toMatchObject({ code: "validation", retryable: false })
   expect(mockInvoke).not.toHaveBeenCalled()
+})
+
+describe("messageRoute (ADR-0239)", () => {
+  it("keeps a reply in the channel and places an edit by its composite id", async () => {
+    const adapter = makeAdapter()
+    const ref = { platform: "discord" as const, adapterId: "dc-1", channelId: "111" }
+    await expect(adapter.messageRoute!("222:333", "reply", ref)).resolves.toBe("within")
+    await expect(adapter.messageRoute!("111:333", "edit", ref)).resolves.toBe("within")
+    await expect(adapter.messageRoute!("333", "edit", ref)).resolves.toBe("within")
+    await expect(adapter.messageRoute!("222:333", "edit", ref)).resolves.toBe("elsewhere")
+    await expect(
+      adapter.messageRoute!("333", "edit", { platform: "discord", adapterId: "dc-1" })
+    ).resolves.toBe("unknown")
+  })
+
+  it("cannot place an edit id that is not a snowflake, which could walk the URL path", async () => {
+    const adapter = makeAdapter()
+    const ref = { platform: "discord" as const, adapterId: "dc-1", channelId: "111" }
+    for (const id of ["../../222/messages/333", "111:../../222/messages/333", "msg-1"]) {
+      await expect(adapter.messageRoute!(id, "edit", ref)).resolves.toBe("unknown")
+    }
+  })
 })

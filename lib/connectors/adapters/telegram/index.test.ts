@@ -1243,3 +1243,19 @@ it("rejects opaque cards before sending earlier media", async () => {
   expect(result.error).toMatchObject({ code: "validation", retryable: false })
   expect(mockInvoke).not.toHaveBeenCalled()
 })
+
+it("messageRoute keeps a reply in the chat and places an edit by its composite id (ADR-0239)", async () => {
+  const adapter = createTelegramAdapter({
+    id: "tg-1",
+    displayName: "Test",
+    transport: "longpoll",
+    botToken: async () => "TOKEN",
+    selfId: "100",
+  })
+  const ref = { platform: "telegram" as const, adapterId: "tg-1", chatId: 11 }
+  await expect(adapter.messageRoute!("22:5", "reply", ref)).resolves.toBe("within")
+  await expect(adapter.messageRoute!("11:777", "edit", ref)).resolves.toBe("within")
+  await expect(adapter.messageRoute!("777", "edit", ref)).resolves.toBe("within")
+  await expect(adapter.messageRoute!("22:777", "edit", ref)).resolves.toBe("elsewhere")
+  await expect(adapter.messageRoute!(":777", "edit", ref)).resolves.toBe("unknown")
+})

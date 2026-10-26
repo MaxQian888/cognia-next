@@ -191,6 +191,9 @@ export interface ReadReceipt {
   hasMore: boolean
 }
 
+/** What {@link PlatformAdapter.messageRoute} answers. */
+export type MessageRoute = "within" | "elsewhere" | "unknown"
+
 /** Urgent (加急) escalation channel for {@link PlatformAdapter.sendUrgent}. */
 export type UrgentChannel = "app" | "sms" | "phone"
 
@@ -250,6 +253,25 @@ export interface PlatformAdapter {
   streamReply?(req: StreamReplyRequest): Promise<void>
   edit?(messageId: string, patch: OutboundRequest): Promise<OutboundResult>
   delete?(messageId: string): Promise<void>
+  /**
+   * Where a delivery through `conversationRef` lands when it replies to
+   * (`replyTo.messageId`) or edits (`editTargetMessageId`, {@link edit})
+   * `messageId`: inside that reference's chat, in another chat, or not
+   * known. On some platforms the message id alone picks the chat (Lark's
+   * reply and edit endpoints), or a composite id names its own chat (an
+   * edit's `chatId:messageId`), so a request could reach a chat other than
+   * the one it names.
+   *
+   * The host asks before it lets a plugin's request point at a message it
+   * has no record of in that conversation (ADR-0239); `"unknown"` and an
+   * absent method refuse it. Answer `"within"` only when the platform keeps
+   * the delivery in the reference's chat whatever the id says.
+   */
+  messageRoute?(
+    messageId: string,
+    use: "reply" | "edit",
+    conversationRef: ConversationReference
+  ): Promise<MessageRoute>
   /** Delete a recipient-only Lark card through its distinct ephemeral lifecycle. */
   deleteEphemeralCard?(messageId: string): Promise<void>
   /**

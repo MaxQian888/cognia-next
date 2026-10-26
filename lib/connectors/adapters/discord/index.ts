@@ -14,6 +14,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { compositeEditRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsDiscordUpload } from "@/lib/connectors/tauri/commands"
 import { DISCORD_A2UI_CAPABILITY, DISCORD_CAPS } from "./capability"
@@ -46,6 +47,9 @@ import type { GatewayClient } from "./gateway-client"
 import { startWebhookTransport, type WebhookTransportHandle } from "./transport-webhook"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
+
+/** A Discord id: a decimal snowflake, the only shape safe in a URL path. */
+const DISCORD_SNOWFLAKE = /^\d{1,20}$/
 
 export interface DiscordAdapterOptions {
   id: string
@@ -621,11 +625,15 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
           },
         }
       }
-      await doRequest("PATCH", `/channels/${channelId}/messages/${bareMessageId}`, {
-        content,
-        embeds,
-        components,
-      })
+      await doRequest(
+        "PATCH",
+        `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(bareMessageId)}`,
+        {
+          content,
+          embeds,
+          components,
+        }
+      )
       return {
         ok: true,
         ...(calls.some((call) => call.downgrades?.length)
@@ -806,6 +814,24 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     health,
     send,
     edit,
+    // A reply is posted to the reference's channel; an edit goes to the
+    // channel its "channelId:messageId" composite names, else the
+    // reference's (ADR-0239).
+    messageRoute: async (messageId, use, conversationRef) => {
+      const refChannel = String(conversationRef["channelId"] ?? "")
+      if (use === "reply") return compositeEditRoute(use, undefined, refChannel)
+      try {
+        const [channelId, bareMessageId] = splitChannelMessage(messageId, refChannel)
+        // Both end up in a URL path: anything but a snowflake (`../../…`)
+        // could walk the request to another channel.
+        if (!DISCORD_SNOWFLAKE.test(channelId) || !DISCORD_SNOWFLAKE.test(bareMessageId)) {
+          return "unknown"
+        }
+        return compositeEditRoute(use, channelId, refChannel)
+      } catch {
+        return "unknown"
+      }
+    },
     delete: deleteMessage,
     setTyping,
     setPresenceStatus,

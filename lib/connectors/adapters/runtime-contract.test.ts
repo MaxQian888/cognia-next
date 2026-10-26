@@ -293,3 +293,35 @@ describe("capability ↔ method drift", () => {
     }
   )
 })
+
+describe("messageRoute (ADR-0239)", () => {
+  // A plugin's reply or edit of a message the host has no record of is
+  // refused unless the adapter places it; every built-in one can.
+  it("is implemented by every built-in adapter", () => {
+    for (const adapter of adapters()) {
+      expect([adapter.meta.type, typeof adapter.messageRoute]).toEqual([
+        adapter.meta.type,
+        "function",
+      ])
+    }
+  })
+
+  it("keeps every delivery in the reference's chat on the platforms whose ids cannot move it", async () => {
+    const bound = new Set([
+      "onebot",
+      "wecom",
+      "wechat-personal",
+      "qq-official",
+      "wechat-oa",
+      "dingtalk",
+    ])
+    const checked = adapters().filter((adapter) => bound.has(adapter.meta.type))
+    expect(checked.map((adapter) => adapter.meta.type).sort()).toEqual([...bound].sort())
+    for (const adapter of checked) {
+      const ref = { platform: adapter.meta.type, adapterId: adapter.id }
+      for (const use of ["reply", "edit"] as const) {
+        await expect(adapter.messageRoute!("other-chat:123", use, ref)).resolves.toBe("within")
+      }
+    }
+  })
+})

@@ -936,3 +936,15 @@ function textEventForLateSync(): MatrixTimelineEvent {
     content: { msgtype: "m.text", body: "must not emit" },
   }
 }
+
+describe("messageRoute (ADR-0239)", () => {
+  it("keeps a reply in the room and places an edit by its composite id", async () => {
+    const bot = adapter()
+    const ref = { platform: "matrix" as const, adapterId: "mx-1", roomId: "!r:matrix.org" }
+    await expect(bot.messageRoute!("!other:matrix.org|$e", "reply", ref)).resolves.toBe("within")
+    await expect(bot.messageRoute!("!r:matrix.org|$e", "edit", ref)).resolves.toBe("within")
+    await expect(bot.messageRoute!("$e", "edit", ref)).resolves.toBe("within")
+    await expect(bot.messageRoute!("!other:matrix.org|$e", "edit", ref)).resolves.toBe("elsewhere")
+    await expect(bot.messageRoute!("|$e", "edit", ref)).resolves.toBe("unknown")
+  })
+})

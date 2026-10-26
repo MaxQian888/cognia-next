@@ -21,6 +21,7 @@ import type {
   ForwardMessageInput,
   UrgentChannel,
   HistoryPage,
+  MessageRoute,
   PlatformHistoryCursor,
 } from "@/types/connectors/adapter"
 import { createLarkRunPresentationDriver } from "@/lib/connectors/run-presentation/lark-driver"
@@ -79,7 +80,11 @@ import { syncLarkSlashCommands } from "./slash-commands"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
-import type { ConversationDeliveryTarget, NormalizedInboundEvent } from "@/types/connectors/event"
+import type {
+  ConversationDeliveryTarget,
+  ConversationReference,
+  NormalizedInboundEvent,
+} from "@/types/connectors/event"
 import { loggers } from "@cognia/logging"
 
 export interface LarkAdapterOptions {
@@ -1287,6 +1292,46 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   }
 
   /**
+   * Where a reply to or an edit of `messageId` lands (ADR-0239). Lark's reply
+   * and edit endpoints are keyed by the message id alone, so the message's
+   * own chat decides: read it (`GET /im/v1/messages/:id`, as message import
+   * does) and compare it with the reference's chat. A message never changes
+   * chat, so answers are cached. A reference that names a person (`ou_`,
+   * `on_`) has no chat id to compare, and a message the platform will not
+   * return is not known.
+   */
+  const messageChats = new Map<string, string>()
+  const MESSAGE_CHAT_CACHE_LIMIT = 512
+  async function messageRoute(
+    messageId: string,
+    _use: "reply" | "edit",
+    conversationRef: ConversationReference
+  ): Promise<MessageRoute> {
+    const refChat = String((conversationRef as Record<string, unknown>)["channelId"] ?? "")
+    if (!refChat.startsWith("oc_") || !messageId) return "unknown"
+    let chat = messageChats.get(messageId)
+    if (chat === undefined) {
+      try {
+        const resp = (await doRequest(
+          "GET",
+          `/im/v1/messages/${encodeURIComponent(messageId)}`
+        )) as { data?: { items?: Array<{ message_id?: string; chat_id?: string }> } } | null
+        const item = resp?.data?.items?.[0]
+        if (!item?.chat_id || item.message_id !== messageId) return "unknown"
+        chat = item.chat_id
+      } catch {
+        return "unknown"
+      }
+      if (messageChats.size >= MESSAGE_CHAT_CACHE_LIMIT) {
+        const oldest = messageChats.keys().next().value
+        if (oldest !== undefined) messageChats.delete(oldest)
+      }
+      messageChats.set(messageId, chat)
+    }
+    return chat === refChat ? "within" : "elsewhere"
+  }
+
+  /**
    * Query who has read a message (feedback). Bot needs `im:message` readonly.
    * Walks the `page_token` cursor until exhausted (capped at
    * READ_RECEIPT_MAX_PAGES pages of 50); `hasMore` is true only when the cap
@@ -1381,6 +1426,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     removeReaction,
     forwardMessage,
     sendUrgent,
+    messageRoute,
     deleteEphemeralCard: ephemeral.delete,
     getReadReceipt,
   }

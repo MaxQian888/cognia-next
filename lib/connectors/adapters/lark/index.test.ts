@@ -1431,6 +1431,52 @@ describe("createLarkAdapter", () => {
     expect(JSON.parse(call!.req.body!).user_id_list).toEqual(["ou_a"])
   })
 
+  it("messageRoute() places a message by the chat the platform reports (ADR-0239)", async () => {
+    mockHttp((url) =>
+      url.includes("om_here")
+        ? { code: 0, data: { items: [{ message_id: "om_here", chat_id: "oc_1" }] } }
+        : url.includes("om_there")
+          ? { code: 0, data: { items: [{ message_id: "om_there", chat_id: "oc_2" }] } }
+          : { code: 0, data: { items: [] } }
+    )
+    const adapter = makeAdapter()
+    const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "oc_1" }
+    await expect(adapter.messageRoute!("om_here", "reply", ref)).resolves.toBe("within")
+    expect(httpCallTo("/im/v1/messages/om_here")?.req.method).toBe("GET")
+    await expect(adapter.messageRoute!("om_there", "edit", ref)).resolves.toBe("elsewhere")
+    await expect(adapter.messageRoute!("om_gone", "reply", ref)).resolves.toBe("unknown")
+  })
+
+  it("messageRoute() caches a message's chat, and cannot compare a person's reference", async () => {
+    mockHttp(() => ({ code: 0, data: { items: [{ message_id: "om_1", chat_id: "oc_1" }] } }))
+    const adapter = makeAdapter()
+    const ref = { platform: "lark" as const, adapterId: "lark-1", channelId: "oc_1" }
+    await adapter.messageRoute!("om_1", "reply", ref)
+    const lookups = () =>
+      mockInvoke.mock.calls.filter(
+        ([cmd, args]: [string, unknown]) =>
+          cmd === "connectors_http_request" &&
+          (args as { req: { url: string } }).req.url.includes("/im/v1/messages/om_1")
+      ).length
+    const before = lookups()
+    await expect(adapter.messageRoute!("om_1", "edit", ref)).resolves.toBe("within")
+    expect(lookups()).toBe(before)
+    await expect(
+      adapter.messageRoute!("om_1", "reply", { ...ref, channelId: "ou_person" })
+    ).resolves.toBe("unknown")
+  })
+
+  it("messageRoute() cannot place a message when the lookup fails", async () => {
+    mockHttp(() => ({ code: 230002, msg: "bot not in chat" }))
+    await expect(
+      makeAdapter().messageRoute!("om_1", "reply", {
+        platform: "lark",
+        adapterId: "lark-1",
+        channelId: "oc_1",
+      })
+    ).resolves.toBe("unknown")
+  })
+
   it("forwardMessage() with neither messageId nor messageIds returns a validation error (no HTTP)", async () => {
     mockHttp(() => ({ code: 0 }))
     const res = await makeAdapter().forwardMessage!({ target: "oc_dest" })

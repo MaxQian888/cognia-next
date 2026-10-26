@@ -1244,3 +1244,17 @@ describe("createSlackAdapter", () => {
     await expect(adapter.refreshCredentials!()).resolves.toBeUndefined()
   })
 })
+
+describe("messageRoute (ADR-0239)", () => {
+  it("keeps a reply in the channel and places an edit by its composite id", async () => {
+    const adapter = makeAdapter()
+    const ref = { platform: "slack" as const, adapterId: "slack-1", channelId: "chan-1" }
+    await expect(adapter.messageRoute!("chan-2:1.2", "reply", ref)).resolves.toBe("within")
+    await expect(adapter.messageRoute!("chan-1:123.456", "edit", ref)).resolves.toBe("within")
+    await expect(adapter.messageRoute!("123.456", "edit", ref)).resolves.toBe("within")
+    await expect(adapter.messageRoute!("chan-2:123.456", "edit", ref)).resolves.toBe("elsewhere")
+    await expect(
+      adapter.messageRoute!("123.456", "edit", { platform: "slack", adapterId: "slack-1" })
+    ).resolves.toBe("unknown")
+  })
+})

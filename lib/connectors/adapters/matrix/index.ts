@@ -17,6 +17,7 @@ import type {
 import { buildConversationKey } from "@/types/connectors/event"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { compositeEditRoute } from "@/lib/connectors/adapters/_shared/message-route"
 import {
   connectorsHttpRequest,
   connectorsMatrixEncryptedMediaUpload,
@@ -763,6 +764,19 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     health,
     send,
     edit,
+    // A reply is sent to the reference's room; an edit goes to the room its
+    // "<roomId>|<eventId>" composite names, else the reference's (ADR-0239).
+    messageRoute: async (messageId, use, conversationRef) => {
+      const refRoom = String(conversationRef["roomId"] ?? "")
+      if (use === "reply" || !messageId.includes("|")) {
+        return compositeEditRoute(use, undefined, refRoom)
+      }
+      try {
+        return compositeEditRoute(use, splitMatrixMessageId(messageId).roomId, refRoom)
+      } catch {
+        return "unknown"
+      }
+    },
     delete: deleteMessage,
     setTyping,
     addReaction,

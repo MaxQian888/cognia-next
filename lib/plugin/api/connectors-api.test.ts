@@ -19,6 +19,8 @@
 import { createConnectorsAPI } from "./connectors-api"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
+import { routePythonHostRequest } from "@/lib/plugin/python/host-request-router"
+import type { PluginContext } from "@/types/plugin/plugin"
 
 const appendAudit = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/connectors/audit", () => ({
@@ -840,6 +842,34 @@ describe("createConnectorsAPI", () => {
       })
     })
 
+    it.each([
+      "outboundRecipients.0",
+      "owner.hostId",
+      "credentialsRef.accounts.0",
+      "settings.token",
+      "defaultEscalation.steps.0",
+    ])("refuses %s in TypeScript and Python instance updates", async (path) => {
+      const api = createConnectorsAPI(PLUGIN)
+      const patch = { displayName: "Renamed", [path]: "injected" }
+      await expect(api.updateInstance("cai_1", patch)).rejects.toThrow("is a key path")
+      const outcome = await routePythonHostRequest(
+        {
+          pluginId: PLUGIN,
+          generation: "gen-1",
+          requestId: 1,
+          method: "connectors.updateInstance",
+          params: { args: ["cai_1", patch] },
+        },
+        { getContext: () => ({ connectors: api }) as PluginContext }
+      )
+
+      expect(outcome).toEqual({
+        ok: false,
+        error: "host call 'connectors.updateInstance' is unavailable to python plugins",
+      })
+      expect(updateAdapterInstance).not.toHaveBeenCalled()
+    })
+
     it("refuses an escalation policy whose urgent steps reach anyone new (ADR-0239)", async () => {
       const urgent = (userIds: string[], targetConversationKey?: string) => ({
         steps: [
@@ -1167,10 +1197,10 @@ describe("createConnectorsAPI", () => {
         "target-mismatch",
       ],
       [
-        "a reply to another conversation's message",
+        "a reply to a message the bot cannot place in the conversation",
         "telegram:tg:42",
         { replyTo: { messageId: "pm_elsewhere" } },
-        "foreign-message",
+        "unplaced-message",
       ],
     ])("refuses %s before anything is queued", async (_what, key, extra, problem) => {
       const api = createConnectorsAPI(PLUGIN)
