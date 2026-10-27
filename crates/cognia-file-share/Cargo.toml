@@ -73,7 +73,7 @@ headers = "0.4"
 local-ip-address = "0.6"
 # SFTP: the same pinned russh line `cognia-terminal` uses (ring backend, no
 # `rsa` feature — RUSTSEC-2023-0071), as a server this time.
-russh = { version = "=0.63.3", default-features = false, features = ["ring"] }
+russh = { version = "=0.64.1", default-features = false, features = ["ring"] }
 russh-sftp = "3.0"
 tauri = { workspace = true, optional = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 
