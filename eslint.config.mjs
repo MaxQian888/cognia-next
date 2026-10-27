@@ -65,12 +65,6 @@ const eslintConfig = defineConfig([
     // the minified bundle, same rationale as the root out/ artifact dir.
     "docs/out/**",
     "docs/next-env.d.ts",
-    // The marketing site (ADR-0092) is a static export like docs/: web/out/
-    // holds the minified bundle and web/.next/ the build cache. Same rationale
-    // as the root out/ artifact dir — flat config does not read .gitignore.
-    "web/.next/**",
-    "web/out/**",
-    "web/next-env.d.ts",
     ".agents/**",
     ".claude/**",
     "sidecar/*.mjs",
@@ -165,13 +159,7 @@ const eslintConfig = defineConfig([
   },
   // Vendored components (ai-elements, shadcn/ui) — relaxed rules per CLAUDE.md
   {
-    files: [
-      "components/ai-elements/**/*.{ts,tsx}",
-      "components/ui/**/*.{ts,tsx}",
-      // The marketing workspace keeps its own shadcn copies (ADR-0092 §1
-      // forbids importing the product's), so they need the same relaxation.
-      "web/components/ui/**/*.{ts,tsx}",
-    ],
+    files: ["components/ai-elements/**/*.{ts,tsx}", "components/ui/**/*.{ts,tsx}"],
     rules: {
       "react-hooks/refs": "off",
       "react-hooks/set-state-in-effect": "off",

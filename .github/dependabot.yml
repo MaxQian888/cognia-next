@@ -5,8 +5,8 @@ version: 2
 updates:
   # JavaScript/TypeScript dependencies (npm/pnpm)
   #
-  # Every open Dependabot PR runs the whole CI graph, and the public-repo runner
-  # pool is shared with trunk and human PRs. Minor and patch updates therefore
+  # The public-repo runner pool is shared with trunk and human PRs.
+  # Minor and patch updates therefore
   # land as two grouped PRs per week (runtime vs tooling); only semver-major
   # updates, which need individual review anyway, arrive one per PR. The
   # cooldown lets a fresh release age before it is proposed, which filters out
@@ -38,36 +38,36 @@ updates:
           - "minor"
           - "patch"
 
-  # Rust dependencies. The root Cargo workspace owns the single Cargo.lock that
-  # src-tauri and every crate under crates/ resolve against.
+  # One shared Cargo.lock: propose one reviewable batch instead of competing
+  # Tauri/general/individual PRs that each compile the same native graph.
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     cooldown:
       default-days: 3
       semver-major-days: 7
     commit-message:
       prefix: "chore(deps)"
-    labels:
-      - "dependencies"
-      - "rust"
+    labels: ["dependencies", "rust"]
     groups:
-      tauri-dependencies:
-        patterns:
-          - "tauri*"
-        update-types:
-          - "minor"
-          - "patch"
-      rust-dependencies:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
+      cargo-dependencies:
+        patterns: ["*"]
+    ignore:
+      # windows 0.62 uses windows-core 0.62 and windows-future 0.3 types.
+      # Upgrade the Windows family together in a dedicated migration.
+      - dependency-name: "windows"
+        versions: ["0.100"]
+      - dependency-name: "windows-future"
+        versions: ["0.100"]
+      # ocrs 0.13.1 exposes rten-imageproc 0.26 types. Wait for a matching ocrs.
+      - dependency-name: "rten"
+        versions: ["0.27"]
+      - dependency-name: "rten-imageproc"
+        versions: ["0.27"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -83,9 +83,8 @@ updates:
       - "dependencies"
       - "github-actions"
     groups:
+      # Action majors belong in the same weekly review batch; workflow tests
+      # validate the complete proposed configuration before merge.
       github-actions:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"

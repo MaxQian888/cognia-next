@@ -83,11 +83,11 @@ images, fonts, scripts, or `next.config.ts`.
 - Verify cancellation, concurrency, backpressure, memory, and cleanup; a faster
   happy path that leaks a child process or task is a regression.
 
-## Docs and official Web workspace
+## Docs and official website
 
-- Treat `docs/` as a server-mode Fumadocs app, not as the main static export.
-- Treat `web/` as its own workspace and deployment surface. Use its existing
-  evidence and capture scripts when they match the requested user path.
+- Treat `docs/` as a separate Fumadocs static export in `docs/out/`.
+- The official website lives in `cognia-labs/cognia-website`. Run its evidence
+  and capture scripts from that checkout when they match the requested user path.
 - Use Lighthouse, field data, or CrUX only for a real web origin and state the
   percentile, device segment, sample window, and URL population. Do not apply
   field metrics to Tauri or Capacitor sessions.

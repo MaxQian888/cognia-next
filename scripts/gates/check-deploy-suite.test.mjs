@@ -348,3 +348,17 @@ test("the web image activates bounded CI static generation inside its build cont
     /process\.env\.CI === "true" \? \{ cpus: 1, staticGenerationMaxConcurrency: 1 \}/
   )
 })
+
+test("dynamic dependency image matrices retain the complete declarative publication catalog", () => {
+  const workflow = `
+env:
+  FAST_IMAGE_MATRIX: '[{"name":"cognia-web"},{"name":"cognia-signaling"}]'
+jobs:
+  fast-images:
+    strategy:
+      matrix:
+        include: expression-from-planner
+`
+  assert.deepEqual([...publishedImageNames(workflow)].sort(), ["cognia-signaling", "cognia-web"])
+  assert.throws(() => publishedImageNames("env:\n  FAST_IMAGE_MATRIX: invalid-json"))
+})

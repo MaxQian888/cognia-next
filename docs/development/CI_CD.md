@@ -85,6 +85,32 @@ If the cache has not been published or is inaccessible, BuildKit falls back to
 a cold build; neither path writes the release registry cache. The large Cargo
 layers remain outside the shared GitHub Actions cache budget.
 
+## Dependabot dependency batches
+
+The root Cargo workspace shares one lockfile. Dependabot proposes one weekly
+`cargo-dependencies` batch (including major updates), with at most one open
+version-update PR. GitHub Actions updates, including majors, also share one
+weekly batch. npm retains separate production/tooling minor-and-patch batches.
+Security updates remain enabled and are not delayed by the version cooldown.
+
+Two native type families currently require a coordinated migration: `windows`
+0.62 / `windows-future` 0.3, and `ocrs` 0.13 / RTen 0.26. The incompatible
+Windows 0.100 and RTen 0.27 releases are ignored explicitly rather than repeatedly
+proposed as isolated bumps. Revisit these exclusions when migrating the families.
+Rust toolchain selection is pinned via the action's `toolchain` input, avoiding
+Dependabot treating future compiler-version action refs as action upgrades.
+
+For a Cargo-only dependency diff, Images builds the four root-workspace Rust
+service consumers, the server check, the managed desktop guard, and both native
+agent-bundle `sandboxd` stages. It does not rebuild independent-lock services,
+the web export, Node runtime or unchanged external agent CLI payloads. Bundle
+runtime smoke still runs for source changes, mixed diffs, missing history,
+manual runs and release tags; publication always requires both native smoke jobs.
+The Git-only planner uses the exact tested HEAD and PR base, with no bot-name or
+PR-label bypass. The image summary records the selected consumers.
+
+Configuration reference: [GitHub Dependabot groups](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#groups).
+
 ## Quality gates
 
 The gate list lives in exactly one place: **`scripts/gates/check-all.mjs`**.
@@ -106,8 +132,13 @@ The first affected-gate rollout declares input scopes for 22 expensive checks
 (type/build/SDK/native). Unscoped checks, including registry and cross-cutting
 invariants, remain always-on. Documentation content skips these expensive checks;
 shared API/metadata inputs retain their contract consumers. Unknown paths,
-deletions/renames, dependency/configuration changes, and workflow/tooling changes
-select the entire registry. Selected checks still inspect their complete input
+deletions/renames, mixed dependency/configuration changes, and workflow/tooling changes
+select the entire registry. A complete, nonempty diff containing only the root
+`Cargo.lock` and workspace `Cargo.toml` files selects the native dependency gates:
+Rust format, clippy, architecture checks, Rust SDK tests, cargo-deny, the gate
+registry and deploy-suite contract. It skips JavaScript builds, lint, typechecking
+and SDK packaging because no JavaScript input changed. Full/manual/nightly plans
+and deleted manifests always retain the complete registry. Selected checks still inspect their complete input
 domain and remain blocking; this is gate selection, not line-only validation.
 
 The `quality-change-plan` artifact records selected/skipped scripts and reasons.
@@ -293,7 +324,6 @@ cross-run flake history is not available.
 | npm downloads              | OS + architecture + Node 26 + npm sidecar locks; isolated runtime manifest                       | Every root workspace install; isolated DeepSeek runtime job                                                                               |
 | Root `.next/cache`         | OS + runner architecture + Node 26 + lockfiles + build configuration + commit                    | Separate desktop production, desktop E2E, Android, iOS, Tauri E2E and Tauri release scopes; release additionally separates target triples |
 | `docs/.next/cache`         | Same compiler identity; CI and deploy scopes separate                                            | Docs verification and Pages deploy; deploy adds environment and canonical docs origin                                                     |
-| `web/.next/cache`          | Same compiler identity; CI and deploy scopes separate                                            | Marketing verification and Pages deploy; deploy adds environment plus website/docs origins                                                |
 | TypeScript `*.tsbuildinfo` | OS + architecture + Node 26 + all pnpm locks and tsconfigs + commit                              | Quality `types`; state remains advisory and cannot replace the compiler check                                                             |
 | Playwright browsers        | OS + lockfile                                                                                    | Browser and extension E2E workers; system libraries are installed on cache hits too                                                       |
 | Cargo `target/`            | `Swatinem/rust-cache` compiler/dependency identity                                               | Rust jobs, with standalone service/toolchain scopes                                                                                       |
@@ -363,7 +393,7 @@ and real-launcher smoke suites are excluded from Jest, not from CI.
 
 Compiled workspace packages and Webclone output are built once in the Jest
 planner, or restored there on PRs from an exact-source trunk cache entry. Its run-scoped artifact is restored before root installs by Jest shards,
-Linux docs/marketing/Android builds, sidecar tests, production/E2E exports and
+Linux docs/Android builds, sidecar tests, production/E2E exports and
 the app E2E lanes. The standalone browser-extension job installs its own checkout and has no product build prerequisites. Consumers download from the same workflow run and checkout;
 when the plan contains no Jest suites, they build their own prerequisites normally.
 The production and E2E static exports remain different artifacts because their
@@ -412,10 +442,10 @@ quality registry checks perform no install and need neither cache.
 
 Local development keeps its existing policy: production Webpack caches normally,
 while the repository's default Turbopack development cache opt-out and explicit
-`dev:cached` opt-in remain unchanged. Installed Next 16.3.6 enables Turbopack build
-filesystem caching by default, so marketing builds reuse `web/.next/cache`
-without changing Next configuration. Compiler cache compression follows Next's
-defaults; the Actions cache service compresses the uploaded directory.
+`dev:cached` opt-in remain unchanged. Marketing builds and their caches now
+belong to [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website).
+Compiler cache compression follows Next's defaults; the Actions cache service
+compresses the uploaded directory.
 
 Root `postbuild` removes only obsolete Webpack `index.pack.old` backups under
 `.next/cache/webpack` after a successful build, and only when the current
@@ -513,10 +543,10 @@ build the signaling and share images from that same checkout.
 
 ### Site deployments (`deploy.yml`, manual/opt-in)
 
-`workflow_dispatch` (or a `workflow_call`) only — never on push. Targets: `docs`
-(Fumadocs, `docs/out`) and `web` (marketing site, `web/out`), each on its own
-Cloudflare Pages project. Dispatch inputs: `environment` (`staging` /
-`production`) and `target` (`all`, `docs`, `web`).
+`workflow_dispatch` (or a `workflow_call`) only — never on push. This workflow
+deploys the Fumadocs static export (`docs/out`) to Cloudflare Pages. Dispatch
+inputs: `environment` (`staging` / `production`) and `target` (`all`, `docs`).
+The marketing website deploys from [cognia-labs/cognia-website](https://github.com/cognia-labs/cognia-website).
 
 Two gates keep forks green with zero configuration: the repository variable
 `DEPLOY_ENABLED` must be the string `true`, and the job requires
@@ -528,9 +558,8 @@ it. The GitHub Environments `staging` and `production` hold the same names:
 | secret   | `CLOUDFLARE_API_TOKEN`  | Pages deploy token                 |
 | variable | `CLOUDFLARE_ACCOUNT_ID` |                                    |
 | variable | `CF_DOCS_PAGES_PROJECT` | Pages project for the docs site    |
-| variable | `CF_WEB_PAGES_PROJECT`  | Pages project for the website      |
 | variable | `DOCS_SITE_URL`         | canonical docs origin (build-time) |
-| variable | `WEB_SITE_URL`          | canonical website origin           |
+| variable | `WEB_SITE_URL`          | external website navigation link   |
 
 Give `production` protection rules (required reviewers, branch restriction)
 under **Settings → Environments**. Service deployments (Workers, Fly.io) are
@@ -608,7 +637,7 @@ signing key.
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | CI         | CI/CD Pipeline, Code Quality, Test Suite, CI Report, Nightly, Compose E2E, Share Server, Signaling Server, Standalone bootstrap scripts | `FEISHU_CI_WEBHOOK_URL`, `FEISHU_CI_SIGNING_SECRET`           |
 | Release    | Release, Build Tauri, Images                                                                                                            | `FEISHU_RELEASE_WEBHOOK_URL`, `FEISHU_RELEASE_SIGNING_SECRET` |
-| Operations | Deploy, Refresh website evidence, Sync model catalog, daily digest                                                                      | `FEISHU_OPS_WEBHOOK_URL`, `FEISHU_OPS_SIGNING_SECRET`         |
+| Operations | Deploy, Sync model catalog, daily digest                                                                                                | `FEISHU_OPS_WEBHOOK_URL`, `FEISHU_OPS_SIGNING_SECRET`         |
 
 An absent route override falls back to the default pair. URLs and signing keys
 are passed only to the two notification CLI steps. The workflow checks out the

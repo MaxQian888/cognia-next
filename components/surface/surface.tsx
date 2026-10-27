@@ -22,7 +22,7 @@ export type SurfaceLayer = "base" | "raised" | "overlay"
 
 /**
  * Named radius steps. `control` / `panel` / `stage` are the scale
- * `web/app/globals.css` pins for the marketing site (8 / 12 / 14px at the
+ * `cognia-labs/cognia-website:app/globals.css` pins for the marketing site (8 / 12 / 14px at the
  * default base); `pill` follows its own axis so squaring the UI never squares a
  * status dot. `inherit` leaves radius to the caller's own class.
  */

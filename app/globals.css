@@ -130,7 +130,7 @@
      tracking `--radius` with zero migration. The values are exact at the
      default base (0.625rem = 10px): control 8px (identical to `--radius-md`),
      panel 12px, stage 14px (identical to `--radius-xl`) — the same 8/12/14
-     scale `web/app/globals.css` pins for the marketing site. Multipliers rather
+     scale `cognia-labs/cognia-website:app/globals.css` pins for the marketing site. Multipliers rather
      than ±px offsets so a 0 base really does square every step; `max(0px, …)`
      stays as a guard against a plugin theme writing a negative `--radius`. */
   --radius-control: max(0px, calc(var(--radius) * 0.8));
@@ -259,7 +259,7 @@
   --effort-ultra: oklch(0.53 0.23 293);
   --effort-ultra-muted: oklch(0.53 0.23 293 / 22%);
 
-  /* Brand accents — copied VERBATIM from `web/app/globals.css` (`--action` and
+  /* Brand accents — copied VERBATIM from `cognia-labs/cognia-website:app/globals.css` (`--action` and
      `--approval` of the ADR-0092 V2 spec) so the two files can be diffed for
      drift. Hex rather than oklch for exactly that reason: a rounded conversion
      would make the site and the app "the same colour" only approximately.

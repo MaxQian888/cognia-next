@@ -14,7 +14,7 @@
   "access": "restricted",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
-  "ignore": ["docs", "web", "mobile"],
+  "ignore": ["docs", "mobile"],
   "privatePackages": {
     "version": true,
     "tag": false

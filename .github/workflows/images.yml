@@ -90,6 +90,18 @@ concurrency:
   group: images-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Shared by the runtime planner and the deploy publication-contract gate.
+  FAST_IMAGE_MATRIX: >-
+    [
+      {"name":"cognia-workspace-runtime","context":".","file":"services/workspace-runtime/Dockerfile"},
+      {"name":"cognia-collab","context":".","file":"deploy/docker/Dockerfile.collab-server","rootCargo":true},
+      {"name":"cognia-deploy-agent","context":".","file":"deploy/docker/Dockerfile.deploy-agent","rootCargo":true},
+      {"name":"cognia-ops-controller","context":".","file":"deploy/docker/Dockerfile.ops-controller","rootCargo":true},
+      {"name":"cognia-docker-proxy","context":".","file":"deploy/docker/Dockerfile.docker-proxy","rootCargo":true},
+      {"name":"cognia-web","context":".","file":"deploy/compose/Dockerfile.web"}
+    ]
+
 permissions:
   contents: read
   packages: write
@@ -101,7 +113,27 @@ jobs:
     outputs:
       owner: ${{ steps.o.outputs.owner }}
       should_push: ${{ steps.o.outputs.should_push }}
+      cargo-only: ${{ steps.plan.outputs.cargo-only }}
+      fast-images: ${{ steps.plan.outputs.fast-images }}
     steps:
+      - uses: actions/checkout@v7
+      - name: Plan dependency image consumers
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { createChangePlan, isCargoDependencyChange } from './scripts/ci/change-plan.mjs';
+          const plan = createChangePlan({ eventName: process.env.EVENT_NAME, head: process.env.GITHUB_SHA, prBaseSha: process.env.PR_BASE_SHA });
+          const cargoOnly = isCargoDependencyChange(plan);
+          const images = JSON.parse(process.env.FAST_IMAGE_MATRIX);
+          // Independent Cargo locks, Node runtimes and external CLIs are unchanged.
+          const selected = cargoOnly ? images.filter(image => image.rootCargo === true) : images;
+          appendFileSync(process.env.GITHUB_OUTPUT, `cargo-only=${cargoOnly}\nfast-images=${JSON.stringify(selected)}\n`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Image plan\nCargo dependencies only: ${cargoOnly}\nFast images: ${selected.map(image => image.name).join(', ')}\n`);
+          NODE
       - id: o
         run: |
           echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
@@ -118,29 +150,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: cognia-workspace-runtime
-            context: .
-            file: services/workspace-runtime/Dockerfile
-          - name: cognia-collab
-            context: .
-            file: deploy/docker/Dockerfile.collab-server
-          - name: cognia-deploy-agent
-            context: .
-            file: deploy/docker/Dockerfile.deploy-agent
-          - name: cognia-ops-controller
-            context: .
-            file: deploy/docker/Dockerfile.ops-controller
-          # ADR-0224 A8: the always-on host's body-inspecting Docker API proxy.
-          - name: cognia-docker-proxy
-            context: .
-            file: deploy/docker/Dockerfile.docker-proxy
-          # Same-origin Web front door: Next.js static export served by Caddy.
-          # Root context so the export sees the whole workspace; .dockerignore
-          # keeps node_modules/out/target off the daemon.
-          - name: cognia-web
-            context: .
-            file: deploy/compose/Dockerfile.web
+        include: ${{ fromJSON(needs.vars.outputs.fast-images) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -413,10 +423,15 @@ jobs:
         with:
           context: .
           file: deploy/bundle/Dockerfile
+          # Dependency-only PRs compile both sandbox binaries on each native
+          # architecture without reinstalling every unchanged external CLI.
+          target: ${{ needs.vars.outputs.cargo-only == 'true' && 'sandboxd' || '' }}
           platforms: ${{ matrix.platform }}
+          # Only full smoke needs a loaded image. Cargo-only checks retain the
+          # result in BuildKit rather than exporting an unused Rust builder.
           # type=docker loads the single native platform for local PR smoke.
           # Publish by digest only: no release tag can point at an untested image.
-          outputs: ${{ needs.vars.outputs.should_push == 'true' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
+          outputs: ${{ needs.vars.outputs.cargo-only == 'true' && 'type=cacheonly' || needs.vars.outputs.should_push == 'true' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=docker' }}
           tags: ${{ needs.vars.outputs.should_push == 'true' && format('ghcr.io/{0}/cognia-agent-bundle', needs.vars.outputs.owner) || 'cognia-agent-bundle:smoke' }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -428,6 +443,7 @@ jobs:
           cache-to: ${{ needs.vars.outputs.should_push == 'true' && format('type=registry,ref=ghcr.io/{0}/cognia-agent-bundle:buildcache-{1}-{2},mode=max', needs.vars.outputs.owner, matrix.variant, matrix.arch) || '' }}
 
       - name: Smoke against user images
+        if: needs.vars.outputs.cargo-only != 'true'
         env:
           SHOULD_PUSH: ${{ needs.vars.outputs.should_push }}
           IMAGE: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-agent-bundle

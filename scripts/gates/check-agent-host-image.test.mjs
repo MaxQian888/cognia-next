@@ -347,7 +347,6 @@ for (const [file, stage] of [
       "packages",
       "docs/package.json",
       "mobile/package.json",
-      "web/package.json",
       "cli/package.json",
       "services/workspace-runtime/package.json",
       "scripts/postinstall.mjs",

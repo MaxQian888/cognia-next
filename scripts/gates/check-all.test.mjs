@@ -644,3 +644,28 @@ test("runGatePlan never overlaps gates that claim the same local resource", asyn
   finish.get("sdk:ts:build")(true)
   await run
 })
+
+test("Cargo dependency updates select native gates without JavaScript-only work", () => {
+  const plan = buildQualityPlan(
+    changes(["Cargo.lock", "Cargo.toml", "crates/cognia-cli/Cargo.toml"])
+  )
+  const scripts = plan.selected.map((gate) => gate.script)
+  for (const script of ["rust:clippy", "rust:deny", "sdk:rust:test", "gates:registry"])
+    assert.ok(scripts.includes(script), script)
+  for (const script of [
+    "typecheck",
+    "lint",
+    "format:check",
+    "build:packages",
+    "sdk:ts:build",
+    "scripts:test:ci",
+  ])
+    assert.ok(!scripts.includes(script), script)
+  assert.equal(plan.mode, "incremental")
+  for (const manifest of [
+    changes(["Cargo.lock", "lib/example.ts"]),
+    changes(["Cargo.lock"], { mode: "full" }),
+    changes(["crates/removed/Cargo.toml"], { deletedFiles: ["crates/removed/Cargo.toml"] }),
+  ])
+    assert.equal(buildQualityPlan(manifest).mode, "full")
+})

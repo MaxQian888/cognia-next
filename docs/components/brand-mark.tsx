@@ -1,7 +1,7 @@
 /**
  * The Cognia mark, drawn the same way as the website's
- * (`web/components/brand-mark.tsx`) so the two sites read as one product. The
- * docs app cannot import across packages, hence the copy: a square aperture,
+ * (`cognia-labs/cognia-website:components/brand-mark.tsx`) so the two sites read as one product. The
+ * docs app keeps a local copy because the website is a separate repository: a square aperture,
  * four registration ticks, a context path that stops at a cyan node. Everything
  * but the node inherits `currentColor`, so it flips with the theme.
  *

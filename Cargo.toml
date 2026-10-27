@@ -213,7 +213,7 @@ uuid = { version = "1" }
 cognia-signaling-core = { git = "https://github.com/cognia-labs/cognia-services", rev = "487e9f2d617c9d1b9b648ec510cafcf53b962c2c" }
 log = { version = "0.4" }
 sha2 = { version = "0.11" }
-tauri = { version = "=2.12.0" }
+tauri = { version = "=2.12.2" }
 reqwest = { version = "0.13", default-features = false }
 chrono = { version = "0.4" }
 dirs = { version = "7" }

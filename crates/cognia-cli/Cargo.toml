@@ -25,7 +25,7 @@ anyhow.workspace = true
 # RFC 8785 canonicalizer for Character Pack signatures (shared leaf).
 cognia-canonical-json = { version = "0.1.0", path = "../cognia-canonical-json" }
 notify.workspace = true
-wasmparser = "0.259"
+wasmparser = "0.261"
 # Used by status/install/uninstall/list/reload/dev to talk to a running
 # cognia desktop's CLI bridge. Plain HTTP because the bridge binds to
 # 127.0.0.1 only — see src-tauri/src/cli_bridge/.
