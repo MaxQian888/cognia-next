@@ -33,13 +33,26 @@ function summarizeForward(d: Record<string, unknown>): string {
   if (Array.isArray(content) && content.length > 0) {
     const lines: string[] = []
     for (const node of content as Array<Record<string, unknown>>) {
+      if (!node || typeof node !== "object") continue
       const nodeData = (node.data ?? {}) as Record<string, unknown>
-      const name = String(nodeData.nickname ?? nodeData.name ?? "")
+      const name =
+        typeof nodeData.nickname === "string"
+          ? nodeData.nickname
+          : typeof nodeData.name === "string"
+            ? nodeData.name
+            : ""
       const inner = nodeData.content ?? nodeData.message
       let text = ""
       if (Array.isArray(inner)) {
         text = (inner as OneBotSegment[])
-          .map((s) => (s.type === "text" ? String((s.data ?? {}).text ?? "") : `[${s.type}]`))
+          .flatMap((s) => {
+            if (!s || typeof s.type !== "string") return []
+            return s.type === "text"
+              ? typeof s.data?.text === "string"
+                ? [s.data.text]
+                : []
+              : [`[${s.type}]`]
+          })
           .join("")
       } else if (typeof inner === "string") {
         text = inner
@@ -99,12 +112,21 @@ function summarizeMagicFace(label: string, d: Record<string, unknown>): string {
 /**
  * Map a NapCat `location` segment to the structured internal `location`
  * segment (higher fidelity than a text marker; the union supports it
- * natively). `lat`/`lon`/`title` field names are shared across v11 + v12.
+ * natively). v12 uses `latitude`/`longitude`; v11 uses `lat`/`lon`.
  */
 function locationSegment(d: Record<string, unknown>): MessageSegment {
-  const lat = Number(d.lat ?? 0)
-  const lon = Number(d.lon ?? d.lng ?? 0)
-  const name = String(d.title ?? d.content ?? "") || undefined
+  const lat = Number(d.latitude ?? d.lat ?? NaN)
+  const lon = Number(d.longitude ?? d.lon ?? d.lng ?? NaN)
+  const name =
+    [
+      ...new Set(
+        [d.title, d.content].filter(
+          (value): value is string => typeof value === "string" && value.length > 0
+        )
+      ),
+    ].join("\n") || undefined
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    return { type: "text", text: name ? `[location:${name}]` : "[location]" }
   return { type: "location", lat, lon, name }
 }
 
@@ -212,12 +234,16 @@ function fromV12Segment(seg: OneBotSegment): MessageSegment {
       return { type: "mention", userId }
     }
 
+    case "mention_all":
+      return { type: "mention", userId: "all", displayName: "@all" }
+
     case "reply":
       return { type: "reply", messageId: String(d.message_id ?? ""), snippet: "" }
 
     case "face":
       return { type: "emoji", code: String(d.id ?? "") }
 
+    case "audio":
     case "voice":
       return { type: "voice", url: String(d.file_id ?? d.url ?? "") }
 
@@ -276,7 +302,23 @@ export function fromOneBotSegments(
   segments: OneBotSegment[],
   variant: "v11" | "v12"
 ): MessageSegment[] {
-  return segments.map((seg) => (variant === "v11" ? fromV11Segment(seg) : fromV12Segment(seg)))
+  if (!Array.isArray(segments)) return []
+  return segments.flatMap((seg) => {
+    if (
+      !seg ||
+      typeof seg.type !== "string" ||
+      !seg.data ||
+      typeof seg.data !== "object" ||
+      Array.isArray(seg.data)
+    )
+      return []
+    try {
+      return [variant === "v11" ? fromV11Segment(seg) : fromV12Segment(seg)]
+    } catch {
+      // A malformed value in one external segment cannot suppress siblings.
+      return []
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------

@@ -59,6 +59,15 @@ describe("beginSlackOAuth", () => {
     })
   })
 
+  it("requests user portraits and DM peer lookup without email or private history access", async () => {
+    const { authorizeUrl } = await beginSlackOAuth({ adapterId: "sl1", redirectUri: RELAY }, deps())
+    const scopes = new URL(authorizeUrl).searchParams.get("scope")!.split(",")
+    expect(scopes).toEqual(expect.arrayContaining(["users:read", "im:read"]))
+    expect(scopes).not.toEqual(expect.arrayContaining(["users:read.email"]))
+    expect(scopes).not.toContain("groups:history")
+    expect(scopes).not.toContain("mpim:history")
+  })
+
   it("does not hand out a URL when the pending write fails", async () => {
     const d = deps({
       setPending: jest.fn(async () => {

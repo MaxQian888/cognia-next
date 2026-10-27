@@ -12,10 +12,19 @@ const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/
 /** Tracks CommonMark fenced code across lines. */
 class FenceTracker {
   private open: string | null = null
+  private quoteDepth = 0
 
   /** Feed one line; true when the line belongs to a fenced block (fences included). */
   inCode(line: string): boolean {
+    // Quotes are containers, not part of the fence delimiter itself.
+    let depth = 0
+    while (/^ {0,3}>[ \t]?/.test(line)) {
+      line = line.replace(/^ {0,3}>[ \t]?/, "")
+      depth++
+    }
+    if (this.open && depth < this.quoteDepth) this.open = null
     if (this.open) {
+      if (depth !== this.quoteDepth) return true
       const close = FENCE_CLOSE.exec(line)?.[1]
       if (close && close[0] === this.open[0] && close.length >= this.open.length) this.open = null
       return true
@@ -23,6 +32,7 @@ class FenceTracker {
     const open = FENCE_OPEN.exec(line)?.[1]
     if (open) {
       this.open = open
+      this.quoteDepth = depth
       return true
     }
     return false
@@ -40,9 +50,19 @@ export function preserveLineBreaks(markdown: string): string {
   const lines = markdown.split("\n")
   const fences = new FenceTracker()
   const code = lines.map((line) => fences.inCode(line))
+  const inlineNewlines = new Set<number>()
+  let lineNumber = 0
+  for (const chunk of splitMarkdownCode(markdown)) {
+    for (const char of chunk.text) {
+      if (char === "\n") {
+        if (chunk.code) inlineNewlines.add(lineNumber)
+        lineNumber++
+      }
+    }
+  }
   return lines
     .map((line, index) => {
-      if (code[index]) return line
+      if (code[index] || inlineNewlines.has(index)) return line
       const next = lines[index + 1]
       if (next === undefined || next.trim() === "" || line.trim() === "") return line
       if (code[index + 1]) return line
@@ -58,7 +78,7 @@ export interface MarkdownChunk {
 }
 
 /**
- * Inline code spans of one line: a backtick run closed by the next run of
+ * Inline code spans: a backtick run closed by the next run of
  * the same length (CommonMark). Each length keeps a forward-only cursor, so
  * a line of unmatched runs is scanned once rather than once per run.
  */
@@ -109,15 +129,26 @@ export function splitMarkdownCode(markdown: string): MarkdownChunk[] {
   }
   const lines = markdown.split("\n")
   const fences = new FenceTracker()
+  let prose = ""
+  const flush = () => {
+    splitInlineCode(prose, push)
+    prose = ""
+  }
   lines.forEach((line, index) => {
     const newline = index < lines.length - 1 ? "\n" : ""
     if (fences.inCode(line)) {
+      flush()
       push(true, line + newline)
       return
     }
-    splitInlineCode(line, push)
-    push(false, newline)
+    if (/^(?:\s*>)*\s*$/.test(line)) {
+      flush()
+      push(false, line + newline)
+      return
+    }
+    prose += line + newline
   })
+  flush()
   return chunks
 }
 

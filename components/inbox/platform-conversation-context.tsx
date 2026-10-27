@@ -23,22 +23,35 @@ import { ThreadMembershipChip } from "./thread-membership-chip"
 
 type Props = { session: ChatSession }
 
+/** Account identity belongs beside the conversation title, outside its actions. */
+export function PlatformConversationIdentity({ session }: Props) {
+  const binding = session.platformBinding
+  const adapter = useAdapterInstance(binding?.adapterId)
+  if (!binding) return null
+  const name = adapter?.displayName ?? binding.adapterId
+  return (
+    <span
+      className="hidden min-w-0 max-w-48 truncate text-xs text-muted-foreground sm:inline"
+      title={name}
+    >
+      {name}
+    </span>
+  )
+}
+
 /** Platform-specific controls shared by desktop and compact chat headers. */
-export function PlatformConversationHeader({ session }: Props) {
+export function PlatformConversationHeader({
+  session,
+  showIdentity = true,
+}: Props & { showIdentity?: boolean }) {
   const binding = session.platformBinding
   const policy = useResolvedBinding(
     binding ? { adapterId: binding.adapterId, conversationKey: binding.conversationKey } : null
   )
-  const adapter = useAdapterInstance(binding?.adapterId)
   if (!binding) return null
   return (
     <>
-      <span
-        className="hidden max-w-32 truncate text-xs text-muted-foreground sm:inline"
-        title={binding.conversationKey}
-      >
-        {adapter?.displayName ?? binding.adapterId}
-      </span>
+      {showIdentity && <PlatformConversationIdentity session={session} />}
       <ThreadMembershipChip conversationKey={binding.conversationKey} className="shrink-0" />
       <ConversationHeader
         controlsOnly
@@ -57,7 +70,8 @@ export function PlatformConversationHeader({ session }: Props) {
 export function PlatformConversationContext({
   session,
   showHeader = false,
-}: Props & { showHeader?: boolean }) {
+  activityInComposer = false,
+}: Props & { showHeader?: boolean; activityInComposer?: boolean }) {
   const binding = session.platformBinding
   const adapter = useAdapterInstance(binding?.adapterId)
   const ownerId = useId()
@@ -118,7 +132,10 @@ export function PlatformConversationContext({
           <PlatformConversationHeader session={session} />
         </div>
       )}
-      <InboxNoticeArea conversationKey={binding.conversationKey} />
+      <InboxNoticeArea
+        conversationKey={binding.conversationKey}
+        suppressKinds={activityInComposer ? ["activity"] : undefined}
+      />
       <HistoryLoadEarlier
         conversationKey={binding.conversationKey}
         adapterId={binding.adapterId}

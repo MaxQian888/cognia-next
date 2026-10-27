@@ -39,9 +39,9 @@ jest.mock("./history-load-earlier", () => ({
   },
 }))
 jest.mock("./notices/notice-area", () => ({
-  InboxNoticeArea: ({ conversationKey }: { conversationKey: string }) => (
+  InboxNoticeArea: jest.fn(({ conversationKey }: { conversationKey: string }) => (
     <div data-testid="notices">{conversationKey}</div>
-  ),
+  )),
 }))
 jest.mock("./thread-membership-chip", () => ({
   ThreadMembershipChip: () => <div data-testid="thread" />,
@@ -49,6 +49,7 @@ jest.mock("./thread-membership-chip", () => ({
 import {
   PlatformConversationContext,
   PlatformConversationHeader,
+  PlatformConversationIdentity,
 } from "./platform-conversation-context"
 const session: ChatSession = {
   id: "s1",
@@ -101,6 +102,16 @@ it("keeps history visible with a missing-scope explanation", () => {
   )
   expect(screen.queryByTestId("controls")).not.toBeInTheDocument()
 })
+it("hands activity to the composer without suppressing the other notice kinds", () => {
+  const { InboxNoticeArea } = jest.requireMock("./notices/notice-area") as {
+    InboxNoticeArea: jest.Mock
+  }
+  render(<PlatformConversationContext session={session} activityInComposer />)
+  expect(InboxNoticeArea.mock.calls.at(-1)?.[0]).toMatchObject({
+    conversationKey: "slack:a1:C1",
+    suppressKinds: ["activity"],
+  })
+})
 it("keeps unsupported history visible and recognizes an embedded pane as viewed", () => {
   render(
     <PlatformConversationContext
@@ -118,8 +129,19 @@ it("keeps unsupported history visible and recognizes an embedded pane as viewed"
 it("shows adapter account identity beside thread and platform controls", () => {
   mockAdapter = { displayName: "Support bot" } as AdapterInstanceRow
   render(<PlatformConversationHeader session={session} />)
-  expect(screen.getByText("Support bot")).toHaveAttribute("title", "slack:a1:C1")
+  expect(screen.getByText("Support bot")).toHaveAttribute("title", "Support bot")
   expect(screen.getByTestId("thread")).toBeInTheDocument()
+})
+it("keeps account identity independently placeable without repeating it in actions", () => {
+  mockAdapter = { displayName: "SnowLuma QQ" } as AdapterInstanceRow
+  render(
+    <>
+      <PlatformConversationIdentity session={session} />
+      <PlatformConversationHeader session={session} showIdentity={false} />
+    </>
+  )
+  expect(screen.getAllByText("SnowLuma QQ")).toHaveLength(1)
+  expect(screen.getByTestId("controls")).toBeInTheDocument()
 })
 it("has no platform surface for a local conversation", () => {
   const local = { ...session, platformBinding: undefined }

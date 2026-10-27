@@ -18,9 +18,14 @@ import { getByPlatformUser } from "@/lib/db/platform-identities"
 import { listRecent } from "@/lib/db/connector-audit"
 import { listRecentGovernanceAuditGaps } from "@/lib/db/governance-ledger"
 import { getBus, __resetBusForTesting } from "./bus"
+import { buildAdapterContext } from "./adapter-context"
 import { LarkFollowUpControlDispatchError } from "./follow-up-control"
 import { __resetPruneCounterForTesting } from "./dedup"
 import { recordDeliveredMessage } from "./delivered-messages"
+import {
+  enqueueConnectorInboundJob,
+  recordConnectorInboundRecall,
+} from "@/lib/db/connector-inbound-jobs"
 import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
@@ -143,6 +148,187 @@ function groupEvent(
 // ── test suite ────────────────────────────────────────────────────────────────
 
 describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
+  it.each(["wechat-personal", "wechat-oa"] as const)(
+    "does not acknowledge %s reception when the durable job cannot commit",
+    async (platform) => {
+      const event = {
+        ...privateEvent(autoAdapterId, "wechat-unaccepted"),
+        platform,
+        conversationKey: `${platform}:${autoAdapterId}:private`,
+      }
+      const ctx = buildAdapterContext({
+        adapterId: autoAdapterId,
+        signal: new AbortController().signal,
+        bus: getBus(),
+      })
+      const write = jest
+        .spyOn(getDb().connectorInboundJobs, "add")
+        .mockRejectedValueOnce(new Error("inbound durable write unavailable"))
+      try {
+        await expect(ctx.emit(event)).rejects.toThrow("inbound durable write unavailable")
+        expect(await getDb().connectorInboundJobs.count()).toBe(0)
+      } finally {
+        write.mockRestore()
+      }
+    }
+  )
+  it("does not create recoverable duplicate work when canonical lookup fails before admission", async () => {
+    const event = privateEvent(autoAdapterId, "failed-canonical-read")
+    await getDb().sessions.put({
+      id: "old-session",
+      title: "old",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    await getDb().messages.put({
+      id: "already-stored",
+      sessionId: "old-session",
+      role: "user",
+      createdAt: 1,
+      platformMessageId: event.messageId,
+      parts: [{ type: "text", text: "latest" }],
+      metadata: {
+        platformMessage: {
+          platform: event.platform,
+          messageId: event.messageId,
+          adapterId: event.adapterId,
+          conversationKey: event.conversationKey,
+        },
+      },
+    } as never)
+    const lookup = jest
+      .spyOn(getBus(), "findStoredPlatformMessage")
+      .mockRejectedValueOnce(new Error("temporary canonical read failure"))
+    try {
+      await getBus().dispatchInboundFull(event)
+      await getBus().resumeDurableInboundJobs()
+      await getBus().flushInboundTurns()
+      expect(routeHandler).not.toHaveBeenCalled()
+      expect(await getDb().connectorInboundJobs.count()).toBe(0)
+    } finally {
+      lookup.mockRestore()
+    }
+  })
+  it.each([
+    "dingtalk",
+    "wecom",
+    "onebot",
+    "qq-official",
+    "matrix",
+    "wechat-personal",
+    "wechat-oa",
+  ] as const)(
+    "recovery uses canonical %s text and withholds historical binary media",
+    async (platform) => {
+      const event = {
+        ...privateEvent(autoAdapterId, "recover-source"),
+        platform,
+        conversationKey: `${platform}:${autoAdapterId}:private`,
+        segments: [
+          {
+            type: "image" as const,
+            url: "data:image/png;base64,DISPLAY_SENTINEL",
+            dataBase64: "BINARY_SENTINEL",
+            mimeType: "image/png",
+          },
+        ],
+        plainText: "STALE_SENTINEL",
+        raw: { stale: "RAW_SENTINEL" },
+      }
+      await getDb().sessions.put({
+        id: "source-session",
+        title: "old",
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      await getDb().messages.put({
+        id: "canonical-recovery",
+        sessionId: "source-session",
+        role: "user",
+        createdAt: 1,
+        platformMessageId: event.messageId,
+        parts: [{ type: "text", text: "latest canonical" }],
+        metadata: {
+          editedAt: 2,
+          platformMessage: {
+            platform,
+            messageId: event.messageId,
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+          },
+        },
+      } as never)
+      await enqueueConnectorInboundJob(event, "queue")
+      await getBus().resumeDurableInboundJobs()
+      await getBus().flushInboundTurns()
+      expect(routeHandler).toHaveBeenCalledTimes(1)
+      const seen = routeHandler.mock.calls[0][0] as NormalizedInboundEvent
+      expect(seen.plainText).toBe("latest canonical")
+      expect(seen.mediaModelPolicy).toBe("local_extract_only")
+      expect(JSON.stringify(seen)).not.toContain("SENTINEL")
+    }
+  )
+
+  it("suppresses a threaded create whose parent recall arrived before its job", async () => {
+    const event = {
+      ...privateEvent(autoAdapterId, "late-thread"),
+      platform: "matrix" as const,
+      conversationKey: `matrix:${autoAdapterId}:!room:srv:$thread`,
+    }
+    await recordConnectorInboundRecall(
+      {
+        ...event,
+        kind: "delete",
+        replacesMessageId: event.messageId,
+        conversationKey: `matrix:${autoAdapterId}:!room:srv`,
+      },
+      10
+    )
+    await getBus().dispatchInboundFull(event)
+    await getBus().flushInboundTurns()
+    expect(routeHandler).not.toHaveBeenCalled()
+    expect(mockMaybeHandleLarkFollowUpControl).not.toHaveBeenCalled()
+  })
+  it.each(["dingtalk", "wecom", "onebot", "qq-official", "matrix"] as const)(
+    "does not reroute a canonical %s source after its job expires",
+    async (platform) => {
+      const event = {
+        ...privateEvent(autoAdapterId, "expired-job-source"),
+        platform,
+        conversationKey: `${platform}:${autoAdapterId}:private`,
+      }
+      await getDb().sessions.put({
+        id: "old-source-session",
+        title: "old",
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      await getDb().messages.put({
+        id: "canonical-source",
+        sessionId: "old-source-session",
+        role: "user",
+        createdAt: 1,
+        platformMessageId: event.messageId,
+        parts: [{ type: "text", text: "[deleted]" }],
+        metadata: {
+          deletedAt: 2,
+          platformMessage: {
+            platform,
+            messageId: event.messageId,
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+          },
+        },
+      } as never)
+      await getBus().dispatchInboundFull(event)
+      await getBus().flushInboundTurns()
+      expect(routeHandler).not.toHaveBeenCalled()
+      expect((await getDb().messages.get("canonical-source"))?.parts).toEqual([
+        { type: "text", text: "[deleted]" },
+      ])
+      expect((await getDb().connectorInboundJobs.toArray())[0]?.status).toBe("history_only")
+    }
+  )
   let autoAdapterId: string
   let manualAdapterId: string
 
@@ -739,64 +925,90 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
     expect(auditRows.some((r) => r.kind === "inbound.received")).toBe(true)
   })
 
-  it("resolves the replied-to author from the delivered-message ledger before policy eval", async () => {
-    // A third adapter whose ONLY trigger rule is `reply-to-bot`.
-    const replyRow = await createAdapterInstance({
-      type: "telegram",
-      displayName: "Reply Bot",
-      enabled: true,
-      transportMode: "stub",
-      settings: {},
-      credentialsRef: { keyringService: "test", accounts: [] },
-      trigger: {
-        rules: [{ kind: "reply-to-bot" }],
-        blockers: [],
-        storeUnmatchedInDraftMode: false,
-      },
-      defaultMode: "auto",
-      mediaModelPolicy: "local_extract_only",
-    })
-    const bus = getBus()
-    bus.registerAdapter(makeAdapter(replyRow.id))
+  it.each(["telegram", "matrix", "qq-official"] as const)(
+    "resolves %s wire reply ids against the delivered-message ledger before policy eval",
+    async (platform) => {
+      // A third adapter whose ONLY trigger rule is `reply-to-bot`.
+      const replyRow = await createAdapterInstance({
+        type: platform,
+        displayName: "Reply Bot",
+        enabled: true,
+        transportMode: "stub",
+        settings: {},
+        credentialsRef: { keyringService: "test", accounts: [] },
+        trigger: {
+          rules: [{ kind: "reply-to-bot" }],
+          blockers: [],
+          storeUnmatchedInDraftMode: false,
+        },
+        defaultMode: "auto",
+        mediaModelPolicy: "local_extract_only",
+      })
+      const bus = getBus()
+      const adapter = makeAdapter(replyRow.id)
+      adapter.meta.type = platform
+      bus.registerAdapter(adapter)
 
-    const conversationKey = `telegram:${replyRow.id}:group`
-    // We delivered platform message "bot_out_7" into this group earlier.
-    await recordDeliveredMessage(replyRow.id, conversationKey, "bot_out_7")
+      const conversationKey = `${platform}:${replyRow.id}:group`
+      const conversationRef = {
+        platform,
+        adapterId: replyRow.id,
+        roomId: "!room:srv",
+        scene: "channel" as const,
+        sceneId: "group",
+      }
+      // We delivered platform message "bot_out_7" into this group earlier.
+      await recordDeliveredMessage(
+        replyRow.id,
+        conversationKey,
+        platform === "matrix"
+          ? "!room:srv|bot_out_7"
+          : platform === "qq-official"
+            ? "channel:group:bot_out_7"
+            : "bot_out_7"
+      )
 
-    const replyToOurs: NormalizedInboundEvent = {
-      ...groupEvent(replyRow.id, "msg_reply_ours", false),
-      conversationKey,
-      replyTo: { messageId: "bot_out_7", snippet: "…" },
+      const replyToOurs: NormalizedInboundEvent = {
+        ...groupEvent(replyRow.id, "msg_reply_ours", false),
+        platform,
+        conversationRef,
+        conversationKey,
+        replyTo: { messageId: "bot_out_7", snippet: "…" },
+      }
+      await bus.dispatchInboundFull(replyToOurs)
+      await bus.flushInboundTurns()
+      expect(routeHandler).toHaveBeenCalledTimes(1)
+      const [seen, decision] = routeHandler.mock.calls[0] as [NormalizedInboundEvent, RouteDecision]
+      expect(decision).toBe("ai-run")
+      expect(seen.replyTo?.parentSenderId).toBe("bot_1")
+      expect(seen.channelData?.replyParentResolvedBy).toBe("ledger")
+
+      // A reply to a message we never sent stays unknown → not a reply to the bot → dropped.
+      routeHandler.mockClear()
+      const replyToHuman: NormalizedInboundEvent = {
+        ...groupEvent(replyRow.id, "msg_reply_human", false),
+        platform,
+        conversationRef,
+        conversationKey,
+        replyTo: { messageId: "human_msg_1", snippet: "…" },
+      }
+      await bus.dispatchInboundFull(replyToHuman)
+      await bus.flushInboundTurns()
+      expect(routeHandler).not.toHaveBeenCalled()
+
+      // Adapter-supplied parent authors are trusted as-is (no ledger stamp).
+      const replyWithParent: NormalizedInboundEvent = {
+        ...groupEvent(replyRow.id, "msg_reply_parent", false),
+        platform,
+        conversationRef,
+        conversationKey,
+        replyTo: { messageId: "x", snippet: "…", parentSenderId: "u_other" },
+      }
+      await bus.dispatchInboundFull(replyWithParent)
+      await bus.flushInboundTurns()
+      expect(routeHandler).not.toHaveBeenCalled()
     }
-    await bus.dispatchInboundFull(replyToOurs)
-    await bus.flushInboundTurns()
-    expect(routeHandler).toHaveBeenCalledTimes(1)
-    const [seen, decision] = routeHandler.mock.calls[0] as [NormalizedInboundEvent, RouteDecision]
-    expect(decision).toBe("ai-run")
-    expect(seen.replyTo?.parentSenderId).toBe("bot_1")
-    expect(seen.channelData?.replyParentResolvedBy).toBe("ledger")
-
-    // A reply to a message we never sent stays unknown → not a reply to the bot → dropped.
-    routeHandler.mockClear()
-    const replyToHuman: NormalizedInboundEvent = {
-      ...groupEvent(replyRow.id, "msg_reply_human", false),
-      conversationKey,
-      replyTo: { messageId: "human_msg_1", snippet: "…" },
-    }
-    await bus.dispatchInboundFull(replyToHuman)
-    await bus.flushInboundTurns()
-    expect(routeHandler).not.toHaveBeenCalled()
-
-    // Adapter-supplied parent authors are trusted as-is (no ledger stamp).
-    const replyWithParent: NormalizedInboundEvent = {
-      ...groupEvent(replyRow.id, "msg_reply_parent", false),
-      conversationKey,
-      replyTo: { messageId: "x", snippet: "…", parentSenderId: "u_other" },
-    }
-    await bus.dispatchInboundFull(replyWithParent)
-    await bus.flushInboundTurns()
-    expect(routeHandler).not.toHaveBeenCalled()
-  })
+  )
 
   it("scenario 5: private message in manual mode → manual-store, regardless of match", async () => {
     const bus = getBus()

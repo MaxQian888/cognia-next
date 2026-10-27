@@ -30,6 +30,101 @@ function makeGroupReq(text: string): OutboundRequest {
   }
 }
 
+describe.each(["v11", "v12"] as const)("%s QQ group readable Markdown", (variant) => {
+  const serialize = (req: OutboundRequest) =>
+    variant === "v11"
+      ? serializeOutboundV11(req, "100000")
+      : serializeOutboundV12(req, "100000", new Map([["https://img.test/a.png", "file-1"]]))
+
+  it("formats headings, emphasis, links and tables while preserving code and native quote/media", () => {
+    const code = '```ts\nconst literal = "**keep** $& a_b [x](url)";\n```'
+    const req: OutboundRequest = {
+      ...makeGroupReq(""),
+      replyTo: { messageId: "source-1" },
+      segments: [
+        {
+          type: "markdown",
+          md:
+            "# 结果\n\n**成功**，查看[文档](https://example.test/docs)。\n\n| 项目 | 数值 |\n| --- | --- |\n| 结果 | 452 |\n\n" +
+            code +
+            "\n\n`a_b * 3`",
+        },
+        { type: "image", url: "https://img.test/a.png" },
+      ],
+    }
+    const message = serialize(req)[0].params.message as Array<{
+      type: string
+      data: Record<string, unknown>
+    }>
+    expect(message[0].type).toBe("reply")
+    const text = message
+      .filter((s) => s.type === "text")
+      .map((s) => s.data.text)
+      .join("")
+    expect(text).toContain("结果")
+    expect(text).toContain("成功")
+    expect(text).not.toContain("# 结果")
+    expect(text).not.toContain("**成功**")
+    expect(text).not.toContain("| --- |")
+    expect(text).toContain("https://example.test/docs")
+    expect(text).toContain("项目 · 数值")
+    expect(text).toContain(code)
+    expect(text).toContain("`a_b * 3`")
+    expect(message.at(-1)).toEqual({
+      type: "image",
+      data: variant === "v11" ? { file: "https://img.test/a.png" } : { file_id: "file-1" },
+    })
+  })
+
+  it("keeps literal text and private-chat Markdown unchanged", () => {
+    const literal = "**literal** a_b 2 * 3 [CQ:at,qq=1]"
+    expect(serialize(makeGroupReq(literal))[0].params.message).toEqual([
+      { type: "text", data: { text: literal } },
+    ])
+    const req = {
+      ...makePrivateReq(""),
+      segments: [{ type: "markdown" as const, md: "# Private **bold**" }],
+    }
+    expect(serialize(req)[0].params.message).toEqual([
+      { type: "text", data: { text: "# Private **bold**" } },
+    ])
+  })
+
+  it("preserves URL destinations and complete indented code containing backticks", () => {
+    const url = "https://example.test/__token__/page"
+    const indented = "    const x = `foo`; **literal** $&"
+    const req = {
+      ...makeGroupReq(""),
+      segments: [{ type: "markdown" as const, md: `[link](${url})\n\n${url}\n\n${indented}\n` }],
+    }
+    const message = serialize(req)[0].params.message as Array<{
+      type: string
+      data: Record<string, unknown>
+    }>
+    const text = message
+      .filter((s) => s.type === "text")
+      .map((s) => s.data.text)
+      .join("")
+    expect(text.match(/https:\/\/example\.test\/__token__\/page/g)).toHaveLength(2)
+    expect(text).toContain(indented)
+  })
+
+  it("keeps the original when formatting would assemble new private data", () => {
+    const source = "**Contact** alice@exam**ple**.com"
+    const req = { ...makeGroupReq(""), segments: [{ type: "markdown" as const, md: source }] }
+    const message = serialize(req)[0].params.message as Array<{
+      type: string
+      data: Record<string, unknown>
+    }>
+    const text = message
+      .filter((s) => s.type === "text")
+      .map((s) => s.data.text)
+      .join("")
+    expect(text).toBe(source)
+    expect(text).not.toContain("alice@example.com")
+  })
+})
+
 // ---------------------------------------------------------------------------
 // v11 serialiser
 // ---------------------------------------------------------------------------
@@ -432,4 +527,19 @@ it("preserves the v12 account selector for upload, delete and identity actions",
     self,
   })
   expect(serializeGetLoginInfoV12(self)).toMatchObject({ action: "get_self_info", self })
+})
+
+it.each([300001, 300002])("sends temp-private replies with source group %i", (groupId) => {
+  const req = makePrivateReq("temp reply")
+  req.conversationRef.groupId = groupId
+  expect(serializeOutboundV11(req, "100000")[0]).toMatchObject({
+    action: "send_private_msg",
+    params: { user_id: 200001, group_id: groupId },
+  })
+  req.conversationRef.userId = 200001
+  delete req.conversationRef.chatKey
+  expect(serializeOutboundV11(req, "100000")[0].params.group_id).toBe(groupId)
+  expect(serializeOutboundV11(makePrivateReq("friend"), "100000")[0].params).not.toHaveProperty(
+    "group_id"
+  )
 })

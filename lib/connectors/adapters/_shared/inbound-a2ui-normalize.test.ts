@@ -7,8 +7,313 @@ import {
   isNavigableInboundUrl,
   isTextOnlyInboundA2UIBlock,
   sanitizeInboundA2UIBlock,
+  withInboundDisplayMedia,
 } from "./inbound-a2ui-normalize"
 import type { InboundA2UIBlock, InboundA2UINode } from "./inbound-a2ui-types"
+
+describe("display-only inbound media", () => {
+  it("isolates malformed recognition data while preserving valid neighboring prose", () => {
+    expect(() =>
+      withInboundDisplayMedia(
+        { v: 1, source: "wechat-oa", body: [{ kind: "text", text: "kept" }] },
+        "wechat-oa",
+        [{ type: "voice", url: "opaque", transcript: {} }] as never
+      )
+    ).not.toThrow()
+  })
+  it("preserves each resolved occurrence of the same personal WeChat image reference", () => {
+    const block = withInboundDisplayMedia(
+      {
+        v: 1,
+        source: "wechat-personal",
+        body: [1, 2].map(() => ({ kind: "image", url: "wechat-personal-media:ref" })),
+      },
+      "wechat-personal",
+      ["AAAA", "BBBB"].map((dataBase64) => ({
+        type: "image",
+        url: "ref",
+        mimeType: "image/png",
+        dataBase64,
+      }))
+    )!
+    expect(block.body.map((node) => (node as { displayUrl?: string }).displayUrl)).toEqual([
+      "data:image/png;base64,AAAA",
+      "data:image/png;base64,BBBB",
+    ])
+  })
+  it("matches shared media references to the compatible kind", () => {
+    const block = withInboundDisplayMedia(
+      {
+        v: 1,
+        source: "wechat-personal",
+        body: [
+          { kind: "image", url: "wechat-personal-media:ref" },
+          { kind: "link", href: "wechat-personal-media:ref", label: "Voice" },
+        ],
+      },
+      "wechat-personal",
+      [
+        { type: "voice", url: "ref" },
+        { type: "image", url: "ref", mimeType: "image/png", dataBase64: "AAAA" },
+      ]
+    )!
+    expect(block.body.map((node) => node.kind)).toEqual(["image", "link"])
+    expect(block.body[0]).toMatchObject({ displayUrl: "data:image/png;base64,AAAA" })
+  })
+  it.each(["wechat-personal", "wechat-oa"] as const)(
+    "does not repeat %s recognized speech as an unavailable media link",
+    (source) => {
+      const block = withInboundDisplayMedia(
+        { v: 1, source, body: [{ kind: "text", text: "Recognized speech" }] },
+        source,
+        [{ type: "voice", url: `${source}:voice:opaque`, transcript: "Recognized speech" }]
+      )!
+      expect(block.body).toEqual([{ kind: "text", text: "Recognized speech" }])
+    }
+  )
+  it("reuses personal WeChat opaque image references and keeps failed ciphertext unavailable", () => {
+    const rawUrl = "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=ref"
+    const block: InboundA2UIBlock = {
+      v: 1,
+      source: "wechat-personal",
+      body: [{ kind: "image", url: `wechat-personal-media:${rawUrl}` }],
+    }
+    const resolved = withInboundDisplayMedia(block, "wechat-personal", [
+      { type: "image", url: rawUrl, mimeType: "image/png", dataBase64: "AAAA" },
+    ])!
+    expect(resolved.body).toHaveLength(1)
+    expect(resolved.body[0]).toMatchObject({ displayUrl: "data:image/png;base64,AAAA" })
+    const failed = withInboundDisplayMedia(block, "wechat-personal", [
+      { type: "image", url: rawUrl },
+    ])!
+    expect(failed.body).toHaveLength(1)
+    expect(failed.body[0]).toMatchObject({ url: `wechat-personal-media:${rawUrl}` })
+    expect(
+      inboundA2UIBlockCoversParts(failed, [{ type: "text", text: `[image: ${rawUrl}]` }])
+    ).toBe(true)
+    expect(isDisplayableInboundMediaUrl((failed.body[0] as { url: string }).url)).toBe(false)
+  })
+  it.each(["file", "voice", "video"] as const)(
+    "does not append or expose personal WeChat %s ciphertext as a navigable link",
+    (type) => {
+      const rawUrl = "https://cdn/encrypted"
+      const block = withInboundDisplayMedia(
+        {
+          v: 1,
+          source: "wechat-personal",
+          body: [{ kind: "link", href: `wechat-personal-media:${rawUrl}`, label: "Media" }],
+        },
+        "wechat-personal",
+        [{ type, url: rawUrl, name: "file.pdf", mimeType: "application/pdf", sizeBytes: 1 }]
+      )!
+      expect(block.body).toHaveLength(1)
+      expect(block.body[0]).toMatchObject({ kind: "link", href: `wechat-personal-media:${rawUrl}` })
+      expect(isNavigableInboundUrl((block.body[0] as { href: string }).href)).toBe(false)
+    }
+  )
+  it("migrates legacy inline URLs to the same bounded display-only field", () => {
+    const bytes = "A".repeat(4 * 1024 * 1024)
+    const block = sanitizeInboundA2UIBlock({
+      source: "matrix",
+      body: [
+        { kind: "image", url: `data:image/png;base64,${bytes}` },
+        { kind: "image", url: `data:image/png;base64,${bytes}` },
+        { kind: "image", url: `data:image/png;base64,${bytes.repeat(2)}` },
+      ],
+    })!
+    expect(block.body).toHaveLength(3)
+    expect(block.body.every((node) => node.kind === "image" && !node.url.startsWith("data:"))).toBe(
+      true
+    )
+    expect(block.body.filter((node) => "displayUrl" in node)).toHaveLength(1)
+    expect(JSON.stringify(block).length).toBeLessThan(7 * 1024 * 1024)
+  })
+  it("never falls back to a WeCom ciphertext image URL after failure or budget exhaustion", () => {
+    const failed = withInboundDisplayMedia(
+      { v: 1, source: "wecom", body: [{ kind: "image", url: "https://cdn/failed" }] },
+      "wecom",
+      [{ type: "image", url: "", rawUrl: "https://cdn/failed" }]
+    )!
+    expect(failed.body[0]).toMatchObject({ kind: "image", url: "wecom-media:https://cdn/failed" })
+    expect(
+      inboundA2UIBlockCoversParts(failed, [{ type: "text", text: "[image: https://cdn/failed]" }])
+    ).toBe(true)
+    const bytes = "A".repeat(4 * 1024 * 1024)
+    const block = withInboundDisplayMedia(
+      null,
+      "wecom",
+      ["a", "b"].map((id) => ({
+        type: "image",
+        url: `data:image/png;base64,${bytes}`,
+        rawUrl: `https://cdn/${id}`,
+        mimeType: "image/png",
+        dataBase64: bytes,
+      }))
+    )!
+    expect(block.body).toHaveLength(2)
+    expect(block.body[1]).toMatchObject({ kind: "image", url: "wecom-media:https://cdn/b" })
+    expect((block.body[1] as { displayUrl?: string }).displayUrl).toBeUndefined()
+  })
+  it.each(["file", "voice", "video"] as const)(
+    "keeps failed %s decryption references non-navigable",
+    (type) => {
+      const rawUrl = "https://cdn/encrypted"
+      const block = withInboundDisplayMedia(
+        { v: 1, source: "wecom", body: [{ kind: "link", href: rawUrl, label: "Attachment" }] },
+        "wecom",
+        [{ type, url: "", rawUrl, name: "doc.pdf", mimeType: "application/pdf", sizeBytes: 0 }]
+      )!
+      expect(block.body).toHaveLength(1)
+      expect(block.body[0]).toMatchObject({ kind: "link", href: "inbound-media:0" })
+    }
+  )
+
+  it.each(["voice", "video"] as const)("replaces OneBot legacy %s aliases exactly once", (type) => {
+    const prefix = type === "voice" ? "cq-record:" : "cq-video:"
+    const block = withInboundDisplayMedia(
+      { v: 1, source: "onebot", body: [{ kind: "link", href: `${prefix}id`, label: "Media" }] },
+      "onebot",
+      [{ type, rawUrl: "id", url: "https://cdn/media" }]
+    )!
+    expect(block.body).toEqual([{ kind: "link", href: "https://cdn/media", label: "Media" }])
+  })
+  it("keeps rewritten inline media solely in displayUrl with a stable marker reference", () => {
+    const bytes = "A".repeat(4 * 1024 * 1024)
+    const segment = {
+      type: "image" as const,
+      url: `data:image/png;base64,${bytes}`,
+      rawUrl: "https://cdn/original",
+      mimeType: "image/png",
+      dataBase64: bytes,
+    }
+    const block = withInboundDisplayMedia(
+      { v: 1, source: "wecom", body: [{ kind: "image", url: segment.rawUrl }] },
+      "wecom",
+      [segment]
+    )!
+    expect(block.body[0]).toMatchObject({
+      kind: "image",
+      url: `wecom-media:${segment.rawUrl}`,
+    })
+    expect((block.body[0] as { displayUrl?: string }).displayUrl === segment.url).toBe(true)
+    expect(JSON.stringify(block).length).toBeLessThan(7 * 1024 * 1024)
+    expect(
+      inboundA2UIBlockCoversParts(block, [{ type: "text", text: `[image: ${segment.rawUrl}]` }])
+    ).toBe(true)
+  })
+  it("preserves ordered repeated media references in normalized-only projections", () => {
+    const block = withInboundDisplayMedia(null, "onebot", [
+      { type: "image", url: "pic", dataBase64: "AAAA", mimeType: "image/png" },
+      { type: "text", text: "between" },
+      { type: "image", url: "pic", dataBase64: "AAAA", mimeType: "image/png" },
+    ])
+    expect(block?.body.map((node) => node.kind)).toEqual(["image", "text", "image"])
+    expect(block?.body[1]).toEqual({ kind: "text", text: "between" })
+  })
+  it("reuses a Matrix image already projected from the same inline bytes", () => {
+    const block = withInboundDisplayMedia(
+      { v: 1, source: "matrix", body: [{ kind: "image", url: "data:image/png;base64,AAAA" }] },
+      "matrix",
+      [
+        {
+          type: "image",
+          url: "https://matrix.test/image",
+          rawUrl: "mxc://host/id",
+          mimeType: "image/png",
+          dataBase64: "AAAA",
+        },
+      ]
+    )!
+    expect(block.body).toHaveLength(1)
+    expect(block.body[0]).toMatchObject({
+      url: "https://matrix.test/image",
+      displayUrl: "data:image/png;base64,AAAA",
+    })
+  })
+  it("bounds serialized output while preserving repeated source occurrences", () => {
+    const segment = {
+      type: "image" as const,
+      url: "key",
+      dataBase64: "A".repeat(4 * 1024 * 1024),
+      mimeType: "image/png",
+    }
+    const repeated = withInboundDisplayMedia(
+      {
+        v: 1,
+        source: "lark",
+        body: Array.from({ length: 3 }, () => ({ kind: "image", url: "lark-img:key" })),
+      },
+      "lark",
+      [segment]
+    )!
+    expect(JSON.stringify(repeated).length).toBeLessThan(7 * 1024 * 1024)
+    expect(withInboundDisplayMedia(null, "lark", [segment, segment])?.body).toHaveLength(2)
+    const oversized = sanitizeInboundA2UIBlock({
+      v: 1,
+      source: "lark",
+      body: [
+        {
+          kind: "image",
+          url: "key",
+          displayUrl: `data:image/png;base64,${"A".repeat(8 * 1024 * 1024)}`,
+        },
+      ],
+    })
+    expect(oversized?.body[0]).not.toHaveProperty("displayUrl")
+  })
+  it("keeps the stable reference for dedup while rendering cached bytes", () => {
+    const block = withInboundDisplayMedia(null, "lark", [
+      { type: "image", url: "image-key", mimeType: "image/png", dataBase64: "AAAA" },
+    ])!
+    expect(inboundA2UIBlockCoversParts(block, [{ type: "text", text: "[image: image-key]" }])).toBe(
+      true
+    )
+    expect(sanitizeInboundA2UIBlock(block)?.body[0]).toMatchObject({
+      displayUrl: "data:image/png;base64,AAAA",
+    })
+  })
+
+  it("bounds display bytes and does not inline unsupported MIME types", () => {
+    const block = withInboundDisplayMedia(null, "lark", [
+      {
+        type: "image",
+        url: "huge",
+        mimeType: "image/png",
+        dataBase64: "A".repeat(7 * 1024 * 1024 + 1),
+      },
+      { type: "image", url: "svg", mimeType: "image/svg+xml", dataBase64: "AAAA" },
+    ])!
+    expect(block.body).toHaveLength(2)
+    expect(block.body.every((node) => !("displayUrl" in node))).toBe(true)
+  })
+
+  it("presents a file's existing URL and name without duplicating its marker", () => {
+    const block = withInboundDisplayMedia(null, "lark", [
+      {
+        type: "file",
+        url: "https://files.test/report.pdf",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 100,
+      },
+    ])!
+    expect(block.body).toEqual([
+      { kind: "link", href: "https://files.test/report.pdf", label: "report.pdf" },
+    ])
+    expect(inboundA2UIBlockCoversParts(block, [{ type: "text", text: "[file: report.pdf]" }])).toBe(
+      true
+    )
+  })
+
+  it("rejects executable display URLs from persisted metadata", () => {
+    const block = sanitizeInboundA2UIBlock({
+      v: 1,
+      source: "lark",
+      body: [{ kind: "image", url: "key", displayUrl: "javascript:alert(1)" }],
+    })
+    expect(block?.body[0]).not.toHaveProperty("displayUrl")
+  })
+})
 
 describe("sanitizeInboundA2UIBlock", () => {
   it("keeps a well-formed block unchanged", () => {
@@ -152,6 +457,39 @@ describe("inboundA2UIBlockCoversParts", () => {
     )
   })
 
+  it("covers literal OneBot URLs with Markdown-like underscores", () => {
+    const body = 'see https://example.com/__keep__/docs; code const text = "keep a_b * 3";'
+    const onebot: InboundA2UIBlock = {
+      v: 1,
+      source: "onebot",
+      body: [
+        { kind: "mention", handle: "bot" },
+        { kind: "text", text: body },
+      ],
+    }
+    expect(inboundA2UIBlockCoversParts(onebot, [{ type: "text", text: `@bot ${body}` }])).toBe(true)
+    expect(inboundA2UIBlockCoversParts(onebot, [{ type: "text", text: `${body} extra` }])).toBe(
+      false
+    )
+  })
+
+  it("covers a leading reply marker only when the same preview is displayed separately", () => {
+    const parts = [{ type: "text", text: " [reply:previous answer] hello there" }]
+    expect(inboundA2UIBlockCoversParts(block, parts, "previous answer")).toBe(true)
+    expect(inboundA2UIBlockCoversParts(block, parts)).toBe(false)
+    expect(inboundA2UIBlockCoversParts(block, parts, "another answer")).toBe(false)
+  })
+
+  it("retains reply-like prose outside the generated leading marker", () => {
+    expect(
+      inboundA2UIBlockCoversParts(
+        block,
+        [{ type: "text", text: "hello there [reply:previous answer]" }],
+        "previous answer"
+      )
+    ).toBe(false)
+  })
+
   it("needs the marker's own image, not any image of the block", () => {
     // Discord: an attachment marker next to an embed's picture.
     expect(
@@ -290,4 +628,33 @@ describe("inboundA2UIBlockToPlainText in Markdown mode", () => {
       )
     )
   })
+})
+it("contains invalid media URLs and preserves valid current text", () => {
+  expect(
+    withInboundDisplayMedia(
+      { v: 1, source: "wecom", body: [{ kind: "text", text: "kept" }] },
+      "wecom",
+      [{ type: "image", url: 42 }] as never
+    )?.body
+  ).toEqual([{ kind: "text", text: "kept" }])
+})
+
+it("maps resolved voice and video references without replaying bytes", () => {
+  const block: InboundA2UIBlock = {
+    v: 1,
+    source: "onebot",
+    body: [
+      { kind: "link", href: "audio-id", label: "Audio" },
+      { kind: "link", href: "video-id", label: "Video" },
+    ],
+  }
+  expect(
+    withInboundDisplayMedia(block, "onebot", [
+      { type: "voice", rawUrl: "audio-id", url: "https://cdn/audio" },
+      { type: "video", rawUrl: "video-id", url: "https://cdn/video" },
+    ])?.body
+  ).toEqual([
+    { kind: "link", href: "https://cdn/audio", label: "Audio" },
+    { kind: "link", href: "https://cdn/video", label: "Video" },
+  ])
 })

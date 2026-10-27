@@ -18,6 +18,26 @@ describe("wechatOaInboundToA2UI", () => {
     ).toEqual([{ kind: "text", text: "hello" }])
   })
 
+  it("keeps XML-looking user text literal and reads the envelope type outside CDATA", () => {
+    const content = "<MsgType>image</MsgType> literal </Content> text"
+    const block = wechatOaInboundToA2UI(
+      wrap(`<Content><![CDATA[${content}]]></Content><MsgType>text</MsgType>`)
+    )
+    expect(block!.body).toEqual([{ kind: "text", text: content }])
+  })
+
+  it("decodes escaped shared-link attributes without changing CDATA prose", () => {
+    const block = wechatOaInboundToA2UI(
+      wrap(
+        "<MsgType>link</MsgType><Title><![CDATA[A &amp; B]]></Title><Url>https://example.com/?a=1&amp;b=2</Url>"
+      )
+    )
+    expect(block!.body[0]).toMatchObject({
+      title: "A &amp; B",
+      children: [{ kind: "link", href: "https://example.com/?a=1&b=2", label: "A &amp; B" }],
+    })
+  })
+
   it("maps image to an image node using PicUrl", () => {
     expect(
       wechatOaInboundToA2UI(wrap("<MsgType>image</MsgType><PicUrl>https://x/p.jpg</PicUrl>"))!

@@ -23,7 +23,7 @@ describe("dingtalkInboundToA2UI", () => {
     ).toEqual([{ kind: "text", text: "hi" }])
   })
 
-  it("maps richText runs to text nodes and marks pictures", () => {
+  it("maps legacy richText runs using the parser's media references", () => {
     const out = dingtalkInboundToA2UI(
       msg({
         msgtype: "richText",
@@ -36,7 +36,7 @@ describe("dingtalkInboundToA2UI", () => {
     )
     expect(out!.body).toEqual([
       { kind: "text", text: "before" },
-      { kind: "text", text: "[picture]", emphasis: "muted" },
+      { kind: "image", url: "dingtalk://download/code" },
       { kind: "text", text: "after" },
     ])
     expect(out!.source).toBe("dingtalk")
@@ -76,11 +76,32 @@ describe("dingtalkInboundToA2UI", () => {
     })
     expect(
       dingtalkInboundToA2UI(msg({ msgtype: "file", content: { fileName: "x.zip" } }))!.body[0]
-    ).toEqual({ kind: "text", text: "[file: x.zip]", emphasis: "muted" })
+    ).toEqual({ kind: "text", text: "[file:x.zip]", emphasis: "muted" })
     expect(dingtalkInboundToA2UI(msg({ msgtype: "file", content: {} }))!.body[0]).toEqual({
       kind: "text",
       text: "[file]",
       emphasis: "muted",
     })
   })
+})
+it("projects official nested rich text in order with canonical download references", () => {
+  const out = dingtalkInboundToA2UI(
+    msg({
+      msgtype: "richText",
+      content: {
+        richText: [
+          null,
+          { text: "before" },
+          { type: "picture", downloadCode: "new/code", pictureDownloadCode: "old" },
+          { text: "after" },
+        ],
+      },
+      richText: [{ text: "legacy should not win" }],
+    })
+  )
+  expect(out?.body).toEqual([
+    { kind: "text", text: "before" },
+    { kind: "image", url: "dingtalk://download/new%2Fcode" },
+    { kind: "text", text: "after" },
+  ])
 })

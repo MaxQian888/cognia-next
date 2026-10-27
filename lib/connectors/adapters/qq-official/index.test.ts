@@ -4,6 +4,7 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import { createQQOfficialAdapter } from "./index"
 import { __resetQQMsgSeqForTesting, qqPassiveMsgSeq, qqPassiveReplyCount } from "./serialize"
 import { startQQGateway } from "./gateway-client"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 jest.mock("./gateway-client", () => ({
   startQQGateway: jest.fn(),
@@ -95,10 +96,80 @@ function fakeDispatches(next: () => Promise<IteratorResult<unknown>>) {
 beforeEach(() => {
   mockInvoke.mockReset()
   mockStartGateway.mockReset()
+  jest.mocked(gateInboundEvent).mockReset().mockResolvedValue(true)
   __resetQQMsgSeqForTesting()
 })
 
 describe("createQQOfficialAdapter", () => {
+  it("does not emit a stopped run's delayed admission or overwrite restart health", async () => {
+    let entered!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    let release!: (value: boolean) => void
+    ;(gateInboundEvent as jest.Mock).mockImplementationOnce(() => {
+      entered()
+      return new Promise<boolean>((resolve) => {
+        release = resolve
+      })
+    })
+    mockStartGateway.mockReturnValueOnce({
+      selfId: "bot",
+      dispatches: (async function* () {
+        yield C2C_DISPATCH
+      })(),
+    })
+    const a = adapter(),
+      old = fakeCtx(),
+      current = fakeCtx()
+    await a.start(old)
+    await ready
+    await a.stop()
+    mockStartGateway.mockReturnValueOnce({
+      selfId: "bot",
+      dispatches: fakeDispatches(() => new Promise(() => {})),
+    })
+    await a.start(current)
+    release(true)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    try {
+      expect(old.emit).not.toHaveBeenCalled()
+      expect(current.emit).not.toHaveBeenCalled()
+      expect(a.health().state).toBe("running")
+    } finally {
+      await a.stop()
+    }
+  })
+  it("delivers recalls directly without media download or admission", async () => {
+    const a = adapter()
+    const context = fakeCtx()
+    jest.mocked(gateInboundEvent).mockClear()
+    jest.mocked(gateInboundEvent).mockResolvedValueOnce(false)
+    let delivered = false
+    mockStartGateway.mockReturnValue({
+      selfId: "bot",
+      dispatches: fakeDispatches(() => {
+        if (delivered) return new Promise(() => {})
+        delivered = true
+        return Promise.resolve({
+          done: false,
+          value: {
+            op: 0,
+            t: "PUBLIC_MESSAGE_DELETE",
+            d: { message: { id: "parent", channel_id: "channel" } },
+          },
+        })
+      }),
+    })
+    await a.start(context)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(context.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "delete", replacesMessageId: "parent" })
+    )
+    expect(httpCalls()).toEqual([])
+    expect(gateInboundEvent).not.toHaveBeenCalled()
+    await a.stop()
+  })
   it.each(["group", "c2c"])(
     "uploads public media before sending a passive %s message",
     async (scene) => {

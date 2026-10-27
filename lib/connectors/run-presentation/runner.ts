@@ -36,6 +36,7 @@ import {
 const TERMINAL = new Set<RunProjectionSnapshot["status"]>(["completed", "failed", "cancelled"])
 const COALESCE_MS = 2_000
 const APPEND_UPDATE_INTERVAL_MS = 30_000
+const ONEBOT_GROUP_PROGRESS_GRACE_MS = 8_000
 const NATIVE_KILL_SWITCH_KEY = "cognia-run-presentation-native-disabled"
 const IMMEDIATE_EVENT_TYPES = new Set<RunEventType>([
   "run.started",
@@ -268,7 +269,21 @@ export function shouldDeliverFallbackUpdate(
   mode: FallbackDeliveryMode,
   now: number = Date.now()
 ): boolean {
+  const quietGroupTurn = isOneBotGroupAgentTurn(binding, snapshot)
+  // The Agent route delivers its authoritative answer separately after the
+  // presentation freezes. A second "completed" timeline only duplicates it.
+  if (quietGroupTurn && snapshot.status === "completed") return false
   if (TERMINAL.has(snapshot.status)) return true
+  if (quietGroupTurn) {
+    const critical = ["waiting", "paused", "recovery_required"]
+    const resumed =
+      snapshot.status === "running" &&
+      critical.includes(String(binding.presentationState?.lastProjectedStatus))
+    if (critical.includes(snapshot.status) || snapshot.pendingInterrupt || resumed) return true
+    // Keep append mode even when suppressed: the existing heartbeat can emit
+    // progress after this grace period without needing another run revision.
+    if (now - snapshot.startedAt < ONEBOT_GROUP_PROGRESS_GRACE_MS) return false
+  }
   if (mode === "final-only") return false
   if (mode === "card-edit" || binding.lastProjectedRevision === 0) return true
   if (
@@ -289,6 +304,17 @@ export function shouldDeliverFallbackUpdate(
   }
   const lastAppendAt = binding.presentationState?.lastAppendAt
   return typeof lastAppendAt !== "number" || now - lastAppendAt >= APPEND_UPDATE_INTERVAL_MS
+}
+
+function isOneBotGroupAgentTurn(
+  binding: ExecutionRunBinding,
+  snapshot: RunProjectionSnapshot
+): boolean {
+  return (
+    binding.deliveryTarget?.address.platform === "onebot" &&
+    binding.deliveryTarget.address.scopeKind === "group" &&
+    snapshot.kind === "agent-turn"
+  )
 }
 
 export async function projectExecutionRunBinding(
@@ -479,6 +505,9 @@ async function deliverFallback(
     }
   }
   const editTargetMessageId = deliveryMode === "card-edit" ? binding.platformMessageId : undefined
+  const readableGroupTurn = isOneBotGroupAgentTurn(binding, snapshot)
+  const readableGroupProgress =
+    readableGroupTurn && snapshot.status === "running" && !snapshot.pendingInterrupt
   const surface = buildRunActivitySurface(snapshot, resolveActivityI18n(snapshot.locale))
 
   // Register the run-control verbs on the generic path too.
@@ -513,11 +542,21 @@ async function deliverFallback(
               resolveWebEntryBase(row),
               row?.settings?.cardPresentation
             )
-          : buildA2UISegment(`execution-run:${snapshot.runId}`, surface),
+          : readableGroupProgress
+            ? { type: "markdown", md: markdown(snapshot) }
+            : buildA2UISegment(`execution-run:${snapshot.runId}`, surface),
       ],
+      ...(readableGroupTurn && binding.sourceMessageId
+        ? { replyTo: { messageId: binding.sourceMessageId } }
+        : {}),
       ...(editTargetMessageId ? { editTargetMessageId } : {}),
       metadata: {
-        idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}`,
+        // Heartbeats need distinct, retry-stable slots even without a new revision.
+        idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}${
+          readableGroupProgress
+            ? `:progress:${Math.floor(snapshot.elapsedMs / APPEND_UPDATE_INTERVAL_MS)}`
+            : ""
+        }`,
         ...(binding.sourceMessageId ? { sourceMessageId: binding.sourceMessageId } : {}),
       },
     },

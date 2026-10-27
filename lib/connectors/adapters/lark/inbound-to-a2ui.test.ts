@@ -1,6 +1,13 @@
 import { larkInboundToA2UI } from "./inbound-to-a2ui"
 
 describe("larkInboundToA2UI", () => {
+  it("retains callback presence without an action ID", () => {
+    expect(
+      larkInboundToA2UI({
+        elements: [{ tag: "button", value: {}, url: "https://x.test", text: { content: "Act" } }],
+      })?.body[0]
+    ).toMatchObject({ kind: "button", actionId: "" })
+  })
   it("reads Card 2.0 body without requiring a header", () => {
     const card = {
       schema: "2.0",

@@ -29,6 +29,15 @@ beforeEach(() => {
 })
 
 describe("larkTenantRequest", () => {
+  it("opts avatar profile reads into the native no-redirect policy", async () => {
+    await larkTenantRequest(CREDS, "GET", "/contact/v3/users/ou_1", undefined, {
+      avatarPolicy: true,
+    })
+    expect(mHttp.mock.calls[0][0].headers["X-Cognia-Avatar-Policy"]).toBe("1")
+    mHttp.mockClear()
+    await larkTenantRequest(CREDS, "GET", "/im/v1/chats/oc_1")
+    expect(mHttp.mock.calls[0][0].headers["X-Cognia-Avatar-Policy"]).toBeUndefined()
+  })
   it("issues a bearer tenant-token request and returns the parsed body", async () => {
     const out = await larkTenantRequest(CREDS, "POST", "/im/v1/chats?x=1", { name: "g" })
     expect(out).toEqual({ code: 0, data: { ok: true } })

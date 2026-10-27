@@ -386,6 +386,19 @@ export async function connectorsKeyringGet(
   return invoker<string | null>("connectors_keyring_get", { adapterId, credential })
 }
 
+export interface ConnectorCredentialSnapshot {
+  value: string
+  revision: string
+}
+
+/** Runtime-only atomic value/revision read; never cached as an idempotent result. */
+export async function connectorsKeyringGetSnapshot(
+  adapterId: string,
+  credential: string
+): Promise<ConnectorCredentialSnapshot | null> {
+  return invoker("connectors_keyring_get_snapshot", { adapterId, credential })
+}
+
 export async function connectorsKeyringDelete(
   adapterId: string,
   credential: string
@@ -402,6 +415,33 @@ export async function connectorsKeyringList(
   accounts: string[]
 ): Promise<string[]> {
   return invoker<string[]>("connectors_keyring_list", { adapterId, accounts })
+}
+
+export interface PendingWechatOaInbound {
+  id: string
+  xml: string
+  receivedAt: number
+  admitted?: boolean
+}
+
+/** Verified OA callbacks retained before HTTP ACK; event notifications only wake this reader. */
+export async function connectorsWechatOaInboundList(
+  adapterId: string
+): Promise<PendingWechatOaInbound[]> {
+  return invoker<PendingWechatOaInbound[]>("connectors_wechat_oa_inbound_list", { adapterId })
+}
+
+/** Durably transfer a pending occurrence to JS admission, atomically with revocation. */
+export async function connectorsWechatOaInboundClaim(
+  adapterId: string,
+  id: string
+): Promise<boolean> {
+  return invoker<boolean>("connectors_wechat_oa_inbound_claim", { adapterId, id })
+}
+
+/** Release exactly one occurrence only after the bus accepted it durably. */
+export async function connectorsWechatOaInboundAck(adapterId: string, id: string): Promise<void> {
+  await invoker("connectors_wechat_oa_inbound_ack", { adapterId, id })
 }
 
 // ---------------------------------------------------------------------------

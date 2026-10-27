@@ -85,8 +85,9 @@ export function InboxNoticeArea({
   const saturation = useOutboundSaturation()
   const recoveryJobs = useInboundRecoveryJobs(conversationKey)
   const drafts = usePendingDraftsForConversation(conversationKey)
-  const auditEntries = useConversationActivity(conversationKey)
-  const assignmentEvents = useConversationAssignmentEvents(conversationKey)
+  const activityKey = suppressKinds?.includes("activity") ? undefined : conversationKey
+  const auditEntries = useConversationActivity(activityKey)
+  const assignmentEvents = useConversationAssignmentEvents(activityKey)
 
   const activityCount = auditEntries.length + assignmentEvents.length
   const firstDraft = drafts[0]

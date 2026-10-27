@@ -274,6 +274,7 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
             } catch {
               continue
             }
+            if (!frame || typeof frame !== "object" || Array.isArray(frame)) continue
             const type = frame.type ?? ""
             const topic = frame.headers?.topic ?? ""
             const messageId = frame.headers?.messageId ?? ""

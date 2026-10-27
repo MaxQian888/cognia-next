@@ -44,10 +44,10 @@ jest.mock("@/hooks/connectors/use-pending-drafts", () => ({
   usePendingDraftsForConversation: () => pendingDrafts,
 }))
 jest.mock("@/hooks/connectors/use-conversation-activity", () => ({
-  useConversationActivity: () => auditEntries,
+  useConversationActivity: jest.fn(() => auditEntries),
 }))
 jest.mock("@/hooks/connectors/use-conversation-assignment-events", () => ({
-  useConversationAssignmentEvents: () => assignmentEvents,
+  useConversationAssignmentEvents: jest.fn(() => assignmentEvents),
 }))
 
 let isMobile = false
@@ -75,6 +75,21 @@ beforeEach(() => {
 })
 
 describe("InboxNoticeArea", () => {
+  it("stops activity queries when the composer owns them and keeps connection warnings", () => {
+    const { useConversationActivity } = jest.requireMock(
+      "@/hooks/connectors/use-conversation-activity"
+    ) as { useConversationActivity: jest.Mock }
+    const { useConversationAssignmentEvents } = jest.requireMock(
+      "@/hooks/connectors/use-conversation-assignment-events"
+    ) as { useConversationAssignmentEvents: jest.Mock }
+    degradedAdapters = [{ adapterId: "a" }]
+    auditEntries = [{ id: "policy" }]
+    renderArea("ck", ["activity"])
+    expect(useConversationActivity).toHaveBeenLastCalledWith(undefined)
+    expect(useConversationAssignmentEvents).toHaveBeenLastCalledWith(undefined)
+    expect(screen.getByTestId("src-connection-loss")).toBeInTheDocument()
+    expect(screen.queryByTestId("src-activity")).not.toBeInTheDocument()
+  })
   it("renders nothing when every source is quiet", () => {
     renderArea("ck")
     expect(screen.queryByTestId("inbox-notice-area")).not.toBeInTheDocument()

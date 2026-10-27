@@ -29,8 +29,25 @@ import { buildConversationKey } from "@/types/connectors/event"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
-import { inboundEventToStoredParts } from "@/lib/connectors/inbound-stored-parts"
-import { resolveInboundReplyTo } from "@/lib/connectors/inbound-reply-to"
+import {
+  inboundEventToStoredParts,
+  inboundImageMarker,
+  inboundPartsForReplay,
+  inboundEventFromStoredMessage,
+  mergeInboundMessagesForStream,
+  stripInboundDisplayMarkers,
+} from "@/lib/connectors/inbound-stored-parts"
+import {
+  findConnectorInboundMutation,
+  listConnectorInboundMutationJobs,
+} from "@/lib/db/connector-inbound-jobs"
+import {
+  inboundEditRevision,
+  isAuthorizedInboundEdit,
+  isNewerInboundEdit,
+  type InboundEditRevision,
+} from "@/lib/connectors/inbound-revision"
+import { inboundReplyLookupIds, resolveInboundReplyTo } from "@/lib/connectors/inbound-reply-to"
 import type { RouteDecision } from "./mode-router"
 import type { LiveSteerHandler } from "./bus"
 import { resolveInboxSuppression, type ResolvedBinding } from "./policy-resolve"
@@ -75,7 +92,7 @@ import { buildSteerPayload, steerBlocksOf } from "@/lib/claude/steer"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import { appendAudit } from "./audit"
-import type { getBus } from "./bus"
+import { getBus } from "./bus"
 import {
   createPlatformSession,
   findActiveSessionForConversation,
@@ -104,10 +121,16 @@ import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
 import { resolveSessionWorkspace, sessionWorkspaceId } from "@/lib/workspace/session-workspace"
 import { isHeadlessHost } from "@/lib/platform/detect"
-import { invalidatePersistSnapshot, stampSessionLastMessage } from "@/lib/db/messages"
+import {
+  invalidatePersistSnapshot,
+  rowToUIMessage,
+  stampSessionLastMessage,
+} from "@/lib/db/messages"
+import { useChatStore } from "@/stores/chat"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
 import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
+import { withTranscriptRuntimeLock } from "@/lib/chat/transcript/revision-events"
 import { getSession, setSdkSessionId } from "@/lib/db/sessions"
 import {
   buildAgentRunRecoveryAnchor,
@@ -622,7 +645,7 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
           source: { type: "base64", media_type: mime, data: inline },
         })
       } else if (typeof seg.url === "string" && seg.url.length > 0) {
-        blocks.push({ type: "text", text: `[image: ${seg.url}]` })
+        blocks.push({ type: "text", text: inboundImageMarker(seg) })
       } else if (!hasOcr) {
         // Neither bytes the model may see nor extracted words nor a URL: say
         // so, rather than dropping the segment and leaving the model to answer
@@ -748,14 +771,16 @@ export async function recentGroupContextBlock(input: {
   event: NormalizedInboundEvent
   excludeMessageId: string
   now?: number
+  sessions?: readonly ChatSession[]
+  onRowsRead?: (rows: readonly StoredMessage[]) => void
 }): Promise<string | undefined> {
   const { event } = input
   if (event.channel.kind === "private") return undefined
   const now = input.now ?? Date.now()
   const cutoff = now - GROUP_CONTEXT_MAX_AGE_MS
-  const sessions = await listSessionsByConversationKey(event.conversationKey).catch(
-    () => [] as ChatSession[]
-  )
+  const sessions =
+    input.sessions ??
+    (await listSessionsByConversationKey(event.conversationKey).catch(() => [] as ChatSession[]))
 
   const candidates: Array<{ createdAt: number; speaker: string; text: string }> = []
   for (const bound of sessions.slice(0, GROUP_CONTEXT_SESSION_LIMIT)) {
@@ -766,14 +791,16 @@ export async function recentGroupContextBlock(input: {
       .limit(GROUP_CONTEXT_SCAN_ROWS)
       .toArray()
       .catch(() => [] as StoredMessage[])
+    input.onRowsRead?.(rows)
     // Newest assistant reply in this session is the watermark: rows at or
     // below it already reached the model through session history.
     const lastAssistantAt = rows.find((row) => row.role === "assistant")?.createdAt ?? 0
     for (const row of rows) {
       if (row.role !== "user") continue
+      if (row.metadata?.deletedAt !== undefined) continue
       if (row.id === input.excludeMessageId) continue
       if (row.createdAt <= lastAssistantAt || row.createdAt < cutoff) continue
-      const text = storedMessagePlainText(row.parts)
+      const text = storedMessagePlainText(inboundPartsForReplay(row.parts))
       if (!text) continue
       const speaker = resolveMessageSpeaker(row)
       candidates.push({
@@ -814,13 +841,17 @@ export async function withConversationContext(
   input: {
     event: NormalizedInboundEvent
     stored: StoredMessage
+    contextSessions?: readonly ChatSession[]
+    onContextRowsRead?: (rows: readonly StoredMessage[]) => void
   }
 ): Promise<SendContent> {
   const headers: string[] = []
   const replyMeta = input.stored.metadata?.replyTo as { preview?: string } | undefined
   const preview = replyMeta?.preview
   if (typeof preview === "string" && preview.trim()) {
-    const flat = redactText(preview.replace(/\s+/g, " ").trim()).redacted
+    const flat = redactText(
+      stripInboundDisplayMarkers(preview).replace(/\s+/g, " ").trim()
+    ).redacted
     if (flat && hasNoLeakingPii(flat)) {
       headers.push(`[replying-to: ${flat.slice(0, 280)}]`)
     }
@@ -828,6 +859,8 @@ export async function withConversationContext(
   const context = await recentGroupContextBlock({
     event: input.event,
     excludeMessageId: input.stored.id,
+    sessions: input.contextSessions,
+    onRowsRead: input.onContextRowsRead,
   })
   if (context) headers.push(context)
   if (headers.length === 0) return prompt
@@ -844,6 +877,27 @@ export async function insertInboundMessage(
   sessionId: string,
   overrideTimestamp?: number
 ): Promise<StoredMessage> {
+  return (await insertInboundMessageWithRevision(event, sessionId, overrideTimestamp)).stored
+}
+
+/** A connector must not create renderer slices for unopened conversations. */
+function projectStoredInboundMessage(stored: StoredMessage): void {
+  const chat = useChatStore.getState()
+  const slice = chat.sessions[stored.sessionId]
+  if (!slice) return
+  chat.replaceSessionMessages(
+    stored.sessionId,
+    mergeInboundMessagesForStream(slice.messages, [rowToUIMessage(stored)])
+  )
+}
+
+async function insertInboundMessageWithRevision(
+  event: NormalizedInboundEvent,
+  sessionId: string,
+  overrideTimestamp?: number,
+  canonicalSource?: StoredMessage
+): Promise<{ stored: StoredMessage; event: NormalizedInboundEvent }> {
+  let effectiveEvent = event
   const targetSession = await getDb().sessions.get(sessionId)
   if (!targetSession) throw new Error("SESSION_NOT_FOUND")
   // Shared-session mirrors are never a write target. Connector bindings must
@@ -851,19 +905,16 @@ export async function insertInboundMessage(
   // server; failing closed here prevents Dexie from becoming an auth bypass.
   assertLocalMutationAllowed(targetSession, "session.post")
   const now = overrideTimestamp ?? Date.now()
-  const existing = await getDb()
-    .messages.where("platformMessageId")
-    .equals(event.messageId)
-    .filter((message) => {
-      const platform = message.metadata?.platformMessage
-      return (
-        message.sessionId === sessionId &&
-        platform?.adapterId === event.adapterId &&
-        platform?.conversationKey === event.conversationKey
-      )
-    })
-    .first()
-  if (existing) return existing
+  const existing = canonicalSource
+    ? await getDb().messages.get(canonicalSource.id)
+    : await getBus().findStoredPlatformMessage(event, event.messageId)
+  if (existing) {
+    projectStoredInboundMessage(existing)
+    return {
+      stored: existing,
+      event: inboundEventFromStoredMessage(event, existing),
+    }
+  }
   const finalParts = inboundEventToStoredParts(event)
 
   // Reverse-project the platform-native rich content (Block Kit, Lark
@@ -880,17 +931,32 @@ export async function insertInboundMessage(
     findParent: async (platformMessageId) => {
       const parent = await getDb()
         .messages.where("platformMessageId")
-        .equals(platformMessageId)
+        .anyOf(
+          inboundReplyLookupIds(event).length ? inboundReplyLookupIds(event) : [platformMessageId]
+        )
         .filter((message) => message.sessionId === sessionId)
         .first()
-      return parent ? { id: parent.id, parts: parent.parts } : undefined
+      return parent
+        ? {
+            id: parent.id,
+            parts:
+              parent.metadata?.deletedAt !== undefined
+                ? [{ type: "text", text: "[deleted]" }]
+                : inboundPartsForReplay(parent.parts),
+          }
+        : undefined
     },
   })
 
   const row: StoredMessage = {
     id: crypto.randomUUID(),
     sessionId,
-    role: "user",
+    role:
+      event.platform === "onebot" &&
+      event.channelData?.onebotHistory === true &&
+      event.sender.remoteUserId === event.selfId
+        ? "assistant"
+        : "user",
     parts: finalParts,
     // Denormalized copy of platformMessage.messageId so the v49 messages
     // index resolves edit/delete events in O(log n). Kept in sync with the
@@ -913,35 +979,123 @@ export async function insertInboundMessage(
     createdAt: now,
   }
   const db = getDb()
-  const persisted = await db.transaction("rw", db.messages, db.sessionState, async () => {
-    // Concurrent redeliveries must neither insert nor increment unread twice.
-    const duplicate = await db.messages
-      .where("platformMessageId")
-      .equals(event.messageId)
-      .filter(
-        (message) =>
-          message.sessionId === sessionId &&
-          message.metadata?.platformMessage?.adapterId === event.adapterId &&
-          message.metadata?.platformMessage?.conversationKey === event.conversationKey
-      )
-      .first()
-    if (duplicate) return duplicate
-    await db.messages.add(row)
-    if (
-      isNotifiableInboundEvent(event) &&
-      !isViewingConversation(event.conversationKey, sessionId)
-    ) {
-      const previous = await db.sessionState.get(sessionId)
-      await db.sessionState.put({
-        sessionId,
-        lastReadAt: previous?.lastReadAt ?? 0,
-        unreadCount: (previous?.unreadCount ?? 0) + 1,
-        updatedAt: Date.now(),
-      })
+  const persisted = await db.transaction(
+    "rw",
+    db.messages,
+    db.sessionState,
+    db.sessions,
+    db.connectorInboundJobs,
+    async () => {
+      // Concurrent redeliveries must neither insert nor increment unread twice.
+      const duplicate = await getBus().findStoredPlatformMessage(event, event.messageId)
+      if (duplicate) return duplicate
+      const mutation = await findConnectorInboundMutation(event)
+      const recalledAt = mutation?.recalledAt
+      const inboundMutationRevision =
+        mutation?.mutationRevision !== undefined
+          ? { jobId: mutation.id, revision: mutation.mutationRevision }
+          : undefined
+      if (
+        event.platform === "matrix" &&
+        (mutation?.matrixEditRevisions !== undefined || mutation?.pendingEdit)
+      ) {
+        const rawless = (rich: ReturnType<typeof projectInboundToA2UI>) => {
+          if (!rich) return undefined
+          const { raw: _raw, ...display } = rich
+          return display
+        }
+        const baseRich = rawless(row.metadata?.inboundA2UI ?? null)
+        const candidates =
+          mutation.matrixEditRevisions ??
+          (mutation.pendingEdit ? { [mutation.pendingEdit.messageId]: mutation.pendingEdit } : {})
+        const edits = Object.fromEntries(
+          Object.entries(candidates)
+            .filter(([, edit]) => isAuthorizedInboundEdit(edit, event.sender.remoteUserId))
+            .map(([id, edit]) => {
+              const rich = rawless(projectInboundToA2UI("matrix", edit.raw, edit.segments))
+              return [
+                id,
+                {
+                  revision: inboundEditRevision(edit),
+                  parts: inboundEventToStoredParts(edit),
+                  ...(rich ? { inboundA2UI: rich } : {}),
+                },
+              ]
+            })
+        )
+        row.metadata = {
+          ...row.metadata,
+          inboundEditBase: { parts: row.parts, ...(baseRich ? { inboundA2UI: baseRich } : {}) },
+          inboundMatrixRevisions: {
+            edits,
+            redactedEditIds: mutation.matrixRedactedEditIds ?? [],
+          },
+        }
+      }
+      if (mutation?.pendingEdit && recalledAt === undefined) {
+        effectiveEvent = {
+          ...event,
+          segments: mutation.pendingEdit.segments,
+          plainText: mutation.pendingEdit.plainText,
+          raw: mutation.pendingEdit.raw,
+          mediaModelPolicy: "local_extract_only",
+        }
+        row.parts = inboundEventToStoredParts(effectiveEvent)
+        const rich = projectInboundToA2UI(
+          effectiveEvent.platform,
+          effectiveEvent.raw,
+          effectiveEvent.segments
+        )
+        const {
+          inboundA2UI: _oldRich,
+          inboundLabels: _oldLabels,
+          ...keptMetadata
+        } = row.metadata ?? {}
+        row.metadata = {
+          ...keptMetadata,
+          ...(rich ? { inboundA2UI: rich } : {}),
+          inboundEditRevision: inboundEditRevision(mutation.pendingEdit),
+          editedAt: Date.now(),
+          editCount: 1,
+        }
+      }
+      if (recalledAt !== undefined) {
+        row.parts = [{ type: "text", text: "[deleted]" }]
+        row.metadata = { platformMessage: row.metadata!.platformMessage, deletedAt: recalledAt }
+      }
+      if (inboundMutationRevision) {
+        row.metadata = { ...row.metadata, inboundMutationRevision }
+      }
+      await db.messages.add(row)
+      if (mutation) {
+        await db.connectorInboundJobs.update(mutation.id, {
+          appliedMutationRevision: mutation.mutationRevision ?? 0,
+        })
+      }
+      await stampSessionLastMessage(sessionId, row)
+      await db.sessions.update(sessionId, { updatedAt: now })
+      if (
+        recalledAt === undefined &&
+        isNotifiableInboundEvent(event) &&
+        !isViewingConversation(event.conversationKey, sessionId)
+      ) {
+        const previous = await db.sessionState.get(sessionId)
+        await db.sessionState.put({
+          sessionId,
+          lastReadAt: previous?.lastReadAt ?? 0,
+          unreadCount: (previous?.unreadCount ?? 0) + 1,
+          updatedAt: Date.now(),
+        })
+      }
+      return row
     }
-    return row
-  })
-  if (persisted.id !== row.id) return persisted
+  )
+  projectStoredInboundMessage(persisted)
+  if (persisted.id !== row.id)
+    return {
+      stored: persisted,
+      event: inboundEventFromStoredMessage(effectiveEvent, persisted),
+    }
   // The persist snapshot in `lib/db/messages.ts` assumes it is the only
   // writer for a session; an inbound platform message arriving mid-stream
   // would otherwise leave it claiming rows are unchanged.
@@ -950,17 +1104,6 @@ export async function insertInboundMessage(
   // search index never learns about it (ADR-0099 indexes only what the chat
   // paths mark dirty, and its backfill latches `complete`).
   markSessionDirty(sessionId)
-  // Bump the bound session's recency so "most-recently-updated" ordering in
-  // `findActiveSessionForConversation` / `listSessionsByConversationKey`
-  // reflects inbound traffic — without this, a conversation whose session
-  // never changes otherwise goes stale and `/sessions` ordering (plus the
-  // active-session fallback) drifts. Best-effort: a missing row is a no-op.
-  await getDb()
-    .sessions.update(sessionId, { updatedAt: now })
-    .catch(() => undefined)
-  // The Inbox list reads the session's denormalized preview rather than one
-  // message query per row, and this write never passes `persistMessages`.
-  await stampSessionLastMessage(sessionId, row)
   // ADR-0131 cross-shell relay. Both calls are reached ONLY for a genuinely
   // new row — the `existing` early-return above means a redelivered platform
   // message never re-invalidates or re-notifies.
@@ -972,8 +1115,10 @@ export async function insertInboundMessage(
   // the operator is already looking, has muted the conversation, or is inside
   // quiet hours. Both are best-effort and never throw.
   publishSyncInvalidate("messages", event.conversationKey)
-  void publishInboundMessageAdded(event, { sessionId, messageId: row.id })
-  return row
+  if (row.metadata?.deletedAt === undefined) {
+    void publishInboundMessageAdded(effectiveEvent, { sessionId, messageId: row.id })
+  }
+  return { stored: row, event: effectiveEvent }
 }
 
 /**
@@ -1255,10 +1400,13 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
     // Reuse the override row the bus already fetched (Step 3) — it is
     // immutable for this inbound event, so a second Dexie read here would be
     // pure waste. Null when the conversation has no override.
-    let session = await findActiveSessionForConversation(
-      event.conversationKey,
-      override ?? undefined
-    )
+    // An accepted source belongs to its original session even after /new or
+    // /switch. Recovery must not move it or duplicate it into the active chat.
+    const source = await bus.findStoredPlatformMessage(event, event.messageId)
+    let session = source
+      ? await getDb().sessions.get(source.sessionId)
+      : await findActiveSessionForConversation(event.conversationKey, override ?? undefined)
+    if (source && !session) throw new Error("SESSION_NOT_FOUND")
     if (!session) {
       session = await createPlatformSession(event, resolved.characterId)
       // Slice 1B: the bus could not stamp the bot-default SLA deadline for a
@@ -1275,7 +1423,123 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
     }
 
     // ── Step 2: insert inbound StoredMessage ─────────────────────────────────
-    const storedMsg = await insertInboundMessage(event, session.id)
+    const insertion = await insertInboundMessageWithRevision(event, session.id, undefined, source)
+    const storedMsg = insertion.stored
+    event = insertion.event
+    if (storedMsg.metadata?.deletedAt !== undefined) return
+    if (storedMsg.sessionId !== session.id) {
+      const originalSession = await getDb().sessions.get(storedMsg.sessionId)
+      if (!originalSession) throw new Error("SESSION_NOT_FOUND")
+      session = originalSession
+    }
+
+    // Async preparation can outlive another edit/recall. Serialize the final
+    // source check and dispatch invocation with the transport mutation lock;
+    // release it before waiting for a model/team/workflow to finish.
+    let contextGenerations: Map<string, string | undefined> | undefined
+    let contextRevisions: Map<string, string> | undefined
+    const contextRevision = (row: StoredMessage) =>
+      JSON.stringify([
+        row.sessionId,
+        row.role,
+        row.createdAt,
+        row.metadata?.editedAt,
+        row.metadata?.editCount,
+        row.metadata?.deletedAt,
+        storedMessagePlainText(inboundPartsForReplay(row.parts)),
+      ])
+    const sourceChange = async (): Promise<{ deleted: boolean } | null> => {
+      const textKey = (row: StoredMessage) =>
+        inboundPartsForReplay(row.parts)
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join("\u0000")
+      const current = await getDb().messages.get(storedMsg.id)
+      // Mutation acceptance precedes its canonical write. Read the journal
+      // after the canonical read so a delayed lookup cannot admit stale input
+      // while an accepted edit/recall waits for the transcript lock.
+      const mutation = await findConnectorInboundMutation(event)
+      const deleted =
+        !current || current.metadata?.deletedAt !== undefined || mutation?.recalledAt !== undefined
+      const pendingEdit = mutation?.pendingEdit
+      const pendingRevision = pendingEdit ? inboundEditRevision(pendingEdit) : undefined
+      const sourceRevision = storedMsg.metadata?.inboundEditRevision as
+        InboundEditRevision | undefined
+      const sourceMutationRevision = storedMsg.metadata?.inboundMutationRevision as
+        { jobId: string; revision: number } | undefined
+      const unobservedMutation =
+        mutation !== undefined &&
+        (mutation.mutationRevision ?? 0) >
+          (sourceMutationRevision?.jobId === mutation.id ? sourceMutationRevision.revision : 0)
+      const sameRevision =
+        pendingRevision?.at === sourceRevision?.at &&
+        pendingRevision?.order === sourceRevision?.order
+      const journalChanged =
+        mutation?.matrixEditRevisions !== undefined
+          ? !sameRevision
+          : pendingEdit !== undefined &&
+            pendingRevision !== undefined &&
+            (!sameRevision ||
+              textKey({ ...storedMsg, parts: inboundEventToStoredParts(pendingEdit) }) !==
+                textKey(storedMsg)) &&
+            isNewerInboundEdit(pendingRevision, sourceRevision)
+      if (
+        deleted ||
+        unobservedMutation ||
+        journalChanged ||
+        current.metadata?.editedAt !== storedMsg.metadata?.editedAt ||
+        current.metadata?.editCount !== storedMsg.metadata?.editCount ||
+        textKey(current) !== textKey(storedMsg)
+      )
+        return { deleted }
+      if (!contextGenerations) return null
+      const generations = contextGenerations
+      const db = getDb()
+      // Observe generation and pending intent atomically: a committed mutation
+      // must appear either as a new generation or as an unacknowledged job.
+      return db.transaction("r", db.sessions, db.messages, db.connectorInboundJobs, async () => {
+        const ids = [...generations.keys()]
+        const sessions = await db.sessions.bulkGet(ids)
+        if (
+          sessions.some(
+            (bound, index) =>
+              !bound || bound.runtimeTranscriptGeneration !== generations.get(ids[index])
+          )
+        )
+          return { deleted: false }
+        const revisions = contextRevisions ?? new Map<string, string>()
+        const rowIds = [...revisions.keys()]
+        const rows = await db.messages.bulkGet(rowIds)
+        if (
+          rows.some((row, index) => !row || contextRevision(row) !== revisions.get(rowIds[index]))
+        ) {
+          return { deleted: false }
+        }
+        for (const job of await listConnectorInboundMutationJobs()) {
+          if (job.adapterId !== event.adapterId || job.event.platform !== event.platform) continue
+          const retained = await bus.findStoredPlatformMessage(job.event, job.sourceMessageId)
+          if (retained && generations.has(retained.sessionId)) return { deleted: false }
+        }
+        return null
+      })
+    }
+    const startForCurrentSource = async <T>(
+      start: () => Promise<T>
+    ): Promise<{ pending: Promise<T> } | null> => {
+      const result = await withTranscriptRuntimeLock(
+        session.id,
+        async (): Promise<{ pending: Promise<T> } | { deleted: boolean }> => {
+          const changed = await sourceChange()
+          return changed ?? { pending: start() }
+        }
+      )
+      if ("pending" in result) return result
+      if (!result.deleted)
+        await markConnectorInboundJobRecoveryRequired(
+          routeContext.inboundJobId,
+          "source_revised_before_dispatch"
+        )
+      return null
+    }
 
     // ── Step 3: branch on decision ───────────────────────────────────────────
     switch (decision) {
@@ -1437,31 +1701,35 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             await auditRuleDecision({ teamId: effectiveTeamId })
           }
           const { startTeamRunFromIM } = await import("./team-dispatch")
-          const res = await startTeamRunFromIM({
-            teamId: effectiveTeamId,
-            goal: event.plainText,
-            adapterId: event.adapterId,
-            conversationKey: event.conversationKey,
-            sessionId: session.id,
-            session,
-            ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
-            permissionCeiling,
-            ...(event.sender.remoteUserId ? { initiatorUserId: event.sender.remoteUserId } : {}),
-            // Acceptance, expressed through the mechanism that exists for a
-            // team. A single-character turn can be held as a draft because its
-            // product lands here; a team's product lands minutes later through
-            // the presentation runner, where there is nothing to hold. What
-            // `suggest` actually means for a team is "a human signs off before
-            // it acts" — which is the plan gate, and it now has a card to ask
-            // on (`makeImPlanApprovalDelegate`). Holding the finished output
-            // instead would review work already done.
-            //
-            // Read from the routing decision, not re-derived from the stored
-            // autonomy: the decision is what routing already concluded, and a
-            // second derivation can disagree with it (a recovery replay hands
-            // the handler a decision whose conversation row has since changed).
-            ...(requireAcceptance ? { requirePlanApprovalFloor: true } : {}),
-          })
+          const started = await startForCurrentSource(() =>
+            startTeamRunFromIM({
+              teamId: effectiveTeamId,
+              goal: event.plainText,
+              adapterId: event.adapterId,
+              conversationKey: event.conversationKey,
+              sessionId: session.id,
+              session,
+              ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
+              permissionCeiling,
+              ...(event.sender.remoteUserId ? { initiatorUserId: event.sender.remoteUserId } : {}),
+              // Acceptance, expressed through the mechanism that exists for a
+              // team. A single-character turn can be held as a draft because its
+              // product lands here; a team's product lands minutes later through
+              // the presentation runner, where there is nothing to hold. What
+              // `suggest` actually means for a team is "a human signs off before
+              // it acts" — which is the plan gate, and it now has a card to ask
+              // on (`makeImPlanApprovalDelegate`). Holding the finished output
+              // instead would review work already done.
+              //
+              // Read from the routing decision, not re-derived from the stored
+              // autonomy: the decision is what routing already concluded, and a
+              // second derivation can disagree with it (a recovery replay hands
+              // the handler a decision whose conversation row has since changed).
+              ...(requireAcceptance ? { requirePlanApprovalFloor: true } : {}),
+            })
+          )
+          if (!started) break
+          const res = await started.pending
           if (res.started && res.runId) {
             // Bind the EXECUTION run id, not the raw team run id. The two are
             // different keys (`execution:team:<id>` vs `<id>`), and
@@ -1607,12 +1875,16 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           let res: Awaited<ReturnType<typeof startWorkflowFromIM>>
           try {
             const { startWorkflowFromIM } = await import("@/lib/workflow/runtime/start-from-im")
-            res = await startWorkflowFromIM({
-              workflowId: effectiveWorkflowId,
-              runParams,
-              triggeredFrom,
-              permissionCeiling,
-            })
+            const started = await startForCurrentSource(() =>
+              startWorkflowFromIM({
+                workflowId: effectiveWorkflowId,
+                runParams,
+                triggeredFrom,
+                permissionCeiling,
+              })
+            )
+            if (!started) break
+            res = await started.pending
           } catch (err) {
             // An admission or preflight refusal is rethrown so the bus still
             // audits it and parks the job for recovery, but the user who sent
@@ -1994,6 +2266,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             .filter((permission) => permission.state === "denied")
             .map((permission) => permission.requestId)
         )
+        const sourceSendState: { changed: { deleted: boolean } | null } = { changed: null }
         const cap: import("@/lib/claude/run-and-capture").RunAndCaptureOptions & {
           adapterId?: string
           conversationKey?: string
@@ -2005,6 +2278,12 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           timeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
           idleTimeoutMs: CONNECTOR_TURN_IDLE_TIMEOUT_MS,
           signal: captureSignal,
+          // IPC evaluates this under the transcript lock after workspace,
+          // middleware and subscription preparation have finished.
+          beforeSend: async () => {
+            sourceSendState.changed = await sourceChange()
+            if (sourceSendState.changed) throw new Error("Inbound source changed before send")
+          },
           // ADR-0239: the IM requester is in the thread and answers asks there;
           // a reply into that thread needs no ask at all.
           outboundPolicy: { unattended: false },
@@ -2082,9 +2361,45 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const inboundPrompt = inboundEventToSendContent(event)
         // Quote + unseen group context ride into the model turn. The stored
         // row keeps its clean body — this augments only what the sidecar sees.
+        const contextSessions =
+          event.channel.kind === "private"
+            ? []
+            : (
+                await listSessionsByConversationKey(event.conversationKey).catch(
+                  () => [] as ChatSession[]
+                )
+              ).slice(0, GROUP_CONTEXT_SESSION_LIMIT)
+        const contextIds = [...new Set([session.id, ...contextSessions.map((bound) => bound.id)])]
+        const contextRows = await getDb().sessions.bulkGet(contextIds)
+        contextGenerations = new Map(
+          contextIds.map((id, index) => [id, contextRows[index]?.runtimeTranscriptGeneration])
+        )
+        const revisions = new Map<string, string>()
+        contextRevisions = revisions
+        const rememberContextRows = (rows: readonly StoredMessage[]) => {
+          for (const row of rows) revisions.set(row.id, contextRevision(row))
+        }
+        let contextStored = storedMsg
+        const reply = storedMsg.metadata?.replyTo
+        if (reply?.messageId) {
+          const parent = await getDb().messages.get(reply.messageId)
+          if (parent && contextGenerations.has(parent.sessionId)) rememberContextRows([parent])
+          const preview =
+            parent && contextGenerations.has(parent.sessionId)
+              ? parent.metadata?.deletedAt !== undefined
+                ? "[deleted]"
+                : storedMessagePlainText(inboundPartsForReplay(parent.parts))
+              : ""
+          contextStored = {
+            ...storedMsg,
+            metadata: { ...storedMsg.metadata, replyTo: { ...reply, preview } },
+          }
+        }
         const contextualPrompt = await withConversationContext(inboundPrompt, {
           event,
-          stored: storedMsg,
+          stored: contextStored,
+          contextSessions,
+          onContextRowsRead: rememberContextRows,
         })
         const prompt =
           event.channelData?.dispatchIntent === "steer-replay"
@@ -2094,7 +2409,18 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             : contextualPrompt
         let captured: Awaited<ReturnType<RunAndCaptureFn>>
         try {
-          captured = await opts.runAndCapture(session.id, prompt, sendOptions, cap)
+          const started = await startForCurrentSource(() =>
+            opts.runAndCapture(session.id, prompt, sendOptions, cap)
+          )
+          if (!started) {
+            await runProducer
+              .finish("cancelled", Date.now(), "Inbound source changed before dispatch")
+              .catch(() => undefined)
+            unregisterRunController()
+            unregisterLiveSteer?.()
+            break
+          }
+          captured = await started.pending
           await Promise.all([
             canonicalTail.catch(() => undefined),
             recoveryMetadataTail.catch(() => undefined),
@@ -2104,6 +2430,19 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             canonicalTail.catch(() => undefined),
             recoveryMetadataTail.catch(() => undefined),
           ])
+          if (sourceSendState.changed) {
+            await runProducer
+              .finish("cancelled", Date.now(), "Inbound source changed before dispatch")
+              .catch(() => undefined)
+            unregisterRunController()
+            unregisterLiveSteer?.()
+            if (!sourceSendState.changed.deleted)
+              await markConnectorInboundJobRecoveryRequired(
+                routeContext.inboundJobId,
+                "source_revised_before_dispatch"
+              )
+            break
+          }
           // The PII gate (`safeSendPrompt`) throws `PiiGateBlocked` and has
           // ALREADY written the precise `adapter.error / pii_blocked` audit
           // row before throwing. Detect it by name (no heavy import) and skip

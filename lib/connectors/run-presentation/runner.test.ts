@@ -33,6 +33,10 @@ import {
 } from "@/lib/connectors/lifecycle"
 import type { OutboundJobRow } from "@/lib/db/connector-types"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
+import {
+  startOutboundRunner,
+  __resetAdapterRuntimeStateForTesting,
+} from "@/lib/connectors/outbound-runner"
 
 const binding: ExecutionRunBinding = {
   id: "binding-1",
@@ -63,6 +67,211 @@ const snapshot: RunProjectionSnapshot = {
   artifacts: [],
   allowedActions: ["stop"],
 }
+
+const qqGroupBinding: ExecutionRunBinding = {
+  ...binding,
+  adapterId: "qq-1",
+  conversationKey: "onebot:qq-1:g:group-1",
+  deliveryMode: "append",
+  deliveryTarget: {
+    refreshedAt: 1,
+    address: {
+      platform: "onebot",
+      adapterId: "qq-1",
+      conversationKey: "onebot:qq-1:g:group-1",
+      scopeKind: "group",
+      containerId: "group-1",
+    },
+    conversationRef: { platform: "onebot", adapterId: "qq-1", chatKey: "g:group-1" },
+  },
+}
+
+describe("QQ group Agent status presentation", () => {
+  it("keeps short turns quiet and leaves the authoritative final answer independent", () => {
+    expect(shouldDeliverFallbackUpdate(qqGroupBinding, snapshot, "append", 2_001)).toBe(false)
+    expect(
+      shouldDeliverFallbackUpdate(
+        qqGroupBinding,
+        { ...snapshot, status: "completed" },
+        "append",
+        2_001
+      )
+    ).toBe(false)
+    expect(shouldDeliverFallbackUpdate(qqGroupBinding, snapshot, "append", 8_001)).toBe(true)
+    const sent = {
+      ...qqGroupBinding,
+      lastProjectedRevision: 2,
+      presentationState: { lastAppendAt: 8_001 },
+    }
+    expect(shouldDeliverFallbackUpdate(sent, snapshot, "append", 38_000)).toBe(false)
+    expect(shouldDeliverFallbackUpdate(sent, snapshot, "append", 38_001)).toBe(true)
+  })
+
+  it.each(["waiting", "paused", "recovery_required", "failed", "cancelled"] as const)(
+    "does not hide %s during the grace period",
+    (status) => {
+      expect(
+        shouldDeliverFallbackUpdate(qqGroupBinding, { ...snapshot, status }, "append", 2_001)
+      ).toBe(true)
+    }
+  )
+
+  it("does not hide a pending approval or the transition back to running", () => {
+    expect(
+      shouldDeliverFallbackUpdate(
+        { ...qqGroupBinding, lastProjectedRevision: 1, presentationState: { lastAppendAt: 2_000 } },
+        {
+          ...snapshot,
+          pendingInterrupt: { id: "approval-1", title: "Approve" },
+        },
+        "append",
+        2_001
+      )
+    ).toBe(true)
+    expect(
+      shouldDeliverFallbackUpdate(
+        {
+          ...qqGroupBinding,
+          presentationState: { lastProjectedStatus: "waiting", lastAppendAt: 2_000 },
+        },
+        snapshot,
+        "append",
+        2_001
+      )
+    ).toBe(true)
+  })
+
+  it("preserves private, other-platform and workflow presentation", () => {
+    const privateBinding = {
+      ...qqGroupBinding,
+      deliveryTarget: {
+        ...qqGroupBinding.deliveryTarget!,
+        address: { ...qqGroupBinding.deliveryTarget!.address, scopeKind: "private" as const },
+      },
+    }
+    expect(shouldDeliverFallbackUpdate(privateBinding, snapshot, "append", 2_001)).toBe(true)
+    expect(shouldDeliverFallbackUpdate(binding, snapshot, "append", 2_001)).toBe(true)
+    expect(
+      shouldDeliverFallbackUpdate(
+        qqGroupBinding,
+        { ...snapshot, kind: "workflow", status: "completed" },
+        "append",
+        2_001
+      )
+    ).toBe(true)
+  })
+
+  it("heartbeats a long quiet turn without new revisions and freezes without a completion notice", async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    __resetLifecycleForTesting()
+    const realNow = Date.now.bind(Date)
+    const startedAt = realNow()
+    let offset = 0
+    const clock = jest.spyOn(Date, "now").mockImplementation(() => realNow() + offset)
+    const running = { ...snapshot, startedAt }
+    const controller = new AbortController()
+    let deliveredCount = 0
+    const send = jest.fn(async () => ({
+      ok: true as const,
+      platformMessageId: `qq-progress-${++deliveredCount}`,
+    }))
+    const adapter = {
+      id: qqGroupBinding.adapterId,
+      meta: {
+        type: "onebot",
+        displayName: "QQ",
+        version: "1",
+        capabilities: [],
+        transportModes: [],
+        configSchema: {},
+      },
+      send,
+    } as unknown as PlatformAdapter
+    const runner = startOutboundRunner({
+      adapters: new Map([[adapter.id, adapter]]),
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      now: () => Date.now(),
+      jitter: () => 0,
+    })
+    try {
+      await createExecutionRun({
+        id: running.runId,
+        kind: "agent-turn",
+        sourceId: "qq-heartbeat",
+        title: "QQ test",
+        status: "running",
+        currentRevision: running.revision,
+        latestSnapshot: running,
+        startedAt: running.startedAt,
+        updatedAt: Date.now(),
+      })
+      await createExecutionRunBinding({ ...qqGroupBinding, sourceMessageId: "qq-input" })
+      startExecutionRunPresentationRunner()
+      for (let i = 0; i < 200; i++) {
+        if (
+          (await getExecutionRunBinding(qqGroupBinding.id))?.lastProjectedRevision ===
+          running.revision
+        )
+          break
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect((await getExecutionRunBinding(qqGroupBinding.id))?.lastProjectedRevision).toBe(
+        running.revision
+      )
+      await heartbeatExecutionRunBinding(qqGroupBinding.id)
+      expect(await getDb().outboundQueue.count()).toBe(0)
+      const deliverHeartbeat = async (count: number) => {
+        const pending = heartbeatExecutionRunBinding(qqGroupBinding.id)
+        let jobs: OutboundJobRow[] = []
+        for (let i = 0; i < 200; i++) {
+          jobs = await getDb().outboundQueue.toArray()
+          if (jobs.length === count) break
+          await new Promise((resolve) => setTimeout(resolve, 5))
+        }
+        expect(jobs).toHaveLength(count)
+        const newest = jobs.sort((a, b) => b.createdAt - a.createdAt)[0]
+        expect(newest.request).toMatchObject({
+          replyTo: { messageId: "qq-input" },
+          segments: [{ type: "markdown" }],
+        })
+        await pending
+        expect(send).toHaveBeenCalledTimes(count)
+      }
+      offset = 9_000
+      await deliverHeartbeat(1)
+      offset = 10_000
+      await heartbeatExecutionRunBinding(qqGroupBinding.id)
+      expect(await getDb().outboundQueue.count()).toBe(1)
+      offset = 39_000
+      await deliverHeartbeat(2)
+      const completed = {
+        ...running,
+        status: "completed" as const,
+        revision: 3,
+        endedAt: Date.now(),
+      }
+      await getDb().executionRuns.update(running.runId, {
+        status: "completed",
+        currentRevision: 3,
+        latestSnapshot: completed,
+        endedAt: Date.now(),
+      })
+      await expect(waitForExecutionRunPresentationFreeze(running.runId, 1_000)).resolves.toBe(true)
+      expect((await getExecutionRunBinding(qqGroupBinding.id))?.status).toBe("finished")
+      expect(await getDb().outboundQueue.count()).toBe(2)
+    } finally {
+      controller.abort()
+      await runner
+      clock.mockRestore()
+      __resetExecutionRunPresentationRunnerForTesting()
+      __resetAdapterRuntimeStateForTesting()
+      await getDb().delete()
+      __resetDbForTesting()
+    }
+  })
+})
 
 describe("run presentation refresh scheduling", () => {
   afterEach(() => {

@@ -29,6 +29,118 @@ function msg(
 }
 
 describe("parseMatrixEvent", () => {
+  it("ignores malformed relations and thumbnails while preserving valid content", () => {
+    const reply = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype: "m.text",
+          body: "> literal quote\n\nvalid",
+          "m.relates_to": { "m.in_reply_to": { event_id: 42 } },
+        } as never,
+      })
+    )!
+    expect(reply.replyTo).toBeUndefined()
+    expect(reply.plainText).toBe("> literal quote\n\nvalid")
+    const video = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype: "m.video",
+          url: "mxc://server/video",
+          filename: "clip.mp4",
+          body: "caption",
+          info: { thumbnail_url: 42 },
+        } as never,
+      })
+    )!
+    expect(video.segments).toEqual([
+      expect.objectContaining({ type: "video", thumbnailUrl: undefined }),
+      { type: "text", text: "caption" },
+    ])
+  })
+  it("does not apply nested replacement relations to the edited body", () => {
+    const out = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          "m.relates_to": { rel_type: "m.replace", event_id: "$original" },
+          "m.new_content": {
+            msgtype: "m.text",
+            body: "> literal quote\n\nkept",
+            "m.relates_to": { "m.in_reply_to": { event_id: "$forged" } },
+          },
+        },
+      })
+    )!
+    expect(out.plainText).toBe("> literal quote\n\nkept")
+    expect(out.replyTo).toBeUndefined()
+  })
+  it("ignores an outer reply relation on a replacement event", () => {
+    const out = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          "m.relates_to": {
+            rel_type: "m.replace",
+            event_id: "$original",
+            "m.in_reply_to": { event_id: "$forged" },
+          },
+          "m.new_content": { msgtype: "m.text", body: "> literal quote\n\nkept" },
+        },
+      }),
+      { ownEventIds: new Set(["$forged"]) }
+    )!
+    expect(out.kind).toBe("edit")
+    expect(out.replacesMessageId).toBe(`${ROOM}|$original`)
+    expect(out.plainText).toBe("> literal quote\n\nkept")
+    expect(out.replyTo).toBeUndefined()
+    expect(out.mentions.selfMentioned).toBe(false)
+  })
+  it("ignores replacements missing new content or carrying a state key", () => {
+    const content = {
+      msgtype: "m.text",
+      body: "* fallback",
+      "m.relates_to": { rel_type: "m.replace", event_id: "$original" },
+    }
+    expect(parseMatrixEvent(ADAPTER, SELF, ROOM, msg({ content }))).toBeNull()
+    expect(
+      parseMatrixEvent(
+        ADAPTER,
+        SELF,
+        ROOM,
+        msg({
+          state_key: "",
+          content: { ...content, "m.new_content": { msgtype: "m.text", body: "edited" } },
+        })
+      )
+    ).toBeNull()
+  })
+  it("keeps a valid caption and text despite malformed media/mention fields", () => {
+    const parsed = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype: "m.image",
+          filename: "image.png",
+          body: "kept caption",
+          url: 42,
+          "m.mentions": { user_ids: {} },
+        } as never,
+      })
+    )
+    expect(parsed?.segments).toEqual([{ type: "text", text: "kept caption" }])
+  })
   it("parses a plain text message as a create event", () => {
     const ev = msg({ content: { msgtype: "m.text", body: "hello world" } })
     const out = parseMatrixEvent(ADAPTER, SELF, ROOM, ev)
@@ -414,6 +526,24 @@ describe("parseMatrixReplyCorrelation", () => {
     expect(mockResolve).toHaveBeenCalledWith(ADAPTER, "$surfaceEvt")
   })
 
+  it("does not correlate a replacement's outer reply relation to an input action", async () => {
+    mockResolve.mockResolvedValue({ kind: "force_reply", surfaceId: "surf-1" })
+    const ev = msg({
+      content: {
+        msgtype: "m.text",
+        body: "* fallback",
+        "m.relates_to": {
+          rel_type: "m.replace",
+          event_id: "$original",
+          "m.in_reply_to": { event_id: "$surfaceEvt" },
+        },
+        "m.new_content": { msgtype: "m.text", body: "edited" },
+      },
+    })
+    expect(await parseMatrixReplyCorrelation(ADAPTER, SELF, ROOM, ev)).toBeNull()
+    expect(mockResolve).not.toHaveBeenCalled()
+  })
+
   it("returns null when there is no reply relation", async () => {
     const ev = msg({ content: { msgtype: "m.text", body: "no reply" } })
     expect(await parseMatrixReplyCorrelation(ADAPTER, SELF, ROOM, ev)).toBeNull()
@@ -443,4 +573,42 @@ describe("parseMatrixReplyCorrelation", () => {
     })
     expect(await parseMatrixReplyCorrelation(ADAPTER, SELF, ROOM, ev)).toBeNull()
   })
+})
+it.each(["m.image", "m.file", "m.audio", "m.video"])(
+  "keeps %s captions alongside media",
+  (msgtype) => {
+    const event = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype,
+          filename: "original.bin",
+          body: "visible caption",
+          url: "mxc://srv/media",
+          info: { mimetype: "image/png" },
+        },
+      })
+    )
+    expect(event?.segments).toContainEqual({ type: "text", text: "visible caption" })
+    expect(event?.plainText).toContain("visible caption")
+  }
+)
+
+it.each([undefined, "original.png"])("does not fabricate a caption for filename %s", (filename) => {
+  const event = parseMatrixEvent(
+    ADAPTER,
+    SELF,
+    ROOM,
+    msg({
+      content: {
+        msgtype: "m.image",
+        filename,
+        body: "original.png",
+        url: "mxc://srv/media",
+      },
+    })
+  )
+  expect(event?.segments.filter((s) => s.type === "text")).toEqual([])
 })

@@ -119,7 +119,7 @@ function mapAction(action: LarkCardElement): InboundA2UINode | null {
           action.behaviors?.find((behavior) => behavior.type === "open_url")?.default_url ||
           action.url ||
           action.multi_url?.url,
-        actionId: actionIdOf(action),
+        ...(actionIdOf(action) !== undefined ? { actionId: actionIdOf(action) } : {}),
         style: action.type?.startsWith("primary")
           ? "primary"
           : action.type?.startsWith("danger")
@@ -130,7 +130,7 @@ function mapAction(action: LarkCardElement): InboundA2UINode | null {
       return {
         kind: "button",
         label: textOf(action) || "Select…",
-        actionId: (action.value?.action_id as string | undefined) ?? undefined,
+        actionId: typeof action.value?.action_id === "string" ? action.value.action_id : "",
       }
     default:
       return null
@@ -138,10 +138,12 @@ function mapAction(action: LarkCardElement): InboundA2UINode | null {
 }
 
 function actionIdOf(action: LarkCardElement): string | undefined {
-  const value =
-    action.behaviors?.find((behavior) => behavior.type === "callback")?.value ?? action.value
+  const callback = action.behaviors?.find((behavior) => behavior.type === "callback")
+  if (!callback && !Object.hasOwn(action, "value")) return undefined
+  const value = callback?.value ?? action.value
   const id = value?.actionId ?? value?.action_id
-  return typeof id === "string" ? id : undefined
+  // Empty IDs retain the callback marker; they must never become URL links.
+  return typeof id === "string" ? id : ""
 }
 
 /** One node of the converted (received) card form. */

@@ -11,11 +11,15 @@ jest.mock("@/lib/connectors/presence/usage-status-runner", () => ({
   syncUsagePresenceSchedule: jest.fn().mockResolvedValue(undefined),
 }))
 
-import { installConnectorRuntime } from "./install-connector-runtime"
+import { adapterRuntimeFingerprint, installConnectorRuntime } from "./install-connector-runtime"
 import { isTauri } from "@/lib/tauri"
 import { hasTaskExecutor, unregisterTaskExecutor } from "@/lib/scheduler"
 import { __resetConnectorRuntimeSupervisorForTesting } from "@/lib/connectors/runtime-supervisor"
+import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
+import { createElement } from "react"
+import { act, render } from "@testing-library/react"
 import type { NormalizedInboundEvent } from "@/types/connectors"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 // ── Mock isTauri ─────────────────────────────────────────────────────────────
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
@@ -233,6 +237,7 @@ const makeTelegramRow = (id = "cai_tg_1") => ({
   credentialsRef: { keyringService: "cognia", accounts: [] },
   trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
   defaultMode: "auto" as const,
+  mediaModelPolicy: "local_extract_only" as const,
   createdAt: Date.now(),
   updatedAt: Date.now(),
 })
@@ -484,6 +489,48 @@ describe("installConnectorRuntime", () => {
     expect(mockListEnabled).not.toHaveBeenCalled()
     expect(mockRegisterAdapter).not.toHaveBeenCalled()
     expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+  })
+
+  it("retries actual busy installs until the provider can own the runtime", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockListEnabled.mockResolvedValue([])
+    const acquire = jest
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true)
+    const retries: Array<{ run: () => void; delay: number }> = []
+    const scheduleRetry = (run: () => void, delay: number) => {
+      const entry = { run, delay }
+      retries.push(entry)
+      return () => {
+        const index = retries.indexOf(entry)
+        if (index >= 0) retries.splice(index, 1)
+      }
+    }
+    const view = render(
+      createElement(ConnectorBusProvider, {
+        install: (options) => install({ ...options, acquireRuntimeLock: acquire }),
+        scheduleRetry,
+      })
+    )
+    try {
+      await waitFor(() => expect(retries).toHaveLength(1))
+      expect(retries[0].delay).toBe(30_000)
+      expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+      expect(mockStopServer).not.toHaveBeenCalled()
+      await act(async () => retries.shift()!.run())
+      await waitFor(() => expect(retries).toHaveLength(1))
+      expect(retries[0].delay).toBe(60_000)
+      expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+      await act(async () => retries.shift()!.run())
+      await waitFor(() => expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1))
+      expect(acquire).toHaveBeenCalledTimes(3)
+      expect(retries).toHaveLength(0)
+      expect(mockResetAllWs).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+    }
   })
 
   // ── Default Web Locks singleton guard ──────────────────────────────────────
@@ -1491,11 +1538,21 @@ describe("installConnectorRuntime", () => {
   })
 
   describe("hot-reconciles the enabled-adapter set (no restart)", () => {
+    it("keeps a first cursor checkpoint out of an otherwise empty personal connection fingerprint", () => {
+      const row = {
+        ...makeTelegramRow("cai_wx_empty"),
+        type: "wechat-personal" as const,
+        settings: undefined as never, // Legacy/imported rows can predate the required settings field.
+      }
+      expect(
+        adapterRuntimeFingerprint({ ...row, settings: { ilinkCheckpoint: { cursor: "first" } } })
+      ).toBe(adapterRuntimeFingerprint(row))
+    })
     // Drive the runtime with an injected adapter-change watcher so a test can
     // fire "the adapterInstances table changed" on demand, then assert the
     // installer reconciles the enabled set into the running set.
     const installWithWatch = async (
-      initialRows: ReturnType<typeof makeTelegramRow>[],
+      initialRows: AdapterInstanceRow[],
       extraOpts: Parameters<typeof install>[0] = {}
     ) => {
       mockedIsTauri.mockReturnValue(true)
@@ -1545,6 +1602,38 @@ describe("installConnectorRuntime", () => {
       expect(syncUsagePresenceSchedule).toHaveBeenCalledWith("cai_B", undefined, {
         adapterLifecycle: true,
       })
+    })
+
+    it("keeps personal WeChat cursor checkpoints live while restarting on connection changes", async () => {
+      const row = {
+        ...makeTelegramRow("cai_wx_checkpoint"),
+        type: "wechat-personal" as const,
+        settings: { baseUrl: "https://one", ilinkCheckpoint: { cursor: "first" } },
+      }
+      const { fire } = await installWithWatch([row])
+      mockBuildAdapterFromRow.mockClear()
+      mockListEnabled.mockResolvedValue([
+        { ...row, settings: { ...row.settings, ilinkCheckpoint: { cursor: "next" } } },
+      ])
+      fire()
+      await waitFor(() => expect(mockListEnabled.mock.calls.length).toBeGreaterThanOrEqual(2))
+      mockListEnabled.mockResolvedValue([
+        {
+          ...row,
+          settings: {
+            ...row.settings,
+            baseUrl: "https://two",
+            ilinkCheckpoint: { cursor: "next" },
+          },
+        },
+      ])
+      fire()
+      await waitFor(() =>
+        expect(mockBuildAdapterFromRow).toHaveBeenCalledWith(
+          expect.objectContaining({ settings: expect.objectContaining({ baseUrl: "https://two" }) })
+        )
+      )
+      expect(mockBuildAdapterFromRow).toHaveBeenCalledTimes(1)
     })
 
     it("stops + unregisters an adapter that was disabled/deleted", async () => {

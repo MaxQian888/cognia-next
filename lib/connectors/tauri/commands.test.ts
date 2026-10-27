@@ -22,8 +22,12 @@ import {
   connectorsStopServer,
   connectorsKeyringSet,
   connectorsKeyringGet,
+  connectorsKeyringGetSnapshot,
   connectorsKeyringDelete,
   connectorsKeyringList,
+  connectorsWechatOaInboundList,
+  connectorsWechatOaInboundClaim,
+  connectorsWechatOaInboundAck,
   connectorsHttpRequest,
   connectorsWsOpen,
   connectorsWsSend,
@@ -62,6 +66,58 @@ import {
 
 const mockInvoke = invoke as jest.Mock
 const mockProfile = detectHostProfile as jest.Mock
+
+it("reads current credential revisions through the runtime invoker", async () => {
+  const snapshot = { value: "test-token", revision: "revision-2" }
+  mockInvoke.mockResolvedValueOnce(snapshot)
+  expect(await connectorsKeyringGetSnapshot("personal-1", "botToken")).toEqual(snapshot)
+  expect(mockInvoke).toHaveBeenCalledWith("connectors_keyring_get_snapshot", {
+    adapterId: "personal-1",
+    credential: "botToken",
+  })
+})
+
+it("reads retained OA callbacks and acknowledges the exact native occurrence", async () => {
+  const pending = [{ id: "delivery-1", xml: "<xml/>", receivedAt: 1 }]
+  mockInvoke.mockResolvedValueOnce(pending).mockResolvedValueOnce(undefined)
+  expect(await connectorsWechatOaInboundList("oa-1")).toEqual(pending)
+  await connectorsWechatOaInboundAck("oa-1", "delivery-1")
+  expect(mockInvoke).toHaveBeenNthCalledWith(1, "connectors_wechat_oa_inbound_list", {
+    adapterId: "oa-1",
+  })
+  expect(mockInvoke).toHaveBeenNthCalledWith(2, "connectors_wechat_oa_inbound_ack", {
+    adapterId: "oa-1",
+    id: "delivery-1",
+  })
+})
+
+it("claims an OA occurrence before durable JS admission", async () => {
+  mockInvoke.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+  expect(await connectorsWechatOaInboundClaim("oa-1", "delivery-1")).toBe(true)
+  expect(await connectorsWechatOaInboundClaim("oa-1", "revoked-delivery")).toBe(false)
+  expect(mockInvoke).toHaveBeenNthCalledWith(1, "connectors_wechat_oa_inbound_claim", {
+    adapterId: "oa-1",
+    id: "delivery-1",
+  })
+})
+
+it("keeps OA ingress list and ACK on the runtime invoker", async () => {
+  const call = jest.fn().mockResolvedValue([])
+  setConnectorCommandInvoker(call)
+  try {
+    await connectorsWechatOaInboundList("oa-headless")
+    await connectorsWechatOaInboundAck("oa-headless", "one")
+    expect(call).toHaveBeenNthCalledWith(1, "connectors_wechat_oa_inbound_list", {
+      adapterId: "oa-headless",
+    })
+    expect(call).toHaveBeenNthCalledWith(2, "connectors_wechat_oa_inbound_ack", {
+      adapterId: "oa-headless",
+      id: "one",
+    })
+  } finally {
+    setConnectorCommandInvoker(null)
+  }
+})
 
 beforeEach(() => {
   mockInvoke.mockReset()
@@ -757,8 +813,8 @@ describe("runtime lease wrappers", () => {
     const fs = await import("node:fs/promises")
     const path = await import("node:path")
     const repoRoot = path.join(__dirname, "..", "..", "..")
-    const rpcDir = path.join(repoRoot, "src-tauri", "src", "companion_api", "rpc")
-    const rpcRs = path.join(repoRoot, "src-tauri", "src", "companion_api", "rpc.rs")
+    const rpcDir = path.join(repoRoot, "crates", "cognia-companion-rpc", "src", "rpc")
+    const rpcRs = path.join(repoRoot, "crates", "cognia-companion-rpc", "src", "rpc.rs")
 
     const wrapperSource = await fs.readFile(path.join(__dirname, "commands.ts"), "utf8")
     const sent = new Set(

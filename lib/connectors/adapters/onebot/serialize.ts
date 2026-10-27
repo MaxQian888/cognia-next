@@ -17,6 +17,62 @@ import type { MessageSegment } from "@/types/connectors/segment"
 import { toOneBotSegments } from "./segments"
 import { buildOneBotA2UISegments } from "./a2ui-mapper"
 import type { OneBotTransport } from "./transport"
+import { splitMarkdownCode } from "@/lib/connectors/adapters/_shared/inbound-markdown"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+
+/** QQ groups have plain text rather than a Markdown renderer. Protect code
+ * before formatting prose; literal text segments must never enter this path. */
+function readableGroupSegments(segments: MessageSegment[], group: boolean): MessageSegment[] {
+  if (!group) return segments
+  return segments.map((segment) => {
+    if (segment.type !== "markdown") return segment
+    const source = segment.md
+    let prefix = "\u0000qq-code-"
+    while (source.includes(prefix)) prefix += "-"
+    const literals: string[] = []
+    const protect = (text: string) => `${prefix}${literals.push(text) - 1}\u0000`
+    // Preserve whole indented lines before inline backticks can split them.
+    const indented = source.replace(/^(?: {4}|\t)[^\n]*/gm, protect)
+    const prose = splitMarkdownCode(indented)
+      .map((chunk) => (chunk.code ? protect(chunk.text) : chunk.text))
+      .join("")
+    let text = prose
+      .replace(/^ {0,3}#{1,6}[ \t]+/gm, "")
+      .replace(
+        /!?\[([^\]\n]*)\]\(([^()\s]+)(?:[ \t]+"[^"\n]*")?\)/g,
+        (_match, label: string, url: string) =>
+          label && label !== url ? `${label} (${protect(url)})` : protect(url)
+      )
+      .replace(/\b(?:https?|ftp|file|attachment):\/\/[^\s<>]+/g, protect)
+      .replace(/(?<!\\)\*\*([^*\n]+)(?<!\\)\*\*/g, "$1")
+      .replace(/(?<![\w\\])__([^_\n]+)__(?!\w)/g, "$1")
+      .replace(/(^|[\s(])([*_])([^*_\n]+)\2(?=$|[\s).,!?:;])/g, "$1$3")
+      .replace(/^(\s*)[-+*][ \t]+/gm, "$1• ")
+      .replace(/^ {0,3}>[ \t]?/gm, "│ ")
+      .split("\n")
+      .map((line) => {
+        if (!/^\s*\|.*\|\s*$/.test(line)) return line
+        const cells = line
+          .trim()
+          .slice(1, -1)
+          .split(/(?<!\\)\|/)
+          .map((cell) => cell.trim())
+        return cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+          ? ""
+          : cells.map((cell) => cell.replace(/\\\|/g, "|")).join(" · ")
+      })
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+    // Restore outer code before nested literals; callbacks preserve "$&" too.
+    for (let index = literals.length - 1; index >= 0; index--) {
+      text = text.replaceAll(`${prefix}${index}\u0000`, () => literals[index])
+    }
+    // Formatting runs after governed delivery's privacy check. If removing
+    // markup would assemble private data, keep the already-approved source.
+    return { type: "text", text: hasNoLeakingPiiDeep(text) ? text : source }
+  })
+}
 
 export class OneBotUnsupportedError extends Error {
   constructor(action: string) {
@@ -132,14 +188,23 @@ function chatIdFromRef(req: OutboundRequest): {
   const chatKey = (ref.chatKey as string | undefined) ?? ""
 
   if (chatKey.startsWith("p:")) {
-    return { userId: chatKey.slice(2), messageType: "private" }
+    return {
+      userId: chatKey.slice(2),
+      groupId: ref.groupId as string | number | undefined,
+      messageType: "private",
+    }
   }
   if (chatKey.startsWith("g:")) {
     return { groupId: chatKey.slice(2), messageType: "group" }
   }
 
   // Fallback: try direct userId / groupId fields
-  if (ref.userId !== undefined) return { userId: ref.userId as string, messageType: "private" }
+  if (ref.userId !== undefined)
+    return {
+      userId: ref.userId as string,
+      groupId: ref.groupId as string | number | undefined,
+      messageType: "private",
+    }
   if (ref.groupId !== undefined) return { groupId: ref.groupId as string, messageType: "group" }
 
   // No target at all — previously this fell through to send_group_msg with
@@ -176,7 +241,7 @@ export function serializeOutboundV11(
 ): SerializedOneBotCall[] {
   const { userId, groupId, messageType } = chatIdFromRef(req)
 
-  const segments = expandA2UISegments(req.segments)
+  const segments = readableGroupSegments(expandA2UISegments(req.segments), messageType === "group")
   // Prepend reply segment if replyTo is set
   const allSegments =
     req.replyTo !== undefined
@@ -191,7 +256,11 @@ export function serializeOutboundV11(
       {
         action: "send_private_msg",
         echo: nextEcho(),
-        params: { user_id: toWireId(userId ?? ""), message: obSegments },
+        params: {
+          user_id: toWireId(userId ?? ""),
+          ...(groupId !== undefined ? { group_id: toWireId(groupId) } : {}),
+          message: obSegments,
+        },
       },
     ]
   }
@@ -231,7 +300,7 @@ export function serializeOutboundV12(
   )
     throw new OneBotValidationError("OneBot 12 channel send requires guildId and channelId")
 
-  const segments = expandA2UISegments(req.segments)
+  const segments = readableGroupSegments(expandA2UISegments(req.segments), messageType === "group")
 
   // The adapter resolves upload_file before serialization. Never put a URL
   // into file_id; require the concrete ids returned by that round-trip.
@@ -350,13 +419,14 @@ export function serializeSetMsgEmojiLike(
 export function serializeGetGroupMsgHistoryV11(
   groupId: string | number,
   messageSeq?: number,
-  count = 20
+  count = 20,
+  cursorField: "message_seq" | "message_id" = "message_seq"
 ): SerializedOneBotCall {
   const params: Record<string, unknown> = {
     group_id: typeof groupId === "string" ? Number(groupId) : groupId,
     count,
   }
-  if (messageSeq !== undefined) params.message_seq = messageSeq
+  if (messageSeq !== undefined) params[cursorField] = messageSeq
   return { action: "get_group_msg_history", echo: nextEcho(), params }
 }
 
@@ -367,13 +437,14 @@ export function serializeGetGroupMsgHistoryV11(
 export function serializeGetFriendMsgHistoryV11(
   userId: string | number,
   messageSeq?: number,
-  count = 20
+  count = 20,
+  cursorField: "message_seq" | "message_id" = "message_seq"
 ): SerializedOneBotCall {
   const params: Record<string, unknown> = {
     user_id: typeof userId === "string" ? Number(userId) : userId,
     count,
   }
-  if (messageSeq !== undefined) params.message_seq = messageSeq
+  if (messageSeq !== undefined) params[cursorField] = messageSeq
   return { action: "get_friend_msg_history", echo: nextEcho(), params }
 }
 

@@ -41,12 +41,14 @@ import { useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from "reac
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { MoreHorizontalIcon, PinIcon, ShieldAlertIcon, UserRoundIcon } from "lucide-react"
 import type { ConversationAssignee, ConversationStatus } from "@/lib/db/conversation-overrides"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { conversationPlatformAvatarTarget } from "@/lib/connectors/platform-avatar"
+import { usePlatformAvatar } from "@/hooks/connectors/use-platform-avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { avatarColor, avatarGlyph, initials } from "@/lib/ui/avatar"
+import { initials } from "@/lib/ui/avatar"
 import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { usePendingApprovalCount } from "@/hooks/connectors/use-pending-approval-count"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -146,6 +148,9 @@ export function ConversationRow({
   const platform = session.platformBinding!.platform as PlatformKind
   const adapterId = session.platformBinding!.adapterId
   const name = session.title || ck
+  const avatarImageUrl = usePlatformAvatar(
+    conversationPlatformAvatarTarget(session.platformBinding)
+  )
   const relative =
     typeof lastMessageAt === "number" ? format.relativeTime(new Date(lastMessageAt), now) : null
   const sla = rowSlaState(override, now.getTime())
@@ -208,14 +213,11 @@ export function ConversationRow({
       >
         {/* Deterministic glyph avatar + platform corner badge */}
         <span className="relative shrink-0">
-          <Avatar className="size-9" aria-hidden>
-            <AvatarFallback
-              className="text-xs font-medium text-white"
-              style={{ backgroundColor: avatarColor({ name }) }}
-            >
-              {avatarGlyph({ name })}
-            </AvatarFallback>
-          </Avatar>
+          <AvatarBadge
+            subject={{ name, avatarImageUrl }}
+            size={36}
+            textClassName="text-xs font-medium"
+          />
           <span className="absolute -bottom-1 -end-1 rounded-full bg-background p-0.5 leading-none">
             <PlatformBadge platform={platform} iconOnly />
           </span>

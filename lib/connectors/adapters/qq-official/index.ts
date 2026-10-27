@@ -153,7 +153,6 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
   let healthState: AdapterHealthState = "starting"
   let healthReason: string | undefined
   let lastActivityAt: number | undefined
-  let stopCalled = false
   let gatewaySelfId = ""
   const lastInbound = new Map<string, QQLastInbound>()
 
@@ -161,10 +160,16 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
   async function handleDispatch(
     ctx: AdapterContext,
     selfId: string,
-    dispatch: QQDispatch
+    dispatch: QQDispatch,
+    active: () => boolean
   ): Promise<void> {
+    if (!active()) return
     const event = parseQQDispatch(opts.id, selfId, dispatch)
     if (!event) return
+    if (event.kind === "delete" || event.kind === "edit") {
+      await ctx.emit(event)
+      return
+    }
     const ref = event.conversationRef as {
       scene?: QQScene
       sceneId?: string
@@ -179,21 +184,23 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
         receivedAt: ref.receivedAt ?? Date.now(),
       })
     }
-    if (!(await gateInboundEvent(opts.id, event))) return
-    lastActivityAt = Date.now()
+    if (!(await gateInboundEvent(opts.id, event)) || !active()) return
     // Download what the parser could only reference, so a picture sent to the
     // bot reaches the model as an image rather than as the text
     // `[image: https://gchat.qpic.cn/…]`. After the gate: a message that is
     // going to be dropped costs no downloads.
     await enrichQQInboundMedia(event)
+    if (!active()) return
+    lastActivityAt = Date.now()
     await ctx.emit(event)
   }
 
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return
-    stopCalled = false
     abortController = new AbortController()
     const signal = abortController.signal
+    const active = () =>
+      !signal.aborted && abortController?.signal === signal && !ctx.signal?.aborted
     healthState = "running"
     healthReason = undefined
 
@@ -208,10 +215,10 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
             if (signal.aborted) break
             // Webhook mode has no READY event, so selfId stays "" unless a
             // prior gateway run populated it.
-            await handleDispatch(ctx, gatewaySelfId, dispatch)
+            await handleDispatch(ctx, gatewaySelfId, dispatch, active)
           }
         } catch (err) {
-          if (!stopCalled) {
+          if (active()) {
             healthState = "degraded"
             healthReason = `QQ webhook loop error: ${err instanceof Error ? err.message : String(err)}`
           }
@@ -234,14 +241,14 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
         for await (const dispatch of gateway.dispatches) {
           if (signal.aborted) break
           gatewaySelfId = gateway.selfId
-          await handleDispatch(ctx, gatewaySelfId, dispatch)
+          await handleDispatch(ctx, gatewaySelfId, dispatch, active)
         }
-        if (!stopCalled) {
+        if (active()) {
           healthState = "down"
           healthReason = "QQ gateway dispatch stream ended unexpectedly"
         }
       } catch (err) {
-        if (!stopCalled) {
+        if (active()) {
           healthState = "degraded"
           healthReason = `QQ gateway loop error: ${err instanceof Error ? err.message : String(err)}`
         }
@@ -250,7 +257,6 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
   }
 
   async function stop(): Promise<void> {
-    stopCalled = true
     abortController?.abort()
     abortController = null
     healthState = "down"

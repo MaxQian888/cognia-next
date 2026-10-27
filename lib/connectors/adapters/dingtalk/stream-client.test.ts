@@ -122,6 +122,8 @@ describe("startDingTalkStream", () => {
     await session.waitForListeners()
 
     // ws opened with the ticket query
+    session.push(null)
+    session.push([])
     expect(mockWsOpen).toHaveBeenCalledWith("wss://fake/connect?ticket=tkt-1")
 
     // ping → expect echo ACK carrying the same opaque

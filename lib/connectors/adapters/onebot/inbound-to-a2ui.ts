@@ -18,6 +18,7 @@
  */
 
 import type { InboundA2UIBlock, InboundA2UINode } from "../_shared/inbound-a2ui-types"
+import { fromOneBotSegments } from "./segments"
 
 interface OneBotSegment {
   type?: string
@@ -25,7 +26,11 @@ interface OneBotSegment {
 }
 
 function s(value: unknown): string {
-  return typeof value === "string" ? value : ""
+  return typeof value === "string"
+    ? value
+    : typeof value === "number" && Number.isFinite(value)
+      ? String(value)
+      : ""
 }
 
 function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
@@ -46,10 +51,12 @@ function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
         handle: s(seg.data?.qq) || s(seg.data?.user_id),
         resolved: s(seg.data?.name) || undefined,
       }
+    case "mention_all":
+      return { kind: "mention", handle: "all" }
     case "reply":
       return {
         kind: "reply_context",
-        replyToMessageId: s(seg.data?.id),
+        replyToMessageId: s(seg.data?.message_id) || s(seg.data?.id),
       }
     case "face":
       return { kind: "text", text: `[face:${s(seg.data?.id)}]`, emphasis: "muted" }
@@ -68,9 +75,14 @@ function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
     // v11 "record" and v12 "voice"; v12 carries file_id instead of url/file.
     case "record":
     case "voice":
+    case "audio":
       return {
         kind: "link",
-        href: s(seg.data?.url) || `cq-record:${s(seg.data?.file) || s(seg.data?.file_id)}`,
+        href:
+          s(seg.data?.url) ||
+          (seg.type === "record"
+            ? `cq-record:${s(seg.data?.file)}`
+            : s(seg.data?.file_id) || s(seg.data?.file)),
         label: "Voice message",
       }
     case "video":
@@ -79,6 +91,26 @@ function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
         href: s(seg.data?.url) || `cq-video:${s(seg.data?.file) || s(seg.data?.file_id)}`,
         label: "Video",
       }
+    case "file":
+      return {
+        kind: "link",
+        href: s(seg.data?.url) || s(seg.data?.file_id) || s(seg.data?.file),
+        label: s(seg.data?.name) || "Attachment",
+      }
+    case "location": {
+      const [location] = fromOneBotSegments([{ type: "location", data: seg.data ?? {} }], "v12")
+      if (
+        !location ||
+        location.type !== "location" ||
+        !Number.isFinite(location.lat) ||
+        !Number.isFinite(location.lon)
+      )
+        return null
+      return {
+        kind: "text",
+        text: `${location.name ? `${location.name} ` : ""}(${location.lat}, ${location.lon})`,
+      }
+    }
     default:
       return null
   }
@@ -87,13 +119,22 @@ function mapSegment(seg: OneBotSegment): InboundA2UINode | null {
 export function onebotInboundToA2UI(payload: {
   message?: OneBotSegment[] | string
 }): InboundA2UIBlock | null {
-  if (!payload.message) return null
+  if (!payload || !payload.message) return null
   // A string-form message is CQ-code text the parser already decodes into
   // segments (entities, @-mentions, images); projecting the raw string would
   // show `[CQ:…]` codes and `&amp;` beside the decoded parts.
   if (typeof payload.message === "string") return null
+  if (!Array.isArray(payload.message)) return null
   const body: InboundA2UINode[] = []
   for (const seg of payload.message) {
+    if (
+      !seg ||
+      typeof seg !== "object" ||
+      !seg.data ||
+      typeof seg.data !== "object" ||
+      Array.isArray(seg.data)
+    )
+      continue
     const node = mapSegment(seg)
     if (node) body.push(node)
   }

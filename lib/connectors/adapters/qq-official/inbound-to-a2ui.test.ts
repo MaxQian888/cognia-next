@@ -17,7 +17,10 @@ describe("qqOfficialInboundToA2UI", () => {
       { kind: "text", text: "hello" },
     ])
     expect(
-      qqOfficialInboundToA2UI(dispatch({ id: "1", content: "<@!123> hey there" }))!.body
+      qqOfficialInboundToA2UI({
+        ...dispatch({ id: "1", content: "<@!123> hey there" }),
+        t: "AT_MESSAGE_CREATE",
+      })!.body
     ).toEqual([{ kind: "text", text: "hey there" }])
   })
 
@@ -58,4 +61,23 @@ describe("qqOfficialInboundToA2UI", () => {
     )
     expect(out!.body).toEqual([{ kind: "link", href: "https://x/d", label: "Attachment" }])
   })
+})
+it("uses normalized attachment URLs and preserves references and non-channel mention text", () => {
+  const out = qqOfficialInboundToA2UI(
+    dispatch({
+      id: "m1",
+      content: "<@!123> quoted text",
+      message_reference: { message_id: "previous" },
+      attachments: [
+        null,
+        { url: "//cdn.example/p.png", content_type: "image/png" },
+        { url: "javascript:bad", content_type: "image/png" },
+      ],
+    } as unknown as NonNullable<QQDispatch["d"]>)
+  )
+  expect(out?.body).toEqual([
+    { kind: "reply_context", replyToMessageId: "previous" },
+    { kind: "text", text: "<@!123> quoted text" },
+    { kind: "image", url: "https://cdn.example/p.png", alt: undefined },
+  ])
 })

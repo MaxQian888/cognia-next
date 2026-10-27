@@ -1,6 +1,15 @@
 import { telegramInboundToA2UI } from "./inbound-to-a2ui"
 
 describe("telegramInboundToA2UI", () => {
+  it("retains callback presence for malformed callback data", () => {
+    expect(
+      telegramInboundToA2UI({
+        reply_markup: {
+          inline_keyboard: [[{ text: "Act", url: "https://x.test", callback_data: 42 }]],
+        },
+      } as never)?.body[0]
+    ).toMatchObject({ children: [{ actionId: "" }] })
+  })
   it("returns null on empty payload", () => {
     expect(telegramInboundToA2UI({})).toBeNull()
   })

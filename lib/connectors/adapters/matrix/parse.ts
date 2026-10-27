@@ -154,13 +154,28 @@ function resolveMediaUrl(
   return { url: resolved ?? url, rawUrl: url }
 }
 
+/** Matrix v1.10+: a distinct body alongside filename is a media caption. */
+export function matrixMediaCaption(content: MatrixEventContent): string | undefined {
+  return typeof content.filename === "string" &&
+    typeof content.body === "string" &&
+    content.filename !== content.body
+    ? content.body
+    : undefined
+}
+
 function buildSegments(
   content: MatrixEventContent,
   options: { homeserver?: string } = {}
 ): MessageSegment[] {
   const segments: MessageSegment[] = []
   const msgtype = content.msgtype ?? "m.text"
-  const mediaUrl = content.file?.url ?? content.url
+  const candidateUrl = content.file?.url ?? content.url
+  const mediaUrl = typeof candidateUrl === "string" ? candidateUrl : undefined
+  const caption = matrixMediaCaption(content)
+  const withCaption = () => [
+    ...segments,
+    ...(caption ? [{ type: "text" as const, text: caption }] : []),
+  ]
 
   switch (msgtype) {
     case "m.image":
@@ -176,7 +191,7 @@ function buildSegments(
           mimeType: content.info?.mimetype,
           matrixEncryptedFile: content.file,
         })
-        return segments
+        return withCaption()
       }
       break
     case "m.video":
@@ -187,9 +202,10 @@ function buildSegments(
           type: "video",
           url: media.url,
           rawUrl: media.rawUrl,
-          thumbnailUrl: thumbnailUrl
-            ? resolveMediaUrl(thumbnailUrl, options.homeserver).url
-            : undefined,
+          thumbnailUrl:
+            typeof thumbnailUrl === "string" && thumbnailUrl
+              ? resolveMediaUrl(thumbnailUrl, options.homeserver).url
+              : undefined,
           durationSec:
             content.info?.duration !== undefined
               ? Math.round(content.info.duration / 1000)
@@ -198,7 +214,7 @@ function buildSegments(
           matrixEncryptedFile: content.file,
           matrixEncryptedThumbnailFile: content.info?.thumbnail_file,
         })
-        return segments
+        return withCaption()
       }
       break
     case "m.audio":
@@ -215,7 +231,7 @@ function buildSegments(
           mimeType: content.info?.mimetype,
           matrixEncryptedFile: content.file,
         })
-        return segments
+        return withCaption()
       }
       break
     case "m.file":
@@ -230,7 +246,7 @@ function buildSegments(
           sizeBytes: content.info?.size ?? 0,
           matrixEncryptedFile: content.file,
         })
-        return segments
+        return withCaption()
       }
       break
     default:
@@ -239,8 +255,9 @@ function buildSegments(
 
   // m.text / m.notice / m.emote (and any media event missing its url) →
   // text from the body, with the reply fallback quote stripped.
-  const raw = content.body ?? ""
-  const text = content["m.relates_to"]?.["m.in_reply_to"]?.event_id ? stripReplyFallback(raw) : raw
+  const raw = typeof content.body === "string" ? content.body : ""
+  const replyId = content["m.relates_to"]?.["m.in_reply_to"]?.event_id
+  const text = typeof replyId === "string" && replyId ? stripReplyFallback(raw) : raw
   if (text) segments.push({ type: "text", text })
   return segments
 }
@@ -260,7 +277,10 @@ function detectMentions(
   content: MatrixEventContent,
   replyToSelf: boolean
 ): { selfMentioned: boolean; users: string[] } {
-  const users = content["m.mentions"]?.user_ids ?? []
+  const rawUsers = content["m.mentions"]?.user_ids
+  const users = Array.isArray(rawUsers)
+    ? rawUsers.filter((user): user is string => typeof user === "string")
+    : []
   const roomPing = content["m.mentions"]?.room === true
   let selfMentioned = replyToSelf || roomPing || (selfId !== "" && users.includes(selfId))
   if (!selfMentioned && selfId !== "" && typeof content.formatted_body === "string") {
@@ -310,6 +330,7 @@ export function parseMatrixEvent(
   ev: MatrixTimelineEvent,
   options: ParseMatrixEventOptions = {}
 ): NormalizedInboundEvent | null {
+  if (!ev || typeof ev.sender !== "string" || typeof ev.event_id !== "string") return null
   // Never echo our own sends back into the bus.
   if (selfId !== "" && ev.sender === selfId) return null
 
@@ -370,6 +391,7 @@ export function parseMatrixEvent(
 
   // ── Messages (create / edit) ──────────────────────────────────────────
   if (ev.type !== "m.room.message") return null
+  if (Object.hasOwn(ev, "state_key")) return null
   if (ev.unsigned?.redacted_because !== undefined) return null
 
   // A spec-conformant `m.room.message` always carries `content`, but a
@@ -377,18 +399,32 @@ export function parseMatrixEvent(
   // event yields an empty message instead of throwing out of the sync loop.
   const msgContent = ev.content ?? {}
   const rel = msgContent["m.relates_to"]
-  const isEdit = rel?.rel_type === "m.replace" && rel.event_id !== undefined
+  const isEdit = rel?.rel_type === "m.replace"
+  if (
+    isEdit &&
+    (typeof rel.event_id !== "string" ||
+      !rel.event_id ||
+      !msgContent["m.new_content"] ||
+      typeof msgContent["m.new_content"] !== "object" ||
+      Array.isArray(msgContent["m.new_content"]))
+  )
+    return null
   // For edits the renderable content lives in `m.new_content`.
-  const renderContent = isEdit ? (msgContent["m.new_content"] ?? msgContent) : msgContent
+  const renderContent = isEdit
+    ? { ...msgContent["m.new_content"]!, "m.relates_to": undefined }
+    : msgContent
 
   // Thread root → conversation thread key. A threaded reply carries
   // rel_type === "m.thread"; the `event_id` is the thread root.
   const threadId =
-    rel?.rel_type === "m.thread" && rel.event_id !== undefined ? rel.event_id : undefined
+    rel?.rel_type === "m.thread" && typeof rel.event_id === "string" ? rel.event_id : undefined
 
   const conversationKey = buildConversationKey("matrix", adapterId, roomId, threadId)
 
-  const inReplyTo = rel?.["m.in_reply_to"]?.event_id
+  // Replacements preserve the original event's reply relation; an edit
+  // cannot supply a new reply target through its outer relation.
+  const rawReplyId = isEdit ? undefined : rel?.["m.in_reply_to"]?.event_id
+  const inReplyTo = typeof rawReplyId === "string" && rawReplyId ? rawReplyId : undefined
   // replyTo stays a BARE event id — it is echoed back onto the wire as an
   // `m.in_reply_to` target by the serializer.
   // A reply whose target is one of the bot's own recent messages addresses
@@ -397,7 +433,7 @@ export function parseMatrixEvent(
   const replyTo = inReplyTo
     ? {
         messageId: inReplyTo,
-        snippet: (renderContent.body ?? "").slice(0, 100),
+        snippet: "",
         // Matrix events don't inline the parent author; the adapter's own
         // sent-event set is the cheap source. Unknown otherwise (the bus may
         // still resolve it from the delivered-message ledger).
@@ -478,6 +514,7 @@ export async function parseMatrixReplyCorrelation(
 ): Promise<ConnectorCallbackEvent | null> {
   if (ev.type !== "m.room.message") return null
   if (selfId !== "" && ev.sender === selfId) return null
+  if (ev.content["m.relates_to"]?.rel_type === "m.replace") return null
   const inReplyTo = ev.content["m.relates_to"]?.["m.in_reply_to"]?.event_id
   if (!inReplyTo) return null
 

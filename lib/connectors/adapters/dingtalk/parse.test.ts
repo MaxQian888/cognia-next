@@ -38,6 +38,7 @@ describe("parseDingTalkBotMessage", () => {
     expect(ev!.plainText).toBe("hello bot")
     expect(ev!.segments).toEqual([{ type: "text", text: "hello bot" }])
     expect(ev!.sender.remoteUserId).toBe("staff_1")
+    expect(ev!.sender.remoteIdType).toBe("staff_id")
     expect(ev!.sender.displayName).toBe("张三")
     expect(ev!.mentions.selfMentioned).toBe(true)
     expect(ev!.conversationKey).toBe("dingtalk:ad_1:cid_1")
@@ -62,6 +63,7 @@ describe("parseDingTalkBotMessage", () => {
       baseMsg({ senderStaffId: undefined, senderId: "$:LWCP_v1:$abc" })
     )
     expect(ev!.sender.remoteUserId).toBe("$:LWCP_v1:$abc")
+    expect(ev!.sender.remoteIdType).toBe("opaque_id")
     // The union id is NOT a valid batchSend target — conversationRef.userId
     // stays empty so send() falls back to the session webhook.
     expect(ev!.conversationRef.userId).toBe("")
@@ -257,3 +259,32 @@ it.each(["picture", "audio", "video", "file"])(
       expect(event?.segments[0]).toMatchObject({ name: "doc.pdf", sizeBytes: 123 })
   }
 )
+it("isolates malformed nested rich-text siblings", () => {
+  const event = parseDingTalkBotMessage(
+    "ad",
+    "bot",
+    baseMsg({
+      msgtype: "richText",
+      content: {
+        richText: [
+          null,
+          3,
+          { text: "before" },
+          { downloadCode: "new/code", type: "picture" },
+          { text: "after" },
+        ],
+      },
+    })
+  )
+  expect(event?.segments.map((s) => s.type)).toEqual(["text", "image", "text"])
+  expect(event?.plainText).toBe("before[picture]after")
+})
+it("ignores invalid mentioned users without suppressing the message", () => {
+  const event = parseDingTalkBotMessage(
+    "ad",
+    "bot",
+    baseMsg({ atUsers: [null, { staffId: "valid" }] as never })
+  )
+  expect(event?.plainText).toBe("hello bot")
+  expect(event?.mentions.users).toEqual(["valid"])
+})

@@ -1,6 +1,17 @@
 import { larkCardMarkdownToCommonMark } from "./card-markdown"
 
 describe("larkCardMarkdownToCommonMark", () => {
+  it("preserves platform tags and newlines inside multiline code spans", () => {
+    const source = "`line one\n<at id=all></at>\nline three`\n<at id=all></at>"
+    expect(larkCardMarkdownToCommonMark(source)).toBe(
+      "`line one\n<at id=all></at>\nline three`  \n@all"
+    )
+  })
+
+  it("preserves fences nested in blockquotes", () => {
+    const source = "> ```\n> <at id=all></at>\n> ```\n<at id=all></at>"
+    expect(larkCardMarkdownToCommonMark(source)).toBe("> ```\n> <at id=all></at>\n> ```\n@all")
+  })
   it("turns platform tags into plain Markdown", () => {
     expect(
       larkCardMarkdownToCommonMark(

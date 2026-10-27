@@ -173,6 +173,25 @@ describe("fromOneBotSegments v11", () => {
 // ---------------------------------------------------------------------------
 
 describe("fromOneBotSegments v12", () => {
+  it("retains both location title and content without inventing missing coordinates", () => {
+    expect(
+      fromOneBotSegments(
+        [
+          {
+            type: "location",
+            data: { latitude: 0, longitude: 0, title: "Place", content: "Address" },
+          },
+        ],
+        "v12"
+      )
+    ).toEqual([{ type: "location", lat: 0, lon: 0, name: "Place\nAddress" }])
+    expect(fromOneBotSegments([{ type: "location", data: {} }], "v12")).toEqual([
+      { type: "text", text: "[location]" },
+    ])
+    expect(
+      fromOneBotSegments([{ type: "location", data: { latitude: 999, longitude: 999 } }], "v12")
+    ).toEqual([{ type: "text", text: "[location]" }])
+  })
   it("text segment", () => {
     const segs: OneBotSegment[] = [{ type: "text", data: { text: "world" } }]
     expect(fromOneBotSegments(segs, "v12")).toEqual([{ type: "text", text: "world" }])
@@ -553,5 +572,62 @@ it("projects inline media bytes to OneBot 11 base64 sources", () => {
   ).toEqual([
     { type: "image", data: { file: "base64://AQID" } },
     { type: "file", data: { file: "base64://aGk=", name: "note.txt" } },
+  ])
+})
+it("supports OneBot 12 candidate mention_all, audio and latitude/longitude location", () => {
+  expect(
+    fromOneBotSegments(
+      [
+        { type: "mention_all", data: {} },
+        { type: "audio", data: { file_id: "audio-1" } },
+        { type: "location", data: { latitude: 31.2, longitude: 121.5, title: "Shanghai" } },
+      ],
+      "v12"
+    )
+  ).toEqual([
+    { type: "mention", userId: "all", displayName: "@all" },
+    { type: "voice", url: "audio-1" },
+    { type: "location", lat: 31.2, lon: 121.5, name: "Shanghai" },
+  ])
+})
+
+it("drops malformed message segment members instead of losing valid siblings", () => {
+  expect(
+    fromOneBotSegments(
+      [
+        null,
+        { type: "text", data: null },
+        { type: "text", data: { text: "kept" } },
+      ] as unknown as OneBotSegment[],
+      "v12"
+    )
+  ).toEqual([{ type: "text", text: "kept" }])
+})
+it("isolates nested forward and coercion failures from valid siblings", () => {
+  expect(
+    fromOneBotSegments(
+      [
+        { type: "text", data: { text: { toString: null } } },
+        {
+          type: "forward",
+          data: {
+            content: [
+              null,
+              {
+                data: {
+                  nickname: "Alice",
+                  content: [null, { type: "text", data: { text: "forwarded" } }],
+                },
+              },
+            ],
+          },
+        },
+        { type: "text", data: { text: "kept" } },
+      ],
+      "v12"
+    )
+  ).toEqual([
+    { type: "text", text: "[合并转发]\nAlice: forwarded" },
+    { type: "text", text: "kept" },
   ])
 })

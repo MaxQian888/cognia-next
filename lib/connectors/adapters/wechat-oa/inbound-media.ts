@@ -2,6 +2,7 @@ import {
   enrichInboundMedia,
   onceAsync,
   isPublicHttpUrl,
+  sniffImageMediaType,
   type InboundMediaDeps,
 } from "@/lib/connectors/adapters/_shared/inbound-media"
 import {
@@ -28,6 +29,21 @@ export async function enrichWechatInboundMedia(
   deps: WechatInboundMediaDeps
 ): Promise<void> {
   if (!(deps.enabled ?? isTauri())) return
+  const read = deps.readAttachment ?? connectorsAttachmentRead
+  const boundedRead: typeof connectorsAttachmentRead = async (adapterId, ref, cap) => {
+    const bytes = await read(adapterId, ref, cap)
+    if (
+      !bytes ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(bytes) ||
+      (bytes.length * 3) / 4 - (bytes.endsWith("==") ? 2 : bytes.endsWith("=") ? 1 : 0) > cap
+    )
+      return null
+    // The media API returns a JSON error envelope on HTTP 200. A cache hit
+    // still needs validation before those bytes become a display data URL.
+    const prefix = atob(bytes.slice(0, 256)).trimStart()
+    if (/^[{[<]/.test(prefix)) return null
+    return bytes
+  }
   const token = onceAsync(deps.accessToken)
   const source = async (id: string) =>
     `${deps.apiBase}/cgi-bin/media/get?access_token=${encodeURIComponent(await token())}&media_id=${encodeURIComponent(id)}`
@@ -44,10 +60,15 @@ export async function enrichWechatInboundMedia(
       },
       extractLabel: "wechat-oa-inbound",
     },
-    deps
+    {
+      ...deps,
+      readAttachment: async (adapterId, ref, cap) => {
+        const bytes = await boundedRead(adapterId, ref, cap)
+        return bytes && sniffImageMediaType(bytes) ? bytes : null
+      },
+    }
   )
 
-  const read = deps.readAttachment ?? connectorsAttachmentRead
   const fetchAttachment = deps.fetchAttachment ?? connectorsAttachmentFetch
   const http = deps.httpRequest ?? connectorsHttpRequest
   for (const segment of event.segments) {
@@ -57,7 +78,7 @@ export async function enrichWechatInboundMedia(
     const ref = `wechat-oa:media:${id}`
     try {
       const cap = deps.maxInlineBytes ?? 10 * 1024 * 1024
-      let bytes = await read(event.adapterId, ref, cap)
+      let bytes = await boundedRead(event.adapterId, ref, cap)
       if (!bytes) {
         let url = await source(id)
         if (segment.type === "video") {
@@ -69,8 +90,9 @@ export async function enrichWechatInboundMedia(
         // The token only goes to the configured API host. Video downloads
         // carry no credentials and must pass the shared public-URL guard.
         if (!isPublicHttpUrl(url)) continue
-        await fetchAttachment(event.adapterId, ref, url)
-        bytes = await read(event.adapterId, ref, cap)
+        const stored = await fetchAttachment(event.adapterId, ref, url)
+        if (stored && stored.sizeBytes > cap) continue
+        bytes = await boundedRead(event.adapterId, ref, cap)
       }
       if (!bytes) continue
       segment.rawUrl ??= segment.url

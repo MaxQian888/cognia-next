@@ -49,7 +49,7 @@ export function buildWeComConversationRef(
 }
 
 function guessMimeFromExt(ext?: string): string {
-  switch ((ext ?? "").toLowerCase()) {
+  switch ((typeof ext === "string" ? ext : "").toLowerCase()) {
     case "pdf":
       return "application/pdf"
     case "doc":
@@ -74,7 +74,7 @@ function guessMimeFromExt(ext?: string): string {
 }
 
 /** Project the inbound body's payload into cross-platform message segments. */
-function bodyToSegments(
+export function wecomBodyToSegments(
   body: Pick<
     WeComInboundMsgBody,
     "msgtype" | "text" | "markdown" | "image" | "voice" | "video" | "file" | "mixed"
@@ -83,41 +83,68 @@ function bodyToSegments(
   const segs: MessageSegment[] = []
   switch (body.msgtype) {
     case "text":
-      if (body.text?.content) segs.push({ type: "text", text: body.text.content })
+      if (typeof body.text?.content === "string" && body.text.content)
+        segs.push({ type: "text", text: body.text.content })
       break
     case "markdown":
-      if (body.markdown?.content) segs.push({ type: "markdown", md: body.markdown.content })
+      if (typeof body.markdown?.content === "string" && body.markdown.content)
+        segs.push({ type: "markdown", md: body.markdown.content })
       break
     case "image":
-      if (body.image?.url) segs.push({ type: "image", url: body.image.url })
+      if (typeof body.image?.url === "string" && body.image.url)
+        segs.push({ type: "image", url: body.image.url })
       break
     case "voice":
-      if (body.voice?.url)
+      if (typeof body.voice?.url === "string" && body.voice.url)
         segs.push({
           type: "voice",
           url: body.voice.url,
-          transcript: body.voice.content ?? body.voice.transcript,
+          transcript:
+            typeof body.voice.content === "string"
+              ? body.voice.content
+              : typeof body.voice.transcript === "string"
+                ? body.voice.transcript
+                : undefined,
         })
-      else if (body.voice?.content || body.voice?.transcript)
-        segs.push({ type: "text", text: body.voice.content || body.voice.transcript! })
+      else {
+        const text =
+          typeof body.voice?.content === "string"
+            ? body.voice.content
+            : typeof body.voice?.transcript === "string"
+              ? body.voice.transcript
+              : ""
+        if (text) segs.push({ type: "text", text })
+      }
       break
     case "video":
-      if (body.video?.url) segs.push({ type: "video", url: body.video.url })
+      if (typeof body.video?.url === "string" && body.video.url)
+        segs.push({ type: "video", url: body.video.url })
       break
     case "file":
-      if (body.file?.url)
+      if (typeof body.file?.url === "string" && body.file.url)
         segs.push({
           type: "file",
           url: body.file.url,
-          name: body.file.filename ?? "file",
+          name: typeof body.file.filename === "string" ? body.file.filename : "file",
           mimeType: guessMimeFromExt(body.file.fileext),
           sizeBytes: 0,
         })
       break
     case "mixed":
-      for (const item of body.mixed?.msg_item ?? []) {
-        if (item.text?.content) segs.push({ type: "text", text: item.text.content })
-        else if (item.image?.url) segs.push({ type: "image", url: item.image.url })
+      for (const item of Array.isArray(body.mixed?.msg_item) ? body.mixed.msg_item : []) {
+        if (!item || typeof item !== "object") continue
+        if (
+          (!item.msgtype || item.msgtype === "text") &&
+          typeof item.text?.content === "string" &&
+          item.text.content
+        )
+          segs.push({ type: "text", text: item.text.content })
+        else if (
+          (!item.msgtype || item.msgtype === "image") &&
+          typeof item.image?.url === "string" &&
+          item.image.url
+        )
+          segs.push({ type: "image", url: item.image.url })
       }
       break
   }
@@ -143,7 +170,7 @@ export function parseWeComMessage(
   const chatId = conversationRef.chatId
   if (!chatId || !body.msgid) return null
   const quoted = body.quote
-    ? bodyToSegments(body.quote).map((segment): MessageSegment =>
+    ? wecomBodyToSegments(body.quote).map((segment): MessageSegment =>
         segment.type === "text"
           ? {
               type: "markdown",
@@ -155,7 +182,7 @@ export function parseWeComMessage(
           : segment
       )
     : []
-  const segments = [...quoted, ...bodyToSegments(body)]
+  const segments = [...quoted, ...wecomBodyToSegments(body)]
   if (segments.length === 0) return null
 
   const isGroup = body.chattype === "group"

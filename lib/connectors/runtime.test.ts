@@ -25,7 +25,13 @@ import "fake-indexeddb/auto"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
-import { enqueueConnectorInboundJob } from "@/lib/db/connector-inbound-jobs"
+import {
+  enqueueConnectorInboundJob,
+  recordConnectorInboundEdit,
+  recordConnectorInboundRecall,
+} from "@/lib/db/connector-inbound-jobs"
+import { parseMatrixEvent } from "./adapters/matrix/parse"
+import { parseV11Event, parseV11HistoryMessage } from "./adapters/onebot/v11"
 import { upsertByConversationKey, readForResolution } from "@/lib/db/conversation-overrides"
 import type { AdapterInstanceRow, DispatchRule } from "@/lib/db/connector-types"
 import {
@@ -55,16 +61,23 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import * as buildOptions from "@/lib/claude/build-options"
 import * as platform from "@/lib/platform/detect"
+import * as standaloneMode from "@/lib/runtime/standalone-mode"
 import { createManagedWorkspaceContext } from "@/lib/task-workspace/managed-workspace"
 import { saveSettings } from "@/lib/db/settings"
 import { createPlatformSession } from "./session-bindings"
+import { parseQQDispatch } from "./adapters/qq-official/parse"
 import { maybeHandleControlCommand } from "./commands/dispatch"
+import { listPendingForConversation } from "@/lib/db/outbound-jobs"
+import { useChatStore } from "@/stores/chat"
 
 // SWC exports getters; copied descriptors let these focused routing cases spy
 // without replacing the real resolver used by the rest of this suite.
 jest.mock("@/lib/platform/detect", () => ({
   __esModule: true,
   ...jest.requireActual("@/lib/platform/detect"),
+}))
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  ...jest.requireActual("@/lib/runtime/standalone-mode"),
 }))
 jest.mock("@/lib/claude/build-options", () => ({
   __esModule: true,
@@ -73,6 +86,17 @@ jest.mock("@/lib/claude/build-options", () => ({
 jest.mock("@/lib/db/connector-inbound-jobs", () => ({
   ...jest.requireActual("@/lib/db/connector-inbound-jobs"),
 }))
+const mockBeforePermissionCeiling = jest.fn(async () => undefined)
+jest.mock("@/lib/connectors/im-permission-ceiling", () => {
+  const actual = jest.requireActual("@/lib/connectors/im-permission-ceiling")
+  return {
+    ...actual,
+    buildImPermissionCeiling: async (...args: unknown[]) => {
+      await mockBeforePermissionCeiling()
+      return actual.buildImPermissionCeiling(...args)
+    },
+  }
+})
 
 const mockEnsureSessionScratchWorkspace = jest.fn<Promise<string>, [ChatSession]>()
 jest.mock("@/lib/task-workspace/managed-workspace", () => ({
@@ -302,6 +326,7 @@ beforeEach(async () => {
   const bus = getBus()
   mockEvaluateImRate.mockReset()
   mockEvaluateImRate.mockResolvedValue(null)
+  mockBeforePermissionCeiling.mockReset().mockResolvedValue(undefined)
   ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockClear()
   ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValue({
     text: "Hello back from Claude!",
@@ -603,6 +628,600 @@ describe("resolveRecoveryExecutionSpec", () => {
 })
 
 describe("installRuntime — ai-run (happy path)", () => {
+  it.each([
+    ["group", "canonical"],
+    ["group", "journal"],
+    ["reply", "canonical"],
+    ["reply", "journal"],
+  ] as const)(
+    "refuses recalled %s context accepted through %s during capture preparation",
+    async (context, acceptance) => {
+      const parent = (context === "group" ? groupEvent : makeEvent)({
+        messageId: "earlier-context",
+        plainText: "WITHDRAWN_CONTEXT_SECRET",
+        segments: [{ type: "text", text: "WITHDRAWN_CONTEXT_SECRET" }],
+      })
+      await callHandler(parent, "manual-store")
+      const parentRow = (await getDb().messages.toArray())[0]!
+      if (context === "group") {
+        const next = await createPlatformSession(parent, undefined)
+        await upsertByConversationKey({
+          conversationKey: parent.conversationKey,
+          sessionId: parentRow.sessionId,
+          activeSessionId: next.id,
+        })
+      }
+      const event = {
+        ...parent,
+        messageId: "current-context-source",
+        plainText: "CURRENT_SOURCE",
+        segments: [{ type: "text" as const, text: "CURRENT_SOURCE" }],
+        ...(context === "reply" ? { replyTo: { messageId: parent.messageId, snippet: "" } } : {}),
+      }
+      const job = await enqueueConnectorInboundJob(event, "queue")
+      let entered!: () => void, release!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const send = jest.fn()
+      let preparedPrompt: unknown
+      installRuntime(getBus(), {
+        runAndCapture: async (_session, prompt, _options, cap) => {
+          preparedPrompt = prompt
+          entered()
+          await blocked
+          await cap?.beforeSend?.()
+          send(prompt)
+          return { text: "stale reply", messageId: "stale-reply" }
+        },
+      })
+      const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+      const standalone = jest.spyOn(standaloneMode, "isStandaloneChatMode").mockReturnValue(true)
+      try {
+        await Promise.race([
+          ready,
+          pending.then(() => {
+            throw new Error("Dispatch finished before capture preparation")
+          }),
+        ])
+        expect(JSON.stringify(preparedPrompt)).toContain("WITHDRAWN_CONTEXT_SECRET")
+        const recall = {
+          ...parent,
+          kind: "delete" as const,
+          replacesMessageId: parent.messageId,
+          messageId: "context-recall",
+          segments: [],
+          plainText: "",
+        }
+        if (acceptance === "canonical") await getBus().dispatchInboundFull(recall)
+        else await recordConnectorInboundRecall(recall, Date.now())
+        expect(
+          (await getDb().sessions.get(parentRow.sessionId))?.runtimeTranscriptGeneration
+        ).toBeUndefined()
+        release()
+        await pending
+        expect(send).not.toHaveBeenCalled()
+        expect(await getDb().outboundQueue.count()).toBe(0)
+        expect((await getDb().connectorInboundJobs.get(job.id))?.status).toBe("recovery_required")
+        const current = await getDb()
+          .messages.where("platformMessageId")
+          .equals(event.messageId)
+          .first()
+        expect(current?.parts).toEqual([{ type: "text", text: "CURRENT_SOURCE" }])
+        expect(current?.metadata?.deletedAt).toBeUndefined()
+      } finally {
+        release()
+        await pending
+        standalone.mockRestore()
+      }
+    }
+  )
+
+  it("admits a turn despite unmatched or unrelated pending context mutations", async () => {
+    const unrelated = makeEvent({
+      conversationKey: "telegram:adapter_1:unrelated-context",
+      messageId: "unrelated-parent",
+    })
+    await callHandler(unrelated, "manual-store")
+    await recordConnectorInboundRecall(
+      {
+        ...unrelated,
+        kind: "delete",
+        replacesMessageId: unrelated.messageId,
+      },
+      Date.now()
+    )
+    const event = makeEvent({ messageId: "unmatched-context-source" })
+    await recordConnectorInboundRecall(
+      {
+        ...event,
+        kind: "delete",
+        replacesMessageId: "not-yet-received-parent",
+      },
+      Date.now()
+    )
+    const send = jest.fn()
+    installRuntime(getBus(), {
+      runAndCapture: async (_session, prompt, _options, cap) => {
+        await cap?.beforeSend?.()
+        send(prompt)
+        return { text: "current reply", messageId: "current-reply" }
+      },
+    })
+    await callHandler(event, "ai-run")
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["edit", "delete"] as const)(
+    "refreshes a local reply parent after a %s during earlier routing preparation",
+    async (kind) => {
+      const parent = makeEvent({
+        messageId: "early-reply-parent",
+        plainText: "OUTDATED_REPLY_SECRET",
+        segments: [{ type: "text", text: "OUTDATED_REPLY_SECRET" }],
+      })
+      await callHandler(parent, "manual-store")
+      const event = makeEvent({
+        messageId: "early-reply-source",
+        replyTo: { messageId: parent.messageId, snippet: "" },
+      })
+      const job = await enqueueConnectorInboundJob(event, "queue")
+      let entered!: () => void, release!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      mockBeforePermissionCeiling.mockImplementationOnce(async () => {
+        entered()
+        await blocked
+      })
+      const send = jest.fn()
+      installRuntime(getBus(), {
+        runAndCapture: async (_session, prompt, _options, cap) => {
+          await cap?.beforeSend?.()
+          send(prompt)
+          return { text: "current reply", messageId: "current-reply" }
+        },
+      })
+      const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+      try {
+        await Promise.race([
+          ready,
+          pending.then(() => {
+            throw new Error("Dispatch finished before routing preparation")
+          }),
+        ])
+        await getBus().dispatchInboundFull({
+          ...parent,
+          kind,
+          messageId: "early-parent-mutation",
+          replacesMessageId: parent.messageId,
+          timestamp: parent.timestamp + 1,
+          plainText: kind === "edit" ? "LATEST_PARENT" : "",
+          segments: kind === "edit" ? [{ type: "text", text: "LATEST_PARENT" }] : [],
+        })
+        release()
+        await pending
+        expect(send).toHaveBeenCalledTimes(1)
+        expect(JSON.stringify(send.mock.calls)).not.toContain("OUTDATED_REPLY_SECRET")
+        expect(send).toHaveBeenCalledWith(
+          expect.stringContaining(kind === "edit" ? "LATEST_PARENT" : "[deleted]")
+        )
+      } finally {
+        release()
+        await pending
+      }
+    }
+  )
+
+  it("refuses a same-clock media edit accepted during the final canonical read", async () => {
+    const image = (dataBase64: string) => ({
+      type: "image" as const,
+      url: `data:image/png;base64,${dataBase64}`,
+      dataBase64,
+      mimeType: "image/png",
+    })
+    const event = makeEvent({
+      platform: "onebot",
+      conversationKey: "onebot:adapter_1:g:42",
+      messageId: "same-clock-media",
+      timestamp: 20,
+      plainText: "[image]",
+      segments: [image("AAAA")],
+    })
+    const job = await enqueueConnectorInboundJob(event, "queue")
+    await recordConnectorInboundEdit({
+      ...event,
+      kind: "edit",
+      messageId: "first-edit",
+      replacesMessageId: event.messageId,
+    })
+    await callHandler(event, "manual-store")
+    const source = (await getDb().messages.toArray())[0]!
+    expect(source.metadata?.inboundMutationRevision).toEqual({ jobId: job.id, revision: 1 })
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const send = jest.fn()
+    installRuntime(getBus(), {
+      runAndCapture: async (_session, _prompt, _options, cap) => {
+        const messages = getDb().messages
+        const originalGet = messages.get.bind(messages)
+        const read = jest.spyOn(messages, "get").mockImplementationOnce((async (key: string) => {
+          const snapshot = await originalGet(key)
+          entered()
+          await blocked
+          return snapshot
+        }) as never)
+        try {
+          await cap?.beforeSend?.()
+          send()
+          return { text: "stale reply", messageId: "stale-reply" }
+        } finally {
+          read.mockRestore()
+        }
+      },
+    })
+    const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+    try {
+      await Promise.race([
+        ready,
+        pending.then(() => {
+          throw new Error("Dispatch finished before the final canonical read")
+        }),
+      ])
+      await recordConnectorInboundEdit({
+        ...event,
+        kind: "edit",
+        messageId: "second-edit",
+        replacesMessageId: event.messageId,
+        segments: [image("BBBB")],
+      })
+      release()
+      await pending
+      expect(send).not.toHaveBeenCalled()
+      const currentJob = await getDb().connectorInboundJobs.get(job.id)
+      expect(currentJob?.mutationRevision).toBe(2)
+      expect(currentJob?.status).toBe("recovery_required")
+      expect((await getDb().messages.get(source.id))?.metadata?.inboundMutationRevision).toEqual({
+        jobId: job.id,
+        revision: 1,
+      })
+      expect(await getDb().outboundQueue.count()).toBe(0)
+    } finally {
+      release()
+      await pending
+    }
+  })
+
+  it.each(["previous edit", "original"] as const)(
+    "refuses a Matrix source while a journaled edit redaction rolls back to %s",
+    async (fallback) => {
+      const parse = (
+        event_id: string,
+        type: string,
+        at: number,
+        content: Record<string, unknown>
+      ) =>
+        parseMatrixEvent("matrix", "@bot:srv", "!room:srv", {
+          type,
+          event_id,
+          sender: "@alice:srv",
+          origin_server_ts: at,
+          content,
+          ...(type === "m.room.redaction" ? { redacts: "$latest" } : {}),
+        })!
+      const event = parse("$source", "m.room.message", 1, { msgtype: "m.text", body: "original" })
+      const job = await enqueueConnectorInboundJob(event, "queue")
+      if (fallback === "previous edit") {
+        await recordConnectorInboundEdit(
+          parse("$previous", "m.room.message", 2, {
+            "m.relates_to": { rel_type: "m.replace", event_id: "$source" },
+            "m.new_content": { msgtype: "m.text", body: "previous" },
+          })
+        )
+      }
+      await recordConnectorInboundEdit(
+        parse("$latest", "m.room.message", 3, {
+          "m.relates_to": { rel_type: "m.replace", event_id: "$source" },
+          "m.new_content": { msgtype: "m.text", body: "latest" },
+        })
+      )
+      await callHandler(event, "manual-store")
+      const source = (await getDb().messages.toArray())[0]!
+      let entered!: () => void, release!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const send = jest.fn()
+      installRuntime(getBus(), {
+        runAndCapture: async (_session, _prompt, _options, cap) => {
+          const messages = getDb().messages
+          const originalGet = messages.get.bind(messages)
+          const read = jest.spyOn(messages, "get").mockImplementationOnce((async (key: string) => {
+            const snapshot = await originalGet(key)
+            entered()
+            await blocked
+            return snapshot
+          }) as never)
+          try {
+            await cap?.beforeSend?.()
+            send()
+            return { text: "stale reply", messageId: "stale-reply" }
+          } finally {
+            read.mockRestore()
+          }
+        },
+      })
+      const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+      try {
+        await Promise.race([
+          ready,
+          pending.then(() => {
+            throw new Error("Dispatch finished before the final canonical read")
+          }),
+        ])
+        await recordConnectorInboundRecall(parse("$redaction", "m.room.redaction", 4, {}), 4)
+        release()
+        await pending
+        expect(send).not.toHaveBeenCalled()
+        expect((await getDb().messages.get(source.id))?.parts).toEqual([
+          { type: "text", text: "latest" },
+        ])
+        const currentJob = await getDb().connectorInboundJobs.get(job.id)
+        expect(currentJob?.status).toBe("recovery_required")
+        expect(currentJob?.recalledAt).toBeUndefined()
+        expect(currentJob?.pendingEdit?.plainText).toBe(
+          fallback === "previous edit" ? "previous" : undefined
+        )
+        expect(await getDb().outboundQueue.count()).toBe(0)
+      } finally {
+        release()
+        await pending
+      }
+    }
+  )
+
+  it.each(
+    (["dingtalk", "wecom", "onebot", "qq-official", "matrix"] as const).flatMap((platform) =>
+      (["edit", "delete"] as const).map((kind) => [platform, kind] as const)
+    )
+  )("refuses a journaled %s %s during the final canonical read", async (platform, kind) => {
+    const event = makeEvent({
+      platform,
+      conversationKey: `${platform}:adapter_1:journaled-source`,
+      messageId: "journaled-source",
+    })
+    await callHandler(event, "manual-store")
+    const source = (await getDb().messages.toArray())[0]!
+    const job = await enqueueConnectorInboundJob(event, "queue")
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const send = jest.fn()
+    installRuntime(getBus(), {
+      runAndCapture: async (_session, _prompt, _options, cap) => {
+        const messages = getDb().messages
+        const originalGet = messages.get.bind(messages)
+        const read = jest.spyOn(messages, "get").mockImplementationOnce((async (key: string) => {
+          const snapshot = await originalGet(key)
+          entered()
+          await blocked
+          return snapshot
+        }) as never)
+        try {
+          await cap?.beforeSend?.()
+          send()
+          return { text: "stale reply", messageId: "stale-reply" }
+        } finally {
+          read.mockRestore()
+        }
+      },
+    })
+    const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+    try {
+      await Promise.race([
+        ready,
+        pending.then(() => {
+          throw new Error("Dispatch finished before the final canonical read")
+        }),
+      ])
+      const mutation = {
+        ...event,
+        kind,
+        messageId: "accepted-mutation",
+        replacesMessageId: event.messageId,
+        timestamp: event.timestamp + 1,
+        segments: kind === "edit" ? [{ type: "text" as const, text: "latest" }] : [],
+        plainText: kind === "edit" ? "latest" : "",
+      }
+      if (kind === "edit") await recordConnectorInboundEdit(mutation)
+      else await recordConnectorInboundRecall(mutation, mutation.timestamp)
+      release()
+      await pending
+      expect(send).not.toHaveBeenCalled()
+      expect(await getDb().outboundQueue.count()).toBe(0)
+      expect((await getDb().messages.get(source.id))?.parts).toEqual(source.parts)
+      const currentJob = await getDb().connectorInboundJobs.get(job.id)
+      if (kind === "edit") expect(currentJob?.status).toBe("recovery_required")
+      else {
+        expect(currentJob?.recalledAt).toBe(mutation.timestamp)
+        expect(currentJob?.status).not.toBe("recovery_required")
+      }
+    } finally {
+      release()
+      await pending
+    }
+  })
+
+  it.each([
+    ["team", "edit"],
+    ["team", "delete"],
+    ["workflow", "edit"],
+    ["workflow", "delete"],
+  ] as const)("does not start %s after a %s during routing preparation", async (target, kind) => {
+    mockStartTeamRunFromIM.mockClear()
+    mockStartWorkflowFromIM.mockClear()
+    const event = makeEvent({ messageId: `${target}-${kind}-preparing` })
+    await callHandler(event, "manual-store")
+    const source = await getDb().messages.where("platformMessageId").equals(event.messageId).first()
+    await upsertByConversationKey({
+      conversationKey: event.conversationKey,
+      sessionId: source!.sessionId,
+      ...(target === "team" ? { teamId: "team" } : { workflowId: "workflow" }),
+    })
+    const job = await enqueueConnectorInboundJob(event, "queue")
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockBeforePermissionCeiling.mockImplementationOnce(async () => {
+      entered()
+      await blocked
+    })
+    const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+    try {
+      await Promise.race([
+        ready,
+        pending.then(() => {
+          throw new Error("Dispatch finished before routing preparation")
+        }),
+      ])
+      await getBus().dispatchInboundFull({
+        ...event,
+        kind,
+        messageId: `${target}-${kind}-mutation`,
+        replacesMessageId: event.messageId,
+        timestamp: Date.now() + 1,
+        segments: kind === "edit" ? [{ type: "text", text: "latest" }] : [],
+        plainText: kind === "edit" ? "latest" : "",
+      })
+      release()
+      await pending
+      expect(mockStartTeamRunFromIM).not.toHaveBeenCalled()
+      expect(mockStartWorkflowFromIM).not.toHaveBeenCalled()
+      if (kind === "edit")
+        expect((await getDb().connectorInboundJobs.get(job.id))?.status).toBe("recovery_required")
+    } finally {
+      release()
+      await pending
+    }
+  })
+  it.each(["edit", "delete"] as const)(
+    "refuses a stale source after a %s inside capture preparation",
+    async (kind) => {
+      const event = makeEvent({ messageId: "late-preparing-source" })
+      await callHandler(event, "manual-store")
+      const job = await enqueueConnectorInboundJob(event, "queue")
+      let entered!: () => void, release!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const send = jest.fn()
+      installRuntime(getBus(), {
+        runAndCapture: async (_session, _prompt, _options, cap) => {
+          entered()
+          await blocked
+          await cap?.beforeSend?.()
+          send()
+          return { text: "stale reply", messageId: "stale-reply" }
+        },
+      })
+      const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+      try {
+        await ready
+        await getBus().dispatchInboundFull({
+          ...event,
+          kind,
+          messageId: "late-mutation",
+          replacesMessageId: event.messageId,
+          timestamp: Date.now() + 1,
+          segments: kind === "edit" ? [{ type: "text", text: "latest" }] : [],
+          plainText: kind === "edit" ? "latest" : "",
+        })
+        release()
+        await pending
+        expect(send).not.toHaveBeenCalled()
+        expect(await getDb().outboundQueue.count()).toBe(0)
+        if (kind === "edit")
+          expect((await getDb().connectorInboundJobs.get(job.id))?.status).toBe("recovery_required")
+      } finally {
+        release()
+        await pending
+      }
+    }
+  )
+  it.each(["edit", "delete"] as const)(
+    "does not dispatch stale content after a %s during preparation",
+    async (kind) => {
+      const event = makeEvent({
+        messageId: "preparing-source",
+        plainText: "ORIGINAL_BODY",
+        segments: [{ type: "text", text: "ORIGINAL_BODY" }],
+      })
+      await callHandler(event, "manual-store")
+      const job = await enqueueConnectorInboundJob(event, "queue")
+      let entered!: () => void, release!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const resolveOptions = buildOptions.resolveSendOptions
+      const spy = jest
+        .spyOn(buildOptions, "resolveSendOptions")
+        .mockImplementationOnce(async (...args) => {
+          entered()
+          await blocked
+          return resolveOptions(...args)
+        })
+      const pending = callHandler(event, "ai-run", RESOLVED, job.id)
+      try {
+        await ready
+        await getBus().dispatchInboundFull({
+          ...event,
+          kind,
+          messageId: "mutation",
+          replacesMessageId: event.messageId,
+          timestamp: Date.now() + 1,
+          segments: kind === "edit" ? [{ type: "text", text: "LATEST_BODY" }] : [],
+          plainText: kind === "edit" ? "LATEST_BODY" : "",
+        })
+        release()
+        await pending
+        expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+        if (kind === "edit")
+          expect((await getDb().connectorInboundJobs.get(job.id))?.status).toBe("recovery_required")
+      } finally {
+        release()
+        await pending
+        spy.mockRestore()
+      }
+    }
+  )
   it("creates a ChatSession with platformBinding", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")
@@ -681,6 +1300,442 @@ describe("installRuntime — ai-run (happy path)", () => {
 
     expect(await getDb().messages.where("platformMessageId").equals(event.messageId).count()).toBe(
       1
+    )
+  })
+
+  it("stores outgoing OneBot history as assistant without changing live inbound roles", async () => {
+    await getDb().sessions.add({
+      id: "snow-history-roles",
+      title: "History",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const event = parseV11HistoryMessage(
+      "adapter_1",
+      {
+        message_id: -100,
+        time: 1,
+        message_type: "private",
+        user_id: 100000,
+        sender: { user_id: 100000, nickname: "Self" },
+        message: [{ type: "text", data: { text: "historical reply" } }],
+      },
+      { selfId: 100000, chatId: 200001, messageType: "private" }
+    )!
+    expect((await insertInboundMessage(event, "snow-history-roles", 10)).role).toBe("assistant")
+    expect(
+      (
+        await insertInboundMessage(
+          { ...event, messageId: "-101", channelData: undefined },
+          "snow-history-roles",
+          11
+        )
+      ).role
+    ).toBe("user")
+    expect(
+      (
+        await insertInboundMessage(
+          { ...event, messageId: "-102", sender: { ...event.sender, remoteUserId: "200001" } },
+          "snow-history-roles",
+          12
+        )
+      ).role
+    ).toBe("user")
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+  })
+
+  it("keeps one OneBot history source in its original session across load-earlier and recall", async () => {
+    const event = parseV11Event("adapter_1", {
+      post_type: "message",
+      message_type: "group",
+      self_id: 1,
+      user_id: 2,
+      group_id: 42,
+      message_id: 77,
+      time: 1,
+      message: [{ type: "text", data: { text: "original" } }],
+    })!
+    for (const id of ["onebot-original", "onebot-later"]) {
+      await getDb().sessions.add({ id, title: id, createdAt: 1, updatedAt: 1 } as never)
+    }
+    const original = await insertInboundMessage(event, "onebot-original")
+    const loaded = await insertInboundMessage(event, "onebot-later")
+    await getBus().dispatchInboundFull(
+      parseV11Event("adapter_1", {
+        post_type: "notice",
+        notice_type: "group_recall",
+        self_id: 1,
+        user_id: 2,
+        group_id: 42,
+        message_id: 77,
+        time: 2,
+      })!
+    )
+    const rows = await getDb().messages.where("platformMessageId").equals(event.messageId).toArray()
+    expect(loaded.id).toBe(original.id)
+    expect(loaded.sessionId).toBe("onebot-original")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.metadata?.deletedAt).toBeDefined()
+    expect(rows[0]?.parts).toEqual([{ type: "text", text: "[deleted]" }])
+  })
+
+  it("deduplicates concurrent OneBot history inserts across different sessions", async () => {
+    const event = makeEvent({
+      platform: "onebot",
+      conversationKey: "onebot:adapter_1:g:42",
+      messageId: "onebot-concurrent-source",
+    })
+    for (const id of ["onebot-first", "onebot-second"]) {
+      await getDb().sessions.add({ id, title: id, createdAt: 1, updatedAt: 1 } as never)
+    }
+    const [first, second] = await Promise.all([
+      insertInboundMessage(event, "onebot-first"),
+      insertInboundMessage(event, "onebot-second"),
+    ])
+    expect(first.id).toBe(second.id)
+    expect(first.sessionId).toBe(second.sessionId)
+    expect(await getDb().messages.where("platformMessageId").equals(event.messageId).count()).toBe(
+      1
+    )
+    const states = await getDb().sessionState.toArray()
+    expect(states.reduce((total, state) => total + state.unreadCount, 0)).toBe(1)
+  })
+
+  it.each(["adapter", "conversation", "legacy-other", "legacy-same"] as const)(
+    "preserves %s scope when reusing a canonical history source",
+    async (scope) => {
+      const event = makeEvent({
+        platform: "onebot",
+        conversationKey: "onebot:adapter_1:g:42",
+        messageId: "scoped-history-source",
+      })
+      await getDb().sessions.bulkAdd(
+        ["scope-original", "scope-later"].map((id) => ({
+          id,
+          title: id,
+          createdAt: 1,
+          updatedAt: 1,
+          platformConversationKey: event.conversationKey,
+        })) as never
+      )
+      const original = await insertInboundMessage(event, "scope-original")
+      if (scope.startsWith("legacy")) {
+        const {
+          adapterId: _adapter,
+          conversationKey: _conversation,
+          ...legacy
+        } = original.metadata!.platformMessage!
+        await getDb().messages.update(original.id, {
+          metadata: { ...original.metadata, platformMessage: legacy },
+        })
+      }
+      const replay = {
+        ...event,
+        ...(scope === "adapter"
+          ? { adapterId: "adapter_2", conversationKey: "onebot:adapter_2:g:42" }
+          : scope === "conversation" || scope === "legacy-other"
+            ? { conversationKey: "onebot:adapter_1:g:43" }
+            : {}),
+      }
+      const loaded = await insertInboundMessage(replay, "scope-later")
+      const count = await getDb()
+        .messages.where("platformMessageId")
+        .equals(event.messageId)
+        .count()
+      if (scope === "legacy-same") {
+        expect(loaded.id).toBe(original.id)
+        expect(loaded.sessionId).toBe("scope-original")
+        expect(count).toBe(1)
+      } else {
+        expect(loaded.id).not.toBe(original.id)
+        expect(loaded.sessionId).toBe("scope-later")
+        expect(count).toBe(2)
+      }
+    }
+  )
+
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ])(
+    "uses the edited canonical source during retry after session switch=%s legacy=%s",
+    async (switched, legacy) => {
+      const create = parseMatrixEvent("adapter_1", "@bot:srv", "!room:srv", {
+        type: "m.room.message",
+        event_id: "$source",
+        sender: "@alice:srv",
+        origin_server_ts: 1,
+        content: { msgtype: "m.text", body: "ORIGINAL_BODY" },
+      })!
+      await callHandler(create, "manual-store")
+      const original = (await getDb().messages.toArray())[0]
+      await getBus().dispatchInboundFull(
+        parseMatrixEvent("adapter_1", "@bot:srv", "!room:srv", {
+          type: "m.room.message",
+          event_id: "$edit",
+          sender: "@alice:srv",
+          origin_server_ts: 2,
+          content: {
+            "m.relates_to": { rel_type: "m.replace", event_id: "$source" },
+            "m.new_content": { msgtype: "m.text", body: "LATEST_BODY" },
+          },
+        })!
+      )
+      if (legacy) {
+        const row = (await getDb().messages.get(original.id))!
+        const {
+          adapterId: _adapter,
+          conversationKey: _key,
+          ...platformMessage
+        } = row.metadata!.platformMessage!
+        await getDb().messages.update(row.id, { metadata: { ...row.metadata, platformMessage } })
+      }
+      if (switched) {
+        const next = await createPlatformSession(create, undefined)
+        await upsertByConversationKey({
+          conversationKey: create.conversationKey,
+          sessionId: original.sessionId,
+          activeSessionId: next.id,
+        })
+      }
+      await callHandler(create, "ai-run")
+      expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledWith(
+        original.sessionId,
+        expect.stringContaining("LATEST_BODY"),
+        expect.anything(),
+        expect.anything()
+      )
+      expect(JSON.stringify((DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls)).not.toContain(
+        "ORIGINAL_BODY"
+      )
+      expect(
+        await getDb().messages.where("platformMessageId").equals(create.messageId).count()
+      ).toBe(1)
+    }
+  )
+
+  it("keeps display image bytes out of replayed message parts", async () => {
+    await getDb().sessions.add({
+      id: "display-media",
+      title: "Media",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const event = makeEvent({
+      platform: "lark",
+      messageId: "display-image",
+      raw: { event: { message: { message_type: "image" } } },
+      segments: [{ type: "image", url: "key", dataBase64: "AAAA", mimeType: "image/png" }],
+      plainText: "[image]",
+    })
+    const row = await insertInboundMessage(event, "display-media")
+    expect(row.parts).toEqual([{ type: "text", text: "[image: key]" }])
+    expect(JSON.stringify(row.parts)).not.toContain("base64")
+    expect(row.metadata?.inboundA2UI).toMatchObject({
+      body: [{ displayUrl: "data:image/png;base64,AAAA" }],
+    })
+  })
+
+  it("retains the original Matrix reply when a valid early edit follows a foreign edit", async () => {
+    await getDb().sessions.add({
+      id: "matrix-reply",
+      title: "Matrix",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const parse = (
+      event_id: string,
+      content: Record<string, unknown>,
+      sender = "@alice:srv",
+      origin_server_ts = 1
+    ) =>
+      parseMatrixEvent("matrix", "@bot:srv", "!room:srv", {
+        type: "m.room.message",
+        event_id,
+        content,
+        sender,
+        origin_server_ts,
+      })!
+    const parent = await insertInboundMessage(
+      parse("$parent", { msgtype: "m.text", body: "parent text" }),
+      "matrix-reply"
+    )
+    const create = parse("$original", {
+      msgtype: "m.text",
+      body: "original",
+      "m.relates_to": { "m.in_reply_to": { event_id: "$parent" } },
+    })
+    const content = {
+      "m.relates_to": { rel_type: "m.replace", event_id: "$original" },
+      "m.new_content": { msgtype: "m.text", body: "edited" },
+    }
+    await recordConnectorInboundEdit(parse("$forged", content, "@mallory:srv", 4))
+    await recordConnectorInboundEdit(parse("$edited", content, "@alice:srv", 3))
+    const stored = await insertInboundMessage(create, "matrix-reply")
+    expect(stored.parts).toEqual([{ type: "text", text: "edited" }])
+    expect(stored.metadata?.inboundEditBase).toMatchObject({
+      parts: [{ type: "text", text: "original" }],
+    })
+    expect(stored.metadata?.replyTo).toMatchObject({ messageId: parent.id, preview: "parent text" })
+    const mutation = (await getDb().connectorInboundJobs.toArray()).find(
+      (job) => job.sourceMessageId === create.messageId
+    )!
+    expect(mutation.appliedMutationRevision).toBe(mutation.mutationRevision)
+  })
+
+  it.each([false, true])(
+    "retains early Matrix revision history after create and job pruning with all-redacted=%s",
+    async (allRedacted) => {
+      const parse = (event_id: string, body: string, at: number, target?: string) =>
+        parseMatrixEvent("matrix", "@bot:srv", "!room:srv", {
+          type: "m.room.message",
+          event_id,
+          sender: "@alice:srv",
+          origin_server_ts: at,
+          content: target
+            ? {
+                "m.relates_to": { rel_type: "m.replace", event_id: target },
+                "m.new_content": { msgtype: "m.text", body },
+              }
+            : { msgtype: "m.text", body },
+        })!
+      const recall = (target: string) =>
+        parseMatrixEvent("matrix", "@bot:srv", "!room:srv", {
+          type: "m.room.redaction",
+          event_id: `$redact-${target}`,
+          sender: "@alice:srv",
+          origin_server_ts: 4,
+          redacts: target,
+          content: {},
+        })!
+      const original = parse("$early-original", "original", 1)
+      const first = parse("$early-first", "first", 2, "$early-original")
+      const latest = parse("$early-latest", "latest", 3, "$early-original")
+      await recordConnectorInboundEdit(first)
+      await recordConnectorInboundEdit(latest)
+      if (allRedacted) {
+        await recordConnectorInboundRecall(recall("$early-first"), 4)
+        await recordConnectorInboundRecall(recall("$early-latest"), 4)
+      }
+      await getDb().sessions.add({
+        id: "early-history",
+        title: "history",
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      const stored = await insertInboundMessage(original, "early-history")
+      const history = stored.metadata?.inboundMatrixRevisions as {
+        edits: Record<string, { parts: unknown; inboundA2UI?: { raw?: unknown } }>
+        redactedEditIds: string[]
+      }
+      expect(Object.keys(history.edits).sort()).toEqual([first.messageId, latest.messageId].sort())
+      expect(history.edits[first.messageId]?.parts).toEqual([{ type: "text", text: "first" }])
+      expect(history.edits[latest.messageId]?.inboundA2UI?.raw).toBeUndefined()
+      expect(history.redactedEditIds).toEqual(
+        allRedacted ? [first.messageId, latest.messageId] : []
+      )
+      expect(stored.metadata?.inboundEditBase).toMatchObject({
+        parts: [{ type: "text", text: "original" }],
+      })
+      await getDb().connectorInboundJobs.clear()
+      await getBus().dispatchInboundFull(recall("$early-latest"))
+      expect((await getDb().messages.get(stored.id))?.parts).toEqual([
+        { type: "text", text: allRedacted ? "original" : "first" },
+      ])
+    }
+  )
+
+  it("persists each QQ reply body and attachment once through the actual parser", async () => {
+    await getDb().sessions.add({
+      id: "qq-history",
+      title: "QQ",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const event = parseQQDispatch("qq", "bot", {
+      op: 0,
+      t: "C2C_MESSAGE_CREATE",
+      d: {
+        id: "message",
+        author: { user_openid: "user" },
+        content: "hello",
+        message_reference: { message_id: "parent" },
+        attachments: [{ url: "https://cdn/voice", content_type: "voice" }],
+      },
+    })!
+    const row = await insertInboundMessage(event, "qq-history")
+    const texts = row.parts.map((part) => (part.type === "text" ? part.text : ""))
+    expect(texts).toEqual(["[reply:]", "hello", "[voice]"])
+    expect(texts.join("\n").match(/hello/g)).toHaveLength(1)
+    expect(row.metadata?.replyTo).toMatchObject({ platformMessageId: "parent" })
+  })
+
+  it("stores a terminal tombstone when recall beats the queued create", async () => {
+    await getDb().sessions.add({
+      id: "recall-before-create",
+      title: "Recall",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const event = makeEvent({
+      messageId: "late-create",
+      plainText: "withdrawn secret",
+      segments: [{ type: "text", text: "withdrawn secret" }],
+    })
+    await getBus().dispatchInboundFull({
+      ...event,
+      kind: "delete",
+      replacesMessageId: event.messageId,
+      segments: [],
+      plainText: "",
+    })
+    const row = await insertInboundMessage(event, "recall-before-create")
+    expect(row.parts).toEqual([{ type: "text", text: "[deleted]" }])
+    expect(row.metadata?.deletedAt).toBeDefined()
+    expect((await getDb().sessions.get("recall-before-create"))?.lastMessagePreview).toBe(
+      "[deleted]"
+    )
+    const mutation = (await getDb().connectorInboundJobs.toArray()).find(
+      (job) => job.sourceMessageId === event.messageId
+    )!
+    expect(mutation.appliedMutationRevision).toBe(mutation.mutationRevision)
+    const duplicate = await insertInboundMessage(event, "recall-before-create")
+    expect(duplicate.id).toBe(row.id)
+    expect(duplicate.parts).toEqual(row.parts)
+    expect(duplicate.metadata?.deletedAt).toBe(row.metadata?.deletedAt)
+  })
+
+  it("uses the latest edit for a create waiting to enter the transcript and prompt", async () => {
+    const event = makeEvent({
+      messageId: "queued-edit",
+      plainText: "original secret",
+      segments: [{ type: "text", text: "original secret" }],
+    })
+    await enqueueConnectorInboundJob(event, "queue")
+    await getBus().dispatchInboundFull({
+      ...event,
+      kind: "edit",
+      replacesMessageId: event.messageId,
+      timestamp: event.timestamp + 1,
+      plainText: "edited question",
+      segments: [{ type: "text", text: "edited question" }],
+    })
+    await callHandler(event, "ai-run")
+    const row = await getDb().messages.where("platformMessageId").equals(event.messageId).first()
+    expect(row?.parts).toEqual([{ type: "text", text: "edited question" }])
+    const mutation = (await getDb().connectorInboundJobs.toArray()).find(
+      (job) => job.sourceMessageId === event.messageId
+    )!
+    expect(mutation.appliedMutationRevision).toBe(mutation.mutationRevision)
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("edited question"),
+      expect.anything(),
+      expect.anything()
+    )
+    expect(JSON.stringify((DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls)).not.toContain(
+      "original secret"
     )
   })
 
@@ -2582,6 +3637,15 @@ describe("installRuntime — session reuse", () => {
 })
 
 describe("inboundEventToSendContent", () => {
+  it("withholds resolved data URLs from text prompts without a binary grant", () => {
+    const event = makeEvent({
+      segments: [
+        { type: "image", url: "data:image/png;base64,DISPLAY_ONLY", rawUrl: "remote-key" },
+      ],
+      plainText: "[image]",
+    })
+    expect(inboundEventToSendContent(event)).toBe("[image: remote-key]")
+  })
   it("collapses a single text segment to a plain string", () => {
     const event = makeEvent({
       segments: [{ type: "text", text: "single" }],
@@ -3306,7 +4370,7 @@ describe("installRuntime — ai-run Lark result card", () => {
     await seedLark()
     await callHandler(larkEvent(), "ai-run")
 
-    const jobs = await getDb().outboundQueue.toArray()
+    const jobs = await listPendingForConversation(larkEvent().conversationKey)
     expect(jobs).toHaveLength(2)
     // `[markdown, a2ui]` → `[card, a2ui]` → grouped `[[card], [a2ui]]` so the
     // card never reaches the multi-segment combiner (which degrades it).
@@ -3865,6 +4929,74 @@ describe("installRuntime — ai-run (adapter teardown abort propagation)", () =>
   })
 })
 
+describe("insertInboundMessage — existing chat projection", () => {
+  beforeEach(() => useChatStore.getState().clear())
+  afterEach(() => useChatStore.getState().clear())
+
+  it("projects the committed inbound row before a later assistant in its own existing slice", async () => {
+    await getDb().sessions.put({ id: "projected", title: "IM", createdAt: 1, updatedAt: 1 })
+    const chat = useChatStore.getState()
+    chat.setActiveSession("projected")
+    const assistant = {
+      id: "live-answer",
+      role: "assistant" as const,
+      parts: [{ type: "text" as const, text: "partial" }],
+      metadata: { createdAt: 300 },
+    }
+    chat.replaceSessionMessages("projected", [assistant])
+    chat.replaceSessionMessages("other", [assistant])
+    const other = useChatStore.getState().sessions.other.messages
+
+    const stored = await insertInboundMessage(
+      makeEvent({ messageId: "projected-inbound" }),
+      "projected",
+      200
+    )
+
+    const state = useChatStore.getState()
+    expect(state.sessions.projected.messages.map((message) => message.id)).toEqual([
+      stored.id,
+      "live-answer",
+    ])
+    expect(state.sessions.projected.messages[0]).toMatchObject({
+      role: "user",
+      metadata: {
+        createdAt: 200,
+        sessionId: "projected",
+        platformMessage: { messageId: "projected-inbound" },
+      },
+    })
+    expect(state.sessions.projected.messages[1]).toBe(assistant)
+    expect(state.sessions.other.messages).toBe(other)
+    expect(state.messages).toBe(state.sessions.projected.messages)
+  })
+
+  it("keeps unopened conversations out of the chat store and projects canonical redelivery later", async () => {
+    await getDb().sessions.put({ id: "unopened", title: "IM", createdAt: 1, updatedAt: 1 })
+    const event = makeEvent({ messageId: "unopened-inbound" })
+    const stored = await insertInboundMessage(event, "unopened", 100)
+    expect(useChatStore.getState().sessions.unopened).toBeUndefined()
+    expect(useChatStore.getState().activeSessionId).toBeNull()
+
+    await getDb().messages.update(stored.id, {
+      parts: [{ type: "text", text: "[deleted]" }],
+      metadata: { ...stored.metadata, deletedAt: 200 },
+    })
+    useChatStore.getState().replaceSessionMessages("unopened", [])
+    const replay = await insertInboundMessage(event, "unopened", 300)
+    expect(replay.id).toBe(stored.id)
+    expect(useChatStore.getState().sessions.unopened.messages).toEqual([
+      expect.objectContaining({
+        id: stored.id,
+        parts: [{ type: "text", text: "[deleted]" }],
+        metadata: expect.objectContaining({ createdAt: 100, deletedAt: 200 }),
+      }),
+    ])
+    expect(await getDb().messages.where("sessionId").equals("unopened").count()).toBe(1)
+    expect(useChatStore.getState().activeSessionId).toBeNull()
+  })
+})
+
 describe("insertInboundMessage — session recency bump", () => {
   it("bumps the bound session's updatedAt to the inserted message's timestamp", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_bump" })
@@ -4002,6 +5134,27 @@ function storedMsgRow(
 }
 
 describe("recentGroupContextBlock", () => {
+  it("scrubs legacy inline image markers before projecting group context", async () => {
+    await seedGroupSession("s_ctx")
+    const now = Date.now()
+    await getDb().messages.bulkAdd([
+      storedMsgRow(
+        "m_legacy",
+        "s_ctx",
+        "user",
+        "caption [image: data:image/png;base64,DISPLAY_HISTORY_SENTINEL] done",
+        now - 1_000
+      ),
+    ])
+    const block = await recentGroupContextBlock({
+      event: groupEvent(),
+      excludeMessageId: "m_now",
+      now,
+    })
+    expect(block).toContain("caption [image] done")
+    expect(block).not.toContain("DISPLAY_HISTORY_SENTINEL")
+  })
+
   it("returns undefined for a private conversation", async () => {
     await expect(
       recentGroupContextBlock({ event: makeEvent({}), excludeMessageId: "x" })
@@ -4062,6 +5215,16 @@ describe("recentGroupContextBlock", () => {
 })
 
 describe("withConversationContext", () => {
+  it("scrubs complete and truncated inline image markers from stored reply previews", async () => {
+    const stored = {
+      id: "m_now",
+      metadata: {
+        replyTo: { messageId: "m_1", preview: "caption [image: blob:DISPLAY_REPLY_SENTINEL" },
+      },
+    } as never
+    const out = await withConversationContext("body", { event: makeEvent({}), stored })
+    expect(out).toBe("[replying-to: caption [image]]\nbody")
+  })
   it("prepends the replied-to preview as a bracketed header", async () => {
     const stored = {
       id: "m_now",

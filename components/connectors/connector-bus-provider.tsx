@@ -68,6 +68,7 @@ export function ConnectorBusProvider({
     let cancelRetry: (() => void) | undefined
     let attempt = 0
     let unmounted = false
+    let generation = 0
 
     const clearRetry = () => {
       cancelRetry?.()
@@ -79,14 +80,15 @@ export function ConnectorBusProvider({
      * backoff and try again — but only while routing is still local, since an
      * activated remote host means we are *meant* to have no runtime.
      */
-    const onRuntimeReleased = () => {
-      if (unmounted) return
+    const onRuntimeReleased = (installedGeneration: number) => {
+      if (unmounted || isRemoteHostActive() || installedGeneration !== generation) return
       dispose = undefined
       clearRetry()
       const delay =
         RUNTIME_RECLAIM_BACKOFF_MS[Math.min(attempt, RUNTIME_RECLAIM_BACKOFF_MS.length - 1)]
       attempt += 1
       cancelRetry = scheduleRetry(() => {
+        if (installedGeneration !== generation) return
         cancelRetry = undefined
         if (unmounted || isRemoteHostActive()) return
         boot()
@@ -96,13 +98,17 @@ export function ConnectorBusProvider({
     const boot = () => {
       // `installConnectorRuntime` is safe to call when another context already
       // owns the lock — it simply does not boot a second runtime.
-      dispose ??= install({ onRuntimeReleased })
+      if (dispose) return
+      const installedGeneration = ++generation
+      const notifyReleased = () => onRuntimeReleased(installedGeneration)
+      dispose = install({ onRuntimeReleased: notifyReleased, onRuntimeBusy: notifyReleased })
     }
 
     // Own the local runtime only while routing locally; defer to the remote
     // brain otherwise. Re-evaluated on every active-host switch.
     const sync = () => {
       if (isRemoteHostActive()) {
+        generation += 1
         clearRetry()
         dispose?.()
         dispose = undefined

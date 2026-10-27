@@ -13,7 +13,7 @@
 import { resolveWebEntryBase } from "./entry/deep-links"
 import type { PlatformAdapter } from "@/types/connectors"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
+import { connectorsKeyringGet, connectorsKeyringGetSnapshot } from "@/lib/connectors/tauri/commands"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { createTelegramAdapter } from "./adapters/telegram"
@@ -384,6 +384,7 @@ export async function buildWechatPersonalAdapter(
     id: row.id,
     displayName: row.displayName,
     token: () => connectorsKeyringGet(row.id, "botToken").then((v) => v ?? ""),
+    tokenSnapshot: () => connectorsKeyringGetSnapshot(row.id, "botToken"),
     baseUrl: async () => settings.baseUrl ?? "",
   })
 }

@@ -14,6 +14,34 @@ import { buildReplyPreview, REPLY_PREVIEW_MAX } from "@cognia/agent-config-types
 import type { MessageReplyTo } from "@cognia/agent-config-types"
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { stripInboundDisplayMarkers } from "./inbound-stored-parts"
+import { encodeQQMessageId } from "./adapters/qq-official/serialize"
+import { buildMatrixMessageId } from "./adapters/matrix/ids"
+
+/** Match wire references against adapter-public delivery ids without changing wire replies. */
+export function inboundReplyLookupIds(
+  event: Pick<NormalizedInboundEvent, "platform" | "replyTo" | "conversationRef">
+): string[] {
+  const id = event.replyTo?.messageId
+  if (typeof id !== "string" || !id) return []
+  const ref = event.conversationRef
+  if (
+    event.platform === "matrix" &&
+    typeof ref.roomId === "string" &&
+    !id.startsWith(`${ref.roomId}|`)
+  )
+    return [id, buildMatrixMessageId(ref.roomId, id)]
+  if (
+    event.platform === "qq-official" &&
+    (ref.scene === "group" ||
+      ref.scene === "c2c" ||
+      ref.scene === "channel" ||
+      ref.scene === "direct") &&
+    typeof ref.sceneId === "string"
+  )
+    return [id, encodeQQMessageId(ref.scene, ref.sceneId, id)]
+  return [id]
+}
 
 export interface ResolveInboundReplyToInput {
   event: Pick<NormalizedInboundEvent, "replyTo">
@@ -30,13 +58,18 @@ export async function resolveInboundReplyTo(
   input: ResolveInboundReplyToInput
 ): Promise<MessageReplyTo | undefined> {
   const descriptor = input.event.replyTo
-  if (!descriptor?.messageId) return undefined
-  const snippet = descriptor.snippet.replace(/\s+/g, " ").trim().slice(0, REPLY_PREVIEW_MAX)
+  if (typeof descriptor?.messageId !== "string" || !descriptor.messageId) return undefined
+  const snippet = stripInboundDisplayMarkers(
+    typeof descriptor.snippet === "string" ? descriptor.snippet : ""
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, REPLY_PREVIEW_MAX)
   const parent = await input.findParent(descriptor.messageId)
   if (parent) {
     // Prefer the stored text: the platform's snippet is often truncated or
     // absent, and the row is what the quote will jump to.
-    const preview = buildReplyPreview(parent.parts) || snippet
+    const preview = stripInboundDisplayMarkers(buildReplyPreview(parent.parts)) || snippet
     return { messageId: parent.id, preview, platformMessageId: descriptor.messageId }
   }
   return {

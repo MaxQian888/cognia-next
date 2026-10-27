@@ -48,6 +48,120 @@ async function drain(
 describe("startMatrixSync", () => {
   beforeEach(() => mockInvoke.mockReset())
 
+  it("continues through empty backfill pages carrying another cursor", async () => {
+    const controller = new AbortController()
+    let page = 0
+    mockInvoke.mockImplementation(async (_cmd, { req }: { req: { url: string } }) => {
+      if (!req.url.includes("/messages"))
+        return syncResp("s2", {
+          "!r:s": { timeline: { limited: true, prev_batch: "p1", events: [textEvent("$live")] } },
+        })
+      page += 1
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify(
+          page === 1 ? { chunk: [], end: "p2" } : { chunk: [textEvent("$gap")] }
+        ),
+      }
+    })
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "token",
+      signal: controller.signal,
+      initialSince: "s1",
+      _backoffBaseMs: 1,
+    })
+    try {
+      expect((await gen.next()).value?.event.event_id).toBe("$gap")
+    } finally {
+      controller.abort()
+      await gen.return(undefined)
+    }
+  })
+
+  it("holds the accepted cursor until a failed downtime gap is recovered", async () => {
+    const controller = new AbortController()
+    const checkpoints = jest.fn()
+    let pages = 0
+    mockInvoke.mockImplementation(async (_cmd, { req }: { req: { url: string } }) => {
+      if (req.url.includes("/messages")) {
+        pages += 1
+        if (pages === 1) return { status: 503, headers: {}, body: "unavailable" }
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            chunk: [{ ...textEvent("$recall"), type: "m.room.redaction", redacts: "$original" }],
+          }),
+        }
+      }
+      return syncResp("s2", {
+        "!r:s": { timeline: { limited: true, prev_batch: "pb", events: [textEvent("$live")] } },
+      })
+    })
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "token",
+      signal: controller.signal,
+      initialSince: "s1",
+      onNextBatch: checkpoints,
+      _backoffBaseMs: 1,
+    })
+    try {
+      expect((await gen.next()).value?.event.event_id).toBe("$recall")
+      expect(checkpoints).not.toHaveBeenCalled()
+      const requests = mockInvoke.mock.calls.map(([, args]) => new URL(args.req.url))
+      expect(
+        requests
+          .filter((url) => url.pathname.endsWith("/sync"))
+          .every((url) => url.searchParams.get("since") === "s1")
+      ).toBe(true)
+      expect(
+        requests.find((url) => url.pathname.endsWith("/messages"))?.searchParams.get("to")
+      ).toBe("s1")
+    } finally {
+      controller.abort()
+      await gen.return(undefined)
+    }
+  })
+
+  it("continues from the next backfill page beyond the three-page burst", async () => {
+    const controller = new AbortController()
+    const from: string[] = []
+    mockInvoke.mockImplementation(async (_cmd, { req }: { req: { url: string } }) => {
+      if (!req.url.includes("/messages"))
+        return syncResp("s2", {
+          "!r:s": { timeline: { limited: true, prev_batch: "p1", events: [textEvent("$live")] } },
+        })
+      const cursor = new URL(req.url).searchParams.get("from")!
+      from.push(cursor)
+      const page = Number(cursor.slice(1))
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          chunk: [textEvent(`$gap${page}`)],
+          ...(page < 4 ? { end: `p${page + 1}` } : {}),
+        }),
+      }
+    })
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "token",
+      signal: controller.signal,
+      initialSince: "s1",
+      _backoffBaseMs: 1,
+    })
+    try {
+      expect((await gen.next()).value?.event.event_id).toBe("$gap4")
+      expect(from).toEqual(["p1", "p2", "p3", "p4"])
+    } finally {
+      controller.abort()
+      await gen.return(undefined)
+    }
+  })
+
   it("discards the priming batch and yields subsequent events", async () => {
     const controller = new AbortController()
     mockInvoke

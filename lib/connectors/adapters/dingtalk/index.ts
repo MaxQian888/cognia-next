@@ -90,7 +90,6 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
   // by `healthReasonLabel` (see the Lark adapter for the shared pattern).
   let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined
-  let stopCalled = false
   let selfId = opts.selfId ?? ""
   let transportFailures = 0
 
@@ -163,9 +162,10 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
 
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return
-    stopCalled = false
     abortController = new AbortController()
     const signal = abortController.signal
+    const active = () =>
+      !signal.aborted && abortController?.signal === signal && !ctx.signal?.aborted
     healthState = "running"
     healthReason = undefined
     transportFailures = 0
@@ -180,7 +180,7 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
       // (e.g. wrong appKey/appSecret), so degrade health after N consecutive
       // failures and restore "running" once a connection lands.
       onTransportState: (state) => {
-        if (stopCalled) return
+        if (!active()) return
         if (state.kind === "connected") {
           transportFailures = 0
           healthState = "running"
@@ -214,7 +214,9 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
               await frame.ack?.(false)
               continue
             }
-            if (!(await gateInboundEvent(opts.id, normalized))) {
+            const admitted = await gateInboundEvent(opts.id, normalized)
+            if (!active()) return
+            if (!admitted) {
               await frame.ack?.(true)
               continue
             }
@@ -238,6 +240,7 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
                     downloadCode: decodeURIComponent(rawUrl.slice("dingtalk://download/".length)),
                     robotCode: raw.robotCode || (await opts.appKey()),
                   })
+                  if (!active()) return
                   if (
                     typeof result.downloadUrl !== "string" ||
                     !isPublicHttpUrl(result.downloadUrl)
@@ -260,11 +263,15 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
                 isPublicHttpUrl(segment.url) ? { url: segment.url } : undefined,
               extractLabel: "dingtalk-inbound",
             })
+            if (!active()) return
             lastActivityAt = Date.now()
             await ctx.emit(normalized)
+            if (!active()) return
             await frame.ack?.(true)
           } catch (error) {
+            if (!active()) return
             await frame.ack?.(false).catch(() => {})
+            if (!active()) return
             ctx.logger.warn(
               `DingTalk inbound processing failed: ${error instanceof Error ? error.message : String(error)}`
             )
@@ -272,12 +279,12 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
             healthReason = "transport_error"
           }
         }
-        if (!stopCalled) {
+        if (active()) {
           healthState = "down"
           healthReason = "no_data"
         }
       } catch {
-        if (!stopCalled) {
+        if (active()) {
           healthState = "degraded"
           healthReason = "transport_error"
         }
@@ -286,7 +293,6 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
   }
 
   async function stop(): Promise<void> {
-    stopCalled = true
     abortController?.abort()
     abortController = null
     healthState = "down"

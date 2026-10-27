@@ -1,4 +1,4 @@
-import { parseV11Event, type OneBotV11Event } from "./v11"
+import { parseV11Event, parseV11HistoryMessage, type OneBotV11Event } from "./v11"
 
 const ADAPTER_ID = "ob-test"
 
@@ -224,5 +224,68 @@ describe("parseV11Event", () => {
       user_id: 200001,
     }
     expect(parseV11Event(ADAPTER_ID, event)).toBeNull()
+  })
+})
+
+it("retains the source group of temporary private messages without confusing normal chats", () => {
+  const temp = (groupId: number) =>
+    parseV11Event(ADAPTER_ID, {
+      ...makeBase(),
+      sub_type: "group",
+      sender: { ...makeBase().sender!, group_id: groupId },
+    })!
+  expect(temp(300001).conversationRef).toMatchObject({
+    chatKey: "p:200001",
+    userId: 200001,
+    groupId: 300001,
+  })
+  expect(temp(300002).conversationRef.groupId).toBe(300002)
+  expect(
+    parseV11Event(ADAPTER_ID, {
+      ...makeBase(),
+      sub_type: "friend",
+      sender: { ...makeBase().sender!, group_id: 300001 },
+    })!.conversationRef.groupId
+  ).toBeUndefined()
+})
+
+it.each([
+  { message_id: undefined },
+  { message_id: 0 },
+  { message_id: Number.NaN },
+  { time: Number.NaN },
+  { self_id: 999 },
+  { user_id: 999 },
+  { user_id: 100000, target_id: 999 },
+  { message_type: "group" as const },
+  { post_type: "notice" },
+])("rejects inconsistent history metadata: %j", (override) => {
+  expect(
+    parseV11HistoryMessage(
+      ADAPTER_ID,
+      { ...makeBase(), ...override },
+      {
+        selfId: 100000,
+        chatId: 200001,
+        messageType: "private",
+      }
+    )
+  ).toBeNull()
+})
+
+it("hydrates outgoing history while continuing to ignore live self echoes", () => {
+  const row = { ...makeBase(), post_type: "message_sent", user_id: 100000, target_id: 200001 }
+  expect(parseV11Event(ADAPTER_ID, row)).toBeNull()
+  expect(
+    parseV11HistoryMessage(ADAPTER_ID, row, {
+      selfId: 100000,
+      chatId: 200001,
+      messageType: "private",
+    })
+  ).toMatchObject({
+    sender: { remoteUserId: "100000" },
+    conversationKey: "onebot:ob-test:p:200001",
+    conversationRef: { userId: 200001 },
+    channelData: { onebotHistory: true },
   })
 })

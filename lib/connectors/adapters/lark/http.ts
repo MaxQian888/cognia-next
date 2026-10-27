@@ -29,7 +29,8 @@ async function rawRequest(
   method: LarkHttpMethod,
   urlPath: string,
   body: unknown,
-  token: string
+  token: string,
+  avatarPolicy = false
 ): Promise<unknown> {
   const resp = await connectorsHttpRequest({
     url: `${LARK_API_BASE}${urlPath}`,
@@ -37,6 +38,7 @@ async function rawRequest(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json; charset=utf-8",
+      ...(avatarPolicy ? { "X-Cognia-Avatar-Policy": "1" } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
@@ -84,11 +86,12 @@ export async function larkTenantRequest(
   creds: LarkCredentials,
   method: LarkHttpMethod,
   urlPath: string,
-  body?: unknown
+  body?: unknown,
+  options?: { avatarPolicy?: boolean }
 ): Promise<unknown> {
   return withTatRefresh(creds, async () => {
     const tat = await getTenantAccessToken(creds)
-    return rawRequest(method, urlPath, body, tat)
+    return rawRequest(method, urlPath, body, tat, options?.avatarPolicy)
   })
 }
 

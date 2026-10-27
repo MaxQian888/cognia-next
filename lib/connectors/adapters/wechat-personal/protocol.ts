@@ -11,7 +11,7 @@
  * shapes + builders. The long-poll loop lives in `index.ts`, QR login in
  * `auth.ts`, normalisation in `parse.ts`, media crypto in `media.ts`.
  *
- * Ref: https://github.com/Tencent/openclaw-weixin (SDK 2.4.8).
+ * Ref: https://github.com/Tencent/openclaw-weixin (published SDK 2.4.10).
  */
 
 export const ILINK_DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -102,6 +102,8 @@ export interface IlinkMediaItem {
 
 export interface IlinkItem {
   type: number
+  /** Official per-item identity when the envelope has no message_id. */
+  msg_id?: string
   ref_msg?: { title?: string; message_item?: IlinkItem }
   text_item?: { text?: string }
   image_item?: IlinkMediaItem
@@ -228,9 +230,27 @@ export function ilinkResultCode(value: unknown): number | undefined {
 
 /** Official CDN resolver, with legacy direct URLs retained for existing accounts. */
 export function ilinkMediaUrl(item: IlinkMediaItem | undefined): string | undefined {
-  if (item?.media?.full_url) return item.media.full_url
-  if (item?.media?.encrypt_query_param) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return undefined
+  const fullUrl = item.media?.full_url
+  if (typeof fullUrl === "string" && /^https?:\/\//i.test(fullUrl)) return fullUrl
+  if (typeof item.media?.encrypt_query_param === "string" && item.media.encrypt_query_param) {
     return `https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=${encodeURIComponent(item.media.encrypt_query_param)}`
   }
-  return item?.url
+  return typeof item.url === "string" && /^https?:\/\//i.test(item.url) ? item.url : undefined
+}
+
+/** Only the payload selected by the wire discriminator owns this occurrence. */
+export function ilinkItemMedia(item: IlinkItem | undefined): IlinkMediaItem | undefined {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return undefined
+  const media =
+    item.type === ILINK_ITEM.image
+      ? item.image_item
+      : item.type === ILINK_ITEM.voice
+        ? item.voice_item
+        : item.type === ILINK_ITEM.video
+          ? item.video_item
+          : item.type === ILINK_ITEM.file
+            ? item.file_item
+            : undefined
+  return media && typeof media === "object" && !Array.isArray(media) ? media : undefined
 }

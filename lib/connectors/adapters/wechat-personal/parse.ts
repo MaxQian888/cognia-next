@@ -50,9 +50,12 @@ function cyrb53(str: string, seed = 0): number {
 }
 
 function itemToSegment(item: IlinkItem): MessageSegment | null {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null
   switch (item.type) {
     case ILINK_ITEM.text:
-      return item.text_item?.text ? { type: "text", text: item.text_item.text } : null
+      return typeof item.text_item?.text === "string" && item.text_item.text
+        ? { type: "text", text: item.text_item.text }
+        : null
     case ILINK_ITEM.image:
       return ilinkMediaUrl(item.image_item)
         ? { type: "image", url: ilinkMediaUrl(item.image_item)! }
@@ -62,9 +65,14 @@ function itemToSegment(item: IlinkItem): MessageSegment | null {
         ? {
             type: "voice",
             url: ilinkMediaUrl(item.voice_item)!,
-            transcript: item.voice_item?.text ?? item.voice_item?.transcript,
+            transcript:
+              typeof item.voice_item?.text === "string"
+                ? item.voice_item.text
+                : typeof item.voice_item?.transcript === "string"
+                  ? item.voice_item.transcript
+                  : undefined,
           }
-        : item.voice_item?.text
+        : typeof item.voice_item?.text === "string" && item.voice_item.text
           ? { type: "text", text: item.voice_item.text }
           : null
     case ILINK_ITEM.video:
@@ -76,7 +84,7 @@ function itemToSegment(item: IlinkItem): MessageSegment | null {
         ? {
             type: "file",
             url: ilinkMediaUrl(item.file_item)!,
-            name: item.file_item?.file_name ?? "file",
+            name: typeof item.file_item?.file_name === "string" ? item.file_item.file_name : "file",
             mimeType: "application/octet-stream",
             sizeBytes:
               Number.isFinite(Number(item.file_item?.len)) && Number(item.file_item?.len) >= 0
@@ -98,15 +106,27 @@ export function parseIlinkMessage(
   msg: IlinkMessage,
   now: number = Date.now()
 ): NormalizedInboundEvent | null {
+  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return null
   if (msg.message_type !== ILINK_MSG.fromUser) return null
-  if (!msg.from_user_id || !msg.context_token) return null
+  if (
+    typeof msg.from_user_id !== "string" ||
+    !msg.from_user_id ||
+    typeof msg.context_token !== "string" ||
+    !msg.context_token
+  )
+    return null
 
-  const segments = (msg.item_list ?? []).flatMap((item): MessageSegment[] => {
+  const items = Array.isArray(msg.item_list) ? msg.item_list : []
+  const segments = items.flatMap((item): MessageSegment[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return []
     const result: MessageSegment[] = []
     const quote = item.ref_msg
     if (quote) {
       const quoted = quote.message_item ? itemToSegment(quote.message_item) : null
-      const snippet = [quote.title, quoted?.type === "text" ? quoted.text : undefined]
+      const snippet = [
+        typeof quote.title === "string" ? quote.title : undefined,
+        quoted?.type === "text" ? quoted.text : undefined,
+      ]
         .filter(Boolean)
         .join(" | ")
       if (snippet) result.push({ type: "reply", messageId: "", snippet })
@@ -123,22 +143,35 @@ export function parseIlinkMessage(
     adapterId,
     userId: msg.from_user_id,
     contextToken: msg.context_token,
-    sessionId: msg.session_id,
+    sessionId: typeof msg.session_id === "string" ? msg.session_id : undefined,
   }
   const conversationKey = buildConversationKey("wechat-personal", adapterId, msg.from_user_id)
   const plainText = segmentsToPlainText(segments).trim()
+  const messageId =
+    typeof msg.message_id === "string" && msg.message_id.trim()
+      ? msg.message_id.trim()
+      : typeof msg.message_id === "number" && Number.isSafeInteger(msg.message_id)
+        ? String(msg.message_id)
+        : items
+            .find((item) => typeof item?.msg_id === "string" && item.msg_id.trim())
+            ?.msg_id?.trim()
+  let fingerprint = ""
+  if (!messageId) {
+    try {
+      fingerprint = JSON.stringify(items)
+    } catch {
+      fingerprint = JSON.stringify(segments)
+    }
+  }
 
   return {
     platform: "wechat-personal",
     adapterId,
-    selfId: msg.to_user_id ?? "",
+    selfId: typeof msg.to_user_id === "string" ? msg.to_user_id : "",
     // Prefer server identity; older gateways require a stable content fingerprint.
-    messageId:
-      msg.message_id != null
-        ? String(msg.message_id)
-        : `${msg.context_token}:${msg.session_id ?? ""}:${cyrb53(
-            JSON.stringify(msg.item_list ?? [])
-          ).toString(36)}`,
+    messageId: messageId
+      ? messageId
+      : `${msg.context_token}:${msg.session_id ?? ""}:${cyrb53(fingerprint).toString(36)}`,
     conversationRef,
     conversationKey,
     sender: {
@@ -161,8 +194,17 @@ export function parseIlinkMessage(
 const SINGLE_DIGIT_RE = /^\s*([1-9])\s*$/
 
 function extractTextForNumeric(msg: IlinkMessage): string {
-  const items = msg.item_list ?? []
-  if (items.some((item) => item.type !== ILINK_ITEM.text || item.ref_msg)) return ""
+  const items = Array.isArray(msg.item_list) ? msg.item_list : []
+  if (
+    items.some(
+      (item) =>
+        !item ||
+        item.type !== ILINK_ITEM.text ||
+        item.ref_msg ||
+        typeof item.text_item?.text !== "string"
+    )
+  )
+    return ""
   return items.map((item) => item.text_item?.text ?? "").join("\n")
 }
 
@@ -185,8 +227,15 @@ export function tryParseNumericCallback(
   msg: IlinkMessage,
   now: number = Date.now()
 ): ConnectorCallbackEvent | null {
+  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return null
   if (msg.message_type !== ILINK_MSG.fromUser) return null
-  if (!msg.from_user_id || !msg.context_token) return null
+  if (
+    typeof msg.from_user_id !== "string" ||
+    !msg.from_user_id ||
+    typeof msg.context_token !== "string" ||
+    !msg.context_token
+  )
+    return null
   const text = extractTextForNumeric(msg)
   if (!text) return null
   const match = SINGLE_DIGIT_RE.exec(text)
@@ -205,7 +254,7 @@ export function tryParseNumericCallback(
   return {
     platform: "wechat-personal",
     adapterId,
-    selfId: msg.to_user_id ?? "",
+    selfId: typeof msg.to_user_id === "string" ? msg.to_user_id : "",
     triggerId,
     surfaceId: "",
     componentId: undefined,

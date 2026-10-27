@@ -72,7 +72,9 @@ function mapElement(el: SlackBlockElement): InboundA2UINode | null {
         kind: "button",
         label: textOf(el.text),
         url: el.url,
-        actionId: el.action_id,
+        ...(Object.hasOwn(el, "action_id") || Object.hasOwn(el, "value")
+          ? { actionId: typeof el.action_id === "string" ? el.action_id : "" }
+          : {}),
         style: el.style === "primary" ? "primary" : el.style === "danger" ? "danger" : "default",
       }
     case "image":
@@ -89,7 +91,7 @@ function mapElement(el: SlackBlockElement): InboundA2UINode | null {
       return {
         kind: "button",
         label: textOf(el.text) || "Select…",
-        actionId: el.action_id,
+        actionId: typeof el.action_id === "string" ? el.action_id : "",
       }
     default:
       return null

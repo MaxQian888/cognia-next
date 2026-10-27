@@ -35,7 +35,7 @@ import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/messag
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { ONEBOT_A2UI_CAPABILITY, ONEBOT_CAPS } from "./capability"
 import { parseOneBotEvent, clearVariantCache } from "./parse"
-import { parseV11Event, type OneBotV11Event } from "./v11"
+import { parseV11HistoryMessage, type OneBotV11Event } from "./v11"
 import {
   serializeOutboundV11,
   serializeOutboundV12,
@@ -116,6 +116,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
   let currentVariant: "v11" | "v12" | null = null
+  let upstreamImpl: string | undefined
+  let upstreamProbe: Promise<void> | undefined
   let supportedActions: Promise<Set<string>> | undefined
   let currentSelf: SerializedOneBotCall["self"]
   let lifecycle = 0
@@ -199,6 +201,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           .toLowerCase()
           .split(/[.\-_:\s]/)[0]
           ?.replace(/[^a-z0-9]/g, "") || "unknown"
+      upstreamImpl = impl
 
       // Capability features advertised by extensions of the OneBot spec
       // — `markdown-card` is what NapCat calls its QQ markdown card
@@ -217,6 +220,9 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
         // LLOneBot originated the set_msg_emoji_like action (NapCat adopted
         // it), so reactions are safe to advertise there too.
         features.push("set_msg_emoji_like")
+      } else if (impl === "snowluma") {
+        // SnowLuma v2.2.0 implements these actions, but not NapCat markdown cards.
+        features.push("upload_group_file", "upload_private_file", "set_msg_emoji_like")
       }
 
       try {
@@ -360,6 +366,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
       onOpen: () => {
         if (!active()) return
         supportedActions = undefined
+        upstreamImpl = undefined
         healthState = "running"
         healthReason = undefined
         lastActivityAt = Date.now()
@@ -369,7 +376,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
         // `get_version_info` outcome doubles as the variant hint for
         // `probeIdentity`, which records the bot's own UIN + nickname into the
         // whoami snapshot — hence the sequential chain.
-        void (async () => {
+        upstreamProbe = (async () => {
           const versionInfoOk = await probeUpstreamImpl(active)
           if (active()) await probeIdentity(ctx, versionInfoOk, active)
         })()
@@ -454,6 +461,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     await transport.stop()
     clearVariantCache(opts.id)
     currentVariant = null
+    upstreamImpl = undefined
+    upstreamProbe = undefined
     currentSelf = undefined
     supportedActions = undefined
     healthState = "down"
@@ -614,6 +623,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
   /** Shared feature gate for the reaction pair (see addReaction docs). */
   async function assertReactionSupported(): Promise<void> {
+    await upstreamProbe
     const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
     const row = await getAdapterInstance(opts.id)
     const features = row?.implMetadata?.features ?? []
@@ -658,10 +668,9 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
   /**
    * Walk `get_group_msg_history` / `get_friend_msg_history` (NapCat /
-   * go-cqhttp extension) with `message_seq` cursor pagination. Each returned
-   * message is projected through `parseV11Event`, the same parser the live
-   * reverse-WS path uses, so the consumer sees identical
-   * `NormalizedInboundEvent` shapes.
+   * go-cqhttp extension). SnowLuma uses signed `message_id` anchors; other
+   * implementations retain `message_seq`. API rows are normalized separately
+   * from live events so history can include self-sent and sanitized messages.
    *
    * v12 has no portable history action — calling fetchHistory on a v12
    * adapter throws because there is no honest result to yield.
@@ -669,8 +678,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
    * Bounds:
    *   - per-page size = 20 (NapCat / go-cqhttp default cap)
    *   - max pages    = 50 (safety stop)
-   *   - `opts.before` is forwarded as the starting `message_seq` (fetches
-   *     older messages strictly before that seq).
+   *   - `opts.before` selects the starting cursor; inclusive anchors are skipped.
    *   - `opts.max` further caps total events yielded.
    */
   async function* fetchHistory(
@@ -689,7 +697,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     // colon, so we can't reuse `parseConversationKey` (it would put "g" into
     // remoteChatId and the id into threadId).
     const segs = conversationKey.split(":")
-    if (segs.length !== 4 || segs[0] !== "onebot") {
+    if (segs.length !== 4 || segs[0] !== "onebot" || segs[1] !== opts.id) {
       throw new Error(
         `OneBot conversationKey must encode chatType:chatId (got "${conversationKey}").`
       )
@@ -705,27 +713,71 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     const pageSize = 20
     const maxPages = 50
     const overallCap = historyOpts.max ?? Number.POSITIVE_INFINITY
+    if (overallCap <= 0) return
+
+    await upstreamProbe
+    const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+    const impl = upstreamImpl ?? (await getAdapterInstance(opts.id))?.implMetadata?.impl
+    const snowLuma = impl === "snowluma"
+    const cursorField = snowLuma ? "message_id" : "message_seq"
+    const context = {
+      selfId: Number(opts.selfBotUin),
+      chatId: Number(chatId),
+      messageType: chatType === "g" ? ("group" as const) : ("private" as const),
+    }
+    if (
+      !Number.isSafeInteger(context.selfId) ||
+      context.selfId <= 0 ||
+      !Number.isSafeInteger(context.chatId) ||
+      context.chatId <= 0
+    )
+      throw new OneBotValidationError("OneBot history requires numeric self and chat IDs")
 
     let cursor: number | undefined = historyOpts.before ? Number(historyOpts.before) : undefined
+    if (cursor !== undefined && (!Number.isSafeInteger(cursor) || (snowLuma && cursor === 0)))
+      throw new OneBotValidationError("OneBot history cursor must be a valid integer")
+    const seen = new Set<string>(historyOpts.before ? [historyOpts.before] : [])
+    const cursors = new Set<number>(cursor !== undefined ? [cursor] : [])
+    let privateNewestFirst = false
     let yielded = 0
 
     for (let page = 0; page < maxPages; page++) {
+      // SnowLuma includes the anchor in its page; reserve a slot for it.
+      const count = pageSize + (snowLuma && cursor !== undefined ? 1 : 0)
       const call =
         chatType === "g"
-          ? serializeGetGroupMsgHistoryV11(chatId, cursor, pageSize)
-          : serializeGetFriendMsgHistoryV11(chatId, cursor, pageSize)
+          ? serializeGetGroupMsgHistoryV11(chatId, cursor, count, cursorField)
+          : serializeGetFriendMsgHistoryV11(chatId, cursor, count, cursorField)
 
       const resp = await transport.send(call)
       assertOneBotSuccess(resp, call.action)
 
-      const data = resp.data as { messages?: OneBotV11Event[] } | null
+      const data = resp.data as { messages?: Partial<OneBotV11Event>[] } | null
       const messages = data?.messages ?? []
+      if (!Array.isArray(messages))
+        throw new OneBotRpcError("OneBot history returned invalid messages")
       if (messages.length === 0) return
 
+      let oldest: { row: Partial<OneBotV11Event>; event: NormalizedInboundEvent } | undefined
+      const privateRows: { id: number; timestamp: number }[] = []
+      let newMessages = 0
       for (const msg of messages) {
         if (yielded >= overallCap) return
-        const event = parseV11Event(opts.id, msg)
+        const event = parseV11HistoryMessage(opts.id, msg, context)
         if (event) {
+          if (snowLuma && chatType === "p")
+            privateRows.push({ id: msg.message_id!, timestamp: event.timestamp })
+          if (seen.has(event.messageId)) continue
+          if (
+            !oldest ||
+            event.timestamp < oldest.event.timestamp ||
+            (event.timestamp === oldest.event.timestamp &&
+              !(snowLuma && chatType === "p") &&
+              (msg.message_seq ?? 0) < (oldest.row.message_seq ?? 0))
+          )
+            oldest = { row: msg, event }
+          seen.add(event.messageId)
+          newMessages++
           yielded++
           yield event
         }
@@ -733,16 +785,40 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
 
       // Avoid querying an exhausted cursor: NapCat rejects a request beyond
       // the oldest message instead of returning another empty page.
-      if (yielded >= overallCap || messages.length < pageSize) return
+      if (
+        yielded >= overallCap ||
+        (!snowLuma && messages.length < count) ||
+        (!(snowLuma && chatType === "p") && (newMessages === 0 || !oldest))
+      )
+        return
 
-      // Page returned in chronological order — oldest message's seq becomes
-      // the new cursor for the next (older) page. NapCat exposes message_seq
-      // alongside message_id; fall back to the oldest message_id if absent
-      // (go-cqhttp legacy behaviour).
-      const oldest = messages[0] as OneBotV11Event & { message_seq?: number }
-      const nextCursor = oldest.message_seq ?? oldest.message_id
-      if (nextCursor === undefined || nextCursor === cursor) return
-      cursor = nextCursor as number
+      // Choose the oldest row even if the upstream returns newest-first.
+      // A signed SnowLuma message ID is opaque, never a sortable sequence.
+      let nextCursor = snowLuma
+        ? oldest?.row.message_id
+        : (oldest?.row.message_seq ?? oldest?.row.message_id)
+      if (privateRows.length) {
+        // A C2C sequence is sender-local. Learn page order from timestamps or
+        // an inclusive anchor at an edge, then use the oldest page boundary.
+        // Include seen rows: a filtered overlapping page can contain no new
+        // messages while still offering an older, untried anchor.
+        const first = privateRows[0]
+        const last = privateRows[privateRows.length - 1]
+        if (first.timestamp !== last.timestamp)
+          privateNewestFirst = first.timestamp > last.timestamp
+        else if (privateRows.length > 1 && cursor !== undefined) {
+          if (first.id === cursor) privateNewestFirst = true
+          else if (last.id === cursor) privateNewestFirst = false
+        }
+        const oldestAt = Math.min(...privateRows.map((row) => row.timestamp))
+        const anchors = privateRows.filter(
+          (row) => row.timestamp === oldestAt && !cursors.has(row.id)
+        )
+        nextCursor = (privateNewestFirst ? anchors[anchors.length - 1] : anchors[0])?.id
+      }
+      if (nextCursor === undefined || cursors.has(nextCursor)) return
+      cursors.add(nextCursor)
+      cursor = nextCursor
     }
   }
 

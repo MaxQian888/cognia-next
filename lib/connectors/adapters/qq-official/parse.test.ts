@@ -18,6 +18,48 @@ describe("stripChannelMention", () => {
 })
 
 describe("parseQQDispatch", () => {
+  it.each(["PUBLIC_MESSAGE_DELETE", "MESSAGE_DELETE", "DIRECT_MESSAGE_DELETE"])(
+    "normalizes the official %s recall notification",
+    (t) => {
+      const event = parseQQDispatch(ADAPTER, SELF, {
+        op: 0,
+        t,
+        d: {
+          message: {
+            id: "parent",
+            channel_id: "channel",
+            guild_id: "guild",
+            author: { id: "original-author" },
+          },
+          op_user: { id: "user" },
+        },
+      })
+      expect(event).toMatchObject({
+        kind: "delete",
+        replacesMessageId: "parent",
+        segments: [],
+        plainText: "",
+        sender: { remoteUserId: "user" },
+      })
+      expect(event?.conversationKey).toBe(
+        `qq-official:${ADAPTER}:${t === "DIRECT_MESSAGE_DELETE" ? "guild" : "channel"}`
+      )
+    }
+  )
+  it("contains malformed timestamps without losing valid text", () => {
+    expect(
+      parseQQDispatch(
+        ADAPTER,
+        SELF,
+        dispatch("C2C_MESSAGE_CREATE", {
+          id: "bad-time",
+          author: { user_openid: "user" },
+          timestamp: { toString: null },
+          content: "kept",
+        } as never)
+      )?.plainText
+    ).toBe("kept")
+  })
   it("parses a group @ message", () => {
     const out = parseQQDispatch(
       ADAPTER,
@@ -203,4 +245,67 @@ describe("parseQQDispatch", () => {
       parseQQDispatch(ADAPTER, SELF, dispatch("GROUP_AT_MESSAGE_CREATE", { id: "m", content: "x" }))
     ).toBeNull() // missing group_openid
   })
+})
+it("preserves official voice/video attachments and message references", () => {
+  const out = parseQQDispatch(
+    ADAPTER,
+    SELF,
+    dispatch("C2C_MESSAGE_CREATE", {
+      id: "m1",
+      author: { user_openid: "u" },
+      content: "reply",
+      message_reference: { message_id: "previous" },
+      attachments: [
+        null,
+        { url: "//cdn.example/voice", content_type: "voice" },
+        { url: "cdn.example/video", content_type: "video/mp4" },
+        { url: "javascript:alert(1)", content_type: "image/png" },
+      ],
+    } as unknown as NonNullable<QQDispatch["d"]>)
+  )
+  expect(out?.segments).toEqual([
+    { type: "reply", messageId: "previous", snippet: "" },
+    { type: "text", text: "reply" },
+    { type: "voice", url: "https://cdn.example/voice", mimeType: undefined },
+    { type: "video", url: "https://cdn.example/video", mimeType: "video/mp4" },
+  ])
+  expect(out?.replyTo).toEqual({ messageId: "previous", snippet: "" })
+})
+
+it.each(["AT_MESSAGE_CREATE", "DIRECT_MESSAGE_CREATE"])(
+  "preserves actual author avatar for %s",
+  (event) => {
+    const url = "https://qqchannel-profile-1251316161.file.myqcloud.com/profile.png"
+    const result = parseQQDispatch(
+      ADAPTER,
+      SELF,
+      dispatch(event, {
+        id: "portrait",
+        channel_id: "channel",
+        guild_id: "guild",
+        content: "hello",
+        author: { id: "opaque-user", avatar: url },
+      })
+    )
+    expect(result?.sender).toMatchObject({
+      remoteUserId: "opaque-user",
+      remoteIdType: "channel_user",
+      avatarUrl: url,
+    })
+  }
+)
+
+it("does not promote arbitrary group message fields or ARK content into an author portrait", () => {
+  const result = parseQQDispatch(
+    ADAPTER,
+    SELF,
+    dispatch("GROUP_AT_MESSAGE_CREATE", {
+      id: "group",
+      group_openid: "group-openid",
+      content: "kept",
+      author: { member_openid: "opaque", avatar: "https://q1.qlogo.cn/arbitrary" },
+    })
+  )
+  expect(result?.sender.avatarUrl).toBeUndefined()
+  expect(result?.sender.remoteIdType).toBe("group_openid")
 })

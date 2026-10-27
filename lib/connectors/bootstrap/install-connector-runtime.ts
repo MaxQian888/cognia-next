@@ -120,6 +120,8 @@ import { isOwnedElsewhere, runsHere } from "@/lib/placement/ownership"
 export type ConnectorRuntimeLogLevel = "info" | "warn" | "error"
 
 export interface InstallConnectorRuntimeOptions {
+  /** Ownership was unavailable; the desktop host may retry without booting a second runtime. */
+  onRuntimeBusy?: () => void
   /** Installation result only: individual adapter failures remain isolated. */
   onBootstrapped?: (result: { ok: true } | { ok: false; error: unknown }) => void
 
@@ -294,11 +296,16 @@ const consoleLog = (level: ConnectorRuntimeLogLevel, message: string): void => {
 }
 
 export function adapterRuntimeFingerprint(row: AdapterInstanceRow): string {
+  let settings = row.settings
+  if (row.type === "wechat-personal") {
+    const { ilinkCheckpoint: _checkpoint, ...connectionSettings } = settings ?? {}
+    settings = connectionSettings
+  }
   return JSON.stringify([
     row.type,
     row.transportMode,
     row.publicUrl ?? null,
-    row.settings,
+    settings,
     row.credentialsRef,
   ])
 }
@@ -570,6 +577,7 @@ export function installConnectorRuntime(
         "warn",
         "[connector-bus] another window already owns the connector runtime; not starting a second instance"
       )
+      opts.onRuntimeBusy?.()
       return
     }
     ownsRuntime = true

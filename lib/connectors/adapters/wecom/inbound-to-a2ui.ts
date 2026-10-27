@@ -10,43 +10,46 @@
 
 import type { InboundA2UIBlock, InboundA2UINode } from "../_shared/inbound-a2ui-types"
 import type { WeComInboundMsgBody } from "./protocol"
+import { wecomBodyToSegments } from "./parse"
+
+function bodyNodes(body: Parameters<typeof wecomBodyToSegments>[0]): InboundA2UINode[] {
+  const nodes: InboundA2UINode[] = []
+  for (const segment of wecomBodyToSegments(body)) {
+    switch (segment.type) {
+      case "text":
+        nodes.push({ kind: "text", text: segment.text })
+        break
+      case "markdown":
+        nodes.push({ kind: "text", text: segment.md, format: "markdown" })
+        break
+      case "image":
+        nodes.push({ kind: "image", url: segment.url })
+        break
+      case "voice":
+        nodes.push({
+          kind: "link",
+          href: segment.url,
+          label: segment.transcript || "Voice message",
+        })
+        break
+      case "video":
+        nodes.push({ kind: "link", href: segment.url, label: "Video" })
+        break
+      case "file":
+        nodes.push({ kind: "link", href: segment.url, label: body.file?.filename || "Attachment" })
+        break
+    }
+  }
+  return nodes
+}
 
 export function wecomInboundToA2UI(body: WeComInboundMsgBody): InboundA2UIBlock | null {
   if (!body || typeof body !== "object") return null
-  const nodes: InboundA2UINode[] = []
-
-  switch (body.msgtype) {
-    case "text":
-      if (body.text?.content) nodes.push({ kind: "text", text: body.text.content })
-      break
-    case "markdown":
-      if (body.markdown?.content) nodes.push({ kind: "text", text: body.markdown.content })
-      break
-    case "image":
-      if (body.image?.url) nodes.push({ kind: "image", url: body.image.url })
-      break
-    case "voice":
-      if (body.voice?.url)
-        nodes.push({
-          kind: "link",
-          href: body.voice.url,
-          label: body.voice.transcript || "Voice message",
-        })
-      break
-    case "video":
-      if (body.video?.url) nodes.push({ kind: "link", href: body.video.url, label: "Video" })
-      break
-    case "file":
-      if (body.file?.url)
-        nodes.push({ kind: "link", href: body.file.url, label: body.file.filename || "Attachment" })
-      break
-    case "mixed":
-      for (const item of body.mixed?.msg_item ?? []) {
-        if (item.text?.content) nodes.push({ kind: "text", text: item.text.content })
-        else if (item.image?.url) nodes.push({ kind: "image", url: item.image.url })
-      }
-      break
-  }
+  const quoted = body.quote ? bodyNodes(body.quote) : []
+  const nodes: InboundA2UINode[] = [
+    ...(quoted.length ? [{ kind: "card" as const, children: quoted }] : []),
+    ...bodyNodes(body),
+  ]
 
   if (nodes.length === 0) return null
   return { v: 1, source: "wecom", body: nodes, raw: body }

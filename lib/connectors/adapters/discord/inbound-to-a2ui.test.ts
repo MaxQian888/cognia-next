@@ -1,6 +1,15 @@
 import { discordInboundToA2UI } from "./inbound-to-a2ui"
 
 describe("discordInboundToA2UI", () => {
+  it("does not turn a callback-style button without custom_id into a link", () => {
+    expect(
+      discordInboundToA2UI({
+        components: [
+          { type: 1, components: [{ type: 2, style: 1, label: "Act", url: "https://x.test" }] },
+        ],
+      })?.body[0]
+    ).toMatchObject({ children: [{ actionId: "" }] })
+  })
   it("returns null on an empty payload", () => {
     expect(discordInboundToA2UI({})).toBeNull()
   })

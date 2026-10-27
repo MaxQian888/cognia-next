@@ -6,7 +6,7 @@ import { renderHook } from "@testing-library/react"
 
 const mockUseLiveQuery = jest.fn()
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockUseLiveQuery(),
+  useLiveQuery: (...args: unknown[]) => mockUseLiveQuery(...args),
 }))
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
@@ -58,6 +58,17 @@ describe("isActivityKind", () => {
 })
 
 describe("useConversationActivity", () => {
+  it("keeps the query dependencies stable across live clock re-renders", () => {
+    mockUseLiveQuery.mockReturnValue([])
+    const now = jest.fn(() => 1000)
+    const { rerender } = renderHook(() => useConversationActivity("ck", { now }))
+    const deps = mockUseLiveQuery.mock.calls.at(-1)?.[1]
+    now.mockReturnValue(2000)
+    rerender()
+    expect(mockUseLiveQuery.mock.calls.at(-1)?.[1]).toEqual(deps)
+    expect(now).toHaveBeenCalledTimes(1)
+  })
+
   it("returns the live-queried entries", () => {
     const rows = [{ id: "e1", kind: "inbound.edited", at: 5 }]
     mockUseLiveQuery.mockReturnValue(rows)

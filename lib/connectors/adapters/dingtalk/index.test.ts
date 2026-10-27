@@ -89,6 +89,55 @@ beforeEach(() => {
 })
 
 describe("createDingTalkAdapter — meta + capability", () => {
+  it("ignores a stopped run's delayed admission and transport health after restart", async () => {
+    let entered!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    let release!: (value: boolean) => void
+    gateInboundEvent.mockImplementationOnce(() => {
+      entered()
+      return new Promise<boolean>((resolve) => {
+        release = resolve
+      })
+    })
+    framesImpl = async function* () {
+      yield {
+        topic: "/v1.0/im/bot/messages/get",
+        data: {
+          msgId: "old-pending",
+          conversationId: "c",
+          conversationType: "1",
+          msgtype: "text",
+          text: { content: "old" },
+          senderStaffId: "u",
+        },
+      }
+    }
+    const a = makeAdapter()
+    const oldEmit = jest.fn(),
+      currentEmit = jest.fn()
+    await a.start(makeCtx("ad_1", oldEmit))
+    await ready
+    const oldState = capturedStreamOpts!.onTransportState!
+    await a.stop()
+    framesImpl = async function* () {
+      await new Promise<void>(() => {})
+    }
+    await a.start(makeCtx("ad_1", currentEmit))
+    release(true)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    oldState({ kind: "failure", reason: "old" })
+    oldState({ kind: "failure", reason: "old" })
+    oldState({ kind: "failure", reason: "old" })
+    try {
+      expect(oldEmit).not.toHaveBeenCalled()
+      expect(currentEmit).not.toHaveBeenCalled()
+      expect(a.health().state).toBe("running")
+    } finally {
+      await a.stop()
+    }
+  })
   it("exposes dingtalk meta, capability matrix, and empty skill capabilities", () => {
     const a = makeAdapter()
     expect(a.meta.type).toBe("dingtalk")

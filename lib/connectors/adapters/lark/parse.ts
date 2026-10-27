@@ -217,6 +217,7 @@ function buildPlatformIdentity(adapterId: string, openId: string): PlatformIdent
     platform: "lark",
     adapterId,
     remoteUserId: openId,
+    remoteIdType: "open_id",
     displayName: undefined,
     avatarUrl: undefined,
   }
@@ -725,6 +726,7 @@ export function parseLarkEventEnvelope(
   const conversationKey = buildConversationKey("lark", adapterId, chatId, threadId)
   const senderIdentity = {
     ...buildPlatformIdentity(adapterId, openId),
+    remoteIdType: sender.sender_id?.open_id ? "open_id" : (sender.id_type ?? "open_id"),
     kind:
       sender.id_type === "app_id" || sender.sender_type === "app" || sender.sender_type === "bot"
         ? ("bot" as const)

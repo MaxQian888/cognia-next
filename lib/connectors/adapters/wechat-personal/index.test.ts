@@ -7,6 +7,16 @@ import type { AdapterContext } from "@/types/connectors/adapter"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { WechatPersonalConversationRef } from "./parse"
 import { ILINK_ITEM, ILINK_MSG } from "./protocol"
+import { encryptIlinkMedia } from "./media"
+import { isTauri } from "@/lib/platform/detect"
+import type { ConnectorCommandInvoker } from "@/lib/connectors/tauri/commands"
+jest.mock("@/lib/db/adapter-instances", () => ({
+  getAdapterInstance: jest.fn(),
+  commitWechatPersonalCheckpoint: jest.fn(),
+}))
+import { getAdapterInstance, commitWechatPersonalCheckpoint } from "@/lib/db/adapter-instances"
+const mockGetAdapterInstance = getAdapterInstance as jest.Mock
+const mockCommitCheckpoint = commitWechatPersonalCheckpoint as jest.Mock
 
 const mockAttachmentRead = jest.fn(async (..._args: unknown[]): Promise<string | null> => null)
 jest.mock("@/lib/connectors/tauri/commands", () => ({
@@ -99,6 +109,22 @@ const userMsg = (text: string, ctxToken = "ctx-1") => ({
 })
 
 beforeEach(() => {
+  mockGetAdapterInstance.mockReset().mockResolvedValue({ settings: {} })
+  mockCommitCheckpoint
+    .mockReset()
+    .mockImplementation(
+      async (
+        id: string,
+        _expected: unknown,
+        next: Record<string, unknown>,
+        isCurrent: () => boolean
+      ) => {
+        const row = await mockGetAdapterInstance(id)
+        if (!row || !isCurrent()) return false
+        Object.assign(row.settings, { ilinkCheckpoint: next })
+        return true
+      }
+    )
   mockNumericReceipts.clear()
   mockAttachmentRead.mockReset()
   mockAttachmentRead.mockResolvedValue(null)
@@ -107,6 +133,708 @@ beforeEach(() => {
 })
 
 describe("createWechatPersonalAdapter — inbound long-poll", () => {
+  it("decrypts inbound images through the headless command invoker without a Tauri marker", async () => {
+    expect(isTauri()).toBe(false)
+    const commands = jest.requireActual<typeof import("@/lib/connectors/tauri/commands")>(
+      "@/lib/connectors/tauri/commands"
+    )
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+    const key = new Uint8Array(16)
+    const encrypted = encryptIlinkMedia(new Uint8Array(Buffer.from(png, "base64")), key)
+    const invoke = jest.fn(async (name: string, args?: Record<string, unknown>) => {
+      if (name === "connectors_attachment_read") return Buffer.from(encrypted).toString("base64")
+      if (name === "connectors_attachment_fetch")
+        return {
+          cacheKey: "headless",
+          remoteRef: args?.remoteRef,
+          sizeBytes: encrypted.length,
+          createdAt: 1,
+          lastAccessedAt: 1,
+          cached: false,
+        }
+      throw new Error(`Unexpected command ${name}`)
+    })
+    const previous = commands.setConnectorCommandInvoker(invoke as ConnectorCommandInvoker)
+    mockAttachmentRead.mockImplementation(async (...args: unknown[]) =>
+      commands.connectorsAttachmentRead(args[0] as string, args[1] as string, args[2] as number)
+    )
+    const emit = jest.fn(async (_event: NormalizedInboundEvent) => undefined)
+    let polls = 0
+    const { ctx } = makeCtx({
+      emit,
+      fetchAttachment: jest.fn(async (adapterId: string, remoteRef: string) =>
+        commands.connectorsAttachmentFetch(adapterId, remoteRef, remoteRef)
+      ),
+      getUpdates: () =>
+        ++polls === 1
+          ? {
+              ret: 0,
+              msgs: [
+                {
+                  ...userMsg(""),
+                  item_list: [
+                    {
+                      type: ILINK_ITEM.image,
+                      image_item: {
+                        media: {
+                          full_url: "https://cdn/encrypted",
+                          aes_key: Buffer.from(key).toString("base64"),
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    try {
+      await a.start(ctx)
+      for (let i = 0; i < 30 && emit.mock.calls.length === 0; i++) await tick()
+      expect(emit.mock.calls[0][0].segments).toEqual([
+        expect.objectContaining({
+          type: "image",
+          url: `data:image/png;base64,${png}`,
+          dataBase64: png,
+          rawUrl: "https://cdn/encrypted",
+        }),
+      ])
+      expect(invoke.mock.calls.map(([name]) => name)).toEqual([
+        "connectors_attachment_fetch",
+        "connectors_attachment_read",
+      ])
+    } finally {
+      await a.stop()
+      commands.setConnectorCommandInvoker(previous)
+    }
+  })
+
+  it("does not let a stopped poll emit into a restarted adapter", async () => {
+    let finish!: (response: HttpResp) => void
+    const old = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    old.http.mockImplementationOnce(
+      () =>
+        new Promise<HttpResp>((resolve) => {
+          finish = resolve
+        })
+    )
+    const current = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(old.ctx)
+    await tick()
+    await a.stop()
+    await a.start(current.ctx)
+    await tick()
+    finish({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        ret: 0,
+        msgs: [userMsg("obsolete")],
+        get_updates_buf: "obsolete-cursor",
+      }),
+    })
+    await tick()
+    expect(old.ctx.emit).not.toHaveBeenCalled()
+    expect(current.ctx.emit).not.toHaveBeenCalled()
+    expect(a.health().reason).toBe("session_expired_rescan")
+    await a.stop()
+  })
+
+  it("matches media by typed occurrence instead of unrelated nested payloads", async () => {
+    let polls = 0
+    const fetchAttachment = jest.fn(async () => undefined)
+    mockAttachmentRead.mockResolvedValue("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB")
+    const emit = jest.fn(async (_event: NormalizedInboundEvent) => undefined)
+    const { ctx } = makeCtx({
+      emit,
+      fetchAttachment,
+      getUpdates: () =>
+        ++polls === 1
+          ? {
+              ret: 0,
+              msgs: [
+                {
+                  ...userMsg("caption"),
+                  item_list: [
+                    {
+                      type: ILINK_ITEM.text,
+                      text_item: { text: "caption" },
+                      image_item: { url: "https://cdn/wrong" },
+                    },
+                    { type: ILINK_ITEM.image, image_item: { url: "https://cdn/right" } },
+                  ],
+                },
+              ],
+            }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 20 && emit.mock.calls.length === 0; i++) await tick()
+    await a.stop()
+    expect(fetchAttachment.mock.calls.map((args: unknown[]) => args[1])).toEqual([
+      "https://cdn/right",
+    ])
+    expect(emit.mock.calls[0][0].segments[1]).toMatchObject({
+      type: "image",
+      rawUrl: "https://cdn/right",
+      mimeType: "image/png",
+    })
+  })
+
+  it("persists accepted scoped cursors and resumes them in a fresh adapter", async () => {
+    const row = { settings: { accountId: "bot-account", unrelated: "keep" } }
+    mockGetAdapterInstance.mockResolvedValue(row)
+    mockCommitCheckpoint.mockImplementation(
+      async (_id: string, _expected: unknown, next: Record<string, unknown>) => {
+        Object.assign(row.settings, { ilinkCheckpoint: next })
+        return true
+      }
+    )
+    let polls = 0
+    const first = makeCtx({
+      emit: jest.fn(async () => undefined),
+      getUpdates: () =>
+        ++polls === 1
+          ? { ret: 0, msgs: [userMsg("accepted")], get_updates_buf: "accepted-cursor" }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(first.ctx)
+    for (let i = 0; i < 30 && polls < 2; i++) await tick()
+    await a.stop()
+    expect(mockCommitCheckpoint).toHaveBeenCalledWith(
+      "wx1",
+      expect.objectContaining({ settings: expect.objectContaining({ accountId: "bot-account" }) }),
+      expect.objectContaining({
+        baseUrl: "https://base",
+        cursor: "accepted-cursor",
+        credentialHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+      expect.any(Function)
+    )
+    expect(JSON.stringify(row.settings)).not.toContain('"tok"')
+    expect(row.settings.unrelated).toBe("keep")
+    const second = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const restarted = adapter()
+    await restarted.start(second.ctx)
+    for (let i = 0; i < 30 && second.http.mock.calls.length === 0; i++) await tick()
+    await restarted.stop()
+    expect(JSON.parse(second.http.mock.calls[0][0].body).get_updates_buf).toBe("accepted-cursor")
+  })
+
+  it("does not checkpoint while acceptance waits and retries a failed checkpoint from the old cursor", async () => {
+    mockGetAdapterInstance.mockResolvedValue({ settings: {} })
+    mockCommitCheckpoint.mockRejectedValueOnce(new Error("storage failure"))
+    let accept!: () => void
+    const emit = jest.fn(async () => {
+      if (emit.mock.calls.length === 1)
+        await new Promise<void>((resolve) => {
+          accept = resolve
+        })
+    })
+    let polls = 0
+    const { ctx, http } = makeCtx({
+      emit,
+      getUpdates: () =>
+        ++polls <= 2
+          ? {
+              ret: 0,
+              msgs: [{ ...userMsg("retained"), message_id: "same-source" }],
+              get_updates_buf: "accepted-cursor",
+            }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 20 && emit.mock.calls.length === 0; i++) await tick()
+    expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+    expect(polls).toBe(1)
+    accept()
+    for (let i = 0; i < 40 && polls < 3; i++) await tick()
+    await a.stop()
+    expect(
+      http.mock.calls.slice(0, 3).map(([request]) => JSON.parse(request.body).get_updates_buf)
+    ).toEqual(["", "", "accepted-cursor"])
+    expect(mockCommitCheckpoint).toHaveBeenCalledTimes(2)
+  })
+
+  it("rereads a competing writer's checkpoint after a rejected commit", async () => {
+    const { sha256Hex } = await import("@/lib/share/hash")
+    const checkpoint = {
+      baseUrl: "https://base",
+      credentialHash: await sha256Hex("tok"),
+      cursor: "initial-cursor",
+    }
+    let row = { settings: { ilinkCheckpoint: checkpoint } }
+    mockGetAdapterInstance.mockImplementation(async () => row)
+    mockCommitCheckpoint.mockImplementationOnce(async () => {
+      row = { settings: { ilinkCheckpoint: { ...checkpoint, cursor: "competing-cursor" } } }
+      return false
+    })
+    let polls = 0
+    const { ctx, http } = makeCtx({
+      emit: jest.fn(async () => undefined),
+      getUpdates: () =>
+        ++polls === 1
+          ? { ret: 0, msgs: [userMsg("accepted")], get_updates_buf: "rejected-cursor" }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 30 && polls < 2; i++) await tick()
+    await a.stop()
+    expect(
+      http.mock.calls.slice(0, 2).map(([request]) => JSON.parse(request.body).get_updates_buf)
+    ).toEqual(["initial-cursor", "competing-cursor"])
+    expect(mockCommitCheckpoint).toHaveBeenCalledWith(
+      "wx1",
+      { settings: { ilinkCheckpoint: checkpoint } },
+      expect.objectContaining({ cursor: "rejected-cursor" }),
+      expect.any(Function)
+    )
+  })
+
+  it("uses peer progress read before polling instead of its older in-memory cursor", async () => {
+    const row = { settings: {} as Record<string, unknown> }
+    mockGetAdapterInstance.mockResolvedValue(row)
+    mockCommitCheckpoint.mockImplementationOnce(
+      async (_id: string, _expected: unknown, next: Record<string, unknown>) => {
+        row.settings.ilinkCheckpoint = { ...next, cursor: "peer-progress" }
+        return true
+      }
+    )
+    let polls = 0
+    const { ctx, http } = makeCtx({
+      emit: jest.fn(async () => undefined),
+      getUpdates: () =>
+        ++polls === 1
+          ? { ret: 0, msgs: [userMsg("accepted")], get_updates_buf: "own-progress" }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 30 && polls < 2; i++) await tick()
+    await a.stop()
+    expect(
+      http.mock.calls.slice(0, 2).map(([request]) => JSON.parse(request.body).get_updates_buf)
+    ).toEqual(["", "peer-progress"])
+  })
+
+  it.each(["HTTP", "gate"])(
+    "rejects an unchanged token with a new credential revision during %s",
+    async (stage) => {
+      let revision = "revision-1"
+      let finishHttp!: (response: HttpResp) => void
+      let finishGate!: (allowed: boolean) => void
+      let polls = 0
+      const { ctx, http } = makeCtx({
+        emit: jest.fn(),
+        getUpdates: () =>
+          ++polls === 1 && stage === "gate"
+            ? { ret: 0, msgs: [userMsg("same-token-old-login")], get_updates_buf: "stale-cursor" }
+            : { ret: -14 },
+      })
+      if (stage === "HTTP")
+        http.mockImplementationOnce(
+          () =>
+            new Promise<HttpResp>((resolve) => {
+              finishHttp = resolve
+            })
+        )
+      if (stage === "gate")
+        mockGate.mockImplementationOnce(
+          () =>
+            new Promise<boolean>((resolve) => {
+              finishGate = resolve
+            })
+        )
+      const options = {
+        id: "wx1",
+        displayName: "My WeChat",
+        token: async () => "tok",
+        tokenSnapshot: async () => ({ value: "tok", revision }),
+        baseUrl: async () => "https://base",
+        _backoffBaseMs: 1,
+      }
+      const a = createWechatPersonalAdapter(options)
+      await a.start(ctx)
+      for (let i = 0; i < 20 && !(finishHttp || finishGate); i++) await tick()
+      revision = "revision-3"
+      if (stage === "HTTP")
+        finishHttp({
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            ret: 0,
+            msgs: [userMsg("same-token-old-login")],
+            get_updates_buf: "stale-cursor",
+          }),
+        })
+      else finishGate(true)
+      for (let i = 0; i < 20; i++) await tick()
+      await a.stop()
+      expect(ctx.emit).not.toHaveBeenCalled()
+      expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not restore a prior credential revision's cursor after same-value login", async () => {
+    const { sha256Hex } = await import("@/lib/share/hash")
+    mockGetAdapterInstance.mockResolvedValue({
+      settings: {
+        ilinkCheckpoint: {
+          baseUrl: "https://base",
+          credentialHash: await sha256Hex("tok"),
+          credentialRevision: "revision-1",
+          cursor: "old-login-cursor",
+        },
+      },
+    })
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const options = {
+      id: "wx1",
+      displayName: "My WeChat",
+      token: async () => "tok",
+      tokenSnapshot: async () => ({ value: "tok", revision: "revision-3" }),
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    }
+    const a = createWechatPersonalAdapter(options)
+    await a.start(ctx)
+    for (let i = 0; i < 20 && http.mock.calls.length === 0; i++) await tick()
+    await a.stop()
+    expect(JSON.parse(http.mock.calls[0][0].body).get_updates_buf).toBe("")
+  })
+
+  it("halts a stale registry instance whose stored server changed before start", async () => {
+    mockGetAdapterInstance.mockResolvedValue({ settings: { baseUrl: "https://replacement" } })
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 10; i++) await tick()
+    expect(http).not.toHaveBeenCalled()
+    expect(a.health().reason).toBe("configuration_changed")
+    await a.stop()
+  })
+
+  it("uses only the atomic snapshot for inbound and persists its revision across restart", async () => {
+    const row = { settings: {} as Record<string, unknown> }
+    mockGetAdapterInstance.mockResolvedValue(row)
+    const token = jest.fn(async () => {
+      throw new Error("Legacy token read is not atomic")
+    })
+    const options = {
+      id: "wx1",
+      displayName: "My WeChat",
+      token,
+      tokenSnapshot: async () => ({ value: "snapshot-token", revision: "revision-1" }),
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    }
+    let polls = 0
+    const first = makeCtx({
+      emit: jest.fn(async () => undefined),
+      getUpdates: () =>
+        ++polls === 1
+          ? { ret: 0, msgs: [userMsg("accepted")], get_updates_buf: "snapshot-cursor" }
+          : { ret: -14 },
+    })
+    const a = createWechatPersonalAdapter(options)
+    await a.start(first.ctx)
+    for (let i = 0; i < 20 && polls < 2; i++) await tick()
+    await a.stop()
+    expect(row.settings.ilinkCheckpoint).toMatchObject({
+      credentialRevision: "revision-1",
+      cursor: "snapshot-cursor",
+    })
+    expect(first.http.mock.calls[0][0].headers.Authorization).toBe("Bearer snapshot-token")
+    const second = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const restarted = createWechatPersonalAdapter(options)
+    await restarted.start(second.ctx)
+    for (let i = 0; i < 20 && second.http.mock.calls.length === 0; i++) await tick()
+    await restarted.stop()
+    expect(JSON.parse(second.http.mock.calls[0][0].body).get_updates_buf).toBe("snapshot-cursor")
+    expect(token).not.toHaveBeenCalled()
+  })
+
+  it("does not fall back to a legacy token after the atomic snapshot is revoked", async () => {
+    const token = jest.fn(async () => "legacy-token")
+    const options = {
+      id: "wx1",
+      displayName: "My WeChat",
+      token,
+      tokenSnapshot: async () => null,
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    }
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = createWechatPersonalAdapter(options)
+    await a.start(ctx)
+    for (let i = 0; i < 10; i++) await tick()
+    expect(a.health().reason).toBe("token_missing")
+    await a.stop()
+    expect(token).not.toHaveBeenCalled()
+    expect(http).not.toHaveBeenCalled()
+  })
+
+  it.each(["rotated-token", ""])(
+    "discards an in-flight poll when its credential changes to %s",
+    async (replacement) => {
+      mockGetAdapterInstance.mockResolvedValue({ settings: {} })
+      let token = "tok"
+      let finish!: (response: HttpResp) => void
+      const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+      http.mockImplementationOnce(
+        () =>
+          new Promise<HttpResp>((resolve) => {
+            finish = resolve
+          })
+      )
+      const a = createWechatPersonalAdapter({
+        id: "wx1",
+        displayName: "My WeChat",
+        token: async () => token,
+        baseUrl: async () => "https://base",
+        _backoffBaseMs: 1,
+      })
+      await a.start(ctx)
+      for (let i = 0; i < 20 && !finish; i++) await tick()
+      token = replacement
+      finish({
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          ret: 0,
+          msgs: [userMsg("old-account")],
+          get_updates_buf: "old-account-cursor",
+        }),
+      })
+      for (let i = 0; i < 20; i++) await tick()
+      await a.stop()
+      expect(ctx.emit).not.toHaveBeenCalled()
+      expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+    }
+  )
+
+  it("discards a response if its base URL changes while the poll is in flight", async () => {
+    mockGetAdapterInstance.mockResolvedValue({ settings: {} })
+    let baseUrl = "https://base"
+    let finish!: (response: HttpResp) => void
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    http.mockImplementationOnce(
+      () =>
+        new Promise<HttpResp>((resolve) => {
+          finish = resolve
+        })
+    )
+    const a = createWechatPersonalAdapter({
+      id: "wx1",
+      displayName: "My WeChat",
+      token: async () => "tok",
+      baseUrl: async () => baseUrl,
+      _backoffBaseMs: 1,
+    })
+    await a.start(ctx)
+    for (let i = 0; i < 20 && !finish; i++) await tick()
+    baseUrl = "https://replacement"
+    finish({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        ret: 0,
+        msgs: [userMsg("old-server")],
+        get_updates_buf: "old-server-cursor",
+      }),
+    })
+    for (let i = 0; i < 20 && http.mock.calls.length < 2; i++) await tick()
+    await a.stop()
+    expect(ctx.emit).not.toHaveBeenCalled()
+    expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+    expect(http.mock.calls[1][0].url).toContain("https://replacement/")
+    expect(JSON.parse(http.mock.calls[1][0].body).get_updates_buf).toBe("")
+  })
+
+  it("revalidates credentials after an asynchronous inbound gate", async () => {
+    mockGetAdapterInstance.mockResolvedValue({ settings: {} })
+    let token = "tok"
+    let release!: (allowed: boolean) => void
+    mockGate.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve
+        })
+    )
+    let polls = 0
+    const { ctx } = makeCtx({
+      emit: jest.fn(),
+      getUpdates: () =>
+        ++polls === 1
+          ? { ret: 0, msgs: [userMsg("old-account")], get_updates_buf: "stale-cursor" }
+          : { ret: -14 },
+    })
+    const a = createWechatPersonalAdapter({
+      id: "wx1",
+      displayName: "My WeChat",
+      token: async () => token,
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    })
+    await a.start(ctx)
+    for (let i = 0; i < 20 && !release; i++) await tick()
+    token = "rotated-token"
+    release(true)
+    for (let i = 0; i < 20 && polls < 2; i++) await tick()
+    await a.stop()
+    expect(ctx.emit).not.toHaveBeenCalled()
+    expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+  })
+
+  it("does not checkpoint an accepted batch after its credential is revoked", async () => {
+    mockGetAdapterInstance.mockResolvedValue({ settings: {} })
+    let token = "tok"
+    let accept!: () => void
+    const emit = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          accept = resolve
+        })
+    )
+    const { ctx } = makeCtx({
+      emit,
+      getUpdates: () => ({
+        ret: 0,
+        msgs: [userMsg("accepted-before-revoke")],
+        get_updates_buf: "stale-cursor",
+      }),
+    })
+    const a = createWechatPersonalAdapter({
+      id: "wx1",
+      displayName: "My WeChat",
+      token: async () => token,
+      baseUrl: async () => "https://base",
+      _backoffBaseMs: 1,
+    })
+    await a.start(ctx)
+    for (let i = 0; i < 20 && !accept; i++) await tick()
+    token = ""
+    accept()
+    for (let i = 0; i < 20; i++) await tick()
+    await a.stop()
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+  })
+
+  it.each(["server", "account", "disabled", "removed"])(
+    "fences an in-flight poll after its stored configuration is %s",
+    async (change) => {
+      const row = {
+        enabled: true,
+        settings: { baseUrl: "https://base", accountId: "old-account" },
+      }
+      mockGetAdapterInstance.mockResolvedValue(row)
+      let finish!: (response: HttpResp) => void
+      const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+      http.mockImplementationOnce(
+        () =>
+          new Promise<HttpResp>((resolve) => {
+            finish = resolve
+          })
+      )
+      // Like the production registry, these options retain the old row's
+      // base URL until supervisor reconciliation builds a replacement.
+      const a = adapter()
+      await a.start(ctx)
+      for (let i = 0; i < 20 && !finish; i++) await tick()
+      if (change === "server") row.settings.baseUrl = "https://replacement"
+      if (change === "account") row.settings.accountId = "replacement-account"
+      if (change === "disabled") row.enabled = false
+      if (change === "removed") mockGetAdapterInstance.mockResolvedValue(undefined)
+      finish({
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          ret: 0,
+          msgs: [userMsg("old-configuration")],
+          get_updates_buf: "stale-cursor",
+        }),
+      })
+      for (let i = 0; i < 20; i++) await tick()
+      await a.stop()
+      expect(ctx.emit).not.toHaveBeenCalled()
+      expect(mockCommitCheckpoint).not.toHaveBeenCalled()
+      expect(http).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it.each([
+    ["server", "https://old-server", "tok"],
+    ["credential", "https://base", "other-token"],
+  ])("ignores a cursor from a different %s", async (_scope, baseUrl, token) => {
+    const { sha256Hex } = await import("@/lib/share/hash")
+    mockGetAdapterInstance.mockResolvedValue({
+      settings: {
+        ilinkCheckpoint: {
+          baseUrl,
+          credentialHash: await sha256Hex(token),
+          cursor: "foreign-cursor",
+        },
+      },
+    })
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 20 && http.mock.calls.length === 0; i++) await tick()
+    await a.stop()
+    expect(JSON.parse(http.mock.calls[0][0].body).get_updates_buf).toBe("")
+  })
+
+  it("does not restore a cursor stored for another configured account", async () => {
+    const { sha256Hex } = await import("@/lib/share/hash")
+    mockGetAdapterInstance.mockResolvedValue({
+      settings: {
+        accountId: "current-account",
+        ilinkCheckpoint: {
+          baseUrl: "https://base",
+          credentialHash: await sha256Hex("tok"),
+          accountId: "previous-account",
+          cursor: "foreign-account-cursor",
+        },
+      },
+    })
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 20 && http.mock.calls.length === 0; i++) await tick()
+    await a.stop()
+    expect(JSON.parse(http.mock.calls[0][0].body).get_updates_buf).toBe("")
+  })
+
+  it("isolates a malformed message and accepts the remaining batch before checkpointing", async () => {
+    let polls = 0
+    const emit = jest.fn(async (_event: NormalizedInboundEvent) => undefined)
+    const { ctx, http } = makeCtx({
+      emit,
+      getUpdates: () =>
+        ++polls === 1
+          ? {
+              ret: 0,
+              msgs: [null, { ...userMsg("broken"), item_list: {} }, userMsg("kept")],
+              get_updates_buf: "good-cursor",
+            }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 30 && polls < 2; i++) await tick()
+    await a.stop()
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit.mock.calls[0][0]).toMatchObject({ plainText: "kept" })
+    expect(JSON.parse(http.mock.calls[1][0].body).get_updates_buf).toBe("good-cursor")
+  })
+
   it("emits a parsed message then stops the loop on session expiry", async () => {
     const emit = jest.fn(async (_e: NormalizedInboundEvent) => undefined)
     let call = 0
@@ -585,6 +1313,23 @@ describe("createWechatPersonalAdapter — lifecycle (abortable backoff)", () => 
 describe("createWechatPersonalAdapter — numeric reply → callback short-circuit", () => {
   beforeEach(() => {
     jest.resetModules()
+    const storage = jest.requireMock<typeof import("@/lib/db/adapter-instances")>(
+      "@/lib/db/adapter-instances"
+    )
+    const row = { settings: {} }
+    ;(storage.getAdapterInstance as jest.Mock).mockResolvedValue(row)
+    ;(storage.commitWechatPersonalCheckpoint as jest.Mock).mockImplementation(
+      async (
+        _id: string,
+        _expected: unknown,
+        next: Record<string, unknown>,
+        isCurrent: () => boolean
+      ) => {
+        if (!isCurrent()) return false
+        Object.assign(row.settings, { ilinkCheckpoint: next })
+        return true
+      }
+    )
   })
 
   it("retries the original callback before advancing the cursor and deduplicates its replay after restart", async () => {

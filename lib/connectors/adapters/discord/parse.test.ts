@@ -500,3 +500,19 @@ it.each([
     })
   ).toMatchObject({ triggerId: customId, value })
 })
+
+it("persists a guild-specific avatar from member without requiring member.user", () => {
+  const raw = {
+    ...guildMentionFixture,
+    d: {
+      ...guildMentionFixture.d,
+      guild_id: "456",
+      author: { ...guildMentionFixture.d.author, id: "123", avatar: "abcd" },
+      member: { avatar: "a_beef", nick: "Guild name" },
+    },
+  } as unknown as DiscordDispatch
+  const event = parseDiscordDispatch(ADAPTER_ID, SELF_ID, raw)
+  expect(event?.sender.avatarUrl).toBe(
+    "https://cdn.discordapp.com/guilds/456/users/123/avatars/a_beef.png?size=128"
+  )
+})

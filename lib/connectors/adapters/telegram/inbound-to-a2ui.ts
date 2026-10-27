@@ -53,7 +53,9 @@ function mapButton(button: TelegramInlineButton): InboundA2UINode | null {
     kind: "button",
     label: label || "Action",
     url,
-    actionId: button.callback_data,
+    ...(Object.hasOwn(button, "callback_data")
+      ? { actionId: typeof button.callback_data === "string" ? button.callback_data : "" }
+      : {}),
   }
 }
 

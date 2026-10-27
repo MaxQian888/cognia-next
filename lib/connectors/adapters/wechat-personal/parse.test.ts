@@ -21,6 +21,47 @@ function msg(over: Partial<IlinkMessage>): IlinkMessage {
 }
 
 describe("parseIlinkMessage", () => {
+  it("isolates malformed members while preserving valid neighboring text", () => {
+    const malformed = [null, 4, "bad", [], { type: 1, text_item: { text: { bad: true } } }]
+    expect(() => parseIlinkMessage(ADP, null as unknown as IlinkMessage)).not.toThrow()
+    expect(parseIlinkMessage(ADP, null as unknown as IlinkMessage)).toBeNull()
+    expect(parseIlinkMessage(ADP, msg({ item_list: {} as never }))).toBeNull()
+    const parsed = parseIlinkMessage(
+      ADP,
+      msg({
+        item_list: [
+          ...malformed,
+          { type: ILINK_ITEM.text, text_item: { text: "kept" }, ref_msg: { title: { bad: true } } },
+          { type: ILINK_ITEM.image, image_item: { media: { full_url: { bad: true } } } },
+        ] as never,
+      })
+    )
+    expect(parsed?.segments).toEqual([{ type: "text", text: "kept" }])
+    expect(parsed?.plainText).toBe("kept")
+  })
+
+  it("uses the official item message identity when the envelope omits it", () => {
+    const first = parseIlinkMessage(
+      ADP,
+      msg({
+        item_list: [
+          { type: ILINK_ITEM.text, msg_id: "18446744073709551615", text_item: { text: "hello" } },
+        ] as never,
+      })
+    )
+    const replay = parseIlinkMessage(
+      ADP,
+      msg({
+        context_token: "rotated-context",
+        item_list: [
+          { type: ILINK_ITEM.text, msg_id: "18446744073709551615", text_item: { text: "hello" } },
+        ] as never,
+      })
+    )
+    expect(first?.messageId).toBe("18446744073709551615")
+    expect(replay?.messageId).toBe(first?.messageId)
+  })
+
   it("normalises an inbound user text message as a private DM", () => {
     const ev = parseIlinkMessage(ADP, msg({}), 5000)
     expect(ev).not.toBeNull()

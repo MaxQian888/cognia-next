@@ -145,7 +145,12 @@ export function buildAdapterContext(input: BuildAdapterContextInput): AdapterCon
       // dedup → adapter lookup → override → policy → route → handler.
       // The runtime's installed route handler is what eventually turns
       // the event into a ChatSession + StoredMessage + ai-run.
-      await bus.dispatchInboundFull(event)
+      if (event.platform === "wechat-personal" || event.platform === "wechat-oa") {
+        if (signal.aborted) throw new DOMException("Adapter stopped", "AbortError")
+        await bus.dispatchInboundFull(event, { requireAcceptance: true })
+      } else {
+        await bus.dispatchInboundFull(event)
+      }
     },
     tauri: {
       httpRequest: (req: TauriHttpRequest): Promise<TauriHttpResponse> =>

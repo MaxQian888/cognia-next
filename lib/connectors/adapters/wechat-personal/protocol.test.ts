@@ -1,4 +1,4 @@
-import { ilinkResultCode } from "./protocol"
+import { ilinkResultCode, ilinkItemMedia, ilinkMediaUrl } from "./protocol"
 import {
   newWechatUin,
   buildIlinkHeaders,
@@ -9,6 +9,21 @@ import {
   ILINK_MSG,
   ILINK_CHANNEL_VERSION,
 } from "./protocol"
+
+it("uses only typed media payloads and rejects malformed or executable URL references", () => {
+  expect(
+    ilinkItemMedia({ type: ILINK_ITEM.text, image_item: { url: "https://cdn/wrong" } })
+  ).toBeUndefined()
+  expect(
+    ilinkItemMedia({ type: ILINK_ITEM.image, image_item: { url: "https://cdn/right" } })
+  ).toEqual({ url: "https://cdn/right" })
+  expect(
+    ilinkMediaUrl({ media: { full_url: {} as never }, url: "javascript:alert(1)" })
+  ).toBeUndefined()
+  expect(ilinkMediaUrl({ media: { encrypt_query_param: "a+b/=" } })).toBe(
+    "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=a%2Bb%2F%3D"
+  )
+})
 
 describe("newWechatUin", () => {
   it("is base64 of a decimal uint32 and varies per call", () => {

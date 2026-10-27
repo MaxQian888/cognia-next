@@ -68,6 +68,7 @@ describe("parseLarkEventEnvelope", () => {
       expect(result!.sender.id).toBe("lark:ou_user_001")
       expect(result!.sender.platform).toBe("lark")
       expect(result!.sender.remoteUserId).toBe("ou_user_001")
+      expect(result!.sender.remoteIdType).toBe("open_id")
       expect(result!.sender.kind).toBe("human")
     })
 
@@ -1250,5 +1251,20 @@ describe("interactive (card) messages carry a text mirror", () => {
   it("leaves a marker when the card has no readable content", () => {
     const event = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, interactiveEnvelope("{}"))!
     expect(event.segments).toEqual([{ type: "text", text: "[card]" }])
+  })
+})
+
+it("preserves app_id namespace for bot history instead of making it a contact open_id", () => {
+  const envelope = {
+    ...dmTextFixture,
+    event: {
+      ...dmTextFixture.event,
+      sender: { id: "cli_other_bot", id_type: "app_id", sender_type: "app" },
+    },
+  } as unknown as LarkEventEnvelope
+  expect(parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)?.sender).toMatchObject({
+    remoteUserId: "cli_other_bot",
+    remoteIdType: "app_id",
+    kind: "bot",
   })
 })

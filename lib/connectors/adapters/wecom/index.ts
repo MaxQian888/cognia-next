@@ -151,6 +151,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   let healthReason: string | undefined
   let lastActivityAt: number | undefined
   let stopCalled = false
+  let runGeneration = 0
+  let connectionGeneration = 0
+  let removeAbortListener: (() => void) | undefined
 
   let ctx: AdapterContext | null = null
   let handleId: string | null = null
@@ -160,6 +163,13 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   let pingMisses = 0
   let attempts = 0
   let selfId = ""
+
+  const isActive = (run: number, connection?: number) =>
+    !stopCalled &&
+    run === runGeneration &&
+    (connection === undefined || connection === connectionGeneration) &&
+    ctx !== null &&
+    !ctx.signal.aborted
 
   /** echo(req_id) → resolver for in-flight outbound RPCs we await. */
   const pending = new Map<string, (resp: WeComFrameEnvelope) => void>()
@@ -289,7 +299,12 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   }
 
   // ── inbound frame routing ───────────────────────────────────────────────
-  async function routeFrame(payload: string): Promise<void> {
+  async function routeFrame(
+    payload: string,
+    context: AdapterContext,
+    active: () => boolean
+  ): Promise<void> {
+    if (!active()) return
     const frame = classifyInboundFrame(payload)
     if (frame.kind === "ack") {
       const debtReqId = frame.reqId
@@ -320,28 +335,39 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       return
     }
     if (frame.kind === "message") {
-      await handleMessage(frame.body, frame.reqId)
+      await handleMessage(frame.body, frame.reqId, context, active)
       return
     }
     if (frame.kind === "event") {
-      await handleEvent(frame.body, frame.reqId)
+      await handleEvent(frame.body, frame.reqId, context, active)
       return
     }
     // unknown — ignore.
   }
 
-  async function handleMessage(body: WeComInboundMsgBody, reqId?: string): Promise<void> {
+  async function handleMessage(
+    body: WeComInboundMsgBody,
+    reqId: string | undefined,
+    context: AdapterContext,
+    active: () => boolean
+  ): Promise<void> {
     if (!selfId && body.aibotid) selfId = body.aibotid
     const event = parseWeComMessage(opts.id, selfId, body, reqId)
     if (!event) return
     recordActiveReq(reqId, (event.conversationRef as WeComConversationRef).chatId)
     await resolveInboundMedia(event, body)
-    if (!(await gateInboundEvent(opts.id, event))) return
+    if (!active()) return
+    if (!(await gateInboundEvent(opts.id, event)) || !active()) return
     lastActivityAt = Date.now()
-    await ctx?.emit(event)
+    await context.emit(event)
   }
 
-  async function handleEvent(body: WeComInboundEventBody, reqId?: string): Promise<void> {
+  async function handleEvent(
+    body: WeComInboundEventBody,
+    reqId: string | undefined,
+    context: AdapterContext,
+    active: () => boolean
+  ): Promise<void> {
     if (!selfId && body.aibotid) selfId = body.aibotid
     const type = body.event.eventtype
     if (type === "enter_chat") {
@@ -380,6 +406,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
           buildUpdateCardFrame(reqId, buildAckUpdateCard(body, "✓"))
         ).catch(() => undefined)
       }
+      if (!active()) return
       // Quick-command (menu) buttons live in the `qc:` namespace — check
       // them BEFORE falling through to the generic A2UI callback dispatch
       // so the resolver doesn't try to look up a non-existent binding.
@@ -388,9 +415,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
         const cmd = resolveQuickCommand(quickCommands, menuClick.triggerKey)
         if (cmd) {
           const event = buildMenuClickInboundEvent(opts.id, selfId, body, cmd, reqId)
-          if (event && (await gateInboundEvent(opts.id, event))) {
+          if (event && (await gateInboundEvent(opts.id, event)) && active()) {
             lastActivityAt = Date.now()
-            await ctx?.emit(event)
+            await context.emit(event)
           }
         }
         return
@@ -428,8 +455,13 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       if (content?.msgtype === "voice" && content.voice?.url)
         return [{ ...content.voice, url: content.voice.url, type: "voice" }]
       if (content?.msgtype === "mixed")
-        return (content.mixed?.msg_item ?? []).flatMap((item) =>
-          item.image ? [{ ...item.image, type: "image" }] : []
+        return (Array.isArray(content.mixed?.msg_item) ? content.mixed.msg_item : []).flatMap(
+          (item) =>
+            item &&
+            (!item.msgtype || item.msgtype === "image") &&
+            typeof item.image?.url === "string"
+              ? [{ ...item.image, type: "image" }]
+              : []
         )
       return []
     })
@@ -451,8 +483,11 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       try {
         const bytes = await fetchAndDecryptMedia(ref.url, ref.aeskey)
         const encoded = bytesToBase64(bytes)
+        const imageMime = sniffImageMediaType(encoded)
+        if (seg.type === "image" && !imageMime)
+          throw new Error("wecom inbound image has no supported image signature")
         seg.mimeType =
-          sniffImageMediaType(encoded) ??
+          imageMime ??
           seg.mimeType ??
           (seg.type === "image"
             ? "image/png"
@@ -496,9 +531,11 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     }
   }
 
-  async function subscribe(): Promise<void> {
+  async function subscribe(active: () => boolean): Promise<void> {
     const [botId, secret] = await Promise.all([opts.botId(), opts.secret()])
+    if (!active()) return
     const resp = await request(buildSubscribeFrame(newReqId(opts.id), botId, secret), 15_000)
+    if (!active()) return
     if (typeof resp.errcode === "number" && resp.errcode !== 0) {
       healthState = "degraded"
       healthReason = `subscribe failed: ${resp.errcode} ${resp.errmsg ?? ""}`.trim()
@@ -520,48 +557,88 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     // connection" answers from HERE instead of opening a second socket that
     // would fight this one. Re-run on every reconnect; last writer wins,
     // which is right because only one socket can exist.
+    const credentialFingerprint = await weComCredentialFingerprint(botId, secret)
+    if (!active()) return
     unregisterLiveConnection?.()
     unregisterLiveConnection = registerWeComLiveConnection({
       adapterId: opts.id,
       botId,
-      credentialFingerprint: await weComCredentialFingerprint(botId, secret),
+      credentialFingerprint,
       health,
     })
   }
 
-  async function connectOnce(): Promise<void> {
+  async function connectOnce(run: number): Promise<void> {
+    if (!isActive(run)) return
+    const connection = ++connectionGeneration
+    const active = () => isActive(run, connection)
+    const context = ctx!
     const id = await connectorsWsOpen(wsUrl)
+    if (!active()) {
+      await connectorsWsClose(id).catch(() => undefined)
+      return
+    }
     handleId = id
     try {
-      unlistenMessage = await connectorListen<string>(`connectors://ws/${id}/message`, (e) => {
-        void routeFrame(e.payload)
-      })
-      unlistenClose = await connectorListen<void>(`connectors://ws/${id}/close`, () => {
+      const messageListener = await connectorListen<string>(
+        `connectors://ws/${id}/message`,
+        (e) => {
+          // Reject new callbacks from an obsolete socket. Work already received
+          // may finish across a reconnect within this run, but never after stop.
+          if (active())
+            void routeFrame(e.payload, context, () => isActive(run)).catch((error) => {
+              if (active())
+                context.logger.warn(
+                  `WeCom inbound processing failed: ${error instanceof Error ? error.message : String(error)}`
+                )
+            })
+        }
+      )
+      if (!active()) {
+        messageListener()
+        await connectorsWsClose(id).catch(() => undefined)
+        return
+      }
+      unlistenMessage = messageListener
+      const closeListener = await connectorListen<void>(`connectors://ws/${id}/close`, () => {
+        if (!active()) return
+        connectionGeneration += 1
         handleId = null
         rejectAllPending("connection closed")
-        if (!stopCalled) {
+        if (isActive(run)) {
           healthState = "degraded"
           healthReason = "connection closed"
-          void scheduleReconnect()
+          void scheduleReconnect(run)
         }
       })
-      await subscribe()
+      if (!active()) {
+        closeListener()
+        await connectorsWsClose(id).catch(() => undefined)
+        return
+      }
+      unlistenClose = closeListener
+      await subscribe(active)
     } catch (err) {
       // A failed handshake must NOT leak the Rust-side socket: WeCom allows
       // exactly ONE connection per bot, so a leaked handle fights the next
       // (re)connect attempt. Detach listeners first so our own close does
       // not double-schedule a reconnect.
-      cleanupListeners()
-      handleId = null
+      const currentConnection = active()
+      if (currentConnection) {
+        cleanupListeners()
+        handleId = null
+      }
       await connectorsWsClose(id).catch(() => undefined)
+      if (!currentConnection || !active()) return
       throw err
     }
     // `attempts` / `pingMisses` are reset inside `subscribe()`, at the instant
     // health flips to `running` — see the note there. Resetting on socket-open
     // instead would hammer bad credentials at base backoff forever, which is
     // why neither lives in `connectOnce`'s prologue.
+    if (!active()) return
     pingTimer = setInterval(() => {
-      void heartbeat()
+      if (active()) void heartbeat(run, active)
     }, pingIntervalMs)
   }
 
@@ -571,11 +648,13 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
    * a half-dead socket (TCP up, peer gone) — force-close and reconnect
    * instead of zombie-ing with health "running".
    */
-  async function heartbeat(): Promise<void> {
+  async function heartbeat(run: number, active: () => boolean): Promise<void> {
     try {
       await requestOk(buildPingFrame(newReqId(opts.id)), pingTimeoutMs)
+      if (!active()) return
       pingMisses = 0
     } catch {
+      if (!active()) return
       pingMisses += 1
       if (pingMisses < PING_MISS_LIMIT || stopCalled) return
       // Socket already gone (close event owns reconnection) — don't race it.
@@ -587,8 +666,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       rejectAllPending("heartbeat lost")
       const id = handleId
       handleId = null
+      connectionGeneration += 1
       if (id) await connectorsWsClose(id).catch(() => undefined)
-      void scheduleReconnect()
+      void scheduleReconnect(run)
     }
   }
 
@@ -607,18 +687,18 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
-  async function scheduleReconnect(): Promise<void> {
+  async function scheduleReconnect(run: number): Promise<void> {
+    if (!isActive(run)) return
     cleanupListeners()
-    if (stopCalled) return
     attempts += 1
     opts._onReconnectAttempt?.(attempts)
     // `reconnectBackoffMs` caps at the shared jittered max (base × 32).
     await delay(reconnectBackoffMs(backoffBaseMs, attempts))
-    if (stopCalled) return
+    if (!isActive(run)) return
     try {
-      await connectOnce()
+      await connectOnce(run)
     } catch {
-      void scheduleReconnect()
+      void scheduleReconnect(run)
     }
   }
 
@@ -871,7 +951,10 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
 
   // ── PlatformAdapter surface ────────────────────────────────────────────────
   async function start(c: AdapterContext): Promise<void> {
+    if (ctx && !stopCalled) return
+    const run = ++runGeneration
     ctx = c
+    removeAbortListener?.()
     stopCalled = false
     healthState = "starting"
     // Honour the runtime's abort signal: abort tears the adapter down just
@@ -880,23 +963,27 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       await stop()
       return
     }
-    c.signal.addEventListener(
-      "abort",
-      () => {
-        void stop()
-      },
-      { once: true }
-    )
+    const onAbort = () => {
+      if (run === runGeneration) void stop()
+    }
+    c.signal.addEventListener("abort", onAbort, { once: true })
+    removeAbortListener = () => c.signal.removeEventListener("abort", onAbort)
     try {
-      await connectOnce()
+      await connectOnce(run)
     } catch {
+      if (!isActive(run)) return
       healthState = "degraded"
-      void scheduleReconnect()
+      void scheduleReconnect(run)
     }
   }
 
   async function stop(): Promise<void> {
+    const stoppedRun = ++runGeneration
+    connectionGeneration += 1
     stopCalled = true
+    removeAbortListener?.()
+    removeAbortListener = undefined
+    ctx = null
     // Release the connection slot before the socket goes: once this adapter is
     // stopping, a probe for these credentials must open its own connection
     // rather than read a health value that is about to become "down".
@@ -912,7 +999,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     if (id) {
       await connectorsWsClose(id).catch(() => undefined)
     }
-    healthState = "down"
+    if (runGeneration === stoppedRun) healthState = "down"
   }
 
   function health(): AdapterHealth {

@@ -104,11 +104,15 @@ describe("startQQGateway", () => {
     const collector = (async () => {
       for await (const d of client.dispatches) {
         out.push(d)
-        if (out.length >= 1) break
+        if (out.length >= 2) break
       }
     })()
 
     await session.waitForListeners()
+    session.push(null)
+    session.push([])
+    session.push({ op: 10, d: null })
+    session.push({ op: 0, t: "READY", d: null })
     session.push({ op: 10, d: { heartbeat_interval: 100000 } })
     await new Promise((r) => setTimeout(r, 20))
     session.push({ op: 0, t: "READY", s: 1, d: { user: { id: "bot-1" }, session_id: "s1" } })
@@ -119,13 +123,20 @@ describe("startQQGateway", () => {
       s: 2,
       d: { id: "m1", content: "hi", group_openid: "GO" },
     })
+    session.push({
+      op: 0,
+      t: "PUBLIC_MESSAGE_DELETE",
+      s: 3,
+      d: { message: { id: "parent", channel_id: "channel" }, op_user: { id: "moderator" } },
+    })
     await new Promise((r) => setTimeout(r, 20))
 
     ctrl.abort()
     await collector
 
-    expect(out).toHaveLength(1)
+    expect(out).toHaveLength(2)
     expect(out[0].t).toBe("GROUP_AT_MESSAGE_CREATE")
+    expect(out[1].t).toBe("PUBLIC_MESSAGE_DELETE")
     expect(client.selfId).toBe("bot-1")
 
     // The IDENTIFY frame carried the `QQBot ` token prefix.

@@ -52,8 +52,24 @@ import { recordDeliveredMessage, wasDeliveredByUs } from "./delivered-messages"
 import { isReactionSystemEvent, recordInboundReaction } from "@/lib/connectors/reactions-inbound"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { projectInboundToA2UI } from "./adapters/_shared/inbound-a2ui-dispatch"
-import { inboundEventToStoredParts } from "./inbound-stored-parts"
+import {
+  inboundEventToStoredParts,
+  inboundEventFromStoredMessage,
+  inboundPartsForReplay,
+} from "./inbound-stored-parts"
+import {
+  inboundEditRevision,
+  isNewerInboundEdit,
+  mutationConversationMatches,
+  isAuthorizedInboundEdit,
+  type InboundEditRevision,
+} from "./inbound-revision"
+import {
+  invalidateTranscriptRuntime,
+  withTranscriptRuntimeLock,
+} from "@/lib/chat/transcript/revision-events"
 import { appendAudit } from "./audit"
+import { inboundReplyLookupIds } from "./inbound-reply-to"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
 import {
   evaluatePolicy,
@@ -90,17 +106,18 @@ import {
   recoverStaleConnectorInboundJobs,
   stampConnectorInboundJobPrincipal,
   updateConnectorInboundJobPayload,
+  recordConnectorInboundRecall,
+  findConnectorInboundMutation,
+  recordConnectorInboundEdit,
+  listConnectorInboundMutationJobs,
+  acknowledgeConnectorInboundMutation,
 } from "@/lib/db/connector-inbound-jobs"
 import { admitConversationEvent } from "./conversation-admission"
 import { classifySiblingSender, type SiblingClassification } from "./sibling-bots"
 import { applyMediaModelGate, resolveMediaModelPolicy } from "./media-model-gate"
 import { consumeSiblingInterplayBudget, DEFAULT_BOT_INTERPLAY_BUDGET } from "./at-gate"
 import { observeUnmentionedDeliveryProbe } from "./at-gate"
-import {
-  CONVERSATION_KEY_SEP,
-  connectorOccurrenceKey,
-  deliveryTargetFromEvent,
-} from "@/types/connectors/event"
+import { connectorOccurrenceKey, deliveryTargetFromEvent } from "@/types/connectors/event"
 import {
   refreshConnectorConversationDeliveryTarget,
   stampConnectorConversationPrincipal,
@@ -389,9 +406,9 @@ export class ConnectorBus {
    * applied to the existing StoredMessage directly. They still write an
    * audit row and (where relevant) fire workflow triggers.
    *
-   * Error containment: adapters call this from their transport for-await
-   * loop (`ctx.emit`), so an exception escaping here would kill the
-   * transport permanently. Any pipeline failure is audited and swallowed.
+   * Pipeline failures are audited and contained by default. Receivers that
+   * checkpoint a provider cursor or ACK a native inbox request acceptance
+   * errors explicitly and own their retry/containment loop.
    *
    * The two slow tail steps — the route-handler model turn and the workflow
    * fan-out — are each enqueued on their own per-conversation FIFO and NOT
@@ -400,7 +417,10 @@ export class ConnectorBus {
    * that assert on turn or fan-out side-effects must
    * `await flushInboundTurns()` after dispatching.
    */
-  async dispatchInboundFull(event: NormalizedInboundEvent): Promise<void> {
+  async dispatchInboundFull(
+    event: NormalizedInboundEvent,
+    options: { requireAcceptance?: boolean } = {}
+  ): Promise<void> {
     try {
       await this.runInboundPipeline(event)
     } catch (err) {
@@ -413,6 +433,10 @@ export class ConnectorBus {
         reason: "inbound_pipeline_failed",
         message: err instanceof Error ? err.message : String(err),
       }).catch(() => undefined)
+      // These receivers advance a durable provider cursor or ACK a native
+      // inbox record only after this promise resolves. A pre-insert failure
+      // must remain retryable rather than masquerading as accepted input.
+      if (options.requireAcceptance) throw err
     }
   }
 
@@ -449,6 +473,25 @@ export class ConnectorBus {
   async resumeDurableInboundJobs(
     options: { reclaimRunning?: boolean } = {}
   ): Promise<{ resumed: number; recoveryRequired: number }> {
+    // Mutation intents commit before native runtime invalidation. Repair them
+    // before resuming any turn, including intents on terminal source jobs.
+    for (const job of await listConnectorInboundMutationJobs()) {
+      const identity = { ...job.event, messageId: job.sourceMessageId }
+      const target = await this.findStoredPlatformMessage(identity, job.sourceMessageId)
+      if (job.recalledAt !== undefined) {
+        await this.applyMessageDelete(
+          { ...identity, kind: "delete", replacesMessageId: job.sourceMessageId },
+          job.recalledAt
+        )
+      } else if (!target) {
+        continue
+      } else if (job.event.platform === "matrix") {
+        await this.reconcileMatrixRevisions(identity, target, Date.now())
+      } else if (job.pendingEdit) {
+        await this.applyMessageEdit(job.pendingEdit, Date.now())
+      }
+      await acknowledgeConnectorInboundMutation(job.id, job.mutationRevision)
+    }
     const recoveryRequired = options.reclaimRunning
       ? await recoverStaleConnectorInboundJobs({ reclaimAllRunning: true })
       : 0
@@ -563,7 +606,11 @@ export class ConnectorBus {
     // platforms only guarantee message ids within one chat.
     let inboundJob = recoveredJob
     if (!inboundJob) {
-      const ensured = await ensureConnectorInboundJob(event, "queue", { now })
+      const canonical = await this.findStoredPlatformMessage(event, event.messageId)
+      const ensured = await ensureConnectorInboundJob(event, "queue", {
+        now,
+        historyOnly: canonical !== undefined,
+      })
       inboundJob = ensured.job
       if (!ensured.inserted) {
         await appendAudit({
@@ -572,6 +619,11 @@ export class ConnectorBus {
           at: now,
           conversationKey: event.conversationKey,
         })
+        return
+      }
+      // Canonical history outlives terminal occurrence retention. A provider
+      // replay after pruning must not execute commands, turns or fan-out again.
+      if (canonical) {
         return
       }
       // Preserve the old ledger for edit/delete lookup and observability. Its
@@ -593,6 +645,21 @@ export class ConnectorBus {
         reason: "inbound_job_missing",
       })
       return
+    }
+    if (
+      inboundJob.recalledAt !== undefined ||
+      (await findConnectorInboundMutation(event))?.recalledAt !== undefined
+    ) {
+      await markConnectorInboundJobHistoryOnly(inboundJob.id, "source_recalled", { now })
+      return
+    }
+    if (recoveredJob) {
+      const canonical = await this.findStoredPlatformMessage(event, event.messageId)
+      if (canonical?.metadata?.deletedAt !== undefined) {
+        await markConnectorInboundJobHistoryOnly(inboundJob.id, "source_recalled", { now })
+        return
+      }
+      if (canonical) event = inboundEventFromStoredMessage(event, canonical)
     }
     // v49 breadcrumb — fire after dedup passes so duplicate events do not
     // inflate the inbound counter. Best-effort: trackInboxEvent swallows
@@ -750,7 +817,13 @@ export class ConnectorBus {
     if (
       event.replyTo &&
       event.replyTo.parentSenderId === undefined &&
-      (await wasDeliveredByUs(event.adapterId, event.conversationKey, event.replyTo.messageId))
+      (
+        await Promise.all(
+          inboundReplyLookupIds(event).map((id) =>
+            wasDeliveredByUs(event.adapterId, event.conversationKey, id)
+          )
+        )
+      ).some(Boolean)
     ) {
       event = { ...event, replyTo: { ...event.replyTo, parentSenderId: event.selfId } }
       replyParentResolvedBy = "ledger"
@@ -1603,7 +1676,7 @@ export class ConnectorBus {
     return senderTriggerRefusal(trigger, event.user.id)
   }
 
-  private async findStoredPlatformMessage(
+  async findStoredPlatformMessage(
     event: NormalizedInboundEvent,
     replaces: string
   ): Promise<StoredMessage | undefined> {
@@ -1612,7 +1685,6 @@ export class ConnectorBus {
     // carries no `m.thread` relation. A row stored under a thread of the
     // event's conversation (`<key>:<thread>`) is therefore the same message —
     // the platform message id is unique within its chat.
-    const threadPrefix = `${event.conversationKey}${CONVERSATION_KEY_SEP}`
     const candidates = await getDb()
       .messages.where("platformMessageId")
       .equals(replaces)
@@ -1622,8 +1694,7 @@ export class ConnectorBus {
         if (pm.adapterId !== undefined && pm.adapterId !== event.adapterId) return false
         if (
           pm.conversationKey !== undefined &&
-          pm.conversationKey !== event.conversationKey &&
-          !pm.conversationKey.startsWith(threadPrefix)
+          !mutationConversationMatches(event.conversationKey, pm.conversationKey)
         ) {
           return false
         }
@@ -1636,7 +1707,16 @@ export class ConnectorBus {
       if (pm.conversationKey === event.conversationKey) return 0
       return pm.conversationKey === undefined ? 2 : 1
     }
-    return candidates.sort((a, b) => rank(a) - rank(b))[0]
+    for (const candidate of candidates.sort((a, b) => rank(a) - rank(b))) {
+      const pm = candidate.metadata?.platformMessage
+      if (pm?.adapterId !== undefined && pm.conversationKey !== undefined) return candidate
+      const session = await getDb().sessions.get(candidate.sessionId)
+      const binding = session?.platformBinding
+      const key = binding?.conversationKey ?? session?.platformConversationKey
+      if (binding && binding.adapterId !== event.adapterId) continue
+      if (key && mutationConversationMatches(event.conversationKey, key)) return candidate
+    }
+    return undefined
   }
 
   /**
@@ -1646,6 +1726,176 @@ export class ConnectorBus {
    * matches (race / dedup window expiry / never-stored direction), we just
    * audit and move on — the platform side already shows the edit.
    */
+  /** Re-select Matrix content; removing an edit may intentionally move backwards. */
+  private async reconcileMatrixRevisions(
+    event: NormalizedInboundEvent,
+    target: StoredMessage,
+    now: number,
+    redactedEditId?: string
+  ): Promise<void> {
+    type Snapshot = {
+      parts: StoredMessage["parts"]
+      inboundA2UI?: NonNullable<StoredMessage["metadata"]>["inboundA2UI"]
+    }
+    type Revision = Snapshot & { revision: InboundEditRevision }
+    type History = { edits: Record<string, Revision>; redactedEditIds: string[] }
+    const db = getDb()
+    const sameRevision = (a: InboundEditRevision | undefined, b: InboundEditRevision | undefined) =>
+      a?.at === b?.at && a?.order === b?.order
+    const build = async (current: StoredMessage) => {
+      const pm = current.metadata?.platformMessage
+      const identity = {
+        ...event,
+        messageId: current.platformMessageId!,
+        sender: pm?.sender ?? event.sender,
+      }
+      const mutation = await findConnectorInboundMutation(identity)
+      const saved = current.metadata?.inboundMatrixRevisions as History | undefined
+      const edits: History["edits"] = {}
+      for (const [id, edit] of Object.entries(saved?.edits ?? {})) {
+        if (
+          edit &&
+          typeof edit === "object" &&
+          Array.isArray(edit.parts) &&
+          Number.isFinite(edit.revision?.at)
+        )
+          edits[id] = edit
+      }
+      const snapshot = (source: StoredMessage): Snapshot => {
+        const rich = source.metadata?.inboundA2UI
+        const { raw: _raw, ...display } = rich ?? {}
+        return {
+          parts: inboundPartsForReplay(source.parts),
+          ...(rich ? { inboundA2UI: display as typeof rich } : {}),
+        }
+      }
+      const storedBase = current.metadata?.inboundEditBase as Snapshot | undefined
+      const base =
+        storedBase && Array.isArray(storedBase.parts)
+          ? storedBase
+          : current.metadata?.editedAt === undefined
+            ? snapshot(current)
+            : mutation && (mutation.event.kind ?? "create") === "create"
+              ? {
+                  parts: inboundEventToStoredParts(mutation.event),
+                  inboundA2UI:
+                    projectInboundToA2UI("matrix", mutation.event.raw, mutation.event.segments) ??
+                    undefined,
+                }
+              : Object.values(mutation?.matrixEditRevisions ?? {}).some((edit) =>
+                    sameRevision(
+                      current.metadata?.inboundEditRevision as InboundEditRevision | undefined,
+                      inboundEditRevision(edit)
+                    )
+                  )
+                ? { parts: [] }
+                : snapshot(current)
+      const candidates =
+        mutation?.matrixEditRevisions ??
+        (mutation?.pendingEdit ? { [mutation.pendingEdit.messageId]: mutation.pendingEdit } : {})
+      for (const [id, edit] of Object.entries(candidates)) {
+        if (!isAuthorizedInboundEdit(edit, pm?.sender?.remoteUserId)) continue
+        const rich = projectInboundToA2UI("matrix", edit.raw, edit.segments)
+        const { raw: _raw, ...display } = rich ?? {}
+        edits[id] = {
+          revision: inboundEditRevision(edit),
+          parts: inboundEventToStoredParts(edit),
+          ...(rich ? { inboundA2UI: display as NonNullable<typeof rich> } : {}),
+        }
+      }
+      const redactedEditIds = [
+        ...new Set([
+          ...(Array.isArray(saved?.redactedEditIds)
+            ? saved.redactedEditIds.filter((id) => typeof id === "string")
+            : []),
+          ...(mutation?.matrixRedactedEditIds ?? []),
+          ...(redactedEditId ? [redactedEditId] : []),
+        ]),
+      ]
+      const winner = Object.entries(edits)
+        .filter(([id]) => !redactedEditIds.includes(id))
+        .reduce<Revision | undefined>(
+          (best, [, edit]) =>
+            !best || isNewerInboundEdit(edit.revision, best.revision) ? edit : best,
+          undefined
+        )
+      const recalled =
+        current.metadata?.deletedAt !== undefined || mutation?.recalledAt !== undefined
+      const selected = winner ?? base
+      const changed =
+        !recalled &&
+        !sameRevision(
+          current.metadata?.inboundEditRevision as InboundEditRevision | undefined,
+          winner?.revision
+        )
+      const {
+        inboundA2UI: _oldRich,
+        inboundLabels: _labels,
+        inboundEditRevision: _revision,
+        ...metadata
+      } = current.metadata ?? {}
+      return {
+        mutation,
+        recalled,
+        changed,
+        parts: selected.parts,
+        metadata: {
+          ...metadata,
+          ...(selected.inboundA2UI ? { inboundA2UI: selected.inboundA2UI } : {}),
+          inboundEditBase: base,
+          inboundMatrixRevisions: { edits, redactedEditIds },
+          ...(winner ? { inboundEditRevision: winner.revision } : {}),
+          ...(mutation
+            ? {
+                inboundMutationRevision: {
+                  jobId: mutation.id,
+                  revision: mutation.mutationRevision ?? 0,
+                },
+              }
+            : {}),
+          ...(changed
+            ? {
+                editedAt: now,
+                editCount: ((current.metadata?.editCount as number | undefined) ?? 0) + 1,
+              }
+            : {}),
+        },
+      }
+    }
+    await withTranscriptRuntimeLock(target.sessionId, async () => {
+      const before = await db.messages.get(target.id)
+      if (!before || before.metadata?.deletedAt !== undefined) return
+      const session = await db.sessions.get(target.sessionId)
+      if (!session) throw new Error("SESSION_NOT_FOUND")
+      assertLocalMutationAllowed(session, "message.correctOwn")
+      const initial = await build(before)
+      if (initial.recalled) return
+      if (initial.changed) await invalidateTranscriptRuntime(target.sessionId)
+      await db.transaction("rw", db.messages, db.sessions, db.connectorInboundJobs, async () => {
+        const current = await db.messages.get(target.id)
+        const session = await db.sessions.get(target.sessionId)
+        if (!current || !session || current.metadata?.deletedAt !== undefined) return
+        assertLocalMutationAllowed(session, "message.correctOwn")
+        const latest = await build(current)
+        // Another intent may commit while invalidation awaits the host. Re-read
+        // under the DB write transaction; never acknowledge un-applied content.
+        if (latest.recalled || (!initial.changed && latest.changed)) return
+        await db.messages.update(current.id, { parts: latest.parts, metadata: latest.metadata })
+        if (latest.changed)
+          await stampSessionLastMessage(current.sessionId, {
+            parts: latest.parts,
+            createdAt: current.createdAt,
+          })
+        if (latest.mutation)
+          await acknowledgeConnectorInboundMutation(
+            latest.mutation.id,
+            latest.mutation.mutationRevision
+          )
+      })
+      invalidatePersistSnapshot(target.sessionId)
+    })
+  }
+
   private async applyMessageEdit(event: NormalizedInboundEvent, now: number): Promise<void> {
     const replaces = event.replacesMessageId
     if (!replaces) {
@@ -1659,9 +1909,27 @@ export class ConnectorBus {
       return
     }
     // Indexed lookup, scoped by adapterId + conversationKey (with a legacy
-    // platform-only fallback) — see `findStoredPlatformMessage`.
+    // session-binding fallback) — see `findStoredPlatformMessage`.
     const db = getDb()
     const target = await this.findStoredPlatformMessage(event, replaces)
+    if (
+      target &&
+      !isAuthorizedInboundEdit(event, target.metadata?.platformMessage?.sender?.remoteUserId)
+    ) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: "edit_sender_mismatch",
+      })
+      return
+    }
+    await recordConnectorInboundEdit(event)
+    if (target && event.platform === "matrix") {
+      await this.reconcileMatrixRevisions(event, target, now)
+      return
+    }
     if (target) {
       const session = await db.sessions.get(target.sessionId)
       if (!session) throw new Error("SESSION_NOT_FOUND")
@@ -1669,29 +1937,80 @@ export class ConnectorBus {
       // Store the new revision exactly as `insertInboundMessage` stores a
       // new message, and re-project its rich block: the old card describes
       // the old text, and an edit that removes the card must remove it here.
-      const finalParts = inboundEventToStoredParts(event)
-      const inboundA2UI = projectInboundToA2UI(event.platform, event.raw, event.segments)
       // Labels judged the old text; an edit makes them stale (ADR-0194).
-      const {
-        inboundLabels: _staleLabels,
-        inboundA2UI: _staleRich,
-        ...keptMetadata
-      } = target.metadata ?? {}
-      const editedMetadata: StoredMessage["metadata"] = {
-        ...keptMetadata,
-        ...(inboundA2UI ? { inboundA2UI } : {}),
-        editedAt: now,
-        editCount: ((target.metadata?.editCount as number | undefined) ?? 0) + 1,
-      }
-      await db.messages.update(target.id, {
-        parts: finalParts,
-        metadata: editedMetadata,
-      })
-      // Rewrites the session preview only when this was the newest message;
-      // the helper refuses to move the preview backwards.
-      await stampSessionLastMessage(target.sessionId, {
-        parts: finalParts,
-        createdAt: target.createdAt,
+      await withTranscriptRuntimeLock(target.sessionId, async () => {
+        const before = await db.messages.get(target.id)
+        const accepted = await findConnectorInboundMutation({ ...event, messageId: replaces })
+        const candidate = accepted?.pendingEdit ?? event
+        const revision = inboundEditRevision(candidate)
+        if (
+          !before ||
+          before.metadata?.deletedAt !== undefined ||
+          accepted?.recalledAt !== undefined ||
+          !isNewerInboundEdit(revision, before.metadata?.inboundEditRevision)
+        )
+          return
+        const stamp = before.metadata?.inboundMutationRevision as
+          { jobId?: string; revision?: number } | undefined
+        if (
+          accepted &&
+          stamp?.jobId === accepted.id &&
+          stamp.revision === (accepted.mutationRevision ?? 0)
+        ) {
+          await acknowledgeConnectorInboundMutation(accepted.id, accepted.mutationRevision)
+          return
+        }
+        await invalidateTranscriptRuntime(target.sessionId)
+        await db.transaction("rw", db.messages, db.sessions, db.connectorInboundJobs, async () => {
+          const session = await db.sessions.get(target.sessionId)
+          if (!session) throw new Error("SESSION_NOT_FOUND")
+          assertLocalMutationAllowed(session, "message.correctOwn")
+          const current = await db.messages.get(target.id)
+          // A delayed edit must never restore a withdrawn message. Read inside
+          // the write transaction so a concurrent recall cannot race this guard.
+          if (
+            !current ||
+            current.metadata?.deletedAt !== undefined ||
+            !isAuthorizedInboundEdit(event, current.metadata?.platformMessage?.sender?.remoteUserId)
+          )
+            return
+          const mutation = await findConnectorInboundMutation({ ...event, messageId: replaces })
+          if (mutation?.recalledAt !== undefined) return
+          const latest = mutation?.pendingEdit ?? event
+          const revision = inboundEditRevision(latest)
+          if (!isNewerInboundEdit(revision, current.metadata?.inboundEditRevision)) return
+          const finalParts = inboundEventToStoredParts(latest)
+          const inboundA2UI = projectInboundToA2UI(latest.platform, latest.raw, latest.segments)
+          const {
+            inboundLabels: _staleLabels,
+            inboundA2UI: _staleRich,
+            ...keptMetadata
+          } = current.metadata ?? {}
+          await db.messages.update(current.id, {
+            parts: finalParts,
+            metadata: {
+              ...keptMetadata,
+              ...(inboundA2UI ? { inboundA2UI } : {}),
+              editedAt: now,
+              inboundEditRevision: revision,
+              ...(mutation
+                ? {
+                    inboundMutationRevision: {
+                      jobId: mutation.id,
+                      revision: mutation.mutationRevision ?? 0,
+                    },
+                  }
+                : {}),
+              editCount: ((current.metadata?.editCount as number | undefined) ?? 0) + 1,
+            },
+          })
+          await stampSessionLastMessage(current.sessionId, {
+            parts: finalParts,
+            createdAt: current.createdAt,
+          })
+          if (mutation)
+            await acknowledgeConnectorInboundMutation(mutation.id, mutation.mutationRevision)
+        })
       })
       // See `invalidatePersistSnapshot`: an in-place edit does not change the
       // session's id set, so the persist snapshot cannot detect it on its own
@@ -1727,9 +2046,40 @@ export class ConnectorBus {
       })
       return
     }
+    const affected = await recordConnectorInboundRecall(event, now)
     // Indexed lookup, scoped by adapterId + conversationKey (with a legacy
-    // platform-only fallback) — see `findStoredPlatformMessage`.
+    // session-binding fallback) — see `findStoredPlatformMessage`.
     const db = getDb()
+    if (event.platform === "matrix") {
+      const parents = new Map<string, StoredMessage>()
+      for (const job of affected) {
+        const parent = await this.findStoredPlatformMessage(job.event, job.sourceMessageId)
+        if (parent) parents.set(parent.id, parent)
+      }
+      // Canonical revision snapshots outlive the terminal job retention tier.
+      const roomPrefix = replaces.slice(0, replaces.lastIndexOf("|") + 1)
+      if (roomPrefix) {
+        for (const parent of await db.messages
+          .where("platformMessageId")
+          .startsWith(roomPrefix)
+          .filter((row) => {
+            const pm = row.metadata?.platformMessage
+            const history = row.metadata?.inboundMatrixRevisions as
+              { edits?: Record<string, unknown> } | undefined
+            return (
+              pm?.platform === "matrix" &&
+              pm.adapterId === event.adapterId &&
+              typeof pm.conversationKey === "string" &&
+              mutationConversationMatches(event.conversationKey, pm.conversationKey) &&
+              Object.hasOwn(history?.edits ?? {}, replaces)
+            )
+          })
+          .toArray())
+          parents.set(parent.id, parent)
+      }
+      for (const parent of parents.values())
+        await this.reconcileMatrixRevisions(event, parent, now, replaces)
+    }
     const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
       const session = await db.sessions.get(target.sessionId)
@@ -1737,24 +2087,45 @@ export class ConnectorBus {
       assertLocalMutationAllowed(session, "message.redactOwn")
       // The rich projection, labels and reply quote describe the withdrawn
       // content; keeping them would leave it on screen behind `[deleted]`.
-      const {
-        inboundA2UI: _withdrawnRich,
-        inboundLabels: _withdrawnLabels,
-        ...keptMetadata
-      } = target.metadata ?? {}
-      const deletedMetadata: StoredMessage["metadata"] = {
-        ...keptMetadata,
-        deletedAt: now,
-      }
-      await db.messages.update(target.id, {
-        parts: [{ type: "text" as const, text: "[deleted]" }],
-        metadata: deletedMetadata,
-      })
-      // A deleted newest message must not keep its text alive in the Inbox
-      // preview line.
-      await stampSessionLastMessage(target.sessionId, {
-        parts: [{ type: "text" as const, text: "[deleted]" }],
-        createdAt: target.createdAt,
+      await withTranscriptRuntimeLock(target.sessionId, async () => {
+        const before = await db.messages.get(target.id)
+        if (!before || before.metadata?.deletedAt !== undefined) return
+        await invalidateTranscriptRuntime(target.sessionId)
+        await db.transaction("rw", db.messages, db.sessions, db.connectorInboundJobs, async () => {
+          const session = await db.sessions.get(target.sessionId)
+          if (!session) throw new Error("SESSION_NOT_FOUND")
+          assertLocalMutationAllowed(session, "message.redactOwn")
+          const current = await db.messages.get(target.id)
+          if (!current) return
+          const mutation = await findConnectorInboundMutation({ ...event, messageId: replaces })
+          const {
+            inboundA2UI: _withdrawnRich,
+            inboundLabels: _withdrawnLabels,
+            replyTo: _withdrawnReply,
+            inboundEditBase: _withdrawnBase,
+            inboundMatrixRevisions: _withdrawnRevisions,
+            ...keptMetadata
+          } = current.metadata ?? {}
+          const parts: StoredMessage["parts"] = [{ type: "text", text: "[deleted]" }]
+          await db.messages.update(current.id, {
+            parts,
+            metadata: {
+              ...keptMetadata,
+              deletedAt: mutation?.recalledAt ?? now,
+              ...(mutation
+                ? {
+                    inboundMutationRevision: {
+                      jobId: mutation.id,
+                      revision: mutation.mutationRevision ?? 0,
+                    },
+                  }
+                : {}),
+            },
+          })
+          await stampSessionLastMessage(current.sessionId, { parts, createdAt: current.createdAt })
+          if (mutation)
+            await acknowledgeConnectorInboundMutation(mutation.id, mutation.mutationRevision)
+        })
       })
       invalidatePersistSnapshot(target.sessionId)
     }

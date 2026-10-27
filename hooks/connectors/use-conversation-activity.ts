@@ -11,6 +11,7 @@
  */
 
 import { useLiveQuery } from "dexie-react-hooks"
+import { useMemo } from "react"
 import { getDb } from "@/lib/db/schema"
 import type { AuditEntry, AuditKind } from "@/types/connectors/audit"
 
@@ -74,8 +75,12 @@ export function useConversationActivity(
 ): AuditEntry[] {
   const windowMs = options.windowMs ?? DEFAULT_WINDOW_MS
   const limit = options.limit ?? DEFAULT_LIMIT
-  const now = (options.now ?? Date.now)()
-  const since = now - windowMs
+  // RunPanel re-renders with the live clock. Keep one query window per visit
+  // instead of resubscribing to the audit table on every streamed frame/tick.
+  const since = useMemo(
+    () => (conversationKey ? (options.now ?? Date.now)() - windowMs : 0),
+    [conversationKey, windowMs, options.now]
+  )
 
   return (
     useLiveQuery<AuditEntry[]>(() => {

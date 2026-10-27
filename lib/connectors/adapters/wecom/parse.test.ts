@@ -164,3 +164,34 @@ describe("parseWeComMessage", () => {
     expect(parseWeComMessage(ADP, SELF, body({ msgid: "", chatid: "" }), "r")).toBeNull()
   })
 })
+it("keeps valid mixed siblings when malformed or mismatched items arrive", () => {
+  const event = parseWeComMessage(
+    ADP,
+    SELF,
+    body({
+      msgtype: "mixed",
+      mixed: {
+        msg_item: [
+          null,
+          {
+            msgtype: "image",
+            text: { content: "wrong field" },
+            image: { url: "https://cdn/quoted" },
+          },
+          { msgtype: "text", text: { content: "valid" } },
+        ],
+      } as unknown as WeComInboundMsgBody["mixed"],
+    })
+  )
+  expect(event?.segments).toEqual([
+    { type: "image", url: "https://cdn/quoted" },
+    { type: "text", text: "valid" },
+  ])
+})
+it.each([
+  { msgtype: "image", image: { url: 42 } },
+  { msgtype: "text", text: { content: {} } },
+])("isolates malformed quoted content: %j", (quote) => {
+  const event = parseWeComMessage(ADP, SELF, body({ quote: quote as never }))
+  expect(event?.segments).toEqual([{ type: "text", text: "hello bot" }])
+})

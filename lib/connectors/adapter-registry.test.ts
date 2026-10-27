@@ -39,6 +39,10 @@ jest.mock("./adapters/matrix", () => ({
   createMatrixAdapter: jest.fn().mockReturnValue({ platform: "matrix", id: "mx-mock" }),
 }))
 
+jest.mock("./adapters/wechat-personal", () => ({
+  createWechatPersonalAdapter: jest.fn().mockReturnValue({ platform: "wechat-personal", id: "wx" }),
+}))
+
 jest.mock("./adapters/dingtalk", () => ({
   createDingTalkAdapter: jest.fn().mockReturnValue({ platform: "dingtalk", id: "dt-mock" }),
 }))
@@ -65,6 +69,7 @@ import {
   buildMatrixAdapter,
   buildDingTalkAdapter,
   buildQQOfficialAdapter,
+  buildWechatPersonalAdapter,
 } from "./adapter-registry"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
@@ -72,6 +77,7 @@ import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
 import { createOneBotAdapter } from "./adapters/onebot"
 import { createMatrixAdapter } from "./adapters/matrix"
+import { createWechatPersonalAdapter } from "./adapters/wechat-personal"
 import { createDingTalkAdapter } from "./adapters/dingtalk"
 import { createQQOfficialAdapter } from "./adapters/qq-official"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -268,6 +274,19 @@ describe("buildMatrixAdapter", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildAdapterFromRow", () => {
+  it("injects an atomic value/revision resolver for personal-WeChat polls", async () => {
+    const snapshot = { value: "test-bot-token", revision: "revision-2" }
+    mockInvoke.mockResolvedValueOnce(snapshot).mockResolvedValueOnce(null)
+    await buildWechatPersonalAdapter(makeRow({ id: "personal-1", type: "wechat-personal" }))
+    const opts = (createWechatPersonalAdapter as jest.Mock).mock.calls[0][0]
+    expect(await opts.tokenSnapshot()).toEqual(snapshot)
+    expect(await opts.tokenSnapshot()).toBeNull()
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_keyring_get_snapshot", {
+      adapterId: "personal-1",
+      credential: "botToken",
+    })
+  })
+
   it("routes 'telegram' type to buildTelegramAdapter and returns an adapter", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "connectors_keyring_get") return makeKeyringOkResp()

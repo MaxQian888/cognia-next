@@ -124,8 +124,11 @@ async function pingLark(row: AdapterInstanceRow): Promise<boolean> {
   }
 }
 
-async function pingOneBot(): Promise<boolean> {
-  // OneBot uses reverse-WS — the QQ client connects to our axum server.
+async function pingOneBot(row: AdapterInstanceRow): Promise<boolean> {
+  // Forward sockets run without our inbound axum server. Its global health
+  // cannot describe that connection and would force a healthy socket to redial.
+  if (row.transportMode === "forward-ws") return pingGateway(row)
+  // In reverse-WS the QQ client connects to our axum server.
   // Without a dedicated `connectors_onebot_probe` Tauri command (out of
   // scope per the plan), we settle for the global server-health signal:
   // the axum server must be running and at least one adapter registered.
@@ -197,7 +200,7 @@ export async function deriveHeartbeat(
   } else if (row.type === "onebot") {
     pingOk = await (options.probeOverrides?.onebotPing
       ? options.probeOverrides.onebotPing()
-      : pingOneBot())
+      : pingOneBot(row))
   } else if (isGatewayTransport(row)) {
     pingOk = await (options.probeOverrides?.gatewayPing
       ? options.probeOverrides.gatewayPing(row)

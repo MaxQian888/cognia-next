@@ -18,6 +18,8 @@
 
 import { escapeMarkdown, markdownLinkDestination } from "./inbound-markdown"
 import type { InboundA2UIBlock, InboundA2UINode } from "./inbound-a2ui-types"
+import type { MessageSegment } from "@/types/connectors/segment"
+import { segmentsToPlainText } from "@/types/connectors/segment"
 
 /** Nesting deeper than any real card; bounds recursion on hostile input. */
 export const MAX_INBOUND_A2UI_DEPTH = 12
@@ -56,6 +58,7 @@ function num(value: unknown): number | undefined {
 
 interface Budget {
   remaining: number
+  displayBytes: number
 }
 
 function sanitizeChildren(value: unknown, depth: number, budget: Budget): InboundA2UINode[] {
@@ -92,14 +95,25 @@ function sanitizeNode(value: unknown, depth: number, budget: Budget): InboundA2U
       return { kind: "heading", level, text }
     }
     case "image": {
-      const url = str(value.url)
-      if (!url) return null
+      const originalUrl = str(value.url)
+      if (!originalUrl) return null
+      // Legacy rows embedded bytes in url before displayUrl existed. Migrate
+      // them into the same budget instead of retaining an unbounded payload.
+      const inlineUrl = /^data:/i.test(originalUrl)
+      const url = inlineUrl ? "inbound-media:legacy" : originalUrl
       const alt = str(value.alt)
       const width = num(value.width)
       const height = num(value.height)
+      const displayUrl = str(value.displayUrl) ?? (inlineUrl ? originalUrl : undefined)
+      const keepDisplay =
+        displayUrl &&
+        displayUrl.length <= budget.displayBytes &&
+        /^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,/i.test(displayUrl)
+      if (keepDisplay) budget.displayBytes -= displayUrl.length
       return {
         kind: "image",
         url,
+        ...(keepDisplay ? { displayUrl } : {}),
         ...(alt !== undefined ? { alt } : {}),
         ...(width !== undefined ? { width } : {}),
         ...(height !== undefined ? { height } : {}),
@@ -118,7 +132,7 @@ function sanitizeNode(value: unknown, depth: number, budget: Budget): InboundA2U
         kind: "button",
         label: str(value.label) ?? "",
         ...(url ? { url } : {}),
-        ...(actionId ? { actionId } : {}),
+        ...(Object.hasOwn(value, "actionId") ? { actionId: actionId ?? "" } : {}),
         ...(style && BUTTON_STYLES.has(style)
           ? { style: style as "primary" | "danger" | "default" }
           : {}),
@@ -175,6 +189,180 @@ function sanitizeNode(value: unknown, depth: number, budget: Budget): InboundA2U
 }
 
 /**
+ * Reuse bytes the adapter already cached for presentation only. They live on
+ * the message's rich metadata, not replayed parts, and share that row's lifetime.
+ * No credentials, fetches or new cache ownership are introduced by rendering.
+ */
+export function withInboundDisplayMedia(
+  block: InboundA2UIBlock | null,
+  source: InboundA2UIBlock["source"],
+  segments: MessageSegment[]
+): InboundA2UIBlock | null {
+  if (!SOURCES.has(source) || !Array.isArray(segments)) return block
+  let remaining = 7 * 1024 * 1024 // Base64 size for the enrichment pass's 5 MiB limit.
+  const media = segments.flatMap((seg, index) => {
+    if (!seg || typeof seg !== "object") return []
+    if (seg.type !== "image" && seg.type !== "file" && seg.type !== "voice" && seg.type !== "video")
+      return []
+    if (typeof seg.url !== "string" || (!seg.url && typeof seg.rawUrl !== "string")) return []
+    const mime = typeof seg.mimeType === "string" ? seg.mimeType : undefined
+    const bytes =
+      "dataBase64" in seg && typeof seg.dataBase64 === "string" ? seg.dataBase64 : undefined
+    const inlineDisplay =
+      /^(?:data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,|blob:)/i.test(seg.url) &&
+      seg.url.length <= remaining
+        ? seg.url
+        : undefined
+    const displayUrl =
+      bytes &&
+      mime &&
+      /^image\/(?:png|jpeg|gif|webp|avif|bmp)$/i.test(mime) &&
+      bytes.length <= remaining
+        ? `data:${mime};base64,${bytes}`
+        : inlineDisplay
+    const aliases = new Set(
+      [seg.url, seg.rawUrl].filter((url): url is string => typeof url === "string" && Boolean(url))
+    )
+    if (source === "wechat-personal")
+      for (const alias of [...aliases])
+        if (!/^(?:data|blob):/i.test(alias)) aliases.add(`wechat-personal-media:${alias}`)
+    if (seg.type === "voice" || seg.type === "video")
+      for (const alias of [...aliases])
+        aliases.add(`${seg.type === "voice" ? "cq-record:" : "cq-video:"}${alias}`)
+    // Resolvers may rewrite url to inline bytes. Keep those bytes in one
+    // bounded display field, retaining the original reference for dedup/state.
+    const ref =
+      [seg.url, seg.rawUrl].find(
+        (url) => typeof url === "string" && url.length > 0 && !/^(?:data|blob):/i.test(url)
+      ) ?? `inbound-media:${index}`
+    if (displayUrl) aliases.add(displayUrl) // Matrix may already use the inline bytes.
+    aliases.add(`lark-img:${seg.url}`)
+    if (seg.url.startsWith("tg://file/")) aliases.add(`telegram-file:${seg.url.slice(10)}`)
+    const node: InboundA2UINode =
+      seg.type === "image" || (seg.type === "file" && mime?.startsWith("image/"))
+        ? {
+            kind: "image",
+            url:
+              source === "wecom" || source === "wechat-personal" ? `${source}-media:${ref}` : ref,
+            ...(displayUrl ? { displayUrl } : {}),
+            alt: seg.type === "image" ? (seg.alt ?? "") : seg.type === "file" ? seg.name : "",
+          }
+        : {
+            kind: "link",
+            href:
+              source === "wechat-personal"
+                ? `wechat-personal-media:${ref}`
+                : !seg.url || /^(?:data|blob):/i.test(seg.url)
+                  ? `inbound-media:${index}`
+                  : seg.url,
+            label:
+              seg.type === "file"
+                ? seg.name
+                : seg.type === "voice"
+                  ? seg.transcript || "Voice message"
+                  : "Video",
+          }
+    return [
+      {
+        aliases,
+        node,
+        index,
+        type: seg.type,
+        speech:
+          seg.type === "voice" && typeof seg.transcript === "string" ? seg.transcript : undefined,
+        inline: /^(?:data|blob):/i.test(seg.url),
+      },
+    ]
+  })
+  if (!media.length) return block
+  const used = new Set<number>()
+  const allocate = (node: InboundA2UINode): InboundA2UINode => {
+    if (node.kind !== "image" || !node.displayUrl) return node
+    const { displayUrl, ...fallback } = node
+    if (displayUrl.length > remaining) return fallback
+    remaining -= displayUrl.length
+    return node
+  }
+  const visit = (node: InboundA2UINode): InboundA2UINode => {
+    if (node.kind === "image" || node.kind === "link") {
+      const matches = (item: (typeof media)[number]) =>
+        !used.has(item.index) && item.aliases.has(node.kind === "image" ? node.url : node.href)
+      const direct =
+        media.find((item) => matches(item) && item.node.kind === node.kind) ??
+        media.find((item) => matches(item) && node.kind === "link" && item.type === "file")
+      // Sanitizing an old inline URL moves it into displayUrl; retain its
+      // source occurrence instead of appending that attachment a second time.
+      const legacy = node.kind === "image" && node.url === "inbound-media:legacy"
+      const legacyMatches = (item: (typeof media)[number]) =>
+        legacy &&
+        item.node.kind === "image" &&
+        (node.displayUrl ? item.aliases.has(node.displayUrl) : item.inline)
+      const found = direct ?? media.find((item) => !used.has(item.index) && legacyMatches(item))
+      if (found) {
+        used.add(found.index)
+        return allocate(
+          found.node.kind === "image" && node.kind === "image"
+            ? { ...found.node, alt: node.alt || found.node.alt }
+            : found.node.kind === "link" && node.kind === "link"
+              ? { ...found.node, label: node.label || found.node.label }
+              : found.node
+        )
+      }
+    }
+    return "children" in node ? { ...node, children: node.children.map(visit) } : node
+  }
+  const body: InboundA2UINode[] = block
+    ? block.body.map(visit)
+    : segments.flatMap((seg, index): InboundA2UINode[] => {
+        if (!seg || typeof seg !== "object") return []
+        if (
+          seg.type === "image" ||
+          seg.type === "file" ||
+          seg.type === "voice" ||
+          seg.type === "video"
+        ) {
+          const item = media.find((candidate) => candidate.index === index)
+          if (!item) return []
+          // Each occurrence belongs at its original position, including two
+          // references to the same attachment on either side of a text run.
+          used.add(item.index)
+          return [allocate(item.node)]
+        }
+        if (seg.type === "text") return [{ kind: "text" as const, text: seg.text }]
+        if (seg.type === "markdown")
+          return [{ kind: "text" as const, text: seg.md, format: "markdown" as const }]
+        if (seg.type === "mention") return [{ kind: "mention", handle: seg.userId }]
+        if (seg.type === "reply")
+          return seg.messageId
+            ? [{ kind: "reply_context", replyToMessageId: seg.messageId, preview: seg.snippet }]
+            : []
+        try {
+          const text = segmentsToPlainText([seg])
+          return text ? [{ kind: "text", text }] : []
+        } catch {
+          return []
+        }
+      })
+  for (const item of media) {
+    if (used.has(item.index)) continue
+    // The WeChat mappers already render recognition as prose. An opaque
+    // voice reference adds no playable control, so do not repeat its caption.
+    if (
+      block &&
+      (source === "wechat-personal" || source === "wechat-oa") &&
+      item.speech &&
+      item.node.kind === "link" &&
+      !isNavigableInboundUrl(item.node.href) &&
+      body.some((node) => node.kind === "text" && node.text.trim() === item.speech?.trim())
+    )
+      continue
+    body.push(allocate(item.node))
+    used.add(item.index)
+  }
+  return sanitizeInboundA2UIBlock({ ...(block ?? { v: 1 as const, source }), body })
+}
+
+/**
  * Rebuild `value` as a well-formed block, dropping every node that does not
  * match the vocabulary. Returns null when nothing renderable is left.
  */
@@ -182,7 +370,10 @@ export function sanitizeInboundA2UIBlock(value: unknown): InboundA2UIBlock | nul
   if (!isRecord(value)) return null
   const source = str(value.source) as InboundA2UIBlock["source"] | undefined
   if (!source || !SOURCES.has(source)) return null
-  const body = sanitizeChildren(value.body, 0, { remaining: MAX_INBOUND_A2UI_NODES })
+  const body = sanitizeChildren(value.body, 0, {
+    remaining: MAX_INBOUND_A2UI_NODES,
+    displayBytes: 7 * 1024 * 1024,
+  })
   if (body.length === 0) return null
   const title = str(value.title)
   return {
@@ -307,7 +498,8 @@ interface BlockMedia {
 
 function collectMedia(nodes: readonly InboundA2UINode[], into: BlockMedia): BlockMedia {
   for (const node of nodes) {
-    if (node.kind === "image") into.imageUrls.add(node.url)
+    if (node.kind === "image")
+      into.imageUrls.add(node.url.replace(/^(?:wecom|wechat-personal)-media:/, ""))
     else if (node.kind === "link") into.linkLabels.add(node.label)
     else if ("children" in node) collectMedia(node.children, into)
   }
@@ -330,7 +522,8 @@ const MEDIA_MARKER = /\[(image|file): ([^\]\n]*)\]/g
  */
 export function inboundA2UIBlockCoversParts(
   block: InboundA2UIBlock,
-  parts: readonly unknown[]
+  parts: readonly unknown[],
+  displayedReplyPreview?: string
 ): boolean {
   // The block in Markdown form (plain text escaped) and the parts are both
   // Markdown, so one display key applies to both sides.
@@ -341,14 +534,25 @@ export function inboundA2UIBlockCoversParts(
     if (part.type === "step-start") continue
     if (part.type !== "text" || typeof part.text !== "string") return false
     let uncovered = false
-    const text = part.text.replace(MEDIA_MARKER, (_m, kind: string, ref: string) => {
+    // Older OneBot rows repeated a generated reply marker before the full
+    // body. Remove only that exact prefix when its quote is displayed too.
+    const replyMarker =
+      displayedReplyPreview === undefined ? undefined : `[reply:${displayedReplyPreview}]`
+    const body =
+      replyMarker && part.text.trimStart().startsWith(replyMarker)
+        ? part.text.trimStart().slice(replyMarker.length)
+        : part.text
+    const text = body.replace(MEDIA_MARKER, (_m, kind: string, ref: string) => {
       const seen = kind === "image" ? media.imageUrls.has(ref) : media.linkLabels.has(ref)
       if (!seen) uncovered = true
       return " "
     })
     if (uncovered) return false
     const needle = displayKey(text)
-    if (needle && !prose.includes(needle)) return false
+    // Stored platform text can be literal prose. Bare URLs such as
+    // /__keep__/ must not lose underscores to Markdown emphasis matching.
+    const literalNeedle = displayKey(escapeMarkdown(text))
+    if (needle && !prose.includes(needle) && !prose.includes(literalNeedle)) return false
   }
   return true
 }

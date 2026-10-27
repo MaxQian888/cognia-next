@@ -16,6 +16,24 @@ describe("extractXmlField", () => {
   it("returns undefined for a missing field", () => {
     expect(extractXmlField("<A>x</A>", "B")).toBeUndefined()
   })
+
+  it("does not read sender-controlled XML-looking text as envelope fields", () => {
+    const xml = textXml("<MsgId>forged</MsgId><MsgType>image</MsgType>")
+    expect(extractXmlField(xml, "MsgId")).toBe("12345")
+    expect(parseWechatOaXml(ADAPTER, "", xml)!.messageId).toBe("12345")
+  })
+
+  it("preserves embedded closing tags, split CDATA and escaped XML text", () => {
+    expect(extractXmlField("<Content><![CDATA[a </Content> b]]></Content>", "Content")).toBe(
+      "a </Content> b"
+    )
+    expect(extractXmlField("<Content><![CDATA[a ]]]]><![CDATA[> b]]></Content>", "Content")).toBe(
+      "a ]]> b"
+    )
+    expect(extractXmlField("<Url>https://example.com/?a=1&amp;b=2</Url>", "Url")).toBe(
+      "https://example.com/?a=1&b=2"
+    )
+  })
 })
 
 describe("parseWechatOaXml", () => {
@@ -40,6 +58,20 @@ describe("parseWechatOaXml", () => {
     const xml = `<xml><FromUserName><![CDATA[oU]]></FromUserName><CreateTime>1</CreateTime><MsgType><![CDATA[voice]]></MsgType><MediaId><![CDATA[VID]]></MediaId><Recognition><![CDATA[hello there]]></Recognition><MsgId>9</MsgId></xml>`
     const out = parseWechatOaXml(ADAPTER, "", xml)
     expect(out!.segments[0]).toMatchObject({ type: "voice", transcript: "hello there" })
+  })
+
+  it("preserves the official speex voice format instead of declaring AMR", () => {
+    const xml = `<xml><FromUserName>oU</FromUserName><CreateTime>1</CreateTime><MsgType>voice</MsgType><MediaId>voice</MediaId><Format>speex</Format><MsgId>9007199254740993</MsgId></xml>`
+    const out = parseWechatOaXml(ADAPTER, "", xml)!
+    expect(out.messageId).toBe("9007199254740993")
+    expect(out.segments[0]).toMatchObject({ type: "voice", mimeType: "audio/speex" })
+  })
+
+  it("rejects out-of-range location coordinates", () => {
+    const xml = `<xml><FromUserName>oU</FromUserName><CreateTime>1</CreateTime><MsgType>location</MsgType><Location_X>91</Location_X><Location_Y>181</Location_Y><Label>Office</Label><MsgId>9</MsgId></xml>`
+    expect(parseWechatOaXml(ADAPTER, "", xml)!.segments).toEqual([
+      { type: "text", text: "Location: Office" },
+    ])
   })
 
   it("carries the selfId through to the event", () => {
@@ -107,6 +139,15 @@ describe("parseWechatOaXml", () => {
   it("drops a CLICK event without an EventKey", () => {
     const xml = `<xml><FromUserName><![CDATA[oU]]></FromUserName><MsgType><![CDATA[event]]></MsgType><Event><![CDATA[CLICK]]></Event></xml>`
     expect(parseWechatOaXml(ADAPTER, "", xml)).toBeNull()
+  })
+
+  it("retains distinct menu clicks in one second while deduplicating retransmission", () => {
+    const xml = (key: string) =>
+      `<xml><FromUserName>oU</FromUserName><CreateTime>1700000000</CreateTime><MsgType>event</MsgType><Event>CLICK</Event><EventKey>${key}</EventKey></xml>`
+    const first = parseWechatOaXml(ADAPTER, "", xml("MENU_HELP"))!
+    const second = parseWechatOaXml(ADAPTER, "", xml("MENU_STATUS"))!
+    expect(second.messageId).not.toBe(first.messageId)
+    expect(parseWechatOaXml(ADAPTER, "", xml("MENU_HELP"))?.messageId).toBe(first.messageId)
   })
 
   it("drops VIEW and other event pushes", () => {

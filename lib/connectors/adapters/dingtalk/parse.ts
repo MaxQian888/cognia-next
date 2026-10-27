@@ -41,9 +41,11 @@ export interface DingTalkBotMessage {
 function richTextToPlain(rich: Array<Record<string, unknown>>): string {
   const parts: string[] = []
   for (const node of rich) {
+    if (!node || typeof node !== "object") continue
     const t = node.text
     if (typeof t === "string" && t.length > 0) parts.push(t)
-    else if (node.type === "picture" || node.pictureDownloadCode) parts.push("[picture]")
+    else if (node.type === "picture" || node.pictureDownloadCode || node.downloadCode)
+      parts.push("[picture]")
   }
   return parts.join("")
 }
@@ -75,7 +77,7 @@ function extractText(msg: DingTalkBotMessage): string {
 }
 
 /** Preserve media references for the adapter's authenticated download pass. */
-function messageSegments(msg: DingTalkBotMessage): MessageSegment[] {
+export function dingtalkMessageSegments(msg: DingTalkBotMessage): MessageSegment[] {
   const media = (
     type: "image" | "voice" | "video" | "file",
     content: Record<string, unknown>
@@ -144,14 +146,21 @@ export function parseDingTalkBotMessage(
   const isGroup = msg.conversationType === "2"
   const remoteUserId = msg.senderStaffId || msg.senderId || "unknown"
   const text = extractText(msg)
-  const segments = messageSegments(msg)
+  const segments = dingtalkMessageSegments(msg)
 
   const effectiveSelfId = selfId || msg.chatbotUserId || ""
   // atUsers → mentioned user ids (staffId preferred), excluding the bot itself
   // (its entry carries dingtalkId === chatbotUserId).
   const mentionedUsers = Array.isArray(msg.atUsers)
     ? msg.atUsers
-        .map((u) => (u.staffId && u.staffId.length > 0 ? u.staffId : (u.dingtalkId ?? "")))
+        .filter((u) => u && typeof u === "object")
+        .map((u) =>
+          typeof u.staffId === "string" && u.staffId
+            ? u.staffId
+            : typeof u.dingtalkId === "string"
+              ? u.dingtalkId
+              : ""
+        )
         .filter((id) => id.length > 0 && id !== effectiveSelfId && id !== (msg.chatbotUserId ?? ""))
     : []
 
@@ -182,6 +191,7 @@ export function parseDingTalkBotMessage(
       platform: "dingtalk",
       adapterId,
       remoteUserId,
+      remoteIdType: msg.senderStaffId ? "staff_id" : "opaque_id",
       displayName: msg.senderNick,
     },
     channel: {

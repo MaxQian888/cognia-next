@@ -342,6 +342,7 @@ export async function safeSendPrompt(
   let result: RunAndCaptureResult
   try {
     result = await runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
+      beforeSend: opts.beforeSend,
       signal: opts.signal,
       timeoutMs: opts.timeoutMs,
       idleTimeoutMs: opts.idleTimeoutMs,

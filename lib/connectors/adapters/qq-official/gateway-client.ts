@@ -159,11 +159,19 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
             } catch {
               continue
             }
+            if (!msg || typeof msg !== "object" || Array.isArray(msg)) continue
             if (msg.s !== undefined && msg.s !== null) session.sequence = msg.s
 
             switch (msg.op) {
               case OP_HELLO: {
+                if (!msg.d || typeof msg.d !== "object") break
                 const { heartbeat_interval } = msg.d as { heartbeat_interval: number }
+                if (
+                  typeof heartbeat_interval !== "number" ||
+                  !Number.isFinite(heartbeat_interval) ||
+                  heartbeat_interval <= 0
+                )
+                  break
                 const sendHeartbeat = () => {
                   if (opts.signal.aborted || wsEnded) return
                   if (unackedHeartbeats >= 2) {
@@ -227,6 +235,7 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
               case OP_DISPATCH: {
                 if (msg.t === "READY") {
                   const ready = msg.d as { user?: { id?: string }; session_id?: string }
+                  if (!ready || typeof ready !== "object") break
                   selfId = ready.user?.id ?? selfId
                   session.sessionId = ready.session_id ?? null
                   attempts = 0

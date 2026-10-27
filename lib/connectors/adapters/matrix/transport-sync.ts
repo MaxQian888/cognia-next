@@ -12,7 +12,7 @@
  *
  * Also handles:
  * - room invites → auto-join (once per room, so a failing join cannot loop),
- * - `limited: true` timelines → gap backfill via `/messages` (dir=b, capped),
+ * - `limited: true` timelines → gap backfill via `/messages` (dir=b, paced),
  * - `M_UNKNOWN_TOKEN` / `soft_logout` → throws {@link MatrixSyncAuthError}
  *   and stops (retrying a dead token forever would mask the auth failure),
  * - 429 → honors `Retry-After`, with legacy `retry_after_ms` fallback,
@@ -28,7 +28,7 @@ import type { MatrixSyncResponse, MatrixTimelineEvent } from "./parse"
 
 const CLIENT_V3 = "/_matrix/client/v3"
 const DEFAULT_TIMEOUT_MS = 30_000
-/** Max `/messages` pages fetched per limited-timeline gap. */
+/** Pause after this many pages without discarding unresolved gap progress. */
 const BACKFILL_PAGE_CAP = 3
 const BACKFILL_PAGE_LIMIT = 50
 
@@ -95,11 +95,15 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
       reject(new DOMException("Aborted", "AbortError"))
       return
     }
-    const tid = setTimeout(resolve, ms)
-    signal.addEventListener("abort", () => {
+    const onAbort = () => {
       clearTimeout(tid)
       reject(new DOMException("Aborted", "AbortError"))
-    })
+    }
+    const tid = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
   })
 }
 
@@ -145,7 +149,7 @@ interface MatrixMessagesResponse {
 /**
  * Backfill a `limited: true` timeline gap: walk `/messages` backwards from
  * the batch's `prev_batch` until we meet the last event we already delivered
- * for the room (or hit the page cap), and return the recovered events
+ * for the room or the accepted sync cursor, and return recovered events
  * OLDEST-FIRST so the consumer sees them in wire order.
  */
 async function backfillGap(
@@ -154,13 +158,19 @@ async function backfillGap(
   roomId: string,
   prevBatch: string,
   lastSeenEventId: string | undefined,
-  logger: MatrixSyncOptions["logger"],
-  signal: AbortSignal
+  since: string | undefined,
+  signal: AbortSignal,
+  backoffBaseMs: number
 ): Promise<MatrixTimelineEvent[]> {
   const recovered: MatrixTimelineEvent[] = []
   let from = prevBatch
-  for (let page = 0; page < BACKFILL_PAGE_CAP; page += 1) {
+  const cursors = new Set<string>()
+  for (let page = 0; !signal.aborted; page += 1) {
+    if (cursors.has(from)) throw new Error("Matrix gap backfill made no progress")
+    cursors.add(from)
+    if (page > 0 && page % BACKFILL_PAGE_CAP === 0) await delay(backoffBaseMs, signal)
     const params = new URLSearchParams({ from, dir: "b", limit: String(BACKFILL_PAGE_LIMIT) })
+    if (since) params.set("to", since)
     const resp = await abortable(
       connectorsHttpRequest({
         url: `${base}${CLIENT_V3}/rooms/${encodeURIComponent(roomId)}/messages?${params.toString()}`,
@@ -170,27 +180,30 @@ async function backfillGap(
       signal
     )
     if (resp.status < 200 || resp.status >= 300) {
-      logger?.warn("matrix:sync gap backfill page failed", { roomId, status: resp.status })
-      break
+      throw new Error(`Matrix gap backfill ${resp.status}`)
     }
     let body: MatrixMessagesResponse
     try {
       body = JSON.parse(resp.body) as MatrixMessagesResponse
     } catch {
-      break
+      throw new Error("Matrix gap backfill returned invalid JSON")
     }
-    const chunk = body.chunk ?? []
-    if (chunk.length === 0) break
+    if (!body || !Array.isArray(body.chunk))
+      throw new Error("Matrix gap backfill returned invalid events")
+    const chunk = body.chunk
     let overlapped = false
     for (const ev of chunk) {
       // dir=b pages newest→oldest; stop at the first already-seen event.
+      if (!ev || typeof ev.event_id !== "string") continue
       if (lastSeenEventId !== undefined && ev.event_id === lastSeenEventId) {
         overlapped = true
         break
       }
       recovered.push(ev)
     }
-    if (overlapped || !body.end) break
+    if (overlapped || body.end === undefined || body.end === since) break
+    if (typeof body.end !== "string" || !body.end)
+      throw new Error("Matrix gap backfill returned invalid cursor")
     from = body.end
   }
   // Collected newest→oldest; deliver oldest-first.
@@ -295,7 +308,6 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
       }
       if (!body.next_batch) throw new Error(`Matrix sync: ${body.error ?? "missing next_batch"}`)
 
-      attempts = 0
       refreshedThisRequest = false
       const nextBatch = body.next_batch
       const hasGap = Object.values(body.rooms?.join ?? {}).some(
@@ -340,6 +352,8 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
         for (const [roomId, room] of Object.entries(joined)) {
           const timeline = room.timeline ?? {}
           let events = timeline.events ?? []
+          if (timeline.limited === true && !timeline.prev_batch)
+            throw new Error("Matrix limited timeline is missing its gap cursor")
           // A limited timeline silently dropped events between our cursor and
           // the batch — recover them (oldest-first) before the batch's own.
           if (timeline.limited === true && timeline.prev_batch) {
@@ -350,8 +364,9 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
                 roomId,
                 timeline.prev_batch,
                 lastSeenByRoom.get(roomId),
-                opts.logger,
-                opts.signal
+                since,
+                opts.signal,
+                backoffBaseMs
               )
               if (gap.length > 0) events = [...gap, ...events]
             } catch (err) {
@@ -359,6 +374,7 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
                 roomId,
                 reason: err instanceof Error ? err.message : String(err),
               })
+              throw err
             }
           }
           for (const event of events) {
@@ -373,6 +389,7 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
         primed = true
       }
 
+      attempts = 0
       if (opts.canAdvanceCursor?.() === false) {
         opts.logger?.warn("matrix:sync cursor held for encrypted-event recovery", {
           nextBatch,

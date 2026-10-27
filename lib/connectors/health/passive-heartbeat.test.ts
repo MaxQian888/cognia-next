@@ -5,10 +5,18 @@ import {
   recordPassiveProbe,
 } from "./passive-heartbeat"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { PlatformAdapter } from "@/types/connectors/adapter"
+import { connectorsHealth } from "@/lib/connectors/tauri/commands"
+import { startHeartbeatSweep } from "./heartbeat-sweep"
 
 // Heartbeats now write to the dedicated `connectorHeartbeats` table (v51);
 // `fetchLastInboundAt` reads `connectorAudit` via `[adapterId+kind+at]`.
 const mockHeartbeatPut = jest.fn().mockResolvedValue(undefined)
+const mockGetRunningAdapter = jest.fn()
+
+jest.mock("@/lib/connectors/lifecycle", () => ({
+  getRunningAdapter: (...args: unknown[]) => mockGetRunningAdapter(...args),
+}))
 
 jest.mock("@/lib/db/schema", () => ({
   getDb: jest.fn(() => ({
@@ -265,5 +273,115 @@ describe("recordPassiveProbe", () => {
     }
     expect(call.fields.state).toBe("degraded")
     expect(call.fields.reason).toBe("lark_ping_failed")
+  })
+})
+
+describe("OneBot transport-specific idle health", () => {
+  const forward = makeRow({
+    id: "onebot-forward",
+    type: "onebot",
+    transportMode: "forward-ws",
+    settings: {},
+  })
+  beforeEach(() => {
+    mockGetRunningAdapter.mockReset()
+    jest.mocked(connectorsHealth).mockClear()
+    jest
+      .mocked(connectorsHealth)
+      .mockResolvedValue({ serverRunning: false, boundAddr: null, registeredAdapterCount: 0 })
+  })
+
+  it("keeps a live forward socket healthy without an inbound axum server", async () => {
+    mockGetRunningAdapter.mockReturnValue({ adapter: { health: () => ({ state: "running" }) } })
+    expect(await deriveHeartbeat(forward, { now: 1_000_000 })).toMatchObject({
+      state: "running",
+      reason: "idle",
+      pingOk: true,
+    })
+    expect(connectorsHealth).not.toHaveBeenCalled()
+  })
+
+  it.each(["degraded", "down"])(
+    "does not mask a %s forward transport with another server's health",
+    async (state) => {
+      jest.mocked(connectorsHealth).mockResolvedValue({
+        serverRunning: true,
+        boundAddr: "127.0.0.1:8080",
+        registeredAdapterCount: 1,
+      })
+      mockGetRunningAdapter.mockReturnValue({ adapter: { health: () => ({ state }) } })
+      expect(await deriveHeartbeat(forward, { now: 1_000_000 })).toMatchObject({
+        state: "degraded",
+        pingOk: false,
+      })
+      expect(connectorsHealth).not.toHaveBeenCalled()
+    }
+  )
+
+  it("treats an absent forward runtime as unhealthy", async () => {
+    jest.mocked(connectorsHealth).mockResolvedValue({
+      serverRunning: true,
+      boundAddr: "127.0.0.1:8080",
+      registeredAdapterCount: 1,
+    })
+    expect(await deriveHeartbeat(forward, { now: 1_000_000 })).toMatchObject({
+      state: "degraded",
+      pingOk: false,
+    })
+  })
+
+  it("retains the native server probe for reverse and legacy default rows", async () => {
+    jest.mocked(connectorsHealth).mockResolvedValue({
+      serverRunning: true,
+      boundAddr: "127.0.0.1:8080",
+      registeredAdapterCount: 1,
+    })
+    for (const transportMode of ["reverse-ws", undefined] as const) {
+      const legacyRow = { ...forward }
+      if (transportMode === undefined) Reflect.deleteProperty(legacyRow, "transportMode")
+      else legacyRow.transportMode = transportMode
+      expect(await deriveHeartbeat(legacyRow, { now: 1_000_000 })).toMatchObject({
+        state: "running",
+        pingOk: true,
+      })
+    }
+    expect(connectorsHealth).toHaveBeenCalledTimes(2)
+    expect(mockGetRunningAdapter).not.toHaveBeenCalled()
+  })
+
+  it("does not requeue a healthy idle forward adapter on repeated real sweep probes", async () => {
+    const adapter = {
+      id: forward.id,
+      health: () => ({ state: "running" as const }),
+    } as PlatformAdapter
+    mockGetRunningAdapter.mockReturnValue({ adapter })
+    const requeue = jest.fn().mockResolvedValue(true)
+    let tick: () => void = () => undefined
+    const handle = startHeartbeatSweep({
+      listAdapters: () => [{ adapter }],
+      recordHeartbeat: async () => undefined,
+      loadRows: async () => [forward],
+      requeue,
+      auditReconnect: jest.fn(),
+      now: () => 1_000_000,
+      scheduler: {
+        setInterval: (callback) => {
+          tick = callback
+          return 1
+        },
+        clearInterval: () => undefined,
+      },
+    })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      tick()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      tick()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(requeue).not.toHaveBeenCalled()
+      expect(mockGetRunningAdapter).toHaveBeenCalledTimes(2)
+    } finally {
+      handle.dispose()
+    }
   })
 })

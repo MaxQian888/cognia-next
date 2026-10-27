@@ -33,6 +33,7 @@ jest.mock("./inbound-media", () => ({
   enrichOneBotInboundMedia: jest.fn().mockResolvedValue(undefined),
 }))
 import { enrichOneBotInboundMedia } from "./inbound-media"
+import { effectiveCapabilities } from "@/lib/connectors/effective-capabilities"
 
 const mockListen = listen as jest.Mock
 const mockOnebotSend = connectorsOnebotSend as jest.Mock
@@ -388,6 +389,18 @@ function respondByAction(
   })
 }
 
+async function waitForIdentity(adapterId: string): Promise<void> {
+  const deadline = Date.now() + 2000
+  while (
+    !mockUpdateAdapter.mock.calls.some(
+      ([id, update]) => id === adapterId && update.lastWhoamiResult
+    )
+  ) {
+    if (Date.now() >= deadline) throw new Error(`Identity probe did not settle: ${adapterId}`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 describe("createOneBotAdapter — identity probe", () => {
   it("writes lastWhoamiResult from get_login_info on connect", async () => {
     const bus = createEventBus()
@@ -442,7 +455,7 @@ describe("createOneBotAdapter — identity probe", () => {
     // Real order: the socket opens first; no inbound event has revealed the
     // variant yet (currentVariant === null).
     bus.trigger("connectors://onebot/ob-v12fresh/open", "")
-    await new Promise((r) => setTimeout(r, 30))
+    await waitForIdentity("ob-v12fresh")
 
     const loginCall = mockOnebotSend.mock.calls.find((c) => String(c[1]).includes("get_login_info"))
     expect(loginCall).toBeUndefined()
@@ -541,7 +554,7 @@ describe("createOneBotAdapter — identity probe", () => {
     await adapter.start(ctx)
 
     bus.trigger("connectors://onebot/ob-retry/open", "")
-    await new Promise((r) => setTimeout(r, 30))
+    await waitForIdentity("ob-retry")
 
     expect(mockUpdateAdapter).toHaveBeenCalledWith(
       "ob-retry",
@@ -993,7 +1006,7 @@ describe("OneBot action acknowledgements", () => {
     try {
       const collected = []
       for await (const event of adapter.fetchHistory!(
-        `onebot:history-terminal:${chatType}:300001`,
+        `onebot:history-terminal:${chatType}:${chatType === "g" ? "300001" : "200001"}`,
         { max }
       ))
         collected.push(event.messageId)
@@ -1174,5 +1187,391 @@ it("stops after partial delivery and forbids retrying already delivered parts", 
     expect(mockOnebotSend).toHaveBeenCalledTimes(2)
   } finally {
     await adapter.stop()
+  }
+})
+
+// SnowLuma v2.2.0: sanitized history rows, signed message-id anchors and extensions.
+describe("SnowLuma wire contracts", () => {
+  async function setupSnowLuma(id: string) {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    respondByAction(bus, id, {
+      get_version_info: {
+        app_name: "SnowLuma",
+        app_version: "2.2.0-node",
+        protocol_version: "v11",
+      },
+      get_login_info: { user_id: 100000, nickname: "Snow fixture" },
+    })
+    const adapter = makeAdapter(id)
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    bus.trigger(`connectors://onebot/${id}/open`, "")
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    mockOnebotSend.mockClear()
+    return { adapter, bus, emitted }
+  }
+
+  function historyRow(chatType: string, id: number, time: number, outgoing = false) {
+    return {
+      time,
+      message_type: chatType === "g" ? "group" : "private",
+      sub_type: chatType === "g" ? "normal" : "friend",
+      message_id: id,
+      real_id: id,
+      message_seq: time + 90000,
+      user_id: outgoing ? 100000 : 200001,
+      ...(chatType === "g" ? { group_id: 300001 } : outgoing ? { target_id: 200001 } : {}),
+      sender: { user_id: outgoing ? 100000 : 200001, nickname: outgoing ? "Self" : "Peer" },
+      message: [{ type: "text", data: { text: `history-${id}` } }],
+    }
+  }
+
+  function respondHistory(
+    bus: ReturnType<typeof createEventBus>,
+    id: string,
+    page: (call: { action: string; params: Record<string, unknown> }) => unknown[]
+  ) {
+    mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+      const call = JSON.parse(payload)
+      bus.trigger(
+        `connectors://onebot/${id}/response`,
+        JSON.stringify({
+          status: "ok",
+          retcode: 0,
+          data: { messages: page(call) },
+          echo: call.echo,
+        })
+      )
+    })
+  }
+
+  it.each(["g", "p"])("normalizes sanitized %s history without live emission", async (chatType) => {
+    const id = `snow-history-${chatType}`
+    const { adapter, bus, emitted } = await setupSnowLuma(id)
+    respondHistory(bus, id, () => [
+      historyRow(chatType, -7, 10),
+      historyRow(chatType, -8, 11, true),
+    ])
+    try {
+      const events = []
+      const chatId = chatType === "g" ? "300001" : "200001"
+      for await (const event of adapter.fetchHistory!(`onebot:${id}:${chatType}:${chatId}`, {}))
+        events.push(event)
+      expect(events).toHaveLength(2)
+      expect(events.map((event) => event.selfId)).toEqual(["100000", "100000"])
+      expect(events.map((event) => event.sender.remoteUserId)).toEqual(["200001", "100000"])
+      expect(
+        events.every((event) => event.conversationKey === `onebot:${id}:${chatType}:${chatId}`)
+      ).toBe(true)
+      expect(events[1].channelData).toMatchObject({ onebotHistory: true })
+      expect(events[1].conversationRef).toMatchObject({ chatKey: `${chatType}:${chatId}` })
+      if (chatType === "p") expect(events[1].conversationRef.userId).toBe(200001)
+      expect(emitted).toHaveLength(0)
+    } finally {
+      await adapter.stop()
+    }
+  })
+
+  it.each(["g", "p"])(
+    "paginates %s history using signed IDs and inclusive anchors",
+    async (chatType) => {
+      const id = `snow-pages-${chatType}`
+      const { adapter, bus } = await setupSnowLuma(id)
+      const first = Array.from({ length: 20 }, (_, i) => historyRow(chatType, -1000 - i, 100 + i))
+      const second = Array.from({ length: 20 }, (_, i) => historyRow(chatType, -2000 - i, 80 + i))
+      const calls: Record<string, unknown>[] = []
+      respondHistory(bus, id, (call) => {
+        calls.push(call.params)
+        return calls.length === 1
+          ? [...first].reverse()
+          : calls.length === 2
+            ? [first[0], ...second].reverse()
+            : [second[0]]
+      })
+      try {
+        const events = []
+        for await (const event of adapter.fetchHistory!(
+          `onebot:${id}:${chatType}:${chatType === "g" ? "300001" : "200001"}`,
+          { max: 100 }
+        ))
+          events.push(event)
+        expect(events).toHaveLength(40)
+        expect(new Set(events.map((event) => event.messageId)).size).toBe(40)
+        expect(calls.map((call) => call.message_id)).toEqual([undefined, -1000, -2000])
+        expect(calls.map((call) => call.count)).toEqual([20, 21, 21])
+        expect(calls.every((call) => call.message_seq === undefined)).toBe(true)
+      } finally {
+        await adapter.stop()
+      }
+    }
+  )
+
+  it("excludes an explicit anchor, stops repeated pages and respects max", async () => {
+    const id = "snow-bounds"
+    const { adapter, bus } = await setupSnowLuma(id)
+    const page = Array.from({ length: 21 }, (_, i) => historyRow("g", -100 - i, 100 + i))
+    respondHistory(bus, id, () => page)
+    try {
+      const events = []
+      for await (const event of adapter.fetchHistory!(`onebot:${id}:g:300001`, {
+        before: "-100",
+        max: 50,
+      }))
+        events.push(event)
+      expect(events).toHaveLength(20)
+      expect(events.some((event) => event.messageId === "-100")).toBe(false)
+      expect(mockOnebotSend).toHaveBeenCalledTimes(2)
+      mockOnebotSend.mockClear()
+      const limited = []
+      for await (const event of adapter.fetchHistory!(`onebot:${id}:g:300001`, { max: 1 }))
+        limited.push(event)
+      expect(limited).toHaveLength(1)
+      expect(mockOnebotSend).toHaveBeenCalledTimes(1)
+    } finally {
+      await adapter.stop()
+    }
+  })
+
+  it.each(["g", "p"])("drops wrong-conversation %s history rows", async (chatType) => {
+    const id = `snow-scope-${chatType}`
+    const { adapter, bus } = await setupSnowLuma(id)
+    respondHistory(bus, id, () => [
+      historyRow(chatType, -1, 1),
+      {
+        ...historyRow(chatType, -2, 2),
+        ...(chatType === "g" ? { group_id: 999 } : { user_id: 999 }),
+      },
+      { ...historyRow(chatType, -3, 3), post_type: "notice", notice_type: "group_recall" },
+    ])
+    try {
+      const events = []
+      for await (const event of adapter.fetchHistory!(
+        `onebot:${id}:${chatType}:${chatType === "g" ? "300001" : "200001"}`,
+        {}
+      ))
+        events.push(event)
+      expect(events.map((event) => event.messageId)).toEqual(["-1"])
+    } finally {
+      await adapter.stop()
+    }
+  })
+
+  it("exposes supported file/reaction features and sends add/remove/file actions", async () => {
+    const id = "snow-features"
+    const { adapter, bus } = await setupSnowLuma(id)
+    try {
+      const metadata = mockUpdateAdapter.mock.calls.find(
+        (call) => call[0] === id && call[1].implMetadata
+      )?.[1].implMetadata
+      expect(metadata).toMatchObject({
+        impl: "snowluma",
+        features: expect.arrayContaining([
+          "set_msg_emoji_like",
+          "upload_group_file",
+          "upload_private_file",
+        ]),
+      })
+      expect(metadata.features).not.toContain("markdown-card")
+      expect(
+        effectiveCapabilities({ platform: "onebot", implMetadata: metadata }).capabilities
+      ).toEqual(expect.arrayContaining(["send.reaction", "send.file"]))
+      ;(getAdapterInstance as jest.Mock).mockResolvedValue({ implMetadata: metadata })
+      const calls: { action: string; params: Record<string, unknown> }[] = []
+      mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+        const call = JSON.parse(payload)
+        calls.push(call)
+        bus.trigger(
+          `connectors://onebot/${id}/response`,
+          JSON.stringify({ status: "ok", retcode: 0, data: { message_id: -9 }, echo: call.echo })
+        )
+      })
+      await adapter.addReaction!("-7", "128077")
+      await adapter.removeReaction!("-7", "128077")
+      expect(
+        await adapter.send({
+          conversationRef: { platform: "onebot", adapterId: id, chatKey: "g:300001" },
+          segments: [
+            {
+              type: "file",
+              url: "https://example.com/file.txt",
+              name: "file.txt",
+              mimeType: "text/plain",
+              sizeBytes: 4,
+            },
+          ],
+          metadata: { idempotencyKey: "snow-file" },
+        })
+      ).toMatchObject({ ok: true, platformMessageId: "-9" })
+      expect(calls).toMatchObject([
+        { action: "set_msg_emoji_like", params: { message_id: -7, emoji_id: "128077", set: true } },
+        {
+          action: "set_msg_emoji_like",
+          params: { message_id: -7, emoji_id: "128077", set: false },
+        },
+        {
+          action: "send_group_msg",
+          params: {
+            group_id: 300001,
+            message: [
+              { type: "file", data: { file: "https://example.com/file.txt", name: "file.txt" } },
+            ],
+          },
+        },
+      ])
+    } finally {
+      await adapter.stop()
+      ;(getAdapterInstance as jest.Mock).mockResolvedValue(undefined)
+    }
+  })
+})
+
+// A private C2C message_seq belongs to its sender, not to the whole conversation.
+it("continues same-second SnowLuma private history across opposite sender sequences", async () => {
+  const bus = createEventBus()
+  mockListen.mockImplementation(bus.listenImpl)
+  ;(getAdapterInstance as jest.Mock).mockResolvedValue({ implMetadata: { impl: "snowluma" } })
+  const adapter = makeAdapter("snow-same-second")
+  await adapter.start(makeCtx().ctx)
+  bus.trigger(
+    "connectors://onebot/snow-same-second/event",
+    JSON.stringify({ post_type: "meta_event" })
+  )
+  const row = (id: number, seq: number, outgoing = false) => ({
+    time: 100,
+    message_type: "private",
+    message_id: id,
+    message_seq: seq,
+    user_id: outgoing ? 100000 : 200001,
+    ...(outgoing ? { target_id: 200001 } : {}),
+    message: [{ type: "text", data: { text: String(id) } }],
+  })
+  const first = Array.from({ length: 20 }, (_, i) => row(-100 - i, 10 + i))
+  const second = Array.from({ length: 20 }, (_, i) => row(-200 - i, 200 + i, true))
+  const pages = [first, [...second, first[0]], [row(-300, 1), second[0]]]
+  const calls: Record<string, unknown>[] = []
+  mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+    const call = JSON.parse(payload)
+    calls.push(call.params)
+    bus.trigger(
+      "connectors://onebot/snow-same-second/response",
+      JSON.stringify({
+        status: "ok",
+        retcode: 0,
+        data: { messages: pages[calls.length - 1] ?? [] },
+        echo: call.echo,
+      })
+    )
+  })
+  try {
+    const events = []
+    for await (const event of adapter.fetchHistory!("onebot:snow-same-second:p:200001", {
+      max: 41,
+    }))
+      events.push(event)
+    expect(events).toHaveLength(41)
+    expect(calls.map((call) => call.message_id)).toEqual([undefined, -100, -200])
+    expect(events[40].messageId).toBe("-300")
+  } finally {
+    await adapter.stop()
+    ;(getAdapterInstance as jest.Mock).mockResolvedValue(undefined)
+  }
+})
+
+it("continues filtered short SnowLuma history pages until no new message remains", async () => {
+  const bus = createEventBus()
+  mockListen.mockImplementation(bus.listenImpl)
+  ;(getAdapterInstance as jest.Mock).mockResolvedValue({ implMetadata: { impl: "snowluma" } })
+  const adapter = makeAdapter("snow-filtered")
+  await adapter.start(makeCtx().ctx)
+  bus.trigger(
+    "connectors://onebot/snow-filtered/event",
+    JSON.stringify({ post_type: "meta_event" })
+  )
+  const row = (id: number) => ({
+    time: id,
+    message_type: "group",
+    group_id: 300001,
+    user_id: 200001,
+    message_id: -id,
+    message: [{ type: "text", data: { text: String(id) } }],
+  })
+  const pages = [[row(10), row(11)], [row(9), row(10)], [row(9)]]
+  const calls: Record<string, unknown>[] = []
+  mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+    const call = JSON.parse(payload)
+    calls.push(call.params)
+    bus.trigger(
+      "connectors://onebot/snow-filtered/response",
+      JSON.stringify({
+        status: "ok",
+        retcode: 0,
+        data: { messages: pages[calls.length - 1] ?? [] },
+        echo: call.echo,
+      })
+    )
+  })
+  try {
+    const events = []
+    for await (const event of adapter.fetchHistory!("onebot:snow-filtered:g:300001", {}))
+      events.push(event)
+    expect(events.map((event) => event.messageId)).toEqual(["-10", "-11", "-9"])
+    expect(calls.map((call) => call.message_id)).toEqual([undefined, -10, -9])
+  } finally {
+    await adapter.stop()
+    ;(getAdapterInstance as jest.Mock).mockResolvedValue(undefined)
+  }
+})
+
+it("reaches older same-second private history when an overlapping page filters a recalled row", async () => {
+  const bus = createEventBus()
+  mockListen.mockImplementation(bus.listenImpl)
+  ;(getAdapterInstance as jest.Mock).mockResolvedValue({ implMetadata: { impl: "snowluma" } })
+  const adapter = makeAdapter("snow-filtered-tie")
+  await adapter.start(makeCtx().ctx)
+  bus.trigger(
+    "connectors://onebot/snow-filtered-tie/event",
+    JSON.stringify({ post_type: "meta_event" })
+  )
+  const canonical = Array.from({ length: 22 }, (_, i) => ({
+    time: 100,
+    message_type: "private",
+    message_id: -100 - i,
+    message_seq: i % 2 === 0 ? 10 + i : 200 + i,
+    user_id: i % 2 === 0 ? 200001 : 100000,
+    ...(i % 2 === 0 ? {} : { target_id: 200001 }),
+    message: [{ type: "text", data: { text: String(i) } }],
+  }))
+  const calls: Record<string, unknown>[] = []
+  mockOnebotSend.mockImplementation(async (_id: string, payload: string) => {
+    const call = JSON.parse(payload)
+    calls.push(call.params)
+    const anchor =
+      call.params.message_id === undefined
+        ? 0
+        : canonical.findIndex((row) => row.message_id === call.params.message_id)
+    expect(anchor).toBeGreaterThanOrEqual(0)
+    const messages = canonical
+      .slice(anchor, anchor + call.params.count)
+      .filter((row) => row.message_id !== -120)
+    bus.trigger(
+      "connectors://onebot/snow-filtered-tie/response",
+      JSON.stringify({ status: "ok", retcode: 0, data: { messages }, echo: call.echo })
+    )
+  })
+  try {
+    const events = []
+    for await (const event of adapter.fetchHistory!("onebot:snow-filtered-tie:p:200001", {
+      max: 50,
+    }))
+      events.push(event)
+    expect(events.map((event) => event.messageId)).toEqual(
+      canonical.filter((row) => row.message_id !== -120).map((row) => String(row.message_id))
+    )
+    expect(calls.some((call) => call.message_id === -119)).toBe(true)
+    expect(calls.length).toBeLessThan(50)
+  } finally {
+    await adapter.stop()
+    ;(getAdapterInstance as jest.Mock).mockResolvedValue(undefined)
   }
 })

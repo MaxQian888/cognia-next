@@ -108,7 +108,9 @@ function mapButtonComponent(c: DiscordComponent): InboundA2UINode | null {
     kind: "button",
     label: label || "Action",
     url: c.url,
-    actionId: c.custom_id,
+    ...(c.style !== 5 || Object.hasOwn(c, "custom_id")
+      ? { actionId: typeof c.custom_id === "string" ? c.custom_id : "" }
+      : {}),
     style: styleOf(c.style),
   }
 }
@@ -120,7 +122,7 @@ function mapSelectComponent(c: DiscordComponent): InboundA2UINode | null {
   return {
     kind: "button",
     label: c.placeholder ?? "Select…",
-    actionId: c.custom_id,
+    actionId: typeof c.custom_id === "string" ? c.custom_id : "",
   }
 }
 

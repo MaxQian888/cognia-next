@@ -22,6 +22,19 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { NormalizedInboundEvent } from "@/types/connectors"
 import type { StoredMessage } from "@cognia/agent-config-types"
+import {
+  parseLarkEventEnvelope,
+  type LarkEventEnvelope,
+} from "@/lib/connectors/adapters/lark/parse"
+import larkMessageFixture from "@/lib/connectors/adapters/lark/fixtures/dm-text.json"
+import { parseMatrixEvent } from "./adapters/matrix/parse"
+import { insertInboundMessage } from "./runtime"
+import {
+  enqueueConnectorInboundJob,
+  completeConnectorInboundJob,
+  recordConnectorInboundEdit,
+  recordConnectorInboundRecall,
+} from "@/lib/db/connector-inbound-jobs"
 
 // 30s hook budget: the first cold open of the full schema (100+ Dexie
 // versions) can exceed jest's default 5s under parallel suite load.
@@ -33,7 +46,13 @@ beforeEach(async () => {
   __resetBusForTesting()
   // Every fabricated row lives in "s-test". Edit and delete refuse a row whose
   // conversation is gone (SESSION_NOT_FOUND), so the conversation must exist.
-  await getDb().sessions.add({ id: "s-test", title: "t", createdAt: 1, updatedAt: 1 } as never)
+  await getDb().sessions.add({
+    id: "s-test",
+    title: "t",
+    createdAt: 1,
+    updatedAt: 1,
+    platformConversationKey: "telegram:telegram-test:42",
+  } as never)
 })
 afterAll(dbFixture.dispose)
 
@@ -121,6 +140,277 @@ function makeDeleteEvent(
 }
 
 describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
+  it("keeps a recall-before-create fence through restart within the retained window", async () => {
+    const create = {
+      ...makeEditEvent("telegram", "delayed", "original"),
+      kind: "create" as const,
+      messageId: "delayed",
+      replacesMessageId: undefined,
+    }
+    const recall = {
+      ...create,
+      kind: "delete" as const,
+      messageId: "recall",
+      replacesMessageId: create.messageId,
+    }
+    await recordConnectorInboundRecall(recall, Date.now())
+    getDb().close()
+    await getDb().open()
+    __resetBusForTesting()
+    const dispatch = jest.fn()
+    getBus().routeHandler = dispatch
+    await getBus().resumeDurableInboundJobs({ reclaimRunning: true })
+    const source = await insertInboundMessage(create, "s-test")
+    expect(source.parts).toEqual([{ type: "text", text: "[deleted]" }])
+    expect(source.metadata?.deletedAt).toBeDefined()
+    expect((await getDb().sessionState.get("s-test"))?.unreadCount ?? 0).toBe(0)
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it("keeps the available legacy baseline when the first tracked Matrix edit is redacted", async () => {
+    const source = makeStoredMessage({
+      id: "legacy-matrix",
+      platform: "matrix",
+      platformMessageId: "!room:s|$original",
+      scope: { adapterId: "matrix-test", conversationKey: "matrix:matrix-test:!room:s" },
+    })
+    source.parts = [{ type: "text", text: "last known legacy content" }]
+    source.metadata = { ...source.metadata, editedAt: 10, editCount: 2 }
+    await getDb().messages.put(source)
+    const edit = {
+      ...makeEditEvent("telegram", source.platformMessageId!, "new edit"),
+      platform: "matrix" as const,
+      adapterId: "matrix-test",
+      conversationKey: "matrix:matrix-test:!room:s",
+      messageId: "!room:s|$edit",
+      timestamp: 20,
+      raw: { event_id: "$edit" },
+    }
+    await getBus().dispatchInboundFull(edit)
+    await getBus().dispatchInboundFull({
+      ...edit,
+      kind: "delete",
+      messageId: "!room:s|$redact",
+      replacesMessageId: edit.messageId,
+      timestamp: 30,
+    })
+    expect((await getDb().messages.get(source.id))?.parts).toEqual(source.parts)
+  })
+  it.each([
+    ["create", "edit1", "recall1"],
+    ["edit1", "recall1", "create"],
+    ["recall1", "edit1", "create"],
+    ["create", "edit2", "edit1", "recall2"],
+    ["create", "edit1", "edit2", "recall2", "recall1"],
+  ])("selects unredacted Matrix content for %j", async (...order: string[]) => {
+    const create = parseMatrixEvent("matrix-test", "@bot:s", "!room:s", {
+      type: "m.room.message",
+      event_id: "$original",
+      sender: "@alice:s",
+      origin_server_ts: 1,
+      content: { msgtype: "m.text", body: "original" },
+    })!
+    const edit = (n: number) =>
+      parseMatrixEvent("matrix-test", "@bot:s", "!room:s", {
+        type: "m.room.message",
+        event_id: `$edit${n}`,
+        sender: "@alice:s",
+        origin_server_ts: n + 1,
+        content: {
+          msgtype: "m.text",
+          body: `* edit${n}`,
+          "m.new_content": { msgtype: "m.text", body: `edit${n}` },
+          "m.relates_to": { rel_type: "m.replace", event_id: "$original" },
+        },
+      })!
+    const recall = (n: number) =>
+      parseMatrixEvent("matrix-test", "@bot:s", "!room:s", {
+        type: "m.room.redaction",
+        event_id: `$redact${n}`,
+        sender: "@alice:s",
+        origin_server_ts: 10 + n,
+        redacts: `$edit${n}`,
+        content: {},
+      })!
+    for (const action of order) {
+      if (action === "create") await insertInboundMessage(create, "s-test")
+      else
+        await getBus().dispatchInboundFull(
+          action.startsWith("edit") ? edit(Number(action.at(-1))) : recall(Number(action.at(-1)))
+        )
+    }
+    const source = await getDb()
+      .messages.where("platformMessageId")
+      .equals(create.messageId)
+      .first()
+    expect(source?.parts).toEqual([
+      {
+        type: "text",
+        text: order.includes("recall2") && !order.includes("recall1") ? "edit1" : "original",
+      },
+    ])
+    expect(source?.metadata?.deletedAt).toBeUndefined()
+    __resetBusForTesting()
+    await getBus().resumeDurableInboundJobs({ reclaimRunning: true })
+    expect((await getDb().messages.get(source!.id))?.parts).toEqual(source?.parts)
+  })
+  it.each(
+    (["dingtalk", "wecom", "onebot", "qq-official", "matrix"] as const).flatMap((platform) =>
+      (["edit", "delete"] as const).map((kind) => [platform, kind] as const)
+    )
+  )(
+    "reconciles committed %s %s intents after a crash before the canonical write",
+    async (platform, kind) => {
+      const id = `${platform}-${kind}`
+      const adapterId = `${platform}-test`
+      const conversationKey = `${platform}:${adapterId}:room`
+      const original = makeStoredMessage({
+        id,
+        platformMessageId: id,
+        platform,
+        scope: { adapterId, conversationKey },
+      })
+      await getDb().messages.put(original)
+      const event = {
+        ...makeEditEvent("telegram", id, "latest body"),
+        platform,
+        adapterId,
+        conversationKey,
+        kind,
+        timestamp: 20,
+        raw: { event_id: "$latest" },
+        sender: { id: "u_1", platform, adapterId, remoteUserId: "u_1" },
+        segments:
+          kind === "edit"
+            ? [
+                { type: "text" as const, text: "latest body" },
+                {
+                  type: "image" as const,
+                  url: "data:image/png;base64,DISPLAY_SENTINEL",
+                  mimeType: "image/png",
+                },
+              ]
+            : [],
+      }
+      const job = await enqueueConnectorInboundJob(
+        {
+          ...event,
+          kind: "create",
+          messageId: id,
+          timestamp: 1,
+          plainText: "original",
+          segments: [{ type: "text", text: "original" }],
+        },
+        "queue"
+      )
+      await completeConnectorInboundJob(job.id)
+      if (kind === "edit") await recordConnectorInboundEdit(event)
+      else await recordConnectorInboundRecall(event, 20)
+      // Only the intent committed before process death. Reopen the real
+      // persisted DB, then drive the production bootstrap recovery entry.
+      getDb().close()
+      await getDb().open()
+      __resetBusForTesting()
+      await getBus().resumeDurableInboundJobs({ reclaimRunning: true })
+      const recovered = await getDb().messages.get(id)
+      expect(recovered?.parts).toEqual(
+        kind === "edit"
+          ? [
+              { type: "text", text: "latest body" },
+              { type: "text", text: "[image]" },
+            ]
+          : [{ type: "text", text: "[deleted]" }]
+      )
+      expect(JSON.stringify(recovered?.parts)).not.toContain("SENTINEL")
+      if (kind === "delete") expect(recovered?.metadata?.deletedAt).toBeDefined()
+    }
+  )
+  it("does not invalidate a later transcript generation for a repeated recall", async () => {
+    await getDb().messages.put(
+      makeStoredMessage({ id: "repeat-recall", platformMessageId: "parent", platform: "telegram" })
+    )
+    const recall = makeDeleteEvent("telegram", "parent")
+    await getBus().dispatchInboundFull(recall)
+    const first = await getDb().messages.get("repeat-recall")
+    await getDb().sessions.update("s-test", { runtimeTranscriptGeneration: "later-turn" })
+    await getBus().dispatchInboundFull(recall)
+    expect((await getDb().messages.get("repeat-recall"))?.metadata?.deletedAt).toBe(
+      first?.metadata?.deletedAt
+    )
+    expect((await getDb().sessions.get("s-test"))?.runtimeTranscriptGeneration).toBe("later-turn")
+  })
+  it("rejects foreign Matrix edits and orders equal-clock replacements by event id", async () => {
+    await getDb().messages.put(
+      makeStoredMessage({
+        id: "matrix-original",
+        platformMessageId: "!room:srv|$original",
+        platform: "matrix",
+        scope: { adapterId: "matrix-test", conversationKey: "matrix:matrix-test:!room:srv" },
+      })
+    )
+    const edit = {
+      ...makeEditEvent("telegram", "!room:srv|$original", "valid"),
+      platform: "matrix" as const,
+      adapterId: "matrix-test",
+      conversationKey: "matrix:matrix-test:!room:srv",
+      timestamp: 20,
+      raw: { event_id: "$z" },
+    }
+    await getBus().dispatchInboundFull({
+      ...edit,
+      sender: { ...edit.sender, remoteUserId: "mallory" },
+      plainText: "forged",
+      segments: [{ type: "text", text: "forged" }],
+    })
+    expect((await getDb().messages.get("matrix-original"))?.parts).toEqual([
+      { type: "text", text: "original" },
+    ])
+    await getBus().dispatchInboundFull(edit)
+    await getBus().dispatchInboundFull({
+      ...edit,
+      raw: { event_id: "$a" },
+      segments: [{ type: "text", text: "stale" }],
+    })
+    expect((await getDb().messages.get("matrix-original"))?.parts).toEqual([
+      { type: "text", text: "valid" },
+    ])
+    await getBus().dispatchInboundFull({ ...edit, kind: "delete", messageId: "redaction" })
+    await getBus().dispatchInboundFull({ ...edit, timestamp: 30, raw: { event_id: "$zz" } })
+    expect((await getDb().messages.get("matrix-original"))?.parts).toEqual([
+      { type: "text", text: "[deleted]" },
+    ])
+  })
+  it("rejects older edit revisions including Telegram updates in the same second", async () => {
+    await getDb().messages.put(
+      makeStoredMessage({ id: "ordered", platformMessageId: "tg:order", platform: "telegram" })
+    )
+    const newer = {
+      ...makeEditEvent("telegram", "tg:order", "newer"),
+      timestamp: 2000,
+      raw: { update_id: 102 },
+    }
+    const older = {
+      ...makeEditEvent("telegram", "tg:order", "older"),
+      timestamp: 2000,
+      raw: { update_id: 101 },
+    }
+    await getBus().dispatchInboundFull(newer)
+    await getBus().dispatchInboundFull(older)
+    await getBus().dispatchInboundFull({ ...older, timestamp: 1000, raw: {} })
+    expect((await getDb().messages.get("ordered"))?.parts).toEqual([
+      { type: "text", text: "newer" },
+    ])
+    expect((await getDb().sessions.get("s-test"))?.lastMessagePreview).toBe("newer")
+  })
+
+  it("does not match an unscoped legacy row in another bound conversation", async () => {
+    await getDb().sessions.update("s-test", { platformConversationKey: "telegram:other-bot:99" })
+    await getDb().messages.put(
+      makeStoredMessage({ id: "legacy-other", platformMessageId: "tg:scope", platform: "telegram" })
+    )
+    await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:scope"))
+    expect((await getDb().messages.get("legacy-other"))?.metadata?.deletedAt).toBeUndefined()
+  })
   it("updates the matching row's parts and bumps editCount", async () => {
     const db = getDb()
     await db.messages.put(
@@ -238,6 +528,7 @@ describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
         sessionId: "s-gone",
         platformMessageId: "tg:13",
         platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:42" },
       })
     )
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
@@ -453,6 +744,31 @@ describe("ConnectorBus.applyMessageDelete (v49 indexed lookup)", () => {
 })
 
 describe("ConnectorBus edit/delete — threads and rich metadata", () => {
+  it("applies a real Lark recall envelope to its managed-thread message", async () => {
+    const created = parseLarkEventEnvelope(
+      "lark-test",
+      "self",
+      larkMessageFixture as LarkEventEnvelope,
+      { replyInThread: true }
+    )!
+    const row = makeStoredMessage({
+      id: "lark-recalled",
+      platform: "lark",
+      platformMessageId: created.messageId,
+      scope: { adapterId: created.adapterId, conversationKey: created.conversationKey },
+    })
+    await getDb().messages.put(row)
+    const recall = parseLarkEventEnvelope("lark-test", "self", {
+      schema: "2.0",
+      header: { event_id: "recall-event", event_type: "im.message.recalled_v1" },
+      event: { chat_id: larkMessageFixture.event.message.chat_id, message_id: created.messageId },
+    })!
+    expect(recall.conversationKey).not.toBe(created.conversationKey)
+    await getBus().dispatchInboundFull(recall)
+    expect((await getDb().messages.get(row.id))?.parts).toEqual([
+      { type: "text", text: "[deleted]" },
+    ])
+  })
   const staleBlock = {
     v: 1,
     source: "telegram",
@@ -523,7 +839,10 @@ describe("ConnectorBus edit/delete — threads and rich metadata", () => {
     row.metadata = {
       ...row.metadata,
       inboundA2UI: staleBlock,
-      inboundLabels: [{ key: "x" }],
+      inboundLabels: [
+        { key: "x", score: 1, severity: "high", label: "Flag", source: "test", at: 1 },
+      ],
+      replyTo: { messageId: "parent", preview: "withdrawn quote" },
     } as StoredMessage["metadata"]
     await db.messages.put(row)
     await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:7"))
@@ -531,6 +850,7 @@ describe("ConnectorBus edit/delete — threads and rich metadata", () => {
     expect(updated?.metadata?.deletedAt).toBeDefined()
     expect(updated?.metadata?.inboundA2UI).toBeUndefined()
     expect(updated?.metadata?.inboundLabels).toBeUndefined()
+    expect(updated?.metadata?.replyTo).toBeUndefined()
     expect(updated?.metadata?.platformMessage).toBeDefined()
   })
 
@@ -575,5 +895,32 @@ describe("ConnectorBus edit/delete — threads and rich metadata", () => {
     const updated = await db.messages.get("rich-gone")
     expect(updated?.parts).toEqual([{ type: "text", text: "plain now" }])
     expect(updated?.metadata?.inboundA2UI).toBeUndefined()
+  })
+
+  it("does not resurrect a withdrawn message when a delayed edit arrives", async () => {
+    const db = getDb()
+    await db.messages.put(
+      makeStoredMessage({ id: "late-edit", platformMessageId: "tg:10", platform: "telegram" })
+    )
+    await getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:10"))
+    await getBus().dispatchInboundFull(makeEditEvent("telegram", "tg:10", "must stay withdrawn"))
+    expect((await db.messages.get("late-edit"))?.parts).toEqual([
+      { type: "text", text: "[deleted]" },
+    ])
+    expect((await db.sessions.get("s-test"))?.lastMessagePreview).toBe("[deleted]")
+  })
+
+  it("keeps both the row and preview withdrawn across concurrent edit and recall", async () => {
+    await getDb().messages.put(
+      makeStoredMessage({ id: "race", platformMessageId: "tg:race", platform: "telegram" })
+    )
+    await Promise.all([
+      getBus().dispatchInboundFull(makeEditEvent("telegram", "tg:race", "late change")),
+      getBus().dispatchInboundFull(makeDeleteEvent("telegram", "tg:race")),
+    ])
+    expect((await getDb().messages.get("race"))?.parts).toEqual([
+      { type: "text", text: "[deleted]" },
+    ])
+    expect((await getDb().sessions.get("s-test"))?.lastMessagePreview).toBe("[deleted]")
   })
 })

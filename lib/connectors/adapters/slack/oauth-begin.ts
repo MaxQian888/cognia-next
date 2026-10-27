@@ -42,6 +42,9 @@ export const SLACK_BOT_SCOPES = [
   "channels:history",
   "im:history",
   "app_mentions:read",
+  // Sender profiles and a DM's actual peer are separate read APIs.
+  "users:read",
+  "im:read",
   // The adapter implements uploads, reactions and pins, and SLACK_CAPS
   // advertises all three — but this list asked for none of their scopes, so
   // every OAuth install advertised capabilities that answered `missing_scope`

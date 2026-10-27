@@ -79,6 +79,22 @@ describe("buildAdapterContext", () => {
     expect(ctx.signal).toBe(ac.signal)
   })
 
+  it.each(["wechat-personal", "wechat-oa"] as const)(
+    "requires durable acceptance for %s and rejects an aborted receiver",
+    async (platform) => {
+      const bus = makeBus()
+      const ac = new AbortController()
+      const ctx = buildAdapterContext({ adapterId: "wechat", signal: ac.signal, bus })
+      const event = { ...makeEvent(), platform }
+      await ctx.emit(event)
+      expect(bus.dispatchInboundFull).toHaveBeenCalledWith(event, { requireAcceptance: true })
+      ;(bus.dispatchInboundFull as jest.Mock).mockClear()
+      ac.abort()
+      await expect(ctx.emit(event)).rejects.toMatchObject({ name: "AbortError" })
+      expect(bus.dispatchInboundFull).not.toHaveBeenCalled()
+    }
+  )
+
   it("publicBaseUrl returns the row URL when supplied", async () => {
     const bus = makeBus()
     const ctx = buildAdapterContext({

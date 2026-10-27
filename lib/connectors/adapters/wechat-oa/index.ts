@@ -2,8 +2,9 @@
  * WeChat Official Account adapter factory.
  *
  * Inbound: the Rust webhook handler (`wechat_oa_handler`) verifies + decrypts
- * the safe-mode callback and emits `{ xml }`; this adapter subscribes, parses,
- * and emits normalized events. The webhook route resolves `wechat-oa` because
+ * the safe-mode callback, journals it, and emits `{ xml, ingressId }`; this
+ * adapter subscribes, replays, parses, and durably accepts normalized events.
+ * The webhook route resolves `wechat-oa` because
  * `ConnectorBusProvider` registers every inbound-server adapter with the Rust
  * connectors server before starting its transport (see `bootAdapter`).
  *
@@ -21,7 +22,12 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { conversationBoundRoute } from "@/lib/connectors/adapters/_shared/message-route"
-import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsHttpRequest,
+  connectorsWechatOaInboundAck,
+  connectorsWechatOaInboundClaim,
+  connectorsWechatOaInboundList,
+} from "@/lib/connectors/tauri/commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { parseConversationKey } from "@/types/connectors/event"
 import { WECHAT_OA_A2UI_CAPABILITY, WECHAT_OA_CAPS } from "./capability"
@@ -95,13 +101,12 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
   let healthState: AdapterHealthState = "starting"
   let healthReason: string | undefined
   let lastActivityAt: number | undefined
-  let stopCalled = false
 
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return
-    stopCalled = false
     abortController = new AbortController()
     const signal = abortController.signal
+    const active = () => !signal.aborted && abortController?.signal === signal
     healthState = "running"
 
     // Registration with the Rust connectors server (so the GET echostr
@@ -110,26 +115,97 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     const feed = startWechatOaWebhook({ adapterId: opts.id, signal })
     ;(async () => {
       try {
-        for await (const xml of feed) {
-          if (signal.aborted) break
-          // ToUserName on an inbound push is the OA's own gh_ account id.
-          const event = parseWechatOaXml(opts.id, extractXmlField(xml, "ToUserName") ?? "", xml)
-          if (event) {
-            if (!(await gateInboundEvent(opts.id, event))) continue
-            lastActivityAt = Date.now()
-            await enrichWechatInboundMedia(event, { accessToken: opts.accessToken, apiBase })
-            await ctx.emit(event)
+        for await (const delivery of feed) {
+          if (!active()) break
+          let retryDelay = 250
+          let accepted = false
+          let admitted = Boolean(delivery.ingressId) && delivery.admitted === true
+          while (active()) {
+            try {
+              const { xml, ingressId } = delivery
+              if (!accepted) {
+                const retained = async () =>
+                  (await connectorsWechatOaInboundList(opts.id)).find(
+                    (row) => row.id === ingressId && row.xml === xml
+                  )
+                if (ingressId) {
+                  // A claim may have committed even if its RPC reply was lost.
+                  // Recover that durable transfer before evaluating new policy.
+                  const row = await retained()
+                  if (!row || !active()) break
+                  admitted ||= row.admitted === true
+                }
+                // ToUserName on an inbound push is the OA's own gh_ account id.
+                const event = parseWechatOaXml(
+                  opts.id,
+                  extractXmlField(xml, "ToUserName") ?? "",
+                  xml
+                )
+                if (!event && admitted) throw new Error("inbound_admitted_event_unparseable")
+                if (event && (admitted || (await gateInboundEvent(opts.id, event)))) {
+                  if (!active()) break
+                  // Headless uses its native RPC bridge even when isTauri is false.
+                  await enrichWechatInboundMedia(event, {
+                    accessToken: opts.accessToken,
+                    apiBase,
+                    enabled: true,
+                  })
+                  if (!active()) break
+                  if (ingressId) {
+                    // The final claim atomically races revocation: false drops
+                    // stale buffered work; true retains ownership until ACK,
+                    // including a restart before the JS journal accepts it.
+                    if (!(await retained()) || !active()) break
+                    if (!(await connectorsWechatOaInboundClaim(opts.id, ingressId))) break
+                    admitted = true
+                    if (!active()) break
+                  }
+                  await ctx.emit(event)
+                }
+                // Once accepted (or terminal), retry only the exact ACK. A
+                // failed native write must not repeat policy/media/model work.
+                accepted = true
+              }
+              if (!active()) break
+              // Unsupported/invalid parsed messages and policy-denied events
+              // are terminal dispositions. An accepted event is ACKed only
+              // after emit has committed it to the shared durable pipeline.
+              if (ingressId) await connectorsWechatOaInboundAck(opts.id, ingressId)
+              if (!active()) break
+              lastActivityAt = Date.now()
+              healthState = "running"
+              healthReason = undefined
+              break
+            } catch {
+              if (!active()) break
+              healthState = "degraded"
+              healthReason = "inbound_acceptance_failed"
+              // Old hosts may emit unjournaled notifications. A bad legacy
+              // item must not kill the following stream. Journaled items stay
+              // owned until durable acceptance or the generation is stopped.
+              if (!delivery.ingressId) break
+              await new Promise<void>((resolve) => {
+                const finish = () => {
+                  clearTimeout(timer)
+                  signal.removeEventListener("abort", finish)
+                  resolve()
+                }
+                const timer = setTimeout(finish, retryDelay)
+                signal.addEventListener("abort", finish, { once: true })
+                if (signal.aborted) finish()
+              })
+              retryDelay = Math.min(retryDelay * 2, 30_000)
+            }
           }
         }
-        if (!stopCalled) healthState = "down"
+        if (active()) healthState = "down"
       } catch {
-        if (!stopCalled) healthState = "degraded"
+        if (active()) healthState = "degraded"
       }
     })()
   }
 
   async function stop(): Promise<void> {
-    stopCalled = true
     abortController?.abort()
     abortController = null
     healthState = "down"

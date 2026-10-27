@@ -457,6 +457,150 @@ describe("createWeComAdapter — heartbeat", () => {
 })
 
 describe("createWeComAdapter — inbound", () => {
+  it("keeps the recovered socket when old connection credentials reject late", async () => {
+    const bus = listenBus()
+    mockListen.mockImplementation(bus.impl)
+    mockWsOpen.mockResolvedValueOnce("h1").mockResolvedValue("h2")
+    let entered!: () => void, rejectOld!: (error: Error) => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const botId = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        entered()
+        return new Promise<string>((_resolve, reject) => {
+          rejectOld = reject
+        })
+      })
+      .mockResolvedValue("bot")
+    const adapter = createWeComAdapter({
+      id: "wc1",
+      displayName: "test",
+      botId,
+      secret: async () => "secret",
+      _backoffBaseMs: 1,
+    })
+    const start = adapter.start(makeCtx(makeEmit()))
+    await ready
+    bus.trigger("connectors://ws/h1/close", "")
+    for (let i = 0; i < 50; i++) {
+      await tick()
+      const sub = sentFrames().find((frame) => frame.cmd === "aibot_subscribe")
+      if (sub) {
+        bus.trigger(
+          "connectors://ws/h2/message",
+          JSON.stringify({ headers: { req_id: sub.headers!.req_id }, errcode: 0 })
+        )
+        break
+      }
+    }
+    await tick()
+    rejectOld(new Error("old keyring failure"))
+    await start
+    await tick()
+    try {
+      expect(mockWsOpen).toHaveBeenCalledTimes(2)
+      expect(adapter.health().state).toBe("running")
+    } finally {
+      await adapter.stop()
+    }
+  })
+  it("isolates delayed old media, close callbacks and abort signals after restart", async () => {
+    const oldEmit = makeEmit(),
+      nextEmit = makeEmit(),
+      oldController = new AbortController()
+    const { adapter, bus } = await startSubscribed(oldEmit, undefined, {
+      signal: oldController.signal,
+    })
+    let entered!: () => void
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    let release!: (bytes: Uint8Array) => void
+    mockDecryptMedia.mockImplementationOnce(() => {
+      entered()
+      return new Promise<Uint8Array>((resolve) => {
+        release = resolve
+      })
+    })
+    bus.trigger(
+      "connectors://ws/h1/message",
+      JSON.stringify({
+        cmd: "aibot_msg_callback",
+        headers: { req_id: "old-image" },
+        body: {
+          msgid: "old-image",
+          aibotid: "bot",
+          chattype: "single",
+          from: { userid: "user" },
+          msgtype: "image",
+          image: { url: "https://cdn/image", aeskey: "key" },
+        },
+      })
+    )
+    await ready
+    await adapter.stop()
+    const before = sentFrames().length
+    mockWsOpen.mockResolvedValue("h2")
+    const starting = adapter.start(makeCtx(nextEmit))
+    for (let i = 0; i < 30; i++) {
+      await tick()
+      const sub = sentFrames()
+        .slice(before)
+        .find((frame) => frame.cmd === "aibot_subscribe")
+      if (sub) {
+        bus.trigger(
+          "connectors://ws/h2/message",
+          JSON.stringify({ headers: { req_id: sub.headers!.req_id }, errcode: 0 })
+        )
+        break
+      }
+    }
+    await starting
+    release(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]))
+    await tick()
+    bus.trigger("connectors://ws/h1/close", "")
+    oldController.abort()
+    await tick()
+    try {
+      expect(oldEmit).not.toHaveBeenCalled()
+      expect(nextEmit).not.toHaveBeenCalled()
+      expect(adapter.health().state).toBe("running")
+      expect(mockWsClose).not.toHaveBeenCalledWith("h2")
+    } finally {
+      await adapter.stop()
+    }
+  })
+  it("withholds unrecognized image bytes when a download has no decryption key", async () => {
+    const emit = makeEmit()
+    const { adapter, bus } = await startSubscribed(emit)
+    try {
+      mockDecryptMedia.mockResolvedValue(new Uint8Array(16).fill(7))
+      bus.trigger(
+        "connectors://ws/h1/message",
+        JSON.stringify({
+          cmd: "aibot_msg_callback",
+          headers: { req_id: "cipher" },
+          body: {
+            msgid: "cipher",
+            aibotid: "bot",
+            chattype: "single",
+            from: { userid: "user" },
+            msgtype: "image",
+            image: { url: "https://cdn/cipher" },
+          },
+        })
+      )
+      await tick()
+      expect(emit).toHaveBeenCalledTimes(1)
+      expect(emit.mock.calls[0][0].segments).toEqual([
+        { type: "image", url: "", rawUrl: "https://cdn/cipher", alt: "[unavailable image]" },
+      ])
+    } finally {
+      await adapter.stop()
+    }
+  })
   it("normalises an inbound text message and emits it through the gate", async () => {
     const emit = makeEmit()
     const { adapter, bus } = await startSubscribed(emit)
@@ -500,6 +644,12 @@ describe("createWeComAdapter — inbound", () => {
           msgtype: "mixed",
           mixed: {
             msg_item: [
+              null,
+              {
+                msgtype: "text",
+                text: { content: "" },
+                image: { url: "https://cdn/wrong-discriminator" },
+              },
               { msgtype: "image", image: { url: "https://cdn/bad", aeskey: "bad-key" } },
               { msgtype: "image", image: { url: "https://cdn/current", aeskey: "current-key" } },
             ],
@@ -529,6 +679,10 @@ describe("createWeComAdapter — inbound", () => {
     ])
     expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/quote", "quote-key")
     expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/current", "current-key")
+    expect(mockDecryptMedia).not.toHaveBeenCalledWith(
+      "https://cdn/wrong-discriminator",
+      expect.anything()
+    )
     await adapter.streamReply!({
       conversationRef: { ...event.conversationRef, reqId: undefined },
       text: "reply",

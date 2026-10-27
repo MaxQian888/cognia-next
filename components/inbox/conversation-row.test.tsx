@@ -3,6 +3,13 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+const mockPlatformAvatar = jest.fn<string | undefined, [unknown]>(() => undefined)
+jest.mock("@/hooks/connectors/use-platform-avatar", () => ({
+  usePlatformAvatar: (target: unknown) => mockPlatformAvatar(target),
+}))
+beforeEach(() => {
+  mockPlatformAvatar.mockReset()
+})
 
 jest.mock("./platform-badge", () => ({
   PlatformBadge: ({ platform }: { platform: string }) => <span data-testid={`badge-${platform}`} />,
@@ -65,6 +72,33 @@ function makeItem(overrides: Partial<ConversationRowItem> = {}): ConversationRow
 }
 
 describe("ConversationRow", () => {
+  it("uses the same platform group avatar as the desktop conversation list", () => {
+    const item = makeItem()
+    item.session.platformBinding = {
+      platform: "onebot",
+      adapterId: "qq",
+      conversationKey: "opaque",
+      conversationRef: {
+        platform: "onebot",
+        adapterId: "qq",
+        messageType: "group",
+        groupId: 999,
+        userId: 123,
+      },
+    }
+    mockPlatformAvatar.mockReturnValue("data:image/png;base64,GROUP")
+    const { container } = render(
+      <ConversationRow item={item} isActive={false} onSelect={() => {}} />
+    )
+    expect(mockPlatformAvatar).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "group", remoteId: "999" })
+    )
+    expect(container.querySelector('img[src="data:image/png;base64,GROUP"]')).toBeInTheDocument()
+    fireEvent.error(container.querySelector("img")!)
+    expect(container.querySelector("img")).toBeNull()
+    expect(screen.getByText("PT")).toBeInTheDocument()
+  })
+
   it("renders the title, preview, platform badge, and relative time", () => {
     render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
     expect(screen.getByText("Product team")).toBeInTheDocument()

@@ -85,7 +85,7 @@ describe("onebotInboundToA2UI", () => {
     })
     expect(out!.body).toEqual([
       { kind: "mention", handle: "200001", resolved: undefined },
-      { kind: "link", href: "cq-record:voice-fid", label: "Voice message" },
+      { kind: "link", href: "voice-fid", label: "Voice message" },
       { kind: "image", url: "img-fid", alt: undefined },
       { kind: "link", href: "cq-video:vid-fid", label: "Video" },
     ])
@@ -115,4 +115,41 @@ describe("onebotInboundToA2UI", () => {
       { kind: "text", text: "[face:12]", emphasis: "muted" },
     ])
   })
+})
+it("projects candidate v12 replies, all-mentions, audio and files", () => {
+  const out = onebotInboundToA2UI({
+    message: [
+      { type: "reply", data: { message_id: "previous" } },
+      { type: "mention_all", data: {} },
+      { type: "audio", data: { file_id: "audio-1" } },
+      { type: "file", data: { file_id: "file-1", name: "report.pdf" } },
+    ],
+  })
+  expect(out?.body).toEqual([
+    { kind: "reply_context", replyToMessageId: "previous" },
+    { kind: "mention", handle: "all" },
+    { kind: "link", href: "audio-1", label: "Voice message" },
+    { kind: "link", href: "file-1", label: "report.pdf" },
+  ])
+})
+
+it("keeps valid segment siblings after malformed members", () => {
+  expect(
+    onebotInboundToA2UI({ message: [null, { type: "text", data: { text: "kept" } }] as never })
+      ?.body
+  ).toEqual([{ kind: "text", text: "kept" }])
+})
+it("retains valid replies around malformed location data", () => {
+  expect(
+    onebotInboundToA2UI({
+      message: [
+        { type: "reply", data: { message_id: "parent" } },
+        { type: "location", data: [] },
+        { type: "text", data: { text: "after" } },
+      ] as never,
+    })?.body
+  ).toEqual([
+    { kind: "reply_context", replyToMessageId: "parent" },
+    { kind: "text", text: "after" },
+  ])
 })

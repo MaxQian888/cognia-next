@@ -16,6 +16,7 @@ import {
   inboundA2UIBlockToPlainText,
   isTextOnlyInboundA2UIBlock,
   sanitizeInboundA2UIBlock,
+  withInboundDisplayMedia,
 } from "./inbound-a2ui-normalize"
 import { slackInboundToA2UI } from "../slack/inbound-to-a2ui"
 import { larkInboundToA2UI } from "../lark/inbound-to-a2ui"
@@ -43,19 +44,27 @@ export function projectInboundToA2UI(
   // `wechat-oa` hands us the inbound XML as a string; every other adapter
   // hands an object. Only reject nullish payloads here and let each mapper
   // validate its own shape (the try/catch below contains any surprise).
-  if (rawPayload == null) return null
-  const projected = runMapper(platform, rawPayload, segments)
+  const projected = rawPayload == null ? null : runMapper(platform, rawPayload, segments)
   // Re-validate what the mapper produced: it is persisted and rendered later,
   // outside this try/catch, so a malformed node must not survive to React.
-  const block = sanitizeInboundA2UIBlock(projected)
+  const safe = sanitizeInboundA2UIBlock(projected)
+  const block = segments
+    ? withInboundDisplayMedia(safe, platform as InboundA2UIBlock["source"], segments)
+    : safe
   if (!block) return null
   // A frame around nothing but the very text the parts already hold adds no
   // structure; the ordinary parts render it. A text-only block that says
   // something else (Slack's `text` fallback differs from its blocks, a long
   // card outgrows its capped mirror, mrkdwn was converted) is kept.
-  if (segments && isTextOnlyInboundA2UIBlock(block)) {
+  if (Array.isArray(segments) && isTextOnlyInboundA2UIBlock(block)) {
     const fallback = segments
-      .map((seg) => (seg.type === "text" ? seg.text : seg.type === "markdown" ? seg.md : ""))
+      .map((seg) =>
+        seg?.type === "text" && typeof seg.text === "string"
+          ? seg.text
+          : seg?.type === "markdown" && typeof seg.md === "string"
+            ? seg.md
+            : ""
+      )
       .join("\n")
     if (sameProse(inboundA2UIBlockToPlainText(block), fallback)) return null
   }

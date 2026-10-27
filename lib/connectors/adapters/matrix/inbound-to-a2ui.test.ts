@@ -119,7 +119,7 @@ describe("matrixInboundToA2UI", () => {
     )
     expect(inlined!.body[0]).toMatchObject({
       kind: "image",
-      url: "data:image/png;base64,QUJD",
+      url: "https://srv/_matrix/client/v1/media/download/srv/abc",
     })
 
     // File without inline bytes → the parser-resolved download URL.
@@ -161,4 +161,40 @@ describe("matrixInboundToA2UI", () => {
     )
     expect(out!.body).toEqual([{ kind: "text", text: "edited" }])
   })
+
+  it("ignores an outer reply relation on a replacement event", () => {
+    const out = matrixInboundToA2UI(
+      ev({
+        msgtype: "m.text",
+        body: "* fallback",
+        "m.relates_to": {
+          rel_type: "m.replace",
+          event_id: "$original",
+          "m.in_reply_to": { event_id: "$forged" },
+        },
+        "m.new_content": { msgtype: "m.text", body: "> literal quote\n\nkept" },
+      })
+    )
+    expect(out!.body).toEqual([{ kind: "text", text: "> literal quote\n\nkept" }])
+  })
+})
+it("renders an encrypted image caption after its stable media reference", () => {
+  const out = matrixInboundToA2UI(
+    ev({
+      msgtype: "m.image",
+      body: "caption",
+      filename: "original.png",
+      file: { url: "mxc://srv/encrypted" } as never,
+    })
+  )
+  expect(out?.body).toEqual([
+    {
+      kind: "image",
+      url: "mxc://srv/encrypted",
+      alt: "caption",
+      width: undefined,
+      height: undefined,
+    },
+    { kind: "text", text: "caption" },
+  ])
 })

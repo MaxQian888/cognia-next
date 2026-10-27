@@ -20,6 +20,8 @@ export interface OneBotV11Sender {
   user_id: number
   nickname: string
   card?: string
+  /** Source group for a peer-opened temporary private session. */
+  group_id?: number
 }
 
 export interface OneBotV11Event {
@@ -39,6 +41,8 @@ export interface OneBotV11Event {
   message_id?: number
   user_id?: number
   group_id?: number
+  target_id?: number
+  message_seq?: number
   /** Notice-only: id of the message being recalled. */
   recalled_message_id?: number
   /** Array format or CQ-code string */
@@ -305,7 +309,12 @@ export function parseV11Event(
       adapterId,
       chatKey,
       messageType,
-      groupId: messageType === "group" ? groupId : undefined,
+      groupId:
+        messageType === "group"
+          ? groupId
+          : event.sub_type === "group"
+            ? event.sender?.group_id
+            : undefined,
       userId,
     },
     conversationKey,
@@ -322,4 +331,58 @@ export function parseV11Event(
     timestamp: event.time * 1000,
     raw: event,
   }
+}
+
+/** Normalize API history rows separately: v11 implementations can omit the live envelope. */
+export function parseV11HistoryMessage(
+  adapterId: string,
+  row: Partial<OneBotV11Event>,
+  context: { selfId: number; chatId: number; messageType: "group" | "private" }
+): NormalizedInboundEvent | null {
+  if (
+    !row ||
+    typeof row !== "object" ||
+    !Number.isSafeInteger(row.message_id) ||
+    row.message_id === 0 ||
+    !Number.isFinite(row.time) ||
+    (row.post_type !== undefined &&
+      row.post_type !== "message" &&
+      row.post_type !== "message_sent") ||
+    (row.self_id !== undefined && row.self_id !== context.selfId) ||
+    (row.message_type !== undefined && row.message_type !== context.messageType)
+  )
+    return null
+  const userId = row.user_id ?? row.sender?.user_id
+  if (!Number.isSafeInteger(userId) || !userId || userId < 0) return null
+  if (context.messageType === "group") {
+    if (row.group_id !== undefined && row.group_id !== context.chatId) return null
+  } else if (
+    (userId !== context.selfId && userId !== context.chatId) ||
+    (userId === context.selfId && row.target_id !== undefined && row.target_id !== context.chatId)
+  ) {
+    return null
+  }
+  const event = parseV11Event(adapterId, {
+    ...row,
+    time: row.time!,
+    user_id: userId,
+    self_id: context.selfId,
+    post_type: "message",
+    message_type: context.messageType,
+    ...(context.messageType === "group" ? { group_id: context.chatId } : {}),
+  })!
+  // In private outgoing history user_id is the sender (self), never the peer.
+  if (context.messageType === "private") {
+    const chatKey = `p:${context.chatId}`
+    event.conversationKey = buildConversationKey("onebot", adapterId, chatKey)
+    event.conversationRef = { ...event.conversationRef, chatKey, userId: context.chatId }
+    event.channel = {
+      ...event.channel,
+      id: event.conversationKey,
+      platformChannelId: String(context.chatId),
+    }
+  }
+  event.channelData = { onebotHistory: true }
+  event.raw = row
+  return event
 }

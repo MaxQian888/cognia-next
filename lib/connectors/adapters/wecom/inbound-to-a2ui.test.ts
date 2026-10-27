@@ -24,7 +24,7 @@ describe("wecomInboundToA2UI", () => {
     ])
     expect(
       wecomInboundToA2UI(body({ msgtype: "markdown", markdown: { content: "# H" } }))!.body
-    ).toEqual([{ kind: "text", text: "# H" }])
+    ).toEqual([{ kind: "text", text: "# H", format: "markdown" }])
   })
 
   it("maps image to an image node", () => {
@@ -82,4 +82,36 @@ describe("wecomInboundToA2UI", () => {
     ])
     expect(out!.source).toBe("wecom")
   })
+})
+it("keeps quoted images before official voice transcription without inventing a reply id", () => {
+  const out = wecomInboundToA2UI(
+    body({
+      msgtype: "voice",
+      voice: { content: "recognized speech" },
+      quote: { msgtype: "image", image: { url: "https://cdn/quote" } },
+    })
+  )
+  expect(out?.body).toEqual([
+    { kind: "card", children: [{ kind: "image", url: "https://cdn/quote" }] },
+    { kind: "text", text: "recognized speech" },
+  ])
+})
+
+it("isolates malformed mixed items and honors the item discriminator", () => {
+  const out = wecomInboundToA2UI(
+    body({
+      msgtype: "mixed",
+      mixed: {
+        msg_item: [
+          null,
+          { msgtype: "image", text: { content: "wrong" }, image: { url: "https://cdn/image" } },
+          { text: { content: "kept" } },
+        ],
+      } as unknown as WeComInboundMsgBody["mixed"],
+    })
+  )
+  expect(out?.body).toEqual([
+    { kind: "image", url: "https://cdn/image" },
+    { kind: "text", text: "kept" },
+  ])
 })

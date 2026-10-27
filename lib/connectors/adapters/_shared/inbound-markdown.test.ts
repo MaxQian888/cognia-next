@@ -77,3 +77,23 @@ describe("escapeMarkdown", () => {
     expect(escapeMarkdown("1. one")).toBe("1\\. one")
   })
 })
+
+describe("code containers", () => {
+  it("does not extend an unclosed quote fence into the next paragraph", () => {
+    expect(splitMarkdownCode("> ```\n> inside\n\noutside")).toEqual([
+      { code: true, text: "> ```\n> inside\n" },
+      { code: false, text: "\noutside" },
+    ])
+    expect(splitMarkdownCode("`before\n\nafter`").every((chunk) => !chunk.code)).toBe(true)
+  })
+  it("does not add hard breaks inside a multiline inline span", () => {
+    expect(preserveLineBreaks("`a\nb`\nc")).toBe("`a\nb`  \nc")
+    expect(splitMarkdownCode("`a\nb`")).toEqual([{ code: true, text: "`a\nb`" }])
+  })
+
+  it("recognizes fences nested in a quote", () => {
+    const source = "> ~~~\n> a\n> b\n> ~~~"
+    expect(preserveLineBreaks(source)).toBe(source)
+    expect(splitMarkdownCode(source)).toEqual([{ code: true, text: source }])
+  })
+})

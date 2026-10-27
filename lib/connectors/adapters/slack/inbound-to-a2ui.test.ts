@@ -1,6 +1,20 @@
 import { slackInboundToA2UI } from "./inbound-to-a2ui"
 
 describe("slackInboundToA2UI", () => {
+  it("retains callback presence for malformed action IDs", () => {
+    expect(
+      slackInboundToA2UI({
+        blocks: [
+          {
+            type: "actions",
+            elements: [
+              { type: "button", action_id: {}, url: "https://x.test", text: { text: "Act" } },
+            ],
+          },
+        ],
+      } as never)?.body[0]
+    ).toMatchObject({ children: [{ actionId: "" }] })
+  })
   it("returns null when payload is empty", () => {
     expect(slackInboundToA2UI({})).toBeNull()
   })

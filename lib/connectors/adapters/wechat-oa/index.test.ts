@@ -5,6 +5,11 @@ import { startWechatOaWebhook } from "./transport-webhook"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import type { AdapterContext } from "@/types/connectors/adapter"
 import type { OutboundRequest } from "@/types/connectors/outbound"
+import { isTauri } from "@/lib/tauri"
+import {
+  setConnectorCommandInvoker,
+  type ConnectorCommandInvoker,
+} from "@/lib/connectors/tauri/commands"
 
 jest.mock("./transport-webhook", () => ({
   startWechatOaWebhook: jest.fn(),
@@ -48,6 +53,70 @@ beforeEach(() => {
 })
 
 describe("createWechatOaAdapter", () => {
+  it.each(["image", "voice", "video"])(
+    "resolves %s media in the active headless receive loop through its injected native bridge",
+    async (type) => {
+      const globals = globalThis as Record<string, unknown>
+      const previousHeadless = globals.__COGNIA_HEADLESS__
+      globals.__COGNIA_HEADLESS__ = true
+      expect(isTauri()).toBe(false)
+      const encoded =
+        type === "image"
+          ? "/9j/"
+          : type === "voice"
+            ? btoa("#!AMR\npayload")
+            : btoa("\0\0\0\x18ftypmp42payload")
+      let reads = 0
+      const xml = `<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>${type}</MsgType><MediaId>media1</MediaId><MsgId>1</MsgId></xml>`
+      const native = jest.fn(async (name: string) => {
+        if (name === "connectors_wechat_oa_inbound_list")
+          return [{ id: "headless-media", xml, receivedAt: 1 }]
+        if (name === "connectors_wechat_oa_inbound_claim") return true
+        if (name === "connectors_attachment_read") return ++reads === 1 ? null : encoded
+        if (name === "connectors_attachment_fetch") return { sizeBytes: atob(encoded).length }
+        if (name === "connectors_http_request")
+          return httpResp(200, { video_url: "https://cdn.example.com/video.mp4" })
+        return undefined
+      })
+      const previousInvoker = setConnectorCommandInvoker(native as ConnectorCommandInvoker)
+      const a = adapter()
+      const emit = jest.fn()
+      mockWebhook.mockImplementation(async function* () {
+        yield {
+          ingressId: "headless-media",
+          xml,
+        }
+      })
+      try {
+        await a.start({ emit } as unknown as AdapterContext)
+        await flush()
+        expect(emit).toHaveBeenCalledTimes(1)
+        const segment = emit.mock.calls[0][0].segments[0]
+        if (type === "image")
+          expect(segment).toMatchObject({ dataBase64: encoded, mimeType: "image/jpeg" })
+        else
+          expect(segment.url).toBe(
+            `data:${type === "voice" ? "audio/amr" : "video/mp4"};base64,${encoded}`
+          )
+        expect(segment.rawUrl).toBe("wxmedia://media1")
+        expect(native).toHaveBeenCalledWith(
+          "connectors_attachment_fetch",
+          expect.objectContaining({ adapterId: "wxoa-1", remoteRef: "wechat-oa:media:media1" })
+        )
+        expect(native).toHaveBeenLastCalledWith("connectors_wechat_oa_inbound_ack", {
+          adapterId: "wxoa-1",
+          id: "headless-media",
+        })
+        expect(mockInvoke).not.toHaveBeenCalled()
+      } finally {
+        await a.stop()
+        setConnectorCommandInvoker(previousInvoker)
+        if (previousHeadless === undefined) delete globals.__COGNIA_HEADLESS__
+        else globals.__COGNIA_HEADLESS__ = previousHeadless
+      }
+    }
+  )
+
   it("preserves unsupported rich content with explicit text downgrades", async () => {
     mockInvoke.mockResolvedValue(httpResp(200, { errcode: 0 }))
     const req = sendReq()
@@ -327,7 +396,9 @@ describe("createWechatOaAdapter", () => {
 
   it("start() extracts ToUserName as the event selfId", async () => {
     mockWebhook.mockImplementation(async function* () {
-      yield `<xml><ToUserName><![CDATA[gh_abc123]]></ToUserName><FromUserName><![CDATA[oUser]]></FromUserName><CreateTime>1700000000</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[hello]]></Content><MsgId>1</MsgId></xml>`
+      yield {
+        xml: `<xml><ToUserName><![CDATA[gh_abc123]]></ToUserName><FromUserName><![CDATA[oUser]]></FromUserName><CreateTime>1700000000</CreateTime><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[hello]]></Content><MsgId>1</MsgId></xml>`,
+      }
     })
     const a = adapter()
     const emit = jest.fn()
@@ -337,4 +408,332 @@ describe("createWechatOaAdapter", () => {
     expect(emit.mock.calls[0][0]).toMatchObject({ selfId: "gh_abc123", plainText: "hello" })
     await a.stop()
   })
+
+  it("continues receiving after a single accepted event fails to persist", async () => {
+    mockWebhook.mockImplementation(async function* () {
+      for (const id of ["1", "2"])
+        yield {
+          xml: `<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>hello</Content><MsgId>${id}</MsgId></xml>`,
+        }
+    })
+    const a = adapter()
+    const emit = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("DB unavailable"))
+      .mockResolvedValue(undefined)
+    await a.start({ emit } as unknown as AdapterContext)
+    await flush()
+    expect(emit.mock.calls.map(([event]) => event.messageId)).toEqual(["1", "2"])
+    await a.stop()
+  })
+
+  it("does not emit from a stopped generation after an awaited gate resumes", async () => {
+    let release!: (allowed: boolean) => void
+    mockGate.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve
+        })
+    )
+    mockWebhook.mockImplementation(async function* () {
+      yield {
+        xml: `<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>hello</Content><MsgId>1</MsgId></xml>`,
+      }
+    })
+    const a = adapter()
+    const emit = jest.fn()
+    await a.start({ emit } as unknown as AdapterContext)
+    await flush()
+    await a.stop()
+    release(true)
+    await flush()
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it("retries durable acceptance without ACKing a failed delivery", async () => {
+    jest.useFakeTimers()
+    const a = adapter()
+    try {
+      const xml =
+        "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>hello</Content><MsgId>1</MsgId></xml>"
+      mockInvoke.mockImplementation(async (name: string) => {
+        if (name === "connectors_wechat_oa_inbound_list")
+          return [{ id: "ingress-1", xml, receivedAt: 1 }]
+        if (name === "connectors_wechat_oa_inbound_claim") return true
+        return undefined
+      })
+      mockWebhook.mockImplementation(async function* () {
+        yield {
+          ingressId: "ingress-1",
+          xml,
+        }
+      })
+      const emit = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("DB unavailable"))
+        .mockResolvedValue(undefined)
+      await a.start({ emit } as unknown as AdapterContext)
+      await jest.advanceTimersByTimeAsync(0)
+      expect(emit).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "connectors_wechat_oa_inbound_ack",
+        expect.anything()
+      )
+      await jest.advanceTimersByTimeAsync(250)
+      expect(emit).toHaveBeenCalledTimes(2)
+      expect(mockInvoke).toHaveBeenCalledWith("connectors_wechat_oa_inbound_ack", {
+        adapterId: "wxoa-1",
+        id: "ingress-1",
+      })
+    } finally {
+      await a.stop()
+      jest.useRealTimers()
+    }
+  })
+
+  it("ACKs terminal unsupported XML without dispatching a model turn", async () => {
+    mockInvoke.mockImplementation(async (name: string) =>
+      name === "connectors_wechat_oa_inbound_list"
+        ? [{ id: "ignored-1", xml: "<xml><MsgType>unknown</MsgType></xml>", receivedAt: 1 }]
+        : undefined
+    )
+    mockWebhook.mockImplementation(async function* () {
+      yield { ingressId: "ignored-1", xml: "<xml><MsgType>unknown</MsgType></xml>" }
+    })
+    const a = adapter()
+    const emit = jest.fn()
+    await a.start({ emit } as unknown as AdapterContext)
+    await flush()
+    expect(emit).not.toHaveBeenCalled()
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_wechat_oa_inbound_ack", {
+      adapterId: "wxoa-1",
+      id: "ignored-1",
+    })
+    await a.stop()
+  })
+
+  it("retries only the exact ACK after durable acceptance succeeds", async () => {
+    jest.useFakeTimers()
+    const a = adapter()
+    try {
+      const xml =
+        "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>hello</Content><MsgId>1</MsgId></xml>"
+      mockWebhook.mockImplementation(async function* () {
+        yield {
+          ingressId: "accepted-1",
+          xml,
+        }
+      })
+      let acknowledgements = 0
+      mockInvoke.mockImplementation(async (name: string) => {
+        if (name === "connectors_wechat_oa_inbound_list")
+          return [{ id: "accepted-1", xml, receivedAt: 1 }]
+        if (name === "connectors_wechat_oa_inbound_claim") return true
+        if (name === "connectors_wechat_oa_inbound_ack" && ++acknowledgements === 1)
+          throw new Error("ACK write failed")
+        return undefined
+      })
+      const emit = jest.fn().mockResolvedValue(undefined)
+      await a.start({ emit } as unknown as AdapterContext)
+      await jest.advanceTimersByTimeAsync(0)
+      expect(emit).toHaveBeenCalledTimes(1)
+      await jest.advanceTimersByTimeAsync(250)
+      expect(acknowledgements).toBe(2)
+      expect(mockInvoke).toHaveBeenLastCalledWith("connectors_wechat_oa_inbound_ack", {
+        adapterId: "wxoa-1",
+        id: "accepted-1",
+      })
+      expect(emit).toHaveBeenCalledTimes(1)
+      expect(mockGate).toHaveBeenCalledTimes(1)
+      expect(
+        mockInvoke.mock.calls.filter(([name]) => name === "connectors_wechat_oa_inbound_claim")
+      ).toHaveLength(1)
+    } finally {
+      await a.stop()
+      jest.useRealTimers()
+    }
+  })
+
+  it("drops a retained delivery revoked while its policy gate was awaiting", async () => {
+    const xml =
+      "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>obsolete</Content><MsgId>1</MsgId></xml>"
+    let release!: (allowed: boolean) => void
+    mockGate.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve
+        })
+    )
+    mockWebhook.mockImplementation(async function* () {
+      yield {
+        ingressId: "revoked-1",
+        xml,
+      }
+    })
+    mockInvoke
+      .mockResolvedValueOnce([{ id: "revoked-1", xml, receivedAt: 1 }])
+      .mockResolvedValue([])
+    const a = adapter()
+    const emit = jest.fn()
+    try {
+      await a.start({ emit } as unknown as AdapterContext)
+      await flush()
+      release(true)
+      await flush()
+      expect(emit).not.toHaveBeenCalled()
+      expect(mockInvoke).toHaveBeenCalledWith("connectors_wechat_oa_inbound_list", {
+        adapterId: "wxoa-1",
+      })
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "connectors_wechat_oa_inbound_ack",
+        expect.anything()
+      )
+    } finally {
+      await a.stop()
+    }
+  })
+
+  it("rechecks native ownership after asynchronous media resolution", async () => {
+    const xml =
+      "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>image</MsgType><MediaId>media1</MediaId><MsgId>1</MsgId></xml>"
+    let retained = true
+    let release!: (value: string) => void
+    mockInvoke.mockImplementation(async (name: string) => {
+      if (name === "connectors_wechat_oa_inbound_list")
+        return retained ? [{ id: "media-1", xml, receivedAt: 1 }] : []
+      if (name === "connectors_attachment_read")
+        return new Promise<string>((resolve) => {
+          release = resolve
+        })
+      return undefined
+    })
+    mockWebhook.mockImplementation(async function* () {
+      yield { ingressId: "media-1", xml }
+    })
+    const a = adapter()
+    const emit = jest.fn()
+    try {
+      await a.start({ emit } as unknown as AdapterContext)
+      await flush()
+      expect(release).toBeDefined()
+      retained = false
+      release("/9j/")
+      await flush()
+      expect(emit).not.toHaveBeenCalled()
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "connectors_wechat_oa_inbound_ack",
+        expect.anything()
+      )
+    } finally {
+      await a.stop()
+    }
+  })
+
+  it("drops a delivery revoked between its final native read and durable claim", async () => {
+    const xml =
+      "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>obsolete</Content><MsgId>1</MsgId></xml>"
+    mockInvoke.mockImplementation(async (name: string) => {
+      if (name === "connectors_wechat_oa_inbound_list")
+        return [{ id: "claim-lost", xml, receivedAt: 1, admitted: false }]
+      if (name === "connectors_wechat_oa_inbound_claim") return false
+      return undefined
+    })
+    mockWebhook.mockImplementation(async function* () {
+      yield { ingressId: "claim-lost", xml, admitted: false }
+    })
+    const a = adapter()
+    const emit = jest.fn()
+    try {
+      await a.start({ emit } as unknown as AdapterContext)
+      await flush()
+      expect(mockInvoke).toHaveBeenCalledWith("connectors_wechat_oa_inbound_claim", {
+        adapterId: "wxoa-1",
+        id: "claim-lost",
+      })
+      expect(emit).not.toHaveBeenCalled()
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "connectors_wechat_oa_inbound_ack",
+        expect.anything()
+      )
+    } finally {
+      await a.stop()
+    }
+  })
+
+  it("resumes an admitted restart delivery even when the current gate denies new work", async () => {
+    const xml =
+      "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>retained</Content><MsgId>1</MsgId></xml>"
+    mockGate.mockResolvedValue(false)
+    mockInvoke.mockImplementation(async (name: string) => {
+      if (name === "connectors_wechat_oa_inbound_list")
+        return [{ id: "claimed-restart", xml, receivedAt: 1, admitted: true }]
+      if (name === "connectors_wechat_oa_inbound_claim") return true
+      return undefined
+    })
+    mockWebhook.mockImplementation(async function* () {
+      yield { ingressId: "claimed-restart", xml, admitted: true }
+    })
+    const a = adapter()
+    const emit = jest.fn().mockResolvedValue(undefined)
+    try {
+      await a.start({ emit } as unknown as AdapterContext)
+      await flush()
+      expect(mockGate).not.toHaveBeenCalled()
+      expect(emit).toHaveBeenCalledTimes(1)
+      expect(mockInvoke).toHaveBeenLastCalledWith("connectors_wechat_oa_inbound_ack", {
+        adapterId: "wxoa-1",
+        id: "claimed-restart",
+      })
+    } finally {
+      await a.stop()
+    }
+  })
+
+  it.each(["claim-reply-lost", "emit-failed"])(
+    "preserves durable admission after %s despite a newly denying gate",
+    async (failure) => {
+      jest.useFakeTimers()
+      const xml =
+        "<xml><FromUserName>oUser</FromUserName><CreateTime>1</CreateTime><MsgType>text</MsgType><Content>retained</Content><MsgId>1</MsgId></xml>"
+      let admitted = false
+      let claims = 0
+      mockInvoke.mockImplementation(async (name: string) => {
+        if (name === "connectors_wechat_oa_inbound_list")
+          return [{ id: "uncertain-claim", xml, receivedAt: 1, admitted }]
+        if (name === "connectors_wechat_oa_inbound_claim") {
+          admitted = true
+          if (++claims === 1 && failure === "claim-reply-lost")
+            throw new Error("claim committed but RPC reply lost")
+          return true
+        }
+        return undefined
+      })
+      mockWebhook.mockImplementation(async function* () {
+        yield { ingressId: "uncertain-claim", xml, admitted: false }
+      })
+      const a = adapter()
+      const emit = jest.fn().mockResolvedValue(undefined)
+      if (failure === "emit-failed") emit.mockRejectedValueOnce(new Error("DB unavailable"))
+      try {
+        await a.start({ emit } as unknown as AdapterContext)
+        await jest.advanceTimersByTimeAsync(0)
+        expect(admitted).toBe(true)
+        expect(mockInvoke).not.toHaveBeenCalledWith(
+          "connectors_wechat_oa_inbound_ack",
+          expect.anything()
+        )
+        mockGate.mockResolvedValue(false)
+        await jest.advanceTimersByTimeAsync(250)
+        expect(mockGate).toHaveBeenCalledTimes(1)
+        expect(emit).toHaveBeenCalledTimes(failure === "emit-failed" ? 2 : 1)
+        expect(mockInvoke).toHaveBeenLastCalledWith("connectors_wechat_oa_inbound_ack", {
+          adapterId: "wxoa-1",
+          id: "uncertain-claim",
+        })
+      } finally {
+        await a.stop()
+        jest.useRealTimers()
+      }
+    }
+  )
 })

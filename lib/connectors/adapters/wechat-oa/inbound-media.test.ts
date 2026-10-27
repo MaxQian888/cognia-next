@@ -34,6 +34,36 @@ it("resolves image MediaId through authenticated download and encrypted cache", 
   expect(e.segments[0]).toMatchObject({ dataBase64: "/9j/", mimeType: "image/jpeg" })
 })
 
+it.each(["image", "voice", "video"])(
+  "keeps %s error envelopes opaque instead of inlining JSON as media",
+  async (type) => {
+    const e = event(type)
+    const d = deps()
+    d.readAttachment
+      .mockReset()
+      .mockResolvedValue(btoa(JSON.stringify({ errcode: 40007, errmsg: "invalid media_id" })))
+    await enrichWechatInboundMedia(e, d)
+    expect(e.segments[0]).not.toHaveProperty("dataBase64")
+    expect(e.segments[0]).toMatchObject({ url: "wxmedia://media1" })
+  }
+)
+
+it.each(["image", "voice", "video"])(
+  "rejects oversized or malformed cached %s payloads",
+  async (type) => {
+    const e = event(type)
+    const d = deps()
+    d.readAttachment.mockReset().mockResolvedValue("A".repeat(32))
+    await enrichWechatInboundMedia(e, { ...d, maxInlineBytes: 3 })
+    expect(e.segments[0]).not.toHaveProperty("dataBase64")
+    expect(e.segments[0]).toMatchObject({ url: "wxmedia://media1" })
+    d.readAttachment.mockReset().mockResolvedValue("not valid base64")
+    await enrichWechatInboundMedia(e, d)
+    expect(e.segments[0]).not.toHaveProperty("dataBase64")
+    expect(e.segments[0]).toMatchObject({ url: "wxmedia://media1" })
+  }
+)
+
 it.each(["voice", "video"])(
   "resolves %s to usable bytes while retaining platform reference",
   async (type) => {
@@ -56,7 +86,7 @@ it.each(["voice", "video"])(
 it("does not resolve credentials for cache hits", async () => {
   const e = event("voice")
   const d = deps()
-  d.readAttachment.mockReset().mockResolvedValue("cached")
+  d.readAttachment.mockReset().mockResolvedValue(btoa("#!AMR\npayload"))
   await enrichWechatInboundMedia(e, d)
   expect(d.accessToken).not.toHaveBeenCalled()
   expect(d.fetchAttachment).not.toHaveBeenCalled()

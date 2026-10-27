@@ -18,6 +18,7 @@
  */
 
 import { namespacedCallbackAction } from "@/lib/connectors/hitl/callback-prefixes"
+import { discordAvatarUrl } from "./avatar"
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -38,11 +39,13 @@ export interface DiscordUser {
   discriminator?: string
   global_name?: string | null
   bot?: boolean
+  avatar?: string | null
 }
 
 export interface DiscordMember {
   user?: DiscordUser
   nick?: string | null
+  avatar?: string | null
 }
 
 export interface DiscordAttachment {
@@ -181,7 +184,12 @@ export interface DiscordDispatch {
 // Parser helpers
 // ---------------------------------------------------------------------------
 
-function buildPlatformIdentity(adapterId: string, author: DiscordUser): PlatformIdentity {
+function buildPlatformIdentity(
+  adapterId: string,
+  author: DiscordUser,
+  member?: DiscordMember,
+  guildId?: string
+): PlatformIdentity {
   const displayName = author.global_name ?? author.username
   return {
     id: `discord:${author.id}`,
@@ -189,7 +197,7 @@ function buildPlatformIdentity(adapterId: string, author: DiscordUser): Platform
     adapterId,
     remoteUserId: author.id,
     displayName,
-    avatarUrl: undefined,
+    avatarUrl: discordAvatarUrl(author, member, guildId),
   }
 }
 
@@ -290,7 +298,7 @@ function messageToEvent(
 
   const conversationKey = buildConversationKey("discord", adapterId, channelId)
 
-  const sender = buildPlatformIdentity(adapterId, msg.author)
+  const sender = buildPlatformIdentity(adapterId, msg.author, msg.member, msg.guild_id)
 
   const { selfMentioned, users } = detectMentions(selfId, msg)
 
@@ -483,7 +491,7 @@ export function parseDiscordInteraction(
   if (!user) return null
 
   const conversationKey = buildConversationKey("discord", adapterId, channelId)
-  const sender = buildPlatformIdentity(adapterId, user)
+  const sender = buildPlatformIdentity(adapterId, user, interaction.member, interaction.guild_id)
   const data = interaction.data ?? {}
 
   let actionType: ConnectorCallbackActionType

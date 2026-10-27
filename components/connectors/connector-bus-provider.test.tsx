@@ -47,7 +47,10 @@ describe("ConnectorBusProvider", () => {
     // Desktop keeps the installer defaults (isTauri gate, console log, no
     // row filter) — passing any of those here would fork desktop behaviour.
     // The only option is the lease-loss callback.
-    expect(mockInstall).toHaveBeenCalledWith({ onRuntimeReleased: expect.any(Function) })
+    expect(mockInstall).toHaveBeenCalledWith({
+      onRuntimeReleased: expect.any(Function),
+      onRuntimeBusy: expect.any(Function),
+    })
     expect(mockDispose).not.toHaveBeenCalled()
   })
 
@@ -135,6 +138,39 @@ describe("ConnectorBusProvider lease-loss reclaim", () => {
     options?.onRuntimeReleased?.("lease-lost")
   }
 
+  function reportBusy(call: number) {
+    const options = mockInstall.mock.calls[call]?.[0] as { onRuntimeBusy?: () => void } | undefined
+    options?.onRuntimeBusy?.()
+  }
+
+  it("keeps retrying when a peer still owns the lease after a loss", () => {
+    const { scheduled, scheduleRetry } = makeScheduler()
+    render(<ConnectorBusProvider scheduleRetry={scheduleRetry} />)
+    releaseRuntime()
+    scheduled.shift()?.run()
+    reportBusy(1)
+    expect(scheduled).toHaveLength(1)
+    expect(scheduled[0].delayMs).toBe(60_000)
+    scheduled.shift()?.run()
+    reportBusy(2)
+    expect(scheduled).toHaveLength(1)
+    expect(scheduled[0].delayMs).toBe(120_000)
+    scheduled.shift()?.run()
+    expect(mockInstall).toHaveBeenCalledTimes(4)
+  })
+
+  it("cancels busy-start retries on remote routing and ignores late callbacks", () => {
+    const { scheduled, scheduleRetry } = makeScheduler()
+    const { unmount } = render(<ConnectorBusProvider scheduleRetry={scheduleRetry} />)
+    reportBusy(0)
+    expect(scheduled).toHaveLength(1)
+    setActiveRemoteTransport(fakeRemote)
+    expect(scheduled).toHaveLength(0)
+    unmount()
+    reportBusy(0)
+    expect(scheduled).toHaveLength(0)
+  })
+
   it("re-acquires the runtime after a lost lease, on a backoff", () => {
     // Nothing in the React lifecycle fires when the installer tears itself
     // down; without this the desktop sits with no runtime until a restart.
@@ -165,6 +201,39 @@ describe("ConnectorBusProvider lease-loss reclaim", () => {
     // A brain-owned deployment loses this race forever; hammering it would be
     // pure waste, so the ladder settles rather than growing without bound.
     expect(delays).toEqual([30_000, 60_000, 120_000, 300_000, 300_000, 300_000])
+  })
+
+  it("ignores a retired install callback after routing returns to local", () => {
+    const disposeOld = jest.fn()
+    const disposeCurrent = jest.fn()
+    mockInstall.mockReturnValueOnce(disposeOld).mockReturnValueOnce(disposeCurrent)
+    const { scheduled, scheduleRetry } = makeScheduler()
+    const { unmount } = render(<ConnectorBusProvider scheduleRetry={scheduleRetry} />)
+    setActiveRemoteTransport(fakeRemote)
+    expect(disposeOld).toHaveBeenCalledTimes(1)
+    setActiveRemoteTransport(null)
+    expect(mockInstall).toHaveBeenCalledTimes(2)
+    releaseRuntime(0)
+    reportBusy(0)
+    expect(scheduled).toHaveLength(0)
+    unmount()
+    expect(disposeCurrent).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores a cancelled retry after a newer install has scheduled its own retry", () => {
+    const { scheduled, scheduleRetry } = makeScheduler()
+    const { unmount } = render(<ConnectorBusProvider scheduleRetry={scheduleRetry} />)
+    releaseRuntime(0)
+    const cancelledRetry = scheduled[0].run
+    setActiveRemoteTransport(fakeRemote)
+    setActiveRemoteTransport(null)
+    releaseRuntime(1)
+    expect(scheduled).toHaveLength(1)
+    cancelledRetry()
+    expect(mockInstall).toHaveBeenCalledTimes(2)
+    expect(scheduled).toHaveLength(1)
+    unmount()
+    expect(scheduled).toHaveLength(0)
   })
 
   it("abandons the retry when a remote host is activated in the meantime", () => {

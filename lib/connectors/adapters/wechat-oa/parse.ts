@@ -17,16 +17,60 @@ import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connector
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 /** Read a WeChat XML field, unwrapping a `<![CDATA[...]]>` when present. */
 export function extractXmlField(xml: string, field: string): string | undefined {
-  const re = new RegExp(`<${field}>([\\s\\S]*?)</${field}>`)
-  const m = re.exec(xml)
-  if (!m) return undefined
-  let inner = m[1].trim()
-  const cdata = /^<!\[CDATA\[([\s\S]*?)\]\]>$/.exec(inner)
-  if (cdata) inner = cdata[1]
-  return inner
+  if (typeof xml !== "string" || !/^[A-Za-z_][\w.-]*$/.test(field)) return undefined
+  // A user's Content CDATA can itself contain <MsgId> or </Content>.
+  // Skip complete CDATA/comment tokens before interpreting envelope tags.
+  const opening = new RegExp(
+    `<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>|$)|<!--[\\s\\S]*?(?:-->|$)|<${field}>`,
+    "g"
+  )
+  for (const match of xml.matchAll(opening)) {
+    if (match[0] !== `<${field}>`) continue
+    const start = match.index! + match[0].length
+    const closing = new RegExp(
+      `<!\\[CDATA\\[[\\s\\S]*?\\]\\]>|<!--[\\s\\S]*?-->|</${field}>|<`,
+      "g"
+    )
+    closing.lastIndex = start
+    for (let end = closing.exec(xml); end; end = closing.exec(xml)) {
+      if (end[0].startsWith("<!")) continue
+      if (end[0] !== `</${field}>`) return undefined
+      const inner = xml.slice(start, end.index).trim()
+      return [...inner.matchAll(/<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|([^<]+)/g)]
+        .map((part) =>
+          part[1] !== undefined
+            ? part[1]
+            : (part[2] ?? "").replace(
+                /&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi,
+                (entity, name: string) => {
+                  const named: Record<string, string> = {
+                    amp: "&",
+                    lt: "<",
+                    gt: ">",
+                    quot: '"',
+                    apos: "'",
+                  }
+                  if (!name.startsWith("#")) return named[name] ?? entity
+                  const code =
+                    name[1].toLowerCase() === "x"
+                      ? parseInt(name.slice(2), 16)
+                      : Number(name.slice(1))
+                  return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+                    ? String.fromCodePoint(code)
+                    : entity
+                }
+              )
+        )
+        .join("")
+    }
+    return undefined
+  }
+  return undefined
 }
 
 interface Envelope {
@@ -114,7 +158,7 @@ function parseEventPush(env: Envelope, xml: string): NormalizedInboundEvent | nu
       if (!eventKey) return null
       return buildEvent(
         env,
-        `event:CLICK:${env.timestamp}:${env.fromUser}`,
+        `event:CLICK:${env.timestamp}:${env.fromUser}:${bytesToHex(sha256(utf8ToBytes(eventKey)))}`,
         [{ type: "text", text: eventKey }],
         xml
       )
@@ -166,7 +210,15 @@ export function parseWechatOaXml(
         type: "voice",
         url: `wxmedia://${mediaId ?? ""}`,
         transcript: recognition || undefined,
-        mimeType: extractXmlField(xml, "Format") === "mp3" ? "audio/mpeg" : "audio/amr",
+        mimeType:
+          (
+            {
+              mp3: "audio/mpeg",
+              amr: "audio/amr",
+              speex: "audio/speex",
+              wav: "audio/wav",
+            } as Record<string, string>
+          )[extractXmlField(xml, "Format")?.toLowerCase() ?? "amr"] ?? "application/octet-stream",
       })
       break
     }
@@ -191,7 +243,12 @@ export function parseWechatOaXml(
       const lat = Number(extractXmlField(xml, "Location_X"))
       const lon = Number(extractXmlField(xml, "Location_Y"))
       const label = extractXmlField(xml, "Label")
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      if (
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        Math.abs(lat) <= 90 &&
+        Math.abs(lon) <= 180
+      ) {
         segments.push({ type: "location", lat, lon, name: label || undefined })
       } else if (label) {
         segments.push({ type: "text", text: `Location: ${label}` })

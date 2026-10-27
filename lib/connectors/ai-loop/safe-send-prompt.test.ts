@@ -281,6 +281,18 @@ describe("safeSendPrompt", () => {
     expect(mockAudit).not.toHaveBeenCalled()
   })
 
+  it("preserves the final source validator through workspace preparation", async () => {
+    canonicalScratch()
+    const beforeSend = jest.fn(async () => undefined)
+    await safeSendPrompt("sess_1", "clean", { cwd: "/scratch/old" }, { ...auditCtx, beforeSend })
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      expect.anything(),
+      expect.objectContaining({ beforeSend })
+    )
+  })
+
   it("aborts before sendPrompt when prompt carries PII and audits with reason=pii_blocked", async () => {
     await expect(
       safeSendPrompt("sess_1", "email me at user@example.com", undefined, auditCtx)
