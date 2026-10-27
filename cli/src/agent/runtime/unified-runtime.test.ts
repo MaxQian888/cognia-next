@@ -1226,3 +1226,42 @@ describe("idle deadline while a tool runs", () => {
     expect(result.error?.code).toBe("idle_timeout")
   })
 })
+
+it("declares builtin one-shot sessions unattended while retaining explicit tool responders", async () => {
+  const provider = fakeSession([{ kind: "reply", text: "done" }])
+  const createSession = jest.fn(provider.factory)
+  const subscribePluginTools = jest.fn(async () => () => {})
+  const { result } = await runUnifiedTurn(
+    params(createMemoryFs(), { createSession, subscribePluginTools })
+  )
+  expect(result.status).toBe("completed")
+  expect(createSession.mock.calls[0]?.[0]).toMatchObject({
+    allowUserInteraction: false,
+    subscribePluginTools,
+  })
+})
+
+it("retains one host deadline across provider retries", async () => {
+  const stamps: Array<[number | undefined, number | undefined]> = []
+  let attempts = 0
+  const fsx = createMemoryFs()
+  const { result } = await runUnifiedTurn(
+    params(fsx, {
+      timeoutMs: 360_000,
+      retry: { maxRetries: 1, baseBackoffMs: 0 },
+      createSession: () => ({
+        sessionId: "budget-retry",
+        close: async () => {},
+        send: async (_prompt, options) => {
+          stamps.push([options.startedAtEpochMs, options.deadlineEpochMs])
+          if (attempts++ === 0) throw Object.assign(new Error("retry"), { status: 503 })
+          return { text: "done" } as RunAndCaptureResult
+        },
+      }),
+    })
+  )
+  expect(result.status).toBe("completed")
+  expect(stamps).toHaveLength(2)
+  expect(stamps[0]).toEqual(stamps[1])
+  expect(stamps[0]![1]! - stamps[0]![0]!).toBe(360_000)
+})

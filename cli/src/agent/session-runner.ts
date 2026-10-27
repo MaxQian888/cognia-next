@@ -177,6 +177,9 @@ export interface AgentSessionParams {
    * tool can resolve). Defaults to {@link subscribePluginToolDispatch} with the
    * CLI subagent-aware handle. */
   subscribePluginTools?: () => Promise<UnlistenFn>
+  /** Builtin dialog availability. One-shot headless turns disable it; persistent
+   * TUI sessions keep their existing dialog consumer. This grants no approval. */
+  allowUserInteraction?: boolean
   /** Discover the dispatchable `.cognia/agents/*.md` subagents for this session.
    * Seeds the `dispatch_agent` (Task) tool the model uses to launch a subagent
    * on the non-Anthropic (ai-sdk) channel — that channel has no SDK-native Task
@@ -250,6 +253,8 @@ export interface SendTurnOptions {
   onDatabaseError?: (error: CliDbSnapshotError) => void
   signal?: AbortSignal
   timeoutMs?: number
+  startedAtEpochMs?: number
+  deadlineEpochMs?: number
 }
 
 export type AgentSessionUiEvent =
@@ -475,7 +480,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const subscribePluginTools =
     params.subscribePluginTools ??
     (() => {
-      const execute = makeConfiguredCliPluginToolHandle(params.config)
+      const execute = makeConfiguredCliPluginToolHandle(
+        params.config,
+        undefined,
+        params.allowUserInteraction !== false
+      )
       return subscribePluginToolDispatch({
         sessionId,
         handle: async (request) => {
@@ -679,6 +688,25 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       if (sendOptions.aiSdkMaxSteps === undefined && params.config.aiSdkMaxSteps !== undefined) {
         sendOptions.aiSdkMaxSteps = params.config.aiSdkMaxSteps
       }
+      const verification = params.config.verificationRuntime
+      const budgetStart = opts.startedAtEpochMs ?? now()
+      const budgetDeadline =
+        opts.deadlineEpochMs ?? (opts.timeoutMs ? budgetStart + opts.timeoutMs : undefined)
+      if (verification?.enabled === true && budgetDeadline !== undefined) {
+        sendOptions.verificationBudget = {
+          startedAtEpochMs: budgetStart,
+          deadlineEpochMs: budgetDeadline,
+          ...(verification.maxBatchMs !== undefined ? { maxBatchMs: verification.maxBatchMs } : {}),
+          ...(verification.verificationFraction !== undefined
+            ? { verificationFraction: verification.verificationFraction }
+            : {}),
+          ...(verification.completionReserveMs !== undefined
+            ? { completionReserveMs: verification.completionReserveMs }
+            : {}),
+        }
+      } else {
+        delete sendOptions.verificationBudget
+      }
       // Per-tool execution deadline for read-only built-ins on the ai-sdk
       // channel. Without it a file-walk tool that hangs on a huge tree keeps the
       // stream-idle watchdog paused, so the turn only dies at the wall clock.
@@ -749,6 +777,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
         config: params.config,
         home,
         gate: opts.gate,
+        allowUserInteraction: params.allowUserInteraction,
         ...(opts.awaitApprovals ? { awaitApprovals: opts.awaitApprovals } : {}),
         ...(params.resolveSubagentOptions
           ? { resolveSubagentOptions: params.resolveSubagentOptions }

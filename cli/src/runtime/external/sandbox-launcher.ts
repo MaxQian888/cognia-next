@@ -1,5 +1,6 @@
 import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts"
 import { resolveAgentSearchPath } from "./agent-path"
+import { antigravityBundle } from "./version-probe"
 import { validateCodexWritableRoots } from "@cognia/agent-codex/app-server-client"
 import fs from "node:fs"
 import os from "node:os"
@@ -21,7 +22,12 @@ import {
   type NodeExternalAgentSpawnConfig,
 } from "./node-backend"
 import { devinOwnedConfigRoot, devinOriginalConfigRoot } from "./devin-mcp-config"
-import type { StateIsolationPlan } from "./state-isolation"
+import { hostAgentStateDataDir, type StateIsolationPlan } from "./state-isolation"
+import {
+  registeredNativeBridgeId,
+  registeredNativeBridgeRoot,
+  registeredHermesProbeStateRoot,
+} from "./native-bridges"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 import {
   SANDBOX_SUPPORTED_PLATFORMS,
@@ -235,8 +241,15 @@ export function buildSandboxLauncherArgs(
   homedir: string,
   isolation: StateIsolationPlan | null = null
 ): string[] {
-  if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
   validateExternalAgentSandboxPolicy(config.sandboxPolicy)
+  const nativeBridgeRoot = registeredNativeBridgeRoot(config.command, config.args ?? [])
+  const crushBridge = registeredNativeBridgeId(config.command, config.args ?? []) === "crush-http"
+  const hermesProbeRoot = registeredHermesProbeStateRoot(
+    config.command,
+    config.args ?? [],
+    config.env,
+    hostAgentStateDataDir()
+  )
   qoderConfigRoot(config, homedir)
   clineConfigRoot(config, homedir)
   kimiConfigRoot(config, homedir)
@@ -247,10 +260,16 @@ export function buildSandboxLauncherArgs(
   const botState = config.env?.COGNIA_BOT_STATE_DIR
   if (botIsolation && (!botState || !path.isAbsolute(botState)))
     throw new Error("Bot isolation requires an owned state directory")
+  if (hermesProbeRoot)
+    config = { ...config, sandboxPolicy: { ...config.sandboxPolicy, readableScope: "workspace" } }
+  if (!config.cwd) throw new Error("external-agent sandbox requires a working directory")
   const effectiveHome = taskHome ?? homedir
   const writable = [
     config.cwd,
     ...codexExtraWritableRoots(config),
+    ...(crushBridge
+      ? policyAgentStateWritableRoots("crush", []).map((root) => path.join(homedir, root))
+      : []),
     ...(botIsolation
       ? [botState!]
       : taskHome
@@ -262,6 +281,9 @@ export function buildSandboxLauncherArgs(
   const devinConfigRoot = devinOwnedConfigRoot(config)
   if (devinConfigRoot) writable.push(devinConfigRoot)
   return [
+    ...[nativeBridgeRoot, hermesProbeRoot]
+      .filter((root): root is string => !!root)
+      .flatMap((root) => ["--readable", root]),
     ...(config.command === "aider"
       ? aiderImplicitConfigPaths(config.cwd, homedir).flatMap((file) => ["--deny-readable", file])
       : []),
@@ -513,6 +535,49 @@ export function minimaxConfigRoot(
   return nativeStateRoot(config, homedir, selected, ".minimax", "MiniMax")
 }
 
+/** GEMINI_HOME redirects file state only; native Keychain credentials remain shared. */
+export function antigravityConfigRoot(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): string | undefined {
+  const base = path
+    .basename(config.command)
+    .toLowerCase()
+    .replace(/\.exe$/, "")
+  if (base !== "agy_acp_server.par" && base !== "agy_acp_server") return undefined
+  if (config.env?.COGNIA_BOT_ISOLATION === "1")
+    throw new Error("Antigravity ACP cannot isolate native Keychain credentials for Bot execution")
+  let selected = config.env?.GEMINI_HOME ?? process.env.GEMINI_HOME
+  if (selected === "~") selected = homedir
+  else if (selected?.startsWith("~/")) selected = path.join(homedir, selected.slice(2))
+  return nativeStateRoot(config, homedir, selected || undefined, ".gemini", "Antigravity ACP")
+}
+
+/** Documented native relocation variables, with the same ownership checks as other agents. */
+export function additionalNativeHome(
+  config: NodeExternalAgentSpawnConfig,
+  homedir: string
+): { key: string; root: string } | undefined {
+  const definitions: Record<string, readonly [string, string]> = {
+    openclaude: ["OPENCLAUDE_CONFIG_DIR", ".openclaude"],
+    "vibe-acp": ["VIBE_HOME", ".vibe"],
+    mimo: ["MIMOCODE_HOME", ".local/share/mimocode"],
+    hermes: ["HERMES_HOME", ".hermes"],
+  }
+  const definition =
+    definitions[
+      path
+        .basename(config.command)
+        .replace(/\.exe$/i, "")
+        .toLowerCase()
+    ]
+  if (!definition) return undefined
+  const [key, directory] = definition
+  const selected = config.env?.[key] ?? process.env[key]
+  if (selected === undefined) return undefined
+  return { key, root: nativeStateRoot(config, homedir, selected, directory, key) }
+}
+
 function nativeStateRoot(
   config: NodeExternalAgentSpawnConfig,
   homedir: string,
@@ -578,6 +643,13 @@ function agentStateWritableRoots(
   homedir: string,
   isolation: StateIsolationPlan | null = null
 ): string[] {
+  if (registeredNativeBridgeId(config.command, config.args ?? []) === "crush-http")
+    return policyAgentStateWritableRoots("crush", []).map((root) => path.join(homedir, root))
+  const additional = additionalNativeHome(config, homedir)
+  if (additional) return [additional.root]
+  const antigravityRoot = antigravityConfigRoot(config, homedir)
+  if (antigravityRoot)
+    return [path.join(antigravityRoot, "antigravity-acp"), path.join(antigravityRoot, "artifacts")]
   const grokRoot = grokConfigRoot(config, homedir)
   if (grokRoot) return [grokRoot]
   const minimaxRoot = minimaxConfigRoot(config, homedir)
@@ -642,6 +714,28 @@ export async function resolveSandboxedExternalAgentLaunch(
     )
   }
   validateExternalAgentSandboxPolicy(config.sandboxPolicy)
+  const hermesHelperRoot = registeredHermesProbeStateRoot(
+    config.command,
+    config.args ?? [],
+    config.env,
+    hostAgentStateDataDir()
+  )
+  if (hermesHelperRoot)
+    config = {
+      ...config,
+      env: { ...config.env, HERMES_HOME: path.join(hermesHelperRoot, "hermes") },
+      sandboxPolicy: { ...config.sandboxPolicy, readableScope: "workspace" },
+    }
+  const antigravity = antigravityBundle(config.command)
+  if (antigravity)
+    config = {
+      ...config,
+      args:
+        runtime.platform === "linux" &&
+        !(config.args ?? []).some((arg) => arg === "--uid" || arg.startsWith("--uid="))
+          ? ["--uid=", ...(config.args ?? [])]
+          : config.args,
+    }
   const launcher = findSandboxLauncher(runtime)
   if (!launcher) {
     throw new Error(
@@ -668,7 +762,38 @@ export async function resolveSandboxedExternalAgentLaunch(
   if (qoderRoot) runtime.ensureDir?.(qoderRoot)
   // Goose's platform extensions create temporary files during session/new.
   // macOS's ambient /var/folders temp root is outside the sandbox write scope.
-  let env: Record<string, string> | undefined
+  let env: Record<string, string> | undefined = hermesHelperRoot
+    ? { HERMES_HOME: path.join(hermesHelperRoot, "hermes"), HERMES_TUI_GATEWAY_URL: "" }
+    : undefined
+  const antigravityRoot = antigravityConfigRoot(config, runtime.homedir)
+  if (antigravity && antigravityRoot) {
+    const temp = path.join(antigravityRoot, "antigravity-acp", "tmp")
+    runtime.ensureDir?.(temp)
+    env = {
+      GEMINI_HOME: antigravityRoot,
+      ANTIGRAVITY_HARNESS_PATH: antigravity.harnessPath,
+      TMPDIR: temp,
+      TMP: temp,
+      TEMP: temp,
+    }
+  }
+  if (registeredNativeBridgeId(config.command, config.args ?? []) === "crush-http")
+    env = { TMPDIR: toolHostRuntimeDir(), TMP: toolHostRuntimeDir(), TEMP: toolHostRuntimeDir() }
+  const additional = additionalNativeHome(config, runtime.homedir)
+  if (additional) {
+    const helperRoot = registeredHermesProbeStateRoot(
+      config.command,
+      config.args ?? [],
+      config.env,
+      hostAgentStateDataDir()
+    )
+    const temp = path.join(additional.root, "tmp")
+    if (!helperRoot) runtime.ensureDir?.(temp)
+    env = {
+      [additional.key]: additional.root,
+      ...(!helperRoot ? { TMPDIR: temp, TMP: temp, TEMP: temp } : {}),
+    }
+  }
   const grokRoot = grokConfigRoot(config, runtime.homedir)
   if (grokRoot) {
     const temp = path.join(grokRoot, "tmp")
@@ -722,20 +847,30 @@ export async function resolveSandboxedExternalAgentLaunch(
       Object.assign(env, { TMPDIR: temp, TMP: temp, TEMP: temp })
     }
   }
-  if (config.command === "goose" && config.env?.COGNIA_BOT_ISOLATION !== "1") {
-    const temp = path.join(
-      config.env?.COGNIA_GATEWAY_TASK_HOME ?? runtime.homedir,
-      ".local/state/goose/tmp"
-    )
+  if (
+    /(?:^|[\\/])goose(?:\.exe)?$/i.test(config.command) &&
+    config.env?.COGNIA_BOT_ISOLATION !== "1"
+  ) {
+    const temp =
+      isolation && config.env?.GOOSE_PATH_ROOT
+        ? path.join(config.env.GOOSE_PATH_ROOT, "state/tmp")
+        : path.join(
+            config.env?.COGNIA_GATEWAY_TASK_HOME ?? runtime.homedir,
+            ".local/state/goose/tmp"
+          )
     runtime.ensureDir?.(temp)
     env = { TMPDIR: temp, TMP: temp, TEMP: temp }
   }
   runtime.ensureDir?.(toolHostRuntimeDir())
   for (const root of agentStateFileRoots(config, runtime.homedir, isolation))
     runtime.ensureFile?.(root)
+  const args = buildSandboxLauncherArgs(config, runtime.homedir, isolation)
+  // Preserve the configured runtime identity while deriving state roots; a
+  // system-installed symlink may point at a release executable with another name.
+  if (antigravity) args[args.indexOf("--") + 1] = antigravity.executablePath
   return {
     command: launcher,
-    args: buildSandboxLauncherArgs(config, runtime.homedir, isolation),
+    args,
     ...(env ? { env } : {}),
   }
 }

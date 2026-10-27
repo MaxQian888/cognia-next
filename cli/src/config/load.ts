@@ -206,6 +206,9 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     builtinTools: layer.builtinTools
       ? { ...acc.builtinTools, ...stripUndefined(layer.builtinTools) }
       : acc.builtinTools,
+    toolSearchRuntime: layer.toolSearchRuntime
+      ? { ...acc.toolSearchRuntime, ...stripUndefined(layer.toolSearchRuntime) }
+      : acc.toolSearchRuntime,
     providers: mergeProviders(acc.providers, layer.providers),
     cwd: layer.cwd ?? acc.cwd,
     pluginTools: layer.pluginTools ?? acc.pluginTools,
@@ -268,6 +271,10 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     notices: layer.notices ? { ...acc.notices, ...stripUndefined(layer.notices) } : acc.notices,
     streamIdleTimeoutMs: layer.streamIdleTimeoutMs ?? acc.streamIdleTimeoutMs,
     aiSdkMaxSteps: layer.aiSdkMaxSteps ?? acc.aiSdkMaxSteps,
+    verificationRuntime:
+      acc.verificationRuntime || layer.verificationRuntime
+        ? { ...acc.verificationRuntime, ...layer.verificationRuntime }
+        : undefined,
     toolExecutionTimeoutMs: layer.toolExecutionTimeoutMs ?? acc.toolExecutionTimeoutMs,
     subagentStreamIdleTimeoutMs:
       layer.subagentStreamIdleTimeoutMs ?? acc.subagentStreamIdleTimeoutMs,

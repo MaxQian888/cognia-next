@@ -91,6 +91,8 @@ export interface CliSubagentDispatchContext {
   cwd: string
   gate: PermissionResponder
   awaitApprovals?: () => Promise<void>
+  /** Inherited by every dispatched descendant; absent keeps interactive behavior. */
+  allowUserInteraction?: boolean
   /** Replay and other harnesses can bind child transport options to its actor id. */
   resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
   /** Actor-scoped approval policy for the dispatched child. */
@@ -367,6 +369,7 @@ export async function handleCliDispatchAgent(
         home: ctx.home,
         cwd: ctx.cwd,
         gate: ctx.resolveSubagentGate?.(d.subagentId) ?? ctx.gate,
+        ...(ctx.allowUserInteraction === false ? { allowUserInteraction: false } : {}),
         ...(ctx.awaitApprovals ? { awaitApprovals: ctx.awaitApprovals } : {}),
         ...(ctx.resolveSubagentOptions
           ? {

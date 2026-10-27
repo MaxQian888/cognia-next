@@ -1,5 +1,7 @@
 /** CLI plugin-tool handle bound to one resolved config snapshot. */
 
+import { ASK_USER_TOOL_NAME } from "@/lib/claude/ask-user-tool"
+
 import type {
   PluginToolExecHostDeps,
   PluginToolExecRequest,
@@ -34,15 +36,27 @@ const defaultExecutor: PluginToolExecutor = async (request, hostDeps) => {
  */
 export function makeConfiguredCliPluginToolHandle(
   config: ResolvedConfig,
-  execute: PluginToolExecutor = defaultExecutor
+  execute: PluginToolExecutor = defaultExecutor,
+  allowUserInteraction = true
 ): (request: PluginToolExecRequest) => Promise<PluginToolExecResponse> {
   // CLI sessions are not Dexie rows, so `working_set` keeps its state in a
   // per-session file under the CLI home instead of the desktop session row.
   const workingSetStore = createFileWorkingSetStore({
     home: config.cliHome ?? resolveHome(process.env, os.homedir()),
   })
-  return makeCliPluginToolHandle((request) =>
-    execute(request, {
+  return makeCliPluginToolHandle((request) => {
+    // `--yes` approves tool execution; it supplies no human facts or consent.
+    // A headless turn has no dialog consumer, so never enqueue a hidden prompt.
+    if (!allowUserInteraction && request.name === ASK_USER_TOOL_NAME) {
+      return Promise.resolve({
+        type: "plugin_tool_response" as const,
+        sessionId: request.sessionId,
+        toolUseId: request.toolUseId,
+        error:
+          "User input is unavailable in this non-interactive headless session. No answer or authorization was provided. Continue only if the existing task and permissions suffice; otherwise report the missing input and stop.",
+      })
+    }
+    return execute(request, {
       workingSetStore,
       resolveWebToolDeps: () => buildCliWebToolDeps(config),
       resolveAttachmentToolDeps: async () => {
@@ -52,5 +66,5 @@ export function makeConfiguredCliPluginToolHandle(
         return resolveAttachmentToolDeps()
       },
     })
-  )
+  })
 }

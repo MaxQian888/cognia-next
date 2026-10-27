@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { buildA2UIRows, isDestructiveA2UIAction } from "./surface-model"
+import { buildA2UIRows, effectiveA2UIModel, isDestructiveA2UIAction } from "./surface-model"
 import type { TuiA2UISurface } from "./surface"
 
 const NATIVE_COMPONENTS = [
@@ -103,5 +103,38 @@ describe("buildA2UIRows", () => {
     expect(isDestructiveA2UIAction({ variant: "destructive", action: "save" })).toBe(true)
     expect(isDestructiveA2UIAction({ action: "delete-project" })).toBe(true)
     expect(isDestructiveA2UIAction({ action: "save" })).toBe(false)
+  })
+})
+
+describe("computed values in the overlay (ADR-0240)", () => {
+  const surface: TuiA2UISurface = {
+    surfaceId: "cart",
+    rootId: "root",
+    dataModel: { qty: 2, price: 5, total: 10 },
+    computed: { "/total": { op: "multiply", args: [{ path: "/qty" }, { path: "/price" }] } },
+    components: {
+      root: { id: "root", component: "Column", children: ["qty", "total"] },
+      qty: { id: "qty", component: "TextField", label: "Qty", value: { path: "/qty" } },
+      total: { id: "total", component: "Text", text: "Total", value: { path: "/total" } },
+    },
+  }
+
+  it("writes a local edit to its bound path and recomputes", () => {
+    expect(effectiveA2UIModel(surface, { qty: "3" })).toMatchObject({ qty: "3", total: 15 })
+    expect(effectiveA2UIModel(surface, {})).toBe(surface.dataModel)
+  })
+
+  it("shows the recomputed value while the user types", () => {
+    const rows = buildA2UIRows(surface, { qty: "4" })
+    expect(rows.find((row) => row.id === "total")?.text).toBe("Total · 20")
+    expect(rows.find((row) => row.id === "qty")?.value).toBe("4")
+  })
+
+  it("ignores edits to controls without a bindable path", () => {
+    const unbound: TuiA2UISurface = {
+      ...surface,
+      components: { ...surface.components, qty: { id: "qty", component: "TextField", value: "x" } },
+    }
+    expect(effectiveA2UIModel(unbound, { qty: "9" })).toBe(surface.dataModel)
   })
 })

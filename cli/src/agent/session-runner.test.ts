@@ -259,7 +259,7 @@ describe("createAgentSession", () => {
 
     await session.send("search", { gate: createPermissionGate({ yes: true }) })
 
-    expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config)
+    expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config, undefined, true)
     expect(readToolHostStatus("s_search_config")?.builtin?.phase).toBe("ready")
     await session.close()
     expect(readToolHostStatus("s_search_config")).toBeUndefined()
@@ -425,7 +425,8 @@ describe("createAgentSession", () => {
         "surface-1": {
           rootId: "root",
           components: { root: { component: "Text", text: "Hello" } },
-          dataModel: {},
+          dataModel: { qty: 2, total: 4 },
+          computed: { "/total": { op: "multiply", args: [{ path: "/qty" }, 2] } },
         },
       },
     }))
@@ -450,7 +451,17 @@ describe("createAgentSession", () => {
       kind: "content-part",
       partId: "a2ui:surface-1",
       operation: "upsert",
-      part: { type: "a2ui", surfaceId: "surface-1", source: "mcp-bridge" },
+      part: {
+        type: "a2ui",
+        surfaceId: "surface-1",
+        source: "mcp-bridge",
+        // Headless and SDK clients get the declarations with their values
+        // applied, so they can recompute as the TUI overlay does (ADR-0240).
+        payload: {
+          dataModel: { qty: 2, total: 4 },
+          computed: { "/total": { op: "multiply", args: [{ path: "/qty" }, 2] } },
+        },
+      },
     })
   })
 
@@ -532,6 +543,33 @@ describe("createAgentSession", () => {
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
     expect(sendOptions.aiSdkMaxSteps).toBe(128)
+  })
+
+  it("forwards one host deadline for verification without resetting it at capture", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg({ verificationRuntime: { enabled: true } } as Partial<ResolvedConfig>),
+      sessionId: "s_verification_budget",
+      home: HOME,
+      now: () => 1000,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "deepseek" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("verify the complete task", {
+      gate: createPermissionGate({ yes: true }),
+      timeoutMs: 360_000,
+      startedAtEpochMs: 1000,
+      deadlineEpochMs: 361_000,
+    } as Parameters<typeof session.send>[1])
+    const options = capture.mock.calls[0][2] as SendOptions & { verificationBudget?: unknown }
+    expect(options.verificationBudget).toMatchObject({
+      startedAtEpochMs: 1000,
+      deadlineEpochMs: 361_000,
+    })
   })
 
   it("injects the config's toolExecutionTimeoutMs into the sendOptions handed to capture", async () => {
@@ -1348,6 +1386,7 @@ describe("createAgentSession", () => {
     const resolveSubagentOptions = jest.fn(async () => ({ provider: "anthropic" }) as never)
     const resolveSubagentGate = jest.fn(() => createPermissionGate({ yes: true }))
     const session = createAgentSession({
+      allowUserInteraction: false,
       config: cfg({ provider: "opencode-go" }),
       sessionId: "s_ctx",
       home: HOME,
@@ -1370,6 +1409,7 @@ describe("createAgentSession", () => {
     expect(ctxDuringTurn?.resolveSubagentOptions).toBe(resolveSubagentOptions)
     expect(ctxDuringTurn?.resolveSubagentGate).toBe(resolveSubagentGate)
     expect(ctxDuringTurn?.awaitApprovals).toBe(awaitApprovals)
+    expect(ctxDuringTurn?.allowUserInteraction).toBe(false)
     expect(getCliSubagentContext("s_ctx")).toBeUndefined()
   })
 
@@ -2174,3 +2214,36 @@ describe("interrupted turns", () => {
     })
   })
 })
+
+it.each([false, undefined])(
+  "passes dialog availability %s to the existing guarded tool executor",
+  async (allowUserInteraction) => {
+    const { makeConfiguredCliPluginToolHandle } = await import("./configured-plugin-tool-handle")
+    const handle = jest.mocked(makeConfiguredCliPluginToolHandle)
+    handle.mockClear()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      allowUserInteraction,
+      transcriptFs: memFs().fsx,
+      resolveSkillIds: () => [],
+      ensureDb: async () => {},
+      primePromptOverrides: async () => ({}),
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn().mockResolvedValue(undefined) }),
+      resolveOptions: jest.fn().mockResolvedValue({ model: "claude-x", provider: "anthropic" }),
+      capture: jest.fn(async () => result("ok")),
+    })
+    try {
+      await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+      expect(handle).toHaveBeenCalledWith(
+        expect.any(Object),
+        undefined,
+        allowUserInteraction !== false
+      )
+    } finally {
+      await session.close()
+    }
+  }
+)

@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 
 import { parseArgv } from "./args"
 
@@ -16,7 +17,7 @@ jest.mock("../runtime/external/dsh-installer", () => {
 
 // Imported after the mock so `defaultDataRoot` is the stubbed one.
 import { backendCommand, resolveRuntimeSourceDir } from "./backend-command"
-import { RUNTIME_ARTIFACTS } from "../runtime/external/dsh-installer"
+import { DshInstallError, RUNTIME_ARTIFACTS } from "../runtime/external/dsh-installer"
 
 function sink() {
   const out: string[] = []
@@ -112,14 +113,33 @@ describe("remove", () => {
 })
 
 describe("resolveRuntimeSourceDir", () => {
-  it("resolves to the repo runtime directory holding the real artifacts", () => {
+  it("resolves to the package-owned runtime directory holding the real artifacts", () => {
     // Guards the path arithmetic: a wrong number of `..` would only surface as
     // a confusing "artifact missing" at install time.
     const dir = resolveRuntimeSourceDir(import.meta.url)
-    expect(path.basename(dir)).toBe("deepseek-harness")
+    expect(dir).toBe(path.resolve("packages/agent-dsh/runtime"))
     for (const artifact of RUNTIME_ARTIFACTS) {
       expect(fs.existsSync(path.join(dir, artifact))).toBe(true)
     }
+  })
+
+  it("resolves the same artifacts relative to the built CLI", () => {
+    const moduleUrl = new URL("../../dist/cli/backend-command.js", import.meta.url).href
+    expect(resolveRuntimeSourceDir(moduleUrl)).toBe(path.resolve("packages/agent-dsh/runtime"))
+  })
+
+  it.each([
+    "../runtime/external/node-backend.ts",
+    "../../dist/runtime/external/node-backend.js",
+    "../../dist/cognia-agent.js",
+  ])("resolves artifacts from the host module or bundle at %s", (relativeUrl) => {
+    const moduleUrl = new URL(relativeUrl, import.meta.url).href
+    expect(resolveRuntimeSourceDir(moduleUrl)).toBe(path.resolve("packages/agent-dsh/runtime"))
+  })
+
+  it("reports a missing payload when no ancestor contains the runtime", () => {
+    const moduleUrl = pathToFileURL(path.join(dataRoot, "backend-command.js")).href
+    expect(() => resolveRuntimeSourceDir(moduleUrl)).toThrow(DshInstallError)
   })
 })
 

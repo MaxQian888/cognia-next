@@ -26,6 +26,48 @@ import {
   webReaderConfigSchema,
 } from "./schema"
 
+describe("CLI deferred tool policy", () => {
+  it("enables discovery by default and accepts explicit residency overrides", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.toolSearchRuntime).toEqual({ enabled: true })
+    const policy = { enabled: false, alwaysLoadTools: ["write"], alwaysLoadServers: ["local"] }
+    expect(cliConfigFileSchema.parse({ toolSearchRuntime: policy }).toolSearchRuntime).toEqual(
+      policy
+    )
+    expect(cliConfigFileSchema.safeParse({ toolSearchRuntime: { enabled: "yes" } }).success).toBe(
+      false
+    )
+    expect(
+      cliConfigFileSchema.safeParse({ toolSearchRuntime: { enabled: true, alwaysLoadTools: [""] } })
+        .success
+    ).toBe(false)
+  })
+})
+
+describe("opt-in verification runtime", () => {
+  it("keeps the feature off by default and validates bounded overrides", () => {
+    expect(DEFAULT_RESOLVED_CONFIG.verificationRuntime).toBeUndefined()
+    const policy = {
+      enabled: true,
+      maxBatchMs: 15_000,
+      verificationFraction: 0.5,
+      completionReserveMs: 15_000,
+    }
+    expect(cliConfigFileSchema.parse({ verificationRuntime: policy }).verificationRuntime).toEqual(
+      policy
+    )
+    for (const bad of [
+      { maxBatchMs: 0 },
+      { maxBatchMs: 120_001 },
+      { verificationFraction: 0 },
+      { verificationFraction: 2 },
+      { completionReserveMs: -1 },
+      { enabled: "yes" },
+    ]) {
+      expect(cliConfigFileSchema.safeParse({ verificationRuntime: bad }).success).toBe(false)
+    }
+  })
+})
+
 describe("renderConfigSchema + resolveRenderConfig", () => {
   it("returns the defaults when render is absent", () => {
     expect(resolveRenderConfig(undefined)).toEqual(RENDER_DEFAULTS)

@@ -142,3 +142,54 @@ describe("usePacedReveal — turn identity", () => {
     expect(result.current).toBe("text")
   })
 })
+
+describe("usePacedReveal — live append latency", () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it("keeps receiving text visible within a bounded live backlog", () => {
+    const { result, rerender } = renderHook(
+      ({ text }: { text: string }) => usePacedReveal(text, true),
+      { initialProps: { text: "" } }
+    )
+    let target = ""
+    for (let i = 0; i < 60; i++) {
+      target += `UI${String(i).padStart(4, "0")} ${"x".repeat(24)}\n\n`
+      rerender({ text: target })
+      act(() => jest.advanceTimersByTime(50))
+      expect(target.startsWith(result.current)).toBe(true)
+      if (i >= 8) expect(target.length - result.current.length).toBeLessThanOrEqual(132)
+    }
+    for (let i = 0; i < 30; i++) act(() => jest.advanceTimersByTime(24))
+    expect(result.current).toBe(target)
+  })
+
+  it("does not starve reveal when appends arrive faster than the reveal cadence", () => {
+    const { result, rerender } = renderHook(
+      ({ text }: { text: string }) => usePacedReveal(text, true),
+      { initialProps: { text: "" } }
+    )
+    let target = ""
+    for (let i = 0; i < 40; i++) {
+      target += "word "
+      rerender({ text: target })
+      act(() => jest.advanceTimersByTime(10))
+    }
+    expect(result.current.length).toBeGreaterThan(100)
+  })
+})
+
+it("reschedules an identical next turn when its epoch changes before the first tick", () => {
+  jest.useFakeTimers()
+  try {
+    const { result, rerender } = renderHook(
+      ({ epoch }: { epoch: number }) => usePacedReveal("same reply", true, { epoch }),
+      { initialProps: { epoch: 1 } }
+    )
+    rerender({ epoch: 2 })
+    for (let i = 0; i < 30; i++) act(() => jest.advanceTimersByTime(24))
+    expect(result.current).toBe("same reply")
+  } finally {
+    jest.useRealTimers()
+  }
+})

@@ -600,7 +600,11 @@ async function flushDirtyTables(
   manifestFile: string
 ): Promise<void> {
   const sourceByName = new Map(sources.map((source) => [source.name, source]))
-  for (const key of dirtyKeys) {
+  // The content-addressed binary store can return file-backed Blobs. Serialize
+  // encoding so equal blobs in different tables cannot replace an inode while
+  // a sibling is reading it; only independent JSON commits run in parallel.
+  let encoding: Promise<unknown> = Promise.resolve()
+  const writeTable = async (key: string): Promise<void> => {
     const [databaseName, tableName] = splitTableKey(key)
     const source = sourceByName.get(databaseName)
     const table = source?.db.tables.find((candidate) => candidate.name === tableName)
@@ -610,12 +614,23 @@ async function flushDirtyTables(
       source.excludeTables?.includes(tableName) ||
       SNAPSHOT_DERIVED_TABLES.includes(tableName)
     )
-      continue
+      return
     const rows = snapshotRowsForTable(tableName, await table.toArray())
+    const encoded = encoding.then(() => encodeSnapshotRows(rows, tableBinaryStore(tableDirectory)))
+    encoding = encoded.catch(() => undefined)
+    const data = JSON.stringify(await encoded)
     await writeSnapshotAtomicallyAsync(
       path.join(tableDirectory, tableFileName(databaseName, tableName)),
-      JSON.stringify(await encodeSnapshotRows(rows, tableBinaryStore(tableDirectory)))
+      data
     )
+  }
+  // Independent files retain their own atomic replace + fsync protocol. Bound
+  // outstanding disk work, and drain every sibling before surfacing a failure
+  // so a retry or lock release cannot race an unfinished previous generation.
+  for (let offset = 0; offset < dirtyKeys.length; offset += 4) {
+    const results = await Promise.allSettled(dirtyKeys.slice(offset, offset + 4).map(writeTable))
+    const failure = results.find((result) => result.status === "rejected")
+    if (failure?.status === "rejected") throw failure.reason
   }
 
   const dbs: TableStoreManifest["dbs"] = {}

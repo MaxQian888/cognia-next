@@ -1,3 +1,5 @@
+import { applyA2UIComputedFields, isComputedTargetPath } from "@/lib/a2ui/computed"
+import { setValueByPath } from "@/lib/a2ui/data-model"
 import { sanitizeTerminalText } from "../render/terminal-block"
 import type { TuiA2UINode, TuiA2UISurface } from "./surface"
 
@@ -172,10 +174,34 @@ function controlText(node: TuiA2UINode, value: unknown): string {
   }
 }
 
+/**
+ * The data model as the overlay shows it: each local edit written to the path
+ * its control binds (`value` / `checked` / `pressed` as `{ path }`), then the
+ * surface's computed declarations recomputed over the result, so a total bound
+ * to `/total` follows the quantity being typed (ADR-0240).
+ */
+export function effectiveA2UIModel(
+  surface: TuiA2UISurface,
+  localValues: Record<string, unknown>
+): Record<string, unknown> {
+  let model = surface.dataModel
+  for (const [id, value] of Object.entries(localValues)) {
+    const node = surface.components[id]
+    const binding = node ? (node.value ?? node.checked ?? node.pressed) : undefined
+    const path =
+      binding && typeof binding === "object" ? (binding as { path?: unknown }).path : undefined
+    if (typeof path === "string" && isComputedTargetPath(path)) {
+      model = setValueByPath(model, path, value)
+    }
+  }
+  return applyA2UIComputedFields(model, surface.computed)
+}
+
 export function buildA2UIRows(
   surface: TuiA2UISurface,
   localValues: Record<string, unknown>
 ): A2UIRow[] {
+  const model = effectiveA2UIModel(surface, localValues)
   const rows: A2UIRow[] = []
   const visited = new Set<string>()
   const walk = (id: string) => {
@@ -184,8 +210,7 @@ export function buildA2UIRows(
     const node = surface.components[id]
     if (!node) return
     const local = localValues[id]
-    const value =
-      local ?? resolveValue(node.value ?? node.checked ?? node.pressed, surface.dataModel)
+    const value = local ?? resolveValue(node.value ?? node.checked ?? node.pressed, model)
     if (CONTROLS.has(node.component)) {
       rows.push({
         id,
@@ -207,7 +232,7 @@ export function buildA2UIRows(
         id,
         component: node.component,
         kind: "display",
-        text: displayText(node, surface.dataModel),
+        text: displayText(node, model),
         node,
       })
     } else {

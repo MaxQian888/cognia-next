@@ -17,7 +17,11 @@
  */
 
 import { z } from "zod"
-import { DEFAULT_BUILTIN_TOOLS, type BuiltinToolsConfig } from "@cognia/agent-config-types"
+import {
+  DEFAULT_BUILTIN_TOOLS,
+  type BuiltinToolsConfig,
+  type ToolSearchRuntimeConfig,
+} from "@cognia/agent-config-types"
 import { SEARCH_PROVIDER_HEALTH_LIMITS, validateSearchEndpoint } from "@cognia/web-search/types"
 import { MAX_OPERATION_ATTEMPTS, READ_TOTAL_BUDGET_MS } from "@cognia/web-search/operation-policy"
 
@@ -995,6 +999,14 @@ export const cliConfigFileSchema = z
      */
     disabledTools: z.array(z.string().min(1)).optional(),
     builtinTools: builtinToolsSchema.optional(),
+    toolSearchRuntime: z
+      .object({
+        enabled: z.boolean(),
+        alwaysLoadServers: z.array(z.string().min(1)).optional(),
+        alwaysLoadTools: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
     providers: z.record(z.string(), providerConfigSchema).optional(),
     cwd: z.string().min(1).optional(),
     /** Expose in-tree first-party plugin tools (web-tools, …) to the agent. */
@@ -1203,6 +1215,15 @@ export const cliConfigFileSchema = z
      * (its agent loop lives inside the Claude Agent SDK).
      */
     aiSdkMaxSteps: z.number().int().min(1).optional(),
+    verificationRuntime: z
+      .object({
+        enabled: z.boolean().optional(),
+        maxBatchMs: z.number().int().min(1).max(120_000).optional(),
+        verificationFraction: z.number().gt(0).max(1).optional(),
+        completionReserveMs: z.number().int().min(0).max(60_000).optional(),
+      })
+      .strict()
+      .optional(),
     /**
      * Per-tool execution deadline for READ-ONLY built-in tools on the
      * non-Anthropic (ai-sdk) provider channel, in milliseconds. Read-only file
@@ -1337,6 +1358,8 @@ export interface ResolvedConfig {
    * panel's per-tool toggles. Absent = no config-level suppression. */
   disabledTools?: string[]
   builtinTools: BuiltinToolsConfig
+  /** Deferred discovery shares the desktop policy and never grants tool permissions. */
+  toolSearchRuntime?: ToolSearchRuntimeConfig
   providers: Record<string, ProviderConfig>
   /** Per-external-backend model memory, keyed by executable preset id. Separate
    * from {@link providers} on purpose — see the config-file schema field. */
@@ -1468,6 +1491,13 @@ export interface ResolvedConfig {
    * (subagents / `/goal`) overrides it. The Anthropic channel is unaffected (its
    * loop lives in the Agent SDK). */
   aiSdkMaxSteps?: number
+  /** Opt-in generic foreground verification batches; requires a finite turn timeout. */
+  verificationRuntime?: {
+    enabled?: boolean
+    maxBatchMs?: number
+    verificationFraction?: number
+    completionReserveMs?: number
+  }
   /** Per-tool execution deadline (ms) for read-only built-in tools on the
    * non-Anthropic (ai-sdk) channel — bounds a file-walk tool that would
    * otherwise hang the whole turn until the wall-clock. Exec tools self-bound
@@ -1515,6 +1545,7 @@ export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
     codeGraph: true,
     astGrep: true,
   },
+  toolSearchRuntime: { enabled: true },
   providers: {},
   streamIdleTimeoutMs: 60_000,
   aiSdkMaxSteps: 256,

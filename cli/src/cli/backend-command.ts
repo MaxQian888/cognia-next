@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -35,15 +36,21 @@ export interface BackendCommandContext {
 const SUPPORTED_BACKENDS = new Set(["deepseek-harness"])
 
 /**
- * Locate `runtime/deepseek-harness/` relative to the built CLI.
+ * Locate `packages/agent-dsh/runtime/` from a CLI module or built chunk.
  *
- * Resolved from this module's own URL so it works from a global install as well
- * as from the repo, where the compiled CLI sits under `cli/dist/`.
+ * Source host modules and built entry points have different directory depths.
+ * Walk their ancestors so each caller finds the same package-owned payload.
  */
 export function resolveRuntimeSourceDir(moduleUrl: string): string {
-  const here = path.dirname(fileURLToPath(moduleUrl))
-  // cli/dist/cli/ -> repo root, or cli/src/cli/ -> repo root.
-  return path.resolve(here, "..", "..", "..", "runtime", "deepseek-harness")
+  let here = path.dirname(fileURLToPath(moduleUrl))
+  while (true) {
+    const candidate = path.join(here, "packages", "agent-dsh", "runtime")
+    if (existsSync(path.join(candidate, "package.json"))) return candidate
+    const parent = path.dirname(here)
+    if (parent === here)
+      throw new DshInstallError("Managed DeepSeek Harness runtime source not found")
+    here = parent
+  }
 }
 
 function parseProfile(args: ParsedArgs): DshProfileId {

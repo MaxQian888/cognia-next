@@ -16,7 +16,7 @@
  * When disabled (non-interactive terminal, CI, tests, or opt-out) it returns the
  * full target immediately, so non-streaming surfaces are unaffected.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 /** Characters a reveal may stop just after — whitespace and sentence/clause
  * punctuation — so a word is never split mid-token. */
@@ -90,22 +90,34 @@ export function usePacedReveal(
     if (enabled && restart && shown !== 0) setShown(0)
   }
 
+  const latestTarget = useRef(target)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    // When disabled the render below returns the whole target, so there's
-    // nothing to animate (and no state to reset). Once caught up, hold the timer
-    // until `target` (an effect dep) grows again. The interval closes over the
-    // current `target` directly — the effect re-runs whenever it changes.
-    if (!enabled || shown >= target.length) return
-    const id = setInterval(() => {
+    latestTarget.current = target
+    if (!enabled || shown >= target.length || timer.current !== null) return
+    // Keep an already scheduled tick when a new delta arrives. Restarting it
+    // on every append starves the reveal when deltas arrive faster than paceMs.
+    timer.current = setTimeout(() => {
+      timer.current = null
       setShown((prev) => {
-        if (prev >= target.length) return prev
-        // Bigger steps as the backlog grows, so a fast burst doesn't lag visibly.
-        const step = Math.max(1, Math.ceil((target.length - prev) / 16))
-        return snapForward(target, Math.min(target.length, prev + step))
+        const text = latestTarget.current
+        if (prev >= text.length) return prev
+        // Four ticks of adaptive catch-up bound the steady streaming backlog
+        // while preserving word-snapped pacing for bursty replies.
+        const step = Math.max(1, Math.ceil((text.length - prev) / 4))
+        return snapForward(text, Math.min(text.length, prev + step))
       })
     }, paceMs)
-    return () => clearInterval(id)
-  }, [enabled, target, paceMs, shown])
+  }, [enabled, target, paceMs, shown, epoch])
+
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current)
+      timer.current = null
+    },
+    [enabled, paceMs, epoch]
+  )
 
   if (!enabled) return target
   return target.slice(0, Math.min(shown, target.length))

@@ -61,6 +61,7 @@ describe("registerTurnSubagentContext", () => {
       resolveSubagentOptions,
       resolveSubagentGate,
       awaitApprovals,
+      allowUserInteraction: false,
       signal: controller.signal,
       approvedTools: new Set(["write"]),
       disabledMcpTools: new Set(["mcp__alpha__x"]),
@@ -72,6 +73,7 @@ describe("registerTurnSubagentContext", () => {
     expect(ctx!.home).toBe(HOME)
     expect(ctx!.gate).toBe(gate)
     expect(ctx!.awaitApprovals).toBe(awaitApprovals)
+    expect(ctx!.allowUserInteraction).toBe(false)
     expect(ctx!.resolveSubagentOptions).toBe(resolveSubagentOptions)
     expect(ctx!.resolveSubagentGate).toBe(resolveSubagentGate)
     expect(ctx!.signal).toBe(controller.signal)

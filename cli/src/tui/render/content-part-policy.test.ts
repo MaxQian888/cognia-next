@@ -42,4 +42,23 @@ describe("validateContentPart", () => {
       })
     ).toMatchObject({ ok: false, reason: expect.stringContaining("components") })
   })
+
+  it("keeps an A2UI surface's computed declarations for the overlay (ADR-0240)", () => {
+    const computed = { "/total": { op: "multiply", args: [{ path: "/qty" }, { path: "/price" }] } }
+    const result = validateContentPart({
+      type: "a2ui",
+      surfaceId: "cart",
+      source: "mcp-bridge",
+      payload: {
+        rootId: "root",
+        components: { root: { id: "root", component: "Text", text: "x" } },
+        dataModel: { qty: 2, price: 3 },
+        computed,
+      },
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      part: { payload: { dataModel: { qty: 2, price: 3, total: 6 }, computed } },
+    })
+  })
 })

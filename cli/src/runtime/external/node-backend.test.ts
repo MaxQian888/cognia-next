@@ -4,8 +4,21 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { resolveWorkspacePortEnv } from "../workspace-port-env"
+import * as nativeBridges from "./native-bridges"
+import * as sandboxLauncher from "./sandbox-launcher"
 
 jest.mock("../workspace-port-env", () => ({ resolveWorkspacePortEnv: jest.fn(async () => ({})) }))
+jest.mock("./native-bridges", () => {
+  const actual = jest.requireActual("./native-bridges")
+  return { ...actual, registeredNativeBridgeId: jest.fn(actual.registeredNativeBridgeId) }
+})
+jest.mock("./sandbox-launcher", () => {
+  const actual = jest.requireActual("./sandbox-launcher")
+  return {
+    ...actual,
+    resolveSandboxedExternalAgentLaunch: jest.fn(actual.resolveSandboxedExternalAgentLaunch),
+  }
+})
 
 import {
   buildExternalAgentChildEnv,
@@ -15,6 +28,16 @@ import {
   validateCommand,
   validateSandboxPolicyCeiling,
 } from "./node-backend"
+
+it("admits Antigravity's file-storage control without trusting a caller-selected helper", () => {
+  const env = buildExternalAgentChildEnv(
+    { NODE_ENV: "test", ANTIGRAVITY_HARNESS_PATH: "/ambient/unsafe" },
+    { AGY_ACP_FORCE_FILE_STORAGE: "1", ANTIGRAVITY_HARNESS_PATH: "/caller/unsafe" },
+    false
+  )
+  expect(env.AGY_ACP_FORCE_FILE_STORAGE).toBe("1")
+  expect(env.ANTIGRAVITY_HARNESS_PATH).toBeUndefined()
+})
 import {
   EXTERNAL_AGENT_BINARY_ALLOWLIST,
   EXTERNAL_AGENT_NPX_ALLOWLIST,
@@ -66,6 +89,69 @@ describe("Pi capability root lookup", () => {
 describe("CLI spawn allowlist", () => {
   const root = os.tmpdir()
 
+  it("allows only new configuration prefixes while keeping process loaders denied", () => {
+    const env = buildExternalAgentChildEnv(
+      { NODE_ENV: "test" },
+      {
+        OPENCLAUDE_HOME: "/owned/openclaude",
+        CONTINUE_API_KEY: "synthetic",
+        CODEBUFF_API_KEY: "synthetic",
+        ROVODEV_API_TOKEN: "synthetic",
+        NODE_OPTIONS: "--eval evil",
+        PYTHONPATH: "/evil",
+      },
+      false
+    )
+    expect(env).toMatchObject({
+      OPENCLAUDE_HOME: "/owned/openclaude",
+      CONTINUE_API_KEY: "synthetic",
+      CODEBUFF_API_KEY: "synthetic",
+      ROVODEV_API_TOKEN: "synthetic",
+    })
+    expect(env.NODE_OPTIONS).toBeUndefined()
+    expect(env.PYTHONPATH).toBeUndefined()
+    for (const command of ["node", "curl", "nc", "python", "cmd"])
+      expect(() => validateCommand({ command, args: ["--eval", "evil"] }, false, root)).toThrow()
+  })
+
+  it("allows the new vendor credentials while refusing loader injection and generic shells", () => {
+    const env = buildExternalAgentChildEnv(
+      { NODE_ENV: "test" },
+      {
+        AUGMENT_SESSION_AUTH: "synthetic-session-json",
+        CODEBUDDY_API_KEY: "synthetic-model-key",
+        KILO_API_KEY: "synthetic-kilo-key",
+        MISTRAL_API_KEY: "synthetic-vibe-key",
+        MIMOCODE_HOME: "/owned/mimo",
+        HERMES_HOME: "/owned/hermes",
+        MUSE_CLI: "muse",
+        AMP_API_KEY: "synthetic-amp-key",
+        ZCODE_CJS: "/Applications/ZCode.app/engine.cjs",
+        NODE_OPTIONS: "--import /injected.mjs",
+        LD_PRELOAD: "/injected.so",
+      },
+      false
+    )
+    expect(env).toMatchObject({
+      AUGMENT_SESSION_AUTH: "synthetic-session-json",
+      CODEBUDDY_API_KEY: "synthetic-model-key",
+      KILO_API_KEY: "synthetic-kilo-key",
+      MISTRAL_API_KEY: "synthetic-vibe-key",
+      MIMOCODE_HOME: "/owned/mimo",
+      HERMES_HOME: "/owned/hermes",
+      MUSE_CLI: "muse",
+      AMP_API_KEY: "synthetic-amp-key",
+    })
+    expect(env.NODE_OPTIONS).toBeUndefined()
+    expect(env.LD_PRELOAD).toBeUndefined()
+    expect(() =>
+      validateCommand({ command: "cmd", args: ["/c", "anything"] }, false, root)
+    ).toThrow(/allowlist/)
+    expect(() =>
+      validateCommand({ command: "commandcode", args: ["acp"] }, false, root)
+    ).not.toThrow()
+  })
+
   it("admits exactly the security policy's binaries and npx packages", () => {
     for (const command of EXTERNAL_AGENT_BINARY_ALLOWLIST) {
       expect(() => validateCommand({ command }, false, root)).not.toThrow()
@@ -107,6 +193,68 @@ describe("CLI spawn allowlist", () => {
 })
 
 describe("NodeExternalAgentBackend", () => {
+  it("rejects Codebuff network widening before any custom launch resolver", async () => {
+    const registered = jest
+      .mocked(nativeBridges.registeredNativeBridgeId)
+      .mockReturnValue("codebuff")
+    const custom = jest.fn()
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot: os.tmpdir(),
+      resolveLaunch: custom,
+    })
+    try {
+      for (const network of [undefined, "full", "allowlist"] as const)
+        await expect(
+          backend.invoke("spawn_external_agent", {
+            config: {
+              id: "codebuff",
+              command: "codex",
+              cwd: os.tmpdir(),
+              sandboxPolicy: network ? { network } : undefined,
+            },
+          })
+        ).rejects.toThrow(/network:'off'/)
+      expect(custom).not.toHaveBeenCalled()
+    } finally {
+      registered.mockImplementation(jest.requireActual("./native-bridges").registeredNativeBridgeId)
+    }
+  })
+  it("forces Codebuff through the mandatory sandbox and fails closed when it is unavailable", async () => {
+    const registered = jest
+      .mocked(nativeBridges.registeredNativeBridgeId)
+      .mockReturnValue("codebuff")
+    const mandatory = jest
+      .mocked(sandboxLauncher.resolveSandboxedExternalAgentLaunch)
+      .mockRejectedValue(new Error("mandatory launcher unavailable"))
+    const custom = jest.fn(async () => ({ command: process.execPath, args: ["--eval", "evil"] }))
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot: os.tmpdir(),
+      resolveLaunch: custom,
+    })
+    try {
+      await expect(
+        backend.invoke("spawn_external_agent", {
+          config: {
+            id: "codebuff",
+            command: "codex",
+            cwd: os.tmpdir(),
+            sandboxPolicy: { network: "off" },
+          },
+        })
+      ).rejects.toThrow("mandatory launcher unavailable")
+      expect(custom).not.toHaveBeenCalled()
+      expect(mandatory).toHaveBeenCalledWith(
+        expect.objectContaining({ sandboxPolicy: { network: "off" } }),
+        undefined,
+        null
+      )
+    } finally {
+      registered.mockImplementation(jest.requireActual("./native-bridges").registeredNativeBridgeId)
+      mandatory.mockImplementation(
+        jest.requireActual("./sandbox-launcher").resolveSandboxedExternalAgentLaunch
+      )
+    }
+  })
   it.each([false, true])(
     "applies trusted ports after filters and launcher overrides (Bot %s)",
     async (bot) => {
@@ -569,6 +717,17 @@ console.log(JSON.stringify({values, githubTokenPresent: !!process.env.GITHUB_TOK
       })
     ).resolves.toBe("stub")
     await Promise.all([running, ready])
+    const info = await backend.invoke<{ id: string; pid: number; state: string }>(
+      "get_external_agent_info",
+      { agentId: "stub" }
+    )
+    expect(info).toMatchObject({ id: "stub", state: "Running" })
+    expect(info.pid).toBeGreaterThan(0)
+    expect(info.pid).not.toBe(process.pid)
+    expect(() => process.kill(info.pid, 0)).not.toThrow()
+    await expect(backend.invoke("get_external_agent_info", { agentId: "unowned" })).rejects.toThrow(
+      /not found/
+    )
 
     const echoed = nextEvent<{ data: string }>(
       backend,
@@ -581,6 +740,10 @@ console.log(JSON.stringify({values, githubTokenPresent: !!process.env.GITHUB_TOK
     const exited = nextEvent(backend, "external-agent://exit")
     await backend.invoke("send_to_external_agent", { agentId: "stub", message: "exit" })
     await exited
+
+    await expect(backend.invoke("get_external_agent_info", { agentId: "stub" })).rejects.toThrow(
+      /not found/
+    )
 
     expect(seen).toContainEqual(["external-agent://spawn", { agentId: "stub", status: "starting" }])
     expect(seen).toContainEqual([

@@ -93,6 +93,11 @@ describe("hashContextVersion", () => {
     ["model", { sendOptions: { ...BASE_OPTIONS, model: "gpt-x" } }],
     ["permission mode", { sendOptions: { ...BASE_OPTIONS, permissionMode: "plan" } }],
     ["builtin category toggle", { sendOptions: { ...BASE_OPTIONS, builtinTools: { git: false } } }],
+    ["tool discovery", { sendOptions: { ...BASE_OPTIONS, toolSearchEnabled: true } }],
+    [
+      "tool residency",
+      { sendOptions: { ...BASE_OPTIONS, toolSearchEnabled: true, alwaysLoadTools: ["git_diff"] } },
+    ],
     ["plugin manifest", { sendOptions: { ...BASE_OPTIONS, pluginTools: [{ name: "ask_user" }] } }],
     ["cwd", { cwd: "/elsewhere" }],
     ["additional roots", { additionalDirectories: ["/work/pkg-a"] }],

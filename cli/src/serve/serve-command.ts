@@ -22,6 +22,7 @@
 import { initializePersonChat } from "@/lib/headless/person-chat"
 import os from "node:os"
 import path from "node:path"
+import { readFile } from "node:fs/promises"
 
 // `serveCommand` is also imported directly by embedders and tests, bypassing
 // the executable entry point. Install IndexedDB synchronously before any
@@ -39,6 +40,7 @@ import { WorkerRpcPool } from "@/lib/ai/agent/team/workers/worker-rpc-pool"
 import { loadMessageResolver } from "@/lib/headless/i18n"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { setTransport } from "@/lib/tauri"
+import { setExtensionHostFileReader } from "@/lib/browser/extension-engine"
 import { CompanionTransport, type CompanionConfig } from "@/lib/tauri/transport-companion"
 
 import { brainAccountSyncHost, brainBackup } from "../account-sync/headless-sync"
@@ -202,6 +204,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     eventsPath: "/internal/events",
   })
   setTransport(transport)
+  setExtensionHostFileReader(async (file) => new Uint8Array(await readFile(file)))
 
   // ── 5. Data plane: the bridge WS ───────────────────────────────────────────
   const bridgeRef: { current: BridgeClient | null } = { current: null }

@@ -67,3 +67,35 @@ describe("validateA2UISurface", () => {
     expect(validateA2UISurface("bad", { components: [] })).toMatchObject({ ok: false })
   })
 })
+
+describe("validateA2UISurface computed declarations (ADR-0240)", () => {
+  const total = { op: "multiply", args: [{ path: "/qty" }, { path: "/price" }] }
+
+  it("keeps the declarations and applies them to the data model", () => {
+    const result = validateA2UISurface("cart", {
+      rootId: "root",
+      components: [node("root")],
+      dataModel: { qty: 3, price: 4 },
+      computed: { "/total": total },
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      surface: { dataModel: { qty: 3, price: 4, total: 12 }, computed: { "/total": total } },
+    })
+  })
+
+  it("refuses a surface whose declarations do not validate", () => {
+    expect(
+      validateA2UISurface("cart", {
+        rootId: "root",
+        components: [node("root")],
+        computed: { "/total": { op: "eval", args: ["1"] } },
+      })
+    ).toEqual({ ok: false, reason: "A2UI computed declarations are invalid" })
+  })
+
+  it("leaves a surface without declarations unchanged", () => {
+    const result = validateA2UISurface("plain", { rootId: "root", components: [node("root")] })
+    expect(result.ok && result.surface).not.toHaveProperty("computed")
+  })
+})

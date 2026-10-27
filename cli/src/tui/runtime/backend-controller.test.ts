@@ -52,6 +52,39 @@ function deps(overrides: Partial<BackendConnectDeps> = {}): BackendConnectDeps {
 }
 
 describe("connectBackend", () => {
+  it("uses the verified interpreter for Codebuff even when PATH has no node", async () => {
+    const commandExists = jest.fn(async () => false),
+      resolveBridgeInterpreter = jest.fn(() => "/verified/node26")
+    const result = await connectBackend(
+      deps({
+        backend: "codebuff",
+        readPreset: (() => ({ protocol: "codebuff-sdk", process: { command: "node" } })) as never,
+        commandExists,
+        resolveBridgeInterpreter,
+      })
+    )
+    expect(result.ok).toBe(true)
+    expect(commandExists).not.toHaveBeenCalled()
+    expect(resolveBridgeInterpreter).toHaveBeenCalledTimes(1)
+  })
+  it("reports a missing plain Node runtime before attempting the bundled bridge", async () => {
+    const host = fakeHost(),
+      result = await connectBackend(
+        deps({
+          backend: "codebuff",
+          host,
+          readPreset: (() => ({ protocol: "codebuff-sdk", process: { command: "node" } })) as never,
+          resolveBridgeInterpreter: () => {
+            throw new Error("Install Node.js 26+ to run the verified bridge")
+          },
+        })
+      )
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { stage: "command", message: expect.stringContaining("Node.js 26") },
+    })
+    expect(host.addAgent).not.toHaveBeenCalled()
+  })
   it("selects the trusted workspace before registering and connecting the process", async () => {
     const order: string[] = []
     const host = fakeHost({

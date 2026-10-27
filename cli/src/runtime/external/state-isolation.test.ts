@@ -80,6 +80,31 @@ describe("agent state isolation (CLI host)", () => {
     expect(applyStateIsolation(config, h)).toEqual({ config, plan: null })
   })
 
+  it("isolates Goose files and forces its shared keyring off", () => {
+    const { host: h, data } = host()
+    const launch = applyStateIsolation(
+      {
+        id: "g",
+        command: "goose",
+        args: ["acp"],
+        env: { [KEY]: "goose-a", GOOSE_PATH_ROOT: "/foreign", GOOSE_DISABLE_KEYRING: "0" },
+      },
+      h
+    )
+    expect(launch.config.env).toMatchObject({
+      GOOSE_PATH_ROOT: path.join(data, "cognia/external-agents/goose-a/goose"),
+      GOOSE_DISABLE_KEYRING: "1",
+    })
+    expect(launch.plan?.denyReadable).toContain(path.join(h.homedir, ".config/goose"))
+    const sibling = applyStateIsolation(
+      { id: "g2", command: "goose", env: { [KEY]: "goose-b" } },
+      h
+    )
+    expect((sibling.config.env as Record<string, string>)?.GOOSE_PATH_ROOT).not.toBe(
+      launch.config.env.GOOSE_PATH_ROOT
+    )
+  })
+
   it("maps the runtime's homes into a private root and strips the key", () => {
     const { host: h, data } = host()
     const input = {

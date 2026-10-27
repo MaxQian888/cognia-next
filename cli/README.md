@@ -133,11 +133,14 @@ Companion specs with `pnpm companion-api:gen`.
 Layered, low → high precedence for model providers:
 
 1. defaults
+
 2. `~/.cognia/config.json`
 3. `~/.cognia/credentials.json` (api keys)
 4. `./.cognia/config.json` (project)
 5. env (`ANTHROPIC_API_KEY`, `COGNIA_PROVIDER`, `COGNIA_MODEL`, …)
 6. CLI flags
+
+Tool discovery is enabled by default. Core file reading, editing, writing and shell tools stay resident; other permitted tools remain available through `ToolSearch`. Set `"toolSearchRuntime": { "enabled": false }` in `config.json` to load every tool up front. With discovery enabled, `alwaysLoadTools` (bare tool names) and `alwaysLoadServers` can pin additional tools or MCP servers; this changes presentation only and never grants permissions. Text reads return at most 50 KiB of body per page; follow the returned continuation offset when more content is needed.
 
 Provider routing mirrors the sidecar dispatch router: `anthropic` uses the
 native claude-agent-sdk path (auth via `ANTHROPIC_API_KEY`); any other provider
@@ -384,3 +387,34 @@ has a removal row. These settings apply on the next turn; actual access depends
 on the active backend and its permissions. A failed config write is reported as
 a session-only change. **Custom limits sources** remains a read-only summary of
 `customLimitsSources` in `config.json`; the `/limits` view consumes those sources.
+
+### Optional verification budget
+
+With a finite `run --timeout` (milliseconds), `verificationRuntime.enabled: true`
+adds host-clock remaining-time feedback and the deferred `verification_batch`
+tool. The feedback is a temporary user message at the current request tail;
+system instructions, tool definitions and prior history stay unchanged. Previous
+feedback is replaced without being saved to conversation history. This protects
+the reusable prompt prefix; actual provider cache utilization still requires
+measurement. The default remains off. Example config:
+
+```json
+{
+  "verificationRuntime": {
+    "enabled": true,
+    "maxBatchMs": 15000,
+    "verificationFraction": 0.5,
+    "completionReserveMs": 15000
+  }
+}
+```
+
+Discover `verification_batch` through ToolSearch. Supply up to four named
+foreground commands per batch. Every command retains Bash authorization,
+sandboxing and cancellation. Approval cannot substitute a different command or
+working directory; submit an explicit new batch instead. Pending, timed-out and
+failed checks remain incomplete. This bounds this tool's verification work;
+ordinary Bash remains available under its existing policy. A batch result does
+not certify the task or remove any acceptance requirement. Per-turn budgets
+share the original host deadline across retries and clear on turns without a
+budget. No automatic summary or answer to an unattended question is added.

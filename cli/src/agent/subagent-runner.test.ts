@@ -79,6 +79,21 @@ function captureResult(overrides: Partial<RunAndCaptureResult> = {}): RunAndCapt
 }
 
 describe("runCliSubagent", () => {
+  it.each([false, undefined])(
+    "inherits parent dialog availability %s",
+    async (allowUserInteraction) => {
+      const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
+        "./configured-plugin-tool-handle"
+      )
+      makeConfiguredCliPluginToolHandle.mockClear()
+      await runCliSubagent(def(), "go", "parent", { ...setupDeps(), allowUserInteraction })
+      expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(
+        expect.any(Object),
+        undefined,
+        allowUserInteraction !== false
+      )
+    }
+  )
   it("drains a nested child host call before releasing its session", async () => {
     const { subscribePluginToolDispatch } = jest.requireMock("../plugin/plugin-tool-dispatch")
     const { makeConfiguredCliPluginToolHandle } = jest.requireMock(
@@ -351,7 +366,9 @@ describe("runCliSubagent", () => {
         id
       )
       expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(
-        expect.objectContaining({ model: "child-model" })
+        expect.objectContaining({ model: "child-model" }),
+        undefined,
+        true
       )
       const request = {
         sessionId: id,

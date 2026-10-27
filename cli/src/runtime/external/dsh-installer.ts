@@ -27,7 +27,7 @@ import { createRuntimeHasher, hashHex } from "../crypto-hasher"
  * execution time.
  */
 
-/** Files copied from `runtime/deepseek-harness/` into the runtime home. */
+/** Files copied from `packages/agent-dsh/runtime/` into the runtime home. */
 export const RUNTIME_ARTIFACTS = [
   "package.json",
   "launcher.mjs",
@@ -54,7 +54,7 @@ export {
 export interface DshInstallPaths {
   /** Cognia data root, e.g. `~/.cognia`. */
   dataRoot: string
-  /** Source directory holding the artifacts (repo `runtime/deepseek-harness/`). */
+  /** Source directory holding the artifacts (repo `packages/agent-dsh/runtime/`). */
   sourceDir: string
 }
 

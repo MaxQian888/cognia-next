@@ -23,6 +23,8 @@ export interface TurnDispatchParams {
   home: string
   gate: PermissionResponder
   awaitApprovals?: () => Promise<void>
+  /** Whether a user can answer questions on this turn's interaction surface. */
+  allowUserInteraction?: boolean
   resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
   resolveSubagentGate?: (actorRef: string) => PermissionResponder
   signal?: AbortSignal
@@ -44,6 +46,7 @@ export function registerTurnSubagentContext(params: TurnDispatchParams): () => v
     home: params.home,
     cwd: session.cwd,
     gate: params.gate,
+    ...(params.allowUserInteraction === false ? { allowUserInteraction: false } : {}),
     ...(params.awaitApprovals ? { awaitApprovals: params.awaitApprovals } : {}),
     ...(params.resolveSubagentOptions
       ? { resolveSubagentOptions: params.resolveSubagentOptions }

@@ -15,6 +15,8 @@ jest.mock("@/lib/ai/agent/external/config/install-catalog", () => {
 
 import type { AgentPathRuntime } from "./agent-path"
 import {
+  antigravityBundle,
+  antigravityBundleDigest,
   isPackageRunner,
   normalizeProbeNodeEnv,
   probeRuntimeVersion,
@@ -95,6 +97,63 @@ describe("resolveProbeExecutable", () => {
 let probeBin: string
 
 describe("probeRuntimeVersion", () => {
+  it("probes the selected plain interpreter for packaged hosts rather than the Cognia executable", async () => {
+    const executable = path.join(probeBin, "verified-node")
+    fs.writeFileSync(executable, "node26")
+    const child = fakeChild(),
+      spawnFn = jest.fn((_command: string, _args: readonly string[], _options: unknown) => child),
+      resolveBridgeInterpreter = jest.fn(() => executable)
+    const pending = probeRuntimeVersion("codebuff", {
+      runtime,
+      spawnFn: spawnFn as never,
+      resolveBridgeInterpreter,
+    })
+    await flush()
+    child.stdout.write("v26.1.0\n")
+    child.emit("close", 0)
+    expect(await pending).toMatchObject({
+      executablePath: executable,
+      output: "v26.1.0\n",
+      exitCode: 0,
+    })
+    expect(spawnFn.mock.calls[0][0]).toBe(executable)
+    expect(resolveBridgeInterpreter).toHaveBeenCalledTimes(1)
+  })
+  it("probes the actual host Node for Codebuff even when PATH contains a different node", async () => {
+    fs.writeFileSync(
+      path.join(probeBin, "node"),
+      "#!/bin/sh\necho path-node-must-not-run\nexit 99\n",
+      { mode: 0o755 }
+    )
+    const probe = await probeRuntimeVersion("codebuff", {
+      runtime: { platform: "darwin", home: probeBin, env: { PATH: probeBin } },
+    })
+    expect(probe.executablePath).toBe(fs.realpathSync(process.execPath))
+    expect(probe.output?.trim()).toBe(process.version)
+    expect(probe.exitCode).toBe(0)
+    expect(probe.executableDigest).toMatch(/^[a-f0-9]{64}$/)
+  })
+  it("binds helper bytes into Antigravity identity and rejects missing or symlinked helpers", async () => {
+    const server = path.join(probeBin, "agy_acp_server.par")
+    const helper = path.join(probeBin, "localharness_external")
+    fs.writeFileSync(server, "server", { mode: 0o755 })
+    jest.restoreAllMocks()
+    const runtime: AgentPathRuntime = {
+      platform: "darwin",
+      home: probeBin,
+      env: { PATH: probeBin },
+    }
+    expect(() => antigravityBundle(server, runtime)).toThrow(/localharness_external/)
+    fs.writeFileSync(helper, "helper-v1", { mode: 0o755 })
+    const first = antigravityBundle(server, runtime)!
+    const firstDigest = await antigravityBundleDigest(first)
+    expect(first.harnessPath).toBe(fs.realpathSync(helper))
+    fs.writeFileSync(helper, "helper-v2")
+    expect(await antigravityBundleDigest(antigravityBundle(server, runtime)!)).not.toBe(firstDigest)
+    fs.unlinkSync(helper)
+    fs.symlinkSync(server, helper)
+    expect(() => antigravityBundle(server, runtime)).toThrow(/localharness_external/)
+  })
   beforeEach(() => {
     probeBin = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-version-probe-"))
     for (const command of ["codex", "npx"]) {
@@ -107,7 +166,11 @@ describe("probeRuntimeVersion", () => {
     const access = fs.accessSync.bind(fs)
     jest.spyOn(fs, "accessSync").mockImplementation((file, mode) => {
       // The resolver also searches system install roots; never probe a real agent.
-      if (!String(file).startsWith(`${probeBin}${path.sep}`)) throw new Error("ENOENT")
+      if (
+        !String(file).startsWith(`${probeBin}${path.sep}`) &&
+        String(file) !== fs.realpathSync(process.execPath)
+      )
+        throw new Error("ENOENT")
       access(file, mode)
     })
   })
@@ -226,19 +289,25 @@ describe("probeRuntimeVersion", () => {
     expect(probe.exitCode).toBe(0)
   })
 
-  it("answers for every catalogued runtime, without spawning anything", async () => {
+  it("answers for every catalogued runtime without an external agent installation", async () => {
     // A catalog entry this cannot answer for is a governed runtime with no way
     // to read its version on the headless host. An empty search path keeps the
-    // sweep hermetic: every command resolves to nothing, so the probe returns
-    // its verdict without touching a real CLI.
+    // sweep hermetic: external commands resolve to nothing. The bundled SDK
+    // runtime probes this test runner's own Node, independently of PATH.
     const empty = { ...runtime, env: { PATH: "/definitely/not/here" } }
     const failures: string[] = []
 
     for (const entry of EXTERNAL_AGENT_RUNTIMES) {
       try {
         const probe = await probeRuntimeVersion(entry.runtimeId, { runtime: empty })
-        if (probe.output !== null) failures.push(`${entry.runtimeId}: unexpectedly found`)
-        if (!probe.detail) failures.push(`${entry.runtimeId}: gave no reason`)
+        if (entry.runtimeId === "codebuff") {
+          expect(probe.executablePath).toBe(fs.realpathSync(process.execPath))
+          expect(probe.output?.trim()).toBe(process.version)
+          expect(probe.exitCode).toBe(0)
+        } else {
+          if (probe.output !== null) failures.push(`${entry.runtimeId}: unexpectedly found`)
+          if (!probe.detail) failures.push(`${entry.runtimeId}: gave no reason`)
+        }
       } catch (error) {
         failures.push(`${entry.runtimeId}: ${String(error)}`)
       }

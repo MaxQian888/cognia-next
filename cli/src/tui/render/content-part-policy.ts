@@ -61,6 +61,8 @@ export function validateContentPart(part: CanonicalContentPart): ContentPartVali
             rootId: validated.surface.rootId,
             components: validated.surface.components,
             dataModel: validated.surface.dataModel,
+            // Kept so `/view` can recompute while the overlay edits (ADR-0240).
+            ...(validated.surface.computed ? { computed: validated.surface.computed } : {}),
           },
         },
       }

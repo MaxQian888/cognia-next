@@ -7,8 +7,11 @@ import { spawn as nodeSpawn } from "node:child_process"
 
 jest.mock("node:child_process", () => ({ spawn: jest.fn() }))
 import path from "node:path"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 
 import { transport as installedTransport } from "@/lib/tauri"
+import { hostFileReader, setExtensionHostFileReader } from "@/lib/browser/extension-engine"
 
 import {
   adaptBunSubprocess,
@@ -302,10 +305,25 @@ describe("bootstrapSidecar", () => {
       setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
       return f.child
     }
-    const boot = await bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs" })
-    expect(boot.transport).toBeInstanceOf(StdioTransport)
-    expect(installedTransport).toBe(boot.transport) // setTransport swapped the live binding
-    expect(boot.transport.isReady()).toBe(true)
+    const directory = await mkdtemp(path.join(tmpdir(), "cognia-bootstrap-reader-"))
+    const file = path.join(directory, "upload.bin")
+    const bytes = new Uint8Array([0, 128, 255])
+    setExtensionHostFileReader(undefined)
+    try {
+      await writeFile(file, bytes)
+      const boot = await bootstrapSidecar({ spawn, scriptPath: "/x/claude-host.mjs" })
+      try {
+        expect(boot.transport).toBeInstanceOf(StdioTransport)
+        expect(installedTransport).toBe(boot.transport) // setTransport swapped the live binding
+        expect(boot.transport.isReady()).toBe(true)
+        await expect(hostFileReader(file)).resolves.toEqual(bytes)
+      } finally {
+        await boot.shutdown()
+      }
+    } finally {
+      setExtensionHostFileReader(undefined)
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it("forwards a send through the installed transport to the child's stdin", async () => {

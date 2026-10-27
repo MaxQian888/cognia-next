@@ -295,6 +295,12 @@ describe("serveCommand", () => {
   it("P5d activates the partition account runtime target before exposing HostState", async () => {
     __resetCliDbForTesting()
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-p5d-serve-"))
+    const uploadPath = path.join(home, "upload.bin")
+    const uploadBytes = new Uint8Array([0, 128, 255])
+    fs.writeFileSync(uploadPath, uploadBytes)
+    const { hostFileReader, setExtensionHostFileReader } =
+      await import("@/lib/browser/extension-engine")
+    setExtensionHostFileReader(undefined)
     const accountId = "pb_693259bd42dbe0fbdd073e21"
     const fetchMock = jest
       .spyOn(globalThis, "fetch")
@@ -321,6 +327,7 @@ describe("serveCommand", () => {
           onStarted: async () => {
             // p6e: a person brain never keeps the CLI's local process table.
             expect(getInstalledExternalAgentHost()).toBeNull()
+            await expect(hostFileReader(uploadPath)).resolves.toEqual(uploadBytes)
             const { getActiveRuntimeTargetContext } =
               await import("@/lib/runtime/runtime-target-context")
             expect(getActiveRuntimeTargetContext()).toMatchObject({
@@ -346,6 +353,7 @@ describe("serveCommand", () => {
       ).toBe(0)
       expect(verified).toBe(true)
     } finally {
+      setExtensionHostFileReader(undefined)
       fetchMock.mockRestore()
       const { __resetDbForTesting } = await import("@/lib/db/schema")
       __resetDbForTesting()
@@ -462,6 +470,7 @@ describe("serveCommand", () => {
     expect(code).toBe(0)
     expect(mockBootOrder).toEqual(["durability-restored", "collab-activated", "runtimes-started"])
     const joined = out.logs.join("")
+    expect(joined).not.toContain("failed to start: browser-companion-agent")
     expect(joined).toContain("bridge connected")
     expect(joined).toContain("desktop-sync-source")
     expect(joined).toContain("account-sync")

@@ -51,6 +51,28 @@ describe("A2UISurfaceOverlay", () => {
     )
   })
 
+  it("recomputes a declared total while a bound field is edited (ADR-0240)", () => {
+    const value: TuiA2UISurface = {
+      surfaceId: "cart",
+      rootId: "root",
+      dataModel: { qty: 2, price: 5, total: 10 },
+      computed: { "/total": { op: "multiply", args: [{ path: "/qty" }, { path: "/price" }] } },
+      components: {
+        root: { id: "root", component: "Column", children: ["qty", "total"] },
+        qty: { id: "qty", component: "TextField", label: "Qty", value: { path: "/qty" } },
+        total: { id: "total", component: "Text", text: "Total", value: { path: "/total" } },
+      },
+    }
+    const { container } = render(
+      <A2UISurfaceOverlay surface={value} onSubmit={() => {}} onRaw={() => {}} onClose={() => {}} />
+    )
+    expect(container.textContent).toContain("Total · 10")
+    fire("", { downArrow: true })
+    fire("0")
+    expect(container.textContent).toContain("Qty: 20")
+    expect(container.textContent).toContain("Total · 100")
+  })
+
   it("requires a second confirmation for destructive actions", () => {
     const onSubmit = jest.fn()
     const { container } = render(

@@ -375,6 +375,7 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     ),
     permissionMode: config.permissionMode,
     builtinTools: config.builtinTools,
+    toolSearchRuntime: config.toolSearchRuntime ?? { enabled: true },
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
     webTools: {

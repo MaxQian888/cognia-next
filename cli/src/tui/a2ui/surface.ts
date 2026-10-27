@@ -1,3 +1,6 @@
+import { applyA2UIComputedFields, isA2UIComputedFields } from "@/lib/a2ui/computed"
+import type { A2UIComputedFields } from "@/types/a2ui/schema"
+
 export const A2UI_MAX_NODES = 500
 export const A2UI_MAX_DEPTH = 32
 export const A2UI_MAX_BYTES = 1024 * 1024
@@ -12,7 +15,10 @@ export interface TuiA2UISurface {
   surfaceId: string
   rootId: string
   components: Record<string, TuiA2UINode>
+  /** Data model with every computed declaration already applied. */
   dataModel: Record<string, unknown>
+  /** Computed declarations (ADR-0240), recomputed as the overlay edits values. */
+  computed?: A2UIComputedFields
 }
 
 export type A2UISurfaceValidation =
@@ -105,13 +111,22 @@ export function validateA2UISurface(
   const graphError = visit(rootId, 1)
   if (graphError) return { ok: false, reason: graphError }
 
+  // The renderer store refuses a surface whose declarations do not validate;
+  // so does the terminal, rather than showing it without its derived values.
+  if (payload.computed !== undefined && !isA2UIComputedFields(payload.computed)) {
+    return { ok: false, reason: "A2UI computed declarations are invalid" }
+  }
+  const computed = payload.computed as A2UIComputedFields | undefined
+  const dataModel = isRecord(payload.dataModel) ? payload.dataModel : {}
+
   return {
     ok: true,
     surface: {
       surfaceId,
       rootId,
       components,
-      dataModel: isRecord(payload.dataModel) ? payload.dataModel : {},
+      dataModel: applyA2UIComputedFields(dataModel, computed),
+      ...(computed ? { computed } : {}),
     },
   }
 }

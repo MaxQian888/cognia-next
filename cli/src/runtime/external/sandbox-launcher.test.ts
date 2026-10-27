@@ -4,6 +4,8 @@ import os from "node:os"
 import path from "node:path"
 
 import {
+  antigravityConfigRoot,
+  additionalNativeHome,
   buildSandboxLauncherArgs,
   codexExtraWritableRoots,
   bundledLauncherCandidates,
@@ -20,6 +22,76 @@ import {
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
 
 describe("external-agent sandbox launcher", () => {
+  it("resolves Antigravity's native home and refuses shared-keychain Bot isolation", () => {
+    expect(
+      antigravityConfigRoot(
+        { id: "agy", command: "agy_acp_server.par", env: { GEMINI_HOME: "~/custom-gemini" } },
+        "/home/me"
+      )
+    ).toBe("/home/me/custom-gemini")
+    expect(() =>
+      antigravityConfigRoot(
+        { id: "agy", command: "agy_acp_server.par", env: { COGNIA_BOT_ISOLATION: "1" } },
+        "/home/me"
+      )
+    ).toThrow(/Keychain/)
+  })
+  it("launches the canonical Antigravity bundle with a host-owned helper and narrow state roots", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "antigravity-launch-"))
+    try {
+      const server = path.join(root, "agy_acp_server.par")
+      const helper = path.join(root, "localharness_external")
+      const renamedServer = path.join(root, "server.bin")
+      fs.writeFileSync(renamedServer, "server", { mode: 0o755 })
+      fs.symlinkSync(renamedServer, server)
+      fs.writeFileSync(helper, "helper", { mode: 0o755 })
+      const home = path.join(root, "gemini-home")
+      const config = {
+        id: "agy",
+        command: server,
+        cwd: root,
+        env: { GEMINI_HOME: home, ANTIGRAVITY_HARNESS_PATH: "/untrusted/helper" },
+      }
+      const runtime = {
+        platform: "darwin" as const,
+        homedir: root,
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+        ensureDir: () => {},
+      }
+      const launch = await resolveSandboxedExternalAgentLaunch(config, runtime)
+      expect(launch.env).toMatchObject({
+        ANTIGRAVITY_HARNESS_PATH: fs.realpathSync(helper),
+        GEMINI_HOME: home,
+      })
+      const writable = launch.args.filter((_, i) => launch.args[i - 1] === "--writable")
+      expect(writable).toContain(path.join(home, "antigravity-acp"))
+      expect(writable).toContain(path.join(home, "artifacts"))
+      expect(writable).not.toContain(home)
+      expect(launch.args[launch.args.indexOf("--") + 1]).toBe(fs.realpathSync(server))
+      await expect(
+        resolveSandboxedExternalAgentLaunch(
+          {
+            ...config,
+            env: { ...config.env, COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: root },
+          },
+          { ...runtime, supportsBotIsolation: () => true }
+        )
+      ).rejects.toThrow(/Keychain/)
+      for (const args of [[], ["--uid="], ["--uid", ""]]) {
+        const linux = await resolveSandboxedExternalAgentLaunch(
+          { ...config, args },
+          { ...runtime, platform: "linux" }
+        )
+        const targetArgs = linux.args.slice(linux.args.indexOf("--") + 2)
+        expect(
+          targetArgs.filter((arg) => arg === "--uid" || arg.startsWith("--uid="))
+        ).toHaveLength(1)
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
   it("resolves symlinked toolchain roots without exposing local share", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "sandbox-toolchain-"))
     try {
@@ -561,6 +633,38 @@ describe("external-agent sandbox launcher", () => {
     expect(launch.args).not.toContain("/untrusted")
     expect(launch.args).not.toContain("/ambient/tmp")
     expect(launch.args).toContain("/home/user/.local/state/goose")
+  })
+
+  it("keeps an absolute Goose binary's temp inside the isolated state root", async () => {
+    const root = "/private/config-goose"
+    const launch = await resolveSandboxedExternalAgentLaunch(
+      {
+        id: "goose-private",
+        command: "/opt/goose",
+        cwd: "/work",
+        env: { GOOSE_PATH_ROOT: `${root}/goose` },
+      },
+      {
+        platform: "darwin",
+        homedir: "/home/user",
+        candidates: ["/launcher"],
+        isExecutable: () => true,
+      },
+      {
+        root,
+        env: { GOOSE_PATH_ROOT: `${root}/goose`, GOOSE_DISABLE_KEYRING: "1" },
+        sharedRoots: ["/home/user/.config/goose"],
+        denyReadable: ["/home/user/.config/goose"],
+      }
+    )
+    expect(launch.env).toMatchObject({
+      TMPDIR: `${root}/goose/state/tmp`,
+      TMP: `${root}/goose/state/tmp`,
+      TEMP: `${root}/goose/state/tmp`,
+    })
+    expect(launch.args).toEqual(
+      expect.arrayContaining(["--writable", root, "--deny-readable", "/home/user/.config/goose"])
+    )
   })
 
   it("provisions all Bot environment directories without adding writable roots", async () => {
@@ -1152,3 +1256,55 @@ it.each(["", "   ", "/work/state/../escape", "/home/user/.grok"])(
     expect(ensureDir).not.toHaveBeenCalled()
   }
 )
+
+it.each([
+  ["openclaude", "OPENCLAUDE_CONFIG_DIR", ".openclaude"],
+  ["vibe-acp", "VIBE_HOME", ".vibe"],
+  ["mimo", "MIMOCODE_HOME", ".local/share/mimocode"],
+  ["hermes", "HERMES_HOME", ".hermes"],
+])(
+  "confines the documented %s state override without keeping shared write access",
+  (command, key, defaultRoot) => {
+    const config = {
+      id: "native",
+      command,
+      args: [],
+      cwd: "/workspace",
+      env: { [key]: "/owned/native" },
+    }
+    expect(additionalNativeHome(config, "/home/me")).toEqual({ key, root: "/owned/native" })
+    const args = buildSandboxLauncherArgs(config, "/home/me")
+    expect(args).toEqual(expect.arrayContaining(["--writable", "/owned/native"]))
+    expect(args).not.toContain(`/home/me/${defaultRoot}`)
+    expect(() => additionalNativeHome({ ...config, env: { [key]: "" } }, "/home/me")).toThrow(
+      /empty/
+    )
+    expect(() =>
+      additionalNativeHome(
+        {
+          ...config,
+          env: { ...config.env, COGNIA_BOT_ISOLATION: "1", COGNIA_BOT_STATE_DIR: "/bot" },
+        },
+        "/home/me"
+      )
+    ).toThrow(/Bot state/)
+  }
+)
+
+it("prepares a shared OpenClaude global configuration file without creating a directory at that path", async () => {
+  const ensureDir = jest.fn(),
+    ensureFile = jest.fn()
+  await resolveSandboxedExternalAgentLaunch(
+    { id: "openclaude-shared", command: "openclaude", args: [], cwd: "/workspace" },
+    {
+      platform: "darwin",
+      homedir: "/home/me",
+      candidates: ["/launcher"],
+      isExecutable: () => true,
+      ensureDir,
+      ensureFile,
+    }
+  )
+  expect(ensureFile).toHaveBeenCalledWith("/home/me/.openclaude.json")
+  expect(ensureDir).not.toHaveBeenCalledWith("/home/me/.openclaude.json")
+})

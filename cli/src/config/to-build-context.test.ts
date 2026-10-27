@@ -30,6 +30,20 @@ function cfg(p: Partial<ResolvedConfig> = {}): ResolvedConfig {
 
 const NOW = 1_700_000_000_000
 
+describe("CLI tool discovery projection", () => {
+  it("forwards enabled policy and explicit opt-out to the shared resolver", () => {
+    const context = (toolSearchRuntime: NonNullable<ResolvedConfig["toolSearchRuntime"]>) =>
+      toBuildContext({
+        sessionId: "discovery",
+        now: NOW,
+        config: cfg({ toolSearchRuntime }),
+      })
+    const policy = { enabled: true, alwaysLoadTools: ["web_fetch"], alwaysLoadServers: ["local"] }
+    expect(context(policy).appSettings?.toolSearchRuntime).toEqual(policy)
+    expect(context({ enabled: false }).appSettings?.toolSearchRuntime).toEqual({ enabled: false })
+  })
+})
+
 describe("toBuildContext — session + appSettings shaping", () => {
   it("feeds model/provider/systemPrompt/cwd/permissionMode through the fields resolveSendOptions reads", () => {
     const ctx = toBuildContext({

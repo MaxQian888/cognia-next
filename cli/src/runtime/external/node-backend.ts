@@ -14,6 +14,7 @@ import { devinOwnedConfigRoot, prepareDevinMcpConfig } from "./devin-mcp-config"
 import {
   applyStateIsolation,
   defaultStateIsolationHost,
+  hostAgentStateDataDir,
   type StateIsolationHost,
   type StateIsolationPlan,
 } from "./state-isolation"
@@ -31,6 +32,13 @@ import {
 } from "./agent-path"
 // Single source for the runtime-home layout the launcher exception is pinned to.
 import { runtimeHomeFor } from "./dsh-installer"
+import {
+  isRegisteredNativeBridgeInvocation,
+  registeredHermesProbeStateRoot,
+  registeredNativeBridgeId,
+  resolveBundledAgentBridge,
+  validateNativeBridgeSandbox,
+} from "./native-bridges"
 
 /**
  * How this agent's stdout is delivered.
@@ -131,6 +139,8 @@ const CHANNEL = {
 const BINARY_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_BINARY_ALLOWLIST)
 const NPX_ALLOWLIST: ReadonlySet<string> = new Set(EXTERNAL_AGENT_NPX_ALLOWLIST)
 const CONFIG_ENV_KEYS = new Set([
+  "COGNIA_HERMES_ACP_BOOTSTRAP",
+  "AGY_ACP_FORCE_FILE_STORAGE",
   "XAI_API_KEY",
   "GROK_HOME",
   "GROK_DISABLE_AUTOUPDATER",
@@ -242,6 +252,22 @@ const RUNTIME_ENV_KEYS = new Set([
   "DISABLE_AUTO_UPDATE",
 ])
 const CONFIG_ENV_PREFIXES = [
+  "AUGMENT_",
+  "AUTOHAND_",
+  "CODEBUDDY_",
+  "KILO_",
+  "MISTRAL_",
+  "VIBE_",
+  "MIMOCODE_",
+  "HERMES_",
+  "OMP_",
+  "MUSE_",
+  "AMP_",
+  "ZCODE_",
+  "OPENCLAUDE_",
+  "CONTINUE_",
+  "CODEBUFF_",
+  "ROVODEV_",
   "ANTHROPIC_",
   "CLAUDE_",
   "OPENAI_",
@@ -302,6 +328,7 @@ export function validateCommand(
 ): void {
   const command = config.command.trim()
   if (!command) throw new Error("empty command")
+  if (isRegisteredNativeBridgeInvocation(command, config.args ?? [])) return
   if (command.includes("/") || command.includes("\\")) {
     // A managed launch resolves the exact host Node executable. Keep the
     // exception narrower than arbitrary absolute binaries or arbitrary JS.
@@ -594,6 +621,17 @@ export class NodeExternalAgentBackend {
       case "kill_external_agent":
         await this.kill(String(args.agentId))
         return undefined as T
+      case "get_external_agent_info": {
+        const record = this.processes.get(String(args.agentId))
+        if (!record) throw new Error(`agent not found: ${String(args.agentId)}`)
+        return {
+          id: String(args.agentId),
+          pid: record.child.pid,
+          state: record.stopping ? "Stopping" : "Running",
+        } as T
+      }
+      case "resolve_bundled_agent_bridge":
+        return resolveBundledAgentBridge(String(args.id)) as T
       case "check_command_exists":
         return (await commandExists(String(args.command))) as T
       // Version certification runs on every host. The caller names a catalog
@@ -674,6 +712,8 @@ export class NodeExternalAgentBackend {
     if (this.processes.has(config.id)) throw new Error(`agent already running: ${config.id}`)
     validateSandboxPolicyCeiling(config.sandboxPolicy, this.networkCeiling)
     validateCommand(config, this.allowSmokeAgent, this.workspacesRoot)
+    const bridgeId = registeredNativeBridgeId(config.command, config.args ?? [])
+    validateNativeBridgeSandbox(bridgeId, config.sandboxPolicy?.network)
     const root = this.selectedWorkspaceRoot ?? this.workspacesRoot
     if (this.selectedWorkspaceRoot && fs.realpathSync(root) !== root) {
       throw new Error(`Selected workspace changed on disk: ${root}`)
@@ -698,8 +738,20 @@ export class NodeExternalAgentBackend {
     try {
       // Resolved before the launcher so the Kimi / Cline / Qoder rebasing
       // reads the isolated home from the config env.
-      ;({ config, plan: stateIsolation } = applyStateIsolation(config, this.stateIsolationHost))
-      launch = await this.resolveLaunch(config, { stateIsolation })
+      const helperRoot = registeredHermesProbeStateRoot(
+        config.command,
+        config.args ?? [],
+        config.env,
+        hostAgentStateDataDir(this.stateIsolationHost)
+      )
+      if (helperRoot) stateIsolation = null
+      else ({ config, plan: stateIsolation } = applyStateIsolation(config, this.stateIsolationHost))
+      // A caller-selected host resolver cannot remove a bridge's OS/network
+      // boundary. The production launcher fails closed if its sandbox is absent.
+      launch =
+        bridgeId === "codebuff" || bridgeId === "hermes-probe" || bridgeId === "hermes-acp"
+          ? await defaultResolveLaunch(config, { stateIsolation })
+          : await this.resolveLaunch(config, { stateIsolation })
       workspaceEnv = await resolveWorkspacePortEnv(cwd)
     } catch (error) {
       cleanup()
@@ -735,6 +787,10 @@ export class NodeExternalAgentBackend {
     Object.assign(env, workspaceEnv)
     let child: ChildProcessWithoutNullStreams
     try {
+      // Launch preparation can await filesystem/host work; repeat integrity
+      // admission immediately before creating the child.
+      validateCommand(config, this.allowSmokeAgent, this.workspacesRoot)
+      validateNativeBridgeSandbox(bridgeId, config.sandboxPolicy?.network)
       child = spawn(launch.command, launch.args, {
         cwd,
         env,

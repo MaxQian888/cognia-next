@@ -14,6 +14,7 @@
  * means, and lives in one place so the two hosts cannot drift.
  */
 import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -26,6 +27,10 @@ import {
   type AgentPathRuntime,
 } from "./agent-path"
 import { hashHex } from "../crypto-hasher"
+import {
+  nativeBridgeInterpreterEnvironment,
+  resolveNativeBridgeInterpreter,
+} from "./native-bridges"
 
 /** Commands that run *another* package rather than being the runtime itself. */
 const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx", "uvx"])
@@ -53,6 +58,7 @@ const ABSENT: RuntimeVersionProbe = {
 export interface ProbeRuntimeVersionDeps {
   runtime?: AgentPathRuntime
   spawnFn?: typeof spawn
+  resolveBridgeInterpreter?: () => string
 }
 
 /** Keep partial test/runtime env bags inside this repo's strict Node env contract. */
@@ -75,9 +81,11 @@ export function resolveProbeExecutable(
 
   const extensions =
     runtime.platform === "win32" ? (runtime.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""]
+  const bareCommand =
+    runtime.platform === "win32" && trimmed === "agy_acp_server.par" ? "agy_acp_server" : trimmed
   for (const dir of agentSearchDirs(runtime)) {
     for (const extension of extensions) {
-      const candidate = path.join(dir, `${trimmed}${extension}`)
+      const candidate = path.join(dir, `${bareCommand}${extension}`)
       try {
         fs.accessSync(candidate, fs.constants.X_OK)
         return candidate
@@ -109,6 +117,51 @@ function digestOf(file: string): string | null {
   }
 }
 
+/** The official ACP release owns both executable files; caller-selected helpers are never trusted. */
+export function antigravityBundle(
+  command: string,
+  runtime: AgentPathRuntime = defaultAgentPathRuntime()
+): { executablePath: string; harnessPath: string } | undefined {
+  const base = path
+    .basename(command)
+    .toLowerCase()
+    .replace(/\.exe$/, "")
+  if (base !== "agy_acp_server.par" && base !== "agy_acp_server") return undefined
+  const resolved = resolveProbeExecutable(command, runtime)
+  if (!resolved) throw new Error("Antigravity ACP server is not installed")
+  const executablePath = fs.realpathSync(resolved)
+  const harnessPath = path.join(
+    path.dirname(executablePath),
+    runtime.platform === "win32" ? "localharness_external.exe" : "localharness_external"
+  )
+  try {
+    if (!fs.lstatSync(harnessPath).isFile() || fs.lstatSync(harnessPath).isSymbolicLink())
+      throw new Error("helper must be a regular file")
+    fs.accessSync(harnessPath, fs.constants.X_OK)
+    fs.accessSync(executablePath, fs.constants.X_OK)
+  } catch {
+    throw new Error(
+      "Antigravity ACP requires an executable localharness_external beside its server"
+    )
+  }
+  return { executablePath, harnessPath }
+}
+
+/** Hash large native releases without blocking the event loop or retaining them in memory. */
+export async function antigravityBundleDigest(bundle: {
+  executablePath: string
+  harnessPath: string
+}): Promise<string> {
+  const hashFile = async (file: string): Promise<string> => {
+    const hash = createHash("sha256")
+    for await (const chunk of fs.createReadStream(file)) hash.update(chunk)
+    return hash.digest("hex")
+  }
+  const serverDigest = await hashFile(bundle.executablePath)
+  const helperDigest = await hashFile(bundle.harnessPath)
+  return hashHex("sha256", `antigravity-acp-v1\n${serverDigest}\n${helperDigest}\n`)
+}
+
 /**
  * Run one runtime's catalogued version probe.
  *
@@ -132,7 +185,30 @@ export async function probeRuntimeVersion(
   }
 
   const runtime = deps.runtime ?? defaultAgentPathRuntime()
-  const executablePath = resolveProbeExecutable(entry.systemCommand, runtime)
+  // Codebuff runs on a verified plain Node, which need not be the host executable.
+  // Its only interpreter probe is fixed here, independently of caller input.
+  if (
+    runtimeId === "codebuff" &&
+    (entry.systemCommand !== "node" ||
+      entry.versionProbe.args.length !== 1 ||
+      entry.versionProbe.args[0] !== "--version")
+  )
+    throw new Error("Codebuff host Node probe must be exactly node --version")
+  let executablePath: string | null
+  try {
+    executablePath =
+      runtimeId === "codebuff"
+        ? (
+            deps.resolveBridgeInterpreter ??
+            (() =>
+              deps.runtime
+                ? resolveNativeBridgeInterpreter({ runtime })
+                : resolveNativeBridgeInterpreter())
+          )()
+        : resolveProbeExecutable(entry.systemCommand, runtime)
+  } catch (error) {
+    return { ...ABSENT, detail: error instanceof Error ? error.message : String(error) }
+  }
   if (!executablePath) {
     return {
       ...ABSENT,
@@ -143,7 +219,28 @@ export async function probeRuntimeVersion(
   // The resolved file for a package runner is `npx`, not the runtime. Recording
   // its digest as the runtime's identity would make an unpinned runtime look
   // stable while the package under it changed on every launch.
-  const executableDigest = isPackageRunner(entry.systemCommand) ? null : digestOf(executablePath)
+  let executableDigest: string | null
+  let harnessPath: string | undefined
+  try {
+    const bundle = antigravityBundle(entry.systemCommand, runtime)
+    if (bundle) {
+      executablePath = bundle.executablePath
+      harnessPath = bundle.harnessPath
+    }
+    executableDigest = bundle
+      ? await antigravityBundleDigest(bundle)
+      : isPackageRunner(entry.systemCommand)
+        ? null
+        : digestOf(executablePath)
+  } catch (error) {
+    return {
+      output: "",
+      executablePath,
+      executableDigest: null,
+      exitCode: null,
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
 
   const spawnFn = deps.spawnFn ?? spawn
   const { timeoutMs } = entry.versionProbe
@@ -155,9 +252,12 @@ export async function probeRuntimeVersion(
     const child = spawnFn(executablePath, [...entry.versionProbe!.args], {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
-        ...runtime.env,
+        ...(runtimeId === "codebuff"
+          ? nativeBridgeInterpreterEnvironment(runtime.env)
+          : runtime.env),
         NODE_ENV: normalizeProbeNodeEnv(runtime.env.NODE_ENV ?? process.env.NODE_ENV),
         PATH: resolveAgentSearchPath(runtime),
+        ...(harnessPath ? { ANTIGRAVITY_HARNESS_PATH: harnessPath } : {}),
       },
       // Own group, so the timeout kill takes the whole tree: `npx` forks
       // `node`, and killing only the parent leaves it running.

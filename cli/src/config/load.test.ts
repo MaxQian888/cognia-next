@@ -33,6 +33,48 @@ function run(
   })
 }
 
+describe("deferred tool policy layers", () => {
+  it("preserves explicit opt-out and projects project residency overrides", () => {
+    expect(run({}).toolSearchRuntime).toEqual({ enabled: true })
+    expect(
+      run({ [userConfigPath(HOME)]: JSON.stringify({ toolSearchRuntime: { enabled: false } }) })
+        .toolSearchRuntime
+    ).toEqual({ enabled: false })
+    const result = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        toolSearchRuntime: { enabled: true, alwaysLoadServers: ["local"] },
+      }),
+      [projectConfigPath(CWD)]: JSON.stringify({
+        toolSearchRuntime: { enabled: true, alwaysLoadTools: ["web_fetch"] },
+      }),
+    })
+    expect(result.toolSearchRuntime).toEqual({
+      enabled: true,
+      alwaysLoadServers: ["local"],
+      alwaysLoadTools: ["web_fetch"],
+    })
+  })
+})
+
+describe("verification runtime layers", () => {
+  it("keeps an explicit opt-out and merges bounded user/project settings", () => {
+    expect(run({}).verificationRuntime).toBeUndefined()
+    const config = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        verificationRuntime: { enabled: true, maxBatchMs: 12_000 },
+      }),
+      [projectConfigPath(CWD)]: JSON.stringify({
+        verificationRuntime: { enabled: false, completionReserveMs: 10_000 },
+      }),
+    })
+    expect(config.verificationRuntime).toEqual({
+      enabled: false,
+      maxBatchMs: 12_000,
+      completionReserveMs: 10_000,
+    })
+  })
+})
+
 describe("resolveHome", () => {
   it("prefers $COGNIA_HOME when set", () => {
     expect(resolveHome({ COGNIA_HOME: "/custom" }, "/home/u")).toBe("/custom")

@@ -17,6 +17,7 @@ import { stripVTControlCharacters } from "node:util"
 import { fileURLToPath } from "node:url"
 
 import { setTransport } from "@/lib/tauri"
+import { setExtensionHostFileReader } from "@/lib/browser/extension-engine"
 import { redactCredentialText } from "@/lib/security/redact-credentials"
 import { DEFAULT_REDACTION_KEYS } from "@/packages/logging/src/redaction-patterns"
 
@@ -453,6 +454,7 @@ export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<Sid
     hostRpc: opts.hostRpc ?? cliHostRpcHandlers(),
   })
   setTransport(transport)
+  setExtensionHostFileReader(async (file) => new Uint8Array(await fs.promises.readFile(file)))
 
   try {
     await transport.whenReady(opts.readyTimeoutMs)

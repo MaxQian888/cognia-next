@@ -610,6 +610,7 @@ describe("ensureCliDb", () => {
       ])
       expect(fs.readFileSync(path.join(tableDir, sessionsFile), "utf8")).toBe(sessionsBefore)
     } finally {
+      await disposeOpenCliDb()
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }
@@ -2056,4 +2057,172 @@ describe("cliStoreMayHoldRows", () => {
       fs.rmSync(home, { recursive: true, force: true })
     }
   })
+})
+
+it("bounds parallel table snapshots and publishes the manifest only after all are durable", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-db-parallel-"))
+  let release!: () => void
+  let entered!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  let active = 0
+  let peak = 0
+  const tables = Array.from({ length: 9 }, (_, i) => new FakeTable(`table${i}`, [{ id: i }]))
+  for (const table of tables) {
+    jest.spyOn(table, "toArray").mockImplementation(async () => {
+      active++
+      peak = Math.max(peak, active)
+      entered()
+      await gate
+      active--
+      return table.rows
+    })
+  }
+  const handle = await ensureCliDb({
+    home,
+    getDatabase: () => ({ name: "CogniaDB", verno: 82, tables }),
+    installGlobals: async () => {},
+    whenReady: async () => {},
+    schedule: () => () => {},
+  })
+  const flush = handle.flush()
+  try {
+    await started
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(active).toBe(4)
+    expect(fs.existsSync(path.join(home, "db.json.tables", "manifest.json"))).toBe(false)
+    release()
+    await flush
+    expect(peak).toBe(4)
+    for (const table of tables) {
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(home, "db.json.tables", `CogniaDB--${table.name}.json`), "utf8")
+        )
+      ).toEqual(table.rows)
+    }
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(home, "db.json.tables", "manifest.json"), "utf8")
+    )
+    expect(manifest.dbs.CogniaDB.tables).toHaveLength(9)
+  } finally {
+    release()
+    await flush.catch(() => {})
+    __resetCliDbForTesting()
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+it("drains sibling table writes before rejecting a failed batch and keeps the whole flush retryable", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-db-parallel-failure-"))
+  const tables = [
+    new FakeTable("goals", [{ id: "saved" }]),
+    new FakeTable("memories", [{ id: "retried" }]),
+  ]
+  let release!: () => void
+  let entered!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  jest.spyOn(tables[0], "toArray").mockImplementationOnce(async () => {
+    entered()
+    await gate
+    return tables[0].rows
+  })
+  jest.spyOn(tables[1], "toArray").mockRejectedValueOnce(new Error("table read failed"))
+  const handle = await ensureCliDb({
+    home,
+    getDatabase: () => ({ name: "CogniaDB", verno: 82, tables }),
+    installGlobals: async () => {},
+    whenReady: async () => {},
+    schedule: () => () => {},
+  })
+  let settled = false
+  const flush = handle.flush().then(
+    () => {
+      settled = true
+    },
+    (error) => {
+      settled = true
+      return error
+    }
+  )
+  try {
+    await started
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(settled).toBe(false)
+    release()
+    expect(await flush).toEqual(new Error("table read failed"))
+    expect(fs.existsSync(path.join(home, "db.json.tables", "manifest.json"))).toBe(false)
+    await handle.flush()
+    for (const table of tables)
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(home, "db.json.tables", `CogniaDB--${table.name}.json`), "utf8")
+        )
+      ).toEqual(table.rows)
+  } finally {
+    release()
+    await flush
+    __resetCliDbForTesting()
+    fs.rmSync(home, { recursive: true, force: true })
+  }
+})
+
+it("serializes shared binary encoding while committing independent table JSON concurrently", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-db-binary-queue-"))
+  const bytes = new Uint8Array(140_000).fill(73)
+  const first = new Blob([bytes]),
+    second = new Blob([bytes])
+  let release!: () => void
+  let entered!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const slice = first.slice.bind(first)
+  jest.spyOn(first, "slice").mockImplementationOnce((...args) => {
+    const chunk = slice(...args)
+    const read = chunk.arrayBuffer.bind(chunk)
+    jest.spyOn(chunk, "arrayBuffer").mockImplementationOnce(async () => {
+      entered()
+      await gate
+      return read()
+    })
+    return chunk
+  })
+  const secondRead = jest.spyOn(second, "slice")
+  const tables = [new FakeTable("one", [{ blob: first }]), new FakeTable("two", [{ blob: second }])]
+  const handle = await ensureCliDb({
+    home,
+    getDatabase: () => ({ name: "CogniaDB", verno: 82, tables }),
+    installGlobals: async () => {},
+    whenReady: async () => {},
+    schedule: () => () => {},
+  })
+  const flush = handle.flush()
+  try {
+    await started
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(secondRead).not.toHaveBeenCalled()
+    release()
+    await flush
+    expect(secondRead).toHaveBeenCalled()
+    expect(fs.readdirSync(path.join(home, "db.json.tables", "binary"))).toHaveLength(1)
+    await handle.dispose()
+  } finally {
+    release()
+    await flush.catch(() => {})
+    __resetCliDbForTesting()
+    fs.rmSync(home, { recursive: true, force: true })
+  }
 })

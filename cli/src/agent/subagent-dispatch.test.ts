@@ -261,13 +261,13 @@ describe("handleCliDispatchAgent", () => {
       usage: { inputTokens: 10, outputTokens: 4 },
       finishReason: "success",
     })
-    registerCliSubagentContext("s1", makeCtx({ run }))
+    registerCliSubagentContext("s1", makeCtx({ run, allowUserInteraction: false }))
     const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "check" }))
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({ id: "reviewer" }),
       "check",
       "s1",
-      expect.objectContaining({ cwd: "/work" })
+      expect.objectContaining({ cwd: "/work", allowUserInteraction: false })
     )
     expect(resp.result).toContain("looks good")
     expect(resp.result).toContain("14 tok")
@@ -733,10 +733,11 @@ describe("nested dispatch (depth / chain / tree edges)", () => {
 
   it("registers the child context (depth+1, extended chain, live edge, root session) via the seam", async () => {
     const run = jest.fn(async (_def, _prompt, _parent, deps) => {
+      expect(deps.allowUserInteraction).toBe(false)
       deps.nesting!.register("s1::sub-child")
       return { text: "ran" }
     })
-    registerCliSubagentContext("s1", makeCtx({ run }))
+    registerCliSubagentContext("s1", makeCtx({ run, allowUserInteraction: false }))
     await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
     const child = getCliSubagentContext("s1::sub-child")
     expect(child).toMatchObject({
@@ -744,6 +745,7 @@ describe("nested dispatch (depth / chain / tree edges)", () => {
       maxDepth: 2,
       parentChain: ["reviewer"],
       rootSessionId: "s1",
+      allowUserInteraction: false,
     })
     expect(child?.selfLiveId).toBe(listLiveSubagents("s1")[0].liveId)
     if (child) clearCliSubagentContext("s1::sub-child")

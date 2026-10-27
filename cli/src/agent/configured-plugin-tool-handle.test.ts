@@ -157,3 +157,60 @@ describe("makeConfiguredCliPluginToolHandle", () => {
     ])
   })
 })
+
+it("refuses unattended user input without invoking a hidden dialog or inventing an answer", async () => {
+  const execute = jest.fn(async () => new Promise<PluginToolExecResponse>(() => {}))
+  const handle = makeConfiguredCliPluginToolHandle(
+    { ...DEFAULT_RESOLVED_CONFIG, cwd: "/workspace" },
+    execute,
+    false
+  )
+  const response = handle({
+    type: "plugin_tool_exec",
+    sessionId: "s-headless",
+    toolUseId: "q-1",
+    name: "ask_user",
+    args: {
+      question: "May I bypass the redaction?",
+      options: [{ value: "yes", label: "Approve" }],
+    },
+  })
+  expect(execute).not.toHaveBeenCalled()
+  await expect(response).resolves.toMatchObject({
+    type: "plugin_tool_response",
+    sessionId: "s-headless",
+    toolUseId: "q-1",
+    error: expect.stringContaining("No answer or authorization was provided"),
+  })
+  expect(await response).not.toHaveProperty("result")
+})
+
+it("keeps interactive ask_user and unattended non-question tools on their existing executor", async () => {
+  const execute = jest.fn(async (request: PluginToolExecRequest) => ({
+    type: "plugin_tool_response" as const,
+    sessionId: request.sessionId,
+    toolUseId: request.toolUseId,
+    result: "explicit real response",
+  }))
+  const cfg = { ...DEFAULT_RESOLVED_CONFIG, cwd: "/workspace" }
+  const request = {
+    type: "plugin_tool_exec" as const,
+    sessionId: "s",
+    toolUseId: "q",
+    name: "ask_user",
+    args: { question: "Choose" },
+  }
+  expect((await makeConfiguredCliPluginToolHandle(cfg, execute)(request)).result).toBe(
+    "explicit real response"
+  )
+  expect(
+    (
+      await makeConfiguredCliPluginToolHandle(
+        cfg,
+        execute,
+        false
+      )({ ...request, name: "web_search" })
+    ).result
+  ).toBe("explicit real response")
+  expect(execute).toHaveBeenCalledTimes(2)
+})

@@ -38,7 +38,7 @@ export interface StateIsolationSpawnConfig {
 export interface StateIsolationPlan {
   /** `<data_dir>/cognia/external-agents/<key>`. */
   root: string
-  /** Env variables pointing the runtime's homes into {@link root}. */
+  /** Runtime home paths and required isolation flags (for example disabling a shared keyring). */
   env: Record<string, string>
   /** The runtime's shared default state roots; they leave the writable set. */
   sharedRoots: string[]
@@ -194,6 +194,8 @@ export function applyStateIsolation<T extends StateIsolationSpawnConfig>(
     mapped[envKey] = dir
   }
   const underHome = (relative: string) => path.join(host.homedir, ...relative.split("/"))
+  // Goose otherwise reads the shared OS keyring despite relocating its files.
+  if ("GOOSE_PATH_ROOT" in mapped) mapped.GOOSE_DISABLE_KEYRING = "1"
   return {
     config: { ...config, env: { ...env, ...mapped } },
     plan: {

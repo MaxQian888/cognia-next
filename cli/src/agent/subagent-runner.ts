@@ -80,6 +80,8 @@ export interface RunCliSubagentDeps {
   gate: PermissionResponder
   /** Shared UI approval barrier: host tools wait while any approval is open. */
   awaitApprovals?: () => Promise<void>
+  /** Inherit the parent surface's ability to answer user questions. */
+  allowUserInteraction?: boolean
   /** Abort signal shared with the parent turn (interrupt cancels children too). */
   signal?: AbortSignal
   /** MCP servers to expose to the subagent (the parent's resolved set). */
@@ -276,7 +278,11 @@ export async function runCliSubagent(
       turnId,
       attemptId,
     })
-    const execute = makeConfiguredCliPluginToolHandle(childConfig)
+    const execute = makeConfiguredCliPluginToolHandle(
+      childConfig,
+      undefined,
+      deps.allowUserInteraction !== false
+    )
     unsubscribe = await subscribePluginToolDispatch({
       sessionId: childSessionId,
       handle: async (request) => {

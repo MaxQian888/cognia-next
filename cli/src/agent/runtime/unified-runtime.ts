@@ -302,6 +302,13 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
 
   // ---- 3. Cancellation scope. Everything registered from here is guaranteed
   // to be torn down, on every exit path including a throw. ------------------
+  const startedAtEpochMs = now()
+  const deadlineEpochMs =
+    typeof params.timeoutMs === "number" &&
+    Number.isFinite(params.timeoutMs) &&
+    params.timeoutMs > 0
+      ? startedAtEpochMs + params.timeoutMs
+      : undefined
   const cancellation = createTurnCancellation({
     ...(params.signal ? { signal: params.signal } : {}),
     ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
@@ -414,6 +421,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
       }
       try {
         const captured = await session.send(params.prompt, {
+          ...(deadlineEpochMs !== undefined ? { startedAtEpochMs, deadlineEpochMs } : {}),
           ...(params.onAttachments ? { onAttachments: params.onAttachments } : {}),
           gate: params.gate,
           signal: cancellation.signal,
@@ -635,7 +643,9 @@ function buildSession(
   if (backend.kind === "external") {
     return (params.createExternalSession ?? createExternalAgentSession)(base)
   }
-  return (params.createSession ?? createAgentSession)(base)
+  // A one-shot builtin run has no TUI dialog consumer. Explicit injected tool
+  // responders (for example the RPC server) still own their existing channel.
+  return (params.createSession ?? createAgentSession)({ ...base, allowUserInteraction: false })
 }
 
 function normalizeUsage(raw: Record<string, unknown>): AgentRunUsage {

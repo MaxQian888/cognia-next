@@ -76,6 +76,13 @@ export function contextVersionProjection(input: ContextVersionInput): Record<str
     allowedTools: [...(o.allowedTools ?? [])].sort(),
     disallowedTools: [...(o.disallowedTools ?? [])].sort(),
     builtinCategories: enabledCategories(o),
+    toolSearch:
+      o.toolSearchEnabled === true
+        ? {
+            alwaysLoadServers: [...new Set(o.alwaysLoadServers ?? [])].sort(),
+            alwaysLoadTools: [...new Set(o.alwaysLoadTools ?? [])].sort(),
+          }
+        : null,
     pluginTools: (o.pluginTools ?? []).map((t) => t.name).sort(),
     confinement: o.confinement
       ? { enabled: o.confinement.enabled, roots: [...o.confinement.roots].sort() }

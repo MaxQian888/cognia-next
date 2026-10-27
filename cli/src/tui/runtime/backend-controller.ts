@@ -38,6 +38,7 @@ import { externalCapabilities, type BackendCapabilities } from "./backend-capabi
 import { buildCodexOptions } from "./backend-bridge"
 import { selectCliAgentWorkspace } from "../../runtime/external/host-branch"
 import { createCliTranslator } from "../i18n"
+import { resolveNativeBridgeInterpreter } from "../../runtime/external/native-bridges"
 
 /**
  * The steps a connect walks through, in order. Doubles as the failure locator.
@@ -117,6 +118,7 @@ export interface BackendConnectDeps {
   platformSupported?: () => boolean
   locateLauncher?: () => string | undefined
   commandExists?: (command: string) => Promise<boolean>
+  resolveBridgeInterpreter?: () => string
 }
 
 const defaultResolvePreset = async (backend: string): Promise<string> =>
@@ -181,7 +183,19 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
         message: `The "${presetId}" preset declares no executable.`,
       })
     }
-    if (commandExists && !(await commandExists(command))) {
+    if (presetId === "codebuff" && preset?.protocol === "codebuff-sdk" && command === "node") {
+      try {
+        ;(deps.resolveBridgeInterpreter ?? resolveNativeBridgeInterpreter)()
+      } catch (error) {
+        return fail({
+          kind: "command",
+          stage: "command",
+          message: error instanceof Error ? error.message : String(error),
+          hint: "Install plain Node.js 26+, then retry /backend codebuff.",
+          command: "node",
+        })
+      }
+    } else if (commandExists && !(await commandExists(command))) {
       return fail({
         kind: "command",
         stage: "command",
