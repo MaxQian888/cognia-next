@@ -3320,6 +3320,7 @@ describe("channel-list branch coverage top-ups", () => {
       />
     )
     await user.click(await screen.findByRole("button", { name: "newConversation" }))
+    await user.click(screen.getByRole("menuitem", { name: "newConversation" }))
     expect(onNewTeamConversation).toHaveBeenCalledWith("t-1")
   })
 
@@ -4064,12 +4065,18 @@ describe("title-bar projection", () => {
     }
   })
 
-  it("keeps the plain + on New chat where no accelerator can fire (web shell)", () => {
+  it("keeps a separate + menu beside New chat in the web shell", async () => {
     renderProjected()
     const newButton = screen.getByTestId("sidebar-new-conversation")
     expect(within(newButton).queryByTestId("sidebar-new-conversation-shortcut")).toBeNull()
     expect(newButton).not.toHaveAttribute("aria-keyshortcuts")
     expect(newButton).toHaveAttribute("title", "newChat")
+    const user = userEvent.setup()
+    const plus = screen.getByRole("button", { name: "createMenu" })
+    expect(plus.parentElement).toContainElement(newButton)
+    await user.click(plus)
+    expect(screen.getByRole("menuitem", { name: "joinViaInvite" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "newChat" })).toBeInTheDocument()
   })
 
   it("heads the rail with new-conversation and keeps the list actions beside the search row", async () => {
@@ -5107,6 +5114,7 @@ describe("drop animation, settle mark and list telemetry", () => {
     await user.click(screen.getByRole("button", { name: "archivedToggle" }))
     expect(listTelemetry.trackConversationViewChanged).toHaveBeenCalledWith("archived")
     await user.click(screen.getAllByRole("button", { name: "newChat" })[0])
+    await user.click(screen.getByRole("menuitem", { name: "newChat" }))
     expect(listTelemetry.trackConversationCreated).toHaveBeenCalledWith("direct")
   })
 

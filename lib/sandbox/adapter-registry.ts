@@ -23,6 +23,7 @@ import type {
 import { buildDockerSandboxAdapter, type DockerAdapterOutcome } from "./docker-adapter"
 import { buildE2bSandboxAdapter, type ManagedDesktopAdapterOptions } from "./e2b-adapter"
 import type { SandboxProviderAdapter } from "./lifecycle-contract"
+import { buildLumeSandboxAdapter } from "./lume-adapter"
 
 /** Builds the adapter for one row and one operation. */
 export type SandboxAdapterFactory = (
@@ -48,6 +49,8 @@ const ADAPTERS: Partial<Record<PairKey, SandboxAdapterFactory>> = {
   "docker:computer-server": buildDockerSandboxAdapter,
   "e2b:computer-server": (row, _client, outcome, _operation, options) =>
     buildE2bSandboxAdapter(row, outcome, options),
+  "lume:cua-driver": (row, _client, outcome, _operation, options) =>
+    buildLumeSandboxAdapter(row, outcome, options),
 }
 
 /** The adapter factory for a row, or null when the pair has none. */
@@ -56,6 +59,7 @@ export function sandboxAdapterFactoryFor(row: SandboxConnectionRow): SandboxAdap
   // config, so it has no adapter either. Catching it here keeps the UI from
   // offering actions that would refuse the moment they were pressed.
   if (row.config.provider !== row.provider) return null
+  if (row.config.provider === "lume" && row.config.contractVersion !== 1) return null
   return ADAPTERS[pairKey(row.provider, row.driver)] ?? null
 }
 

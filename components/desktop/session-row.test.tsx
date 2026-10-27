@@ -7,6 +7,10 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
 const logInfo = jest.fn()
+const mockPlatformAvatar = jest.fn<string | undefined, [unknown]>(() => undefined)
+jest.mock("@/hooks/connectors/use-platform-avatar", () => ({
+  usePlatformAvatar: (target: unknown) => mockPlatformAvatar(target),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -104,6 +108,7 @@ const baseSession: ChatSession = {
 }
 
 beforeEach(() => {
+  mockPlatformAvatar.mockReset()
   logInfo.mockReset()
   mockTitleRenders.mockReset()
   mockBranchQueries = 0
@@ -1105,6 +1110,31 @@ test("shows the source platform as an accessible corner badge on IM session avat
     "-bottom-1",
     "-end-1"
   )
+})
+
+test("shows the controlled group portrait using the group's id instead of its last sender", () => {
+  mockPlatformAvatar.mockReturnValue("data:image/png;base64,GROUP")
+  const { container } = setup({
+    session: {
+      ...baseSession,
+      platformBinding: {
+        platform: "onebot",
+        adapterId: "qq",
+        conversationKey: "opaque",
+        conversationRef: {
+          platform: "onebot",
+          adapterId: "qq",
+          messageType: "group",
+          groupId: 999,
+          userId: 123,
+        },
+      },
+    },
+  })
+  expect(mockPlatformAvatar).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: "group", remoteId: "999" })
+  )
+  expect(container.querySelector('img[src="data:image/png;base64,GROUP"]')).toBeInTheDocument()
 })
 
 describe("move to workspace", () => {

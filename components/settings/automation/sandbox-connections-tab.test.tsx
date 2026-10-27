@@ -119,14 +119,14 @@ test("Selkies streaming is opt-in behind the licence notice and switches the ima
   fireEvent.click(await screen.findByRole("button", { name: "Build with Selkies" }))
   await waitFor(() =>
     expect(screen.getByLabelText("Docker image")).toHaveValue(
-      "cognia-cua-desktop:0.3.46-2-selkies-2.0.0"
+      "cognia-cua-desktop:0.3.46-2-selkies-2.0.0-2"
     )
   )
   expect(toggle).toBeChecked()
   fireEvent.click(screen.getByText("Save"))
   await waitFor(() =>
     expect(actions.create).toHaveBeenCalledWith(
-      expect.objectContaining({ image: "cognia-cua-desktop:0.3.46-2-selkies-2.0.0" })
+      expect.objectContaining({ image: "cognia-cua-desktop:0.3.46-2-selkies-2.0.0-2" })
     )
   )
 })
@@ -135,7 +135,7 @@ test("turning Selkies off goes straight back to the built-in image", async () =>
   renderTab()
   fireEvent.click(screen.getByText("Add connection"))
   fireEvent.change(screen.getByLabelText("Docker image"), {
-    target: { value: "cognia-cua-desktop:0.3.46-2-selkies-2.0.0" },
+    target: { value: "cognia-cua-desktop:0.3.46-2-selkies-2.0.0-2" },
   })
   const toggle = screen.getByRole("switch", { name: "Stream with Selkies" })
   expect(toggle).toBeChecked()

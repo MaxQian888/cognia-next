@@ -173,8 +173,9 @@ export function useSandboxDesktop(
       const requestedCaptureEpoch = captureEpoch
       clearTimeout(poll)
       capturing = true
+      const requestedGeneration = generation
+      let frameRpcFailed = false
       try {
-        const requestedGeneration = generation
         if (desktop.status) {
           controlStatus = await desktop.status()
           if (
@@ -200,7 +201,10 @@ export function useSandboxDesktop(
             return
           }
         }
-        const proof = await desktop.frame()
+        const proof = await desktop.frame().catch((error: unknown) => {
+          frameRpcFailed = true
+          throw error
+        })
         const next = proof.screenshot
         if (
           !alive ||
@@ -223,10 +227,15 @@ export function useSandboxDesktop(
         setFrame(next)
         setError((previous) => (previous === "capture" ? null : previous))
       } catch {
-        if (!alive || captureEpoch !== requestedCaptureEpoch) return
+        if (!alive || generation !== requestedGeneration || captureEpoch !== requestedCaptureEpoch)
+          return
         currentFrame = null
+        currentProof = null
         setFrame(null)
-        await release()
+        // Selkies input is fenced by the Host lease, independently of this
+        // auxiliary screenshot RPC. Keep that lease while renewals succeed;
+        // invalid frame proofs and all screenshot-only failures still release.
+        if (!frameRpcFailed || !streaming.current || desktop.managed) await release()
         if (alive) setError("capture")
       } finally {
         capturing = false

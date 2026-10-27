@@ -83,6 +83,40 @@ test("uploads binary bytes to the original container with a fresh post-picker le
   await waitFor(() => expect(client.releaseControl).toHaveBeenCalledWith("a", "fresh", 3))
 })
 
+test("uses the Lume workspace default and freezes the expected resource epoch", async () => {
+  picker.mockResolvedValue([picked([new Uint8Array([0, 255, 128])])])
+  render(
+    <SandboxFileTransfer
+      connectionId="lume-connection"
+      containerId="lume:r:1:boot"
+      defaultFolder="/workspace"
+      enabled
+      releaseControl={release}
+      onBusyChange={busyChanged}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Choose file and upload" }))
+  await screen.findByText("File uploaded to the selected sandbox.")
+  expect(client.uploadFile).toHaveBeenCalledWith(
+    "lume-connection",
+    "lume:r:1:boot",
+    "fresh",
+    "/workspace/binary.dat",
+    "AP+A"
+  )
+})
+
+test("explains the clean-clone requirement when Lume refuses an upload after Shell or GUI work", async () => {
+  picker.mockResolvedValue([picked([new Uint8Array([1])])])
+  client.uploadFile.mockRejectedValue(new Error("lume_workspace_writers_active"))
+  render(panel("lume-connection", "lume:r:1:boot"))
+  fireEvent.click(screen.getByRole("button", { name: "Choose file and upload" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("Use a fresh clean clone")
+  await waitFor(() =>
+    expect(client.releaseControl).toHaveBeenCalledWith("lume-connection", "fresh", 3)
+  )
+})
+
 test("closes an over-limit stream before control acquisition or upload", async () => {
   const closed = jest.fn()
   picker.mockResolvedValue([

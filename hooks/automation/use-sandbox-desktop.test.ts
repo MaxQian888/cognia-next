@@ -192,6 +192,115 @@ test("capture failures clear stale pixels, release control, and recover automati
   expect(result.current.error).toBeNull()
 })
 
+test("an auxiliary screenshot failure keeps a streaming lease but clears native input proofs", async () => {
+  const onLeaseChange = jest.fn()
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true, onLeaseChange })
+  )
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  client.desktopFrame.mockRejectedValueOnce(new Error("screenshot transport unavailable"))
+  await tick(5000)
+  expect(result.current.frame).toBeNull()
+  expect(result.current.controlling).toBe(true)
+  expect(result.current.error).toBe("capture")
+  expect(client.releaseControl).not.toHaveBeenCalled()
+  expect(onLeaseChange).not.toHaveBeenCalledWith(null)
+  expect(client.renewControl).toHaveBeenCalled()
+  expect(await result.current.input({ kind: "click" }, { x: 1, y: 2 }, 42)).toBe(false)
+  expect(client.controlInput).not.toHaveBeenCalled()
+  await tick(5000)
+  expect(result.current.frame).toEqual(frame)
+  expect(result.current.error).toBeNull()
+  expect(result.current.controlling).toBe(true)
+  await act(async () => {
+    await result.current.release()
+  })
+  expect(client.releaseControl).toHaveBeenCalledTimes(1)
+  expect(onLeaseChange).toHaveBeenLastCalledWith(null)
+})
+
+test("a streaming frame with the wrong fence still releases control", async () => {
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true })
+  )
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  client.desktopFrame.mockImplementationOnce(async () => ({ ...proofFor(), fence: fence + 1 }))
+  await tick(5000)
+  expect(result.current.controlling).toBe(false)
+  expect(client.releaseControl).toHaveBeenCalledTimes(1)
+  expect(result.current.frame).toBeNull()
+})
+
+test("streaming screenshot failures do not prevent lease loss from releasing control", async () => {
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true })
+  )
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  client.desktopFrame.mockRejectedValue(new Error("capture failed"))
+  await tick(5000)
+  expect(result.current.controlling).toBe(true)
+  client.renewControl.mockRejectedValueOnce(new Error("lease revoked"))
+  await tick(5000)
+  expect(result.current.controlling).toBe(false)
+  expect(client.releaseControl).toHaveBeenCalledTimes(1)
+})
+
+test("a streaming lease still expires when auxiliary captures fail and renewal hangs", async () => {
+  let completeRenewal!: (lease: { token: string; fence: number; expiresAt: number }) => void
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true })
+  )
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  client.desktopFrame.mockRejectedValue(new Error("capture unavailable"))
+  client.renewControl.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        completeRenewal = resolve
+      })
+  )
+  await tick(5000)
+  expect(result.current.controlling).toBe(true)
+  await tick(10000)
+  expect(result.current.controlling).toBe(false)
+  expect(client.releaseControl).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    completeRenewal({ token: "lease", fence, expiresAt: Date.now() + 15000 })
+  })
+  expect(result.current.controlling).toBe(false)
+  expect(await result.current.input({ kind: "click" }, { x: 1, y: 2 }, 42)).toBe(false)
+})
+
+test("blur releases a streaming lease even after an auxiliary capture failure", async () => {
+  const { result } = renderHook(() =>
+    useSandboxDesktop("c1", true, undefined, true, { streaming: true })
+  )
+  await tick()
+  await act(async () => {
+    await result.current.acquire()
+  })
+  client.desktopFrame.mockRejectedValueOnce(new Error("capture unavailable"))
+  await tick(5000)
+  expect(result.current.controlling).toBe(true)
+  await act(async () => {
+    window.dispatchEvent(new Event("blur"))
+  })
+  await tick()
+  expect(result.current.controlling).toBe(false)
+  expect(client.releaseControl).toHaveBeenCalledTimes(1)
+})
+
 test("no overlapping capture requests or work on disabled connections", async () => {
   client.desktopFrame.mockImplementationOnce(() => new Promise(() => {}))
   const { result, rerender } = renderHook(({ enabled }) => useSandboxDesktop("c1", enabled), {

@@ -17,7 +17,12 @@ import {
 import { desktop } from "./client"
 import { extract } from "@/lib/ocr"
 import { OcrError } from "@/lib/ocr/errors"
-import { clearComputerUsePipState, getComputerUsePipSnapshot } from "./computer-use-pip"
+import {
+  clearComputerUsePipState,
+  getComputerUsePipSnapshot,
+  beginComputerUsePipRun,
+  getComputerUsePipCaptureSuppressed,
+} from "./computer-use-pip"
 import type { Screenshot } from "./types"
 import type { OcrResult } from "@/types/ocr"
 
@@ -156,6 +161,23 @@ describe("clickScreenTextWith", () => {
 })
 
 describe("production entries (findScreenText / clickScreenText)", () => {
+  it("keeps JPEG format and ignores an OCR frame completed after its run ended", async () => {
+    mockedScreenshot.mockResolvedValueOnce(shot({ bytes: "JPEG", format: "jpeg", capturedAt: 10 }))
+    await findScreenText({ query: "login", ctx: { surface: "computerUse", sessionKey: "jpeg" } })
+    expect(getComputerUsePipSnapshot("jpeg").frame?.src).toBe("data:image/jpeg;base64,JPEG")
+    beginComputerUsePipRun("jpeg", 1)
+    mockedScreenshot.mockImplementationOnce(async () => {
+      beginComputerUsePipRun("jpeg", 2)
+      return shot({ bytes: "LATE", capturedAt: 100 })
+    })
+    await findScreenText({ query: "login", ctx: { surface: "computerUse", sessionKey: "jpeg" } })
+    expect(getComputerUsePipSnapshot("jpeg")).toMatchObject({
+      runId: 2,
+      frame: null,
+      action: null,
+      captureSuppressed: false,
+    })
+  })
   beforeEach(() => {
     mockedScreenshot.mockReset().mockResolvedValue(shot())
     mockedClick.mockReset().mockResolvedValue(undefined)
@@ -178,7 +200,7 @@ describe("production entries (findScreenText / clickScreenText)", () => {
 
   it("publishes capture-safe find_text activity and its frame to the chat PiP", async () => {
     mockedScreenshot.mockImplementationOnce(async () => {
-      expect(getComputerUsePipSnapshot("session-1").captureSuppressed).toBe(true)
+      expect(getComputerUsePipCaptureSuppressed()).toBe(true)
       return shot({ bytes: "OCR_FRAME", width: 1280, height: 800 })
     })
 
@@ -186,6 +208,7 @@ describe("production entries (findScreenText / clickScreenText)", () => {
       query: "login",
       ctx: { surface: "computerUse", sessionKey: "session-1" },
     })
+    expect(getComputerUsePipCaptureSuppressed()).toBe(false)
 
     expect(getComputerUsePipSnapshot("session-1")).toMatchObject({
       action: "find_text",

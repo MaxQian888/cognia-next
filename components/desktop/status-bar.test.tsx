@@ -386,6 +386,17 @@ test("footer is hidden below the mobile breakpoint and shown from md up", () => 
   expect(footer.className).toContain("md:block")
 })
 
+test("gives status buttons and links a shared inset keyboard focus ring", () => {
+  render(<StatusBar />)
+  const row = screen.getByTestId("status-bar").firstElementChild
+  expect(row).toHaveClass(
+    "[&_:is(button,a)]:outline-none",
+    "[&_:is(button,a):focus-visible]:ring-1",
+    "[&_:is(button,a):focus-visible]:ring-inset",
+    "[&_:is(button,a):focus-visible]:ring-ring/50"
+  )
+})
+
 // ── collapse ───────────────────────────────────────────────────────────────
 // Hiding the bar used to unmount it, which dropped 24px out of the window in
 // one frame and shoved everything above it down. It now animates its own

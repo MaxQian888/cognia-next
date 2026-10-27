@@ -109,7 +109,11 @@ export function StatusBar({ collapsed = false }: { collapsed?: boolean }) {
                 // and tighten its padding — the bar reads as one continuous
                 // line instead of a row of boxes. See the module doc for why
                 // these descendant selectors need no `!`.
-                "[&_button]:px-1.5 [&_button]:text-[10px] [&_button]:hover:bg-transparent"
+                "[&_button]:px-1.5 [&_button]:text-[10px] [&_button]:hover:bg-transparent",
+                // Native focus outlines extend beyond this 24px row and can
+                // look like blue separators. Share an inset, theme-aware ring
+                // across buttons and links while preserving keyboard focus.
+                "[&_:is(button,a)]:outline-none [&_:is(button,a):focus-visible]:ring-1 [&_:is(button,a):focus-visible]:ring-inset [&_:is(button,a):focus-visible]:ring-ring/50"
               )}
             >
               {/* No "Tauri" / "Web" badge: it never changes for a given install, so it

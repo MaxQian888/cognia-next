@@ -142,5 +142,5 @@ it("pins the authenticated computer-server recipe revision", () => {
 })
 
 it("names the Selkies variant after the base image it is layered on", () => {
-  expect(SELKIES_DOCKER_SANDBOX_IMAGE).toBe(`${DEFAULT_DOCKER_SANDBOX_IMAGE}-selkies-2.0.0`)
+  expect(SELKIES_DOCKER_SANDBOX_IMAGE).toBe(`${DEFAULT_DOCKER_SANDBOX_IMAGE}-selkies-2.0.0-2`)
 })

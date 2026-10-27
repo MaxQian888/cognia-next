@@ -53,6 +53,8 @@ export interface SandboxStreamGrant {
   viewerId: string
   url: string
   role: SandboxStreamRole
+  /** Missing on older images: preserve their stream without liveness deadlines. */
+  healthVersion?: 1
 }
 
 /** The Host's refusal when the sandbox image has no Selkies stream. */

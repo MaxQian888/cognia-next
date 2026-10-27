@@ -7,6 +7,8 @@ import { JumpFlash } from "@/components/chat/jump-flash"
 import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-handoff-source-dialog"
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { conversationPlatformAvatarTarget } from "@/lib/connectors/platform-avatar"
+import { usePlatformAvatar } from "@/hooks/connectors/use-platform-avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -313,6 +315,9 @@ function SessionRowImpl({
   settleFlash,
 }: SessionRowProps) {
   const t = useTranslations("desktop.sessionRow")
+  const platformAvatarImageUrl = usePlatformAvatar(
+    conversationPlatformAvatarTarget(session.platformBinding)
+  )
   // "3 unread" — the rail's wording, so a screen reader hears the same words for
   // a row's count as for its team's.
   const tRail = useTranslations("desktop.guildRail")
@@ -693,7 +698,10 @@ function SessionRowImpl({
                 ) : session.platformBinding ? (
                   <span className="relative flex">
                     <AvatarBadge
-                      subject={{ name: session.title || session.platformBinding.conversationKey }}
+                      subject={{
+                        name: session.title || session.platformBinding.conversationKey,
+                        avatarImageUrl: platformAvatarImageUrl,
+                      }}
                       size={20}
                       textClassName="text-[9px]"
                     />

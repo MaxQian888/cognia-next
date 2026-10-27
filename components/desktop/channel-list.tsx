@@ -103,6 +103,7 @@ import { useSidebarNavHost } from "@/hooks/shell/use-sidebar-nav-host"
 import { useMutedTeamIds } from "@/hooks/shell/use-team-mute"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { SidebarNavSection, SidebarRow } from "@/components/shell/sidebar-nav-section"
+import { ConversationCreateMenu } from "@/components/chat/conversation-create-menu"
 import { SidebarRowsScope } from "@/components/shell/sidebar-row-roving"
 import {
   GuildMutedGlyph,
@@ -3175,10 +3176,8 @@ const NEW_CHAT_ACCELERATOR: Chord = "ctrl+n"
  * right, because `Button`'s `has-[>svg]:px-3` fires on a bare icon child
  * that `SidebarRow`'s icon span shields it from.
  *
- * The trailing slot carries the accelerator as a keycap on the desktop app,
- * where ⌘N / Ctrl+N really opens a new chat — it says the same "this is an
- * action" the "+" did, and teaches the faster path. Without an accelerator
- * (the web shell) it stays the "+".
+ * The trailing keycap names the desktop accelerator. A separate "+" beside
+ * the row opens creation and invitation actions without nesting buttons.
  *
  * Always a direct chat: the scope tree shows every squad at once, so there is
  * no selected scope for the button to inherit — squad conversations start
@@ -3191,7 +3190,7 @@ function SidebarNewConversationButton({ onNewDirect }: { onNewDirect: () => void
   const label = t("newChat")
   const shortcut = desktop ? formatKeybinding(NEW_CHAT_ACCELERATOR) : ""
   return (
-    <div className="shrink-0 px-2 pt-1.5 pb-0.5">
+    <div className="flex shrink-0 items-center gap-0.5 px-2 pt-1.5 pb-0.5">
       <SidebarRow
         onClick={onNewDirect}
         title={shortcut ? tRail("shortcutHint", { label, shortcut }) : label}
@@ -3210,13 +3209,23 @@ function SidebarNewConversationButton({ onNewDirect }: { onNewDirect: () => void
             >
               {shortcut}
             </Kbd>
-          ) : (
-            <PlusIcon className="size-3.5 text-muted-foreground/70" aria-hidden />
-          )
+          ) : null
         }
-        className="group/new-chat"
+        className="group/new-chat min-w-0 flex-1"
         testId="sidebar-new-conversation"
       />
+      <ConversationCreateMenu onNewConversation={onNewDirect} newConversationLabel={label}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0 text-muted-foreground"
+          aria-label={t("createMenu")}
+          title={t("createMenu")}
+        >
+          <PlusIcon className="size-3.5" aria-hidden />
+        </Button>
+      </ConversationCreateMenu>
     </div>
   )
 }
@@ -3696,22 +3705,20 @@ function HeaderActions({
     </DropdownMenu>
   )
   const newButton = (
-    <Button
-      size="icon"
-      variant="ghost"
-      className="size-7"
-      onClick={() => {
+    <ConversationCreateMenu
+      newConversationLabel={ctaLabel}
+      onNewConversation={() => {
         if (selectedGuild.kind === "team") {
           onNewTeamConversation(selectedGuild.teamId)
         } else {
           onNewDirect()
         }
       }}
-      aria-label={ctaLabel}
-      title={ctaLabel}
     >
-      <PlusIcon className="size-4" />
-    </Button>
+      <Button size="icon" variant="ghost" className="size-7" aria-label={ctaLabel} title={ctaLabel}>
+        <PlusIcon className="size-4" />
+      </Button>
+    </ConversationCreateMenu>
   )
   return (
     <div className={cn("flex shrink-0 items-center gap-0.5", className)}>

@@ -19,6 +19,21 @@ function row(overrides: Partial<SandboxConnectionRow> = {}): SandboxConnectionRo
 }
 
 describe("sandboxAdapterFactoryFor", () => {
+  it("resolves versioned Lume driver connections without adopting legacy rows", () => {
+    const lume = row({
+      provider: "lume",
+      driver: "cua-driver",
+      config: {
+        provider: "lume",
+        vmName: "owned",
+        contractVersion: 1,
+      } as SandboxConnectionRow["config"],
+    })
+    expect(sandboxAdapterFactoryFor(lume)).toBeInstanceOf(Function)
+    expect(
+      sandboxAdapterFactoryFor({ ...lume, config: { provider: "lume", vmName: "legacy" } })
+    ).toBeNull()
+  })
   it("resolves the Docker/computer-server adapter", () => {
     expect(sandboxAdapterFactoryFor(row())).toBeInstanceOf(Function)
     expect(hasSandboxAdapter(row())).toBe(true)
@@ -57,7 +72,11 @@ describe("sandboxAdapterFactoryFor", () => {
     // A pair appearing here without a working adapter would let the UI enable
     // controls that cannot run, which is the failure mode the capability
     // contract exists to prevent.
-    expect(adapterPairs()).toEqual(["docker:computer-server", "e2b:computer-server"])
+    expect(adapterPairs()).toEqual([
+      "docker:computer-server",
+      "e2b:computer-server",
+      "lume:cua-driver",
+    ])
   })
 })
 
@@ -99,6 +118,10 @@ describe("providers that are declared but not implemented", () => {
   })
 
   it("lists lifecycle adapters while deferred providers stay absent", () => {
-    expect(adapterPairs()).toEqual(["docker:computer-server", "e2b:computer-server"])
+    expect(adapterPairs()).toEqual([
+      "docker:computer-server",
+      "e2b:computer-server",
+      "lume:cua-driver",
+    ])
   })
 })

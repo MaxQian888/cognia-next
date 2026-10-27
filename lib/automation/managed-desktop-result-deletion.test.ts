@@ -74,6 +74,10 @@ it("commits the outbox with canonical deletion then fences native evidence befor
   expect(queued).toHaveLength(1)
   expect(queued[0].phase).toBe("committed")
   expect(commands).toContain("managed_desktop_handoff_revoke_source")
+  expect(localTransport.call).toHaveBeenCalledWith("managed_desktop_local_call", {
+    name: "managed_desktop_handoff_source_host",
+    args: {},
+  })
   expect(await isManagedDesktopResultDeletionPending(getDb(), { conversationId: row.id })).toBe(
     true
   )

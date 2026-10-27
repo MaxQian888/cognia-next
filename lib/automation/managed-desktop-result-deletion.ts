@@ -125,7 +125,7 @@ async function call<T>(
   const detach = onTransportChange(() => {
     invalidated = true
   })
-  const invoke = <R>(command: string, input: Record<string, unknown>) =>
+  const callHost = <R>(command: string, input: Record<string, unknown>) =>
     remote
       ? remote.call<R>(command, input)
       : isTauri() && command.startsWith("managed_desktop_")
@@ -152,11 +152,11 @@ async function call<T>(
   }
   try {
     check()
-    const identity = await invoke<{ hostId: string }>("managed_desktop_handoff_source_host", {})
+    const identity = await callHost<{ hostId: string }>("managed_desktop_handoff_source_host", {})
     check()
     if (identity.hostId !== row.host.hostId)
       throw new Error("managed_desktop_deletion_original_host_required")
-    const result = await invoke<T>(name, args)
+    const result = await callHost<T>(name, args)
     check()
     return result
   } finally {

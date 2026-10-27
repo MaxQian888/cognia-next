@@ -38,7 +38,7 @@ import type {
  * current revision is recomputed from defaults. Handshake narrowing is
  * per-connection and still only ever removes, within a revision.
  */
-export const SANDBOX_CAPABILITY_REVISION = 4
+export const SANDBOX_CAPABILITY_REVISION = 5
 
 /** Every operation, in a stable order for iteration and display. */
 export const SANDBOX_LIFECYCLE_OPERATIONS: readonly SandboxLifecycleOperation[] = [
@@ -136,6 +136,18 @@ export function defaultSandboxCapabilities(
   provider: SandboxConnectionProvider,
   driver: SandboxConnectionDriver
 ): SandboxCapabilities {
+  if (provider === "lume" && driver === "cua-driver")
+    return caps({
+      create: true,
+      connect: true,
+      start: true,
+      stop: true,
+      delete: true,
+      health: true,
+      gui: true,
+      workspaceRead: true,
+      workspaceExec: true,
+    })
   const base = PROVIDER_CAPABILITIES[provider]
   const restrictions = DRIVER_RESTRICTIONS[driver]
   if (!restrictions) return base

@@ -136,7 +136,8 @@ function SandboxConnectionDetail({
   const [busy, setBusy] = useState<SandboxLifecycleOperation | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const alive = useRef(true)
-  const pending = useRef(false)
+  const pending = useRef<SandboxLifecycleOperation | null>(null)
+  const urgentPending = useRef(false)
   useEffect(() => {
     alive.current = true
     return () => {
@@ -167,8 +168,11 @@ function SandboxConnectionDetail({
   const docker = connection.config.provider === "docker" ? connection.config : null
 
   async function run(spec: ActionSpec) {
-    if (!connection || pending.current || !alive.current) return
-    pending.current = true
+    if (!connection || !alive.current) return
+    const urgent = connection.config.provider === "lume" && spec.operation === "stop"
+    if (urgent ? urgentPending.current : pending.current !== null || urgentPending.current) return
+    if (urgent) urgentPending.current = true
+    else pending.current = spec.operation
     setBusy(spec.operation)
     try {
       await spec.run(actions, connection.id)
@@ -181,8 +185,9 @@ function SandboxConnectionDetail({
     } catch (error) {
       if (alive.current) onError(error instanceof Error ? error.message : String(error))
     } finally {
-      pending.current = false
-      if (alive.current) setBusy(null)
+      if (urgent) urgentPending.current = false
+      else pending.current = null
+      if (alive.current) setBusy(urgentPending.current ? "stop" : pending.current)
     }
   }
 
@@ -216,7 +221,15 @@ function SandboxConnectionDetail({
                     size="sm"
                     variant={spec.destructive ? "destructive" : "outline"}
                     className="w-32 shrink-0 justify-start"
-                    disabled={!allowed || busy !== null}
+                    disabled={
+                      !allowed ||
+                      (busy !== null &&
+                        !(
+                          connection.config.provider === "lume" &&
+                          spec.operation === "stop" &&
+                          busy !== "stop"
+                        ))
+                    }
                     data-testid={`sandbox-action-${spec.operation}`}
                     title={
                       allowed

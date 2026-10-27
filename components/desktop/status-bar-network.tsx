@@ -70,37 +70,44 @@ export function StatusBarNetwork() {
           data-testid="status-network"
           aria-label={label}
           title={label}
-          className="flex h-6 shrink-0 items-center gap-1.5 px-2 text-muted-foreground transition-colors hover:text-foreground"
+          // Fixed tracks keep the neighboring host and sync controls still as
+          // digit counts, rate units and probe states change. The latency track
+          // stays reserved even when there is no target to measure.
+          className="grid h-6 shrink-0 grid-cols-[4.5rem_4.5rem_4.75rem] items-center gap-1 px-2 text-muted-foreground transition-colors hover:text-foreground"
         >
-          <span className="flex items-center gap-0.5 tabular-nums">
-            <ArrowDownIcon aria-hidden className="size-2.5" />
-            {down}
+          <span className="flex min-w-0 items-center gap-0.5">
+            <ArrowDownIcon aria-hidden className="size-2.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-right tabular-nums">{down}</span>
           </span>
-          <span className="flex items-center gap-0.5 tabular-nums">
-            <ArrowUpIcon aria-hidden className="size-2.5" />
-            {up}
+          <span className="flex min-w-0 items-center gap-0.5">
+            <ArrowUpIcon aria-hidden className="size-2.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-right tabular-nums">{up}</span>
           </span>
-          {target ? (
-            <>
-              <span aria-hidden className="text-muted-foreground/50">
-                ·
-              </span>
-              <span
-                className="flex items-center gap-1 tabular-nums"
-                data-testid="status-network-latency"
-              >
+          <span className="flex min-w-0 items-center gap-1">
+            {target ? (
+              <>
+                <span aria-hidden className="shrink-0 text-muted-foreground/50">
+                  ·
+                </span>
                 <span
-                  aria-hidden
-                  data-quality={quality ?? "pending"}
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    quality ? QUALITY_DOT[quality] : "bg-muted-foreground/40"
-                  )}
-                />
-                {latencyText}
-              </span>
-            </>
-          ) : null}
+                  className="flex min-w-0 flex-1 items-center gap-1"
+                  data-testid="status-network-latency"
+                >
+                  <span
+                    aria-hidden
+                    data-quality={quality ?? "pending"}
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      quality ? QUALITY_DOT[quality] : "bg-muted-foreground/40"
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-right tabular-nums">
+                    {latencyText}
+                  </span>
+                </span>
+              </>
+            ) : null}
+          </span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={4} className="w-72 space-y-3 p-3 text-xs">

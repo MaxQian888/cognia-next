@@ -18,7 +18,32 @@ import {
   type SandboxConnectionOperationResult,
 } from "@/lib/sandbox/connection-lifecycle"
 import { DEFAULT_DOCKER_SANDBOX_IMAGE } from "@/lib/sandbox/docker-adapter"
+import { projectLumeResource } from "@/lib/sandbox/lume-projection"
 import type { SandboxProviderConfig, SandboxWorkspaceMount } from "@/types/sandbox"
+
+// Urgent Lume Stop invalidates queued intents and late settlements in every
+// mounted registry instance without waiting for its lifecycle FIFO.
+const lifecycleEpochs = new Map<string, number>()
+const stateWrites = new Map<string, Promise<unknown>>()
+function settleState(
+  id: string,
+  epoch: number,
+  patch: Parameters<typeof updateSandboxConnectionState>[1]
+) {
+  const previous = stateWrites.get(id) ?? Promise.resolve()
+  const result = previous
+    .catch(() => undefined)
+    .then(async () => {
+      if ((lifecycleEpochs.get(id) ?? 0) === epoch) await updateSandboxConnectionState(id, patch)
+    })
+  stateWrites.set(id, result)
+  void result
+    .finally(() => {
+      if (stateWrites.get(id) === result) stateWrites.delete(id)
+    })
+    .catch(() => undefined)
+  return result
+}
 
 export interface CreateSandboxConnectionInput {
   name: string
@@ -127,6 +152,7 @@ export function useSandboxConnections() {
       // lifecycle contract refuses `start` while running.
       if (row.state === "running") return null
       const result = await runSandboxConnectionOperation(row, "start")
+      if (row.config.provider === "lume") return lumeSettlement(row, result)
       if (row.config.provider !== "docker" || result.port === undefined) {
         throw new Error("Docker sandbox start completed without a mapped port.")
       }
@@ -163,26 +189,36 @@ export function useSandboxConnections() {
   }, [])
 
   const stop = useCallback(async (id: string): Promise<void> => {
-    await runLifecycle(id, "stopping", async (row) => {
-      // A connection that was never initialized has nothing to stop. The
-      // lifecycle contract refuses `stop` in that state and the toolbar still
-      // offers the button, so settle the row instead of erroring it.
-      if (row.state !== "uninitialized") {
-        await runSandboxConnectionOperation(row, "stop")
-      }
-      return {
-        state: "stopped",
-        lastHealthStatus: "unknown",
-        // The mapped port is gone, because Docker publishes none for a stopped
-        // container. The container id stays: the container itself survives a
-        // stop now, along with everything written inside it, and dropping the
-        // id would orphan a machine the row is still responsible for.
-        config: row.config.provider === "docker" ? { ...row.config, port: 0 } : row.config,
-      }
-    })
+    const current = await getSandboxConnection(id)
+    const urgent = current?.config.provider === "lume"
+    if (urgent) lifecycleEpochs.set(id, (lifecycleEpochs.get(id) ?? 0) + 1)
+    await runLifecycle(
+      id,
+      "stopping",
+      async (row) => {
+        // A connection that was never initialized has nothing to stop. The
+        // lifecycle contract refuses `stop` in that state and the toolbar still
+        // offers the button, so settle the row instead of erroring it.
+        if (row.state !== "uninitialized") {
+          const result = await runSandboxConnectionOperation(row, "stop")
+          if (row.config.provider === "lume") return lumeSettlement(row, result)
+        }
+        return {
+          state: "stopped",
+          lastHealthStatus: "unknown",
+          // The mapped port is gone, because Docker publishes none for a stopped
+          // container. The container id stays: the container itself survives a
+          // stop now, along with everything written inside it, and dropping the
+          // id would orphan a machine the row is still responsible for.
+          config: row.config.provider === "docker" ? { ...row.config, port: 0 } : row.config,
+        }
+      },
+      urgent
+    )
   }, [])
 
   const refreshHealth = useCallback(async (id: string): Promise<void> => {
+    const epoch = lifecycleEpochs.get(id) ?? 0
     await serializeSandboxConnectionOperation(id, async () => {
       const row = await getSandboxConnection(id)
       if (!row) return
@@ -191,19 +227,24 @@ export function useSandboxConnections() {
       // action a user reaches for when the machine is already broken.
       const probe = await runSandboxConnectionOperation(row, "health")
         .then((result) => ({
-          ok: result.health === true,
+          ok: result.healthReport?.reachable ?? result.health === true,
+          lume: result.lume,
           report: result.healthReport,
           containerState: result.containerState,
           error: undefined as string | undefined,
         }))
         .catch((error: unknown) => ({
           ok: false,
+          lume: undefined,
           report: undefined,
           containerState: undefined,
           error: error instanceof Error ? error.message : String(error),
         }))
 
+      if ((lifecycleEpochs.get(id) ?? 0) !== epoch) return
+
       let observedConfig: SandboxProviderConfig | undefined
+      if (probe.lume) observedConfig = lumeSettlement(row, { lume: probe.lume }).config
       if (row.config.provider === "docker") {
         if (probe.containerState === null) {
           observedConfig = { ...row.config, port: 0 }
@@ -215,7 +256,7 @@ export function useSandboxConnections() {
         }
       }
 
-      await updateSandboxConnectionState(id, {
+      await settleState(id, epoch, {
         lastHealthStatus: probe.ok ? "ok" : "unreachable",
         // Clearing this on success is the point: the machine answered. On
         // failure it must NOT be cleared, because this is the moment the user
@@ -263,26 +304,37 @@ type LifecycleSettlement = Parameters<typeof updateSandboxConnectionState>[1] ex
 async function runLifecycle(
   id: string,
   transitional: SandboxConnectionRow["state"],
-  action: (row: SandboxConnectionRow) => Promise<LifecycleSettlement | null>
+  action: (row: SandboxConnectionRow) => Promise<LifecycleSettlement | null>,
+  urgent = false
 ): Promise<void> {
-  await serializeSandboxConnectionOperation(id, async () => {
+  const epoch = lifecycleEpochs.get(id) ?? 0
+  const current = () => (lifecycleEpochs.get(id) ?? 0) === epoch
+  const run = async () => {
+    if (!current()) return
     const row = await getSandboxConnection(id)
     if (!row) return
-    await updateSandboxConnectionState(id, {
+    if (!current()) return
+    const transition = settleState(id, epoch, {
       state: transitional,
       ...(transitional === "starting" ? { lastHealthStatus: "starting" as const } : {}),
       now: Date.now(),
     })
+    // Native preemption does not wait for a stalled projection write.
+    if (!urgent) await transition
+    else void transition.catch(() => undefined)
+    if (!current()) return
     try {
       const settlement = await action(row)
+      if (!current()) return
       // `null` means the action decided there was nothing to do. Put the row
       // back where it was rather than leaving it stuck mid-transition.
-      await updateSandboxConnectionState(id, {
+      await settleState(id, epoch, {
         ...(settlement ?? { state: row.state, lastHealthStatus: row.lastHealthStatus }),
         now: Date.now(),
       })
     } catch (error) {
-      await updateSandboxConnectionState(id, {
+      if (!current()) return
+      await settleState(id, epoch, {
         state: "error",
         lastHealthStatus: "error",
         lastHealthError: error instanceof Error ? error.message : String(error),
@@ -291,7 +343,24 @@ async function runLifecycle(
       })
       throw error
     }
-  })
+  }
+  if (urgent) await run()
+  else await serializeSandboxConnectionOperation(id, run)
+}
+
+function lumeSettlement(
+  row: SandboxConnectionRow,
+  result: SandboxConnectionOperationResult
+): LifecycleSettlement {
+  if (!result.lume || row.config.provider !== "lume") throw new Error("lume_resource_reply_missing")
+  const projected = projectLumeResource(result.lume, row.config.featureEnabled !== false, row)
+  return {
+    state: projected.state,
+    config: projected.config,
+    lastHealthStatus: projected.lastHealthStatus,
+    lastHealthError: projected.lastHealthError ?? null,
+    lastHealthCheckAt: projected.lastHealthCheckAt,
+  }
 }
 
 /** Fold a placement the adapter reported back into the row's config. */

@@ -53,6 +53,7 @@ import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbo
 import { ManagedDesktopSettings } from "./managed-desktop-settings"
 import type { ManagedDesktopTarget } from "@/lib/automation/managed-desktop-client"
 import { SandboxConnectionSheet } from "./sandbox-connection-sheet"
+import { LumeSettings } from "./lume-settings"
 
 function statusVariant(status: SandboxHealthStatus): "default" | "secondary" | "destructive" {
   if (status === "ok") return "default"
@@ -371,6 +372,7 @@ function LocalSandboxConnectionsTab({
       )}
 
       <ManagedDesktopSettings target={managedDesktopTarget} />
+      <LumeSettings framed={framed} />
 
       <SandboxConnectionSheet
         connection={selected}

@@ -33,6 +33,59 @@ export interface PictureInPictureMediaSize {
   mediaHeight: number
 }
 
+/** Bounded, non-overlapping cells; extra targets remain reachable in the selector. */
+export function computePictureInPictureTiles(
+  host: PictureInPictureRect,
+  obstacles: readonly PictureInPictureRect[],
+  count: number
+) {
+  const safe = { ...host }
+  const gap = 12
+  for (const obstacle of obstacles) {
+    if (obstacle.width < host.width / 2) continue
+    if (obstacle.y <= host.y && obstacle.y + obstacle.height > safe.y) {
+      const top = obstacle.y + obstacle.height + gap
+      safe.height = Math.max(1, safe.y + safe.height - top)
+      safe.y = top
+    } else if (obstacle.y + obstacle.height >= host.y + host.height) {
+      safe.height = Math.max(1, Math.min(safe.height, obstacle.y - gap - safe.y))
+    }
+  }
+  const margin = Math.min(
+    24,
+    Math.max(0, (safe.width - 220) / 2),
+    Math.max(0, (safe.height - 150) / 2)
+  )
+  const width = Math.max(1, safe.width - margin * 2)
+  const height = Math.max(1, safe.height - margin * 2 - 40)
+  const columns = Math.max(1, Math.min(2, Math.floor((width + gap) / (220 + gap))))
+  const rows = Math.max(1, Math.min(2, Math.floor((height + gap) / (150 + gap))))
+  const capacity = Math.min(4, Math.max(1, count), columns * rows)
+  const usedColumns = Math.min(columns, capacity)
+  const usedRows = Math.ceil(capacity / usedColumns)
+  const cellWidth = Math.min(250, Math.max(1, (width - (usedColumns - 1) * gap) / usedColumns))
+  const cellHeight = Math.min(192, Math.max(1, (height - (usedRows - 1) * gap) / usedRows))
+  const group = {
+    width: cellWidth * usedColumns + gap * (usedColumns - 1),
+    height: cellHeight * usedRows + gap * (usedRows - 1) + 40,
+  }
+  const anchor = computePictureInPictureAnchors(safe, obstacles, group).bottomRight
+  const tiles = Array.from({ length: capacity }, (_, index) => ({
+    x: anchor.x - host.x + (index % usedColumns) * (cellWidth + gap),
+    y: anchor.y - host.y + Math.floor(index / usedColumns) * (cellHeight + gap),
+    width: cellWidth,
+    height: cellHeight,
+  }))
+  return {
+    tiles,
+    selector: {
+      x: anchor.x - host.x,
+      y: anchor.y - host.y + group.height - 32,
+      width: group.width,
+    },
+  }
+}
+
 /**
  * Size the screenshot viewport first, then add toolbar chrome outside it.
  * This keeps the media box at the source ratio while ensuring portrait and
@@ -58,18 +111,27 @@ export function computePictureInPictureSize({
   mediaWidth *= grow
   mediaHeight *= grow
 
-  const availableWidth = Math.max(1, hostWidth - PICTURE_IN_PICTURE_EDGE_MARGIN * 2)
-  const availableMediaHeight = Math.max(
-    1,
-    hostHeight - PICTURE_IN_PICTURE_EDGE_MARGIN * 2 - PICTURE_IN_PICTURE_CHROME_HEIGHT
+  const horizontalMargin = Math.min(
+    PICTURE_IN_PICTURE_EDGE_MARGIN,
+    Math.max(0, (hostWidth - PICTURE_IN_PICTURE_MIN_WIDTH) / 2)
   )
+  const verticalMargin = Math.min(
+    PICTURE_IN_PICTURE_EDGE_MARGIN,
+    Math.max(
+      0,
+      (hostHeight - PICTURE_IN_PICTURE_CHROME_HEIGHT - PICTURE_IN_PICTURE_MIN_MEDIA_HEIGHT) / 2
+    )
+  )
+  const chromeHeight = Math.min(PICTURE_IN_PICTURE_CHROME_HEIGHT, Math.max(0, hostHeight - 1))
+  const availableWidth = Math.max(1, hostWidth - horizontalMargin * 2)
+  const availableMediaHeight = Math.max(1, hostHeight - verticalMargin * 2 - chromeHeight)
   const shrink = Math.min(1, availableWidth / mediaWidth, availableMediaHeight / mediaHeight)
   mediaWidth = Math.max(1, Math.floor(mediaWidth * shrink))
   mediaHeight = Math.max(1, Math.floor(mediaHeight * shrink))
 
   return {
     width: mediaWidth,
-    height: mediaHeight + PICTURE_IN_PICTURE_CHROME_HEIGHT,
+    height: mediaHeight + chromeHeight,
     mediaWidth,
     mediaHeight,
   }
@@ -91,10 +153,18 @@ function resolveObstacles(
   obstacles: readonly PictureInPictureRect[],
   size: { width: number; height: number }
 ): PictureInPicturePoint {
-  const minX = host.x + PICTURE_IN_PICTURE_EDGE_MARGIN
-  const minY = host.y + PICTURE_IN_PICTURE_EDGE_MARGIN
-  const maxX = host.x + host.width - size.width - PICTURE_IN_PICTURE_EDGE_MARGIN
-  const maxY = host.y + host.height - size.height - PICTURE_IN_PICTURE_EDGE_MARGIN
+  const marginX = Math.min(
+    PICTURE_IN_PICTURE_EDGE_MARGIN,
+    Math.max(0, (host.width - size.width) / 2)
+  )
+  const marginY = Math.min(
+    PICTURE_IN_PICTURE_EDGE_MARGIN,
+    Math.max(0, (host.height - size.height) / 2)
+  )
+  const minX = host.x + marginX
+  const minY = host.y + marginY
+  const maxX = host.x + host.width - size.width - marginX
+  const maxY = host.y + host.height - size.height - marginY
   let point = { x: clamp(initial.x, minX, maxX), y: clamp(initial.y, minY, maxY) }
 
   for (let iteration = 0; iteration < 6; iteration++) {

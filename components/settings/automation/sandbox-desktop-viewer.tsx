@@ -57,17 +57,23 @@ export function SandboxDesktopViewer({
   connectionId,
   enabled,
   containerId,
+  transferTargetId,
+  transferFolder,
   openDesktop,
   observeOnly = false,
   streamDeps,
+  allowStreaming = true,
 }: {
   connectionId: string
   enabled: boolean
   containerId?: string
+  transferTargetId?: string
+  transferFolder?: string
   openDesktop?: OpenSandboxDesktop
   observeOnly?: boolean
   /** Test seam for the stream grant calls. */
   streamDeps?: SandboxDesktopStreamDeps
+  allowStreaming?: boolean
 }) {
   const t = useTranslations("automation.sandboxConnections.desktopViewer")
   const mobileObservation =
@@ -75,11 +81,24 @@ export function SandboxDesktopViewer({
     (observeOnly ||
       isCapacitor() ||
       (typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)))
-  // Only the client-local Docker desktop has a Selkies variant.
-  const stream = useSandboxDesktopStream(connectionId, enabled && !openDesktop, streamDeps)
-  const streaming = stream.grant !== null
   const releaseRef = useRef<(() => Promise<void> | undefined) | null>(null)
-  const { claim: claimStream, reopen: reopenStream } = stream
+  const releaseBeforeRecovery = useCallback(async () => {
+    await releaseRef.current?.()
+  }, [])
+  // Only the client-local Docker desktop has a Selkies variant.
+  const {
+    grant: streamGrant,
+    status: streamStatus,
+    attachFrame: attachStreamFrame,
+    claim: claimStream,
+    reopen: reopenStream,
+  } = useSandboxDesktopStream(
+    connectionId,
+    enabled && allowStreaming && !openDesktop,
+    streamDeps,
+    releaseBeforeRecovery
+  )
+  const streaming = streamGrant !== null
   const onLeaseChange = useCallback(
     (lease: SandboxControlLease | null) => {
       if (!lease) {
@@ -96,7 +115,7 @@ export function SandboxDesktopViewer({
   const { frame, controlling, acquiring, error, acquire, release, refresh, input, status } =
     useSandboxDesktop(connectionId, enabled, openDesktop, !mobileObservation, {
       streaming,
-      onLeaseChange: openDesktop ? undefined : onLeaseChange,
+      onLeaseChange: openDesktop || !allowStreaming ? undefined : onLeaseChange,
     })
   useLayoutEffect(() => {
     releaseRef.current = release
@@ -248,6 +267,18 @@ export function SandboxDesktopViewer({
       <p className="text-xs text-muted-foreground">
         {streaming ? t("streamCadence") : t("cadence")}
       </p>
+      {streamStatus === "connecting" || streamStatus === "opening" ? (
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          {t("streamConnecting")}
+        </p>
+      ) : streamStatus === "error" ? (
+        <p className="text-xs text-destructive" role="alert">
+          {t("streamRecovering")}
+        </p>
+      ) : null}
+      {streamStatus === "unmonitored" ? (
+        <p className="text-xs text-muted-foreground">{t("streamLegacy")}</p>
+      ) : null}
       {openDesktop ? (
         <p className="text-xs text-muted-foreground" data-dormant="managed-desktop-agent-control">
           {t("agentDormant")}
@@ -263,17 +294,22 @@ export function SandboxDesktopViewer({
       ) : null}
       {error ? (
         <p role="alert" className="text-xs text-destructive">
-          {t(`error.${error}`)}
+          {t(
+            error === "capture" && streaming && controlling
+              ? "error.captureStreaming"
+              : `error.${error}`
+          )}
         </p>
       ) : null}
-      {stream.grant ? (
+      {streamGrant ? (
         // Remounted per grant: a role change closes Selkies' socket anyway.
         <iframe
-          key={stream.grant.url}
-          src={stream.grant.url}
+          ref={attachStreamFrame}
+          key={streamGrant.url}
+          src={streamGrant.url}
           title={t("streamTitle")}
           data-sandbox-stream={connectionId}
-          data-stream-role={stream.grant.role}
+          data-stream-role={streamGrant.role}
           sandbox="allow-scripts allow-same-origin allow-pointer-lock"
           allow="fullscreen"
           referrerPolicy="no-referrer"
@@ -314,7 +350,11 @@ export function SandboxDesktopViewer({
           size="sm"
           disabled={
             !enabled ||
-            !frame ||
+            (!frame && !controlling) ||
+            (!controlling &&
+              streaming &&
+              streamStatus !== "open" &&
+              streamStatus !== "unmonitored") ||
             acquiring ||
             transferring ||
             mobileObservation ||
@@ -368,9 +408,10 @@ export function SandboxDesktopViewer({
       ) : null}
       {!openDesktop ? (
         <SandboxFileTransfer
-          key={`${connectionId}:${containerId ?? ""}`}
+          key={`${connectionId}:${transferTargetId ?? containerId ?? ""}`}
           connectionId={connectionId}
-          containerId={containerId}
+          containerId={transferTargetId ?? containerId}
+          defaultFolder={transferFolder}
           enabled={enabled}
           releaseControl={release}
           onBusyChange={setTransferring}

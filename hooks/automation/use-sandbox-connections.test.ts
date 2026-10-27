@@ -1,4 +1,5 @@
-import { renderHook, act } from "@testing-library/react"
+jest.mock("@/lib/automation/lume-client", () => ({ lumeClient: { run: jest.fn() } }))
+import { renderHook, act, waitFor } from "@testing-library/react"
 import type { SandboxConnectionRow } from "@/types/sandbox"
 
 jest.mock("dexie-react-hooks", () => ({
@@ -127,7 +128,7 @@ test("create writes a docker row with defaults", async () => {
   expect(lastWrite()).toMatchObject({
     name: "home",
     provider: "docker",
-    image: "cognia-cua-desktop:0.3.46-1",
+    image: "cognia-cua-desktop:0.3.46-2",
     host: "127.0.0.1",
     port: 0,
     lastHealthStatus: "unknown",
@@ -431,4 +432,239 @@ test("a confirmed absent container clears stale placement without losing its con
     port: 0,
   })
   expect(lastWrite()?.state).toBe("uninitialized")
+})
+
+function nativeLumeRow(state: "running" | "stopped") {
+  return dockerRow({
+    provider: "lume",
+    driver: "cua-driver",
+    state,
+    config: {
+      provider: "lume",
+      vmName: "cognia-owned",
+      contractVersion: 1,
+      resourceId: "owned-resource",
+      generation: 1,
+      bootEpoch: "before",
+      featureEnabled: true,
+      readiness: { vm: state === "running", ssh: true, helper: true, gui: true },
+    },
+    capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+  })
+}
+function nativeLumeReceipt(state: "running" | "stopped") {
+  return {
+    id: "native-op",
+    state: "succeeded",
+    stage: "finished",
+    output: null,
+    errorCode: null,
+    resource: {
+      resourceId: "owned-resource",
+      generation: 1,
+      bootEpoch: "after",
+      connectionId: "c1",
+      vmName: "cognia-owned",
+      state,
+      memoryMb: 8192,
+      quarantine: false,
+      readiness: { vm: state === "running", ssh: false, helper: false, gui: false },
+      lastErrorCode: null,
+      groupId: null,
+    },
+  }
+}
+test("urgent Stop invalidates a Start paused in its first database read", async () => {
+  seed(nativeLumeRow("stopped"))
+  const stale = stored
+  let release!: (row: SandboxConnectionRow | undefined) => void
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve
+      })
+  )
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  native.mockResolvedValue(nativeLumeReceipt("stopped"))
+  const { result } = renderHook(() => useSandboxConnections())
+  const starting = result.current.start("c1")
+  await waitFor(() => expect(release).toBeDefined())
+  await act(async () => {
+    await result.current.stop("c1")
+  })
+  release(stale)
+  await act(async () => {
+    await starting
+  })
+  expect(native.mock.calls.map(([operation]) => operation.kind)).toEqual(["stop"])
+  expect(stored?.state).toBe("stopped")
+  expect(stored?.config).toMatchObject({ bootEpoch: "after" })
+})
+test("urgent Stop dispatches during a blocked Start projection write and wins final settlement", async () => {
+  seed(nativeLumeRow("stopped"))
+  const initialUpdate = update.getMockImplementation()!
+  let release!: () => void
+  update.mockImplementationOnce(
+    (id: string, patch: Record<string, unknown>) =>
+      new Promise<SandboxConnectionRow | undefined>((resolve) => {
+        release = () => {
+          void Promise.resolve(initialUpdate(id, patch)).then(resolve)
+        }
+      })
+  )
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  native.mockResolvedValue(nativeLumeReceipt("stopped"))
+  const { result } = renderHook(() => useSandboxConnections())
+  const starting = result.current.start("c1").catch(() => undefined)
+  await waitFor(() => expect(release).toBeDefined())
+  const stopping = result.current.stop("c1")
+  try {
+    await waitFor(() =>
+      expect(native.mock.calls.map(([operation]) => operation.kind)).toEqual(["stop"])
+    )
+  } finally {
+    await act(async () => {
+      release()
+      await Promise.allSettled([starting, stopping])
+    })
+  }
+  expect(native.mock.calls.map(([operation]) => operation.kind)).toEqual(["stop"])
+  expect(stored?.state).toBe("stopped")
+  expect(stored?.config).toMatchObject({
+    bootEpoch: "after",
+    readiness: { vm: false, helper: false, gui: false },
+  })
+})
+test("Lume native terminal start receipt must settle running and preserve the new boot ref", async () => {
+  seed(nativeLumeRow("stopped"))
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  native.mockResolvedValue(nativeLumeReceipt("running"))
+  const { result } = renderHook(() => useSandboxConnections())
+  let error: unknown
+  await act(async () => {
+    try {
+      await result.current.start("c1")
+    } catch (cause) {
+      error = cause
+    }
+  })
+  expect(native).toHaveBeenCalledWith(
+    {
+      kind: "start",
+      reference: {
+        resourceId: "owned-resource",
+        generation: 1,
+        bootEpoch: "before",
+      },
+    },
+    undefined
+  )
+  expect({
+    state: stored?.state,
+    bootEpoch: stored?.config.provider === "lume" ? stored.config.bootEpoch : null,
+    error: error instanceof Error ? error.message : error,
+  }).toEqual({ state: "running", bootEpoch: "after", error: undefined })
+})
+test("Lume native terminal stop receipt must preserve its rotated epoch for the next call", async () => {
+  seed(nativeLumeRow("running"))
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  native.mockResolvedValue(nativeLumeReceipt("stopped"))
+  const { result } = renderHook(() => useSandboxConnections())
+  await act(async () => {
+    await result.current.stop("c1")
+  })
+  expect(stored?.state).toBe("stopped")
+  expect(stored?.config).toMatchObject({
+    bootEpoch: "after",
+    readiness: { vm: false, helper: false, gui: false },
+  })
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+  expect(native).toHaveBeenLastCalledWith(
+    {
+      kind: "health",
+      reference: {
+        resourceId: "owned-resource",
+        generation: 1,
+        bootEpoch: "after",
+      },
+    },
+    undefined
+  )
+})
+test("Lume native terminal urgent stop must dispatch while a start is pending", async () => {
+  seed(nativeLumeRow("stopped"))
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  let finish!: (value: unknown) => void
+  native
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    .mockResolvedValue(nativeLumeReceipt("stopped"))
+  const { result } = renderHook(() => useSandboxConnections())
+  const starting = result.current.start("c1").catch(() => undefined)
+  for (let i = 0; i < 10 && !finish; i++) await Promise.resolve()
+  expect(finish).toBeDefined()
+  const stopping = result.current.stop("c1")
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  try {
+    expect(native.mock.calls.some(([op]) => op.kind === "stop")).toBe(true)
+  } finally {
+    finish(nativeLumeReceipt("running"))
+    await Promise.allSettled([starting, stopping])
+  }
+})
+
+test("Lume native terminal next health must use the stop receipt boot epoch", async () => {
+  seed(nativeLumeRow("running"))
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  native.mockImplementation(async (operation) => {
+    if (operation.kind === "stop") return nativeLumeReceipt("stopped")
+    if (operation.reference.bootEpoch !== "after") throw new Error("lume_stale_resource")
+    return nativeLumeReceipt("stopped")
+  })
+  const { result } = renderHook(() => useSandboxConnections())
+  await act(async () => {
+    await result.current.stop("c1")
+  })
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+  expect(native).toHaveBeenLastCalledWith(
+    {
+      kind: "health",
+      reference: {
+        resourceId: "owned-resource",
+        generation: 1,
+        bootEpoch: "after",
+      },
+    },
+    undefined
+  )
+})
+
+test("Lume native terminal healthy receipt must report the VM as healthy", async () => {
+  seed(nativeLumeRow("running"))
+  const native = jest.requireMock("@/lib/automation/lume-client").lumeClient.run as jest.Mock
+  native.mockResolvedValue(nativeLumeReceipt("running"))
+  const { result } = renderHook(() => useSandboxConnections())
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+  expect(native).toHaveBeenCalledWith(
+    {
+      kind: "health",
+      reference: {
+        resourceId: "owned-resource",
+        generation: 1,
+        bootEpoch: "before",
+      },
+    },
+    undefined
+  )
+  expect(stored?.lastHealthStatus).toBe("ok")
 })

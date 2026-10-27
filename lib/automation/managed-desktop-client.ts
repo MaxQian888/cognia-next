@@ -379,7 +379,7 @@ export async function openManagedDesktop(
         })
       )
   }
-  async function invoke<T>(
+  async function callControl<T>(
     name: string,
     args: Record<string, unknown>,
     cleanup = false
@@ -433,16 +433,17 @@ export async function openManagedDesktop(
   }
   return {
     managed: true,
-    status: () => invoke<SandboxDesktopStatus>("managed_desktop_control_status", {}),
-    frame: () => invoke<SandboxDesktopFrame>("managed_desktop_control_frame", {}),
+    status: () => callControl<SandboxDesktopStatus>("managed_desktop_control_status", {}),
+    frame: () => callControl<SandboxDesktopFrame>("managed_desktop_control_frame", {}),
     acquire: (takeover) =>
-      invoke<SandboxControlLease>("managed_desktop_control_acquire", { takeover }),
-    renew: (lease) => invoke<SandboxControlLease>("managed_desktop_control_renew", proof(lease)),
-    release: (lease) => invoke<void>("managed_desktop_control_release", proof(lease), true),
+      callControl<SandboxControlLease>("managed_desktop_control_acquire", { takeover }),
+    renew: (lease) =>
+      callControl<SandboxControlLease>("managed_desktop_control_renew", proof(lease)),
+    release: (lease) => callControl<void>("managed_desktop_control_release", proof(lease), true),
     input: (lease, frame, point, action) => {
       if (!frame.frameId || frame.fence !== lease.fence)
         return Promise.reject(new Error("managed_desktop_missing_frame_proof"))
-      return invoke<void>("managed_desktop_control_input", {
+      return callControl<void>("managed_desktop_control_input", {
         ...proof(lease),
         frameId: frame.frameId,
         point,

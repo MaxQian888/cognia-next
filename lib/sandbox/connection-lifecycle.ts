@@ -24,6 +24,7 @@ import {
 export type SupportedConnectionOperation = Exclude<SandboxLifecycleOperation, "gui">
 
 export interface SandboxConnectionOperationResult {
+  lume?: import("@/lib/automation/lume-client").LumeResource
   managedDesktop?: ManagedDesktopResource
   containerId?: string
   port?: number
@@ -39,6 +40,7 @@ export interface SandboxConnectionOperationResult {
 }
 
 export interface SandboxOperationOptions extends ManagedDesktopAdapterOptions {
+  signal?: AbortSignal
   client?: SandboxClient
   /** Required for `workspaceExec`. */
   exec?: SandboxExecRequest
@@ -100,6 +102,7 @@ export async function runSandboxConnectionOperation(
     driver: row.driver,
     capabilities: row.capabilities,
     state: row.state,
+    signal: options.signal,
   }
 
   await runSandboxOperation<void | SandboxHealthReport | SandboxExecResult | string>(
@@ -164,6 +167,7 @@ export async function runSandboxConnectionOperation(
   )
 
   if (outcome.managedDesktop !== undefined) result.managedDesktop = outcome.managedDesktop
+  if (outcome.lume !== undefined) result.lume = outcome.lume
   if (outcome.containerId !== undefined) result.containerId = outcome.containerId
   if (outcome.port !== undefined) result.port = outcome.port
   if (outcome.health !== undefined) result.health = outcome.health

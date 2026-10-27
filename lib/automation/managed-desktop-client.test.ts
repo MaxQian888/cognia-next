@@ -68,6 +68,57 @@ test("routes explicitly local without following the active Host", async () => {
   expect(withManagementChannel).not.toHaveBeenCalled()
 })
 
+test("local viewer operations use the registered wrapper and preserve their fenced payloads", async () => {
+  const ref = { desktopId: "desktop", generation: 3 }
+  const session = await openManagedDesktop({ kind: "local" }, ref)
+  const lease = { token: "input-lease", fence: 4, expiresAt: Date.now() + 15000 }
+  ;(localTransport.call as jest.Mock).mockResolvedValue(lease)
+  try {
+    expect(session.status).toEqual(expect.any(Function))
+    await session.status!()
+    await session.frame()
+    await session.acquire(true)
+    await session.renew(lease)
+    await session.input(
+      lease,
+      {
+        screenshot: { bytes: "aA==", width: 1, height: 1, capturedAt: 1, format: "png" },
+        frameId: "frame",
+        fence: 4,
+        expiresAt: Date.now() + 5000,
+      },
+      { x: 0, y: 0 },
+      { kind: "click" }
+    )
+    await session.release(lease)
+    expect(
+      (localTransport.call as jest.Mock).mock.calls.map(([command, payload]) => [
+        command,
+        payload.name,
+      ])
+    ).toEqual(
+      ["status", "frame", "acquire", "renew", "input", "release"].map((verb) => [
+        "managed_desktop_local_call",
+        `managed_desktop_control_${verb}`,
+      ])
+    )
+    expect(localTransport.call).toHaveBeenCalledWith("managed_desktop_local_call", {
+      name: "managed_desktop_control_input",
+      args: {
+        ...ref,
+        token: lease.token,
+        fence: 4,
+        frameId: "frame",
+        point: { x: 0, y: 0 },
+        action: { kind: "click" },
+      },
+    })
+    expect(issueHostAdminLease).not.toHaveBeenCalled()
+  } finally {
+    session.close()
+  }
+})
+
 test("routes to the named management Host and preserves its generation", async () => {
   const call = jest.fn().mockResolvedValue({ reachable: true })
   ;(withManagementChannel as jest.Mock).mockImplementation((_host, work) =>

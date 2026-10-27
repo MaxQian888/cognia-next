@@ -93,7 +93,12 @@ test("desktop observation and control stay scoped to the same connection and lea
 })
 
 test("stream grants open, claim with the lease, and close by viewer id", async () => {
-  const grant = { viewerId: "v1", url: "http://127.0.0.1:49000/?token=t", role: "viewer" }
+  const grant = {
+    viewerId: "v1",
+    url: "http://127.0.0.1:49000/?token=t",
+    role: "viewer",
+    healthVersion: 1,
+  }
   call.mockResolvedValue(grant)
   await expect(sandboxClient.streamOpen("c1")).resolves.toEqual(grant)
   expect(call).toHaveBeenLastCalledWith("cua_sandbox_desktop_stream_open", { connectionId: "c1" })

@@ -17,6 +17,8 @@ function streamState(overrides = {}) {
   return {
     status: "unavailable" as const,
     grant: null,
+    attachFrame: jest.fn(),
+    fail: jest.fn().mockResolvedValue(undefined),
     claim: jest.fn().mockResolvedValue(true),
     reopen: jest.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -65,6 +67,35 @@ test("requires explicit takeover before keyboard or pointer input", () => {
   fireEvent.click(screen.getByRole("button", { name: "Take control" }))
   expect(model.acquire).toHaveBeenCalledTimes(1)
   expect(screen.getByRole("status")).toHaveTextContent("View only")
+})
+
+test("a screenshot-only Lume viewer preserves human control without a stream grant", () => {
+  const model = state({ controlling: true })
+  const stream = streamState({ claim: jest.fn().mockResolvedValue(false) })
+  useDesktop.mockReturnValue(model)
+  useStream.mockReturnValue(stream)
+  render(
+    <NextIntlClientProvider locale="en" messages={{ automation: messages }}>
+      <SandboxDesktopViewer
+        connectionId="lume"
+        enabled
+        allowStreaming={false}
+        transferTargetId="lume:r:1:b"
+        transferFolder="/workspace"
+      />
+    </NextIntlClientProvider>
+  )
+  expect(useStream).toHaveBeenCalledWith("lume", false, undefined, expect.any(Function))
+  expect(useDesktop).toHaveBeenCalledWith(
+    "lume",
+    true,
+    undefined,
+    true,
+    expect.objectContaining({ onLeaseChange: undefined })
+  )
+  expect(stream.claim).not.toHaveBeenCalled()
+  expect(model.release).not.toHaveBeenCalled()
+  expect(screen.getByRole("region", { name: "File transfer" })).toBeInTheDocument()
 })
 
 test("supports IME text submission, keyboard chords and local Escape release", async () => {
@@ -331,6 +362,6 @@ test("a managed desktop never asks for a stream", () => {
       <SandboxDesktopViewer connectionId="c1" enabled openDesktop={jest.fn()} />
     </NextIntlClientProvider>
   )
-  expect(useStream).toHaveBeenCalledWith("c1", false, undefined)
+  expect(useStream).toHaveBeenCalledWith("c1", false, undefined, expect.any(Function))
   expect(useDesktop.mock.calls.at(-1)?.[4]).toMatchObject({ onLeaseChange: undefined })
 })

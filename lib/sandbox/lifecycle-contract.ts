@@ -106,6 +106,10 @@ export interface SandboxExecRequest {
 }
 
 export interface SandboxExecResult {
+  /** A confirmed VM cleanup barrier retired this execution binding. */
+  vmStopped?: boolean
+  /** Normal completion may retain background jobs within the exclusive VM group. */
+  executionGroupRetained?: boolean
   exitCode: number
   stdout: string
   stderr: string
@@ -223,6 +227,7 @@ export async function runSandboxOperation<T>(
 
 /** Provider-neutral discoveries; Docker fields remain compatible with existing callers. */
 export interface SandboxAdapterOutcome {
+  lume?: import("@/lib/automation/lume-client").LumeResource
   containerId?: string
   port?: number
   health?: boolean

@@ -58,6 +58,19 @@ beforeEach(() => {
   >)
 })
 
+test("resolves an authoritative preview target independently of the chat's current binding", async () => {
+  connection.mockResolvedValue({
+    id: "historical-target",
+    config: { provider: "docker" },
+    state: "running",
+  } as Awaited<ReturnType<typeof getSandboxConnection>>)
+  renderHook(() => useSessionSandboxDesktop("chat", "historical-target"))
+  const result = await querier!()
+  expect(connection).toHaveBeenCalledWith("historical-target")
+  expect(session).not.toHaveBeenCalled()
+  expect(result).toMatchObject({ connectionId: "historical-target", enabled: true })
+})
+
 test("no session or a session without a bound GUI connection has no desktop", async () => {
   expect(await resolve(null)).toBeNull()
   session.mockResolvedValue(undefined)
@@ -95,6 +108,35 @@ test("a session-bound connection is shown and enabled only while running with GU
     containerId: undefined,
     enabled: false,
   })
+})
+
+test("a versioned Lume connection can expose the same viewer while legacy rows remain inactive", async () => {
+  session.mockResolvedValue({ id: "s1", computerUseTarget: { connectionId: "c1" } } as Awaited<
+    ReturnType<typeof getSession>
+  >)
+  connection.mockResolvedValue({
+    ...dockerConnection("running"),
+    config: {
+      provider: "lume",
+      vmName: "vm",
+      contractVersion: 1,
+      resourceId: "resource",
+      generation: 2,
+      bootEpoch: "boot",
+    },
+  } as Awaited<ReturnType<typeof getSandboxConnection>>)
+  expect(await resolve("s1")).toMatchObject({
+    enabled: true,
+    connectionId: "c1",
+    allowStreaming: false,
+    transferTargetId: "lume:resource:2:boot",
+    transferFolder: "/workspace",
+  })
+  connection.mockResolvedValue({
+    ...dockerConnection("running"),
+    config: { provider: "lume", vmName: "legacy" },
+  } as Awaited<ReturnType<typeof getSandboxConnection>>)
+  expect(await resolve("s1")).toMatchObject({ enabled: false })
 })
 
 test("the character's binding is inherited and the app tier is a dependency", async () => {

@@ -1,4 +1,5 @@
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+import type { LumeClient } from "@/lib/automation/lume-client"
 
 jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
 
@@ -37,6 +38,296 @@ const payload = {
     networkHosts: [],
   },
 }
+
+test("closing a session stops heartbeat before pending native rebind consent settles", async () => {
+  jest.useFakeTimers()
+  const deps = createDeps()
+  const binding = {
+    resourceId: "r",
+    generation: 1,
+    bootEpoch: "boot",
+    bindingId: "heartbeat",
+    sessionId: "session",
+  }
+  const resource = {
+    ...binding,
+    connectionId: "connection-1",
+    vmName: "owned",
+    state: "running",
+    memoryMb: 8192,
+    readiness: { vm: true, ssh: true, helper: true, gui: true },
+    quarantine: false,
+    groupId: null,
+    lastErrorCode: null,
+  }
+  const api = {
+    diagnose: jest
+      .fn()
+      .mockResolvedValue({ contractVersion: 1, enabled: true, resources: [resource] }),
+    bind: jest.fn().mockResolvedValue(binding),
+    renew: jest.fn().mockResolvedValue(undefined),
+    unbind: jest.fn().mockResolvedValue(undefined),
+  } as unknown as LumeClient
+  deps.getLumeClient = jest.fn(() => api)
+  deps.getConnection.mockResolvedValue({
+    ...runningConnection(),
+    provider: "lume",
+    driver: "cua-driver",
+    config: { provider: "lume", vmName: "owned", contractVersion: 1, ...binding },
+    capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+  } as SandboxConnectionRow)
+  const runtime = new SandboxSessionRuntime(deps)
+  try {
+    const input = {
+      sessionId: "session",
+      binding: {
+        shellTier: "cua-desktop" as const,
+        computerTarget: "bound" as const,
+        connectionId: "connection-1",
+      },
+      policy: { network: "on" as const },
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: true,
+      workspaceRoot: "/workspace",
+    }
+    await runtime.bindSession(input)
+    let finish!: (value: typeof binding) => void
+    jest.mocked(api.bind).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const rebind = runtime.bindSession({ ...input, policy: { ...input.policy, maxMemoryMb: 8192 } })
+    await jest.advanceTimersByTimeAsync(0)
+    expect(finish).toBeDefined()
+    const release = runtime.releaseSession("session")
+    await jest.advanceTimersByTimeAsync(20_000)
+    expect(api.renew).not.toHaveBeenCalled()
+    const settled = Promise.allSettled([rebind, release])
+    finish({ ...binding, bindingId: "late" })
+    await settled
+    expect(runtime.activeRefForSession("session")).toBeUndefined()
+    expect(api.unbind).toHaveBeenCalledWith(binding)
+  } finally {
+    runtime.__resetForTesting()
+    jest.useRealTimers()
+  }
+})
+
+test("Lume heartbeat renews only live bindings and retires on refusal", async () => {
+  jest.useFakeTimers()
+  const deps = createDeps()
+  const binding = {
+    resourceId: "r",
+    generation: 1,
+    bootEpoch: "boot",
+    bindingId: "heartbeat",
+    sessionId: "session",
+  }
+  const resource = {
+    ...binding,
+    connectionId: "connection-1",
+    vmName: "owned",
+    state: "running",
+    memoryMb: 8192,
+    readiness: { vm: true, ssh: true, helper: true, gui: true },
+    quarantine: false,
+    groupId: null,
+    lastErrorCode: null,
+  }
+  const api = {
+    diagnose: jest
+      .fn()
+      .mockResolvedValue({ contractVersion: 1, enabled: true, resources: [resource] }),
+    bind: jest.fn().mockResolvedValue(binding),
+    renew: jest.fn().mockResolvedValue(undefined),
+    unbind: jest.fn().mockResolvedValue(undefined),
+  } as unknown as LumeClient
+  deps.getLumeClient = jest.fn(() => api)
+  deps.getConnection.mockResolvedValue({
+    ...runningConnection(),
+    provider: "lume",
+    driver: "cua-driver",
+    config: { provider: "lume", vmName: "owned", contractVersion: 1, ...binding },
+    capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+  } as SandboxConnectionRow)
+  const runtime = new SandboxSessionRuntime(deps)
+  try {
+    await runtime.bindSession({
+      sessionId: "session",
+      binding: { shellTier: "cua-desktop", computerTarget: "bound", connectionId: "connection-1" },
+      policy: { network: "on" },
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: true,
+      workspaceRoot: "/workspace",
+    })
+    await jest.advanceTimersByTimeAsync(5_000)
+    expect(api.renew).toHaveBeenCalledWith(binding)
+    jest.mocked(api.renew).mockRejectedValueOnce(new Error("lume_binding_expired"))
+    await jest.advanceTimersByTimeAsync(5_000)
+    expect(runtime.activeRefForSession("session")).toBeUndefined()
+    expect(api.unbind).toHaveBeenCalledWith(binding)
+    await jest.advanceTimersByTimeAsync(20_000)
+    expect(api.renew).toHaveBeenCalledTimes(2)
+  } finally {
+    runtime.__resetForTesting()
+    jest.useRealTimers()
+  }
+})
+
+test("Lume freezes one native binding for GUI, shell and typed files and releases it", async () => {
+  const deps = createDeps()
+  const binding = {
+    resourceId: "r",
+    generation: 1,
+    bootEpoch: "boot",
+    bindingId: "native-binding",
+    sessionId: "session",
+  }
+  const api = {
+    diagnose: jest.fn().mockResolvedValue({
+      enabled: true,
+      resources: [
+        {
+          ...binding,
+          connectionId: "connection-1",
+          vmName: "owned",
+          state: "running",
+          memoryMb: 8192,
+          readiness: { vm: true, ssh: true, helper: true, gui: true },
+          quarantine: false,
+        },
+      ],
+    }),
+    bind: jest.fn().mockResolvedValue(binding),
+    unbind: jest.fn().mockResolvedValue(undefined),
+    renew: jest.fn().mockResolvedValue(undefined),
+    execute: jest.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: "guest",
+      stderr: "",
+      durationMs: 2,
+      timedOut: false,
+    }),
+    file: jest.fn().mockResolvedValue({ result: { hash: "hash" }, dataBase64: btoa("guest-file") }),
+  } as unknown as LumeClient
+  deps.getLumeClient = jest.fn(() => api)
+  const row = {
+    ...runningConnection(),
+    provider: "lume",
+    driver: "cua-driver",
+    config: { provider: "lume", vmName: "owned", contractVersion: 1, ...binding },
+    capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+  } as SandboxConnectionRow
+  deps.getConnection.mockResolvedValue(row)
+  const runtime = new SandboxSessionRuntime(deps)
+  const ref = await runtime.bindSession({
+    sessionId: "session",
+    binding: { shellTier: "cua-desktop", computerTarget: "bound", connectionId: row.id },
+    policy: { network: "on" },
+    confine: null,
+    sandboxEnabled: true,
+    computerUseEnabled: true,
+    workspaceRoot: "/workspace",
+  })
+  expect(api.bind).toHaveBeenCalledWith(
+    { resourceId: "r", generation: 1, bootEpoch: "boot" },
+    "session",
+    expect.objectContaining({ workspaceRoot: "/workspace", groupId: "session" })
+  )
+  deps.getConnection.mockResolvedValue({
+    ...row,
+    config: { ...row.config, resourceId: "replacement" },
+  } as SandboxConnectionRow)
+  expect((await runtime.decorateComputerUseContext(ref, {})).sandboxConnectionId).toBe(
+    "lume-binding:native-binding"
+  )
+  await runtime.executeSandbox(ref, { ...payload, request: { ...payload.request, network: "on" } })
+  expect(api.execute).toHaveBeenCalledWith(
+    binding,
+    expect.objectContaining({ cwd: "." }),
+    undefined
+  )
+  expect(await runtime.fileOperation(ref, { kind: "read", path: "/workspace/x" })).toEqual({
+    hash: "hash",
+    content: "guest-file",
+  })
+  expect(api.file).toHaveBeenCalledWith(binding, { kind: "read", path: "x" }, "", undefined)
+  const signal = new AbortController().signal
+  await runtime.fileOperation(ref, { kind: "read", path: "/workspace/x" }, { signal })
+  expect(api.file).toHaveBeenLastCalledWith(binding, { kind: "read", path: "x" }, "", signal)
+  await runtime.executeSandbox(
+    ref,
+    { ...payload, request: { ...payload.request, network: "on" } },
+    { signal }
+  )
+  expect(api.execute).toHaveBeenLastCalledWith(
+    binding,
+    expect.objectContaining({ cwd: "." }),
+    signal
+  )
+  jest.mocked(api.diagnose).mockResolvedValue({
+    contractVersion: 1,
+    lumeVersion: "0.6.1",
+    platformSupported: true,
+    enabled: true,
+    resources: [
+      {
+        ...binding,
+        bootEpoch: "new-boot",
+        connectionId: row.id,
+        vmName: "owned",
+        state: "running",
+        memoryMb: 8192,
+        readiness: { vm: true, ssh: true, helper: true, gui: true },
+        quarantine: false,
+        groupId: "session",
+        lastErrorCode: null,
+      },
+    ],
+  })
+  jest
+    .mocked(api.bind)
+    .mockResolvedValue({ ...binding, bootEpoch: "new-boot", bindingId: "new-binding" })
+  deps.makeRef.mockReturnValue("sandbox-runtime:new-generation")
+  const rebound = await runtime.bindSession({
+    sessionId: "session",
+    binding: { shellTier: "cua-desktop", computerTarget: "bound", connectionId: row.id },
+    policy: { network: "on" },
+    confine: null,
+    sandboxEnabled: true,
+    computerUseEnabled: true,
+    workspaceRoot: "/workspace",
+  })
+  expect(rebound).not.toBe(ref)
+  await expect(runtime.fileOperation(ref, { kind: "read", path: "/workspace/x" })).rejects.toThrow()
+  expect((await runtime.decorateComputerUseContext(rebound, {})).sandboxConnectionId).toBe(
+    "lume-binding:new-binding"
+  )
+  jest.mocked(api.execute).mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: "one-shot",
+    stderr: "",
+    durationMs: 2,
+    timedOut: false,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    vmStopped: true,
+  })
+  await runtime.executeSandbox(rebound, {
+    ...payload,
+    request: { ...payload.request, network: "on" },
+  })
+  await expect(
+    runtime.fileOperation(rebound, { kind: "read", path: "/workspace/x" })
+  ).rejects.toThrow()
+  await runtime.releaseSession("session")
+  expect(api.unbind).toHaveBeenCalledWith(binding)
+  expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+})
 
 function createDeps(): jest.Mocked<SandboxSessionRuntimeDeps> {
   return {

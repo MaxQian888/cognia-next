@@ -9,6 +9,7 @@ import { pickStreamFiles } from "@/lib/files/file-bridge"
 import { saveExport } from "@/lib/files/save-export"
 import { decodeBase64, encodeBase64 } from "@/lib/share/encoding"
 import { MAX_SANDBOX_TRANSFER_BYTES, sandboxClient } from "@/lib/automation/sandbox-client"
+import { lumeFailureKind } from "@/lib/automation/lume-client"
 
 type Notice =
   | "cancelled"
@@ -21,6 +22,7 @@ type Notice =
   | "downloadFailed"
   | "invalidPath"
   | "invalidPayload"
+  | "writers"
   | null
 
 function absolutePath(value: string): boolean {
@@ -30,6 +32,7 @@ function absolutePath(value: string): boolean {
 interface SandboxFileTransferProps {
   connectionId: string
   containerId?: string
+  defaultFolder?: string
   enabled: boolean
   releaseControl: () => Promise<void> | undefined
   onBusyChange: (busy: boolean) => void
@@ -48,13 +51,15 @@ export function SandboxFileTransfer(props: SandboxFileTransferProps) {
 function SandboxFileTransferSession({
   connectionId,
   containerId,
+  defaultFolder = "/home/cua",
   enabled,
   releaseControl,
   onBusyChange,
 }: SandboxFileTransferProps) {
   const t = useTranslations("automation.sandboxConnections.fileTransfer")
+  const lumeErrors = useTranslations("automation.lume.errors")
   const id = useId()
-  const [folder, setFolder] = useState("/home/cua")
+  const [folder, setFolder] = useState(defaultFolder)
   const [downloadPath, setDownloadPath] = useState("")
   const [busy, setBusy] = useState<"upload" | "download" | null>(null)
   const [notice, setNotice] = useState<Notice>(null)
@@ -183,8 +188,8 @@ function SandboxFileTransferSession({
               : "saveFailed"
         )
       }
-    } catch {
-      if (generation.current) setNotice(failure)
+    } catch (error) {
+      if (generation.current) setNotice(lumeFailureKind(error) === "writers" ? "writers" : failure)
     } finally {
       // A dispatched upload may finish after unmount. Release its exact lease,
       // even though no UI is left to receive the result. Expiry is already safe.
@@ -248,7 +253,7 @@ function SandboxFileTransferSession({
           role={isError ? "alert" : "status"}
           className={`text-xs ${isError ? "text-destructive" : "text-muted-foreground"}`}
         >
-          {t(`notice.${notice}`)}
+          {notice === "writers" ? lumeErrors("writers") : t(`notice.${notice}`)}
         </p>
       ) : null}
     </section>

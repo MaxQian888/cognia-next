@@ -79,6 +79,49 @@ test("renders nothing without a connection", () => {
   expect(screen.queryByTestId("sandbox-connection-detail")).not.toBeInTheDocument()
 })
 
+test("Lume Stop stays available and dispatches while Start is pending", async () => {
+  let finish!: () => void
+  const acts = actions()
+  acts.start.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+  )
+  renderSheet(
+    row({
+      provider: "lume",
+      driver: "cua-driver",
+      state: "stopped",
+      config: {
+        provider: "lume",
+        contractVersion: 1,
+        vmName: "cognia-test",
+        resourceId: "r",
+        generation: 1,
+        bootEpoch: "boot",
+        featureEnabled: true,
+        readiness: { vm: false, ssh: false, helper: false, gui: false },
+        quarantine: false,
+      },
+      capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+    }),
+    { acts }
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Start" }))
+  await waitFor(() => expect(acts.start).toHaveBeenCalledWith("c1"))
+  try {
+    const stop = screen.getByRole("button", { name: "Stop" })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    await waitFor(() => expect(acts.stop).toHaveBeenCalledWith("c1"))
+  } finally {
+    await act(async () => {
+      finish()
+    })
+  }
+})
+
 test("wires the selected running Docker connection into the desktop viewer", () => {
   renderSheet(row())
   expect(screen.getByTestId("desktop-viewer")).toHaveAttribute("data-connection", "c1")

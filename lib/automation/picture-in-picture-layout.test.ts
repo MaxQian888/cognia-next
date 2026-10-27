@@ -1,7 +1,43 @@
 import {
   computePictureInPictureAnchors,
   computePictureInPictureSize,
+  computePictureInPictureTiles,
 } from "./picture-in-picture-layout"
+
+describe("multi-presentation tiles", () => {
+  it.each([1, 2, 4, 8])("bounds and separates %i targets in a roomy host", (count) => {
+    const { tiles, selector } = computePictureInPictureTiles(
+      { x: 0, y: 0, width: 1000, height: 650 },
+      [],
+      count
+    )
+    expect(tiles.length).toBe(Math.min(4, count))
+    for (const [index, tile] of tiles.entries()) {
+      expect(tile.x).toBeGreaterThanOrEqual(0)
+      expect(tile.y).toBeGreaterThanOrEqual(0)
+      expect(tile.x + tile.width).toBeLessThanOrEqual(1000)
+      expect(tile.y + tile.height).toBeLessThanOrEqual(selector.y)
+      for (const other of tiles.slice(index + 1))
+        expect(
+          tile.x + tile.width <= other.x ||
+            other.x + other.width <= tile.x ||
+            tile.y + tile.height <= other.y ||
+            other.y + other.height <= tile.y
+        ).toBe(true)
+    }
+  })
+  it("keeps one focused card and a bounded selector inside a narrow host", () => {
+    const { tiles, selector } = computePictureInPictureTiles(
+      { x: 0, y: 0, width: 180, height: 240 },
+      [],
+      8
+    )
+    expect(tiles).toHaveLength(1)
+    expect(tiles[0]!.width).toBeLessThanOrEqual(180)
+    expect(selector.x + selector.width).toBeLessThanOrEqual(180)
+    expect(selector.y + 32).toBeLessThanOrEqual(240)
+  })
+})
 
 describe("computePictureInPictureSize", () => {
   it("adds chrome outside the media ratio instead of distorting the frame", () => {
@@ -64,6 +100,27 @@ describe("computePictureInPictureSize", () => {
 })
 
 describe("computePictureInPictureAnchors", () => {
+  it("keeps constrained previews inside hosts smaller than the usual margins", () => {
+    for (const [width, height] of [
+      [180, 120],
+      [40, 30],
+    ]) {
+      const size = computePictureInPictureSize({
+        aspectRatio: 16 / 10,
+        preferredLongEdge: 250,
+        hostWidth: width,
+        hostHeight: height,
+      })
+      for (const point of Object.values(
+        computePictureInPictureAnchors({ x: 0, y: 0, width, height }, [], size)
+      )) {
+        expect(point.x).toBeGreaterThanOrEqual(0)
+        expect(point.y).toBeGreaterThanOrEqual(0)
+        expect(point.x + size.width).toBeLessThanOrEqual(width)
+        expect(point.y + size.height).toBeLessThanOrEqual(height)
+      }
+    }
+  })
   it("places a 250px surface at all four 24px-inset corners", () => {
     const anchors = computePictureInPictureAnchors({ x: 0, y: 0, width: 1000, height: 800 }, [])
 

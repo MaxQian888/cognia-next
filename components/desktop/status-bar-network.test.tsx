@@ -109,6 +109,30 @@ describe("StatusBarNetwork", () => {
     )
   })
 
+  it("reserves the same columns across changing rates, units and probe states", () => {
+    const { rerender } = render(<StatusBarNetwork />)
+    const states: Partial<NetworkMeter>[] = [
+      { throughput: { rxBps: 0, txBps: 53_000 }, latency: sample(8) },
+      { throughput: { rxBps: 1023.9 * 1024, txBps: 2 * 1024 ** 3 }, latency: sample(12_345) },
+      { throughput: null, latency: null, latencyHistory: [] },
+      { latency: sample(null) },
+      { target: null, latency: null, latencyHistory: [] },
+    ]
+
+    for (const state of states) {
+      meter = makeMeter(state)
+      rerender(<StatusBarNetwork />)
+      const chip = screen.getByRole("button", { name: /^label:/ })
+      expect(chip).toHaveClass("grid", "grid-cols-[4.5rem_4.5rem_4.75rem]", "gap-1", "shrink-0")
+      expect(chip.children).toHaveLength(3)
+      const values = chip.querySelectorAll("span.truncate")
+      expect(values).toHaveLength(meter.target ? 3 : 2)
+      for (const value of values) {
+        expect(value).toHaveClass("min-w-0", "truncate", "tabular-nums")
+      }
+    }
+  })
+
   it("marks an unreachable target", () => {
     meter = makeMeter({
       latency: sample(null, { error: "connection refused" }),

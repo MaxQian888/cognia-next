@@ -13,8 +13,9 @@ import {
 } from "./lifecycle-contract"
 
 import { hasCurrentManagedDesktopQualification } from "./connection-capabilities"
+import type { LumeAdapterOptions } from "./lume-adapter"
 
-export interface ManagedDesktopAdapterOptions {
+export interface ManagedDesktopAdapterOptions extends LumeAdapterOptions {
   managedClient?: ManagedDesktopClient
   /** Single-use authorization issued by the owning Host after human consent. Never persisted in the row. */
   managedCreation?: ManagedDesktopCreation

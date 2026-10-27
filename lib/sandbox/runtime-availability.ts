@@ -90,6 +90,7 @@ export function projectSandboxConnectionCapabilities(
         operation,
         adapterAvailable &&
           enabled &&
+          !(row.config.provider === "lume" && !lumeOperationReady(row, operation)) &&
           !(
             row.config.provider === "e2b" &&
             operation === "create" &&
@@ -98,6 +99,16 @@ export function projectSandboxConnectionCapabilities(
       ])
     )
   ) as SandboxCapabilities
+}
+
+function lumeOperationReady(row: SandboxConnectionRow, operation: string): boolean {
+  if (row.config.provider !== "lume" || row.config.contractVersion !== 1) return false
+  if (["health", "stop", "delete"].includes(operation)) return Boolean(row.config.resourceId)
+  if (!row.config.featureEnabled || row.config.quarantine) return false
+  if (operation === "gui") return row.config.readiness?.gui === true
+  if (operation === "workspaceRead" || operation === "workspaceExec")
+    return row.config.readiness?.helper === true
+  return true
 }
 
 export function updateOsSandboxAvailability(status: CodeSandboxStatus): void {

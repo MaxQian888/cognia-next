@@ -69,3 +69,13 @@ test("falls back to the glyph when the image fails to load", () => {
   expect(container.querySelector("img")).toBeNull()
   expect(container.querySelector("span")?.textContent).toBe("🐙")
 })
+
+test("tries a new avatar URL after the previous image failed", () => {
+  const { container, rerender } = render(
+    <AvatarBadge subject={{ name: "Alice", avatarImageUrl: "data:image/png;base64,OLD" }} />
+  )
+  fireEvent.error(container.querySelector("img")!)
+  expect(container.querySelector("img")).toBeNull()
+  rerender(<AvatarBadge subject={{ name: "Alice", avatarImageUrl: "data:image/png;base64,NEW" }} />)
+  expect(container.querySelector("img")).toHaveAttribute("src", "data:image/png;base64,NEW")
+})

@@ -53,15 +53,15 @@ describe("defaultSandboxCapabilities", () => {
   })
 
   it("withholds workspace access from providers with no adapter at all", () => {
-    for (const provider of ["cua-cloud", "lume"] as const) {
+    for (const provider of ["cua-cloud"] as const) {
       const caps = defaultSandboxCapabilities(provider, "computer-server")
       expect(caps.workspaceRead).toBe(false)
       expect(caps.workspaceExec).toBe(false)
     }
   })
 
-  it("keeps cua-cloud and lume rows readable without unsupported actions", () => {
-    for (const provider of ["cua-cloud", "lume"] as const) {
+  it("keeps cua-cloud rows readable without unsupported actions", () => {
+    for (const provider of ["cua-cloud"] as const) {
       const caps = defaultSandboxCapabilities(provider, "cua-driver")
       expect(Object.values(caps).every((value) => value === false)).toBe(true)
     }
@@ -69,22 +69,22 @@ describe("defaultSandboxCapabilities", () => {
 
   it("does not advertise health without a registered lifecycle adapter", () => {
     expect(defaultSandboxCapabilities("cua-cloud", "computer-server").health).toBe(false)
-    expect(defaultSandboxCapabilities("lume", "cua-driver").health).toBe(false)
+    expect(defaultSandboxCapabilities("lume", "computer-server").health).toBe(false)
   })
 
-  it("withholds Lume workspace access at the provider, not the driver", () => {
+  it("supports Lume workspace access only through its registered driver", () => {
     // The computer-server driver carries workspace operations now. What keeps
     // them off a Lume row is that Lume has no adapter at all, so neither
     // driver can reach it.
     for (const driver of DRIVERS) {
       const caps = defaultSandboxCapabilities("lume", driver)
-      expect(caps.workspaceRead).toBe(false)
-      expect(caps.workspaceExec).toBe(false)
+      expect(caps.workspaceRead).toBe(driver === "cua-driver")
+      expect(caps.workspaceExec).toBe(driver === "cua-driver")
     }
   })
 
   it("keeps the unregistered cua-driver projection unavailable", () => {
-    for (const provider of PROVIDERS) {
+    for (const provider of PROVIDERS.filter((candidate) => candidate !== "lume")) {
       expect(
         Object.values(defaultSandboxCapabilities(provider, "cua-driver")).every(
           (value) => value === false

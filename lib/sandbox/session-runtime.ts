@@ -23,6 +23,13 @@ import {
   type MicrovmResult,
 } from "./microvm-bridge"
 import { clampPolicyRequest, clampReadableRequest, isPathUnderRoot } from "./policy-bridge"
+import { lumeClient, type LumeBinding, type LumeClient } from "@/lib/automation/lume-client"
+import { lumeReference } from "./lume-adapter"
+import { projectLumeResource } from "./lume-projection"
+import type {
+  SandboxFileRequest,
+  SandboxFileResult,
+} from "@cognia/plugin-contract/lib/plugin/api/sandbox-api"
 
 export type SandboxConfine = NonNullable<CallContext["sandboxConfine"]>
 
@@ -49,6 +56,7 @@ export interface BindSandboxSessionInput {
 }
 
 export interface SandboxSessionRuntimeDeps {
+  getLumeClient?(): LumeClient
   getConnection(id: string): Promise<SandboxConnectionRow | undefined>
   getMicrovmAdapter(): MicrovmExecAdapter | null
   /**
@@ -72,6 +80,7 @@ interface UnplacedSurfaces {
 }
 
 interface RuntimeRecord extends BindSandboxSessionInput {
+  lume?: { binding: LumeBinding; root: string; row: SandboxConnectionRow }
   ref: SandboxRuntimeRef
   fingerprint: string
   /** The adapter a `microvm` or `container` generation runs every call through. */
@@ -178,6 +187,7 @@ export class SandboxSessionRuntime {
   private readonly pendingBinds = new Map<string, PendingBinding>()
   private readonly bindingAttempts = new Map<string, Set<PendingBinding>>()
   private readonly releases = new Map<string, Promise<void>>()
+  private readonly lumeHeartbeats = new Map<SandboxRuntimeRef, ReturnType<typeof setInterval>>()
 
   constructor(private readonly deps: SandboxSessionRuntimeDeps) {
     this.records.set(HOST_FALLBACK_RUNTIME_REF, HOST_FALLBACK_RECORD)
@@ -248,12 +258,62 @@ export class SandboxSessionRuntime {
     const nextFingerprint = fingerprint(input)
     const activeRef = this.activeBySession.get(input.sessionId)
     const active = activeRef ? this.records.get(activeRef) : undefined
-    if (active?.fingerprint === nextFingerprint) return active.ref
+    if (active?.fingerprint === nextFingerprint) {
+      if (!active.lume) return active.ref
+      const diagnostic = await (this.deps.getLumeClient?.() ?? lumeClient).diagnose()
+      const current = diagnostic.resources.find(
+        (resource) => resource.resourceId === active.lume!.binding.resourceId
+      )
+      if (
+        current &&
+        diagnostic.enabled &&
+        !current.quarantine &&
+        current.readiness.helper &&
+        current.generation === active.lume.binding.generation &&
+        current.bootEpoch === active.lume.binding.bootEpoch
+      )
+        return active.ref
+      this.retireRecord(active.ref)
+    }
 
-    await this.preflightMutableTarget(input)
+    const preflightRow = await this.preflightMutableTarget(input)
     assertBindingCurrent(attempt)
 
     const ref = this.deps.makeRef()
+    let lume: RuntimeRecord["lume"]
+    if (
+      (input.sandboxEnabled && input.binding.shellTier === "cua-desktop") ||
+      (input.computerUseEnabled && input.binding.computerTarget === "bound")
+    ) {
+      const row = preflightRow!
+      if (row.config.provider === "lume") {
+        if (!input.workspaceRoot)
+          throw new SandboxRuntimeError("placement-unavailable", "lume_workspace_required")
+        const api = this.deps.getLumeClient?.() ?? lumeClient
+        const root = input.workspaceRoot.replace(/\/$/, "")
+        const logical = (path: string) => lumeLogicalPath(root, path)
+        const roots = (
+          policy: readonly string[] | undefined,
+          confined: readonly string[] | undefined
+        ) => (policy?.length ? policy : confined?.length ? confined : [root])
+        const binding = await api.bind(lumeReference(row), input.sessionId, {
+          groupId: input.sessionId,
+          workspaceRoot: root,
+          network: input.policy?.network ?? input.confine?.network ?? "on",
+          maxCpuSeconds: input.policy?.maxCpuSeconds ?? 0,
+          maxMemoryMb: input.policy?.maxMemoryMb ?? 0,
+          readable: roots(input.policy?.readableRoots, input.confine?.readable).map(logical),
+          writable: roots(input.policy?.writableRoots, input.confine?.writable).map(logical),
+        })
+        try {
+          assertBindingCurrent(attempt)
+        } catch (error) {
+          await api.unbind(binding)
+          throw error
+        }
+        lume = { binding: Object.freeze(binding), root, row: { ...row, config: { ...row.config } } }
+      }
+    }
     let tierAdapter: MicrovmExecAdapter | undefined
     if (input.sandboxEnabled && input.binding.shellTier === "microvm") {
       tierAdapter = this.deps.getMicrovmAdapter() ?? undefined
@@ -281,12 +341,13 @@ export class SandboxSessionRuntime {
       ref,
       fingerprint: nextFingerprint,
       ...(tierAdapter ? { tierAdapter } : {}),
+      ...(lume ? { lume } : {}),
     })
     try {
       await tierAdapter?.preflight?.(ref, input.workspaceRoot, input.sessionId)
       assertBindingCurrent(attempt)
     } catch (cause) {
-      if (tierAdapter?.release) {
+      if (tierAdapter?.release || lume) {
         this.cleanupByRef.set(ref, record)
         // Keep failed cleanup in the ledger for releaseSession to retry.
         await this.releaseCleanupRecord(record).catch(() => undefined)
@@ -296,6 +357,7 @@ export class SandboxSessionRuntime {
     const previousRef = this.activeBySession.get(input.sessionId)
     this.records.set(ref, record)
     this.activeBySession.set(input.sessionId, ref)
+    if (record.lume) this.startLumeHeartbeat(record)
     this.retireRecord(previousRef)
     return ref
   }
@@ -406,11 +468,12 @@ export class SandboxSessionRuntime {
    */
   private retireRecord(ref: SandboxRuntimeRef | undefined): void {
     if (!ref || ref === HOST_FALLBACK_RUNTIME_REF) return
+    this.stopLumeHeartbeat(ref)
     const record = this.records.get(ref)
     if (!record) return
     this.records.delete(ref)
-    if (!adapterTier(record.binding.shellTier)) return
-    if (!record.tierAdapter?.release) return
+    if (!record.lume && !adapterTier(record.binding.shellTier)) return
+    if (!record.lume && !record.tierAdapter?.release) return
     this.cleanupByRef.set(ref, record)
     void this.releaseCleanupRecord(record).catch(() => undefined)
   }
@@ -439,6 +502,9 @@ export class SandboxSessionRuntime {
     }
     if (record.binding.computerTarget === "local") return result
 
+    if (record.lume)
+      return { ...result, sandboxConnectionId: `lume-binding:${record.lume.binding.bindingId}` }
+
     const row = await this.requireConnection(record.binding.connectionId)
     assertSandboxOperationAllowed(operationContext(row), "gui")
     return { ...result, sandboxConnectionId: row.id }
@@ -446,7 +512,8 @@ export class SandboxSessionRuntime {
 
   async executeSandbox(
     ref: SandboxRuntimeRef,
-    payload: MicrovmExecPayload
+    payload: MicrovmExecPayload,
+    options?: { signal?: AbortSignal }
   ): Promise<MicrovmResult> {
     const record = this.requireRecord(ref)
     if (!record.sandboxEnabled) {
@@ -600,17 +667,39 @@ export class SandboxSessionRuntime {
         // policy against the container's frozen confinement before running
         // anything. A refusal at either point stays a refusal: there is no
         // fallback to this host.
-        const row = await this.requireConnection(record.binding.connectionId)
+        const row = record.lume?.row ?? (await this.requireConnection(record.binding.connectionId))
         const started = Date.now()
         try {
           const exec = await runSandboxConnectionOperation(row, "workspaceExec", {
+            signal: options?.signal,
+            ...(record.lume
+              ? {
+                  lumeBinding: record.lume.binding,
+                  lumeClient: this.deps.getLumeClient?.() ?? lumeClient,
+                }
+              : {}),
             exec: {
               argv: payload.command.argv,
-              cwd: payload.command.cwd,
+              cwd: record.lume
+                ? lumeLogicalPath(record.lume.root, payload.command.cwd)
+                : payload.command.cwd,
               env: payload.command.env,
               stdin: payload.command.stdin ?? undefined,
               timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
-              policy: payload.request,
+              policy: record.lume
+                ? {
+                    ...payload.request,
+                    readable: payload.request.readable.map((path) =>
+                      lumeLogicalPath(record.lume!.root, path)
+                    ),
+                    writable: payload.request.writable.map((path) =>
+                      lumeLogicalPath(record.lume!.root, path)
+                    ),
+                    targetFiles: payload.request.targetFiles.map((path) =>
+                      lumeLogicalPath(record.lume!.root, path)
+                    ),
+                  }
+                : payload.request,
             },
           })
           if (!exec.exec) {
@@ -619,6 +708,7 @@ export class SandboxSessionRuntime {
               "The bound machine accepted the command but returned no result."
             )
           }
+          if (record.lume && exec.exec.vmStopped) this.retireRecord(ref)
           const result: MicrovmResult = {
             exit_code: exec.exec.exitCode,
             stdout: exec.exec.stdout,
@@ -645,6 +735,39 @@ export class SandboxSessionRuntime {
           throw error
         }
       }
+    }
+  }
+
+  async fileOperation(
+    ref: SandboxRuntimeRef,
+    request: SandboxFileRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<SandboxFileResult | undefined> {
+    const record = this.requireRecord(ref)
+    if (!record.lume) return undefined
+    if (!record.sandboxEnabled || record.unplaced?.sandbox)
+      throw new SandboxRuntimeError("surface-disabled", "lume_file_surface_unavailable")
+    if (request.kind === "write") this.assertWritablePath(ref, request.path)
+    const path = lumeLogicalPath(record.lume.root, request.path)
+    const bytes =
+      request.kind === "write" ? new TextEncoder().encode(request.content) : new Uint8Array()
+    if (bytes.byteLength > 8 * 1024 * 1024) throw new Error("lume_file_limit")
+    let binary = ""
+    for (let offset = 0; offset < bytes.length; offset += 8192)
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
+    const reply = await (this.deps.getLumeClient?.() ?? lumeClient).file(
+      record.lume.binding,
+      request.kind === "read"
+        ? { kind: "read", path }
+        : { kind: "write", path, expected_hash: request.expectedHash ?? null },
+      btoa(binary),
+      options?.signal
+    )
+    if (request.kind === "write") return { hash: reply.result.hash }
+    const decoded = Uint8Array.from(atob(reply.dataBase64), (character) => character.charCodeAt(0))
+    return {
+      content: new TextDecoder("utf-8", { fatal: true }).decode(decoded),
+      hash: reply.result.hash,
     }
   }
 
@@ -675,6 +798,9 @@ export class SandboxSessionRuntime {
   }
 
   releaseSession(sessionId: string): Promise<void> {
+    for (const record of this.records.values()) {
+      if (record.sessionId === sessionId) this.stopLumeHeartbeat(record.ref)
+    }
     if (sessionId === HOST_FALLBACK_SESSION_ID) return Promise.resolve()
     const existing = this.releases.get(sessionId)
     if (existing) return existing
@@ -707,7 +833,7 @@ export class SandboxSessionRuntime {
     const owned = [...this.records.values()].filter((record) => record.sessionId === sessionId)
     for (const record of owned) {
       this.records.delete(record.ref)
-      if (adapterTier(record.binding.shellTier) && record.tierAdapter?.release) {
+      if (record.lume || (adapterTier(record.binding.shellTier) && record.tierAdapter?.release)) {
         this.cleanupByRef.set(record.ref, record)
       }
     }
@@ -733,9 +859,12 @@ export class SandboxSessionRuntime {
   }
 
   private releaseCleanupRecord(record: RuntimeRecord): Promise<void> {
+    this.stopLumeHeartbeat(record.ref)
     const existing = this.cleanupInFlight.get(record.ref)
     if (existing) return existing
-    const release = record.tierAdapter?.release
+    const release = record.lume
+      ? () => (this.deps.getLumeClient?.() ?? lumeClient).unbind(record.lume!.binding)
+      : record.tierAdapter?.release
     if (!release) {
       this.cleanupByRef.delete(record.ref)
       return Promise.resolve()
@@ -752,6 +881,39 @@ export class SandboxSessionRuntime {
       })
     this.cleanupInFlight.set(record.ref, pending)
     return pending
+  }
+
+  private stopLumeHeartbeat(ref: SandboxRuntimeRef): void {
+    const timer = this.lumeHeartbeats.get(ref)
+    if (timer !== undefined) clearInterval(timer)
+    this.lumeHeartbeats.delete(ref)
+  }
+
+  private startLumeHeartbeat(record: RuntimeRecord): void {
+    const binding = record.lume!.binding
+    let pending = false
+    const timer = setInterval(() => {
+      if (
+        pending ||
+        this.records.get(record.ref) !== record ||
+        this.activeBySession.get(record.sessionId) !== record.ref ||
+        this.closedSessions.has(record.sessionId)
+      )
+        return
+      pending = true
+      void (this.deps.getLumeClient?.() ?? lumeClient)
+        .renew(binding)
+        .catch(() => {
+          if (this.activeBySession.get(record.sessionId) === record.ref)
+            this.activeBySession.delete(record.sessionId)
+          this.retireRecord(record.ref)
+        })
+        .finally(() => {
+          pending = false
+        })
+    }, 5_000)
+    if (typeof timer === "object" && "unref" in timer) timer.unref()
+    this.lumeHeartbeats.set(record.ref, timer)
   }
 
   private recordMicrovmAudit(
@@ -847,6 +1009,7 @@ export class SandboxSessionRuntime {
    * the next and the second test silently exercises the first one's record.
    */
   __resetForTesting(): void {
+    for (const ref of this.lumeHeartbeats.keys()) this.stopLumeHeartbeat(ref)
     for (const sessionId of this.bindingAttempts.keys()) this.cancelPendingBindings(sessionId)
     this.bindingAttempts.clear()
     this.releases.clear()
@@ -909,11 +1072,19 @@ export class SandboxSessionRuntime {
     return row
   }
 
-  private async preflightMutableTarget(input: BindSandboxSessionInput): Promise<void> {
+  private async preflightMutableTarget(
+    input: BindSandboxSessionInput
+  ): Promise<SandboxConnectionRow | undefined> {
     const needsGui = input.computerUseEnabled && input.binding.computerTarget === "bound"
     const needsExec = input.sandboxEnabled && input.binding.shellTier === "cua-desktop"
     if (!needsGui && !needsExec) return
-    const row = await this.requireConnection(input.binding.connectionId)
+    let row = await this.requireConnection(input.binding.connectionId)
+    if (row.config.provider === "lume") {
+      const diagnostic = await (this.deps.getLumeClient?.() ?? lumeClient).diagnose()
+      const current = diagnostic.resources.find((resource) => resource.connectionId === row.id)
+      if (!current) throw new SandboxRuntimeError("placement-unavailable", "lume_resource_missing")
+      row = projectLumeResource(current, diagnostic.enabled, row)
+    }
     if (needsGui) {
       assertSandboxOperationAllowed(operationContext(row), "gui")
     }
@@ -924,11 +1095,23 @@ export class SandboxSessionRuntime {
       // answer for cua-cloud and lume: they have no adapter at all.
       assertSandboxOperationAllowed(operationContext(row), "workspaceExec")
     }
+    return row
   }
 }
 
 function makeRuntimeRef(): SandboxRuntimeRef {
   return `sandbox-runtime:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`
+}
+
+/** Host source paths are logical guest workspace paths, never SSH commands. */
+export function lumeLogicalPath(root: string, path: string): string {
+  if (path === root || path === ".") return "."
+  if (!isPathUnderRoot(path, root))
+    throw new SandboxRuntimeError("placement-unavailable", "lume_workspace_path_outside_binding")
+  const logical = path.slice(root.length).replace(/^\//, "")
+  if (!logical || logical.split("/").some((part) => !part || part === ".." || part === "."))
+    throw new SandboxRuntimeError("placement-unavailable", "lume_workspace_path_invalid")
+  return logical
 }
 
 function defaultMicrovmAdapter(): MicrovmExecAdapter | null {

@@ -1,4 +1,5 @@
 import type { SandboxClient } from "@/lib/automation/sandbox-client"
+import type { LumeClient, LumeResource } from "@/lib/automation/lume-client"
 import type { SandboxConnectionRow } from "@/types/sandbox"
 import {
   hasSandboxConnectionLifecycleAdapter,
@@ -58,6 +59,49 @@ function fakeClient(overrides: Partial<SandboxClient> = {}): SandboxClient {
 }
 
 describe("runSandboxConnectionOperation", () => {
+  it("preserves the native Lume receipt and forwards the same cancellation signal", async () => {
+    const signal = new AbortController().signal
+    const resource: LumeResource = {
+      resourceId: "owned",
+      generation: 2,
+      bootEpoch: "new-boot",
+      connectionId: "conn-1",
+      vmName: "owned",
+      state: "running",
+      readiness: { vm: true, ssh: true, helper: true, gui: true },
+      quarantine: false,
+      memoryMb: 8192,
+      lastErrorCode: null,
+      groupId: null,
+    }
+    const run = jest.fn().mockResolvedValue({ resource })
+    const local = fakeClient()
+    const connection = row({
+      provider: "lume",
+      driver: "cua-driver",
+      state: "running",
+      config: {
+        provider: "lume",
+        vmName: "owned",
+        contractVersion: 1,
+        resourceId: "owned",
+        generation: 2,
+        bootEpoch: "old-boot",
+      },
+      capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+    })
+    const outcome = await runSandboxConnectionOperation(connection, "connect", {
+      client: local,
+      lumeClient: { run } as unknown as LumeClient,
+      signal,
+    })
+    expect(outcome.lume).toBe(resource)
+    expect(run).toHaveBeenCalledWith(
+      { kind: "connect", reference: { resourceId: "owned", generation: 2, bootEpoch: "old-boot" } },
+      signal
+    )
+    expect(local.start).not.toHaveBeenCalled()
+  })
   it("dispatches Docker lifecycle operations through the checked adapter", async () => {
     const client = fakeClient()
     await expect(runSandboxConnectionOperation(row(), "start", { client })).resolves.toMatchObject({

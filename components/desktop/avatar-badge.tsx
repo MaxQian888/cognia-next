@@ -30,8 +30,8 @@ export function AvatarBadge({
   statusDot,
 }: AvatarBadgeProps) {
   // Fall back to the glyph if the image fails to load (stale tauriPath, etc.).
-  const [imgFailed, setImgFailed] = useState(false)
-  const showImage = Boolean(subject.avatarImageUrl) && !imgFailed
+  const [failedUrl, setFailedUrl] = useState<string>()
+  const showImage = Boolean(subject.avatarImageUrl) && failedUrl !== subject.avatarImageUrl
   const style: CSSProperties = {
     width: size,
     height: size,
@@ -51,10 +51,14 @@ export function AvatarBadge({
       {showImage ? (
         // eslint-disable-next-line @next/next/no-img-element -- avatar is a data:/asset URL, not an optimizable remote asset
         <img
+          key={subject.avatarImageUrl}
           src={subject.avatarImageUrl}
           alt=""
           className="size-full object-cover"
-          onError={() => setImgFailed(true)}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setFailedUrl(subject.avatarImageUrl)}
         />
       ) : (
         avatarGlyph(subject)

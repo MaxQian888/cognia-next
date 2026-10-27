@@ -17,6 +17,13 @@ import {
   setComputerUsePipRunEnded,
   subscribeComputerUsePip,
   suppressComputerUsePipForCapture,
+  withComputerUsePipActivity,
+  setComputerUsePipTarget,
+  getComputerUsePipPresentationIds,
+  getComputerUsePipCaptureSuppressed,
+  retainComputerUsePipSession,
+  COMPUTER_USE_PIP_RETENTION_MS,
+  retainComputerUsePipPresentation,
 } from "./computer-use-pip"
 
 afterEach(() => {
@@ -26,6 +33,304 @@ afterEach(() => {
 })
 
 describe("computer-use PiP state", () => {
+  it("rejects sourced frames, results and target changes from another chat", () => {
+    const source = publishComputerUseActivity("a", "get_app_state")
+    publishComputerUseActivity("b", "type", undefined, undefined, null)
+    const before = getComputerUsePipSnapshot("b")
+    publishComputerUsePipFrame("b", { output: "FROM_A", width: 80, height: 60 }, source)
+    publishComputerUseActivity("b", "get_app_state", { ok: false, error: "FROM_A" }, source)
+    setComputerUsePipTarget("b", source, "wrong-desktop")
+    expect(getComputerUsePipSnapshot("b")).toBe(before)
+  })
+  it("keeps concurrent app presentations and their controls isolated inside one chat", () => {
+    const a = publishComputerUseActivity("chat", "get_app_state", undefined, undefined, null, {
+      id: "app-a",
+      label: "Editor",
+    })
+    const b = publishComputerUseActivity("chat", "get_app_state", undefined, undefined, "remote", {
+      id: "app-b",
+      label: "Browser",
+    })
+    publishComputerUsePipFrame("chat", { output: "A", width: 800, height: 600 }, a)
+    publishComputerUsePipFrame(
+      "chat",
+      { output: "B", width: 1280, height: 800, targetConnectionId: "remote" },
+      b
+    )
+    expect(getComputerUsePipPresentationIds("chat")).toEqual(["app-a", "app-b"])
+    expect(getComputerUsePipSnapshot("chat", "app-a").frame?.src).toContain("A")
+    expect(getComputerUsePipSnapshot("chat", "app-b").frame?.src).toContain("B")
+    setComputerUsePipHidden("chat", true, "app-a")
+    setComputerUsePipDismissed("chat", true, "app-b")
+    expect(getComputerUsePipSnapshot("chat", "app-a")).toMatchObject({
+      hidden: true,
+      dismissed: false,
+    })
+    expect(getComputerUsePipSnapshot("chat", "app-b")).toMatchObject({
+      hidden: false,
+      dismissed: true,
+    })
+  })
+
+  it("notifies only the owning presentation on a frame update", () => {
+    const a = publishComputerUseActivity("a", "get_app_state")
+    publishComputerUseActivity("b", "get_app_state")
+    const own = jest.fn(),
+      other = jest.fn()
+    const offA = subscribeComputerUsePip(own, "a")
+    const offB = subscribeComputerUsePip(other, "b")
+    publishComputerUsePipFrame("a", { output: "A", width: 80, height: 60 }, a)
+    expect(own).toHaveBeenCalledTimes(1)
+    expect(other).not.toHaveBeenCalled()
+    offA()
+    offB()
+  })
+
+  it("retires old presentation identities across repeated explicit runs", () => {
+    for (let run = 1; run <= 20; run++) {
+      beginComputerUsePipRun("chat", run)
+      publishComputerUseActivity("chat", "get_app_state", undefined, undefined, null, {
+        id: `generation-${run}`,
+      })
+      expect(getComputerUsePipPresentationIds("chat")).toEqual([`generation-${run}`])
+    }
+  })
+
+  it("bounds offscreen target frames while retaining the displayed target", () => {
+    const release = retainComputerUsePipPresentation("chat", "visible")
+    const visible = publishComputerUseActivity(
+      "chat",
+      "get_app_state",
+      undefined,
+      undefined,
+      null,
+      { id: "visible" }
+    )
+    publishComputerUsePipFrame("chat", { output: "VISIBLE", width: 80, height: 60 }, visible)
+    for (let i = 0; i < 20; i++) {
+      const a = publishComputerUseActivity("chat", "get_app_state", undefined, undefined, null, {
+        id: `app-${i}`,
+      })
+      publishComputerUsePipFrame("chat", { output: `FRAME-${i}`, width: 80, height: 60 }, a)
+    }
+    expect(getComputerUsePipPresentationIds("chat")).toHaveLength(21)
+    const cached = getComputerUsePipPresentationIds("chat").filter(
+      (id) => getComputerUsePipSnapshot("chat", id).frame
+    )
+    expect(cached).toHaveLength(9)
+    expect(getComputerUsePipSnapshot("chat", "visible").frame?.src).toContain("VISIBLE")
+    expect(getComputerUsePipSnapshot("chat", "app-0")).toMatchObject({
+      frame: null,
+      frameUnavailable: true,
+    })
+    release()
+  })
+
+  it("does not reopen a terminal run when its final action result arrives", () => {
+    const a = publishComputerUseActivity("chat", "get_app_state")
+    setComputerUsePipRunEnded("chat")
+    publishComputerUseActivity("chat", "get_app_state", { ok: true }, a)
+    expect(getComputerUsePipSnapshot("chat").ended).toBe(true)
+  })
+
+  it("enforces the inactive byte budget and ignores results after retirement", () => {
+    jest.useFakeTimers()
+    const first = publishComputerUseActivity("bytes", "get_app_state", undefined, undefined, null, {
+      id: "a",
+    })
+    publishComputerUsePipFrame(
+      "bytes",
+      { output: "A".repeat(9 * 1024 * 1024), width: 80, height: 60 },
+      first
+    )
+    publishComputerUseActivity("bytes", "get_app_state", { ok: true }, first)
+    const second = publishComputerUseActivity(
+      "bytes",
+      "get_app_state",
+      undefined,
+      undefined,
+      null,
+      { id: "b" }
+    )
+    publishComputerUsePipFrame(
+      "bytes",
+      { output: "B".repeat(9 * 1024 * 1024), width: 80, height: 60 },
+      second
+    )
+    publishComputerUseActivity("bytes", "get_app_state", { ok: true }, second)
+    expect(getComputerUsePipSnapshot("bytes", "a")).toMatchObject({
+      frame: null,
+      frameUnavailable: true,
+    })
+    expect(getComputerUsePipSnapshot("bytes", "b").frame).not.toBeNull()
+    setComputerUsePipRunEnded("bytes")
+    jest.advanceTimersByTime(COMPUTER_USE_PIP_RETENTION_MS + 1)
+    publishComputerUseActivity("bytes", "get_app_state", { ok: true }, second)
+    publishComputerUsePipFrame("bytes", { output: "LATE", width: 80, height: 60 }, second)
+    expect(getComputerUsePipPresentationIds("bytes")).toEqual([])
+    jest.useRealTimers()
+  })
+
+  it("suppresses all local overlay layers across overlapping full-desktop captures", async () => {
+    publishComputerUseActivity("a", "screenshot")
+    publishComputerUseActivity("b", "get_app_state", undefined, undefined, "remote")
+    const first = await suppressComputerUsePipForCapture("a", "local-desktop")
+    const second = await suppressComputerUsePipForCapture("b", "local-desktop")
+    expect(getComputerUsePipCaptureSuppressed()).toBe(true)
+    first()
+    first()
+    expect(getComputerUsePipCaptureSuppressed()).toBe(true)
+    second()
+    expect(getComputerUsePipCaptureSuppressed()).toBe(false)
+  })
+
+  it("retires completed background previews while preserving every mounted view", () => {
+    jest.useFakeTimers()
+    const releaseFirst = retainComputerUsePipSession("visible")
+    const releaseSecond = retainComputerUsePipSession("visible")
+    publishComputerUseActivity("visible", "get_app_state", { ok: true })
+    publishComputerUseActivity("background", "get_app_state", { ok: true })
+    setComputerUsePipRunEnded("visible")
+    setComputerUsePipRunEnded("background")
+    releaseFirst()
+    jest.advanceTimersByTime(COMPUTER_USE_PIP_RETENTION_MS + 1)
+    expect(getComputerUsePipSnapshot("background").action).toBeNull()
+    expect(getComputerUsePipSnapshot("visible").action).toBe("get_app_state")
+    releaseSecond()
+    jest.advanceTimersByTime(COMPUTER_USE_PIP_RETENTION_MS + 1)
+    expect(getComputerUsePipSnapshot("visible").action).toBeNull()
+    jest.useRealTimers()
+  })
+
+  it("rejects a frame whose late target resolution lost to a newer action on another desktop", () => {
+    publishComputerUseActivity("s", "type", undefined, undefined, null)
+    const remote = publishComputerUseActivity("s", "get_app_state")
+    publishComputerUseActivity("s", "type", undefined, undefined, null)
+    setComputerUsePipTarget("s", remote, "remote-desktop")
+    publishComputerUsePipFrame(
+      "s",
+      {
+        output: "REMOTE",
+        width: 800,
+        height: 600,
+        capturedAt: 100,
+        targetConnectionId: "remote-desktop",
+      },
+      remote
+    )
+    expect(getComputerUsePipSnapshot("s")).toMatchObject({
+      targetConnectionId: null,
+      action: "type",
+      frame: null,
+    })
+  })
+  it("advances ownership on identical frames without allowing an earlier activity to replace them", () => {
+    const first = publishComputerUseActivity("s", "get_app_state")
+    const frame = { output: "SAME", width: 80, height: 60, capturedAt: 100 }
+    publishComputerUsePipFrame("s", frame, first)
+    const second = publishComputerUseActivity("s", "get_app_state")
+    publishComputerUsePipFrame("s", frame, second)
+    publishComputerUsePipFrame("s", { ...frame, output: "OLD" }, first)
+    expect(getComputerUsePipSnapshot("s").frame?.src).toContain("SAME")
+  })
+
+  it("isolates capture releases across explicit and implicit run boundaries", async () => {
+    publishComputerUseActivity("s", "get_app_state")
+    const oldRelease = await suppressComputerUsePipForCapture("s")
+    setComputerUsePipRunEnded("s")
+    publishComputerUseActivity("s", "get_app_state")
+    expect(getComputerUsePipSnapshot("s").captureSuppressed).toBe(false)
+    const release = await suppressComputerUsePipForCapture("s")
+    oldRelease()
+    expect(getComputerUsePipSnapshot("s").captureSuppressed).toBe(true)
+    release()
+    beginComputerUsePipRun("s", 1)
+    const previous = await suppressComputerUsePipForCapture("s")
+    beginComputerUsePipRun("s", 2)
+    const next = await suppressComputerUsePipForCapture("s")
+    previous()
+    expect(getComputerUsePipSnapshot("s").captureSuppressed).toBe(true)
+    next()
+    expect(getComputerUsePipSnapshot("s").captureSuppressed).toBe(false)
+  })
+
+  it.each(["refused", "notDelivered", "unknown"])(
+    "reports semantic %s outcomes without changing the tool result",
+    async (status) => {
+      const result = { status, policyDecision: { allowed: false, reason: "Blocked" } }
+      expect(
+        await withComputerUsePipActivity("s", "perform_action", async () => result, null)
+      ).toBe(result)
+      expect(getComputerUsePipSnapshot("s")).toMatchObject({
+        phase: "error",
+        error: "Blocked",
+        targetConnectionId: null,
+      })
+    }
+  )
+
+  it("preserves thrown errors and allows unowned calls without creating session state", async () => {
+    const error = new Error("failure")
+    await expect(
+      withComputerUsePipActivity("s", "get_app_state", async () => {
+        throw error
+      })
+    ).rejects.toBe(error)
+    expect(getComputerUsePipSnapshot("s").phase).toBe("error")
+    expect(await withComputerUsePipActivity(undefined, "get_app_state", async () => 42)).toBe(42)
+    expect(getComputerUsePipSnapshot("unowned").action).toBeNull()
+  })
+
+  it("rejects outdated frames and completions from a previous run", () => {
+    beginComputerUsePipRun("s", 1)
+    const old = publishComputerUseActivity("s", "get_app_state")
+    beginComputerUsePipRun("s", 2)
+    const current = publishComputerUseActivity("s", "get_app_state")
+    publishComputerUsePipFrame(
+      "s",
+      { output: "NEW", width: 800, height: 600, capturedAt: 2000 },
+      current
+    )
+    publishComputerUsePipFrame(
+      "s",
+      { output: "OLD", width: 800, height: 600, capturedAt: 3000 },
+      old
+    )
+    publishComputerUseActivity("s", "get_app_state", { ok: false, error: "old error" }, old)
+    expect(getComputerUsePipSnapshot("s")).toMatchObject({
+      runId: 2,
+      phase: "running",
+      error: null,
+      frame: { capturedAt: 2000 },
+    })
+    publishComputerUsePipFrame(
+      "s",
+      { output: "OLDER", width: 800, height: 600, capturedAt: 1000 },
+      current
+    )
+    expect(getComputerUsePipSnapshot("s").frame?.src).toContain("NEW")
+  })
+
+  it("uses the screenshot format and skips identical frame notifications", () => {
+    const activity = publishComputerUseActivity("s", "get_app_state")
+    const frame = {
+      output: "JPEG",
+      width: 800,
+      height: 600,
+      capturedAt: 1000,
+      format: "jpeg" as const,
+    }
+    publishComputerUsePipFrame("s", frame, activity)
+    const previous = getComputerUsePipSnapshot("s")
+    const listener = jest.fn()
+    const unsubscribe = subscribeComputerUsePip(listener)
+    publishComputerUsePipFrame("s", frame, activity)
+    expect(getComputerUsePipSnapshot("s")).toBe(previous)
+    expect(previous.frame?.src).toBe("data:image/jpeg;base64,JPEG")
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
   it("retains the latest screenshot while subsequent actions run", () => {
     publishComputerUseActivity("session-1", "screenshot", {
       ok: true,

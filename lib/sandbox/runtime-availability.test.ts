@@ -8,6 +8,47 @@ import type { SandboxConnectionRow } from "@/types/sandbox"
 
 afterEach(__resetSandboxRuntimeAvailabilityForTesting)
 
+it("keeps Lume recovery available while feature, helper and GUI gates stay independent", () => {
+  const row = connection({
+    provider: "lume",
+    driver: "cua-driver",
+    config: {
+      provider: "lume",
+      vmName: "owned",
+      contractVersion: 1,
+      resourceId: "r",
+      generation: 1,
+      bootEpoch: "boot",
+      featureEnabled: false,
+      quarantine: true,
+    },
+    capabilities: defaultSandboxCapabilities("lume", "cua-driver"),
+  })
+  expect(projectSandboxConnectionCapabilities(row, true)).toMatchObject({
+    health: true,
+    stop: true,
+    delete: true,
+    start: false,
+    gui: false,
+    workspaceExec: false,
+  })
+  row.config = {
+    ...row.config,
+    provider: "lume",
+    vmName: "owned",
+    featureEnabled: true,
+    quarantine: false,
+    readiness: { vm: true, ssh: true, helper: true, gui: false },
+  }
+  expect(projectSandboxConnectionCapabilities(row, true)).toMatchObject({
+    start: true,
+    workspaceRead: true,
+    workspaceExec: true,
+    gui: false,
+  })
+  expect(projectSandboxConnectionCapabilities(row, false).stop).toBe(false)
+})
+
 it("projects OS from active confinement and microVM from the accepting adapter", () => {
   const available = projectSandboxRuntimeAvailability(
     { confined: true, backend: "macos-sandbox-exec", detail: "ok" },
