@@ -70,7 +70,7 @@ log.workspace = true
 # Do not enable russh's `rsa` feature: it pulls the unpatched RustCrypto RSA
 # implementation affected by RUSTSEC-2023-0071. Ed25519/ECDSA SSH keys remain
 # supported through the ring backend.
-russh = { version = "=0.63.3", default-features = false, features = ["ring"] }
+russh = { version = "=0.64.1", default-features = false, features = ["ring"] }
 # SFTP over the SSH connection `ssh.rs` already dialled (ADR-0162). Transport
 # agnostic by design: it takes any `AsyncRead + AsyncWrite`, so it rides
 # `channel.into_stream()` from the same russh session rather than opening a

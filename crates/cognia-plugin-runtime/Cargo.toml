@@ -53,7 +53,7 @@ wasmtime = { version = "=49.0.4", default-features = false, features = ["runtime
 # Preview 1 adapter (wiggle) and Preview 3 component async support.
 wasmtime-wasi = { version = "=49.0.4", default-features = false, features = ["p2"] }
 # Component/manifest validation during install.
-wasmparser = "0.261"
+wasmparser = "0.262"
 # Bounded child-process shutdown in the python host.
 wait-timeout.workspace = true
 serde = { workspace = true, features = ["derive"] }
