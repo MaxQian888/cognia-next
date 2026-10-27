@@ -65,6 +65,7 @@ import {
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual"
 
 import { Button } from "@/components/ui/button"
+import { ConversationCreateMenu } from "@/components/chat/conversation-create-menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -977,17 +978,21 @@ function MobileChannelListBody({
       <div className="flex shrink-0 flex-col gap-1 border-b border-border px-3 pt-2 pb-1">
         <div className="flex min-w-0 items-center gap-2">
           <MobileChannelSearchField />
+          <ConversationCreateMenu
+            onNewConversation={onNewDirect}
+            newConversationLabel={tShell("newChat")}
+          >
           <Button
             type="button"
             size="icon"
             variant="ghost"
-            onClick={onNewDirect}
             aria-label={tShell("newChat")}
             data-testid="mobile-channel-new"
             className="size-11 shrink-0"
           >
             <PlusIcon className="size-5" />
           </Button>
+          </ConversationCreateMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

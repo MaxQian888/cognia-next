@@ -236,7 +236,12 @@ function normalizePathSegments(
   return { absolute, segments: drive ? [drive.slice(0, 2).toLowerCase(), ...segments] : segments }
 }
 
-function workspaceRelativePath(path: string, workspaceRoot: string): string | undefined {
+/**
+ * `path` relative to `workspaceRoot`, or `undefined` when it is outside it,
+ * escapes it with `..`, or starts at `~`. A relative path is taken as already
+ * workspace-relative.
+ */
+export function workspaceRelativePath(path: string, workspaceRoot: string): string | undefined {
   const candidate = normalizePathSegments(path)
   const root = normalizePathSegments(workspaceRoot)
   if (!candidate || !root || !root.absolute) return undefined

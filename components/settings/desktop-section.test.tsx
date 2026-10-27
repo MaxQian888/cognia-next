@@ -1,10 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { broadcastAutostartChanged } from "@/lib/tray/autostart-control"
+import { AutostartStateMismatchError } from "@/lib/tauri/autostart"
 
+const translateMock = jest.fn((ns: string, key: string, _values?: unknown) => `${ns}.${key}`)
 jest.mock("next-intl", () => ({
-  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+  useTranslations: (ns: string) => (key: string, values?: unknown) =>
+    translateMock(ns, key, values),
 }))
 
 const isTauriMock = jest.fn(() => true)
@@ -37,6 +41,7 @@ jest.mock("@/lib/tauri/close-behavior", () => ({
 const isAutostartEnabledMock = jest.fn().mockResolvedValue(false)
 const setAutostartMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/autostart", () => ({
+  ...jest.requireActual("@/lib/tauri/autostart"),
   isAutostartEnabled: () => isAutostartEnabledMock(),
   setAutostart: (...args: unknown[]) => setAutostartMock(...args),
 }))
@@ -170,6 +175,7 @@ beforeEach(() => {
   saveSettingsMock.mockClear()
   hosting = { hostMode: { enabled: false, bootHidden: false }, loaded: true, state: "off" }
   setHostModeEnabledMock.mockImplementation(async (enabled: boolean) => {
+    if (enabled) broadcastAutostartChanged(true)
     hosting = {
       hostMode: { enabled, bootHidden: false },
       loaded: true,
@@ -180,6 +186,26 @@ beforeEach(() => {
 })
 
 describe("always-on host mode", () => {
+  it("does not overwrite a newer registration change when host activation finishes", async () => {
+    let finishHost!: () => void
+    setHostModeEnabledMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishHost = resolve
+        })
+    )
+    render(<DesktopSection />)
+    const autostart = screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+    await waitFor(() => expect(autostart).not.toBeDisabled())
+    fireEvent.click(screen.getByRole("switch", { name: "settings.desktop.hostMode.toggle" }))
+    act(() => {
+      broadcastAutostartChanged(true)
+      broadcastAutostartChanged(false)
+    })
+    await act(async () => finishHost())
+    expect(autostart).not.toBeChecked()
+  })
+
   it("is off by default and says work runs only while the app is open", async () => {
     render(<DesktopSection />)
     const toggle = await screen.findByRole("switch", { name: "settings.desktop.hostMode.toggle" })
@@ -326,6 +352,79 @@ it("reports desktop action failures", async () => {
   fireEvent.click(screen.getByRole("button", { name: "settings.desktop.pingRust" }))
 
   await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(5))
+})
+
+it("follows tray changes and rechecks changes from system settings on focus", async () => {
+  render(<DesktopSection />)
+  const toggle = screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+  await waitFor(() => expect(toggle).not.toBeDisabled())
+  act(() => broadcastAutostartChanged(true))
+  expect(toggle).toBeChecked()
+  isAutostartEnabledMock.mockResolvedValueOnce(false)
+  fireEvent.focus(window)
+  await waitFor(() => expect(toggle).not.toBeChecked())
+  expect(isAutostartEnabledMock).toHaveBeenCalledTimes(2)
+})
+
+it("keeps a newer tray state when the initial settings read finishes late", async () => {
+  let finishRead!: (on: boolean) => void
+  isAutostartEnabledMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishRead = resolve
+      })
+  )
+  render(<DesktopSection />)
+  const toggle = screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+  expect(toggle).toBeDisabled()
+  act(() => broadcastAutostartChanged(true))
+  await act(async () => finishRead(false))
+  expect(toggle).toBeChecked()
+  expect(toggle).not.toBeDisabled()
+})
+
+it("localizes a rejected registration and does not show a success toast", async () => {
+  setAutostartMock.mockRejectedValueOnce(new AutostartStateMismatchError())
+  render(<DesktopSection />)
+  const toggle = screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+  await waitFor(() => expect(toggle).not.toBeDisabled())
+  fireEvent.click(toggle)
+  await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
+  expect(translateMock).toHaveBeenCalledWith("settings.desktop", "launchAutostartFailed", {
+    error: "settings.desktop.launchStateMismatch",
+  })
+  expect(toastSuccessMock).not.toHaveBeenCalled()
+  expect(toggle).not.toBeChecked()
+})
+
+it("prevents another toggle while a registration is pending", async () => {
+  let finish!: () => void
+  setAutostartMock.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+  )
+  render(<DesktopSection />)
+  const toggle = screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+  await waitFor(() => expect(toggle).not.toBeDisabled())
+  fireEvent.click(toggle)
+  expect(toggle).toBeDisabled()
+  fireEvent.click(toggle)
+  expect(setAutostartMock).toHaveBeenCalledTimes(1)
+  await act(async () => finish())
+  expect(toggle).not.toBeDisabled()
+  expect(toggle).toBeChecked()
+})
+
+it("keeps an unreadable autostart state disabled while loading other desktop metadata", async () => {
+  isAutostartEnabledMock.mockRejectedValueOnce(new Error("permission denied"))
+  render(<DesktopSection />)
+  await screen.findByText(/Windows \(windows\)/)
+  const toggle = screen.getByRole("switch", { name: "settings.desktop.launchAtLoginToggle" })
+  expect(toggle).toBeDisabled()
+  fireEvent.focus(window)
+  await waitFor(() => expect(toggle).not.toBeDisabled())
 })
 
 it("does not notify when desktop notification permission is denied", async () => {

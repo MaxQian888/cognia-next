@@ -80,6 +80,7 @@ export class AgentTraceTransport implements Transport {
   }
 
   private writes = 0
+  private flushChain: Promise<void> = Promise.resolve()
 
   constructor(options?: AgentTraceTransportOptions) {
     this.options = {
@@ -120,6 +121,12 @@ export class AgentTraceTransport implements Transport {
   }
 
   async flush(): Promise<void> {
+    const next = this.flushChain.then(() => this.flushBuffered())
+    this.flushChain = next.catch(() => {})
+    await next
+  }
+
+  private async flushBuffered(): Promise<void> {
     if (this.buffer.length === 0) return
     const batch = this.buffer
     this.buffer = []

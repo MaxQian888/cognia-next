@@ -154,6 +154,14 @@ export interface CuaCloudSandboxConfig {
 }
 
 export interface LumeSandboxConfig {
+  /** Absent on legacy compatibility rows, which remain inactive. */
+  contractVersion?: 1
+  resourceId?: string
+  generation?: number
+  bootEpoch?: string
+  readiness?: { vm: boolean; ssh: boolean; helper: boolean; gui: boolean }
+  quarantine?: boolean
+  featureEnabled?: boolean
   /** Lume VM name. */
   vmName: string
   /** Image the VM was created from. */

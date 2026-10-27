@@ -45,6 +45,20 @@ export function getWasmRuntimeGeneration(pluginId: string): string | undefined {
   return wasmGenerations.get(pluginId)
 }
 
+/** Re-initialize configuration through the existing transactional activation. */
+export async function updateWasmPluginConfig(
+  pluginId: string,
+  config: Record<string, unknown>
+): Promise<void> {
+  const generation = wasmGenerations.get(pluginId)
+  if (!isWasmHostAvailable() || !generation) return
+  await invokeWasmHost("plugin_wasm_activate", {
+    pluginId,
+    generation,
+    configJson: JSON.stringify(config),
+  })
+}
+
 async function invokeWasmHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core")

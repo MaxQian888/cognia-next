@@ -4,13 +4,72 @@ import { getDb } from "@/lib/db/schema"
 import { saveSettings } from "@/lib/db/settings"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { useSettingsStore } from "@/stores/settings"
+import * as statusNotifier from "./status-notifier"
+
+jest.mock("./status-notifier", () => {
+  const actual = jest.requireActual("./status-notifier")
+  return { ...actual, startBrowserStatusNotifier: jest.fn(actual.startBrowserStatusNotifier) }
+})
 
 import {
   BROWSER_COMPANION_COMMANDS,
   __resetCapabilityRevisionCacheForTests,
   createBrowserCompanionDeps,
   isBrowserCompanionCommand,
+  startBrowserCompanionAgentRuntime,
 } from "./host-dispatch"
+
+describe("browser companion runtime startup and teardown", () => {
+  const fixture = createDbTestFixture()
+  beforeAll(fixture.initialize)
+  beforeEach(fixture.restore)
+  afterAll(fixture.dispose)
+
+  it("does not leave a reconciliation timer when notifier startup fails", async () => {
+    const failure = new Error("notifier startup failed")
+    const notifier = jest
+      .spyOn(statusNotifier, "startBrowserStatusNotifier")
+      .mockImplementationOnce(() => {
+        throw failure
+      })
+    const schedule = jest.spyOn(globalThis, "setInterval")
+    const clear = jest.spyOn(globalThis, "clearInterval")
+    try {
+      await expect(startBrowserCompanionAgentRuntime()).rejects.toBe(failure)
+      expect(schedule).not.toHaveBeenCalled()
+    } finally {
+      for (const result of schedule.mock.results) {
+        if (result.type === "return") clearInterval(result.value)
+      }
+      schedule.mockRestore()
+      clear.mockRestore()
+      notifier.mockRestore()
+    }
+  })
+
+  it("releases the reconciliation timer and notifier on shutdown", async () => {
+    const stopNotifier = jest.fn()
+    const notifier = jest
+      .spyOn(statusNotifier, "startBrowserStatusNotifier")
+      .mockReturnValueOnce(stopNotifier)
+    const schedule = jest.spyOn(globalThis, "setInterval")
+    const clear = jest.spyOn(globalThis, "clearInterval")
+    let stop: (() => void) | undefined
+    try {
+      stop = await startBrowserCompanionAgentRuntime()
+      expect(schedule).toHaveBeenCalledTimes(1)
+      stop()
+      stop = undefined
+      expect(clear).toHaveBeenCalledWith(schedule.mock.results[0].value)
+      expect(stopNotifier).toHaveBeenCalledTimes(1)
+    } finally {
+      stop?.()
+      schedule.mockRestore()
+      clear.mockRestore()
+      notifier.mockRestore()
+    }
+  })
+})
 
 describe("browser companion command surface", () => {
   it("names exactly the commands the manifest registers", () => {

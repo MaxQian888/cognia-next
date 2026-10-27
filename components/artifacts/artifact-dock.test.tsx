@@ -959,7 +959,9 @@ describe("ArtifactDock — converged workbench shell", () => {
     act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(false))
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.focus" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.focus" })
+    )
     expect(
       useContextWorkbenchStore.getState().layouts["test:artifact::artifact:artifact-1"]?.mode
     ).toBe("focus")
@@ -983,24 +985,21 @@ describe("ArtifactDock — converged workbench shell", () => {
     })
     render(<ArtifactDock />)
 
-    expect(screen.getByRole("button", { name: "contextWorkbench.actions.wide" })).toHaveAttribute(
-      "data-variant",
-      "secondary"
-    )
+    expect(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.wide" })
+    ).toHaveAttribute("data-variant", "secondary")
 
     // Activating a panel with no `preferredMode` writes `layout.mode = "narrow"`,
     // but the dock's width never moves with a panel — so a highlight read off
     // the mode would claim "narrow" over a wide dock.
     fireEvent.click(screen.getByRole("button", { name: "artifacts.dock.artifactMode" }))
 
-    expect(screen.getByRole("button", { name: "contextWorkbench.actions.wide" })).toHaveAttribute(
-      "data-variant",
-      "secondary"
-    )
-    expect(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" })).toHaveAttribute(
-      "data-variant",
-      "ghost"
-    )
+    expect(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.wide" })
+    ).toHaveAttribute("data-variant", "secondary")
+    expect(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.narrow" })
+    ).toHaveAttribute("data-variant", "ghost")
   })
 
   it("hands a reveal intent to the session surface when the artifact is gone", () => {
@@ -1061,17 +1060,23 @@ describe("ArtifactDock — converged workbench shell", () => {
 
     // The dock is mounted with manageOwnWidth={false}, so without this wiring
     // these two buttons would render but do nothing.
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.wide" })
+    )
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.narrow" })
+    )
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
   })
 
   it("drives the dock width from the session surface too", () => {
     render(<ArtifactDock />)
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.wide" })
+    )
 
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.wide)
   })
@@ -1115,7 +1120,9 @@ describe("ArtifactDock — converged workbench shell", () => {
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(52)
 
     // Naming no panel means an explicit user request, which applies.
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.workspace.narrow" })
+    )
     expect(useArtifactDockLayoutStore.getState().dockSize).toBe(DOCK_MODE_WIDTH_PERCENT.narrow)
   })
 

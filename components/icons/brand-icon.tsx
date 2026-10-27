@@ -100,6 +100,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   ai21: assets.ai21,
   amp: assets.amp,
   antigravity: assets.antigravity,
+  "antigravity-acp": assets.antigravity,
   anthropic: assets.anthropic,
   "anthropic-vision": assets.anthropic,
   apple: assets.apple,

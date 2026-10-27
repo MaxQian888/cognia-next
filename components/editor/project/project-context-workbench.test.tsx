@@ -225,20 +225,44 @@ describe("ProjectContextWorkbench", () => {
       screen.queryByRole("separator", { name: "contextWorkbench.actions.resize" })
     ).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.wide" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.fileSidebar.wide" })
+    )
     expect(onModeWidthHint).toHaveBeenLastCalledWith("wide")
-    fireEvent.click(screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.fileSidebar.narrow" })
+    )
     expect(onModeWidthHint).toHaveBeenLastCalledWith("narrow")
+  })
+
+  it("reports the header's required width to the editor host", () => {
+    const onHeaderMinimumWidthChange = jest.fn()
+    const width = jest
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === "context-workbench-header") return 200
+        return this.tagName === "BUTTON" ? 32 : 0
+      })
+    try {
+      const view = renderWorkbench({ onHeaderMinimumWidthChange })
+      expect(onHeaderMinimumWidthChange).toHaveBeenCalled()
+      expect(onHeaderMinimumWidthChange.mock.calls.at(-1)![0]).toBeGreaterThan(0)
+      view.unmount()
+    } finally {
+      width.mockRestore()
+    }
   })
 
   it("lights the width the host reports rather than the recorded intent", () => {
     renderWorkbench({ resolvedMode: "wide", scopeKey: "session:s-resolved" })
 
     expect(
-      screen.getByRole("button", { name: "contextWorkbench.actions.wide" }).dataset.variant
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.fileSidebar.wide" }).dataset
+        .variant
     ).toBe("secondary")
     expect(
-      screen.getByRole("button", { name: "contextWorkbench.actions.narrow" }).dataset.variant
+      screen.getByRole("button", { name: "contextWorkbench.layoutScopes.fileSidebar.narrow" })
+        .dataset.variant
     ).toBe("ghost")
   })
 

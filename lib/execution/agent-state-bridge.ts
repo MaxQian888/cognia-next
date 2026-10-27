@@ -1,12 +1,14 @@
 import Dexie, { type Subscription } from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
-import { getDb } from "@/lib/db/schema"
+import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import {
+  appendRunEventInsideTransaction,
+  appendRunEventsInsideTransaction,
   createExecutionRun,
   getExecutionRun,
   putExecutionRunBinding,
-  runEventJournal,
   semanticRunEvent,
+  type AppendRunEventInput,
 } from "@/lib/db/execution-runs"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
@@ -146,6 +148,53 @@ function lifecycleEvent(
   }
 }
 
+/** A source snapshot cannot extend a settled run, including during overlapping syncs. */
+async function syncRunProjection(
+  runId: string,
+  events: readonly AppendRunEventInput[],
+  lifecycle: { status: ExecutionRunStatus; ts: number; sourceEventId: string },
+  isCurrent: () => boolean
+): Promise<void> {
+  const databaseName = getDb().name
+  await withDbReopenRetry(() => {
+    assertCurrent(isCurrent)
+    const db = getDb()
+    assertCurrent(() => db.name === databaseName)
+    return db.transaction(
+      "rw",
+      db.executionRuns,
+      db.executionRunEvents,
+      db.notificationProjectionWork,
+      async () => {
+        const run = await db.executionRuns.get(runId)
+        assertCurrent(isCurrent)
+        if (run && ["completed", "failed", "cancelled"].includes(run.status)) return
+
+        await appendRunEventsInsideTransaction(db, runId, events)
+        assertCurrent(isCurrent)
+        const current = (await db.executionRuns.get(runId))?.latestSnapshot?.status ?? "queued"
+        assertCurrent(isCurrent)
+        const type = lifecycleEvent(current, lifecycle.status)
+        if (type) {
+          await appendRunEventInsideTransaction(
+            db,
+            runId,
+            semanticRunEvent(
+              type,
+              {},
+              {
+                ts: lifecycle.ts,
+                sourceEventId: lifecycle.sourceEventId,
+              }
+            )
+          )
+          assertCurrent(isCurrent)
+        }
+      }
+    )
+  })
+}
+
 function goalExecutionStatus(goal: Goal): ExecutionRunStatus {
   switch (goal.status) {
     case "active":
@@ -251,24 +300,16 @@ export async function syncGoalExecutionRun(
       )
     ),
   ]
-  await runEventJournal.appendBatch(runId, events)
-  assertCurrent(isCurrent)
-  const current = (await getExecutionRun(runId))?.latestSnapshot?.status ?? "queued"
-  assertCurrent(isCurrent)
-  const type = lifecycleEvent(current, goalExecutionStatus(goal))
-  if (type) {
-    await runEventJournal.append(
-      runId,
-      semanticRunEvent(
-        type,
-        {},
-        {
-          ts: goal.updatedAt,
-          sourceEventId: `goal:${goal.id}:status:${goal.status}:${goal.generationId}`,
-        }
-      )
-    )
-  }
+  await syncRunProjection(
+    runId,
+    events,
+    {
+      status: goalExecutionStatus(goal),
+      ts: goal.updatedAt,
+      sourceEventId: `goal:${goal.id}:status:${goal.status}:${goal.generationId}`,
+    },
+    isCurrent
+  )
 }
 
 export async function syncPlanExecutionRun(
@@ -296,7 +337,7 @@ export async function syncPlanExecutionRun(
       sourceStatus: step.status,
       status: runStepStatus(step.status),
     }))
-  await runEventJournal.appendBatch(runId, [
+  const events = [
     semanticRunEvent(
       "plan.revised",
       { version: plan.updatedAt, steps },
@@ -315,24 +356,17 @@ export async function syncPlanExecutionRun(
         }
       )
     ),
-  ])
-  assertCurrent(isCurrent)
-  const current = (await getExecutionRun(runId))?.latestSnapshot?.status ?? "queued"
-  assertCurrent(isCurrent)
-  const type = lifecycleEvent(current, planExecutionStatus(plan))
-  if (type) {
-    await runEventJournal.append(
-      runId,
-      semanticRunEvent(
-        type,
-        {},
-        {
-          ts: plan.updatedAt,
-          sourceEventId: `plan:${plan.id}:status:${plan.status}:${plan.generationId}`,
-        }
-      )
-    )
-  }
+  ]
+  await syncRunProjection(
+    runId,
+    events,
+    {
+      status: planExecutionStatus(plan),
+      ts: plan.updatedAt,
+      sourceEventId: `plan:${plan.id}:status:${plan.status}:${plan.generationId}`,
+    },
+    isCurrent
+  )
 }
 
 type BridgeOwner = {

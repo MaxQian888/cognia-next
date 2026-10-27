@@ -1,4 +1,7 @@
 import { transport } from "@/lib/tauri"
+import { getCompanionConfigGeneration } from "@/lib/tauri/transport-companion"
+import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import {
   bridgeJobOwner,
   cancelBackgroundMonitor,
@@ -18,10 +21,66 @@ import {
 jest.mock("@/lib/tauri", () => ({
   transport: { call: jest.fn() },
 }))
+jest.mock("@/lib/tauri/transport-companion", () => ({ getCompanionConfigGeneration: jest.fn() }))
+jest.mock("@/lib/tauri/transport-routing", () => ({ getActiveRemoteTransport: jest.fn() }))
+jest.mock("@/lib/runtime/runtime-target-context", () => ({
+  getActiveRuntimeTargetContext: jest.fn(),
+}))
 
 const invoke = jest.mocked(transport.call)
 
-beforeEach(() => invoke.mockReset())
+let pairingGeneration = 0
+beforeEach(() => {
+  invoke.mockReset()
+  jest.mocked(getCompanionConfigGeneration).mockReturnValue(++pairingGeneration)
+  jest.mocked(getActiveRemoteTransport).mockReturnValue(null)
+  jest
+    .mocked(getActiveRuntimeTargetContext)
+    .mockReturnValue({ accountId: "ada", targetId: "host", routingGeneration: 1 })
+})
+
+it.each([listBackgroundJobs, listBackgroundMonitors])(
+  "stops asking a refused list across later turns and retries after pairing changes (%#)",
+  async (list) => {
+    const refusal = Object.assign(new Error("host_surface_forbidden"), { retryable: false })
+    invoke.mockRejectedValue(refusal)
+    await expect(list()).rejects.toBe(refusal)
+    await expect(list()).rejects.toBe(refusal)
+    expect(invoke).toHaveBeenCalledTimes(1)
+    jest.mocked(getCompanionConfigGeneration).mockReturnValue(++pairingGeneration)
+    await expect(list()).rejects.toBe(refusal)
+    expect(invoke).toHaveBeenCalledTimes(2)
+  }
+)
+
+it("keeps list refusals independent and retries transient failures", async () => {
+  const refusal = Object.assign(new Error("forbidden"), { retryable: false })
+  invoke.mockRejectedValueOnce(refusal).mockResolvedValueOnce({ monitors: [] })
+  await expect(listBackgroundJobs()).rejects.toBe(refusal)
+  await expect(listBackgroundMonitors()).resolves.toEqual([])
+  const transient = Object.assign(new Error("unavailable"), { retryable: true })
+  invoke.mockRejectedValueOnce(transient).mockResolvedValueOnce({ monitors: [] })
+  await expect(listBackgroundMonitors()).rejects.toBe(transient)
+  await expect(listBackgroundMonitors()).resolves.toEqual([])
+  expect(invoke).toHaveBeenCalledTimes(4)
+})
+
+it("retries a final refusal when the account, target, or remote transport changes", async () => {
+  const refusal = Object.assign(new Error("forbidden"), { retryable: false })
+  invoke.mockRejectedValue(refusal)
+  await expect(listBackgroundJobs()).rejects.toBe(refusal)
+  jest
+    .mocked(getActiveRuntimeTargetContext)
+    .mockReturnValue({ accountId: "bob", targetId: "host", routingGeneration: 2 })
+  await expect(listBackgroundJobs()).rejects.toBe(refusal)
+  jest
+    .mocked(getActiveRuntimeTargetContext)
+    .mockReturnValue({ accountId: "bob", targetId: "other", routingGeneration: 3 })
+  await expect(listBackgroundJobs()).rejects.toBe(refusal)
+  jest.mocked(getActiveRemoteTransport).mockReturnValue({ call: jest.fn(), subscribe: jest.fn() })
+  await expect(listBackgroundJobs()).rejects.toBe(refusal)
+  expect(invoke).toHaveBeenCalledTimes(4)
+})
 
 it("lists jobs and monitors through the active transport", async () => {
   invoke

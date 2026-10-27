@@ -3,6 +3,7 @@
  */
 
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { getNativeSelect, selectOption } from "@/lib/testing/select-option"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -166,18 +167,20 @@ describe("SecuritySection", () => {
     expect(mockToastSuccess).not.toHaveBeenCalled()
   })
 
-  it("defaults the auto-lock select to Off and persists a chosen interval", () => {
+  it("defaults the auto-lock select to Off and persists a chosen interval", async () => {
     render(<SecuritySection />)
-    const select = screen.getByTestId("account-auto-lock-select") as HTMLSelectElement
-    expect(select.value).toBe("0")
+    const select = screen.getByRole("combobox", { name: "autoLock.label" })
+    expect(getNativeSelect(select)).toHaveValue("0")
 
-    fireEvent.change(select, { target: { value: "15" } })
+    await selectOption(select, "15")
     expect(saveMock).toHaveBeenCalledWith({ accountAutoLockMinutes: 15 })
   })
 
   it("reflects the persisted auto-lock interval", () => {
     mockedSettings = { accountAutoLockMinutes: 30 }
     render(<SecuritySection />)
-    expect((screen.getByTestId("account-auto-lock-select") as HTMLSelectElement).value).toBe("30")
+    expect(getNativeSelect(screen.getByRole("combobox", { name: "autoLock.label" }))).toHaveValue(
+      "30"
+    )
   })
 })

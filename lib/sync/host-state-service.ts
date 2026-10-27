@@ -79,6 +79,7 @@ import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
 import { instantSessionTitle, isPlaceholderTitle } from "@/lib/chat/placeholder-title"
+import { refusedHostMessageId } from "@/lib/chat/refused-host-message"
 import { announceFileSpaceSessionsChanged } from "@/lib/filespace/lifecycle"
 
 export const HOST_STATE_ACTION_TOPIC = "host-state://action"
@@ -1286,7 +1287,17 @@ async function projectPendingHostStateActions(
       if (!Array.isArray(payloadActions) || payloadActions.length !== 1) return []
       return isHostStateAction(payloadActions[0]) ? [payloadActions[0]] : []
     })
-  return actions.reduce((projected, action) => reduceHostStateIntent(projected, action), confirmed)
+  return actions.reduce((projected, action) => {
+    // The broadcast can beat its submit receipt. Once the Host knows this
+    // enqueue, a still-`sending` outbox row must not queue it again or clear a
+    // newer draft — especially after the Host has permanently dropped it.
+    if (
+      action.action.kind === "message.enqueue" &&
+      confirmed.operations.some((operation) => operation.actionId === action.actionId)
+    )
+      return projected
+    return reduceHostStateIntent(projected, action)
+  }, confirmed)
 }
 
 async function materializeOptimisticMessages(
@@ -1322,6 +1333,77 @@ async function materializeOptimisticMessages(
     }
     await db.messages.put(message)
     markSessionDirty(message.sessionId)
+  }
+
+  // A failed operation still in `queue` is waiting for a dispatch retry.
+  // Only its removal confirms that this intent will never reach the runtime.
+  // Keep that distinction local: neither the Host transcript nor the shared
+  // draft (and its client-authored revision) should change to recover a send.
+  const refused = state.operations.filter(
+    (operation) =>
+      operation.kind === "message.enqueue" &&
+      operation.status === "failed" &&
+      operation.errorCode &&
+      !state.queue.some((queued) => queued.actionId === operation.actionId)
+  )
+  if (refused.length > 0) {
+    const localMessages = await db.messages.where("sessionId").equals(state.sessionId).toArray()
+    // A reconnect may first observe the dropped snapshot, missing the queued
+    // event entirely. This device's durable outbox still holds the submission.
+    const outbound = await db.mobileOutboundQueue
+      .filter((row) => row.protocol === "host-state" && row.channel === state.channel)
+      .toArray()
+    for (const operation of refused) {
+      const retainedId = refusedHostMessageId(operation.actionId)
+      if (await db.messages.get(retainedId)) continue
+      let message = localMessages.find(
+        (candidate) =>
+          (candidate.metadata?.hostState as { actionId?: unknown } | undefined)?.actionId ===
+          operation.actionId
+      )
+      if (!message) {
+        const row = outbound.find((candidate) => candidate.actionId === operation.actionId)
+        const actions = (row?.payload as { actions?: unknown } | undefined)?.actions
+        const action = Array.isArray(actions) && actions.length === 1 ? actions[0] : undefined
+        if (!isHostStateAction(action) || action.action.kind !== "message.enqueue") continue
+        // A canonical message with this id wins, even if it carries no local
+        // HostState metadata. Never turn an actual delivery into a refusal.
+        if (await db.messages.get(action.action.messageId)) continue
+        message = {
+          id: action.action.messageId,
+          sessionId: state.sessionId,
+          role: "user",
+          parts: [{ type: "text", text: action.action.text }],
+          metadata: {
+            hostState: {
+              actionId: action.actionId,
+              clientId: action.clientId,
+              attachmentRefs: action.action.attachments,
+              optimistic: true,
+            },
+            ...pickReferenceMetadata(action.action),
+          },
+          createdAt: action.createdAt,
+        }
+      }
+      const hostState = message.metadata?.hostState as
+        { optimistic?: unknown; refusal?: unknown } | undefined
+      if (!hostState || hostState.refusal || message.role !== "user") continue
+      await db.messages.put({
+        ...message,
+        // Never share the Host's id: sync_pull and legacy history hydration
+        // can keep upserting its unconfirmed enqueue placeholder under it.
+        id: retainedId,
+        metadata: {
+          ...message.metadata,
+          hostState: {
+            ...hostState,
+            optimistic: true,
+            refusal: { code: operation.errorCode, at: operation.updatedAt, messageId: message.id },
+          },
+        },
+      })
+    }
   }
 
   const terminalRows = await db.mobileOutboundQueue

@@ -7,30 +7,36 @@ import {
 } from "./autostart-control"
 
 const isEnabled = jest.fn<Promise<boolean>, []>()
-const setAuto = jest.fn<Promise<void>, [boolean]>()
+const enableNative = jest.fn<Promise<void>, []>()
+const disableNative = jest.fn<Promise<void>, []>()
 
-jest.mock("@/lib/tauri/autostart", () => ({
-  isAutostartEnabled: () => isEnabled(),
-  setAutostart: (on: boolean) => setAuto(on),
+jest.mock("@/lib/platform/detect", () => ({ isTauri: () => true }))
+jest.mock("@tauri-apps/plugin-autostart", () => ({
+  isEnabled: () => isEnabled(),
+  enable: () => enableNative(),
+  disable: () => disableNative(),
 }))
 
 beforeEach(() => {
   isEnabled.mockReset()
-  setAuto.mockReset().mockResolvedValue(undefined)
+  enableNative.mockReset().mockResolvedValue(undefined)
+  disableNative.mockReset().mockResolvedValue(undefined)
 })
 
 describe("toggleTrayAutostart", () => {
   it("flips off→on and returns the value read back", async () => {
     isEnabled.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
     const result = await toggleTrayAutostart()
-    expect(setAuto).toHaveBeenCalledWith(true)
+    expect(enableNative).toHaveBeenCalledTimes(1)
+    expect(disableNative).not.toHaveBeenCalled()
     expect(result).toBe(true)
   })
 
   it("flips on→off", async () => {
     isEnabled.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
     const result = await toggleTrayAutostart()
-    expect(setAuto).toHaveBeenCalledWith(false)
+    expect(disableNative).toHaveBeenCalledTimes(1)
+    expect(enableNative).not.toHaveBeenCalled()
     expect(result).toBe(false)
   })
 

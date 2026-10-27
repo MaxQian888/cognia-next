@@ -660,6 +660,9 @@ export class CompanionTransport implements Transport {
   private wsCloseGraceTimer: ReturnType<typeof setTimeout> | null = null
   private wsDestroyed = false
   private wsResyncInFlight: Promise<void> | null = null
+  private wsTicketAttempt = 0
+  private wsTicketPending: { config: CompanionConfig; pairing: number } | null = null
+  private wsTicketRefusal: { config: CompanionConfig; pairing: number } | null = null
 
   /** Per-channel cursor: highest seq number seen from the server. */
   private highestSeq: Map<string, number> = new Map()
@@ -1656,6 +1659,11 @@ export class CompanionTransport implements Transport {
    */
   public reconnectWs(): void {
     if (this.wsDestroyed) return
+    // An explicit reconnect may follow a changed grant on the same pairing.
+    this.wsTicketRefusal = null
+    this.wsTicketAttempt++
+    this.wsTicketPending = null
+    this.wsState = "idle"
     if (this.wsReconnectTimer !== null) {
       clearTimeout(this.wsReconnectTimer)
       this.wsReconnectTimer = null
@@ -2233,6 +2241,23 @@ export class CompanionTransport implements Transport {
   private openWebSocket(): void {
     const config = this.config()
     if (!config || this.wsDestroyed) return
+    const pairing = getCompanionConfigGeneration()
+    if (
+      this.wsTicketRefusal?.pairing === pairing &&
+      isSameCompanionTarget(this.wsTicketRefusal.config, config)
+    )
+      return
+    this.wsTicketRefusal = null
+    // A retained transport may switch callers before the old ticket answers.
+    // A new caller must not inherit that pending handshake's connecting state.
+    if (
+      this.wsState === "connecting" &&
+      this.wsTicketPending &&
+      (this.wsTicketPending.pairing !== pairing ||
+        !isSameCompanionTarget(this.wsTicketPending.config, config))
+    )
+      this.wsState = "idle"
+    if (this.wsState === "connecting" || this.ws !== null || this.wsReconnectTimer !== null) return
     if (requiresNativePinnedWebSocket(config)) {
       // The browser WebSocket constructor cannot bind a connection to the
       // accepted SPKI. Keep the channel closed until a native pinned WS
@@ -2255,21 +2280,48 @@ export class CompanionTransport implements Transport {
       this.openAuthenticatedWebSocket(config, internalServiceToken, true)
       return
     }
+    const attempt = ++this.wsTicketAttempt
+    this.wsTicketPending = { config, pairing }
+    const current = () =>
+      !this.wsDestroyed &&
+      attempt === this.wsTicketAttempt &&
+      pairing === getCompanionConfigGeneration() &&
+      isSameCompanionTarget(config, this.config())
+    const failed = (error: unknown) => {
+      if (!current()) return
+      this.wsTicketPending = null
+      if ((error as { retryable?: unknown } | null)?.retryable === false) {
+        // A refused event stream cannot be recovered by adding subscribers
+        // or by an online event. Retry only after pairing or explicit reconnect.
+        this.wsTicketRefusal = { config, pairing }
+        this.wsState = "closed"
+        this.lastSubscribeError = error instanceof CompanionApiError ? error.code : String(error)
+        this.setPlaneHealth({ events: "idle" })
+        this.setConnectionState(
+          error instanceof CompanionApiError && error.status === 401 ? "unauthenticated" : "offline"
+        )
+        return
+      }
+      this.wsState = "reconnecting"
+      this.scheduleWsReconnect()
+    }
     try {
       const issued = eventSocketTicketIssuer(config, "events")
       if (isPromiseLike(issued)) {
         void issued
-          .then(({ ticket }) => this.openAuthenticatedWebSocket(config, ticket, false))
-          .catch(() => {
-            this.wsState = "reconnecting"
-            this.scheduleWsReconnect()
+          .then(({ ticket }) => {
+            if (current()) {
+              this.wsTicketPending = null
+              this.openAuthenticatedWebSocket(config, ticket, false)
+            }
           })
+          .catch(failed)
       } else {
+        this.wsTicketPending = null
         this.openAuthenticatedWebSocket(config, issued.ticket, false)
       }
-    } catch {
-      this.wsState = "reconnecting"
-      this.scheduleWsReconnect()
+    } catch (error) {
+      failed(error)
     }
   }
 

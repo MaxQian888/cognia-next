@@ -495,6 +495,8 @@ export interface CaptureToolResultDecision {
 }
 
 export interface RunAndCaptureOptions {
+  /** Validate the accepted source at the actual send boundary, under the transcript lock. */
+  beforeSend?: () => Promise<void>
   /**
    * Optional cancellation signal. When the signal aborts, the wrapper
    * detaches its subscription, fires `interruptSession` (best-effort),
@@ -2075,7 +2077,12 @@ async function captureAssistantReplyCore(
           sessionId,
           prompt,
           { ...(options ?? {}), turnId },
-          cap?.transcriptRuntime ? { transcriptRuntime: cap.transcriptRuntime } : undefined
+          cap?.transcriptRuntime || cap?.beforeSend
+            ? {
+                ...(cap.transcriptRuntime ? { transcriptRuntime: cap.transcriptRuntime } : {}),
+                ...(cap.beforeSend ? { beforeSend: cap.beforeSend } : {}),
+              }
+            : undefined
         ).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err)
           finishErr(new RunAndCaptureError(`sendPrompt failed: ${message}`, "send_failed"))
@@ -2321,19 +2328,29 @@ async function captureHostExternalReply(
     if (cap?.signal?.aborted) abort()
     if (timeoutMs > 0) timer = setTimeout(() => fail("External agent turn timed out"), timeoutMs)
     if (!settled) {
-      const result = await startRemoteExternalTurn({
-        runId,
-        chatSessionId: sessionId,
-        stamp: {
-          configId,
-          revision: config.revision,
-          lifecycleGeneration: config.lifecycleGeneration,
-        },
-        prompt: hostPrompt,
-        model: options?.model,
-        reasoningEffort: options?.requestedEffort ?? options?.effort,
-        externalSessionId: options?.resumeSessionId,
-      })
+      const dispatch = () =>
+        startRemoteExternalTurn({
+          runId,
+          chatSessionId: sessionId,
+          stamp: {
+            configId,
+            revision: config.revision,
+            lifecycleGeneration: config.lifecycleGeneration,
+          },
+          prompt: hostPrompt,
+          model: options?.model,
+          reasoningEffort: options?.requestedEffort ?? options?.effort,
+          externalSessionId: options?.resumeSessionId,
+        })
+      const result = cap?.beforeSend
+        ? await (
+            await import("@/lib/chat/transcript/revision-events")
+          ).withTranscriptRuntimeLock(sessionId, async () => {
+            await cap.beforeSend!()
+            if (cap.signal?.aborted) throw new RunAndCaptureError("aborted before send", "aborted")
+            return dispatch()
+          })
+        : await dispatch()
       started = result.started
       if (started && shouldCancel) void cancelRemoteExternalTurn(runId).catch(() => undefined)
       if (!result.started)

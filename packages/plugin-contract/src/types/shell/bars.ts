@@ -167,15 +167,14 @@ export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
     desktopOnly: true,
     defaultHidden: true,
   },
-  // The soonest local schedule and when it fires. The bar's flexible middle:
-  // it is the one segment with a name of variable length in it, and the centre
-  // can give it room without shoving the edge clusters. Renders nothing while
-  // no schedule is active, so it costs the default bar no width, and drops
-  // itself below `lg` (in the component — the status zone has no `minWidth`).
-  { id: "nextRun", bar: "status", zone: "center", i18nKey: "nextRun" },
   { id: "notifications", bar: "status", zone: "end", i18nKey: "notifications" },
   { id: "attention", bar: "status", zone: "end", i18nKey: "attention" },
   { id: "jobs", bar: "status", zone: "end", i18nKey: "jobs" },
+  // The soonest local schedule and when it fires belongs beside the task
+  // center. Keep this ambient status in the end cluster so a background job
+  // does not occupy the bar's visual center. The component truncates long
+  // names, hides below `lg`, and renders nothing without an active schedule.
+  { id: "nextRun", bar: "status", zone: "end", i18nKey: "nextRun" },
   // ADR-0108 global agent thread browser: hidden subagent sessions under their
   // parent lineage. Beside `jobs` because it is the same kind of ambient,
   // cross-project state. Not `defaultHidden` — the segment renders nothing

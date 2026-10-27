@@ -9,6 +9,7 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
     activeRefForSession: jest.fn(() => "sandbox-runtime:session"),
     decorateComputerUseContext: jest.fn(async (_ref: string, base: object) => ({ ...base })),
     executeSandbox: jest.fn(async () => ({ exit_code: 0 })),
+    fileOperation: jest.fn(async () => ({ hash: "hash", content: "guest" })),
     clampRequest: jest.fn((_ref: string, request: object) => request),
     assertWritablePath: jest.fn(),
   },
@@ -26,6 +27,16 @@ const adapter = { execute: jest.fn() } as unknown as MicrovmExecAdapter
 const PLUGIN_ID = "test-plugin"
 
 describe("createSandboxAPI", () => {
+  it("requires filesystem permission for typed guest IO", async () => {
+    getPermissionGuard().registerPlugin("unprivileged-lume", [])
+    expect(() =>
+      createSandboxAPI("unprivileged-lume").fileOperation!("runtime", {
+        kind: "read",
+        path: "/workspace/x",
+      })
+    ).toThrow()
+    expect(sandboxSessionRuntime.fileOperation).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     jest.clearAllMocks()
     resetPermissionGuard()

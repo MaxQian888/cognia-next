@@ -1224,6 +1224,27 @@ describe("sendMessageFromMobile", () => {
 })
 
 describe("transcript generation dispatch", () => {
+  it("runs the final source validator under the send lock before transport", async () => {
+    callSpy.mockResolvedValue(undefined)
+    let locked = false
+    mockWithTranscriptRuntimeLock.mockImplementationOnce(async (_session, action) => {
+      locked = true
+      try {
+        return await (action as () => Promise<unknown>)()
+      } finally {
+        locked = false
+      }
+    })
+    const beforeSend = jest.fn(async () => {
+      expect(locked).toBe(true)
+      throw new Error("source recalled")
+    })
+    await expect(sendPrompt("edited", "stale", {}, { beforeSend })).rejects.toThrow(
+      "source recalled"
+    )
+    expect(beforeSend).toHaveBeenCalledTimes(1)
+    expect(callSpy).not.toHaveBeenCalled()
+  })
   it("prepares ordinary sends under the transcript lock before transport", async () => {
     callSpy.mockResolvedValue(undefined)
     mockPrepareTranscriptRuntimeSend.mockResolvedValueOnce({

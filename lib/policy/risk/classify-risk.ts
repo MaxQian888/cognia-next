@@ -98,6 +98,7 @@ const COMPUTER_USE_TOOL_IDS = new Set([
 
 /** Shell / native command execution. See `lib/settings/builtin-tools-data.json`. */
 const NATIVE_COMMAND_TOOL_IDS = new Set([
+  "verification_batch",
   "bash",
   "bash_20250124",
   "bash_output",

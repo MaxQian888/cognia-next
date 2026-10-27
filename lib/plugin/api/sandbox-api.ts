@@ -29,7 +29,12 @@ export function createSandboxAPI(pluginId: string): PluginSandboxAPI {
     activeRefForSession: (sessionId) => sandboxSessionRuntime.activeRefForSession(sessionId),
     decorateComputerUseContext: (ref, base) =>
       sandboxSessionRuntime.decorateComputerUseContext(ref, base),
-    execute: (ref, payload) => sandboxSessionRuntime.executeSandbox(ref, payload),
+    execute: (ref, payload, options) =>
+      options
+        ? sandboxSessionRuntime.executeSandbox(ref, payload, options)
+        : sandboxSessionRuntime.executeSandbox(ref, payload),
+    fileOperation: (ref, request, options) =>
+      sandboxSessionRuntime.fileOperation(ref, request, options),
     clampRequest: (ref, request) => sandboxSessionRuntime.clampRequest(ref, request),
     assertWritablePath: (ref, path, label) =>
       sandboxSessionRuntime.assertWritablePath(ref, path, label),
@@ -41,6 +46,7 @@ export function createSandboxAPI(pluginId: string): PluginSandboxAPI {
     {
       registerMicrovmAdapter: "native:process",
       execute: "native:process",
+      fileOperation: "native:filesystem",
       clampRequest: "native:process",
       assertWritablePath: "native:filesystem",
       activeRefForSession: "session:read",

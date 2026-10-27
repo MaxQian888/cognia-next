@@ -149,12 +149,30 @@ export function applyProviderAttemptLimits(
       settings?.customProviders
     ).maxInputTokens
     if (compaction.summaryTokenBudgetIsDefault) {
-      // Generation (including reasoning) and retained state have separate caps.
-      // Leave half a small window for source input; use the model's output
-      // capacity on larger windows. Recompute on each provider attempt.
+      // A delta need not regenerate the cumulative checkpoint. Reserve a
+      // half of small windows, bounded on large models, rather than their
+      // full output capacity. Explicit caps above remain authoritative.
+      const summaryProtocol =
+        compaction.summary?.protocol ??
+        compaction.summary?.credentials?.protocol ??
+        compaction.summary?.providerId ??
+        options.providerCredentials?.protocol ??
+        options.provider
+      const thinking = modelParams?.providerOptions?.anthropic?.thinking as
+        { type?: string; budgetTokens?: number } | undefined
+      const explicitThinking =
+        summaryProtocol === "anthropic" &&
+        !claude55CapabilitiesForModel(summaryModel) &&
+        thinking?.type === "enabled"
+          ? (thinking.budgetTokens ?? 1024)
+          : 0
       compaction.maxSummaryTokens = Math.min(
-        summaryOutput ?? 65_536,
-        Math.max(1, Math.floor(summaryWindow / 2))
+        summaryOutput ?? Infinity,
+        Math.max(1, summaryWindow - 1),
+        Math.max(
+          Math.min(32_768, Math.max(1, Math.floor(summaryWindow / 2))),
+          explicitThinking > 0 ? explicitThinking + 1024 : 0
+        )
       )
     }
     // The sidecar enforces this as total generated output, including thinking.

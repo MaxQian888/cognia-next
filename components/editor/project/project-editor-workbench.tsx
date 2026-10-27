@@ -111,10 +111,6 @@ import {
 } from "./project-context-workbench"
 import { ParkedView, ParkedViewSlot, useParkedViewTarget } from "./parked-view"
 import type { ContextPanelMode, TextSelectionCoordinates } from "@/types/context-workbench"
-import {
-  CONTEXT_WORKBENCH_DEFAULT_WIDTH,
-  CONTEXT_WORKBENCH_MIN_WIDTH,
-} from "@/stores/context-workbench/context-workbench-store"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { useShowKeyboardHints } from "@/hooks/ui/use-pointer"
 import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
@@ -126,6 +122,10 @@ import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 import { isTauri } from "@/lib/platform/detect"
 import { claimNativeMenuAction } from "@/lib/desktop/menu-focus-claims"
 import { EDITOR_SUBTITLE_ROW_CLASS } from "./editor-chrome"
+import {
+  CONTEXT_SIDEBAR_MAX_PERCENT as CONTEXT_PANEL_MAX_PERCENT,
+  getContextSidebarSizing,
+} from "./context-sidebar-sizing"
 
 export type ProjectEditorWorkbenchLayout = "split" | "mobile"
 
@@ -1222,9 +1222,6 @@ interface ProjectEditorFileWorkbenchProps {
 
 /** The file context workbench's "wide" preset, as a share of the workbench. */
 const CONTEXT_PANEL_WIDE_PERCENT = 60
-
-/** Largest share the file context workbench may take from the editor. */
-const CONTEXT_PANEL_MAX_PERCENT = 65
 
 /** Workbench chords Monaco would otherwise swallow — see `editorContextActions`. */
 const WORKBENCH_MONACO_BINDINGS: Record<string, string> = {
@@ -2782,13 +2779,18 @@ export function ProjectEditorFileWorkbench({
 
   // --- The file context workbench as the secondary sidebar ---
   //
-  // Its width belongs to this workbench, not to the context workbench itself:
-  // left to size itself it measured against the window, so its 360px default
-  // and `clamp(640px, 50%, 960px)` wide preset could swallow a 480–900px dock
-  // whole — and a landing proposal switches it to wide unprompted. As a panel
-  // of the editor's resizable group it is bounded by the dock, keeps its pixel
-  // width while the dock is dragged, and folds to its 48px rail.
+  // The tree starts at a compact share of this workspace, not a fixed width
+  // taken from the full-window context workbench. Automatic sizing follows the
+  // dock until the user drags the divider or explicitly requests wide mode.
   const contextPanelRef = usePanelRef()
+  const contextGroupRef = useRef<HTMLDivElement>(null)
+  const [contextGroupWidth, setContextGroupWidth] = useState(0)
+  const [contextHeaderMinimumWidth, setContextHeaderMinimumWidth] = useState(0)
+  const contextHeaderMinimumWidthRef = useRef(0)
+  const contextSizing = getContextSidebarSizing(contextGroupWidth, contextHeaderMinimumWidth)
+  const autoContextWidthRef = useRef(true)
+  const contextSizingFrameRef = useRef<number | null>(null)
+  const contextHeaderSizingFrameRef = useRef<number | null>(null)
   // Mounted whether or not a file is open: it is also the explorer, and a
   // panel that came and went with the first/last open file (or a blocked one)
   // resized the editor every time.
@@ -2808,7 +2810,7 @@ export function ProjectEditorFileWorkbench({
     [filesViewTarget, searchViewTarget]
   )
   // The width to unfold back to; read only from effects and callbacks.
-  const lastContextWidthRef = useRef(CONTEXT_WORKBENCH_DEFAULT_WIDTH)
+  const lastContextWidthRef = useRef<number | null>(null)
   // A width request that arrived while the sidebar was folded, applied on unfold.
   const pendingContextModeRef = useRef<Exclude<ContextPanelMode, "focus"> | null>(null)
   const contextPanelMountedRef = useRef(false)
@@ -2839,8 +2841,77 @@ export function ProjectEditorFileWorkbench({
     const pending = pendingContextModeRef.current
     pendingContextModeRef.current = null
     if (pending === "wide") panel.resize(`${CONTEXT_PANEL_WIDE_PERCENT}%`)
-    else if (panel.isCollapsed()) panel.resize(`${lastContextWidthRef.current}px`)
+    else if (panel.isCollapsed()) {
+      const width = getContextSidebarSizing(
+        contextGroupRef.current?.clientWidth ?? 0,
+        contextHeaderMinimumWidthRef.current
+      ).defaultWidth
+      panel.resize(
+        `${autoContextWidthRef.current ? width : (lastContextWidthRef.current ?? width)}px`
+      )
+    }
   }, [contextPanelRef, contextWorkbenchOpen, hasContextPanel])
+
+  // The group reports mount and container resizes, as well as divider input.
+  // Wait a frame for the measured constraints (and any remounted panel) to
+  // register with the group before using its imperative handle.
+  const updateContextSizing = useCallback<
+    NonNullable<ComponentProps<typeof ResizablePanelGroup>["onLayoutChanged"]>
+  >(
+    (_layout, { isUserInteraction }) => {
+      const width = contextGroupRef.current?.clientWidth ?? 0
+      if (width <= 0) return
+      setContextGroupWidth((previous) => (previous === width ? previous : width))
+      if (isUserInteraction) autoContextWidthRef.current = false
+      if (contextSizingFrameRef.current !== null)
+        cancelAnimationFrame(contextSizingFrameRef.current)
+      if (!hasContextPanel || !autoContextWidthRef.current || !contextWorkbenchOpen) return
+      contextSizingFrameRef.current = requestAnimationFrame(() => {
+        contextSizingFrameRef.current = null
+        const panel = contextPanelRef.current
+        if (!panel || !autoContextWidthRef.current) return
+        const target = getContextSidebarSizing(
+          contextGroupRef.current?.clientWidth ?? 0,
+          contextHeaderMinimumWidthRef.current
+        ).defaultWidth
+        if (Math.abs(panel.getSize().inPixels - target) > 1) panel.resize(`${target}px`)
+      })
+    },
+    [contextPanelRef, contextWorkbenchOpen, hasContextPanel]
+  )
+
+  const handleHeaderMinimumWidthChange = useCallback(
+    (width: number) => {
+      if (contextHeaderMinimumWidthRef.current === width) return
+      contextHeaderMinimumWidthRef.current = width
+      if (contextHeaderSizingFrameRef.current !== null)
+        cancelAnimationFrame(contextHeaderSizingFrameRef.current)
+      contextHeaderSizingFrameRef.current = requestAnimationFrame(() => {
+        contextHeaderSizingFrameRef.current = null
+        const minimum = contextHeaderMinimumWidthRef.current
+        const panel = contextPanelRef.current
+        const next = getContextSidebarSizing(contextGroupRef.current?.clientWidth ?? 0, minimum)
+        // Grow under the old constraints first. Raising a collapsible floor
+        // above a dragged size can otherwise snap the sidebar shut.
+        if (panel && !panel.isCollapsed() && panel.getSize().inPixels < next.minWidth) {
+          panel.resize(`${next.minWidth}px`)
+        }
+        setContextHeaderMinimumWidth(minimum)
+        updateContextSizing({}, { isUserInteraction: false })
+      })
+    },
+    [contextPanelRef, updateContextSizing]
+  )
+
+  useEffect(
+    () => () => {
+      if (contextSizingFrameRef.current !== null)
+        cancelAnimationFrame(contextSizingFrameRef.current)
+      if (contextHeaderSizingFrameRef.current !== null)
+        cancelAnimationFrame(contextHeaderSizingFrameRef.current)
+    },
+    []
+  )
 
   // The context workbench's narrow/wide requests. A panel activation names its
   // panel and may widen the sidebar, never narrow it — the chat dock's
@@ -2853,20 +2924,22 @@ export function ProjectEditorFileWorkbench({
       if (!panel) return
       if (panel.isCollapsed()) {
         pendingContextModeRef.current = mode
+        if (!panelId || mode === "wide") autoContextWidthRef.current = mode === "narrow"
         return
       }
+      const { asPercentage, inPixels } = panel.getSize()
+      const groupPx = asPercentage > 0 ? (inPixels * 100) / asPercentage : 0
+      const narrowWidth = getContextSidebarSizing(
+        groupPx,
+        contextHeaderMinimumWidthRef.current
+      ).defaultWidth
       if (panelId) {
-        const { asPercentage, inPixels } = panel.getSize()
-        const groupPx = asPercentage > 0 ? (inPixels * 100) / asPercentage : 0
         const targetPx =
-          mode === "wide"
-            ? (groupPx * CONTEXT_PANEL_WIDE_PERCENT) / 100
-            : CONTEXT_WORKBENCH_DEFAULT_WIDTH
+          mode === "wide" ? (groupPx * CONTEXT_PANEL_WIDE_PERCENT) / 100 : narrowWidth
         if (groupPx === 0 || targetPx <= inPixels) return
       }
-      panel.resize(
-        mode === "wide" ? `${CONTEXT_PANEL_WIDE_PERCENT}%` : `${CONTEXT_WORKBENCH_DEFAULT_WIDTH}px`
-      )
+      autoContextWidthRef.current = mode === "narrow"
+      panel.resize(mode === "wide" ? `${CONTEXT_PANEL_WIDE_PERCENT}%` : `${narrowWidth}px`)
     },
     [contextPanelRef]
   )
@@ -3275,13 +3348,20 @@ export function ProjectEditorFileWorkbench({
       <ContextSidebarPanel
         id={`${panelIdPrefix}-context`}
         open={contextWorkbenchOpen}
+        minWidth={contextSizing.minWidth}
         panelRef={contextPanelRef}
         onResize={(size) => {
           const open = size.inPixels > WORKBENCH_RAIL_WIDTH_PX + 8
           if (open) {
             lastContextWidthRef.current = size.inPixels
+            const groupWidth = size.asPercentage > 0 ? (size.inPixels * 100) / size.asPercentage : 0
             setContextPanelMode(
-              size.inPixels > CONTEXT_WORKBENCH_DEFAULT_WIDTH + 24 ? "wide" : "narrow"
+              size.inPixels >
+                getContextSidebarSizing(groupWidth, contextHeaderMinimumWidthRef.current)
+                  .defaultWidth +
+                  24
+                ? "wide"
+                : "narrow"
             )
           }
           // A drag across the collapse threshold is an open/close too.
@@ -3300,6 +3380,7 @@ export function ProjectEditorFileWorkbench({
           onCollapse={() => setContextWorkbenchOpen(false)}
           onEnsureVisible={() => setContextWorkbenchOpen(true)}
           onModeWidthHint={hintContextWidth}
+          onHeaderMinimumWidthChange={handleHeaderMinimumWidthChange}
           resolvedMode={contextPanelMode}
           projectViews={projectViews}
           revealRequest={sideReveal}
@@ -3359,6 +3440,8 @@ export function ProjectEditorFileWorkbench({
       <ResizablePanelGroup
         orientation="horizontal"
         className="h-full min-h-0 min-w-0 overflow-hidden"
+        elementRef={contextGroupRef}
+        onLayoutChanged={updateContextSizing}
       >
         {/* The editor sits beside the chat; the one sidebar — project views
             and file views as peers — sits to its right. */}
@@ -3411,25 +3494,25 @@ export function ProjectEditorFileWorkbench({
 function ContextSidebarPanel({
   id,
   open,
+  minWidth,
   panelRef,
   onResize,
   children,
 }: {
   id: string
   open: boolean
+  minWidth: number
   panelRef: ComponentProps<typeof ResizablePanel>["panelRef"]
   onResize: NonNullable<ComponentProps<typeof ResizablePanel>["onResize"]>
   children: ReactNode
 }) {
-  const [defaultSize] = useState(
-    () => `${open ? CONTEXT_WORKBENCH_DEFAULT_WIDTH : WORKBENCH_RAIL_WIDTH_PX}px`
-  )
+  const [defaultSize] = useState(() => (open ? "30%" : `${WORKBENCH_RAIL_WIDTH_PX}px`))
   return (
     <ResizablePanel
       id={id}
       collapsible
       collapsedSize={`${WORKBENCH_RAIL_WIDTH_PX}px`}
-      minSize={`${CONTEXT_WORKBENCH_MIN_WIDTH}px`}
+      minSize={`${minWidth}px`}
       maxSize={`${CONTEXT_PANEL_MAX_PERCENT}%`}
       defaultSize={defaultSize}
       // Dragging the dock resizes the editor, not the sidebars.

@@ -160,7 +160,33 @@ describe("applySdkEvent — assistant", () => {
       content: [{ type: "text", text: "hi there" }],
     } as unknown as BetaMessage)
     const { messages } = applySdkEvent([], evt)
-    expect(messages[0].metadata).toEqual({ phase: "finish", traceId: "trace-message" })
+    expect(messages[0].metadata).toMatchObject({
+      phase: "finish",
+      traceId: "trace-message",
+      createdAt: expect.any(Number),
+    })
+  })
+
+  it("keeps the first assistant timestamp and live metadata across canonical replacement", () => {
+    const evt = asAssistant({
+      id: "clock",
+      content: [{ type: "text", text: "done" }],
+      metadata: { phase: "finish", createdAt: 9999 },
+    } as unknown as BetaMessage)
+    const prior = [
+      {
+        id: "clock",
+        role: "assistant",
+        parts: [],
+        metadata: { createdAt: 1000, localTrace: "keep" },
+      },
+    ] as UIMessage[]
+    const { messages } = applySdkEvent(prior, evt)
+    expect(messages[0].metadata).toMatchObject({
+      createdAt: 1000,
+      localTrace: "keep",
+      phase: "finish",
+    })
   })
 
   it("represents tool_use blocks with `tool-{name}` parts", () => {
@@ -2029,6 +2055,7 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     expect(messages[0].id).toBe("asst-stream-1")
     expect(messages[0].role).toBe("assistant")
     expect(messages[0].parts).toHaveLength(0)
+    expect(messages[0].metadata).toMatchObject({ createdAt: expect.any(Number) })
   })
 
   it("message_start is idempotent (no duplicate for the same id)", () => {
@@ -2077,12 +2104,12 @@ describe("applySdkEvent — stream_event (token-level streaming)", () => {
     expect(usage).toMatchObject({ inputTokens: 1000, outputTokens: 42 })
   })
 
-  it("a usage-less message_start (ai-sdk path) attaches no metadata", () => {
+  it("a usage-less message_start (ai-sdk path) keeps a clock without inventing usage", () => {
     const { messages } = applySdkEvent(
       [],
       streamEvt({ type: "message_start", message: { id: "ai-sdk" } })
     )
-    expect((messages[0] as { metadata?: unknown }).metadata).toBeUndefined()
+    expect(messages[0].metadata).toEqual({ createdAt: expect.any(Number) })
   })
 
   it("text_delta accumulates into a single streaming text part", () => {

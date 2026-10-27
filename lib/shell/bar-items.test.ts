@@ -73,15 +73,30 @@ describe("resolveBarLayout", () => {
       "notifications",
       "attention",
       "jobs",
+      "nextRun",
       "agentThreads",
       "todayUsage",
       "usage",
       "accountStatus",
       "runStatus",
     ])
-    // The flexible middle carries the next scheduled run (self-hiding).
-    expect(ids(resolved.zones.center)).toEqual(["nextRun"])
+    expect(ids(resolved.zones.center)).toEqual([])
     expect(ids(resolved.hidden)).toEqual(["terminal", "perf"])
+  })
+
+  it("moves an existing layout's next run into the end cluster without losing customization", () => {
+    const resolved = resolveBarLayout(catalog, {
+      order: ["nextRun", "jobs", "notifications", "attention"],
+      hidden: ["usage"],
+    })
+    expect(ids(resolved.zones.center)).toEqual([])
+    expect(ids(resolved.zones.end).slice(0, 4)).toEqual([
+      "nextRun",
+      "jobs",
+      "notifications",
+      "attention",
+    ])
+    expect(ids(resolved.hidden)).toContain("usage")
   })
 
   it("honours a user reorder inside a zone", () => {

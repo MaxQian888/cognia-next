@@ -84,6 +84,11 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - `lume-local-vm` — desktop-only Apple Silicon lifecycle and SSH/MCP
+ *   supervision owned by the native account-bound CuaSandboxRegistry. Local
+ *   IPC starts bounded operation handles; account lock and desktop shutdown
+ *   revoke bindings and stop owned guests. No headless or paired-host route.
+ *
  * - `document-database-lifetime` — browser/mobile renderer-only pagehide
  *   cleanup, installed by CogniaDB construction. Abandoned readonly snapshot
  *   transactions belong to the document; a headless host has no document.

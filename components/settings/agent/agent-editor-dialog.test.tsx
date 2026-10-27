@@ -34,7 +34,7 @@ const existingAgent: ExternalAgentConfig = {
   protocol: "acp",
   transport: "stdio",
   enabled: true,
-  process: { command: "npx", args: ["@anthropics/claude-code", "--stdio"] },
+  process: { command: "npx", args: ["@agentclientprotocol/codex-acp"] },
   defaultPermissionMode: "default",
   tags: ["coding"],
   timeout: 300000,
@@ -1101,12 +1101,37 @@ describe("AgentEditorDialog", () => {
     it("explains and saves the shared state for a runtime that cannot be isolated", async () => {
       const onSave = jest.fn().mockResolvedValue(true)
       render(
-        <AgentEditorDialog open onOpenChange={jest.fn()} initialPreset="goose" onSave={onSave} />
+        <AgentEditorDialog open onOpenChange={jest.fn()} initialPreset="devin" onSave={onSave} />
       )
       expect(screen.getByTestId("state-isolation-unsupported")).toBeInTheDocument()
       expect(screen.getByTestId("state-isolation-isolated")).toBeDisabled()
       await userEvent.click(screen.getAllByRole("button", { name: /^add$/i }).at(-1)!)
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ stateIsolation: "shared" }))
+    })
+
+    it("saves Goose runtime controls with an isolated configuration", async () => {
+      const onSave = jest.fn().mockResolvedValue(true)
+      render(
+        <AgentEditorDialog open onOpenChange={jest.fn()} initialPreset="goose" onSave={onSave} />
+      )
+      expect(screen.queryByTestId("state-isolation-unsupported")).not.toBeInTheDocument()
+      fireEvent.change(
+        screen.getByRole("spinbutton", { name: messages.externalAgent.goose.concurrency }),
+        { target: { value: "2" } }
+      )
+      await userEvent.click(
+        screen.getByRole("switch", { name: messages.externalAgent.goose.codeMode })
+      )
+      await userEvent.click(screen.getAllByRole("button", { name: /^add$/i }).at(-1)!)
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stateIsolation: "isolated",
+          process: expect.objectContaining({
+            args: ["acp", "--with-builtin", "developer,code_execution"],
+            env: expect.objectContaining({ GOOSE_MAX_CONCURRENT_SUBAGENTS: "2" }),
+          }),
+        })
+      )
     })
 
     it("says there is nothing to isolate for a network agent", async () => {
@@ -1508,3 +1533,30 @@ describe("new preset names", () => {
   })
 })
 import { selectOption } from "@/lib/testing/select-option"
+
+it.each(["crush", "rovo-dev", "codebuff"])(
+  "saves %s using its native local process contract without an endpoint",
+  async (presetId) => {
+    const onSave = jest.fn().mockResolvedValue(true)
+    render(
+      <AgentEditorDialog open onOpenChange={jest.fn()} initialPreset={presetId} onSave={onSave} />
+    )
+    expect(screen.getByLabelText(/^command$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^arguments$/i)).toBeDisabled()
+    expect(screen.queryByLabelText(/^endpoint$/i)).not.toBeInTheDocument()
+    if (presetId === "codebuff") expect(screen.getByLabelText(/^command$/i)).toBeDisabled()
+    await act(async () => {
+      await userEvent.click(screen.getAllByRole("button", { name: /^add$/i }).at(-1)!)
+    })
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        process: expect.objectContaining({
+          command: presetId === "codebuff" ? "node" : presetId === "crush" ? "crush" : "acli",
+          args: presetId === "rovo-dev" ? ["rovodev", "serve"] : [],
+        }),
+        metadata: expect.objectContaining({ preset: presetId }),
+      })
+    )
+    expect(onSave.mock.calls[0][0].network).toBeUndefined()
+  }
+)

@@ -100,6 +100,7 @@ export function ProjectContextWorkbench({
   onCollapse,
   onEnsureVisible,
   onModeWidthHint,
+  onHeaderMinimumWidthChange,
   resolvedMode,
   projectViews,
   revealRequest,
@@ -116,6 +117,7 @@ export function ProjectContextWorkbench({
   onEnsureVisible: () => void
   /** Narrow/wide requests; see `ContextWorkbench`'s `onModeWidthHint`. */
   onModeWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+  onHeaderMinimumWidthChange?: (width: number) => void
   /** The preset the host's panel actually sits at, once measured. */
   resolvedMode?: ContextPanelMode
   /** The explorer and project search, rendered by the editor (kept alive across folds). */
@@ -137,6 +139,7 @@ export function ProjectContextWorkbench({
         onCollapse,
         onEnsureVisible,
         onModeWidthHint,
+        onHeaderMinimumWidthChange,
         resolvedMode,
         projectViews,
         revealRequest,
@@ -277,6 +280,7 @@ function ProjectContextWorkbenchHost({
     onCollapse: () => void
     onEnsureVisible: () => void
     onModeWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+    onHeaderMinimumWidthChange?: (width: number) => void
     resolvedMode?: ContextPanelMode
     projectViews: ProjectViews
     revealRequest?: { panelId: string; seq: number }
@@ -518,6 +522,8 @@ function ProjectContextWorkbenchHost({
       resource={resource}
       panels={panels}
       manageOwnWidth={false}
+      layoutControlScope="file-sidebar"
+      onHeaderMinimumWidthChange={desktop?.onHeaderMinimumWidthChange}
       railOnly={desktop?.railOnly}
       onCollapse={desktop?.onCollapse}
       onEnsureVisible={desktop?.onEnsureVisible}

@@ -1041,10 +1041,12 @@ describe("<MobileChannelList />", () => {
       expect(await screen.findByTestId("mobile-channel-actions")).toHaveTextContent("Octopus Tutor")
     })
 
-    it("calls onNewDirect from the + button", async () => {
+    it("offers New chat in the + menu before creating a conversation", async () => {
       const user = userEvent.setup()
       const { props } = renderList()
       await user.click(screen.getByTestId("mobile-channel-new"))
+      expect(props.onNewDirect).not.toHaveBeenCalled()
+      await user.click(screen.getByRole("menuitem", { name: "New chat" }))
       expect(props.onNewDirect).toHaveBeenCalled()
     })
   })

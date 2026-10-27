@@ -575,11 +575,16 @@ export async function startBrowserCompanionAgentRuntime(): Promise<() => void> {
       unbind: unbindExtensionSession,
     }).catch(() => undefined)
   await reconcile()
-  const [{ liveQuery }, { getDb }] = await Promise.all([import("dexie"), import("@/lib/db/schema")])
-  const reconcileTimer = setInterval(() => void reconcile(), AGENT_BINDING_RECONCILE_MS)
+  const [{ default: Dexie }, { getDb }] = await Promise.all([
+    import("dexie"),
+    import("@/lib/db/schema"),
+  ])
   const stop = startBrowserStatusNotifier({
     observe: (read, onResult) => {
-      const subscription = liveQuery(read).subscribe({ next: onResult, error: () => undefined })
+      const subscription = Dexie.liveQuery(read).subscribe({
+        next: onResult,
+        error: () => undefined,
+      })
       return () => subscription.unsubscribe()
     },
     listSubmissions: () => getDb().browserSubmissions.toArray(),
@@ -593,6 +598,7 @@ export async function startBrowserCompanionAgentRuntime(): Promise<() => void> {
     },
     notify: notifyBrowserSocket,
   })
+  const reconcileTimer = setInterval(() => void reconcile(), AGENT_BINDING_RECONCILE_MS)
   return () => {
     clearInterval(reconcileTimer)
     stop()

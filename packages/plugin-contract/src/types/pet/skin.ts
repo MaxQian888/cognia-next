@@ -11,13 +11,14 @@ import type { PetMood, PetOneShot, PetVisualState } from "./visual-state"
 export type PetFacing = "left" | "right"
 
 /** Renderer families supported by the desktop-pet subsystem. */
-export type PetSkinId = "svg" | "live2d" | "sprite-v2"
+export type PetSkinId = "svg" | "live2d" | "sprite-v2" | "media"
 
 /** Durable asset selection resolved before a skin is asked to render. */
 export type PetSkinSelection =
   | { skinId: "svg" }
   | { skinId: "live2d"; modelId: string }
   | { skinId: "sprite-v2"; packId: string }
+  | { skinId: "media"; packId: string }
 
 /** Expensive renderer budget assigned by the per-WebView skin runtime. */
 export type PetRenderMode = "live" | "snapshot" | "placeholder"

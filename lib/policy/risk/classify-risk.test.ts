@@ -98,6 +98,12 @@ describe("classifyRisk", () => {
       expect(surfaceIds(i)).toEqual(["native-command"])
     })
 
+    it("classifies a verification-only batch roster as native command execution", () => {
+      const i = input({ toolIds: ["verification_batch"] })
+      expect(classifyRisk(i).tier).toBe("high")
+      expect(surfaceIds(i)).toEqual(["native-command"])
+    })
+
     it("data-destructive → high from a destructive verb in the objective", () => {
       const i = input({ objective: "Delete the stale customer rows from the archive" })
       expect(classifyRisk(i).tier).toBe("high")

@@ -7,6 +7,10 @@ import { waitFor } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import {
+  EXECUTION_RUN_EVENT_RETENTION_MS,
+  sweepExecutionRunEventRetention,
+} from "@/lib/db/execution-runs"
 import type { Goal } from "@/types/goal"
 import type { AgentPlan } from "@/types/agent/plan"
 import {
@@ -228,6 +232,79 @@ describe("agent state execution bridge", () => {
     }
   })
 
+  it("retries a projection transaction reopening within the captured database", async () => {
+    const row = { ...session(), platformBinding: undefined }
+    await syncGoalExecutionRun(goal(), row)
+    const transaction = jest
+      .spyOn(getDb(), "transaction")
+      .mockRejectedValueOnce(new Dexie.DatabaseClosedError("schema closed"))
+    try {
+      await expect(syncGoalExecutionRun(goal({ updatedAt: 30 }), row)).resolves.toBeUndefined()
+      expect(transaction).toHaveBeenCalledTimes(2)
+      expect(
+        (await getDb().executionRuns.get(agentStateExecutionRunId("goal", "goal-1")))
+          ?.currentRevision
+      ).toBe(7)
+    } finally {
+      transaction.mockRestore()
+    }
+  })
+
+  it("does not retry a projection transaction into a replacement account or target", async () => {
+    const row = { ...session(), platformBinding: undefined }
+    await syncGoalExecutionRun(goal(), row)
+    const initial = getDb()
+    let replacement: schema.CogniaDB | undefined
+    const transaction = jest.spyOn(initial, "transaction").mockImplementationOnce(() => {
+      schema.activateAccountDatabase("acct_projection_retry_test", "other-target")
+      replacement = getDb()
+      return Promise.reject(new Dexie.DatabaseClosedError("schema closed")) as never
+    })
+    try {
+      await expect(syncGoalExecutionRun(goal({ updatedAt: 30 }), row)).rejects.toThrow(
+        "database changed"
+      )
+      expect(transaction).toHaveBeenCalledTimes(1)
+      expect(await replacement!.executionRuns.count()).toBe(0)
+      expect(await replacement!.executionRunEvents.count()).toBe(0)
+      expect(await replacement!.executionRunBindings.count()).toBe(0)
+      expect(await replacement!.notificationProjectionWork.count()).toBe(0)
+    } finally {
+      transaction.mockRestore()
+      await replacement?.delete()
+      schema.clearAccountDatabaseSelection()
+    }
+  })
+
+  it("rolls back a projection if its captured scope changes during journal writes", async () => {
+    const row = { ...session(), platformBinding: undefined }
+    await syncGoalExecutionRun(goal(), row)
+    const db = getDb()
+    const runId = agentStateExecutionRunId("goal", "goal-1")
+    const before = await db.executionRuns.get(runId)
+    const events = await db.executionRunEvents.where("runId").equals(runId).toArray()
+    const projectionWork = await db.notificationProjectionWork.toArray()
+    let current = true
+    const add = db.executionRunEvents.add.bind(db.executionRunEvents)
+    const write = jest.spyOn(db.executionRunEvents, "add").mockImplementationOnce((event) =>
+      add(event).then((id) => {
+        current = false
+        return id
+      })
+    )
+    try {
+      await expect(
+        syncGoalExecutionRun(goal({ updatedAt: 30 }), row, () => current)
+      ).rejects.toThrow("database changed")
+      expect(write).toHaveBeenCalled()
+      expect(await db.executionRuns.get(runId)).toEqual(before)
+      expect(await db.executionRunEvents.where("runId").equals(runId).toArray()).toEqual(events)
+      expect(await db.notificationProjectionWork.toArray()).toEqual(projectionWork)
+    } finally {
+      write.mockRestore()
+    }
+  })
+
   it("projects a live Goal into the shared durable run and binding without objective text", async () => {
     const row = session()
     await syncGoalExecutionRun(goal(), row)
@@ -267,6 +344,119 @@ describe("agent state execution bridge", () => {
     expect(JSON.stringify(run?.latestSnapshot)).not.toContain("private first step")
     expect(await getDb().executionRunEvents.where("runId").equals(runId).count()).toBe(4)
   })
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "preserves a %s Plan journal when later source snapshots are replayed",
+    async (status) => {
+      const row = session()
+      await syncPlanExecutionRun(plan({ status }), row)
+      const runId = agentStateExecutionRunId("plan", "plan-1")
+      const before = await getDb().executionRuns.get(runId)
+      const events = await getDb().executionRunEvents.where("runId").equals(runId).toArray()
+      expect(before?.status).toBe(status)
+
+      await expect(
+        syncPlanExecutionRun(plan({ status, updatedAt: 30 }), row)
+      ).resolves.toBeUndefined()
+      await expect(
+        syncPlanExecutionRun(
+          plan({ status: "executing", updatedAt: 40, generationId: "later-generation" }),
+          row
+        )
+      ).resolves.toBeUndefined()
+
+      expect(await getDb().executionRuns.get(runId)).toEqual(before)
+      expect(await getDb().executionRunEvents.where("runId").equals(runId).toArray()).toEqual(
+        events
+      )
+    }
+  )
+
+  it.each([
+    ["completed", "completed"],
+    ["budget_limited", "failed"],
+    ["stopped", "cancelled"],
+  ] as const)(
+    "preserves a %s Goal journal when later source snapshots are replayed",
+    async (status, executionStatus) => {
+      const row = session()
+      await syncGoalExecutionRun(goal({ status }), row)
+      const runId = agentStateExecutionRunId("goal", "goal-1")
+      const before = await getDb().executionRuns.get(runId)
+      const events = await getDb().executionRunEvents.where("runId").equals(runId).toArray()
+      expect(before?.status).toBe(executionStatus)
+
+      await expect(
+        syncGoalExecutionRun(goal({ status, updatedAt: 30 }), row)
+      ).resolves.toBeUndefined()
+      await expect(
+        syncGoalExecutionRun(
+          goal({ status: "active", updatedAt: 40, generationId: "later-generation" }),
+          row
+        )
+      ).resolves.toBeUndefined()
+
+      expect(await getDb().executionRuns.get(runId)).toEqual(before)
+      expect(await getDb().executionRunEvents.where("runId").equals(runId).toArray()).toEqual(
+        events
+      )
+    }
+  )
+
+  it.each(["plan", "goal"] as const)(
+    "does not recreate pruned events when replaying a retained terminal %s",
+    async (kind) => {
+      const row = { ...session(), platformBinding: undefined }
+      const sync =
+        kind === "plan"
+          ? () => syncPlanExecutionRun(plan({ status: "cancelled" }), row)
+          : () => syncGoalExecutionRun(goal({ status: "stopped" }), row)
+      await sync()
+      const runId = agentStateExecutionRunId(kind, `${kind}-1`)
+      const before = await getDb().executionRuns.get(runId)
+      expect(before?.status).toBe("cancelled")
+      expect(await sweepExecutionRunEventRetention(21 + EXECUTION_RUN_EVENT_RETENTION_MS)).toBe(4)
+
+      await expect(sync()).resolves.toBeUndefined()
+
+      expect(await getDb().executionRuns.get(runId)).toEqual(before)
+      expect(await getDb().executionRunEvents.where("runId").equals(runId).count()).toBe(0)
+    }
+  )
+
+  it.each(["plan", "goal"] as const)(
+    "serializes overlapping %s projections through completion",
+    async (kind) => {
+      const row = session()
+      const sync =
+        kind === "plan"
+          ? (completed: boolean, updatedAt: number) =>
+              syncPlanExecutionRun(
+                plan({ status: completed ? "completed" : "executing", updatedAt }),
+                row
+              )
+          : (completed: boolean, updatedAt: number) =>
+              syncGoalExecutionRun(
+                goal({ status: completed ? "completed" : "active", updatedAt }),
+                row
+              )
+      await sync(false, 20)
+
+      const results = await Promise.allSettled([sync(true, 30), sync(false, 40), sync(true, 50)])
+
+      expect(results).toEqual(
+        Array.from({ length: 3 }, () => ({ status: "fulfilled", value: undefined }))
+      )
+      const runId = agentStateExecutionRunId(kind, `${kind}-1`)
+      expect((await getDb().executionRuns.get(runId))?.status).toBe("completed")
+      const events = await getDb()
+        .executionRunEvents.where("[runId+seq]")
+        .between([runId, 0], [runId, Number.POSITIVE_INFINITY])
+        .toArray()
+      expect(events.filter((event) => event.type === "run.completed")).toHaveLength(1)
+      expect(events.at(-1)?.type).toBe("run.completed")
+    }
+  )
 
   it("projects a rejected Plan as a declined (cancelled) run", async () => {
     const row = session()

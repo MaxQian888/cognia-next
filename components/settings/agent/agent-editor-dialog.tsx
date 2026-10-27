@@ -1,4 +1,5 @@
 "use client"
+import { GooseRuntimeFields } from "@/components/agent/external-agent/goose-runtime-fields"
 
 /**
  * AgentEditorDialog — the full create/edit form for an external agent.
@@ -718,12 +719,16 @@ export function AgentEditorDialog({
     adaptPermissionMode(formData.defaultPermissionMode, formData.protocol).mode === "acceptEdits" &&
     formData.codexSandboxMode !== "readOnly"
   const managedDsh = getPresetConfig(selectedPreset)?.metadata?.requiresManagedRuntime === true
+  const localNativeService = formData.protocol === "crush-http" || formData.protocol === "rovo-http"
+  const bundledBridge = formData.protocol === "codebuff-sdk"
+  const fixedNativeArguments = localNativeService || bundledBridge
   const [processEnvRows, setProcessEnvRows] = useState(() => objectToKvRows(formData.processEnv))
   const [submitting, setSubmitting] = useState(false)
 
   // Gateway-owned V2 tasks launch a private service even without a saved command.
   const launchesProcess =
     formData.transport === "stdio" ||
+    localNativeService ||
     (formData.protocol === "opencode" && formData.opencodeAutoSpawn) ||
     (formData.protocol === "opencode-v2" &&
       Boolean(formData.cogniaModel) &&
@@ -775,8 +780,10 @@ export function AgentEditorDialog({
     }
     const processArgs = siwcMode
       ? ["app-server"]
-      : managedDsh
-        ? []
+      : managedDsh || fixedNativeArguments
+        ? formData.protocol === "rovo-http"
+          ? ["rovodev", "serve"]
+          : []
         : tokenizeShellCommand(formData.processArgs)
     if (usesProcess && processArgs === null) {
       toast.error(t("argumentsInvalid"))
@@ -930,13 +937,19 @@ export function AgentEditorDialog({
           apiKey: formData.networkApiKey || undefined,
         }
       }
-    } else if (formData.transport === "stdio") {
-      if (!managedDsh && !formData.processCommand.trim()) {
+    } else if (formData.transport === "stdio" || localNativeService) {
+      if (!managedDsh && !bundledBridge && !formData.processCommand.trim()) {
         toast.error(t("commandRequired"))
         return
       }
       input.process = {
-        command: siwcMode ? "codex" : managedDsh ? "" : formData.processCommand.trim(),
+        command: siwcMode
+          ? "codex"
+          : bundledBridge
+            ? "node"
+            : managedDsh
+              ? ""
+              : formData.processCommand.trim(),
         args: processArgs ?? [],
         cwd: formData.processCwd || undefined,
         env: {
@@ -1135,6 +1148,9 @@ export function AgentEditorDialog({
     processEnvRows,
     selectedPreset,
     managedDsh,
+    bundledBridge,
+    fixedNativeArguments,
+    localNativeService,
     launchesProcess,
     effectiveStateIsolation,
     codexFamily,
@@ -1654,12 +1670,12 @@ export function AgentEditorDialog({
             defaultOpen
             dataTestId="connection-section"
             summary={
-              formData.transport === "stdio"
+              launchesProcess
                 ? formData.processCommand || undefined
                 : formData.networkEndpoint || undefined
             }
           >
-            {formData.transport === "stdio" ? (
+            {launchesProcess ? (
               <>
                 {managedDsh && (
                   <div className="grid gap-2">
@@ -1686,7 +1702,7 @@ export function AgentEditorDialog({
                   <Label htmlFor={fid("command")}>{t("command")}</Label>
                   <Input
                     id={fid("command")}
-                    disabled={managedDsh || siwcMode}
+                    disabled={managedDsh || siwcMode || bundledBridge}
                     value={formData.processCommand}
                     onChange={(e) => setFormData({ ...formData, processCommand: e.target.value })}
                     // i18n-exempt: example CLI command, not UI prose
@@ -1697,7 +1713,7 @@ export function AgentEditorDialog({
                   <Label htmlFor={fid("args")}>{t("arguments")}</Label>
                   <Input
                     id={fid("args")}
-                    disabled={managedDsh || siwcMode}
+                    disabled={managedDsh || siwcMode || fixedNativeArguments}
                     value={formData.processArgs}
                     onChange={(e) => setFormData({ ...formData, processArgs: e.target.value })}
                     // i18n-exempt: example CLI arguments, not UI prose
@@ -1799,6 +1815,14 @@ export function AgentEditorDialog({
               valuePlaceholder={t("aiderEnvironmentValue")}
             />
           </FormSection>
+        )}
+        {launchesProcess && /(?:^|[\\/])goose(?:\.exe)?$/i.test(formData.processCommand) && (
+          <GooseRuntimeFields
+            rows={processEnvRows}
+            onRowsChange={setProcessEnvRows}
+            args={formData.processArgs}
+            onArgsChange={(processArgs) => setFormData((current) => ({ ...current, processArgs }))}
+          />
         )}
 
         {/* Where this configuration keeps its runtime state (ADR-0216). The

@@ -29,6 +29,11 @@ const BASE_SCOPES = [
 const FEATURES = [
   { id: "cards", scopes: ["cardkit:card:write"] },
   { id: "attachments", scopes: ["im:resource"] },
+  {
+    id: "avatars",
+    scopes: ["contact:contact.base:readonly", "contact:user.base:readonly", "im:chat:readonly"],
+  },
+  { id: "appAvatars", scopes: ["admin:app.info:readonly"] },
   { id: "history", scopes: ["im:message:readonly", "im:message.group_msg"] },
   { id: "allMessages", scopes: ["im:message.group_msg"] },
   { id: "botMentions", scopes: ["im:message.group_at_msg.include_bot:readonly"] },

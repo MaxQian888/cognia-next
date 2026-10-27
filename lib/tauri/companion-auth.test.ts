@@ -151,6 +151,64 @@ describe("companion auth lifecycle", () => {
     expect((error as CompanionApiError).status).toBe(403)
   })
 
+  it.each([
+    [503, false],
+    [403, true],
+  ])(
+    "preserves Host retryability for a socket-ticket HTTP %s response",
+    async (status, retryable) => {
+      const fetcher = jest.fn().mockResolvedValue({
+        ok: false,
+        status,
+        json: async () => ({
+          type: "https://cognia.dev/problems/host_surface_forbidden",
+          title: "Refused",
+          status,
+          detail: "refused",
+          code: "host_surface_forbidden",
+          requestId: "ticket-refused",
+          retryable,
+          details: {},
+        }),
+      })
+      await expect(
+        issueSocketTicket(
+          {
+            baseUrl: "https://host.test",
+            serviceToken: "test",
+            deviceId: "ada",
+            serverVersion: "test",
+          },
+          "events",
+          fetcher
+        )
+      ).rejects.toMatchObject({ status, retryable })
+    }
+  )
+
+  it.each([408, 429, 503])(
+    "retries legacy socket-ticket HTTP %s errors without a retryability field",
+    async (status) => {
+      const fetcher = jest.fn().mockResolvedValue({
+        ok: false,
+        status,
+        json: async () => ({ error: { code: "temporarily_unavailable", message: "retry later" } }),
+      })
+      await expect(
+        issueSocketTicket(
+          {
+            baseUrl: "https://host.test",
+            serviceToken: "test",
+            deviceId: "ada",
+            serverVersion: "test",
+          },
+          "events",
+          fetcher
+        )
+      ).rejects.toMatchObject({ status, retryable: true })
+    }
+  )
+
   it("reports no code when the host did not send one", async () => {
     const fetcher = jest.fn().mockResolvedValue({
       ok: false,

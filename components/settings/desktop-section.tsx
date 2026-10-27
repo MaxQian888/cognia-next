@@ -10,7 +10,12 @@ import { toast } from "sonner"
 import { CopyIcon, ExternalLinkIcon, LaptopIcon, PowerIcon, ServerIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
-import { isAutostartEnabled, setAutostart } from "@/lib/tauri/autostart"
+import {
+  AutostartStateMismatchError,
+  isAutostartEnabled,
+  onAutostartChanged,
+  setAutostart,
+} from "@/lib/tauri/autostart"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
 import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
@@ -35,7 +40,9 @@ import { BrowserLocalSettings } from "./browser/browser-local-settings"
 export function DesktopSection() {
   const t = useTranslations("settings.desktop")
   const [osInfo, setOsInfo] = useState<OsInfo | null>(null)
-  const [autostart, setAutostartState] = useState<boolean>(false)
+  const [autostart, setAutostartState] = useState<boolean | null>(null)
+  const [autostartPending, setAutostartPending] = useState(false)
+  const [autostartReadError, setAutostartReadError] = useState<string | null>(null)
   const [closeBehavior, setCloseBehaviorState] = useState<CloseBehavior>("ask")
   const [loaded, setLoaded] = useState(false)
   const [appDataDir, setAppDataDir] = useState<string | null>(null)
@@ -53,17 +60,38 @@ export function DesktopSection() {
       return
     }
     let cancelled = false
+    let autostartRevision = 0
+    const refreshAutostart = () => {
+      const revision = ++autostartRevision
+      void isAutostartEnabled()
+        .then((on) => {
+          if (cancelled || revision !== autostartRevision) return
+          setAutostartState(on)
+          setAutostartReadError(null)
+        })
+        .catch((err: unknown) => {
+          if (cancelled || revision !== autostartRevision) return
+          setAutostartState(null)
+          setAutostartReadError(err instanceof Error ? err.message : String(err))
+          loggers.app.warn("desktop.autostartReadFailed", { err: String(err) })
+        })
+    }
+    const offAutostart = onAutostartChanged((on) => {
+      autostartRevision++
+      setAutostartState(on)
+      setAutostartReadError(null)
+    })
+    refreshAutostart()
+    window.addEventListener("focus", refreshAutostart)
     void (async () => {
       try {
-        const [info, auto, behavior, dir] = await Promise.all([
+        const [info, behavior, dir] = await Promise.all([
           getOsInfo(),
-          isAutostartEnabled(),
           getCloseBehavior(),
           import("@tauri-apps/api/path").then((m) => m.appDataDir()),
         ])
         if (cancelled) return
         setOsInfo(info)
-        setAutostartState(auto)
         setCloseBehaviorState(behavior)
         setAppDataDir(dir)
       } catch (err) {
@@ -74,6 +102,8 @@ export function DesktopSection() {
     })()
     return () => {
       cancelled = true
+      offAutostart()
+      window.removeEventListener("focus", refreshAutostart)
     }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
@@ -95,15 +125,23 @@ export function DesktopSection() {
   }
 
   const handleAutostart = async (checked: boolean) => {
+    setAutostartPending(true)
     try {
       await setAutostart(checked)
       setAutostartState(checked)
       loggers.app.info("desktop.autostart", { enabled: checked })
       toast.success(checked ? t("launchOnToast") : t("launchOffToast"))
     } catch (err) {
-      const errorText = err instanceof Error ? err.message : String(err)
+      const errorText =
+        err instanceof AutostartStateMismatchError
+          ? t("launchStateMismatch")
+          : err instanceof Error
+            ? err.message
+            : String(err)
       loggers.app.error("desktop.autostartFailed", err)
       toast.error(t("launchAutostartFailed", { error: errorText }))
+    } finally {
+      setAutostartPending(false)
     }
   }
 
@@ -122,16 +160,20 @@ export function DesktopSection() {
   const handleHostMode = async (checked: boolean) => {
     try {
       await hosting.setEnabled(checked)
-      // Turning the mode on also registered launch at login and set the close
-      // button to the tray (`setHostMode`); show what it did.
+      // Registration is reflected by the wrapper's readback event. A newer
+      // tray change may already have superseded it while host setup finished.
       if (checked) {
-        setAutostartState(true)
         setCloseBehaviorState("tray")
       }
       loggers.app.info("desktop.hostMode", { enabled: checked })
       toast.success(checked ? t("hostMode.enabledToast") : t("hostMode.disabledToast"))
     } catch (err) {
-      const errorText = err instanceof Error ? err.message : String(err)
+      const errorText =
+        err instanceof AutostartStateMismatchError
+          ? t("launchStateMismatch")
+          : err instanceof Error
+            ? err.message
+            : String(err)
       loggers.app.error("desktop.hostModeFailed", err)
       toast.error(t("hostMode.failed", { error: errorText }))
     }
@@ -253,12 +295,18 @@ export function DesktopSection() {
             <p className="text-xs text-muted-foreground">{t("schedulerBackgroundHint")}</p>
           </div>
           <Switch
-            checked={autostart}
+            checked={autostart ?? false}
             onCheckedChange={(c) => void handleAutostart(c)}
-            disabled={!loaded}
+            disabled={autostart === null || autostartPending}
             aria-label={t("launchAtLoginToggle")}
           />
         </div>
+
+        {autostartReadError !== null && (
+          <p className="text-xs text-destructive" role="status">
+            {t("launchStateUnavailable", { error: autostartReadError })}
+          </p>
+        )}
 
         <div className="space-y-2 border-t pt-3">
           <div className="space-y-1">

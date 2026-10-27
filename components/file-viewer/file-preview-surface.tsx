@@ -47,10 +47,9 @@ type LoadState =
 /**
  * The one place a file becomes text on screen.
  *
- * Both entry points — the project workbench's preview panel and the read-only
- * dialog behind terminal and chat file links — are thin wrappers over this.
- * They differ only in how the request is built: the workbench hands over the
- * live editor draft, so it never touches the disk at all.
+ * The workbench, file-link dialog and registered attachment previews share
+ * this surface. Editor drafts and attachment bodies arrive as `providedText`,
+ * so those entry points never request a workspace read.
  */
 export function FilePreviewSurface({ request }: { request: FileViewerRequest | null }) {
   const t = useTranslations("fileViewer")
@@ -140,6 +139,7 @@ export function FilePreviewSurface({ request }: { request: FileViewerRequest | n
 
   const probe = {
     extension: extensionOf(request.relPath),
+    mimeType: request.mimeType,
     size: utf8ByteLength(current.text),
     source: request.source,
   }

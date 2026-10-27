@@ -550,6 +550,29 @@ describe("redactText — ported secret shapes (ai-memory sanitizer)", () => {
     expect(redacted).toBe("Bearer <JWT_001>")
   })
 
+  it.each(["<token>.", "<token>,", "<token>;", "<token>", "<api_key>."])(
+    "leaves a complete documentation placeholder untouched: %s",
+    (value) => {
+      const text = `Report TRACE_TOKEN=${value} without revealing credentials.`
+      expect(hasNoLeakingPii(text)).toBe(true)
+      expect(redactText(text).redacted).toBe(text)
+    }
+  )
+
+  it.each([
+    "<token>.realSecret123",
+    "realSecret123<token>",
+    "<actualSecret123>.",
+    "abc.def.ghi!",
+    "<API_KEY_001>realSecret123",
+  ])("still redacts credential-bearing env values: %s", (value) => {
+    const text = `TRACE_TOKEN=${value}`
+    const result = redactText(text)
+    expect(hasNoLeakingPii(text)).toBe(false)
+    expect(result.redacted).not.toContain(value)
+    expect(unredactText(result.redacted, result.map)).toBe(text)
+  })
+
   it("redacts env-style secret values, keeping the variable name", () => {
     const cases: Array<[string, string]> = [
       ["DB_PASSWORD=hunter22hunter", "hunter22hunter"],
@@ -900,5 +923,53 @@ describe("placeholder pattern single-source (PII_KINDS)", () => {
     const already = "call <PHONE_1000> or ping <IP_ADDR_1000>"
     const { redacted } = redactText(already)
     expect(redacted).toBe(already)
+  })
+})
+
+it("round-trips env credentials with a recognized prefix and a punctuation suffix", () => {
+  for (const value of [
+    "sk-abcdefghijklmnopqrstuvwxyz012345.realSuffix123",
+    "ghp_abcdefghijklmnopqrstuvwxyz012345.suffix123",
+  ]) {
+    const text = `TRACE_TOKEN=${value}`
+    const result = redactText(text)
+    expect(hasNoLeakingPii(text)).toBe(false)
+    expect(result.redacted).not.toContain("realSuffix123")
+    expect(unredactText(result.redacted, result.map)).toBe(text)
+  }
+})
+
+describe("translateOffsetsThroughRedaction snap", () => {
+  it("moves an offset inside a placeholder to its edges, never into it", () => {
+    const text = "mail alice@example.com now"
+    const { redacted, map } = redactText(text)
+    const inside = text.indexOf("example")
+    const [clamped] = translateOffsetsThroughRedaction(
+      [{ charStart: inside, charEnd: inside }],
+      redacted,
+      map
+    )
+    const [snapped] = translateOffsetsThroughRedaction(
+      [{ charStart: inside, charEnd: inside }],
+      redacted,
+      map,
+      { snap: true }
+    )
+    const start = redacted.indexOf("<EMAIL_")
+    const end = redacted.indexOf(">", start) + 1
+    expect(clamped!.charStart).toBeGreaterThan(start)
+    expect(snapped).toEqual({ charStart: start, charEnd: end })
+  })
+
+  it("leaves plain-text offsets where they are", () => {
+    const text = "mail alice@example.com now"
+    const { redacted, map } = redactText(text)
+    const [entry] = translateOffsetsThroughRedaction(
+      [{ charStart: 2, charEnd: text.length }],
+      redacted,
+      map,
+      { snap: true }
+    )
+    expect(entry).toEqual({ charStart: 2, charEnd: redacted.length })
   })
 })

@@ -676,7 +676,8 @@ export class CompanionApiError extends Error {
   constructor(
     message: string,
     readonly code: string,
-    readonly status: number
+    readonly status: number,
+    readonly retryable: boolean = status === 408 || status === 429 || status >= 500
   ) {
     super(message)
     this.name = "CompanionApiError"
@@ -693,10 +694,15 @@ async function expectJson(responsePromise: Promise<Response>): Promise<Record<st
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
   if (!response.ok) {
     const problem = parseProblem(body, response.status)
+    // Older envelopes omit retryable. The shared parser guesses from status,
+    // but a ticket rate limit or timeout still needs the constructor's fallback.
+    const candidate =
+      body?.error && typeof body.error === "object" ? (body.error as Record<string, unknown>) : body
     throw new CompanionApiError(
       problem && problem.detail.length > 0 ? problem.detail : `HTTP ${response.status}`,
       problem?.code ?? "",
-      response.status
+      response.status,
+      typeof candidate?.retryable === "boolean" ? candidate.retryable : undefined
     )
   }
   return body ?? {}

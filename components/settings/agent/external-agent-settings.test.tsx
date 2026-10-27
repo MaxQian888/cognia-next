@@ -799,7 +799,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       expect.objectContaining({
         protocol: "opencode-v2",
         network: { endpoint: "https://opencode.example.test", apiKey: "service-token" },
-        process: { command: "", args: [], cwd: "/workspace/project" },
+        process: { command: "", args: [], cwd: "/workspace/project", env: {} },
       })
     )
   })
@@ -905,7 +905,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
         "agent-2",
         expect.objectContaining({
           network: { endpoint: "", apiKey: undefined },
-          process: { command: "", args: [], cwd: undefined },
+          process: { command: "", args: [], cwd: undefined, env: {} },
         })
       )
     } finally {
@@ -1011,7 +1011,10 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(within(detail).getByText("Claude Surface")).toBeInTheDocument()
     expect(within(detail).getByText("Beta surface")).toBeInTheDocument()
     expect(within(detail).getByText("https://api.example.com/agent")).toBeInTheDocument()
-    // Recommended actions are a list, one step per item.
+    // Recommended actions stay collapsed until explicitly requested.
+    await user.click(
+      within(detail).getByRole("button", { name: /detailsRecommendedActions|Recommended actions/i })
+    )
     expect(within(detail).getByText("Install CLI").tagName).toBe("LI")
     expect(within(detail).getByText("Authenticate").tagName).toBe("LI")
     // Selecting the gallery's slot is replaced by the detail pane.
@@ -1864,4 +1867,13 @@ describe("stacked detail focus", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     expect(screen.getByTestId("agent-detail-agent-2")).toBeInTheDocument()
   })
+})
+
+it("makes managed terminal agents reachable from agent settings", () => {
+  render(<ExternalAgentSettings />)
+  expect(
+    screen.getByRole("button", {
+      name: `${externalAgentMessages.manager.terminalAgents.title} ${externalAgentMessages.manager.terminalAgents.terminalOnly}`,
+    })
+  ).toBeInTheDocument()
 })

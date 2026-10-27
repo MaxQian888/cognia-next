@@ -127,6 +127,200 @@ function renderWorkbench(panels: ContextPanelDefinition[]) {
   )
 }
 
+describe("scoped layout controls", () => {
+  beforeEach(() => {
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+    useSettingsStore.setState({ settings: {} as never })
+  })
+
+  afterEach(() => jest.restoreAllMocks())
+
+  it("reports the full active header and remeasures when its font metrics change", () => {
+    useContextWorkbenchStore.setState({ navigationStyle: "tabs" })
+    const onHeaderMinimumWidthChange = jest.fn()
+    let tabWidth = 88
+    const width = function (this: HTMLElement) {
+      if (this.dataset.testid === "context-workbench-header") return 200
+      if (this.hasAttribute("data-workbench-active-tab")) return tabWidth
+      return this.tagName === "BUTTON" ? 32 : 0
+    }
+    jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(width)
+    jest.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(width)
+    const originalObserver = globalThis.ResizeObserver
+    const originalFonts = Object.getOwnPropertyDescriptor(document, "fonts")
+    const fonts = Object.assign(new EventTarget(), { ready: Promise.resolve() })
+    Object.defineProperty(document, "fonts", { configurable: true, value: fonts })
+    const disconnectHeader = jest.fn()
+    let resizeHeader = () => {}
+    globalThis.ResizeObserver = class implements ResizeObserver {
+      private header = false
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(element: Element) {
+        if (element.getAttribute("data-testid") === "context-workbench-header") {
+          this.header = true
+          resizeHeader = () => this.callback([], this)
+        }
+      }
+      unobserve() {}
+      disconnect() {
+        if (this.header) disconnectHeader()
+      }
+    }
+    try {
+      const view = render(
+        <ContextWorkbench
+          workbenchInstanceId="header-sizing"
+          resource={resource}
+          panels={[
+            {
+              id: "comments",
+              labelKey: "contextWorkbench.comments",
+              appliesTo: () => true,
+              retention: "stateful",
+              renderer: () => <div>panel</div>,
+            },
+          ]}
+          onHeaderMinimumWidthChange={onHeaderMinimumWidthChange}
+        />
+      )
+      expect(onHeaderMinimumWidthChange).toHaveBeenLastCalledWith(216)
+      tabWidth = 112
+      act(() => resizeHeader())
+      expect(onHeaderMinimumWidthChange).toHaveBeenLastCalledWith(240)
+      tabWidth = 128
+      act(() => {
+        fonts.dispatchEvent(new Event("loadingdone"))
+      })
+      expect(onHeaderMinimumWidthChange).toHaveBeenLastCalledWith(256)
+      disconnectHeader.mockClear()
+      view.unmount()
+      expect(disconnectHeader).toHaveBeenCalled()
+      onHeaderMinimumWidthChange.mockClear()
+      act(() => {
+        resizeHeader()
+        fonts.dispatchEvent(new Event("loadingdone"))
+      })
+      expect(onHeaderMinimumWidthChange).not.toHaveBeenCalled()
+    } finally {
+      globalThis.ResizeObserver = originalObserver
+      if (originalFonts) Object.defineProperty(document, "fonts", originalFonts)
+      else Reflect.deleteProperty(document, "fonts")
+    }
+  })
+
+  it("keeps workspace and sidebar actions distinct when both controls are on screen", () => {
+    const workspaceWidth = jest.fn()
+    const sidebarWidth = jest.fn()
+    const panels: ContextPanelDefinition[] = [
+      {
+        id: "comments",
+        labelKey: "contextWorkbench.comments",
+        appliesTo: () => true,
+        retention: "stateful",
+        renderer: () => <div>panel</div>,
+      },
+    ]
+    render(
+      <>
+        <ContextWorkbench
+          workbenchInstanceId="outer-layout"
+          resource={resource}
+          panels={panels}
+          placement="chat-dock"
+          manageOwnWidth={false}
+          onModeWidthHint={workspaceWidth}
+        />
+        <ContextWorkbench
+          workbenchInstanceId="inner-layout"
+          resource={resource}
+          panels={panels}
+          layoutControlScope="file-sidebar"
+          manageOwnWidth={false}
+          onModeWidthHint={sidebarWidth}
+        />
+      </>
+    )
+    workspaceWidth.mockClear()
+    sidebarWidth.mockClear()
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Workspace layout" }), { key: "Enter" })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Widen workspace" }))
+    expect(workspaceWidth).toHaveBeenLastCalledWith("wide")
+    expect(sidebarWidth).not.toHaveBeenCalled()
+
+    workspaceWidth.mockClear()
+    fireEvent.keyDown(screen.getByRole("button", { name: "File sidebar layout" }), { key: "Enter" })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Automatic sidebar width" }))
+    expect(sidebarWidth).toHaveBeenLastCalledWith("narrow")
+    expect(workspaceWidth).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      "en",
+      "workspace",
+      "Workspace layout",
+      "Resize the entire right workspace relative to the chat.",
+      "Narrow workspace",
+    ],
+    [
+      "en",
+      "file-sidebar",
+      "File sidebar layout",
+      "Resize the file sidebar relative to the editor.",
+      "Automatic sidebar width",
+    ],
+    ["zh-CN", "workspace", "工作区布局", "调整整个右侧工作区与聊天区的空间分配。", "收窄工作区"],
+    ["zh-CN", "file-sidebar", "文件侧栏布局", "调整文件侧栏与编辑区的空间分配。", "自动适宽"],
+  ])(
+    "names the %s %s control and explains its scope",
+    (locale, scope, title, description, narrow) => {
+      const onModeWidthHint = jest.fn()
+      const localized = JSON.parse(
+        readFileSync(join(process.cwd(), `i18n/messages/${locale}/contextWorkbench.json`), "utf8")
+      )
+      // The global next-intl mock resolves the English bundle and ignores
+      // provider props. Seed just these labels to exercise both locale variants.
+      const mockMessages = jest.requireActual("@/i18n/messages/en.json")
+      jest.replaceProperty(mockMessages.contextWorkbench, "layoutScopes", localized.layoutScopes)
+      render(
+        <NextIntlClientProvider
+          locale={locale}
+          messages={{
+            ...messages,
+            contextWorkbench: { ...messages.contextWorkbench, ...localized },
+          }}
+        >
+          <ContextWorkbench
+            workbenchInstanceId={`layout-${locale}-${scope}`}
+            resource={resource}
+            placement={scope === "workspace" ? "chat-dock" : "adjacent-editor"}
+            {...(scope === "file-sidebar" ? { layoutControlScope: "file-sidebar" as const } : {})}
+            panels={[
+              {
+                id: "comments",
+                labelKey: "contextWorkbench.comments",
+                appliesTo: () => true,
+                retention: "stateful",
+                renderer: () => <div>panel</div>,
+              },
+            ]}
+            manageOwnWidth={false}
+            onModeWidthHint={onModeWidthHint}
+          />
+        </NextIntlClientProvider>
+      )
+      const trigger = screen.getByRole("button", { name: title })
+      expect(trigger).toHaveAttribute("title", title)
+      fireEvent.keyDown(trigger, { key: "Enter" })
+      const menu = screen.getByRole("menu", { name: title })
+      expect(within(menu).getByText(description)).toBeVisible()
+      fireEvent.click(within(menu).getByRole("menuitem", { name: narrow }))
+      expect(onModeWidthHint).toHaveBeenLastCalledWith("narrow")
+    }
+  )
+})
+
 describe("ContextWorkbench", () => {
   beforeEach(() => {
     useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })

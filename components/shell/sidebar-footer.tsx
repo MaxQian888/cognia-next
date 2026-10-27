@@ -51,7 +51,6 @@ import { cn } from "@/lib/utils"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { SidebarUserCard } from "./sidebar-user-card"
 import { NavigationIcon } from "./navigation-icon"
-import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 
 // The same stops the mobile quick toggles cycle through (system → light →
 // dark) so the two surfaces never disagree about what "next" means.
@@ -183,7 +182,6 @@ export function SidebarFooter({
           </Button>
         ) : null}
       </div>
-      <SharedSessionJoin />
       <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="sidebar" />
     </div>
   )

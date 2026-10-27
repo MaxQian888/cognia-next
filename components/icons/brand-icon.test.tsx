@@ -144,6 +144,7 @@ describe("BrandIcon", () => {
     ["replit", "Replit", "/icons/lobe/replit-color.svg"],
     ["amp", "Amp", "/icons/lobe/amp-color.svg"],
     ["antigravity", "Antigravity", "/icons/lobe/antigravity-color.svg"],
+    ["antigravity-acp", "Antigravity ACP", "/icons/lobe/antigravity-color.svg"],
     ["manus", "Manus", "/icons/lobe/manus.svg"],
     ["kimi", "Kimi", "/icons/lobe/kimi-color.svg"],
     ["qoder", "Qoder", "/icons/lobe/qoder-color.svg"],

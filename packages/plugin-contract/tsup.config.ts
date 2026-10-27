@@ -6,7 +6,8 @@ import { defineConfig } from "tsup"
 export default defineConfig({
   entry: ["src/**/*.ts", "!src/**/*.test.ts"],
   format: ["esm", "cjs"],
-  dts: true,
+  // build-package.mjs emits checked declarations with native TypeScript first.
+  dts: false,
   sourcemap: true,
   clean: true,
   target: "es2017",

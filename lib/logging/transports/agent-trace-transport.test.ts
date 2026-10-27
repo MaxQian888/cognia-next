@@ -33,6 +33,32 @@ function makeEntry(span: AgentTraceSpan): StructuredLogEntry {
 }
 
 describe("AgentTraceTransport.log", () => {
+  it("waits for an in-flight auto-flush before acknowledging an explicit barrier", async () => {
+    let finishWrite!: () => void
+    let acknowledged = false
+    const writing = new Promise<void>((resolve) => {
+      finishWrite = resolve
+    })
+    const writer = jest.fn(async () => writing)
+    const transport = new AgentTraceTransport({ bufferSize: 1, flushInterval: 0, writer })
+    try {
+      transport.log(makeEntry(makeSpan({ id: "pending" })))
+      await Promise.resolve()
+      expect(writer).toHaveBeenCalledTimes(1)
+      const barrier = transport.flush().then(() => {
+        acknowledged = true
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(acknowledged).toBe(false)
+      finishWrite()
+      await barrier
+      expect(acknowledged).toBe(true)
+    } finally {
+      finishWrite()
+      await transport.close()
+    }
+  })
   it("buffers span entries and flushes once the buffer fills", async () => {
     const captured: AgentTraceSpan[][] = []
     const writer = jest.fn(async (spans: AgentTraceSpan[]) => {

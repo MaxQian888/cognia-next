@@ -446,6 +446,7 @@ export class PermissionGuard {
   private auditLog: PermissionAuditEntry[] = []
   private requestHandler: PermissionRequestHandler | null = null
   private pendingRequests: Map<string, Promise<boolean>> = new Map()
+  private permissionListeners = new Set<() => void>()
   /**
    * Tier overlay (ADR-0020 model). Missing rows default to "silent"
    * (the historic behavior). Keyed by `pluginId → permission → tier`.
@@ -503,6 +504,7 @@ export class PermissionGuard {
       }
       if (tierRow.size > 0) this.tiers.set(pluginId, tierRow)
     }
+    this.notifyPermissionChanges()
   }
 
   unregisterPlugin(pluginId: string): void {
@@ -510,6 +512,25 @@ export class PermissionGuard {
     this.grants.delete(pluginId)
     this.denials.delete(pluginId)
     this.tiers.delete(pluginId)
+    this.notifyPermissionChanges()
+  }
+
+  /** Observe permission mutations across independently mounted UI consumers. */
+  subscribePermissionChanges(listener: () => void): () => void {
+    this.permissionListeners.add(listener)
+    return () => {
+      this.permissionListeners.delete(listener)
+    }
+  }
+
+  private notifyPermissionChanges(): void {
+    for (const listener of this.permissionListeners) {
+      try {
+        listener()
+      } catch {
+        // A UI subscriber cannot interrupt permission enforcement.
+      }
+    }
   }
 
   // ===========================================================================
@@ -678,6 +699,13 @@ export class PermissionGuard {
   // Permission Granting
   // ===========================================================================
 
+  /** Check policy before an external permission-ledger write. */
+  assertGrantAllowed(grantedBy?: "manifest" | "user" | "system"): void {
+    if (!this.config.allowRuntimeGrants && grantedBy !== "manifest") {
+      throw new Error("Runtime permission grants are disabled")
+    }
+  }
+
   grant(
     pluginId: string,
     permission: PluginPermission,
@@ -686,9 +714,7 @@ export class PermissionGuard {
       expiresIn?: number
     } = {}
   ): void {
-    if (!this.config.allowRuntimeGrants && options.grantedBy !== "manifest") {
-      throw new Error("Runtime permission grants are disabled")
-    }
+    this.assertGrantAllowed(options.grantedBy)
 
     let grantMap = this.grants.get(pluginId)
     if (!grantMap) {
@@ -706,6 +732,7 @@ export class PermissionGuard {
     this.revokedPermissions.get(pluginId)?.delete(permission)
 
     this.audit(pluginId, permission, "grant", true)
+    this.notifyPermissionChanges()
   }
 
   grantMultiple(pluginId: string, permissions: PluginPermission[]): void {
@@ -724,6 +751,7 @@ export class PermissionGuard {
     this.revokedPermissions.set(pluginId, revoked)
     this.grants.get(pluginId)?.delete(permission)
     this.audit(pluginId, permission, "revoke", false)
+    this.notifyPermissionChanges()
   }
 
   revokeMultiple(pluginId: string, permissions: PluginPermission[]): void {
@@ -741,6 +769,7 @@ export class PermissionGuard {
       }
       grantMap.clear()
     }
+    this.notifyPermissionChanges()
   }
 
   // ===========================================================================
@@ -951,6 +980,7 @@ export class PermissionGuard {
     this.pendingRequests.clear()
     this.tiers.clear()
     this.tierListeners.clear()
+    this.permissionListeners.clear()
   }
 }
 

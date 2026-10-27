@@ -1,4 +1,4 @@
-/// cognia-next WASM plugin contract — v0.2.0
+/// cognia-next WASM plugin contract — v0.2.1
 ///
 /// A plugin imports the cognia capabilities it needs (each capability is
 /// gated by the host's `CapabilityGranter`) and exports a small set of
@@ -42,7 +42,8 @@
 ///
 /// ## Error channel
 ///
-/// Every `result<..., string>` error in this package carries a
+/// Except for legacy process.exec errors (kept byte-compatible with v0.2.0),
+/// every `result<..., string>` error in this package carries a
 /// machine-parseable prefix:
 ///
 ///     "<CODE>: <human-readable message>"
@@ -64,7 +65,7 @@
 /// separator is human-facing and may change in any release; the codes are
 /// stable for the life of the 0.2 contract.
 
-package cognia:plugin@0.2.0;
+package cognia:plugin@0.2.1;
 
 interface logger {
     enum log-level {
@@ -130,6 +131,15 @@ interface process {
     /// The child's environment is cleared before `options.env` is applied, so
     /// host credentials in the ambient environment are never inherited.
     exec: func(program: string, args: list<string>, options: exec-options) -> result<exec-result, string>;
+
+    /// Added in v0.2.1. Same permission, allowlist, environment and result as
+    /// `exec`, with binary stdin (up to 4 MiB), closed after writing for EOF.
+    /// stdout and stderr are drained concurrently and each capped at 8 MiB;
+    /// overflow returns `PAYLOAD_TOO_LARGE`, never a silently truncated result.
+    /// The requested timeout is capped by wasm.callTimeoutMs. Timeout or
+    /// plugin teardown kills/reaps the child; teardown returns `CANCELLED`.
+    /// Existing exec-options, exec-result and exec signatures are unchanged.
+    exec-with-stdin: func(program: string, args: list<string>, options: exec-options, stdin: list<u8>) -> result<exec-result, string>;
 }
 
 interface clipboard {
@@ -186,7 +196,7 @@ interface workflow {
     emit-event: func(workflow-id: string, kind: string, payload: list<u8>) -> result<_, string>;
 }
 
-/// The plugin world v0.2.0. Hosts implement every `import`, guests implement
+/// The plugin world v0.2.1. Hosts implement every `import`, guests implement
 /// every `export`. cognia-specific WIT lives here; the WASI Preview 2 worlds
 /// (filesystem/clocks/io/random/cli) are added to the same component at link
 /// time on the host side without appearing in this file — they are standard

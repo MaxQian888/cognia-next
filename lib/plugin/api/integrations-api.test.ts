@@ -13,6 +13,8 @@ import * as githubAuth from "@/lib/integrations/github-auth"
 import { setIntegrationAuthenticatedRequestExecutorForTesting } from "@/lib/integrations/action-runner"
 import { setIntegrationAccountOutboundRecipients } from "@/lib/db/integrations"
 import { createIntegrationsAPI, toPluginAccount } from "./integrations-api"
+import { routePythonHostRequest } from "@/lib/plugin/python/host-request-router"
+import type { PluginContext } from "@/types/plugin/plugin"
 
 // Mutable namespace seams retain the real implementations unless a boundary test spies on one.
 jest.mock("@/lib/db/integrations", () => ({
@@ -185,6 +187,59 @@ describe("ctx.integrations", () => {
     }
     expect(toPluginAccount({ ...row, outboundRecipients: [] })).toEqual(row)
   })
+
+  it.each(["typescript", "python"])(
+    "does not interpret %s account patch keys as Dexie paths",
+    async (runtime) => {
+      const api = createIntegrationsAPI("example-delivery", () => true)
+      const account = await api.createAccount({
+        integrationId: "example",
+        providerId: "oauth",
+        authSessionId: "opaque-session-id",
+        remoteAccountId: "one",
+        label: "One",
+      })
+      const recipients = [
+        {
+          recipient: {
+            kind: "repository" as const,
+            channel: "github",
+            recipient: "github:github.com/acme/web",
+          },
+          addedAt: 1,
+          addedBy: "local-user" as const,
+        },
+      ]
+      await setIntegrationAccountOutboundRecipients("example-delivery", account.id, recipients)
+      const patch = {
+        label: "Renamed",
+        "outboundRecipients.0.recipient.recipient": "github:github.com/attacker/repo",
+        "settings.token": "injected",
+      }
+      if (runtime === "python") {
+        const outcome = await routePythonHostRequest(
+          {
+            pluginId: "example-delivery",
+            generation: "gen-1",
+            requestId: 1,
+            method: "integrations.updateAccount",
+            params: { args: [account.id, patch] },
+          },
+          { getContext: () => ({ integrations: api }) as PluginContext }
+        )
+        expect(outcome.ok).toBe(true)
+      } else {
+        await api.updateAccount(account.id, patch)
+      }
+
+      const stored = await getDb().integrationAccounts.get(account.id)
+      expect(stored).toMatchObject({ label: "Renamed", authSessionId: "opaque-session-id" })
+      expect(stored?.outboundRecipients).toEqual(recipients)
+      expect(stored).not.toHaveProperty("settings")
+      // put() stores these as literal properties; it never applies them as paths.
+      expect(Object.keys(stored ?? {})).toContain("settings.token")
+    }
+  )
 
   it("discovers resources and persists normalized account health", async () => {
     const api = createIntegrationsAPI("example-delivery", () => true)

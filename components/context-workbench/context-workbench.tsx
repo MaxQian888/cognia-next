@@ -57,7 +57,9 @@ import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -125,6 +127,7 @@ import {
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { PANEL_SNAP_MAGNET_PX, snapPanelSize } from "@/lib/ui/panel-snap"
 import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
+import { measureWorkbenchHeaderMinimumWidth } from "./header-minimum-width"
 
 interface ContextWorkbenchValue {
   workbenchInstanceId: string
@@ -228,6 +231,10 @@ export interface ContextWorkbenchProps {
   placement?: ContextWorkbenchPlacement
   className?: string
   manageOwnWidth?: boolean
+  /** Name the nested file sidebar independently from the surrounding workspace. */
+  layoutControlScope?: "file-sidebar"
+  /** Report the space needed for a complete active tab and visible header actions. */
+  onHeaderMinimumWidthChange?: (width: number) => void
   onExitFocus?: () => void
   onCollapse?: () => void
   /**
@@ -422,6 +429,8 @@ export interface ContextWorkbenchMobileDrawerProps extends Omit<
   | "placement"
   | "className"
   | "manageOwnWidth"
+  | "layoutControlScope"
+  | "onHeaderMinimumWidthChange"
   | "railOnly"
   | "onCollapse"
   | "leadingActivities"
@@ -689,6 +698,8 @@ function ContextWorkbenchView({
   placement = "adjacent-editor",
   className,
   manageOwnWidth = true,
+  layoutControlScope,
+  onHeaderMinimumWidthChange,
   onExitFocus,
   onCollapse,
   onEnsureVisible,
@@ -711,6 +722,10 @@ function ContextWorkbenchView({
   const sectionRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const panelTabsRef = useRef<HTMLDivElement | null>(null)
+  const headerElementRef = useRef<HTMLElement | null>(null)
+  const bindHeaderElement = useCallback((element: HTMLElement | null) => {
+    headerElementRef.current = element
+  }, [])
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const lifecyclePanelsRef = useRef(new Map<string, Set<string>>())
   /**
@@ -732,6 +747,34 @@ function ContextWorkbenchView({
   /** The JSON form of the above, so the lifecycle effect has a primitive dep. */
   const lastVisibleKeyRef = useRef(new Map<string, string>())
   const t = useTranslations()
+  const scopedLayoutLabels =
+    layoutControlScope === "file-sidebar"
+      ? {
+          title: t("contextWorkbench.layoutScopes.fileSidebar.title"),
+          description: t("contextWorkbench.layoutScopes.fileSidebar.description"),
+          narrow: t("contextWorkbench.layoutScopes.fileSidebar.narrow"),
+          wide: t("contextWorkbench.layoutScopes.fileSidebar.wide"),
+          focus: t("contextWorkbench.layoutScopes.fileSidebar.focus"),
+        }
+      : placement === "chat-dock"
+        ? {
+            title: t("contextWorkbench.layoutScopes.workspace.title"),
+            description: t("contextWorkbench.layoutScopes.workspace.description"),
+            narrow: t("contextWorkbench.layoutScopes.workspace.narrow"),
+            wide: t("contextWorkbench.layoutScopes.workspace.wide"),
+            focus: t("contextWorkbench.layoutScopes.workspace.focus"),
+          }
+        : null
+  const layoutMenuLabel = scopedLayoutLabels?.title ?? t("contextWorkbench.actions.layoutMenu")
+  const narrowLabel = scopedLayoutLabels?.narrow ?? t("contextWorkbench.actions.narrow")
+  const wideLabel = scopedLayoutLabels?.wide ?? t("contextWorkbench.actions.wide")
+  const focusLabel = scopedLayoutLabels?.focus ?? t("contextWorkbench.actions.focus")
+  const LayoutControlIcon =
+    layoutControlScope === "file-sidebar"
+      ? PanelRightIcon
+      : placement === "chat-dock"
+        ? PanelsTopLeftIcon
+        : SlidersHorizontalIcon
   const [customizeRailOpen, setCustomizeRailOpen] = useState(false)
   useSyncExternalStore(
     contextPanelRegistry.subscribe,
@@ -1579,6 +1622,35 @@ function ContextWorkbenchView({
   // and now the exit too.
   const focusTakeover = isFocus || focusExiting
 
+  // Rebind after commits that can change tabs, controls or locale. Observe
+  // intrinsic tab size too: font loading can change it without resizing the host.
+  useEffect(() => {
+    const header = headerElementRef.current
+    if (!header || !onHeaderMinimumWidthChange || bodyHidden || focusTakeover) return
+    let mounted = true
+    const measure = () => {
+      if (!mounted) return
+      const minimum = measureWorkbenchHeaderMinimumWidth(header)
+      if (minimum > 0) onHeaderMinimumWidthChange(minimum)
+    }
+    measure()
+    const fonts = header.ownerDocument.fonts
+    fonts?.addEventListener("loadingdone", measure)
+    void fonts?.ready.then(measure)
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure)
+    if (observer) {
+      observer.observe(header)
+      Array.from(header.children).forEach((child) => observer.observe(child))
+      const activeTab = header.querySelector("[data-workbench-active-tab]")
+      if (activeTab) observer.observe(activeTab)
+    }
+    return () => {
+      mounted = false
+      observer?.disconnect()
+      fonts?.removeEventListener("loadingdone", measure)
+    }
+  })
+
   // The header row — either drawn above the panel body or, when the host hands
   // over `headerOutlet`, rendered into the shell's title bar so the workbench
   // sits under a single 40px row (`components/shell/title-bar-outlets.tsx`).
@@ -1683,6 +1755,7 @@ function ContextWorkbenchView({
                     "group flex shrink-0 items-center rounded-md",
                     selected && "bg-secondary"
                   )}
+                  data-workbench-active-tab={selected || undefined}
                 >
                   <button
                     type="button"
@@ -1853,6 +1926,7 @@ function ContextWorkbenchView({
               size="sm"
               variant={layout.activePanelId === panel.id ? "secondary" : "ghost"}
               data-workbench-group-tab
+              data-workbench-active-tab={layout.activePanelId === panel.id || undefined}
               data-split-secondary={secondaryPanelId === panel.id || undefined}
               role={splitActive ? undefined : "tab"}
               aria-selected={splitActive ? undefined : layout.activePanelId === panel.id}
@@ -1880,13 +1954,14 @@ function ContextWorkbenchView({
         // actually on screen instead.
         <div
           data-testid="context-workbench-active-panel-title"
+          data-workbench-title
           className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground"
         >
           <ActivePanelIcon className="size-3.5 shrink-0" />
           <span className="truncate">{getPanelLabel(activePanel)}</span>
         </div>
       ) : (
-        <div className="flex-1" />
+        <div className="flex-1" data-workbench-spacer />
       )}
       <PluginExtensionSlot
         point="panel.header"
@@ -1908,7 +1983,8 @@ function ContextWorkbenchView({
               type="button"
               size="icon-sm"
               variant={widthMode === "narrow" ? "secondary" : "ghost"}
-              aria-label={t("contextWorkbench.actions.narrow")}
+              aria-label={narrowLabel}
+              title={narrowLabel}
               onClick={() => selectMode("narrow")}
             >
               <PanelRightIcon className="size-4" />
@@ -1917,7 +1993,8 @@ function ContextWorkbenchView({
               type="button"
               size="icon-sm"
               variant={widthMode === "wide" ? "secondary" : "ghost"}
-              aria-label={t("contextWorkbench.actions.wide")}
+              aria-label={wideLabel}
+              title={wideLabel}
               onClick={() => selectMode("wide")}
             >
               <Rows3Icon className="size-4" />
@@ -1932,7 +2009,8 @@ function ContextWorkbenchView({
               size="icon-sm"
               variant={layout.mode === "focus" ? "secondary" : "ghost"}
               aria-pressed={layout.mode === "focus"}
-              aria-label={t("contextWorkbench.actions.focus")}
+              aria-label={focusLabel}
+              title={focusLabel}
               onClick={() => selectMode(layout.mode === "focus" ? exitFocusMode : "focus")}
             >
               <FocusIcon className="size-4" />
@@ -1944,7 +2022,8 @@ function ContextWorkbenchView({
                 type="button"
                 size="icon-sm"
                 variant="ghost"
-                aria-label={t("contextWorkbench.actions.layoutMenu")}
+                aria-label={layoutMenuLabel}
+                title={layoutMenuLabel}
                 data-testid="context-workbench-layout-menu"
                 // Reset alone did not justify a permanent button, so this
                 // used to hide above the fold unless `onResetLayout` was
@@ -1955,81 +2034,91 @@ function ContextWorkbenchView({
                 // breakpoint instead of everywhere.
                 className="shrink-0"
               >
-                <SlidersHorizontalIcon className="size-4" />
+                <LayoutControlIcon className="size-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
-                onSelect={() => selectMode("narrow")}
-              >
-                <PanelRightIcon className="size-4" />
-                {t("contextWorkbench.actions.narrow")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
-                onSelect={() => selectMode("wide")}
-              >
-                <Rows3Icon className="size-4" />
-                {t("contextWorkbench.actions.wide")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
-                onSelect={() => selectMode("focus")}
-              >
-                <FocusIcon className="size-4" />
-                {t("contextWorkbench.actions.focus")}
-              </DropdownMenuItem>
-              {/* `Rows2Icon`, not `Columns2Icon`: the split stacks, and
+            <DropdownMenuContent align="end" aria-label={layoutMenuLabel}>
+              <DropdownMenuGroup>
+                {scopedLayoutLabels ? (
+                  <DropdownMenuLabel>
+                    {scopedLayoutLabels.title}
+                    <span className="mt-1 block max-w-64 whitespace-normal text-xs font-normal text-muted-foreground">
+                      {scopedLayoutLabels.description}
+                    </span>
+                  </DropdownMenuLabel>
+                ) : null}
+                <DropdownMenuItem
+                  className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
+                  onSelect={() => selectMode("narrow")}
+                >
+                  <PanelRightIcon className="size-4" />
+                  {narrowLabel}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
+                  onSelect={() => selectMode("wide")}
+                >
+                  <Rows3Icon className="size-4" />
+                  {wideLabel}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={cn(!useTabs && "@[20rem]/wb-header:hidden")}
+                  onSelect={() => selectMode("focus")}
+                >
+                  <FocusIcon className="size-4" />
+                  {focusLabel}
+                </DropdownMenuItem>
+                {/* `Rows2Icon`, not `Columns2Icon`: the split stacks, and
                         `Rows3Icon` is already the Wide glyph, so the two read
                         as a family. */}
-              {splitActive ? (
-                <DropdownMenuItem
-                  data-testid="context-workbench-close-split-menu"
-                  onSelect={handleCloseSplit}
-                >
-                  <Rows2Icon className="size-4" />
-                  {t("contextWorkbench.actions.closeSplit")}
-                </DropdownMenuItem>
-              ) : canOfferSplit ? (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger data-testid="context-workbench-split-below">
-                    <Rows2Icon className="size-4" />
-                    {t("contextWorkbench.actions.splitBelow")}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent
-                    aria-label={t("contextWorkbench.actions.splitBelowPanel")}
+                {splitActive ? (
+                  <DropdownMenuItem
+                    data-testid="context-workbench-close-split-menu"
+                    onSelect={handleCloseSplit}
                   >
-                    {splitCandidates.map((panel) => (
-                      <DropdownMenuItem
-                        key={panel.id}
-                        data-testid={`context-workbench-split-candidate-${panel.id}`}
-                        onSelect={() => handleSplitBelow(panel)}
-                      >
-                        {getPanelLabel(panel)}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              ) : (
-                <DropdownMenuItem
-                  disabled
-                  data-testid="context-workbench-split-unavailable"
-                  onSelect={(event) => event.preventDefault()}
-                >
-                  <Rows2Icon className="size-4" />
-                  {t("contextWorkbench.actions.splitNeedsWide")}
-                </DropdownMenuItem>
-              )}
-              {onResetLayout ? (
-                <DropdownMenuItem
-                  data-testid="context-workbench-reset-layout"
-                  onSelect={onResetLayout}
-                >
-                  <RotateCcwIcon className="size-4" />
-                  {t("contextWorkbench.actions.resetLayout")}
-                </DropdownMenuItem>
-              ) : null}
+                    <Rows2Icon className="size-4" />
+                    {t("contextWorkbench.actions.closeSplit")}
+                  </DropdownMenuItem>
+                ) : canOfferSplit ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger data-testid="context-workbench-split-below">
+                      <Rows2Icon className="size-4" />
+                      {t("contextWorkbench.actions.splitBelow")}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent
+                      aria-label={t("contextWorkbench.actions.splitBelowPanel")}
+                    >
+                      {splitCandidates.map((panel) => (
+                        <DropdownMenuItem
+                          key={panel.id}
+                          data-testid={`context-workbench-split-candidate-${panel.id}`}
+                          onSelect={() => handleSplitBelow(panel)}
+                        >
+                          {getPanelLabel(panel)}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : (
+                  <DropdownMenuItem
+                    disabled
+                    data-testid="context-workbench-split-unavailable"
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    <Rows2Icon className="size-4" />
+                    {t("contextWorkbench.actions.splitNeedsWide")}
+                  </DropdownMenuItem>
+                )}
+                {onResetLayout ? (
+                  <DropdownMenuItem
+                    data-testid="context-workbench-reset-layout"
+                    onSelect={onResetLayout}
+                  >
+                    <RotateCcwIcon className="size-4" />
+                    {t("contextWorkbench.actions.resetLayout")}
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </>
@@ -2045,6 +2134,7 @@ function ContextWorkbenchView({
     headerOutlet && !focusTakeover ? (
       createPortal(
         <div
+          ref={bindHeaderElement}
           data-testid="context-workbench-header"
           className="@container/wb-header flex h-full min-w-0 flex-1 items-center gap-1 px-2"
           // The activity rail keeps its column inside the dock, so the projected
@@ -2057,6 +2147,7 @@ function ContextWorkbenchView({
       )
     ) : (
       <header
+        ref={bindHeaderElement}
         data-testid="context-workbench-header"
         className={cn(
           "@container/wb-header flex h-10 shrink-0 items-center gap-1 border-b px-2",

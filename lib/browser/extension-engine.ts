@@ -78,6 +78,13 @@ export type ExtensionTransport = (input: {
 /** Reads one file the agent asked to upload, from the Host's own disk. */
 export type ExtensionFileReader = (path: string) => Promise<Uint8Array>
 
+let installedHostFileReader: ExtensionFileReader | undefined
+
+/** Installed by a Node Host at boot; browser bundles have no disk fallback. */
+export function setExtensionHostFileReader(reader: ExtensionFileReader | undefined): void {
+  installedHostFileReader = reader
+}
+
 export interface ExtensionBinding {
   /** The paired browser device that will run the operations. */
   deviceId: string
@@ -439,16 +446,18 @@ const hostExtensionTransport: ExtensionTransport = (input) => callBrowserSocket(
 
 /**
  * Reads a file the agent names on this Host: through the desktop's fs plugin,
- * or straight from disk in the headless brain, which is a Node process on the
- * machine the paths belong to.
+ * or through the file port installed by the headless brain on that machine.
  */
 export const hostFileReader: ExtensionFileReader = async (path) => {
   if (isTauri()) {
     const { readFile } = await import("@tauri-apps/plugin-fs")
     return readFile(path)
   }
-  const { readFile } = await import("node:fs/promises")
-  return new Uint8Array(await readFile(path))
+  if (installedHostFileReader) return installedHostFileReader(path)
+  throw new BrowserSessionError(
+    "browser_feature_unsupported",
+    "Host file access is unavailable in this browser runtime."
+  )
 }
 
 // ── Conversation bindings ───────────────────────────────────────────────────

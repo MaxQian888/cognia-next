@@ -45,6 +45,8 @@ export interface PlatformIdentity {
   adapterId: string
   /** Platform-native user id (Telegram int, Discord snowflake, etc.) as string. */
   remoteUserId: string
+  /** Adapter-reported namespace; e.g. Lark open_id and app_id are not interchangeable. */
+  remoteIdType?: string
   displayName?: string
   avatarUrl?: string
   mergedFromIds?: string[]

@@ -899,12 +899,12 @@ describe("personAgents", () => {
     models: { deepseek: ["ark-deepseek-v4.1-flash"] },
     usage: { month: "2026-10", spentTokens: 5, reservedTokens: 1, monthlyTokens: null },
   }
-  const wire = (extra: Record<string, unknown>) =>
+  const wire = (_extra: Record<string, unknown>) =>
     JSON.parse(
       JSON.stringify(
         buildLocalHostFeatureManifest({ platform: "headless", personPartition: true, personAgents })
       )
-    ) as Record<string, unknown> & typeof extra
+    ) as Record<string, unknown> & typeof _extra
 
   it("p6g travels only with a person partition and survives the wire", () => {
     expect(

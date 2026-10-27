@@ -227,7 +227,12 @@ import {
   getBrowserBuiltinRegistry,
   getBrowserBuiltinRegistryEntry,
 } from "./browser-builtin-registry"
-import { buildWasmNodeDefs, buildWasmToolDefinitions, callWasmExport } from "./wasm-loader"
+import {
+  buildWasmNodeDefs,
+  buildWasmToolDefinitions,
+  callWasmExport,
+  updateWasmPluginConfig,
+} from "./wasm-loader"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
 // codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
@@ -7127,7 +7132,7 @@ export class PluginManager {
 
   /**
    * Config-change fan-out: dispatch the JS `onConfigChange` hook and push
-   * the new config into a python/hybrid plugin's host. Call after
+   * the new config into a native WASM or python/hybrid plugin's host. Call after
    * persisting via `setPluginConfig`.
    */
   async notifyPluginConfigChanged(
@@ -7140,6 +7145,9 @@ export class PluginManager {
     emitPluginConfigChange(pluginId, config)
     const plugin = usePluginStore.getState().plugins[pluginId]
     const type = plugin?.manifest.type
+    if (type === "wasm" && plugin?.status === "enabled") {
+      await updateWasmPluginConfig(pluginId, config)
+    }
     if (type === "python" || type === "hybrid") {
       try {
         await this.pushPythonConfig(pluginId, config)

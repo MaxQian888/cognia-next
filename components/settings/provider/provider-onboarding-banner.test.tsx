@@ -2,8 +2,12 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
+import { fetchIpInfo } from "@/lib/network/ip-info"
+
+jest.mock("@/lib/network/ip-info", () => ({ fetchIpInfo: jest.fn() }))
+const mockFetchIpInfo = jest.mocked(fetchIpInfo)
 
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 jest.mock("next-intl", () => ({
@@ -16,6 +20,9 @@ jest.mock("next-intl", () => ({
       openai: "OpenAI",
       anthropic: "Anthropic",
       google: "Google",
+      deepseek: "DeepSeek",
+      qwen: "Qwen",
+      doubao: "Doubao",
       "modelsDev.update": "Update catalog",
       "modelsDev.syncing": "Syncing…",
       "modelsDev.never": "never",
@@ -31,6 +38,7 @@ jest.mock("next-intl", () => ({
 
 // ── store mock ────────────────────────────────────────────────────────────────
 const storeState = {
+  settings: { networkProxy: { ipLookupEnabled: true } },
   providerOnboardingDismissed: false,
   dismissProviderOnboarding: jest.fn(),
 }
@@ -60,6 +68,13 @@ jest.mock("@/hooks/onboarding/use-setup-status", () => ({
 }))
 
 beforeEach(() => {
+  jest.restoreAllMocks()
+  mockFetchIpInfo.mockReset()
+  mockFetchIpInfo.mockResolvedValue({ ok: true, info: { ip: "192.0.2.1", country: "US" } })
+  jest.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+    timeZone: "America/New_York",
+  } as Intl.ResolvedDateTimeFormatOptions)
+  storeState.settings.networkProxy.ipLookupEnabled = true
   access.builtIn = false
   storeState.providerOnboardingDismissed = false
   storeState.dismissProviderOnboarding = jest.fn()
@@ -72,6 +87,82 @@ beforeEach(() => {
 })
 
 describe("ProviderOnboardingBanner (dismissible hint)", () => {
+  it("uses Chinese providers when the IP lookup detects China", async () => {
+    mockFetchIpInfo.mockResolvedValue({ ok: true, info: { ip: "192.0.2.1", country: "CN" } })
+    render(<ProviderOnboardingBanner />)
+    expect(await screen.findByRole("button", { name: "DeepSeek" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Qwen" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Doubao" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "OpenAI" })).not.toBeInTheDocument()
+  })
+
+  it.each(["deepseek", "qwen", "doubao"])("navigates to the Chinese provider %s", async (id) => {
+    mockFetchIpInfo.mockResolvedValue({ ok: true, info: { ip: "192.0.2.1", country: "CN" } })
+    const onScrollToProvider = jest.fn()
+    render(<ProviderOnboardingBanner onScrollToProvider={onScrollToProvider} />)
+    const names = { deepseek: "DeepSeek", qwen: "Qwen", doubao: "Doubao" }
+    fireEvent.click(await screen.findByRole("button", { name: names[id as keyof typeof names] }))
+    expect(onScrollToProvider).toHaveBeenCalledWith(id)
+  })
+
+  it.each(["Asia/Shanghai", "Asia/Urumqi"])("uses %s as an offline fallback", async (timeZone) => {
+    jest.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      timeZone,
+    } as Intl.ResolvedDateTimeFormatOptions)
+    mockFetchIpInfo.mockResolvedValue({ ok: false, error: "offline" })
+    render(<ProviderOnboardingBanner />)
+    expect(await screen.findByRole("button", { name: "DeepSeek" })).toBeInTheDocument()
+  })
+
+  it("uses the local fallback without a request when IP lookup is disabled", async () => {
+    storeState.settings.networkProxy.ipLookupEnabled = false
+    jest.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      timeZone: "Asia/Shanghai",
+    } as Intl.ResolvedDateTimeFormatOptions)
+    render(<ProviderOnboardingBanner />)
+    expect(await screen.findByRole("button", { name: "DeepSeek" })).toBeInTheDocument()
+    expect(mockFetchIpInfo).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the timezone when the lookup has no country", async () => {
+    jest.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      timeZone: "Asia/Shanghai",
+    } as Intl.ResolvedDateTimeFormatOptions)
+    mockFetchIpInfo.mockResolvedValue({ ok: true, info: { ip: "192.0.2.1" } })
+    render(<ProviderOnboardingBanner />)
+    expect(await screen.findByRole("button", { name: "DeepSeek" })).toBeInTheDocument()
+  })
+
+  it("ignores an old lookup after IP lookup is disabled", async () => {
+    let resolveLookup!: (result: Awaited<ReturnType<typeof fetchIpInfo>>) => void
+    mockFetchIpInfo.mockReturnValue(new Promise((resolve) => (resolveLookup = resolve)))
+    const { rerender } = render(<ProviderOnboardingBanner />)
+    storeState.settings.networkProxy.ipLookupEnabled = false
+    rerender(<ProviderOnboardingBanner />)
+    await act(async () => {
+      resolveLookup({ ok: true, info: { ip: "192.0.2.1", country: "CN" } })
+    })
+    expect(screen.getByRole("button", { name: "OpenAI" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "DeepSeek" })).not.toBeInTheDocument()
+  })
+
+  it("prefers a detected non-China country over a China timezone", async () => {
+    jest.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      timeZone: "Asia/Shanghai",
+    } as Intl.ResolvedDateTimeFormatOptions)
+    render(<ProviderOnboardingBanner />)
+    await waitFor(() => expect(mockFetchIpInfo).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole("button", { name: "OpenAI" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "DeepSeek" })).not.toBeInTheDocument()
+  })
+
+  it("keeps global providers when region detection has no usable signal", async () => {
+    mockFetchIpInfo.mockResolvedValue({ ok: false, error: "offline" })
+    render(<ProviderOnboardingBanner />)
+    await waitFor(() => expect(mockFetchIpInfo).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole("button", { name: "OpenAI" })).toBeInTheDocument()
+  })
+
   it("does not tell a user with a connected external agent to get started", () => {
     render(<ProviderOnboardingBanner externalRuntimeReady />)
     expect(screen.getByText("externalRuntimes.bannerTitle")).toBeInTheDocument()
@@ -99,6 +190,7 @@ describe("ProviderOnboardingBanner (dismissible hint)", () => {
     storeState.providerOnboardingDismissed = true
     const { container } = render(<ProviderOnboardingBanner />)
     expect(container.firstChild).toBeNull()
+    expect(mockFetchIpInfo).not.toHaveBeenCalled()
   })
 
   it("steps aside once the built-in agent can reach a model", () => {
@@ -106,6 +198,7 @@ describe("ProviderOnboardingBanner (dismissible hint)", () => {
     access.builtIn = true
     const { container } = render(<ProviderOnboardingBanner />)
     expect(container.firstChild).toBeNull()
+    expect(mockFetchIpInfo).not.toHaveBeenCalled()
   })
 
   it("stays up while access is still being probed, so it never flashes in late", () => {

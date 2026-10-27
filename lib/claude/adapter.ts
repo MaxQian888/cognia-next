@@ -873,11 +873,17 @@ function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage)
   const id = evt.message.id ?? evt.uuid
   const idx = messages.findIndex((m) => m.id === id)
   const parts = preserveStepStartParts(messages[idx], buildAssistantParts(evt.message))
+  const previousMetadata = (messages[idx]?.metadata ?? {}) as Record<string, unknown>
+  const incomingMetadata = (evt.message.metadata ?? {}) as Record<string, unknown>
+  const createdAt =
+    [previousMetadata.createdAt, incomingMetadata.createdAt].find(
+      (value): value is number => typeof value === "number" && Number.isFinite(value)
+    ) ?? Date.now()
   const next: UIMessage = {
     id,
     role: "assistant",
     parts,
-    ...(evt.message.metadata !== undefined ? { metadata: evt.message.metadata } : {}),
+    metadata: { ...previousMetadata, ...incomingMetadata, createdAt },
   }
   if (idx >= 0) {
     const copy = messages.slice()
@@ -1062,7 +1068,10 @@ function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage
     if (!id) return messages
     let next = messages
     if (!messages.some((m) => m.id === id)) {
-      next = [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+      next = [
+        ...messages,
+        { id, role: "assistant", parts: [], metadata: { createdAt: Date.now() } } as UIMessage,
+      ]
     }
     // Live context-usage refresh: the native Anthropic `message_start` carries the
     // turn's real input + cache token counts. Attaching them to the in-progress

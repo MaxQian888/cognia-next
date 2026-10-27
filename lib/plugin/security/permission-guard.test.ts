@@ -39,6 +39,36 @@ describe("PermissionGuard", () => {
     guard.clear()
   })
 
+  it("notifies permission subscribers on mutations but never on permission reads", () => {
+    const listener = jest.fn()
+    const unsubscribe = guard.subscribePermissionChanges(listener)
+    guard.grant("views", "process:spawn")
+    expect(listener).toHaveBeenCalledTimes(1)
+    guard.check("views", "process:spawn")
+    guard.getPluginPermissions("views")
+    expect(listener).toHaveBeenCalledTimes(1)
+    guard.revokeAll("views")
+    expect(listener).toHaveBeenCalledTimes(2)
+    unsubscribe()
+    guard.registerPlugin("views", ["process:spawn"])
+    guard.unregisterPlugin("views")
+    expect(listener).toHaveBeenCalledTimes(2)
+    const afterClear = jest.fn()
+    guard.subscribePermissionChanges(afterClear)
+    guard.clear()
+    guard.grant("views", "process:spawn")
+    expect(afterClear).not.toHaveBeenCalled()
+  })
+
+  it("validates grant policy without mutating permissions", () => {
+    const restricted = new PermissionGuard({ allowRuntimeGrants: false })
+    expect(() => restricted.assertGrantAllowed("user")).toThrow(
+      "Runtime permission grants are disabled"
+    )
+    expect(() => restricted.assertGrantAllowed("manifest")).not.toThrow()
+    expect(restricted.getPluginPermissions("preflight")).toEqual([])
+  })
+
   describe("Plugin Registration", () => {
     it("should register a plugin with permissions", () => {
       guard.registerPlugin("plugin-a", ["network:fetch", "clipboard:read"])

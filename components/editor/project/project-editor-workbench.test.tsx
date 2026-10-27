@@ -1814,6 +1814,93 @@ describe("zen mode and go to symbol", () => {
     fireEvent.keyDown(monaco, { key: "z" })
   }
 
+  it.each([
+    [432, 173],
+    [600, 200],
+    [880, 264],
+    [1600, 320],
+  ])(
+    "sizes a measured %ipx workspace through real panel registration and Zen remount",
+    async (workspaceWidth, expectedWidth) => {
+      // jsdom has no layout. Supply flex geometry while keeping the installed
+      // Group/Panel registration, constraints and imperative handles real.
+      const widthOf = (element: HTMLElement): number => {
+        if (element.hasAttribute("data-group")) return workspaceWidth
+        if (!element.hasAttribute("data-panel")) return 0
+        const panels = Array.from(element.parentElement?.children ?? []).filter((child) =>
+          child.hasAttribute("data-panel")
+        ) as HTMLElement[]
+        const basis = (panel: HTMLElement) => {
+          const size = parseFloat(panel.style.flexBasis) || 0
+          return panel.style.flexBasis.endsWith("%") ? (size * workspaceWidth) / 100 : size
+        }
+        const grow = (panel: HTMLElement) => parseFloat(panel.style.flexGrow) || 0
+        const remaining = workspaceWidth - panels.reduce((sum, panel) => sum + basis(panel), 0)
+        const totalGrow = panels.reduce((sum, panel) => sum + grow(panel), 0)
+        return basis(element) + (totalGrow ? (remaining * grow(element)) / totalGrow : 0)
+      }
+      const spies = [
+        jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (
+          this: HTMLElement
+        ) {
+          return widthOf(this)
+        }),
+        jest.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+          this: HTMLElement
+        ) {
+          return widthOf(this)
+        }),
+        jest.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (
+          this: HTMLElement
+        ) {
+          let left = 0
+          let sibling = this.previousElementSibling
+          while (sibling instanceof HTMLElement) {
+            left += widthOf(sibling)
+            sibling = sibling.previousElementSibling
+          }
+          return left
+        }),
+      ]
+      try {
+        editor.openFiles = [{ relPath: "src/a.ts" }]
+        render(<Harness />)
+        await waitFor(() =>
+          expect(screen.getByTestId("test-context").offsetWidth).toBeCloseTo(expectedWidth, 0)
+        )
+        if (workspaceWidth === 600) {
+          const props = () => projectContextWorkbenchProps.mock.calls.at(-1)![0]
+          act(() => props().onModeWidthHint("wide"))
+          const divider = screen.getByRole("separator")
+          for (
+            let step = 0;
+            step < 32 && screen.getByTestId("test-context").offsetWidth > 201;
+            step++
+          ) {
+            fireEvent.keyDown(divider, { key: "ArrowRight" })
+          }
+          expect(screen.getByTestId("test-context").offsetWidth).toBeCloseTo(200, 0)
+          act(() => props().onHeaderMinimumWidthChange(356))
+          await waitFor(() =>
+            expect(screen.getByTestId("test-context").offsetWidth).toBeCloseTo(356, 0)
+          )
+          expect(props().railOnly).toBe(false)
+        }
+        zenChord()
+        expect(screen.queryByTestId("test-context")).toBeNull()
+        zenChord()
+        await waitFor(() =>
+          expect(screen.getByTestId("test-context").offsetWidth).toBeCloseTo(
+            workspaceWidth === 600 ? 356 : expectedWidth,
+            0
+          )
+        )
+      } finally {
+        spies.forEach((spy) => spy.mockRestore())
+      }
+    }
+  )
+
   it("⌘K Z hides sidebar/tabs/status-bar but keeps the editors", () => {
     editor.openFiles = [{ relPath: "src/a.ts" }]
     render(<Harness />)

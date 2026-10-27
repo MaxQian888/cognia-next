@@ -27,7 +27,15 @@ export type InboundA2UINode =
       format?: "markdown"
     }
   | { kind: "heading"; level: 1 | 2 | 3; text: string }
-  | { kind: "image"; url: string; alt?: string; width?: number; height?: number }
+  | {
+      kind: "image"
+      url: string
+      /** Bounded, display-only cached image bytes; never part of model history. */
+      displayUrl?: string
+      alt?: string
+      width?: number
+      height?: number
+    }
   | { kind: "link"; href: string; label: string }
   | {
       kind: "button"

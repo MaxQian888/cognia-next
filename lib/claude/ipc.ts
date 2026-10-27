@@ -116,6 +116,8 @@ export class TranscriptRuntimeRecoveryError extends Error {
 
 type PromptDelivery = {
   commandId?: string
+  /** Renderer-only validation, inside local transcript admission's lock. */
+  beforeSend?: () => Promise<void>
   /**
    * `prepared` requires the caller to hold the transcript lock through this
    * receipt. `host-owned` is for a host that keeps its own durable history
@@ -186,6 +188,7 @@ async function sendPromptToTransport(
   delivery?: PromptDelivery,
   route: { pairedHost?: boolean } = {}
 ): Promise<void> {
+  await delivery?.beforeSend?.()
   const sdk = options?.claudeAgentSdk
   if (
     !hasNoLeakingPiiDeep({

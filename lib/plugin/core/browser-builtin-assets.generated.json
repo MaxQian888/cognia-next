@@ -6582,15 +6582,15 @@
       "path": "builtin://cognia-sandboxed-tools",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-sandboxed-tools/ebd9c5d5ec2905630cec5e842fc48b22dd5a4ad0d7ef37fde2edc00a6e59dbb3.cjs",
-        "sha256": "ebd9c5d5ec2905630cec5e842fc48b22dd5a4ad0d7ef37fde2edc00a6e59dbb3",
+        "url": "/_cognia/builtin-plugins/cognia-sandboxed-tools/d06bcf3f8876fdd3e427244bcde9ba72a36a913468739686df30c712eff8d767.cjs",
+        "sha256": "d06bcf3f8876fdd3e427244bcde9ba72a36a913468739686df30c712eff8d767",
         "sharedModules": [
           "@cognia/plugin-sdk",
           "@cognia/plugin-sdk/api/sandbox"
         ],
         "resourcesUrl": "/_cognia/builtin-plugins/cognia-sandboxed-tools/resources/",
         "entryHashes": {
-          "dist/index.js": "ebd9c5d5ec2905630cec5e842fc48b22dd5a4ad0d7ef37fde2edc00a6e59dbb3"
+          "dist/index.js": "d06bcf3f8876fdd3e427244bcde9ba72a36a913468739686df30c712eff8d767"
         }
       }
     },

@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { act, renderHook } from "@testing-library/react"
+import { renderHook } from "@testing-library/react"
 
 import { useChatRowBudget, type ChatRowBudgetOptions } from "./use-chat-row-budget"
 import { useElementAxisSize } from "@/hooks/use-element-axis-size"
@@ -39,48 +39,60 @@ it("holds the layout until the row is measured", () => {
   expect(useUIStore.getState().sidebarCollapsed).toBe(false)
 })
 
-it("folds the sidebar when the open sidebar leaves the chat too little room", () => {
-  // Row = sidebar 260 + group; the group needs 900 → a 1100 row folds.
+it("preserves the expanded sidebar when entering a conversation with an open dock", () => {
   setRowWidth(1100)
   const { result } = renderHook(() => useChatRowBudget(options()))
-  expect(result.current).toMatchObject({ autoFold: true, overlay: false })
-  expect(useUIStore.getState()).toMatchObject({
-    sidebarCollapsed: true,
-    sidebarAutoCollapsed: true,
-  })
+  expect(useUIStore.getState().sidebarCollapsed).toBe(false)
+  expect(result.current).toMatchObject({ autoFold: false, overlay: true, groupPx: 840 })
 })
 
-it("reads the total across the fold, so the fold's own reflow does not undo it", () => {
+it("preserves the sidebar when the dock opens after entering a conversation", () => {
   setRowWidth(1100)
-  const { result, rerender } = renderHook(() => useChatRowBudget(options()))
-  expect(useUIStore.getState().sidebarAutoCollapsed).toBe(true)
-  // Folded: the icon rail (56px) left the row, which is now 56px narrower.
-  act(() => useShellColumnsStore.setState({ widths: { rail: 56, sidebar: 0, dock: 0 } }))
-  setRowWidth(1044)
-  rerender()
-  expect(result.current).toMatchObject({ autoFold: true })
-  expect(useUIStore.getState().sidebarAutoCollapsed).toBe(true)
+  const { result, rerender } = renderHook(
+    (props: ChatRowBudgetOptions) => useChatRowBudget(props),
+    {
+      initialProps: options({ dockOpen: false }),
+    }
+  )
+  expect(result.current).toMatchObject({ overlay: false })
+  rerender(options())
+  expect(result.current).toMatchObject({ autoFold: false, overlay: true })
+  expect(useUIStore.getState().sidebarCollapsed).toBe(false)
 })
 
-it("unfolds once the window has room again", () => {
+it("floats the dock as the row narrows and docks it again without folding the sidebar", () => {
+  setRowWidth(1400)
+  const { result, rerender } = renderHook(() => useChatRowBudget(options()))
+  expect(result.current).toMatchObject({ overlay: false })
+  setRowWidth(1100)
+  rerender()
+  expect(result.current).toMatchObject({ autoFold: false, overlay: true, groupPx: 840 })
+  expect(useUIStore.getState().sidebarCollapsed).toBe(false)
+  setRowWidth(1400)
+  rerender()
+  expect(result.current).toMatchObject({ overlay: false, groupPx: 1140 })
+  expect(useUIStore.getState().sidebarCollapsed).toBe(false)
+})
+
+it("releases a previous automatic fold even when the row is narrow", () => {
   useUIStore.setState({ sidebarCollapsed: true, sidebarAutoCollapsed: true })
   useShellColumnsStore.setState({ widths: { rail: 56, sidebar: 0, dock: 0 } })
-  setRowWidth(1400)
-  renderHook(() => useChatRowBudget(options()))
+  setRowWidth(1044)
+  const { result } = renderHook(() => useChatRowBudget(options()))
+  expect(result.current).toMatchObject({ autoFold: false, overlay: true })
   expect(useUIStore.getState()).toMatchObject({
     sidebarCollapsed: false,
     sidebarAutoCollapsed: false,
   })
 })
 
-it("floats the dock rather than re-folding a sidebar the user re-opened", () => {
-  useUIStore.setState({ sidebarAutoCollapseSuppressed: true })
+it("floats the dock when the sidebar is wider than its default", () => {
+  useUIStore.setState({ sidebarWidth: 400 })
   setRowWidth(1100)
   const { result } = renderHook(() => useChatRowBudget(options()))
   expect(result.current).toMatchObject({ autoFold: false, needsFold: true, overlay: true })
   expect(useUIStore.getState().sidebarCollapsed).toBe(false)
-  // Still squeezed: the refusal holds.
-  expect(useUIStore.getState().sidebarAutoCollapseSuppressed).toBe(true)
+  expect(result.current?.groupPx).toBe(700)
 })
 
 it("counts the icon rail beside a right-edge sidebar", () => {
@@ -92,23 +104,29 @@ it("counts the icon rail beside a right-edge sidebar", () => {
   expect(result.current).toMatchObject({ autoFold: false, groupPx: 900 })
 })
 
-it("returns a borrowed fold when the dock host unmounts", () => {
+it("preserves a manually collapsed sidebar through navigation", () => {
+  useUIStore.setState({ sidebarCollapsed: true })
+  useShellColumnsStore.setState({ widths: { rail: 56, sidebar: 0, dock: 0 } })
   setRowWidth(1100)
-  const { unmount } = renderHook(() => useChatRowBudget(options()))
-  expect(useUIStore.getState().sidebarAutoCollapsed).toBe(true)
+  const { result, unmount } = renderHook(() => useChatRowBudget(options()))
+  expect(result.current).toMatchObject({ autoFold: false, overlay: false, groupPx: 1100 })
   unmount()
   expect(useUIStore.getState()).toMatchObject({
-    sidebarCollapsed: false,
+    sidebarCollapsed: true,
     sidebarAutoCollapsed: false,
   })
 })
 
-it("releases the fold when the dock closes", () => {
+it("stops floating the dock when it closes without changing the sidebar", () => {
   setRowWidth(1100)
-  const { rerender } = renderHook((props: ChatRowBudgetOptions) => useChatRowBudget(props), {
-    initialProps: options(),
-  })
-  expect(useUIStore.getState().sidebarAutoCollapsed).toBe(true)
+  const { result, rerender } = renderHook(
+    (props: ChatRowBudgetOptions) => useChatRowBudget(props),
+    {
+      initialProps: options(),
+    }
+  )
+  expect(result.current?.overlay).toBe(true)
   rerender(options({ dockOpen: false }))
+  expect(result.current).toMatchObject({ autoFold: false, overlay: false })
   expect(useUIStore.getState().sidebarCollapsed).toBe(false)
 })

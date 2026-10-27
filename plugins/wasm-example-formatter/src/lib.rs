@@ -1,25 +1,9 @@
-//! wasm-example-formatter — reference plugin exercising the full v0.1
-//! capability surface.
+//! wasm-example-formatter — reference for the v0.2.1 process stdin operation.
 //!
-//! Behavior:
-//!   - On `init`, posts a notification that the plugin is alive.
-//!   - On `tool-execute` with name "format_rust", reads its input from
-//!     the JSON payload, writes it to a temp file under the plugin data
-//!     dir, spawns `rustfmt` via the `process` capability, and returns
-//!     the formatted output. Demonstrates fs + process composition.
-//!
-//! Known limitation (cognia:plugin@0.2.0): `rustfmt` runs as a HOST
-//! process, but the file this guest writes lives at a WASI guest path
-//! (`/format-input.rs` → the plugin data dir), which the host process
-//! cannot open, and `process.exec` has no stdin channel to pipe the
-//! source through instead. rustfmt therefore reports the input missing;
-//! `format_via_rustfmt` recognises that and returns an actionable
-//! `HOST_UNAVAILABLE` error rather than an empty "formatted" result. The
-//! fix is a WIT change (a `stdin` field on `exec-options`), not a guest one.
-//!   - On `workflow-node-execute` with kind
-//!     "action.wasm-example-formatter.format", does the same thing — so
-//!     workflow nodes and agent tools share a single backend.
-//!   - On any other call, surfaces a structured error.
+//! Tool and workflow calls save source inside the WASI data directory, then
+//! pipe its bytes to host rustfmt. Guest filesystem paths never become host
+//! command arguments. A configured rustfmtProgram can select an absolute host
+//! binary without inheriting the host environment or accepting caller argv.
 //!
 //! Capability declarations required (in plugin.json `permissions[]`):
 //!   - notification
@@ -48,6 +32,24 @@ const INPUT_GUEST_PATH: &str = "/format-input.rs";
 
 struct Plugin;
 
+static RUSTFMT_PROGRAM: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct FormatterConfig {
+    rustfmt_program: Option<String>,
+}
+
+fn configured_program(config: &[u8]) -> Result<String, String> {
+    let config: FormatterConfig = serde_json::from_slice(config)
+        .map_err(|e| format!("INVALID_REQUEST: formatter config: {e}"))?;
+    match config.rustfmt_program {
+        None => Ok("rustfmt".into()),
+        Some(program) if !program.trim().is_empty() && !program.contains('\0') => Ok(program),
+        Some(_) => Err("INVALID_REQUEST: rustfmtProgram must name an executable".into()),
+    }
+}
+
 /// Fixed rustfmt arguments. The caller supplies only the source: rustfmt runs
 /// as a HOST process, where a caller-chosen `--emit files` or
 /// `--print-config default <path>` would write wherever it names.
@@ -70,7 +72,8 @@ struct FormatResponse {
 }
 
 impl Guest for Plugin {
-    fn init(_config: Vec<u8>) -> Result<(), String> {
+    fn init(config: Vec<u8>) -> Result<(), String> {
+        *RUSTFMT_PROGRAM.lock().unwrap() = Some(configured_program(&config)?);
         logger::log(
             logger::LogLevel::Info,
             "init",
@@ -135,23 +138,28 @@ fn format_via_rustfmt(payload: Vec<u8>) -> Result<Vec<u8>, String> {
     std::fs::write(INPUT_GUEST_PATH, request.source.as_bytes())
         .map_err(|e| format!("write input: {e}"))?;
 
-    let mut combined_args: Vec<String> = RUSTFMT_ARGS.iter().map(|a| a.to_string()).collect();
-    combined_args.push(INPUT_GUEST_PATH.into());
+    let combined_args: Vec<String> = RUSTFMT_ARGS.iter().map(|a| a.to_string()).collect();
 
     let exec_options = process::ExecOptions {
         cwd: None,
         env: Vec::new(),
         timeout_ms: Some(10_000),
     };
-    let result = process::exec("rustfmt", &combined_args, &exec_options)
-        .map_err(|e| explain_exec_error(&e))?;
+    let program = RUSTFMT_PROGRAM
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| "rustfmt".into());
+    let result = process::exec_with_stdin(
+        &program,
+        &combined_args,
+        &exec_options,
+        request.source.as_bytes(),
+    )
+    .map_err(|e| explain_exec_error(&e))?;
 
     let formatted = String::from_utf8_lossy(&result.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&result.stderr).into_owned();
-
-    if input_unreachable(result.code, &stderr) {
-        return Err(input_unreachable_message(&stderr));
-    }
 
     let response = FormatResponse {
         formatted,
@@ -159,24 +167,6 @@ fn format_via_rustfmt(payload: Vec<u8>) -> Result<Vec<u8>, String> {
         exit_code: result.code,
     };
     serde_json::to_vec(&response).map_err(|e| format!("encode FormatResponse: {e}"))
-}
-
-/// rustfmt exited non-zero because it could not open the guest path — the
-/// 0.2 contract's missing stdin channel, not a problem with the source.
-fn input_unreachable(code: i32, stderr: &str) -> bool {
-    code != 0 && stderr.contains(INPUT_GUEST_PATH)
-}
-
-fn input_unreachable_message(stderr: &str) -> String {
-    format!(
-        "HOST_UNAVAILABLE: format_rust cannot hand the source to rustfmt on this host. \
-         rustfmt runs as a host process, and cognia:plugin/process@0.2.0 gives it neither \
-         stdin nor a path it can open: `{INPUT_GUEST_PATH}` exists only inside this plugin's \
-         WASI sandbox (its data directory). The source was saved there. Formatting needs a \
-         `stdin` field on `process.exec-options` — a WIT contract change, not something the \
-         guest can work around. rustfmt said: {}",
-        stderr.trim()
-    )
 }
 
 /// Turn the host's `process.exec` refusals into the step that fixes them.
@@ -190,11 +180,11 @@ fn explain_exec_error(error: &str) -> String {
             "{error} — grant process:spawn to wasm-example-formatter in the Plugins page \
              (plugin details → Permissions)."
         )
-    } else if error.starts_with("spawn rustfmt") {
+    } else if error.contains("spawn ") && error.contains("rustfmt") {
         format!(
             "{error} — rustfmt could not be started on the host. Install it with \
-             `rustup component add rustfmt`; the host starts the child with an empty \
-             environment, so rustfmt must be resolvable without your shell's PATH."
+             `rustup component add rustfmt`. If rustfmt is a rustup shim, set rustfmtProgram \
+             to the absolute binary printed by `rustup which rustfmt`; the child inherits no host environment."
         )
     } else {
         error.to_string()
@@ -206,19 +196,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_missing_guest_path_is_the_known_limitation() {
-        let stderr = format!("Error: file `{INPUT_GUEST_PATH}` does not exist\n");
-        assert!(input_unreachable(1, &stderr));
-        let message = input_unreachable_message(&stderr);
-        assert!(message.starts_with("HOST_UNAVAILABLE: "));
-        assert!(message.contains("stdin"));
-        assert!(message.contains("does not exist"));
+    fn formatter_config_defaults_and_rejects_invalid_executables() {
+        assert_eq!(configured_program(b"{}").unwrap(), "rustfmt");
+        assert_eq!(
+            configured_program(br#"{"rustfmtProgram":"/toolchain/bin/rustfmt"}"#).unwrap(),
+            "/toolchain/bin/rustfmt"
+        );
+        assert!(configured_program(br#"{"rustfmtProgram":" "}"#)
+            .unwrap_err()
+            .starts_with("INVALID_REQUEST:"));
+        assert!(configured_program(b"invalid JSON").is_err());
     }
 
     #[test]
-    fn a_rustfmt_diagnostic_about_the_source_is_not_the_limitation() {
-        assert!(!input_unreachable(1, "error: expected one of `;` or `}`"));
-        assert!(!input_unreachable(0, INPUT_GUEST_PATH));
+    fn workflow_source_is_preserved_in_the_host_envelope() {
+        let envelope: NodeEnvelope = serde_json::from_value(serde_json::json!({
+            "kind": FORMAT_NODE, "params": {"source":"fn main(){println!(\"你好\");}"}, "upstream": {}
+        })).unwrap();
+        let request: FormatRequest = serde_json::from_value(envelope.params).unwrap();
+        assert_eq!(request.source, "fn main(){println!(\"你好\");}");
     }
 
     #[test]

@@ -10,7 +10,7 @@ import type { ComponentType } from "react"
  * terminal link but would be a second, confusing copy of a buffer already open
  * in the editor beside it.
  */
-export type FileViewerSource = "terminal" | "project-preview"
+export type FileViewerSource = "terminal" | "project-preview" | "attachment"
 
 /**
  * Every way opening a file can fail, as data.
@@ -62,6 +62,8 @@ export interface FileViewerRequest {
   relPath: string
   /** Chrome label only. Never logged, never passed to a filesystem API. */
   displayName: string
+  /** MIME type supplied by an attachment; workspace reads may leave it unknown. */
+  mimeType?: string
   /**
    * Text the host already holds, which short-circuits the read entirely.
    *
@@ -78,7 +80,7 @@ export interface FileViewerRequest {
 export interface FileViewerProbe {
   /** Lower-cased, without the dot. `""` when the name has no extension. */
   extension: string
-  /** Reserved. Nothing derives this yet and no built-in reads it. */
+  /** Supplied by attachments when known; absent during workspace capability checks. */
   mimeType?: string
   /**
    * Byte size, when known — absent during the capability pre-flight, which runs
@@ -98,7 +100,7 @@ export interface FileViewerProbe {
  * anything.
  */
 export interface FileViewerRenderProps {
-  /** UTF-8 text the host has already read, confined, and size-checked. */
+  /** UTF-8 text the host has read from an authorized workspace or attachment and size-checked. */
   text: string
   displayName: string
   relPath: string

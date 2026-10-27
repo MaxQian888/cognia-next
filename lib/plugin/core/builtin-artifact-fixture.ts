@@ -12,8 +12,8 @@
  * Test-only: reads the staged tree with `node:fs`, and nothing in the app
  * imports it.
  */
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync } from "node:fs" // static-export-exempt: Node-only fixture imported exclusively by host *.test.ts suites.
+import { join } from "node:path" // static-export-exempt: Node-only fixture imported exclusively by host *.test.ts suites.
 import type { PluginManifest } from "@/types/plugin"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { fetchAndVerifyBrowserBuiltinAsset } from "./browser-builtin-assets"

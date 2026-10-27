@@ -37,12 +37,14 @@ function installTransport(results: MicrovmResult[] = []): {
 }
 
 /** Collect the tools the plugin registers via its activate() callback. */
-async function collectTools(): Promise<Map<string, PluginTool>> {
+async function collectTools(
+  sandbox = createSandboxAPI(PLUGIN_ID)
+): Promise<Map<string, PluginTool>> {
   const tools = new Map<string, PluginTool>()
   await definition.activate?.({
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
     agent: { registerTool: (t: PluginTool) => tools.set(t.name, t) },
-    sandbox: createSandboxAPI(PLUGIN_ID),
+    sandbox,
   } as unknown as Parameters<NonNullable<typeof definition.activate>>[0])
   return tools
 }
@@ -96,6 +98,37 @@ describe("cognia-sandboxed-tools registration", () => {
 })
 
 describe("sandbox_write", () => {
+  it("uses typed file CAS with cancellation and never falls back after a conflict", async () => {
+    const signal = new AbortController().signal
+    const context = { ...CTX, signal }
+    const execute = jest.fn()
+    const fileOperation = jest
+      .fn()
+      .mockResolvedValueOnce({ content: "one", hash: "before" })
+      .mockResolvedValueOnce({ hash: "after" })
+    const tools = await collectTools({ ...createSandboxAPI(PLUGIN_ID), execute, fileOperation })
+    await tools
+      .get("sandbox_text_editor")!
+      .execute({ command: "str_replace", path: "/w/file", oldStr: "one", newStr: "two" }, context)
+    expect(fileOperation).toHaveBeenNthCalledWith(
+      1,
+      context.sandboxRuntimeRef,
+      { kind: "read", path: "/w/file" },
+      { signal }
+    )
+    expect(fileOperation).toHaveBeenNthCalledWith(
+      2,
+      context.sandboxRuntimeRef,
+      { kind: "write", path: "/w/file", content: "two", expectedHash: "before" },
+      { signal }
+    )
+    fileOperation.mockRejectedValueOnce(new Error("lume_guest_file_conflict"))
+    await expect(
+      tools.get("sandbox_write")!.execute({ path: "/w/file", content: "clobber" }, context)
+    ).rejects.toThrow("lume_guest_file_conflict")
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it("writes content through the sandbox with cat > and a byte-array stdin", async () => {
     const { calls } = installTransport()
     const tools = await collectTools()

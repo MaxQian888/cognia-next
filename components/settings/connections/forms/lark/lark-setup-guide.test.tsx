@@ -129,6 +129,30 @@ it("reports clipboard rejection and leaves a selectable permission list", async 
   )
 })
 
+it("offers scoped avatar permissions and explains contact visibility without granting them by default", async () => {
+  render(<LarkSetupGuide {...defaultProps} />)
+  openPermissions()
+  const avatars = screen.getByRole("checkbox", { name: "People and conversation avatars" })
+  expect(avatars).not.toBeChecked()
+  fireEvent.click(avatars)
+  expect(screen.getByText(/contact data permissions must include the people/)).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Copy selected permissions" }))
+  await waitFor(() => expect(writeClipboardText).toHaveBeenCalledTimes(1))
+  const scopes = jest.mocked(writeClipboardText).mock.calls[0][0].split("\n")
+  expect(scopes).toEqual(
+    expect.arrayContaining([
+      "contact:contact.base:readonly",
+      "contact:user.base:readonly",
+      "im:chat:readonly",
+    ])
+  )
+  expect(scopes).not.toContain("contact:contact:readonly")
+  fireEvent.click(avatars)
+  fireEvent.click(screen.getByRole("button", { name: "Copy selected permissions" }))
+  await waitFor(() => expect(writeClipboardText).toHaveBeenCalledTimes(2))
+  expect(jest.mocked(writeClipboardText).mock.calls[1][0]).not.toContain("contact:")
+})
+
 it("does not claim copying succeeded in an unsupported browser", async () => {
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined })
   render(<LarkSetupGuide {...defaultProps} />)

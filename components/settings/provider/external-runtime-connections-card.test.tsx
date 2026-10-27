@@ -3,14 +3,7 @@
  */
 
 import { render, screen, within } from "@testing-library/react"
-
-// The Pi credential probe spawns processes; its own suite covers it. Here it
-// only has to show which agent it was asked about.
-jest.mock("@/components/agent/external-agent/credential-status-badge", () => ({
-  AgentCredentialBadge: ({ agentId }: { agentId: string }) => (
-    <span data-testid={`credential-${agentId}`} />
-  ),
-}))
+import userEvent from "@testing-library/user-event"
 
 import {
   EXTERNAL_AGENTS_SETTINGS_HREF,
@@ -44,12 +37,15 @@ const connections = (
 })
 
 describe("ExternalRuntimeConnectionsCard", () => {
+  beforeEach(() => window.localStorage.clear())
+  afterEach(() => window.localStorage.clear())
+
   it("renders nothing when no external agent is configured", () => {
     const { container } = render(<ExternalRuntimeConnectionsCard connections={connections({})} />)
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("lists working agents and says their credentials live elsewhere", () => {
+  it("summarizes model access without displaying individual agents", () => {
     render(
       <ExternalRuntimeConnectionsCard
         connections={connections({
@@ -59,17 +55,15 @@ describe("ExternalRuntimeConnectionsCard", () => {
         })}
       />
     )
-    const card = screen.getByTestId("external-runtime-connections")
+    const card = screen.getByRole("region", { name: "Agents with their own model access" })
     expect(
       within(card).getByRole("heading", { name: "Agents with their own model access" })
     ).toBeInTheDocument()
     expect(card).toHaveTextContent("Their credentials are managed in External Agents")
     expect(screen.getByTestId("external-runtime-summary")).toHaveTextContent("1 of 1 ready")
-    const item = screen.getByTestId("external-runtime-row-external:pi")
-    expect(item).toHaveTextContent("Pi")
-    expect(item).toHaveTextContent("PI-RPC")
-    expect(screen.getByTestId("external-runtime-state-external:pi")).toHaveTextContent("Connected")
-    expect(screen.getByTestId("credential-pi")).toBeInTheDocument()
+    expect(within(card).queryByRole("list")).not.toBeInTheDocument()
+    expect(within(card).queryByText("Pi")).not.toBeInTheDocument()
+    expect(within(card).queryByText("PI-RPC")).not.toBeInTheDocument()
   })
 
   it("points at the External Agents settings section", () => {
@@ -85,7 +79,7 @@ describe("ExternalRuntimeConnectionsCard", () => {
     expect(EXTERNAL_AGENTS_SETTINGS_HREF).toBe("/settings?section=agents")
   })
 
-  it("shows a block reason and marks host-run rows", () => {
+  it("summarizes local and host agents without exposing row details", () => {
     render(
       <ExternalRuntimeConnectionsCard
         connections={connections({
@@ -110,16 +104,21 @@ describe("ExternalRuntimeConnectionsCard", () => {
         })}
       />
     )
-    expect(screen.getByTestId("external-runtime-row-external:codex")).toHaveTextContent(
-      "codex binary not found"
-    )
-    expect(screen.getByTestId("external-runtime-state-external:codex")).toHaveTextContent("Blocked")
-    const host = screen.getByTestId("external-runtime-row-host:h1")
-    expect(host).toHaveTextContent("Runs on the paired host")
-    expect(screen.getByTestId("external-runtime-state-host:h1")).toHaveTextContent("Ready")
-    // No local agent, so no credential probe to ask.
-    expect(within(host).queryByTestId(/^credential-/)).toBeNull()
+    expect(screen.queryByText("codex binary not found")).not.toBeInTheDocument()
+    expect(screen.queryByText("Host Claude")).not.toBeInTheDocument()
+    expect(screen.queryByRole("list")).not.toBeInTheDocument()
     expect(screen.getByTestId("external-runtime-summary")).toHaveTextContent("1 of 2 ready")
+  })
+
+  it("dismisses the notice and keeps it hidden after revisiting the page", async () => {
+    const user = userEvent.setup()
+    const props = connections({ configuredCount: 1, rows: [row({})], workingCount: 1 })
+    const { unmount } = render(<ExternalRuntimeConnectionsCard connections={props} />)
+    await user.click(screen.getByRole("button", { name: "Dismiss" }))
+    expect(screen.queryByRole("region")).not.toBeInTheDocument()
+    unmount()
+    render(<ExternalRuntimeConnectionsCard connections={props} />)
+    expect(screen.queryByRole("region")).not.toBeInTheDocument()
   })
 
   it("does not present a global-off state for an empty runtime catalog", () => {

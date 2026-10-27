@@ -28,11 +28,14 @@ import { listAppDataDirectory, removeAppDataDirectory } from "@/lib/tauri/app-da
 export const GENERATED_VIDEO_APP_DATA_DIR = "generated-videos"
 /** Copies of composer videos staged for FFmpeg; each lives for one preparation. */
 export const COMPOSER_VIDEO_STAGING_APP_DATA_DIR = "composer-video-staging"
+/** Pet videos staged for alpha-preserving import conversion. */
+export const PET_MEDIA_STAGING_APP_DATA_DIR = "pet-media-staging"
 
 /** Every account-scoped AppData directory, so a purge or sweep misses none. */
 export const ACCOUNT_APP_DATA_DIRS = [
   GENERATED_VIDEO_APP_DATA_DIR,
   COMPOSER_VIDEO_STAGING_APP_DATA_DIR,
+  PET_MEDIA_STAGING_APP_DATA_DIR,
 ] as const
 
 export type AccountAppDataDir = (typeof ACCOUNT_APP_DATA_DIRS)[number]

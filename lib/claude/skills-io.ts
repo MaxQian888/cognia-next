@@ -19,7 +19,7 @@ import matter from "gray-matter"
 import type { Skill, SkillCategory, SkillValidationError } from "@cognia/agent-config-types"
 import type { SkillDraft } from "@/lib/db/skills"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
-import { isTauri } from "@/lib/tauri"
+import { isTauri } from "@/lib/platform/detect"
 import { replacePluginRootTokens } from "@/lib/plugin/utils/plugin-root-tokens"
 import { deriveSkillSlug, isValidSkillSlug } from "@/lib/skills/slug"
 

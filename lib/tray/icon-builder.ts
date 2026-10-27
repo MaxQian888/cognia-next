@@ -1,4 +1,4 @@
-// Renderer-side character tray-icon rasterizer with status and usage badges.
+// Platform-aware tray-icon rasterizer with status and usage badges.
 //
 // We reuse four Lucide icons verbatim by inlining their SVG path data
 // (license: ISC, see `node_modules/lucide-react/LICENSE`). Inlining sidesteps
@@ -9,7 +9,7 @@
 // EXACTLY; if you want to upgrade the visual, copy the new `d` strings from
 // `node_modules/lucide-react/dist/esm/icons/<name>.mjs`.
 //
-// Pipeline: `character + state badge → offscreen canvas → PNG bytes →
+// Pipeline: `platform glyph + badges → offscreen canvas → PNG bytes →
 // invoke("tray_register_icon")`. Rust caches the bytes keyed by state and
 // `tray_set_icon_state` swaps them without any further IPC round-trip.
 
@@ -18,6 +18,7 @@
 import { invoke } from "@tauri-apps/api/core"
 
 import { isTauri } from "@/lib/tauri"
+import { isMacOs } from "@/lib/platform/os"
 import { loggers } from "@cognia/logging"
 import type { TrayIconState } from "./types"
 import characterIcon from "@/src-tauri/icons/128x128.png"
@@ -64,6 +65,40 @@ const STATE_NODES: Record<TrayIconState, LucideNode[]> = {
     ["path", { d: "m2 2 20 20" }],
     ["path", { d: "M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05" }],
   ],
+}
+
+// A filled orbital C gives the menu bar a stable Cognia identity at 18 pt.
+// Only the detail in its opening changes with state; the silhouette stays put.
+const COGNIA_ORBIT_PATH = "M18.2 5.4a9 9 0 1 0 0 13.2l-2.4-2.4a5.7 5.7 0 1 1 0-8.4Z"
+
+const MACOS_STATE_NODES: Record<TrayIconState, LucideNode[]> = {
+  idle: [
+    [
+      "path",
+      {
+        d: "M19.2 8.3c.55 2.35 1.35 3.15 3.7 3.7-2.35.55-3.15 1.35-3.7 3.7-.55-2.35-1.35-3.15-3.7-3.7 2.35-.55 3.15-1.35 3.7-3.7Z",
+        fill: "#000000",
+        stroke: "none",
+      },
+    ],
+  ],
+  busy: [["path", { d: "M19.2 8.9a3.1 3.1 0 1 1-2.685 1.55", strokeWidth: 2 }]],
+  error: [
+    ["path", { d: "M19.2 8.7v3.9", strokeWidth: 2.2 }],
+    ["circle", { cx: 19.2, cy: 15, r: 1.1, fill: "#000000", stroke: "none" }],
+  ],
+  muted: [["path", { d: "m16.6 9.4 5.2 5.2", strokeWidth: 2.2 }]],
+}
+
+/** Native macOS mark: transparent, monochrome, and stable across states. */
+export function buildMacOsTraySvg(state: TrayIconState): string {
+  return buildLucideSvg(
+    [
+      ["path", { d: COGNIA_ORBIT_PATH, fill: "#000000", stroke: "none" }],
+      ...MACOS_STATE_NODES[state],
+    ],
+    "#000000"
+  )
 }
 
 const DEFAULT_ATTRS: Record<string, string | number> = {
@@ -127,7 +162,7 @@ export interface TrayIconBadge {
   color: string
 }
 
-/** Composite the character, an optional SVG status badge and the usage readout. */
+/** Render a macOS template glyph or the character with status/usage badges. */
 export async function rasterizeSvgToPng(
   svg: string,
   size: number,
@@ -137,10 +172,14 @@ export async function rasterizeSvgToPng(
   if (typeof document === "undefined") {
     throw new Error("rasterizeSvgToPng requires a DOM (document undefined)")
   }
+  const template = isMacOs()
   const blob = new Blob([svg], { type: "image/svg+xml" })
   const url = URL.createObjectURL(blob)
   try {
-    const [character, image] = await Promise.all([loadImage(characterIcon.src), loadImage(url)])
+    const [character, image] = await Promise.all([
+      template ? Promise.resolve(null) : loadImage(characterIcon.src),
+      loadImage(url),
+    ])
     const canvas = document.createElement("canvas")
     canvas.width = size
     canvas.height = size
@@ -150,10 +189,10 @@ export async function rasterizeSvgToPng(
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = "high"
     ctx.clearRect(0, 0, size, size)
-    // Keep the same full-color character used by the native bootstrap icon.
-    // State is a small corner badge, never a replacement for the app identity.
-    ctx.drawImage(character, 0, 0, size, size)
-    if (showStatus) {
+    // AppKit derives template images from alpha; the character and opaque
+    // status plate would become solid silhouettes. Use the state glyph alone.
+    ctx.drawImage(character ?? image, 0, 0, size, size)
+    if (!template && showStatus) {
       const statusSize = size * 0.45
       ctx.fillStyle = "#ffffff"
       ctx.beginPath()
@@ -161,7 +200,7 @@ export async function rasterizeSvgToPng(
       ctx.fill()
       ctx.drawImage(image, size - statusSize, 0, statusSize, statusSize)
     }
-    if (badge) drawBadge(ctx, size, badge)
+    if (badge) drawBadge(ctx, size, badge, template)
     return await canvasToPng(canvas)
   } finally {
     URL.revokeObjectURL(url)
@@ -174,9 +213,15 @@ export async function rasterizeSvgToPng(
  * Tray icons render at ~16-32 px, so the text is clamped to 3 glyphs —
  * anything longer would be unreadable at that size.
  *
- * The native icon stays full-color on every platform, including macOS.
+ * Template badges cut the text out of the pill's alpha so AppKit can tint
+ * both the icon and the readout in light, dark and highlighted appearances.
  */
-export function drawBadge(ctx: CanvasRenderingContext2D, size: number, badge: TrayIconBadge): void {
+export function drawBadge(
+  ctx: CanvasRenderingContext2D,
+  size: number,
+  badge: TrayIconBadge,
+  template = false
+): void {
   const text = badge.text.replace(/%$/, "").slice(0, 3)
   if (!text) return
   const height = size * 0.55
@@ -190,8 +235,9 @@ export function drawBadge(ctx: CanvasRenderingContext2D, size: number, badge: Tr
   // roundRect is available in every WebView this app ships in (Chromium /
   // WebKit ≥ 2021); jsdom's canvas mock in tests stubs it.
   ctx.roundRect(x, y, width, height, radius)
-  ctx.fillStyle = badge.color
+  ctx.fillStyle = template ? "#000000" : badge.color
   ctx.fill()
+  if (template) ctx.globalCompositeOperation = "destination-out"
   ctx.fillStyle = "#ffffff"
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
@@ -222,14 +268,14 @@ async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
  * Render every tray-icon state and push the resulting PNG bytes to Rust.
  * Idempotent — Rust caches by state, so calling this twice is safe.
  *
- * `color` controls only the small status glyph; the character keeps its colors.
+ * macOS uses black template glyphs; elsewhere `color` controls the status glyph.
  *
- * `size` defaults to 32 — sufficient resolution for 100 % DPI down to 200 %.
+ * `size` defaults to 36 on macOS (18 points at Retina scale), 32 elsewhere.
  * The OS scales as needed.
  */
 export async function rasterizeAndRegisterTrayIcons({
   color = "#000000",
-  size = 32,
+  size = isMacOs() ? 36 : 32,
   badge,
 }: { color?: string; size?: number; badge?: TrayIconBadge } = {}): Promise<void> {
   if (!isTauri()) return
@@ -237,7 +283,7 @@ export async function rasterizeAndRegisterTrayIcons({
   await Promise.all(
     states.map(async (state) => {
       try {
-        const svg = buildLucideSvg(STATE_NODES[state], color)
+        const svg = isMacOs() ? buildMacOsTraySvg(state) : buildLucideSvg(STATE_NODES[state], color)
         // The badge overlays every state so the readout survives busy/error
         // flips; Rust re-applies the current state's raster on registration
         // (`tray_register_icon`), so no extra `tray_set_icon_state` call is

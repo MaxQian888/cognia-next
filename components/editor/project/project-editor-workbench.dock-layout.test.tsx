@@ -88,6 +88,7 @@ jest.mock("@/components/editor/light-code-editor", () => ({ LightCodeEditor: () 
 jest.mock("@/components/source-control/diff-viewer", () => ({ DiffViewer: () => null }))
 
 interface ContextWorkbenchProps {
+  onHeaderMinimumWidthChange?: (width: number) => void
   file: { relPath: string } | null
   projectViews: { files: () => ReactNode; search: () => ReactNode }
   railOnly: boolean
@@ -121,6 +122,23 @@ interface MockPanel {
 }
 const mockPanels = new Map<string, MockPanel>()
 let mockGroupWidth = 600
+let mockLayoutChanged:
+  ((layout: Record<string, number>, meta: { isUserInteraction: boolean }) => void) | undefined
+const mockAnimationFrames = new Map<number, FrameRequestCallback>()
+
+function flushLayoutFrames() {
+  act(() => {
+    const callbacks = [...mockAnimationFrames.values()]
+    mockAnimationFrames.clear()
+    callbacks.forEach((callback) => callback(0))
+  })
+}
+
+function renderWorkbench() {
+  const result = render(<Harness />)
+  flushLayoutFrames()
+  return result
+}
 
 function mockToPx(size: unknown): number {
   if (typeof size === "number") return size
@@ -180,6 +198,7 @@ jest.mock("@/components/ui/resizable", () => {
       }
     })
     React.useEffect(() => () => void mockPanels.delete(id), [id])
+    React.useEffect(() => report(current), [current])
     return (
       <div data-testid={`panel-${id}`} data-px={current.px}>
         {props.children}
@@ -187,13 +206,35 @@ jest.mock("@/components/ui/resizable", () => {
     )
   }
   return {
-    ResizablePanelGroup: ({
+    ResizablePanelGroup: function MockPanelGroup({
       children,
       elementRef,
+      onLayoutChanged,
     }: {
       children?: ReactNode
       elementRef?: Ref<HTMLDivElement>
-    }) => <div ref={elementRef}>{children}</div>,
+      onLayoutChanged?: typeof mockLayoutChanged
+    }) {
+      React.useEffect(() => {
+        mockLayoutChanged = onLayoutChanged
+        onLayoutChanged?.({}, { isUserInteraction: false })
+      }, [onLayoutChanged])
+      return (
+        <div
+          ref={(element) => {
+            if (element)
+              Object.defineProperty(element, "clientWidth", {
+                configurable: true,
+                get: () => mockGroupWidth,
+              })
+            if (typeof elementRef === "function") elementRef(element)
+            else if (elementRef) elementRef.current = element
+          }}
+        >
+          {children}
+        </div>
+      )
+    },
     ResizablePanel,
     ResizableHandle: () => <div data-testid="resize-handle" />,
   }
@@ -229,6 +270,7 @@ function drag(panel: MockPanel | undefined, px: number) {
       asPercentage: number
     }) => void
     onResize({ inPixels: px, asPercentage: (px / mockGroupWidth) * 100 })
+    mockLayoutChanged?.({}, { isUserInteraction: true })
   })
 }
 
@@ -254,6 +296,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockPanels.clear()
   mockGroupWidth = 600
+  mockLayoutChanged = undefined
+  mockAnimationFrames.clear()
   mockEditor.openFiles = [{ relPath: "src/a.ts" }]
   mockEditor.activePath = "src/a.ts"
   mockEditor.activeFile = {
@@ -264,12 +308,16 @@ beforeEach(() => {
     draftVersion: 1,
   }
   useProjectEditorSessionStore.setState({ sessions: {} })
-  // The narrow-dock fold runs a frame later; run it inline.
+  // Let React commit measured constraints before applying the frame's resize.
+  let nextFrame = 0
   jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-    callback(0)
-    return 0
+    const frame = ++nextFrame
+    mockAnimationFrames.set(frame, callback)
+    return frame
   })
-  jest.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {})
+  jest.spyOn(window, "cancelAnimationFrame").mockImplementation((frame) => {
+    mockAnimationFrames.delete(frame)
+  })
 })
 
 afterEach(() => {
@@ -277,18 +325,105 @@ afterEach(() => {
 })
 
 describe("the file context workbench as a resizable sidebar", () => {
-  it("is a panel of the editor's group, bounded by the dock rather than the window", () => {
+  it("fits the full file tab and toolbar after the header reports its intrinsic width", () => {
+    renderWorkbench()
+    act(() => lastContextProps().onHeaderMinimumWidthChange?.(252))
+    flushLayoutFrames()
+    expect(contextPanel()!.props.minSize).toBe("252px")
+    expect(contextPanel()!.px).toBe(252)
+    act(() => lastContextProps().onCollapse())
+    openContextSidebar()
+    expect(contextPanel()!.px).toBe(252)
+  })
+
+  it("updates the automatic content floor without discarding a wider dragged size", () => {
+    renderWorkbench()
+    act(() => lastContextProps().onHeaderMinimumWidthChange?.(252))
+    flushLayoutFrames()
+    drag(contextPanel(), 300)
+    act(() => lastContextProps().onHeaderMinimumWidthChange?.(272))
+    flushLayoutFrames()
+    expect(contextPanel()!.props.minSize).toBe("272px")
+    expect(contextPanel()!.px).toBe(300)
+  })
+
+  it("grows a dragged sidebar before raising a floor that would collapse it", () => {
+    renderWorkbench()
+    drag(contextPanel(), 200)
+    act(() => lastContextProps().onHeaderMinimumWidthChange?.(356))
+    expect(contextPanel()!.props.minSize).toBe("200px")
+    flushLayoutFrames()
+    expect(contextPanel()!.px).toBe(356)
+    expect(contextPanel()!.props.minSize).toBe("356px")
+    expect(lastContextProps().railOnly).toBe(false)
+  })
+
+  it.each([
+    [431, 172],
+    [432, 173],
+    [600, 200],
+    [880, 264],
+    [1600, 320],
+  ])("calculates a compact initial width for a %ipx workspace", (width, expected) => {
+    mockGroupWidth = width
+    renderWorkbench()
+    expect(contextPanel()!.px).toBe(expected)
+    expect(lastContextProps().resolvedMode).toBe("narrow")
+  })
+
+  it("waits for measured constraints to commit before applying the initial width", () => {
+    mockGroupWidth = 432
     render(<Harness />)
+    expect(contextPanel()!.calls).toEqual([])
+    expect(contextPanel()!.props.minSize).toBe("173px")
+    flushLayoutFrames()
+    expect(contextPanel()!.px).toBe(173)
+    expect(lastContextProps().railOnly).toBe(false)
+  })
+
+  it("cancels pending sizing when the workbench unmounts", () => {
+    const { unmount } = render(<Harness />)
+    expect(mockAnimationFrames.size).toBeGreaterThan(0)
+    unmount()
+    expect(mockAnimationFrames.size).toBe(0)
+  })
+
+  it("calculates the first unfold against the current workspace width", () => {
+    restoreFolded()
+    renderWorkbench()
+    mockGroupWidth = 880
+    act(() => mockLayoutChanged?.({}, { isUserInteraction: false }))
+    openContextSidebar()
+    expect(contextPanel()!.px).toBe(264)
+  })
+
+  it("adapts automatic sizing to a resized workspace without replacing a dragged width", () => {
+    renderWorkbench()
+    mockGroupWidth = 880
+    act(() => mockLayoutChanged?.({}, { isUserInteraction: false }))
+    flushLayoutFrames()
+    expect(contextPanel()!.px).toBe(264)
+
+    drag(contextPanel(), 300)
+    act(() => mockLayoutChanged?.({}, { isUserInteraction: true }))
+    mockGroupWidth = 1000
+    act(() => mockLayoutChanged?.({}, { isUserInteraction: false }))
+    flushLayoutFrames()
+    expect(contextPanel()!.px).toBe(300)
+  })
+
+  it("is a panel of the editor's group, bounded by the dock rather than the window", () => {
+    renderWorkbench()
 
     const panel = contextPanel()!
     expect(panel.props).toEqual(
       expect.objectContaining({
         collapsible: true,
         collapsedSize: "48px",
-        minSize: "240px",
+        minSize: "200px",
         maxSize: "65%",
         // Open by default: the explorer is its first panel.
-        defaultSize: "360px",
+        defaultSize: "30%",
         groupResizeBehavior: "preserve-pixel-size",
       })
     )
@@ -296,8 +431,8 @@ describe("the file context workbench as a resizable sidebar", () => {
     // absorbs the change.
     expect(mockPanels.get("dock-editor")!.props.groupResizeBehavior).toBeUndefined()
     expect(lastContextProps().railOnly).toBe(false)
-    // Mounting needs no imperative call — the handle is not registered yet.
-    expect(contextPanel()!.calls).toEqual([])
+    // Apply the measured default after the group has registered its panels.
+    expect(contextPanel()!.calls).toEqual(["resize:200px"])
     // The editor has one sidebar: no separate explorer panel beside it.
     expect(mockPanels.has("dock-sidebar")).toBe(false)
     expect(screen.getByTestId("project-context-workbench")).toContainElement(
@@ -307,7 +442,7 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("first appears folded to its rail when the session restores it folded", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
 
     expect(contextPanel()!.props.defaultSize).toBe("48px")
     expect(lastContextProps().railOnly).toBe(true)
@@ -316,11 +451,11 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("unfolds to its last width and folds back to the rail on the rail's requests", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
 
     openContextSidebar()
-    expect(contextPanel()!.calls).toEqual(["resize:360px"])
-    expect(contextPanel()!.px).toBe(360)
+    expect(contextPanel()!.calls).toEqual(["resize:200px"])
+    expect(contextPanel()!.px).toBe(200)
     expect(lastContextProps().railOnly).toBe(false)
 
     drag(contextPanel(), 300)
@@ -335,7 +470,7 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("treats a drag across the collapse threshold as an open or a close", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
 
     drag(contextPanel(), 280)
     expect(contextOpenInStore()).toBe(true)
@@ -348,7 +483,7 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("reports the preset it really sits at for the header's narrow/wide highlight", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
     expect(lastContextProps().resolvedMode).toBeUndefined()
 
     openContextSidebar()
@@ -359,7 +494,7 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("applies the header's narrow/wide buttons as asked, within the dock", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
     openContextSidebar()
 
     act(() => lastContextProps().onModeWidthHint("wide"))
@@ -367,7 +502,7 @@ describe("the file context workbench as a resizable sidebar", () => {
     expect(contextPanel()!.px).toBe(360)
 
     act(() => lastContextProps().onModeWidthHint("narrow"))
-    expect(contextPanel()!.calls.at(-1)).toBe("resize:360px")
+    expect(contextPanel()!.calls.at(-1)).toBe("resize:200px")
 
     // Focus is a full-screen takeover; it owns no sidebar width.
     const before = contextPanel()!.calls.length
@@ -378,7 +513,7 @@ describe("the file context workbench as a resizable sidebar", () => {
   it("lets a panel activation widen the sidebar but never narrow it", () => {
     mockGroupWidth = 1000
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
     openContextSidebar()
     drag(contextPanel(), 450)
     const before = contextPanel()!.calls.length
@@ -398,7 +533,7 @@ describe("the file context workbench as a resizable sidebar", () => {
 
   it("unfolds straight to the wide preset when a proposal lands on the folded rail", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
 
     // What the context workbench does when the AI answers with a proposal.
     act(() => {
@@ -414,15 +549,15 @@ describe("the file context workbench as a resizable sidebar", () => {
     mockEditor.activeFile = null
     mockEditor.activePath = null
     mockEditor.openFiles = []
-    render(<Harness />)
-    expect(contextPanel()!.px).toBe(360)
+    renderWorkbench()
+    expect(contextPanel()!.px).toBe(200)
     expect(lastContextProps().file).toBeNull()
     expect(screen.getByTestId("tree")).toBeInTheDocument()
   })
 
-  it("steps aside for zen and comes back open without driving the fresh panel", () => {
+  it("steps aside for zen and sizes the remounted panel after measurement", () => {
     restoreFolded()
-    render(<Harness />)
+    renderWorkbench()
     openContextSidebar()
     const zenChord = () => {
       const monaco = screen.getByTestId("monaco")
@@ -434,11 +569,10 @@ describe("the file context workbench as a resizable sidebar", () => {
     expect(contextPanel()).toBeUndefined()
 
     zenChord()
-    // A remounted panel is not registered with its group until a render
-    // later; its size comes from the open flag (and, in the real group, the
-    // layout it remembers), never from an imperative call that would throw.
-    expect(contextPanel()!.calls).toEqual([])
-    expect(contextPanel()!.props.defaultSize).toBe("360px")
+    flushLayoutFrames()
+    // The group's measurement schedules sizing after panel registration.
+    expect(contextPanel()!.calls).toEqual(["resize:200px"])
+    expect(contextPanel()!.props.defaultSize).toBe("30%")
     expect(lastContextProps().railOnly).toBe(false)
   })
 })
@@ -457,7 +591,7 @@ describe("a stable width while files come and go", () => {
     mockEditor.activeFile = null
     mockEditor.activePath = null
     mockEditor.openFiles = []
-    const { rerender } = render(<Harness />)
+    const { rerender } = renderWorkbench()
     drag(contextPanel(), 420)
     const panelBefore = contextPanel()
     const callsBefore = contextPanel()!.calls.length
@@ -489,7 +623,7 @@ describe("a stable width while files come and go", () => {
   })
 
   it("keeps one layout for the whole project rather than one per file", () => {
-    const { rerender } = render(<Harness />)
+    const { rerender } = renderWorkbench()
     const first = lastContextProps()
     mockEditor.openFiles = [{ relPath: "src/a.ts" }, { relPath: "src/b.ts" }]
     mockEditor.activePath = "src/b.ts"

@@ -168,6 +168,34 @@ it("merges monitor state and rejects invalid timestamps and removed installation
   await getDb().botInstallations.delete("install")
   await expect(api.recordMonitor("run", {})).rejects.toThrow("removed")
 })
+it("keeps monitor key paths inside the monitor value instead of patching the installation", async () => {
+  const api = createBotsAPI("p", () => true)
+  const protectedFields = {
+    owner: { kind: "this-device", reason: "manual", pinnedAt: 1 },
+    outboundRecipients: [
+      {
+        recipient: { kind: "conversation", channel: "lark", recipient: "conv:lark:bot:oc_1" },
+        addedAt: 1,
+        addedBy: "local-user",
+      },
+    ],
+    credentialBindings: installation.credentialBindings,
+  }
+  await getDb().botInstallations.update("install", protectedFields as never)
+  const patch = {
+    lastSuccessAt: 100,
+    "owner.kind": "remote-host",
+    "outboundRecipients.0": { recipient: { recipient: "attacker/repo" } },
+    "credentialBindings.github.integrationAccountId": "attacker-account",
+  }
+
+  await api.recordMonitor("run", patch)
+
+  const stored = await getDb().botInstallations.get("install")
+  expect(stored).toMatchObject(protectedFields)
+  expect(stored?.monitor).toEqual(patch)
+  expect(Object.keys(stored ?? {}).some((key) => key.includes("."))).toBe(false)
+})
 it("cancels obsolete resource runs and approval while preserving the current revision", async () => {
   const api = createBotsAPI("p", () => true)
   for (const revision of ["old", "current"]) {

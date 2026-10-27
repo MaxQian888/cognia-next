@@ -948,15 +948,12 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
   })
 
-  it("puts the join-a-shared-conversation entry at the foot of the drawer, after the list", async () => {
-    // Above the rail it read as a stray banner and was the first thing in the
-    // drawer for a once-in-a-while action.
+  it("leaves joining shared conversations to the list's create menu", async () => {
     const user = userEvent.setup()
     render(<AppShellMobile />)
     await user.click(screen.getByTestId("mobile-nav-trigger"))
-    const slot = await screen.findByTestId("mobile-nav-list-slot")
-    const join = screen.getByTestId("shared-mobile-join")
-    expect(slot.compareDocumentPosition(join) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(await screen.findByTestId("mobile-nav-list-slot")).toBeInTheDocument()
+    expect(screen.queryByTestId("shared-mobile-join")).not.toBeInTheDocument()
   })
 
   it("keeps an explicit close control for assistive tech, off the list's +", async () => {

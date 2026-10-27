@@ -26,6 +26,7 @@ import {
   unloadWasmPlugin,
   buildWasmToolDefinitions,
   buildWasmNodeDefs,
+  updateWasmPluginConfig,
 } from "./wasm-loader"
 import type { PluginToolContext } from "@/types/plugin"
 import type { StepExecutionContext } from "@/types/workflow/visual"
@@ -59,6 +60,49 @@ beforeEach(() => {
   invokeMock.mockReset()
   transportCallMock.mockReset()
   delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+})
+
+describe("updateWasmPluginConfig", () => {
+  it("re-activates a loaded generation with the updated config", async () => {
+    setTauri(true)
+    invokeMock.mockResolvedValueOnce({ pluginApiVersion: "0.2.1", generation: "config-generation" })
+    await loadWasmDefinition({ ...baseManifest, id: "config.wasm" }, "/plugins/config.wasm")
+    invokeMock.mockClear()
+    invokeMock.mockResolvedValueOnce({ exports: ["init"] })
+    await updateWasmPluginConfig("config.wasm", { rustfmtProgram: "/toolchain/bin/rustfmt" })
+    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_activate", {
+      pluginId: "config.wasm",
+      generation: "config-generation",
+      configJson: JSON.stringify({ rustfmtProgram: "/toolchain/bin/rustfmt" }),
+    })
+  })
+
+  it("defers unloaded plugin config to the next load", async () => {
+    setTauri(true)
+    await updateWasmPluginConfig("not-loaded-for-config", { value: 1 })
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it("propagates rejected configuration without discarding the generation", async () => {
+    setTauri(true)
+    invokeMock.mockResolvedValueOnce({ pluginApiVersion: "0.2.1", generation: "stable-generation" })
+    await loadWasmDefinition(
+      { ...baseManifest, id: "config-failure.wasm" },
+      "/plugins/config-failure.wasm"
+    )
+    invokeMock.mockRejectedValueOnce(new Error("invalid configuration"))
+    await expect(
+      updateWasmPluginConfig("config-failure.wasm", { rustfmtProgram: "" })
+    ).rejects.toThrow("invalid configuration")
+    invokeMock.mockResolvedValueOnce({ exports: ["init"] })
+    await updateWasmPluginConfig("config-failure.wasm", { rustfmtProgram: "rustfmt" })
+    expect(invokeMock).toHaveBeenLastCalledWith(
+      "plugin_wasm_activate",
+      expect.objectContaining({
+        generation: "stable-generation",
+      })
+    )
+  })
 })
 
 describe("isWasmHostAvailable", () => {

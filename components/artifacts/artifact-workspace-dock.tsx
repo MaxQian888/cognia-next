@@ -481,8 +481,8 @@ function ArtifactWorkspaceDockDesktop({ children }: { children: ReactNode }) {
 
   /**
    * The chat row's width budget (ADR-0214, D5): when the window cannot hold
-   * the chat's minimum beside the dock's floor, the sidebar folds first and
-   * the dock floats over the chat last. The row is this host's parent — the
+   * the chat's minimum beside the dock's floor, the dock floats over the chat
+   * and preserves the sidebar's visibility. The row is this host's parent — the
    * element the conversation sidebar shares with it.
    */
   const [row, setRow] = useState<HTMLElement | null>(null)

@@ -56,6 +56,9 @@ import {
   installHostStateSync,
   installHostStateSyncForTarget,
 } from "./host-state-service"
+import { replaceSessionTranscript } from "@/lib/db/messages"
+import { refusedHostMessageOf, refusedHostMessageId } from "@/lib/chat/refused-host-message"
+import { syncMessages } from "./handlers/messages"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
 import type { Transport } from "@/lib/tauri/transport-types"
@@ -3039,6 +3042,98 @@ describe("HostStateService", () => {
       useChatStore.getState().setSessionDiagnostic("session-1", null)
     })
 
+    it("retains a live dropped optimistic row without an outbox and leaves canonical delivery intact", async () => {
+      const queued = {
+        ...createEmptyHostStateSession(channel, "session-1"),
+        revision: 1,
+        queue: [
+          {
+            actionId: "live-send",
+            messageId: "live-message",
+            text: "keep this",
+            attachments: [],
+            clientId: "client-a",
+          },
+        ],
+        operations: [send("live-send", { status: "dispatching" })],
+      }
+      const { sync, push } = await install(queued)
+      try {
+        await push({
+          kind: "message.dropped",
+          actionId: "live-send",
+          errorCode: "org_agent_not_allowed",
+          at: 20,
+          revision: 2,
+        })
+        expect(
+          refusedHostMessageOf(await getDb().messages.get(refusedHostMessageId("live-send")))
+        ).toMatchObject({
+          code: "org_agent_not_allowed",
+        })
+        await replaceSessionTranscript("session-1", [
+          {
+            id: "live-message",
+            role: "user",
+            parts: [{ type: "text", text: "confirmed delivery" }],
+          },
+        ])
+        const confirmed = await getDb().messages.get("live-message")
+        expect(refusedHostMessageOf(confirmed)).toBeNull()
+        expect(confirmed?.parts).toEqual([{ type: "text", text: "confirmed delivery" }])
+      } finally {
+        sync.stop()
+      }
+    })
+
+    it("does not relabel an already canonical message when a refused snapshot arrives", async () => {
+      await getDb().messages.put({
+        id: "canonical",
+        sessionId: "session-1",
+        role: "user",
+        parts: [{ type: "text", text: "confirmed" }],
+        createdAt: 1,
+      })
+      const { sync } = await install({
+        ...createEmptyHostStateSession(channel, "session-1"),
+        operations: [
+          send("canonical-action", { status: "failed", errorCode: "org_agent_not_allowed" }),
+        ],
+      })
+      try {
+        expect(refusedHostMessageOf(await getDb().messages.get("canonical"))).toBeNull()
+        await expect(getDb().messages.count()).resolves.toBe(1)
+      } finally {
+        sync.stop()
+      }
+    })
+
+    it("recovers a Host enqueue placeholder even though it is not marked optimistic", async () => {
+      await getDb().messages.put({
+        id: "host-placeholder",
+        sessionId: "session-1",
+        role: "user",
+        parts: [{ type: "text", text: "never ran" }],
+        createdAt: 1,
+        metadata: { hostState: { actionId: "placeholder-action", clientId: "client-a" } },
+      })
+      const { sync } = await install({
+        ...createEmptyHostStateSession(channel, "session-1"),
+        operations: [
+          send("placeholder-action", { status: "failed", errorCode: "org_agent_not_allowed" }),
+        ],
+      })
+      try {
+        expect(
+          refusedHostMessageOf(
+            await getDb().messages.get(refusedHostMessageId("placeholder-action"))
+          )
+        ).toMatchObject({ code: "org_agent_not_allowed", messageId: "host-placeholder" })
+      } finally {
+        sync.stop()
+      }
+    })
+
     it("a turn that hit the member's cap shows the allowance banner until the next turn", async () => {
       const failed = {
         ...createEmptyHostStateSession(channel, "session-1"),
@@ -3282,6 +3377,185 @@ describe("HostStateService", () => {
       metadata: { hostState: { actionId: "pending-action", optimistic: true } },
     })
     sync.stop()
+  })
+
+  it.each([
+    { code: "model_access_unavailable", status: "sent" as const },
+    { code: "org_agent_not_allowed", status: "sent" as const },
+    { code: "model_access_unavailable", status: "sending" as const },
+  ])(
+    "retains a refused send after reconnect and transcript sync: $code ($status)",
+    async ({ code, status }) => {
+      const queuedAction = action(
+        {
+          kind: "message.enqueue",
+          messageId: "refused-message",
+          text: "my original words",
+          attachments: [
+            { name: "notes.txt", mediaType: "text/plain", size: 4, ref: "cognia-upload:notes" },
+          ],
+        },
+        { hostGeneration: 4, actionId: "refused-action", baseRevision: undefined }
+      )
+      await getDb().mobileOutboundQueue.put({
+        id: queuedAction.actionId,
+        accountId: scope.accountId,
+        targetId: scope.runtimeTargetId,
+        command: "host_state_submit",
+        payload: { actions: [queuedAction] },
+        status,
+        attempts: 1,
+        createdAt: 100,
+        nextAttemptAt: 100,
+        idempotencyKey: queuedAction.actionId,
+        protocol: "host-state",
+        channel,
+        hostGeneration: 4,
+        clientId: queuedAction.clientId,
+        clientSeq: queuedAction.clientSeq,
+        actionId: queuedAction.actionId,
+      })
+      const initial = createEmptyHostStateSession(channel, "session-1")
+      const state = {
+        ...initial,
+        revision: 2,
+        draft: { text: "a newer draft", attachments: [], revision: 11 },
+        operations: [
+          {
+            actionId: queuedAction.actionId,
+            kind: "message.enqueue" as const,
+            status: "failed" as const,
+            clientId: queuedAction.clientId,
+            createdAt: 100,
+            updatedAt: 200,
+            errorCode: code,
+          },
+        ],
+      }
+      const transport: Transport = {
+        subscribe: () => () => undefined,
+        call: async (command) =>
+          (command === "host_state_status"
+            ? writableStatus
+            : {
+                channel,
+                hostId,
+                hostGeneration: 4,
+                cutHostSeq: 8,
+                revision: state.revision,
+                digest: hostStateDigest(state),
+                state,
+              }) as never,
+      }
+      const sync = await installHostStateSync({
+        transport,
+        ...scope,
+        channels: async () => [channel],
+      })
+      try {
+        const retainedId = refusedHostMessageId(queuedAction.actionId)
+        const saved = await getDb().messages.get(retainedId)
+        expect(saved?.parts).toEqual([{ type: "text", text: "my original words" }])
+        expect(refusedHostMessageOf(saved)).toEqual({
+          code,
+          at: 200,
+          messageId: "refused-message",
+          attachments:
+            queuedAction.action.kind === "message.enqueue" ? queuedAction.action.attachments : [],
+        })
+        // Real message-table sync upserts the Host's unconfirmed placeholder
+        // under the original id. It cannot replace the separate local copy.
+        const pull: Transport = {
+          subscribe: () => () => undefined,
+          call: async () =>
+            ({
+              rows: [
+                {
+                  id: "refused-message",
+                  sessionId: "session-1",
+                  role: "user",
+                  parts: [{ type: "text", text: "my original words" }],
+                  createdAt: 100,
+                  metadata: {
+                    hostState: { actionId: queuedAction.actionId, clientId: queuedAction.clientId },
+                  },
+                },
+              ],
+              deleted_ids: [],
+              next_since: 300,
+            }) as never,
+        }
+        expect((await syncMessages(pull, { since: 0 })).ok).toBe(true)
+        expect(refusedHostMessageOf(await getDb().messages.get(retainedId))?.code).toBe(code)
+        await replaceSessionTranscript("session-1", [])
+        // The outbox may be vacuumed after receipt; retention is in the local row.
+        await getDb().mobileOutboundQueue.clear()
+        await sync.resync()
+        expect(refusedHostMessageOf(await getDb().messages.get(retainedId))?.code).toBe(code)
+        await expect(getDb().chatDrafts.get("session-1")).resolves.toMatchObject({
+          text: "a newer draft",
+          revision: 11,
+        })
+        await expect(getDb().messages.count()).resolves.toBe(1)
+      } finally {
+        sync.stop()
+      }
+    }
+  )
+
+  it("does not retain a transient dispatch failure as a permanently refused message", async () => {
+    const initial = createEmptyHostStateSession(channel, "session-1")
+    const state = {
+      ...initial,
+      revision: 1,
+      queue: [
+        {
+          actionId: "retry-action",
+          messageId: "retry-message",
+          text: "retry me",
+          attachments: [],
+          clientId: "web-a",
+        },
+      ],
+      operations: [
+        {
+          actionId: "retry-action",
+          kind: "message.enqueue" as const,
+          status: "failed" as const,
+          clientId: "web-a",
+          createdAt: 100,
+          updatedAt: 200,
+          errorCode: "runtime_dispatch_failed",
+        },
+      ],
+    }
+    const transport: Transport = {
+      subscribe: () => () => undefined,
+      call: async (command) =>
+        (command === "host_state_status"
+          ? writableStatus
+          : {
+              channel,
+              hostId,
+              hostGeneration: 4,
+              cutHostSeq: 8,
+              revision: 1,
+              digest: hostStateDigest(state),
+              state,
+            }) as never,
+    }
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [channel],
+    })
+    try {
+      const message = await getDb().messages.get("retry-message")
+      expect(message).toBeDefined()
+      expect(refusedHostMessageOf(message)).toBeNull()
+    } finally {
+      sync.stop()
+    }
   })
 
   it.each([

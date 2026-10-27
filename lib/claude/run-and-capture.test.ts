@@ -170,6 +170,19 @@ const sessionEnded = (opts?: {
 })
 
 describe("runAndCaptureAssistantReply", () => {
+  it("forwards the final source validator to IPC admission", async () => {
+    const beforeSend = jest.fn(async () => undefined)
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      beforeSend,
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", expect.anything(), { beforeSend })
+  })
   it("resolves with assembled text from the assistant event", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
     // Wait for the subscribe to land (broker admission + the IPC `.then` add a
@@ -3441,6 +3454,29 @@ describe("host-owned external agent capture", () => {
     getRemoteConfigMock.mockClear()
     stopExternalMock.mockClear()
     cancelExternalTurnMock.mockClear()
+  })
+
+  it("refuses a revised source before external admission", async () => {
+    const fixture = createDbTestFixture({ seeded: false })
+    await fixture.initialize()
+    try {
+      const beforeSend = jest.fn(async () => {
+        throw new Error("source revised")
+      })
+      await expect(
+        runAndCaptureAssistantReply(
+          SESSION,
+          "stale",
+          { provider: "cognia:external-agent:pi-1" },
+          { execution: { skip: true }, timeoutMs: 100, beforeSend }
+        )
+      ).rejects.toThrow("source revised")
+      expect(beforeSend).toHaveBeenCalledTimes(1)
+      expect(startExternalTurnMock).not.toHaveBeenCalled()
+      expect(stopExternalMock).toHaveBeenCalled()
+    } finally {
+      await fixture.dispose()
+    }
   })
 
   it.each([

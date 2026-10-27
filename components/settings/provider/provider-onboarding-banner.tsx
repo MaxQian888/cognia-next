@@ -11,6 +11,7 @@
 // optional manual nudge — failures stay silent (no toast), and the counts /
 // last-synced detail live behind the button's hover title.
 
+import { useEffect, useState } from "react"
 import { KeyRoundIcon, Loader2, RefreshCw, SparklesIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
@@ -19,8 +20,18 @@ import { GuideCallout } from "@/components/guide/guide-callout"
 import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useBuiltInModelAccess } from "@/hooks/onboarding/use-setup-status"
+import { fetchIpInfo } from "@/lib/network/ip-info"
+import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 
 const QUICK_SETUP_PROVIDERS = ["openai", "anthropic", "google"] as const
+const CHINA_QUICK_SETUP_PROVIDERS = ["deepseek", "qwen", "doubao"] as const
+const CHINA_TIMEZONES = new Set([
+  "Asia/Shanghai",
+  "Asia/Urumqi",
+  "Asia/Chongqing",
+  "Asia/Harbin",
+  "PRC",
+])
 
 /** How long a quick-setup target stays highlighted after the jump. */
 const HIGHLIGHT_MS = 2000
@@ -60,6 +71,32 @@ export function ProviderOnboardingBanner({
   const dismiss = useSettingsStore((s) => s.dismissProviderOnboarding)
   const builtInAccess = useBuiltInModelAccess()
   const { row, providerCount, modelCount, isSyncing, sync } = useModelsDevCatalog()
+  const ipLookupEnabled = useSettingsStore(
+    (s) =>
+      s.settings?.networkProxy?.ipLookupEnabled ?? DEFAULT_NETWORK_PROXY_SETTINGS.ipLookupEnabled
+  )
+  const [isInChina, setIsInChina] = useState(false)
+
+  useEffect(() => {
+    if (dismissed || builtInAccess === true) return
+    let active = true
+    async function detectRegion() {
+      const result = ipLookupEnabled ? await fetchIpInfo() : null
+      // IP describes the current network egress. Offline or opted out, use
+      // the device timezone as a hint; UI language does not imply location.
+      const country = result?.ok ? result.info.country?.trim().toUpperCase() : undefined
+      const inChina = country
+        ? country === "CN"
+        : CHINA_TIMEZONES.has(Intl.DateTimeFormat().resolvedOptions().timeZone)
+      if (active) setIsInChina(inChina)
+    }
+    void detectRegion()
+    return () => {
+      active = false
+    }
+  }, [dismissed, builtInAccess, ipLookupEnabled])
+
+  const quickSetupProviders = isInChina ? CHINA_QUICK_SETUP_PROVIDERS : QUICK_SETUP_PROVIDERS
 
   if (dismissed) return null
   // Nothing left to get started with. `null` (still probing) keeps it up, so
@@ -89,7 +126,7 @@ export function ProviderOnboardingBanner({
       actions={
         <>
           <span className="text-xs text-muted-foreground">{t("onboardingQuickSetup")}:</span>
-          {QUICK_SETUP_PROVIDERS.map((id) => (
+          {quickSetupProviders.map((id) => (
             <Badge
               key={id}
               asChild

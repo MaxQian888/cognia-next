@@ -59,6 +59,9 @@ describe("layout", () => {
     expect(activeDatabaseAppDataDir("composer-video-staging")).toBe(
       "composer-video-staging/acct_alpha/cognia-account-acct_alpha-encrypted-v1"
     )
+    expect(activeDatabaseAppDataDir("pet-media-staging")).toBe(
+      "pet-media-staging/acct_alpha/cognia-account-acct_alpha-encrypted-v1"
+    )
   })
 
   it("refuses a segment that could leave its directory", () => {
@@ -116,15 +119,17 @@ describe("sweepDroppedDatabaseAppData", () => {
       "generated-videos/acct_alpha/live-db",
       "generated-videos/acct_alpha/dropped-db",
       "generated-videos/acct_gone/gone-db",
-      "composer-video-staging/acct_gone/gone-db"
+      "composer-video-staging/acct_gone/gone-db",
+      "pet-media-staging/acct_gone/gone-db"
     )
     const live = new Set(["live-db"])
-    await expect(sweepDroppedDatabaseAppData(async (name) => live.has(name))).resolves.toBe(3)
+    await expect(sweepDroppedDatabaseAppData(async (name) => live.has(name))).resolves.toBe(4)
     expect(tree.has("generated-videos/acct_alpha/live-db")).toBe(true)
     expect(tree.has("generated-videos/acct_alpha/dropped-db")).toBe(false)
     // An account left with nothing goes too.
     expect(tree.has("generated-videos/acct_gone")).toBe(false)
     expect(tree.has("composer-video-staging/acct_gone")).toBe(false)
+    expect(tree.has("pet-media-staging/acct_gone")).toBe(false)
   })
 
   it("leaves what this layout did not create", async () => {

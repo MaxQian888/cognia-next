@@ -2,12 +2,12 @@
 
 /**
  * Wires the chat row's width budget (`lib/shell/chat-row-budget.ts`, ADR-0214
- * D5) to the live layout: measures the row, resolves the budget, and folds or
- * releases the conversation sidebar through the ui-store's transient fold.
+ * D5) to the live layout: measures the row and resolves the dock's budget
+ * while preserving the user's conversation-sidebar visibility.
  *
  * The dock host owns what the budget says about the dock itself (the overlay);
- * the sidebar is a different column with its own owner, so the fold goes
- * through the store rather than through a prop.
+ * the sidebar is a different column with its own owner. A restored or opened
+ * dock must float when space is tight rather than hide that navigation.
  */
 
 import { useEffect, useMemo } from "react"
@@ -48,7 +48,6 @@ export function useChatRowBudget({
   const railPx = useShellColumnsStore((state) => state.widths.rail)
   const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed)
   const sidebarAutoCollapsed = useUIStore((state) => state.sidebarAutoCollapsed)
-  const foldAllowed = useUIStore((state) => !state.sidebarAutoCollapseSuppressed)
   const sidebarWidth = useUIStore((state) => state.sidebarWidth)
   const guildRailCollapsed = useUIStore((state) => state.guildRailCollapsed)
   const sidebarSide = useSettingsStore(
@@ -74,7 +73,7 @@ export function useChatRowBudget({
         sidebar,
         expandedSidebarPx,
         foldedSidebarPx,
-        foldAllowed,
+        foldAllowed: false,
         dockOpen,
         dockFloor: { minPx: floorMinPx, minPercent: floorMinPercent },
         chatMinPx,
@@ -85,7 +84,6 @@ export function useChatRowBudget({
       sidebar,
       expandedSidebarPx,
       foldedSidebarPx,
-      foldAllowed,
       dockOpen,
       floorMinPx,
       floorMinPercent,
@@ -93,20 +91,11 @@ export function useChatRowBudget({
     ]
   )
 
-  const measured = budget !== null
-  const autoFold = budget?.autoFold ?? false
-  const needsFold = budget?.needsFold ?? false
+  // Release a transient fold left by the previous layout policy. This never
+  // opens a sidebar the user collapsed, and navigation no longer borrows it.
   useEffect(() => {
-    if (!measured) return
-    const ui = useUIStore.getState()
-    if (autoFold) ui.autoCollapseSidebar()
-    // `needsFold` without `autoFold`: the user refused the fold — hold it.
-    else if (!needsFold) ui.releaseSidebarAutoCollapse()
-  }, [measured, autoFold, needsFold])
-
-  // A fold borrowed for this row is returned with it — leaving the chat route,
-  // or the window dropping to the tablet Sheet, takes the reason with it.
-  useEffect(() => () => useUIStore.getState().releaseSidebarAutoCollapse(), [])
+    useUIStore.getState().releaseSidebarAutoCollapse()
+  }, [])
 
   return budget
 }

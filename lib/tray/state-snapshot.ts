@@ -118,22 +118,32 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
   )
 
   // OS launch-at-login state. Read once on mount, then kept fresh by the
-  // `toggle-autostart` tray action's broadcast (`lib/tray/autostart-control`).
+  // native wrapper's broadcasts, including settings and host-mode writes.
   const [autostart, setAutostart] = useState(false)
   useEffect(() => {
     // Least-privilege pet windows are not granted `autostart:allow-is-enabled`
     // (see `src-tauri/capabilities/pet.json`); reading it there only warns.
     if (!isTauri() || !isMainAppWindow()) return
     let cancelled = false
-    void isAutostartEnabled().then((on) => {
-      if (!cancelled) setAutostart(on)
-    })
+    let revision = 0
+    const refresh = () => {
+      const request = ++revision
+      void isAutostartEnabled()
+        .then((on) => {
+          if (!cancelled && request === revision) setAutostart(on)
+        })
+        .catch((err: unknown) => console.warn("tray autostart read failed", err))
+    }
     const off = onAutostartChanged((on) => {
+      revision++
       if (!cancelled) setAutostart(on)
     })
+    refresh()
+    window.addEventListener("focus", refresh)
     return () => {
       cancelled = true
       off()
+      window.removeEventListener("focus", refresh)
     }
   }, [])
 

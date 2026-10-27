@@ -5,3 +5,5 @@
  * stay unchanged.
  */
 export * from "@cognia/ocr/hash"
+// Keep the runtime value explicit when this shim is also a bundle entry.
+export { sha256Bytes } from "@cognia/ocr/hash"

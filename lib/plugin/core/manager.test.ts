@@ -11,6 +11,12 @@ const builtinAssetFetcher: typeof fetch = async (input) => {
 }
 
 import { invoke } from "@tauri-apps/api/core"
+import { updateWasmPluginConfig } from "./wasm-loader"
+
+jest.mock("./wasm-loader", () => ({
+  ...jest.requireActual("./wasm-loader"),
+  updateWasmPluginConfig: jest.fn().mockResolvedValue(undefined),
+}))
 import {
   PluginManager,
   PluginEnableError,
@@ -5824,7 +5830,7 @@ describe("PluginManager", () => {
       expect(store.registerPluginHooks).not.toHaveBeenCalled()
     })
 
-    it("notifyPluginConfigChanged pushes config into python hosts only", async () => {
+    it("notifyPluginConfigChanged pushes config into python hosts", async () => {
       const plugin = createTypedPlugin("py-plugin", "python")
       const store = createLoadStore(plugin)
       mockGetState.mockReturnValue(store)
@@ -5856,6 +5862,38 @@ describe("PluginManager", () => {
       await expect(
         manager.notifyPluginConfigChanged("py-plugin", { a: 1 })
       ).resolves.toBeUndefined()
+    })
+
+    it("notifyPluginConfigChanged applies WASM configuration to the active host", async () => {
+      mockGetState.mockReturnValue(
+        createLoadStore({ ...createTypedPlugin("wasm-plugin", "wasm"), status: "enabled" })
+      )
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.notifyPluginConfigChanged("wasm-plugin", { rustfmtProgram: "/native/rustfmt" })
+      expect(updateWasmPluginConfig).toHaveBeenCalledWith("wasm-plugin", {
+        rustfmtProgram: "/native/rustfmt",
+      })
+    })
+
+    it("notifyPluginConfigChanged reports rejected WASM configuration", async () => {
+      mockGetState.mockReturnValue(
+        createLoadStore({ ...createTypedPlugin("wasm-plugin", "wasm"), status: "enabled" })
+      )
+      jest.mocked(updateWasmPluginConfig).mockRejectedValueOnce(new Error("invalid config"))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(
+        manager.notifyPluginConfigChanged("wasm-plugin", { rustfmtProgram: "" })
+      ).rejects.toThrow("invalid config")
+    })
+
+    it("saving WASM configuration never activates a disabled plugin", async () => {
+      jest.mocked(updateWasmPluginConfig).mockClear()
+      mockGetState.mockReturnValue(
+        createLoadStore({ ...createTypedPlugin("wasm-plugin", "wasm"), status: "disabled" })
+      )
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.notifyPluginConfigChanged("wasm-plugin", { rustfmtProgram: "/native/rustfmt" })
+      expect(updateWasmPluginConfig).not.toHaveBeenCalled()
     })
 
     it("installPythonDeps and pushPythonConfig delegate to the backend commands", async () => {

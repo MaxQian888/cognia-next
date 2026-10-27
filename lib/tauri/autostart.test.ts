@@ -1,5 +1,12 @@
 /** @jest-environment jsdom */
-import { isAutostartEnabled, enableAutostart, disableAutostart, setAutostart } from "./autostart"
+import {
+  AutostartStateMismatchError,
+  isAutostartEnabled,
+  enableAutostart,
+  disableAutostart,
+  setAutostart,
+} from "./autostart"
+import { onAutostartChanged, toggleTrayAutostart } from "@/lib/tray/autostart-control"
 
 jest.mock("@tauri-apps/plugin-autostart", () => ({
   enable: jest.fn(),
@@ -25,17 +32,23 @@ function setTauri(on: boolean) {
 }
 
 describe("lib/tauri/autostart", () => {
-  let warnSpy: jest.SpyInstance
+  let nativeEnabled: boolean
 
   beforeEach(() => {
     jest.clearAllMocks()
     setTauri(false)
-    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    nativeEnabled = false
+    mockedEnable.mockImplementation(async () => {
+      nativeEnabled = true
+    })
+    mockedDisable.mockImplementation(async () => {
+      nativeEnabled = false
+    })
+    mockedIsEnabled.mockImplementation(async () => nativeEnabled)
   })
 
   afterEach(() => {
     setTauri(false)
-    warnSpy.mockRestore()
   })
 
   describe("isAutostartEnabled", () => {
@@ -52,11 +65,10 @@ describe("lib/tauri/autostart", () => {
       expect(mockedIsEnabled).toHaveBeenCalledTimes(1)
     })
 
-    it("logs and returns false when the native helper rejects", async () => {
+    it("preserves a native read failure instead of reporting disabled", async () => {
       setTauri(true)
       mockedIsEnabled.mockRejectedValue(new Error("boom"))
-      await expect(isAutostartEnabled()).resolves.toBe(false)
-      expect(warnSpy).toHaveBeenCalledWith("isAutostartEnabled failed", expect.any(Error))
+      await expect(isAutostartEnabled()).rejects.toThrow("boom")
     })
   })
 
@@ -68,7 +80,6 @@ describe("lib/tauri/autostart", () => {
 
     it("calls native enable in Tauri", async () => {
       setTauri(true)
-      mockedEnable.mockResolvedValue(undefined)
       await enableAutostart()
       expect(mockedEnable).toHaveBeenCalledTimes(1)
     })
@@ -82,13 +93,19 @@ describe("lib/tauri/autostart", () => {
 
     it("calls native disable in Tauri", async () => {
       setTauri(true)
-      mockedDisable.mockResolvedValue(undefined)
       await disableAutostart()
       expect(mockedDisable).toHaveBeenCalledTimes(1)
     })
   })
 
   describe("setAutostart", () => {
+    it("keeps tray toggles inert outside Tauri", async () => {
+      await expect(toggleTrayAutostart()).resolves.toBe(false)
+      expect(mockedIsEnabled).not.toHaveBeenCalled()
+      expect(mockedEnable).not.toHaveBeenCalled()
+      expect(mockedDisable).not.toHaveBeenCalled()
+    })
+
     it("is a no-op outside Tauri (true)", async () => {
       await setAutostart(true)
       expect(mockedEnable).not.toHaveBeenCalled()
@@ -103,7 +120,6 @@ describe("lib/tauri/autostart", () => {
 
     it("calls enable when on=true in Tauri", async () => {
       setTauri(true)
-      mockedEnable.mockResolvedValue(undefined)
       await setAutostart(true)
       expect(mockedEnable).toHaveBeenCalledTimes(1)
       expect(mockedDisable).not.toHaveBeenCalled()
@@ -111,10 +127,80 @@ describe("lib/tauri/autostart", () => {
 
     it("calls disable when on=false in Tauri", async () => {
       setTauri(true)
-      mockedDisable.mockResolvedValue(undefined)
       await setAutostart(false)
       expect(mockedDisable).toHaveBeenCalledTimes(1)
       expect(mockedEnable).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("verified, serialized changes", () => {
+    beforeEach(() => setTauri(true))
+
+    it("broadcasts changes made outside the tray after reading them back", async () => {
+      const seen: boolean[] = []
+      const off = onAutostartChanged((on) => seen.push(on))
+      try {
+        await enableAutostart()
+        await disableAutostart()
+        expect(seen).toEqual([true, false])
+        expect(mockedIsEnabled).toHaveBeenCalledTimes(2)
+      } finally {
+        off()
+      }
+    })
+
+    it("rejects a registration that did not take effect", async () => {
+      mockedEnable.mockResolvedValue(undefined)
+      await expect(setAutostart(true)).rejects.toThrow(AutostartStateMismatchError)
+    })
+
+    it("does not invent a broadcast when readback fails and recovers on the next write", async () => {
+      const listener = jest.fn()
+      const off = onAutostartChanged(listener)
+      mockedIsEnabled.mockRejectedValueOnce(new Error("readback failed"))
+      try {
+        await expect(setAutostart(true)).rejects.toThrow("readback failed")
+        expect(nativeEnabled).toBe(true)
+        expect(listener).not.toHaveBeenCalled()
+        await setAutostart(false)
+        expect(listener).toHaveBeenCalledTimes(1)
+        expect(listener).toHaveBeenCalledWith(false)
+      } finally {
+        off()
+      }
+    })
+
+    it("does not overlap writes and lets a later write recover after failure", async () => {
+      let rejectFirst!: (error: Error) => void
+      mockedEnable.mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject
+          })
+      )
+      const first = setAutostart(true)
+      const firstResult = expect(first).rejects.toThrow("registration failed")
+      const second = setAutostart(false)
+      await Promise.resolve()
+      expect(mockedEnable).toHaveBeenCalledTimes(1)
+      expect(mockedDisable).not.toHaveBeenCalled()
+      rejectFirst(new Error("registration failed"))
+      await firstResult
+      await second
+      expect(mockedDisable).toHaveBeenCalledTimes(1)
+    })
+
+    it("applies two concurrent tray toggles in order", async () => {
+      const results = await Promise.all([toggleTrayAutostart(), toggleTrayAutostart()])
+      expect(results).toEqual([true, false])
+      expect(nativeEnabled).toBe(false)
+    })
+
+    it("never enables autostart when the tray cannot read its current state", async () => {
+      mockedIsEnabled.mockRejectedValue(new Error("permission denied"))
+      await expect(toggleTrayAutostart()).rejects.toThrow("permission denied")
+      expect(mockedEnable).not.toHaveBeenCalled()
+      expect(mockedDisable).not.toHaveBeenCalled()
     })
   })
 })

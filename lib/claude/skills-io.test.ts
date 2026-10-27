@@ -5,12 +5,14 @@ import {
   serializeSkill,
   skillFilename,
 } from "./skills-io"
-import { isTauri } from "@/lib/tauri"
+import { isTauri } from "@/lib/platform/detect"
+import { readTextFile } from "@tauri-apps/plugin-fs"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 
-jest.mock("@/lib/tauri", () => ({
+jest.mock("@/lib/platform/detect", () => ({
   isTauri: jest.fn(() => false),
 }))
+jest.mock("@tauri-apps/plugin-fs", () => ({ readTextFile: jest.fn() }))
 
 describe("serializeSkill", () => {
   it("produces frontmatter with name and content body", () => {
@@ -152,6 +154,7 @@ describe("resolveSkillMarkdown (M4)", () => {
 
   beforeEach(() => {
     mIsTauri.mockReturnValue(false)
+    jest.mocked(readTextFile).mockReset()
   })
 
   it("returns the inline body verbatim for inline source", async () => {
@@ -211,6 +214,7 @@ describe("resolveSkillMarkdown (M4)", () => {
     expect(body).toBeUndefined()
     expect(warn).toHaveBeenCalled()
     expect((warn.mock.calls[0]?.[0] as string).includes("local-test")).toBe(true)
+    expect(readTextFile).not.toHaveBeenCalled()
     warn.mockRestore()
   })
 
@@ -223,15 +227,27 @@ describe("resolveSkillMarkdown (M4)", () => {
     }
     mIsTauri.mockReturnValue(true)
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
-    // In jest/jsdom there's no @tauri-apps/plugin-fs runtime — the dynamic
-    // import throws which is caught and reported via console.warn; the
-    // resolver returns undefined so the renderer drops the skill instead
-    // of injecting an `[skill "…": failed to read]` placeholder into the
-    // system prompt.
+    jest.mocked(readTextFile).mockRejectedValueOnce(new Error("fixture read refused"))
     const body = await resolveSkillMarkdown(def)
     expect(body).toBeUndefined()
-    expect(warn).toHaveBeenCalled()
+    expect(readTextFile).toHaveBeenCalledWith("/no/such/path/SKILL.md")
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("fixture read refused"))
     warn.mockRestore()
+  })
+
+  it("reads a Tauri skill and binds its root without loading the transport barrel", async () => {
+    mIsTauri.mockReturnValue(true)
+    jest.mocked(readTextFile).mockResolvedValueOnce("Run ${CLAUDE_PLUGIN_ROOT}/scripts/check.ts")
+    await expect(
+      resolveSkillMarkdown({
+        id: "local",
+        name: "Local",
+        description: "Fixture",
+        runtimePluginRoot: "/plugins/local",
+        source: { kind: "local-folder", path: "/plugins/local/" },
+      })
+    ).resolves.toBe("Run /plugins/local/scripts/check.ts")
+    expect(readTextFile).toHaveBeenCalledWith("/plugins/local/SKILL.md")
   })
 
   it("treats local-bundle the same as local-folder for body purposes", async () => {

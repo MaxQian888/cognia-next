@@ -43,4 +43,6 @@ export interface EvalRunCaseRow {
   outputTruncated?: boolean
   /** Set when the RUN itself failed for this case (vs. a clean low-quality answer). */
   sampleError?: string
+  /** Actual execution environment of repetition 1; absent on legacy rows. */
+  executionProfile?: import("../../types/eval/eval").EvalSample["executionProfile"]
 }

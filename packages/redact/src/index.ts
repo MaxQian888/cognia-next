@@ -239,8 +239,12 @@ export function normalizeForRedaction(text: string): string {
   return text.replace(ESCAPE_SEQUENCE_RE, "").replace(STRIPPED_CONTROL_RE, "")
 }
 
-// One placeholder anywhere in a string (non-global → stateless `.test()`).
-const PLACEHOLDER_DETECT = new RegExp(PII_PLACEHOLDER_SOURCE)
+// Accept only a whole known placeholder, optionally followed by prose punctuation.
+// A placeholder embedded in a larger value must not conceal a credential suffix.
+const ENV_PLACEHOLDER_RE = new RegExp(
+  `^(?:${PII_PLACEHOLDER_SOURCE}|<(?:token|api[_-]?key|secret|password|credential)>)[.,;:!?)]*$`,
+  "i"
+)
 
 /**
  * Whether a `Bearer` operand looks like a credential rather than a word.
@@ -258,7 +262,7 @@ const ENV_REFERENCE_RE =
 
 function isRedactableEnvValue(value: string): boolean {
   if (value.length < 8) return false
-  if (PLACEHOLDER_DETECT.test(value)) return false
+  if (ENV_PLACEHOLDER_RE.test(value)) return false
   return !ENV_REFERENCE_RE.test(value)
 }
 
@@ -519,7 +523,8 @@ export function redactText(text: string, nameHints: Iterable<string> = []): Reda
   )
   out = out.replace(ENV_SECRET_RE, (full, _name: string, value: string) =>
     isRedactableEnvValue(value)
-      ? full.slice(0, full.length - value.length) + tokenize(state, "API_KEY", value)
+      ? full.slice(0, full.length - value.length) +
+        tokenize(state, "API_KEY", unredactText(value, state.map))
       : full
   )
   out = out.replace(API_KEY_HINT_RE, (full, secret: string) =>
@@ -629,7 +634,9 @@ function redactionSpans(redacted: string, map: Record<string, RedactionRecord>):
  *
  *   - offsets in identity segments shift by the accumulated delta;
  *   - offsets that fall INSIDE a redacted span have no exact twin and clamp
- *     to the placeholder's bounds;
+ *     to the placeholder's bounds; with `snap`, a start moves to the
+ *     placeholder's start and an end to its end, so a slice holds either the
+ *     whole placeholder or none of it;
  *   - everything clamps to `[0, redacted.length]`.
  *
  * Pure; used by the twin ingest job runner to move the PDF `pageMap` into
@@ -638,19 +645,25 @@ function redactionSpans(redacted: string, map: Record<string, RedactionRecord>):
 export function translateOffsetsThroughRedaction<T extends RedactableOffsetEntry>(
   entries: T[],
   redacted: string,
-  map: Record<string, RedactionRecord>
+  map: Record<string, RedactionRecord>,
+  options: { snap?: boolean } = {}
 ): T[] {
   const spans = redactionSpans(redacted, map)
 
-  const translate = (offset: number): number => {
+  const translate = (offset: number, end: boolean): number => {
     let result = offset
     for (const span of spans) {
       if (offset < span.origStart) break
-      if (offset < span.origEnd) {
-        // Inside a redacted span — clamp into the placeholder.
-        result = Math.min(span.redStart + (offset - span.origStart), span.redEnd)
+      if (offset > span.origStart && offset < span.origEnd) {
+        // Inside a redacted span — snap to an edge, or clamp into the placeholder.
+        result = options.snap
+          ? end
+            ? span.redEnd
+            : span.redStart
+          : Math.min(span.redStart + (offset - span.origStart), span.redEnd)
         return Math.max(0, Math.min(result, redacted.length))
       }
+      if (offset === span.origStart) return Math.max(0, Math.min(span.redStart, redacted.length))
       // Past this span — accumulate its delta.
       result = span.redEnd + (offset - span.origEnd)
     }
@@ -659,8 +672,8 @@ export function translateOffsetsThroughRedaction<T extends RedactableOffsetEntry
 
   return entries.map((entry) => ({
     ...entry,
-    charStart: translate(entry.charStart),
-    charEnd: translate(entry.charEnd),
+    charStart: translate(entry.charStart, false),
+    charEnd: translate(entry.charEnd, true),
   }))
 }
 

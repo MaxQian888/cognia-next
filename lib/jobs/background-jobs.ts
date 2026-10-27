@@ -1,6 +1,42 @@
 import { transport } from "@/lib/tauri"
+import { getCompanionConfigGeneration } from "@/lib/tauri/transport-companion"
+import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import type { BackgroundMonitorCondition } from "@cognia/plugin-contract/lib/jobs/background-jobs"
 export type { BackgroundMonitorCondition } from "@cognia/plugin-contract/lib/jobs/background-jobs"
+
+// The global job center can remount between turns. Keep final refusals at
+// the read boundary, scoped to the caller and pairing, rather than its timer.
+let listScope:
+  | {
+      remote: ReturnType<typeof getActiveRemoteTransport>
+      pairing: number
+      runtime: string
+      refusals: Map<string, unknown>
+    }
+  | undefined
+
+async function readSupervisorList<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  const remote = getActiveRemoteTransport()
+  const pairing = getCompanionConfigGeneration()
+  const runtime = JSON.stringify(getActiveRuntimeTargetContext())
+  if (
+    listScope?.remote !== remote ||
+    listScope.pairing !== pairing ||
+    listScope.runtime !== runtime
+  )
+    listScope = { remote, pairing, runtime, refusals: new Map() }
+  const scope = listScope
+  const key = JSON.stringify([command, args])
+  if (scope.refusals.has(key)) throw scope.refusals.get(key)
+  try {
+    return await transport.call<T>(command, args)
+  } catch (error) {
+    if ((error as { retryable?: unknown } | null)?.retryable === false)
+      scope.refusals.set(key, error)
+    throw error
+  }
+}
 
 export type BackgroundJobOwner =
   | { kind: "session"; sessionId: string }
@@ -48,7 +84,7 @@ export interface BackgroundMonitorRecord {
 export async function listBackgroundJobs(
   owner?: BackgroundJobOwner
 ): Promise<BackgroundJobRecord[]> {
-  const result = await transport.call<{ jobs: BackgroundJobRecord[] }>(
+  const result = await readSupervisorList<{ jobs: BackgroundJobRecord[] }>(
     "background_job_list",
     owner ? { owner } : {}
   )
@@ -162,7 +198,7 @@ export function waitBackgroundJobOutput(
 }
 
 export async function listBackgroundMonitors(): Promise<BackgroundMonitorRecord[]> {
-  const result = await transport.call<{ monitors: BackgroundMonitorRecord[] }>(
+  const result = await readSupervisorList<{ monitors: BackgroundMonitorRecord[] }>(
     "background_monitor_list",
     {}
   )

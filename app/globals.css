@@ -3204,6 +3204,77 @@ html[data-shell-view-transition-shrink~="cognia-terminal-outlet-end"]::view-tran
   .workbench-scroll:hover::-webkit-scrollbar-thumb {
     background-color: color-mix(in oklch, var(--foreground) 36%, transparent);
   }
+
+  /* Transcript chrome is shared by live, observer and remote reading lanes.
+     Keep this local: editors and other workbenches own their own scrollbars. */
+  .conversation-scroll {
+    scrollbar-gutter: stable;
+  }
+  .conversation-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .conversation-scroll::-webkit-scrollbar-track,
+  .conversation-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  .conversation-scroll::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+  .conversation-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 36%, transparent);
+  }
+  .conversation-scroll::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    .conversation-scroll {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+    }
+  }
+  /* The actual collapsed rail, rather than just the preference or mount gate,
+     owns native chrome. The container query also covers a resize frame before
+     ResizeObserver has updated the JS gate. Expanded/empty/narrow states keep
+     native navigation. No extra per-scroll state is lifted into MessageList. */
+  @media (forced-colors: none) {
+    @container message-list (min-width: 56rem) {
+      [data-chat-scroll-surface]:has(> [data-conversation-timeline="collapsed"])
+        > [data-chat-message-lane]
+        > .conversation-scroll {
+        scrollbar-width: none;
+        scrollbar-gutter: auto;
+      }
+      [data-chat-scroll-surface]:has(> [data-conversation-timeline="collapsed"])
+        > [data-chat-message-lane]
+        > .conversation-scroll::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
+      }
+    }
+  }
+  @media (forced-colors: active) {
+    [data-chat-scroll-surface] > [data-conversation-timeline="collapsed"] [role="scrollbar"] {
+      display: none;
+    }
+    .conversation-scroll {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+    .conversation-scroll::-webkit-scrollbar {
+      width: auto;
+      height: auto;
+    }
+    .conversation-scroll::-webkit-scrollbar-thumb {
+      background-color: CanvasText;
+    }
+  }
   /* Workflow editor — mobile/touch canvas. The mobile editor roots the React
      Flow surface in `.wf-touch-canvas`; there, source handles drive
      tap-to-connect, so they must receive pointer events (React Flow sets

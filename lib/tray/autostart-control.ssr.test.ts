@@ -4,11 +4,6 @@
 // This file runs in the `node` project, where there is genuinely no window.
 import { broadcastAutostartChanged, onAutostartChanged } from "./autostart-control"
 
-jest.mock("@/lib/tauri/autostart", () => ({
-  isAutostartEnabled: jest.fn(),
-  setAutostart: jest.fn(),
-}))
-
 describe("autostart-control DOM-less (SSR) guards", () => {
   it("has no window to begin with", () => {
     expect(typeof window).toBe("undefined")

@@ -6,3 +6,5 @@
  * compatibility entry for app importers.
  */
 export * from "@cognia/agent-contracts/external-agent"
+// Keep the runtime value explicit when this shim is also a bundle entry.
+export { normalizeCogniaModelBinding } from "@cognia/agent-contracts/external-agent"

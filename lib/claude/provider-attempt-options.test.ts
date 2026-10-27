@@ -638,6 +638,47 @@ describe("registered API subscriptions", () => {
     expect(limits.compaction).toMatchObject({ maxSummaryTokens: 500, summaryInputBudget: 6000 })
   })
 
+  it.each([
+    [32768, 16384],
+    [1000000, 32768],
+  ])(
+    "bounds default summary output on a %s window while retaining source input",
+    (window, expected) => {
+      const limits = applyProviderAttemptLimits(
+        {
+          provider: "openai",
+          model: "summary-budget",
+          compaction: { enabled: true, summaryTokenBudgetIsDefault: true },
+        },
+        settings("openai", {
+          discoveredModels: [
+            { id: "summary-budget", contextLength: window, maxOutputTokens: 131072 },
+          ],
+        })
+      )
+      expect(limits.compaction?.maxSummaryTokens).toBe(expected)
+      expect(limits.compaction?.summaryInputBudget).toBe(window - expected)
+    }
+  )
+
+  it("retains an explicit additive thinking budget when sizing default summary output", () => {
+    const limits = applyProviderAttemptLimits(
+      {
+        provider: "anthropic",
+        model: "small",
+        modelParams: {
+          providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 10000 } } },
+        },
+        compaction: { enabled: true, summaryTokenBudgetIsDefault: true },
+      },
+      settings("anthropic", {
+        discoveredModels: [{ id: "small", contextLength: 16384, maxOutputTokens: 16384 }],
+      })
+    )
+    expect(limits.compaction?.maxSummaryTokens).toBe(11024)
+    expect(limits.compaction?.summaryInputBudget).toBe(5360)
+  })
+
   it("leaves input room for an unconfigured summary cap on a small model", () => {
     const limits = applyProviderAttemptLimits(
       {
@@ -725,8 +766,8 @@ describe("registered API subscriptions", () => {
       appSettings
     )
     expect(large.compaction).toMatchObject({
-      maxSummaryTokens: 131_072,
-      summaryInputBudget: 868_928,
+      maxSummaryTokens: 32_768,
+      summaryInputBudget: 967_232,
     })
   })
 
@@ -746,7 +787,7 @@ describe("registered API subscriptions", () => {
       })
     )
     expect(limits.compaction).toMatchObject({
-      maxSummaryTokens: 131_072,
+      maxSummaryTokens: 32_768,
       checkpointTokenBudget: 260_678,
       postCompactionTokenBudget: 347_571,
     })
@@ -817,6 +858,37 @@ describe("registered API subscriptions", () => {
     )
     expect(limits.compaction?.summaryInputBudget).toBe(7500)
   })
+  it.each([
+    ["anthropic", 4024],
+    ["openai", 4000],
+  ])(
+    "uses the summary credential protocol %s for its default output budget",
+    (protocol, expected) => {
+      const limits = applyProviderAttemptLimits(
+        {
+          provider: "anthropic",
+          model: "old",
+          modelParams: {
+            providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 3000 } } },
+          },
+          compaction: {
+            enabled: true,
+            summaryTokenBudgetIsDefault: true,
+            summary: {
+              providerId: "anthropic",
+              model: "old",
+              credentials: { apiKey: "test", protocol },
+            },
+          },
+        },
+        settings("anthropic", {
+          discoveredModels: [{ id: "old", contextLength: 8000, maxOutputTokens: 8192 }],
+        })
+      )
+      expect(limits.compaction?.maxSummaryTokens).toBe(expected)
+      expect(limits.compaction?.summaryInputBudget).toBe(8000 - Number(expected))
+    }
+  )
   it.each([
     [10000, 4096],
     [1024, 1024],

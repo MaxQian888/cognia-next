@@ -28,7 +28,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 tsup",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/build-package.mjs",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

@@ -27,6 +27,13 @@ describe("bar item catalogs", () => {
     for (const m of ALL) expect(BAR_ZONE_ORDER).toContain(m.zone)
   })
 
+  it("places the next scheduled run beside jobs in the right cluster", () => {
+    expect(STATUS_BAR_ITEMS.find((item) => item.id === "nextRun")?.zone).toBe("end")
+    const jobsIndex = DEFAULT_STATUS_BAR_LAYOUT.order.indexOf("jobs")
+    expect(DEFAULT_STATUS_BAR_LAYOUT.order[jobsIndex + 1]).toBe("nextRun")
+    expect(STATUS_BAR_ITEMS.filter((item) => item.zone === "center")).toEqual([])
+  })
+
   it("uses each id as its own i18n key", () => {
     for (const m of ALL) expect(m.i18nKey).toBe(m.id)
   })

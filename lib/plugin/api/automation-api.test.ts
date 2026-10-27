@@ -8,9 +8,19 @@
  */
 
 import { createAutomationAPI } from "./automation-api"
-import { getComputerUsePipSnapshot } from "@/lib/automation/computer-use-pip"
+import {
+  getComputerUsePipSnapshot,
+  beginComputerUsePipRun,
+  publishComputerUseActivity,
+  publishComputerUsePipFrame,
+  getComputerUsePipPresentationIds,
+} from "@/lib/automation/computer-use-pip"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
+jest.mock("@/lib/automation/ocr-click", () => ({
+  findScreenText: jest.fn(async () => ({ matches: [] })),
+  clickScreenText: jest.fn(async () => ({ ok: true })),
+}))
 
 const desktop = {
   capabilities: jest.fn(async () => ({ screenshot: true })),
@@ -284,6 +294,106 @@ describe("createAutomationAPI", () => {
 })
 
 describe("picture-in-picture live view", () => {
+  it("keeps the captured fallback chat when focus changes during context assembly", async () => {
+    let reads = 0
+    const api = createAutomationAPI(PLUGIN, {
+      desktop,
+      focusedSessionId: () => (reads++ === 0 ? "focus-a" : "focus-b"),
+      getComputerUseSettings: () => undefined,
+      captureDisplay: jest.fn(),
+      sandbox: {
+        hostFallbackRuntimeRef: "host",
+        activeRefForSession: () => undefined,
+        decorateComputerUseContext: async (_ref: string, context: object) => context,
+      },
+    } as never)
+    desktop.getAppState.mockResolvedValueOnce({
+      screenshot: { bytes: "A", width: 80, height: 60 },
+    } as never)
+    await api.getAppState("app", { kind: "displayName", displayName: "Editor" })
+    expect(desktop.getAppState).toHaveBeenLastCalledWith(
+      "app",
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({ sessionKey: "focus-a" })
+    )
+    expect(getComputerUsePipSnapshot("focus-a").frame?.src).toContain("A")
+    expect(getComputerUsePipPresentationIds("focus-b")).toEqual([])
+  })
+  it("preserves two app sessions in one chat through get-state, action and zoom", async () => {
+    const api = createAutomationAPI(PLUGIN)
+    const origin = { sessionId: "multi-chat" }
+    desktop.getAppState.mockResolvedValueOnce({
+      screenshot: { bytes: "A", width: 800, height: 600, capturedAt: 1 },
+    } as never)
+    desktop.getAppState.mockResolvedValueOnce({
+      screenshot: { bytes: "B", width: 800, height: 600, capturedAt: 2 },
+    } as never)
+    await api.getAppState("app-a", { kind: "displayName", displayName: "Editor" }, {}, origin)
+    await api.getAppState("app-b", { kind: "displayName", displayName: "Browser" }, {}, origin)
+    const ids = getComputerUsePipPresentationIds("multi-chat")
+    expect(ids).toHaveLength(2)
+    expect(getComputerUsePipSnapshot("multi-chat", ids[0])).toMatchObject({
+      label: "Editor",
+      frame: { src: "data:image/png;base64,A" },
+    })
+    await api.zoom(
+      { sessionId: "app-b", lineageId: "l", revision: 1 },
+      { x: 0, y: 0, width: 10, height: 10 },
+      origin
+    )
+    expect(getComputerUsePipPresentationIds("multi-chat")).toEqual(ids)
+    expect(getComputerUsePipSnapshot("multi-chat", ids[0]).frame?.src).toContain("A")
+    expect(getComputerUsePipSnapshot("multi-chat", ids[1]).action).toBe("zoom")
+    await api.findText({ state: { sessionId: "app-a" } } as never, origin)
+    await api.clickText({ state: { sessionId: "app-b" } } as never, origin)
+    expect(getComputerUsePipPresentationIds("multi-chat")).toEqual(ids)
+    expect(getComputerUsePipSnapshot("multi-chat", ids[0]).action).toBe("find_text")
+    expect(getComputerUsePipSnapshot("multi-chat", ids[1]).action).toBe("click_text")
+  })
+  it("routes element and pixel actions for the same app across two authoritative desktops", async () => {
+    const api = createAutomationAPI(PLUGIN, {
+      desktop,
+      focusedSessionId: () => undefined,
+      getComputerUseSettings: () => undefined,
+      captureDisplay: jest.fn(),
+      sandbox: {
+        hostFallbackRuntimeRef: "host",
+        activeRefForSession: () => undefined,
+        decorateComputerUseContext: async (ref: string, context: object) => ({
+          ...context,
+          sandboxConnectionId: ref === "runtime-a" ? "desktop-a" : "desktop-b",
+        }),
+      },
+    } as never)
+    const a = { sessionId: "multi-desktop", sandboxRuntimeRef: "runtime-a" },
+      b = { sessionId: "multi-desktop", sandboxRuntimeRef: "runtime-b" }
+    await api.getAppState("browser", { kind: "displayName", displayName: "Browser" }, {}, a)
+    await api.getAppState("browser", { kind: "displayName", displayName: "Browser" }, {}, b)
+    const ids = getComputerUsePipPresentationIds("multi-desktop")
+    expect(ids).toHaveLength(2)
+    const idA = ids.find(
+      (id) => getComputerUsePipSnapshot("multi-desktop", id).targetConnectionId === "desktop-a"
+    )
+    const idB = ids.find(
+      (id) => getComputerUsePipSnapshot("multi-desktop", id).targetConnectionId === "desktop-b"
+    )
+    expect(idA).toBeDefined()
+    expect(idB).toBeDefined()
+    expect(idA).not.toBe(idB)
+    await api.performAction(
+      { target: { kind: "element", handle: { sessionId: "browser" } } } as never,
+      a
+    )
+    expect(getComputerUsePipSnapshot("multi-desktop", idA).action).toBe("perform_action")
+    expect(getComputerUsePipSnapshot("multi-desktop", idB).action).toBe("get_app_state")
+    await api.performAction(
+      { target: { kind: "pixel", target: { sessionId: "browser" } } } as never,
+      b
+    )
+    expect(getComputerUsePipSnapshot("multi-desktop", idB).action).toBe("perform_action")
+    expect(getComputerUsePipPresentationIds("multi-desktop")).toEqual(ids)
+  })
   // The PiP surface had no producer on this path: its only publishers lived in
   // the OCR fallback module, so during a real computer-use turn the component
   // mounted, saw no activity, and never appeared.
@@ -324,6 +434,132 @@ describe("picture-in-picture live view", () => {
     expect(snapshot.action).toBe("get_app_state")
     expect(snapshot.phase).toBe("complete")
     expect(snapshot.frame?.src).toContain("QUJD")
+  })
+
+  it("does not let a producer from a previous run replace a newer JPEG preview", async () => {
+    let finish!: (value: never) => void
+    desktop.getAppState.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    beginComputerUsePipRun("late-chat", 1)
+    const pending = createAutomationAPI(PLUGIN).getAppState("app", {} as never, {}, {
+      sessionId: "late-chat",
+    } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    beginComputerUsePipRun("late-chat", 2)
+    const activity = publishComputerUseActivity("late-chat", "get_app_state")
+    publishComputerUsePipFrame(
+      "late-chat",
+      { output: "NEW", width: 800, height: 600, format: "jpeg", capturedAt: 10 },
+      activity
+    )
+    finish({
+      screenshot: { bytes: "OLD", width: 800, height: 600, capturedAt: 500, format: "png" },
+    } as never)
+    await pending
+    expect(getComputerUsePipSnapshot("late-chat")).toMatchObject({
+      runId: 2,
+      phase: "running",
+      frame: { src: "data:image/jpeg;base64,NEW" },
+    })
+  })
+
+  it("reports a refused action without altering its returned result", async () => {
+    const result = { status: "refused", policyDecision: { allowed: false, reason: "Denied" } }
+    desktop.performAction.mockResolvedValueOnce(result as never)
+    expect(
+      await createAutomationAPI(PLUGIN).performAction(
+        {} as never,
+        { sessionId: "refused-chat" } as never
+      )
+    ).toBe(result)
+    expect(getComputerUsePipSnapshot("refused-chat")).toMatchObject({
+      phase: "error",
+      error: "Denied",
+      targetConnectionId: null,
+    })
+  })
+
+  it("keeps a delayed context resolver owned by the run that invoked it", async () => {
+    let finishContext!: (value: unknown) => void
+    const api = createAutomationAPI(PLUGIN, {
+      desktop,
+      focusedSessionId: () => undefined,
+      getComputerUseSettings: () => undefined,
+      captureDisplay: jest.fn(),
+      sandbox: {
+        hostFallbackRuntimeRef: "host",
+        activeRefForSession: () => undefined,
+        decorateComputerUseContext: () =>
+          new Promise((resolve) => {
+            finishContext = resolve
+          }),
+      },
+    } as never)
+    desktop.getAppState.mockResolvedValueOnce({
+      screenshot: { bytes: "OLD", width: 800, height: 600, capturedAt: 500, format: "png" },
+    } as never)
+    beginComputerUsePipRun("context-chat", 1)
+    const pending = api.getAppState("app", {} as never, {}, { sessionId: "context-chat" } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    beginComputerUsePipRun("context-chat", 2)
+    const current = publishComputerUseActivity("context-chat", "get_app_state")
+    publishComputerUsePipFrame(
+      "context-chat",
+      { output: "NEW", width: 800, height: 600, capturedAt: 10 },
+      current
+    )
+    finishContext({ sessionKey: "context-chat", sandboxConnectionId: "old-target" })
+    await pending
+    expect(getComputerUsePipSnapshot("context-chat")).toMatchObject({
+      runId: 2,
+      phase: "running",
+      frame: { src: "data:image/png;base64,NEW" },
+    })
+  })
+
+  it("keeps the same remote preview visible while the next context is resolving", async () => {
+    let finishContext!: (value: unknown) => void
+    const context = { sessionKey: "remote-chat", sandboxConnectionId: "remote-1" }
+    const decorate = jest
+      .fn()
+      .mockResolvedValueOnce(context)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishContext = resolve
+          })
+      )
+    const api = createAutomationAPI(PLUGIN, {
+      desktop,
+      focusedSessionId: () => undefined,
+      getComputerUseSettings: () => undefined,
+      captureDisplay: jest.fn(),
+      sandbox: {
+        hostFallbackRuntimeRef: "host",
+        activeRefForSession: () => undefined,
+        decorateComputerUseContext: decorate,
+      },
+    } as never)
+    desktop.getAppState.mockResolvedValueOnce({
+      screenshot: { bytes: "FIRST", width: 800, height: 600, capturedAt: 10, format: "png" },
+    } as never)
+    desktop.getAppState.mockResolvedValueOnce({
+      screenshot: { bytes: "NEXT", width: 800, height: 600, capturedAt: 20, format: "png" },
+    } as never)
+    await api.getAppState("app", {} as never, {}, { sessionId: "remote-chat" } as never)
+    const pending = api.getAppState("app", {} as never, {}, { sessionId: "remote-chat" } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(getComputerUsePipSnapshot("remote-chat")).toMatchObject({
+      targetConnectionId: "remote-1",
+      frame: { src: "data:image/png;base64,FIRST" },
+    })
+    finishContext(context)
+    await pending
+    expect(getComputerUsePipSnapshot("remote-chat").frame?.src).toBe("data:image/png;base64,NEXT")
   })
 
   it("publishes an error phase when the call throws", async () => {

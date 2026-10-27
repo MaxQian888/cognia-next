@@ -19,6 +19,7 @@ let liveGoal: { status?: string; safeObjective?: string } | null = null
 // length (goal passes `[activeSessionId]`, pet profile passes `[]`).
 let livePetProfile: unknown = undefined
 let autostartValue = false
+const readAutostart = jest.fn<Promise<boolean>, []>()
 let petSettingsEnabled = false
 const listenHandlers: Record<string, (e: { payload?: unknown }) => void> = {}
 
@@ -38,7 +39,8 @@ jest.mock("@/lib/db/goals", () => ({
   getOpenGoalForSession: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/tauri/autostart", () => ({
-  isAutostartEnabled: () => Promise.resolve(autostartValue),
+  ...jest.requireActual("@/lib/tauri/autostart"),
+  isAutostartEnabled: () => readAutostart(),
 }))
 jest.mock("@tauri-apps/api/event", () => ({
   listen: (event: string, handler: (e: { payload?: unknown }) => void) => {
@@ -68,6 +70,7 @@ beforeEach(() => {
   liveGoal = null
   livePetProfile = undefined
   autostartValue = false
+  readAutostart.mockReset().mockImplementation(async () => autostartValue)
   petSettingsEnabled = false
   for (const k of Object.keys(listenHandlers)) delete listenHandlers[k]
   // `isMainAppWindow` reads the real Tauri internals; clear any pet label.
@@ -171,6 +174,46 @@ describe("useTrayStateSnapshot", () => {
     // Stays at the default despite autostartValue=true, proving the effect
     // short-circuited before calling isAutostartEnabled().
     expect(result.current.app.autostart).toBe(false)
+    expect(readAutostart).not.toHaveBeenCalled()
+  })
+
+  it("keeps a newer broadcast when an older startup read finishes", async () => {
+    let resolveRead!: (on: boolean) => void
+    readAutostart.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRead = resolve
+        })
+    )
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    act(() => broadcastAutostartChanged(true))
+    await act(async () => resolveRead(false))
+    expect(result.current.app.autostart).toBe(true)
+  })
+
+  it("refreshes on focus and preserves the last known value when the read fails", async () => {
+    autostartValue = true
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const { result, unmount } = renderHook(() => useTrayStateSnapshot())
+    try {
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(result.current.app.autostart).toBe(true)
+      readAutostart.mockRejectedValueOnce(new Error("permission denied"))
+      await act(async () => window.dispatchEvent(new Event("focus")))
+      expect(result.current.app.autostart).toBe(true)
+      expect(warn).toHaveBeenCalledWith("tray autostart read failed", expect.any(Error))
+      autostartValue = false
+      await act(async () => window.dispatchEvent(new Event("focus")))
+      expect(result.current.app.autostart).toBe(false)
+      unmount()
+      const reads = readAutostart.mock.calls.length
+      window.dispatchEvent(new Event("focus"))
+      expect(readAutostart).toHaveBeenCalledTimes(reads)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it("reports pet=null when the pet subsystem is disabled, even with a profile present", () => {

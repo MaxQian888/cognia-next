@@ -143,6 +143,33 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.name).toBe("Updated Task")
     })
 
+    it("does not turn task or nested config keys into Dexie paths", async () => {
+      const task = createMockTask({
+        id: "key-path-task",
+        createdBy: { kind: "plugin", pluginId: "scheduler-plugin" },
+      })
+      await schedulerDb.createTask(task)
+      const config = { ...task.config, "permissions.mode": "allow" }
+      await schedulerDb.updateTask({
+        ...task,
+        name: "Renamed",
+        config,
+        "createdBy.kind": "user",
+        "owner.hostId": "attacker",
+        "config.maxRetries": 999,
+      } as ScheduledTask)
+
+      const stored = await schedulerDb.getTask(task.id)
+      expect(stored?.name).toBe("Renamed")
+      expect(stored?.createdBy).toEqual(task.createdBy)
+      expect(stored?.owner).toBeUndefined()
+      expect(stored?.config).toEqual({ ...config, overlapPolicy: "skip" })
+      expect(stored?.config).not.toHaveProperty("permissions")
+      expect(Object.keys((await getDb().scheduledTasks.get(task.id)) ?? {})).toEqual(
+        expect.not.arrayContaining(["createdBy.kind", "owner.hostId", "config.maxRetries"])
+      )
+    })
+
     it("atomically claims a schedule slot only once, reserves runCount, and advances nextRunAt", async () => {
       const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
       const nextRunAt = new Date("2026-07-25T10:00:00.000Z")

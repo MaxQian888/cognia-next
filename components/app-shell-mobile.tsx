@@ -69,7 +69,6 @@ import { SingleExportDialog } from "@/components/data/export/single-export-dialo
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
-import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 import { MobileGlanceDrawer } from "@/components/mobile/glance/mobile-glance-drawer"
 import { MobileGlanceHome } from "@/components/mobile/glance/mobile-glance-home"
 import {
@@ -724,11 +723,6 @@ export function AppShellMobile() {
                     )}
                   </div>
                 </div>
-                {/* Joining someone else's conversation is a once-in-a-while
-                  action, so it sits at the foot of the drawer rather than
-                  above the rail and the list (renders nothing unless shared
-                  chat is enabled). */}
-                <SharedSessionJoin className="shrink-0 rounded-none border-t px-4" />
               </SheetContent>
             </Sheet>
           </MobileChannelListSourceProvider>

@@ -20,6 +20,37 @@ import {
   type PluginPermissionTier,
 } from "@/lib/plugin/security/permission-guard"
 import type { PluginPermission } from "@/types/plugin"
+import {
+  grantPluginPermission,
+  revokePluginPermission,
+  listPluginPermissions,
+  isPluginGatewayAvailable,
+} from "@/lib/plugin/core/transport"
+import { recordSilentFailure } from "@/lib/plugin/contracts/diagnostics-store"
+
+function applyPermissionChange(
+  pluginId: string,
+  writeHost: () => Promise<unknown>,
+  applyLocal: () => void
+): void {
+  if (!isPluginGatewayAvailable()) {
+    applyLocal()
+    return
+  }
+  void writeHost()
+    .then(applyLocal)
+    .catch((error) =>
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "permission.uiHostMutation",
+          message: "Failed to synchronize native plugin permissions",
+          expected: false,
+        },
+        error
+      )
+    )
+}
 
 export interface UsePluginPermissions {
   /** All declared groups (filesystem / network / clipboard / …). */
@@ -83,28 +114,78 @@ export function usePluginPermissions(): UsePluginPermissions {
         expiresIn?: number
       }
     ) => {
-      guard.grant(pluginId, permission, options)
-      bump()
+      guard.assertGrantAllowed(options?.grantedBy)
+      applyPermissionChange(
+        pluginId,
+        () =>
+          grantPluginPermission(
+            pluginId,
+            permission,
+            options?.grantedBy ?? "user",
+            options?.expiresIn ? new Date(Date.now() + options.expiresIn).toISOString() : undefined
+          ),
+        () => {
+          guard.grant(pluginId, permission, options)
+          bump()
+        }
+      )
     },
     [guard, bump]
   )
   const revoke = useCallback(
     (pluginId: string, permission: PluginPermission) => {
-      guard.revoke(pluginId, permission)
-      bump()
+      applyPermissionChange(
+        pluginId,
+        () => revokePluginPermission(pluginId, permission),
+        () => {
+          guard.revoke(pluginId, permission)
+          bump()
+        }
+      )
     },
     [guard, bump]
   )
   const revokeAll = useCallback(
     (pluginId: string) => {
-      guard.revokeAll(pluginId)
-      bump()
+      const local = guard.getPluginPermissions(pluginId)
+      applyPermissionChange(
+        pluginId,
+        async () => {
+          const permissions = new Set([...local, ...(await listPluginPermissions(pluginId))])
+          await Promise.all(
+            [...permissions].map((permission) => revokePluginPermission(pluginId, permission))
+          )
+        },
+        () => {
+          guard.revokeAll(pluginId)
+          bump()
+        }
+      )
     },
     [guard, bump]
   )
   const request = useCallback(
     async (pluginId: string, permission: PluginPermission, reason?: string) => {
+      const alreadyGranted = guard.check(pluginId, permission)
       const result = await guard.request(pluginId, permission, reason)
+      if (result && !alreadyGranted && isPluginGatewayAvailable()) {
+        try {
+          await grantPluginPermission(pluginId, permission, "user")
+        } catch (error) {
+          guard.revoke(pluginId, permission)
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "permission.uiHostMutation",
+              message: "Failed to synchronize native plugin permissions",
+              expected: false,
+            },
+            error
+          )
+          bump()
+          return false
+        }
+      }
       bump()
       return result
     },
@@ -115,9 +196,10 @@ export function usePluginPermissions(): UsePluginPermissions {
     [guard]
   )
 
-  // Tier changes happen outside React; subscribe so any consumer that
-  // reads getTier re-renders when the guard mutates.
+  // Changes may come from another mounted permissions view or the manager.
+  // Keep every consumer's derived grants and tiers synchronized.
   useEffect(() => guard.subscribeTierChanges(bump), [guard, bump])
+  useEffect(() => guard.subscribePermissionChanges(bump), [guard, bump])
 
   const getTier = useCallback(
     (pluginId: string, permission: PluginPermission) => guard.getTier(pluginId, permission),

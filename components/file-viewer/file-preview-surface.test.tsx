@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import type { FileViewerRequest } from "@/lib/file-viewer/types"
+import { registerFileViewer } from "@/lib/file-viewer/registry"
 
 const mockStat = jest.fn()
 const mockRead = jest.fn()
@@ -94,6 +95,52 @@ describe("FilePreviewSurface", () => {
     renderSurface(request({ providedText: "", relPath: "a.md" }))
     await screen.findByTestId("mock-viewer")
     expect(mockRead).not.toHaveBeenCalled()
+  })
+
+  it("previews attachment text through the same registry without accessing the workspace", async () => {
+    renderSurface(
+      request({
+        source: "attachment",
+        root: undefined,
+        relPath: "data.json",
+        providedText: '{"value":1}',
+      })
+    )
+    expect(await screen.findByTestId("mock-viewer")).toHaveTextContent('{"value":1}')
+    expect(screen.getByTestId("file-preview-surface")).toHaveAttribute("data-source", "attachment")
+    expect(screen.getByTestId("file-preview-surface")).toHaveAttribute(
+      "data-viewer-id",
+      "builtin.json"
+    )
+    expect(mockStat).not.toHaveBeenCalled()
+    expect(mockRead).not.toHaveBeenCalled()
+  })
+
+  it("resolves a MIME-only attachment viewer using the original attachment MIME", async () => {
+    const dispose = registerFileViewer({
+      id: "test.mime-only",
+      priority: 200,
+      matches: (probe) => probe.mimeType === "application/x-custom-text",
+      load: async () => ({ default: () => null }),
+    })
+    const view = renderSurface(
+      request({
+        source: "attachment",
+        root: undefined,
+        relPath: "unknown.bin",
+        providedText: "Decoded attachment text",
+        mimeType: "application/x-custom-text",
+      })
+    )
+    expect(await screen.findByTestId("mock-viewer")).toHaveTextContent("Decoded attachment text")
+    expect(screen.getByTestId("file-preview-surface")).toHaveAttribute(
+      "data-viewer-id",
+      "test.mime-only"
+    )
+    expect(mockStat).not.toHaveBeenCalled()
+    expect(mockRead).not.toHaveBeenCalled()
+    view.unmount()
+    act(dispose)
   })
 
   it("refuses an oversized file from the stat alone, without transferring it", async () => {

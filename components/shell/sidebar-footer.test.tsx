@@ -77,7 +77,7 @@ describe("SidebarFooter", () => {
     const footer = screen.getByTestId("sidebar-footer")
     expect(footer).toContainElement(screen.getByTestId("slot-sidebar.left.bottom"))
     expect(footer).toContainElement(screen.getByTestId("sidebar-user-card"))
-    expect(footer).toContainElement(screen.getByTestId("shared-session-join"))
+    expect(screen.queryByTestId("shared-session-join")).not.toBeInTheDocument()
   })
 
   it("keeps theme and settings one click away beside the card", () => {

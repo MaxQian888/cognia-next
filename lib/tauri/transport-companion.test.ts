@@ -2561,6 +2561,118 @@ describe("WebSocket reconnect", () => {
     __setBackoffRandomForTests(null)
   })
 
+  it.each(["sync", "async"])(
+    "stops %s final ticket refusals until an explicit reconnect",
+    async (mode) => {
+      const refusal = Object.assign(
+        new CompanionApiError("refused", "host_surface_forbidden", 503),
+        {
+          retryable: false,
+        }
+      )
+      const issue = jest.fn(() => {
+        if (mode === "sync") throw refusal
+        return Promise.reject(refusal)
+      })
+      __setEventSocketTicketIssuerForTests(issue)
+      transport = new CompanionTransport()
+      transport.subscribe("ch:first", jest.fn())
+      await jest.advanceTimersByTimeAsync(0)
+      transport.subscribe("ch:second", jest.fn())
+      window.dispatchEvent(new Event("online"))
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(issue).toHaveBeenCalledTimes(1)
+      expect(MockWebSocket.instances).toHaveLength(0)
+      expect(transport.getConnectionState()).toBe("offline")
+      transport.reconnectWs()
+      await jest.advanceTimersByTimeAsync(0)
+      expect(issue).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("does not issue duplicate tickets while a handshake is pending", async () => {
+    let resolve!: (value: { ticket: string; expiresAt: number }) => void
+    const issue = jest.fn(
+      () =>
+        new Promise<{ ticket: string; expiresAt: number }>((done) => {
+          resolve = done
+        })
+    )
+    __setEventSocketTicketIssuerForTests(issue)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:first", jest.fn())
+    transport.subscribe("ch:second", jest.fn())
+    expect(issue).toHaveBeenCalledTimes(1)
+    resolve({ ticket: "once", expiresAt: Date.now() + 60_000 })
+    await jest.advanceTimersByTimeAsync(0)
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it("retries a final refusal after the pairing changes on a retained transport", async () => {
+    const issue = jest
+      .fn()
+      .mockRejectedValueOnce(new CompanionApiError("refused", "forbidden", 403))
+      .mockResolvedValue({ ticket: "new-pairing", expiresAt: Date.now() + 60_000 })
+    __setEventSocketTicketIssuerForTests(issue)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:first", jest.fn())
+    await jest.advanceTimersByTimeAsync(0)
+    await setConfig({ ...MOCK_CONFIG, deviceId: "bob" })
+    transport.subscribe("ch:second", jest.fn())
+    await jest.advanceTimersByTimeAsync(0)
+    expect(issue).toHaveBeenCalledTimes(2)
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it.each(["resolve", "reject"])(
+    "ignores a late %s from the old pairing's ticket handshake",
+    async (completion) => {
+      let resolve!: (value: { ticket: string; expiresAt: number }) => void
+      let reject!: (error: Error) => void
+      const issue = jest
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((done, fail) => {
+              resolve = done
+              reject = fail
+            })
+        )
+        .mockResolvedValue({ ticket: "bob-ticket", expiresAt: Date.now() + 60_000 })
+      __setEventSocketTicketIssuerForTests(issue)
+      transport = new CompanionTransport()
+      transport.subscribe("ch:first", jest.fn())
+      await setConfig({ ...MOCK_CONFIG, deviceId: "bob" })
+      transport.subscribe("ch:second", jest.fn())
+      await jest.advanceTimersByTimeAsync(0)
+      expect(issue).toHaveBeenCalledTimes(2)
+      MockWebSocket.lastInstance!.triggerOpen()
+      if (completion === "resolve")
+        resolve({ ticket: "ada-ticket", expiresAt: Date.now() + 60_000 })
+      else reject(new CompanionApiError("refused", "forbidden", 403))
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(MockWebSocket.instances).toHaveLength(1)
+      expect(MockWebSocket.lastInstance!.url).toContain("bob-ticket")
+      expect(transport.getConnectionState()).toBe("connected")
+      expect(issue).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("retries a transient socket-ticket 503", async () => {
+    const issue = jest
+      .fn()
+      .mockRejectedValueOnce(
+        new CompanionApiError("unavailable", "host_authority_unavailable", 503)
+      )
+      .mockResolvedValue({ ticket: "recovered", expiresAt: Date.now() + 60_000 })
+    __setEventSocketTicketIssuerForTests(issue)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:first", jest.fn())
+    await jest.advanceTimersByTimeAsync(1_000)
+    expect(issue).toHaveBeenCalledTimes(2)
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
   it.each(["sync", "async"])("recovers after %s event ticket issuance fails", async (mode) => {
     const issue = jest
       .fn()

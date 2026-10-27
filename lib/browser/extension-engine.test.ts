@@ -16,6 +16,7 @@ import {
   hostFileReader,
   mediaTypeForPath,
   resetExtensionBindings,
+  setExtensionHostFileReader,
   unbindExtensionSession,
   type ExtensionTransport,
 } from "./extension-engine"
@@ -45,6 +46,7 @@ function harness(answer: (operation: string) => unknown = () => ({ ok: true })) 
 
 afterEach(() => {
   resetExtensionBindings()
+  setExtensionHostFileReader(undefined)
 })
 
 describe("ExtensionBrowserEngine", () => {
@@ -186,7 +188,7 @@ describe("the engine's Host defaults", () => {
     )
   })
 
-  it("reads upload paths straight from disk outside the desktop shell", async () => {
+  it("reads upload paths only through an installed Host file port outside the desktop", async () => {
     const { mkdtemp, writeFile, rm } = await import("node:fs/promises")
     const { join } = await import("node:path")
     const { tmpdir } = await import("node:os")
@@ -194,6 +196,9 @@ describe("the engine's Host defaults", () => {
     try {
       const path = join(dir, "note.txt")
       await writeFile(path, "hello from the Host")
+      await expect(hostFileReader(path)).rejects.toThrow("Host file access")
+      const { readFile } = await import("node:fs/promises")
+      setExtensionHostFileReader(async (file) => new Uint8Array(await readFile(file)))
       const bytes = await hostFileReader(path)
       expect(bytes).toBeInstanceOf(Uint8Array)
       expect(new TextDecoder().decode(bytes)).toBe("hello from the Host")

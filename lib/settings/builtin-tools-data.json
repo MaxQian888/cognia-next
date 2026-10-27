@@ -179,6 +179,13 @@
           "alwaysLoad": false
         },
         {
+          "name": "verification_batch",
+          "descriptionKey": "tools.verificationBatch",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
           "name": "TodoWrite",
           "descriptionKey": "tools.coreTodoWrite",
           "riskLevel": "low",

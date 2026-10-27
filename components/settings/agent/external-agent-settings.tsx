@@ -1,5 +1,7 @@
 "use client"
 
+import { TerminalAgentPanel } from "@/components/agent/external-agent/terminal-agent-panel"
+
 /**
  * ExternalAgentSettings — list/detail layout on `SettingsListDetail`.
  *
@@ -588,6 +590,12 @@ export function ExternalAgentSettings() {
           </Button>
         </div>
       ) : null}
+
+      {(density === "split" || stackedView === "list") && (
+        <div className="mt-3 max-h-[45vh] shrink-0 overflow-y-auto">
+          <TerminalAgentPanel />
+        </div>
+      )}
 
       {/* Mandatory-sandbox notice: only shown on a desktop shell whose OS has
           no spawn sandbox (Windows today). Browser shells have no spawn path

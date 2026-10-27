@@ -432,6 +432,7 @@ function throwIfAborted(callCtx: PluginToolContext): void {
 // Different targets remain parallel; a full write/create participates too, so
 // an edit cannot later overwrite a newer full-file write with its stale read.
 const fileMutationTails = new Map<string, Promise<void>>()
+const typedFileHashes = new WeakMap<PluginToolContext, Map<string, string>>()
 
 function fileMutationKey(path: string): string {
   const windows = /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\")
@@ -502,7 +503,9 @@ async function dispatchSandbox(
   callCtx: PluginToolContext
 ): Promise<SandboxResultShape> {
   throwIfAborted(callCtx)
-  return sandbox.execute(requireRuntimeRef(sandbox, callCtx), payload)
+  return callCtx.signal
+    ? sandbox.execute(requireRuntimeRef(sandbox, callCtx), payload, { signal: callCtx.signal })
+    : sandbox.execute(requireRuntimeRef(sandbox, callCtx), payload)
 }
 
 async function execBash(
@@ -643,6 +646,18 @@ async function sandboxReadFile(
     networkHosts: [],
   })
   const request = { ...clamped, targetFiles: [path] }
+  throwIfAborted(callCtx)
+  const typed = await sandbox.fileOperation?.(
+    requireRuntimeRef(sandbox, callCtx),
+    { kind: "read", path },
+    { signal: callCtx.signal }
+  )
+  if (typed) {
+    const hashes = typedFileHashes.get(callCtx) ?? new Map<string, string>()
+    hashes.set(path, typed.hash)
+    typedFileHashes.set(callCtx, hashes)
+    return typed.content ?? ""
+  }
   const res = await dispatchSandbox(
     sandbox,
     {
@@ -700,6 +715,17 @@ async function sandboxWriteFile(
     network: "off" as const,
     networkHosts: [],
   })
+  throwIfAborted(callCtx)
+  const expectedHash = typedFileHashes.get(callCtx)?.get(path)
+  const typed = await sandbox.fileOperation?.(
+    requireRuntimeRef(sandbox, callCtx),
+    { kind: "write", path, content, ...(expectedHash ? { expectedHash } : {}) },
+    { signal: callCtx.signal }
+  )
+  if (typed) {
+    typedFileHashes.get(callCtx)?.delete(path)
+    return { exit_code: 0, stdout: "", stderr: "", duration: 0, timed_out: false }
+  }
   const res = await dispatchSandbox(
     sandbox,
     {

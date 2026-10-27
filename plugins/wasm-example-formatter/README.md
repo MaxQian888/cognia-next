@@ -10,29 +10,34 @@ End-to-end reference for a `type: "wasm"` cognia plugin. Demonstrates:
 - **agent tool** — registers the `format_rust` tool the agent can call
 - **workflow node** — adds `action.wasm-example-formatter.format` to the visual workflow palette
 
-## Known limitation: formatting does not complete yet
+## Process input and compatibility
 
-`rustfmt` runs as a **host** process, but the source file this plugin writes
-lives at a WASI guest path (`/format-input.rs`, which is the plugin's data
-directory inside the sandbox). The host process cannot open that path, and
-`cognia:plugin/process@0.2.0`'s `exec` has no stdin channel to pipe the
-source through instead. So every call reaches rustfmt, rustfmt reports the
-input missing, and the plugin returns:
+The formatter uses `cognia:plugin@0.2.1`'s additive `process.exec-with-stdin`.
+It saves the source inside the plugin data directory, then sends the source
+bytes over stdin to host rustfmt with fixed `--emit stdout --edition 2021`
+arguments. No guest path is passed to the host process. Tool calls and workflow
+nodes return the same formatted text, diagnostics and exit code as rustfmt.
 
-```text
-HOST_UNAVAILABLE: format_rust cannot hand the source to rustfmt on this host. …
-```
+Existing v0.2.0 plugin binaries keep their original `process.exec` signature,
+record layouts, null stdin, output-size behavior and ordinary error strings.
+The host still runs those binaries without rebuilding them.
 
-It does not return an empty "formatted" string. The plugin still exercises the
-notification, filesystem, allow-list and process-capability gates end to end;
-the fix is a WIT contract change (a `stdin` field on `exec-options`), not a
-guest change. The host also starts the child with an empty environment, so
-`rustfmt` must be resolvable without your shell's `PATH`.
+The new operation accepts up to 4 MiB of binary input and 8 MiB per output
+stream, closes stdin for EOF, drains both streams concurrently, and reports
+`PAYLOAD_TOO_LARGE` rather than returning incomplete output. Execution is
+bounded by the smaller of the requested timeout and `wasm.callTimeoutMs`.
+Stopping/unloading the plugin cancels its process; timed-out children are
+killed and reaped. On Unix, cleanup covers the process group.
+
+The child's environment is cleared. In the plugin settings, `rustfmtProgram`
+can name an executable or an absolute native binary. For a rustup installation,
+run `rustup which rustfmt` and use the returned path; a rustup shim may require
+host environment that plugins deliberately do not inherit.
 
 ## Prerequisites
 
 ```bash
-rustup target add wasm32-wasip2
+rustup target add wasm32-wasip1
 cargo install --locked cargo-component
 # rustfmt is part of the default Rust toolchain
 ```
@@ -44,13 +49,13 @@ cd plugins/wasm-example-formatter
 cargo component build --release
 ```
 
-Output: `target/wasm32-wasip2/release/wasm_example_formatter.wasm`.
+Output: `target/wasm32-wasip1/release/wasm_example_formatter.wasm`.
 
 ## Install (development)
 
 ```bash
 # From plugins/wasm-example-formatter, with the `cognia` CLI in PATH:
-cognia plugin build .
+cognia plugin build
 ```
 
 That writes `target/cognia/wasm-example-formatter-0.1.0.zip`. In the desktop
@@ -64,8 +69,7 @@ After install + grant, you can:
 - **Agent tool**: ask the assistant to "format this Rust code: \`fn main() { let x = 1; }\`". It calls `format_rust` via the cognia agent runtime.
 - **Workflow node**: open **Workflows** (`/workflows`) → create a workflow → drag the **Format Rust** node onto the canvas, wire it to a string input, and run.
 
-Until the limitation above is lifted, both return the `HOST_UNAVAILABLE`
-error. Once the host can pipe stdin, the plugin returns a JSON envelope:
+Both return a JSON envelope. Non-zero rustfmt exits keep their diagnostics:
 
 ```json
 {
