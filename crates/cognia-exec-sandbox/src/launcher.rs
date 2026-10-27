@@ -650,6 +650,32 @@ fn push_secret_read_denies(out: &mut String, readable: &[String]) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn scoped_loader_grants_root_directory_without_global_content_reads() {
+        let profile = render_sbpl(&LaunchScope { restrict_readable: true, ..scope() });
+        assert!(profile.contains("(allow file-read-data (literal \"/\"))"));
+        assert!(!profile.contains("(allow file-read*)\n"));
+        assert!(!profile.contains("(subpath \"/\")"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn scoped_loader_runs_native_binary_but_cannot_read_an_ungranted_file() {
+        use std::process::Command;
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let private = root.path().join("ungranted.txt");
+        std::fs::write(&private, "not-for-the-child").unwrap();
+        let profile = render_sbpl(&LaunchScope { cwd: workspace.to_string_lossy().into_owned(), writable: vec![workspace.to_string_lossy().into_owned()], readable: vec![], network: NetworkPolicy::Off, restrict_readable: true, ..scope() });
+        let echo = Command::new("/usr/bin/sandbox-exec").args(["-p", &profile, "/bin/echo", "native-loader-ready"]).output().unwrap();
+        assert!(echo.status.success(), "{:?}", echo);
+        assert_eq!(echo.stdout, b"native-loader-ready\n");
+        let read = Command::new("/usr/bin/sandbox-exec").args(["-p", &profile, "/bin/cat"]).arg(private).output().unwrap();
+        assert!(!read.status.success());
+        assert!(read.stdout.is_empty());
+    }
+
+    #[test]
     fn network_host_validation_uses_the_shared_matcher_grammar() {
         for host in [
             "api.example.com",

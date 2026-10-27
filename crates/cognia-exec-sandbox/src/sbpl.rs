@@ -57,6 +57,9 @@ pub(crate) fn push_loadability_base(out: &mut String) {
 pub(crate) fn push_scoped_loadability_base(out: &mut String) {
     out.push_str("(allow process*)\n(allow mach-lookup)\n(allow sysctl-read)\n");
     out.push_str("(allow file-read-metadata)\n");
+    // macOS 26 dyld CacheFinder enumerates the root directory before loading.
+    // A literal permits that directory only; subtrees still require explicit grants.
+    out.push_str("(allow file-read-data (literal \"/\"))\n");
     out.push_str("(allow file-write-data (literal \"/dev/null\"))\n");
     for root in [
         "/dev",

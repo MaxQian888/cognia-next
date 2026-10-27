@@ -3,6 +3,14 @@
 use super::*;
 use crate::cua_sandbox::managed::handoff::{self, HandoffBudget, HandoffLaunch, InstalledHandoff, PreparedHandoff};
 
+pub struct HandoffTransfer<'a> {
+    pub prepared: &'a PreparedHandoff,
+    pub operation_id: &'a str,
+    pub launch: Option<&'a HandoffLaunch>,
+    pub budget: &'a HandoffBudget,
+    pub source_current: Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
 impl ManagedDesktopService {
     pub async fn cleanup_handoff_smoke(&self, p: &ManagedDesktopPrincipal, operation_id: &str) -> Result<()> {
         p.require_admin()?;
@@ -23,17 +31,16 @@ impl ManagedDesktopService {
 
     pub async fn install_handoff_smoke(
         &self, p: &ManagedDesktopPrincipal, desktop: &ManagedDesktop,
-        prepared: &PreparedHandoff, operation_id: &str, launch: Option<&HandoffLaunch>,
-        budget: &HandoffBudget, source_current: Arc<dyn Fn() -> bool + Send + Sync>,
+        transfer: HandoffTransfer<'_>,
     ) -> Result<InstalledHandoff> {
-        let row = self.handoff_target(p, desktop, operation_id).await?;
+        let row = self.handoff_target(p, desktop, transfer.operation_id).await?;
         self.validate_live_boundary(p, desktop).await?;
-        let check = source_current.clone();
+        let check = transfer.source_current.clone();
         if !tokio::task::spawn_blocking(move || check()).await.unwrap_or(false) { return Err(refused("managed_desktop_handoff_source_unavailable")); }
         let secret = self.secrets.desktop(&desktop.id).await?;
         let bootstrap = super::super::provider::bootstrap_request(&row, &secret)?;
-        let bounded = HandoffBudget { deadline_at_ms: budget.deadline_at_ms.min(row.desktop.deadline_at), cancel: budget.cancel.clone() };
-        self.run_handoff_transfer(p, desktop, prepared, operation_id, launch, &bounded, source_current, bootstrap).await
+        let bounded = HandoffBudget { deadline_at_ms: transfer.budget.deadline_at_ms.min(row.desktop.deadline_at), cancel: transfer.budget.cancel.clone() };
+        self.run_handoff_transfer(p, desktop, HandoffTransfer { budget: &bounded, ..transfer }, bootstrap).await
     }
 
     async fn handoff_target(&self, p: &ManagedDesktopPrincipal, desktop: &ManagedDesktop, operation_id: &str) -> Result<DesktopRecord> {
@@ -47,9 +54,10 @@ impl ManagedDesktopService {
         Ok(row)
     }
 
-    async fn run_handoff_transfer(&self, p: &ManagedDesktopPrincipal, desktop: &ManagedDesktop, prepared: &PreparedHandoff, operation_id: &str, launch: Option<&HandoffLaunch>, bounded: &HandoffBudget, source_current: Arc<dyn Fn() -> bool + Send + Sync>, bootstrap: cognia_e2b::envd::DesktopBootstrap) -> Result<InstalledHandoff> {
+    async fn run_handoff_transfer(&self, p: &ManagedDesktopPrincipal, desktop: &ManagedDesktop, transfer: HandoffTransfer<'_>, bootstrap: cognia_e2b::envd::DesktopBootstrap) -> Result<InstalledHandoff> {
+        let HandoffTransfer { prepared, operation_id, launch, budget: bounded, source_current } = transfer;
         let result = {
-        let transfer = handoff::install_on_desktop(&bootstrap, prepared, operation_id, launch, &bounded);
+        let transfer = handoff::install_on_desktop(&bootstrap, prepared, operation_id, launch, bounded);
         tokio::pin!(transfer);
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
         let result = loop {
@@ -91,7 +99,6 @@ impl ManagedDesktopService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     #[tokio::test]
     async fn only_the_exact_smoke_source_and_generation_can_receive_a_transfer() {
         let fixture = super::super::tests::Fixture::new();

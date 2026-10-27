@@ -24,6 +24,21 @@ use std::{
 const LEASE_MS: i64 = cognia_remote_desktop::control::LEASE_MS;
 const FRAME_MS: i64 = cognia_remote_desktop::control::FRAME_MS;
 
+/// A lease proof is always checked as a token/fence pair.
+pub struct ManagedControlLeaseRef<'a> {
+    pub token: &'a str,
+    pub fence: u64,
+}
+
+/// Input remains bound to the observed frame and the lease that produced it.
+pub struct ManagedControlInput<'a> {
+    pub token: &'a str,
+    pub fence: u64,
+    pub frame_id: &'a str,
+    pub point: Option<Point>,
+    pub action: UiAction,
+}
+
 /// Implemented by the authenticated Host, checking its live device/owner
 /// authority store. A captured request context alone is not a revocation check.
 #[async_trait]
@@ -340,12 +355,14 @@ async fn smoke_input(
             p,
             &desktop.id,
             desktop.generation,
-            &lease.token,
-            lease.fence,
-            &frame.frame_id,
-            Some(Point { x: 0, y: 0 }),
-            UiAction::Scroll {
-                opts: crate::automation::types::ScrollOpts { dx: 0, dy: 0 },
+            ManagedControlInput {
+                token: &lease.token,
+                fence: lease.fence,
+                frame_id: &frame.frame_id,
+                point: Some(Point { x: 0, y: 0 }),
+                action: UiAction::Scroll {
+                    opts: crate::automation::types::ScrollOpts { dx: 0, dy: 0 },
+                },
             },
             authority,
             true,
@@ -367,8 +384,10 @@ async fn fresh_smoke_input(
             p,
             &desktop.id,
             desktop.generation,
-            &lease.token,
-            lease.fence,
+            ManagedControlLeaseRef {
+                token: &lease.token,
+                fence: lease.fence,
+            },
             authority,
             true,
         )
@@ -527,8 +546,10 @@ async fn control_smoke_steps(
                 p,
                 &desktop.id,
                 desktop.generation,
-                &lease.token,
-                lease.fence,
+                ManagedControlLeaseRef {
+                    token: &lease.token,
+                    fence: lease.fence,
+                },
                 &authority,
                 true,
             )
@@ -545,8 +566,10 @@ async fn control_smoke_steps(
                 p,
                 &desktop.id,
                 desktop.generation,
-                &lease.token,
-                lease.fence,
+                ManagedControlLeaseRef {
+                    token: &lease.token,
+                    fence: lease.fence,
+                },
                 &authority,
                 true,
             )
@@ -574,8 +597,10 @@ async fn control_smoke_steps(
                 p,
                 &desktop.id,
                 desktop.generation,
-                &lease.token,
-                lease.fence,
+                ManagedControlLeaseRef {
+                    token: &lease.token,
+                    fence: lease.fence,
+                },
                 &authority,
                 true,
             )
@@ -682,8 +707,10 @@ async fn control_smoke_steps(
                 &second,
                 &desktop.id,
                 desktop.generation,
-                &second_lease.token,
-                second_lease.fence,
+                ManagedControlLeaseRef {
+                    token: &second_lease.token,
+                    fence: second_lease.fence,
+                },
                 &authority,
                 true,
             )
@@ -779,8 +806,10 @@ async fn control_smoke_steps(
                 p,
                 &desktop.id,
                 desktop.generation,
-                &lease.token,
-                lease.fence,
+                ManagedControlLeaseRef {
+                    token: &lease.token,
+                    fence: lease.fence,
+                },
                 &authority,
                 true,
             )
@@ -1127,13 +1156,12 @@ impl ManagedDesktopService {
         p: &ManagedDesktopPrincipal,
         id: &str,
         generation: u64,
-        token: &str,
-        fence: u64,
+        lease: ManagedControlLeaseRef<'_>,
         authority: &dyn ManagedControlAuthority,
         _permit: &ExplicitPaidSmokeAuthorization,
     ) -> Result<ManagedControlLease> {
         self.require_control_smoke(p, id, generation).await?;
-        self.control_renew_inner(p, id, generation, token, fence, authority, true)
+        self.control_renew_inner(p, id, generation, lease, authority, true)
             .await
     }
     pub async fn control_input_smoke(
@@ -1141,19 +1169,13 @@ impl ManagedDesktopService {
         p: &ManagedDesktopPrincipal,
         id: &str,
         generation: u64,
-        token: &str,
-        fence: u64,
-        frame_id: &str,
-        point: Option<Point>,
-        action: UiAction,
+        input: ManagedControlInput<'_>,
         authority: &dyn ManagedControlAuthority,
         _permit: &ExplicitPaidSmokeAuthorization,
     ) -> Result<()> {
         self.require_control_smoke(p, id, generation).await?;
-        self.control_input_inner(
-            p, id, generation, token, fence, frame_id, point, action, authority, true,
-        )
-        .await
+        self.control_input_inner(p, id, generation, input, authority, true)
+            .await
     }
     async fn require_control_smoke(
         &self,
@@ -1326,19 +1348,26 @@ impl ManagedDesktopService {
         fence: u64,
         authority: &dyn ManagedControlAuthority,
     ) -> Result<ManagedControlLease> {
-        self.control_renew_inner(p, id, generation, token, fence, authority, false)
-            .await
+        self.control_renew_inner(
+            p,
+            id,
+            generation,
+            ManagedControlLeaseRef { token, fence },
+            authority,
+            false,
+        )
+        .await
     }
     async fn control_renew_inner(
         &self,
         p: &ManagedDesktopPrincipal,
         id: &str,
         generation: u64,
-        token: &str,
-        fence: u64,
+        lease: ManagedControlLeaseRef<'_>,
         authority: &dyn ManagedControlAuthority,
         smoke: bool,
     ) -> Result<ManagedControlLease> {
+        let ManagedControlLeaseRef { token, fence } = lease;
         self.scoped(p, id, generation).await?;
         let slot = self.control_slot(id, generation).await;
         let mut c = slot.lock().await;
@@ -1398,31 +1427,28 @@ impl ManagedDesktopService {
         p: &ManagedDesktopPrincipal,
         id: &str,
         generation: u64,
-        token: &str,
-        fence: u64,
-        frame_id: &str,
-        point: Option<Point>,
-        action: UiAction,
+        input: ManagedControlInput<'_>,
         authority: &dyn ManagedControlAuthority,
     ) -> Result<()> {
-        self.control_input_inner(
-            p, id, generation, token, fence, frame_id, point, action, authority, false,
-        )
-        .await
+        self.control_input_inner(p, id, generation, input, authority, false)
+            .await
     }
     async fn control_input_inner(
         &self,
         p: &ManagedDesktopPrincipal,
         id: &str,
         generation: u64,
-        token: &str,
-        fence: u64,
-        frame_id: &str,
-        point: Option<Point>,
-        action: UiAction,
+        input: ManagedControlInput<'_>,
         authority: &dyn ManagedControlAuthority,
         smoke: bool,
     ) -> Result<()> {
+        let ManagedControlInput {
+            token,
+            fence,
+            frame_id,
+            point,
+            action,
+        } = input;
         let input_started = Instant::now();
         p.require_human()?;
         self.scoped(p, id, generation).await?;
@@ -1849,12 +1875,14 @@ mod tests {
                     p,
                     &row.id,
                     row.generation,
-                    "token",
-                    1,
-                    "frame",
-                    Some(Point { x: 0, y: 0 }),
-                    UiAction::Scroll {
-                        opts: crate::automation::types::ScrollOpts { dx: 0, dy: 0 }
+                    ManagedControlInput {
+                        token: "token",
+                        fence: 1,
+                        frame_id: "frame",
+                        point: Some(Point { x: 0, y: 0 }),
+                        action: UiAction::Scroll {
+                            opts: crate::automation::types::ScrollOpts { dx: 0, dy: 0 }
+                        }
                     },
                     &authority,
                     &permit
@@ -1921,8 +1949,10 @@ mod tests {
                 p,
                 &row.id,
                 row.generation,
-                &lease.token,
-                lease.fence,
+                ManagedControlLeaseRef {
+                    token: &lease.token,
+                    fence: lease.fence,
+                },
                 &authority,
                 true,
             )
@@ -2278,11 +2308,13 @@ mod tests {
                 p,
                 &row.id,
                 row.generation,
-                &lease.token,
-                lease.fence,
-                &frame.frame_id,
-                Some(Point { x: 20, y: 1 }),
-                click(),
+                ManagedControlInput {
+                    token: &lease.token,
+                    fence: lease.fence,
+                    frame_id: &frame.frame_id,
+                    point: Some(Point { x: 20, y: 1 }),
+                    action: click()
+                },
                 &authority,
                 true
             )
@@ -2293,11 +2325,13 @@ mod tests {
                 p,
                 &row.id,
                 row.generation,
-                &lease.token,
-                lease.fence,
-                &frame.frame_id,
-                Some(Point { x: 1, y: 1 }),
-                click(),
+                ManagedControlInput {
+                    token: &lease.token,
+                    fence: lease.fence,
+                    frame_id: &frame.frame_id,
+                    point: Some(Point { x: 1, y: 1 }),
+                    action: click(),
+                },
                 &authority,
                 true,
             )
@@ -2308,11 +2342,13 @@ mod tests {
                 p,
                 &row.id,
                 row.generation,
-                &lease.token,
-                lease.fence,
-                &frame.frame_id,
-                Some(Point { x: 1, y: 1 }),
-                click(),
+                ManagedControlInput {
+                    token: &lease.token,
+                    fence: lease.fence,
+                    frame_id: &frame.frame_id,
+                    point: Some(Point { x: 1, y: 1 }),
+                    action: click()
+                },
                 &authority,
                 true
             )
@@ -2324,11 +2360,13 @@ mod tests {
                 p,
                 &row.id,
                 row.generation,
-                &lease.token,
-                lease.fence,
-                &later_frame.frame_id,
-                Some(Point { x: 1, y: 1 }),
-                click(),
+                ManagedControlInput {
+                    token: &lease.token,
+                    fence: lease.fence,
+                    frame_id: &later_frame.frame_id,
+                    point: Some(Point { x: 1, y: 1 }),
+                    action: click()
+                },
                 &authority,
                 true
             )
@@ -2385,13 +2423,15 @@ mod tests {
             p,
             &row.id,
             row.generation,
-            &lease.token,
-            lease.fence,
-            &frame.frame_id,
-            Some(Point { x: 1, y: 1 }),
-            UiAction::Click {
-                button: None,
-                count: None,
+            ManagedControlInput {
+                token: &lease.token,
+                fence: lease.fence,
+                frame_id: &frame.frame_id,
+                point: Some(Point { x: 1, y: 1 }),
+                action: UiAction::Click {
+                    button: None,
+                    count: None,
+                },
             },
             &authority,
             true,
@@ -2444,13 +2484,15 @@ mod tests {
             p,
             &row.id,
             row.generation,
-            &lease.token,
-            lease.fence,
-            &frame.frame_id,
-            Some(Point { x: 1, y: 1 }),
-            UiAction::Click {
-                button: None,
-                count: None,
+            ManagedControlInput {
+                token: &lease.token,
+                fence: lease.fence,
+                frame_id: &frame.frame_id,
+                point: Some(Point { x: 1, y: 1 }),
+                action: UiAction::Click {
+                    button: None,
+                    count: None,
+                },
             },
             &authority,
             true,
@@ -2568,11 +2610,13 @@ mod tests {
                     p,
                     &row.id,
                     row.generation,
-                    &lease.token,
-                    lease.fence,
-                    &frame.frame_id,
-                    Some(Point { x: 1, y: 1 }),
-                    action,
+                    ManagedControlInput {
+                        token: &lease.token,
+                        fence: lease.fence,
+                        frame_id: &frame.frame_id,
+                        point: Some(Point { x: 1, y: 1 }),
+                        action
+                    },
                     &authority,
                     true
                 )
@@ -2600,13 +2644,15 @@ mod tests {
             p,
             &row.id,
             row.generation,
-            &lease.token,
-            lease.fence,
-            &frame.frame_id,
-            Some(Point { x: 1, y: 1 }),
-            UiAction::Click {
-                button: Some(crate::automation::types::MouseButton::Middle),
-                count: Some(2),
+            ManagedControlInput {
+                token: &lease.token,
+                fence: lease.fence,
+                frame_id: &frame.frame_id,
+                point: Some(Point { x: 1, y: 1 }),
+                action: UiAction::Click {
+                    button: Some(crate::automation::types::MouseButton::Middle),
+                    count: Some(2),
+                },
             },
             &authority,
             true,
@@ -2640,13 +2686,15 @@ mod tests {
                 p,
                 &row.id,
                 row.generation,
-                &lease.token,
-                lease.fence,
-                &frame.frame_id,
-                Some(Point { x: 1, y: 1 }),
-                UiAction::Click {
-                    button: None,
-                    count: None,
+                ManagedControlInput {
+                    token: &lease.token,
+                    fence: lease.fence,
+                    frame_id: &frame.frame_id,
+                    point: Some(Point { x: 1, y: 1 }),
+                    action: UiAction::Click {
+                        button: None,
+                        count: None,
+                    },
                 },
                 &authority,
                 true,
@@ -2689,13 +2737,15 @@ mod tests {
             p,
             &row.id,
             row.generation,
-            &lease.token,
-            lease.fence,
-            &frame.frame_id,
-            Some(Point { x: 1, y: 1 }),
-            UiAction::Click {
-                button: Some(crate::automation::types::MouseButton::Middle),
-                count: Some(2),
+            ManagedControlInput {
+                token: &lease.token,
+                fence: lease.fence,
+                frame_id: &frame.frame_id,
+                point: Some(Point { x: 1, y: 1 }),
+                action: UiAction::Click {
+                    button: Some(crate::automation::types::MouseButton::Middle),
+                    count: Some(2),
+                },
             },
             &authority,
             true,

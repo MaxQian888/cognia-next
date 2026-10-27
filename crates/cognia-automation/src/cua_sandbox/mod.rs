@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 pub mod desktop_session;
 pub mod file_transfer;
 pub mod lifecycle;
+pub mod lume;
 pub mod managed;
 pub mod protocol;
 pub mod registry;

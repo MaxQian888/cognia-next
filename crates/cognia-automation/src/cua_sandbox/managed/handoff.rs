@@ -438,13 +438,14 @@ async fn copy_recovery(source: &RecoverySource, destination: &Path, budget: &Han
     Ok(digest)
 }
 fn bundle_prerequisites(header: &[u8]) -> Result<Vec<String>> {
-    let mut lines = header.split(|b| *b == b'\n');
+    let end = header.windows(2).position(|bytes| bytes == b"\n\n")
+        .ok_or("managed_handoff_bundle_invalid")?;
+    let mut lines = header[..end].split(|b| *b == b'\n');
     if !matches!(lines.next(), Some(b"# v2 git bundle") | Some(b"# v3 git bundle")) {
         return Err("managed_handoff_bundle_invalid".into());
     }
     let mut prerequisites = BTreeSet::new();
     for line in lines {
-        if line.is_empty() { return Ok(prerequisites.into_iter().collect()); }
         if let Some(line) = line.strip_prefix(b"-") {
             let id = std::str::from_utf8(line.split(|b| *b == b' ').next().unwrap_or_default())
                 .map_err(|_| "managed_handoff_bundle_invalid")?;
@@ -452,7 +453,7 @@ fn bundle_prerequisites(header: &[u8]) -> Result<Vec<String>> {
             prerequisites.insert(id.to_string());
         }
     }
-    Err("managed_handoff_bundle_invalid".into())
+    Ok(prerequisites.into_iter().collect())
 }
 
 struct StagingReservation {
@@ -1194,7 +1195,7 @@ mod tests {
         let header = format!("# v2 git bundle\n-{sha} base\n{} refs/heads/task\n\nPACK", "b".repeat(40));
         assert_eq!(bundle_prerequisites(header.as_bytes()).unwrap(), vec![sha]);
         for bad in ["garbage\n\n", "# v2 git bundle\n-../../x bad\n\n", "# v2 git bundle\n"] {
-            assert!(bundle_prerequisites(bad.as_bytes()).is_err());
+            assert!(bundle_prerequisites(bad.as_bytes()).is_err(), "{bad:?}");
         }
     }
     #[tokio::test]

@@ -278,24 +278,13 @@ async fn run(
     });
 }
 
-async fn accept_viewer(
-    listener: &TcpListener,
-    ticket: &str,
-    ticket_ttl: Duration,
-) -> Result<WebSocketStream<TcpStream>> {
-    let expected = format!("/rd/{ticket}");
-    let deadline = tokio::time::Instant::now() + ticket_ttl;
-    for _ in 0..MAX_UPGRADE_ATTEMPTS {
-        let (stream, peer) = tokio::time::timeout_at(deadline, listener.accept())
-            .await
-            .map_err(|_| RemoteDesktopError::new("remote_desktop_ticket_expired"))?
-            .map_err(|_| RemoteDesktopError::new("remote_desktop_bridge_unavailable"))?;
-        if !peer.ip().is_loopback() {
-            continue;
-        }
-        let expected = expected.clone();
-        let callback = move |request: &Request, mut response: Response| {
-            if !constant_time_eq(request.uri().path().as_bytes(), expected.as_bytes()) {
+struct ViewerHandshake {
+    expected_path: String,
+}
+
+impl tokio_tungstenite::tungstenite::handshake::server::Callback for ViewerHandshake {
+    fn on_request(self, request: &Request, mut response: Response) -> std::result::Result<Response, ErrorResponse> {
+            if !constant_time_eq(request.uri().path().as_bytes(), self.expected_path.as_bytes()) {
                 return Err(refuse(StatusCode::NOT_FOUND));
             }
             let origin = request
@@ -318,7 +307,25 @@ async fn accept_viewer(
                     .insert("sec-websocket-protocol", HeaderValue::from_static("binary"));
             }
             Ok(response)
-        };
+    }
+}
+
+async fn accept_viewer(
+    listener: &TcpListener,
+    ticket: &str,
+    ticket_ttl: Duration,
+) -> Result<WebSocketStream<TcpStream>> {
+    let expected = format!("/rd/{ticket}");
+    let deadline = tokio::time::Instant::now() + ticket_ttl;
+    for _ in 0..MAX_UPGRADE_ATTEMPTS {
+        let (stream, peer) = tokio::time::timeout_at(deadline, listener.accept())
+            .await
+            .map_err(|_| RemoteDesktopError::new("remote_desktop_ticket_expired"))?
+            .map_err(|_| RemoteDesktopError::new("remote_desktop_bridge_unavailable"))?;
+        if !peer.ip().is_loopback() {
+            continue;
+        }
+        let callback = ViewerHandshake { expected_path: expected.clone() };
         let config = WebSocketConfig::default()
             .max_message_size(Some(MAX_FRAME_BYTES))
             .max_frame_size(Some(MAX_FRAME_BYTES));

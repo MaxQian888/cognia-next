@@ -53,6 +53,8 @@ pub struct StreamGrant {
     pub viewer_id: String,
     pub url: String,
     pub role: StreamRole,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_version: Option<u8>,
 }
 
 /// One connected Selkies page, as `GET /api/sessions` lists it.
@@ -282,6 +284,7 @@ impl StreamState {
             viewer_id: viewer.id.clone(),
             url: format!("http://127.0.0.1:{}/?token={}", endpoint.port, viewer.token),
             role: viewer.role,
+            health_version: endpoint.health_version,
         })
     }
 
@@ -670,6 +673,7 @@ pub(crate) mod testing {
         StreamEndpoint {
             port: 49_000,
             master_token: "m".repeat(64),
+            health_version: Some(1),
         }
     }
 
@@ -710,10 +714,31 @@ mod tests {
             endpoint: Some(StreamEndpoint {
                 port: 49_000,
                 master_token: "m".repeat(64),
+                health_version: Some(1),
             }),
             timing: fast(),
             ..StreamState::default()
         }
+    }
+
+    #[tokio::test]
+    async fn grants_advertise_only_the_images_supported_health_protocol() {
+        let api = FakeSelkies::default();
+        let mut current = state();
+        let viewer = current.open(&api).await.unwrap();
+        assert_eq!(viewer.health_version, Some(1));
+        assert_eq!(serde_json::to_value(&viewer).unwrap()["healthVersion"], 1);
+        let controller = current.claim(&api, &viewer.viewer_id).await.unwrap();
+        assert_eq!(controller.health_version, Some(1));
+
+        let mut legacy = state();
+        legacy.endpoint.as_mut().unwrap().health_version = None;
+        let viewer = legacy.open(&FakeSelkies::default()).await.unwrap();
+        assert_eq!(viewer.health_version, None);
+        assert!(serde_json::to_value(viewer)
+            .unwrap()
+            .get("healthVersion")
+            .is_none());
     }
 
     fn roles(table: &Value) -> Vec<String> {

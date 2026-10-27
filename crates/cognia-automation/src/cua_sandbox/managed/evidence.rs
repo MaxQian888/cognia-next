@@ -348,14 +348,13 @@ impl EvidenceStore {
                 self.read_artifact(&state, id, artifact)?;
             }
         }
-        if input.outcome == AcceptanceOutcome::Passed {
-            if record.evidence_limit_reached || input.criteria.len() != record.binding.criteria.len()
+        if input.outcome == AcceptanceOutcome::Passed
+            && (record.evidence_limit_reached || input.criteria.len() != record.binding.criteria.len()
                 || input.criteria.iter().any(|r| r.outcome != CriterionOutcome::Passed)
                 || record.binding.criteria.iter().any(|criterion| criterion.required_evidence && !input.criteria.iter()
-                    .any(|r| r.criterion_id == criterion.id && !r.artifact_ids.is_empty())) {
+                    .any(|r| r.criterion_id == criterion.id && !r.artifact_ids.is_empty()))) {
                 return Err("acceptance_pass_requires_complete_evidence".into());
             }
-        }
         if input.outcome == AcceptanceOutcome::Failed && !input.criteria.iter().any(|c| c.outcome == CriterionOutcome::Failed) {
             return Err("acceptance_failed_criterion_required".into());
         }

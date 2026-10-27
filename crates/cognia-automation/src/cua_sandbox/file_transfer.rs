@@ -103,11 +103,13 @@ pub(crate) async fn execute(
     let output = lifecycle::supervised_exec_with_limits(
         container_id,
         &argv,
-        None,
-        &BTreeMap::new(),
-        Some(&request),
+        lifecycle::ExecContext {
+            cwd: None,
+            env: &BTreeMap::new(),
+            stdin: Some(&request),
+            user: exec_user,
+        },
         Duration::from_secs(30),
-        exec_user,
         MAX_WIRE_BYTES,
         MAX_WIRE_BYTES,
     )

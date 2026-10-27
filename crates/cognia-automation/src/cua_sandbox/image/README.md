@@ -68,7 +68,7 @@ These implementation paths remain dormant until exact-image qualification.
 
 ## Selkies variant (ADR-0234 Phase 4)
 
-`selkies/` builds `cognia-cua-desktop:0.3.46-2-selkies-2.0.0` on top of the
+`selkies/` builds `cognia-cua-desktop:0.3.46-2-selkies-2.0.0-2` on top of the
 built-in image. A sandbox only gets it when the user turns on its Selkies switch
 after the licence notice. It is built on first start from the public `selkies==2.0.0`,
 `pixelflux==2.1.0` and `pcmflux==2.1.0` wheels. The `pixelflux` wheel bundles GPL
@@ -81,8 +81,18 @@ Selkies once `:99` answers:
 - **Environment.** Selkies runs with an explicit environment holding only the
   display variables and `SELKIES_MASTER_TOKEN`. The computer-server credential
   never reaches it.
-- **Restarts.** The startup restarts Selkies with backoff, at most five times,
-  and keeps the desktop running if Selkies gives up.
+- **Restarts.** Selkies is retried after process exits and transient launch
+  failures with interruptible exponential backoff capped at 30 seconds. A
+  stable 60-second run resets backoff; there is no lifetime retry cutoff.
+  Stopping the sandbox prevents further starts and terminates its process group.
+- **Stream health.** The variant advertises `cognia.cua.selkies.health=1`.
+  Its stock entry module and runtime core are SHA256-pinned before the build
+  instruments socket and decoder/output progress. The bridge reports only
+  versioned liveness to its embedding parent; it never forwards input,
+  credentials, URLs or pixels. The parent checks the iframe source, exact
+  origin and per-mount nonce. An idle image is healthy; outstanding video with
+  no decoder/output progress is a failure. Recovery releases control first
+  and reopens view-only; it never automatically takes control again.
 - **Network.** It listens on container port 8080. Lifecycle publishes that port
   on host loopback only, and passes the master token as
   `COGNIA_SELKIES_MASTER_TOKEN` by name, the same way as the auth token.
@@ -105,7 +115,7 @@ before the lease is released or the agent acts.
 against code running as `cua`: that code can already reach the X display. It
 keeps other processes on the host from using the published port.
 
-Build by hand: `docker build --build-arg BASE_IMAGE=cognia-cua-desktop:0.3.46-2 -t cognia-cua-desktop:0.3.46-2-selkies-2.0.0 selkies`
+Build by hand: `docker build --build-arg BASE_IMAGE=cognia-cua-desktop:0.3.46-2 -t cognia-cua-desktop:0.3.46-2-selkies-2.0.0-2 selkies`
 
 **Package mirror.** Both Dockerfiles take an optional build argument for a PyPI
 mirror: `PIP_INDEX_URL` for the base, `UV_DEFAULT_INDEX` for the variant. Unset,
@@ -117,3 +127,13 @@ the image history), its builds pass it on as both. For example
 Sources verified 2026-10-18: https://pypi.org/project/selkies/2.0.0/ ,
 https://docs.selkies.io/latest/secure-mode ,
 https://github.com/selkies-project/pixelflux/blob/1ebcb0a10a96caeba20e1ad09be47cc018a55238/LICENSES.md
+
+**Existing containers.** The repaired variant is tagged
+`cognia-cua-desktop:0.3.46-2-selkies-2.0.0-2`. Existing running containers keep
+their immutable image and are never replaced automatically. Old images that do
+not advertise health protocol 1 keep their stream and show an upgrade notice;
+the client does not impose unsupported heartbeat deadlines. Back up any files
+that must survive, then recreate the sandbox with the revised variant to obtain
+both the guest bridge and supervisor recovery. Recreating a saved configuration
+with the old built-in Selkies tag resolves to the repaired recipe. Custom images
+must explicitly include the compatible bridge before declaring the health label.

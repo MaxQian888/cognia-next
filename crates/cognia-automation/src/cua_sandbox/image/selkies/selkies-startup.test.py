@@ -2,6 +2,7 @@ import importlib.util
 import pathlib
 import signal
 import sys
+import threading
 import types
 import unittest
 from unittest import mock
@@ -15,13 +16,15 @@ TOKEN = "ab" * 32
 
 
 class FakeChild:
-    def __init__(self, exits=True):
+    def __init__(self, exits=True, on_wait=lambda: None):
         self.pid = 4242
         self.returncode = 0 if exits else None
         self.waited = 0
+        self.on_wait = on_wait
 
     def wait(self):
         self.waited += 1
+        self.on_wait()
         return self.returncode
 
     def poll(self):
@@ -90,21 +93,100 @@ class SupervisorTests(unittest.TestCase):
 
     def test_selkies_starts_once_the_display_answers_with_its_own_session(self):
         answers = iter([False, False, True])
-        popen = mock.Mock(side_effect=[FakeChild()] * (startup.MAX_RESTARTS + 1))
+        child = FakeChild()
+        popen = mock.Mock(return_value=child)
         supervisor = self.supervisor(popen, ready=lambda: next(answers))
+        child.on_wait = supervisor.stop
         supervisor.run()
         argv = popen.call_args.args[0]
         options = popen.call_args.kwargs
         self.assertEqual(argv[0], startup.SELKIES)
         self.assertTrue(options["start_new_session"])
         self.assertEqual(options["env"]["SELKIES_MASTER_TOKEN"], TOKEN)
-        # Repeated exits stop after the restart budget; the desktop stays up.
-        self.assertEqual(popen.call_count, startup.MAX_RESTARTS + 1)
+        self.assertEqual(popen.call_count, 1)
 
     def test_a_display_that_never_answers_starts_nothing(self):
         popen = mock.Mock()
         self.supervisor(popen, ready=lambda: False).run()
         popen.assert_not_called()
+
+    def test_recovery_continues_after_six_exits_with_capped_backoff(self):
+        delays = []
+        supervisor = None
+        children = []
+
+        def exited():
+            if len(children) == 10:
+                supervisor.stop()
+
+        def spawn(*_args, **_kwargs):
+            child = FakeChild(on_wait=exited)
+            children.append(child)
+            return child
+
+        supervisor = self.supervisor(mock.Mock(side_effect=spawn))
+        supervisor._sleep = delays.append
+        supervisor.run()
+        self.assertEqual(len(children), 10)
+        self.assertEqual(delays, [1, 2, 4, 8, 16, 30, 30, 30, 30])
+
+    def test_transient_spawn_failure_is_retried(self):
+        supervisor = self.supervisor(mock.Mock())
+        child = FakeChild(on_wait=supervisor.stop)
+        supervisor._popen.side_effect = [OSError("temporary process resource limit"), child]
+        supervisor.run()
+        self.assertEqual(supervisor._popen.call_count, 2)
+
+    def test_a_stable_run_resets_the_backoff(self):
+        clock = [0]
+        durations = iter([0, 0, 70, 0])
+        delays = []
+        children = []
+        supervisor = None
+
+        def exited():
+            clock[0] += next(durations)
+            if len(children) == 4:
+                supervisor.stop()
+
+        def spawn(*_args, **_kwargs):
+            child = FakeChild(on_wait=exited)
+            children.append(child)
+            return child
+
+        supervisor = startup.StreamSupervisor(
+            TOKEN, {"DISPLAY": ":99"}, popen=spawn, ready=lambda: True,
+            sleep=delays.append, now=lambda: clock[0], killpg=mock.Mock())
+        supervisor.run()
+        self.assertEqual(len(children), 4)
+        self.assertEqual(delays, [1, 2, 1])
+
+    def test_stop_interrupts_restart_backoff_without_another_spawn(self):
+        exited = threading.Event()
+        child = FakeChild(on_wait=exited.set)
+        popen = mock.Mock(return_value=child)
+        supervisor = startup.StreamSupervisor(
+            TOKEN, {"DISPLAY": ":99"}, popen=popen, ready=lambda: True, killpg=mock.Mock())
+        thread = threading.Thread(target=supervisor.run)
+        thread.start()
+        try:
+            self.assertTrue(exited.wait(1))
+            supervisor.stop()
+            thread.join(1)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(popen.call_count, 1)
+        finally:
+            supervisor.stop()
+            thread.join(3)
+
+    def test_shutdown_polling_still_waits_after_the_stop_event_is_set(self):
+        supervisor = self.supervisor(mock.Mock(), clock=iter([0, 0, 1, 2, 3]))
+        supervisor._child = FakeChild(exits=False)
+        supervisor._sleep = mock.Mock()
+        with mock.patch.object(startup.time, "sleep") as shutdown_sleep:
+            supervisor.stop()
+        self.assertEqual(shutdown_sleep.call_args_list, [mock.call(0.05)] * 3)
+        supervisor._sleep.assert_not_called()
 
     def test_stop_terminates_the_process_group(self):
         child = FakeChild(exits=False)

@@ -66,6 +66,10 @@ pub(crate) struct RemoteDesktop {
     control: ControlLeaseCore,
     // Cancellation leaves quarantine resident until cleanup is confirmed.
     cleanup_unconfirmed: bool,
+    // A Lume shell may intentionally retain detached work in its exclusive
+    // execution group. Further Agent calls may continue, but human control
+    // needs the VM Stop barrier first.
+    pub(crate) retained_execution_group: bool,
     pub(crate) held_mouse_buttons: Vec<MouseButton>,
     pub(crate) held_keys: Vec<String>,
     pub(crate) preempt: Arc<DesktopPreemption>,
@@ -142,6 +146,7 @@ impl RemoteDesktop {
     }
     pub(crate) fn confirm_quiescence(&mut self) {
         self.cleanup_unconfirmed = false;
+        self.retained_execution_group = false;
         self.held_mouse_buttons.clear();
         self.held_keys.clear();
     }
@@ -187,6 +192,12 @@ impl RemoteDesktop {
     pub(crate) fn require_controller(&mut self, token: &str) -> Result<()> {
         self.require_control_lease(token, self.control.fence)
     }
+    pub(crate) fn controller_expiry(&self) -> Option<i64> {
+        self.control
+            .lease
+            .as_ref()
+            .map(|lease| lease.dto.expires_at)
+    }
     pub(crate) fn require_control_lease(&mut self, token: &str, fence: u64) -> Result<()> {
         self.require_quiescent()?;
         self.expire();
@@ -198,6 +209,9 @@ impl RemoteDesktop {
     }
     fn acquire(&mut self) -> Result<ControlLease> {
         self.require_quiescent()?;
+        if self.retained_execution_group {
+            return Err(denied("Lume may still have background Agent work; stop and reconnect the VM before taking human control"));
+        }
         self.expire();
         if self.control.lease.is_some() {
             return Err(denied("sandbox desktop is already under human control"));
@@ -782,6 +796,14 @@ pub(crate) fn button_name(button: MouseButton) -> &'static str {
 mod tests {
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn retained_lume_work_allows_agent_continuation_but_requires_stop_before_human_control() {
+        let mut desktop = RemoteDesktop { retained_execution_group: true, ..Default::default() };
+        assert!(desktop.require_agent().is_ok());
+        assert!(desktop.acquire().is_err());
+        desktop.confirm_quiescence();
+        assert!(desktop.acquire().is_ok());
+    }
     #[tokio::test]
     async fn upload_admission_must_revalidate_a_lease_that_expires_before_dispatch() {
         let mut desktop = RemoteDesktop::default();

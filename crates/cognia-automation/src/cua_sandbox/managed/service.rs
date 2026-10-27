@@ -1,6 +1,7 @@
 //! Host authority and crash-safe paid-operation state machine (ADR-0233).
 #[path = "handoff_service.rs"]
 mod handoff_service;
+pub use handoff_service::HandoffTransfer;
 #[path = "control.rs"]
 pub mod control;
 #[path = "smoke.rs"]
@@ -2268,7 +2269,7 @@ pub(super) mod tests {
         assert_eq!(receipt.evidence_version, 2);
         assert!(receipt.workload_evidence.is_none());
         assert!(!receipt.private_egress_probe_no_response);
-        assert_eq!(receipt.provider_root_observation.as_ref().unwrap().observations["metadata"], true);
+        assert!(receipt.provider_root_observation.as_ref().unwrap().observations["metadata"]);
         // Even historically successful v1 booleans never qualify the new profile.
         let mut legacy = serde_json::to_value(&receipt).unwrap();
         legacy.as_object_mut().unwrap().remove("evidenceVersion");

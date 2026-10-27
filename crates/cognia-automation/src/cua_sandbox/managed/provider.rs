@@ -584,7 +584,7 @@ impl ManagedDesktopProvider for E2bDesktopProvider {
             .await
             .map_err(|_| retryable("managed_desktop_health_unavailable"))?;
         if !response.status().is_success() {
-            if matches!(response.status().as_u16(), 502 | 503 | 504) {
+            if matches!(response.status().as_u16(), 502..=504) {
                 return Err(retryable("managed_desktop_health_unavailable"));
             }
             return Err(refused("managed_desktop_health_rejected"));
@@ -617,7 +617,7 @@ fn require_auth_rejection(status: u16) -> Result<()> {
         // A process-start acknowledgement precedes the guest listener. Edge
         // upstream failures prove neither access nor denial: retry readiness
         // within the existing deadline, without restarting or extending it.
-        502 | 503 | 504 => Err(retryable("managed_desktop_health_unavailable")),
+        502..=504 => Err(retryable("managed_desktop_health_unavailable")),
         _ => Err(refused("managed_desktop_unauthenticated_endpoint")),
     }
 }
@@ -825,6 +825,7 @@ mod tests {
     async fn exact_build_response_cannot_spend_after_admission_is_revoked() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default()).unwrap();
         let fixture = super::super::service::tests::Fixture::new();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let provider = E2bDesktopProvider {

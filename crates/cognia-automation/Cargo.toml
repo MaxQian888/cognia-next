@@ -37,10 +37,14 @@ cognia-secrets = { path = "../cognia-secrets" }
 aes-gcm = { workspace = true, features = ["aes"] }
 cognia-e2b = { path = "../cognia-e2b" }
 cognia-desktop-guest = { path = "../cognia-desktop-guest" }
+# Lume replicas use the existing workspace revision/confined-read/CAS authority.
+cognia-task-workspace = { path = "../cognia-task-workspace" }
 cognia-environment = { path = "../cognia-environment", default-features = false }
 cognia-net = { path = "../cognia-net" }
-reqwest = { workspace = true, features = ["json", "rustls"] }
+# Managed clients install cognia-net's ring provider before building HTTPS.
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
 fs2 = "0.4"
+sysinfo = { workspace = true, features = ["system"] }
 # The execution sandbox (ADR-0028), its own crate since ADR-0196 P2 and
 # re-exported as `crate::sandbox`; the three sandbox Tauri commands and the
 # plugin-grant admission check stay in `src/sandbox.rs`.
@@ -135,7 +139,6 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 # Pinned to core-graphics 0.25's own foreign-types requirement.
 foreign-types = "0.5"
 objc2-app-kit = { version = "0.3.2", features = ["libc", "NSRunningApplication", "NSWorkspace"] }
-objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSString", "NSURL"] }
 objc2 = "0.6.4"
 
 

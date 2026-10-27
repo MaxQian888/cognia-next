@@ -19,7 +19,8 @@ import time
 SELKIES = "/opt/selkies/bin/selkies"
 STARTUP = "/opt/cognia-desktop/startup.py"
 TOKEN_ENV = "COGNIA_SELKIES_MASTER_TOKEN"
-MAX_RESTARTS = 5
+MAX_RESTART_BACKOFF_S = 30
+STABLE_RUN_S = 60
 DISPLAY_DEADLINE_S = 60
 # Only these reach the Selkies process; the computer-server credential never does.
 CHILD_ENV_KEYS = ("DISPLAY", "HOME", "PATH", "XDG_RUNTIME_DIR", "LANG")
@@ -30,6 +31,7 @@ CHILD_ENV_KEYS = ("DISPLAY", "HOME", "PATH", "XDG_RUNTIME_DIR", "LANG")
 FLAGS = (
     "--addr=0.0.0.0",
     "--port=8080",
+    "--web-root=/opt/cognia-desktop/selkies-web",
     "--mode=websockets",
     "--enable-dual-mode=false|locked",
     "--wayland=false",
@@ -91,16 +93,16 @@ class StreamSupervisor:
     """Start Selkies once the display answers; restart it with backoff."""
 
     def __init__(self, token, environ, popen=subprocess.Popen, ready=display_ready,
-                 sleep=time.sleep, now=time.monotonic, killpg=os.killpg):
+                 sleep=None, now=time.monotonic, killpg=os.killpg):
         self._argv = selkies_argv()
         self._env = selkies_env(token, environ)
         self._popen = popen
         self._ready = ready
-        self._sleep = sleep
         self._now = now
         self._killpg = killpg
         self._lock = threading.Lock()
         self._stopping = threading.Event()
+        self._sleep = sleep or self._stopping.wait
         self._child = None
         self.restarts = 0
 
@@ -113,21 +115,27 @@ class StreamSupervisor:
                 print("Selkies stream not started: the display never became ready", file=sys.stderr)
                 return
             self._sleep(0.2)
+        backoff = 1
         while not self._stopping.is_set():
+            started_at = self._now()
             with self._lock:
                 if self._stopping.is_set():
                     return
-                self._child = self._popen(self._argv, env=self._env, start_new_session=True, close_fds=True)
+                self._child = None
+                try:
+                    self._child = self._popen(self._argv, env=self._env, start_new_session=True, close_fds=True)
+                except OSError:
+                    print("Selkies stream could not start; retrying with backoff", file=sys.stderr)
                 child = self._child
-            child.wait()
+            if child is not None:
+                child.wait()
             if self._stopping.is_set():
                 return
             self.restarts += 1
-            if self.restarts > MAX_RESTARTS:
-                # The desktop keeps running; viewers fall back to snapshots.
-                print("Selkies stream stopped after repeated failures", file=sys.stderr)
-                return
-            self._sleep(min(30, 2 ** self.restarts))
+            if child is not None and self._now() - started_at >= STABLE_RUN_S:
+                backoff = 1
+            self._sleep(backoff)
+            backoff = min(MAX_RESTART_BACKOFF_S, backoff * 2)
 
     def stop(self):
         self._stopping.set()
@@ -138,7 +146,7 @@ class StreamSupervisor:
         self._signal(child, signal.SIGTERM)
         deadline = self._now() + 3
         while child.poll() is None and self._now() < deadline:
-            self._sleep(0.05)
+            time.sleep(0.05)
         if child.poll() is None:
             self._signal(child, signal.SIGKILL)
 

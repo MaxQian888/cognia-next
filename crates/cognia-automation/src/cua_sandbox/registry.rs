@@ -30,6 +30,8 @@ use crate::automation::types::{AutomationError, Result};
 const MAX_DOCKER_CONTAINER_NAME_LEN: usize = 63;
 const CONTAINER_NAME_PREFIX: &str = "cua-";
 
+type DesktopConnections = HashMap<String, (Arc<Mutex<RemoteDesktop>>, Arc<DesktopPreemption>)>;
+
 /// What a lifecycle call did, so the renderer can record the resulting state
 /// without a second round-trip.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,9 +44,11 @@ pub struct SandboxPlacement {
 
 #[derive(Default, Clone)]
 pub struct CuaSandboxRegistry {
+    pub(crate) lume: Arc<Mutex<HashMap<String, Arc<super::lume::service::Service>>>>,
+    pub(crate) lume_principal: Arc<parking_lot::RwLock<Option<super::lume::NativePrincipal>>>,
     /// Live driver connections only. Rebuildable at any time from Docker.
     clients: Arc<Mutex<HashMap<String, Arc<CuaRemoteClient>>>>,
-    desktops: Arc<Mutex<HashMap<String, (Arc<Mutex<RemoteDesktop>>, Arc<DesktopPreemption>)>>>,
+    desktops: Arc<Mutex<DesktopConnections>>,
     /// Selkies session tables (ADR-0234 Phase 4), one writer per connection.
     pub(crate) streams: super::stream::StreamSlots,
     pub(crate) stream_backend: super::stream::StreamBackendHandle,
@@ -93,6 +97,16 @@ impl CuaSandboxRegistry {
         &self,
         connection_id: &str,
     ) -> (Arc<Mutex<RemoteDesktop>>, Arc<DesktopPreemption>) {
+        let resolved_id = if let Some(lume) = self.existing_lume_service().await {
+            lume.resolve_target(connection_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|(reference, _, id)| format!("{id}:{}", reference.boot_epoch))
+        } else {
+            None
+        };
+        let connection_id = resolved_id.as_deref().unwrap_or(connection_id);
         self.desktops
             .lock()
             .await
@@ -400,6 +414,54 @@ impl CuaSandboxRegistry {
     ) -> Result<super::file_transfer::SandboxFileInfo> {
         use super::file_transfer;
         file_transfer::validate_path(path)?;
+        if expected_container_id.starts_with("lume:") {
+            let principal = self
+                .lume_principal
+                .read()
+                .clone()
+                .ok_or_else(|| backend_err("lume_account_locked"))?;
+            let service = self
+                .existing_lume_service()
+                .await
+                .ok_or_else(|| backend_err("lume_account_locked"))?;
+            let (reference, _, _) = service
+                .resolve_target(connection_id)
+                .await
+                .map_err(backend_err)?
+                .ok_or_else(|| backend_err("lume_resource_missing"))?;
+            super::lume::validate_transfer_reference(expected_container_id, &reference)
+                .map_err(backend_err)?;
+            let bytes = file_transfer::decode_bytes(data_base64)?;
+            let size = bytes.len() as u64;
+            let sha256 = file_transfer::sha256(&bytes);
+            let mut desktop = self.desktop_guard(connection_id).await;
+            desktop.require_controller(token)?;
+            let deadline = desktop
+                .controller_expiry()
+                .ok_or_else(|| backend_err("lume_control_expired"))?;
+            let preempt = desktop.preempt.clone();
+            let epoch = preempt.epoch.load(std::sync::atomic::Ordering::SeqCst);
+            let native = service.send_fence(&reference, None);
+            let admission = Arc::new(move || {
+                !principal.revoked.load(std::sync::atomic::Ordering::SeqCst)
+                    && native()
+                    && preempt.epoch.load(std::sync::atomic::Ordering::SeqCst) == epoch
+                    && crate::automation::commands::now_ms() < deadline
+            });
+            desktop
+                .run_mutation(async {
+                    service
+                        .transfer_file(&reference, path, Some(bytes), admission)
+                        .await
+                        .map_err(backend_err)
+                })
+                .await?;
+            return Ok(file_transfer::SandboxFileInfo {
+                path: path.into(),
+                size,
+                sha256,
+            });
+        }
         file_transfer::validate_container_id(expected_container_id)?;
         let bytes = file_transfer::decode_bytes(data_base64)?;
         let size = bytes.len();
@@ -434,6 +496,41 @@ impl CuaSandboxRegistry {
     ) -> Result<super::file_transfer::SandboxFileDownload> {
         use super::file_transfer;
         file_transfer::validate_path(path)?;
+        if expected_container_id.starts_with("lume:") {
+            let principal = self
+                .lume_principal
+                .read()
+                .clone()
+                .ok_or_else(|| backend_err("lume_account_locked"))?;
+            let service = self
+                .existing_lume_service()
+                .await
+                .ok_or_else(|| backend_err("lume_account_locked"))?;
+            let (reference, _, _) = service
+                .resolve_target(connection_id)
+                .await
+                .map_err(backend_err)?
+                .ok_or_else(|| backend_err("lume_resource_missing"))?;
+            super::lume::validate_transfer_reference(expected_container_id, &reference)
+                .map_err(backend_err)?;
+            let desktop = self.desktop_guard(connection_id).await;
+            desktop.require_quiescent()?;
+            let native = service.send_fence(&reference, None);
+            let admission = Arc::new(move || {
+                !principal.revoked.load(std::sync::atomic::Ordering::SeqCst) && native()
+            });
+            let bytes = service
+                .transfer_file(&reference, path, None, admission)
+                .await
+                .map_err(backend_err)?;
+            use base64::Engine;
+            return Ok(file_transfer::SandboxFileDownload {
+                path: path.into(),
+                size: bytes.len() as u64,
+                sha256: file_transfer::sha256(&bytes),
+                data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+            });
+        }
         file_transfer::validate_container_id(expected_container_id)?;
         let desktop = self.desktop_guard(connection_id).await;
         desktop.require_quiescent()?;
@@ -464,6 +561,50 @@ impl CuaSandboxRegistry {
     /// it belongs to may well still be running. Refusing on a cache miss would
     /// make a perfectly healthy machine look dead.
     pub async fn client(&self, connection_id: &str) -> Result<Arc<CuaRemoteClient>> {
+        let principal = self.lume_principal.read().clone();
+        if let Some(lume) = self.existing_lume_service().await {
+            if let Some((reference, binding, _)) = lume
+                .resolve_target(connection_id)
+                .await
+                .map_err(backend_err)?
+            {
+                let account_fence: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+                    principal.as_ref().is_some_and(|principal| {
+                        !principal.revoked.load(std::sync::atomic::Ordering::SeqCst)
+                    })
+                });
+                let key = format!("lume:{}:{}", connection_id, reference.boot_epoch);
+                if let Some(client) = self
+                    .clients
+                    .lock()
+                    .await
+                    .get(&key)
+                    .filter(|client| !client.is_closed())
+                {
+                    return Ok(client.fenced_preemptible(account_fence));
+                }
+                let client = lume
+                    .desktop_client(reference, binding)
+                    .await
+                    .map_err(backend_err)?;
+                self.clients.lock().await.insert(key, client.clone());
+                return Ok(client.fenced_preemptible(account_fence));
+            }
+        }
+        if connection_id.starts_with("lume-binding:") {
+            return Err(backend_err("lume_binding_revoked"));
+        }
+        let services: Vec<_> = self.lume.lock().await.values().cloned().collect();
+        for service in services {
+            if service
+                .resolve_target(connection_id)
+                .await
+                .map_err(backend_err)?
+                .is_some()
+            {
+                return Err(backend_err("lume_account_locked"));
+            }
+        }
         if let Some(client) = self.clients.lock().await.get(connection_id) {
             if !client.is_closed() {
                 return Ok(client.clone());
@@ -489,6 +630,10 @@ impl CuaSandboxRegistry {
     /// expected to still be there when the app comes back, and `start` adopts
     /// it rather than creating a second one.
     pub async fn disconnect_all(&self) {
+        let services: Vec<_> = self.lume.lock().await.values().cloned().collect();
+        for lume in services {
+            lume.shutdown().await;
+        }
         self.clients.lock().await.clear();
         self.streams.lock().await.clear();
         let desktops: Vec<_> = self.desktops.lock().await.values().cloned().collect();
@@ -690,7 +835,7 @@ mod tests {
     }
     #[tokio::test]
     async fn readiness_retries_starting_server_until_authenticated_capture_is_available() {
-        use super::super::remote_client::{accept_test_client, TEST_AUTH_TOKEN};
+        use super::super::remote_client::{accept_test_client, TestHandshake, TEST_AUTH_TOKEN};
         use base64::Engine as _;
         use futures_util::{SinkExt, StreamExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -700,13 +845,13 @@ mod tests {
             let (starting, _) = listener.accept().await.unwrap();
             assert!(tokio_tungstenite::accept_hdr_async(
                 starting,
-                |_: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                TestHandshake(|_: &tokio_tungstenite::tungstenite::handshake::server::Request,
                  _: tokio_tungstenite::tungstenite::handshake::server::Response| {
-                    Err(tokio_tungstenite::tungstenite::http::Response::builder()
+                    Err(Box::new(tokio_tungstenite::tungstenite::http::Response::builder()
                         .status(503)
                         .body(None)
-                        .unwrap())
-                }
+                        .unwrap()))
+                })
             )
             .await
             .is_err());

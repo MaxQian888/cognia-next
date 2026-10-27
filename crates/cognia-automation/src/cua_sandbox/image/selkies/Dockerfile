@@ -30,10 +30,12 @@ RUN apt-get update \
 # Drops Selkies' per-frame warning for viewer acks (see sitecustomize.py).
 COPY sitecustomize.py /opt/selkies/lib/python3.12/site-packages/sitecustomize.py
 RUN /opt/selkies/bin/python -c "import logging, sitecustomize; assert logging.getLogger('ws').filters"
+COPY prepare-web-root.py stream-health.js /opt/cognia-desktop/
+RUN /opt/selkies/bin/python /opt/cognia-desktop/prepare-web-root.py
 COPY selkies-startup.py /opt/cognia-desktop/selkies-startup.py
 COPY selkies-entrypoint.sh /usr/local/bin/cognia-desktop-selkies
 RUN chmod 0755 /usr/local/bin/cognia-desktop-selkies
 
-LABEL cognia.cua.selkies="2.0.0"
+LABEL cognia.cua.selkies="2.0.0" cognia.cua.selkies.health="1"
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/cognia-desktop-selkies"]

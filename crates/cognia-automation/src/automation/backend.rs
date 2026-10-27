@@ -48,7 +48,7 @@ pub fn select_application_window(
         .iter()
         .filter(eligible)
         .find(|window| window.focused)
-        .or_else(|| windows.iter().filter(eligible).next())
+        .or_else(|| windows.iter().find(eligible))
         .map(|window| window.id)
         .ok_or(AutomationError::ElementNotFound)
 }

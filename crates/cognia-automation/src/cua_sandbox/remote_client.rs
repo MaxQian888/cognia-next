@@ -29,6 +29,13 @@ type Job = (
     Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 );
 
+type NativeHandler = dyn Fn(
+        WsRequest,
+        Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
+    ) -> futures_util::future::BoxFuture<'static, Result<Value>>
+    + Send
+    + Sync;
+
 pub struct CuaRemoteClient {
     tx: mpsc::Sender<Job>,
     admission: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
@@ -47,6 +54,32 @@ fn auth_denied(reason: impl Into<String>) -> AutomationError {
 }
 
 impl CuaRemoteClient {
+    /// Native transports reuse the same bounded queue and pre-send admission
+    /// checks as WebSocket desktops. This constructor is not an IPC surface.
+    pub(crate) fn from_handler(handler: Arc<NativeHandler>) -> Arc<Self> {
+        let (tx, mut rx) = mpsc::channel::<Job>(16);
+        tokio::spawn(async move {
+            while let Some((request, reply, deadline, admission)) = rx.recv().await {
+                if reply.is_closed() || tokio::time::Instant::now() >= deadline {
+                    continue;
+                }
+                if let Some(check) = &admission {
+                    if let Err(error) = check() {
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
+                }
+                let result = tokio::time::timeout_at(deadline, handler(request, admission))
+                    .await
+                    .unwrap_or_else(|_| Err(backend_err("desktop driver timed out")));
+                let _ = reply.send(result);
+            }
+        });
+        Arc::new(Self {
+            tx,
+            admission: None,
+        })
+    }
     /// Only admit a protected endpoint. The token stays in native request
     /// headers: never in URLs, renderer replies, logs or formatted errors.
     pub async fn connect(host: &str, port: u16, token: &str) -> Result<Arc<Self>> {
@@ -223,9 +256,13 @@ impl CuaRemoteClient {
     /// Each queued command checks its authority immediately before send. This
     /// also fences later commands in a compound click/scroll/drag operation.
     pub(crate) fn fenced(&self, admission: Arc<dyn Fn() -> bool + Send + Sync>) -> Arc<Self> {
+        let inherited = self.admission.clone();
         Arc::new(Self {
             tx: self.tx.clone(),
             admission: Some(Arc::new(move || {
+                if let Some(check) = &inherited {
+                    check()?;
+                }
                 if admission() {
                     Ok(())
                 } else {
@@ -241,9 +278,13 @@ impl CuaRemoteClient {
         &self,
         admission: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Arc<Self> {
+        let inherited = self.admission.clone();
         Arc::new(Self {
             tx: self.tx.clone(),
             admission: Some(Arc::new(move || {
+                if let Some(check) = &inherited {
+                    check()?;
+                }
                 if admission() {
                     Ok(())
                 } else {
@@ -295,13 +336,40 @@ impl CuaRemoteClient {
 #[cfg(test)]
 pub(crate) const TEST_AUTH_TOKEN: &str = "synthetic-desktop-test-token-00000000";
 
+/// Keep fixture errors boxed until the external handshake trait requires ownership.
+#[cfg(test)]
+pub(crate) struct TestHandshake<F>(pub F);
+
+#[cfg(test)]
+impl<F> tokio_tungstenite::tungstenite::handshake::server::Callback for TestHandshake<F>
+where
+    F: FnOnce(
+        &tokio_tungstenite::tungstenite::handshake::server::Request,
+        tokio_tungstenite::tungstenite::handshake::server::Response,
+    ) -> std::result::Result<
+        tokio_tungstenite::tungstenite::handshake::server::Response,
+        Box<tokio_tungstenite::tungstenite::handshake::server::ErrorResponse>,
+    >,
+{
+    fn on_request(
+        self,
+        request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+        response: tokio_tungstenite::tungstenite::handshake::server::Response,
+    ) -> std::result::Result<
+        tokio_tungstenite::tungstenite::handshake::server::Response,
+        tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+    > {
+        (self.0)(request, response).map_err(|error| *error)
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn test_authorize(
     request: &tokio_tungstenite::tungstenite::handshake::server::Request,
     response: tokio_tungstenite::tungstenite::handshake::server::Response,
 ) -> std::result::Result<
     tokio_tungstenite::tungstenite::handshake::server::Response,
-    tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+    Box<tokio_tungstenite::tungstenite::handshake::server::ErrorResponse>,
 > {
     if request
         .headers()
@@ -311,10 +379,12 @@ pub(crate) fn test_authorize(
     {
         Ok(response)
     } else {
-        Err(tokio_tungstenite::tungstenite::http::Response::builder()
-            .status(401)
-            .body(Some("Unauthorized".into()))
-            .unwrap())
+        Err(Box::new(
+            tokio_tungstenite::tungstenite::http::Response::builder()
+                .status(401)
+                .body(Some("Unauthorized".into()))
+                .unwrap(),
+        ))
     }
 }
 
@@ -324,11 +394,13 @@ pub(crate) async fn accept_test_client(
 ) -> tokio_tungstenite::WebSocketStream<tokio::net::TcpStream> {
     // The native client first probes that the unauthenticated path is denied.
     let (probe, _) = listener.accept().await.unwrap();
-    assert!(tokio_tungstenite::accept_hdr_async(probe, test_authorize)
-        .await
-        .is_err());
+    assert!(
+        tokio_tungstenite::accept_hdr_async(probe, TestHandshake(test_authorize))
+            .await
+            .is_err()
+    );
     let (socket, _) = listener.accept().await.unwrap();
-    tokio_tungstenite::accept_hdr_async(socket, test_authorize)
+    tokio_tungstenite::accept_hdr_async(socket, TestHandshake(test_authorize))
         .await
         .unwrap()
 }
@@ -345,7 +417,7 @@ mod tests {
         let server = tokio::spawn(async move {
             for index in 0..3 {
                 let (socket, _) = listener.accept().await.unwrap();
-                let accepted = tokio_tungstenite::accept_hdr_async(socket, move |
+                let accepted = tokio_tungstenite::accept_hdr_async(socket, TestHandshake(move |
                     request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                     response: tokio_tungstenite::tungstenite::handshake::server::Response,
                 | {
@@ -361,8 +433,8 @@ mod tests {
                         2 => { assert_eq!(traffic, Some(TRAFFIC)); assert_eq!(guest, Some(TEST_AUTH_TOKEN)); return Ok(response); },
                         _ => unreachable!(),
                     }
-                    Err(tokio_tungstenite::tungstenite::http::Response::builder().status(401).body(Some("Unauthorized".into())).unwrap())
-                }).await;
+                    Err(Box::new(tokio_tungstenite::tungstenite::http::Response::builder().status(401).body(Some("Unauthorized".into())).unwrap()))
+                })).await;
                 if index < 2 {
                     assert!(accepted.is_err());
                 } else {
@@ -472,6 +544,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn desktop_lease_wrapping_cannot_replace_a_revoked_account_fence() {
+        let sends = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let observed = sends.clone();
+        let client = CuaRemoteClient::from_handler(Arc::new(move |_, _| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async { Ok(serde_json::json!({"success":true})) })
+        }));
+        let guarded = client
+            .fenced_preemptible(Arc::new(|| false))
+            .fenced(Arc::new(|| true));
+        assert!(guarded
+            .call_simple("left_click", serde_json::json!({"x":0,"y":0}))
+            .await
+            .is_err());
+        assert_eq!(sends.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn managed_transport_rejects_plaintext_before_any_network_operation() {
         assert!(CuaRemoteClient::connect_managed(
             "ws://127.0.0.1:1/ws".into(),
@@ -549,19 +639,19 @@ mod tests {
                 let (socket, _) = listener.accept().await.unwrap();
                 let result = tokio_tungstenite::accept_hdr_async(
                     socket,
-                    move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                    TestHandshake(move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                           _response: tokio_tungstenite::tungstenite::handshake::server::Response| {
                         if index == 0 {
                             assert!(request.headers().get(AUTH_HEADER).is_none());
                         } else {
                             assert_eq!(request.headers()[AUTH_HEADER], WRONG);
                         }
-                        Err(tokio_tungstenite::tungstenite::http::Response::builder()
+                        Err(Box::new(tokio_tungstenite::tungstenite::http::Response::builder()
                             .status(401)
                             .header("x-echo-secret", WRONG)
                             .body(Some(WRONG.into()))
-                            .unwrap())
-                    },
+                            .unwrap()))
+                    }),
                 )
                 .await;
                 assert!(result.is_err());

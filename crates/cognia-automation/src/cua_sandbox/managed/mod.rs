@@ -13,11 +13,12 @@ pub use provider::{
     ManagedDesktopProvider, ManagedDesktopSecrets,
 };
 pub use service::{
-    run_qualification_smoke, ExplicitPaidSmokeAuthorization, ManagedDesktopService,
+    run_qualification_smoke, ExplicitPaidSmokeAuthorization, HandoffTransfer, ManagedDesktopService,
     ManagedDesktopSmokeHost,
 };
 
 pub use service::control::{
     run_control_qualification_smoke, ControlQualificationReceipt, ManagedControlAuthority,
     ManagedControlFrame, ManagedControlLease, ManagedControlStatus,
+    ManagedControlInput, ManagedControlLeaseRef,
 };

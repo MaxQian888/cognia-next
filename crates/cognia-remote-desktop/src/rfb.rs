@@ -155,8 +155,7 @@ pub fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     }
     let cipher = des::Des::new(&key.into());
     let mut response = *challenge;
-    for chunk in response.chunks_exact_mut(8) {
-        let block: &mut [u8; 8] = chunk.try_into().expect("8-byte chunk");
+    for block in response.as_chunks_mut::<8>().0 {
         cipher.encrypt_block(block.into());
     }
     key.fill(0);
