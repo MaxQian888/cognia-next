@@ -1,3 +1,4 @@
+import { BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS } from "@cognia/agent-contracts/external-agent-capability"
 import { validateExternalAgentSandboxPolicy } from "@cognia/agent-contracts/external-agent"
 import { nanoid } from "nanoid"
 import { supportsExternalAgents } from "../agent-transport"
@@ -36,17 +37,7 @@ import { normalizeCogniaModelBinding } from "./gateway-task"
 // `manager.ts` (they were listed-but-unregistered before ADR-0119/0120 landed).
 // Even so, do not treat this list as proof of registration: the execution gate
 // consults the runtime `protocolAdapterRegistry`, which is the source of truth.
-export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = [
-  "acp",
-  "codex-app-server",
-  "codex-siwc-app-server",
-  "dsh-sdk",
-  "pi-rpc",
-  "aider-cli",
-  "opencode-v2",
-  "opencode",
-  "a2a",
-] as const
+export const SUPPORTED_EXTERNAL_AGENT_PROTOCOLS = BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS
 
 const DEFAULT_TIMEOUT = 300000
 const DEFAULT_RETRY_CONFIG = {
@@ -390,12 +381,20 @@ export function getExternalAgentEcosystemReadiness(
 }
 
 export async function probeExternalAgentEcosystemReadiness(
-  config: Pick<ExternalAgentConfig, "metadata" | "transport" | "process">,
+  config: Pick<ExternalAgentConfig, "metadata" | "transport" | "process"> &
+    Partial<Pick<ExternalAgentConfig, "protocol">>,
   options: ExternalAgentEcosystemProbeOptions = {}
 ): Promise<ExternalAgentEcosystemReadinessSnapshot | undefined> {
   const runtimeIsTauri = options.runtimeIsTauri ?? supportsExternalAgents()
   const readiness = getExternalAgentEcosystemReadiness(config, runtimeIsTauri)
-  const command = config.transport === "stdio" ? config.process?.command?.trim() : undefined
+  const command =
+    config.protocol === "codebuff-sdk"
+      ? undefined
+      : config.transport === "stdio" ||
+          config.protocol === "crush-http" ||
+          config.protocol === "rovo-http"
+        ? config.process?.command?.trim()
+        : undefined
   // The launch preflight applies to any stdio config that spawns a local
   // binary — including hand-written ones that resolve no ecosystem surface.
   // Without this a missing CLI slipped past the execution gate and surfaced as

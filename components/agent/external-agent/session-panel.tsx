@@ -186,6 +186,7 @@ function RemoteSessionPanel({
         agentId={link.agentId}
         sessionId={link.sessionId}
         isExecuting={isExecuting}
+        onPrompt={onExecuteCommand}
         onFork={async (options) =>
           selectSession(await manager.forkSession(link.agentId, link.sessionId, options))
         }
@@ -493,6 +494,7 @@ function LocalExternalAgentSessionPanel({
           onFork={async (options) => selectSession(await forkSession(activeSession.id, options))}
           onClone={async () => selectSession(await cloneSession(activeSession.id))}
           onShell={executeSessionShell}
+          onPrompt={execute}
         />
       )}
       <ToolApprovalDialog

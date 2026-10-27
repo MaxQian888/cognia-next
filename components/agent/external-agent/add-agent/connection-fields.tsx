@@ -31,6 +31,7 @@ import {
 } from "@/lib/ai/agent/external/config/add-agent-form"
 import type { AddAgentFormState } from "@/hooks/agent/use-add-agent-form"
 import type { AddAgentFormData } from "@/types/agent/component-types"
+import { GooseRuntimeFields } from "../goose-runtime-fields"
 
 export interface ConnectionFieldsProps {
   form: AddAgentFormState
@@ -79,7 +80,15 @@ export function ConnectionFields({ form, planeWarning }: ConnectionFieldsProps) 
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const { data, setData, setField, presetId, processEnvRows, setProcessEnvRows, shape } = form
-  const { isOpenCode, isOpenCodeV2, isStdio, managedRuntime } = shape
+  const {
+    isOpenCode,
+    isOpenCodeV2,
+    isStdio,
+    usesProcess,
+    managedRuntime,
+    bundledBridge,
+    fixedLaunchArguments,
+  } = shape
   const directEnvironment = usesDirectEnvironment(data, presetId)
 
   return (
@@ -240,7 +249,7 @@ export function ConnectionFields({ form, planeWarning }: ConnectionFieldsProps) 
             <p className="text-xs text-muted-foreground">{tManager("defaultModelHint")}</p>
           </div>
         </>
-      ) : isStdio ? (
+      ) : usesProcess ? (
         <>
           {managedRuntime && (
             <div className="grid gap-2">
@@ -279,8 +288,8 @@ export function ConnectionFields({ form, planeWarning }: ConnectionFieldsProps) 
               onChange={(e) => setField("command", e.target.value)}
               // i18n-exempt: example CLI command, not UI prose
               placeholder="npx"
-              required={isStdio && !managedRuntime}
-              disabled={managedRuntime}
+              required={usesProcess && !managedRuntime && !bundledBridge}
+              disabled={managedRuntime || bundledBridge}
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
@@ -290,6 +299,7 @@ export function ConnectionFields({ form, planeWarning }: ConnectionFieldsProps) 
             <Label htmlFor="args">{tSettings("arguments")}</Label>
             <Input
               id="args"
+              disabled={managedRuntime || fixedLaunchArguments}
               value={data.args}
               onChange={(e) => setField("args", e.target.value)}
               // i18n-exempt: example CLI arguments, not UI prose
@@ -361,7 +371,7 @@ export function ConnectionFields({ form, planeWarning }: ConnectionFieldsProps) 
         </div>
       )}
 
-      {(isStdio || (isOpenCode && data.autoSpawnServer)) && !directEnvironment && (
+      {(usesProcess || (isOpenCode && data.autoSpawnServer)) && !directEnvironment && (
         <Collapsible className="rounded-md border">
           <CollapsibleTrigger className="group flex w-full items-center justify-between px-3 py-2 text-sm font-medium">
             {tSettings("processEnvironment")}
@@ -389,6 +399,14 @@ export function ConnectionFields({ form, planeWarning }: ConnectionFieldsProps) 
             />
           </CollapsibleContent>
         </Collapsible>
+      )}
+      {isStdio && (presetId === "goose" || /(?:^|[\\/])goose(?:\.exe)?$/i.test(data.command)) && (
+        <GooseRuntimeFields
+          rows={processEnvRows}
+          onRowsChange={setProcessEnvRows}
+          args={data.args}
+          onArgsChange={(args) => setField("args", args)}
+        />
       )}
     </div>
   )

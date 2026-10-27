@@ -45,6 +45,8 @@ export interface TerminalProfileHostDefaults {
    * local PTY, which sends the request itself.
    */
   adHoc?: SpawnRequest
+  /** Explicit user-launched profiles, kept outside persistent settings. */
+  transientProfiles?: readonly SynchronizedTerminalProfile[]
 }
 
 export interface SynchronizedTerminalProfile {
@@ -97,6 +99,12 @@ export async function syncTerminalHostProfiles(
   call: typeof transport.call = transport.call.bind(transport)
 ): Promise<void> {
   const synchronized = buildSynchronizedTerminalProfiles(profiles, defaults)
+  for (const profile of defaults.transientProfiles ?? []) {
+    if (synchronized.some((saved) => saved.profileId === profile.profileId)) {
+      throw new Error("transient terminal profile conflicts with a saved profile")
+    }
+    synchronized.push(profile)
+  }
   if (selectTerminalTransportChain()[0] !== "tauri-channel") {
     const remote = defaults.adHoc
       ? [
@@ -179,6 +187,8 @@ interface SettingsSnapshot {
 /** Test-only: allow a second sync against a re-stubbed shell. */
 export function __resetTerminalHostProfileSyncForTests(): void {
   profileSync = null
+  transientProfiles.clear()
+  transientSync = Promise.resolve()
 }
 
 /**
@@ -201,8 +211,117 @@ export function __resetTerminalHostProfileSyncForTests(): void {
  */
 export const ADHOC_PROFILE_ID = "__adhoc"
 
-export async function ensureRemoteSpawnProfile(request: SpawnRequest): Promise<string> {
+interface TransientProfile {
+  request: SpawnRequest
+  target?: string
+  removing?: boolean
+}
+
+const transientProfiles = new Map<string, TransientProfile>()
+let transientSync: Promise<void> = Promise.resolve()
+
+interface TransientProfileSyncDeps {
+  call?: typeof transport.call
+  readSettings?: typeof settingsLoaded
+  resolveTarget?: () => Promise<string>
+}
+
+/** Register fixed argv before the ordinary orchestrator chooses its transport. */
+export function registerTransientTerminalProfile(request: SpawnRequest): void {
+  const id = request.profileId
+  if (!id || id === "default" || id === ADHOC_PROFILE_ID) {
+    throw new Error("transient terminal profile needs a distinct identity")
+  }
+  if (transientProfiles.has(id)) throw new Error("transient terminal profile is already registered")
+  transientProfiles.set(id, {
+    request: { ...request, args: request.args ? [...request.args] : undefined },
+  })
+}
+
+export function hasTransientTerminalProfile(profileId: string): boolean {
+  return transientProfiles.has(profileId)
+}
+
+async function currentProfileTarget(): Promise<string> {
+  const { defaultCompanionEndpointResolver } = await import("@/lib/tauri/companion-endpoint")
+  const endpoint = await defaultCompanionEndpointResolver()
+  if (!endpoint) throw new Error("terminal host is unavailable for profile synchronization")
+  return JSON.stringify([
+    endpoint.baseUrl.replace(/\/+$/, ""),
+    endpoint.deviceId,
+    endpoint.accountId,
+  ])
+}
+
+function syncTransientProfiles(target: string, deps: TransientProfileSyncDeps): Promise<void> {
+  const operation = transientSync
+    .catch(() => {})
+    .then(async () => {
+      if ((await (deps.resolveTarget ?? currentProfileTarget)()) !== target) {
+        throw new Error("select the original terminal host to synchronize its agent profile")
+      }
+      const terminal = (await (deps.readSettings ?? settingsLoaded)()).terminal
+      if ((await (deps.resolveTarget ?? currentProfileTarget)()) !== target) {
+        throw new Error("select the original terminal host to synchronize its agent profile")
+      }
+      await syncTerminalHostProfiles(
+        terminal?.profiles,
+        {
+          enableShellIntegration: terminal?.enableShellIntegration,
+          forceUtf8: terminal?.forceUtf8,
+          sandboxed: terminal?.sandboxed,
+          transientProfiles: [...transientProfiles.entries()].flatMap(([profileId, profile]) =>
+            profile.target === target && !profile.removing
+              ? [{ profileId, request: profile.request }]
+              : []
+          ),
+        },
+        deps.call
+      )
+    })
+  transientSync = operation
+  return operation
+}
+
+/** Remove host launch metadata after its process has been terminated. Retryable. */
+export async function removeTransientTerminalProfile(
+  profileId: string,
+  deps: TransientProfileSyncDeps = {}
+): Promise<void> {
+  const profile = transientProfiles.get(profileId)
+  if (!profile) return
+  if (!profile.target) {
+    transientProfiles.delete(profileId)
+    return
+  }
+  profile.removing = true
+  await syncTransientProfiles(profile.target, deps)
+  if (transientProfiles.get(profileId) === profile) transientProfiles.delete(profileId)
+}
+
+export async function ensureRemoteSpawnProfile(
+  request: SpawnRequest,
+  deps: TransientProfileSyncDeps = {}
+): Promise<string> {
   if (request.profileId && request.profileId.trim().length > 0) {
+    const transient = transientProfiles.get(request.profileId)
+    if (transient) {
+      if (transient.removing) throw new Error("transient terminal profile cleanup is pending")
+      // The orchestrator has already applied plugin veto/mutation. Sync that
+      // accepted request, including any narrowed workspace or sandbox policy.
+      transient.request = {
+        ...request,
+        args: request.args ? [...request.args] : undefined,
+        env: request.env ? { ...request.env } : undefined,
+      }
+      const target = await (deps.resolveTarget ?? currentProfileTarget)()
+      if (transient.target && transient.target !== target) {
+        throw new Error("terminal agent profile belongs to another host")
+      }
+      transient.target = target
+      await syncTransientProfiles(target, deps)
+      return request.profileId
+    }
     await ensureTerminalHostProfilesSynced()
     return request.profileId
   }

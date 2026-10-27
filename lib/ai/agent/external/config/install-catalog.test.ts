@@ -25,7 +25,11 @@ import {
   runtimeSupportsPlatform,
   selectDistribution,
 } from "./install-catalog"
-import { EXTERNAL_AGENT_PRESETS, type ExternalAgentPresetId } from "./presets"
+import {
+  EXTERNAL_AGENT_PRESETS,
+  getPresetConfig as getPresetForCatalogTest,
+  type ExternalAgentPresetId,
+} from "./presets"
 import { EXTERNAL_AGENT_BINARY_ALLOWLIST, baseCommandName } from "../policy/security-policy"
 
 const SHA = "a".repeat(64)
@@ -62,6 +66,60 @@ function entry(
 }
 
 describe("catalog shape", () => {
+  it.each([
+    "auggie",
+    "autohand-code",
+    "codebuddy",
+    "command-code",
+    "kilocode",
+    "mistral-vibe",
+    "mimo-code",
+    "hermes-agent",
+    "oh-my-pi",
+    "muse",
+    "amp",
+    "zcode",
+  ])("binds %s to its inspected system runtime without fabricating certification", (id) => {
+    const preset = getPresetForCatalogTest(id)!
+    const runtime = findRuntimeByPresetId(id)!
+    expect(runtime).toMatchObject({
+      runtimeId: id,
+      ownership: "system",
+      protocol: "acp",
+      transport: "stdio",
+      systemCommand: preset.process!.command,
+      launchArgs: preset.process!.args,
+      distributions: [],
+      sandbox: { required: true, windowsExceptionEligible: false },
+    })
+    expect(runtime.certifiedVersions).toBeUndefined()
+    expect(runtimeSupportsPlatform(runtime, "darwin")).toBe(true)
+    expect(runtimeSupportsPlatform(runtime, "win32")).toBe(false)
+    expect(deriveRuntimeBinding({ protocol: "acp", metadata: { preset: id } })).toEqual({
+      runtimeId: id,
+      ownership: "system",
+    })
+  })
+
+  it("binds official Antigravity ACP without claiming a managed install or certification", () => {
+    const runtime = findRuntimeByPresetId("antigravity-acp")!
+    expect(runtime).toMatchObject({
+      runtimeId: "antigravity-acp",
+      ownership: "system",
+      systemCommand: "agy_acp_server.par",
+      launchArgs: [],
+      versionProbe: { args: ["--version"], parser: "antigravity-build-label" },
+      distributions: [],
+      sandbox: { required: true, windowsExceptionEligible: false },
+    })
+    expect(runtime.certifiedVersions).toBeUndefined()
+    expect(
+      deriveRuntimeBinding({ protocol: "acp", process: { command: "agy_acp_server.par" } })
+    ).toEqual({
+      runtimeId: "antigravity-acp",
+      ownership: "system",
+    })
+  })
   it("catalogs Cline as system-owned and uncertified until authenticated acceptance", () => {
     const runtime = findRuntimeByPresetId("cline")!
     expect(runtime).toMatchObject({
@@ -195,7 +253,15 @@ describe("catalog shape", () => {
     // the unpinned-launch waivers, not by the binary allowlist.
     for (const runtime of EXTERNAL_AGENT_RUNTIMES) {
       if (!runtime.systemCommand || isUnpinnedLaunch(runtime)) continue
-      expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain(baseCommandName(runtime.systemCommand))
+      if (runtime.bundledBridgeId) {
+        expect(runtime.bundledBridgeId).toBe("codebuff")
+        expect(runtime.protocol).toBe("codebuff-sdk")
+        expect(runtime.systemCommand).toBe("node")
+        expect(runtime.launchArgs).toEqual([])
+        expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain("node")
+      } else {
+        expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain(baseCommandName(runtime.systemCommand))
+      }
     }
   })
 

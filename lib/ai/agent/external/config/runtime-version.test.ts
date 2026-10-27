@@ -105,6 +105,15 @@ describe("satisfiesRange", () => {
 })
 
 describe("parseProbeVersion", () => {
+  it("reads only Antigravity's build label, never a bundled tool or timestamp", () => {
+    expect(
+      parseProbeVersion("antigravity-build-label", "Python 3.14.5\nBuild label: 1.4.3\n")
+    ).toBe("1.4.3")
+    expect(
+      parseProbeVersion("antigravity-build-label", "Python 3.14.5\nBuild label: unknown")
+    ).toBeUndefined()
+    expect(parseProbeVersion("antigravity-build-label", "Build label: 1.4.3junk")).toBeUndefined()
+  })
   it("finds a version anywhere in the output", () => {
     expect(parseProbeVersion("semver-anywhere", "codex-cli 0.48.1 (rust)")).toBe("0.48.1")
     expect(parseProbeVersion("semver-anywhere", "1.0.0-rc.2")).toBe("1.0.0-rc.2")

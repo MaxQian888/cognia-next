@@ -3,6 +3,7 @@ import { externalProtocolOptions } from "./protocol-options"
 import {
   __resetPluginProtocolAdaptersForTesting,
   registerPluginProtocolAdapter,
+  unregisterPluginProtocolAdaptersByPlugin,
 } from "./protocol-adapter"
 
 const values = (current?: string) => externalProtocolOptions(current).map((o) => o.value)
@@ -16,27 +17,30 @@ describe("externalProtocolOptions", () => {
       "a2a",
       "acp",
       "aider-cli",
+      "codebuff-sdk",
       "codex-app-server",
       "codex-siwc-app-server",
+      "continue-cli",
+      "crush-http",
       "dsh-sdk",
+      "openclaude-cli",
+      "opencode",
       "opencode-v2",
       "pi-rpc",
+      "rovo-http",
     ])
   })
 
-  it("offers the current OpenCode service and keeps the old protocol unselectable", () => {
-    expect(externalProtocolOptions()).toContainEqual({
-      value: "opencode-v2",
-      label: "OpenCode V2 (HTTP + SSE)",
-      selectable: true,
-    })
-    expect(values()).not.toContain("opencode")
-    expect(externalProtocolOptions("opencode")[0]).toEqual({
-      value: "opencode",
-      label: "OpenCode (HTTP + SSE)",
-      selectable: false,
-      reasonKey: "legacyProtocolUnavailable",
-    })
+  it.each([
+    { value: "opencode-v2", label: "OpenCode V2 (HTTP + SSE)" },
+    { value: "opencode", label: "OpenCode (HTTP + SSE)" },
+  ])("keeps the registered OpenCode route $value selectable when editing it", (route) => {
+    const expected = { ...route, selectable: true }
+    expect(externalProtocolOptions()).toContainEqual(expected)
+    const editing = externalProtocolOptions(route.value)
+    expect(editing).toContainEqual(expected)
+    expect(editing.filter((option) => option.value === route.value)).toEqual([expected])
+    expect(editing).toHaveLength(BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.length)
   })
 
   it("no longer offers protocols nothing can speak", () => {
@@ -97,6 +101,12 @@ describe("externalProtocolOptions", () => {
 
   /** The contributing plugin is disabled or uninstalled: keep it, refuse it. */
   it("refuses a plugin protocol whose adapter is no longer registered", () => {
+    registerPluginProtocolAdapter("acme:demo", () => ({}) as never, { pluginId: "acme" })
+    expect(externalProtocolOptions("acme:demo")).toContainEqual(
+      expect.objectContaining({ value: "acme:demo", selectable: true })
+    )
+    expect(unregisterPluginProtocolAdaptersByPlugin("acme")).toBe(1)
+    expect(values()).not.toContain("acme:demo")
     const options = externalProtocolOptions("acme:demo")
     expect(options[0]).toEqual({
       value: "acme:demo",
@@ -104,6 +114,7 @@ describe("externalProtocolOptions", () => {
       selectable: false,
       reasonKey: "legacyProtocolUnavailable",
     })
+    expect(options.filter((option) => option.value === "acme:demo")).toHaveLength(1)
   })
 
   it("preserves an unrecognized value without letting it be re-picked", () => {

@@ -120,8 +120,19 @@ jest.mock("@/components/ui/dialog", () => {
 })
 
 jest.mock("@/components/agent/external-agent/manager", () => ({
-  ExternalAgentManager: ({ headerActions }: { headerActions?: React.ReactNode }) => (
-    <div data-testid="external-agent-manager">{headerActions}</div>
+  ExternalAgentManager: ({
+    headerActions,
+    onOpenedInTerminal,
+  }: {
+    headerActions?: React.ReactNode
+    onOpenedInTerminal?: () => void
+  }) => (
+    <div data-testid="external-agent-manager">
+      {headerActions}
+      <button type="button" onClick={onOpenedInTerminal}>
+        Open native terminal fixture
+      </button>
+    </div>
   ),
 }))
 jest.mock("@/components/agent/external-agent/connection-status-badge", () => ({
@@ -521,6 +532,14 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     const manager = screen.getByTestId("external-agent-manager")
     // i18n is passthrough in this suite, so the aria-label is the raw key.
     fireEvent.click(within(manager).getByRole("button", { name: "close" }))
+    expect(screen.queryByTestId("manage-dialog")).toBeNull()
+  })
+
+  it("dismisses the manager after opening a native terminal so the user can interact with it", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("runtime-manage-agents"))
+    fireEvent.click(screen.getByRole("button", { name: "Open native terminal fixture" }))
     expect(screen.queryByTestId("manage-dialog")).toBeNull()
   })
 })

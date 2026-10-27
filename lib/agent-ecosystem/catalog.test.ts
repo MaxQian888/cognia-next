@@ -11,6 +11,43 @@ import {
 } from "./catalog"
 
 describe("lookups", () => {
+  it.each([
+    "auggie",
+    "autohand-code",
+    "codebuddy",
+    "command-code",
+    "kilocode",
+    "mistral-vibe",
+    "mimo-code",
+    "hermes-agent",
+    "oh-my-pi",
+    "muse",
+    "amp",
+    "zcode",
+  ])("links the %s ACP runtime without inventing a portable history importer", (id) => {
+    expect(findEcosystemByRuntimeId(id)?.id).toBe(id)
+    expect(findEcosystemById(id)).toMatchObject({
+      runtimeIds: [id],
+      sessionSourceIds: [],
+      migrationVendor: null,
+    })
+  })
+
+  it("links Goose's passive history source to its native runtime", () => {
+    expect(findEcosystemBySessionSource("goose")?.id).toBe("goose")
+    expect(findEcosystemById("goose")?.runtimeIds).toEqual(["goose"])
+    expect(findEcosystemById("goose")?.sessionSourceIds).toEqual(["goose"])
+  })
+  it("links Antigravity ACP without claiming Gemini history or credential migration", () => {
+    expect(findEcosystemByRuntimeId("antigravity-acp")?.id).toBe("antigravity")
+    expect(findEcosystemById("antigravity")).toMatchObject({
+      runtimeIds: ["antigravity-acp"],
+      sessionSourceIds: [],
+      migrationVendor: null,
+      vendorRootKeys: [],
+      pluginEcosystem: null,
+    })
+  })
   it("links native Kimi ACP without conflating the subscription provider plugin or history import", () => {
     expect(findEcosystemByRuntimeId("kimi")?.id).toBe("kimi")
     expect(findEcosystemById("kimi")).toMatchObject({
@@ -115,10 +152,13 @@ describe("migration vendor accessors", () => {
   })
 })
 
-it("keeps history-only ecosystems free of a launchable runtime", () => {
-  for (const id of ["continue-dev"]) {
-    expect(findEcosystemById(id)?.runtimeIds).toEqual([])
-  }
+it("adds native Continue execution while retaining its existing history identity", () => {
+  expect(findEcosystemById("continue-dev")).toMatchObject({
+    runtimeIds: ["continue-dev"],
+    sessionSourceIds: ["continue-dev"],
+    configRootKey: "continueDir",
+    vendorRootKeys: ["continueDir"],
+  })
 })
 
 it("links Aider's runnable CLI without inventing a machine-wide history root", () => {

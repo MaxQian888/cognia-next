@@ -67,10 +67,25 @@ export interface ApprovalPolicyRequest {
  * own approvals switched off (Codex in `bypassPermissions`) sends none.
  */
 export function configuredApprovalPolicy(
-  config: { autoApprovePatterns?: string[]; requireApprovalFor?: string[] } | undefined,
+  config:
+    | {
+        autoApprovePatterns?: string[]
+        requireApprovalFor?: string[]
+        metadata?: { preset?: unknown }
+        process?: { command?: string }
+      }
+    | undefined,
   request: ApprovalPolicyRequest
 ): ConfiguredApprovalPolicy {
   if (!config) return null
+  // Goose Code Mode approves a complete JavaScript batch. Its nested calls do
+  // not generate separate ACP permission requests, so review the opaque batch
+  // whenever any inner tool may be covered by a mandatory rule.
+  const goose =
+    config.metadata?.preset === "goose" ||
+    /(?:^|[\\/])goose(?:\.exe)?$/i.test(config.process?.command ?? "")
+  if (goose && config.requireApprovalFor?.length && request.toolInfo?.name === "execute_javascript")
+    return "ask"
   const names = Array.from(
     new Set(
       [request.title, request.toolInfo?.name, request.kind].filter(

@@ -202,6 +202,10 @@ export function parseProbeVersion(
   if (!text) return undefined
 
   switch (parser) {
+    case "antigravity-build-label": {
+      const label = /^Build label:\s*(\S+)\s*$/m.exec(text)?.[1]
+      return label && parseSemver(label) ? label : undefined
+    }
     case "semver-anywhere":
       return SEMVER_ANYWHERE.exec(text)?.[1]
     case "semver-first-line":

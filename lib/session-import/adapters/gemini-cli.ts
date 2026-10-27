@@ -55,7 +55,8 @@ interface GeminiRecord {
   startTime?: string
   lastUpdated?: string
   summary?: string
-  memoryScratchpad?: string
+  // Current Gemini records a versioned object; older exports used text.
+  memoryScratchpad?: string | Record<string, unknown> | null
   kind?: "main" | "subagent"
   messages?: GeminiRecord[]
   // message record:
@@ -326,7 +327,16 @@ export function parseGeminiChat(
     if (rec.directories?.[0]) cwd = rec.directories[0]
     if (rec.model) model = rec.model
     if (rec.kind) kind = rec.kind
-    if (rec.memoryScratchpad !== undefined) memoryScratchpad = rec.memoryScratchpad
+    if (rec.memoryScratchpad !== undefined) {
+      memoryScratchpad =
+        typeof rec.memoryScratchpad === "string"
+          ? rec.memoryScratchpad
+          : rec.memoryScratchpad &&
+              typeof rec.memoryScratchpad === "object" &&
+              !Array.isArray(rec.memoryScratchpad)
+            ? JSON.stringify(rec.memoryScratchpad, null, 2)
+            : undefined
+    }
     if (rec.summary !== undefined) summary = rec.summary
     const ms = tsToMs(rec.timestamp || rec.startTime || rec.lastUpdated, updatedAt || Date.now())
     if (rec.timestamp || rec.startTime || rec.lastUpdated) {
@@ -541,8 +551,10 @@ export const geminiCliSessionSource: AgentSessionSourceAdapter = {
   id: "gemini-cli",
   displayName: "Gemini CLI",
   labelKey: "gemini-cli",
-  verifiedVersion: "0.57.0",
-  verifiedAt: "2026-08-29",
+  // Captured with the official recorder and independently loaded by upstream:
+  // scripts/smoke/gemini-history-smoke.ts; fixture kept beside the generation gate.
+  verifiedVersion: "0.61.0",
+  verifiedAt: "2026-10-25",
   acceptedExtensions: ACCEPTED,
 
   // `roots.geminiDir` first: it comes from the Rust resolver, which is the one

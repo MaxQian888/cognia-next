@@ -112,6 +112,15 @@ describe("scrubInlineCredentials", () => {
 })
 
 describe("sanitizeConfigForExport", () => {
+  it("reads missing credential slots from stored metadata without runtime configuration", () => {
+    expect(
+      credentialsRequiredByImport({
+        metadata: {
+          [EXTERNAL_AGENT_CREDENTIAL_REQUIRED_MARKER]: ["apiKey", "not-a-slot"],
+        },
+      })
+    ).toEqual(["apiKey"])
+  })
   it("exports no secret and marks what the importer must supply", () => {
     const { config: exported, credentialsRequired } = sanitizeConfigForExport(networked())
     expect(JSON.stringify(exported)).not.toContain(SECRET)

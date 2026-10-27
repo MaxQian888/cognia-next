@@ -15,6 +15,11 @@ import { codexManifest } from "@cognia/agent-codex/manifest"
 import { deepseekHarnessManifest } from "@cognia/agent-dsh/manifest"
 import { opencodeManifest } from "@cognia/agent-opencode/manifest"
 import { piManifest } from "@cognia/agent-pi/manifest"
+import { openClaudeManifest } from "@cognia/agent-openclaude/manifest"
+import { crushManifest } from "@cognia/agent-crush/manifest"
+import { continueDevManifest } from "@cognia/agent-continue/manifest"
+import { rovoDevManifest } from "@cognia/agent-rovo/manifest"
+import { codebuffManifest } from "@cognia/agent-codebuff/manifest"
 
 import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
 import type { AgentEcosystemEntry } from "./types"
@@ -31,9 +36,52 @@ export const INTEGRATION_MANIFESTS: readonly AgentIntegrationManifest[] = [
   deepseekHarnessManifest,
   opencodeManifest,
   piManifest,
+  openClaudeManifest,
+  crushManifest,
+  continueDevManifest,
+  rovoDevManifest,
+  codebuffManifest,
 ]
 
 export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
+  // ACP-only integrations share the protocol package; identity does not imply history migration.
+  ...[
+    "auggie",
+    "autohand-code",
+    "codebuddy",
+    "command-code",
+    "kilocode",
+    "mistral-vibe",
+    "mimo-code",
+    "hermes-agent",
+    "oh-my-pi",
+    "muse",
+    "amp",
+    "zcode",
+  ].map((id): AgentEcosystemEntry => ({
+    id,
+    runtimeIds: [id],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  })),
+  {
+    id: "antigravity",
+    runtimeIds: ["antigravity-acp"],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  },
   {
     id: "minimax-code",
     runtimeIds: ["minimax-code"],
@@ -60,10 +108,10 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     memoryAgentId: null,
   },
   {
-    // Launch-only over ACP: no portable session format or config to import.
+    // Native ACP plus passive imports of the official JSON Session export.
     id: "goose",
     runtimeIds: ["goose"],
-    sessionSourceIds: [],
+    sessionSourceIds: ["goose"],
     migrationVendor: null,
     vendorRootKeys: [],
     configRootKey: null,
@@ -100,6 +148,11 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
   codexManifest.ecosystem,
   opencodeManifest.ecosystem,
   piManifest.ecosystem,
+  openClaudeManifest.ecosystem,
+  crushManifest.ecosystem,
+  continueDevManifest.ecosystem,
+  rovoDevManifest.ecosystem,
+  codebuffManifest.ecosystem,
   {
     id: "gemini-cli",
     runtimeIds: ["gemini-cli"],
@@ -159,18 +212,6 @@ export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
     probeRootKeys: [],
     pluginEcosystem: null,
     subagentSourceId: "cline",
-    memoryAgentId: null,
-  },
-  {
-    id: "continue-dev",
-    runtimeIds: [],
-    sessionSourceIds: ["continue-dev"],
-    migrationVendor: null,
-    vendorRootKeys: ["continueDir"],
-    configRootKey: "continueDir",
-    probeRootKeys: ["continueDir"],
-    pluginEcosystem: null,
-    subagentSourceId: null,
     memoryAgentId: null,
   },
   aiderManifest.ecosystem,

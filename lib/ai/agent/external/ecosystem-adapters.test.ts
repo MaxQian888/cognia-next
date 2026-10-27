@@ -17,23 +17,51 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
   it("registers the expected adapters", () => {
     expect(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).sort()).toEqual([
       "aider",
+      "amp",
+      "antigravity",
+      "auggie",
+      "autohand-code",
       "claude-code",
       "cline",
+      "codebuddy",
+      "codebuff",
       "codex",
+      "command-code",
+      "continue-dev",
       "copilot-cli",
+      "crush",
       "cursor",
       "devin",
       "droid",
       "gemini-cli",
       "goose",
       "grok",
+      "hermes-agent",
+      "kilocode",
       "kimi",
       "kiro",
+      "mimo-code",
       "minimax-code",
+      "mistral-vibe",
+      "muse",
+      "oh-my-pi",
+      "openclaude",
       "pi",
       "qoder",
       "qwen-code",
+      "rovo-dev",
+      "zcode",
     ])
+  })
+
+  it("describes official Antigravity ACP independently of the agy CLI and Gemini", () => {
+    const surface = findExternalAgentSurfaceByPresetId("antigravity-acp")!.surface
+    expect(surface.process).toEqual({ command: "agy_acp_server.par", args: [] })
+    expect(surface.protocol).toBe("acp")
+    expect(surface.defaultPermissionMode).toBe("default")
+    expect(surface.setupHint).toContain("localharness_external")
+    expect(surface.envVarHint).toContain("keychain")
+    expect(surface.limitationNote).toContain("Plan mode")
   })
 
   it("offers Pi exactly one surface: its own native RPC", () => {
@@ -86,6 +114,11 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
           "codex-app-server",
           "pi-rpc",
           "aider-cli",
+          "openclaude-cli",
+          "crush-http",
+          "continue-cli",
+          "rovo-http",
+          "codebuff-sdk",
           "custom",
           "http",
           "websocket",
@@ -167,22 +200,40 @@ describe("listExternalAgentEcosystemAdapters", () => {
     expect(list.length).toBe(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).length)
     expect(list.map((a) => a.id).sort()).toEqual([
       "aider",
+      "amp",
+      "antigravity",
+      "auggie",
+      "autohand-code",
       "claude-code",
       "cline",
+      "codebuddy",
+      "codebuff",
       "codex",
+      "command-code",
+      "continue-dev",
       "copilot-cli",
+      "crush",
       "cursor",
       "devin",
       "droid",
       "gemini-cli",
       "goose",
       "grok",
+      "hermes-agent",
+      "kilocode",
       "kimi",
       "kiro",
+      "mimo-code",
       "minimax-code",
+      "mistral-vibe",
+      "muse",
+      "oh-my-pi",
+      "openclaude",
       "pi",
       "qoder",
       "qwen-code",
+      "rovo-dev",
+      "zcode",
     ])
   })
 })

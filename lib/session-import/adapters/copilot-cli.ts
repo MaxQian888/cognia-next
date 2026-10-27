@@ -85,11 +85,23 @@ function normalizeCopilotDocument(document: unknown, locatorSessionId: string): 
       else children.set(agentId, [message])
     }
   }
-  const common = { ...root, cwd: root.cwd ?? object(startData.context).cwd }
+  const primaryEvents = raw
+    .map(object)
+    .filter((event) => !(event.agentId ?? object(event.data).agentId))
+  const modelChange = primaryEvents.findLast((event) => event.type === "session.model_change")
+  const assistant = primaryEvents.findLast((event) => event.type === "assistant.message")
+  const common = {
+    ...root,
+    cwd: root.cwd ?? object(startData.context).cwd,
+    model: root.model ?? object(modelChange?.data).newModel ?? object(assistant?.data).model,
+  }
   return [
     { ...common, sessionId, messages: main },
     ...[...children].map(([agentId, childMessages]) => ({
       ...common,
+      model:
+        object(childMessages.findLast((message) => typeof object(message).model === "string"))
+          .model ?? common.model,
       sessionId: `${sessionId}:agent:${agentId}`,
       parentSessionId: sessionId,
       archiveOnly: true,
@@ -104,7 +116,8 @@ function normalizeCopilotDocument(document: unknown, locatorSessionId: string): 
 export const copilotCliSessionSource = createPortableAgentSessionSource({
   id: "copilot-cli",
   displayName: "Copilot CLI",
-  verifiedVersion: "0.0.350",
+  verifiedVersion: "1.0.103",
+  verifiedAt: "2026-10-23",
   presetId: "copilot-cli",
   acceptedExtensions: [".json", ".jsonl"],
   roots: (home) => (home ? [joinPath(home, ".copilot/session-state")] : []),

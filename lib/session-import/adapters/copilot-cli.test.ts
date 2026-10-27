@@ -1,10 +1,54 @@
 import { copilotCliSessionSource } from "./copilot-cli"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 
 describe("copilotCliSessionSource", () => {
   it("scans the documented local session-state directory", () => {
     expect(copilotCliSessionSource.scanRoots("/home/u")).toEqual(["/home/u/.copilot/session-state"])
     expect(copilotCliSessionSource.detect([])).toBe("no")
   })
+})
+
+it("imports a sanitized real 1.0.103 transcript with current provenance, model and completed tools", async () => {
+  const content = readFileSync(
+    path.join(process.cwd(), "lib/session-import/fixtures/copilot-1.0.103-events.jsonl"),
+    "utf8"
+  )
+  const input = {
+    fs,
+    home: "",
+    pickedFiles: [
+      {
+        name: "events.jsonl",
+        path: "/fixtures/.copilot/session-state/copilot-1.0.103-acceptance/events.jsonl",
+        content,
+      },
+    ],
+  }
+  const listed = await copilotCliSessionSource.listSessions(input)
+  expect(listed).toHaveLength(1)
+  expect(listed[0].ref.originalSessionId).toBe("copilot-1.0.103-acceptance")
+  const graph = await copilotCliSessionSource.parseGraph!(listed[0].ref, input)
+  const conversation = graph.nodes[0].conversation
+  expect(conversation.session).toMatchObject({
+    model: "cognia-copilot-smoke",
+    workingDir: "/fixtures/copilot-workspace",
+    importRuntimeBinding: {
+      nativeSessionId: "copilot-1.0.103-acceptance",
+      verifiedAt: "2026-10-23",
+    },
+  })
+  expect(copilotCliSessionSource.verifiedVersion).toBe("1.0.103")
+  expect(copilotCliSessionSource.verifiedAt).toBe("2026-10-23")
+  const parts = conversation.messages.flatMap((message) => message.parts)
+  expect(parts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ text: "COPILOT_SMOKE_OK" }),
+      expect.objectContaining({ text: "RESUMED_OK" }),
+      expect.objectContaining({ toolCallId: "smoke-approve", state: "output-available" }),
+      expect.objectContaining({ toolCallId: "smoke-reject", state: "output-error" }),
+    ])
+  )
 })
 
 const fs = {
@@ -86,12 +130,13 @@ it("projects persisted SDK messages and complete tools without duplicating ephem
 
 it("keeps subagent events out of the parent transcript and uses read-only synthetic child bindings", async () => {
   const records = [
+    { type: "session.model_change", data: { newModel: "parent-model" } },
     { id: "u", type: "user.message", data: { content: "root" }, timestamp: "2026-09-01T00:00:00Z" },
     {
       id: "a",
       type: "assistant.message",
       agentId: "worker",
-      data: { content: "child" },
+      data: { content: "child", model: "child-model" },
       timestamp: "2026-09-01T00:00:01Z",
     },
   ]
@@ -114,6 +159,8 @@ it("keeps subagent events out of the parent transcript and uses read-only synthe
   expect(graph.nodes[1].conversation.messages[0].parts[0]).toMatchObject({ text: "child" })
   expect(graph.nodes[1].conversation.session.importRuntimeBinding).toBeUndefined()
   expect(graph.nodes[1].session.header.lineage?.kind).toBe("subagent")
+  expect(graph.nodes[0].conversation.session.model).toBe("parent-model")
+  expect(graph.nodes[1].conversation.session.model).toBe("child-model")
 })
 
 it.each(["id", "session_id", "conversationId"])(

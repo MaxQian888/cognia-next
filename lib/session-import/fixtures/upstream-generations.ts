@@ -3,7 +3,7 @@ export interface SessionImportGenerationFixture {
   sourceId: string
   generation: "current" | "previous"
   version: string
-  verifiedAt: "2026-08-29"
+  verifiedAt: string
   evidence: string
   capabilities: string[]
   redactedSample: Record<string, unknown>
@@ -148,12 +148,13 @@ const fixture = (
   version: string,
   evidence: string,
   capabilities: string[],
-  redactedSample: Record<string, unknown>
+  redactedSample: Record<string, unknown>,
+  verifiedAt = "2026-08-29"
 ): SessionImportGenerationFixture => ({
   sourceId,
   generation,
   version,
-  verifiedAt: "2026-08-29",
+  verifiedAt,
   evidence,
   capabilities,
   redactedSample,
@@ -211,10 +212,11 @@ export const SESSION_IMPORT_GENERATION_FIXTURES: readonly SessionImportGeneratio
   fixture(
     "gemini-cli",
     "current",
-    "0.57.0",
-    "https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingTypes.ts",
-    ["set", "rewindTo", "agentId", "multimodal"],
-    { type: "content", agentId: "[agent]", content: [] }
+    "0.61.0",
+    "https://github.com/google-gemini/gemini-cli/blob/v0.61.0/packages/core/src/services/chatRecordingService.ts",
+    ["set", "rewindTo", "agentId", "structured-memory", "reasoning", "usage"],
+    { artifact: "gemini-0.61.0-session.jsonl", sessionId: "gemini-0.61.0-acceptance" },
+    "2026-10-25"
   ),
   fixture(
     "gemini-cli",
@@ -259,10 +261,11 @@ export const SESSION_IMPORT_GENERATION_FIXTURES: readonly SessionImportGeneratio
   fixture(
     "pi",
     "current",
-    "0.84.4",
+    "1.0.2",
     "https://github.com/badlogic/pi-mono",
     ["branch", "subagent", "bash", "compaction"],
-    { type: "session", id: "[session]" }
+    { type: "session", id: "[session]" },
+    "2026-10-05"
   ),
   fixture("pi", "previous", "pre-migration", "https://github.com/badlogic/pi-mono", ["branch"], {
     type: "message",
@@ -303,10 +306,11 @@ export const SESSION_IMPORT_GENERATION_FIXTURES: readonly SessionImportGeneratio
   fixture(
     "copilot-cli",
     "current",
-    "0.0.350",
-    "https://docs.github.com/en/copilot/concepts/agents/copilot-cli/chronicle",
-    ["events-jsonl", "sqlite", "checkpoint", "background"],
-    { sessionId: "[session]", type: "checkpoint" }
+    "1.0.103",
+    "docs/evidence/2026-10-23-copilot-cli-support-audit.md",
+    ["events-jsonl", "assistant-text", "model", "tool-results", "native-resume"],
+    { artifact: "copilot-1.0.103-events.jsonl", sessionId: "copilot-1.0.103-acceptance" },
+    "2026-10-23"
   ),
   fixture(
     "copilot-cli",

@@ -22,7 +22,7 @@ import { listAllTerminals, TerminalSession } from "./session"
 import { SshTerminalSession } from "./ssh-session"
 import { RemoteTerminalSession } from "./transport-ws"
 import { selectTerminalTransportChain, type TerminalTransportKind } from "./pick-transport"
-import { registerLiveSession } from "./session-registry"
+import { getLiveSession, registerLiveSession } from "./session-registry"
 import { wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { classifyTerminalHostError } from "./host-state"
@@ -36,6 +36,27 @@ export interface RehydrateResult {
 
 type RehydrateStore = TerminalStoreLike & {
   restorePersistedLayout?: () => void
+}
+
+function registerReattachedSession(
+  info: SessionInfo,
+  session: BaseTerminalSession,
+  store: TerminalStoreLike
+): void {
+  // The dock mounts from the row, so the live handle must exist first.
+  registerLiveSession(session)
+  store.registerSession({
+    id: info.id,
+    projectId: info.projectId,
+    extensionId: info.extensionId,
+    origin: info.origin,
+    shell: info.shell,
+    kind: info.kind,
+    profileId: info.profileId,
+    hostId: info.hostId,
+    remoteHost: session.info.remoteHost !== undefined ? session.info.remoteHost : info.remoteHost,
+  })
+  wireSessionToStore(session, store)
 }
 
 async function tryTransportChain<T>(
@@ -99,6 +120,55 @@ function reattachToActiveHost(
   })
 }
 
+/** Recover only a named native CLI before spawning, including a detached process. */
+export class TerminalProfileRecoveryError extends Error {
+  constructor(
+    readonly code: "ambiguous" | "not-native" | "identity-changed",
+    message: string
+  ) {
+    super(message)
+    this.name = "TerminalProfileRecoveryError"
+  }
+}
+
+export async function rehydrateTerminalProfile(
+  profileId: string,
+  opts: {
+    store?: TerminalStoreLike
+    list?: () => Promise<SessionInfo[]>
+    reattach?: (info: SessionInfo, resumeAfter: number) => Promise<BaseTerminalSession>
+  } = {}
+): Promise<string | undefined> {
+  const store = opts.store ?? useTerminalStore.getState()
+  // Unlike boot's best-effort recovery, an unknown list must not authorize a
+  // replacement process: the old native agent may still be running.
+  const infos = await (opts.list ?? listFromActiveHost)()
+  const matching = infos.filter((info) => info.profileId === profileId && info.alive !== false)
+  if (matching.length > 1)
+    throw new TerminalProfileRecoveryError(
+      "ambiguous",
+      "multiple live terminals use this agent profile"
+    )
+  const info = matching[0]
+  if (!info) return undefined
+  if (info.kind && info.kind !== "localPty")
+    throw new TerminalProfileRecoveryError("not-native", "agent profile is not a native terminal")
+  // Boot may have registered it while the host list was in flight. The passed
+  // Zustand snapshot can predate that row; the live registry is authoritative.
+  const live = getLiveSession(info.id)
+  if (live && !live.isExited && live.info.alive !== false) return info.id
+  const session = await (opts.reattach ?? reattachToActiveHost)(info, 0)
+  if (session.info.id !== info.id) {
+    await session.detach()
+    throw new TerminalProfileRecoveryError(
+      "identity-changed",
+      "terminal host returned a different session identity"
+    )
+  }
+  registerReattachedSession(info, session, store)
+  return info.id
+}
+
 export async function rehydrateTerminals(
   opts: {
     store?: RehydrateStore
@@ -137,23 +207,7 @@ export async function rehydrateTerminals(
       // the `await reattach` gap — before the live session existed — leaving a
       // dead, black terminal. This mirrors the spawn path (spawn-orchestrator).
       const session = await reattach(info, 0)
-      registerLiveSession(session)
-      store.registerSession({
-        id: info.id,
-        projectId: info.projectId,
-        extensionId: info.extensionId,
-        origin: info.origin,
-        shell: info.shell,
-        // Without these the restored row cannot tell an SSH tab from a local
-        // one, so it renders as a shell called "ssh" with no way back to the
-        // profile it came from.
-        kind: info.kind,
-        profileId: info.profileId,
-        hostId: info.hostId,
-        remoteHost:
-          session.info.remoteHost !== undefined ? session.info.remoteHost : info.remoteHost,
-      })
-      wireSessionToStore(session, store)
+      registerReattachedSession(info, session, store)
       restored++
     } catch {
       failed++

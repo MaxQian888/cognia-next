@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
+import { GooseSessionInspector } from "./goose-session-controls"
 import type { SessionCreateOptions } from "@/lib/ai/agent/external/protocol-adapter"
 import type {
   ExternalAgentNativeSubagents,
@@ -40,7 +41,13 @@ export type SessionOperationsManager = Pick<
   | "getSessionEntries"
   | "getNativeSubagents"
   | "changeNativeSubagentModel"
->
+> &
+  Partial<
+    Pick<
+      import("@/lib/ai/agent/external/manager").ExternalAgentManager,
+      "listGooseChildren" | "inspectGooseChild" | "prepareGooseRecovery"
+    >
+  >
 interface Props {
   manager?: SessionOperationsManager
   agentId: string
@@ -48,6 +55,7 @@ interface Props {
   isExecuting: boolean
   onFork: (options: SessionCreateOptions) => Promise<unknown>
   onClone: () => Promise<unknown>
+  onPrompt?: (prompt: string) => Promise<unknown>
   onShell: (
     command: string,
     options: { excludeFromContext: boolean }
@@ -196,6 +204,10 @@ export function ExternalAgentSessionOperations(props: Props) {
     owner: string
     data: ExternalAgentNativeSubagents
   }>()
+  const [gooseOwner, setGooseOwner] = useState<{
+    owner: string
+    manager: SessionOperationsManager
+  }>()
   const entryText = useMemo(
     () => (entries === undefined ? undefined : JSON.stringify(entries, null, 2)),
     [entries]
@@ -205,6 +217,24 @@ export function ExternalAgentSessionOperations(props: Props) {
   const manager = props.manager ?? getExternalAgentManager()
   const { agentId, sessionId } = props
   const owner = `${agentId}:${sessionId}`
+  const goose =
+    gooseOwner?.owner === owner &&
+    gooseOwner.manager === manager &&
+    manager.listGooseChildren &&
+    manager.inspectGooseChild &&
+    manager.prepareGooseRecovery
+      ? {
+          listChildren: async () => {
+            const children = await manager.listGooseChildren!(agentId, sessionId)
+            if (!children) throw new Error(t("unsupported"))
+            return children
+          },
+          inspect: (_parent: string, childId: string) =>
+            manager.inspectGooseChild!(agentId, sessionId, childId),
+          recoveryPrompt: (_parent: string, childId: string) =>
+            manager.prepareGooseRecovery!(agentId, sessionId, childId),
+        }
+      : null
   const native = nativeSnapshot?.owner === owner ? nativeSnapshot.data : undefined
   const args = [agentId, sessionId] as const
   const can = (key: keyof ExternalAgentSessionOperationCapabilities) =>
@@ -228,6 +258,16 @@ export function ExternalAgentSessionOperations(props: Props) {
   useEffect(() => {
     if (!open) return
     let cancelled = false
+    if (manager.listGooseChildren)
+      void manager
+        .listGooseChildren(agentId, sessionId)
+        .then((children) => {
+          if (!cancelled)
+            setGooseOwner(children ? { owner: `${agentId}:${sessionId}`, manager } : undefined)
+        })
+        .catch(() => {
+          if (!cancelled) setGooseOwner(undefined)
+        })
     void manager
       .getSessionOperationCapabilities(agentId, sessionId)
       .then(async (caps) => {
@@ -359,6 +399,15 @@ export function ExternalAgentSessionOperations(props: Props) {
       <summary className="cursor-pointer py-1">{t("title")}</summary>
       {open && (
         <div className="flex flex-col gap-3 py-2">
+          {goose && (
+            <GooseSessionInspector
+              key={`${agentId}:${sessionId}`}
+              api={goose}
+              parentId={sessionId}
+              busy={props.isExecuting}
+              onPrompt={props.onPrompt}
+            />
+          )}
           {error && (
             <p role="alert" className="text-destructive">
               {error}

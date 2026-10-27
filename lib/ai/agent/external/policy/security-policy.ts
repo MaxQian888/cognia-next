@@ -133,10 +133,12 @@ export function externalAgentSandboxSupportsPlatform(platform?: string): boolean
 
 /** Strip a Windows executable suffix and lower-case, as both launchers do. */
 export function baseCommandName(command: string): string {
-  return command
+  const base = command
     .trim()
     .toLowerCase()
     .replace(/\.(?:exe|cmd|bat)$/i, "")
+  // Goose is system-owned; runtime discovery may return its absolute executable.
+  return /(?:^|[\\/])goose$/.test(base) ? "goose" : base
 }
 
 /**

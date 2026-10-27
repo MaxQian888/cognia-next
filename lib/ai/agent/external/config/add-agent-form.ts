@@ -1,3 +1,4 @@
+import { agentStateIsolationFor } from "../policy/security-policy"
 /**
  * The "add an external agent" form, without the form.
  *
@@ -67,7 +68,16 @@ const DIRECT_ENVIRONMENT_PRESETS: readonly string[] = ["qoder", "cline", "kimi"]
  * behind the generic process-environment section.
  */
 export function usesDirectEnvironment(data: AddAgentFormData, presetId: string): boolean {
-  return data.protocol === "aider-cli" || DIRECT_ENVIRONMENT_PRESETS.includes(presetId)
+  return (
+    [
+      "aider-cli",
+      "openclaude-cli",
+      "continue-cli",
+      "crush-http",
+      "rovo-http",
+      "codebuff-sdk",
+    ].includes(data.protocol) || DIRECT_ENVIRONMENT_PRESETS.includes(presetId)
+  )
 }
 
 /** The shape of the form a preset implies, and the process environment it starts with. */
@@ -108,7 +118,8 @@ export function transportForProtocol(
   // OpenCode runs over HTTP + SSE; A2A is a remote HTTP (JSON-RPC + optional
   // SSE) protocol — both need a network endpoint rather than a stdio command.
   if (protocol === "opencode" || protocol === "opencode-v2") return "sse"
-  if (protocol === "a2a") return "http"
+  if (["a2a", "crush-http", "rovo-http"].includes(protocol)) return "http"
+  if (["openclaude-cli", "continue-cli", "codebuff-sdk"].includes(protocol)) return "stdio"
   return current
 }
 
@@ -116,6 +127,10 @@ export interface AddAgentFormShape {
   isOpenCode: boolean
   isOpenCodeV2: boolean
   isStdio: boolean
+  isLocalService: boolean
+  usesProcess: boolean
+  bundledBridge: boolean
+  fixedLaunchArguments: boolean
   /** The preset launches a managed runtime, so command and arguments are not the user's. */
   managedRuntime: boolean
   preset: ExternalAgentPresetConfig | null
@@ -125,10 +140,17 @@ export function addAgentFormShape(data: AddAgentFormData, presetId: string): Add
   const isOpenCode = data.protocol === "opencode"
   const isOpenCodeV2 = data.protocol === "opencode-v2"
   const preset = presetId ? getPresetConfig(presetId) : null
+  const isLocalService = data.protocol === "crush-http" || data.protocol === "rovo-http"
+  const bundledBridge = data.protocol === "codebuff-sdk"
+  const isStdio = !isOpenCode && !isOpenCodeV2 && data.transport === "stdio"
   return {
     isOpenCode,
     isOpenCodeV2,
-    isStdio: !isOpenCode && !isOpenCodeV2 && data.transport === "stdio",
+    isStdio,
+    isLocalService,
+    usesProcess: isStdio || isLocalService,
+    bundledBridge,
+    fixedLaunchArguments: bundledBridge || isLocalService,
     managedRuntime: preset?.metadata?.requiresManagedRuntime === true,
     preset,
   }
@@ -150,7 +172,11 @@ export function addAgentFormGatewayConfig(
       args: tokenizeShellCommand(data.args) ?? [],
     },
     network:
-      data.transport !== "stdio" && !data.autoSpawnServer ? { endpoint: data.endpoint } : undefined,
+      data.transport !== "stdio" &&
+      !data.autoSpawnServer &&
+      !["crush-http", "rovo-http"].includes(data.protocol)
+        ? { endpoint: data.endpoint }
+        : undefined,
     metadata: { ...shape.preset?.metadata, autoSpawnServer: data.autoSpawnServer },
   }
 }
@@ -219,9 +245,14 @@ export function validateAddAgentForm(
     // Remote mode (no auto-spawn) needs an endpoint; auto-spawn defaults the
     // command to `opencode`, so nothing else is strictly required.
     if (!data.autoSpawnServer && !data.endpoint.trim()) return "endpointRequired"
-  } else if (shape.isStdio && !shape.managedRuntime && !data.command.trim()) {
+  } else if (
+    shape.usesProcess &&
+    !shape.managedRuntime &&
+    !shape.bundledBridge &&
+    !data.command.trim()
+  ) {
     return "commandRequired"
-  } else if (!shape.isStdio && !data.endpoint.trim()) {
+  } else if (!shape.usesProcess && !data.endpoint.trim()) {
     return "endpointRequired"
   }
 
@@ -248,8 +279,9 @@ export function validateAddAgentForm(
     return "modelRolesInvalid"
   }
   if (
-    (shape.isStdio || (shape.isOpenCode && data.autoSpawnServer)) &&
+    (shape.usesProcess || (shape.isOpenCode && data.autoSpawnServer)) &&
     !shape.managedRuntime &&
+    !shape.fixedLaunchArguments &&
     tokenizeShellCommand(data.args) === null
   ) {
     return "argumentsInvalid"
@@ -267,8 +299,7 @@ export function validateAddAgentForm(
 
 /**
  * What a valid form adds. `defaultPermissionMode` is the caller's choice where
- * it offers one; without it the protocol's own default applies (Aider alone
- * carries one from its preset, because it would otherwise edit unasked).
+ * it offers one; otherwise the preset's declared authority is retained.
  */
 export function buildCreateExternalAgentInput(
   data: AddAgentFormData,
@@ -285,6 +316,12 @@ export function buildCreateExternalAgentInput(
     .map((pattern) => pattern.trim())
     .filter(Boolean)
 
+  const preset = data.preset ? getPresetConfig(data.preset) : null
+  const permissionMode =
+    options.defaultPermissionMode ??
+    preset?.defaultPermissionMode ??
+    (data.protocol === "aider-cli" ? "plan" : undefined)
+  const shape = addAgentFormShape(data, data.preset ?? "")
   const config: CreateExternalAgentInput = {
     ...(data.preset
       ? { metadata: { ...getPresetConfig(data.preset)?.metadata, preset: data.preset } }
@@ -296,15 +333,7 @@ export function buildCreateExternalAgentInput(
       : {}),
     ...(data.cogniaModel && data.modelRoles ? { modelRoles: data.modelRoles } : {}),
     protocol: data.protocol,
-    ...(options.defaultPermissionMode
-      ? { defaultPermissionMode: options.defaultPermissionMode }
-      : data.protocol === "aider-cli"
-        ? {
-            defaultPermissionMode: data.preset
-              ? (getPresetConfig(data.preset)?.defaultPermissionMode ?? "plan")
-              : "plan",
-          }
-        : {}),
+    ...(permissionMode ? { defaultPermissionMode: permissionMode } : {}),
     transport: data.transport,
     timeout: toNonNegativeInteger(data.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
     retryConfig: {
@@ -359,10 +388,20 @@ export function buildCreateExternalAgentInput(
     }
   } else if (data.protocol === "opencode-v2") {
     config.metadata = { preview: true, localServiceDiscovery: true }
-  } else if (data.transport === "stdio") {
+  } else if (shape.usesProcess) {
     config.process = {
-      command: config.metadata?.requiresManagedRuntime ? "" : data.command,
-      args: config.metadata?.requiresManagedRuntime ? [] : (tokenizeShellCommand(data.args) ?? []),
+      command: shape.bundledBridge
+        ? "node"
+        : config.metadata?.requiresManagedRuntime
+          ? ""
+          : data.command,
+      args: shape.fixedLaunchArguments
+        ? data.protocol === "rovo-http"
+          ? ["rovodev", "serve"]
+          : []
+        : config.metadata?.requiresManagedRuntime
+          ? []
+          : (tokenizeShellCommand(data.args) ?? []),
       cwd: data.processCwd?.trim() || undefined,
       env: data.processEnv ?? {},
       ...(config.metadata?.requiresManagedRuntime
@@ -373,13 +412,20 @@ export function buildCreateExternalAgentInput(
               : {}),
           }
         : {}),
-      bare: data.bare || undefined,
-      debug: data.debug || undefined,
+      ...(!shape.fixedLaunchArguments
+        ? { bare: data.bare || undefined, debug: data.debug || undefined }
+        : {}),
     }
   } else {
     config.network = {
       endpoint: data.endpoint,
     }
+  }
+
+  if (config.process?.command) {
+    config.stateIsolation = agentStateIsolationFor(config.process.command, config.process.args)
+      ? "isolated"
+      : "shared"
   }
 
   return config
@@ -530,10 +576,16 @@ export function addAgentFormLaunchTarget(data: AddAgentFormData): {
   command: string
   args: string[]
 } {
-  const spawns = data.transport === "stdio" || data.autoSpawnServer
+  const shape = addAgentFormShape(data, data.preset ?? "")
+  if (shape.bundledBridge) return { command: "node", args: [] }
+  const spawns = shape.usesProcess || data.autoSpawnServer
   if (!spawns) return { command: "", args: [] }
   return {
     command: data.command.trim() || (data.autoSpawnServer ? "opencode" : ""),
-    args: tokenizeShellCommand(data.args) ?? [],
+    args: shape.fixedLaunchArguments
+      ? data.protocol === "rovo-http"
+        ? ["rovodev", "serve"]
+        : []
+      : (tokenizeShellCommand(data.args) ?? []),
   }
 }

@@ -199,7 +199,7 @@ export function sanitizeConfigForExport(config: LifecycleAgentConfig): Sanitized
 
 /** Which slots does an imported configuration say it still needs? */
 export function credentialsRequiredByImport(
-  config: LifecycleAgentConfig
+  config: Pick<LifecycleAgentConfig, "metadata">
 ): ExternalAgentCredentialSlot[] {
   const marker = config.metadata?.[EXTERNAL_AGENT_CREDENTIAL_REQUIRED_MARKER]
   if (!Array.isArray(marker)) return []

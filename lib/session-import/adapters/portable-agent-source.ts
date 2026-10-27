@@ -38,6 +38,8 @@ export interface PortableSourceConfig {
   id: string
   displayName: string
   verifiedVersion: string
+  /** Date of the source-specific compatibility evidence; legacy sources retain their original date. */
+  verifiedAt?: string
   /** Matching configured runtime preset, when native resume is supported. */
   presetId?: string
   acceptedExtensions: string[]
@@ -46,7 +48,7 @@ export interface PortableSourceConfig {
   contentHints?: string[]
   detectContent?: (content: string) => boolean
   /** Read-only desktop SQLite projection supplied by the Tauri store transport. */
-  storeSource?: "cursor" | "cline" | "copilot-cli"
+  storeSource?: "cursor" | "cline" | "copilot-cli" | "goose"
   defaultTitle: string
   fidelity?: SessionFidelity
   markdown?: boolean
@@ -541,7 +543,7 @@ function toConversation(
       nativeSessionId: parsed.originalSessionId,
       cwd: parsed.cwd,
       resumeMethod: "cli",
-      verifiedAt: "2026-08-29",
+      verifiedAt: config.verifiedAt ?? "2026-08-29",
     }
   if (parsed.parentNativeSessionId && parsed.relationKind) {
     session.parentSessionId = importedSessionId(config.id, parsed.parentNativeSessionId)
@@ -731,7 +733,7 @@ export function createPortableAgentSessionSource(
     displayName: config.displayName,
     labelKey: config.id,
     verifiedVersion: config.verifiedVersion,
-    verifiedAt: "2026-08-29",
+    verifiedAt: config.verifiedAt ?? "2026-08-29",
     acceptedExtensions: config.acceptedExtensions,
     scanRoots: (home) => config.roots(home),
     detect(files: PickedSessionFile[]) {
@@ -806,7 +808,7 @@ export function createPortableAgentSessionSource(
       const graph = buildImportedSessionGraph(conversation, {
         sourceRuntime: config.id,
         sourceVersion: config.verifiedVersion,
-        verifiedAt: "2026-08-29",
+        verifiedAt: config.verifiedAt ?? "2026-08-29",
         importFidelity: config.fidelity ?? "structured",
       })
       for (const node of graph.nodes) {

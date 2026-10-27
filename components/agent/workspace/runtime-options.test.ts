@@ -10,6 +10,10 @@ import {
 import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/config/presets"
 
 describe("runtime-options", () => {
+  it("offers the official Antigravity ACP runtime with a localized label", () => {
+    expect(RUNTIME_OPTIONS).toContain("antigravity-acp")
+    expect(runtimeLabelKey("antigravity-acp")).toBe("antigravityAcp")
+  })
   it("offers Kimi Code in teammate runtimes with its localized label", () => {
     expect(RUNTIME_OPTIONS).toContain("kimi")
     expect(runtimeLabelKey("kimi")).toBe("kimi")

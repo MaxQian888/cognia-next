@@ -55,9 +55,9 @@ describe("stateIsolationBlockReason", () => {
   it("refuses a runtime with no documented home to move", () => {
     expect(
       stateIsolationBlockReason(
-        config({ stateIsolation: "isolated", process: { command: "goose", args: ["acp"] } })
+        config({ stateIsolation: "isolated", process: { command: "devin", args: ["acp"] } })
       )
-    ).toMatch(/goose/)
+    ).toMatch(/devin/)
   })
 
   it("refuses an id that cannot name a directory", () => {
@@ -76,7 +76,7 @@ describe("stateIsolationBlockReason", () => {
     expect(stateIsolationBlockReason(network)).toBeNull()
     const gateway = config({
       stateIsolation: "isolated",
-      process: { command: "goose" },
+      process: { command: "devin" },
       metadata: { cogniaGatewayTask: true },
     })
     expect(stateIsolationBlockReason(gateway)).toBeNull()
@@ -108,10 +108,10 @@ describe("applyStateIsolation", () => {
 
   it("throws state_isolation_unsupported for a runtime it cannot isolate", () => {
     expect(() =>
-      applyStateIsolation(config({ stateIsolation: "isolated", process: { command: "goose" } }))
+      applyStateIsolation(config({ stateIsolation: "isolated", process: { command: "devin" } }))
     ).toThrow(ExternalAgentLifecycleError)
     try {
-      applyStateIsolation(config({ stateIsolation: "isolated", process: { command: "goose" } }))
+      applyStateIsolation(config({ stateIsolation: "isolated", process: { command: "devin" } }))
     } catch (error) {
       expect((error as ExternalAgentLifecycleError).code).toBe("state_isolation_unsupported")
     }

@@ -332,10 +332,14 @@ describe("protocol registration", () => {
     const { protocolAdapterRegistry } = await import("../protocol-adapter")
     await import("../manager")
     const { ExternalAgentManager } = await import("../manager")
-    ExternalAgentManager.getInstance()
-
-    expect(protocolAdapterRegistry.has("pi-rpc")).toBe(true)
-    expect(protocolAdapterRegistry.create("pi-rpc")?.protocol).toBe("pi-rpc")
+    const manager = ExternalAgentManager.getInstance()
+    try {
+      expect(protocolAdapterRegistry.has("pi-rpc")).toBe(true)
+      expect(protocolAdapterRegistry.create("pi-rpc")?.protocol).toBe("pi-rpc")
+    } finally {
+      await manager.dispose()
+      ExternalAgentManager.resetInstance()
+    }
   })
 
   it("declares itself in the supported protocol list", async () => {

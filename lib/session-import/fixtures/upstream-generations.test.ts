@@ -1,4 +1,6 @@
 import { getSessionSources } from "../registry"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import {
   executableGenerationArtifact,
   SESSION_IMPORT_GENERATION_FIXTURES,
@@ -14,7 +16,13 @@ describe("session import upstream generation fixtures", () => {
       expect(fixtures.find((fixture) => fixture.generation === "current")?.version).toBe(
         source.verifiedVersion
       )
-      expect(fixtures.every((fixture) => fixture.verifiedAt === source.verifiedAt)).toBe(true)
+      expect(fixtures.find((fixture) => fixture.generation === "current")?.verifiedAt).toBe(
+        source.verifiedAt
+      )
+      for (const fixture of fixtures) {
+        expect(fixture.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+        expect(new Date(fixture.verifiedAt).toISOString().slice(0, 10)).toBe(fixture.verifiedAt)
+      }
     }
   })
 
@@ -27,7 +35,32 @@ describe("session import upstream generation fixtures", () => {
     "$sourceId parses its $generation executable fixture through the registered adapter",
     async (fixture) => {
       const source = getSessionSources().find((candidate) => candidate.id === fixture.sourceId)!
-      const artifact = executableGenerationArtifact(fixture)
+      const artifact =
+        fixture.sourceId === "copilot-cli" && fixture.generation === "current"
+          ? {
+              name: "events.jsonl",
+              path: "/fixtures/.copilot/session-state/copilot-1.0.103-acceptance/events.jsonl",
+              content: readFileSync(
+                path.join(
+                  process.cwd(),
+                  "lib/session-import/fixtures/copilot-1.0.103-events.jsonl"
+                ),
+                "utf8"
+              ),
+            }
+          : fixture.sourceId === "gemini-cli" && fixture.generation === "current"
+            ? {
+                name: "session.jsonl",
+                path: "/fixtures/.gemini/tmp/project/chats/gemini-0.61.0-session.jsonl",
+                content: readFileSync(
+                  path.join(
+                    process.cwd(),
+                    "lib/session-import/fixtures/gemini-0.61.0-session.jsonl"
+                  ),
+                  "utf8"
+                ),
+              }
+            : executableGenerationArtifact(fixture)
       const input = {
         fs: {
           exists: async () => false,

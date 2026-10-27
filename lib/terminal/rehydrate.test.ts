@@ -2,15 +2,18 @@
  * @jest-environment jsdom
  */
 
-jest.mock("./session-registry", () => ({ registerLiveSession: jest.fn() }))
+jest.mock("./session-registry", () => ({
+  registerLiveSession: jest.fn(),
+  getLiveSession: jest.fn(),
+}))
 jest.mock("./spawn-orchestrator", () => ({ wireSessionToStore: jest.fn() }))
 let mockTransportChain: Array<"tauri-channel" | "ws" | "webrtc"> = ["tauri-channel"]
 jest.mock("./pick-transport", () => ({
   selectTerminalTransportChain: () => mockTransportChain,
 }))
 
-import { rehydrateTerminals } from "./rehydrate"
-import { registerLiveSession } from "./session-registry"
+import { rehydrateTerminals, rehydrateTerminalProfile } from "./rehydrate"
+import { getLiveSession, registerLiveSession } from "./session-registry"
 import { wireSessionToStore, type TerminalStoreLike } from "./spawn-orchestrator"
 import type { SessionInfo } from "./types"
 import { TerminalSession } from "./session"
@@ -51,10 +54,116 @@ beforeEach(() => {
   mockTransportChain = ["tauri-channel"]
   ;(registerLiveSession as jest.Mock).mockClear()
   ;(wireSessionToStore as jest.Mock).mockClear()
+  ;(getLiveSession as jest.Mock).mockReset()
 })
 
 afterEach(() => {
   jest.restoreAllMocks()
+})
+
+describe("rehydrateTerminalProfile", () => {
+  const profileId = "cognia-agent-terminal-freebuff"
+  const agentInfo = (id: string): SessionInfo => ({
+    ...info(id),
+    profileId,
+    kind: "localPty",
+    alive: true,
+  })
+
+  it("restores only the matching live marker without changing unrelated tabs or layout", async () => {
+    const store = makeStore()
+    const reattach = jest.fn(fakeReattach)
+    await expect(
+      rehydrateTerminalProfile(profileId, {
+        store,
+        list: async () => [
+          info("unrelated"),
+          { ...agentInfo("exited"), alive: false },
+          agentInfo("survived"),
+        ],
+        reattach,
+      })
+    ).resolves.toBe("survived")
+    expect(reattach).toHaveBeenCalledTimes(1)
+    expect(reattach).toHaveBeenCalledWith(agentInfo("survived"), 0)
+    expect(registerLiveSession).toHaveBeenCalledTimes(1)
+    expect(store.registerSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "survived", profileId })
+    )
+    expect(wireSessionToStore).toHaveBeenCalledTimes(1)
+    expect(store.removeSession).not.toHaveBeenCalled()
+    expect(store.restorePersistedLayout).not.toHaveBeenCalled()
+  })
+
+  it("does not duplicate an attachment already restored by boot", async () => {
+    const store = makeStore()
+    // The action snapshot predates boot's row, while the process registry has
+    // already acquired the live handle. Do not attach a second stream.
+    ;(getLiveSession as jest.Mock).mockReturnValue({ info: agentInfo("survived") })
+    const reattach = jest.fn(fakeReattach)
+    await expect(
+      rehydrateTerminalProfile(profileId, {
+        store,
+        list: async () => [agentInfo("survived")],
+        reattach,
+      })
+    ).resolves.toBe("survived")
+    expect(reattach).not.toHaveBeenCalled()
+    expect(registerLiveSession).not.toHaveBeenCalled()
+    expect(store.registerSession).not.toHaveBeenCalled()
+  })
+
+  it("returns missing only after a successful authoritative list", async () => {
+    const store = makeStore()
+    await expect(
+      rehydrateTerminalProfile(profileId, { store, list: async () => [info("other")] })
+    ).resolves.toBeUndefined()
+    await expect(
+      rehydrateTerminalProfile(profileId, {
+        store,
+        list: async () => {
+          throw new Error("terminal list capability denied")
+        },
+      })
+    ).rejects.toThrow("terminal list capability denied")
+    expect(registerLiveSession).not.toHaveBeenCalled()
+  })
+
+  it("refuses ambiguous live owners and non-native sessions before reattachment", async () => {
+    const store = makeStore()
+    const reattach = jest.fn(fakeReattach)
+    await expect(
+      rehydrateTerminalProfile(profileId, {
+        store,
+        list: async () => [agentInfo("one"), agentInfo("two")],
+        reattach,
+      })
+    ).rejects.toMatchObject({ code: "ambiguous" })
+    await expect(
+      rehydrateTerminalProfile(profileId, {
+        store,
+        list: async () => [{ ...agentInfo("ssh"), kind: "ssh" }],
+        reattach,
+      })
+    ).rejects.toMatchObject({ code: "not-native" })
+    expect(reattach).not.toHaveBeenCalled()
+    expect(store.registerSession).not.toHaveBeenCalled()
+  })
+
+  it("releases a mismatched attachment instead of assigning its identity to the agent", async () => {
+    const store = makeStore()
+    const detach = jest.fn(async () => {})
+    await expect(
+      rehydrateTerminalProfile(profileId, {
+        store,
+        list: async () => [agentInfo("expected")],
+        reattach: async () => ({ info: agentInfo("different"), detach }) as never,
+      })
+    ).rejects.toMatchObject({ code: "identity-changed" })
+    expect(detach).toHaveBeenCalledTimes(1)
+    expect(registerLiveSession).not.toHaveBeenCalled()
+    expect(store.registerSession).not.toHaveBeenCalled()
+  })
 })
 
 describe("rehydrateTerminals", () => {

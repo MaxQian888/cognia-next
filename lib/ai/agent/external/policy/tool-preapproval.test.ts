@@ -68,6 +68,32 @@ describe("configuredApprovalPolicy", () => {
     expect(configuredApprovalPolicy({}, { title: "Read" })).toBeNull()
   })
 
+  it("requires review of an opaque Goose JavaScript batch when any inner tool rule is mandatory", () => {
+    const config = {
+      metadata: { preset: "goose" },
+      requireApprovalFor: ["write(/private/*)"],
+      autoApprovePatterns: ["*"],
+    }
+    expect(
+      configuredApprovalPolicy(config, {
+        toolInfo: { name: "execute_javascript" },
+        rawInput: { code: "async function run(){ return tools.call(dynamicName, args) }" },
+      })
+    ).toBe("ask")
+    expect(
+      configuredApprovalPolicy(
+        { ...config, metadata: undefined, process: { command: "/opt/goose" } },
+        { toolInfo: { name: "execute_javascript" } }
+      )
+    ).toBe("ask")
+    expect(
+      configuredApprovalPolicy(
+        { ...config, metadata: { preset: "other" } },
+        { toolInfo: { name: "execute_javascript" } }
+      )
+    ).toBe("approve")
+  })
+
   it("approves a request an auto-approval entry matches", () => {
     expect(configuredApprovalPolicy(lists, { title: "Read" })).toBe("approve")
     expect(

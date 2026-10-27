@@ -1,6 +1,7 @@
 "use client"
 
 import { ExternalAgentAuthentication } from "./authentication"
+import { TerminalAgentPanel } from "./terminal-agent-panel"
 import { ExternalAgentSessionOperations } from "./session-operations"
 
 /**
@@ -503,6 +504,8 @@ export interface ExternalAgentManagerProps {
    * conversation it would otherwise cover is the thing the user asked for.
    */
   onOpenedInChat?: () => void
+  /** Close a hosting modal so the native terminal receives interaction. */
+  onOpenedInTerminal?: () => void
 }
 
 /** "3 min ago" style label for a session row; empty for an unparseable value. */
@@ -524,6 +527,7 @@ export function ExternalAgentManager({
   className,
   headerActions,
   onOpenedInChat,
+  onOpenedInTerminal,
 }: ExternalAgentManagerProps) {
   const t = useTranslations("externalAgent")
   const tSettings = useTranslations("externalAgent.settings")
@@ -1092,6 +1096,8 @@ export function ExternalAgentManager({
         </div>
       </div>
 
+      <TerminalAgentPanel onOpenedInTerminal={onOpenedInTerminal} />
+
       {agents.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
           <Bot className="mb-4 size-12 text-muted-foreground/50" />
@@ -1484,6 +1490,7 @@ export function ExternalAgentManager({
                           onFork={(options) => forkSession(activeSession.id, options)}
                           onClone={() => cloneSession(activeSession.id)}
                           onShell={executeSessionShell}
+                          onPrompt={execute}
                         />
                       )}
                     </div>

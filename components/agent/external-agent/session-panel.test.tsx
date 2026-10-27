@@ -34,6 +34,9 @@ const mockAgentRuntime = jest.fn()
 const mockSessionLink = jest.fn(() => undefined as unknown)
 const mockSetSessionLink = jest.fn()
 const mockRemoteManager = {
+  listGooseChildren: jest.fn(async () => undefined as string[] | undefined),
+  inspectGooseChild: jest.fn(),
+  prepareGooseRecovery: jest.fn(),
   getSessionOperationCapabilities: jest.fn(),
   getSessionRuntimeState: jest.fn(),
   refreshSessionCommands: jest.fn(),
@@ -378,5 +381,98 @@ it("uses the paired-host facade and carries the host identity when selecting a t
   )
   expect(mockRemoteManager.forkSession).toHaveBeenCalledWith("remote", "native", {
     forkAt: { kind: "turn", id: "t1", boundary: "before" },
+  })
+})
+
+describe("Goose recovery from the owning session panel", () => {
+  const prompt = 'Continue the failed delegate with {"resume":"child"}'
+  const snapshot = {
+    id: "child",
+    parentId: "parent",
+    title: "Child task",
+    completed: false,
+    transcript: "Read-only child progress",
+  }
+
+  async function openChild() {
+    const details = screen.getByText(en.externalAgent.sessionOperations.title).closest("details")!
+    details.open = true
+    fireEvent(details, new Event("toggle"))
+    fireEvent.click(
+      await screen.findByRole("button", { name: en.externalAgent.goose.refreshChildren })
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "View child" }))
+    expect(await screen.findByLabelText(en.externalAgent.goose.transcript)).toHaveTextContent(
+      snapshot.transcript
+    )
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockAgentRuntime.mockReset()
+    mockSessionLink.mockReturnValue(undefined)
+    hasPluginToolbarMock.mockReturnValue(false)
+    mockRemoteManager.getSessionOperationCapabilities.mockResolvedValue({})
+    mockRemoteManager.listGooseChildren.mockResolvedValue(["child"])
+    mockRemoteManager.inspectGooseChild.mockResolvedValue(snapshot)
+    mockRemoteManager.prepareGooseRecovery.mockResolvedValue(prompt)
+  })
+
+  afterEach(() => jest.restoreAllMocks())
+
+  it("submits recovery through the local parent's ordinary execution path", async () => {
+    const { getExternalAgentManager } = jest.requireActual<
+      typeof import("@/lib/ai/agent/external/manager")
+    >("@/lib/ai/agent/external/manager")
+    const manager = getExternalAgentManager()
+    jest.spyOn(manager, "getSessionOperationCapabilities").mockResolvedValue({} as never)
+    jest.spyOn(manager, "getNativeSubagents").mockResolvedValue(undefined)
+    jest.spyOn(manager, "listGooseChildren").mockResolvedValue(["child"])
+    jest.spyOn(manager, "inspectGooseChild").mockResolvedValue(snapshot)
+    const prepare = jest.spyOn(manager, "prepareGooseRecovery").mockResolvedValue(prompt)
+    const execute = jest.fn(async () => undefined)
+    const chatSend = jest.fn(async () => undefined)
+    mockAgentRuntime.mockReturnValue({ runtime: "external" })
+    useExternalAgentMock.mockReturnValue({
+      ...baseAgentState,
+      activeAgentId: "agent",
+      activeSession: { id: "parent" },
+      execute,
+      forkSession: jest.fn(),
+      cloneSession: jest.fn(),
+      executeSessionShell: jest.fn(),
+    })
+    render(wrap(<ExternalAgentSessionPanel onExecuteCommand={chatSend} />))
+    await openChild()
+    fireEvent.click(screen.getByRole("button", { name: en.externalAgent.goose.resumeChild }))
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(prompt))
+    expect(prepare).toHaveBeenCalledWith("agent", "parent", "child")
+    expect(chatSend).not.toHaveBeenCalled()
+  })
+
+  it("submits paired-host recovery through the current chat's send callback", async () => {
+    const host = { configId: "remote", revision: "r1", lifecycleGeneration: 1 }
+    mockAgentRuntime.mockReturnValue({ runtime: "host" })
+    mockSessionLink.mockReturnValue({ agentId: "remote", sessionId: "parent", host })
+    const onExecuteCommand = jest.fn(async () => undefined)
+    render(wrap(<ExternalAgentSessionPanel sessionId="chat" onExecuteCommand={onExecuteCommand} />))
+    await openChild()
+    fireEvent.click(screen.getByRole("button", { name: en.externalAgent.goose.resumeChild }))
+    await waitFor(() => expect(onExecuteCommand).toHaveBeenCalledWith(prompt))
+    expect(mockRemoteManager.prepareGooseRecovery).toHaveBeenCalledWith("remote", "parent", "child")
+    expect(mockSetSessionLink).not.toHaveBeenCalled()
+  })
+
+  it("keeps remote inspection read-only when the owning chat has no send callback", async () => {
+    const host = { configId: "remote", revision: "r1", lifecycleGeneration: 1 }
+    mockAgentRuntime.mockReturnValue({ runtime: "host" })
+    mockSessionLink.mockReturnValue({ agentId: "remote", sessionId: "parent", host })
+    render(wrap(<ExternalAgentSessionPanel sessionId="chat" />))
+    await openChild()
+    expect(
+      screen.queryByRole("button", { name: en.externalAgent.goose.resumeChild })
+    ).not.toBeInTheDocument()
+    expect(mockRemoteManager.prepareGooseRecovery).not.toHaveBeenCalled()
+    expect(mockSetSessionLink).not.toHaveBeenCalled()
   })
 })

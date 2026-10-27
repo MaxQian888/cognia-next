@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent, act, within } from "@testing-library/react"
+import { render, screen, fireEvent, act, within, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import en from "@/i18n/messages/en.json"
@@ -120,6 +120,14 @@ jest.mock("./config-options", () => ({
   ExternalAgentConfigOptions: () => <div data-testid="config-options" />,
 }))
 
+jest.mock("./terminal-agent-panel", () => ({
+  TerminalAgentPanel: ({ onOpenedInTerminal }: { onOpenedInTerminal?: () => void }) => (
+    <button type="button" onClick={onOpenedInTerminal}>
+      Open managed terminal fixture
+    </button>
+  ),
+}))
+
 const wrap = (ui: React.ReactNode) => (
   <NextIntlClientProvider locale="en" messages={en} timeZone="UTC">
     <TooltipProvider>{ui}</TooltipProvider>
@@ -184,6 +192,93 @@ const baseHookValue = () => ({
 })
 
 describe("ExternalAgentManager", () => {
+  it("exposes native terminal agents even without structured configurations and forwards the close handoff", () => {
+    mockUseExternalAgent.mockReturnValue(baseHookValue())
+    const onOpenedInTerminal = jest.fn()
+    render(wrap(<ExternalAgentManager onOpenedInTerminal={onOpenedInTerminal} />))
+    fireEvent.click(screen.getByRole("button", { name: "Open managed terminal fixture" }))
+    expect(onOpenedInTerminal).toHaveBeenCalledTimes(1)
+  })
+
+  it("recovers a Goose child through the active parent and retains normal tool approval", async () => {
+    const { getExternalAgentManager } = jest.requireActual<
+      typeof import("@/lib/ai/agent/external/manager")
+    >("@/lib/ai/agent/external/manager")
+    const manager = getExternalAgentManager()
+    const snapshot = {
+      id: "child",
+      parentId: "native-parent",
+      title: "Delegated work",
+      completed: false,
+      transcript: "Child progress",
+    }
+    const prompt = 'Continue existing delegate with {"resume":"child"}'
+    const operations = [
+      jest.spyOn(manager, "getSessionOperationCapabilities").mockResolvedValue({} as never),
+      jest.spyOn(manager, "getNativeSubagents").mockResolvedValue(undefined),
+      jest.spyOn(manager, "listGooseChildren").mockResolvedValue(["child"]),
+      jest.spyOn(manager, "inspectGooseChild").mockResolvedValue(snapshot),
+      jest.spyOn(manager, "prepareGooseRecovery").mockResolvedValue(prompt),
+    ]
+    try {
+      const agent = makeAgent({
+        name: "Goose",
+        transport: "http",
+        process: undefined,
+        network: { endpoint: "http://localhost:4096" },
+      })
+      agent.connectionStatus = "connected"
+      const hook = {
+        ...baseHookValue(),
+        agents: [agent],
+        activeAgentId: agent.config.id,
+        activeSession: { id: "native-parent" },
+        cloneSession: jest.fn(),
+        executeSessionShell: jest.fn(),
+      }
+      mockUseExternalAgent.mockReturnValue(hook)
+      let rendered!: ReturnType<typeof render>
+      await act(async () => {
+        rendered = render(wrap(<ExternalAgentManager />))
+      })
+      const details = screen.getByText(en.externalAgent.sessionOperations.title).closest("details")!
+      details.open = true
+      fireEvent(details, new Event("toggle"))
+      fireEvent.click(
+        await screen.findByRole("button", { name: en.externalAgent.goose.refreshChildren })
+      )
+      fireEvent.click(await screen.findByRole("button", { name: "View child" }))
+      expect(await screen.findByLabelText(en.externalAgent.goose.transcript)).toHaveTextContent(
+        snapshot.transcript
+      )
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.goose.resumeChild }))
+      await waitFor(() => expect(hook.execute).toHaveBeenCalledWith(prompt))
+      expect(manager.prepareGooseRecovery).toHaveBeenCalledWith("agent-1", "native-parent", "child")
+      expect(hook.resumeSession).not.toHaveBeenCalled()
+
+      const pending: AcpPermissionRequest = {
+        id: "resume-tool",
+        requestId: "resume-tool",
+        sessionId: "native-parent",
+        title: "Approve resumed task tool",
+        toolInfo: { id: "tool", name: "write" },
+        rawInput: { path: "/repo/result.txt" },
+        riskLevel: "low",
+      }
+      mockUseExternalAgent.mockReturnValue({ ...hook, pendingPermission: pending })
+      await act(async () => {
+        rendered.rerender(wrap(<ExternalAgentManager />))
+      })
+      fireEvent.click(await screen.findByRole("button", { name: /^approve$/i }))
+      await waitFor(() =>
+        expect(hook.respondToPermission).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: "resume-tool", granted: true })
+        )
+      )
+    } finally {
+      operations.forEach((spy) => spy.mockRestore())
+    }
+  })
   it("mounts shared controls for a connected active session", async () => {
     const agent = makeAgent({
       transport: "http",

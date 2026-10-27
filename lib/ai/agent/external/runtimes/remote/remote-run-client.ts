@@ -310,6 +310,9 @@ async function resolve(payload: Record<string, unknown>): Promise<RemoteDecision
 export type RemoteSessionOperationsClient = Pick<
   ExternalAgentManager,
   | "getNativeSubagents"
+  | "listGooseChildren"
+  | "inspectGooseChild"
+  | "prepareGooseRecovery"
   | "changeNativeSubagentModel"
   | "getSessionOperationCapabilities"
   | "getSessionRuntimeState"
@@ -347,6 +350,8 @@ export async function callRemoteSessionOperation<T>(
     throw new HostNativeSubagentUpdateRequiredError()
   }
   const reads = [
+    "gooseChildren",
+    "gooseInspect",
     "nativeSubagents",
     "capabilities",
     "snapshot",
@@ -436,6 +441,9 @@ export function createRemoteSessionOperationsClient(
   }
   return {
     getNativeSubagents: (a, s) => call(a, s, { operation: "nativeSubagents" }),
+    listGooseChildren: (a, s) => call(a, s, { operation: "gooseChildren" }),
+    inspectGooseChild: (a, s, childId) => call(a, s, { operation: "gooseInspect", childId }),
+    prepareGooseRecovery: (a, s, childId) => call(a, s, { operation: "gooseRecovery", childId }),
     changeNativeSubagentModel: (a, s, change) =>
       call(a, s, { operation: "nativeSubagentModel", change }),
     getSessionOperationCapabilities: (a, s) => call(a, s, { operation: "capabilities" }),

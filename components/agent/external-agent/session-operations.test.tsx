@@ -6,6 +6,9 @@ import en from "@/i18n/messages/en.json"
 import { ExternalAgentSessionOperations } from "./session-operations"
 
 const mockManager = {
+  listGooseChildren: jest.fn(),
+  inspectGooseChild: jest.fn(),
+  prepareGooseRecovery: jest.fn(),
   getNativeSubagents: jest.fn(),
   changeNativeSubagentModel: jest.fn(),
   getSessionOperationCapabilities: jest.fn(),
@@ -62,11 +65,36 @@ function show(
 beforeEach(() => {
   jest.clearAllMocks()
   mockManager.getNativeSubagents.mockResolvedValue(undefined)
+  mockManager.listGooseChildren.mockResolvedValue(undefined)
   mockManager.getSessionOperationCapabilities.mockResolvedValue({
     inputQueue: "supported",
     clearQueue: "supported",
   })
   mockManager.enqueueSessionInput.mockResolvedValue({ disposition: "queued", mode: "follow_up" })
+})
+
+it("uses session-scoped Goose inspection and the parent's normal prompt callback", async () => {
+  mockManager.listGooseChildren.mockResolvedValue(["child"])
+  mockManager.inspectGooseChild.mockResolvedValue({
+    id: "child",
+    parentId: "session",
+    title: "Child",
+    completed: false,
+    transcript: "Read-only progress",
+  })
+  mockManager.prepareGooseRecovery.mockResolvedValue("Resume existing child")
+  const onPrompt = jest.fn(async () => undefined)
+  show({ isExecuting: false, onPrompt })
+  fireEvent.click(
+    await screen.findByRole("button", { name: en.externalAgent.goose.refreshChildren })
+  )
+  fireEvent.click(await screen.findByRole("button", { name: "View child" }))
+  expect(await screen.findByLabelText(en.externalAgent.goose.transcript)).toHaveTextContent(
+    "Read-only progress"
+  )
+  fireEvent.click(screen.getByRole("button", { name: en.externalAgent.goose.resumeChild }))
+  await waitFor(() => expect(onPrompt).toHaveBeenCalledWith("Resume existing child"))
+  expect(mockManager.prepareGooseRecovery).toHaveBeenCalledWith("agent", "session", "child")
 })
 
 it("shows native identity and sends separate settings scopes without claiming observed inference", async () => {

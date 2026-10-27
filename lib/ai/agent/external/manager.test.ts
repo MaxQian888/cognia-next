@@ -483,7 +483,16 @@ describe("the session a model surface should describe", () => {
       models: [{ id: "allowed" }, { id: "denied" }],
     }))
     const change = jest.fn(async () => ({ status: "applied-awaiting-step" }))
-    Object.assign(child, { getNativeSubagents: read, changeNativeSubagentModel: change })
+    const goose = {
+      listChildren: jest.fn(async () => ["goose-child"]),
+      inspect: jest.fn(async () => ({ id: "goose-child" })),
+      recoveryPrompt: jest.fn(async () => "Resume goose-child"),
+    }
+    Object.assign(child, {
+      getNativeSubagents: read,
+      changeNativeSubagentModel: change,
+      gooseSessionControls: goose,
+    })
     const internals = manager as unknown as {
       adapters: Map<string, MockAdapter>
       instances: Map<string, unknown>
@@ -499,6 +508,13 @@ describe("the session a model surface should describe", () => {
       release: async () => {},
     })
     const publicId = "cognia-gateway:task-a:native-root"
+    expect(await manager.listGooseChildren("agent-1", publicId)).toEqual(["goose-child"])
+    await manager.inspectGooseChild("agent-1", publicId, "goose-child")
+    expect(await manager.prepareGooseRecovery("agent-1", publicId, "goose-child")).toBe(
+      "Resume goose-child"
+    )
+    expect(goose.inspect).toHaveBeenCalledWith("native-root", "goose-child")
+    expect(goose.recoveryPrompt).toHaveBeenCalledWith("native-root", "goose-child")
     expect(await manager.getNativeSubagents("agent-1", publicId)).toMatchObject({
       rootThreadId: "native-root",
       models: [{ id: "allowed" }],
@@ -5803,4 +5819,18 @@ it("routes MiniMax through the conversation-isolated adapter in the real manager
       buildBaseConfig({ transport: "stdio", process: { command: "mcode", args: ["acp"] } })
     )
   ).toBeInstanceOf(MiniMaxAcpAdapter)
+})
+
+describe("native agent package registration", () => {
+  it.each(["openclaude-cli", "crush-http", "continue-cli", "rovo-http", "codebuff-sdk"])(
+    "creates a real %s client from the runtime registry",
+    (protocol) => {
+      const registry = new ProtocolAdapterRegistry()
+      registerBuiltinProtocolAdapters(registry)
+      const adapter = registry.create(protocol)
+      expect(adapter?.protocol).toBe(protocol)
+      expect(adapter?.semantics).toBeDefined()
+      expect(adapter?.isConnected()).toBe(false)
+    }
+  )
 })

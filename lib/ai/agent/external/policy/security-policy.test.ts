@@ -9,6 +9,13 @@ import {
   isAgentStateFileRoot,
 } from "./security-policy"
 
+it("recognizes resolved Goose executables for private state without matching unrelated binaries", () => {
+  for (const command of ["goose", "/opt/bin/goose", "C:\\Tools\\goose.exe"]) {
+    expect(agentStateIsolationFor(command)?.env).toEqual({ GOOSE_PATH_ROOT: "goose" })
+  }
+  expect(agentStateIsolationFor("/opt/not-goose")).toBeNull()
+})
+
 describe("sandbox platform gate", () => {
   it("allows exactly the platforms with a real sandbox", () => {
     expect(externalAgentSandboxSupportsPlatform("darwin")).toBe(true)
@@ -28,6 +35,27 @@ describe("sandbox platform gate", () => {
 })
 
 describe("allowlists", () => {
+  it("admits inspected agent executables without admitting the Windows command shell", () => {
+    for (const command of [
+      "auggie",
+      "autohand",
+      "codebuddy",
+      "commandcode",
+      "kilo",
+      "vibe-acp",
+      "mimo",
+      "hermes",
+      "omp",
+      "muse-acp",
+      "amp-acp",
+      "zcode-acp",
+    ]) {
+      expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain(command)
+    }
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain("cmd")
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain("sh")
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).not.toContain("bash")
+  })
   it("admits the installed Devin ACP binary", () => {
     expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("devin")
   })
@@ -57,6 +85,25 @@ describe("allowlists", () => {
 })
 
 describe("agentStateWritableRoots", () => {
+  it("keeps new ACP state in the correct vendor roots instead of their ancestors' accounts", () => {
+    expect(agentStateWritableRoots("omp")).toEqual([".omp"])
+    expect(agentStateWritableRoots("mimo")).toEqual([
+      ".config/mimocode",
+      ".local/share/mimocode",
+      ".local/state/mimocode",
+      ".cache/mimocode",
+    ])
+    expect(agentStateWritableRoots("kilo")).toEqual([
+      ".config/kilo",
+      ".local/share/kilo",
+      ".local/state/kilo",
+      ".cache/kilo",
+    ])
+    expect(agentStateWritableRoots("muse-acp")).toEqual([".config/muse", ".local/state/muse-acp"])
+    expect(agentStateWritableRoots("zcode-acp")).toEqual([".zcode", ".zcode-acp"])
+    expect(agentStateWritableRoots("not-omp")).toEqual([])
+    expect(agentStateWritableRoots("not-mimo")).toEqual([])
+  })
   it("grants Qoder only its documented config root", () => {
     expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("cline")
     expect(agentStateWritableRoots("cline", ["--acp"])).toEqual([".cline"])
@@ -156,4 +203,27 @@ it("scopes Grok state by its exact executable and documented home", () => {
     sharedRoots: [".grok"],
     denyReadable: [".grok"],
   })
+})
+
+it("keeps OpenClaude credentials separate from Claude Code, including private state", () => {
+  expect(agentStateWritableRoots("openclaude", [])).toEqual([".openclaude", ".openclaude.json"])
+  expect(agentStateIsolationFor("openclaude")?.env).toEqual({ OPENCLAUDE_CONFIG_DIR: "openclaude" })
+  for (const command of ["claude", "claude-agent-acp", "claude-code-acp"])
+    expect(agentStateIsolationFor(command)?.env).toEqual({ CLAUDE_CONFIG_DIR: "claude" })
+  expect(agentStateIsolationFor("not-claude-agent")).toBeNull()
+  expect(agentStateWritableRoots("not-claude-agent", [])).not.toContain(".claude")
+})
+
+it.each([
+  ["vibe-acp", "VIBE_HOME", "vibe"],
+  ["mimo", "MIMOCODE_HOME", "mimocode"],
+  ["hermes", "HERMES_HOME", "hermes"],
+])("relocates %s only through its documented home variable", (command, key, leaf) => {
+  expect(agentStateIsolationFor(command)?.env).toEqual({ [key]: leaf })
+})
+
+it("recognizes OpenClaude global config files as files rather than state directories", () => {
+  expect(isAgentStateFileRoot(".openclaude.json")).toBe(true)
+  expect(isAgentStateFileRoot(".openclaude.json.backup")).toBe(true)
+  expect(isAgentStateFileRoot(".openclaude")).toBe(false)
 })

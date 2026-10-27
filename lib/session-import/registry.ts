@@ -15,6 +15,7 @@ import { geminiCliSessionSource } from "./adapters/gemini-cli"
 import { opencodeSessionSource } from "./adapters/opencode"
 import { piSessionSource } from "./adapters/pi"
 import { qwenCodeSessionSource } from "./adapters/qwen-code"
+import { gooseSessionSource } from "./adapters/goose"
 import type { VendorRoots } from "@/lib/agent-roots"
 import { joinPath } from "@/lib/claude/instructions/paths"
 import type { AgentSessionSourceAdapter, PickedSessionFile } from "./types"
@@ -32,6 +33,7 @@ const STATIC_SOURCES: AgentSessionSourceAdapter[] = [
   clineSessionSource,
   copilotCliSessionSource,
   qwenCodeSessionSource,
+  gooseSessionSource,
 ]
 
 interface RegisteredSource {

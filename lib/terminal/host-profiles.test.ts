@@ -5,13 +5,186 @@ jest.mock("./pick-transport", () => ({
 
 import {
   ADHOC_PROFILE_ID,
+  __resetTerminalHostProfileSyncForTests,
   buildSynchronizedSshProfiles,
   buildSynchronizedTerminalProfiles,
+  ensureRemoteSpawnProfile,
+  hasTransientTerminalProfile,
+  registerTransientTerminalProfile,
+  removeTransientTerminalProfile,
   syncTerminalHostProfiles,
 } from "./host-profiles"
 
 beforeEach(() => {
   mockChain = ["tauri-channel"]
+  __resetTerminalHostProfileSyncForTests()
+})
+
+describe("transient user-launched terminal profiles", () => {
+  const request = {
+    profileId: "cognia-agent-terminal-freebuff",
+    shell: "freebuff",
+    args: [],
+    cwd: "/workspace with spaces",
+    rows: 24,
+    cols: 80,
+    enableShellIntegration: false,
+    forceUtf8: false,
+  }
+
+  function deps() {
+    return {
+      call: jest.fn(async (_method: string, _payload: unknown) => undefined) as jest.Mock,
+      readSettings: jest.fn(async () => ({
+        terminal: { profiles: [{ id: "saved", name: "Saved", shell: "/bin/bash" }] },
+      })),
+      resolveTarget: jest.fn(async () => "original-host-and-account"),
+    }
+  }
+
+  it("syncs the fixed executable/argv alongside saved profiles through the gated host API", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    registerTransientTerminalProfile(request)
+    await expect(ensureRemoteSpawnProfile(request, sync)).resolves.toBe(request.profileId)
+    expect(sync.call).toHaveBeenCalledWith("terminal_host_sync_profiles", {
+      profiles: [
+        expect.objectContaining({ profileId: "saved" }),
+        { profileId: request.profileId, request },
+      ],
+    })
+  })
+
+  it("does not silently use a stale host profile if synchronization or capability checks fail", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    registerTransientTerminalProfile(request)
+    sync.call.mockRejectedValueOnce(new Error("terminal.open capability denied"))
+    await expect(ensureRemoteSpawnProfile(request, sync)).rejects.toThrow(
+      "terminal.open capability denied"
+    )
+    expect(hasTransientTerminalProfile(request.profileId)).toBe(true)
+    await expect(ensureRemoteSpawnProfile(request, sync)).resolves.toBe(request.profileId)
+  })
+
+  it("synchronizes the policy-mutated workspace and sandbox request rather than its earlier draft", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    registerTransientTerminalProfile(request)
+    await ensureRemoteSpawnProfile({ ...request, cwd: "/policy-approved", sandboxed: true }, sync)
+    expect(sync.call).toHaveBeenCalledWith("terminal_host_sync_profiles", {
+      profiles: [
+        expect.anything(),
+        {
+          profileId: request.profileId,
+          request: expect.objectContaining({
+            cwd: "/policy-approved",
+            sandboxed: true,
+            enableShellIntegration: false,
+          }),
+        },
+      ],
+    })
+  })
+
+  it("serializes device-scoped profile replacements so concurrent agents preserve each other", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    let active = 0
+    let maximum = 0
+    sync.call.mockImplementation(async () => {
+      active += 1
+      maximum = Math.max(maximum, active)
+      await Promise.resolve()
+      active -= 1
+    })
+    const other = { ...request, profileId: "cognia-agent-terminal-zcode", shell: "zcode" }
+    registerTransientTerminalProfile(request)
+    registerTransientTerminalProfile(other)
+    await Promise.all([
+      ensureRemoteSpawnProfile(request, sync),
+      ensureRemoteSpawnProfile(other, sync),
+    ])
+    expect(maximum).toBe(1)
+    const last = sync.call.mock.calls.at(-1)![1] as { profiles: { profileId: string }[] }
+    expect(last.profiles.map((profile) => profile.profileId)).toEqual([
+      "saved",
+      request.profileId,
+      other.profileId,
+    ])
+  })
+
+  it("removes only transient metadata and retains failed cleanup for retry", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    registerTransientTerminalProfile(request)
+    await ensureRemoteSpawnProfile(request, sync)
+    sync.call.mockRejectedValueOnce(new Error("host offline"))
+    await expect(removeTransientTerminalProfile(request.profileId, sync)).rejects.toThrow(
+      "host offline"
+    )
+    expect(hasTransientTerminalProfile(request.profileId)).toBe(true)
+    await expect(ensureRemoteSpawnProfile(request, sync)).rejects.toThrow("cleanup is pending")
+    await removeTransientTerminalProfile(request.profileId, sync)
+    expect(hasTransientTerminalProfile(request.profileId)).toBe(false)
+    expect(sync.call).toHaveBeenLastCalledWith("terminal_host_sync_profiles", {
+      profiles: [expect.objectContaining({ profileId: "saved" })],
+    })
+  })
+
+  it("refuses profile cleanup on a different host/account and succeeds after returning", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    registerTransientTerminalProfile(request)
+    await ensureRemoteSpawnProfile(request, sync)
+    sync.resolveTarget.mockResolvedValueOnce("different-host-or-account")
+    await expect(removeTransientTerminalProfile(request.profileId, sync)).rejects.toThrow(
+      "original terminal host"
+    )
+    expect(sync.call).toHaveBeenCalledTimes(1)
+    expect(hasTransientTerminalProfile(request.profileId)).toBe(true)
+    await removeTransientTerminalProfile(request.profileId, sync)
+    expect(hasTransientTerminalProfile(request.profileId)).toBe(false)
+  })
+
+  it("rechecks the host after asynchronously loading settings before sending launch metadata", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    let target = "original-host-and-account"
+    sync.resolveTarget.mockImplementation(async () => target)
+    const saved = await sync.readSettings()
+    sync.readSettings.mockImplementationOnce(async () => {
+      target = "different-host-or-account"
+      return saved
+    })
+    registerTransientTerminalProfile(request)
+    await expect(ensureRemoteSpawnProfile(request, sync)).rejects.toThrow("original terminal host")
+    expect(sync.call).not.toHaveBeenCalled()
+  })
+
+  it("does not override a saved profile or accept an ambiguous identity", async () => {
+    mockChain = ["ws"]
+    const sync = deps()
+    registerTransientTerminalProfile({ ...request, profileId: "saved" })
+    await expect(
+      ensureRemoteSpawnProfile({ ...request, profileId: "saved" }, sync)
+    ).rejects.toThrow("conflicts with a saved profile")
+    expect(sync.call).not.toHaveBeenCalled()
+    for (const profileId of [undefined, "default", ADHOC_PROFILE_ID]) {
+      expect(() => registerTransientTerminalProfile({ ...request, profileId })).toThrow(
+        "distinct identity"
+      )
+    }
+  })
+
+  it("cleans a local profile without contacting another host", async () => {
+    const sync = deps()
+    registerTransientTerminalProfile(request)
+    await removeTransientTerminalProfile(request.profileId, sync)
+    expect(sync.call).not.toHaveBeenCalled()
+    expect(sync.resolveTarget).not.toHaveBeenCalled()
+    expect(hasTransientTerminalProfile(request.profileId)).toBe(false)
+  })
 })
 
 describe("terminal host profile synchronization", () => {

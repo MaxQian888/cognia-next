@@ -1,0 +1,12 @@
+{"sessionId":"gemini-0.61.0-acceptance","projectHash":"public-fixture","startTime":"2026-10-24T16:30:25.119Z","lastUpdated":"2026-10-24T16:30:25.119Z","kind":"main","directories":["/workspace/gemini-fixture"]}
+{"$set":{"memoryScratchpad":{"version":1,"workflowSummary":"Inspected the public fixture","toolSequence":["read_file"],"touchedPaths":["/workspace/fixture.ts"],"validationStatus":"passed"}}}
+{"$set":{"sessionId":"gemini-0.61.0-acceptance"}}
+{"id":"user-1","timestamp":"2026-10-24T16:30:25.123Z","type":"user","content":[{"text":"Inspect the public fixture"}]}
+{"$set":{"lastUpdated":"2026-10-24T16:30:25.123Z"}}
+{"id":"assistant-1","timestamp":"2026-10-24T16:30:25.124Z","type":"gemini","content":[{"text":"Fixture inspected"}],"thoughts":[{"subject":"Inspect","description":"Read the fixture first","timestamp":"2026-10-24T16:30:25.123Z"}],"tokens":{"input":12,"output":6,"cached":3,"thoughts":2,"tool":1,"total":21},"model":"gemini-fixture"}
+{"$set":{"lastUpdated":"2026-10-24T16:30:25.124Z"}}
+{"id":"assistant-1","timestamp":"2026-10-24T16:30:25.124Z","type":"gemini","content":[{"text":"Fixture inspected"}],"thoughts":[{"subject":"Inspect","description":"Read the fixture first","timestamp":"2026-10-24T16:30:25.123Z"}],"tokens":{"input":12,"output":6,"cached":3,"thoughts":2,"tool":1,"total":21},"model":"gemini-fixture","toolCalls":[{"id":"read-fixture","name":"read_file","args":{"file_path":"/workspace/fixture.ts"},"result":[{"text":"export const fixture = true"}],"status":"success","timestamp":"2026-10-24T16:30:25.124Z","agentId":"fixture-reader","displayName":"Read fixture","description":"Read a public fixture","renderOutputAsMarkdown":false}]}
+{"id":"discarded","timestamp":"2026-10-24T16:30:25.124Z","type":"user","content":"discarded turn"}
+{"$set":{"lastUpdated":"2026-10-24T16:30:25.124Z"}}
+{"$rewindTo":"discarded"}
+{"$set":{"summary":"Public fixture inspected"}}

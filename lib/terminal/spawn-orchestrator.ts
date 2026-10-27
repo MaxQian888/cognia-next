@@ -155,11 +155,15 @@ function withRemoteProfile(
   spawn: (req: SpawnRequest) => Promise<BaseTerminalSession>
 ): (req: SpawnRequest) => Promise<BaseTerminalSession> {
   return async (req) => {
-    const { ensureRemoteSpawnProfile } = await import("./host-profiles")
+    const { ensureRemoteSpawnProfile, hasTransientTerminalProfile } =
+      await import("./host-profiles")
     let profileId = req.profileId
     try {
       profileId = await ensureRemoteSpawnProfile(req)
-    } catch {
+    } catch (error) {
+      // A transient profile carries this exact executable/argv/workspace. A
+      // stale host profile is not a safe fallback when its sync was refused.
+      if (profileId && hasTransientTerminalProfile(profileId)) throw error
       // A host that refuses the sync may still know the id the caller named;
       // let the spawn try rather than failing before it has been attempted.
     }
@@ -435,18 +439,28 @@ function fanOutCommandTrigger(
  * Explicit kill — used by the dock's tab close button. Removes the
  * store row and the live registry entry, plus fires the lifecycle hook
  * for plugin audit consistency with the exited path.
+ * Strict callers retain ownership on a refused or timed-out termination.
  */
 export async function killFromDock(
   sessionId: string,
   store: TerminalStoreLike,
-  hooks: ReturnType<typeof getPluginEventHooks> = getPluginEventHooks()
+  hooks: ReturnType<typeof getPluginEventHooks> = getPluginEventHooks(),
+  options: { strict?: boolean } = {}
 ): Promise<void> {
   const { getLiveSession } = await import("./session-registry")
   const session = getLiveSession(sessionId)
   if (session) {
     try {
-      await session.kill()
+      const termination = session.kill()
+      if (options.strict) {
+        await withTimeout(termination, SPAWN_TIMEOUT_MS, "terminal stop", () => {})
+      } else {
+        await termination
+      }
     } catch (err) {
+      // Managed user processes must retain a retryable handle when termination
+      // fails. Existing dock callers keep their historical best-effort close.
+      if (options.strict) throw err
       console.warn(`spawn-orchestrator: kill threw for ${sessionId}:`, err)
     }
     hooks.dispatchTerminalLifecycle({

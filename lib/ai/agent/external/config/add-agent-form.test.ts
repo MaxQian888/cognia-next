@@ -1,3 +1,5 @@
+import { normalizeExternalAgentConfigInput } from "./config-normalizer"
+import { stateIsolationBlockReason } from "../lifecycle/launch-preparation"
 import {
   CONNECTION_PROBLEMS,
   DEFAULT_ADD_AGENT_FORM_DATA,
@@ -236,7 +238,7 @@ describe("buildCreateExternalAgentInput", () => {
     expect(input.timeout).toBe(1000)
     expect(input.retryConfig?.retryOnErrors).toEqual(["ECONNRESET", "timeout", "EPIPE"])
     expect(input.metadata?.preset).toBe("claude-code")
-    expect(input.defaultPermissionMode).toBeUndefined()
+    expect(input.defaultPermissionMode).toBe(getPresetConfig("claude-code")!.defaultPermissionMode)
   })
 
   it("falls back to defaults for unusable numbers", () => {
@@ -476,4 +478,102 @@ describe("addAgentFormLaunchTarget", () => {
       )
     ).toEqual({ command: "", args: [] })
   })
+})
+
+describe("native local services and bundled bridges", () => {
+  it.each(["crush", "rovo-dev"])(
+    "keeps %s on the process plane without a caller endpoint",
+    (id) => {
+      const applied = addAgentFormForPreset(form({}), id)!
+      expect(applied).not.toBeNull()
+      const data = {
+        ...applied.data,
+        preset: id,
+        processCwd: "/workspace",
+        processEnv: { NATIVE_TOKEN: "private" },
+      }
+      expect(addAgentFormShape(data, id)).toMatchObject({ usesProcess: true, isLocalService: true })
+      expect(validateAddAgentForm(data, id, NO_ENV)).toBeNull()
+      const built = buildCreateExternalAgentInput(data)
+      expect(built.process).toMatchObject({
+        command: applied.data.command,
+        cwd: "/workspace",
+        env: { NATIVE_TOKEN: "private" },
+      })
+      expect(built.network).toBeUndefined()
+      expect(addAgentFormLaunchTarget(data).command).toBe(applied.data.command)
+    }
+  )
+
+  it("uses a fixed bundled Codebuff bridge and retains workspace and credentials", () => {
+    const applied = addAgentFormForPreset(form({}), "codebuff")!
+    expect(applied).not.toBeNull()
+    const data = {
+      ...applied.data,
+      preset: "codebuff",
+      command: "untrusted",
+      args: "--eval bad",
+      processCwd: "/workspace",
+      processEnv: { CODEBUFF_API_KEY: "private" },
+    }
+    expect(addAgentFormShape(data, "codebuff")).toMatchObject({
+      bundledBridge: true,
+      managedRuntime: false,
+      usesProcess: true,
+    })
+    expect(validateAddAgentForm(data, "codebuff", NO_ENV)).toBeNull()
+    expect(buildCreateExternalAgentInput(data).process).toEqual({
+      command: "node",
+      args: [],
+      cwd: "/workspace",
+      env: { CODEBUFF_API_KEY: "private" },
+    })
+    expect(addAgentFormLaunchTarget(data)).toEqual({ command: "node", args: [] })
+  })
+
+  it("keeps each preset's explicit permission choice unless the caller overrides it", () => {
+    for (const id of ["amp", "continue-dev"]) {
+      const applied = addAgentFormForPreset(form({}), id)!
+      const data = { ...applied.data, preset: id }
+      expect(buildCreateExternalAgentInput(data).defaultPermissionMode).toBe(
+        getPresetConfig(id)!.defaultPermissionMode
+      )
+      expect(
+        buildCreateExternalAgentInput(data, { defaultPermissionMode: "default" })
+          .defaultPermissionMode
+      ).toBe("default")
+    }
+  })
+
+  it("moves native HTTP services to HTTP transport", () => {
+    expect(transportForProtocol("crush-http", "stdio")).toBe("http")
+    expect(transportForProtocol("rovo-http", "stdio")).toBe("http")
+  })
+})
+
+it.each([
+  "openclaude",
+  "crush",
+  "continue-dev",
+  "rovo-dev",
+  "codebuff",
+  "auggie",
+  "autohand-code",
+  "codebuddy",
+  "command-code",
+  "kilocode",
+  "mistral-vibe",
+  "mimo-code",
+  "hermes-agent",
+  "oh-my-pi",
+  "muse",
+  "amp",
+  "zcode",
+])("quick-add %s reaches launch preparation with a supported state choice", (id) => {
+  const applied = addAgentFormForPreset(form({}), id)!
+  const input = buildCreateExternalAgentInput({ ...applied.data, preset: id })
+  const config = normalizeExternalAgentConfigInput(input, { id: "saved-agent" })
+  expect(stateIsolationBlockReason(config)).toBeNull()
+  if (id === "hermes-agent") expect(config.stateIsolation).toBe("isolated")
+  if (id === "oh-my-pi" || id === "codebuff") expect(config.stateIsolation).toBe("shared")
 })

@@ -22,6 +22,11 @@ import type { ExternalAgentCapabilityCell } from "@cognia/agent-contracts/extern
 import { DSH_CAPABILITIES } from "@cognia/agent-dsh/manifest"
 import { OPENCODE_CAPABILITIES } from "@cognia/agent-opencode/manifest"
 import { PI_CAPABILITIES } from "@cognia/agent-pi/manifest"
+import { OPENCLAUDE_CAPABILITIES } from "@cognia/agent-openclaude/manifest"
+import { CRUSH_CAPABILITIES } from "@cognia/agent-crush/manifest"
+import { CONTINUE_CAPABILITIES } from "@cognia/agent-continue/manifest"
+import { ROVO_CAPABILITIES } from "@cognia/agent-rovo/manifest"
+import { CODEBUFF_CAPABILITIES } from "@cognia/agent-codebuff/manifest"
 import { AGENT_CAPABILITY_IDS } from "@cognia/agent-contracts/capability-ids"
 
 /** Every package's capability contribution. */
@@ -33,6 +38,11 @@ export const INTEGRATION_CAPABILITIES: readonly AgentCapabilityContribution[] = 
   OPENCODE_CAPABILITIES,
   A2A_CAPABILITIES,
   AIDER_CAPABILITIES,
+  OPENCLAUDE_CAPABILITIES,
+  CRUSH_CAPABILITIES,
+  CONTINUE_CAPABILITIES,
+  ROVO_CAPABILITIES,
+  CODEBUFF_CAPABILITIES,
 ]
 
 /** The persisted manifest; only the two contributed sections are typed here. */

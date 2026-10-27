@@ -53,6 +53,11 @@ describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
       "dsh-sdk",
       "pi-rpc",
       "aider-cli",
+      "openclaude-cli",
+      "crush-http",
+      "continue-cli",
+      "rovo-http",
+      "codebuff-sdk",
       "opencode-v2",
       "opencode",
       "a2a",
@@ -758,3 +763,31 @@ describe("Cognia model role persistence", () => {
     ).toThrow(/model role/)
   })
 })
+
+it("does not confuse the verified Codebuff host interpreter with a PATH node prerequisite", async () => {
+  const checkCommandExists = jest.fn(async () => false)
+  await probeExternalAgentEcosystemReadiness(
+    baseConfig({
+      protocol: "codebuff-sdk",
+      process: { command: "node", args: [] },
+      metadata: { preset: "codebuff" },
+    }),
+    { runtimeIsTauri: true, checkCommandExists }
+  )
+  expect(checkCommandExists).not.toHaveBeenCalled()
+})
+
+it.each([
+  ["crush-http", "crush"],
+  ["rovo-http", "acli"],
+] as const)(
+  "probes the local native process behind %s rather than requiring a user endpoint",
+  async (protocol, command) => {
+    const checkCommandExists = jest.fn(async () => false)
+    await probeExternalAgentEcosystemReadiness(
+      baseConfig({ protocol, transport: "http", process: { command, args: [] }, metadata: {} }),
+      { runtimeIsTauri: true, checkCommandExists }
+    )
+    expect(checkCommandExists).toHaveBeenCalledWith(command)
+  }
+)

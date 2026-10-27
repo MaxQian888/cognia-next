@@ -495,6 +495,7 @@ export function AgentRuntimeSelector({
           <ExternalAgentManager
             className="min-h-0 flex-1"
             onOpenedInChat={() => setManageOpen(false)}
+            onOpenedInTerminal={() => setManageOpen(false)}
             headerActions={
               <DialogClose asChild>
                 <Button variant="ghost" size="icon-sm" aria-label={tCommon("close")}>

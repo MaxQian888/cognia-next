@@ -118,8 +118,57 @@ describe("ACP host wiring", () => {
 })
 
 import { MiniMaxAcpAdapter } from "@cognia/agent-acp/minimax-adapter"
-import { isolatedAcpExtension } from "@cognia/agent-acp/isolated-adapter"
+import { IsolatedAcpAdapter, isolatedAcpExtension } from "@cognia/agent-acp/isolated-adapter"
 import { isolateNativeAcp } from "./acp"
+import { prepareHermesControlledDaemon } from "./hermes-daemon"
+import type { ExternalAgentConfig } from "@cognia/agent-contracts/external-agent"
+it("wires a real controlled Hermes daemon acquisition hook", () => {
+  expect(createAcpClientDeps().prepareControlledDaemon).toBe(prepareHermesControlledDaemon)
+})
+it.each([
+  ["command-code", "commandcode", ["acp"]],
+  ["zcode", "zcode-acp", []],
+  ["hermes-agent", "hermes", ["acp"]],
+])("isolates %s viewers while retaining the configured workspace", (preset, command, args) => {
+  const config = {
+    id: "owner",
+    enabled: true,
+    name: "Agent",
+    protocol: "acp",
+    transport: "stdio",
+    metadata: { preset },
+    process: { command, args, cwd: "/work" },
+  } as ExternalAgentConfig
+  const wrapped = isolateNativeAcp(config, createAcpClientAdapter())!
+  expect(wrapped).toBeInstanceOf(IsolatedAcpAdapter)
+  const internal = wrapped as unknown as {
+    _config: ExternalAgentConfig
+    processConfig(suffix: string, options?: { cwd?: string }): ExternalAgentConfig
+  }
+  internal._config = config
+  expect(internal.processConfig("1").process?.cwd).toBe("/work")
+  expect(() => internal.processConfig("2", { cwd: "/outside" })).toThrow("workspace")
+  expect(isolateNativeAcp(config, { protocol: "acp" } as never)).toEqual({ protocol: "acp" })
+  if (preset === "hermes-agent") {
+    const a = internal.processConfig("1").process!.env!.COGNIA_AGENT_STATE_KEY
+    expect(a).toBe("owner")
+    expect(internal.processConfig("99").process!.env!.COGNIA_AGENT_STATE_KEY).toBe(a)
+  }
+})
+it("requires an explicit project before launching discovery for a project-scoped ACP runtime", async () => {
+  const config = {
+    id: "cmd",
+    enabled: true,
+    name: "Command Code",
+    protocol: "acp",
+    transport: "stdio",
+    metadata: { preset: "command-code" },
+    process: { command: "commandcode", args: ["acp"] },
+  } as ExternalAgentConfig
+  await expect(isolateNativeAcp(config, createAcpClientAdapter())!.connect(config)).rejects.toThrow(
+    "workspace"
+  )
+})
 it("isolates native MiniMax for both preset and manual configuration, preserving plugin adapters", () => {
   const config = {
     id: "mm",

@@ -38,7 +38,7 @@ function fakeSource(
 afterEach(() => __resetDynamicSessionSourcesForTesting())
 
 describe("session-source registry", () => {
-  it("ships all eleven first-party sources", () => {
+  it("ships all twelve first-party sources", () => {
     const ids = getSessionSources().map((s) => s.id)
     expect(ids).toEqual([
       "claude-code",
@@ -52,6 +52,7 @@ describe("session-source registry", () => {
       "cline",
       "copilot-cli",
       "qwen-code",
+      "goose",
     ])
   })
 
@@ -60,7 +61,8 @@ describe("session-source registry", () => {
       if (source.id.includes(":")) continue
       expect(source.parseGraph).toEqual(expect.any(Function))
       expect(source.verifiedVersion).toEqual(expect.any(String))
-      expect(source.verifiedAt).toBe("2026-08-29")
+      expect(source.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      expect(new Date(source.verifiedAt!).toISOString().slice(0, 10)).toBe(source.verifiedAt)
     }
   })
 

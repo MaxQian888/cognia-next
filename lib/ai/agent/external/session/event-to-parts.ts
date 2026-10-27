@@ -405,6 +405,7 @@ function applyToolCallUpdate(
   const previousMetadata = (cur.toolMetadata as Record<string, unknown> | undefined) ?? {}
   const toolMetadata = {
     ...previousMetadata,
+    ...(event.toolMetadata ?? {}),
     ...(event.kind ? { kind: event.kind } : {}),
     ...(event.locations ? { locations: event.locations } : {}),
   }

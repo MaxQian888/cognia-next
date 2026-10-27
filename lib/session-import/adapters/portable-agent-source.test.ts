@@ -2,6 +2,7 @@ import { cursorSessionSource } from "./cursor"
 import { clineSessionSource } from "./cline"
 import { copilotCliSessionSource } from "./copilot-cli"
 import { qwenCodeSessionSource } from "./qwen-code"
+import { gooseSessionSource } from "./goose"
 
 const mockStoreCall = jest.fn()
 jest.mock("@/lib/tauri", () => ({
@@ -34,6 +35,60 @@ const fs = {
 }
 
 describe("portable external-agent artifacts", () => {
+  it("routes desktop Goose store projections through its passive normalizer", async () => {
+    mockStoreCall.mockReset()
+    mockStoreCall.mockResolvedValueOnce([
+      {
+        id: "native",
+        working_dir: "/repo",
+        session_type: "user",
+        _cognia_store: "config-a",
+        conversation: [
+          {
+            role: "user",
+            created: 1792886400,
+            content: [{ type: "text", text: "From native Goose" }],
+          },
+        ],
+      },
+    ])
+    const input = { fs, home: "/fixture" }
+    const [listed] = await gooseSessionSource.listSessions(input)
+    const parsed = await gooseSessionSource.parseSession(listed.ref, input)
+    expect(mockStoreCall).toHaveBeenCalledWith("external_agent_sessions_read", {
+      source: "goose",
+      home: "/fixture",
+    })
+    expect(parsed.messages[0].parts).toContainEqual({
+      type: "text",
+      text: "From native Goose",
+      state: "done",
+    })
+    expect(parsed.session.importRuntimeBinding).toBeUndefined()
+    expect(mockStoreCall).toHaveBeenCalledTimes(1)
+  })
+  it("carries source-specific verification evidence through archive and native resume projections", async () => {
+    const source = createPortableAgentSessionSource({
+      ...config,
+      verifiedAt: "2026-10-23",
+      presetId: "test-agent",
+    })
+    const content = JSON.stringify({
+      sessionId: "evidence",
+      messages: [{ role: "user", content: "hello" }],
+    })
+    const input = {
+      fs,
+      home: "",
+      pickedFiles: [{ name: "events.json", path: "/fixture/events.json", content }],
+    }
+    const listed = await source.listSessions(input)
+    const graph = await source.parseGraph!(listed[0].ref, input)
+    expect(source.verifiedAt).toBe("2026-10-23")
+    expect(graph.nodes[0].conversation.session.importRuntimeBinding?.verifiedAt).toBe("2026-10-23")
+    expect(graph.nodes[0].session.header.source?.verifiedAt).toBe("2026-10-23")
+    expect(createPortableAgentSessionSource(config).verifiedAt).toBe("2026-08-29")
+  })
   it("preserves tools, lineage, lifecycle, tasks, checkpoints, history, and diagnostics", async () => {
     const content = JSON.stringify({
       sessionId: "child",

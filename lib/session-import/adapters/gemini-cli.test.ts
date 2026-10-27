@@ -1,5 +1,8 @@
 import { geminiCliSessionSource, parseGeminiChat } from "./gemini-cli"
 import type { SessionScanInput } from "../types"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import bundledVersions from "@/deploy/bundle/agent-versions.json"
 
 const LINES = [
   {
@@ -26,6 +29,37 @@ const LINES = [
 const CONTENT = LINES.map((l) => JSON.stringify(l)).join("\n")
 
 describe("parseGeminiChat", () => {
+  it("keeps the structured Gemini 0.61.0 memory scratchpad as text", async () => {
+    const scratchpad = {
+      version: 1,
+      workflowSummary: "Inspected the fixture source",
+      toolSequence: ["read_file"],
+      touchedPaths: ["/workspace/fixture.ts"],
+      validationStatus: "passed",
+    }
+    const content = [
+      { sessionId: "gemini-0.61.0-memory", projectHash: "fixture" },
+      { id: "u1", type: "user", content: [{ text: "inspect fixture" }] },
+      { $set: { memoryScratchpad: scratchpad } },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n")
+    const input: SessionScanInput = {
+      fs: {
+        exists: async () => false,
+        readDir: async () => [],
+        stat: async () => ({ size: content.length, isFile: true }),
+        readTextFile: async () => content,
+      },
+      home: "",
+      pickedFiles: [{ name: "session.jsonl", path: "/fixture/session.jsonl", content }],
+    }
+    const [entry] = await geminiCliSessionSource.listSessions(input)
+    const conversation = await geminiCliSessionSource.parseSession(entry.ref, input)
+    expect(typeof conversation.session.scratchpad).toBe("string")
+    expect(JSON.parse(conversation.session.scratchpad!)).toEqual(scratchpad)
+  })
+
   it("reconstructs user + gemini turns with thoughts, tools, and usage", () => {
     const parsed = parseGeminiChat(CONTENT, "chat.jsonl")
     expect(parsed.originalSessionId).toBe("gem-1")
@@ -176,6 +210,35 @@ describe("parseGeminiChat", () => {
 })
 
 describe("geminiCliSessionSource", () => {
+  it("pins its validation to the bundled release and actual upstream recorder artifact", () => {
+    const bundled = bundledVersions.runtimes.find((runtime) => runtime.id === "gemini-cli")!
+    expect(geminiCliSessionSource.verifiedVersion).toBe(bundled.version)
+    expect(geminiCliSessionSource.verifiedVersion).toBe("0.61.0")
+    const content = readFileSync(
+      path.join(process.cwd(), "lib/session-import/fixtures/gemini-0.61.0-session.jsonl"),
+      "utf8"
+    )
+    const parsed = parseGeminiChat(content, "session.jsonl")
+    expect(parsed.originalSessionId).toBe("gemini-0.61.0-acceptance")
+    expect(parsed.messages).toHaveLength(2)
+    expect(parsed.summary).toBe("Public fixture inspected")
+    expect(parsed.messages[1].parts.map((part) => part.type)).toEqual([
+      "reasoning",
+      "text",
+      "tool-read_file",
+    ])
+    expect(JSON.parse(parsed.memoryScratchpad!)).toMatchObject({
+      version: 1,
+      workflowSummary: "Inspected the public fixture",
+      toolSequence: ["read_file"],
+      validationStatus: "passed",
+    })
+    expect(parsed.messages[1].metadata).toMatchObject({
+      usage: { inputTokens: 12, outputTokens: 6, cacheReadInputTokens: 3, reasoningTokens: 2 },
+      geminiTokens: { tool: 1, total: 21 },
+    })
+  })
+
   const fs = {
     exists: async () => false,
     readDir: async () => [],

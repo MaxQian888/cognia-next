@@ -15,6 +15,7 @@ const messages = {
         aider: "Aider",
         claudeCode: "Claude Code",
         geminiCli: "Gemini",
+        antigravityAcp: "Antigravity ACP",
         cursorCli: "Cursor",
         opencodeAcp: "OpenCode (ACP)",
         opencodeServer: "OpenCode V1",
@@ -32,6 +33,13 @@ function renderBadge(runtime: TeammateRuntime, iconOnly = false) {
 }
 
 describe("RuntimeBadge", () => {
+  it("renders the distinct official Antigravity ACP identity", () => {
+    renderBadge("antigravity-acp")
+    expect(screen.getByTitle("Antigravity ACP").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/antigravity-color.svg"
+    )
+  })
   it("renders the local OpenCode V1 runtime label", () => {
     renderBadge("opencode-server")
     expect(screen.getByText("OpenCode V1")).toBeInTheDocument()

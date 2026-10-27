@@ -272,6 +272,34 @@ describe("applyExternalAgentEventToParts — tool calls", () => {
     expect(end[0]).toMatchObject({ type: "tool-Read", input: { path: "b.ts" } })
   })
 
+  it("retains Goose child identity from an intermediate update through completion", () => {
+    const metadata = {
+      nativeSubagent: {
+        runtime: "goose" as const,
+        parentSessionId: "parent",
+        sessionId: "child",
+        readOnly: true as const,
+      },
+    }
+    const started = applyExternalAgentEventToParts(
+      [],
+      ev({ type: "tool_use_start", toolUseId: "delegate", toolName: "delegate", rawInput: {} })
+    )
+    const updated = applyExternalAgentEventToParts(
+      started,
+      ev({ type: "tool_call_update", toolCallId: "delegate", toolMetadata: metadata })
+    )
+    const completed = applyExternalAgentEventToParts(
+      updated,
+      ev({ type: "tool_result", toolUseId: "delegate", result: "Done" })
+    )
+    expect(completed[0]).toMatchObject({
+      toolMetadata: metadata,
+      output: "Done",
+      state: "output-available",
+    })
+  })
+
   it("transitions to output-available on tool_result success", () => {
     const events: ExternalAgentEvent[] = [
       ev({ type: "tool_use_start", toolUseId: "t1", toolName: "Read", rawInput: {} }),

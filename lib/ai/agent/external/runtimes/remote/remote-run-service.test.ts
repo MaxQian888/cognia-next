@@ -1168,6 +1168,47 @@ describe("owned remote session operations", () => {
     expect(h.manager.renameSession).not.toHaveBeenCalled()
   })
   it("dispatches narrow native-child operations under the existing root stamp", async () => {
+    h.manager.listGooseChildren = jest.fn(async () => ["child"])
+    h.manager.inspectGooseChild = jest.fn(async () => ({
+      id: "child",
+      parentId: "native-1",
+      title: "Task",
+      completed: false,
+      transcript: "progress",
+    }))
+    h.manager.prepareGooseRecovery = jest.fn(async () => "Resume child")
+    await executeRemoteSessionOperation(
+      { ...target, requestId: "goose-list", action: { operation: "gooseChildren" } },
+      true
+    )
+    await executeRemoteSessionOperation(
+      {
+        ...target,
+        requestId: "goose-inspect",
+        action: { operation: "gooseInspect", childId: "child" },
+      },
+      true
+    )
+    expect(h.manager.inspectGooseChild).toHaveBeenCalledWith("eac_1", "native-1", "child")
+    await expect(
+      executeRemoteSessionOperation(
+        {
+          ...target,
+          requestId: "goose-read-only-recovery",
+          action: { operation: "gooseRecovery", childId: "child" },
+        },
+        true
+      )
+    ).rejects.toThrow("interactive")
+    await executeRemoteSessionOperation(
+      {
+        ...target,
+        requestId: "goose-recovery",
+        action: { operation: "gooseRecovery", childId: "child" },
+      },
+      false
+    )
+    expect(h.manager.prepareGooseRecovery).toHaveBeenCalledWith("eac_1", "native-1", "child")
     const change = {
       operationId: "native-change",
       nativeChildThreadId: "child",

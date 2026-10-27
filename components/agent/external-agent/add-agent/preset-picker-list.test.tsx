@@ -103,15 +103,26 @@ describe("PresetPickerList", () => {
 
   it("keeps experimental presets hidden until requested, then explains why they cannot be picked", async () => {
     const { onPick } = renderPicker()
-    expect(screen.queryByTestId("preset-pick-opencode-server")).toBeNull()
+    expect(screen.queryByTestId("preset-pick-opencode-remote")).toBeNull()
     await userEvent.click(screen.getByRole("switch", { name: "Show experimental" }))
-    const row = screen.getByTestId("preset-pick-opencode-server")
+    const row = screen.getByTestId("preset-pick-opencode-remote")
     expect(screen.getByTestId("preset-group-experimental")).toContainElement(row)
     expect(row).toBeDisabled()
     expect(row).toHaveAccessibleDescription()
     await userEvent.click(row)
     expect(onPick).not.toHaveBeenCalled()
   })
+
+  it.each(["opencode-server", "opencode-v2-service"])(
+    "keeps executable OpenCode compatibility route %s selectable",
+    async (id) => {
+      const { onPick } = renderPicker()
+      const row = screen.getByTestId(`preset-pick-${id}`)
+      expect(row).toBeEnabled()
+      await userEvent.click(row)
+      expect(onPick).toHaveBeenCalledWith(id)
+    }
+  )
 
   it("marks only the preferred Codex executable preset as recommended", async () => {
     renderPicker()
@@ -148,7 +159,9 @@ describe("PresetPickerList", () => {
     expect(first).toHaveFocus()
     expect(onPick).toHaveBeenLastCalledWith("claude-code")
     await userEvent.keyboard("{ArrowDown}")
-    expect(screen.getByTestId("preset-pick-codex")).toHaveFocus()
+    expect(
+      within(screen.getByTestId("preset-group-available")).getAllByRole("button")[0]
+    ).toHaveFocus()
   })
 
   it("shows the empty search state and keeps custom configuration reachable", async () => {

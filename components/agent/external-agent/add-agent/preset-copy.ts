@@ -15,6 +15,26 @@ import type { ExternalAgentEcosystemSupportTier } from "@/types/agent/external-a
 /** `useTranslations("externalAgent.manager")` / `("externalAgent.settings")`. */
 type Translate = (key: string) => string
 
+const ADDITIONAL_AGENT_IDS = new Set([
+  "openclaude",
+  "crush",
+  "continue-dev",
+  "rovo-dev",
+  "codebuff",
+  "auggie",
+  "autohand-code",
+  "codebuddy",
+  "command-code",
+  "kilocode",
+  "mistral-vibe",
+  "mimo-code",
+  "hermes-agent",
+  "oh-my-pi",
+  "muse",
+  "amp",
+  "zcode",
+])
+
 const SETUP_HINT_KEYS: Readonly<Record<string, string>> = {
   grok: "grokSetupHint",
   "minimax-code": "minimaxCodeSetupHint",
@@ -84,6 +104,7 @@ export function presetSetupHint(
   tSettings?: Translate
 ): string | undefined {
   if (!preset.setupHint) return undefined
+  if (ADDITIONAL_AGENT_IDS.has(presetId)) return tManager(`additionalAgents.${presetId}.setup`)
   const settingsKey = SETTINGS_SETUP_HINT_KEYS[presetId]
   if (settingsKey && tSettings) return tSettings(settingsKey)
   const key = SETUP_HINT_KEYS[presetId]
@@ -104,7 +125,16 @@ export function presetEnvironmentLabel(
 ): string | undefined {
   const key =
     (presetId ? ENVIRONMENT_LABEL_KEYS[presetId] : undefined) ??
-    (protocol === "aider-cli" ? ENVIRONMENT_LABEL_KEYS.aider : undefined)
+    ([
+      "aider-cli",
+      "openclaude-cli",
+      "crush-http",
+      "continue-cli",
+      "rovo-http",
+      "codebuff-sdk",
+    ].includes(protocol)
+      ? ENVIRONMENT_LABEL_KEYS.aider
+      : undefined)
   return key ? tSettings(key) : undefined
 }
 
@@ -115,6 +145,8 @@ export function presetEnvVarHint(
   preset: ExternalAgentPresetConfig
 ): string | undefined {
   if (!preset.envVarHint) return undefined
+  if (ADDITIONAL_AGENT_IDS.has(presetId))
+    return tManager(`additionalAgents.${presetId}.environment`)
   const key = ENV_VAR_HINT_KEYS[presetId]
   return key ? tManager(key) : preset.envVarHint
 }
@@ -125,6 +157,8 @@ export function presetDescription(
   presetId: string,
   preset: ExternalAgentPresetConfig
 ): string {
+  if (ADDITIONAL_AGENT_IDS.has(presetId))
+    return tSettings(`additionalAgents.${presetId}.description`)
   const key = DESCRIPTION_KEYS[presetId]
   return key ? tSettings(key) : preset.description
 }

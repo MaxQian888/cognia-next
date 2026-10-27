@@ -45,6 +45,7 @@ function buildPresetConfig(
     defaultPermissionMode: surface.defaultPermissionMode,
     tags: surface.tags,
     icon: surface.icon,
+    ...(surface.metadata ? { metadata: surface.metadata } : {}),
   }
 }
 
@@ -119,7 +120,7 @@ const OPENCODE_V2_SERVICE_PRESET: ExternalAgentPresetConfig = {
  * DeepSeek Harness presets.
  *
  * These presets use Cognia's pinned official DSH runtime and owned launch
- * profiles (`runtime/deepseek-harness/`) in an isolated runtime home. Managed
+ * profiles (`packages/agent-dsh/runtime/`) in an isolated runtime home. Managed
  * launch preparation resolves absolute process paths after certification.
  */
 const DEEPSEEK_HARNESS_READONLY_PRESET: ExternalAgentPresetConfig = {
@@ -192,6 +193,23 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   ExternalAgentPresetId,
   ExternalAgentPresetConfig | null
 > = {
+  openclaude: buildPresetConfig("openclaude"),
+  crush: buildPresetConfig("crush"),
+  "continue-dev": buildPresetConfig("continue-dev"),
+  "rovo-dev": buildPresetConfig("rovo-dev"),
+  codebuff: buildPresetConfig("codebuff"),
+  auggie: buildPresetConfig("auggie"),
+  "autohand-code": buildPresetConfig("autohand-code"),
+  codebuddy: buildPresetConfig("codebuddy"),
+  "command-code": buildPresetConfig("command-code"),
+  kilocode: buildPresetConfig("kilocode"),
+  "mistral-vibe": buildPresetConfig("mistral-vibe"),
+  "mimo-code": buildPresetConfig("mimo-code"),
+  "hermes-agent": buildPresetConfig("hermes-agent"),
+  "oh-my-pi": buildPresetConfig("oh-my-pi"),
+  muse: buildPresetConfig("muse"),
+  amp: buildPresetConfig("amp"),
+  zcode: buildPresetConfig("zcode"),
   codex: buildPresetConfig("codex"),
   "codex-acp": {
     ...buildPresetConfig("codex-acp"),
@@ -201,6 +219,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "codex-app-server": buildPresetConfig("codex-app-server"),
   "claude-code": buildPresetConfig("claude-code"),
   "gemini-cli": buildPresetConfig("gemini-cli"),
+  "antigravity-acp": buildPresetConfig("antigravity-acp"),
   "cursor-cli": buildPresetConfig("cursor-cli"),
   "copilot-cli": buildPresetConfig("copilot-cli"),
   kiro: buildPresetConfig("kiro"),

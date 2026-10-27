@@ -70,6 +70,11 @@ export const PROTOCOL_PERMISSION_MODE_SUPPORT: Record<
   // The CLI cannot ask the host or enforce an allowlist. Unsupported modes
   // clamp to plan, never to automatic confirmations.
   "aider-cli": ["bypassPermissions", "plan"],
+  "openclaude-cli": ALL_PERMISSION_MODES,
+  "crush-http": ["default"],
+  "continue-cli": ["plan", "bypassPermissions"],
+  "rovo-http": ["default"],
+  "codebuff-sdk": ["default"],
   "codex-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
   "codex-siwc-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
   opencode: ["default", "acceptEdits", "bypassPermissions", "plan"],

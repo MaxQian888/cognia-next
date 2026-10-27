@@ -6,6 +6,7 @@
  */
 
 import { resolvePiSubagents } from "./config/pi-subagents"
+import { gooseSessionExtension } from "@cognia/agent-acp/goose-session"
 import type {
   ExternalAgentConfig,
   ExternalAgentSession,
@@ -96,6 +97,12 @@ import { acpClientExtension } from "@cognia/agent-acp/client"
 import { isolatedAcpExtension } from "@cognia/agent-acp/isolated-adapter"
 import { createAcpAdapterFactory, isolateNativeAcp } from "./integrations/acp"
 import { createAiderCliAdapterFactory } from "./integrations/aider"
+import { createOpenClaudeAdapterFactory } from "./integrations/openclaude"
+import { createCrushAdapterFactory } from "./integrations/crush"
+import { createContinueAdapterFactory } from "./integrations/continue"
+import { createRovoDevAdapterFactory } from "./integrations/rovo"
+import { createCodebuffAdapterFactory } from "./integrations/codebuff"
+
 import { createCodexAppServerAdapterFactory } from "./integrations/codex"
 import { createSiwcAppServerAdapterFactory, isCodexAppServerProtocol } from "./integrations/siwc"
 import {
@@ -399,6 +406,12 @@ export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistr
   // Pi's own RPC protocol, not ACP (ADR-0119).
   registry.register("pi-rpc", createPiRpcAdapterFactory())
   registry.register("aider-cli", createAiderCliAdapterFactory())
+  registry.register("openclaude-cli", createOpenClaudeAdapterFactory())
+  registry.register("crush-http", createCrushAdapterFactory())
+  registry.register("continue-cli", createContinueAdapterFactory())
+  registry.register("rovo-http", createRovoDevAdapterFactory())
+  registry.register("codebuff-sdk", createCodebuffAdapterFactory())
+
   // Future: registry.register("http", () => new HttpClientAdapter())
 }
 
@@ -1146,6 +1159,28 @@ export class ExternalAgentManager {
           models: snapshot.models.filter((model) => task.allowedModels?.includes(model.id)),
         }
       : snapshot
+  }
+
+  private gooseSessionTarget(agentId: string, sessionId: string) {
+    const target = this.sessionOperationTarget(agentId, sessionId)
+    return { ...target, controls: gooseSessionExtension.resolve(target.adapter) }
+  }
+
+  async listGooseChildren(agentId: string, sessionId: string): Promise<string[] | undefined> {
+    const target = this.gooseSessionTarget(agentId, sessionId)
+    return target.controls?.listChildren(target.sessionId)
+  }
+
+  async inspectGooseChild(agentId: string, sessionId: string, childId: string) {
+    const target = this.gooseSessionTarget(agentId, sessionId)
+    if (!target.controls) throw new Error("Goose child inspection unsupported")
+    return target.controls.inspect(target.sessionId, childId)
+  }
+
+  async prepareGooseRecovery(agentId: string, sessionId: string, childId: string) {
+    const target = this.gooseSessionTarget(agentId, sessionId)
+    if (!target.controls) throw new Error("Goose child recovery unsupported")
+    return target.controls.recoveryPrompt(target.sessionId, childId)
   }
 
   async changeNativeSubagentModel(

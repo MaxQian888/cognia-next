@@ -34,6 +34,7 @@ export interface ExternalAgentEcosystemSurfaceDefinition {
   process?: ExternalAgentEcosystemSurfaceProcessConfig
   network?: ExternalAgentEcosystemSurfaceNetworkConfig
   icon?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface ExternalAgentEcosystemAdapterDefinition {
@@ -45,10 +46,344 @@ export interface ExternalAgentEcosystemAdapterDefinition {
   surfaces: ExternalAgentEcosystemSurfaceDefinition[]
 }
 
+/** Local agent surfaces share product metadata; protocol packages own their wire clients. */
+function nativeAgentAdapter(definition: {
+  id: string
+  name: string
+  command: string
+  args: string[]
+  docsUrl: string
+  description: string
+  setupHint: string
+  envVarHint?: string
+  limitationNote?: string
+  defaultPermissionMode?: AcpPermissionMode
+  protocol?: ExternalAgentProtocol
+  transport?: ExternalAgentTransport
+  metadata?: Record<string, unknown>
+}): ExternalAgentEcosystemAdapterDefinition {
+  const {
+    id,
+    name,
+    command,
+    args,
+    docsUrl,
+    protocol = "acp",
+    transport = "stdio",
+    ...surface
+  } = definition
+  return {
+    id,
+    name,
+    description: surface.description,
+    docsUrl,
+    tags: ["coding", id, protocol],
+    surfaces: [
+      {
+        id: `${protocol}-${transport}`,
+        presetId: id,
+        name,
+        ...surface,
+        docsUrl,
+        protocol,
+        transport,
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: surface.defaultPermissionMode ?? "default",
+        tags: ["coding", id, protocol],
+        process: { command, args },
+      },
+    ],
+  }
+}
+
 export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   string,
   ExternalAgentEcosystemAdapterDefinition
 > = {
+  openclaude: nativeAgentAdapter({
+    id: "openclaude",
+    name: "OpenClaude",
+    command: "openclaude",
+    args: [],
+    protocol: "openclaude-cli",
+    docsUrl: "https://github.com/twigpine/openclaude",
+    description:
+      "OpenClaude's bidirectional native stream protocol with host permission hooks and exact session recovery.",
+    setupHint:
+      "Install @twigpine/openclaude@0.33.0 and authenticate using its own CLI. Cognia uses OpenClaude's native protocol with mandatory tool hooks; Claude Code credentials are separate.",
+    envVarHint:
+      "Use native OpenClaude authentication and OPENCLAUDE_CONFIG_DIR when selecting a private configuration root.",
+  }),
+  crush: nativeAgentAdapter({
+    id: "crush",
+    name: "Charm Crush",
+    command: "crush",
+    args: [],
+    protocol: "crush-http",
+    transport: "http",
+    docsUrl: "https://github.com/charmbracelet/crush",
+    description:
+      "Charm Crush's native service API through a private host socket, including streamed tools and user decisions.",
+    setupHint:
+      "Install Crush 0.98.2 and configure its native provider. Cognia owns the private Unix socket server and verifies its bundled host bridge.",
+    envVarHint:
+      "Native Crush credentials and configuration stay with Crush. Configure provider credentials in the native setup or explicit process environment.",
+    limitationNote:
+      "Requires a local macOS or Linux process host. Public unauthenticated server endpoints are not used.",
+    metadata: { localProcessService: true },
+  }),
+  "continue-dev": nativeAgentAdapter({
+    id: "continue-dev",
+    name: "Continue",
+    command: "cn",
+    args: [],
+    protocol: "continue-cli",
+    defaultPermissionMode: "plan",
+    docsUrl: "https://docs.continue.dev/cli/overview",
+    description:
+      "Continue's native headless CLI with bounded structured results and host-owned conversation history.",
+    setupHint:
+      "Install the official Continue CLI and run cn login. Cognia uses headless JSON output and never starts the unauthenticated cn serve endpoint.",
+    envVarHint:
+      "Use native Continue configuration and login under ~/.continue, or explicitly configure its documented provider credentials.",
+    limitationNote:
+      "Headless output is a final result, without a per-tool host approval stream. Read-only plan or explicitly authorized automatic execution is required; history is replayed by the host.",
+  }),
+  "rovo-dev": nativeAgentAdapter({
+    id: "rovo-dev",
+    name: "Rovo Dev",
+    command: "acli",
+    args: ["rovodev", "serve"],
+    protocol: "rovo-http",
+    transport: "http",
+    docsUrl: "https://support.atlassian.com/rovo/docs/use-rovo-dev-cli/",
+    description:
+      "Atlassian Rovo Dev's native streaming service with an owned authenticated local process.",
+    setupHint:
+      "Install Atlassian CLI and authenticate Rovo Dev. Cognia starts its own bearer-authenticated local service with configured permissions respected.",
+    envVarHint:
+      "Use native acli authentication. Explicit USER_EMAIL and USER_API_TOKEN are accepted only when required by your native setup.",
+    limitationNote:
+      "Requires a local macOS or Linux process host. Authentication must prove ownership of the server before a prompt is sent.",
+    metadata: { localProcessService: true },
+  }),
+  codebuff: nativeAgentAdapter({
+    id: "codebuff",
+    name: "Codebuff",
+    command: "node",
+    args: [],
+    protocol: "codebuff-sdk",
+    docsUrl: "https://www.codebuff.com/docs/help/sdk",
+    description:
+      "Codebuff's pinned SDK through a verified isolated host bridge with gated network and tool access.",
+    setupHint:
+      "Cognia supplies the verified bridge and @codebuff/sdk 0.10.7. Configure CODEBUFF_API_KEY and a workspace; the Codebuff CLI is not substituted for this SDK protocol.",
+    envVarHint:
+      "Set CODEBUFF_API_KEY in the process environment. Credentials remain in host secret storage and are not placed in prompts.",
+    limitationNote:
+      "Requires a local macOS or Linux sandbox with bridge networking disabled and host-gated requests. Native MCP and provider OAuth are unavailable.",
+    metadata: { bundledBridge: "codebuff" },
+  }),
+  auggie: nativeAgentAdapter({
+    id: "auggie",
+    name: "Auggie",
+    command: "auggie",
+    args: ["--acp"],
+    docsUrl: "https://docs.augmentcode.com/cli/acp/agent",
+    description:
+      "Augment's native ACP agent using its own login and negotiated session capabilities.",
+    setupHint:
+      "Install @augmentcode/auggie@0.36.0, then run auggie login. Cognia starts the installed CLI with automatic updates disabled. Update outside hosted sessions.",
+    envVarHint:
+      "Use the native Auggie login or explicitly supply AUGMENT_SESSION_AUTH session JSON. Cognia never prints the credential.",
+  }),
+  "autohand-code": nativeAgentAdapter({
+    id: "autohand-code",
+    name: "Autohand Code",
+    command: "autohand",
+    args: ["--acp"],
+    docsUrl: "https://github.com/autohandai/code-cli/blob/v0.9.8/docs/guides/ACP.md",
+    description:
+      "Autohand Code's native ACP with streamed turns, host tool decisions and negotiated session recovery.",
+    setupHint:
+      "Install autohand-cli@0.9.8, then run autohand --setup for the native account/provider configuration. Cognia uses native ACP, not the older separate ACP bridge.",
+    envVarHint:
+      "Reuse the native configuration under ~/.autohand. Provider credentials stay in the native configuration or an explicitly configured process environment.",
+  }),
+  codebuddy: nativeAgentAdapter({
+    id: "codebuddy",
+    name: "CodeBuddy",
+    command: "codebuddy",
+    args: ["--acp"],
+    docsUrl: "https://www.codebuddy.ai/docs/cli/acp",
+    description:
+      "Tencent CodeBuddy's native ACP with session, tool and model controls negotiated from the installed CLI.",
+    setupHint:
+      "Install @tencent-ai/codebuddy-code@2.177.0 and complete native CodeBuddy login. Cognia uses codebuddy --acp. Sandbox permission-bypass environment switches are not accepted.",
+    envVarHint:
+      "CODEBUDDY_API_KEY is a model credential; CODEBUDDY_AUTH_TOKEN is a platform credential. Use only the credential required by the selected native setup.",
+  }),
+  "command-code": nativeAgentAdapter({
+    id: "command-code",
+    name: "Command Code",
+    command: "commandcode",
+    args: ["acp"],
+    docsUrl: "https://commandcode.ai/docs/acp",
+    description:
+      "Command Code's native ACP with an isolated process per conversation and host tool decisions.",
+    setupHint:
+      "Install command-code@1.88.0 and run commandcode login. Cognia uses the package's commandcode alias to avoid the Windows system cmd name. Each conversation owns its project process.",
+    envVarHint:
+      "Native authentication and custom providers are configured under ~/.commandcode. The Windows system cmd executable is not this agent.",
+    limitationNote:
+      "Client stdio and HTTP MCP are supported; legacy SSE is unavailable. Native same-name MCP configuration takes precedence.",
+  }),
+  kilocode: nativeAgentAdapter({
+    id: "kilocode",
+    name: "Kilo Code",
+    command: "kilo",
+    args: ["acp"],
+    docsUrl: "https://kilo.ai/docs/code-with-ai/platforms/cli",
+    description:
+      "Kilo Code's native ACP for streaming, tools, model selection and advertised native sessions.",
+    setupHint:
+      "Install @kilocode/cli@7.8.18 and authenticate in Kilo. Cognia launches kilo acp and preserves the system installation when removing its saved configuration.",
+    envVarHint:
+      "Use native login or explicitly supply KILO_API_KEY and optional KILO_ORG_ID. KILO_AUTH_CONTENT contains native auth JSON and must remain private.",
+  }),
+  "mistral-vibe": nativeAgentAdapter({
+    id: "mistral-vibe",
+    name: "Mistral Vibe",
+    command: "vibe-acp",
+    args: [],
+    docsUrl: "https://github.com/mistralai/mistral-vibe/blob/v3.0.1/docs/acp-setup.md",
+    description:
+      "Mistral Vibe's official ACP executable with native authentication and negotiated tools and sessions.",
+    setupHint:
+      "Install mistral-vibe 3.0.1 using the official installer or uv. Cognia launches the separate vibe-acp executable and uses its advertised authentication methods.",
+    envVarHint:
+      "MISTRAL_API_KEY can configure the native provider. VIBE_HOME selects native configuration and credential storage; default ~/.vibe.",
+  }),
+  "mimo-code": nativeAgentAdapter({
+    id: "mimo-code",
+    name: "MiMo Code",
+    command: "mimo",
+    args: ["acp"],
+    docsUrl: "https://github.com/XiaomiMiMo/MiMo-Code",
+    description:
+      "Xiaomi MiMo Code's native ACP for streamed replies, host tool decisions and native session recovery.",
+    setupHint:
+      "Install MiMo Code from the official Xiaomi installer and authenticate with mimo auth login. Cognia launches mimo acp; upstream's legacy OpenCode authentication label is not used as a launch command.",
+    envVarHint:
+      "MIMOCODE_HOME selects MiMo's own data/config/cache/state root. Existing MiMo credentials remain native; OpenCode credentials are not copied.",
+  }),
+  "hermes-agent": nativeAgentAdapter({
+    id: "hermes-agent",
+    name: "Hermes Agent",
+    command: "hermes",
+    args: ["acp"],
+    docsUrl:
+      "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/acp.md",
+    description:
+      "Hermes Agent's native ACP with daemon-aware cancellation and advertised native sessions.",
+    setupHint:
+      "Install Hermes with its ACP extra, configure the native provider with hermes model, and verify hermes acp --check. Cognia uses the daemon-aware ACP cancellation path.",
+    envVarHint:
+      "HERMES_HOME selects native state; default ~/.hermes. Configure the native provider rather than placing credentials in chat prompts.",
+    limitationNote:
+      "The ACP process is a gateway viewer. Detaching a viewer is distinct from cancelling active daemon work.",
+  }),
+  "oh-my-pi": nativeAgentAdapter({
+    id: "oh-my-pi",
+    name: "oh-my-pi",
+    command: "omp",
+    args: ["acp"],
+    docsUrl: "https://github.com/can1357/oh-my-pi",
+    description:
+      "oh-my-pi's official ACP with guarded host files and terminals, tool decisions and native session management.",
+    setupHint:
+      "Install @oh-my-pi/pi-coding-agent or the official omp binary and configure its native provider. Cognia launches omp acp with guarded client file and terminal ports inside the host sandbox.",
+    envVarHint:
+      "Native OMP configuration is under ~/.omp/agent. Pi's account and state are a separate product; Cognia does not copy them into OMP.",
+    limitationNote:
+      "This application route uses official ACP. The separate experimental native RPC package is not substituted for the guarded ACP host.",
+  }),
+  muse: nativeAgentAdapter({
+    id: "muse",
+    name: "Meta Muse Code",
+    command: "muse-acp",
+    args: [],
+    docsUrl: "https://github.com/BrokkAi/muse-acp",
+    description:
+      "Meta Muse Code through the BrokkAi ACP bridge to its native Muse Session Protocol.",
+    setupHint:
+      "Install and authenticate native Muse Code with muse login, then install @brokkai/muse-acp. The unscoped muse-acp package is a different project. Cognia requires prompt-based tool approval and negotiated Muse session grants.",
+    envVarHint:
+      "MUSE_CLI can locate the installed vendor CLI. Native Muse credentials and state remain Muse-owned.",
+    limitationNote:
+      "Community adapter. Client MCP requires the native sessionMcp grant; missing grants and unsupported SSE are refused explicitly.",
+  }),
+  amp: nativeAgentAdapter({
+    id: "amp",
+    name: "Amp",
+    command: "amp-acp",
+    args: [],
+    docsUrl: "https://github.com/tao12345666333/amp-acp",
+    description:
+      "Amp through its local ACP bridge, with explicit launch authority and host process containment.",
+    setupHint:
+      "Install and authenticate native Amp, then install amp-acp 0.10.0. This community bridge does not relay per-tool host approvals. Explicit automatic authority and the host sandbox are required; Orb execution is unavailable.",
+    envVarHint:
+      "AMP_API_KEY or native Amp login; AMP_CLI_PATH can select the installed executable. AMP_ACP_STATE_DIR stores exact native thread mappings.",
+    limitationNote:
+      "No per-tool Cognia approval loop. Mandatory host approval rules and remote Orb execution are refused; native thread recovery never selects the latest unrelated thread.",
+    defaultPermissionMode: "bypassPermissions",
+  }),
+  zcode: nativeAgentAdapter({
+    id: "zcode",
+    name: "ZCode",
+    command: "zcode-acp",
+    args: [],
+    docsUrl: "https://github.com/Liang-HZ/zcode-acp",
+    description: "Z.ai ZCode through the macOS ACP bridge with one process per conversation.",
+    setupHint:
+      "Install and sign into the official ZCode macOS application, then install zcode-acp 0.9.1. Cognia launches the bridge without the auto-approving run subcommand. Native terminal use is also available.",
+    envVarHint:
+      "ZCODE_CJS selects the installed desktop engine; native state remains under ~/.zcode. The adapter keeps diagnostics under ~/.zcode-acp.",
+    limitationNote:
+      "Community bridge for the signed-in macOS desktop engine. Text input only; native resume is distinct from legacy session/load.",
+  }),
+  antigravity: {
+    id: "antigravity",
+    name: "Google Antigravity",
+    description: "Google's official Antigravity ACP server",
+    docsUrl: "https://antigravity.google/docs/ide/extensions/zed/",
+    tags: ["coding", "google", "antigravity", "acp"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "antigravity-acp",
+        name: "Antigravity (ACP)",
+        description:
+          "Connect the official Antigravity ACP server using its native account and model configuration.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "google", "antigravity", "acp"],
+        setupHint:
+          "Install the official antigravity-acp archive from the ACP Registry. Keep agy_acp_server.par and localharness_external together and executable, and add that directory to PATH. Cognia uses the separate ACP server, not agy print mode; removing a configuration preserves the system installation and native account.",
+        envVarHint:
+          "Authenticate with the ACP server's advertised Google account, enterprise, Gemini API or Agent Platform method. The agy CLI login is separate. A custom GEMINI_HOME selects configuration and file storage, but does not isolate the operating system keychain.",
+        limitationNote:
+          "Requires a Cognia process host and sandbox. Plan mode, private-state cloning, Cognia model gateway and transcript import are unavailable. Native session/model features depend on negotiated capabilities; authenticated acceptance is recorded separately.",
+        process: { command: "agy_acp_server.par", args: [] },
+        icon: "antigravity",
+      },
+    ],
+  },
   grok: {
     id: "grok",
     name: "Grok Build",

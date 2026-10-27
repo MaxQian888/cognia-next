@@ -200,3 +200,40 @@ describe("supportTierLabel", () => {
     }
   })
 })
+
+it.each([
+  "openclaude",
+  "crush",
+  "continue-dev",
+  "rovo-dev",
+  "codebuff",
+  "auggie",
+  "autohand-code",
+  "codebuddy",
+  "command-code",
+  "kilocode",
+  "mistral-vibe",
+  "mimo-code",
+  "hermes-agent",
+  "oh-my-pi",
+  "muse",
+  "amp",
+  "zcode",
+])("uses matching localized setup, credentials and description for %s", (id) => {
+  expect(presetSetupHint(t, id, preset(), t)).toBe(`t:additionalAgents.${id}.setup`)
+  expect(presetEnvVarHint(t, id, preset())).toBe(`t:additionalAgents.${id}.environment`)
+  expect(presetDescription(t, id, preset())).toBe(`t:additionalAgents.${id}.description`)
+  for (const messages of [enMessages, zhMessages]) {
+    const copy = messages.externalAgent.manager.additionalAgents as Record<
+      string,
+      { setup: string; environment: string }
+    >
+    const description = messages.externalAgent.settings.additionalAgents as Record<
+      string,
+      { description: string }
+    >
+    expect(copy[id]?.setup).toBeTruthy()
+    expect(copy[id]?.environment).toBeTruthy()
+    expect(description[id]?.description).toBeTruthy()
+  }
+})

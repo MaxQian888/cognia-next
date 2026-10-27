@@ -27,6 +27,43 @@ afterEach(() => {
 })
 
 describe("EXTERNAL_AGENT_PRESETS", () => {
+  it.each([
+    ["auggie", "auggie", ["--acp"]],
+    ["autohand-code", "autohand", ["--acp"]],
+    ["codebuddy", "codebuddy", ["--acp"]],
+    ["command-code", "commandcode", ["acp"]],
+    ["kilocode", "kilo", ["acp"]],
+    ["mistral-vibe", "vibe-acp", []],
+    ["mimo-code", "mimo", ["acp"]],
+    ["hermes-agent", "hermes", ["acp"]],
+    ["oh-my-pi", "omp", ["acp"]],
+    ["muse", "muse-acp", []],
+    ["amp", "amp-acp", []],
+    ["zcode", "zcode-acp", []],
+  ] as const)("materializes %s into its actual inspected ACP executable", (id, command, args) => {
+    const config = createAgentFromPreset(id)
+    expect(config).toMatchObject({
+      protocol: "acp",
+      transport: "stdio",
+      process: { command, args },
+      metadata: { preset: id, ecosystemAdapterId: id, ecosystemSurfaceId: "acp-stdio" },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain(id)
+    expect(getRunnablePresets()).toContain(id)
+  })
+
+  it("launches the official Antigravity ACP server rather than the interactive CLI", () => {
+    const config = createAgentFromPreset("antigravity-acp")!
+    expect(config).toMatchObject({
+      protocol: "acp",
+      transport: "stdio",
+      defaultPermissionMode: "default",
+      process: { command: "agy_acp_server.par", args: [] },
+      metadata: { preset: "antigravity-acp", ecosystemAdapterId: "antigravity" },
+    })
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("antigravity-acp")
+    expect(getRunnablePresets()).toContain("antigravity-acp")
+  })
   it("launches current Kimi Code directly with subscription login and native ACP", () => {
     const config = createAgentFromPreset("kimi")!
     expect(config).toMatchObject({

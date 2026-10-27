@@ -10,7 +10,15 @@ import {
   RESTART_NOT_LOCAL_PTY,
 } from "./spawn-orchestrator"
 import { __clearLiveSessionsForTesting, getLiveSession } from "./session-registry"
+import { RemoteTerminalSession } from "./transport-ws"
 import type { SpawnRequest, SessionInfo } from "./types"
+
+jest.mock("./pick-transport", () => ({ selectTerminalTransportChain: jest.fn(() => []) }))
+jest.mock("./host-profiles", () => ({
+  ...jest.requireActual("./host-profiles"),
+  ensureRemoteSpawnProfile: jest.fn(async (req: SpawnRequest) => req.profileId ?? "default"),
+  hasTransientTerminalProfile: jest.fn(() => false),
+}))
 
 // The persist path (`persistCommandHistory`) lazy-imports these three —
 // mocked so command_end events in every test stay deterministic and the
@@ -256,6 +264,33 @@ beforeEach(() => {
 })
 
 describe("spawnFromDock", () => {
+  it("fails before remote spawn when a transient profile cannot be synchronized", async () => {
+    const { selectTerminalTransportChain } = jest.requireMock("./pick-transport") as {
+      selectTerminalTransportChain: jest.Mock
+    }
+    const { ensureRemoteSpawnProfile, hasTransientTerminalProfile } = jest.requireMock(
+      "./host-profiles"
+    ) as { ensureRemoteSpawnProfile: jest.Mock; hasTransientTerminalProfile: jest.Mock }
+    selectTerminalTransportChain.mockReturnValueOnce(["ws"])
+    ensureRemoteSpawnProfile.mockRejectedValueOnce(new Error("terminal.open capability denied"))
+    hasTransientTerminalProfile.mockReturnValueOnce(true)
+    const remote = jest.spyOn(RemoteTerminalSession, "spawn")
+    const store = makeFakeStore()
+    try {
+      await expect(
+        spawnFromDock({
+          req: { ...baseReq, profileId: "cognia-agent-terminal-freebuff" },
+          store,
+          hooks: makeFakeHooks() as never,
+        })
+      ).resolves.toEqual({ kind: "error", message: "terminal.open capability denied" })
+      expect(remote).not.toHaveBeenCalled()
+      expect(store.registered).toEqual([])
+    } finally {
+      remote.mockRestore()
+    }
+  })
+
   it("falls through the transport chain when the LAN attempt fails", async () => {
     const store = makeFakeStore()
     const hooks = makeFakeHooks()
@@ -727,6 +762,79 @@ describe("detachFromDock", () => {
 })
 
 describe("killFromDock", () => {
+  it("bounds a strict stop and retains ownership when the host never confirms it", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("stalled-stop")
+    await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as never,
+      spawn: async () => fake as never,
+    })
+    let finish!: () => void
+    fake.kill = () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    jest.useFakeTimers()
+    try {
+      const result = expect(
+        killFromDock("stalled-stop", store, hooks as never, { strict: true })
+      ).rejects.toThrow("terminal stop timed out")
+      await jest.advanceTimersByTimeAsync(15_000)
+      await result
+      expect(getLiveSession("stalled-stop")).toBe(fake)
+      expect(store.removed).toEqual([])
+      finish()
+      await Promise.resolve()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("retains the live handle and row when a strict stop fails", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("strict-stop")
+    await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as never,
+      spawn: async () => fake as never,
+    })
+    fake.kill = jest.fn().mockRejectedValue(new Error("host refused termination"))
+
+    await expect(
+      killFromDock("strict-stop", store, hooks as never, { strict: true })
+    ).rejects.toThrow("host refused termination")
+    expect(getLiveSession("strict-stop")).toBe(fake)
+    expect(store.removed).toEqual([])
+    expect(hooks.lifecycle.filter((event) => event.kind === "killed")).toEqual([])
+  })
+
+  it("preserves existing best-effort cleanup for callers that do not request strict stop", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("best-effort")
+    await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as never,
+      spawn: async () => fake as never,
+    })
+    fake.kill = jest.fn().mockRejectedValue(new Error("host unavailable"))
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(killFromDock("best-effort", store, hooks as never)).resolves.toBeUndefined()
+      expect(getLiveSession("best-effort")).toBeUndefined()
+      expect(store.removed).toEqual(["best-effort"])
+      expect(hooks.lifecycle.filter((event) => event.kind === "killed")).toHaveLength(1)
+    } finally {
+      warning.mockRestore()
+    }
+  })
+
   it("calls session.kill, fires 'killed' lifecycle, and removes the store row", async () => {
     const hooks = makeFakeHooks()
     const store = makeFakeStore()

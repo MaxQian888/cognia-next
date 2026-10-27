@@ -539,6 +539,22 @@ describe("remote native session facade", () => {
   }
   it("separates native inspection from mutation and refuses old Hosts before transport", async () => {
     const client = createRemoteSessionOperationsClient(target)
+    reply = { value: ["child"] }
+    expect(await client.listGooseChildren("host", "native")).toEqual(["child"])
+    expect(calls.at(-1)).toMatchObject({
+      command: "external_agent_session_query",
+      payload: { action: { operation: "gooseChildren" } },
+    })
+    await client.inspectGooseChild("host", "native", "child")
+    expect(calls.at(-1)).toMatchObject({
+      command: "external_agent_session_query",
+      payload: { action: { operation: "gooseInspect", childId: "child" } },
+    })
+    await client.prepareGooseRecovery("host", "native", "child")
+    expect(calls.at(-1)).toMatchObject({
+      command: "external_agent_session_mutate",
+      payload: { action: { operation: "gooseRecovery", childId: "child" } },
+    })
     reply = { value: { children: [] } }
     await expect(client.getNativeSubagents("host", "native")).resolves.toEqual({ children: [] })
     expect(calls.at(-1)).toMatchObject({

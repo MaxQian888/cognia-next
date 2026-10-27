@@ -287,6 +287,9 @@ export interface ExternalRunManager extends Partial<
     ExternalAgentManager,
     | "getSession"
     | "getNativeSubagents"
+    | "listGooseChildren"
+    | "inspectGooseChild"
+    | "prepareGooseRecovery"
     | "changeNativeSubagentModel"
     | "getSessionOperationCapabilities"
     | "refreshSessionCommands"
@@ -1093,6 +1096,8 @@ const forkTargetSchema = z
   })
   .strict()
 const sessionOperationSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("gooseInspect"), childId: z.string().min(1).max(256) }).strict(),
+  z.object({ operation: z.literal("gooseRecovery"), childId: z.string().min(1).max(256) }).strict(),
   z
     .object({
       operation: z.literal("nativeSubagentModel"),
@@ -1129,6 +1134,7 @@ const sessionOperationSchema = z.discriminatedUnion("operation", [
         "commands",
         "runtimeState",
         "nativeSubagents",
+        "gooseChildren",
         "entries",
         "tree",
         "exportHtml",
@@ -1211,6 +1217,8 @@ export interface RemoteSessionRequest extends RemoteSessionTarget {
   callerDeviceId?: string
 }
 export const REMOTE_SESSION_READS = new Set<RemoteSessionOperation["operation"]>([
+  "gooseChildren",
+  "gooseInspect",
   "nativeSubagents",
   "capabilities",
   "snapshot",
@@ -1300,6 +1308,15 @@ export async function executeRemoteSessionOperation(
     }
     let value: unknown
     switch (action.operation) {
+      case "gooseChildren":
+        value = manager.listGooseChildren ? await call("listGooseChildren") : undefined
+        break
+      case "gooseInspect":
+        value = await call("inspectGooseChild", action.childId)
+        break
+      case "gooseRecovery":
+        value = await call("prepareGooseRecovery", action.childId)
+        break
       case "nativeSubagents":
         value = manager.getNativeSubagents ? await call("getNativeSubagents") : undefined
         break

@@ -57,6 +57,18 @@ beforeEach(() => {
 })
 
 describe("ConnectionFields", () => {
+  it("wires Goose native concurrency and Code Mode into the shared form", async () => {
+    render(<Harness presetId="goose" />)
+    const user = userEvent.setup()
+    const limit = screen.getByRole("spinbutton", { name: en.externalAgent.goose.concurrency })
+    await user.type(limit, "2")
+    await user.click(screen.getByRole("switch", { name: en.externalAgent.goose.codeMode }))
+    expect(latestForm?.processEnvRows).toContainEqual({
+      key: "GOOSE_MAX_CONCURRENT_SUBAGENTS",
+      value: "2",
+    })
+    expect(latestForm?.data.args).toContain("developer,code_execution")
+  })
   it("shows command, arguments and the bare/debug toggles for a stdio preset", () => {
     render(<Harness presetId="claude-code" />)
 
@@ -109,18 +121,19 @@ describe("ConnectionFields", () => {
     expect(screen.getByLabelText(settings.endpoint!)).toBeInTheDocument()
   })
 
-  it("does not offer the retired OpenCode V1 protocol as a selectable option", async () => {
+  it("keeps the registered OpenCode V1 protocol selectable alongside V2", async () => {
     const user = userEvent.setup()
     render(<Harness presetId="claude-code" />)
 
     await user.click(screen.getByRole("combobox", { name: settings.protocol }))
     await screen.findByRole("option", { name: settings.opencodeV2Protocol })
-    expect(screen.queryByRole("option", { name: "OpenCode (HTTP + SSE)" })).toBeNull()
+    expect(screen.getByRole("option", { name: "OpenCode (HTTP + SSE)" })).not.toHaveAttribute(
+      "data-disabled"
+    )
   })
 
   it("shows the auto-spawn toggle and opencode fields when the form holds the opencode protocol", () => {
-    // OpenCode V1 is no longer selectable (only a stored/preset value can carry
-    // it), so drive it through the form state the select would have written.
+    // Drive the saved protocol through the same shared state as the picker.
     render(<Harness presetId="claude-code" />)
     act(() => {
       form().setData((current) => ({ ...current, protocol: "opencode", transport: "sse" }))
@@ -226,4 +239,26 @@ describe("ConnectionFields", () => {
     expect(container).toHaveClass("grid", "sm:grid-cols-2")
     expect(container).not.toHaveClass("grid-cols-2")
   })
+})
+
+it.each(["crush", "rovo-dev"])(
+  "shows %s process configuration and fixed service arguments without an endpoint",
+  (presetId) => {
+    render(<Harness presetId={presetId} planeWarning="Host unavailable" />)
+    expect(screen.getByLabelText(settings.command!)).toBeEnabled()
+    expect(screen.getByLabelText(settings.arguments!)).toBeDisabled()
+    expect(screen.getByLabelText(settings.workingDirectory!)).toBeInTheDocument()
+    expect(screen.queryByLabelText(settings.endpoint!)).not.toBeInTheDocument()
+    expect(screen.getByText(/Host unavailable/)).toBeInTheDocument()
+  }
+)
+
+it("shows Codebuff's fixed bridge with its own environment instead of DSH credentials", () => {
+  render(<Harness presetId="codebuff" />)
+  expect(screen.getByLabelText(settings.command!)).toHaveValue("node")
+  expect(screen.getByLabelText(settings.command!)).toBeDisabled()
+  expect(screen.getByLabelText(settings.arguments!)).toBeDisabled()
+  expect(screen.getByLabelText(settings.workingDirectory!)).toBeInTheDocument()
+  expect(screen.queryByLabelText(settings.apiKey!)).not.toBeInTheDocument()
+  expect(screen.queryByRole("switch", { name: settings.passBareFlag })).not.toBeInTheDocument()
 })
