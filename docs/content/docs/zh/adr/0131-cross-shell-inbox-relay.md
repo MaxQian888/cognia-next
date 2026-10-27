@@ -86,6 +86,8 @@ Dexie **v173** 为 `outboundQueue` 与 `connectorDrafts` 增加带索引的 `upd
 
 丢失运行时租约与卸载、与让位给远端宿主，是三件不同的事。`installConnectorRuntime` 接受拆除原因；在 `"lease-lost"` 时立即回收在途入站作业（`reclaimAllRunning: true`），使它们呈现为 `recovery_required`，而不是顶着"running"却无人在跑，并回调 `onRuntimeReleased`。`ConnectorBusProvider` 按 30 秒 → 5 分钟退避重新获取，每次先查 `isRemoteHostActive()`。
 
+获取时遇到 busy（包括首次启动和后续重试）会回调 `onRuntimeBusy`，桌面继续同一退避阶梯，直到所有权可用。每次安装捕获独立 generation；已退休实例的回调和已取消的重试不会清空新实例的 disposer 或重试句柄。切到远端和卸载时取消当前重试。
+
 到达已不再持有运行时的进程的中继写入会抛出 `connector_runtime_not_owner`。**措辞是承重的**：`lib/queue/retry-policy.ts` 将其归类为**可重试**，因此手机的持久化队列会跨越交接窗口重放（5 次尝试 ≈ 31 秒），而不是把这条回复投入死信。
 
 ### 7. 独立壳会自我说明

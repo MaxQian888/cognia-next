@@ -69,6 +69,8 @@ A surface declares `computed: { "<pointer>": { op, args } }`. It can appear on `
 
 **Where it applies.** The store recomputes after every data mutation. The declaration travels through every serialization site: the Dexie surface row, saved apps, import and export, capture (`run-and-capture`), the `segmentToMessages` replay, and the IM card projection, which carries the values as of the reply. Each of those sites validates the declaration again, and each refuses a message (or MCP call) whose map is invalid, as the store does, rather than keeping the rest without it. The MCP `a2ui_create_surface` and `a2ui_data_model_update` tools accept the same map, in both the renderer and sidecar copies, and a parity test keeps the copies aligned.
 
+Outside the desktop renderer, the headless brain feeds MCP dispatches into the same store, so it computes as the desktop does. A captured surface reaches `cognia serve` and SDK clients as an `a2ui` content part whose payload carries the declarations with their values applied. The CLI TUI validates the declarations when the part arrives (an invalid map refuses the surface, as the store does), keeps them through `/view`, and its overlay writes each edit to the path its control binds and recomputes, so a total follows the quantity being typed.
+
 ### One URL policy
 
 `lib/a2ui/url-policy.ts` mirrors `untrustedMarkdownUrlTransform`, and a test pins the two together.
@@ -108,7 +110,6 @@ These remain open:
 - JSON-Schema contracts for all 68 types.
 - Feeding validation failures back to the model. The sidecar tools still return `ok: true`.
 - The A2UI `Markdown` component follows the assistant's chat Markdown policy rather than the A2UI URL policy; whether plugin- or external-agent-authored Markdown needs an untrusted mode is open.
-- The CLI TUI and headless `a2ui` stream frames do not carry computed declarations.
 - A send that the chat controller rejects after accepting it (send guard, concurrency cap) shows the controller's error, not the A2UI toast.
 - An evaluation harness for generated layouts.
 - Turning A2UI on by default.
@@ -126,7 +127,7 @@ Unit and component tests cover:
 - the provider wiring;
 - the local action-name pin;
 - every computed operator, its limits, order and identity, the well-ordered rule and the `concat` cap;
-- computed round trips through the store, Dexie hydration, import, capture, IM projection and app save and export;
+- computed round trips through the store, Dexie hydration, import, capture, IM projection, app save and export, the headless content part, and the CLI TUI (validation, `/view`, live recompute in the overlay);
 - MCP schema parity and dispatch forwarding;
 - the URL policy, its parity with chat Markdown, and the inline `style` sanitizer on both render paths;
 - the Link, Breadcrumb, Image, Avatar, Card and PDF behavior.

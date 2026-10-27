@@ -235,6 +235,7 @@
     "0237-an-agents-harness-evolves-through-probed-approved-versions",
     "0238-agent-configuration-is-governed-by-evidence",
     "0239-an-outbound-action-is-authorized-by-the-request",
-    "0240-a-generated-surface-streams-answers-and-computes"
+    "0240-a-generated-surface-streams-answers-and-computes",
+    "0241-a-shared-run-streams-to-its-members"
   ]
 }

@@ -15,10 +15,17 @@ when adding files.
 | `src-tauri/`, `sidecar/`                                              | Desktop shell and agent/extension hosts / 桌面外壳与智能体宿主                                |
 | `web/`, `mobile/`, `cli/`, `browser-extension/`                       | Product website and client workspaces / 产品网站与客户端                                      |
 | `plugins/`, `plugin-sdk/`, `skills/`, `generated/`                    | Plugin assets/tooling, bundled skills, and generated skill loaders / 插件、技能及其生成加载器 |
-| `services/`, `deploy/`, `runtime/`                                    | Services, deployment assets, and runtime harnesses / 服务、部署与运行时验证环境               |
+| `services/`, `deploy/`                                                | Services and deployment assets / 服务与部署资源                                               |
 | `config/`, `scripts/`, `tests/`, `test-fixtures/`, `__mocks__/`       | Shared configuration data, automation, E2E suites, fixtures, and mocks / 配置、脚本与测试     |
 | `patches/`                                                            | Dependency patches referenced by pnpm / pnpm 依赖补丁                                         |
 | `output/`                                                             | Existing tracked document exports; inspect before removing / 已跟踪的文档导出，清理前先检查   |
+
+Managed DeepSeek Harness launcher sources and profiles live alongside their
+adapter in `packages/agent-dsh/runtime/`. Their upstream dependencies are installed
+into an isolated runtime home, outside the pnpm workspace.
+
+DeepSeek Harness 的托管启动器与配置归属 `packages/agent-dsh/runtime/`，与适配器放在一起；
+上游依赖仍安装到 pnpm workspace 之外的隔离运行时目录。
 
 ## Development guides / 开发指南
 

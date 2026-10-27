@@ -36,7 +36,7 @@ A sixth fact settled a question that had looked like a blocker: Cognia pins `@ag
 
 ## Decision
 
-Cognia owns and versions the DSH **host plane** as first-party source under `runtime/deepseek-harness/`, installs it into an isolated runtime home, and certifies it by digest.
+Cognia owns and versions the DSH **host plane** as first-party source under `packages/agent-dsh/runtime/`, installs it into an isolated runtime home, and certifies it by digest.
 
 **Three profiles, two transports.** `cognia-sdk-readonly` (default), `cognia-sdk-workspace`, and `cognia-acp`. A session may never move between transports: they differ in both what the user can see and what they can veto, so switching would silently change the safety properties of a running conversation.
 
@@ -72,7 +72,7 @@ Windows is out of scope for now: `koffi` is a hard dependency of `dsh-fs-local` 
 
 ## References
 
-- `runtime/deepseek-harness/` — compositions, launcher, pinned dependencies
+- `packages/agent-dsh/runtime/` — compositions, launcher, pinned dependencies
 - `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts` — shared verdict and manifest policy
 - `lib/ai/agent/external/runtimes/dsh/dsh-session-event-codec.ts` — wire → canonical events
 - `crates/cognia-external-agent/src/dsh_runtime.rs` — desktop lifecycle

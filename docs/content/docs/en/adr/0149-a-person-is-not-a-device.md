@@ -733,3 +733,15 @@ The deterministic regression workload uses ten samples: a burst of 50
 notifications requires two history pulls rather than 50, and correcting one of
 20 attachment-bearing messages writes one media-reference row rather than 20.
 These are operation-count budgets, not production latency or battery measurements.
+
+## Implementation update — members watch a run live (2026-10-26)
+
+ADR-0241 refines the shared AI sessions update above. A run's reply now reaches
+members while it is written: the executor posts never-stored live frames with
+its run token, the server checks the lease, standing and rollout on each one
+and relays them to `cognia.chat.v2` sockets, and the stored corrections stay
+the record (on settle, and at most every 10 s while live carries the reply).
+What members see of a tool call is a per-session tier, `summary` by default
+and `full` only by an owner or maintainer, enforced with a revision the server
+checks on every publication. A conversation can also be shared from now on,
+leaving its private history on the device.

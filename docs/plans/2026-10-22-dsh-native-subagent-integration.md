@@ -24,17 +24,17 @@
 
 以下为代码核对事实，非新增实现；上游证据固定到 `dsh-v0.2.1-rc.2`。当天调查时 npm latest/next 与该版本一致，后续实施仍须重新认证版本。
 
-| 现有所有者                                                | 已有能力                                                   | 需要补齐                                                                                      |
-| --------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `runtime/deepseek-harness/launcher.mjs`、`host.sdk-*.yml` | 严格受管组合、网关 LLM、MCP、启动 readiness、沙箱          | 原生插件及受控 child preset；必要的窄 SDK 控制入口                                            |
-| `packages/agent-dsh/src/channel.ts`、`manifest.ts`        | profile/plugin inventory、协议与有效能力分离               | native-enabled 认证、真实来源证据与细分操作能力                                               |
-| `sdk-client.ts`、`event-codec.ts`                         | lineage 路由、等待 descendants、过滤 child 正文            | 原生 child 快照、根会话 native resume、控制投影；不能把现有 `children` 集合当 native registry |
-| `model-slots.ts`、`model-plan.ts`                         | 共享 role/default/candidate 编译、有限集合、fingerprint    | DSH `subagent.default` 与受认证的 spawn overrides 描述                                        |
-| `gateway-task.ts`                                         | DSH Cognia provider、任务票据；其他 runtime 已用多模型计划 | 从冻结计划投影完整模型集及准确 metadata，当前 DSH 分支只有 primary                            |
-| `manager.ts`                                              | 原生操作路由到实际 gateway adapter/session、候选模型复核   | runtime-neutral 的契约分支和 DSH capability gate                                              |
-| `agent-contracts/src/session-operations.ts`               | 原生 snapshot/change 契约                                  | 当前含 Codex backend、thread identity、current/future turn 语义，不能直接假装适用于 DSH       |
-| `runtimes/remote/remote-run-{client,service}.ts`          | Host 所有权、会话操作 RPC                                  | 协商后的新分支；旧 Host 必须拒绝而非丢字段降级                                                |
-| `RoleModelFields`、`ExternalAgentSessionOperations`       | 模型角色编辑、原生 child 卡片与模型控件                    | 由每项真实 capability 驱动可见性、scope 和状态                                                |
+| 现有所有者                                                  | 已有能力                                                   | 需要补齐                                                                                      |
+| ----------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `packages/agent-dsh/runtime/launcher.mjs`、`host.sdk-*.yml` | 严格受管组合、网关 LLM、MCP、启动 readiness、沙箱          | 原生插件及受控 child preset；必要的窄 SDK 控制入口                                            |
+| `packages/agent-dsh/src/channel.ts`、`manifest.ts`          | profile/plugin inventory、协议与有效能力分离               | native-enabled 认证、真实来源证据与细分操作能力                                               |
+| `sdk-client.ts`、`event-codec.ts`                           | lineage 路由、等待 descendants、过滤 child 正文            | 原生 child 快照、根会话 native resume、控制投影；不能把现有 `children` 集合当 native registry |
+| `model-slots.ts`、`model-plan.ts`                           | 共享 role/default/candidate 编译、有限集合、fingerprint    | DSH `subagent.default` 与受认证的 spawn overrides 描述                                        |
+| `gateway-task.ts`                                           | DSH Cognia provider、任务票据；其他 runtime 已用多模型计划 | 从冻结计划投影完整模型集及准确 metadata，当前 DSH 分支只有 primary                            |
+| `manager.ts`                                                | 原生操作路由到实际 gateway adapter/session、候选模型复核   | runtime-neutral 的契约分支和 DSH capability gate                                              |
+| `agent-contracts/src/session-operations.ts`                 | 原生 snapshot/change 契约                                  | 当前含 Codex backend、thread identity、current/future turn 语义，不能直接假装适用于 DSH       |
+| `runtimes/remote/remote-run-{client,service}.ts`            | Host 所有权、会话操作 RPC                                  | 协商后的新分支；旧 Host 必须拒绝而非丢字段降级                                                |
+| `RoleModelFields`、`ExternalAgentSessionOperations`         | 模型角色编辑、原生 child 卡片与模型控件                    | 由每项真实 capability 驱动可见性、scope 和状态                                                |
 
 架构遵循 ADR-0090 的同任务网关授权及跨 provider/account 的编排边界、ADR-0217 的 package/Host-port 分层。子代理 preset 若来自 Harness Evolution，沿用 ADR-0237 的批准版本，不另造可由模型写入的权限配置。
 

@@ -23,7 +23,7 @@ description: "完成此前的部分实现，主代理派遣由外部CLI代理支
 `ecosystem-adapters.ts`发布的发售命令永远无法生成指定特工——已与当前ACP文档核实：
 
 - **Claude Code** 运行`npx @anthropics/claude-code --stdio`（不存在包，无原生 ACP 条目）。Claude Code只能通过官方的Zed适配器ACP：`npx -y @zed-industries/claude-code-acp`。
-- **双子座CLI**通过`--stdio`，进入交互模式并挂起;ACP入场旗帜为`--experimental-acp`。
+- **Gemini CLI** 曾传入 `--stdio`，导致进入交互模式并挂起；当前 ACP 启动参数为 `--acp`（早期为 `--experimental-acp`）。
 - **光标CLI**运行一个没有ACP子指令的裸`cursor-agent`;ACP服务器通过`cursor-agent acp`开始。
 
 Codex（`@zed-industries/codex-acp` shim 和 native `codex app-server`）已经是正确的。所有可执行预设命令现在都被锁定在参数化测试中。
@@ -68,3 +68,11 @@ Codex（`@zed-industries/codex-acp` shim 和 native `codex app-server`）已经�
 ## 当前状态修订（2026-08-13）
 
 历史上的五 runtime 限制已经关闭。`TeammateRuntime` 消费可执行 preset catalog（明确排除不可执行的 custom/preview 条目），auto-compose 也通过同一 runtime owner 消费 external presets。兼容工作必须扩展该 catalog，不得重新引入按 runtime 分叉的 dispatch 路径。
+
+## Gemini 验证修订（2026-10-25）
+
+当前可执行预设和 runtime descriptor 都通过已安装的 `gemini --acp` 启动，与[官方 ACP 文档](https://geminicli.com/docs/cli/acp-mode/)一致。上文的实验性参数仅描述历史状态。
+
+Gemini 历史导入已针对沙箱固定的 **0.61.0** 版本验证：`scripts/smoke/gemini-history-smoke.ts` 使用官方 `@google/gemini-cli-core@0.61.0` recording service 在本地磁盘生成记录，由上游 loader 重新加载，并与 Cognia 的导入结果比较；生成的公开测试记录保存在 `lib/session-import/fixtures/gemini-0.61.0-session.jsonl`。验证覆盖重复消息更新、包含目标消息的 rewind、思考、工具、用量和带版本的结构化 memory scratchpad。Cognia 将结构化 scratchpad 无损保存为 JSON 文本，以匹配自身的文本字段。这是录制格式验证，不代表已验收真实账户下的 ACP 推理，也不代表所有后续 Gemini 版本均已验证。
+
+Google [已于 2026-06-18 停止个人 Free/Pro/Ultra 的 Gemini CLI 请求](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)；企业和付费 API 路径仍是独立的上游支持选项。本地存在登录状态，不能证明个人账户仍可通过 Gemini CLI 发起请求。

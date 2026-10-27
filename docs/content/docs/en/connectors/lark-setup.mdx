@@ -361,3 +361,11 @@ automatically, falling back to the bot identity if a refresh fails.
 | "Send as me" still sends as the bot              | `offline_access` + `im:message` + `im:message.send_as_user` not granted/approved, or the authorization expired — reconnect the account                         |
 
 Sources verified 2026-10-01: [message receive](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive), [history](https://open.feishu.cn/document/server-docs/im-v1/message/list), [card callbacks](https://open.feishu.cn/document/feishu-cards/card-callback-communication).
+
+## Avatars
+
+In the connection setup guide, select **People and conversation avatars** if you want platform pictures. Grant `contact:contact.base:readonly` for the user endpoint, `contact:user.base:readonly` for its avatar field, and `im:chat:readonly` for chat pictures; an existing broader permission may already cover these. The application's contact data range must include the people being displayed. Publish permission changes. Missing access keeps the placeholder and does not interrupt messages.
+
+Self-bot pictures use the bot's verified identity. **Other app bot avatars** is a separate optional permission (`admin:app.info:readonly`) for same-tenant application information. An app ID is never queried as a contact open ID; an unknown bot is not shown with this application's picture.
+
+Contracts: [user information](https://open.feishu.cn/document/server-docs/contact-v3/user/get.md), [chat information](https://open.feishu.cn/document/server-docs/group/chat/get-2.md), [application information](https://open.feishu.cn/document/server-docs/application-v6/application/get.md).

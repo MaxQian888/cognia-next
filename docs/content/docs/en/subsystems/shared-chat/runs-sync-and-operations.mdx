@@ -29,10 +29,36 @@ while the session is explicitly importing a private transcript, before activatio
 
 ## HTTP repairs and WebSocket accelerates
 
-HTTP owns commands and event-gap recovery. WebSocket carries incremental events after a single-use
-stream ticket. The reducer applies only `lastSequence + 1`; a gap, reconnect, or policy change triggers
-an HTTP fetch from the stored cursor. Every policy-changing event is followed by a fresh membership
-check before more events are sent.
+HTTP owns commands and every read of stored events. The WebSocket, opened with a single-use stream
+ticket, tells a member that something changed: each stored event it announces makes the client pull
+from its cursor, and the reducer applies only `lastSequence + 1`. A gap, reconnect, or policy change
+triggers the same pull. Every policy-changing event is followed by a fresh membership check before more
+events are sent.
+
+## Members watch a run live
+
+A run's reply is not only stored as it grows (ADR-0241). On a server that reports `shared-chat-live-v1`
+in `/health`, the executor also posts live frames (the transcript codec's patches and 2 s keyframes,
+about four a second) with its run token to `…/runs/{run}/live`. The server checks the lease, the holder's
+standing and the shared-chat rollout on every frame, relays it to members whose socket negotiated
+`cognia.chat.v2`, and stores nothing. A `cognia.chat.v1` socket never receives one. Live frames lag the
+truth by design, never lead it: the stored corrections stay the record, written on settle and at most
+every 10 s while live carries the reply (every second on a server without live).
+
+What members see is one projection for both channels:
+
+- **Text** is redacted as one whole message. While the reply streams, its last 256 characters stay with
+  the executor, and a private key, JWT or URL credential is held from its opener until it is redacted.
+- **Tools** follow the session's tool-detail tier. `summary` (the default) shows the tool, the workspace
+  paths it touched and diff stats. `full`, which only an owner or maintainer can turn on, also shows the
+  commands, edits, searches and to-dos, redacted. A publication carries the tier revision it was
+  projected under; the server refuses an older one (`409 tool_detail_stale`) and the executor
+  re-projects. MCP and plugin tools never share their input.
+- A part that fails the PII gate is replaced by an inert "withheld" row; the rest still publishes.
+
+A member drops a streaming reply after 6 s without a frame, at once on its redaction or a socket close,
+and keeps a settled one until its pull has read past the final correction (10 s at most). A redaction
+also stops the server from relaying any queued frame for that message.
 
 Membership removal closes the person's stream, invalidates attachment tickets, cancels their queued
 input, and ends their active lease. The client purges the corresponding shared projection. Offline mode

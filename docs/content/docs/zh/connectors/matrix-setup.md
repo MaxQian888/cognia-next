@@ -89,3 +89,7 @@ cognia-next 使用一个长期有效的 `access_token` 调用 Matrix API。你�
 - **端到端加密（E2EE）房间不受支持**：`/sync` 传输直接读取房间时间线中的明文事件，**不包含任何解密逻辑**（无 olm / megolm 支持）。在端到端加密的房间中，机器人将无法读取消息内容。请仅在**未加密的房间**中使用该机器人。
 - **富文本与互动**：消息以 `org.matrix.custom.html` 富文本发送，原生支持 Markdown、链接、引用、编辑、撤回、表情回应、回复与话题。A2UI 中的按钮 / 选择等交互元素以编号列表形式呈现，用户通过**回复**消息进行选择（回复关联），而非内联点击。
 - **图片与文件**：入站 `mxc://` 媒体会解析为 Matrix v1 authenticated media download URL，并通过带 Bearer 的附件缓存下载；小图片会尽力内联给视觉 / OCR 路径。出站图片、文件、语音与视频会先上传到 homeserver 媒体库，再以原生 `m.image` / `m.file` / `m.audio` / `m.video` 事件发送。
+
+## 头像
+
+发送者头像优先读取绑定房间的成员头像，再回退到全局资料；会话列表在有 `m.room.avatar` 时显示房间图片。媒体通过带认证的 `/_matrix/client/v1/media/download/…` 接口下载。支持公网 HTTPS CDN 跳转，每跳重新校验目标，跨域时清除认证及其他请求头。私网、明文 HTTP homeserver 或未设置图片时保留占位头像。参见[认证媒体契约](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid)。

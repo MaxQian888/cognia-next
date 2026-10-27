@@ -37,7 +37,7 @@ agents — verified against current ACP docs:
   no native ACP entry). Claude Code speaks ACP only through the official Zed
   adapter: `npx -y @zed-industries/claude-code-acp`.
 - **Gemini CLI** passed `--stdio`, which drops it into interactive mode and hangs;
-  the ACP entry flag is `--experimental-acp`.
+  the current ACP entry flag is `--acp` (historically `--experimental-acp`).
 - **Cursor CLI** ran a bare `cursor-agent` with no ACP subcommand; the ACP server
   starts via `cursor-agent acp`.
 
@@ -130,3 +130,11 @@ aggregates rebuilt). Delivered as five independently-revertible commits.
 ## Current-state amendment (2026-08-13)
 
 The historical five-runtime limitation is closed. `TeammateRuntime` consumes the executable preset catalog (excluding intentionally non-executable custom/preview entries), and auto-compose consumes external presets through the same runtime owner. Compatibility work must extend that catalog rather than reintroduce runtime-specific dispatch branches.
+
+## Gemini validation amendment (2026-10-25)
+
+The executable preset and runtime descriptor both launch the installed `gemini --acp`, as specified in the [official ACP guide](https://geminicli.com/docs/cli/acp-mode/). The former experimental flag above is historical, not the current launch contract.
+
+Gemini history import is validated against the bundled **0.61.0** release using `scripts/smoke/gemini-history-smoke.ts` and the committed `lib/session-import/fixtures/gemini-0.61.0-session.jsonl`. The smoke executes the official `@google/gemini-cli-core@0.61.0` recording service on local disk, reloads its output with the upstream loader, and compares Cognia's import. It exercises duplicate updates, inclusive rewind, reasoning, tools, usage and the versioned structured memory scratchpad. Cognia preserves that scratchpad as JSON text because its session scratchpad is a text field. This validates the recording format; it does not certify authenticated ACP inference or every later Gemini release.
+
+Google [ended individual Free/Pro/Ultra Gemini CLI access on 2026-06-18](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/); enterprise and paid API routes remain separate supported upstream options. Existing native login state must not be treated as proof that a personal account can still serve Gemini CLI requests.

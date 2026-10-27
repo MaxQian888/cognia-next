@@ -82,3 +82,7 @@ If the adapter shows **degraded** or **stopped**:
   like `1` is routed as a button callback instead of a normal chat message.
 - **Desktop-only**: QR login and long-poll messaging use the gateway through Tauri's HTTP proxy, so
   this connector is desktop-only.
+
+## Avatar availability
+
+The current [public iLink protocol](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol.md) supplies user/group IDs but no portrait field or public profile API. Cognia keeps the identity placeholder. Message pictures, typing tickets and the `X-WECHAT-UIN` random nonce are not avatar sources or QQ account numbers.

@@ -114,3 +114,7 @@ If the adapter shows **Down** or **Degraded**:
 - **Interactive components (A2UI)**: Buttons, select menus, and modals work in Gateway mode — the bot acknowledges each interaction within Discord's 3-second window and replies as a normal channel message. **Modals** (TextField / TextArea / Dialog surfaces) are Gateway-only; in webhook mode a modal-open button degrades to a plain callback.
 - **Media**: Images, files, videos, and voice messages are uploaded as real multipart attachments (not URL embeds). Voice messages carry the `IS_VOICE_MESSAGE` flag plus duration and waveform metadata.
 - **Webhook transport is interaction-only**: The Discord Interactions Endpoint never delivers message events — only interactions. Use Gateway mode for any bot that needs to read chat messages or DMs.
+
+## Avatars
+
+Message portraits prefer the member's server-specific avatar, then the global user picture, then Discord's official default. Partial member payloads are resolved in the bound server before accepting a global fallback. The same user can have different pictures in different servers. Missing member access falls back to the user profile; unknown fields are not treated as an explicitly unset avatar. See the [member contract](https://docs.discord.com/developers/resources/guild#guild-member-object) and [image formats/default index](https://docs.discord.com/developers/reference#image-formatting).

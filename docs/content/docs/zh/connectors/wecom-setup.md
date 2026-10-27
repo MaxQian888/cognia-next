@@ -69,3 +69,7 @@ description: "用 BotID 与长连接 Secret 接入企业微信智能机器人—
 - **长连接运行位置**：长连接的 socket 生命周期由桌面端 Tauri 的连接器运行时（Rust WS 桥）持有，可在网页视图（webview）重载时存活。因此该适配器通常运行在桌面端的连接器运行时中。
 - **不支持的能力**：智能机器人长连接协议没有通用的消息编辑（`edit`）、撤回（`delete`）、正在输入指示器（`typing`）或历史拉取（`history.fetch`）帧；其中 `aibot_respond_update_msg` 仅用于更新处于交互态的 `template_card`，并非通用编辑。
 - **A2UI 与卡片**：助手的交互式 A2UI 界面会尽量投射为 `template_card` 的按钮（`button_interaction`，企业微信唯一会回传点击回调的交互组件），其余无原生对应的组件会降级为纯文本镜像并附加到 markdown 正文中。markdown 正文上限为 20 480 字节。
+
+## 头像可用范围
+
+当前连接使用智能机器人协议及 `botId + secret`。[长连接契约](https://developer.work.weixin.qq.com/document/path/101463)提供发送者和会话 ID，没有头像字段或资料查询 API，部分发送者 ID 还可能经过加密。Cognia 保留名称或身份的占位头像。企业通讯录属于其他凭据和授权流程，不会从智能机器人访问权限推定获得。

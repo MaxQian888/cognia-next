@@ -113,3 +113,7 @@ cognia-next 默认使用 intent 位掩码 **46593**：
 - **交互组件（A2UI）**：按钮、下拉选择和 modal 在 Gateway 模式下可用 —— 机器人会在 Discord 的 3 秒窗口内确认每次交互，并作为普通频道消息回复。**Modal**（TextField / TextArea / Dialog 界面）仅在 Gateway 模式可用；在 webhook 模式下，modal 触发按钮会退化为普通回调。
 - **媒体**：图片、文件、视频和语音消息以真正的 multipart 附件上传（而非 URL 内嵌）。语音消息携带 `IS_VOICE_MESSAGE` 标志以及时长和波形元数据。
 - **Webhook 传输仅限交互**：Discord 的 Interactions Endpoint 永远不会投递消息事件，只投递交互。任何需要读取聊天消息或私信的机器人都请使用 Gateway 模式。
+
+## 头像
+
+消息头像依次使用成员的服务器专属头像、全局用户头像、Discord 官方默认头像。成员数据不完整时，先在绑定的服务器中查询，避免直接把全局头像当成服务器头像。同一用户在不同服务器可显示不同头像。无成员访问权限时回退到用户资料；缺失字段不会直接当作明确未设置头像。参见[成员契约](https://docs.discord.com/developers/resources/guild#guild-member-object)和[图片格式及默认头像索引](https://docs.discord.com/developers/reference#image-formatting)。

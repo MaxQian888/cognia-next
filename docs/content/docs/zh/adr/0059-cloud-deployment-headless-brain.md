@@ -127,7 +127,9 @@ Cognia本地优先：Next.js静态导出被三个壳消耗，**桌面是服务�
 
 - 这些 arm 变为**主机中立**（`DispatchHost::connectors_state()`），并同时注册为 Tauri 命令——桌面 webview 说的是 IPC，够不到自己伴生服务的 HTTP 面。两条路径绑定同一份 managed state，因此只有一个槽位。
 - 它们是 **`target: execution` / `capability: agent.run`**，而非 service 作用域。桌面端持有的是设备 JWT 而非服务令牌；若保持 service-only，最需要参与竞争的一方反而无法参与。
-- 所有权在 owner-id 前缀中携带**优先级类别**（`brain:` / `desktop:`）。brain 可立即抢占存活的 desktop 租约；desktop 永不驱逐 brain；同类之间保持先到先得，以免两个云端副本在每个续约周期互相抢夺。没有抢占的话，恰好先启动的笔记本会让常驻进程每次被挡住一整个 TTL。无法识别的前缀归入 `desktop`（较低类别）——解析不了的 owner id 绝不能驱逐运行中的 brain。
+- 所有权在 owner-id 前缀中携带**优先级类别**（`brain:` / `desktop:`）。brain 为存活的 desktop 租约预留交接，待原所有者确认拆除或租约到期后启动；desktop 永不驱逐 brain；同类之间保持先到先得，以免两个云端副本在每个续约周期互相抢夺。没有抢占的话，恰好先启动的笔记本会让常驻进程每次被挡住一整个 TTL。无法识别的前缀归入 `desktop`（较低类别）——解析不了的 owner id 绝不能驱逐运行中的 brain。
+
+租约到期后，其他所有者可以接管该 slot。续约与所有权检查共用 Rust mutex：如果 slot 仍属于同一 owner，且没有存活的交接预留，允许延迟续约。续约不会重建已释放的 slot，也不会夺回已被接管的 slot；仅清理已过期的交接预留。这样可容忍 renderer 调度暂停，同时保留15秒 TTL 和 owner 优先级。
 
 该租约在**桌面端失败即放行**、在 **brain 端失败即拒绝**。够不到伴生服务的 brain 按定义就是一个未经仲裁的第二所有者；而桌面端的伴生服务面是可选的，调用出错的安装必须与守卫存在之前完全一样地启动——Web Lock 仍覆盖其自身的 webview。
 

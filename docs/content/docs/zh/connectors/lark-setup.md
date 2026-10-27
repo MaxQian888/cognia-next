@@ -250,3 +250,11 @@ cognia-next 可以用一张交互卡片欢迎用户，并在收到 `/help` 时�
 | "以我的身份发送" 仍以机器人身份发出      | 未授予/审批 `offline_access` + `im:message` + `im:message.send_as_user`，或授权已过期——请重新连接账号    |
 
 来源（核对日期 2026-10-01）：[message receive](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive), [history](https://open.feishu.cn/document/server-docs/im-v1/message/list), [card callbacks](https://open.feishu.cn/document/feishu-cards/card-callback-communication).
+
+## 头像
+
+如需显示平台头像，在连接配置向导中选择**成员和会话头像**。用户查询接口需要 `contact:contact.base:readonly`，头像字段需要 `contact:user.base:readonly`，会话图片需要 `im:chat:readonly`；已有的更大范围权限可能已覆盖这些要求。通讯录数据权限还必须包含需要显示头像的成员。修改权限后需发布应用。没有访问权限时继续显示占位头像，不影响消息处理。
+
+当前机器人的头像按已验证身份获取。**其他应用机器人的头像**单独使用可选的 `admin:app.info:readonly` 权限读取同租户应用信息。应用 ID 不会作为通讯录 open ID 查询；无法确认的机器人不会误用当前应用的图片。
+
+官方契约：[用户信息](https://open.feishu.cn/document/server-docs/contact-v3/user/get.md)、[群信息](https://open.feishu.cn/document/server-docs/group/chat/get-2.md)、[应用信息](https://open.feishu.cn/document/server-docs/application-v6/application/get.md)。

@@ -73,3 +73,7 @@ If the adapter shows **stopped** or **degraded**:
 - **Safe Mode and 43-character EncodingAESKey are required**: this connector supports Safe Mode only. The form validates that `EncodingAESKey` is 43 characters. Rust decodes `EncodingAESKey + "="` to a 32-byte AES key and uses the first 16 bytes as the IV for AES-256-CBC decryption.
 - **Desktop only**: this connector depends on the Tauri Rust webhook server for signature verification and decryption. The browser-only build has no HTTP ingress for WeChat callbacks.
 - **Message capability**: the current adapter declares text send only (`send.text`). Richer outbound segment types and A2UI surfaces degrade to a plain-text mirror.
+
+## Avatar availability
+
+The service-side app token used by this connector does not grant user portraits. The [official user-management contract](https://developers.weixin.qq.com/doc/service/guide/product/unionid.html) stopped returning avatar/nickname on 2021-12-27. Cognia does not issue an ineffective avatar query to that endpoint. [Web authorization](https://developers.weixin.qq.com/doc/service/guide/h5/auth.html) with `snsapi_userinfo` is a separate end-user consent/token flow and is not supplied by this bot connection; the sender keeps a placeholder.

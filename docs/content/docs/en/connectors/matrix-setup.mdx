@@ -91,3 +91,7 @@ If the adapter shows **stopped** or **degraded**:
 - **Encrypted rooms are not supported**: the current `/sync` path reads plaintext timeline events and does not perform olm / megolm decryption. Use the bot only in unencrypted rooms.
 - **Rich text and interaction**: outbound messages use Matrix `org.matrix.custom.html`, so Markdown, links, quotes, edits, redactions, reactions, replies, and threads are native. A2UI buttons and selects render as numbered lists; users choose by replying to the surface message rather than clicking inline controls.
 - **Images and files**: inbound `mxc://` media is resolved to an authenticated Matrix media download URL and fetched through the Bearer-aware attachment cache. Outbound image, file, voice, and video segments are uploaded to the homeserver media repository before sending native `m.image`, `m.file`, `m.audio`, or `m.video` events.
+
+## Avatars
+
+Sender portraits prefer the bound room's member avatar before the global profile; conversation rows use `m.room.avatar` when available. Media uses the authenticated `/_matrix/client/v1/media/download/…` endpoint. Public HTTPS CDN redirects are supported with per-hop destination checks; credentials and other request headers are removed when the origin changes. Private/plain-HTTP homeservers and unset images keep the placeholder. See [authenticated media](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid).

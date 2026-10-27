@@ -73,3 +73,7 @@ If the adapter shows **stopped** or **degraded**:
 - **Unsupported capabilities**: the AI Bot long-connection protocol has no generic message edit, message delete, typing indicator, or history-fetch frame. `aibot_respond_update_msg` only updates an interactive `template_card`; it is not a generic edit API.
 - **A2UI and cards**: A2UI surfaces map to `template_card` buttons when possible. Other interactive components degrade to their plain-text mirror appended to the markdown body. WeCom markdown content is capped at 20,480 bytes.
 - **Media**: outbound images, voice, video, and files are uploaded through WeCom's three-step `aibot_upload_media_*` flow before the message references the returned `media_id`. Inbound image content is decrypted best-effort for vision / OCR paths when the platform provides the encrypted media URL and AES key.
+
+## Avatar availability
+
+This connection uses the smart-bot protocol and `botId + secret`. The current [long-connection contract](https://developer.work.weixin.qq.com/document/path/101463) provides sender/chat IDs but no portrait field or profile API; some sender IDs may also be encrypted. Cognia retains a name/identity placeholder. Corporate contact access belongs to a different credential and permission flow and is not inferred from smart-bot access.

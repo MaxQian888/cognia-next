@@ -72,3 +72,7 @@ description: "在微信公众平台配置服务器（安全模式），把回调
 - **安全模式 + 43 位 EncodingAESKey 必填**：本连接器只支持安全模式；`EncodingAESKey` 必须为 43 位，cognia 会在保存前做长度校验。其 `base64decode(EncodingAESKey + "=")` 得到 32 字节 AES 密钥，IV 取该密钥前 16 字节——解密在 Rust 侧完成。
 - **仅桌面端可用**：该连接器依赖随 Tauri 一起运行的 Rust webhook 服务器来完成签名校验与解密。纯浏览器（Web）模式下没有这个 HTTP 入口，适配器无法接收回调。
 - **消息能力**：当前版本仅声明文本能力（`send.text`），更丰富的消息类型会降级为纯文本；A2UI 交互界面同样降级为纯文本镜像。
+
+## 头像可用范围
+
+当前连接的服务端 app token 不提供用户头像权限。[官方用户管理契约](https://developers.weixin.qq.com/doc/service/guide/product/unionid.html)自 2021-12-27 起不再返回头像和昵称。Cognia 不会向该接口发起无效头像查询。[网页授权](https://developers.weixin.qq.com/doc/service/guide/h5/auth.html)中的 `snsapi_userinfo` 需要独立的用户同意和 token 流程，不由当前机器人连接提供，因此发送者保留占位头像。

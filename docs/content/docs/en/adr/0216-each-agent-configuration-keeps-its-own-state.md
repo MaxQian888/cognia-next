@@ -60,10 +60,16 @@ on 2026-10-05 found that the configurations were not actually separate:
 `protocol/external-agent-security-policy.json` gains `agentStateIsolation.rules`: per
 runtime, which home variables to set (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
 `QWEN_HOME` …), which shared roots exist and which to deny reading. Supported:
-codex, claude, qwen, pi, kimi, cline, qoder, copilot, opencode. A runtime without a
-rule (gemini, goose, devin, kiro, droid, cursor, aider, dsh) cannot be isolated: an
+codex, claude, qwen, pi, kimi, cline, qoder, copilot, opencode, goose. A runtime without a
+rule (gemini, devin, kiro, droid, cursor, aider, dsh) cannot be isolated: an
 isolated configuration on it is blocked with `state_isolation_unsupported`, and the
 UI offers only the shared state for it.
+
+Goose support added on 2026-10-25 maps `GOOSE_PATH_ROOT` to the configuration's
+`goose/` directory and forces `GOOSE_DISABLE_KEYRING=1`. Moving files alone would
+still share Goose's OS keyring. Its temporary directory stays under that private
+root; shared Goose config/data/state roots are denied by the sandbox. Existing
+shared configurations keep their state until the user changes the isolation mode.
 
 The TypeScript side (`lib/ai/agent/external/lifecycle/launch-preparation.ts`) sets
 `COGNIA_AGENT_STATE_KEY=<configId>` and removes any env key the rule owns. Each spawn

@@ -140,3 +140,62 @@ sequenceDiagram
 - **请求超时** —— `sendRequest` 默认 30 秒（`:1630`）；`healthCheck` 以 5 秒 ping（`:1574`）。
 - **进程退出** —— `handleProcessExit`（`:2575`）拒绝所有待决请求、标记会话关闭，并（若 `restartOnCrash`）触发 `attemptReconnection`（`:2602`），指数退避至多 3 次（`:2608`）。
 - **断开清理** —— 把待决权限清成 `cancelled`、待决请求，以及扩展支持缓存（`:821`–`:827`）。
+
+## 官方 Antigravity ACP
+
+在外部 Agent 预设中选择 **Antigravity (ACP)**。从[官方 ACP Registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)
+安装 `antigravity-acp` 压缩包，将 `agy_acp_server.par` 和 `localharness_external`
+保存在同一目录，赋予两者执行权限并将该目录加入 `PATH`。这是独立的官方 ACP
+服务端，与交互式 `agy` CLI 及其登录分开。Cognia 不安装、更新或删除这套系统安装。
+macOS 和 Linux 仍要求正常的 Cognia 沙箱；Linux 启动遵循 Registry 的 `--uid=` 参数。
+
+宿主校验伴随程序，并将两个文件一同计入 runtime 身份。未经认证的版本仍需现有
+runtime 授权。使用服务端声明的认证方式；Gemini API key 还需要选择
+`gemini-api-key` 认证。文件状态由 `GEMINI_HOME` 指定，默认 `~/.gemini`，
+但改变该目录不能隔离原生钥匙串。Bot／私有状态克隆会被拒绝；沙箱只允许写入
+其中的 `antigravity-acp` 和 `artifacts` 子目录。
+
+不支持 Plan 模式。恢复会话后重新应用请求的权限模式；存在 Cognia 强制审批规则时，
+原生模式保持为 `default`，拒绝切换为原生自动批准，并在会话主动声明不安全模式时
+终止连接。上游企业管理员自动执行策略仍是限制，不能据此宣称所有原生工具都受
+Cognia 拦截。PII 闸门检查 Cognia 发出的帧，外部 Agent 还会自行加载原生上下文。
+模型与会话能力以实际协商为准。历史导入、MCP 配置迁移及 Cognia 模型网关属于
+独立能力；验收范围记录在 `docs/evidence/2026-10-24-gemini-antigravity-cli-support-audit.md`。
+## Goose 1.56
+
+单独安装 Goose 后选择 **Goose** 预设。Cognia 默认启动
+`goose acp --with-builtin developer`。配置编辑器提供正整数的**最大并发 Subagent 数量**
+（`GOOSE_MAX_CONCURRENT_SUBAGENTS`，留空使用 Goose 每个父会话默认 5 个的限制），以及可选的
+**Goose Code Mode**。打开会话数量和 Team 限制与 Goose 内部子任务并发分开计算。
+
+Code Mode 会把 `code_execution` 加入 `--with-builtin`。1.56 使用 Boa JavaScript：
+先发现函数、检查参数结构，再定义 `async function run()`，通过
+`await tools.call(exactName, args)` 调用工具。TypeScript 生成与 Code Mode 的
+`execute_bash` 已不可用。JavaScript 批次整体获批，内部工具不会逐个再次请求审批；
+配置存在强制工具审批规则时，Cognia 会要求审核整个外层批次，即使其他工具允许自动批准。
+
+1.56.0 实测发现，继承 Code Mode 的子任务不会暴露完成任务所需的最终结果工具。
+委派时指定 `extensions: ["developer"]`，可让子任务保留完成和恢复能力，父会话继续使用
+Code Mode。已有子任务恢复时不能更改 extensions，因此不能宣称 1.56.0 的继承 Code Mode
+子任务已完整兼容。
+
+Delegate 工具详情可打开**只读**子会话；会话操作区也能列出原生子任务。查看和手动加载最新进展
+使用原生导出，不加载运行中的 child，也不安装其工具。**恢复子任务**通过所属父会话的普通聊天、
+PII 和审批路径发送指令；其他父会话的 child 与已完成的 child 会被拒绝，父回合执行时不能发起恢复。
+恢复沿用已保存的上下文，未完成的外部副作用可能重复执行。本地 manager 与配对 Host 均保留原有
+归属、配置版本与审批检查；子会话链接是 Cognia 内部导航。
+原生子任务控制要求初始化响应确认至少 1.56.0 的稳定版 Goose v1。
+旧版本或无法识别版本的运行时保留基础 ACP 支持，不宣称具备新增恢复协议。
+
+Goose 自定义状态通知、上下文用量和累计费用进入现有会话界面。Responses 缓存键和 Provider 计价
+由已安装的 Goose 实现，Cognia 不宣称已测得缓存收益。原生 Skills 使用 Goose 的文件发现规则，
+包括工作区的 `.agents/skills`。
+
+新的独立配置使用 `GOOSE_PATH_ROOT` 并禁用共享 OS keyring，需要为该配置提供凭据；已有共享配置
+保留原状态。Goose JSON 导出可作为只读历史档案导入。桌面端还会只读扫描已知的共享和独立配置
+SQLite 会话库，保留父子关系，并按 store 区分相同原生 ID。档案不伪造原生恢复绑定，
+仅 assistant 可见的内容不会进入导入后的用户界面。
+
+宿主平台仍为 macOS 和 Linux。官方 1.56.0 二进制已通过本地确定性 Provider 的隔离运行验证；
+真实 Provider 认证与原生桌面 UI 验收单独记录。未认证版本仍需现有的执行文件身份确认。
+证据与限制见 `docs/evidence/2026-10-25-goose-v156-support-audit.md`。

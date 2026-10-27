@@ -355,3 +355,8 @@ interrupted conversation. And the per-member stop had to become a runner
 method rather than a store flag, because the existing flag was only read
 before a member started and could never reach one that was already replying.
 
+## Implementation update (2026-10-26, ADR-0241)
+
+The `shared` kind now streams: members watch a shared run's reply as it is
+written, through never-stored live frames over `cognia.chat.v2`, instead of
+waiting for the 1 s stored corrections. Nothing in "Later" changes.

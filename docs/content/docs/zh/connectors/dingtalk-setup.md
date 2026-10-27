@@ -97,3 +97,7 @@ POST https://api.dingtalk.com/v1.0/gateway/connections/open
 | 单聊主动发送失败 | 会话引用缺少 `userId`；先向机器人发送一条消息，让 cognia-next 学到该字段。 |
 | 群聊主动发送失败 | 会话引用缺少 `openConversationId`；请使用已经产生过入站事件的群聊。 |
 | A2UI 控件显示为文本 | 当前钉钉 markdown 适配没有这些控件的回调通道，因此 cognia-next 会把操作列为文本。 |
+
+## 头像
+
+员工头像使用已有应用凭据和真实的 `senderStaffId`／员工 `userId` 查询，需要已有的 `qyapi_get_member`（成员信息读权限）及成员数据可见范围。union／Stream sender ID 不是员工 ID。默认头像缺失、权限不足、外部或不透明身份都保留占位头像。普通机器人所在群没有可通用读取的群图标：场景群接口还有独立的群资格和权限要求，返回值也是媒体 ID 而非图片 URL。参见[用户详情](https://open.dingtalk.com/document/development/query-user-details)和[场景群](https://open.dingtalk.com/document/orgapp/query-group-information)。

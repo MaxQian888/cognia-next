@@ -97,3 +97,9 @@ Point each NapCat instance to its own URL. Bearer tokens can differ per adapter.
 | Delete action        | `delete_msg`                          | `delete_message`               |
 
 cognia-next auto-detects the version from the first event and caches it per adapter instance. You do not need to configure this manually.
+
+## Group replies and progress
+
+For Agent turns in QQ groups, ordinary progress has an 8-second grace period. Short turns usually produce only the final answer. With activity updates enabled, longer turns publish progress on the existing heartbeat and space ordinary updates at least 30 seconds apart; waiting, approvals, pauses, recovery, failures and cancellations retain immediate feedback. The final answer uses the triggering message's native quote when reply quoting is enabled.
+
+Group Markdown is converted to readable plain text: headings and emphasis are simplified, links retain their destinations, and table rows use separated cells. Code spans, fenced and indented code, literal text segments, mentions and media remain intact. If formatting would assemble sensitive content, Cognia preserves the original approved Markdown bytes.

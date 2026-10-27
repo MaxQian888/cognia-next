@@ -42,7 +42,9 @@ description: "同一外部运行时的多个配置过去共用它的主目录、
 
 ### 状态根
 
-`protocol/external-agent-security-policy.json` 新增 `agentStateIsolation.rules`：按运行时说明要设置哪些主目录变量（`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`QWEN_HOME` 等）、有哪些共享根、禁止读取哪些。支持：codex、claude、qwen、pi、kimi、cline、qoder、copilot、opencode。没有规则的运行时（gemini、goose、devin、kiro、droid、cursor、aider、dsh）无法隔离：在其上设为独立的配置会以 `state_isolation_unsupported` 被阻止，界面对它只提供共享状态。
+`protocol/external-agent-security-policy.json` 新增 `agentStateIsolation.rules`：按运行时说明要设置哪些主目录变量（`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`QWEN_HOME` 等）、有哪些共享根、禁止读取哪些。支持：codex、claude、qwen、pi、kimi、cline、qoder、copilot、opencode、goose。没有规则的运行时（gemini、devin、kiro、droid、cursor、aider、dsh）无法隔离：在其上设为独立的配置会以 `state_isolation_unsupported` 被阻止，界面对它只提供共享状态。
+
+2026-10-25 新增的 Goose 隔离把 `GOOSE_PATH_ROOT` 映射到配置独有的 `goose/` 目录，并强制设置 `GOOSE_DISABLE_KEYRING=1`，避免仅迁移文件后仍共享 OS keyring。临时目录也落在私有根内，沙箱禁止读取共享的 Goose config/data/state 根。已有共享配置保留原状态，直到用户切换隔离方式。
 
 TypeScript 侧（`lib/ai/agent/external/lifecycle/launch-preparation.ts`）设置 `COGNIA_AGENT_STATE_KEY=<configId>`，并移除规则所拥有的环境变量。每个派生后端——Rust `crates/cognia-external-agent/src/state_isolation.rs` 与 CLI 的 `cli/src/runtime/external/state-isolation.ts`——校验键（`^[A-Za-z0-9_-]{1,128}$`），根据宿主环境解析 `<data_dir>/cognia/external-agents/<key>`，以 `0700` 创建，把规则的变量映射进去，从子进程环境中移除该键；在沙箱中使该根可写，把共享根移出可写集合并禁止读取。在 Linux 上，若状态根位于被遮蔽的密钥存储之下，启动器会重新打开它（`crates/cognia-exec-sandbox/src/launcher.rs`）。删除配置会删除它的根（`external_agent_state_root_remove`）；检查器显示路径和大小（`external_agent_state_root_info`）。
 

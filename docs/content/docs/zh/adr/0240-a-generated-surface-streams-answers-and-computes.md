@@ -69,6 +69,8 @@ Surface 用 `computed: { "<指针>": { op, args } }` 声明计算值，可以写
 
 **适用范围。** store 在每次数据变更后重新计算。声明会经过所有序列化点：Dexie 中的 Surface 行、已保存的应用、导入与导出、捕获（`run-and-capture`）、`segmentToMessages` 回放，以及 IM 卡片投影（携带回复时刻的值）。每个序列化点都会重新校验声明；声明无效的消息（或 MCP 调用）在每一处都会被整体拒绝，与 store 的行为一致，而不是去掉声明后保留其余部分。MCP 的 `a2ui_create_surface` 和 `a2ui_data_model_update` 也接受同样的映射，渲染端和 sidecar 两份副本由一致性测试保持同步。
 
+在桌面渲染器之外，headless brain 把 MCP 派发送入同一个 store，计算方式与桌面一致。捕获到的 Surface 以 `a2ui` 内容部件送达 `cognia serve` 和 SDK 客户端，其 payload 携带声明及已算出的值。CLI TUI 在收到部件时校验声明（映射无效时整体拒绝该 Surface，与 store 一致），并在 `/view` 中保留它们；覆盖层把每次编辑写入控件绑定的路径并重新计算，合计会随输入的数量实时变化。
+
 ### 统一的 URL 策略
 
 `lib/a2ui/url-policy.ts` 与 `untrustedMarkdownUrlTransform` 保持一致，并有测试把两者绑定。
@@ -108,7 +110,6 @@ A2UI 的 `Markdown` 组件沿用助手自身的聊天 Markdown 策略，因为�
 - 68 种类型的 JSON Schema 契约。
 - 把校验失败反馈给模型。sidecar 工具目前仍返回 `ok: true`。
 - A2UI `Markdown` 组件沿用助手的聊天 Markdown 策略，而非 A2UI URL 策略；插件或外部智能体写的 Markdown 是否需要严格模式尚未决定。
-- CLI TUI 和 headless 的 `a2ui` 流帧不携带计算值声明。
 - 聊天控制器在接受后又拒绝的发送（发送守卫、并发上限）显示的是控制器的错误，而不是 A2UI 的提示。
 - 生成布局的评估工具。
 - 默认开启 A2UI。
@@ -126,7 +127,7 @@ A2UI 的 `Markdown` 组件沿用助手自身的聊天 Markdown 策略，因为�
 - provider 接线；
 - 本地动作名单的对齐测试；
 - 每个计算运算符及其上限、求值顺序、引用不变，以及有序规则和 `concat` 上限；
-- 计算值在 store、Dexie 水合、导入、捕获、IM 投影、应用保存与导出中的往返；
+- 计算值在 store、Dexie 水合、导入、捕获、IM 投影、应用保存与导出、headless 内容部件以及 CLI TUI（校验、`/view`、覆盖层实时重算）中的往返；
 - MCP schema 一致性与派发转发；
 - URL 策略、它与聊天 Markdown 的一致性，以及两条渲染路径上的内联 `style` 清理；
 - Link、Breadcrumb、Image、Avatar、Card 与 PDF 的行为。

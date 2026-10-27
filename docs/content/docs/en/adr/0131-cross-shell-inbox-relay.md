@@ -86,6 +86,8 @@ Dexie **v173** adds an indexed `updatedAt` to `outboundQueue` and `connectorDraf
 
 Losing the runtime lease is distinct from unmounting and from deferring to a remote host. `installConnectorRuntime` takes a teardown reason; on `"lease-lost"` it reclaims in-flight inbound jobs immediately (`reclaimAllRunning: true`) so they surface as `recovery_required` instead of sitting "running" with nothing running them, and it notifies `onRuntimeReleased`. `ConnectorBusProvider` re-acquires on a 30 s → 5 min backoff, checking `isRemoteHostActive()` each time.
 
+Busy acquisition calls `onRuntimeBusy`, including at initial boot and on later retries, so the desktop continues the same backoff ladder until ownership is available. Each install captures a generation; callbacks and cancelled retries from retired installs cannot clear a newer runtime's disposer or retry. Remote routing and unmount cancel the current retry.
+
 Relayed writes that reach a process which no longer owns the runtime throw `connector_runtime_not_owner`. The wording is load-bearing: `lib/queue/retry-policy.ts` classifies it as **retryable**, so the phone's durable queue replays across the handoff window (5 attempts ≈ 31 s) instead of dead-lettering the reply.
 
 ### 7. Standalone shells explain themselves

@@ -119,3 +119,7 @@ for group conversations.
 | Proactive 1:1 send fails | The conversation reference is missing `userId`; send a message to the bot first so cognia-next can learn it. |
 | Proactive group send fails | The conversation reference is missing `openConversationId`; use a group conversation that has already produced an inbound event. |
 | A2UI controls appear as text | DingTalk markdown has no callback channel for those controls in this adapter, so cognia-next lists the actions as text. |
+
+## Avatars
+
+The employee lookup uses the existing application credentials and a real `senderStaffId`/staff `userId`. It requires an existing `qyapi_get_member` (member information read) grant and visible member data. A union/Stream sender ID is not an employee ID. Default pictures, absent permission and external/opaque senders keep the placeholder. Ordinary robot groups do not expose a generally usable icon: the scene-group API has separate group eligibility/permissions and returns a media ID, not an image URL. See [user details](https://open.dingtalk.com/document/development/query-user-details) and [scene groups](https://open.dingtalk.com/document/orgapp/query-group-information).

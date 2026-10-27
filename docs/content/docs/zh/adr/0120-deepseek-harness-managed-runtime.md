@@ -36,7 +36,7 @@ DeepSeek Harness（下称 DSH）是 DeepSeek 开源的 agent harness，基于 Co
 
 ## 决策
 
-Cognia 将 DSH 的 **host 平面**作为一等源码纳入 `runtime/deepseek-harness/` 并随 Cognia 版本化，安装到隔离运行时目录，并以摘要进行认证。
+Cognia 将 DSH 的 **host 平面**作为一等源码纳入 `packages/agent-dsh/runtime/` 并随 Cognia 版本化，安装到隔离运行时目录，并以摘要进行认证。
 
 **三个 profile，两种传输层。** `cognia-sdk-readonly`（默认）、`cognia-sdk-workspace`、`cognia-acp`。会话**不得**跨传输层迁移：两者在「用户能看到什么」与「用户能否否决」上都不同，中途切换会静默改变一次进行中对话的安全属性。
 
@@ -72,7 +72,7 @@ Windows 暂不在范围内：`koffi` 是 `dsh-fs-local` 的硬依赖且需要编
 
 ## 参考
 
-- `runtime/deepseek-harness/` — 组合、launcher、锁定依赖
+- `packages/agent-dsh/runtime/` — 组合、launcher、锁定依赖
 - `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts` — 共享判定与 manifest 策略
 - `lib/ai/agent/external/runtimes/dsh/dsh-session-event-codec.ts` — wire → canonical 事件
 - `crates/cognia-external-agent/src/dsh_runtime.rs` — 桌面端生命周期

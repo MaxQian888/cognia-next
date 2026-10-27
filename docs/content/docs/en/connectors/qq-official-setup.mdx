@@ -62,3 +62,7 @@ If the adapter shows **stopped** or **degraded**:
 - **Conversation coverage depends on QQ platform approval**: channel, group, and C2C availability depend on the abilities granted to your bot in QQ Open Platform. cognia-next subscribes to the supported event families, but a conversation type only works after the platform grants that scope.
 - **Gateway compatibility only**: cognia-next connects over the QQ WebSocket gateway using Discord-like HELLO / IDENTIFY / heartbeat / RESUME flow. Disconnects are retried with exponential backoff and resumed when possible.
 - **Message capability scope**: the current adapter receives messages and sends text-only passive replies. QQ Markdown templates and interactive buttons require per-template platform approval, so rich / interactive assistant output falls back to the plain-text mirror.
+
+## Avatars
+
+Channel and channel-direct messages preserve the platform's actual `author.avatar`. Older channel rows can resolve member information through the bound guild; channel rows can use the guild icon. Official group/C2C open IDs are unrelated to QQ UINs and are never used to construct numeric QQ avatar URLs. Their current message/profile contracts do not provide a general portrait, so those scenes keep their placeholder. An ARK card's avatar field is message content, not the sender's identity. See [channel User](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/channel/manage/user/model.html).

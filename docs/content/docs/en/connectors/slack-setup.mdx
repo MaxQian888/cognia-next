@@ -117,3 +117,7 @@ If the adapter shows **Down** or **Degraded**:
 - **Events API webhook**: Supported when the desktop tunnel exposes the connectors server at a public HTTPS URL. The Rust webhook handler verifies Slack HMAC signatures before emitting events to the adapter.
 - **Typing indicator**: Slack's `assistant.threads.setStatus` is restricted to Slack Assistant apps. Standard bot adapters do not support typing indicators.
 - **File uploads**: Slack outbound sends file segments as hyperlinks via `chat.postMessage`. Native upload through Slack file APIs is still future work.
+
+## Avatars
+
+Sender profiles require `users:read`; resolving a direct-message conversation to its peer also requires `im:read`. Cognia's OAuth flow requests both. Reinstall or reauthorize an existing Slack installation after adding these scopes; changing the application code does not extend an already issued token. Email access and private-channel/group-DM history scopes are not required for avatars. Ordinary channels without a profile picture keep their placeholder. See [users.info](https://docs.slack.dev/reference/methods/users.info/) and [conversations.info](https://docs.slack.dev/reference/methods/conversations.info/).

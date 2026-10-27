@@ -58,7 +58,7 @@ flowchart LR
   API --> Auth["grant + authorize_session_action"]
   Auth --> PG["PostgreSQL + RLS: source of truth"]
   API --> Objects["local or S3-compatible object store"]
-  API --> Stream["WebSocket ordered events"]
+  API --> Stream["WebSocket change notices + live frames"]
   Stream --> Mirror["Dexie read projection"]
   Mirror --> UI
   Client --> Lease["device-bound Run lease token"]
@@ -131,7 +131,7 @@ The client first counts messages and attachments and warns that invitees can rea
 
 ### Sync and reconnect
 
-HTTP owns commands and gap recovery; WebSocket owns low-latency increments. The reducer accepts only the next sequence. Any gap, reconnect, or policy change triggers HTTP recovery from the last cursor. Membership loss purges the local shared projection while leaving unrelated private chats untouched. Offline mode permits cached reading and drafts only; sending or starting a Run requires renewed user action after reconnect.
+HTTP owns commands, gap recovery and every read of stored events; the WebSocket only announces that an event committed, and each notice makes the client pull from its cursor. (Corrected 2026-10-26: the stream never carried increments the reducer applied. Since ADR-0241 a `cognia.chat.v2` socket also relays a run's never-stored live frames.) The reducer accepts only the next sequence. Any gap, reconnect, or policy change triggers HTTP recovery from the last cursor. Membership loss purges the local shared projection while leaving unrelated private chats untouched. Offline mode permits cached reading and drafts only; sending or starting a Run requires renewed user action after reconnect.
 
 ### Agent Run lifecycle
 

@@ -176,3 +176,82 @@ its listener at `:965` and yields whatever lands in its queue. Legacy notificati
   backoff up to 3 attempts (`:2608`).
 - **Disconnect cleanup** — clears pending permissions to `cancelled`, pending requests, and the
   extension-support cache (`:821`–`:827`).
+
+## Official Antigravity ACP
+
+Choose **Antigravity (ACP)** in the external-agent preset picker. Install the
+`antigravity-acp` archive from the [official ACP Registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json),
+keep `agy_acp_server.par` and `localharness_external` in the same directory, make
+both executable, and add that directory to `PATH`. Cognia uses the official ACP
+server; the interactive `agy` CLI and its login are separate. Cognia does not
+install, update or delete this system-owned distribution. macOS and Linux
+require the normal Cognia sandbox; Linux launch follows the registry's `--uid=` argument.
+
+The host validates the companion and includes both files in the runtime identity.
+An uncertified release still requires the existing runtime consent. Authenticate
+through one of the server's advertised methods; a Gemini API key also needs the
+`gemini-api-key` auth selection. File state uses `GEMINI_HOME` (default `~/.gemini`),
+but changing it does not isolate the native keychain. Bot/private-state cloning
+is refused. Only `antigravity-acp` and `artifacts` subdirectories are writable.
+
+Plan mode is unavailable. Restoring a session reapplies the requested permission
+mode. Mandatory Cognia approval rules keep native mode at `default`, reject
+native-auto configuration changes and terminate a session that announces an
+unsafe mode. Native enterprise administrator auto-proceed policies remain an
+upstream limitation; these controls do not prove universal interception of the
+agent's native tools. Cognia's PII gate covers frames it sends, while the external
+agent also loads its own native context. Model/session capabilities are negotiated.
+Transcript import, MCP-file migration and Cognia model-gateway routing are separate
+from this ACP integration. Acceptance evidence is recorded in `docs/evidence/2026-10-24-gemini-antigravity-cli-support-audit.md`.
+
+## Goose 1.56
+
+Install Goose separately and choose the **Goose** preset. Cognia launches
+`goose acp --with-builtin developer`. The configuration editor exposes a positive
+**Maximum concurrent subagents** value (`GOOSE_MAX_CONCURRENT_SUBAGENTS`, blank
+uses Goose's default of 5 per parent) and an opt-in **Goose Code Mode** toggle.
+Open-session and Team limits are separate from this native child limit.
+
+Code Mode adds `code_execution` to `--with-builtin`. In 1.56 it uses Boa JavaScript:
+discover functions, inspect their schemas, then define `async function run()` and
+call `await tools.call(exactName, args)`. TypeScript generation and Code Mode's
+`execute_bash` are unavailable. Each JavaScript batch is approved as a whole;
+its nested tools do not prompt separately. Mandatory Cognia approval rules force
+review of the outer batch, including when other tools are normally auto-approved.
+
+The 1.56.0 runtime check found that children inheriting Code Mode do not expose
+their required final-output tool. Keep recoverable children on the developer
+extension by calling `delegate` with `extensions: ["developer"]`; the parent can
+continue using Code Mode. An already-created child cannot change extensions when
+resumed. This runtime limitation prevents claiming full inherited-Code-Mode child
+compatibility for 1.56.0.
+
+Delegate tool details link to a **read-only** child transcript. Session operations
+also list native children. Viewing and manually loading latest progress use native
+exports; they never load a live child or install its tools. **Resume child** submits
+an instruction through the owning parent's ordinary chat, PII and approval path.
+Foreign and completed children are refused; wait until the parent turn finishes.
+Recovery preserves saved context and may repeat unfinished external effects.
+These controls work through both the local manager and a paired Host with its
+normal ownership, revision and approval checks. Links remain inside Cognia.
+Native child controls require the initialization response to identify a stable
+Goose v1 release at least 1.56.0. Older or unidentified runtimes retain base ACP
+support without advertising the new recovery contract.
+
+Goose's custom status notices and context/cumulative-cost updates reach existing
+session UI. Its Responses cache key and provider pricing are owned by the installed
+runtime; Cognia does not claim measured cache savings. Native Skills discovery uses
+the Goose filesystem roots, including the workspace's `.agents/skills`.
+
+New isolated configurations use `GOOSE_PATH_ROOT` and disable Goose's shared OS
+keyring. Supply credentials for that configuration; existing shared configurations
+retain their state. Goose JSON exports can be imported as passive archives. Desktop
+also reads the known shared/private SQLite session stores without writing them,
+preserves parent-child relations, and scopes IDs by store. Imported archives do not
+claim a live native resume binding; assistant-only content remains hidden.
+
+macOS and Linux remain the supported hosting platforms. 1.56.0 passed isolated
+official-binary tests against a local deterministic provider; authenticated-provider
+certification and native desktop UI acceptance remain separate. The catalog keeps
+the existing identity-bound consent for uncertified versions. Evidence and exact
+limits: `docs/evidence/2026-10-25-goose-v156-support-audit.md`.

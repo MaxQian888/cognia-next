@@ -90,10 +90,10 @@ asserts the pill's bounding box is inside the viewport after scrolling up.
 That spec runs on the Capacitor shell rather than the desktop browser project, because the browser
 build renders a "run inside Tauri" banner where the chat pane would be. The `chromium` project
 `testIgnore`s `tests/e2e/mobile/**`, so the pill's geometry is covered on exactly one project.
-**The right-edge timeline rail's geometry — its lane beside the scrollbar, and its at-rest
-visibility — has no E2E coverage**: the rail is desktop-only (`shouldMountTimeline` skips
-mobile), so the one project that renders it is `tauri`, which is opt-in and serial. Its behaviour has
-unit tests. Its layout has no E2E coverage.
+The right-edge rail is desktop-only (`shouldMountTimeline` skips mobile), so its actual scrollbar
+geometry belongs to the opt-in, serial `tauri` project. The 2026-10-26 repair adds
+`tests/e2e/tauri/chat/conversation-scrollbar.spec.ts` for ownership, input and fallback geometry.
+Its execution is pending Windows connectivity; unit assertions alone do not establish layout.
 
 The return point is a scroll *offset*, not a message id: what the user wants back is the view they
 had, and the message they were reading may not be a turn anchor. A single slot rather than a stack
@@ -113,6 +113,16 @@ hover; the grip is faintly visible at rest rather than fully transparent. Pointe
 mouse events (a stylus got no scrub preview at all), and the viewport thumb is draggable, mapping
 the rail onto the scroll range as the exact inverse of how the thumb is placed
 (`scrollTopForThumb`).
+
+**2026-10-26 amendment:** the collapsed rail now replaces native scrollbar chrome for that
+viewport instead of presenting a second draggable control beside it. Scoped CSS requires an
+actual collapsed rail and the same pane container breakpoint; no rail, narrow/disabled states,
+and an expanded panel retain a thin native scrollbar. The expanded panel's own list scrolls
+independently. Forced colors retain platform scrollbar styling and the expand button, hiding
+only the replacement rail. Scrollports remain focusable. The unified rail has a named scrollbar
+role and controls the pane's unique ID, with arrows, paging, Home/End, wheel and pointer input.
+Its track starts below the expand grip, and minimum-thumb geometry maps both endpoints across
+the entire scroll range. Releasing a drag cannot also activate an anchor jump.
 
 ### The panel shows where you are
 
