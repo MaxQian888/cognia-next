@@ -44,7 +44,9 @@ import type {
   SessionMembership,
   SessionRole,
   SharedSession,
+  SharedToolDetail,
 } from "@cognia/agent-config-types"
+import { isTranscriptLiveFrame, type TranscriptLiveFrame } from "@/lib/chat/transcript/live-frames"
 
 /** One issue as the collaboration plane returns it. */
 export interface CollabIssue {
@@ -389,6 +391,40 @@ export interface AcceptedCollabInvitation {
  */
 const GRANT_REFRESH_MARGIN_MS = 30_000
 export const SHARED_CHAT_PROTOCOL_VERSION = "2"
+
+/** Shared chat stream subprotocols: v1 pings on stored events; v2 (ADR-0241) also carries live frames. */
+export const SHARED_CHAT_STREAM_V1 = "cognia.chat.v1"
+export const SHARED_CHAT_STREAM_V2 = "cognia.chat.v2"
+
+/** The `/health` feature of a server that accepts and relays live frames (ADR-0241). */
+export const SHARED_CHAT_LIVE_FEATURE = "shared-chat-live-v1"
+
+export type SharedSessionStreamMessage =
+  | { kind: "event"; event: unknown }
+  | { kind: "live"; frame: TranscriptLiveFrame }
+  | { kind: "unknown" }
+
+/**
+ * Read one text frame of a shared chat stream. A v2 envelope names its kind;
+ * a v1 frame (no envelope) is an event. An envelope type this client does not
+ * know, or a live frame that fails the codec's check, is `unknown` and ignored.
+ */
+export function readSharedSessionStreamMessage(data: string): SharedSessionStreamMessage {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(data)
+  } catch {
+    return { kind: "event", event: data }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return { kind: "event", event: parsed }
+  const envelope = parsed as { type?: unknown; event?: unknown; frame?: unknown }
+  if (envelope.type === undefined) return { kind: "event", event: parsed }
+  if (envelope.type === "event") return { kind: "event", event: envelope.event }
+  if (envelope.type === "live" && isTranscriptLiveFrame(envelope.frame))
+    return { kind: "live", frame: envelope.frame }
+  return { kind: "unknown" }
+}
 
 /** The subprotocol the workspace change feed offers. Must match `FEED_SUBPROTOCOL` (ADR-0206). */
 export const FEED_SUBPROTOCOL = "cognia.collab.feed.v1"
@@ -1029,6 +1065,8 @@ export class CollabClient {
     input: {
       title?: string
       status?: SharedSession["status"]
+      /** Owner/maintainer only (ADR-0241 D18). */
+      toolDetail?: SharedToolDetail
       operationId: string
       baseRevision: number
     }
@@ -1206,7 +1244,8 @@ export class CollabClient {
   async openSessionStream(
     orgId: string,
     sessionId: string,
-    handlers: PlatformWebSocketHandlers = {}
+    handlers: PlatformWebSocketHandlers = {},
+    options: { live?: boolean } = {}
   ): Promise<PlatformWebSocket> {
     const { ticket } = await this.json<{ ticket: string; expiresAt: number }>(
       orgId,
@@ -1220,7 +1259,11 @@ export class CollabClient {
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
     return this.openWebSocket(url.toString(), {
       ...handlers,
-      protocols: ["cognia.chat.v1", ticket],
+      // A server that speaks v2 (ADR-0241) picks it and adds live frames; an
+      // older one picks v1, so offering both never breaks the stream.
+      protocols: options.live
+        ? [SHARED_CHAT_STREAM_V2, SHARED_CHAT_STREAM_V1, ticket]
+        : [SHARED_CHAT_STREAM_V1, ticket],
     })
   }
 
@@ -1629,6 +1672,11 @@ export class CollabClient {
         | "run.failed"
       payload: Record<string, unknown>
       operationId: string
+      /**
+       * The tool-detail revision a `message.*` publication was projected
+       * under (ADR-0241 D18); the server refuses an older one.
+       */
+      toolDetailRevision?: number
     }
   ): Promise<SessionEvent> {
     const response = await this.fetchImpl(
@@ -1644,6 +1692,33 @@ export class CollabClient {
       }
     )
     return readJson<SessionEvent>(response)
+  }
+
+  /**
+   * Upload one live frame of a shared run's reply (ADR-0241). Broadcast to
+   * the session's v2 sockets and never stored: the stored corrections stay
+   * the record. Answers nothing.
+   */
+  async postSessionRunLiveFrame(
+    orgId: string,
+    sessionId: string,
+    runId: string,
+    token: string,
+    input: { frame: TranscriptLiveFrame; toolDetailRevision: number }
+  ): Promise<void> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/live`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+          "x-cognia-run-token": token,
+        },
+        body: JSON.stringify(input),
+      }
+    )
+    await readJson<void>(response)
   }
 
   async listSessionApprovals(orgId: string, sessionId: string): Promise<ApprovalRequest[]> {

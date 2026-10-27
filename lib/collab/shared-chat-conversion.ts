@@ -12,6 +12,7 @@ import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
 import { bytesToBase64 } from "@/lib/ocr/image-prep"
 import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
 import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
+import { pickChatContinuationMetadata } from "@/lib/chat/continuation"
 import type { CollabClient } from "./client"
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
@@ -362,7 +363,10 @@ export async function convertLocalSessionToShared(
     // Whitelist the reference subset of the row's metadata: imported messages
     // keep the citations their send recorded, so a converted transcript's
     // backlinks survive the move to shared storage.
-    const referenceMetadata = pickReferenceMetadata(message.metadata)
+    const references = pickReferenceMetadata(message.metadata)
+    const continuation = pickChatContinuationMetadata(message.metadata)
+    const referenceMetadata =
+      references || continuation ? { ...references, ...continuation } : undefined
     const event = await client.appendSessionEvent(input.orgId, remoteDraft.id, {
       kind: "message.created",
       operationId: `${prefix}:message:${message.id}`,

@@ -8,6 +8,7 @@ import type {
   PendingApproval,
   ApprovalDecision,
   SessionEvent,
+  SharedToolDetail,
 } from "@cognia/agent-config-types"
 import {
   getSharedRunJournal,
@@ -21,16 +22,34 @@ import {
 } from "@/lib/db/shared-run-journal"
 import { getDb, type CogniaDB } from "@/lib/db/schema"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
+import { loggers } from "@cognia/logging"
 import { getSession } from "@/lib/db/sessions"
 import { SharedApprovalBridge } from "./shared-approval-bridge"
 import { listMessages } from "@/lib/db/messages"
-import { redactText, hasNoLeakingPiiDeep } from "@cognia/redact"
-import { safeToolActivityMetadata } from "@/lib/execution/run-activity"
 import { getDeviceId } from "@/lib/device/device-identity"
-import { CollabError, type CollabClient } from "./client"
+import {
+  CollabConflictError,
+  CollabError,
+  SHARED_CHAT_LIVE_FEATURE,
+  type CollabClient,
+} from "./client"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "./runtime-client"
 import { resolveSharedAttachmentParts, uploadMessageAttachments } from "./shared-chat-conversion"
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
+import { isSharedWithheldPart } from "./shared-withheld-part"
+import {
+  createSharedAssistantProjector,
+  type SharedAssistantProjector,
+} from "./shared-assistant-projection"
+import { resolveSessionCwd } from "@/lib/workspace/session-cwd"
+import type { TranscriptLivePart } from "@/lib/chat/transcript/live-frames"
+import {
+  createSharedRunLivePublisher,
+  SHARED_LIVE_FRAME_INTERVAL_MS,
+  type SharedRunLivePublisher,
+} from "./shared-run-live-publisher"
+
+const log = loggers.shell
 
 const HEARTBEAT_INTERVAL_MS = 30_000
 /** `LEASE_HEARTBEAT_TTL_MS` in crates/cognia-collab-server/src/chat_api.rs. */
@@ -43,7 +62,14 @@ const LEASE_HEARTBEAT_TTL_MS = 90_000
  */
 const MAX_FINISH_ATTEMPTS = 10
 
+/**
+ * While live frames carry a streaming reply (ADR-0241), how long its stored
+ * record may lag. A crashed executor loses at most this much of a reply.
+ */
+const STORED_WHILE_LIVE_INTERVAL_MS = 10_000
+
 interface ActiveSharedRun {
+  requestMessageId?: string
   client: CollabClient
   db: CogniaDB
   approvalBridge?: SharedApprovalBridge
@@ -71,12 +97,41 @@ interface ActiveSharedRun {
    * The redaction + PII sweep + digest in the loop below is the expensive part,
    * and the 1s `updates` tick re-walks every assistant message in the session.
    * Comparing the RAW parts first means an unchanged message costs one
-   * `JSON.stringify` instead of a full `sharedAssistantParts` conversion and a
+   * `JSON.stringify` instead of a full projection and a
    * SHA-256, which is what made a long turn in a large session re-hash its
    * whole transcript once a second while tokens were streaming.
    */
   rawSeen: Map<string, string>
+  /**
+   * The run's one projector (ADR-0241), built on the first pass: the stored
+   * corrections and the live frames must read the same shareable form.
+   */
+  projector?: SharedAssistantProjector
+  /** The session's tool-detail tier and its revision, read once per run and again when stale (D18). */
+  toolDetail?: SharedToolDetail
+  toolDetailRevision?: number
+  toolDetailLoaded?: boolean
+  /** Resolved once: the executor's workspace root, if any. */
+  workspaceRoot?: { path?: string }
+  /** When each reply's stored record was last written, and the sequence the server gave it. */
+  storedAt: Map<string, number>
+  storedSequence: Map<string, number>
+  /** The live upload, on a server that relays live frames and a run that answers a request. */
+  live?: SharedRunLivePublisher
+  liveTimer?: ReturnType<typeof setInterval>
   publication: Promise<void>
+  /**
+   * A pass is in flight. The 1s tick must not queue another behind a slow
+   * server: it asks for one trailing pass instead (`republish`).
+   */
+  publishing?: boolean
+  republish?: boolean
+  /**
+   * Messages a member redacted while this run still wrote them. The server
+   * refuses every further correction (`409 message_redacted`); retrying one
+   * each second would wedge publication and then the finish.
+   */
+  redactedMessageIds?: Set<string>
   updates: ReturnType<typeof setInterval>
   finishing?: Promise<void>
   /** Failed terminal attempts, so the 1s retry cannot spin for the process's life. */
@@ -217,6 +272,8 @@ export async function recoverSharedSessionRun(
     baselineMessageIds: new Set(journal.baselineMessageIds),
     published: new Map(),
     rawSeen: new Map(),
+    storedAt: new Map(),
+    storedSequence: new Map(),
     publication: Promise.resolve(),
     heartbeat: undefined as never,
     updates: undefined as never,
@@ -239,6 +296,7 @@ function operationId(prefix: string, runId: string): string {
 
 interface SharedRunMessage {
   id: string
+  metadata?: Record<string, unknown>
   role: string
   parts?: unknown[]
   createdAt?: number
@@ -507,6 +565,7 @@ export async function beginSharedSessionRun(
   if (!health.features?.includes("shared-chat-execution-v2")) {
     throw new Error("Collaboration server upgrade required: shared-chat-execution-v2")
   }
+  const liveSupported = health.features.includes(SHARED_CHAT_LIVE_FEATURE)
   if (typeof queuedPayload.messageId !== "string")
     throw new Error("AI request requires a durable messageId")
   const queued =
@@ -589,6 +648,7 @@ export async function beginSharedSessionRun(
   const schedule = deps.setInterval ?? globalThis.setInterval
   const cancel = deps.clearInterval ?? globalThis.clearInterval
   const active: ActiveSharedRun = {
+    requestMessageId: queuedPayload.messageId,
     client: context.client,
     db,
     journalRef: journalRef(context, session.id),
@@ -603,6 +663,8 @@ export async function beginSharedSessionRun(
     baselineMessageIds: new Set(claimIntent.baselineMessageIds),
     published: new Map(),
     rawSeen: new Map(),
+    storedAt: new Map(),
+    storedSequence: new Map(),
     publication: Promise.resolve(),
     updates: undefined as never,
     heartbeat: undefined as never,
@@ -683,6 +745,27 @@ export async function beginSharedSessionRun(
         active.onLeaseLost?.()
       })
   }, HEARTBEAT_INTERVAL_MS)
+  if (liveSupported && active.requestMessageId) {
+    active.live = createSharedRunLivePublisher({
+      sessionId: active.sharedSessionId,
+      now: active.now,
+      post: (frame) =>
+        active.client.postSessionRunLiveFrame(
+          active.orgId,
+          active.sharedSessionId,
+          active.runId,
+          active.token,
+          { frame, toolDetailRevision: active.toolDetailRevision ?? 0 }
+        ),
+      onToolDetailStale: () => invalidateToolDetail(active),
+      onRedacted: (messageId) => {
+        ;(active.redactedMessageIds ??= new Set()).add(messageId)
+      },
+    })
+    active.liveTimer = schedule(() => {
+      void streamSharedRunLive(session.id).catch(() => undefined)
+    }, SHARED_LIVE_FRAME_INTERVAL_MS)
+  }
   // A second run on the same local session (a retry, a duplicate submit, a turn
   // that died before `finishSharedSessionRun`) must not strand the previous
   // heartbeat: overwriting the map entry alone left a 30s timer beating a dead
@@ -701,63 +784,121 @@ export async function beginSharedSessionRun(
   }
 }
 
-export function sharedAssistantParts(parts: unknown[]): unknown[] {
-  const safe = parts.flatMap((raw): unknown[] => {
-    const part = raw as Record<string, unknown>
-    if (part.type === "text" && typeof part.text === "string")
-      return [{ type: "text", text: redactText(part.text).redacted }]
-    if (
-      typeof part.type === "string" &&
-      (part.type.startsWith("tool-") || part.type === "dynamic-tool")
-    ) {
-      const metadata = safeToolActivityMetadata(
-        String(part.toolName ?? part.type.replace(/^tool-/, "")),
-        part.input
-      )
-      const output =
-        part.output === undefined
-          ? undefined
-          : redactText(
-              JSON.stringify(part.output, (key, value) =>
-                /password|secret|token|authorization|api[-_]?key|credential/i.test(key)
-                  ? "[REDACTED]"
-                  : value
-              )
-            ).redacted
-      return [
-        {
-          type: "dynamic-tool",
-          toolName: metadata.toolName,
-          toolCallId: String(part.toolCallId ?? ""),
-          state: part.state,
-          input: {},
-          ...(output !== undefined ? { output } : {}),
-          ...(typeof part.errorText === "string"
-            ? { errorText: redactText(part.errorText).redacted }
-            : {}),
-        },
-      ]
-    }
-    return []
-  })
-  if (!hasNoLeakingPiiDeep(safe))
-    throw new Error("Shared assistant publication contains unsafe content")
-  return safe
-}
-
 /** Publish complete snapshots serially so replay never observes half of a tool/message update. */
 /**
  * The member a shared session's live run is serving, or `undefined` when the
  * session has no live run here (ADR-0239: the run's requester).
  */
+/** Whether this device executes a run of the session now (its own store streams the reply). */
+export function hasActiveSharedRun(localSessionId: string): boolean {
+  const active = activeRuns.get(localSessionId)
+  return active !== undefined && !active.leaseLost
+}
+
 export function getSharedRunRequester(localSessionId: string): string | undefined {
   const active = activeRuns.get(localSessionId)
   return active && !active.leaseLost ? active.requestedByUserId : undefined
 }
 
+/** Drop the run's tier and projector: the next pass reads the tier again and re-projects (D18). */
+function invalidateToolDetail(active: ActiveSharedRun): void {
+  active.toolDetailLoaded = false
+  active.projector = undefined
+}
+
+/**
+ * The run's one projector (ADR-0241), under the session's current tool-detail
+ * tier. Paths are shared relative to the executor's workspace, never absolute.
+ */
+async function runProjector(
+  active: ActiveSharedRun,
+  localSessionId: string
+): Promise<SharedAssistantProjector> {
+  if (active.projector && active.toolDetailLoaded) return active.projector
+  if (!active.toolDetailLoaded) {
+    const shared = await active.client.getSharedSession(active.orgId, active.sharedSessionId)
+    // A server older than D18 names no tier: the default, and no revision to send.
+    active.toolDetail = shared.toolDetail === "full" ? "full" : "summary"
+    active.toolDetailRevision =
+      typeof shared.toolDetailRevision === "number" ? shared.toolDetailRevision : undefined
+    active.toolDetailLoaded = true
+  }
+  active.workspaceRoot ??= { path: await resolveSessionCwd(localSessionId) }
+  active.projector = createSharedAssistantProjector({
+    tier: active.toolDetail ?? "summary",
+    workspaceRoot: active.workspaceRoot.path,
+  })
+  return active.projector
+}
+
+function runReplies(active: ActiveSharedRun, messages: SharedRunMessage[]): SharedRunMessage[] {
+  return messages.filter(
+    (message) =>
+      message.role === "assistant" &&
+      !active.baselineMessageIds.has(message.id) &&
+      !active.redactedMessageIds?.has(message.id)
+  )
+}
+
+/**
+ * End a reply's live frames once its stored record is final: a `settled`
+ * keyframe that members keep drawing until their pull reads past the final
+ * correction. A run that failed or was cancelled ends its streaming reply
+ * with `reset`, so members fall back to what is stored.
+ */
+async function endLiveReply(
+  active: ActiveSharedRun,
+  message: SharedRunMessage,
+  projector: SharedAssistantProjector
+): Promise<void> {
+  const live = active.live
+  if (!live || live.ended(message.id) || !active.requestMessageId) return
+  if (
+    active.terminalStatus &&
+    active.terminalStatus !== "completed" &&
+    live.current === message.id
+  ) {
+    await live.reset(message.id)
+    return
+  }
+  const sequence = active.storedSequence.get(message.id)
+  await live.settle(
+    { messageId: message.id, replyTo: active.requestMessageId },
+    projector.project(message.id, message.parts ?? [], "settled") as TranscriptLivePart[],
+    sequence === undefined ? undefined : sequence - 1
+  )
+}
+
+/**
+ * The 250 ms live tick: the run's newest reply, projected and held back like
+ * its stored record, as a live frame. Reads the chat store only, never the
+ * database: this is the hot path while tokens stream. A reply starts only
+ * once the server knows it (its `message.created` landed) and every earlier
+ * reply of the run has ended, so members never see two at once (R7).
+ */
+async function streamSharedRunLive(localSessionId: string): Promise<void> {
+  const active = activeRuns.get(localSessionId)
+  const live = active?.live
+  if (!active || !live || live.disabled || active.leaseLost || active.terminalStatus) return
+  if (!active.requestMessageId || !active.projector || !active.toolDetailLoaded) return
+  const { useChatStore } = await import("@/stores/chat")
+  const replies = runReplies(
+    active,
+    (useChatStore.getState().sessions[localSessionId]?.messages ?? []) as SharedRunMessage[]
+  )
+  const last = replies.at(-1)
+  if (!last || !active.published.has(last.id)) return
+  if (replies.slice(0, -1).some((reply) => !live.ended(reply.id))) return
+  await live.stream(
+    { messageId: last.id, replyTo: active.requestMessageId },
+    active.projector.project(last.id, last.parts ?? [], "streaming") as TranscriptLivePart[]
+  )
+}
+
 export async function publishSharedSessionRun(localSessionId: string): Promise<void> {
   const active = activeRuns.get(localSessionId)
   if (!active || active.leaseLost) return
+  const current = () => !active.leaseLost && activeRuns.get(localSessionId) === active
   const publish = async () => {
     assertCurrentDatabase(active.db)
     if (active.approvalBridge && !active.terminalStatus) {
@@ -767,69 +908,146 @@ export async function publishSharedSessionRun(localSessionId: string): Promise<v
       )
     }
     const messages = await sessionMessages(localSessionId)
-    if (active.leaseLost || activeRuns.get(localSessionId) !== active) return
-    for (const message of messages) {
-      if (message.role !== "assistant" || active.baselineMessageIds.has(message.id)) continue
-      // Raw compare FIRST. `sharedAssistantParts` redacts every text part and
-      // runs the deep PII sweep, and the digest below hashes the result, so
-      // doing that for an already-published message on every 1s tick is the
-      // whole cost of this loop. Identical raw parts cannot produce a different
-      // snapshot, so this skip is exact rather than a heuristic.
-      const raw = JSON.stringify(message.parts ?? [])
-      if (active.rawSeen.get(message.id) === raw && active.published.has(message.id)) continue
-      const parts = sharedAssistantParts(message.parts ?? [])
-      const snapshot = JSON.stringify(parts)
+    if (!current()) return
+    const projector = await runProjector(active, localSessionId)
+    if (!current()) return
+    const replies = runReplies(active, messages)
+    for (const [index, message] of replies.entries()) {
+      // A reply is settled once the run ended or a newer reply started: only
+      // the last reply of a live run is still being written.
+      const phase = active.terminalStatus || index < replies.length - 1 ? "settled" : "streaming"
+      // While live frames carry the reply (ADR-0241), the stored record of a
+      // streaming reply is refreshed at most every 10s; the settle is always
+      // written at once. A server without live keeps the 1s cadence.
+      const storedAt = active.storedAt.get(message.id)
+      if (
+        phase === "streaming" &&
+        active.live &&
+        !active.live.disabled &&
+        storedAt !== undefined &&
+        active.now() - storedAt < STORED_WHILE_LIVE_INTERVAL_MS
+      )
+        continue
+      // Raw compare FIRST. The projection redacts every text part and runs the
+      // deep PII sweep, and the digest below hashes the result, so doing that
+      // for an already-published message on every 1s tick is the whole cost
+      // of this loop. Identical raw parts in the same phase cannot produce a
+      // different snapshot, so this skip is exact rather than a heuristic.
+      const raw = `${phase}\u0000${JSON.stringify(message.parts ?? [])}`
+      const unchanged = active.rawSeen.get(message.id) === raw && active.published.has(message.id)
+      const parts = unchanged
+        ? undefined
+        : projector.project(message.id, message.parts ?? [], phase)
+      const snapshot = parts ? JSON.stringify(parts) : undefined
       const previous = active.published.get(message.id)
-      if (previous === snapshot) {
+      if (parts && snapshot !== undefined && previous !== snapshot) {
+        const withheld = parts.filter(isSharedWithheldPart).length
+        // A content digest makes retry operations stable, including after a lost response.
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(snapshot))
+        const revision = Array.from(new Uint8Array(digest), (byte) =>
+          byte.toString(16).padStart(2, "0")
+        ).join("")
+        if (!current()) return
+        const tier =
+          active.toolDetailRevision !== undefined
+            ? { toolDetailRevision: active.toolDetailRevision }
+            : {}
+        let accepted: SessionEvent
+        try {
+          if (previous === undefined) {
+            await active.client.appendSessionRunEvent(
+              active.orgId,
+              active.sharedSessionId,
+              active.runId,
+              active.token,
+              {
+                kind: "message.created",
+                payload: {
+                  messageId: message.id,
+                  role: "assistant",
+                  parts: [],
+                  createdAt: message.createdAt ?? Date.now(),
+                  author: { kind: "agent", id: `run:${active.runId}` },
+                },
+                operationId: operationId(`assistant:${message.id}:created`, active.runId),
+                ...tier,
+              }
+            )
+          }
+          if (!current()) return
+          accepted = await active.client.appendSessionRunEvent(
+            active.orgId,
+            active.sharedSessionId,
+            active.runId,
+            active.token,
+            {
+              kind: "message.corrected",
+              payload: { targetMessageId: message.id, parts },
+              operationId: operationId(`assistant:${message.id}:${revision}`, active.runId),
+              ...tier,
+            }
+          )
+        } catch (error) {
+          const reason =
+            error instanceof CollabConflictError
+              ? (error.authoritative as { reason?: unknown } | undefined)?.reason
+              : undefined
+          if (reason === "message_redacted") {
+            ;(active.redactedMessageIds ??= new Set()).add(message.id)
+            void active.live?.reset(message.id)
+            continue
+          }
+          if (reason === "tool_detail_stale") {
+            // The tier changed under this run (ADR-0241 D18): read it again,
+            // re-project everything under it, and publish once more.
+            invalidateToolDetail(active)
+            active.republish = true
+            return
+          }
+          throw error
+        }
+        // Both stamped together, and only after the append landed: a raw hash
+        // recorded ahead of a failed publish would skip the retry.
+        active.published.set(message.id, snapshot)
+        active.rawSeen.set(message.id, raw)
+        active.storedAt.set(message.id, active.now())
+        if (typeof accepted?.sequence === "number")
+          active.storedSequence.set(message.id, accepted.sequence)
+        if (withheld > 0)
+          log.warn("shared run: parts withheld from members by the PII gate", {
+            messageId: message.id,
+            withheld,
+          })
+      } else {
         // Already on the server. Remember the raw form too, so the next tick
         // stops before the redaction pass instead of re-deriving this answer.
         active.rawSeen.set(message.id, raw)
-        continue
       }
-      // A content digest makes retry operations stable, including after a lost response.
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(snapshot))
-      const revision = Array.from(new Uint8Array(digest), (byte) =>
-        byte.toString(16).padStart(2, "0")
-      ).join("")
-      if (active.leaseLost || activeRuns.get(localSessionId) !== active) return
-      if (previous === undefined) {
-        await active.client.appendSessionRunEvent(
-          active.orgId,
-          active.sharedSessionId,
-          active.runId,
-          active.token,
-          {
-            kind: "message.created",
-            payload: {
-              messageId: message.id,
-              role: "assistant",
-              parts: [],
-              createdAt: message.createdAt ?? Date.now(),
-              author: { kind: "agent", id: `run:${active.runId}` },
-            },
-            operationId: operationId(`assistant:${message.id}:created`, active.runId),
-          }
-        )
-      }
-      if (active.leaseLost || activeRuns.get(localSessionId) !== active) return
-      await active.client.appendSessionRunEvent(
-        active.orgId,
-        active.sharedSessionId,
-        active.runId,
-        active.token,
-        {
-          kind: "message.corrected",
-          payload: { targetMessageId: message.id, parts },
-          operationId: operationId(`assistant:${message.id}:${revision}`, active.runId),
-        }
-      )
-      // Both stamped together, and only after the append landed: a raw hash
-      // recorded ahead of a failed publish would skip the retry.
-      active.published.set(message.id, snapshot)
-      active.rawSeen.set(message.id, raw)
+      if (phase === "settled") await endLiveReply(active, message, projector)
     }
   }
-  active.publication = active.publication.catch(() => undefined).then(publish)
+  if (active.publishing) {
+    active.republish = true
+    return active.publication
+  }
+  active.publishing = true
+  active.publication = (async () => {
+    try {
+      let failure: unknown
+      do {
+        active.republish = false
+        failure = undefined
+        try {
+          await publish()
+        } catch (error) {
+          failure = error
+        }
+      } while (active.republish && !active.leaseLost && activeRuns.get(localSessionId) === active)
+      if (failure !== undefined) throw failure
+    } finally {
+      active.publishing = false
+    }
+  })()
   return active.publication
 }
 
@@ -852,7 +1070,34 @@ export async function finishSharedSessionRun(
     let settled = false
     try {
       await publishSharedSessionRun(localSessionId)
+      // The last live frame goes out before the run's terminal event.
+      await active.live?.drain()
       if (active.leaseLost || activeRuns.get(localSessionId) !== active) return
+      const { continuationMessageId, pickChatContinuationMetadata, chatTurnOutcomeOf } =
+        await import("@/lib/chat/continuation")
+      const request = (await sessionMessages(localSessionId)).find(
+        (message) =>
+          message.role === "user" && continuationMessageId(message) === active.requestMessageId
+      )
+      const outcomeState = finalStatus === "cancelled" ? "interrupted" : finalStatus
+      const existingOutcome = chatTurnOutcomeOf(request?.metadata)
+      const continuation = request
+        ? {
+            messageId: active.requestMessageId,
+            metadata: {
+              ...pickChatContinuationMetadata(request.metadata),
+              chatTurnOutcome: {
+                state: outcomeState,
+                revision:
+                  (existingOutcome?.revision ?? 0) +
+                  (existingOutcome?.state === outcomeState ? 0 : 1),
+                retryable:
+                  finalStatus === "cancelled" ||
+                  (finalStatus === "failed" && existingOutcome?.retryable === true),
+              },
+            },
+          }
+        : undefined
       await active.client.appendSessionRunEvent(
         active.orgId,
         active.sharedSessionId,
@@ -860,7 +1105,7 @@ export async function finishSharedSessionRun(
         active.token,
         {
           kind: finalStatus === "completed" ? "run.completed" : "run.failed",
-          payload: { status: finalStatus },
+          payload: { status: finalStatus, ...continuation },
           operationId: operationId(`run-${finalStatus}`, active.runId),
         }
       )
@@ -945,4 +1190,6 @@ function stopHeartbeat(active: ActiveSharedRun | undefined): void {
   if (!active) return
   active.cancel(active.heartbeat)
   active.cancel(active.updates)
+  if (active.liveTimer !== undefined) active.cancel(active.liveTimer)
+  active.live?.stop()
 }

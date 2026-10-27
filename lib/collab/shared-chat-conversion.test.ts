@@ -252,6 +252,8 @@ describe("local-to-shared chat conversion", () => {
       createdAt: 5,
       metadata: {
         mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+        continuationOf: "original-request",
+        continuationRuntime: { kind: "external", agentId: "ext-1" },
         promptPreamble: {
           sections: ["references"],
           references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],
@@ -306,6 +308,8 @@ describe("local-to-shared chat conversion", () => {
     ) as Record<string, unknown>
     expect(withRefs.metadata).toEqual({
       mentions: [{ kind: "entity", id: "session:source_a", label: "Sprint planning" }],
+      continuationOf: "original-request",
+      continuationRuntime: { kind: "external", agentId: "ext-1" },
       promptPreamble: {
         sections: ["references"],
         references: [{ kind: "entity", entityKind: "session", title: "Sprint planning" }],

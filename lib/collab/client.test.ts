@@ -5,6 +5,7 @@ import {
   CollabError,
   SHARED_CHAT_PROTOCOL_VERSION,
   encodeReasonHeader,
+  readSharedSessionStreamMessage,
 } from "./client"
 
 const ORG = "org_acme00000000000000000"
@@ -766,6 +767,121 @@ describe("CollabClient", () => {
     expect(sockets[0].url).not.toContain("st_one_time")
     // The caller's handlers survive the ticket being folded in beside them.
     expect(messages).toEqual(["hello"])
+  })
+
+  it("offers the live subprotocol first only when asked (ADR-0241)", async () => {
+    const offered: Array<readonly string[] | undefined> = []
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url) =>
+        url.endsWith("/grants")
+          ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          : jsonResponse({ ticket: "st_one_time", expiresAt: 30_000 }),
+      now: () => 0,
+      openWebSocket: async (_url, options) => {
+        offered.push(options.protocols)
+        return {
+          id: "t",
+          kind: "browser",
+          send: async () => undefined,
+          close: async () => undefined,
+        }
+      },
+    })
+    await client.openSessionStream(ORG, "ses_1", {}, { live: true })
+    await client.openSessionStream(ORG, "ses_1")
+    expect(offered).toEqual([
+      ["cognia.chat.v2", "cognia.chat.v1", "st_one_time"],
+      ["cognia.chat.v1", "st_one_time"],
+    ])
+  })
+
+  it("posts a live frame with the run token and reads a stale tier as a conflict", async () => {
+    const calls: Call[] = []
+    const answers = [
+      new Response(null, { status: 204 }),
+      jsonResponse(
+        {
+          error: "stale",
+          authoritative: {
+            reason: "tool_detail_stale",
+            toolDetail: "summary",
+            toolDetailRevision: 2,
+          },
+        },
+        409
+      ),
+    ]
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        return answers.shift()!
+      },
+      now: () => 0,
+    })
+    const frame = {
+      sessionId: "ses_1",
+      messageId: "m",
+      replyTo: "u",
+      seq: 1,
+      base: 0,
+      keyframe: true,
+      state: "streaming" as const,
+      parts: [],
+    }
+    await expect(
+      client.postSessionRunLiveFrame(ORG, "ses_1", "run_1", "tok", { frame, toolDetailRevision: 1 })
+    ).resolves.toBeUndefined()
+    expect(calls[0].url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/chat-sessions/ses_1/runs/run_1/live`
+    )
+    expect(calls[0].init?.headers).toMatchObject({
+      "x-cognia-run-token": "tok",
+      "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+    })
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ frame, toolDetailRevision: 1 })
+    const stale = await client
+      .postSessionRunLiveFrame(ORG, "ses_1", "run_1", "tok", { frame, toolDetailRevision: 1 })
+      .catch((error: unknown) => error)
+    expect(stale).toBeInstanceOf(CollabConflictError)
+    expect((stale as CollabConflictError).authoritative).toMatchObject({
+      reason: "tool_detail_stale",
+      toolDetailRevision: 2,
+    })
+  })
+
+  it("reads v1 frames as events and v2 envelopes by kind, ignoring unknown ones", () => {
+    const frame = {
+      sessionId: "s",
+      messageId: "m",
+      replyTo: "u",
+      seq: 1,
+      base: 0,
+      keyframe: true,
+      state: "streaming",
+      parts: [],
+    }
+    expect(readSharedSessionStreamMessage('{"kind":"message.created"}')).toEqual({
+      kind: "event",
+      event: { kind: "message.created" },
+    })
+    expect(readSharedSessionStreamMessage("ping")).toEqual({ kind: "event", event: "ping" })
+    expect(
+      readSharedSessionStreamMessage(JSON.stringify({ type: "event", event: { sequence: 3 } }))
+    ).toEqual({ kind: "event", event: { sequence: 3 } })
+    expect(readSharedSessionStreamMessage(JSON.stringify({ type: "live", frame }))).toEqual({
+      kind: "live",
+      frame,
+    })
+    expect(
+      readSharedSessionStreamMessage(JSON.stringify({ type: "live", frame: { ...frame, seq: 0 } }))
+    ).toEqual({ kind: "unknown" })
+    expect(readSharedSessionStreamMessage(JSON.stringify({ type: "presence" }))).toEqual({
+      kind: "unknown",
+    })
   })
 
   describe("Canvas documents", () => {

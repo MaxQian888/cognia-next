@@ -16,13 +16,20 @@ import {
   sharedChatCacheKey,
 } from "@/lib/db/collab-chat-mirror"
 import type { PlatformWebSocket } from "@/lib/network/platform-websocket"
-import { CollabError, type CollabClient } from "./client"
+import { CollabError, readSharedSessionStreamMessage, type CollabClient } from "./client"
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 import { resolveSharedAttachmentParts } from "./shared-chat-conversion"
 import { normalizeStoredMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { messageMediaRefRows } from "@/lib/db/message-media-refs"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { pickReferenceMetadata } from "@/lib/chat/mentions/read"
+import {
+  endSharedLive,
+  noteSharedLiveEvent,
+  noteSharedLivePull,
+  publishSharedLiveFrame,
+} from "./shared-live-frames"
+import { mergeChatTurnMetadata, pickChatContinuationMetadata } from "@/lib/chat/continuation"
 
 type SharedChatReader = Pick<
   CollabClient,
@@ -46,6 +53,16 @@ export interface SharedChatSyncOptions {
 }
 
 export { sharedChatCacheKey } from "@/lib/db/collab-chat-mirror"
+
+/**
+ * The local id a shared message projects to on a device that did not write
+ * it. The device that did keeps its own id, which is also the remote one
+ * (`sendSharedSessionMessage` and the executor publish under their local ids).
+ * One formula for the projection and the live overlay (ADR-0241 R5).
+ */
+export function sharedMessageLocalId(localSessionId: string, remoteMessageId: string): string {
+  return `${localSessionId}:message:${JSON.stringify(remoteMessageId)}`
+}
 
 function assertCurrent(db: ReturnType<typeof getDb>, signal?: AbortSignal): void {
   if (signal?.aborted || getDb() !== db)
@@ -102,7 +119,9 @@ function payloadCreatedAt(payload: Record<string, unknown>, fallback: number): n
 function payloadMessageMetadata(
   payload: Record<string, unknown>
 ): StoredMessage["metadata"] | undefined {
-  return pickReferenceMetadata(payload.metadata) as StoredMessage["metadata"] | undefined
+  const references = pickReferenceMetadata(payload.metadata)
+  const continuation = pickChatContinuationMetadata(payload.metadata)
+  return references || continuation ? { ...references, ...continuation } : undefined
 }
 
 /** Author kinds that name a PERSON, and can therefore be impersonated. */
@@ -194,7 +213,9 @@ async function projectEvents(
         event.sequence > cursor &&
         (event.kind === "message.created" ||
           event.kind === "message.corrected" ||
-          event.kind === "message.redacted")
+          event.kind === "message.redacted" ||
+          event.kind === "run.completed" ||
+          event.kind === "run.failed")
     )
     const messages = new Map(
       (changesMessages
@@ -242,11 +263,27 @@ async function projectEvents(
       if (event.sequence !== cursor + 1) throw new Error("Shared session event sequence gap")
       const payload = eventPayload(event)
 
-      if (event.kind === "message.created") {
+      if (event.kind === "run.completed" || event.kind === "run.failed") {
+        const targetId = payloadString(payload, "messageId")
+        const target = targetId ? messages.get(targetId) : undefined
+        const continuation = pickChatContinuationMetadata(payload.metadata)
+        if (target?.role === "user" && continuation) {
+          const projected = {
+            ...target,
+            metadata: mergeChatTurnMetadata(
+              { ...target.metadata, ...continuation },
+              target.metadata
+            ),
+          }
+          const write = writeMessage(projected)
+          if (write) await write
+          messages.set(targetId!, projected)
+          changedMessages.set(projected.id, projected)
+        }
+      } else if (event.kind === "message.created") {
         const remoteMessageId = payloadString(payload, "messageId") ?? event.id
         const prior = messages.get(remoteMessageId)
-        const messageId =
-          prior?.id ?? `${localSession.id}:message:${JSON.stringify(remoteMessageId)}`
+        const messageId = prior?.id ?? sharedMessageLocalId(localSession.id, remoteMessageId)
         const role = payloadRole(payload)
         const parts = payloadParts(payload)
         if (role && parts) {
@@ -715,7 +752,8 @@ export async function connectSharedSessionStream(
         // A pulse during a pull requires one trailing pull, never an unbounded queue.
         while (refreshRequested && !stopped && socket) {
           refreshRequested = false
-          await syncSharedSession(client, orgId, sharedSessionId, syncOptions)
+          const pulled = await syncSharedSession(client, orgId, sharedSessionId, syncOptions)
+          noteSharedLivePull(sharedSessionId, pulled.events)
         }
       } catch (error) {
         refreshRequested = false
@@ -730,28 +768,44 @@ export async function connectSharedSessionStream(
     connecting = true
     const currentGeneration = ++generation
     try {
-      await syncSharedSession(client, orgId, sharedSessionId, syncOptions)
+      const initial = await syncSharedSession(client, orgId, sharedSessionId, syncOptions)
+      noteSharedLivePull(sharedSessionId, initial.events)
       if (stopped) return
       let closedDuringOpen = false
-      const opened = await client.openSessionStream(orgId, sharedSessionId, {
-        onMessage: () => {
-          if (currentGeneration === generation) refresh()
+      const opened = await client.openSessionStream(
+        orgId,
+        sharedSessionId,
+        {
+          onMessage: (data) => {
+            if (currentGeneration !== generation) return
+            // A live frame (ADR-0241) is drawn, never pulled; every stored
+            // event still only means "pull".
+            const message = readSharedSessionStreamMessage(data)
+            if (message.kind === "live") publishSharedLiveFrame(sharedSessionId, message.frame)
+            else if (message.kind === "event") {
+              noteSharedLiveEvent(sharedSessionId, message.event)
+              refresh()
+            }
+          },
+          onClose: () => {
+            if (stopped || currentGeneration !== generation) return
+            closedDuringOpen = true
+            socket = null
+            endSharedLive(sharedSessionId)
+            void updateConnection(false)
+            schedule()
+          },
         },
-        onClose: () => {
-          if (stopped || currentGeneration !== generation) return
-          closedDuringOpen = true
-          socket = null
-          void updateConnection(false)
-          schedule()
-        },
-      })
+        { live: true }
+      )
       if (stopped || closedDuringOpen || currentGeneration !== generation) {
         void opened.close()
         return
       }
       socket = opened
       // An event can commit after the first pull and before subscription.
-      await syncSharedSession(client, orgId, sharedSessionId, syncOptions)
+      const caughtUp = await syncSharedSession(client, orgId, sharedSessionId, syncOptions)
+      noteSharedLivePull(sharedSessionId, caughtUp.events)
       if (stopped || closedDuringOpen || currentGeneration !== generation || socket !== opened)
         return
       attempt = 0
@@ -788,6 +842,7 @@ export async function connectSharedSessionStream(
     if (timer !== undefined) clearTimeout(timer)
     void socket?.close()
     socket = null
+    endSharedLive(sharedSessionId)
     options.signal?.removeEventListener("abort", close)
     if (typeof window !== "undefined") window.removeEventListener("online", recover)
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", recover)

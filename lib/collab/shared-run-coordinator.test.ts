@@ -35,8 +35,12 @@ jest.mock("@/lib/db/shared-run-journal", () => {
   }
 })
 jest.mock("./runtime-client", () => ({ resolveCurrentCollabContext: jest.fn() }))
+jest.mock("@/lib/workspace/session-cwd", () => ({
+  resolveSessionCwd: jest.fn().mockResolvedValue(undefined),
+}))
 
-import { CollabError } from "./client"
+import { CollabConflictError, CollabError } from "./client"
+import { SHARED_STREAMING_WINDOW } from "./shared-assistant-projection"
 import {
   canAutomaticallyDrainSharedQueue,
   beginSharedSessionRun,
@@ -45,7 +49,6 @@ import {
   resetSharedRunCoordinatorForTesting,
   sharedRequestTranscript,
   sharedMessageSendContent,
-  sharedAssistantParts,
   recoverSharedSessionRun,
   sendSharedSessionMessage,
   suspendSharedSessionRuns,
@@ -89,6 +92,7 @@ it("acquires a bound lease, publishes lifecycle events, and releases it", async 
     }),
     appendSessionEvent: jest.fn().mockResolvedValue({}),
     appendSessionRunEvent: jest.fn().mockResolvedValue({}),
+    getSharedSession: jest.fn().mockResolvedValue({ id: "shared-session" }),
     heartbeatSessionRunLease: jest.fn().mockResolvedValue({}),
     releaseSessionRunLease: jest.fn().mockResolvedValue({}),
   }
@@ -186,6 +190,7 @@ it("retries finalization without dropping the lease after a publication failure"
       item: { requestedByUserId: "user", payload: {} },
     }),
     appendSessionRunEvent: jest.fn().mockResolvedValue({}),
+    getSharedSession: jest.fn().mockResolvedValue({ id: "shared-session" }),
     heartbeatSessionRunLease: jest.fn(),
     releaseSessionRunLease: jest
       .fn()
@@ -244,21 +249,6 @@ it("replays only the queued event boundary, ignoring later edits and later messa
   expect(JSON.stringify(content)).not.toContain("later")
 })
 
-it("shares tool status while removing credentials and private tool input", () => {
-  const parts = sharedAssistantParts([
-    {
-      type: "tool-read",
-      toolCallId: "call",
-      state: "output-available",
-      input: { password: "private" },
-      output: { apiKey: "opaque-secret", result: "ok" },
-    },
-  ])
-  expect(JSON.stringify(parts)).not.toContain("opaque-secret")
-  expect(JSON.stringify(parts)).not.toContain("private")
-  expect(JSON.stringify(parts)).toContain("ok")
-})
-
 it("persists claim credentials before the request and reuses them after a lost response", async () => {
   const client = {
     health: jest.fn().mockResolvedValue({ features: ["shared-chat-execution-v2"] }),
@@ -296,6 +286,7 @@ it("recovers partial durable assistant output before hydration and finalizes wit
       .fn()
       .mockResolvedValue({ id: "lease", runId: "run", holderDeviceId: "device" }),
     appendSessionRunEvent: jest.fn().mockResolvedValue({}),
+    getSharedSession: jest.fn().mockResolvedValue({ id: "shared-session" }),
     releaseSessionRunLease: jest.fn().mockResolvedValue({}),
   }
   const ctx = { orgId: "org", userId: "user", localAccountId: "local", client }
@@ -352,6 +343,7 @@ function fullClient() {
     heartbeatSessionRunLease: jest.fn().mockResolvedValue({}),
     releaseSessionRunLease: jest.fn().mockResolvedValue({}),
     getSharedSession: jest.fn().mockResolvedValue({ id: "shared-session" }),
+    postSessionRunLiveFrame: jest.fn().mockResolvedValue(undefined),
     commitSessionAttachment: jest.fn().mockResolvedValue({}),
     getActiveSessionRunLease: jest.fn().mockResolvedValue(null),
   }
@@ -811,21 +803,6 @@ it("supports documents while rejecting unsupported or missing user parts", () =>
   ])
   expect(() => sharedMessageSendContent([{ type: "file" }])).toThrow("unavailable")
   expect(() => sharedMessageSendContent([{ type: "unknown" }])).toThrow("Unsupported")
-  expect(
-    sharedAssistantParts([
-      { type: "reasoning", text: "hidden" },
-      { type: "dynamic-tool", toolName: "read", state: "output-error", errorText: "failed" },
-    ])
-  ).toEqual([
-    {
-      type: "dynamic-tool",
-      toolName: "read",
-      toolCallId: "",
-      state: "output-error",
-      input: {},
-      errorText: "failed",
-    },
-  ])
 })
 
 it("does not recover absent, mismatched-account, or unaccepted claim intents", async () => {
@@ -934,6 +911,49 @@ it("serializes racing terminal signals and preserves the first accepted outcome"
     expect.arrayContaining([expect.objectContaining({ payload: { status: "cancelled" } })]),
   ])
   await finishSharedSessionRun(session.id, "completed")
+})
+
+it("publishes an anchored interruption and concrete runtime for other collaborators", async () => {
+  const client = fullClient()
+  jest.mocked(jest.requireMock("@/lib/db/messages").listMessages).mockResolvedValue([
+    {
+      id: "m",
+      role: "user",
+      parts: [{ type: "text", text: "Implement it" }],
+      metadata: {
+        continuationRuntime: { kind: "external", agentId: "ext-1" },
+        chatTurnOutcome: { state: "running", revision: 1, retryable: true },
+      },
+    },
+  ])
+  await beginSharedSessionRun(
+    session,
+    "run",
+    { messageId: "m" },
+    {
+      resolveContext: context(client as never),
+      getDeviceId: async () => "d",
+      setInterval: (() => 1) as never,
+    }
+  )
+  await finishSharedSessionRun(session.id, "cancelled")
+  expect(client.appendSessionRunEvent).toHaveBeenLastCalledWith(
+    "org",
+    "shared-session",
+    "run",
+    "secret",
+    expect.objectContaining({
+      kind: "run.failed",
+      payload: {
+        status: "cancelled",
+        messageId: "m",
+        metadata: {
+          continuationRuntime: { kind: "external", agentId: "ext-1" },
+          chatTurnOutcome: { state: "interrupted", revision: 2, retryable: true },
+        },
+      },
+    })
+  )
 })
 
 it("publishes server approval requests from production polling and revalidates permission before delivering", async () => {
@@ -1095,5 +1115,366 @@ describe("designated idle executor queue wakeup", () => {
     expect(await eligibility([{ ...start, sessionId: "foreign" }])).toBe(false)
     expect(await eligibility([])).toBe(false)
     expect(await eligibility([start, complete, queued], "")).toBe(false)
+  })
+})
+
+describe("ADR-0241 WP0 publication defects", () => {
+  // Mid-run, a reply's last SHARED_STREAMING_WINDOW characters stay local.
+  const TAIL = " ".repeat(SHARED_STREAMING_WINDOW)
+  it("keeps publishing later messages after a part is withheld", async () => {
+    const client = fullClient()
+    await beginSharedSessionRun(
+      session,
+      "run",
+      { messageId: "message" },
+      {
+        resolveContext: context(client as never),
+        getDeviceId: async () => "device",
+        setInterval: (() => 1) as never,
+      }
+    )
+    jest.requireMock("@/lib/db/messages").listMessages.mockResolvedValue([
+      {
+        id: "a",
+        role: "assistant",
+        createdAt: 1,
+        parts: [{ type: "dynamic-tool", toolName: "read", toolCallId: "bob@example.com" }],
+      },
+      { id: "b", role: "assistant", createdAt: 2, parts: [{ type: "text", text: `next${TAIL}` }] },
+    ])
+    await publishSharedSessionRun(session.id)
+    const corrections = client.appendSessionRunEvent.mock.calls
+      .map((call) => call[4])
+      .filter((event) => event.kind === "message.corrected")
+    expect(corrections.map((event) => event.payload)).toEqual([
+      {
+        targetMessageId: "a",
+        parts: [{ type: "data-shared-withheld", data: { reason: "pii" } }],
+      },
+      { targetMessageId: "b", parts: [{ type: "text", text: "next" }] },
+    ])
+  })
+
+  it("holds a streaming reply's tail and publishes the reply whole on finish", async () => {
+    const client = fullClient()
+    await beginSharedSessionRun(
+      session,
+      "run",
+      { messageId: "message" },
+      {
+        resolveContext: context(client as never),
+        getDeviceId: async () => "device",
+        setInterval: (() => 1) as never,
+      }
+    )
+    jest
+      .requireMock("@/lib/db/messages")
+      .listMessages.mockResolvedValue([
+        { id: "a", role: "assistant", createdAt: 1, parts: [{ type: "text", text: "short" }] },
+      ])
+    const corrected = () =>
+      client.appendSessionRunEvent.mock.calls
+        .map((call) => call[4])
+        .filter((event) => event.kind === "message.corrected")
+        .map((event) => event.payload.parts)
+    await publishSharedSessionRun(session.id)
+    expect(corrected()).toEqual([[]])
+    await finishSharedSessionRun(session.id, "completed")
+    expect(corrected()).toEqual([[], [{ type: "text", text: "short" }]])
+  })
+
+  it("stops publishing a message a member redacted instead of retrying it every tick", async () => {
+    const client = fullClient()
+    await beginSharedSessionRun(
+      session,
+      "run",
+      { messageId: "message" },
+      {
+        resolveContext: context(client as never),
+        getDeviceId: async () => "device",
+        setInterval: (() => 1) as never,
+      }
+    )
+    const listMessages = jest.requireMock("@/lib/db/messages").listMessages
+    listMessages.mockResolvedValue([
+      { id: "a", role: "assistant", createdAt: 1, parts: [{ type: "text", text: "one" }] },
+    ])
+    await publishSharedSessionRun(session.id)
+    client.appendSessionRunEvent.mockImplementation(async (_o, _s, _r, _t, event) => {
+      if (event.payload?.targetMessageId === "a")
+        throw new CollabConflictError("conflict", { reason: "message_redacted" })
+      return {}
+    })
+    listMessages.mockResolvedValue([
+      { id: "a", role: "assistant", createdAt: 1, parts: [{ type: "text", text: "one two" }] },
+      { id: "b", role: "assistant", createdAt: 2, parts: [{ type: "text", text: `next${TAIL}` }] },
+    ])
+    await expect(publishSharedSessionRun(session.id)).resolves.toBeUndefined()
+    const targets = () =>
+      client.appendSessionRunEvent.mock.calls
+        .map((call) => call[4].payload?.targetMessageId)
+        .filter((target): target is string => typeof target === "string")
+    expect(targets().filter((target) => target === "b")).toEqual(["b"])
+    const refusedSoFar = targets().filter((target) => target === "a").length
+    listMessages.mockResolvedValue([
+      {
+        id: "a",
+        role: "assistant",
+        createdAt: 1,
+        parts: [{ type: "text", text: "one two three" }],
+      },
+    ])
+    await publishSharedSessionRun(session.id)
+    expect(targets().filter((target) => target === "a").length).toBe(refusedSoFar)
+  })
+
+  it("runs one trailing pass instead of queueing a pass per tick behind a slow server", async () => {
+    const client = fullClient()
+    await beginSharedSessionRun(
+      session,
+      "run",
+      { messageId: "message" },
+      {
+        resolveContext: context(client as never),
+        getDeviceId: async () => "device",
+        setInterval: (() => 1) as never,
+      }
+    )
+    const listMessages = jest.requireMock("@/lib/db/messages").listMessages
+    listMessages.mockResolvedValue([
+      { id: "a", role: "assistant", createdAt: 1, parts: [{ type: "text", text: `one${TAIL}` }] },
+    ])
+    let release!: () => void
+    client.appendSessionRunEvent.mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve({})))
+    )
+    listMessages.mockClear()
+    const first = publishSharedSessionRun(session.id)
+    const second = publishSharedSessionRun(session.id)
+    const third = publishSharedSessionRun(session.id)
+    // Wait for the first pass to reach its (held) append.
+    while (!release) await new Promise((resolve) => setTimeout(resolve, 0))
+    listMessages.mockResolvedValue([
+      {
+        id: "a",
+        role: "assistant",
+        createdAt: 1,
+        parts: [{ type: "text", text: `one two${TAIL}` }],
+      },
+    ])
+    release()
+    await Promise.all([first, second, third])
+    // One pass in flight, one trailing pass: never one pass per call.
+    expect(listMessages).toHaveBeenCalledTimes(2)
+    const last = client.appendSessionRunEvent.mock.calls.at(-1)?.[4]
+    expect(last).toMatchObject({
+      kind: "message.corrected",
+      payload: { targetMessageId: "a", parts: [{ type: "text", text: "one two" }] },
+    })
+  })
+
+  it("lets a trailing pass succeed after the in-flight pass failed", async () => {
+    const client = fullClient()
+    await beginSharedSessionRun(
+      session,
+      "run",
+      { messageId: "message" },
+      {
+        resolveContext: context(client as never),
+        getDeviceId: async () => "device",
+        setInterval: (() => 1) as never,
+      }
+    )
+    jest
+      .requireMock("@/lib/db/messages")
+      .listMessages.mockResolvedValue([
+        { id: "a", role: "assistant", createdAt: 1, parts: [{ type: "text", text: "one" }] },
+      ])
+    let fail!: () => void
+    client.appendSessionRunEvent.mockImplementationOnce(
+      () => new Promise((_, reject) => (fail = () => reject(new Error("blip"))))
+    )
+    const first = publishSharedSessionRun(session.id)
+    const retry = publishSharedSessionRun(session.id)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fail()
+    await expect(Promise.all([first, retry])).resolves.toBeDefined()
+    expect(client.appendSessionRunEvent.mock.calls.at(-1)?.[4]).toMatchObject({
+      kind: "message.corrected",
+      payload: { targetMessageId: "a" },
+    })
+  })
+})
+
+describe("ADR-0241 WP3 live publisher", () => {
+  const TAIL = " ".repeat(SHARED_STREAMING_WINDOW)
+  const LIVE = ["shared-chat-execution-v2", "shared-chat-live-v1"]
+
+  async function liveRun(client = fullClient(), features = LIVE) {
+    client.health.mockResolvedValue({ features })
+    // A reply left in the store would count as the run's baseline.
+    await setReplies([])
+    const timers: Array<() => void> = []
+    let clock = 0
+    await beginSharedSessionRun(
+      session,
+      "run",
+      { messageId: "request" },
+      {
+        resolveContext: context(client as never),
+        getDeviceId: async () => "device",
+        setInterval: ((fn: () => void) => {
+          timers.push(fn)
+          return timers.length
+        }) as never,
+        clearInterval: (() => undefined) as never,
+        now: () => clock,
+      }
+    )
+    return {
+      client,
+      timers,
+      advance: (ms: number) => {
+        clock += ms
+      },
+    }
+  }
+
+  async function setReplies(messages: unknown[]) {
+    const { useChatStore } = await import("@/stores/chat")
+    useChatStore.getState().openSession(session.id)
+    useChatStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [session.id]: { ...state.sessions[session.id], messages: messages as never },
+      },
+    }))
+    jest.requireMock("@/lib/db/messages").listMessages.mockResolvedValue(messages)
+  }
+
+  const setReply = (parts: unknown[], id = "reply") =>
+    setReplies([{ id, role: "assistant", createdAt: 1, parts }])
+
+  const flush = async () => {
+    for (let i = 0; i < 6; i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  const corrections = (client: ReturnType<typeof fullClient>) =>
+    client.appendSessionRunEvent.mock.calls
+      .map((call) => call[4])
+      .filter((event) => event.kind === "message.corrected")
+  const frames = (client: ReturnType<typeof fullClient>) =>
+    client.postSessionRunLiveFrame.mock.calls.map((call) => call[4].frame)
+
+  afterEach(() => resetSharedRunCoordinatorForTesting())
+
+  it("streams the newest reply live once the server knows it", async () => {
+    const { client, timers } = await liveRun()
+    // updates, heartbeat, live
+    expect(timers).toHaveLength(3)
+    await setReply([{ type: "text", text: `hello${TAIL}` }])
+    timers[2]!()
+    await flush()
+    expect(client.postSessionRunLiveFrame).not.toHaveBeenCalled()
+    await publishSharedSessionRun(session.id)
+    timers[2]!()
+    await flush()
+    expect(client.postSessionRunLiveFrame).toHaveBeenCalledWith(
+      "org",
+      "shared-session",
+      "run",
+      "secret",
+      {
+        frame: expect.objectContaining({
+          sessionId: "shared-session",
+          messageId: "reply",
+          replyTo: "request",
+          keyframe: true,
+          state: "streaming",
+          parts: [{ type: "text", text: "hello" }],
+        }),
+        toolDetailRevision: 0,
+      }
+    )
+  })
+
+  it("refreshes a streaming reply's record at most every 10 s and settles it at once", async () => {
+    const { client, advance } = await liveRun()
+    let sequence = 0
+    client.appendSessionRunEvent.mockImplementation(async () => ({ sequence: ++sequence }))
+    await setReply([{ type: "text", text: `a${TAIL}` }])
+    await publishSharedSessionRun(session.id)
+    expect(corrections(client)).toHaveLength(1)
+    await setReply([{ type: "text", text: `ab${TAIL}` }])
+    advance(5_000)
+    await publishSharedSessionRun(session.id)
+    expect(corrections(client)).toHaveLength(1)
+    advance(6_000)
+    await publishSharedSessionRun(session.id)
+    expect(corrections(client)).toHaveLength(2)
+    await setReply([{ type: "text", text: "ab done" }])
+    await finishSharedSessionRun(session.id, "completed")
+    expect(corrections(client).at(-1)?.payload.parts).toEqual([{ type: "text", text: "ab done" }])
+    const settled = frames(client).at(-1)
+    expect(settled).toMatchObject({ state: "settled", keyframe: true })
+    // created 1, corrections 2 and 3, the final one 4: members draw the
+    // settled reply until their pull reads past 3.
+    expect(settled.afterRevision).toBe(3)
+  })
+
+  it("keeps the 1 s cadence and sends no live frame on a server without live", async () => {
+    const { client, timers } = await liveRun(fullClient(), ["shared-chat-execution-v2"])
+    expect(timers).toHaveLength(2)
+    await setReply([{ type: "text", text: `a${TAIL}` }])
+    await publishSharedSessionRun(session.id)
+    await setReply([{ type: "text", text: `ab${TAIL}` }])
+    await publishSharedSessionRun(session.id)
+    expect(corrections(client)).toHaveLength(2)
+    await finishSharedSessionRun(session.id, "completed")
+    expect(client.postSessionRunLiveFrame).not.toHaveBeenCalled()
+  })
+
+  it("re-reads the tool-detail tier and re-projects when its revision is stale", async () => {
+    const client = fullClient()
+    client.getSharedSession
+      .mockResolvedValueOnce({ id: "shared-session", toolDetail: "summary", toolDetailRevision: 1 })
+      .mockResolvedValue({ id: "shared-session", toolDetail: "full", toolDetailRevision: 2 })
+    let rejected = false
+    client.appendSessionRunEvent.mockImplementation(async (...args: unknown[]) => {
+      const event = args[4] as { kind: string }
+      if (event.kind === "message.corrected" && !rejected) {
+        rejected = true
+        throw new CollabConflictError("stale", { reason: "tool_detail_stale" })
+      }
+      return {}
+    })
+    await liveRun(client)
+    await setReply([
+      { type: "tool-Bash", toolCallId: "c", state: "input-available", input: { command: "ls" } },
+    ])
+    await publishSharedSessionRun(session.id)
+    const last = corrections(client).at(-1)
+    expect(last?.toolDetailRevision).toBe(2)
+    expect(last?.payload.parts[0].input).toEqual({ command: "ls" })
+    expect(client.getSharedSession).toHaveBeenCalledTimes(2)
+  })
+
+  it("sends no frame once the run is torn down", async () => {
+    const { client, timers } = await liveRun()
+    await setReply([{ type: "text", text: `a${TAIL}` }])
+    await publishSharedSessionRun(session.id)
+    suspendSharedSessionRuns()
+    timers[2]!()
+    await flush()
+    expect(client.postSessionRunLiveFrame).not.toHaveBeenCalled()
+  })
+
+  it("ends a failed run's streaming reply with reset", async () => {
+    const { client, timers } = await liveRun()
+    await setReply([{ type: "text", text: `a${TAIL}` }])
+    await publishSharedSessionRun(session.id)
+    timers[2]!()
+    await flush()
+    await finishSharedSessionRun(session.id, "failed")
+    expect(frames(client).map((frame) => frame.state)).toEqual(["streaming", "reset"])
   })
 })

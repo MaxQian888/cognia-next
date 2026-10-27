@@ -8,6 +8,7 @@ import {
   syncSharedSession,
 } from "./shared-chat-sync"
 import type { PlatformWebSocketHandlers } from "@/lib/network/platform-websocket"
+import { subscribeSharedLive } from "./shared-live-frames"
 
 const dbFixture = createDbTestFixture()
 
@@ -64,6 +65,38 @@ describe("shared chat synchronization", () => {
     await dbFixture.restore()
   })
   afterAll(dbFixture.dispose)
+
+  it("retains validated continuation identity across shared transcript synchronization", async () => {
+    const metadata = {
+      continuationOf: "original-request",
+      continuationRuntime: { kind: "external", agentId: "ext-1" },
+      chatTurnOutcome: { state: "interrupted", revision: 2, retryable: true },
+    }
+    await syncSharedSession(
+      readerFor({ ...messageEvent, payload: { ...messageEvent.payload, metadata } }),
+      session.orgId,
+      session.id
+    )
+    const messages = await getDb().messages.toArray()
+    expect(messages.find((message) => message.role === "user")?.metadata).toMatchObject(metadata)
+  })
+
+  it("projects another collaborator's terminal run onto the owning user anchor", async () => {
+    const metadata = {
+      continuationRuntime: { kind: "external", agentId: "ext-1" },
+      chatTurnOutcome: { state: "interrupted", revision: 2, retryable: true },
+    }
+    const ended: SessionEvent = {
+      ...messageEvent,
+      id: "ended",
+      sequence: 2,
+      kind: "run.failed",
+      payload: { status: "cancelled", messageId: "message_1", metadata },
+    }
+    await syncSharedSession(readerFor(messageEvent, ended), session.orgId, session.id)
+    const messages = await getDb().messages.toArray()
+    expect(messages.find((message) => message.role === "user")?.metadata).toMatchObject(metadata)
+  })
 
   it("does not delete sibling sessions when refreshing one conversation", async () => {
     await getDb().collabChatSessions.put({ ...session, id: "sibling", fetchedAt: 1 })
@@ -893,6 +926,63 @@ describe("shared chat synchronization", () => {
     expect(await getDb().collabChatSyncStates.get(session.id)).toBeUndefined()
     handlers.onClose?.({ code: 1000, reason: null })
     stream.close()
+  })
+
+  it("offers live frames, draws them without pulling, and notes events before pulling (ADR-0241)", async () => {
+    let handlers: PlatformWebSocketHandlers = {}
+    const client = {
+      ...readerFor(),
+      openSessionStream: jest.fn(
+        async (
+          _org: string,
+          _id: string,
+          callbacks: PlatformWebSocketHandlers,
+          _options?: { live?: boolean }
+        ) => {
+          handlers = callbacks
+          return {
+            id: "live",
+            kind: "browser" as const,
+            close: jest.fn(async () => {}),
+            send: jest.fn(async () => {}),
+          }
+        }
+      ),
+    }
+    const stream = await connectSharedSessionStream(client, session.orgId, session.id)
+    const drawn: unknown[] = []
+    const stop = subscribeSharedLive(session.id, (frame) => drawn.push(frame))
+    try {
+      expect(client.openSessionStream.mock.calls[0]?.[3]).toEqual({ live: true })
+      const pulls = client.listSessionEvents.mock.calls.length
+      const frame = {
+        sessionId: session.id,
+        messageId: "m",
+        replyTo: "u",
+        seq: 1,
+        base: 0,
+        keyframe: true,
+        state: "streaming",
+        parts: [],
+      }
+      handlers.onMessage?.(JSON.stringify({ type: "live", frame }))
+      expect(drawn).toEqual([frame])
+      expect(client.listSessionEvents.mock.calls.length).toBe(pulls)
+      handlers.onMessage?.(
+        JSON.stringify({
+          type: "event",
+          event: { kind: "message.redacted", payload: { targetMessageId: "m" } },
+        })
+      )
+      // The redaction resets the drawn reply at once, before any pull.
+      expect(drawn.at(-1)).toMatchObject({ messageId: "m", state: "reset" })
+      for (let i = 0; i < 100 && client.listSessionEvents.mock.calls.length === pulls; i++)
+        await new Promise((resolve) => setTimeout(resolve, 2))
+      expect(client.listSessionEvents.mock.calls.length).toBeGreaterThan(pulls)
+    } finally {
+      stop()
+      stream.close()
+    }
   })
 
   it("returns a closable controller after a transient initial failure", async () => {
