@@ -23,6 +23,8 @@
   "launchAutostartFailed": "无法修改自启动：{error}",
   "launchOffToast": "已关闭登录时启动。",
   "launchOnToast": "Cognia 将在登录时自动启动。",
+  "launchStateMismatch": "系统未应用所请求的登录时启动设置。",
+  "launchStateUnavailable": "无法读取登录时启动状态：{error}。返回此窗口时将重试。",
   "loadFailed": "加载桌面信息失败。",
   "locale": "区域",
   "notificationBody": "测试通知——你的桌面集成已经接通。",

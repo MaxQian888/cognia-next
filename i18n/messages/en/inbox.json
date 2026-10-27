@@ -534,6 +534,8 @@
     "sidebarSection": "Inbox sidebar section"
   },
   "inboundA2UI": {
+    "rawUnavailable": "This payload cannot be displayed as JSON.",
+    "replyTo": "Reply to message {id}",
     "rawPayload": "Raw payload",
     "actionUnavailable": "This action can only be used in {platform}",
     "imageUnavailable": "Image available in {platform}",

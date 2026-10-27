@@ -191,6 +191,7 @@
       "sad": "难过",
       "sleeping": "睡觉",
       "thinking": "思考中",
+      "unwell": "不舒服",
       "waiting": "等待中"
     },
     "storageUsage": "{count} 个模型 · {size}",
@@ -279,7 +280,8 @@
     "options": {
       "live2d": "Live2D 模型",
       "sprite-v2": "AI 精灵图（v2）",
-      "svg": "矢量吉祥物"
+      "svg": "矢量吉祥物",
+      "media": "视频 / 帧动画"
     }
   },
   "skinStatus": {
@@ -307,7 +309,8 @@
     "skins": {
       "live2d": "Live2D 模型",
       "sprite-v2": "AI 精灵图（v2）",
-      "svg": "矢量吉祥物"
+      "svg": "矢量吉祥物",
+      "media": "视频 / 帧动画"
     },
     "unknownResource": "未知资源"
   },
@@ -369,6 +372,27 @@
       "empty": "你还没有任何 Twin。",
       "label": "关注的 Twin",
       "placeholder": "选择一个 Twin…"
+    }
+  },
+  "mediaPack": {
+    "importZip": "导入动画 ZIP",
+    "importFolder": "导入动画文件夹",
+    "hint": "支持 DSH config.jsonc 配套 WebM 视频，或 pet-manifest.json 配套 WebP/PNG 帧。请保留原始文件夹结构。",
+    "importing": "正在导入并准备动画…",
+    "installed": "动画角色包已安装并选用。",
+    "empty": "尚未安装动画角色包。",
+    "details": "{count} 段动作 · {size} MiB",
+    "active": "当前使用",
+    "activate": "启用",
+    "delete": "删除",
+    "deleteNamed": "删除 {name}",
+    "errors": {
+      "invalid": "无法安装此角色包，请检查配置和媒体文件。",
+      "missingFiles": "缺少部分动画文件，请导入完整角色包文件夹或 ZIP。",
+      "tooLarge": "角色包上限为 128 MiB、5,000 个文件，每段视频不超过 15 秒。",
+      "ambiguous": "发现多个动画配置，请每次导入一个角色包。",
+      "unsupported": "此处无法导入该格式。请在本机桌面端使用 DSH 视频角色包或 WebP/PNG 帧动画包。",
+      "decoderMissing": "视频转换需要支持 VP8/VP9 的 FFmpeg。请安装 FFmpeg，或改为导入 WebP/PNG 帧动画包。"
     }
   }
 }

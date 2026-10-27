@@ -3484,29 +3484,47 @@
       },
       "runtime": {
         "aider": "Aider",
+        "amp": "Amp",
+        "antigravityAcp": "Antigravity ACP",
+        "auggie": "Auggie",
+        "autohandCode": "Autohand Code",
         "claude": "Claude",
         "claudeCode": "Claude Code",
         "cline": "Cline",
+        "codebuddy": "CodeBuddy",
+        "codebuff": "Codebuff",
         "codex": "Codex",
         "codexAcp": "Codex ACP",
         "codexAppServer": "Codex（应用服务）",
+        "commandCode": "Command Code",
+        "continueDev": "Continue",
         "copilotCli": "GitHub Copilot",
+        "crush": "Charm Crush",
         "cursorCli": "Cursor",
         "devin": "Devin CLI",
         "droid": "Droid",
         "geminiCli": "Gemini",
         "goose": "Goose",
         "grok": "Grok Build",
+        "hermesAgent": "Hermes Agent",
+        "kilocode": "Kilo Code",
         "kimi": "Kimi Code",
         "kiro": "Kiro",
+        "mimoCode": "MiMo Code",
         "minimaxCode": "MiniMax Code",
+        "mistralVibe": "Mistral Vibe",
+        "muse": "Muse",
+        "ohMyPi": "oh-my-pi",
+        "openclaude": "OpenClaude",
         "opencodeAcp": "OpenCode（ACP）",
         "opencodeRemote": "OpenCode（远程）",
         "opencodeServer": "OpenCode V1",
         "pi": "Pi",
         "piRpc": "Pi（原生 RPC）",
         "qoder": "Qoder",
-        "qwenCode": "Qwen Code"
+        "qwenCode": "Qwen Code",
+        "rovoDev": "Rovo Dev",
+        "zcode": "ZCode"
       },
       "runtimeStatus": {
         "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",
@@ -4934,6 +4952,8 @@
       "hunkReplace": "替换",
       "lines": "行",
       "original": "当前",
+      "previewSelectionAria": "查看引用内容：{title}",
+      "previewToolbarAria": "引用内容工具栏",
       "promoteSelectionAria": "把 {title} 设为编辑目标",
       "proposed": "提案",
       "reDiff": "与当前重新比对",
@@ -5456,6 +5476,89 @@
         "raw": "原始树"
       }
     },
+    "lume": {
+      "adoptWorkspace": "批准并采纳已审阅更改",
+      "attach": "领养 Cognia 存储中的 VM",
+      "binary": "已安装的 Lume 可执行文件",
+      "cancelOperation": "取消操作",
+      "cancellationPending": "已请求取消，正在等待 Host 确认；仍可使用“立即停止”。",
+      "clone": "克隆已停止的 seed",
+      "completedAfterCancel": "Host 在确认取消前已完成此操作，已保留其执行结果。",
+      "connect": "连接",
+      "create": "使用本地 IPSW 创建",
+      "delete": "删除 VM",
+      "description": "在 Apple Silicon 上运行本地 macOS guest。VM 磁盘和 SSH 凭据保留在此 Mac。",
+      "desktopRequired": "请在拥有 VM 的 Apple Silicon Mac 上打开 Cognia 桌面应用。",
+      "disable": "禁用新操作",
+      "driverVersion": "已批准的 Cua Driver 版本",
+      "enable": "配置并启用",
+      "errors": {
+        "authorization": "请解锁拥有该 VM 的 Cognia 账户，并批准原生请求后再试。",
+        "cancelled": "Host 已确认取消此操作。继续前请刷新诊断状态。",
+        "capacity": "Host 的可用磁盘、内存或 VM 槽位不足。请提供足够容量后再启动。",
+        "guest": "请启动 guest，并验证 helper、Driver 和图形会话权限后再继续。",
+        "identity": "此 VM 或会话引用已过期。请刷新诊断并使用当前受管资源。",
+        "observation": "无法确认操作状态，已请求取消。重试前请检查 VM 和源文件；命令未被自动重放。",
+        "policy": "此任务要求的策略超出 Lume profile 的保障范围。请检查网络、CPU、内存和路径要求。",
+        "recovery": "此操作需要恢复处理。请刷新诊断，确认 VM 已停止，并检查结果后再试；已采纳的更改仍然有效。",
+        "ssh": "请检查 guest SSH 账户、已安装公钥和已信任的 Host 指纹，然后重新连接。",
+        "version": "请核对已安装的 Lume 版本和可执行文件路径。若文件已变化，请重新配置并批准。",
+        "workspace": "请检查已导入工作区、源目录身份和大小限制。采纳前请重新审阅更改。",
+        "writers": "Shell 或 GUI 工作可能异步修改 guest 文件，且可能在重启后继续。typed 编辑或上传请使用新的干净 clone；当前执行组仍可读取文件并继续工作。"
+      },
+      "health": "检查健康状态",
+      "helperHash": "已安装 helper 的 SHA-256",
+      "hostKey": "Guest SSH 公共主机密钥",
+      "importWorkspace": "导入工作区副本",
+      "ipsw": "本地 IPSW 路径",
+      "notReady": "未就绪",
+      "operationFailed": "操作失败。请刷新诊断并检查 VM 后重试。",
+      "operationProgress": "{operation}：{stage}",
+      "policyNotice": "Lume 拒绝 VM 整体断网、网络白名单和严格 CPU 时限。正常命令保留同一执行组，后台进程可能继续运行。取消、执行结果不确定和执行组退休时会停止 VM。不支持挂起和恢复。",
+      "prepareSsh": "准备 SSH 身份",
+      "provision": "准备受管 VM",
+      "qualify": "验证 guest 通道",
+      "quarantined": "已隔离：请停止并检查 VM 后再允许继续执行。",
+      "readiness": "VM：{vm} · SSH：{ssh} · Helper：{helper} · GUI：{gui}",
+      "ready": "已就绪",
+      "refresh": "刷新诊断",
+      "reviewWorkspace": "审阅 guest 更改",
+      "seedStorage": "Seed 存储目录",
+      "setup": "清空剪贴板并打开准备窗口",
+      "setupInstructions": "请使用专用 guest 账户。安装独立 SSH 公钥，轮换克隆的主机密钥，安装 helper 和签名的 CuaDriver.app，并在 guest 控制台授予隐私权限。无头自动化要求冷启动后仍有已解锁的 GUI 会话。准备会话在 15 分钟后或原生窗口进程退出时停止；“立即停止”可马上结束。",
+      "setupMaterial": "Guest 准备材料（公钥和实例 nonce）",
+      "sourceMode": "准备方式",
+      "sshUser": "Guest SSH 账户",
+      "stages": {
+        "awaitingConsent": "等待批准",
+        "finished": "Host 已确认",
+        "provisioning": "正在准备虚拟机",
+        "queued": "等待开始",
+        "running": "执行中",
+        "unknown": "等待 Host 状态"
+      },
+      "start": "无头启动",
+      "state": "状态：{state}",
+      "states": {
+        "creating": "准备中",
+        "deleting": "删除中",
+        "error": "错误",
+        "running": "运行中",
+        "starting": "启动中",
+        "stopped": "已停止",
+        "stopping": "停止中",
+        "uninitialized": "尚未准备",
+        "unknown": "未知"
+      },
+      "stop": "立即停止",
+      "title": "Lume 虚拟机",
+      "trustSsh": "核验并信任 SSH 密钥",
+      "vmName": "源 VM 名称",
+      "workspaceConflict": "源文件在导入后发生变化，未写入任何文件。请保留 guest 磁盘并解决源版本冲突后再采纳。",
+      "workspaceDiff": "冻结的工作区差异",
+      "workspaceNotice": "为任务选择此 VM 前，先向空 guest 工作区导入副本。导入上限为 512 个文件、8 MiB，排除凭据和 Git 元数据。采纳前须审阅差异；采纳会停止 VM，并校验导入时的源版本。文本补丁上限为 64 个文件、1 MiB；二进制更改请单独下载。",
+      "workspaceRoot": "已选择的 Host 工作区目录"
+    },
     "overview": {
       "capabilities": {
         "a11yTree": "无障碍树",
@@ -5574,12 +5677,21 @@
       "failed": "桌面自动化操作失败",
       "hide": "隐藏画中画",
       "justNow": "刚刚",
+      "live": "实时",
+      "liveActivity": "实时 · {action}",
+      "localDesktop": "本机",
       "move": "移动画中画",
       "openSandboxDesktop": "打开沙箱桌面",
+      "previewLabel": "{app} · {desktop} · {number}",
+      "previewUnavailable": "预览暂不可用",
+      "previews": "Computer Use 预览",
+      "remoteDesktop": "远程桌面",
       "resize": "调整画中画大小",
       "screenAlt": "桌面自动化画面",
       "secondsAgo": "{seconds} 秒前",
+      "selectPreview": "显示预览：{target}",
       "show": "显示画中画",
+      "streamTitle": "电脑操作实时预览",
       "title": "桌面自动化",
       "viewLarger": "查看大图",
       "waitingForFrame": "正在等待第一张截图……"
@@ -5610,6 +5722,7 @@
         "doubleClick": "双击模式",
         "error": {
           "capture": "无法获取桌面画面，控制权已释放。",
+          "captureStreaming": "辅助截图暂时无法刷新。串流控制将在现有控制权有效期间继续。",
           "control": "无法获取或续期控制权，请重新接管。",
           "input": "无法确认输入是否成功，控制权已释放；请检查画面后再重试。",
           "release": "无法确认控制权是否已释放；控制权将在 15 秒内自动过期。",
@@ -5627,7 +5740,10 @@
         "sendEscape": "发送 Escape",
         "sendText": "发送文字",
         "streamCadence": "通过 Selkies 实时串流，仅限本机访问。只有在你持有控制权时，键盘和鼠标才会作用于桌面。",
+        "streamConnecting": "正在连接实时串流…",
         "streamControlHelp": "点击进入串流画面后直接使用键盘和鼠标。释放控制权即可把桌面交还；离开应用也会释放。接管期间智能体输入会暂停。",
+        "streamLegacy": "此沙箱镜像不支持串流健康检测。使用新版 Selkies 镜像重建后，即可启用自动故障检测。",
+        "streamRecovering": "实时串流已中断，正在显示截图并自动重试；恢复后请重新接管控制。",
         "streamTitle": "沙箱桌面实时串流",
         "takeControl": "接管控制",
         "textLabel": "发送到沙箱的文字",
@@ -7846,6 +7962,7 @@
     "composer": {
       "ariaAttachImage": "添加文件",
       "ariaMessage": "消息",
+      "ariaResume": "继续",
       "ariaSend": "发送",
       "ariaSendSteer": "作为补充发送",
       "ariaSending": "发送中…",
@@ -7910,8 +8027,12 @@
           "ocrRunning": "OCR 识别中…",
           "ocrToInput": "把文本加进输入框",
           "ocrToggle": "同时发送 OCR 文本",
+          "originalFileTab": "原文件",
+          "originalTab": "原文",
+          "processedTab": "处理结果",
           "redactedNote": "高亮部分在发送前已被脱敏。",
-          "tokens": "{tokens} tokens"
+          "tokens": "{tokens} tokens",
+          "toolbarAria": "文件预览工具栏"
         },
         "processing": {
           "audioPlayer": "播放 {filename}",
@@ -8433,6 +8554,8 @@
         "removeAria": "移除引用 {path}"
       },
       "removePastedChip": "移除粘贴的文本",
+      "resumePrompt": "请从已有进展继续被中断的任务，保留已完成的工作和已有工具结果。对于结果不确定的操作，先检查当前状态再决定是否重做，并完成剩余工作。",
+      "resumeTooltip": "继续被中断的回复",
       "reviewDraftsAria": "审阅 {count} 条待处理草稿",
       "reviewDraftsLabel": "审阅草稿",
       "reviewDraftsTooltip": "有起草好的回复等待你审阅。直接输入消息即可改为发送你自己的内容。",
@@ -9077,10 +9200,12 @@
         "summaryPlan": "规划",
         "summaryUtility": "辅助"
       },
+      "externalCredentialsRequired": "需要配置 Agent 凭证",
       "forkAria": "派生会话",
       "forkSuccess": "已派生新会话，已切换到该分支。",
       "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
       "forkUnsupported": "此 agent 不支持派生会话。",
+      "gatewayUnavailable": "所选 Agent 网关路由不可用",
       "groups": {
         "default": "默认",
         "favorites": "收藏",
@@ -9705,6 +9830,7 @@
       "shareFailed": "无法分享这条消息。",
       "shareLabel": "分享消息",
       "shareTooltip": "分享",
+      "sharedWithheld": "这部分回复可能含有个人或机密信息，已对共享成员隐藏。",
       "showParsed": "查看解析",
       "showRaw": "查看原文",
       "stopReading": "停止朗读",
@@ -9865,6 +9991,13 @@
       "palette": "表情回应",
       "pick": "用 {emoji} 回应",
       "toggle": "{emoji} {count}"
+    },
+    "refusedHostMessages": {
+      "attachments": "附件",
+      "failure": "未发送：{reason}",
+      "keptLocally": "已保留在此设备上。可复制文字后重试。",
+      "notSent": "消息未发送",
+      "unknownReason": "Host 拒绝了这条消息。"
     },
     "renderers": {
       "a2ui": {
@@ -10492,6 +10625,7 @@
       "jumpTo": "跳转到：{label}",
       "noBookmarks": "还没有收藏的轮次。给消息加星标即可固定到这里。",
       "replyCount": "{count} 条回复",
+      "scrollConversation": "滚动对话",
       "showAll": "显示全部轮次",
       "showBookmarked": "只看已收藏的对话轮次",
       "starredReply": "已收藏的回复",
@@ -10838,6 +10972,11 @@
     "approver": "审批人",
     "audit": "授权审计",
     "auditActor": "{user} · {reason}",
+    "backgroundDraft": "根据本对话起草",
+    "backgroundDraftFailed": "无法起草背景说明，你可以自己填写。",
+    "backgroundHeading": "来自之前一段私有对话的背景：",
+    "backgroundHint": "只有留在这里的内容会被分享。它会作为你的第一条消息发布，成员和 Agent 都能看到。",
+    "backgroundLabel": "给成员的背景说明（可选）",
     "breakGlass": "紧急访问",
     "breakGlassAction": "授予 15 分钟紧急访问",
     "breakGlassFailed": "无法授予紧急访问。",
@@ -10959,6 +11098,7 @@
     "inviteToken": "邀请令牌",
     "inviteTokenPlaceholder": "cit_…",
     "joinDescription": "粘贴对话成员提供的邀请令牌。",
+    "joinViaInvite": "通过邀请加入会话…",
     "leaveConversation": "退出对话",
     "leaveFailed": "无法退出对话，请刷新成员信息后重试。",
     "leftConversation": "已退出共享对话。",
@@ -10995,6 +11135,13 @@
     "runCoordination": "Agent 运行",
     "runHost": "正在 {user} 的设备上运行",
     "running": "运行中",
+    "shareFromNowComplete": "共享对话已开始，本对话仍保持私有。",
+    "shareFromNowFailed": "无法开始共享对话，没有分享任何内容。",
+    "shareModeFromNow": "从现在开始分享",
+    "shareModeFromNowDescription": "新建一个共享对话。本对话及其历史保持私有，成员只能看到之后发生的内容。",
+    "shareModeHistory": "分享完整历史",
+    "shareModeHistoryDescription": "把本对话转为共享对话。所有受邀成员都能读到之前的每条消息和附件。",
+    "shareModeLabel": "分享方式",
     "shareReferencesCancel": "取消",
     "shareReferencesConfirm": "仍然分享",
     "shareReferencesLiveToast": "此消息嵌入了其他对话的快照——这里的所有成员都能读到。",
@@ -11004,6 +11151,7 @@
     "shared": "共享",
     "sharedDescription": "成员、消息、运行、审批和附件均以服务器权限为准。",
     "sharedTitle": "共享会话",
+    "startShared": "开始共享对话",
     "switchBuildDisabled": "当前构建未启用共享会话，因此无法在这里打开。",
     "switchHelp": "允许本机打开多人共享的会话，角色、事件顺序和审批由服务端决定。关闭后会隐藏共享入口，并停止本应用拉取共享会话，不会删除任何数据。",
     "switchLabel": "共享会话",
@@ -11019,6 +11167,14 @@
     },
     "teamRoomConversion": "团队会话暂时无法共享：它的回复在本机生成，而共享会话的回复来自服务端。",
     "toggleApprover": "切换 {user} 的高风险审批权限",
+    "toolDetailCancel": "取消",
+    "toolDetailConfirm": "显示",
+    "toolDetailConfirmTitle": "向成员显示命令和编辑内容？",
+    "toolDetailConfirmWarning": "命令和编辑内容里可能有脱敏遗漏的内部主机名、路径或密钥。从下一次工具调用起，此对话的所有成员（包括访客）都能看到。",
+    "toolDetailDescription": "关闭：成员只看到运行了哪些工具、改动了工作区里的哪些文件以及改动量。开启：成员还会看到命令、编辑内容、搜索和待办，其中的密钥会被脱敏。",
+    "toolDetailFailed": "无法更改成员可见的内容",
+    "toolDetailLabel": "向成员显示命令和编辑内容",
+    "toolDetailReadOnly": "只有所有者或维护者可以更改此项。",
     "transferBeforeLeaving": "退出前请将另一位成员设为 Owner，最后一位所有者不能退出。",
     "updateFailed": "成员状态已在其他位置变化或无法更新。",
     "userId": "用户 ID",
@@ -12821,6 +12977,22 @@
       "resourceViews": "此项的视图"
     },
     "exportResourceSession": "导出此资源会话",
+    "layoutScopes": {
+      "fileSidebar": {
+        "description": "调整文件侧栏与编辑区的空间分配。",
+        "focus": "聚焦文件侧栏",
+        "narrow": "自动适宽",
+        "title": "文件侧栏布局",
+        "wide": "加宽文件侧栏"
+      },
+      "workspace": {
+        "description": "调整整个右侧工作区与聊天区的空间分配。",
+        "focus": "聚焦工作区",
+        "narrow": "收窄工作区",
+        "title": "工作区布局",
+        "wide": "加宽工作区"
+      }
+    },
     "logsPanel": {
       "count": "{count, plural, other {# 条日志}}",
       "emptyDescription": "当前过滤条件下没有日志条目。",
@@ -13858,6 +14030,7 @@
       "collapseTeams": "折叠团队列表",
       "compactDensity": "紧凑行距",
       "conversationsTitle": "会话",
+      "createMenu": "新建或加入会话",
       "deleteFolder": "删除文件夹",
       "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留，并回到放入文件夹之前所在的列表位置。此操作不可撤销。",
       "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
@@ -17311,6 +17484,17 @@
         "retention": "保留天数",
         "title": "证据"
       },
+      "executionProfile": {
+        "label": "执行环境",
+        "profiles": {
+          "desktop-chat": "桌面对话",
+          "isolated-text": "隔离文本",
+          "pure-model": "纯模型"
+        },
+        "teamNoticeDescription": "团队运行仅评估文本协作。原生工具、MCP、文件、检索和桌面状态均不可用；结果不代表这些能力的效果。",
+        "teamNoticeTitle": "团队评测采用隔离文本环境",
+        "unknown": "未记录"
+      },
       "goal": {
         "description": "在消耗 Token 前先定义决策。项目既可评估纯模型，也可评估完整 Agent 行为。",
         "title": "定义评估目标"
@@ -17352,7 +17536,7 @@
         "evidenceHint": "当前有 {count} 项预检需要处理。"
       },
       "review": {
-        "actualCost": "实际费用",
+        "actualCost": "已记录费用",
         "allStatuses": "全部状态",
         "allVariants": "全部变体",
         "apply": {
@@ -17413,8 +17597,8 @@
         "caseEvidenceHint": "检查重复运行、输出、轨迹、评分来源和评审状态，且不会暴露凭据。",
         "confidence": "95% 置信区间",
         "confidenceHint": "在有效留出集上进行带种子的配对 Bootstrap。",
-        "costSummary": "实际费用与估算费用",
-        "costSummaryHint": "最坏情况预留用于保护硬上限；实际用量来自提供方响应。",
+        "costSummary": "记录费用与估算费用",
+        "costSummaryHint": "记录费用取决于可取得的用量和价格；缺失测量会单独标注，提供方最终账单可能不同。",
         "description": "检查推荐、约束、前沿、逐例结果、轨迹、评审意见和来源。",
         "dominated": "被支配 / 已排除",
         "effectiveCases": "有效用例",
@@ -17424,10 +17608,12 @@
         "frontier": "Pareto 前沿",
         "frontierHint": "只对满足全部硬约束的非支配变体排序。",
         "input": "输入",
+        "metricUnavailable": "未测得",
         "noConclusion": "尚无结论",
         "noConclusionHint": "在证据充分且能够区分候选项之前，系统不会推断推荐。",
         "onFrontier": "Pareto 前沿",
         "output": "输出",
+        "partialMetric": "{value}（记录不完整）",
         "providerErrors": "提供方错误与重试",
         "providerErrorsHint": "{count} 项任务包含提供方重试或失败证据。",
         "reasons": {
@@ -18004,11 +18190,13 @@
         "aiderCliBridge": "由 Cognia 的官方 Aider CLI 适配器和独立会话历史提供",
         "attachmentStoreUnavailable": "该运行时没有可接收附件字节的存储",
         "cancelKillsRuntime": "取消会结束整个运行时，而不只是当前回合",
+        "codebuffSdkBridge": "通过固定版本 SDK 桥接实现",
         "codexOptionsChannel": "通过 Codex options 通道传递",
         "cogniaDispatchAgent": "由 Cognia 的 dispatch_agent 工具提供",
         "cogniaExtensionBridge": "由随附的 Cognia 扩展提供",
         "cogniaHookRuntime": "由 Cognia Hook 运行时包裹该回合",
         "committedRepliesOnly": "该通道只上报已提交的回复",
+        "continueCliBridge": "通过 headless 结果和宿主管理的历史回放实现",
         "isolatedLocalService": "由此对话专用的本地服务提供",
         "launchTimeAuthorityOnly": "权限只在启动时授予，运行中无法更改",
         "modelVariantOverlay": "以模型变体（variant）的形式下发",
@@ -18176,6 +18364,21 @@
       "retrying": "正在重试",
       "session": "会话操作失败"
     },
+    "goose": {
+      "childrenTitle": "Goose 子任务",
+      "codeMode": "启用 Goose Code Mode",
+      "codeModeHint": "使用已安装的 Goose 运行时。1.56 版使用 Boa JavaScript 独立上下文，不再支持 TypeScript 生成和 Code Mode execute_bash。审批针对整个批次，内部工具不会逐个再次请求审批。1.56 中继承 Code Mode 的子任务无法暴露最终结果工具；委派时指定 extensions: [\"developer\"] 可保留子任务完成和恢复能力。",
+      "concurrency": "每个父任务的子任务并发数",
+      "concurrencyHint": "默认 5 个，超出的子任务排队等待。此设置独立于 Cognia 会话及 Team 并发限制。",
+      "operationFailed": "操作未能完成，请刷新父会话后重试。",
+      "readOnlyHint": "只读快照，重新加载可查看进展。恢复操作通过父会话执行。",
+      "refreshChildren": "加载子任务",
+      "reloadProgress": "加载最新进展",
+      "resumeChild": "通过父任务恢复",
+      "runtimeTitle": "Goose 运行时",
+      "transcript": "子任务记录",
+      "viewChild": "查看 {id}"
+    },
     "hostConfigs": {
       "actionsLabel": "{name} 的操作",
       "copyLocal": "从本机复制",
@@ -18279,6 +18482,76 @@
       "addAgentFailed": "添加外部代理失败。",
       "addExternalAgent": "添加外部代理",
       "addingAgent": "添加中…",
+      "additionalAgents": {
+        "amp": {
+          "environment": "使用 AMP_API_KEY 或原生登录；AMP_CLI_PATH 定位程序，AMP_ACP_STATE_DIR 保存精确会话映射，不会恢复无关的最近会话。",
+          "setup": "先安装并登录 Amp，再安装 amp-acp 0.10.0。此社区 bridge 不转发逐工具审批，需要显式自动权限及宿主沙箱，不支持 Orb。"
+        },
+        "auggie": {
+          "environment": "使用原生登录，或显式提供 AUGMENT_SESSION_AUTH 会话 JSON。凭据不会写入诊断日志。",
+          "setup": "安装 @augmentcode/auggie@0.36.0，然后运行 auggie login。托管会话禁用自动更新；请在会话之外更新。"
+        },
+        "autohand-code": {
+          "environment": "复用 ~/.autohand 下的原生配置。凭据保留在原生配置或显式设置的进程环境中。",
+          "setup": "安装 autohand-cli@0.9.8，然后运行 autohand --setup 配置账号和模型提供商。此入口使用原生 ACP。"
+        },
+        "codebuddy": {
+          "environment": "CODEBUDDY_API_KEY 用于模型调用，CODEBUDDY_AUTH_TOKEN 用于平台调用，请按原生配置选择所需凭据。",
+          "setup": "安装 @tencent-ai/codebuddy-code@2.177.0 并完成原生登录。使用 codebuddy --acp；不接受绕过工具权限的沙箱环境开关。"
+        },
+        "codebuff": {
+          "environment": "在进程环境中设置 CODEBUFF_API_KEY。凭据保存在宿主的密钥存储中，不写入提示词。",
+          "setup": "Cognia 内置经过校验的桥接和 @codebuff/sdk 0.10.7。设置 CODEBUFF_API_KEY 和工作目录；此接入使用官方 SDK。"
+        },
+        "command-code": {
+          "environment": "原生账号和自定义提供商保留在 ~/.commandcode。支持客户端 stdio、HTTP MCP，不支持旧 SSE；原生同名服务器优先。",
+          "setup": "安装 command-code@1.88.0，然后运行 commandcode login。使用官方 commandcode 别名避免与 Windows 系统 cmd 混淆。"
+        },
+        "continue-dev": {
+          "environment": "使用 ~/.continue 中的原生配置和登录，或明确设置原生模型服务凭据。",
+          "setup": "安装官方 Continue CLI 并运行 cn login。Cognia 使用 headless JSON 结果，不启动缺少认证的 cn serve 服务。"
+        },
+        "crush": {
+          "environment": "使用 Crush 原生配置，或在进程环境中明确设置其模型服务凭据。",
+          "setup": "安装 Crush 0.98.2 并配置原生模型服务。Cognia 启动私有 Unix socket 服务，通过校验后的内置桥接通信。"
+        },
+        "hermes-agent": {
+          "environment": "HERMES_HOME 选择原生状态目录，默认 ~/.hermes。仅关闭 ACP viewer 不代表后台任务已取消。",
+          "setup": "安装 Hermes 及 ACP 扩展，用 hermes model 配置提供商，并运行 hermes acp --check。运行任务需要由当前宿主管理的受限 daemon。"
+        },
+        "kilocode": {
+          "environment": "使用原生登录或显式提供 KILO_API_KEY、KILO_ORG_ID。KILO_AUTH_CONTENT 是敏感原生认证 JSON。",
+          "setup": "安装 @kilocode/cli@7.8.18 并在 Kilo 中登录。移除 Cognia 配置会保留系统安装。"
+        },
+        "mimo-code": {
+          "environment": "MIMOCODE_HOME 可设置 MiMo 自己的数据、配置、缓存和状态目录，不复制 OpenCode 凭据。",
+          "setup": "使用小米官方安装器安装 MiMo Code，然后运行 mimo auth login。不会执行上游遗留的 OpenCode 登录命令。"
+        },
+        "mistral-vibe": {
+          "environment": "MISTRAL_API_KEY 可配置提供商；VIBE_HOME 可调整原生状态和凭据目录，默认 ~/.vibe。",
+          "setup": "使用官方安装器或 uv 安装 mistral-vibe 3.0.1。启动独立的 vibe-acp，并使用其公布的认证方式。"
+        },
+        "muse": {
+          "environment": "MUSE_CLI 可定位原生程序。MCP 需要 Muse 的 sessionMcp 授权；缺少授权或使用不支持的 SSE 会明确报错。",
+          "setup": "先安装 Muse Code 并运行 muse login，再安装 @brokkai/muse-acp。未加作用域的 muse-acp 是不同项目。工具审批和会话授权必须可用。"
+        },
+        "oh-my-pi": {
+          "environment": "OMP 原生配置位于 ~/.omp/agent。Pi 是独立产品，不会复制其账号和状态。此入口不使用实验性原生 RPC 包。",
+          "setup": "安装 @oh-my-pi/pi-coding-agent 或官方 omp 程序并配置原生提供商。通过 omp acp 和宿主沙箱运行。"
+        },
+        "openclaude": {
+          "environment": "使用 OpenClaude 原生登录；OPENCLAUDE_CONFIG_DIR 可选择其独立配置目录。",
+          "setup": "安装 @twigpine/openclaude@0.33.0 并通过其原生 CLI 登录。Cognia 使用独立的 stream-json 协议和强制工具审批钩子，凭据与 Claude Code 分开。"
+        },
+        "rovo-dev": {
+          "environment": "优先使用 acli 原生登录；仅在原生配置需要时设置 USER_EMAIL 和 USER_API_TOKEN。",
+          "setup": "安装 Atlassian CLI 并登录 Rovo Dev。Cognia 启动带随机会话凭据的本地服务，保留原生配置中的权限规则。"
+        },
+        "zcode": {
+          "environment": "ZCODE_CJS 定位已安装的桌面引擎。原生状态位于 ~/.zcode，bridge 诊断位于 ~/.zcode-acp；此入口仅支持文本。",
+          "setup": "安装并登录官方 ZCode macOS 应用，再安装 zcode-acp 0.9.1。不会使用自动批准所有操作的 run 子命令，也可选择原生终端入口。"
+        }
+      },
       "advancedOptions": "高级选项",
       "agentsHeading": "代理",
       "aiderEnvVarHint": "DeepSeek 示例：参数 --model deepseek/deepseek-flash，环境变量 DEEPSEEK_API_KEY。其他服务请使用对应的 Aider model ID 和 key。",
@@ -18452,6 +18725,48 @@
       "tabCompatibility": "兼容性",
       "tabDiagnostics": "诊断",
       "tabSessions": "会话",
+      "terminalAgents": {
+        "currentWorkspace": "当前工作区",
+        "directory": "终端宿主上的工作目录",
+        "directoryPlaceholder": "项目的绝对目录",
+        "errors": {
+          "cleanup-failed": "未能移除宿主上的临时启动配置。请选择原来的宿主并重试清理，进程状态以终端显示为准。",
+          "docs-failed": "无法打开配置文档，请重试。",
+          "early-exit": "Agent 在启动时退出，请打开终端查看输出。",
+          "invalid-workspace": "请输入终端宿主上的绝对工作目录。",
+          "profile-conflict": "有多个运行中的终端使用此 Agent 配置，请先在终端中关闭多余的进程，再重新启动。",
+          "recovery-failed": "无法检查此宿主上是否已有 Agent 进程。请重新连接或恢复终端列表权限后重试，系统未启动替代进程。",
+          "session-unavailable": "终端连接不可用。请先重新连接所属宿主，再停止或启动其他进程。",
+          "spawn-denied": "宿主或插件策略拒绝了此次终端启动。",
+          "spawn-failed": "无法启动 Agent。请检查安装情况和终端宿主状态，然后重试。",
+          "stop-failed": "无法确认进程已停止。终端仍被保留，你可以重试。",
+          "stopping": "上一个进程仍在停止中，请等待后再启动。",
+          "unknown-agent": "此终端 Agent 不可用。"
+        },
+        "hostUnavailable": "启动 Agent 需要桌面端或已配对的终端宿主。",
+        "launch": "启动 {agent}",
+        "launching": "正在启动…",
+        "limitations": "这些 Agent 由你在终端中直接操作，使用各自的账号、网络访问和工具权限。Cognia 聊天的审批、提示词过滤、结构化事件及会话恢复／分叉不适用于此处。请直接在终端中交互和登录。",
+        "open": "打开 {agent} 终端",
+        "restart": "重新启动 {agent}",
+        "retryCleanup": "重试清理 {agent}",
+        "setup": {
+          "freebuff": "请在终端宿主上安装官方 Freebuff CLI，然后在终端中完成原生登录。系统不会自动提交提示词。",
+          "zcode": "请在终端宿主上安装官方 ZCode CLI。此入口打开原生交互式 TUI，账号和模型服务配置由 ZCode 管理。"
+        },
+        "setupDocs": "配置 {agent}",
+        "statuses": {
+          "disconnected": "连接不可用",
+          "exited": "已退出",
+          "not-started": "未运行",
+          "running": "进程运行中"
+        },
+        "stop": "停止并关闭 {agent}",
+        "stopping": "正在停止…",
+        "terminalOnly": "原生终端",
+        "title": "终端 Agent",
+        "workspace": "工作区"
+      },
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
       "transportStdioLocal": "stdio（本地）",
@@ -18798,6 +19113,59 @@
       "acpStableElicitation": "稳定版信息征询",
       "addAgent": "添加代理",
       "addAgentToStart": "添加一个代理以开始使用",
+      "additionalAgents": {
+        "amp": {
+          "description": "通过本地 ACP bridge 运行 Amp，并明确授予当前启动的工具权限。"
+        },
+        "auggie": {
+          "description": "通过 Auggie 原生 ACP 使用现有登录和协商后的会话能力。"
+        },
+        "autohand-code": {
+          "description": "通过 Autohand Code 原生 ACP 接收回复、处理工具审批和恢复原生会话。"
+        },
+        "codebuddy": {
+          "description": "通过腾讯 CodeBuddy 原生 ACP 协商会话、工具和模型控制能力。"
+        },
+        "codebuff": {
+          "description": "通过固定版本 SDK 和受限宿主桥接接入 Codebuff，统一处理工具与网络请求。"
+        },
+        "command-code": {
+          "description": "通过 Command Code 原生 ACP 使用每个会话独立的进程和工具审批。"
+        },
+        "continue-dev": {
+          "description": "通过 Continue 原生 CLI 获取结构化结果，由 Cognia 管理对话历史。"
+        },
+        "crush": {
+          "description": "通过私有服务接口接入 Charm Crush，支持流式输出、工具审批与用户问答。"
+        },
+        "hermes-agent": {
+          "description": "通过 Hermes 原生 ACP 使用受控 daemon 和会话生命周期。"
+        },
+        "kilocode": {
+          "description": "通过 Kilo Code 原生 ACP 使用流式回复、工具、模型选择和已协商的会话能力。"
+        },
+        "mimo-code": {
+          "description": "通过小米 MiMo Code 原生 ACP 接收回复、处理工具审批并恢复会话。"
+        },
+        "mistral-vibe": {
+          "description": "通过 Mistral Vibe 官方 ACP 程序使用原生账号、工具和会话。"
+        },
+        "muse": {
+          "description": "通过 BrokkAi 社区 ACP bridge 连接 Meta Muse Code 原生协议。"
+        },
+        "oh-my-pi": {
+          "description": "通过 oh-my-pi 官方 ACP 使用受权限控制的文件、终端和原生会话。"
+        },
+        "openclaude": {
+          "description": "通过原生流式协议接入 OpenClaude，支持工具审批和精确会话恢复。"
+        },
+        "rovo-dev": {
+          "description": "通过自主管理且经过身份校验的本地流式服务接入 Rovo Dev。"
+        },
+        "zcode": {
+          "description": "通过 macOS 社区 ACP bridge 运行 ZCode，每个会话独立进程。"
+        }
+      },
       "agentAdded": "代理添加成功",
       "agentConfigDescription": "配置外部代理的连接参数",
       "agentDuplicated": "已复制智能体",
@@ -22532,6 +22900,8 @@
       "actionUnavailable": "此操作只能在 {platform} 中使用",
       "imageUnavailable": "图片需在 {platform} 中查看",
       "rawPayload": "原始负载",
+      "rawUnavailable": "无法将此负载显示为 JSON。",
+      "replyTo": "回复消息 {id}",
       "untitledAction": "操作"
     },
     "inboundRecovery": {
@@ -32352,6 +32722,7 @@
       "empty": "还没有角色。",
       "inheritAppearance": "继承全局外观",
       "live2dOption": "Live2D · {name}",
+      "mediaOption": "动画：{name}",
       "saveFailed": "角色绑定保存失败，请重试。",
       "skinFor": "{name} 的皮肤",
       "speciesFor": "{name} 的物种",
@@ -32655,6 +33026,7 @@
         },
         "binding": {
           "live2d": "Live2D 模型",
+          "media": "动画包",
           "readOnly": "角色的宠物外观需在桌面端编辑。",
           "sprite": "精灵包"
         },
@@ -32785,7 +33157,9 @@
       "look": {
         "description": "在不改变身份的前提下重新装扮宠物。",
         "descriptionLive2d": "预览并微调当前使用的 Live2D 模型。",
+        "descriptionMedia": "外观与动作由所选角色包提供。",
         "descriptionSprite": "预览当前 AI 生成的 v2 精灵图宠物。",
+        "mediaManagedBelow": "请在下方选择动画角色包。",
         "spriteManagedBelow": "可在下方“外观”区域创建、导入和切换 v2 精灵图宠物。",
         "title": "造型"
       },
@@ -38449,6 +38823,7 @@
     "dismissOnboarding": "关闭",
     "dismissSecurityAlert": "关闭安全提示",
     "done": "完成",
+    "doubao": "豆包",
     "download": "下载",
     "downloading": "下载中...",
     "dropFileHere": "拖放文件到此处或点击浏览",
@@ -38916,6 +39291,7 @@
     "quickSetup": "快速设置",
     "quotaExceeded": "配额超限行为",
     "quotaUsage": "配额使用",
+    "qwen": "通义千问",
     "random": "随机",
     "rateLimitRemaining": "剩余速率限制",
     "readiness": {
@@ -43500,6 +43876,7 @@
       "copilot-cli": "Copilot CLI",
       "cursor": "Cursor",
       "gemini-cli": "Gemini CLI",
+      "goose": "Goose",
       "opencode": "OpenCode",
       "pi": "Pi",
       "qwen-code": "Qwen Code"
@@ -47969,9 +48346,17 @@
               "help": "添加敏感权限 im:message.group_msg。接收到的消息能否运行 Agent，仍由准入规则决定。",
               "title": "群聊免 @ 续聊"
             },
+            "appAvatars": {
+              "help": "读取同一租户内其他机器人的应用信息。仅在需要显示这些头像时选择；无法确认身份时保留回退头像，不会误用当前应用的头像。",
+              "title": "其他应用机器人的头像"
+            },
             "attachments": {
               "help": "添加 im:resource，用于消息附件。聊天附件不需要额外开通文档、云盘或人事文件权限。",
               "title": "图片与文件"
+            },
+            "avatars": {
+              "help": "读取成员头像和会话图片。请开通所列权限并发布应用，通讯录数据权限还需包含要显示头像的成员；没有访问权限时继续显示首字母头像。",
+              "title": "成员和会话头像"
             },
             "botMentions": {
               "help": "添加 im:message.group_at_msg.include_bot:readonly，并在 Cognia 配置机器人发送者准入规则。",
@@ -50719,6 +51104,8 @@
       "launchAutostartFailed": "无法修改自启动：{error}",
       "launchOffToast": "已关闭登录时启动。",
       "launchOnToast": "Cognia 将在登录时自动启动。",
+      "launchStateMismatch": "系统未应用所请求的登录时启动设置。",
+      "launchStateUnavailable": "无法读取登录时启动状态：{error}。返回此窗口时将重试。",
       "loadFailed": "加载桌面信息失败。",
       "locale": "区域",
       "notificationBody": "测试通知——你的桌面集成已经接通。",
@@ -53410,6 +53797,7 @@
           "sad": "难过",
           "sleeping": "睡觉",
           "thinking": "思考中",
+          "unwell": "不舒服",
           "waiting": "等待中"
         },
         "storageUsage": "{count} 个模型 · {size}",
@@ -53426,6 +53814,27 @@
       "lowPower": {
         "description": "将 Live2D 帧率限制为 30 fps，并让漫游休息更久。",
         "label": "低功耗模式"
+      },
+      "mediaPack": {
+        "activate": "启用",
+        "active": "当前使用",
+        "delete": "删除",
+        "deleteNamed": "删除 {name}",
+        "details": "{count} 段动作 · {size} MiB",
+        "empty": "尚未安装动画角色包。",
+        "errors": {
+          "ambiguous": "发现多个动画配置，请每次导入一个角色包。",
+          "decoderMissing": "视频转换需要支持 VP8/VP9 的 FFmpeg。请安装 FFmpeg，或改为导入 WebP/PNG 帧动画包。",
+          "invalid": "无法安装此角色包，请检查配置和媒体文件。",
+          "missingFiles": "缺少部分动画文件，请导入完整角色包文件夹或 ZIP。",
+          "tooLarge": "角色包上限为 128 MiB、5,000 个文件，每段视频不超过 15 秒。",
+          "unsupported": "此处无法导入该格式。请在本机桌面端使用 DSH 视频角色包或 WebP/PNG 帧动画包。"
+        },
+        "hint": "支持 DSH config.jsonc 配套 WebM 视频，或 pet-manifest.json 配套 WebP/PNG 帧。请保留原始文件夹结构。",
+        "importFolder": "导入动画文件夹",
+        "importZip": "导入动画 ZIP",
+        "importing": "正在导入并准备动画…",
+        "installed": "动画角色包已安装并选用。"
       },
       "memory": {
         "clearAction": "清空宠物记忆",
@@ -53497,6 +53906,7 @@
         "label": "皮肤",
         "options": {
           "live2d": "Live2D 模型",
+          "media": "视频 / 帧动画",
           "sprite-v2": "AI 精灵图（v2）",
           "svg": "矢量吉祥物"
         }
@@ -53525,6 +53935,7 @@
         "retry": "重试",
         "skins": {
           "live2d": "Live2D 模型",
+          "media": "视频 / 帧动画",
           "sprite-v2": "AI 精灵图（v2）",
           "svg": "矢量吉祥物"
         },
@@ -62886,6 +63297,7 @@
       "terminalReplWrite": "向 REPL 会话 stdin 写入字节。非阻塞 —— 配合 terminal_repl_read 使用。",
       "terminateProcess": "终止 PID（默认仅允许本会话启动的 PID）。",
       "topMemoryProcesses": "按常驻内存排序取前 N 个进程。",
+      "verificationBatch": "在共享预算内逐条执行验证批次，命令沿用 Bash 审批。",
       "webClone": "对在线网页做快照——下载其 HTML 以及全部 CSS/JS/图片/字体资源，打包成自包含单文件或目录 bundle，可选做组件提取与框架代码生成。产物写入工作区。",
       "webCloneConvert": "对已有的本地快照（目录 bundle 或单 HTML 文件）做组件提取 + 框架代码生成，无需重新抓取。生成 Vue/React/Angular/Svelte/jQuery 组件。"
     },

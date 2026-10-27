@@ -191,6 +191,7 @@
       "sad": "Sad",
       "sleeping": "Sleeping",
       "thinking": "Thinking",
+      "unwell": "Unwell",
       "waiting": "Waiting"
     },
     "storageUsage": "{count} models · {size}",
@@ -279,7 +280,8 @@
     "options": {
       "live2d": "Live2D model",
       "sprite-v2": "AI sprite (v2)",
-      "svg": "Vector mascot"
+      "svg": "Vector mascot",
+      "media": "Video / frame animation"
     }
   },
   "skinStatus": {
@@ -307,7 +309,8 @@
     "skins": {
       "live2d": "Live2D model",
       "sprite-v2": "AI sprite (v2)",
-      "svg": "Vector mascot"
+      "svg": "Vector mascot",
+      "media": "Video / frame animation"
     },
     "unknownResource": "unknown resource"
   },
@@ -369,6 +372,27 @@
       "empty": "You don't have any Twins yet.",
       "label": "Watched Twin",
       "placeholder": "Choose a Twin…"
+    }
+  },
+  "mediaPack": {
+    "importZip": "Import animation ZIP",
+    "importFolder": "Import animation folder",
+    "hint": "Import DSH config.jsonc with WebM clips, or pet-manifest.json with WebP/PNG frames. Keep the original folder structure.",
+    "importing": "Importing and preparing animation…",
+    "installed": "Animation pack installed and selected.",
+    "empty": "No animation packs installed.",
+    "details": "{count} clips · {size} MiB",
+    "active": "Active",
+    "activate": "Activate",
+    "delete": "Delete",
+    "deleteNamed": "Delete {name}",
+    "errors": {
+      "invalid": "Could not install this pack. Check its configuration and media files.",
+      "missingFiles": "Some animation files are missing. Import the complete pack folder or ZIP.",
+      "tooLarge": "Pack limit: 128 MiB, 5,000 files and 15 seconds per video clip.",
+      "ambiguous": "Multiple animation configurations found. Import one character pack at a time.",
+      "unsupported": "This format cannot be imported here. Use a DSH video pack or a WebP/PNG frame pack on the local desktop.",
+      "decoderMissing": "Video conversion needs FFmpeg with VP8/VP9 support. Install FFmpeg or import a WebP/PNG frame pack."
     }
   }
 }

@@ -534,6 +534,8 @@
     "sidebarSection": "收件箱侧栏分区"
   },
   "inboundA2UI": {
+    "rawUnavailable": "无法将此负载显示为 JSON。",
+    "replyTo": "回复消息 {id}",
     "rawPayload": "原始负载",
     "actionUnavailable": "此操作只能在 {platform} 中使用",
     "imageUnavailable": "图片需在 {platform} 中查看",

@@ -76,6 +76,7 @@
     "contentSearch": "Search file contents (substring or regex) with line numbers.",
     "coreApplyPatch": "Apply a unified diff across one or more files atomically (create / modify / delete).",
     "coreBash": "Execute a free-form shell command (approval-gated; output keeps the tail).",
+    "verificationBatch": "Run bounded sequential verification batches with per-command Bash approval.",
     "coreBashOutput": "Read new output from a background shell started with bash(run_in_background).",
     "coreEdit": "Replace an exact string in a file, with whitespace-tolerant fuzzy fallback.",
     "coreGlob": "Find files by glob pattern, sorted by modification time (newest first).",

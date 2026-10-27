@@ -314,6 +314,17 @@
       "retention": "保留天数",
       "title": "证据"
     },
+    "executionProfile": {
+      "label": "执行环境",
+      "profiles": {
+        "isolated-text": "隔离文本",
+        "desktop-chat": "桌面对话",
+        "pure-model": "纯模型"
+      },
+      "teamNoticeTitle": "团队评测采用隔离文本环境",
+      "teamNoticeDescription": "团队运行仅评估文本协作。原生工具、MCP、文件、检索和桌面状态均不可用；结果不代表这些能力的效果。",
+      "unknown": "未记录"
+    },
     "goal": {
       "description": "在消耗 Token 前先定义决策。项目既可评估纯模型，也可评估完整 Agent 行为。",
       "title": "定义评估目标"
@@ -355,7 +366,7 @@
       "evidenceHint": "当前有 {count} 项预检需要处理。"
     },
     "review": {
-      "actualCost": "实际费用",
+      "actualCost": "已记录费用",
       "allStatuses": "全部状态",
       "allVariants": "全部变体",
       "apply": {
@@ -416,8 +427,10 @@
       "caseEvidenceHint": "检查重复运行、输出、轨迹、评分来源和评审状态，且不会暴露凭据。",
       "confidence": "95% 置信区间",
       "confidenceHint": "在有效留出集上进行带种子的配对 Bootstrap。",
-      "costSummary": "实际费用与估算费用",
-      "costSummaryHint": "最坏情况预留用于保护硬上限；实际用量来自提供方响应。",
+      "costSummary": "记录费用与估算费用",
+      "costSummaryHint": "记录费用取决于可取得的用量和价格；缺失测量会单独标注，提供方最终账单可能不同。",
+      "metricUnavailable": "未测得",
+      "partialMetric": "{value}（记录不完整）",
       "description": "检查推荐、约束、前沿、逐例结果、轨迹、评审意见和来源。",
       "dominated": "被支配 / 已排除",
       "effectiveCases": "有效用例",

@@ -1,5 +1,6 @@
 {
   "acceptInvite": "Join shared conversation",
+  "joinViaInvite": "Join conversation by invitation…",
   "approvalFailed": "The approval changed or could not be resolved.",
   "allowed": "Allowed",
   "approvals": "Approvals",
@@ -191,5 +192,26 @@
       "done": "Removed the sharing device",
       "failed": "Could not remove the sharing device. Try again."
     }
-  }
+  },
+  "shareModeLabel": "How to share",
+  "shareModeFromNow": "Share from now on",
+  "shareModeFromNowDescription": "Starts a new shared conversation. This conversation and its history stay private; members see only what happens next.",
+  "shareModeHistory": "Share the full history",
+  "shareModeHistoryDescription": "Turns this conversation into a shared one. Everyone invited can read every earlier message and attachment.",
+  "backgroundLabel": "Background for members (optional)",
+  "backgroundDraft": "Draft from this conversation",
+  "backgroundDraftFailed": "The background could not be drafted. You can write it yourself.",
+  "backgroundHint": "Only what you leave here is shared. It is posted as your first message, so members and the agent both see it.",
+  "backgroundHeading": "Background from an earlier private conversation:",
+  "startShared": "Start shared conversation",
+  "shareFromNowComplete": "Shared conversation started. This conversation stays private.",
+  "shareFromNowFailed": "The shared conversation could not be started. Nothing was shared.",
+  "toolDetailLabel": "Show members commands and edits",
+  "toolDetailDescription": "Off: members see which tools ran, the workspace files they touched and how much changed. On: they also see the commands, edits, searches and to-dos, with secrets redacted.",
+  "toolDetailReadOnly": "Only the owner or a maintainer can change this.",
+  "toolDetailConfirmTitle": "Show commands and edits to members?",
+  "toolDetailConfirmWarning": "Commands and edits can hold internal hostnames, paths or secrets that redaction misses. Every member of this conversation, guests included, sees them from the next tool call on.",
+  "toolDetailConfirm": "Show them",
+  "toolDetailCancel": "Cancel",
+  "toolDetailFailed": "Couldn't change what members see"
 }

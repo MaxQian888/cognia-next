@@ -139,7 +139,8 @@
       "title": "Clear the pet binding for {name}?"
     },
     "cleared": "{name} now uses the global pet.",
-    "saveFailed": "Couldn't save the character binding. Try again."
+    "saveFailed": "Couldn't save the character binding. Try again.",
+    "mediaOption": "Animation: {name}"
   },
   "bubbleAction": {
     "openConsole": "Open {tab}"
@@ -383,7 +384,8 @@
       "binding": {
         "readOnly": "Characters' looks are edited in the desktop app.",
         "live2d": "Live2D model",
-        "sprite": "Sprite pack"
+        "sprite": "Sprite pack",
+        "media": "Animation pack"
       },
       "noPet": {
         "title": "No pet on your desktop yet",
@@ -465,7 +467,9 @@
       "descriptionLive2d": "Preview and fine-tune your active Live2D model.",
       "descriptionSprite": "Preview your active AI-generated v2 sprite pet.",
       "spriteManagedBelow": "Create, import, and switch v2 sprite pets in the Appearance section below.",
-      "title": "Look"
+      "title": "Look",
+      "descriptionMedia": "Appearance and animation come from the selected character pack.",
+      "mediaManagedBelow": "Choose an animation pack below."
     },
     "openSettings": "Open full pet settings",
     "preview": {

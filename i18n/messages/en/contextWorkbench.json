@@ -129,6 +129,22 @@
     "showItem": "Show"
   },
   "exportResourceSession": "Export this resource conversation",
+  "layoutScopes": {
+    "workspace": {
+      "title": "Workspace layout",
+      "description": "Resize the entire right workspace relative to the chat.",
+      "narrow": "Narrow workspace",
+      "wide": "Widen workspace",
+      "focus": "Focus workspace"
+    },
+    "fileSidebar": {
+      "title": "File sidebar layout",
+      "description": "Resize the file sidebar relative to the editor.",
+      "narrow": "Automatic sidebar width",
+      "wide": "Widen file sidebar",
+      "focus": "Focus file sidebar"
+    }
+  },
   "logsPanel": {
     "count": "{count, plural, one {# entry} other {# entries}}",
     "emptyDescription": "No log entries match the current filter.",

@@ -135,6 +135,7 @@
     },
     "moveFolderDown": "Move folder down",
     "moveFolderUp": "Move folder up",
+    "createMenu": "Create or join a conversation",
     "newChat": "New chat",
     "newConversation": "New conversation",
     "newConversationIn": "New conversation in {name}",

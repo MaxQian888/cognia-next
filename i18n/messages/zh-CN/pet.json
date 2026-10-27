@@ -139,7 +139,8 @@
       "title": "清除 {name} 的宠物绑定？"
     },
     "cleared": "{name} 已恢复使用全局宠物。",
-    "saveFailed": "角色绑定保存失败，请重试。"
+    "saveFailed": "角色绑定保存失败，请重试。",
+    "mediaOption": "动画：{name}"
   },
   "bubbleAction": {
     "openConsole": "打开{tab}"
@@ -376,7 +377,8 @@
       "binding": {
         "readOnly": "角色的宠物外观需在桌面端编辑。",
         "live2d": "Live2D 模型",
-        "sprite": "精灵包"
+        "sprite": "精灵包",
+        "media": "动画包"
       },
       "noPet": {
         "title": "桌面端还没有宠物",
@@ -458,7 +460,9 @@
       "descriptionLive2d": "预览并微调当前使用的 Live2D 模型。",
       "descriptionSprite": "预览当前 AI 生成的 v2 精灵图宠物。",
       "spriteManagedBelow": "可在下方“外观”区域创建、导入和切换 v2 精灵图宠物。",
-      "title": "造型"
+      "title": "造型",
+      "descriptionMedia": "外观与动作由所选角色包提供。",
+      "mediaManagedBelow": "请在下方选择动画角色包。"
     },
     "openSettings": "打开完整宠物设置",
     "preview": {

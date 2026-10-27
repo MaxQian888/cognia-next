@@ -67,7 +67,9 @@
       "cogniaExtensionBridge": "由随附的 Cognia 扩展提供",
       "isolatedLocalService": "由此对话专用的本地服务提供",
       "aiderCliBridge": "由 Cognia 的官方 Aider CLI 适配器和独立会话历史提供",
-      "profilePluginNotComposed": "已认证配置未挂载此原生插件"
+      "profilePluginNotComposed": "已认证配置未挂载此原生插件",
+      "continueCliBridge": "通过 headless 结果和宿主管理的历史回放实现",
+      "codebuffSdkBridge": "通过固定版本 SDK 桥接实现"
     },
     "adapterMethod": {
       "steerTurn": "Cognia 适配器已实现 steerTurn",
@@ -176,6 +178,48 @@
   "manage": "管理",
   "manageAgents": "管理代理",
   "manager": {
+    "terminalAgents": {
+      "title": "终端 Agent",
+      "terminalOnly": "原生终端",
+      "limitations": "这些 Agent 由你在终端中直接操作，使用各自的账号、网络访问和工具权限。Cognia 聊天的审批、提示词过滤、结构化事件及会话恢复／分叉不适用于此处。请直接在终端中交互和登录。",
+      "workspace": "工作区",
+      "currentWorkspace": "当前工作区",
+      "directory": "终端宿主上的工作目录",
+      "directoryPlaceholder": "项目的绝对目录",
+      "hostUnavailable": "启动 Agent 需要桌面端或已配对的终端宿主。",
+      "setupDocs": "配置 {agent}",
+      "launch": "启动 {agent}",
+      "launching": "正在启动…",
+      "restart": "重新启动 {agent}",
+      "open": "打开 {agent} 终端",
+      "stop": "停止并关闭 {agent}",
+      "stopping": "正在停止…",
+      "retryCleanup": "重试清理 {agent}",
+      "setup": {
+        "freebuff": "请在终端宿主上安装官方 Freebuff CLI，然后在终端中完成原生登录。系统不会自动提交提示词。",
+        "zcode": "请在终端宿主上安装官方 ZCode CLI。此入口打开原生交互式 TUI，账号和模型服务配置由 ZCode 管理。"
+      },
+      "statuses": {
+        "not-started": "未运行",
+        "running": "进程运行中",
+        "exited": "已退出",
+        "disconnected": "连接不可用"
+      },
+      "errors": {
+        "unknown-agent": "此终端 Agent 不可用。",
+        "invalid-workspace": "请输入终端宿主上的绝对工作目录。",
+        "spawn-denied": "宿主或插件策略拒绝了此次终端启动。",
+        "spawn-failed": "无法启动 Agent。请检查安装情况和终端宿主状态，然后重试。",
+        "session-unavailable": "终端连接不可用。请先重新连接所属宿主，再停止或启动其他进程。",
+        "stopping": "上一个进程仍在停止中，请等待后再启动。",
+        "stop-failed": "无法确认进程已停止。终端仍被保留，你可以重试。",
+        "cleanup-failed": "未能移除宿主上的临时启动配置。请选择原来的宿主并重试清理，进程状态以终端显示为准。",
+        "profile-conflict": "有多个运行中的终端使用此 Agent 配置，请先在终端中关闭多余的进程，再重新启动。",
+        "recovery-failed": "无法检查此宿主上是否已有 Agent 进程。请重新连接或恢复终端列表权限后重试，系统未启动替代进程。",
+        "early-exit": "Agent 在启动时退出，请打开终端查看输出。",
+        "docs-failed": "无法打开配置文档，请重试。"
+      }
+    },
     "clineSetupHint": "安装 npm install -g cline@3.0.67，运行 cline auth 登录 Cline/ClinePass/ChatGPT，或在本地设置 CLINE_PROVIDER、CLINE_MODEL 和 CLINE_API_KEY。独立 ACP 状态请用 --config 或 CLINE_DIR；ACP 不支持 --data-dir。托管运行关闭自动更新。删除配置会保留系统安装与 Cline 数据。Cline 3.0.67 ACP 未转发图片和会话 MCP；原生 MCP 使用 cline mcp 配置。",
     "clineEnvVarHint": "使用已有 OAuth 登录，或配合 CLINE_PROVIDER、CLINE_MODEL 设置 CLINE_API_KEY。CLINE_DIR 可指定状态目录。固定 CLINE_PROVIDER 后不能在会话中切换服务商。",
     "minimaxCodeSetupHint": "安装 @minimax-ai/code@0.6.12，使用受支持的 Node.js，并启用可选的 SQLite 依赖。在此配置所选的状态目录中执行 mcode login。Cognia 为每个会话单独启动 mcode acp 进程。支持默认、计划和完全访问模式。默认模式下 MiniMax 可能自动批准操作；不支持仅接受编辑、不询问及强制主机审批规则。移除配置会保留系统安装和登录信息。",
@@ -360,7 +404,77 @@
     "updatedAt": "更新于 {time}",
     "currentSession": "当前会话",
     "grokSetupHint": "安装 @xai-official/grok@1.0.62 后在 Grok Build 中登录，或提供 XAI_API_KEY。Cognia 会启动独立 Grok 进程并禁用自动更新。隔离配置使用各自的登录和设置。请在 Cognia 会话之外更新 CLI；删除此配置会保留系统安装。此版本不支持会话分叉、图片输入和音频输入。",
-    "grokEnvVarHint": "使用 Grok Build 登录或 XAI_API_KEY。可选 GROK_HOME 指定共享状态目录（默认 ~/.grok）；隔离配置使用单独的状态目录。"
+    "grokEnvVarHint": "使用 Grok Build 登录或 XAI_API_KEY。可选 GROK_HOME 指定共享状态目录（默认 ~/.grok）；隔离配置使用单独的状态目录。",
+    "additionalAgents": {
+      "auggie": {
+        "setup": "安装 @augmentcode/auggie@0.36.0，然后运行 auggie login。托管会话禁用自动更新；请在会话之外更新。",
+        "environment": "使用原生登录，或显式提供 AUGMENT_SESSION_AUTH 会话 JSON。凭据不会写入诊断日志。"
+      },
+      "autohand-code": {
+        "setup": "安装 autohand-cli@0.9.8，然后运行 autohand --setup 配置账号和模型提供商。此入口使用原生 ACP。",
+        "environment": "复用 ~/.autohand 下的原生配置。凭据保留在原生配置或显式设置的进程环境中。"
+      },
+      "codebuddy": {
+        "setup": "安装 @tencent-ai/codebuddy-code@2.177.0 并完成原生登录。使用 codebuddy --acp；不接受绕过工具权限的沙箱环境开关。",
+        "environment": "CODEBUDDY_API_KEY 用于模型调用，CODEBUDDY_AUTH_TOKEN 用于平台调用，请按原生配置选择所需凭据。"
+      },
+      "command-code": {
+        "setup": "安装 command-code@1.88.0，然后运行 commandcode login。使用官方 commandcode 别名避免与 Windows 系统 cmd 混淆。",
+        "environment": "原生账号和自定义提供商保留在 ~/.commandcode。支持客户端 stdio、HTTP MCP，不支持旧 SSE；原生同名服务器优先。"
+      },
+      "kilocode": {
+        "setup": "安装 @kilocode/cli@7.8.18 并在 Kilo 中登录。移除 Cognia 配置会保留系统安装。",
+        "environment": "使用原生登录或显式提供 KILO_API_KEY、KILO_ORG_ID。KILO_AUTH_CONTENT 是敏感原生认证 JSON。"
+      },
+      "mistral-vibe": {
+        "setup": "使用官方安装器或 uv 安装 mistral-vibe 3.0.1。启动独立的 vibe-acp，并使用其公布的认证方式。",
+        "environment": "MISTRAL_API_KEY 可配置提供商；VIBE_HOME 可调整原生状态和凭据目录，默认 ~/.vibe。"
+      },
+      "mimo-code": {
+        "setup": "使用小米官方安装器安装 MiMo Code，然后运行 mimo auth login。不会执行上游遗留的 OpenCode 登录命令。",
+        "environment": "MIMOCODE_HOME 可设置 MiMo 自己的数据、配置、缓存和状态目录，不复制 OpenCode 凭据。"
+      },
+      "hermes-agent": {
+        "setup": "安装 Hermes 及 ACP 扩展，用 hermes model 配置提供商，并运行 hermes acp --check。运行任务需要由当前宿主管理的受限 daemon。",
+        "environment": "HERMES_HOME 选择原生状态目录，默认 ~/.hermes。仅关闭 ACP viewer 不代表后台任务已取消。"
+      },
+      "oh-my-pi": {
+        "setup": "安装 @oh-my-pi/pi-coding-agent 或官方 omp 程序并配置原生提供商。通过 omp acp 和宿主沙箱运行。",
+        "environment": "OMP 原生配置位于 ~/.omp/agent。Pi 是独立产品，不会复制其账号和状态。此入口不使用实验性原生 RPC 包。"
+      },
+      "muse": {
+        "setup": "先安装 Muse Code 并运行 muse login，再安装 @brokkai/muse-acp。未加作用域的 muse-acp 是不同项目。工具审批和会话授权必须可用。",
+        "environment": "MUSE_CLI 可定位原生程序。MCP 需要 Muse 的 sessionMcp 授权；缺少授权或使用不支持的 SSE 会明确报错。"
+      },
+      "amp": {
+        "setup": "先安装并登录 Amp，再安装 amp-acp 0.10.0。此社区 bridge 不转发逐工具审批，需要显式自动权限及宿主沙箱，不支持 Orb。",
+        "environment": "使用 AMP_API_KEY 或原生登录；AMP_CLI_PATH 定位程序，AMP_ACP_STATE_DIR 保存精确会话映射，不会恢复无关的最近会话。"
+      },
+      "zcode": {
+        "setup": "安装并登录官方 ZCode macOS 应用，再安装 zcode-acp 0.9.1。不会使用自动批准所有操作的 run 子命令，也可选择原生终端入口。",
+        "environment": "ZCODE_CJS 定位已安装的桌面引擎。原生状态位于 ~/.zcode，bridge 诊断位于 ~/.zcode-acp；此入口仅支持文本。"
+      },
+      "openclaude": {
+        "setup": "安装 @twigpine/openclaude@0.33.0 并通过其原生 CLI 登录。Cognia 使用独立的 stream-json 协议和强制工具审批钩子，凭据与 Claude Code 分开。",
+        "environment": "使用 OpenClaude 原生登录；OPENCLAUDE_CONFIG_DIR 可选择其独立配置目录。"
+      },
+      "crush": {
+        "setup": "安装 Crush 0.98.2 并配置原生模型服务。Cognia 启动私有 Unix socket 服务，通过校验后的内置桥接通信。",
+        "environment": "使用 Crush 原生配置，或在进程环境中明确设置其模型服务凭据。"
+      },
+      "continue-dev": {
+        "setup": "安装官方 Continue CLI 并运行 cn login。Cognia 使用 headless JSON 结果，不启动缺少认证的 cn serve 服务。",
+        "environment": "使用 ~/.continue 中的原生配置和登录，或明确设置原生模型服务凭据。"
+      },
+      "rovo-dev": {
+        "setup": "安装 Atlassian CLI 并登录 Rovo Dev。Cognia 启动带随机会话凭据的本地服务，保留原生配置中的权限规则。",
+        "environment": "优先使用 acli 原生登录；仅在原生配置需要时设置 USER_EMAIL 和 USER_API_TOKEN。"
+      },
+      "codebuff": {
+        "setup": "Cognia 内置经过校验的桥接和 @codebuff/sdk 0.10.7。设置 CODEBUFF_API_KEY 和工作目录；此接入使用官方 SDK。",
+        "environment": "在进程环境中设置 CODEBUFF_API_KEY。凭据保存在宿主的密钥存储中，不写入提示词。"
+      }
+    }
   },
   "placement": {
     "fallback": "未使用沙箱",
@@ -881,7 +995,60 @@
     "grokPresetName": "Grok Build",
     "grokPresetDescription": "通过原生 ACP 运行 xAI Grok Build，支持流式回复、工具审批、用户提问、MCP 和持久化会话。",
     "codexStepModelSwitching": "实验性当前 turn 模型切换",
-    "codexStepModelSwitchingDesc": "允许修改活跃 V1 子代理后续采样步骤的模型。修改后需要重新连接代理。V2 子代理仍由父代理管理。"
+    "codexStepModelSwitchingDesc": "允许修改活跃 V1 子代理后续采样步骤的模型。修改后需要重新连接代理。V2 子代理仍由父代理管理。",
+    "additionalAgents": {
+      "auggie": {
+        "description": "通过 Auggie 原生 ACP 使用现有登录和协商后的会话能力。"
+      },
+      "autohand-code": {
+        "description": "通过 Autohand Code 原生 ACP 接收回复、处理工具审批和恢复原生会话。"
+      },
+      "codebuddy": {
+        "description": "通过腾讯 CodeBuddy 原生 ACP 协商会话、工具和模型控制能力。"
+      },
+      "command-code": {
+        "description": "通过 Command Code 原生 ACP 使用每个会话独立的进程和工具审批。"
+      },
+      "kilocode": {
+        "description": "通过 Kilo Code 原生 ACP 使用流式回复、工具、模型选择和已协商的会话能力。"
+      },
+      "mistral-vibe": {
+        "description": "通过 Mistral Vibe 官方 ACP 程序使用原生账号、工具和会话。"
+      },
+      "mimo-code": {
+        "description": "通过小米 MiMo Code 原生 ACP 接收回复、处理工具审批并恢复会话。"
+      },
+      "hermes-agent": {
+        "description": "通过 Hermes 原生 ACP 使用受控 daemon 和会话生命周期。"
+      },
+      "oh-my-pi": {
+        "description": "通过 oh-my-pi 官方 ACP 使用受权限控制的文件、终端和原生会话。"
+      },
+      "muse": {
+        "description": "通过 BrokkAi 社区 ACP bridge 连接 Meta Muse Code 原生协议。"
+      },
+      "amp": {
+        "description": "通过本地 ACP bridge 运行 Amp，并明确授予当前启动的工具权限。"
+      },
+      "zcode": {
+        "description": "通过 macOS 社区 ACP bridge 运行 ZCode，每个会话独立进程。"
+      },
+      "openclaude": {
+        "description": "通过原生流式协议接入 OpenClaude，支持工具审批和精确会话恢复。"
+      },
+      "crush": {
+        "description": "通过私有服务接口接入 Charm Crush，支持流式输出、工具审批与用户问答。"
+      },
+      "continue-dev": {
+        "description": "通过 Continue 原生 CLI 获取结构化结果，由 Cognia 管理对话历史。"
+      },
+      "rovo-dev": {
+        "description": "通过自主管理且经过身份校验的本地流式服务接入 Rovo Dev。"
+      },
+      "codebuff": {
+        "description": "通过固定版本 SDK 和受限宿主桥接接入 Codebuff，统一处理工具与网络请求。"
+      }
+    }
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -1347,5 +1514,20 @@
     "addSpawnModel": "添加派生候选模型",
     "removeSpawnModel": "移除 {model}",
     "clearSpawnModels": "清除额外候选模型"
+  },
+  "goose": {
+    "childrenTitle": "Goose 子任务",
+    "readOnlyHint": "只读快照，重新加载可查看进展。恢复操作通过父会话执行。",
+    "refreshChildren": "加载子任务",
+    "viewChild": "查看 {id}",
+    "transcript": "子任务记录",
+    "reloadProgress": "加载最新进展",
+    "resumeChild": "通过父任务恢复",
+    "operationFailed": "操作未能完成，请刷新父会话后重试。",
+    "runtimeTitle": "Goose 运行时",
+    "concurrency": "每个父任务的子任务并发数",
+    "concurrencyHint": "默认 5 个，超出的子任务排队等待。此设置独立于 Cognia 会话及 Team 并发限制。",
+    "codeMode": "启用 Goose Code Mode",
+    "codeModeHint": "使用已安装的 Goose 运行时。1.56 版使用 Boa JavaScript 独立上下文，不再支持 TypeScript 生成和 Code Mode execute_bash。审批针对整个批次，内部工具不会逐个再次请求审批。1.56 中继承 Code Mode 的子任务无法暴露最终结果工具；委派时指定 extensions: [\"developer\"] 可保留子任务完成和恢复能力。"
   }
 }

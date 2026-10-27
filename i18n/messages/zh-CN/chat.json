@@ -237,6 +237,7 @@
     "contextRegion": "输入框上下文与提示",
     "ariaAttachImage": "添加文件",
     "ariaMessage": "消息",
+    "ariaResume": "继续",
     "ariaSend": "发送",
     "ariaSendSteer": "作为补充发送",
     "ariaSending": "发送中…",
@@ -290,8 +291,12 @@
         "ocrRunning": "OCR 识别中…",
         "ocrToInput": "把文本加进输入框",
         "ocrToggle": "同时发送 OCR 文本",
+        "originalFileTab": "原文件",
+        "originalTab": "原文",
+        "processedTab": "处理结果",
         "redactedNote": "高亮部分在发送前已被脱敏。",
-        "tokens": "{tokens} tokens"
+        "tokens": "{tokens} tokens",
+        "toolbarAria": "文件预览工具栏"
       },
       "rejectReason": {
         "empty": "未找到可读文本",
@@ -914,6 +919,8 @@
     },
     "sendSteerTooltip": "作为补充发送给当前回合",
     "sendTooltip": "发送",
+    "resumePrompt": "请从已有进展继续被中断的任务，保留已完成的工作和已有工具结果。对于结果不确定的操作，先检查当前状态再决定是否重做，并完成剩余工作。",
+    "resumeTooltip": "继续被中断的回复",
     "shell": {
       "consentRequired": "`$ {cmd}` 未执行 —— 需要先在主机上有人批准远程执行命令。",
       "failed": "`$ {cmd}` 执行失败：{error}",
@@ -1484,6 +1491,8 @@
     "memoryOff": "关闭",
     "memoryOn": "开启",
     "memoryUse": "在此对话使用记忆",
+    "externalCredentialsRequired": "需要配置 Agent 凭证",
+    "gatewayUnavailable": "所选 Agent 网关路由不可用",
     "noApiKey": "未配置 API Key",
     "openBrowser": "打开浏览器面板",
     "openInCodexApp": "在 Codex App 中打开",
@@ -2116,7 +2125,8 @@
     },
     "shareCopiedFallback": "此处无法调用系统分享，已将消息复制到剪贴板。",
     "shareFailed": "无法分享这条消息。",
-    "editingSubmitTouch": "发送"
+    "editingSubmitTouch": "发送",
+    "sharedWithheld": "这部分回复可能含有个人或机密信息，已对共享成员隐藏。"
   },
   "messageDisplay": {
     "assistant": "助手",
@@ -2795,6 +2805,7 @@
     "jumpTo": "跳转到：{label}",
     "noBookmarks": "还没有收藏的轮次。给消息加星标即可固定到这里。",
     "replyCount": "{count} 条回复",
+    "scrollConversation": "滚动对话",
     "showAll": "显示全部轮次",
     "showBookmarked": "只看已收藏的对话轮次",
     "starredReply": "已收藏的回复",
@@ -3217,5 +3228,12 @@
     "undoConflict": "无法干净地撤销：{count} 个文件存在后续编辑冲突",
     "undoFailed": "无法撤销这一轮：{error}",
     "undoNotApplied": "没有可撤销的内容：这一轮的改动不在工作区中。"
+  },
+  "refusedHostMessages": {
+    "attachments": "附件",
+    "failure": "未发送：{reason}",
+    "keptLocally": "已保留在此设备上。可复制文字后重试。",
+    "notSent": "消息未发送",
+    "unknownReason": "Host 拒绝了这条消息。"
   }
 }

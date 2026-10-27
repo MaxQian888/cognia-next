@@ -121,6 +121,8 @@
     "rejectAll": "全部拒绝",
     "removeSelectionAria": "移除选区 {title}",
     "revealInDiff": "在差异中定位第 {range} 行",
+    "previewToolbarAria": "引用内容工具栏",
+    "previewSelectionAria": "查看引用内容：{title}",
     "selectionChipCommentLabel": "{title} · 批注",
     "selectionChipEntityLabel": "{kind}：{title}",
     "selectionChipExcerptAcrossLabel": "{derivation, select, summary {总结} explanation {解释} translation {译文} other {摘录}}：{title} · {count} 条消息",

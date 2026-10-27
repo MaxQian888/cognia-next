@@ -585,6 +585,7 @@
   "dismissOnboarding": "关闭",
   "dismissSecurityAlert": "关闭安全提示",
   "done": "完成",
+  "doubao": "豆包",
   "download": "下载",
   "downloading": "下载中...",
   "dropFileHere": "拖放文件到此处或点击浏览",
@@ -1044,6 +1045,7 @@
   "quickSetup": "快速设置",
   "quotaExceeded": "配额超限行为",
   "quotaUsage": "配额使用",
+  "qwen": "通义千问",
   "random": "随机",
   "rateLimitRemaining": "剩余速率限制",
   "readiness": {

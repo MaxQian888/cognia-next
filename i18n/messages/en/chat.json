@@ -237,6 +237,7 @@
     "contextRegion": "Composer context and notices",
     "ariaAttachImage": "Attach files",
     "ariaMessage": "Message",
+    "ariaResume": "Resume",
     "ariaSend": "Send",
     "ariaSendSteer": "Send as a follow-up",
     "ariaSending": "Sending…",
@@ -290,8 +291,12 @@
         "ocrRunning": "Running OCR…",
         "ocrToInput": "Add text to message",
         "ocrToggle": "Also send OCR text",
+        "originalFileTab": "Original file",
+        "originalTab": "Original",
+        "processedTab": "Processed",
         "redactedNote": "Highlighted spans were redacted before sending.",
-        "tokens": "{tokens} tokens"
+        "tokens": "{tokens} tokens",
+        "toolbarAria": "File preview controls"
       },
       "rejectReason": {
         "empty": "No readable text found",
@@ -914,6 +919,8 @@
     },
     "sendSteerTooltip": "Send as a follow-up to the running turn",
     "sendTooltip": "Send",
+    "resumePrompt": "Continue the interrupted task from the progress already made. Keep completed work and prior tool results. Check the current state before repeating an action whose outcome is uncertain, and finish the remaining work.",
+    "resumeTooltip": "Continue the interrupted response",
     "shell": {
       "consentRequired": "`$ {cmd}` didn’t run — the Host needs someone to approve remote command execution on it first.",
       "failed": "`$ {cmd}` failed: {error}",
@@ -1484,6 +1491,8 @@
     "memoryOff": "Off",
     "memoryOn": "On",
     "memoryUse": "Use memories in this chat",
+    "externalCredentialsRequired": "Agent credentials required",
+    "gatewayUnavailable": "Selected Agent gateway route unavailable",
     "noApiKey": "No API key",
     "openBrowser": "Open browser panel",
     "openInCodexApp": "Open in Codex app",
@@ -2116,7 +2125,8 @@
     },
     "shareCopiedFallback": "Sharing isn't available here, so the message was copied to the clipboard.",
     "shareFailed": "Couldn't share this message.",
-    "editingSubmitTouch": "Send"
+    "editingSubmitTouch": "Send",
+    "sharedWithheld": "Part of this reply was withheld from shared members because it may contain personal or secret data."
   },
   "messageDisplay": {
     "assistant": "Assistant",
@@ -2795,6 +2805,7 @@
     "jumpTo": "Jump to: {label}",
     "noBookmarks": "No bookmarked turns yet. Star a message to pin it here.",
     "replyCount": "{count} replies",
+    "scrollConversation": "Scroll conversation",
     "showAll": "Show all turns",
     "showBookmarked": "Show only bookmarked turns",
     "starredReply": "Starred reply",
@@ -3217,5 +3228,12 @@
     "undoConflict": "Could not undo cleanly: {count, plural, one {# file has} other {# files have}} later edits in the way",
     "undoFailed": "Could not undo this turn: {error}",
     "undoNotApplied": "There is nothing to undo: this turn's changes are not in the working tree."
+  },
+  "refusedHostMessages": {
+    "attachments": "Attachments",
+    "failure": "Not sent: {reason}",
+    "keptLocally": "Kept on this device. Copy the text to try again.",
+    "notSent": "Message not sent",
+    "unknownReason": "The Host refused this message."
   }
 }

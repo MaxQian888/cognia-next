@@ -121,6 +121,8 @@
     "rejectAll": "Reject all",
     "removeSelectionAria": "Remove selection {title}",
     "revealInDiff": "Show lines {range} in the diff",
+    "previewToolbarAria": "Referenced content controls",
+    "previewSelectionAria": "View referenced content: {title}",
     "selectionChipCommentLabel": "{title} · comment",
     "selectionChipEntityLabel": "{kind}: {title}",
     "selectionChipExcerptAcrossLabel": "{derivation, select, summary {Summary} explanation {Explanation} translation {Translation} other {Quote}}: {title} · {count} messages",

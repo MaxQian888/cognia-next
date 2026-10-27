@@ -314,6 +314,17 @@
       "retention": "Retention days",
       "title": "Evidence"
     },
+    "executionProfile": {
+      "label": "Execution environment",
+      "profiles": {
+        "isolated-text": "Isolated text",
+        "desktop-chat": "Desktop chat",
+        "pure-model": "Pure model"
+      },
+      "teamNoticeTitle": "Team evaluation uses isolated text",
+      "teamNoticeDescription": "Team runs evaluate text collaboration only. Native tools, MCP, files, retrieval, and desktop state are unavailable; these results do not measure those capabilities.",
+      "unknown": "Not recorded"
+    },
     "goal": {
       "description": "Define the decision before spending tokens. A project can evaluate raw models or complete Agent behavior.",
       "title": "Define the evaluation goal"
@@ -355,7 +366,7 @@
       "evidenceHint": "{count} preflight checks currently need attention."
     },
     "review": {
-      "actualCost": "Actual",
+      "actualCost": "Recorded cost",
       "allStatuses": "All statuses",
       "allVariants": "All variants",
       "apply": {
@@ -416,8 +427,10 @@
       "caseEvidenceHint": "Inspect repetitions, outputs, trajectories, scorer provenance, and review state without exposing credentials.",
       "confidence": "95% confidence intervals",
       "confidenceHint": "Seeded paired bootstrap over the effective holdout set.",
-      "costSummary": "Actual versus estimated cost",
-      "costSummaryHint": "Worst-case reservations protect the hard cap; actual usage is recorded from provider responses.",
+      "costSummary": "Recorded and estimated cost",
+      "costSummaryHint": "Recorded costs depend on available usage and pricing. Missing measurements are marked; the provider's final bill may differ.",
+      "metricUnavailable": "Not measured",
+      "partialMetric": "{value} (incomplete)",
       "description": "Inspect the recommendation, constraints, frontier, cases, trajectories, reviewers, and provenance.",
       "dominated": "Dominated / excluded",
       "effectiveCases": "Effective cases",

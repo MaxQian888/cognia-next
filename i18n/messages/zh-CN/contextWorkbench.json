@@ -129,6 +129,22 @@
     "showItem": "显示"
   },
   "exportResourceSession": "导出此资源会话",
+  "layoutScopes": {
+    "workspace": {
+      "title": "工作区布局",
+      "description": "调整整个右侧工作区与聊天区的空间分配。",
+      "narrow": "收窄工作区",
+      "wide": "加宽工作区",
+      "focus": "聚焦工作区"
+    },
+    "fileSidebar": {
+      "title": "文件侧栏布局",
+      "description": "调整文件侧栏与编辑区的空间分配。",
+      "narrow": "自动适宽",
+      "wide": "加宽文件侧栏",
+      "focus": "聚焦文件侧栏"
+    }
+  },
   "logsPanel": {
     "count": "{count, plural, other {# 条日志}}",
     "emptyDescription": "当前过滤条件下没有日志条目。",

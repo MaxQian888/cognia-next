@@ -585,6 +585,7 @@
   "dismissOnboarding": "Dismiss",
   "dismissSecurityAlert": "Dismiss Security Alert",
   "done": "Done",
+  "doubao": "Doubao",
   "download": "Download",
   "downloading": "Downloading…",
   "dropFileHere": "Drop file here or click to browse",
@@ -1044,6 +1045,7 @@
   "quickSetup": "Quick Setup",
   "quotaExceeded": "Quota Exceeded Behavior",
   "quotaUsage": "Quota Usage",
+  "qwen": "Qwen",
   "random": "Random",
   "rateLimitRemaining": "Rate Limit",
   "readiness": {

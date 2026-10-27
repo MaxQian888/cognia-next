@@ -23,6 +23,8 @@
   "launchAutostartFailed": "Could not change autostart: {error}",
   "launchOffToast": "Launch-at-login disabled.",
   "launchOnToast": "Cognia will launch at login.",
+  "launchStateMismatch": "The system did not apply the requested launch-at-login setting.",
+  "launchStateUnavailable": "Could not read launch-at-login status: {error}. Return to this window to retry.",
   "loadFailed": "Failed to load desktop info.",
   "locale": "Locale",
   "notificationBody": "Test notification — your desktop integration is wired up.",

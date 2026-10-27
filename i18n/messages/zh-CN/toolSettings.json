@@ -76,6 +76,7 @@
     "contentSearch": "在文件内容中按子串或正则查找，返回行号。",
     "coreApplyPatch": "原子地对一个或多个文件应用统一 diff（创建 / 修改 / 删除）。",
     "coreBash": "执行任意 shell 命令（需审批；超长输出保留尾部）。",
+    "verificationBatch": "在共享预算内逐条执行验证批次，命令沿用 Bash 审批。",
     "coreBashOutput": "读取由 bash(run_in_background) 启动的后台 shell 的新增输出。",
     "coreEdit": "在文件中替换精确字符串，带空白容差的模糊回退。",
     "coreGlob": "按 glob 模式查找文件，按修改时间从新到旧排序。",

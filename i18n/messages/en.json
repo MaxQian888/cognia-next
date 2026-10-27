@@ -3484,29 +3484,47 @@
       },
       "runtime": {
         "aider": "Aider",
+        "amp": "Amp",
+        "antigravityAcp": "Antigravity ACP",
+        "auggie": "Auggie",
+        "autohandCode": "Autohand Code",
         "claude": "Claude",
         "claudeCode": "Claude Code",
         "cline": "Cline",
+        "codebuddy": "CodeBuddy",
+        "codebuff": "Codebuff",
         "codex": "Codex",
         "codexAcp": "Codex ACP",
         "codexAppServer": "Codex (App Server)",
+        "commandCode": "Command Code",
+        "continueDev": "Continue",
         "copilotCli": "GitHub Copilot",
+        "crush": "Charm Crush",
         "cursorCli": "Cursor",
         "devin": "Devin CLI",
         "droid": "Droid",
         "geminiCli": "Gemini",
         "goose": "Goose",
         "grok": "Grok Build",
+        "hermesAgent": "Hermes Agent",
+        "kilocode": "Kilo Code",
         "kimi": "Kimi Code",
         "kiro": "Kiro",
+        "mimoCode": "MiMo Code",
         "minimaxCode": "MiniMax Code",
+        "mistralVibe": "Mistral Vibe",
+        "muse": "Muse",
+        "ohMyPi": "oh-my-pi",
+        "openclaude": "OpenClaude",
         "opencodeAcp": "OpenCode (ACP)",
         "opencodeRemote": "OpenCode (Remote)",
         "opencodeServer": "OpenCode V1",
         "pi": "Pi",
         "piRpc": "Pi (native RPC)",
         "qoder": "Qoder",
-        "qwenCode": "Qwen Code"
+        "qwenCode": "Qwen Code",
+        "rovoDev": "Rovo Dev",
+        "zcode": "ZCode"
       },
       "runtimeStatus": {
         "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect.",
@@ -4934,6 +4952,8 @@
       "hunkReplace": "Replacement",
       "lines": "Lines",
       "original": "Current",
+      "previewSelectionAria": "View referenced content: {title}",
+      "previewToolbarAria": "Referenced content controls",
       "promoteSelectionAria": "Make {title} the edit target",
       "proposed": "Proposed",
       "reDiff": "Re-diff against current",
@@ -5456,6 +5476,89 @@
         "raw": "Raw tree"
       }
     },
+    "lume": {
+      "adoptWorkspace": "Approve and adopt reviewed changes",
+      "attach": "Adopt from Cognia storage",
+      "binary": "Installed Lume executable",
+      "cancelOperation": "Cancel operation",
+      "cancellationPending": "Cancellation requested. Waiting for Host confirmation; Stop now remains available.",
+      "clone": "Clone a stopped seed",
+      "completedAfterCancel": "The Host completed this operation before cancellation was confirmed. Its result is preserved.",
+      "connect": "Connect",
+      "create": "Create from a local IPSW",
+      "delete": "Delete VM",
+      "description": "Local macOS guests on Apple Silicon. VM disks and SSH credentials stay on this Mac.",
+      "desktopRequired": "Open Cognia's desktop app on the Apple Silicon Mac that owns the VM.",
+      "disable": "Disable new operations",
+      "driverVersion": "Approved Cua Driver version",
+      "enable": "Configure and enable",
+      "errors": {
+        "authorization": "Unlock the owning Cognia account and approve the native request before trying again.",
+        "cancelled": "The Host confirmed the operation was cancelled. Refresh diagnostics before continuing.",
+        "capacity": "The Host lacks available disk space, memory or VM slots. Provide enough capacity before starting again.",
+        "guest": "Start the guest and verify its helper, Driver and graphical-session permissions before continuing.",
+        "identity": "This VM or session reference is no longer current. Refresh diagnostics and use the current owned resource.",
+        "observation": "The operation status could not be confirmed. Cancellation was requested; inspect the VM and source files before retrying. The command was not replayed.",
+        "policy": "This task requires a policy the Lume profile cannot enforce. Review its network, CPU, memory and path requirements.",
+        "recovery": "The operation needs recovery. Refresh diagnostics, confirm the VM is stopped and inspect the result before retrying. Applied changes remain applied.",
+        "ssh": "Check the guest SSH account, installed public key and trusted host fingerprint, then reconnect.",
+        "version": "Verify the installed Lume version and executable path. If the binary changed, configure and approve it again.",
+        "workspace": "Check the imported workspace, source identity and size limits. Review changes again before adoption.",
+        "writers": "Shell or GUI work may change guest files asynchronously, including after a reboot. Use a fresh clean clone for typed edits or uploads. Reads and work in the current execution group remain available."
+      },
+      "health": "Check health",
+      "helperHash": "Installed helper SHA-256",
+      "hostKey": "Guest SSH public host key",
+      "importWorkspace": "Import workspace replica",
+      "ipsw": "Local IPSW path",
+      "notReady": "Not ready",
+      "operationFailed": "The operation failed. Refresh diagnostics and inspect the VM before retrying.",
+      "operationProgress": "{operation}: {stage}",
+      "policyNotice": "Lume refuses VM-wide network off, network allowlists and strict CPU time limits. Normal commands keep the same execution group and may leave background jobs running. Cancellation, uncertain execution and group retirement stop the VM. Suspend and resume are unavailable.",
+      "prepareSsh": "Prepare SSH identity",
+      "provision": "Prepare owned VM",
+      "qualify": "Verify guest channels",
+      "quarantined": "Quarantined: stop and inspect the VM before allowing further work.",
+      "readiness": "VM: {vm} · SSH: {ssh} · Helper: {helper} · GUI: {gui}",
+      "ready": "Ready",
+      "refresh": "Refresh diagnostics",
+      "reviewWorkspace": "Review guest changes",
+      "seedStorage": "Seed storage directory",
+      "setup": "Clear clipboard and open setup",
+      "setupInstructions": "Use a dedicated guest account. Install its unique SSH key, rotate cloned host keys, install the helper and signed CuaDriver.app, and grant privacy permissions in the guest console. Headless automation requires an unlocked GUI session after cold boot. Setup stops after 15 minutes or when its native window exits; Stop now ends it immediately.",
+      "setupMaterial": "Guest preparation material (public key and instance nonce)",
+      "sourceMode": "Preparation method",
+      "sshUser": "Guest SSH account",
+      "stages": {
+        "awaitingConsent": "Waiting for approval",
+        "finished": "Confirmed by Host",
+        "provisioning": "Preparing the virtual machine",
+        "queued": "Waiting to start",
+        "running": "In progress",
+        "unknown": "Waiting for Host status"
+      },
+      "start": "Start headless",
+      "state": "State: {state}",
+      "states": {
+        "creating": "Preparing",
+        "deleting": "Deleting",
+        "error": "Error",
+        "running": "Running",
+        "starting": "Starting",
+        "stopped": "Stopped",
+        "stopping": "Stopping",
+        "uninitialized": "Not prepared",
+        "unknown": "Unknown"
+      },
+      "stop": "Stop now",
+      "title": "Lume virtual machines",
+      "trustSsh": "Verify and trust SSH key",
+      "vmName": "Source VM name",
+      "workspaceConflict": "The source changed since import. No files were written. Keep the guest disk and resolve the source conflict before adopting.",
+      "workspaceDiff": "Immutable workspace diff",
+      "workspaceNotice": "Import an empty guest replica before selecting this VM for a task. Import is bounded to 512 files and 8 MiB and excludes credentials and Git metadata. Review changes before approval; adoption stops the VM and uses the original source revision. Text patches are limited to 64 files and 1 MiB; download changed binary files separately.",
+      "workspaceRoot": "Selected Host workspace directory"
+    },
     "overview": {
       "capabilities": {
         "a11yTree": "Accessibility Tree",
@@ -5574,12 +5677,21 @@
       "failed": "Computer Use action failed",
       "hide": "Hide picture in picture",
       "justNow": "Just now",
+      "live": "Live",
+      "liveActivity": "Live · {action}",
+      "localDesktop": "This computer",
       "move": "Move picture in picture",
       "openSandboxDesktop": "Open sandbox desktop",
+      "previewLabel": "{app} · {desktop} · {number}",
+      "previewUnavailable": "Preview unavailable",
+      "previews": "Computer Use previews",
+      "remoteDesktop": "Remote desktop",
       "resize": "Resize picture in picture",
       "screenAlt": "Computer Use screen",
       "secondsAgo": "{seconds}s ago",
+      "selectPreview": "Show preview: {target}",
       "show": "Show picture in picture",
+      "streamTitle": "Live Computer Use preview",
       "title": "Computer Use",
       "viewLarger": "View larger",
       "waitingForFrame": "Waiting for the first screenshot…"
@@ -5610,6 +5722,7 @@
         "doubleClick": "Double-click mode",
         "error": {
           "capture": "Unable to capture the desktop. Control has been released.",
+          "captureStreaming": "The auxiliary screenshot could not be refreshed. Live-stream control continues while its lease remains valid.",
           "control": "Unable to acquire or renew control. Try taking control again.",
           "input": "The input could not be confirmed. Control has been released; check the screen before retrying.",
           "release": "The release could not be confirmed. Control expires automatically within 15 seconds.",
@@ -5627,7 +5740,10 @@
         "sendEscape": "Send Escape",
         "sendText": "Send text",
         "streamCadence": "Live stream through Selkies, from this machine only. Your keyboard and mouse reach the desktop only while you hold control.",
+        "streamConnecting": "Connecting to the live stream…",
         "streamControlHelp": "Click into the stream and use your keyboard and mouse there. Release control to give the desktop back; leaving the app also releases it. Agent input is paused while you have control.",
+        "streamLegacy": "This sandbox image does not report stream health. Recreate it with the updated Selkies image to enable automatic failure detection.",
+        "streamRecovering": "The live stream stopped. Showing screenshots while retrying; take control again after recovery.",
         "streamTitle": "Live sandbox desktop stream",
         "takeControl": "Take control",
         "textLabel": "Text to type in the sandbox",
@@ -7846,6 +7962,7 @@
     "composer": {
       "ariaAttachImage": "Attach files",
       "ariaMessage": "Message",
+      "ariaResume": "Resume",
       "ariaSend": "Send",
       "ariaSendSteer": "Send as a follow-up",
       "ariaSending": "Sending…",
@@ -7910,8 +8027,12 @@
           "ocrRunning": "Running OCR…",
           "ocrToInput": "Add text to message",
           "ocrToggle": "Also send OCR text",
+          "originalFileTab": "Original file",
+          "originalTab": "Original",
+          "processedTab": "Processed",
           "redactedNote": "Highlighted spans were redacted before sending.",
-          "tokens": "{tokens} tokens"
+          "tokens": "{tokens} tokens",
+          "toolbarAria": "File preview controls"
         },
         "processing": {
           "audioPlayer": "Play {filename}",
@@ -8433,6 +8554,8 @@
         "removeAria": "Remove reference to {path}"
       },
       "removePastedChip": "Remove pasted text",
+      "resumePrompt": "Continue the interrupted task from the progress already made. Keep completed work and prior tool results. Check the current state before repeating an action whose outcome is uncertain, and finish the remaining work.",
+      "resumeTooltip": "Continue the interrupted response",
       "reviewDraftsAria": "Review {count, plural, one {# pending draft} other {# pending drafts}}",
       "reviewDraftsLabel": "Review drafts",
       "reviewDraftsTooltip": "Drafted replies are waiting for your review. Type a message to send your own instead.",
@@ -9077,10 +9200,12 @@
         "summaryPlan": "Plan",
         "summaryUtility": "Utility"
       },
+      "externalCredentialsRequired": "Agent credentials required",
       "forkAria": "Fork session",
       "forkSuccess": "Session forked. The new branch is now active.",
       "forkTooltip": "Fork conversation — branches a new session from this one's history",
       "forkUnsupported": "This agent doesn't support session forking.",
+      "gatewayUnavailable": "Selected Agent gateway route unavailable",
       "groups": {
         "default": "Default",
         "favorites": "Favorites",
@@ -9705,6 +9830,7 @@
       "shareFailed": "Couldn't share this message.",
       "shareLabel": "Share message",
       "shareTooltip": "Share",
+      "sharedWithheld": "Part of this reply was withheld from shared members because it may contain personal or secret data.",
       "showParsed": "Show parsed",
       "showRaw": "Show raw",
       "stopReading": "Stop reading",
@@ -9865,6 +9991,13 @@
       "palette": "Reactions",
       "pick": "React with {emoji}",
       "toggle": "{emoji} {count}"
+    },
+    "refusedHostMessages": {
+      "attachments": "Attachments",
+      "failure": "Not sent: {reason}",
+      "keptLocally": "Kept on this device. Copy the text to try again.",
+      "notSent": "Message not sent",
+      "unknownReason": "The Host refused this message."
     },
     "renderers": {
       "a2ui": {
@@ -10492,6 +10625,7 @@
       "jumpTo": "Jump to: {label}",
       "noBookmarks": "No bookmarked turns yet. Star a message to pin it here.",
       "replyCount": "{count} replies",
+      "scrollConversation": "Scroll conversation",
       "showAll": "Show all turns",
       "showBookmarked": "Show only bookmarked turns",
       "starredReply": "Starred reply",
@@ -10838,6 +10972,11 @@
     "approver": "Approver",
     "audit": "Authorization audit",
     "auditActor": "{user} · {reason}",
+    "backgroundDraft": "Draft from this conversation",
+    "backgroundDraftFailed": "The background could not be drafted. You can write it yourself.",
+    "backgroundHeading": "Background from an earlier private conversation:",
+    "backgroundHint": "Only what you leave here is shared. It is posted as your first message, so members and the agent both see it.",
+    "backgroundLabel": "Background for members (optional)",
     "breakGlass": "Emergency access",
     "breakGlassAction": "Grant 15-minute emergency access",
     "breakGlassFailed": "Emergency access could not be granted.",
@@ -10959,6 +11098,7 @@
     "inviteToken": "Invitation token",
     "inviteTokenPlaceholder": "cit_…",
     "joinDescription": "Paste the invitation token from a conversation member.",
+    "joinViaInvite": "Join conversation by invitation…",
     "leaveConversation": "Leave conversation",
     "leaveFailed": "Could not leave the conversation. Refresh membership and retry.",
     "leftConversation": "You left the shared conversation.",
@@ -10995,6 +11135,13 @@
     "runCoordination": "Agent run",
     "runHost": "Running on {user}'s device",
     "running": "Running",
+    "shareFromNowComplete": "Shared conversation started. This conversation stays private.",
+    "shareFromNowFailed": "The shared conversation could not be started. Nothing was shared.",
+    "shareModeFromNow": "Share from now on",
+    "shareModeFromNowDescription": "Starts a new shared conversation. This conversation and its history stay private; members see only what happens next.",
+    "shareModeHistory": "Share the full history",
+    "shareModeHistoryDescription": "Turns this conversation into a shared one. Everyone invited can read every earlier message and attachment.",
+    "shareModeLabel": "How to share",
     "shareReferencesCancel": "Cancel",
     "shareReferencesConfirm": "Share anyway",
     "shareReferencesLiveToast": "This message embeds a snapshot of another conversation — everyone here can read it.",
@@ -11004,6 +11151,7 @@
     "shared": "Shared",
     "sharedDescription": "The server is authoritative for membership, messages, runs, approvals, and attachments.",
     "sharedTitle": "Shared conversation",
+    "startShared": "Start shared conversation",
     "switchBuildDisabled": "This build was not compiled with shared conversations, so the switch cannot be turned on here.",
     "switchHelp": "Let this machine open conversations that several people share, with the server deciding roles, event order and approvals. Turning it off hides the sharing controls and stops this app pulling shared sessions. Nothing is deleted.",
     "switchLabel": "Shared conversations",
@@ -11019,6 +11167,14 @@
     },
     "teamRoomConversion": "A team conversation cannot be shared yet: its replies are produced locally, and a shared session's come from the server.",
     "toggleApprover": "Toggle high-risk approver for {user}",
+    "toolDetailCancel": "Cancel",
+    "toolDetailConfirm": "Show them",
+    "toolDetailConfirmTitle": "Show commands and edits to members?",
+    "toolDetailConfirmWarning": "Commands and edits can hold internal hostnames, paths or secrets that redaction misses. Every member of this conversation, guests included, sees them from the next tool call on.",
+    "toolDetailDescription": "Off: members see which tools ran, the workspace files they touched and how much changed. On: they also see the commands, edits, searches and to-dos, with secrets redacted.",
+    "toolDetailFailed": "Couldn't change what members see",
+    "toolDetailLabel": "Show members commands and edits",
+    "toolDetailReadOnly": "Only the owner or a maintainer can change this.",
     "transferBeforeLeaving": "Promote another member to Owner before leaving. The last owner cannot leave.",
     "updateFailed": "The membership changed elsewhere or could not be updated.",
     "userId": "User ID",
@@ -12821,6 +12977,22 @@
       "resourceViews": "Views of this item"
     },
     "exportResourceSession": "Export this resource conversation",
+    "layoutScopes": {
+      "fileSidebar": {
+        "description": "Resize the file sidebar relative to the editor.",
+        "focus": "Focus file sidebar",
+        "narrow": "Automatic sidebar width",
+        "title": "File sidebar layout",
+        "wide": "Widen file sidebar"
+      },
+      "workspace": {
+        "description": "Resize the entire right workspace relative to the chat.",
+        "focus": "Focus workspace",
+        "narrow": "Narrow workspace",
+        "title": "Workspace layout",
+        "wide": "Widen workspace"
+      }
+    },
     "logsPanel": {
       "count": "{count, plural, one {# entry} other {# entries}}",
       "emptyDescription": "No log entries match the current filter.",
@@ -13858,6 +14030,7 @@
       "collapseTeams": "Collapse teams",
       "compactDensity": "Compact rows",
       "conversationsTitle": "Conversations",
+      "createMenu": "Create or join a conversation",
       "deleteFolder": "Delete folder",
       "deleteFolderConfirmBody": "The folder is removed; its conversations stay and move back into the list, where they were before you filed them. This cannot be undone.",
       "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
@@ -17311,6 +17484,17 @@
         "retention": "Retention days",
         "title": "Evidence"
       },
+      "executionProfile": {
+        "label": "Execution environment",
+        "profiles": {
+          "desktop-chat": "Desktop chat",
+          "isolated-text": "Isolated text",
+          "pure-model": "Pure model"
+        },
+        "teamNoticeDescription": "Team runs evaluate text collaboration only. Native tools, MCP, files, retrieval, and desktop state are unavailable; these results do not measure those capabilities.",
+        "teamNoticeTitle": "Team evaluation uses isolated text",
+        "unknown": "Not recorded"
+      },
       "goal": {
         "description": "Define the decision before spending tokens. A project can evaluate raw models or complete Agent behavior.",
         "title": "Define the evaluation goal"
@@ -17352,7 +17536,7 @@
         "evidenceHint": "{count} preflight checks currently need attention."
       },
       "review": {
-        "actualCost": "Actual",
+        "actualCost": "Recorded cost",
         "allStatuses": "All statuses",
         "allVariants": "All variants",
         "apply": {
@@ -17413,8 +17597,8 @@
         "caseEvidenceHint": "Inspect repetitions, outputs, trajectories, scorer provenance, and review state without exposing credentials.",
         "confidence": "95% confidence intervals",
         "confidenceHint": "Seeded paired bootstrap over the effective holdout set.",
-        "costSummary": "Actual versus estimated cost",
-        "costSummaryHint": "Worst-case reservations protect the hard cap; actual usage is recorded from provider responses.",
+        "costSummary": "Recorded and estimated cost",
+        "costSummaryHint": "Recorded costs depend on available usage and pricing. Missing measurements are marked; the provider's final bill may differ.",
         "description": "Inspect the recommendation, constraints, frontier, cases, trajectories, reviewers, and provenance.",
         "dominated": "Dominated / excluded",
         "effectiveCases": "Effective cases",
@@ -17424,10 +17608,12 @@
         "frontier": "Pareto frontier",
         "frontierHint": "Only non-dominated variants satisfying every hard constraint are ranked.",
         "input": "Input",
+        "metricUnavailable": "Not measured",
         "noConclusion": "No conclusion yet",
         "noConclusionHint": "A recommendation is never inferred before sufficient separated evidence exists.",
         "onFrontier": "Pareto frontier",
         "output": "Output",
+        "partialMetric": "{value} (incomplete)",
         "providerErrors": "Provider errors and retries",
         "providerErrorsHint": "{count} tasks contain provider retry or failure evidence.",
         "reasons": {
@@ -18004,11 +18190,13 @@
         "aiderCliBridge": "provided by Cognia’s official Aider CLI adapter and per-session history",
         "attachmentStoreUnavailable": "this runtime has no attachment store to hand the bytes to",
         "cancelKillsRuntime": "cancelling ends the whole runtime, not just the turn",
+        "codebuffSdkBridge": "implemented through the pinned SDK bridge",
         "codexOptionsChannel": "carried on the Codex options channel",
         "cogniaDispatchAgent": "served by Cognia's dispatch_agent tool",
         "cogniaExtensionBridge": "provided by the bundled Cognia extension",
         "cogniaHookRuntime": "Cognia's hook runtime wraps the turn",
         "committedRepliesOnly": "this channel reports committed replies only",
+        "continueCliBridge": "headless result and host-owned history replay",
         "isolatedLocalService": "provided by a private local service for this conversation",
         "launchTimeAuthorityOnly": "authority is granted at launch and cannot change mid-run",
         "modelVariantOverlay": "carried as a named model variant",
@@ -18176,6 +18364,21 @@
       "retrying": "Trying again",
       "session": "The session action failed"
     },
+    "goose": {
+      "childrenTitle": "Goose subagents",
+      "codeMode": "Enable Goose Code Mode",
+      "codeModeHint": "Uses the installed Goose runtime. Version 1.56 uses Boa JavaScript with fresh contexts; TypeScript generation and Code Mode execute_bash are unavailable. Approval covers the whole batch; nested tools do not prompt separately. In 1.56, children inheriting Code Mode cannot expose their final-output tool. Delegate with extensions: [\"developer\"] to keep child completion and recovery available.",
+      "concurrency": "Concurrent subagents per parent",
+      "concurrencyHint": "Default: 5. Extra subagents wait for a slot. This is separate from Cognia session and Team limits.",
+      "operationFailed": "Unable to complete this operation. Refresh the parent and try again.",
+      "readOnlyHint": "Read-only snapshot. Reload to see progress. Recovery runs through the parent conversation.",
+      "refreshChildren": "Load subagents",
+      "reloadProgress": "Load latest progress",
+      "resumeChild": "Resume through parent",
+      "runtimeTitle": "Goose runtime",
+      "transcript": "Subagent transcript",
+      "viewChild": "View {id}"
+    },
     "hostConfigs": {
       "actionsLabel": "Actions for {name}",
       "copyLocal": "Copy from this device",
@@ -18279,6 +18482,76 @@
       "addAgentFailed": "Failed to add external agent.",
       "addExternalAgent": "Add External Agent",
       "addingAgent": "Adding…",
+      "additionalAgents": {
+        "amp": {
+          "environment": "AMP_API_KEY or native Amp login; AMP_CLI_PATH can select the installed executable. AMP_ACP_STATE_DIR stores exact native thread mappings.",
+          "setup": "Install and authenticate native Amp, then install amp-acp 0.10.0. This community bridge does not relay per-tool host approvals. Explicit automatic authority and the host sandbox are required; Orb execution is unavailable."
+        },
+        "auggie": {
+          "environment": "Use the native Auggie login or explicitly supply AUGMENT_SESSION_AUTH session JSON. Cognia never prints the credential.",
+          "setup": "Install @augmentcode/auggie@0.36.0, then run auggie login. Cognia starts the installed CLI with automatic updates disabled. Update outside hosted sessions."
+        },
+        "autohand-code": {
+          "environment": "Reuse the native configuration under ~/.autohand. Provider credentials stay in the native configuration or an explicitly configured process environment.",
+          "setup": "Install autohand-cli@0.9.8, then run autohand --setup for the native account/provider configuration. Cognia uses native ACP, not the older separate ACP bridge."
+        },
+        "codebuddy": {
+          "environment": "CODEBUDDY_API_KEY is a model credential; CODEBUDDY_AUTH_TOKEN is a platform credential. Use only the credential required by the selected native setup.",
+          "setup": "Install @tencent-ai/codebuddy-code@2.177.0 and complete native CodeBuddy login. Cognia uses codebuddy --acp. Sandbox permission-bypass environment switches are not accepted."
+        },
+        "codebuff": {
+          "environment": "Set CODEBUFF_API_KEY in the process environment. Credentials remain in host secret storage and are not placed in prompts.",
+          "setup": "Cognia supplies the verified bridge and @codebuff/sdk 0.10.7. Configure CODEBUFF_API_KEY and a workspace; the Codebuff CLI is not substituted for this SDK protocol."
+        },
+        "command-code": {
+          "environment": "Native authentication and custom providers are configured under ~/.commandcode. The Windows system cmd executable is not this agent.",
+          "setup": "Install command-code@1.88.0 and run commandcode login. Cognia uses the package's commandcode alias to avoid the Windows system cmd name. Each conversation owns its project process."
+        },
+        "continue-dev": {
+          "environment": "Use native Continue configuration and login under ~/.continue, or explicitly configure its documented provider credentials.",
+          "setup": "Install the official Continue CLI and run cn login. Cognia uses headless JSON output and never starts the unauthenticated cn serve endpoint."
+        },
+        "crush": {
+          "environment": "Native Crush credentials and configuration stay with Crush. Configure provider credentials in the native setup or explicit process environment.",
+          "setup": "Install Crush 0.98.2 and configure its native provider. Cognia owns the private Unix socket server and verifies its bundled host bridge."
+        },
+        "hermes-agent": {
+          "environment": "HERMES_HOME selects native state; default ~/.hermes. Configure the native provider rather than placing credentials in chat prompts.",
+          "setup": "Install Hermes with its ACP extra, configure the native provider with hermes model, and verify hermes acp --check. Cognia uses the daemon-aware ACP cancellation path."
+        },
+        "kilocode": {
+          "environment": "Use native login or explicitly supply KILO_API_KEY and optional KILO_ORG_ID. KILO_AUTH_CONTENT contains native auth JSON and must remain private.",
+          "setup": "Install @kilocode/cli@7.8.18 and authenticate in Kilo. Cognia launches kilo acp and preserves the system installation when removing its saved configuration."
+        },
+        "mimo-code": {
+          "environment": "MIMOCODE_HOME selects MiMo's own data/config/cache/state root. Existing MiMo credentials remain native; OpenCode credentials are not copied.",
+          "setup": "Install MiMo Code from the official Xiaomi installer and authenticate with mimo auth login. Cognia launches mimo acp; upstream's legacy OpenCode authentication label is not used as a launch command."
+        },
+        "mistral-vibe": {
+          "environment": "MISTRAL_API_KEY can configure the native provider. VIBE_HOME selects native configuration and credential storage; default ~/.vibe.",
+          "setup": "Install mistral-vibe 3.0.1 using the official installer or uv. Cognia launches the separate vibe-acp executable and uses its advertised authentication methods."
+        },
+        "muse": {
+          "environment": "MUSE_CLI can locate the installed vendor CLI. Native Muse credentials and state remain Muse-owned.",
+          "setup": "Install and authenticate native Muse Code with muse login, then install @brokkai/muse-acp. The unscoped muse-acp package is a different project. Cognia requires prompt-based tool approval and negotiated Muse session grants."
+        },
+        "oh-my-pi": {
+          "environment": "Native OMP configuration is under ~/.omp/agent. Pi's account and state are a separate product; Cognia does not copy them into OMP.",
+          "setup": "Install @oh-my-pi/pi-coding-agent or the official omp binary and configure its native provider. Cognia launches omp acp with guarded client file and terminal ports inside the host sandbox."
+        },
+        "openclaude": {
+          "environment": "Use native OpenClaude authentication and OPENCLAUDE_CONFIG_DIR when selecting a private configuration root.",
+          "setup": "Install @twigpine/openclaude@0.33.0 and authenticate using its own CLI. Cognia uses OpenClaude's native protocol with mandatory tool hooks; Claude Code credentials are separate."
+        },
+        "rovo-dev": {
+          "environment": "Use native acli authentication. Explicit USER_EMAIL and USER_API_TOKEN are accepted only when required by your native setup.",
+          "setup": "Install Atlassian CLI and authenticate Rovo Dev. Cognia starts its own bearer-authenticated local service with configured permissions respected."
+        },
+        "zcode": {
+          "environment": "ZCODE_CJS selects the installed desktop engine; native state remains under ~/.zcode. The adapter keeps diagnostics under ~/.zcode-acp.",
+          "setup": "Install and sign into the official ZCode macOS application, then install zcode-acp 0.9.1. Cognia launches the bridge without the auto-approving run subcommand. Native terminal use is also available."
+        }
+      },
       "advancedOptions": "Advanced",
       "agentsHeading": "Agents",
       "aiderEnvVarHint": "DeepSeek example: args --model deepseek/deepseek-flash and environment variable DEEPSEEK_API_KEY. Use your provider’s Aider model ID and key for other services.",
@@ -18452,6 +18725,48 @@
       "tabCompatibility": "Compatibility",
       "tabDiagnostics": "Diagnostics",
       "tabSessions": "Sessions",
+      "terminalAgents": {
+        "currentWorkspace": "Current workspace",
+        "directory": "Working directory on the terminal host",
+        "directoryPlaceholder": "Absolute project directory",
+        "errors": {
+          "cleanup-failed": "The temporary host launch profile could not be removed. Select its original host and retry cleanup. The terminal shows the process status.",
+          "docs-failed": "Unable to open the setup documentation. Try again.",
+          "early-exit": "The agent exited during startup. Open its terminal to inspect the output.",
+          "invalid-workspace": "Enter an absolute working directory on the terminal host.",
+          "profile-conflict": "Several running terminals use this agent profile. Close the extra processes in the terminal before launching again.",
+          "recovery-failed": "Unable to check for an existing agent process on this host. Reconnect or restore terminal-list permission, then retry. No replacement process was started.",
+          "session-unavailable": "The terminal connection is unavailable. Reconnect its owning host before stopping or launching another process.",
+          "spawn-denied": "Terminal launch was denied by host or plugin policy.",
+          "spawn-failed": "Unable to launch the agent. Check its installation and the terminal host status, then retry.",
+          "stop-failed": "The process could not be confirmed stopped. Its terminal is retained so you can retry.",
+          "stopping": "The previous process is still stopping. Wait before launching again.",
+          "unknown-agent": "This terminal agent is unavailable."
+        },
+        "hostUnavailable": "A desktop or paired terminal host is required to launch an agent.",
+        "launch": "Launch {agent}",
+        "launching": "Starting…",
+        "limitations": "These agents run as user-operated terminal sessions using their native accounts, network access and tool permissions. Cognia chat approvals, prompt filtering, structured events and chat resume/fork do not apply. Interact and sign in directly in the terminal.",
+        "open": "Open {agent} terminal",
+        "restart": "Restart {agent}",
+        "retryCleanup": "Retry {agent} cleanup",
+        "setup": {
+          "freebuff": "Install the official Freebuff CLI on the terminal host, then complete its native sign-in in the terminal. No prompt is submitted automatically.",
+          "zcode": "Install the official ZCode CLI on the terminal host. This opens its native interactive TUI; account and provider setup stay in ZCode."
+        },
+        "setupDocs": "Set up {agent}",
+        "statuses": {
+          "disconnected": "Connection unavailable",
+          "exited": "Exited",
+          "not-started": "Not running",
+          "running": "Process running"
+        },
+        "stop": "Stop and close {agent}",
+        "stopping": "Stopping…",
+        "terminalOnly": "Native terminal",
+        "title": "Terminal agents",
+        "workspace": "Workspace"
+      },
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
       "transportStdioLocal": "stdio (local)",
@@ -18798,6 +19113,59 @@
       "acpStableElicitation": "Stable elicitation",
       "addAgent": "Add Agent",
       "addAgentToStart": "Add an agent to get started",
+      "additionalAgents": {
+        "amp": {
+          "description": "Amp through its local ACP bridge, with explicit launch authority and host process containment."
+        },
+        "auggie": {
+          "description": "Augment's native ACP agent using its own login and negotiated session capabilities."
+        },
+        "autohand-code": {
+          "description": "Autohand Code's native ACP with streamed turns, host tool decisions and negotiated session recovery."
+        },
+        "codebuddy": {
+          "description": "Tencent CodeBuddy's native ACP with session, tool and model controls negotiated from the installed CLI."
+        },
+        "codebuff": {
+          "description": "Codebuff's pinned SDK through a verified isolated host bridge with gated network and tool access."
+        },
+        "command-code": {
+          "description": "Command Code's native ACP with an isolated process per conversation and host tool decisions."
+        },
+        "continue-dev": {
+          "description": "Continue's native headless CLI with bounded structured results and host-owned conversation history."
+        },
+        "crush": {
+          "description": "Charm Crush's native service API through a private host socket, including streamed tools and user decisions."
+        },
+        "hermes-agent": {
+          "description": "Hermes Agent's native ACP with daemon-aware cancellation and advertised native sessions."
+        },
+        "kilocode": {
+          "description": "Kilo Code's native ACP for streaming, tools, model selection and advertised native sessions."
+        },
+        "mimo-code": {
+          "description": "Xiaomi MiMo Code's native ACP for streamed replies, host tool decisions and native session recovery."
+        },
+        "mistral-vibe": {
+          "description": "Mistral Vibe's official ACP executable with native authentication and negotiated tools and sessions."
+        },
+        "muse": {
+          "description": "Meta Muse Code through the BrokkAi ACP bridge to its native Muse Session Protocol."
+        },
+        "oh-my-pi": {
+          "description": "oh-my-pi's official ACP with guarded host files and terminals, tool decisions and native session management."
+        },
+        "openclaude": {
+          "description": "OpenClaude's bidirectional native stream protocol with host permission hooks and exact session recovery."
+        },
+        "rovo-dev": {
+          "description": "Atlassian Rovo Dev's native streaming service with an owned authenticated local process."
+        },
+        "zcode": {
+          "description": "Z.ai ZCode through the macOS ACP bridge with one process per conversation."
+        }
+      },
       "agentAdded": "Agent added successfully",
       "agentConfigDescription": "Configure the external agent connection settings",
       "agentDuplicated": "Agent duplicated",
@@ -22532,6 +22900,8 @@
       "actionUnavailable": "This action can only be used in {platform}",
       "imageUnavailable": "Image available in {platform}",
       "rawPayload": "Raw payload",
+      "rawUnavailable": "This payload cannot be displayed as JSON.",
+      "replyTo": "Reply to message {id}",
       "untitledAction": "Action"
     },
     "inboundRecovery": {
@@ -32352,6 +32722,7 @@
       "empty": "No characters yet.",
       "inheritAppearance": "Inherit global appearance",
       "live2dOption": "Live2D · {name}",
+      "mediaOption": "Animation: {name}",
       "saveFailed": "Couldn't save the character binding. Try again.",
       "skinFor": "Skin for {name}",
       "speciesFor": "Species for {name}",
@@ -32655,6 +33026,7 @@
         },
         "binding": {
           "live2d": "Live2D model",
+          "media": "Animation pack",
           "readOnly": "Characters' looks are edited in the desktop app.",
           "sprite": "Sprite pack"
         },
@@ -32785,7 +33157,9 @@
       "look": {
         "description": "Restyle your pet without changing who it is.",
         "descriptionLive2d": "Preview and fine-tune your active Live2D model.",
+        "descriptionMedia": "Appearance and animation come from the selected character pack.",
         "descriptionSprite": "Preview your active AI-generated v2 sprite pet.",
+        "mediaManagedBelow": "Choose an animation pack below.",
         "spriteManagedBelow": "Create, import, and switch v2 sprite pets in the Appearance section below.",
         "title": "Look"
       },
@@ -38449,6 +38823,7 @@
     "dismissOnboarding": "Dismiss",
     "dismissSecurityAlert": "Dismiss Security Alert",
     "done": "Done",
+    "doubao": "Doubao",
     "download": "Download",
     "downloading": "Downloading…",
     "dropFileHere": "Drop file here or click to browse",
@@ -38916,6 +39291,7 @@
     "quickSetup": "Quick Setup",
     "quotaExceeded": "Quota Exceeded Behavior",
     "quotaUsage": "Quota Usage",
+    "qwen": "Qwen",
     "random": "Random",
     "rateLimitRemaining": "Rate Limit",
     "readiness": {
@@ -43500,6 +43876,7 @@
       "copilot-cli": "Copilot CLI",
       "cursor": "Cursor",
       "gemini-cli": "Gemini CLI",
+      "goose": "Goose",
       "opencode": "OpenCode",
       "pi": "Pi",
       "qwen-code": "Qwen Code"
@@ -47969,9 +48346,17 @@
               "help": "Adds im:message.group_msg, a sensitive permission. Admission rules still decide which received messages may run the Agent.",
               "title": "Group follow-ups without @"
             },
+            "appAvatars": {
+              "help": "Read application information for other bots in the same tenant. Select only if you need their avatars; unknown bot identities keep the fallback instead of showing this app's picture.",
+              "title": "Other app bot avatars"
+            },
             "attachments": {
               "help": "Adds im:resource for message attachments. Document, Drive and HR permissions are separate and are not needed just for chat files.",
               "title": "Images and files"
+            },
+            "avatars": {
+              "help": "Read member profiles and chat pictures. Enable the listed permissions, then publish the app; contact data permissions must include the people whose avatars you want to show. Missing access keeps the initials fallback.",
+              "title": "People and conversation avatars"
             },
             "botMentions": {
               "help": "Adds im:message.group_at_msg.include_bot:readonly. Also configure Cognia’s bot-sender admission rules.",
@@ -50719,6 +51104,8 @@
       "launchAutostartFailed": "Could not change autostart: {error}",
       "launchOffToast": "Launch-at-login disabled.",
       "launchOnToast": "Cognia will launch at login.",
+      "launchStateMismatch": "The system did not apply the requested launch-at-login setting.",
+      "launchStateUnavailable": "Could not read launch-at-login status: {error}. Return to this window to retry.",
       "loadFailed": "Failed to load desktop info.",
       "locale": "Locale",
       "notificationBody": "Test notification — your desktop integration is wired up.",
@@ -53410,6 +53797,7 @@
           "sad": "Sad",
           "sleeping": "Sleeping",
           "thinking": "Thinking",
+          "unwell": "Unwell",
           "waiting": "Waiting"
         },
         "storageUsage": "{count} models · {size}",
@@ -53426,6 +53814,27 @@
       "lowPower": {
         "description": "Cap the Live2D frame rate at 30 fps and make wandering rest longer.",
         "label": "Low-power mode"
+      },
+      "mediaPack": {
+        "activate": "Activate",
+        "active": "Active",
+        "delete": "Delete",
+        "deleteNamed": "Delete {name}",
+        "details": "{count} clips · {size} MiB",
+        "empty": "No animation packs installed.",
+        "errors": {
+          "ambiguous": "Multiple animation configurations found. Import one character pack at a time.",
+          "decoderMissing": "Video conversion needs FFmpeg with VP8/VP9 support. Install FFmpeg or import a WebP/PNG frame pack.",
+          "invalid": "Could not install this pack. Check its configuration and media files.",
+          "missingFiles": "Some animation files are missing. Import the complete pack folder or ZIP.",
+          "tooLarge": "Pack limit: 128 MiB, 5,000 files and 15 seconds per video clip.",
+          "unsupported": "This format cannot be imported here. Use a DSH video pack or a WebP/PNG frame pack on the local desktop."
+        },
+        "hint": "Import DSH config.jsonc with WebM clips, or pet-manifest.json with WebP/PNG frames. Keep the original folder structure.",
+        "importFolder": "Import animation folder",
+        "importZip": "Import animation ZIP",
+        "importing": "Importing and preparing animation…",
+        "installed": "Animation pack installed and selected."
       },
       "memory": {
         "clearAction": "Clear pet memory",
@@ -53497,6 +53906,7 @@
         "label": "Skin",
         "options": {
           "live2d": "Live2D model",
+          "media": "Video / frame animation",
           "sprite-v2": "AI sprite (v2)",
           "svg": "Vector mascot"
         }
@@ -53525,6 +53935,7 @@
         "retry": "Retry",
         "skins": {
           "live2d": "Live2D model",
+          "media": "Video / frame animation",
           "sprite-v2": "AI sprite (v2)",
           "svg": "Vector mascot"
         },
@@ -62886,6 +63297,7 @@
       "terminalReplWrite": "Write bytes into a REPL session's stdin. Non-blocking — pair with terminal_repl_read.",
       "terminateProcess": "Terminate a PID (default: only PIDs this session started).",
       "topMemoryProcesses": "Top N processes by resident memory.",
+      "verificationBatch": "Run bounded sequential verification batches with per-command Bash approval.",
       "webClone": "Snapshot a live web page — download its HTML plus all CSS/JS/image/font assets into a self-contained single file or a directory bundle, with optional component extraction + framework codegen. Writes into the workspace.",
       "webCloneConvert": "Run component extraction + framework codegen on an existing local snapshot (bundle directory or single HTML) without re-fetching. Generates Vue/React/Angular/Svelte/jQuery components."
     },

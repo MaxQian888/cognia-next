@@ -1236,6 +1236,14 @@
         "menus": {
           "title": "Managed group menus and chat tabs",
           "help": "Adds chat read, chat-tab write and group-menu write permissions. Configure Entry surfaces, a reachable web entry and identity authorization. Bot quick-command menus use the separate event described in step 3."
+        },
+        "avatars": {
+          "title": "People and conversation avatars",
+          "help": "Read member profiles and chat pictures. Enable the listed permissions, then publish the app; contact data permissions must include the people whose avatars you want to show. Missing access keeps the initials fallback."
+        },
+        "appAvatars": {
+          "title": "Other app bot avatars",
+          "help": "Read application information for other bots in the same tenant. Select only if you need their avatars; unknown bot identities keep the fallback instead of showing this app's picture."
         }
       },
       "delivery": {

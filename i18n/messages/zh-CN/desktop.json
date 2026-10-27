@@ -135,6 +135,7 @@
     },
     "moveFolderDown": "下移文件夹",
     "moveFolderUp": "上移文件夹",
+    "createMenu": "新建或加入会话",
     "newChat": "新建对话",
     "newConversation": "新建会话",
     "newConversationIn": "在「{name}」中新建会话",

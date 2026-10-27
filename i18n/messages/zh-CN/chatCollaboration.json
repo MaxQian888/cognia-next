@@ -1,5 +1,6 @@
 {
   "acceptInvite": "加入共享会话",
+  "joinViaInvite": "通过邀请加入会话…",
   "approvalFailed": "审批状态已变化或无法处理。",
   "allowed": "允许",
   "approvals": "审批",
@@ -191,5 +192,26 @@
       "done": "已移除共享设备",
       "failed": "无法移除共享设备，请重试。"
     }
-  }
+  },
+  "shareModeLabel": "分享方式",
+  "shareModeFromNow": "从现在开始分享",
+  "shareModeFromNowDescription": "新建一个共享对话。本对话及其历史保持私有，成员只能看到之后发生的内容。",
+  "shareModeHistory": "分享完整历史",
+  "shareModeHistoryDescription": "把本对话转为共享对话。所有受邀成员都能读到之前的每条消息和附件。",
+  "backgroundLabel": "给成员的背景说明（可选）",
+  "backgroundDraft": "根据本对话起草",
+  "backgroundDraftFailed": "无法起草背景说明，你可以自己填写。",
+  "backgroundHint": "只有留在这里的内容会被分享。它会作为你的第一条消息发布，成员和 Agent 都能看到。",
+  "backgroundHeading": "来自之前一段私有对话的背景：",
+  "startShared": "开始共享对话",
+  "shareFromNowComplete": "共享对话已开始，本对话仍保持私有。",
+  "shareFromNowFailed": "无法开始共享对话，没有分享任何内容。",
+  "toolDetailLabel": "向成员显示命令和编辑内容",
+  "toolDetailDescription": "关闭：成员只看到运行了哪些工具、改动了工作区里的哪些文件以及改动量。开启：成员还会看到命令、编辑内容、搜索和待办，其中的密钥会被脱敏。",
+  "toolDetailReadOnly": "只有所有者或维护者可以更改此项。",
+  "toolDetailConfirmTitle": "向成员显示命令和编辑内容？",
+  "toolDetailConfirmWarning": "命令和编辑内容里可能有脱敏遗漏的内部主机名、路径或密钥。从下一次工具调用起，此对话的所有成员（包括访客）都能看到。",
+  "toolDetailConfirm": "显示",
+  "toolDetailCancel": "取消",
+  "toolDetailFailed": "无法更改成员可见的内容"
 }

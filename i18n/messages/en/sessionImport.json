@@ -86,7 +86,8 @@
     "gemini-cli": "Gemini CLI",
     "opencode": "OpenCode",
     "pi": "Pi",
-    "qwen-code": "Qwen Code"
+    "qwen-code": "Qwen Code",
+    "goose": "Goose"
   },
   "title": "Import agent sessions",
   "unrecognized": "These files weren't recognized as a supported agent session.",

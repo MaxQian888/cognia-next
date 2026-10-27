@@ -86,7 +86,8 @@
     "gemini-cli": "Gemini CLI",
     "opencode": "OpenCode",
     "pi": "Pi",
-    "qwen-code": "Qwen Code"
+    "qwen-code": "Qwen Code",
+    "goose": "Goose"
   },
   "title": "导入 Agent 会话",
   "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
