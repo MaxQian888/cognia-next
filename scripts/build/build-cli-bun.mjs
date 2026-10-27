@@ -22,6 +22,7 @@ import {
 } from "./cli-bun-contract.mjs"
 import { signCliArtifacts } from "./sign-cli-bun.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { nativeBridgeInterpreterEnvironment, resolveNativeBridgeInterpreter } from "../../cli/src/runtime/external/native-bridges.ts"
 import { resolveClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
 import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
 import { BUN_SIDECAR_PATCHES, applySidecarPatch, patchFilter } from "./lib/bun-sidecar-patches.mjs"
@@ -35,8 +36,8 @@ const buildArgs = parseCliBuildArgs(process.argv.slice(2), hostTarget)
 
 if (buildArgs.layoutOnly) {
   const legacyLayout = Bun.spawn(
-    ["node", path.join(root, "scripts/build/build-cli-binary.mjs"), "--layout-only"],
-    { cwd: root, stdin: "inherit", stdout: "inherit", stderr: "inherit" }
+    [resolveNativeBridgeInterpreter(), path.join(root, "scripts/build/build-cli-binary.mjs"), "--layout-only"],
+    { cwd: root, env: nativeBridgeInterpreterEnvironment(process.env), stdin: "inherit", stdout: "inherit", stderr: "inherit" }
   )
   process.exit(await legacyLayout.exited)
 }
@@ -256,6 +257,21 @@ const zodCommonJsPlugin = {
 
 fs.rmSync(coreDir, { recursive: true, force: true })
 fs.mkdirSync(coreDir, { recursive: true })
+// The compiled host embeds these pins, so stage once before Bun compiles it.
+// The native entries remain ordinary Node files beside each released variant.
+// esbuild's synchronous worker service cannot spawn reliably under Bun 1.4.
+// Staging is a fixed build operation in plain Node, not a generic script arm.
+const stageNativeBridgesScript = [
+  'import {pathToFileURL} from "node:url";',
+  'const {stageNativeAgentBridges}=await import(pathToFileURL(process.argv[1]).href);',
+  'stageNativeAgentBridges({root:process.argv[2],sidecarOutDir:process.argv[3]});',
+].join("\n")
+const stagedNativeBridges = { dir: path.join(coreDir, "sidecar/native-agents") }
+const stageResult = Bun.spawnSync([
+  resolveNativeBridgeInterpreter(), "--input-type=module", "--eval", stageNativeBridgesScript,
+  path.join(root, "scripts/build/lib/stage-native-agent-bridges.mjs"), root, path.join(coreDir, "sidecar"),
+], { cwd: root, env: nativeBridgeInterpreterEnvironment(process.env), stdin: "ignore", stdout: "inherit", stderr: "inherit" })
+if (stageResult.exitCode !== 0) throw new Error(`build-cli-bun: verified Node bridge staging failed (${stageResult.exitCode})`)
 
 const result = await Bun.build({
   entrypoints: [entry],
@@ -373,6 +389,7 @@ for (const variant of variants) {
   // helper also verifies the pin, which the plain copy here did not: a stale
   // digest used to ship and then refuse every session at runtime.
   stagePiExtension({ root, sidecarOutDir: path.join(layoutRoot, "sidecar") })
+  fs.cpSync(stagedNativeBridges.dir, path.join(layoutRoot, "sidecar/native-agents"), { recursive: true, dereference: false })
   // The generated built-in plugin chunks. Their catalog URLs are
   // root-relative, so the Node reader resolves them against this layout
   // directory; without the tree all five refuse to enable on this host.

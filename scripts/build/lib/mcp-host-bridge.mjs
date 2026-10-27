@@ -1,4 +1,9 @@
 import { renameSync, rmSync, writeFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+
+const COMPUTER_USE_PROXY = fileURLToPath(
+  new URL("../../../lib/external-bridge/handlers/computer-use-proxy.ts", import.meta.url)
+)
 
 const HOST_BRIDGED_IMPORTS = new Set([
   "@/lib/db/wiki-articles",
@@ -38,7 +43,9 @@ export function createMcpHostBridgePlugin(bridgeRuntime) {
     name: "cognia-mcp-host-bridge",
     setup(build) {
       build.onResolve({ filter: /.*/ }, (args) =>
-        HOST_BRIDGED_IMPORTS.has(args.path) ? { path: bridgeRuntime } : undefined
+        args.path === "../handlers/computer-use"
+          ? { path: COMPUTER_USE_PROXY }
+          : HOST_BRIDGED_IMPORTS.has(args.path) ? { path: bridgeRuntime } : undefined
       )
     },
   }

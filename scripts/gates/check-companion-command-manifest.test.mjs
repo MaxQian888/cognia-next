@@ -32,6 +32,33 @@ test("accepts a complete descriptor", () => {
   assert.deepEqual(validateManifest({ contractVersion: 3, commands: [descriptor()] }), [])
 })
 
+test("ephemeral preview issuers share the generator's narrow receipt policy", () => {
+  for (const name of ["sandbox_preview_create", "sandbox_preview_open"]) {
+    const preview = descriptor({
+      name,
+      target: "service",
+      operation: "write",
+      idempotency: "forbidden",
+      transports: ["internal"],
+    })
+    assert.deepEqual(validateManifest({ contractVersion: 3, commands: [preview] }), [])
+    for (const change of [
+      { name: "other_secret_create" },
+      { target: "client" },
+      { target: "execution" },
+      { transports: ["http"] },
+      { transports: ["internal", "websocket"] },
+      { idempotency: "structural" },
+    ]) {
+      assert.ok(
+        validateManifest({ contractVersion: 3, commands: [{ ...preview, ...change }] }).some(
+          (error) => error.includes("mutations require idempotency")
+        )
+      )
+    }
+  }
+})
+
 test("requires the grammar fields", () => {
   const errors = validateManifest({
     contractVersion: 3,

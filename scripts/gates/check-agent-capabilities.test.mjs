@@ -8,6 +8,7 @@ import {
   declaredExecutableProtocols,
   externalOnlyCapabilityIds,
   presetCommands,
+  bundledPresetCommands,
   registeredProtocols,
   runChecks,
   rustIsolationRules,
@@ -378,4 +379,30 @@ test("an allowlist that does not come from the policy module is caught", () => {
     '"./my-allowlist"'
   )
   assert.ok(checkCliAllowlistSource(elsewhere).some((error) => error.includes("policy module")))
+})
+
+test("bundled Node exceptions require the exact Codebuff source contract", () => {
+  const security = policy({
+    bundledNodeBridges: { codebuff: { file: "codebuff.cjs", args: ["--cognia-codebuff-bridge"] } },
+  })
+  const source =
+    'codebuff: nativeAgentAdapter({id:"codebuff",command:"node",args:[],protocol:"codebuff-sdk",metadata:{bundledBridge:"codebuff"}})'
+  assert.deepEqual([...bundledPresetCommands(source, "", security).commands], ["node"])
+  assert.deepEqual(bundledPresetCommands(source, "", security).errors, [])
+  for (const invalid of [
+    source.replace("args:[]", 'args:["--eval","arbitrary()"]'),
+    source.replace('bundledBridge:"codebuff"', 'bundledBridge:"unknown"'),
+    source.replace('protocol:"codebuff-sdk"', 'protocol:"acp"'),
+    'process: {command:"node",args:["untrusted.js"]}',
+  ]) {
+    const checked = bundledPresetCommands(invalid, "", security)
+    assert.equal(checked.commands.size, 0)
+    assert.equal(checked.errors.length, 1)
+  }
+  assert.equal(bundledPresetCommands(source, "", policy()).errors.length, 1)
+  assert.ok(
+    checkSecurityPolicyParity(policy(), RUST_PRESETS, RUST_SANDBOX, new Set(["node"])).some(
+      (error) => error.includes('preset command "node"')
+    )
+  )
 })

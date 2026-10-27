@@ -268,13 +268,13 @@ test("workspace pnpm caches account for the sidecar lock installed by root posti
 
 test("DeepSeek node:test suites run in their isolated native Node job, never under Jest", async () => {
   const config = await readFile(new URL("../../jest.config.ts", import.meta.url), "utf8")
-  assert.ok(config.includes('"/runtime/deepseek-harness/.*\\\\.test\\\\.mjs$"'))
+  assert.ok(config.includes('"/packages/agent-dsh/runtime/.*\\\\.test\\\\.mjs$"'))
   const { jobs } = parse(await readWorkflow("test.yml"))
   const job = jobs["deepseek-runtime"]
   assert.equal(job.needs, "jest-plan")
   assert.equal(job.if, "fromJSON(needs.jest-plan.outputs.impacts).deepseekRuntime")
   const install = job.steps.find((step) => step.name === "Install isolated runtime")
-  assert.match(install.run, /cp runtime\/deepseek-harness\/\* "\$DSH_TEST_ROOT\/"/)
+  assert.match(install.run, /cp packages\/agent-dsh\/runtime\/\* "\$DSH_TEST_ROOT\/"/)
   assert.match(install.run, /npm install --prefix "\$DSH_TEST_ROOT" --ignore-scripts/)
   const test = job.steps.find((step) => step.name === "Run launcher and service smoke suites")
   assert.ok(job.steps.indexOf(install) < job.steps.indexOf(test))

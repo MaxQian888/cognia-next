@@ -79,6 +79,7 @@
     "cognia-server": "app"
   },
   "allowedSameLayer": [
+    "cognia-automation -> cognia-task-workspace",
     "cognia-core -> cognia-problem",
     "cognia-companion-rpc -> cognia-companion",
     "cognia-sidecar -> cognia-exec-sandbox",
@@ -92,6 +93,7 @@
     "cognia-update-catalog -> cognia-canonical-json",
     "cognia-update-catalog -> cognia-net",
     "cognia-ccswitch -> cognia-subscription",
+    "cognia-ccswitch -> cognia-skills",
     "cognia-mcp-server -> cognia-automation",
     "cognia-plugin-runtime -> cognia-terminal",
     "cognia-agent-state -> cognia-gateway",
@@ -144,6 +146,36 @@
       "dep": "keyring",
       "allowed": ["cognia-secrets", "cognia-next"],
       "reason": "OS credential access goes through cognia-secrets; the app keeps its per-target keyring backend declarations"
+    }
+  ],
+  "dependencyFeatures": [
+    {
+      "dep": "tokio",
+      "forbidden": ["full"],
+      "reason": "Declare the runtime, I/O and process features each member uses instead of enabling every Tokio subsystem"
+    },
+    {
+      "dep": "wasmtime-wasi",
+      "allowed": ["p2"],
+      "defaultFeatures": false,
+      "reason": "The plugin linker serves WASI Preview 2; Preview 1 and Preview 3 add unused adapters and component async machinery"
+    },
+    {
+      "dep": "reqwest",
+      "forbidden": ["rustls"],
+      "reason": "Use rustls-no-provider with the ring provider supplied by cognia-net instead of adding a second native crypto backend"
+    },
+    {
+      "dep": "kube",
+      "crates": ["cognia-sandbox-pool"],
+      "forbidden": ["runtime"],
+      "reason": "The sandbox pool uses client, config and exec APIs; the external-agent k8s-exec backend retains runtime::wait"
+    },
+    {
+      "dep": "zip",
+      "defaultFeatures": false,
+      "forbidden": ["deflate", "deflate-zopfli"],
+      "reason": "Use deflate-flate2-zlib-rs for existing archive compression levels and retain BZip2 where it is already supported"
     }
   ],
   "tauri": {
@@ -209,6 +241,8 @@
       "settings.rs",
       "sftp_service.rs",
       "shortcuts",
+      "siwc",
+      "siwc.rs",
       "shutdown.rs",
       "startup",
       "subscription",

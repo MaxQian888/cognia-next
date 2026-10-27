@@ -93,3 +93,5 @@ plugins/pi-latex-workbench/vendor-lock.json
 
 # The pinned external Browser Companion checkout and verification output.
 .cache/
+
+sidecar/native-agents/

@@ -76,6 +76,7 @@ const eslintConfig = defineConfig([
     "sidecar/*.mjs",
     "sidecar/node_modules/**",
     "sidecar/pi-extension/**",
+    "sidecar/native-agents/**",
     "sidecar/vscode-ext-host/**",
     "sidecar/webclone/**",
     "sidecar/codeserver-agent-ext/**",

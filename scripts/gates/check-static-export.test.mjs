@@ -221,6 +221,51 @@ test("e2e: tracked files deleted in the working tree are skipped", () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+test("e2e: a git index larger than the default child buffer is fully scanned", () => {
+  const root = makeFixture({
+    tsFiles: [{ path: "lib/z-last.ts", contents: "export const ok = true" }],
+  })
+  try {
+    const blob = spawnSync("git", ["hash-object", "-w", "--stdin"], {
+      cwd: root,
+      input: "export const fixture = true",
+      encoding: "utf8",
+    })
+    assert.equal(blob.status, 0)
+    const entries = Array.from(
+      { length: 12000 },
+      (_, index) => `100644 ${blob.stdout.trim()}\tlib/${"nested/".repeat(12)}fixture-${index}.ts\n`
+    ).join("")
+    assert.ok(entries.length > 1024 * 1024)
+    const indexed = spawnSync("git", ["update-index", "--index-info"], {
+      cwd: root,
+      input: entries,
+      encoding: "utf8",
+    })
+    assert.equal(indexed.status, 0, indexed.stderr)
+    const clean = runScript(root)
+    assert.equal(clean.status, 0, clean.stderr.slice(0, 1000))
+    writeFileSync(join(root, "lib/z-last.ts"), 'import fs from "node:fs"')
+    const violation = runScript(root)
+    assert.equal(violation.status, 1)
+    assert.match(violation.stderr, /lib\/z-last\.ts:1\s+imports "node:fs"/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("e2e: git paths with spaces or newlines remain in the scan", () => {
+  const filename = "lib/space and\nnewline.ts"
+  const root = makeFixture({ tsFiles: [{ path: filename, contents: 'import fs from "node:fs"' }] })
+  try {
+    const result = runScript(root)
+    assert.equal(result.status, 1)
+    assert.ok(result.stderr.includes(`${filename}:1`))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("e2e: .test/.stories/.mjs files are out of scope", () => {
   const root = makeFixture({
     tsFiles: [

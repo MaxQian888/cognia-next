@@ -6,7 +6,7 @@ import path from "node:path"
  * sidecar HOST is not among them: `resolveSidecarScript` walks up from the
  * bundle and is meant to reach the repo's own `sidecar/claude-host.mjs`.
  */
-export const JS_LAYOUT_SIDECAR_ENTRIES = new Set(["pi-extension", "ast-grep", "ast-grep.exe"])
+export const JS_LAYOUT_SIDECAR_ENTRIES = new Set(["pi-extension", "native-agents", "ast-grep", "ast-grep.exe"])
 
 /**
  * Remove whatever an earlier packaging layout left under `<outDir>/sidecar`.

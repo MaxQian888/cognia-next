@@ -41,7 +41,7 @@ async function main() {
       process.argv[2] && fs.existsSync(path.join(installed, "node_modules/@deepseek-ai/dsh")),
       "Pass an installed latest managed runtime directory"
     )
-  const source = path.resolve("runtime/deepseek-harness")
+  const source = path.resolve("packages/agent-dsh/runtime")
   const { createMockDeepSeek } = await import(
     pathToFileURL(path.join(source, "mock-deepseek.mjs")).href
   )

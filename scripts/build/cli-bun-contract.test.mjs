@@ -96,6 +96,25 @@ test("the compiled core does not embed or extract the Claude executable", () => 
   assert.match(buildScript, /copyRequired\(claudeBinary, packagedClaude/)
 })
 
+test("both release pipelines stage verified native bridges before embedding their pins", () => {
+  for (const name of ["build-cli-binary.mjs", "build-cli-bun.mjs"]) {
+    const source = fs.readFileSync(path.resolve(import.meta.dirname, name), "utf8")
+    const stage = source.indexOf("stageNativeAgentBridges({")
+    const compile = source.indexOf(name === "build-cli-bun.mjs" ? "await Bun.build({" : "await esbuild.build({")
+    assert.ok(stage >= 0, `${name} must stage the signed Node bridge dependency closure`)
+    assert.ok(stage < compile, `${name} must verify pins before the CLI core embeds them`)
+    if (name === "build-cli-bun.mjs") {
+      assert.match(source, /Bun\.spawnSync\(\[\s*resolveNativeBridgeInterpreter\(\)/, "Bun must stage esbuild output in verified plain Node")
+      const copied = source.indexOf("fs.cpSync(stagedNativeBridges.dir")
+      assert.ok(copied > compile, "every Bun variant must copy the verified bridge closure")
+      assert.ok(copied < source.indexOf("writeCliArtifactManifest(\n    layoutRoot"), "bridge files must enter the release integrity inventory")
+    } else {
+      assert.ok(stage < source.indexOf("fs.cpSync(sidecarOutDir, path.join(layoutDir"), "the plain Node layout must include the staged sidecar")
+      assert.ok(stage < source.indexOf("fs.cpSync(sidecarOutDir, path.join(distDir"), "pkg layouts must include the staged sidecar")
+    }
+  }
+})
+
 test("tagged macOS host publishing fails closed before Developer ID signing", () => {
   const workflow = fs.readFileSync(
     path.resolve(import.meta.dirname, "../../.github/workflows/release.yml"),

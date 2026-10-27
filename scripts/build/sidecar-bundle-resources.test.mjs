@@ -26,6 +26,20 @@ async function bundleResources() {
   return conf.bundle.resources
 }
 
+test("stages the package-owned DSH runtime for the desktop installer", async () => {
+  const resources = await bundleResources()
+  for (const file of [
+    "package.json",
+    "launcher.mjs",
+    "host.sdk-readonly.yml",
+    "host.sdk-workspace.yml",
+    "host.acp.yml",
+  ]) {
+    const source = `packages/agent-dsh/runtime/${file}`
+    assert.ok(resources.some((entry) => resourceMatcher(entry)(source)), source)
+  }
+})
+
 /** A throwaway git work tree (files untracked but not ignored count as known). */
 function fixtureRepo(files) {
   const dir = mkdtempSync(path.join(tmpdir(), "sidecar-closure-"))
@@ -190,9 +204,9 @@ test("resolves resource entries relative to src-tauri/", () => {
   assert.equal(recursive("sidecar/other/index.mjs"), false)
 
   // A single `*` stays within one path segment.
-  const shallow = resourceMatcher("../runtime/deepseek-harness/*")
-  assert.equal(shallow("runtime/deepseek-harness/run.mjs"), true)
-  assert.equal(shallow("runtime/deepseek-harness/nested/run.mjs"), false)
+  const shallow = resourceMatcher("../packages/agent-dsh/runtime/*")
+  assert.equal(shallow("packages/agent-dsh/runtime/run.mjs"), true)
+  assert.equal(shallow("packages/agent-dsh/runtime/nested/run.mjs"), false)
 
   // Entries without `../` are already relative to src-tauri/.
   const local = resourceMatcher("resources/terminal/shell-integration.zsh")

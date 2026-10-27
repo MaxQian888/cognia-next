@@ -202,9 +202,36 @@ const config: StorybookConfig = {
     }
     const walkRules = (rules: unknown[] | undefined) => {
       for (const r of rules ?? []) {
-        const rule = r as { use?: unknown; oneOf?: unknown[]; rules?: unknown[] }
+        const rule = r as { use?: unknown; exclude?: unknown; oneOf?: unknown[]; rules?: unknown[] }
         if (!rule || typeof rule !== "object") continue
         if (rule.use) stripRefresh(rule.use)
+        for (const use of Array.isArray(rule.use) ? rule.use : [rule.use]) {
+          const loader = use as
+            | {
+                loader?: string
+                options?: { nextConfig?: { transpilePackages?: string[] } }
+              }
+            | undefined
+          const packages = loader?.options?.nextConfig?.transpilePackages
+          if (
+            loader?.loader === "@storybook/nextjs/next-swc-loader-patch" &&
+            packages?.length &&
+            rule.exclude
+          ) {
+            // Storybook 10.6's node_modules exclusion also matches the outer
+            // node_modules/.pnpm/ directory, skipping Next's transpilePackages.
+            // Opt those packages back into the existing SWC rule, preserving
+            // compiler options and all other exclusions. Use the LAST
+            // node_modules segment so their unlisted dependencies stay excluded.
+            rule.exclude = {
+              and: [rule.exclude],
+              not: (resource: string) => {
+                const packagePath = resource.replace(/\\/g, "/").split("/node_modules/").pop()
+                return packages.some((name) => packagePath?.startsWith(`${name}/`))
+              },
+            }
+          }
+        }
         if (rule.oneOf) walkRules(rule.oneOf)
         if (rule.rules) walkRules(rule.rules)
       }

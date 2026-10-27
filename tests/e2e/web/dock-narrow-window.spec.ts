@@ -1,14 +1,11 @@
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
-import { ensureAppMounted, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
+import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 /**
  * The chat row's width budget (ADR-0214, D5): whatever the window, the open
  * dock never squeezes the conversation under `CHAT_MIN_PX`, and the summary
- * card stays on screen. The fold and overlay steps need a dock floor the web
- * shell's compact dock never reaches at desktop widths (the workspace profile
- * is a desktop-host surface), so they are pinned by the unit tests beside
- * `lib/shell/chat-row-budget.ts` and `artifact-workspace-dock.tsx`; this spec
- * pins the geometry a browser can see.
+ * card stays on screen. The dock floats when its floor and the chat no longer
+ * fit beside the expanded sidebar; navigation must preserve that sidebar.
  */
 
 const CHAT_MIN_PX = 420
@@ -26,13 +23,21 @@ async function openConversation(page: Page) {
     window.localStorage.setItem("cognia-ui", JSON.stringify(persisted))
   })
   await page.goto("/")
-  await ensureAppMounted(page)
+  // Seed this disposable account before booting the chat shell. The layout
+  // does not need the plugin runtime, which chat only loads on demand.
+  await ensureCogniaAccount(page)
+  await page.goto("about:blank")
+  await page.goto("/")
+  await waitForTestGlobals(page, 30_000)
   await setCogniaSettings(page, {
     onboardingProgress: { version: 2, path: "completed", completedAt: "2026-09-12T00:00:00.000Z" },
   })
+  // The onboarding verdict is fixed for this boot; the session navigation
+  // below starts a boot that reads the completed fixture record.
   const session = await page.evaluate(() =>
     window.__cogniaSeedConversation!({ turns: 2, title: "Narrow window task" })
   )
+  await page.goto("about:blank")
   await page.goto(`/?session=${session.sessionId}`)
   await waitForTestGlobals(page, 30_000)
   const disableHud = page.getByRole("button", { name: "Disable HUD", exact: true })
@@ -54,11 +59,12 @@ test("@smoke the open dock keeps the chat readable from 1600px down to a tablet"
 
   for (const width of [1600, 1280, 1024]) {
     await page.setViewportSize({ width, height: 900 })
-    // Docked beside the chat, not floated: the compact dock always fits here.
-    await expect(page.getByTestId("artifact-workspace-dock")).not.toHaveAttribute(
-      "data-dock-overlay",
-      /.*/
-    )
+    const dock = page.getByTestId("artifact-workspace-dock")
+    if (width === 1024) await expect(dock).toHaveAttribute("data-dock-overlay", "true")
+    else await expect(dock).not.toHaveAttribute("data-dock-overlay", /.*/)
+    await expect(
+      page.getByRole("button", { name: "Collapse conversation list", exact: true })
+    ).toBeVisible()
     await expect
       .poll(async () => (await page.getByTestId("artifact-dock-wrapper").boundingBox())?.width)
       .toBeGreaterThan(0)
@@ -77,6 +83,34 @@ test("@smoke the open dock keeps the chat readable from 1600px down to a tablet"
       .poll(async () => (await stage(page).boundingBox())?.width ?? 0)
       .toBeGreaterThanOrEqual(CHAT_MIN_PX)
   }
+})
+
+test("@smoke entering a conversation from home preserves the expanded sidebar", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await openConversation(page)
+  const toggle = page.getByRole("button", { name: "Toggle Right Sidebar", exact: true })
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
+
+  await page.getByRole("button", { name: "New chat", exact: true }).first().click()
+  await expect(page.getByTestId("welcome-composer")).toBeVisible()
+  await page.setViewportSize({ width: 1024, height: 900 })
+  const conversation = page.getByRole("button", { name: "Narrow window task", exact: true })
+  await conversation.click()
+
+  await expect(page.getByTestId("welcome-composer")).toBeHidden()
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByTestId("artifact-workspace-dock")).toHaveAttribute(
+    "data-dock-overlay",
+    "true"
+  )
+  await expect(conversation).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Collapse conversation list", exact: true })
+  ).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("conversation-sidebar-preserved.png") })
 })
 
 test("@smoke the summary card stays on screen, and inside the stage when it floats", async ({

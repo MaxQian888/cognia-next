@@ -10,10 +10,12 @@ import { fileURLToPath } from "node:url"
 import { createBundleAgentProtocolDependenciesPlugin } from "../build/esbuild-shared.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
+const copilotAcp = process.argv.includes("--copilot-acp")
 const kimiAcp = process.argv.includes("--kimi-acp")
 const clineAcp = process.argv.includes("--cline-acp")
 const qoderAcp = process.argv.includes("--qoder-acp")
 const gooseAcp = process.argv.includes("--goose-acp")
+const gooseV156 = process.argv.includes("--goose-v156")
 const aiderCli = process.argv.includes("--aider-cli")
 const devinAcp = process.argv.includes("--devin-acp")
 const pi = process.argv.includes("--pi")
@@ -21,43 +23,51 @@ const piSubagentModels = process.argv.includes("--pi-subagent-models")
 const dsh = process.argv.includes("--deepseek-harness") || pi || process.argv.includes("--opencode")
 const entry = path.join(
   root,
-  piSubagentModels
-    ? "scripts/smoke/pi-subagent-models.ts"
-    : kimiAcp
-      ? "scripts/smoke/kimi-acp-smoke.ts"
-      : clineAcp
-        ? "scripts/smoke/cline-acp-smoke.ts"
-        : qoderAcp
-          ? "scripts/smoke/qoder-acp-smoke.ts"
-          : aiderCli
-            ? "scripts/smoke/aider-cli-smoke.ts"
-            : gooseAcp
-              ? "scripts/smoke/goose-acp-smoke.ts"
-              : dsh
-                ? "scripts/smoke/deepseek-harness-adapter-smoke.ts"
-                : devinAcp
-                  ? "scripts/smoke/devin-acp-smoke.ts"
-                  : "scripts/smoke/external-cognia-parity-smoke.ts"
+  gooseV156
+    ? "scripts/smoke/goose-v156-smoke.ts"
+    : copilotAcp
+      ? "scripts/smoke/copilot-acp-smoke.ts"
+      : piSubagentModels
+        ? "scripts/smoke/pi-subagent-models.ts"
+        : kimiAcp
+          ? "scripts/smoke/kimi-acp-smoke.ts"
+          : clineAcp
+            ? "scripts/smoke/cline-acp-smoke.ts"
+            : qoderAcp
+              ? "scripts/smoke/qoder-acp-smoke.ts"
+              : aiderCli
+                ? "scripts/smoke/aider-cli-smoke.ts"
+                : gooseAcp
+                  ? "scripts/smoke/goose-acp-smoke.ts"
+                  : dsh
+                    ? "scripts/smoke/deepseek-harness-adapter-smoke.ts"
+                    : devinAcp
+                      ? "scripts/smoke/devin-acp-smoke.ts"
+                      : "scripts/smoke/external-cognia-parity-smoke.ts"
 )
 const outfile = path.join(
   root,
-  piSubagentModels
-    ? ".cache/pi-subagent-models/probe.mjs"
-    : kimiAcp
-      ? "cli/dist/smoke/kimi-acp-smoke.mjs"
-      : clineAcp
-        ? "cli/dist/smoke/cline-acp-smoke.mjs"
-        : qoderAcp
-          ? "cli/dist/smoke/qoder-acp-smoke.mjs"
-          : aiderCli
-            ? "cli/dist/smoke/aider-cli-smoke.mjs"
-            : gooseAcp
-              ? "cli/dist/smoke/goose-acp-smoke.mjs"
-              : dsh
-                ? "cli/dist/smoke/deepseek-harness-adapter-smoke.mjs"
-                : devinAcp
-                  ? "cli/dist/smoke/devin-acp-smoke.mjs"
-                  : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
+  gooseV156
+    ? ".cache/goose-v156-implementation/smoke.mjs"
+    : copilotAcp
+      ? ".cache/copilot-cli-acceptance/probe.mjs"
+      : piSubagentModels
+        ? ".cache/pi-subagent-models/probe.mjs"
+        : kimiAcp
+          ? "cli/dist/smoke/kimi-acp-smoke.mjs"
+          : clineAcp
+            ? "cli/dist/smoke/cline-acp-smoke.mjs"
+            : qoderAcp
+              ? "cli/dist/smoke/qoder-acp-smoke.mjs"
+              : aiderCli
+                ? "cli/dist/smoke/aider-cli-smoke.mjs"
+                : gooseAcp
+                  ? "cli/dist/smoke/goose-acp-smoke.mjs"
+                  : dsh
+                    ? "cli/dist/smoke/deepseek-harness-adapter-smoke.mjs"
+                    : devinAcp
+                      ? "cli/dist/smoke/devin-acp-smoke.mjs"
+                      : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
 )
 
 const esbuild = await import("esbuild")
@@ -104,6 +114,12 @@ const smokeEntry = {
 }
 
 fs.mkdirSync(path.dirname(outfile), { recursive: true })
+if (copilotAcp || gooseV156) {
+  // This graph includes CLI-only dependencies such as undici. Keep generated
+  // output in the root cache while retaining the CLI's dependency resolution.
+  const modules = path.join(path.dirname(outfile), "node_modules")
+  if (!fs.existsSync(modules)) fs.symlinkSync(path.join(root, "cli/node_modules"), modules, "dir")
+}
 await esbuild.build({
   stdin: smokeEntry,
   outfile,

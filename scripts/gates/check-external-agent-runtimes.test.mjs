@@ -62,6 +62,45 @@ test("shippedPresetIds reads the preset union and drops custom", () => {
   assert.deepEqual(shippedPresetIds(PRESETS_SOURCE), ["codex", "droid"])
 })
 
+test("shippedPresetIds reads TypeScript syntax without matching comments or trailing declarations", () => {
+  const source = `export type ExternalAgentPresetId =
+    | 'codex' // 'not-a-preset'
+    | 'droid'
+    | 'custom';
+export const unrelated = "also-not-a-preset";`
+  assert.deepEqual(shippedPresetIds(source), ["codex", "droid"])
+})
+
+test("shippedPresetIds refuses a relocated, missing or unexported declaration", () => {
+  for (const source of [
+    'export type { ExternalAgentPresetId } from "./contract"',
+    'export type RenamedPresetId = "codex"',
+    'type ExternalAgentPresetId = "codex"',
+  ]) {
+    assert.throws(() => shippedPresetIds(source), /exported ExternalAgentPresetId declaration/)
+  }
+})
+
+test("shippedPresetIds refuses an open union instead of silently omitting its members", () => {
+  for (const type of ['"codex" | string', '"codex" | OtherPresetId']) {
+    assert.throws(
+      () => shippedPresetIds(`export type ExternalAgentPresetId = ${type}`),
+      /closed string-literal union/
+    )
+  }
+})
+
+test("shippedPresetIds refuses syntax errors and a declaration with no executable presets", () => {
+  assert.throws(
+    () => shippedPresetIds("export type ExternalAgentPresetId = |"),
+    /cannot parse preset contract/
+  )
+  assert.throws(
+    () => shippedPresetIds('export type ExternalAgentPresetId = "custom"'),
+    /contains no executable preset ids/
+  )
+})
+
 // --- schema ----------------------------------------------------------------
 
 test("schema rejects a duplicate runtime id", () => {
@@ -110,6 +149,13 @@ test("schema accepts a well-formed entry", () => {
 })
 
 // --- coverage --------------------------------------------------------------
+
+test("coverage fails clearly when the owning preset declaration cannot be read", () => {
+  const errors = checkCoverage(catalog([]), 'export type RenamedPresetId = "codex"')
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /cannot determine shipped presets/)
+  assert.match(errors[0], /exported ExternalAgentPresetId declaration/)
+})
 
 test("coverage fails when a shipped preset has no runtime", () => {
   const errors = checkCoverage(catalog([runtime()]), PRESETS_SOURCE)
@@ -444,4 +490,46 @@ test("a schema failure short-circuits instead of cascading", () => {
   })
   assert.ok(errors.length > 0)
   assert.ok(errors.every((e) => e.startsWith("broken:") || e.includes("external-agent-runtimes")))
+})
+
+test("only a declared fixed Codebuff bundle can use Node without broad interpreter authority", () => {
+  const policy = {
+    ...POLICY,
+    bundledNodeBridges: { codebuff: { file: "codebuff.cjs", args: ["--cognia-codebuff-bridge"] } },
+  }
+  const entry = runtime({
+    runtimeId: "codebuff",
+    presetIds: ["codebuff"],
+    protocol: "codebuff-sdk",
+    systemCommand: "node",
+    bundledBridgeId: "codebuff",
+  })
+  assert.deepEqual(checkLaunchParity(catalog([entry]), policy), [])
+  for (const bad of [
+    { ...entry, bundledBridgeId: undefined },
+    { ...entry, bundledBridgeId: "unknown" },
+    { ...entry, launchArgs: ["--eval", "arbitrary()"] },
+    { ...entry, protocol: "acp" },
+    { ...entry, systemCommand: "/untrusted/node" },
+    { ...entry, presetIds: ["droid"] },
+  ])
+    assert.ok(checkLaunchParity(catalog([bad]), policy).length > 0)
+  assert.ok(
+    checkLaunchParity(catalog([entry]), {
+      ...policy,
+      bundledNodeBridges: { codebuff: { file: "other.cjs", args: ["--cognia-codebuff-bridge"] } },
+    }).length > 0
+  )
+})
+
+test("an empty certification list does not invent a supported version range", () => {
+  assert.deepEqual(
+    checkSchema(catalog([runtime({ certifiedVersions: [], supportedRange: undefined })])),
+    []
+  )
+  assert.ok(
+    checkSchema(
+      catalog([runtime({ certifiedVersions: ["1.0.0"], supportedRange: undefined })])
+    ).some((error) => error.includes("supportedRange"))
+  )
 })

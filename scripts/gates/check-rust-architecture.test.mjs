@@ -243,6 +243,74 @@ test("direct-only dependencies are allowed only in the named crates", () => {
   assert.deepEqual(collectFindings(ws, config).ratcheted, ["direct-only: tts depends on keyring"])
 })
 
+test("dependency feature budgets reject broad defaults and unused WASI previews", () => {
+  const config = baseConfig(
+    { runtime: "domain" },
+    {
+      dependencyFeatures: [
+        { dep: "tokio", forbidden: ["full"] },
+        { dep: "wasmtime-wasi", allowed: ["p2"], defaultFeatures: false },
+      ],
+    }
+  )
+  const ws = workspace(
+    pkg("runtime", [
+      ext("tokio", { kind: "dev", features: ["full"] }),
+      ext("wasmtime-wasi", { features: ["p1", "p3"] }),
+    ])
+  )
+  assert.deepEqual(collectFindings(ws, config).hard, [
+    "dependency-feature: runtime enables tokio/full",
+    "dependency-feature: runtime enables wasmtime-wasi/default",
+    "dependency-feature: runtime enables wasmtime-wasi/p1",
+    "dependency-feature: runtime enables wasmtime-wasi/p3",
+  ])
+  const lean = workspace(
+    pkg("runtime", [
+      ext("tokio", { features: ["fs", "process", "rt-multi-thread"] }),
+      ext("wasmtime-wasi", { uses_default_features: false, features: ["p2"] }),
+    ])
+  )
+  assert.deepEqual(collectFindings(lean, config).hard, [])
+})
+
+test("dependency feature budgets also inspect renamed and weak feature forwarding", () => {
+  const config = baseConfig(
+    { runtime: "domain" },
+    {
+      dependencyFeatures: [{ dep: "wasmtime-wasi", allowed: ["p2"], defaultFeatures: false }],
+    }
+  )
+  const ws = workspace(
+    pkg("runtime", [ext("wasmtime-wasi", { rename: "wasi", uses_default_features: false })], {
+      legacy: ["wasi/p1"],
+      future: ["wasi?/p3"],
+      defaults: ["wasi/default"],
+    })
+  )
+  assert.deepEqual(collectFindings(ws, config).hard, [
+    "dependency-feature: runtime enables wasmtime-wasi/default",
+    "dependency-feature: runtime enables wasmtime-wasi/p1",
+    "dependency-feature: runtime enables wasmtime-wasi/p3",
+  ])
+})
+
+test("dependency feature budgets can preserve runtime support in another consumer", () => {
+  const config = baseConfig(
+    { pool: "domain", agent: "domain" },
+    {
+      dependencyFeatures: [{ dep: "kube", crates: ["pool"], forbidden: ["runtime"] }],
+    }
+  )
+  const ws = workspace(
+    pkg("pool", [ext("kube", { features: ["client", "runtime", "ws"] })]),
+    pkg("agent", [ext("kube", { features: ["client", "runtime", "ws"] })])
+  )
+  assert.deepEqual(collectFindings(ws, config).hard, [
+    "dependency-feature: pool enables kube/runtime",
+  ])
+})
+
 test("only the listed enablers may turn on a crate's tauri-host", () => {
   const ws = workspace(
     pkg("app", [member("lib", { features: ["tauri-host"] })]),
@@ -328,6 +396,52 @@ test("the committed config layers its crates in known layers", () => {
   }
   assert.deepEqual(config.tauri.enablers, ["cognia-next"])
   assert.equal(new Set(config.appShell.modules).size, config.appShell.modules.length)
+  assert.deepEqual(
+    config.dependencyFeatures.map(({ dep, crates, allowed, forbidden, defaultFeatures }) => ({
+      dep,
+      crates,
+      allowed,
+      forbidden,
+      defaultFeatures,
+    })),
+    [
+      {
+        dep: "tokio",
+        crates: undefined,
+        allowed: undefined,
+        forbidden: ["full"],
+        defaultFeatures: undefined,
+      },
+      {
+        dep: "wasmtime-wasi",
+        crates: undefined,
+        allowed: ["p2"],
+        forbidden: undefined,
+        defaultFeatures: false,
+      },
+      {
+        dep: "reqwest",
+        crates: undefined,
+        allowed: undefined,
+        forbidden: ["rustls"],
+        defaultFeatures: undefined,
+      },
+      {
+        dep: "kube",
+        crates: ["cognia-sandbox-pool"],
+        allowed: undefined,
+        forbidden: ["runtime"],
+        defaultFeatures: undefined,
+      },
+      {
+        dep: "zip",
+        crates: undefined,
+        allowed: undefined,
+        forbidden: ["deflate", "deflate-zopfli"],
+        defaultFeatures: false,
+      },
+    ]
+  )
 })
 
 test("the committed baseline is a sorted list of known finding kinds", () => {

@@ -26,6 +26,8 @@
  *   6. The app shell (`src-tauri/src`) may only have the top-level modules the
  *      config lists, and its line count stays under a ceiling that each
  *      extraction lowers.
+ *   7. Direct dependency features stay within the configured budgets, including
+ *      defaults and feature forwarding. These findings always fail.
  *
  * Findings 2–5 are ratcheted against `rust-architecture-baseline.json`: the
  * baseline records the violations that existed when the gate landed, a new one
@@ -230,6 +232,31 @@ export function collectFindings(ws, config) {
   for (const name of Object.keys(config.crates)) {
     if (!ws.members.has(name))
       hard.push(`stale-crate: ${name} is in rust-architecture.json but not a workspace member`)
+  }
+
+  for (const [name, pkg] of ws.members) {
+    const forwarded = Object.values(pkg.features ?? {}).flat()
+    for (const rule of config.dependencyFeatures ?? []) {
+      if (rule.crates && !rule.crates.includes(name)) continue
+      const requested = new Set()
+      for (const dep of pkg.dependencies.filter((dep) => dep.name === rule.dep)) {
+        if (dep.uses_default_features) requested.add("default")
+        for (const feature of dep.features) requested.add(feature)
+        for (const value of forwarded) {
+          for (const prefix of [`${depKey(dep)}/`, `${depKey(dep)}?/`]) {
+            if (value.startsWith(prefix)) requested.add(value.slice(prefix.length))
+          }
+        }
+      }
+      for (const feature of [...requested].sort()) {
+        const forbidden =
+          feature === "default"
+            ? rule.defaultFeatures === false
+            : rule.forbidden?.includes(feature) ||
+              (rule.allowed !== undefined && !rule.allowed.includes(feature))
+        if (forbidden) hard.push(`dependency-feature: ${name} enables ${rule.dep}/${feature}`)
+      }
+    }
   }
 
   const edges = new Set()

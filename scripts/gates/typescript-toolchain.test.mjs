@@ -32,6 +32,32 @@ test("editor selects the native SDK instead of the compatibility API", () => {
   assert.match(manifest(sdk).version, /^7\./)
 })
 
+test("contract typechecks resolve canonical source without declaration build artifacts", () => {
+  const ts = require("typescript")
+  const directory = join(root, "packages/plugin-contract")
+  const config = ts.readConfigFile(join(directory, "tsconfig.json"), ts.sys.readFile)
+  assert.equal(config.error, undefined)
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, directory)
+  const host = {
+    ...ts.sys,
+    fileExists: (file) => !file.includes("/dist/") && ts.sys.fileExists(file),
+  }
+  for (const [specifier, source] of [
+    ["@cognia/plugin-contract/types/a2ui/schema", "plugin-contract/src/types/a2ui/schema.ts"],
+    ["@cognia/plugin-contract/contracts/generated", "plugin-contract/src/contracts/generated.ts"],
+    ["@cognia/agent-pi/auth", "agent-pi/src/auth.ts"],
+    ["@cognia/logging/types", "logging/src/types/index.ts"],
+  ]) {
+    const resolved = ts.resolveModuleName(
+      specifier,
+      join(directory, "src/types/plugin/plugin.ts"),
+      parsed.options,
+      host
+    ).resolvedModule
+    assert.equal(resolved?.resolvedFileName, join(root, "packages", source), specifier)
+  }
+})
+
 test("workspace and sidecar scripts resolve native tsc instead of a shadowing TS6 binary", () => {
   const workspaces = [
     root,

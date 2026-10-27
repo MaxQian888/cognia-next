@@ -133,3 +133,20 @@ test("bundle analysis is opt-in and preserves the mobile webpack configuration",
     }
   }
 })
+
+test("development avoids unsafe lazy compilation across native windows", () => {
+  for (const platform of [undefined, "mobile"]) {
+    const next = config({ NODE_ENV: "development", NEXT_PUBLIC_PLATFORM: platform })
+    assert.notEqual(next.experimental.turbopackLazyDynamicImports, true)
+    assert.notEqual(next.experimental.turbopackLazyDynamicImportsSSR, true)
+  }
+})
+
+test("dynamic compilation policy preserves the shared production static export", () => {
+  for (const platform of [undefined, "mobile"]) {
+    const next = config({ NODE_ENV: "production", NEXT_PUBLIC_PLATFORM: platform })
+    assert.equal(next.output, "export")
+    assert.notEqual(next.experimental.turbopackLazyDynamicImports, true)
+    assert.notEqual(next.experimental.turbopackLazyDynamicImportsSSR, true)
+  }
+})

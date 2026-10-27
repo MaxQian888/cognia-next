@@ -298,14 +298,21 @@ test("shared manifests, Rust graph and workflow changes conservatively fan out t
 
 test("DeepSeek runtime changes select the isolated Node launcher smoke without unrelated frontend builds", () => {
   for (const file of [
-    "runtime/deepseek-harness/launcher.mjs",
-    "runtime/deepseek-harness/package.json",
-    "runtime/deepseek-harness/host.acp.yml",
+    "packages/agent-dsh/runtime/launcher.mjs",
+    "packages/agent-dsh/runtime/package.json",
+    "packages/agent-dsh/runtime/host.acp.yml",
   ]) {
     const impact = classifyCiImpact([file])
     assert.equal(impact.deepseekRuntime, true, file)
     assert.equal(impact.frontend, false, file)
+    assert.equal(impact.sidecar, false, file)
+    assert.equal(impact.gateway, false, file)
+    assert.equal(impact.browserExtension, false, file)
   }
+  const adapter = classifyCiImpact(["packages/agent-dsh/src/transport.ts"])
+  assert.equal(adapter.frontend, true)
+  assert.equal(adapter.sidecar, true)
+  assert.equal(adapter.deepseekRuntime, false)
   assert.equal(classifyCiImpact(["components/chat/message.tsx"]).deepseekRuntime, false)
   assert.equal(classifyCiImpact(["pnpm-lock.yaml"]).deepseekRuntime, true)
 })

@@ -43,3 +43,17 @@ test("is a no-op without a sidecar directory or with only owned entries", () => 
   assert.deepEqual(pruneSidecarResidue({ outDir: owned, log: (l) => lines.push(l) }), [])
   assert.deepEqual(lines, [])
 })
+
+
+test("preserves staged verified native-agent assets through the full CLI cleanup", () => {
+  const outDir = scratch()
+  try {
+    const root = path.join(outDir, "sidecar/native-agents")
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(path.join(root, "codebuff.cjs"), "verified bundle")
+    fs.writeFileSync(path.join(root, "pins.json"), "{}")
+    assert.deepEqual(pruneSidecarResidue({ outDir }), [])
+    assert.equal(fs.readFileSync(path.join(root, "codebuff.cjs"), "utf8"), "verified bundle")
+    assert.equal(fs.existsSync(path.join(root, "pins.json")), true)
+  } finally { fs.rmSync(outDir, { recursive: true, force: true }) }
+})

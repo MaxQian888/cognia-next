@@ -4,7 +4,146 @@ import fs from "node:fs"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { once } from "node:events"
+import { createServer } from "node:http"
+import { pathToFileURL } from "node:url"
 import * as debug from "./agent-debug.mjs"
+
+test("startup recovery requires compiled HTML and a never-initialized new window", () => {
+  const empty = { helper: null, renderers: {} }
+  assert.equal(debug.canRecoverInitialNavigation(empty, true, false), true)
+  assert.equal(debug.canRecoverInitialNavigation(empty, false, false), false)
+  assert.equal(debug.canRecoverInitialNavigation(empty, true, true), false)
+  assert.equal(
+    debug.canRecoverInitialNavigation({ ...empty, helper: { version: 3 } }, true, false),
+    false
+  )
+  assert.equal(
+    debug.canRecoverInitialNavigation(
+      { ...empty, renderers: { main: { awaitingLoad: true } } },
+      true,
+      false
+    ),
+    false
+  )
+})
+
+test("frontend warmup waits for application HTML rather than an open port or error page", async () => {
+  let calls = 0
+  const controller = new AbortController()
+  const ready = await debug.warmDevFrontend("http://localhost:3000/", {
+    timeout: 5000,
+    signal: controller.signal,
+    fetchImpl: async () => {
+      calls++
+      if (calls === 1) throw new Error("connection refused")
+      if (calls === 2) return new Response("compiling", { status: 503 })
+      return new Response("<html><title>Cognia</title></html>")
+    },
+  })
+  assert.equal(ready, true)
+  assert.equal(calls, 3)
+  controller.abort()
+  assert.equal(
+    await debug.warmDevFrontend("http://localhost:3000/", {
+      timeout: 100,
+      signal: controller.signal,
+      fetchImpl: async () => {
+        throw new Error("must not fetch after abort")
+      },
+    }),
+    false
+  )
+})
+
+test("startup authenticates the new endpoint before warmup and navigates to its compiled URL", async () => {
+  const parent = path.resolve(".cache/tauri-agent-debug/startup-recovery-tests")
+  fs.mkdirSync(parent, { recursive: true })
+  const workspace = fs.mkdtempSync(path.join(parent, "recovery-"))
+  const script = path.join(workspace, "scripts/tauri/agent-debug.mjs")
+  fs.mkdirSync(path.dirname(script), { recursive: true })
+  fs.mkdirSync(path.join(workspace, "src-tauri"))
+  fs.copyFileSync(new URL("./agent-debug.mjs", import.meta.url), script)
+  let authenticated = false
+  let navigated = false
+  const events = []
+  const session = {
+    sessionId: "recovery",
+    workspace,
+    endpointFile: path.join(workspace, "endpoint.json"),
+  }
+  const identity = {
+    sessionId: session.sessionId,
+    workspace,
+    pid: process.pid,
+    appInstanceId: "test",
+  }
+  const token = "recovery-test-token".repeat(4)
+  const server = createServer(async (req, res) => {
+    events.push(req.url)
+    if (req.url === "/compiled") {
+      assert.equal(
+        authenticated,
+        true,
+        "a prior server must not satisfy warmup before session authentication"
+      )
+      res.end("<html><title>Cognia</title></html>")
+    } else {
+      assert.equal(req.headers["x-cognia-dev-token"], token)
+      res.setHeader("content-type", "application/json")
+      if (req.url === "/api/dev/agent/health") {
+        authenticated = true
+        res.end(
+          JSON.stringify({
+            ok: true,
+            agentDebug: true,
+            pid: process.pid,
+            debugSession: identity,
+            helper: navigated ? { version: 3, readyState: "complete" } : null,
+            renderers: {},
+          })
+        )
+      } else if (req.url === "/api/dev/agent/navigate") {
+        let body = ""
+        for await (const chunk of req) body += chunk
+        assert.deepEqual(JSON.parse(body), { window: "main", url: `${baseUrl}/compiled` })
+        assert(events.includes("/compiled"), "navigate only after successful HTML warmup")
+        navigated = true
+        res.end(JSON.stringify({ ok: true }))
+      } else {
+        res
+          .writeHead(400)
+          .end(JSON.stringify({ error: "reload cannot recover a never-committed document" }))
+      }
+    }
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const baseUrl = `http://127.0.0.1:${server.address().port}`
+  fs.writeFileSync(
+    path.join(workspace, "src-tauri/tauri.conf.json"),
+    JSON.stringify({ build: { devUrl: `${baseUrl}/compiled` } })
+  )
+  fs.writeFileSync(
+    session.endpointFile,
+    JSON.stringify({ baseUrl, devToken: token, debugSession: identity })
+  )
+  try {
+    const isolated = await import(pathToFileURL(script).href)
+    const ready = await isolated.waitForAgent(
+      Date.now() - 1000,
+      5000,
+      undefined,
+      undefined,
+      session
+    )
+    assert.equal(ready.health.helper.version, 3)
+    assert.equal(events.filter((event) => event === "/api/dev/agent/navigate").length, 1)
+    assert.equal(events.includes("/api/dev/agent/reload"), false)
+  } finally {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+    fs.rmSync(workspace, { recursive: true, force: true })
+  }
+})
 
 import {
   cliErrorPayload,

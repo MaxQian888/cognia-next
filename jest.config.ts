@@ -130,7 +130,7 @@ const baseTestPathIgnorePatterns = [
   "/services/workspace-runtime/",
   // These launcher tests use node:test and the official runtime's native ESM
   // module graph. The deepseek-runtime CI job installs and tests them in isolation.
-  "/runtime/deepseek-harness/.*\\.test\\.mjs$",
+  "/packages/agent-dsh/runtime/.*\\.test\\.mjs$",
   // `tmp/` is gitignored (see .gitignore) — a local-only vendored clone of
   // the CUA TypeScript libs whose tests target Vitest. Never run under Jest.
   "/tmp/",
@@ -223,6 +223,16 @@ const projectCommon: Config = {
     "^@cognia/agent-dsh/(.*)$": "<rootDir>/packages/agent-dsh/src/$1",
     "^@cognia/agent-aider$": "<rootDir>/packages/agent-aider/src/index.ts",
     "^@cognia/agent-aider/(.*)$": "<rootDir>/packages/agent-aider/src/$1",
+    "^@cognia/agent-openclaude$": "<rootDir>/packages/agent-openclaude/src/index.ts",
+    "^@cognia/agent-openclaude/(.*)$": "<rootDir>/packages/agent-openclaude/src/$1",
+    "^@cognia/agent-crush$": "<rootDir>/packages/agent-crush/src/index.ts",
+    "^@cognia/agent-crush/(.*)$": "<rootDir>/packages/agent-crush/src/$1",
+    "^@cognia/agent-continue$": "<rootDir>/packages/agent-continue/src/index.ts",
+    "^@cognia/agent-continue/(.*)$": "<rootDir>/packages/agent-continue/src/$1",
+    "^@cognia/agent-rovo$": "<rootDir>/packages/agent-rovo/src/index.ts",
+    "^@cognia/agent-rovo/(.*)$": "<rootDir>/packages/agent-rovo/src/$1",
+    "^@cognia/agent-codebuff$": "<rootDir>/packages/agent-codebuff/src/index.ts",
+    "^@cognia/agent-codebuff/(.*)$": "<rootDir>/packages/agent-codebuff/src/$1",
     "^@cognia/agent-pi$": "<rootDir>/packages/agent-pi/src/index.ts",
     "^@cognia/agent-pi/(.*)$": "<rootDir>/packages/agent-pi/src/$1",
     "^@cognia/agent-opencode$": "<rootDir>/packages/agent-opencode/src/index.ts",
@@ -450,7 +460,7 @@ const projectCommon: Config = {
   // have transformed it (that is how `@workflow/serde`, a transitive ESM-only
   // dep of `@ai-sdk/provider-utils@5`, slipped through).
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@agentclientprotocol\\+|@agentclientprotocol/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio|@noble\\+|@noble/|@babel\\+|@babel/|@cognia\\+sync-protocol|@cognia/sync-protocol|@cognia\\+status-contract|@cognia/status-contract))",
+    "/node_modules/(?!ai/|.*(?:\\.pnpm/ai@|/node_modules/ai/|\\bai/dist/|@agentclientprotocol\\+|@agentclientprotocol/|@ai-sdk\\+|@ai-sdk/|@standard-schema\\+|@standard-schema/|@workflow\\+|@workflow/|@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/|@modelcontextprotocol\\+|@modelcontextprotocol/|@xyflow\\+|@xyflow/|chart\\.js|cheerio|@noble\\+|@noble/|@babel\\+|@babel/|@cognia\\+sync-protocol|@cognia/sync-protocol|@cognia\\+status-contract|@cognia/status-contract))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 }

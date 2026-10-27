@@ -8,7 +8,7 @@ per line, in wire order. These drive the codec tests in
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `upstream-bash-tool.notifications.jsonl`        | Upstream regression snapshot, `deepseek-ai/deepseek-harness@master`, `examples/jsonrpc-agent/tests/snapshots/bash-tool/notifications.expected.jsonl`. MIT. Session ids and prompt/tool text are templated upstream (`{{sessionId}}`). |
 | `upstream-persistent-tools.notifications.jsonl` | Same origin, `snapshots/persistent-tools/`. MIT.                                                                                                                                                                                      |
-| `cognia-sdk-readonly.notifications.jsonl`       | **Cognia-captured.** Live run of `runtime/deepseek-harness/host.sdk-readonly.yml` against `deepseek-v4-flash`, driven by `@deepseek-ai/dsh-sdk-client@0.1.0-rc.6`.                                                                    |
+| `cognia-sdk-readonly.notifications.jsonl`       | **Cognia-captured.** Live run of `packages/agent-dsh/runtime/host.sdk-readonly.yml` against `deepseek-v4-flash`, driven by `@deepseek-ai/dsh-sdk-client@0.1.0-rc.6`.                                                                  |
 
 The two kinds are not interchangeable and both are needed.
 
@@ -24,7 +24,7 @@ ships**. It records the model being asked to write a file under
 with `sandbox_permissions: "workspace-write"`, and that escalation fails closed
 because the profile composes no approval provider. That sequence is the
 evidence behind the read-only guarantee documented in
-`runtime/deepseek-harness/host.sdk-readonly.yml`; if a future composition change
+`packages/agent-dsh/runtime/host.sdk-readonly.yml`; if a future composition change
 silently added an approval provider, this trace is what would stop looking the
 same.
 

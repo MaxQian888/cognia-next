@@ -142,6 +142,16 @@ const SPECS = {
     dataOnly: ["./manifest"],
     runtimeModules: ["sdk-client", "transport", "event-codec", "agent-runtime-kit"],
     smoke: `
+      import fs from "node:fs"
+      import path from "node:path"
+      import { createRequire } from "node:module"
+      const require = createRequire(import.meta.url)
+      const packageRoot = path.dirname(require.resolve("@cognia/agent-dsh/package.json"))
+      for (const file of ["launcher.mjs", "package.json", "host.sdk-readonly.yml", "host.sdk-workspace.yml", "host.acp.yml"]) {
+        if (!fs.existsSync(path.join(packageRoot, "runtime", file))) throw new Error("missing managed runtime asset: " + file)
+      }
+      const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"))
+      if (Object.keys(pkg.dependencies).some((name) => name.startsWith("@deepseek-ai/"))) throw new Error("runtime dependencies must stay isolated")
       import { deepseekHarnessManifest, DSH_SDK_EXECUTION_SEMANTICS } from "@cognia/agent-dsh/manifest"
       import { DshSdkClientAdapter } from "@cognia/agent-dsh/sdk-client"
       import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "@cognia/agent-dsh/transport"
@@ -591,6 +601,47 @@ const SPECS = {
       export { store, mode, plan, committed, prepared }
     `,
   },
+}
+
+
+// Each new wire client must work from its packed public surface without app aliases.
+for (const [name, identity, manifest, adapter, protocol, extraEntries] of [
+  ["openclaude", "openclaude", "openClaudeManifest", "OpenClaudeAdapter", "openclaude-cli", []],
+  ["crush", "crush", "crushManifest", "CrushAdapter", "crush-http", ["./socket-bridge", "./node-bridge"]],
+  ["continue", "continue-dev", "continueDevManifest", "ContinueAdapter", "continue-cli", []],
+  ["rovo", "rovo-dev", "rovoDevManifest", "RovoDevAdapter", "rovo-http", []],
+  ["codebuff", "codebuff", "codebuffManifest", "CodebuffAdapter", "codebuff-sdk", ["./node-bridge"]],
+]) {
+  const pkg = `@cognia/agent-${name}`
+  SPECS[`agent-${name}`] = {
+    entries: [".", "./manifest", "./client", ...extraEntries],
+    dataOnly: ["./manifest"],
+    runtimeModules: ["/client.", "base-adapter", "prompt-gate", "node-bridge", "socket-bridge"],
+    smoke: `
+      import assert from "node:assert/strict"
+      import { ${manifest} as manifest } from "${pkg}/manifest"
+      import { ${adapter} as Adapter } from "${pkg}/client"
+      assert.equal(manifest.ecosystem.id, "${identity}")
+      assert.ok(manifest.protocols.some(row => row.protocol === "${protocol}"))
+      const unavailable = async () => { throw new Error("No live host in packed consumer") }
+      const processHost = { available: false, commandExists: async () => false, spawn: unavailable, send: unavailable, kill: unavailable, onStdoutLine: unavailable, onStdoutRaw: unavailable, onStderr: unavailable, onExit: unavailable }
+      const adapter = new Adapter({ processHost, fileHost: { available: false }, fetch: unavailable, outboundGate: () => true, redactDiagnostic: value => value, resolveLaunchEnvironment: async () => ({}), approvalPolicy: () => ({}), toolPreApproval: () => false, resolveBridgeLaunch: unavailable })
+      assert.equal(adapter.protocol, "${protocol}")
+      assert.ok(adapter.semantics)
+      await assert.rejects(async () => adapter.createSession({ cwd: "/workspace" }))
+      await adapter.disconnect()
+    `,
+    types: `
+      import { ${adapter} as Adapter } from "${pkg}/client"
+      import { ${manifest} as manifest } from "${pkg}/manifest"
+      import type { ProtocolAdapter } from "@cognia/agent-contracts/adapter"
+      import type { AgentIntegrationManifest } from "@cognia/agent-contracts/ecosystem"
+      declare const deps: ConstructorParameters<typeof Adapter>[0]
+      const adapter: ProtocolAdapter = new Adapter(deps)
+      const contribution: AgentIntegrationManifest = manifest
+      export { adapter, contribution }
+    `,
+  }
 }
 
 

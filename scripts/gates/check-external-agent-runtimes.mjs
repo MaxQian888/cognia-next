@@ -44,6 +44,7 @@ import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
+import ts from "typescript"
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
@@ -52,7 +53,7 @@ const readJson = (rel) => JSON.parse(read(rel))
 
 const CATALOG = "protocol/external-agent-runtimes.json"
 const SECURITY_POLICY = "protocol/external-agent-security-policy.json"
-const PRESETS_TS = "lib/ai/agent/external/config/presets.ts"
+const PRESETS_TS = "packages/plugin-contract/src/lib/ai/agent/external/config/presets.ts"
 
 const KNOWN_PLATFORMS = new Set(["darwin", "linux", "win32"])
 const OWNERSHIP_MODES = new Set(["managed", "system", "remote"])
@@ -68,11 +69,33 @@ const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex")
 
 /** Preset ids the app actually ships, read from the preset union. */
 export function shippedPresetIds(presetsSource) {
-  const match = /export type ExternalAgentPresetId =([\s\S]*?)\n\n/.exec(presetsSource)
-  if (!match) return []
-  return [...match[1].matchAll(/"([^"]+)"/g)]
-    .map((entry) => entry[1])
-    .filter((id) => id !== "custom")
+  const source = ts.createSourceFile(PRESETS_TS, presetsSource, ts.ScriptTarget.Latest, true)
+  if (source.parseDiagnostics.length > 0) {
+    throw new Error(
+      `cannot parse preset contract: ${ts.flattenDiagnosticMessageText(source.parseDiagnostics[0].messageText, " ")}`
+    )
+  }
+  const declaration = source.statements.find(
+    (statement) =>
+      ts.isTypeAliasDeclaration(statement) &&
+      statement.name.text === "ExternalAgentPresetId" &&
+      statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  )
+  if (!declaration) {
+    throw new Error(`missing exported ExternalAgentPresetId declaration in ${PRESETS_TS}`)
+  }
+  const members = ts.isUnionTypeNode(declaration.type) ? declaration.type.types : [declaration.type]
+  const ids = members.map((member) => {
+    if (!ts.isLiteralTypeNode(member) || !ts.isStringLiteral(member.literal)) {
+      throw new Error("ExternalAgentPresetId must remain a closed string-literal union")
+    }
+    return member.literal.text
+  })
+  const executableIds = ids.filter((id) => id !== "custom")
+  if (executableIds.length === 0) {
+    throw new Error("ExternalAgentPresetId contains no executable preset ids")
+  }
+  return executableIds
 }
 
 /** Strip a Windows executable suffix and lower-case, as both launchers do. */
@@ -134,7 +157,7 @@ export function checkSchema(catalog) {
         errors.push(`${id}: versionProbe.timeoutMs must be a positive bound`)
       }
     }
-    if (entry.certifiedVersions && !entry.supportedRange) {
+    if (entry.certifiedVersions?.length && !entry.supportedRange) {
       errors.push(`${id}: certifiedVersions without a supportedRange to sit inside`)
     }
     for (const version of entry.certifiedVersions ?? []) {
@@ -148,7 +171,12 @@ export function checkSchema(catalog) {
 
 export function checkCoverage(catalog, presetsSource) {
   const errors = []
-  const shipped = new Set(shippedPresetIds(presetsSource))
+  let shipped
+  try {
+    shipped = new Set(shippedPresetIds(presetsSource))
+  } catch (error) {
+    return [`cannot determine shipped presets: ${error.message}`]
+  }
   const claimed = new Map()
 
   for (const entry of catalog.runtimes) {
@@ -282,6 +310,22 @@ export function checkLaunchParity(catalog, policy) {
   for (const entry of catalog.runtimes) {
     const command = entry.systemCommand
     if (!command) continue
+
+    if (entry.bundledBridgeId !== undefined) {
+      const bridge = policy.bundledNodeBridges?.[entry.bundledBridgeId]
+      if (
+        entry.bundledBridgeId !== "codebuff" ||
+        command !== "node" ||
+        entry.protocol !== "codebuff-sdk" ||
+        !(entry.presetIds ?? []).includes("codebuff") ||
+        (entry.launchArgs ?? []).length !== 0 ||
+        bridge?.file !== "codebuff.cjs" ||
+        JSON.stringify(bridge?.args) !== JSON.stringify(["--cognia-codebuff-bridge"])
+      ) {
+        errors.push(`${entry.runtimeId}: invalid verified bundled Node bridge launch`)
+      }
+      continue
+    }
 
     if (!isPackageRunner(command)) {
       if (!binaries.has(baseCommand(command))) {

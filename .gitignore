@@ -290,3 +290,7 @@ packages/agent-host-*/integrity.json
 # Encrypted data backups (`.cbk`) exported while testing backup/restore. They
 # carry account data and never belong in the repository.
 *.cbk
+
+# Reproducible native agent assets; only embedded build pins are source controlled.
+/sidecar/native-agents/*
+!/sidecar/native-agents/pins.json

@@ -95,11 +95,14 @@ function runtimeLayout(root, directory, create) {
   const manifest = path.join(root, "cli/package.json")
   const copied = path.join(directory, "cli/package.json")
   if (create && fs.existsSync(manifest)) fs.copyFileSync(manifest, copied)
-  for (const relative of ["cli/node_modules", "runtime"]) {
+  for (const relative of ["cli/node_modules", "packages/agent-dsh/runtime"]) {
     const source = path.join(root, relative)
     if (!fs.existsSync(source)) continue
     const target = path.join(directory, relative)
-    if (create) fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir")
+    if (create) {
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir")
+    }
     else {
       try {
         if (path.resolve(path.dirname(target), fs.readlinkSync(target)) !== source) return false

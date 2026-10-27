@@ -30,7 +30,7 @@ test("routes renderer-owned scheduling and task-spawn handlers to the host bridg
   assert.deepEqual(resolveWith(plugin, "../handlers/issues"), { path: bridgeRuntime })
   assert.deepEqual(resolveWith(plugin, "../handlers/browser"), { path: bridgeRuntime })
   assert.deepEqual(resolveWith(plugin, "../handlers/workspace"), { path: bridgeRuntime })
-  assert.equal(resolveWith(plugin, "../handlers/computer-use"), undefined)
+  assert.match(resolveWith(plugin, "../handlers/computer-use").path, /handlers\/computer-use-proxy\.ts$/)
 })
 
 test("rejects renderer-only modules that contribute to an MCP sidecar output", () => {

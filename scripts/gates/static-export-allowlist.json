@@ -1,15 +1,5 @@
 [
   {
-    "file": "lib/external-bridge/handlers/computer-use.ts",
-    "module": "node:net",
-    "reason": "External-bridge handler runs in the Tauri/Node host, never in the renderer bundle; net import is lazy."
-  },
-  {
-    "file": "lib/external-bridge/handlers/computer-use.ts",
-    "module": "node:crypto",
-    "reason": "External-bridge handler runs in the Tauri/Node host; crypto reached via guarded require with Web Crypto fallback."
-  },
-  {
     "file": "lib/external-bridge/mcp-server/server.ts",
     "module": "@modelcontextprotocol/sdk/server/mcp.js",
     "reason": "MCP server module is host-only (standalone-entry / Tauri main), never imported by renderer pages."

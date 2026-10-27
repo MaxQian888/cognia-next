@@ -824,7 +824,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node26-deepseek-${{ hashFiles('runtime/deepseek-harness/package.json') }}
+          key: ${{ runner.os }}-node26-deepseek-${{ hashFiles('packages/agent-dsh/runtime/package.json') }}
           restore-keys: ${{ runner.os }}-node26-deepseek-
       - name: Install isolated runtime
         env:
@@ -832,7 +832,7 @@ jobs:
         run: |
           echo "DSH_TEST_ROOT=$DSH_TEST_ROOT" >> "$GITHUB_ENV"
           mkdir -p "$DSH_TEST_ROOT"
-          cp runtime/deepseek-harness/* "$DSH_TEST_ROOT/"
+          cp packages/agent-dsh/runtime/* "$DSH_TEST_ROOT/"
           npm install --prefix "$DSH_TEST_ROOT" --ignore-scripts --no-audit --no-fund --prefer-offline
       - name: Run launcher and service smoke suites
         working-directory: ${{ env.DSH_TEST_ROOT }}

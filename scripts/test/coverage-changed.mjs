@@ -219,7 +219,12 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
         file
       )
     )
-  const any = (pattern) => all || changedFiles.some((file) => pattern.test(file))
+  // The package-owned DSH payload is installed and tested independently of the
+  // app's JavaScript workspaces, just as it was before moving under packages/.
+  const workspaceFiles = changedFiles.filter(
+    (file) => !/^packages\/agent-dsh\/runtime\//.test(file)
+  )
+  const any = (pattern) => all || workspaceFiles.some((file) => pattern.test(file))
   const globalJS = any(
     /^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.npmrc|patches\/.*|tsconfig(?:\.[^/]+)?\.json|\.github\/workflows\/(?:ci|test)\.yml)$/
   )
@@ -238,7 +243,8 @@ export function classifyCiImpact(changedFiles, mode = "incremental") {
         /^(?:(?:app|components|hooks|lib|stores|types|i18n|public|packages|scripts\/build|tests\/e2e|e2e)\/|next\.config\.|playwright\.)/
       ),
     sidecar: globalJS || any(/^(?:sidecar|cli|packages|lib)\//),
-    deepseekRuntime: globalJS || any(/^runtime\/deepseek-harness\//),
+    deepseekRuntime:
+      all || globalJS || changedFiles.some((file) => /^packages\/agent-dsh\/runtime\//.test(file)),
     docs: globalJS || any(/^docs\//),
     web: globalJS || any(/^web\//),
     mobile: globalJS || any(/^mobile\/|^lib\/capacitor\/|\.mobile\.tsx?$|^next\.config\./),

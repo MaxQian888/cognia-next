@@ -8,6 +8,51 @@ import buildConfig from "../../jest.config.ts"
 const config = await buildConfig()
 const root = process.cwd().replaceAll("\\", "/")
 
+test("AI SDK stays transformable at native pnpm module boundaries", () => {
+  const child = spawnSync(process.execPath, ["node_modules/jest/bin/jest.js", "--showConfig"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 30000,
+  })
+  assert.equal(child.status, 0, child.stderr)
+  const resolved = JSON.parse(child.stdout.slice(child.stdout.indexOf("{")))
+  for (const project of resolved.configs) {
+    const ignored = (file) =>
+      project.transformIgnorePatterns.some((pattern) => new RegExp(pattern).test(file))
+    assert.equal(
+      ignored(
+        path.join(
+          process.cwd(),
+          "node_modules",
+          ".pnpm",
+          "ai@7.0.128",
+          "node_modules",
+          "ai",
+          "dist",
+          "index.js"
+        )
+      ),
+      false
+    )
+    assert.equal(ignored(path.join(process.cwd(), "node_modules", "ai", "dist", "index.js")), false)
+    assert.equal(
+      ignored(
+        path.join(
+          process.cwd(),
+          "node_modules",
+          ".pnpm",
+          "tailwindcss@4",
+          "node_modules",
+          "tailwindcss",
+          "dist",
+          "index.js"
+        )
+      ),
+      true
+    )
+  }
+})
+
 function isHidden(project, file) {
   return project.modulePathIgnorePatterns.some((pattern) =>
     new RegExp(pattern.replaceAll("<rootDir>", root)).test(`${root}/${file}`)

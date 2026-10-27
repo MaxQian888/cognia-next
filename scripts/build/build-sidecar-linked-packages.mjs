@@ -16,6 +16,7 @@
 //
 // Runs from the root postinstall, `predev`, `prebuild`, and `sidecar:test`.
 
+import ts from "typescript"
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -80,12 +81,27 @@ export function materializeLinkedPackages(packages, root = sidecarRoot) {
  */
 export function runtimeCogniaSpecifiers(source) {
   const found = new Set()
-  const staticImport = /^\s*(import|export)\s+(?!type\s)[^;]*?\bfrom\s*["'](@cognia\/[^"']+)["']/gm
-  const bareImport = /^\s*import\s*["'](@cognia\/[^"']+)["']/gm
-  const dynamicImport = /\bimport\(\s*["'](@cognia\/[^"']+)["']\s*\)/g
-  for (const m of source.matchAll(staticImport)) found.add(m[2])
-  for (const m of source.matchAll(bareImport)) found.add(m[1])
-  for (const m of source.matchAll(dynamicImport)) found.add(m[1])
+  const file = ts.createSourceFile("sidecar.ts", source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
+  const add = (value) => {
+    if (value && ts.isStringLiteralLike(value) && value.text.startsWith("@cognia/")) found.add(value.text)
+  }
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) {
+      const bindings = node.importClause?.namedBindings
+      const onlyTypes = !node.importClause?.name && bindings && ts.isNamedImports(bindings)
+        && bindings.elements.length > 0 && bindings.elements.every((item) => item.isTypeOnly)
+      if (!node.importClause?.isTypeOnly && !onlyTypes) add(node.moduleSpecifier)
+    } else if (ts.isExportDeclaration(node)) {
+      const bindings = node.exportClause
+      const onlyTypes = bindings && ts.isNamedExports(bindings)
+        && bindings.elements.length > 0 && bindings.elements.every((item) => item.isTypeOnly)
+      if (!node.isTypeOnly && !onlyTypes) add(node.moduleSpecifier)
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      add(node.arguments[0])
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
   return found
 }
 

@@ -41,6 +41,7 @@ import {
   writeCheckedMcpSidecarOutput,
 } from "./lib/mcp-host-bridge.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { stageNativeAgentBridges } from "./lib/stage-native-agent-bridges.mjs"
 import { stageClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
 import { copyRuntimeClosure } from "./lib/copy-runtime-closure.mjs"
 import { createPreferEsmEntryPlugin } from "./lib/prefer-esm-entry-plugin.mjs"
@@ -257,6 +258,9 @@ const CREATE_REQUIRE_BANNER =
 // but fine in ESM. pkg (@yao-pkg) packages an ESM entry directly.
 safeRm(binDir)
 fs.mkdirSync(binDir, { recursive: true })
+// These pins are imported into the CLI core. Verify/stage before compilation,
+// then preserve the exact bridge + SDK/assets closure in every copied sidecar.
+stageNativeAgentBridges({ root, sidecarOutDir })
 await esbuild.build({
   entryPoints: [cliEntry],
   outfile: cliBundle,

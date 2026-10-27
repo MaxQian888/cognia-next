@@ -591,7 +591,7 @@ async function runRepositoryCheckpointAcceptance() {
     assert(active.requests.every((r) => r.status === 200))
     if (profile === "stress")
       assert(active.compactions!.length > 0, "stress profile did not compact")
-    const states = active.checkpoints!.map(parseProgressCheckpoint)
+    const states = active.checkpoints!.map((checkpoint) => parseProgressCheckpoint(checkpoint))
     assert(states.every(Boolean), "published malformed progress state")
     for (const state of states) {
       for (const id of workstreams)

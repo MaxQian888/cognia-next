@@ -156,9 +156,9 @@
     // @yao-pkg/pkg is an on-demand dev tool: the script exits with an
     // install hint when absent, by design.
     "scripts/build/build-cli-binary.mjs": ["unlisted"],
-    // runtime/deepseek-harness is outside the pnpm workspace and manages
-    // its own dependencies.
-    "runtime/deepseek-harness/**/*.mjs": ["unlisted"],
+    // The nested runtime payload is not a pnpm workspace member and installs
+    // its upstream dependencies into an isolated runtime home.
+    "packages/agent-dsh/runtime/**/*.mjs": ["unlisted"],
     // plugins/* are not workspace members; @jest/globals and browser-side
     // libs resolve from the host environment when the harness or the skill's
     // scripts run.

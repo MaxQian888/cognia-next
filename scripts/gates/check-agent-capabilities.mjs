@@ -40,6 +40,7 @@
  */
 
 import { readFileSync } from "node:fs"
+import ts from "typescript"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 
@@ -225,6 +226,61 @@ export function presetCommands(ecosystem, presets) {
   return commands
 }
 
+/** The sole interpreter preset is a fixed verified bundle, never arbitrary Node argv. */
+export function bundledPresetCommands(ecosystem, presets, policy) {
+  const commands = new Set(),
+    errors = []
+  for (const source of [ecosystem, presets]) {
+    const file = ts.createSourceFile("presets.ts", source, ts.ScriptTarget.Latest, true)
+    if (file.parseDiagnostics.length) {
+      errors.push("cannot parse preset source for bundled Node admission")
+      continue
+    }
+    const property = (object, name) =>
+      object.properties.find(
+        (row) =>
+          ts.isPropertyAssignment(row) &&
+          row.name.getText(file).replaceAll('"', "").replaceAll("'", "") === name
+      )?.initializer
+    const string = (node) => (node && ts.isStringLiteral(node) ? node.text : undefined)
+    const visit = (node) => {
+      if (
+        ts.isPropertyAssignment(node) &&
+        node.name.getText(file) === "command" &&
+        string(node.initializer) === "node"
+      ) {
+        const object = node.parent
+        const call = object.parent
+        const metadata = ts.isObjectLiteralExpression(object)
+          ? property(object, "metadata")
+          : undefined
+        const args = ts.isObjectLiteralExpression(object) ? property(object, "args") : undefined
+        const bridge = policy.bundledNodeBridges?.codebuff
+        if (
+          ts.isObjectLiteralExpression(object) &&
+          ts.isCallExpression(call) &&
+          call.expression.getText(file) === "nativeAgentAdapter" &&
+          string(property(object, "id")) === "codebuff" &&
+          string(property(object, "protocol")) === "codebuff-sdk" &&
+          args &&
+          ts.isArrayLiteralExpression(args) &&
+          args.elements.length === 0 &&
+          metadata &&
+          ts.isObjectLiteralExpression(metadata) &&
+          string(property(metadata, "bundledBridge")) === "codebuff" &&
+          bridge?.file === "codebuff.cjs" &&
+          JSON.stringify(bridge?.args) === JSON.stringify(["--cognia-codebuff-bridge"])
+        )
+          commands.add("node")
+        else errors.push("preset command node must name the fixed verified Codebuff bridge")
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+  }
+  return { commands, errors }
+}
+
 /** @returns {string[]} errors */
 export function checkCapabilityManifest(manifest, vocabulary, registered) {
   const errors = []
@@ -322,7 +378,13 @@ export function checkCliAllowlistSource(source) {
 }
 
 /** @returns {string[]} errors */
-export function checkSecurityPolicyParity(policy, rustPresets, rustSandbox, commands) {
+export function checkSecurityPolicyParity(
+  policy,
+  rustPresets,
+  rustSandbox,
+  commands,
+  bundledCommands = new Set()
+) {
   const errors = []
 
   const compare = (label, fromJson, fromRust) => {
@@ -387,7 +449,7 @@ export function checkSecurityPolicyParity(policy, rustPresets, rustSandbox, comm
   // …and the converse: a preset whose command is not allowlisted cannot spawn
   // headlessly, which is exactly how `claude-agent-acp` was broken.
   for (const command of commands) {
-    if (command === "npx") continue
+    if (command === "npx" || bundledCommands.has(command)) continue
     if (!policy.binaryAllowlist.commands.includes(command)) {
       errors.push(
         `binaryAllowlist: preset command "${command}" is not allowlisted, so a headless spawn is refused`
@@ -426,13 +488,16 @@ export function runChecks() {
     }
   }
 
+  const bundles = bundledPresetCommands(read(ECOSYSTEM_TS), read(PRESETS_TS), policy)
+  errors.push(...bundles.errors)
   errors.push(...checkCapabilityManifest(manifest, vocabulary, registered))
   errors.push(
     ...checkSecurityPolicyParity(
       policy,
       read(RUST_PRESETS),
       read(RUST_SANDBOX),
-      presetCommands(read(ECOSYSTEM_TS), read(PRESETS_TS))
+      presetCommands(read(ECOSYSTEM_TS), read(PRESETS_TS)),
+      bundles.commands
     )
   )
   errors.push(...checkIsolationParity(policy, read(RUST_STATE_ISOLATION)))

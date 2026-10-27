@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseRegisteredCommands } from "./lib/generate-handler.mjs"
-import { DISPATCH_SOURCES, hasArm } from "./check-command-grammar.mjs"
+import { DISPATCH_SOURCES, hasArm, isEphemeralPreviewCommand } from "./check-command-grammar.mjs"
 import { COMPANION_SOURCES, requireCompanionSources } from "./lib/companion-source-paths.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
@@ -41,7 +41,11 @@ export function validateManifest(manifest) {
     if (typeof command.capability !== "string" || command.capability.length === 0) {
       errors.push(`${label}: capability is required`)
     }
-    if (command.operation !== "read" && command.idempotency !== "required") {
+    if (
+      command.operation !== "read" &&
+      command.idempotency !== "required" &&
+      !isEphemeralPreviewCommand(command)
+    ) {
       errors.push(`${label}: mutations require idempotency`)
     }
     if (

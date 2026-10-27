@@ -408,6 +408,30 @@ async function launch(extra = []) {
     terminal.write("\r")
   }
   await s.wait(s.idle, "composer startup", 45000)
+  if (phase === "budget" || phase === "resume-exit") {
+    // A restored transcript can paint before Ink subscribes to input. Confirm
+    // an editable draft before sending a one-shot paste; never submit the probe.
+    const readyDeadline = Date.now() + 5000
+    const probe = "input-ready"
+    const composer = () => screen.text().slice(screen.text().lastIndexOf("╭"))
+    while (!renderedPaste(composer(), probe)) {
+      assert.ok(Date.now() < readyDeadline, "composer must acknowledge real input")
+      terminal.write("\u007f".repeat(probe.length))
+      terminal.write(probe)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    const beforeClear = s.revision
+    const clearDeadline = Date.now() + 5000
+    while (!s.idle()) {
+      assert.ok(Date.now() < clearDeadline, "composer must clear the readiness probe")
+      terminal.write("\u007f")
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    await s.wait(
+      () => s.revision > beforeClear && !renderedPaste(composer(), probe) && s.idle(),
+      "composer readiness probe cleared"
+    )
+  }
   s.snapshot("startup")
   return s
 }
@@ -1530,6 +1554,16 @@ try {
         const reads = uniqueResearchReads(inference)
         assert.equal(reads.length, fixture.manifest.length, "no repeated completed source reads")
         assert.equal(new Set(reads.map((r) => r.path)).size, fixture.manifest.length)
+        assert.equal(
+          uniqueResearchReads(inference.filter((row) => row.agentRole === "Explore")).length,
+          fixture.manifest.length,
+          "Explore must complete the corpus before handing its report to Plan"
+        )
+        assert.equal(
+          uniqueResearchReads(inference.filter((row) => row.agentRole === "Plan")).length,
+          0,
+          "Plan must reuse Explore evidence without rereading source pages"
+        )
         assert.ok(
           boundary < 0 || inference.slice(boundary).some((r) => r.toolNames.includes("read")),
           "new source work must follow compaction"
@@ -1659,7 +1693,7 @@ try {
         await launch(["--continue"])
         const at = Date.now()
         const r = await turn(
-          `First use ToolSearch with exactly query "select:dispatch_agent"; then use only dispatch_agent with resume:"${limited.runId}" to finish the original unfinished Explore task from its saved source evidence. The follow-up is: ${correction ? `The source ${correction.file} changed after your earlier read. This new instruction supersedes the earlier no-reread rule for that changed file only. Read it once to discover the current Evidence code. Explicitly supersede the old finding with a line: Source correction: <obsolete Evidence code> -> <current Evidence code>. Reopen its same-ID completed workstream with a correction reason if present. Retain all other completed source evidence and read only the remaining unread pages.` : "Continue only the next unread page; preserve every prior Evidence code and read only missing pages. Do not reread completed pages."} Then deliver the complete report. Do not use working_set, attachment, monitor, memory or other parent tools. Do not start a fresh investigation. Return the complete child report with all current Evidence codes and any explicit source correction. Preserve its complete <source-findings> JSON array verbatim, including both tags, behavior text and copied/original source citations; do not convert it to a table or abridge its rows.`,
+          `First use ToolSearch with exactly query "select:dispatch_agent"; then use only dispatch_agent with resume:"${limited.runId}" to finish the original unfinished Explore task from its saved source evidence. The follow-up is: ${correction ? `The source ${correction.file} changed after your earlier read. This new instruction supersedes the earlier no-reread rule for that changed file only. Read it once to discover the current Evidence code. Explicitly supersede the old finding with this standalone, unbulleted and unformatted line (no list or quote prefix): Source correction: <obsolete Evidence code> -> <current Evidence code>. Reopen its same-ID completed workstream with a correction reason if present. Retain all other completed source evidence and read only the remaining unread pages.` : "Continue only the next unread page; preserve every prior Evidence code and read only missing pages. Do not reread completed pages."} Then deliver the complete report. Do not use working_set, attachment, monitor, memory or other parent tools. Do not start a fresh investigation. Return the complete child report with all current Evidence codes and any explicit source correction. Preserve its complete <source-findings> JSON array verbatim, including both tags, behavior text and copied/original source citations; do not convert it to a table or abridge its rows. Keep the Source correction line standalone, unbulleted and unformatted, with no list or quote prefix; preserve both observed codes.`,
           undefined,
           { timeout: budgetTimeoutMs, approve: true }
         )

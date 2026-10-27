@@ -158,7 +158,7 @@ test("concurrent processes publish one build; dead readers are collected but unk
 test("runtime layout preserves CLI dependency, dev-checkout and backend resource paths", async (t) => {
   const f = fixture(t)
   fs.mkdirSync(path.join(f.root, "cli/node_modules/only-cli"), { recursive: true })
-  fs.mkdirSync(path.join(f.root, "runtime/deepseek-harness"), { recursive: true })
+  fs.mkdirSync(path.join(f.root, "packages/agent-dsh/runtime"), { recursive: true })
   fs.writeFileSync(
     path.join(f.root, "cli/package.json"),
     JSON.stringify({ name: "fixture-cli", version: "1.2.3" })
@@ -171,7 +171,7 @@ test("runtime layout preserves CLI dependency, dev-checkout and backend resource
     path.join(f.root, "cli/node_modules/only-cli/index.js"),
     "module.exports = 'cli-dependency'"
   )
-  fs.writeFileSync(path.join(f.root, "runtime/deepseek-harness/marker"), "runtime")
+  fs.writeFileSync(path.join(f.root, "packages/agent-dsh/runtime/marker"), "runtime")
   const entry = await ensureTestBundle({
     ...f.options,
     build: async (out) => {
@@ -182,7 +182,7 @@ test("runtime layout preserves CLI dependency, dev-checkout and backend resource
         `
       import value from 'only-cli'; import fs from 'node:fs'; import path from 'node:path'; import {fileURLToPath} from 'node:url';
       const here=path.dirname(fileURLToPath(import.meta.url));
-      const runtime=fs.readFileSync(path.resolve(here,'../../..','runtime/deepseek-harness/marker'),'utf8');
+      const runtime=fs.readFileSync(path.resolve(here,'../../..','packages/agent-dsh/runtime/marker'),'utf8');
       const manifest=JSON.parse(fs.readFileSync(path.resolve(here,'../..','package.json'),'utf8'));
       console.log([value,runtime,manifest.name,here.includes('/cli/dist/')].join(':'));
     `

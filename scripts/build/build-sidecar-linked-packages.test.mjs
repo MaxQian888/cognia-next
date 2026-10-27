@@ -105,6 +105,16 @@ test("unshippableResolutions flags TypeScript targets and resolution failures", 
   )
 })
 
+test("runtime import scanning never crosses a declaration into a type-only leaf", () => {
+  const source = `import { now } from "node:perf_hooks"
+import type { VerificationBudgetStamp } from "@cognia/agent-config-types/execution-budget"
+import { type OnlyType } from "@cognia/type-only"
+export { type AnotherType } from "@cognia/another-type"
+import { type Shape, runtimeValue } from "@cognia/runtime"
+`
+  assert.deepEqual([...runtimeCogniaSpecifiers(source)], ["@cognia/runtime"])
+})
+
 test("every linked package can build, and the sidecar's runtime imports resolve to its compiled output", () => {
   const manifest = JSON.parse(readFileSync(join(sidecarRoot, "package.json"), "utf8"))
   const linked = linkedPackageDirs(manifest)

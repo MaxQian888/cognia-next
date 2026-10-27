@@ -20,6 +20,7 @@ import {
 } from "./esbuild-shared.mjs"
 import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { stageNativeAgentBridges } from "./lib/stage-native-agent-bridges.mjs"
 import {
   BUILTIN_PLUGIN_ASSET_DIR,
   stageBuiltinPluginAssets,
@@ -45,6 +46,8 @@ if (inputsIndex >= 0 && (!process.argv[inputsIndex + 1] || process.argv[inputsIn
 // uses it so the one test that runs the shipped artifact does not depend on a
 // `cargo build --release` having happened on the machine.
 const jsOnly = process.argv.includes("--js-only")
+
+if (!jsOnly) stageNativeAgentBridges({ root, sidecarOutDir: path.join(outdir, "sidecar") })
 
 const esbuild = await loadEsbuild()
 
@@ -74,6 +77,7 @@ if (jsOnly) {
   // walk-up reach the live source file (and its pin) instead of an extension
   // frozen at the date of the last full build.
   fs.rmSync(path.join(outdir, "sidecar", "pi-extension"), { recursive: true, force: true })
+  fs.rmSync(path.join(outdir, "sidecar", "native-agents"), { recursive: true, force: true })
   // Refresh built-in plugin chunks when the generated `public/` tree already
   // exists — a plain copy that keeps restored plugins (cognia-visualize & co.)
   // working under a js-only dist. Never trigger `plugin:builtin:build` here:

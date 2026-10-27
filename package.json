@@ -25,8 +25,9 @@
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next build --webpack",
     "build:analyze": "cross-env ANALYZE=true pnpm run build",
     "postbuild": "node scripts/build/clean-stale-webpack-cache.mjs --backups-only",
-    "build:packages": "cross-env NODE_OPTIONS=--max-old-space-size=16384 pnpm --filter @cognia/agent --filter @cognia/agent-contracts --filter @cognia/agent-runtime-kit --filter @cognia/agent-dsh --filter @cognia/agent-codex --filter @cognia/agent-aider --filter @cognia/agent-pi --filter @cognia/agent-opencode --filter @cognia/agent-a2a --filter @cognia/agent-acp --filter @cognia/agent-claude-code --filter @cognia/agent-orchestration --filter @cognia/eval-core --filter @cognia/router-fusion --filter @cognia/provider-types --filter @cognia/provider-core --filter @cognia/memory --filter @cognia/network-guard --filter @cognia/ocr --filter @cognia/plugin-ui --filter @cognia/security-findings run build",
+    "build:packages": "cross-env NODE_OPTIONS=--max-old-space-size=16384 pnpm --filter @cognia/agent --filter @cognia/agent-contracts --filter @cognia/agent-runtime-kit --filter @cognia/agent-dsh --filter @cognia/agent-codex --filter @cognia/agent-aider --filter @cognia/agent-pi --filter @cognia/agent-opencode --filter @cognia/agent-a2a --filter @cognia/agent-acp --filter @cognia/agent-claude-code --filter @cognia/agent-orchestration --filter @cognia/eval-core --filter @cognia/router-fusion --filter @cognia/provider-types --filter @cognia/provider-core --filter @cognia/memory --filter @cognia/network-guard --filter @cognia/ocr --filter @cognia/plugin-ui --filter @cognia/security-findings --filter @cognia/agent-openclaude --filter @cognia/agent-crush --filter @cognia/agent-continue --filter @cognia/agent-rovo --filter @cognia/agent-codebuff run build",
     "build:profile": "node scripts/build/build-profile.mjs",
+    "eval:multiagentbench": "node scripts/eval/multiagentbench.mjs",
     "artifact-runtime:build": "node scripts/build/build-artifact-runtime.mjs",
     "artifact-runtime:test": "node --test scripts/build/build-artifact-runtime.test.mjs",
     "monaco:copy": "node scripts/build/copy-monaco-assets.mjs",
@@ -411,8 +412,8 @@
     "// 17 ─── npm lifecycle hooks — run automatically, not by hand ───": "",
     "prepare": "husky",
     "postinstall": "node scripts/postinstall.mjs",
-    "predev": "pnpm run workflow-app:embed:build && node scripts/build/stage-plugin-artifacts.mjs && node scripts/build/download-cubism-core.mjs && node scripts/build/clean-stale-turbopack-cache.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-artifact-runtime.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-sidecar-linked-packages.mjs && node scripts/build/build-builtin-skills.mjs && node scripts/build/build-support-docs.mjs && node scripts/dev/ensure-cognia-cli.mjs && node scripts/build/stage-browser-runtime.mjs",
-    "prebuild": "pnpm ide:generate && pnpm run workflow-app:embed:build && node scripts/build/stage-plugin-artifacts.mjs && node scripts/build/download-cubism-core.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-artifact-runtime.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-vscode-ext-host-sidecar.mjs && node scripts/build/build-webclone-sidecar.mjs && node scripts/build/build-sidecar-linked-packages.mjs && node scripts/build/build-mcp-sidecar.mjs && node scripts/build/build-a2ui-sidecar.mjs && node scripts/build/build-builtin-skills.mjs && node scripts/build/build-support-docs.mjs && node scripts/build/stage-browser-runtime.mjs",
+    "predev": "node scripts/build/build-native-agent-bridges.mjs && pnpm run workflow-app:embed:build && node scripts/build/stage-plugin-artifacts.mjs && node scripts/build/download-cubism-core.mjs && node scripts/build/clean-stale-turbopack-cache.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-artifact-runtime.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-sidecar-linked-packages.mjs && node scripts/build/build-builtin-skills.mjs && node scripts/build/build-support-docs.mjs && node scripts/dev/ensure-cognia-cli.mjs && node scripts/build/stage-browser-runtime.mjs",
+    "prebuild": "node scripts/build/build-native-agent-bridges.mjs && pnpm ide:generate && pnpm run workflow-app:embed:build && node scripts/build/stage-plugin-artifacts.mjs && node scripts/build/download-cubism-core.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-artifact-runtime.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-vscode-ext-host-sidecar.mjs && node scripts/build/build-webclone-sidecar.mjs && node scripts/build/build-sidecar-linked-packages.mjs && node scripts/build/build-mcp-sidecar.mjs && node scripts/build/build-a2ui-sidecar.mjs && node scripts/build/build-builtin-skills.mjs && node scripts/build/build-support-docs.mjs && node scripts/build/stage-browser-runtime.mjs",
     "precli:build": "pnpm run cli:native-hosts:build",
     "precli:build:binary": "pnpm run cli:release:prepare",
     "precli:dev": "node scripts/build/ensure-native-hosts.mjs",
@@ -640,7 +641,12 @@
     "yjs": "^13.6.33",
     "zod": "catalog:",
     "zundo": "^2.3.0",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "@cognia/agent-openclaude": "workspace:*",
+    "@cognia/agent-crush": "workspace:*",
+    "@cognia/agent-continue": "workspace:*",
+    "@cognia/agent-rovo": "workspace:*",
+    "@cognia/agent-codebuff": "workspace:*"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

@@ -434,42 +434,114 @@ function terminateProcessTree(pid, signal = "SIGTERM") {
   }
 }
 
-async function waitForAgent(startedAt, timeoutMs, childPid, logFile, session, reusing = false) {
+export function canRecoverInitialNavigation(health, frontendReady, reusing) {
+  return (
+    frontendReady &&
+    !reusing &&
+    health.helper == null &&
+    Object.keys(health.renderers ?? {}).length === 0
+  )
+}
+
+export async function warmDevFrontend(url, { timeout, signal, fetchImpl = fetch }) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline && !signal.aborted) {
+    try {
+      const response = await fetchImpl(url, {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]),
+      })
+      const html = await response.text()
+      if (response.ok && html.includes("<html") && html.includes("Cognia")) return true
+    } catch {
+      // beforeDevCommand may still be preparing assets or binding the port.
+    }
+    if (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  return false
+}
+
+export async function waitForAgent(
+  startedAt,
+  timeoutMs,
+  childPid,
+  logFile,
+  session,
+  reusing = false
+) {
   const deadline = Date.now() + timeoutMs
   let lastError = "endpoint not written"
-  while (Date.now() < deadline) {
-    const terminalFailure = terminalFailureFromFile(logFile)
-    if (terminalFailure && !reusing) throw new Error(`Tauri launch failed: ${terminalFailure}`)
-    if (childPid && !processAlive(childPid)) {
-      throw new Error(`Tauri debug process ${childPid} exited before the bridge was ready`)
-    }
-    try {
-      const file = session?.endpointFile || discoveryFile()
-      const stat = fs.statSync(file)
-      if (stat.mtimeMs + 1_000 < startedAt) throw new Error("stale endpoint file")
-      const endpoint = loadEndpoint(file)
-      const health = await request("/api/dev/agent/health", {
-        endpoint,
-        timeout: Math.max(1, Math.min(15_000, deadline - Date.now())),
-      })
-      if (session?.sessionId)
-        reconcileDebugSession(session, health, endpoint, fs.realpathSync(REPO_ROOT))
-      if (
-        health.helper?.version !== 3 ||
-        !["interactive", "complete"].includes(health.helper.readyState)
-      ) {
-        throw new Error("agent helper is not ready in the main webview")
+  let frontendReady = false
+  let frontendUrl
+  let warmupStarted = false
+  let navigationRecovered = false
+  const warmup = new AbortController()
+  try {
+    while (Date.now() < deadline) {
+      const terminalFailure = terminalFailureFromFile(logFile)
+      if (terminalFailure && !reusing) throw new Error(`Tauri launch failed: ${terminalFailure}`)
+      if (childPid && !processAlive(childPid)) {
+        throw new Error(`Tauri debug process ${childPid} exited before the bridge was ready`)
       }
-      return { endpoint, health }
-    } catch (error) {
-      if (error.code === "debug_session_mismatch") throw error
-      lastError = error.message
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now())))
-      )
+      try {
+        const file = session?.endpointFile || discoveryFile()
+        const stat = fs.statSync(file)
+        if (stat.mtimeMs + 1_000 < startedAt) throw new Error("stale endpoint file")
+        const endpoint = loadEndpoint(file)
+        const health = await request("/api/dev/agent/health", {
+          endpoint,
+          timeout: Math.max(1, Math.min(15_000, deadline - Date.now())),
+        })
+        if (session?.sessionId)
+          reconcileDebugSession(session, health, endpoint, fs.realpathSync(REPO_ROOT))
+        if (!reusing && !warmupStarted) {
+          // The wrapper clears old frontend listeners before this endpoint
+          // exists. Do not let an older server satisfy this run's warmup.
+          warmupStarted = true
+          frontendUrl = readJson(path.join(REPO_ROOT, "src-tauri/tauri.conf.json"))?.build?.devUrl
+          if (frontendUrl)
+            void warmDevFrontend(frontendUrl, {
+              timeout: Math.max(1, deadline - Date.now()),
+              signal: warmup.signal,
+            })
+              .then((ready) => {
+                frontendReady = ready
+              })
+              .catch(() => {})
+        }
+        if (
+          health.helper?.version !== 3 ||
+          !["interactive", "complete"].includes(health.helper.readyState)
+        ) {
+          if (!navigationRecovered && canRecoverInitialNavigation(health, frontendReady, reusing)) {
+            // A listening dev port does not imply a compiled document. A cold
+            // navigation can expire before Next responds. Explicitly navigate:
+            // WKWebView.reload() may do nothing before a document has loaded.
+            navigationRecovered = true
+            await request("/api/dev/agent/navigate", {
+              method: "POST",
+              body: { window: "main", url: frontendUrl },
+              endpoint,
+              timeout: Math.max(1, Math.min(15_000, deadline - Date.now())),
+            })
+            console.error(
+              "[agent-debug] navigated the uninitialized main window after frontend warmup"
+            )
+          }
+          throw new Error("agent helper is not ready in the main webview")
+        }
+        return { endpoint, health }
+      } catch (error) {
+        if (error.code === "debug_session_mismatch") throw error
+        lastError = error.message
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now())))
+        )
+      }
     }
+    throw new Error(`timed out waiting for agent-debug bridge: ${lastError}`)
+  } finally {
+    warmup.abort()
   }
-  throw new Error(`timed out waiting for agent-debug bridge: ${lastError}`)
 }
 
 async function launch(options) {
