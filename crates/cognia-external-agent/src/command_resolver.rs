@@ -29,6 +29,60 @@
 
 use std::path::{Path, PathBuf};
 
+/// Exact official ACP server names; the interactive `agy` CLI is not ACP.
+pub(crate) fn is_antigravity_acp_command(command: &str) -> bool {
+    command
+        .rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| {
+            matches!(name.to_ascii_lowercase().as_str(), "agy_acp_server.par" | "agy_acp_server" | "agy_acp_server.exe")
+        })
+}
+
+/// Linux's official ACP Registry launch includes an empty launcher uid. This
+/// applies only to execution; the version probe keeps its complete flag vector.
+pub(crate) fn configure_antigravity_platform_args(command: &str, args: &mut Vec<String>, os: &str) {
+    if os == "linux" && is_antigravity_acp_command(command)
+        && !args.iter().any(|arg| arg == "--uid" || arg.starts_with("--uid="))
+    {
+        args.push("--uid=".into());
+    }
+}
+
+/// Bind the helper to the resolved server's release directory, including when
+/// the user installs the server through a symlink. Upstream lets an ambient
+/// `ANTIGRAVITY_HARNESS_PATH` replace this executable; callers must overwrite
+/// that variable with this host-derived path after request-env filtering.
+pub(crate) fn antigravity_harness_path(program: &Path) -> Result<Option<PathBuf>, String> {
+    if !is_antigravity_acp_command(&program.to_string_lossy()) {
+        return Ok(None);
+    }
+    let server = program.canonicalize().map_err(|error| {
+        format!("Cannot resolve Antigravity ACP server {}: {error}", program.display())
+    })?;
+    let directory = server.parent().ok_or("Antigravity ACP server has no release directory")?;
+    let helper_name = if program.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+        "localharness_external.exe"
+    } else {
+        "localharness_external"
+    };
+    let expected = directory.join(helper_name);
+    let helper = expected.canonicalize().map_err(|error| {
+        format!("Antigravity ACP requires its matching sibling {helper_name}: {error}")
+    })?;
+    if helper != expected || !helper.is_file() {
+        return Err("Antigravity ACP helper must be a regular file in the server release directory".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if helper.metadata().map_err(|error| error.to_string())?.permissions().mode() & 0o111 == 0 {
+            return Err("Antigravity ACP helper is not executable".into());
+        }
+    }
+    Ok(Some(helper))
+}
+
 /// Executable extensions used when `PATHEXT` is unset. Mirrors the Windows
 /// default and the historical `check_command_exists` list.
 #[cfg(windows)]
@@ -210,6 +264,68 @@ mod tests {
         assert!(!check_command_exists(""));
         // resolve_command echoes the (untrimmed) input back when unresolved.
         assert_eq!(resolve_command(""), "");
+    }
+
+    #[test]
+    fn antigravity_helper_is_release_bound_and_requires_an_executable_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let server = write_file(temp.path(), "agy_acp_server.par");
+        assert!(antigravity_harness_path(&server).unwrap_err().contains("matching sibling"));
+        let helper = write_file(temp.path(), "localharness_external");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(antigravity_harness_path(&server).unwrap_err().contains("not executable"));
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(antigravity_harness_path(&server).unwrap(), Some(helper.canonicalize().unwrap()));
+        assert_eq!(antigravity_harness_path(&temp.path().join("agy")).unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_server_symlink_resolves_its_own_release_helper_and_rejects_helper_escape() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let release = tempfile::tempdir().unwrap();
+        let install = tempfile::tempdir().unwrap();
+        let server = write_file(release.path(), "agy_acp_server.par");
+        let helper = write_file(release.path(), "localharness_external");
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        let alias = install.path().join("agy_acp_server.par");
+        symlink(&server, &alias).unwrap();
+        assert_eq!(antigravity_harness_path(&alias).unwrap(), Some(helper.canonicalize().unwrap()));
+        fs::remove_file(&helper).unwrap();
+        let external = write_file(install.path(), "outside-helper");
+        symlink(&external, &helper).unwrap();
+        assert!(antigravity_harness_path(&server).unwrap_err().contains("release directory"));
+    }
+
+    #[test]
+    fn antigravity_windows_server_selects_the_exe_helper() {
+        let temp = tempfile::tempdir().unwrap();
+        let server = write_file(temp.path(), "agy_acp_server.exe");
+        let helper = write_file(temp.path(), "localharness_external.exe");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(antigravity_harness_path(&server).unwrap(), Some(helper.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn antigravity_linux_launch_matches_the_registry_without_duplicate_uid_flags() {
+        let mut args = vec![];
+        configure_antigravity_platform_args("agy_acp_server.par", &mut args, "linux");
+        assert_eq!(args, ["--uid="]);
+        configure_antigravity_platform_args("agy_acp_server.par", &mut args, "linux");
+        assert_eq!(args, ["--uid="]);
+        for platform in ["macos", "windows"] {
+            let mut args = vec![];
+            configure_antigravity_platform_args("agy_acp_server.par", &mut args, platform);
+            assert!(args.is_empty());
+        }
     }
 
     #[test]

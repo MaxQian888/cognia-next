@@ -1637,7 +1637,7 @@ impl TaskWorkspaceService {
                     if rollback {
                         let publication_key = integration_provenance_key(run, &root.root_id, false);
                         if let Some(intent) = store.provenance().mutation_intent(&publication_key).map_err(|error| error.to_string())? {
-                            map = capture::undo_map(&mut store, &intent, old_path, before_bytes, &before_map, after_bytes, &unknown, now_ms())?;
+                            map = capture::undo_map(&mut store, &intent, old_path, capture::MappedContent { bytes: before_bytes, segments: &before_map }, after_bytes, &unknown, now_ms())?;
                         }
                     } else {
                         let count = line_map::split_lines(after_bytes).map_err(|error| error.to_string())?.len();
@@ -1696,8 +1696,7 @@ impl TaskWorkspaceService {
                 };
                 paths.push(capture::CapturePath { path: file.path.clone(), old_path: file.old_path.clone(), before, after, segments });
             }
-            capture::prepare(&mut store, &root, &key, if rollback { "integrationRollback" } else { "integrationPublish" },
-                &paths, &adoptions, verification, None, now_ms())?;
+            capture::prepare(&mut store, &root, capture::CaptureOperation { key: &key, kind: if rollback { "integrationRollback" } else { "integrationPublish" }, now: now_ms() }, &paths, &adoptions, verification, None)?;
             keys.push(key);
         }
         Ok(keys)

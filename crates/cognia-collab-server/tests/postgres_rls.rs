@@ -291,6 +291,7 @@ async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
         .iter()
         .any(|session| session.id == session_id));
     let event = NewSessionEvent {
+        tool_detail_revision: None,
         id: format!("event_{session_id}"),
         org_id: scope.org_id.clone(),
         workspace_id: scope.workspace_id.clone(),
@@ -388,6 +389,7 @@ async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
         .await
         .is_err());
     let stale = NewSessionEvent {
+        tool_detail_revision: None,
         id: format!("late_{session_id}"),
         org_id: scope.org_id.clone(),
         workspace_id: scope.workspace_id.clone(),
@@ -1688,6 +1690,84 @@ fn standing_lease(scope: &OperatorBootstrap, user_id: &str) -> cognia_collab_ser
 }
 
 #[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn redacted_corrections_are_rejected_inside_both_postgres_append_paths() {
+    use cognia_collab_server::{
+        chat_store::{ChatStore, NewSessionEvent},
+        store::StoreError,
+    };
+    let (database, store, owner, _, _) = standing_fixture().await;
+    store
+        .acquire_run_lease(standing_lease(&owner, &owner.user_id))
+        .await
+        .unwrap();
+    for run in [false, true] {
+        let original = NewSessionEvent {
+            tool_detail_revision: None,
+            id: format!("created-{run}"),
+            org_id: owner.org_id.clone(),
+            workspace_id: owner.workspace_id.clone(),
+            session_id: "standing_session".into(),
+            kind: "message.created".into(),
+            actor_kind: "human".into(),
+            actor_id: owner.user_id.clone(),
+            actor_label: None,
+            payload: serde_json::json!({"messageId":format!("message-{run}"),"parts":[]}),
+            now: 4,
+            operation_id: format!("created-{run}"),
+        };
+        store.append_session_event(original.clone()).await.unwrap();
+        let mut correction = original.clone();
+        correction.id = format!("correct-{run}");
+        correction.operation_id = correction.id.clone();
+        correction.kind = "message.corrected".into();
+        correction.payload = serde_json::json!({"targetMessageId":format!("message-{run}"),"parts":[{"type":"text","text":"raw"}]});
+        if run {
+            correction.actor_kind = "agent".into();
+            correction.actor_id = "run:standing_run".into();
+        }
+        let append = |input| async {
+            if run {
+                store
+                    .append_session_run_event(input, "standing_run", "standing-token")
+                    .await
+            } else {
+                store.append_session_event(input).await
+            }
+        };
+        append(correction.clone()).await.unwrap();
+        let mut redaction = original;
+        redaction.id = format!("redact-{run}");
+        redaction.operation_id = redaction.id.clone();
+        redaction.kind = "message.redacted".into();
+        redaction.payload = serde_json::json!({"targetMessageId":format!("message-{run}")});
+        store.append_session_event(redaction).await.unwrap();
+        for replay in [false, true] {
+            let mut input = correction.clone();
+            if !replay {
+                input.id = format!("late-{run}");
+                input.operation_id = input.id.clone();
+            }
+            let result = append(input).await;
+            assert!(
+                matches!(result, Err(StoreError::Conflict(ref value)) if value["reason"] == "message_redacted"),
+                "run={run} replay={replay}: {result:?}"
+            );
+        }
+    }
+    assert_eq!(
+        store
+            .list_session_events(&owner.org_id, "standing_session", 0, 100)
+            .await
+            .unwrap()
+            .len(),
+        6
+    );
+    drop(store);
+    database.cleanup().await;
+}
+
+#[tokio::test]
 #[ignore = "requires an isolated PostgreSQL instance and COLLAB_RLS_ADMIN_DATABASE_URL / COLLAB_RLS_APP_DATABASE_URL"]
 async fn losing_a_workspace_seat_keeps_an_org_admins_session_standing_in_postgres() {
     use cognia_collab_server::{chat::SessionRole, chat_store::ChatStore, Store};
@@ -2652,4 +2732,479 @@ async fn org_member_names_list_only_this_orgs_members_in_postgres() {
     expected.sort_by(|left, right| left.user_id.cmp(&right.user_id));
     assert_eq!(names, expected);
     assert_eq!(store.org_member_names(&owner.org_id, 1).await.unwrap(), expected[..1]);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn shared_live_admission_and_tool_detail_revisions_are_atomic_in_postgres() {
+    use cognia_collab_server::{
+        chat::{SessionRole, ToolDetail},
+        chat_store::{ChatStore, NewSessionEvent, RunWrite},
+        store::StoreError,
+    };
+    let (database, store, owner, maintainer, guest) = standing_fixture().await;
+    let initial = store
+        .admin_session(&owner.org_id, "standing_session")
+        .await
+        .unwrap();
+    assert_eq!(
+        (initial.tool_detail, initial.tool_detail_revision),
+        (ToolDetail::Summary, 0)
+    );
+    assert!(matches!(
+        store
+            .patch_session(
+                &owner.org_id,
+                "standing_session",
+                None,
+                None,
+                Some((ToolDetail::Full, &guest.user_id)),
+                "denied",
+                initial.revision,
+                3
+            )
+            .await,
+        Err(StoreError::Policy(_))
+    ));
+    let full = store
+        .patch_session(
+            &owner.org_id,
+            "standing_session",
+            None,
+            None,
+            Some((ToolDetail::Full, &owner.user_id)),
+            "full",
+            initial.revision,
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(full.tool_detail_revision, 1);
+    assert_eq!(full.policy_revision, initial.policy_revision + 1);
+    let same = store
+        .patch_session(
+            &owner.org_id,
+            "standing_session",
+            None,
+            None,
+            Some((ToolDetail::Full, &owner.user_id)),
+            "same",
+            full.revision,
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(same, full);
+    store
+        .acquire_run_lease(standing_lease(&owner, &owner.user_id))
+        .await
+        .unwrap();
+    let mut event = NewSessionEvent {
+        tool_detail_revision: Some(0),
+        id: "live_created".into(),
+        org_id: owner.org_id.clone(),
+        workspace_id: owner.workspace_id.clone(),
+        session_id: "standing_session".into(),
+        kind: "message.created".into(),
+        actor_kind: "agent".into(),
+        actor_id: "run:standing_run".into(),
+        actor_label: None,
+        payload: serde_json::json!({"messageId":"live_reply","parts":[]}),
+        now: 4,
+        operation_id: "live_created".into(),
+    };
+    assert!(
+        matches!(store.append_session_run_event(event.clone(),"standing_run","standing-token").await,Err(StoreError::Conflict(v)) if v==serde_json::json!({"reason":"tool_detail_stale","toolDetail":"full","toolDetailRevision":1}))
+    );
+    event.tool_detail_revision = None;
+    store
+        .append_session_run_event(event.clone(), "standing_run", "standing-token")
+        .await
+        .unwrap();
+    let write = |token| RunWrite {
+        org_id: &owner.org_id,
+        session_id: "standing_session",
+        run_id: "standing_run",
+        token_hash: token,
+        now: 5,
+    };
+    assert!(store
+        .admit_live_frame(write("wrong"), "live_reply", 1)
+        .await
+        .is_err());
+    let mut missing = write("standing-token");
+    missing.run_id = "missing";
+    assert!(store
+        .admit_live_frame(missing, "live_reply", 1)
+        .await
+        .is_err());
+    let mut expired = write("standing-token");
+    expired.now = 100;
+    assert!(store
+        .admit_live_frame(expired, "live_reply", 1)
+        .await
+        .is_err());
+    assert!(
+        matches!(store.admit_live_frame(write("standing-token"),"live_reply",0).await,Err(StoreError::Conflict(v)) if v["reason"]=="tool_detail_stale")
+    );
+    let before = store
+        .admin_session(&owner.org_id, "standing_session")
+        .await
+        .unwrap();
+    let count = store
+        .list_session_events(&owner.org_id, "standing_session", 0, 100)
+        .await
+        .unwrap()
+        .len();
+    store
+        .admit_live_frame(write("standing-token"), "live_reply", 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .admin_session(&owner.org_id, "standing_session")
+            .await
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        store
+            .list_session_events(&owner.org_id, "standing_session", 0, 100)
+            .await
+            .unwrap()
+            .len(),
+        count
+    );
+    event.id = "live_correction".into();
+    event.operation_id = "live_correction".into();
+    event.kind = "message.corrected".into();
+    event.payload = serde_json::json!({"targetMessageId":"live_reply","parts":[]});
+    event.tool_detail_revision = Some(0);
+    assert!(
+        matches!(store.append_session_run_event(event.clone(),"standing_run","standing-token").await,Err(StoreError::Conflict(v)) if v["reason"]=="tool_detail_stale")
+    );
+    event.tool_detail_revision = Some(1);
+    store
+        .append_session_run_event(event.clone(), "standing_run", "standing-token")
+        .await
+        .unwrap();
+    let summary = store
+        .patch_session(
+            &owner.org_id,
+            "standing_session",
+            None,
+            None,
+            Some((ToolDetail::Summary, &maintainer.user_id)),
+            "summary",
+            full.revision,
+            6,
+        )
+        .await
+        .unwrap();
+    assert_eq!(summary.tool_detail_revision, 2);
+    assert_eq!(summary.policy_revision, full.policy_revision + 1);
+    assert!(
+        matches!(store.admit_live_frame(write("standing-token"),"live_reply",1).await,Err(StoreError::Conflict(v)) if v["reason"]=="tool_detail_stale" && v["toolDetail"]=="summary")
+    );
+    event.id = "live_redact".into();
+    event.operation_id = "live_redact".into();
+    event.kind = "message.redacted".into();
+    event.payload = serde_json::json!({"targetMessageId":"live_reply"});
+    store.append_session_event(event).await.unwrap();
+    assert!(
+        matches!(store.admit_live_frame(write("standing-token"),"live_reply",2).await,Err(StoreError::Conflict(v)) if v["reason"]=="message_redacted")
+    );
+    // Store-level role refusal while the lease is otherwise still live.
+    store
+        .put_member(
+            &owner.org_id,
+            "standing_session",
+            &owner.workspace_id,
+            &maintainer.user_id,
+            SessionRole::Viewer,
+            false,
+            false,
+            &owner.user_id,
+            7,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        store
+            .patch_session(
+                &owner.org_id,
+                "standing_session",
+                None,
+                None,
+                Some((ToolDetail::Full, &maintainer.user_id)),
+                "revoked",
+                summary.revision,
+                8
+            )
+            .await,
+        Err(StoreError::Policy(_))
+    ));
+    let (admin, connection) = tokio_postgres::connect(&database.url, NoTls).await.unwrap();
+    let connection_task = tokio::spawn(async move { connection.await.unwrap() });
+    admin.execute("UPDATE chat_session_memberships SET role='viewer' WHERE org_id=$1 AND session_id='standing_session' AND user_id=$2",&[&owner.org_id,&owner.user_id]).await.unwrap();
+    assert!(store
+        .admit_live_frame(write("standing-token"), "live_reply", 2)
+        .await
+        .is_err());
+    drop(admin);
+    connection_task.await.unwrap();
+    drop(store);
+    database.cleanup().await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn shared_live_rechecks_postgres_kill_switch_and_terminal_events_can_drain() {
+    use cognia_collab_server::{
+        chat_store::{ChatStore, NewSessionEvent, RunWrite},
+        rollout::FeatureKey,
+        store::StoreError,
+    };
+    for key in [FeatureKey::SharedChat, FeatureKey::SharedChatExecution] {
+        let (database, store, owner, _, _) = standing_fixture().await;
+        store
+            .acquire_run_lease(standing_lease(&owner, &owner.user_id))
+            .await
+            .unwrap();
+        let write = || RunWrite {
+            org_id: &owner.org_id,
+            session_id: "standing_session",
+            run_id: "standing_run",
+            token_hash: "standing-token",
+            now: 5,
+        };
+        store.admit_live_frame(write(), "m", 0).await.unwrap();
+        let mut policy = admission_policy(key);
+        policy.kill = true;
+        store
+            .apply_feature_policy(policy, 0, key.as_str(), "emergency stop", "operator")
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.admit_live_frame(write(), "m", 0).await,
+            Err(StoreError::FeatureUnavailable(_))
+        ));
+        store
+            .append_session_run_event(
+                NewSessionEvent {
+                    tool_detail_revision: None,
+                    id: "terminal".into(),
+                    org_id: owner.org_id.clone(),
+                    workspace_id: owner.workspace_id.clone(),
+                    session_id: "standing_session".into(),
+                    kind: "run.completed".into(),
+                    actor_kind: "agent".into(),
+                    actor_id: "run:standing_run".into(),
+                    actor_label: None,
+                    payload: serde_json::json!({}),
+                    now: 5,
+                    operation_id: "terminal".into(),
+                },
+                "standing_run",
+                "standing-token",
+            )
+            .await
+            .unwrap();
+        drop(store);
+        database.cleanup().await;
+    }
+}
+
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn shared_live_http_checks_postgres_ownership_admission_and_never_inserts() {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use cognia_collab_server::{
+        chat_store::{ChatStore, NewSessionEvent},
+        rollout::FeatureKey,
+        router, AppState,
+    };
+    use cognia_tenant_auth::{grant::GrantSigner, oidc::TestAuthenticator};
+    use sha2::{Digest, Sha256};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+    let (database, store, owner, _, _) = standing_fixture().await;
+    let mut lease = standing_lease(&owner, &owner.user_id);
+    lease.token_hash = hex::encode(Sha256::digest(b"token"));
+    store.acquire_run_lease(lease).await.unwrap();
+    let mut event = NewSessionEvent {
+        tool_detail_revision: None,
+        id: "live_reply".into(),
+        org_id: owner.org_id.clone(),
+        workspace_id: owner.workspace_id.clone(),
+        session_id: "standing_session".into(),
+        kind: "message.created".into(),
+        actor_kind: "agent".into(),
+        actor_id: "run:standing_run".into(),
+        actor_label: None,
+        payload: serde_json::json!({"messageId":"reply","parts":[]}),
+        now: 4,
+        operation_id: "live_reply".into(),
+    };
+    store
+        .append_session_run_event(
+            event.clone(),
+            "standing_run",
+            &hex::encode(Sha256::digest(b"token")),
+        )
+        .await
+        .unwrap();
+    event.id = "foreign".into();
+    event.operation_id = "foreign".into();
+    event.actor_id = "run:other".into();
+    event.payload["messageId"] = serde_json::json!("foreign");
+    store.append_session_event(event.clone()).await.unwrap();
+    let store = Arc::new(store);
+    let mut state = AppState::new(
+        store.clone(),
+        GrantSigner::new(&[7; 32]).unwrap(),
+        Arc::new(TestAuthenticator),
+    )
+    .with_chat_store(store.clone());
+    state.now = Arc::new(|| 10);
+    let app = router(state.clone());
+    let frame = serde_json::json!({"sessionId":"standing_session","messageId":"reply","replyTo":"question","seq":1,"base":0,"keyframe":true,"state":"streaming","parts":[]});
+    let request = |frame: serde_json::Value, token: Option<&str>| {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/v1/orgs/{}/chat-sessions/standing_session/runs/standing_run/live",
+                owner.org_id
+            ))
+            .header("x-cognia-collab-protocol", "2")
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("x-cognia-run-token", token);
+        }
+        request
+            .body(Body::from(
+                serde_json::json!({"frame":frame,"toolDetailRevision":0}).to_string(),
+            ))
+            .unwrap()
+    };
+    let before = store
+        .list_session_events(&owner.org_id, "standing_session", 0, 100)
+        .await
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(request(frame.clone(), Some("token")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        store
+            .list_session_events(&owner.org_id, "standing_session", 0, 100)
+            .await
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(frame.clone(), None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(frame.clone(), Some("wrong")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    for (key, value, status) in [
+        (
+            "messageId",
+            serde_json::json!("foreign"),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "messageId",
+            serde_json::json!("missing"),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            "sessionId",
+            serde_json::json!("foreign"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "seq",
+            serde_json::json!(0),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "parts",
+            serde_json::json!([{"text":"x".repeat(256*1024)}]),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+    ] {
+        let mut invalid = frame.clone();
+        invalid[key] = value;
+        assert_eq!(
+            app.clone()
+                .oneshot(request(invalid, Some("token")))
+                .await
+                .unwrap()
+                .status(),
+            status
+        );
+    }
+    // Deployment-off removes these routes for both stores; policy kill is an atomic write admission.
+    assert_eq!(
+        router(state.with_shared_chat_enabled(false))
+            .oneshot(request(frame.clone(), Some("token")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let mut policy = admission_policy(FeatureKey::SharedChatExecution);
+    policy.kill = true;
+    store
+        .apply_feature_policy(policy, 0, "live_http_kill", "emergency stop", "operator")
+        .await
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(request(frame.clone(), Some("token")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    event.id = "redact".into();
+    event.operation_id = "redact".into();
+    event.kind = "message.redacted".into();
+    event.payload = serde_json::json!({"targetMessageId":"reply"});
+    store.append_session_event(event).await.unwrap();
+    let mut policy = admission_policy(FeatureKey::SharedChatExecution);
+    policy.kill = false;
+    store
+        .apply_feature_policy(policy, 1, "live_http_resume", "resume", "operator")
+        .await
+        .unwrap();
+    assert_eq!(
+        app.oneshot(request(frame, Some("token")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    drop(store);
+    database.cleanup().await;
 }

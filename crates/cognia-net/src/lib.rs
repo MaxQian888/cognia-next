@@ -32,6 +32,7 @@ pub mod inbound_policy;
 pub mod ndjson_stream;
 pub mod net_meter;
 pub mod outbound_pii;
+mod pinned_http;
 pub mod proxy_config;
 pub mod request_cancellation;
 pub mod sse_stream;

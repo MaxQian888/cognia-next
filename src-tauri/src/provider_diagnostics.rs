@@ -1,5 +1,5 @@
 //! Facade over [`cognia_provider_diagnostics`] — the provider balance-script
-//! sandbox. Only the three `#[tauri::command]` shells live here, which keeps
+//! sandbox. Only desktop command shells live here, which keeps
 //! the crate tauri-free (ADR-0196). The sandbox first moved into `cognia-net`
 //! (ADR-0067 Tier C), which put a C-compiled JS engine and the credential
 //! store in a foundation crate every networked crate links; it has its own
@@ -25,6 +25,14 @@ pub async fn provider_diagnostics_run_balance_script(
     request: BalanceScriptRunRequest,
 ) -> Result<BalanceScriptRunResult, String> {
     cognia_provider_diagnostics::run_balance_script_timed(request).await
+}
+
+/// Magpie discovery is separate from the balance-script sandbox.
+#[tauri::command]
+pub async fn magpie_gateway_port() -> Result<u16, String> {
+    tokio::task::spawn_blocking(cognia_ccswitch::magpie::gateway_port)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! Host-side bindings + capability impls for cognia-plugin **v0.2.0**.
+//! Host-side bindings + capability impls for cognia-plugin **v0.2.x**.
 //!
 //! Bridges the WIT contract in `src-tauri/wit/cognia-plugin.wit` to the rest of
 //! the runtime. Three responsibilities:
@@ -146,7 +146,7 @@ impl cognia::plugin::secrets::Host for HostState {
 }
 
 // =============================================================================
-// Process — std::process::Command behind `process:spawn` / `shell:execute`.
+// Process — bounded async subprocess I/O behind `process:spawn` / `shell:execute`.
 // Unchanged from v0.1 apart from the coded capability-denial strings.
 // =============================================================================
 
@@ -157,67 +157,63 @@ impl cognia::plugin::process::Host for HostState {
         args: Vec<String>,
         options: cognia::plugin::process::ExecOptions,
     ) -> Result<cognia::plugin::process::ExecResult, String> {
-        process::check(self)?;
-        process::validate(&program, &args)?;
-        // DENY-by-default: the program must be in the plugin's declared
-        // `shellCommands` allowlist — parity with the TS `shell:execute` gate.
-        process::check_program_allowed(self, &program)?;
-        let timeout_ms = options.timeout_ms.unwrap_or(self.call_timeout_ms as u32);
-
-        let mut cmd = std::process::Command::new(&program);
-        cmd.args(&args);
-        if let Some(cwd) = options.cwd.as_deref() {
-            cmd.current_dir(cwd);
-        }
-        // Environment: we *replace* the env so plugin code can't read
-        // arbitrary host secrets through e.g. AWS_PROFILE or ANTHROPIC_API_KEY.
-        cmd.env_clear();
-        for (k, v) in options.env.iter() {
-            cmd.env(k, v);
-        }
-        // Run sync on a blocking pool so async hosts stay responsive.
-        let timeout = Duration::from_millis(timeout_ms as u64);
         let plugin_id = self.plugin_id.clone();
-        let out = tokio::task::spawn_blocking(move || -> Result<_, String> {
-            let mut child = cmd
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .map_err(|e| format!("spawn {program}: {e}"))?;
-
-            match wait_timeout::ChildExt::wait_timeout(&mut child, timeout)
-                .map_err(|e| format!("wait_timeout: {e}"))?
-            {
-                Some(status) => {
-                    let mut stdout = Vec::new();
-                    let mut stderr = Vec::new();
-                    if let Some(mut s) = child.stdout.take() {
-                        std::io::Read::read_to_end(&mut s, &mut stdout).ok();
-                    }
-                    if let Some(mut s) = child.stderr.take() {
-                        std::io::Read::read_to_end(&mut s, &mut stderr).ok();
-                    }
-                    Ok((status.code().unwrap_or(-1), stdout, stderr))
+        run_process(self, program, args, options, None)
+            .await
+            .map_err(|error| {
+                // Existing guests may inspect these original exec error strings.
+                // The additive operation uses the canonical coded errors below.
+                if let Some(message) = error.strip_prefix("TIMEOUT: ") {
+                    format!("{message} (plugin {plugin_id})")
+                } else if error.starts_with("CAPABILITY_DENIED: ")
+                    || error.starts_with("INVALID_REQUEST: ")
+                    || error.starts_with("PROVIDER_ERROR: ")
+                {
+                    error
+                        .split_once(": ")
+                        .map(|(_, message)| message.to_string())
+                        .unwrap_or(error)
+                } else {
+                    error
                 }
-                None => {
-                    let _ = child.kill();
-                    Err(format!(
-                        "process exec timed out after {}ms (plugin {plugin_id})",
-                        timeout.as_millis()
-                    ))
-                }
-            }
-        })
-        .await
-        .map_err(|e| format!("blocking task join: {e}"))??;
-
-        Ok(cognia::plugin::process::ExecResult {
-            code: out.0,
-            stdout: out.1,
-            stderr: out.2,
-        })
+            })
     }
+
+    async fn exec_with_stdin(
+        &mut self,
+        program: String,
+        args: Vec<String>,
+        options: cognia::plugin::process::ExecOptions,
+        stdin: Vec<u8>,
+    ) -> Result<cognia::plugin::process::ExecResult, String> {
+        run_process(self, program, args, options, Some(stdin)).await
+    }
+}
+
+async fn run_process(
+    state: &mut HostState,
+    program: String,
+    args: Vec<String>,
+    options: cognia::plugin::process::ExecOptions,
+    input: Option<Vec<u8>>,
+) -> Result<cognia::plugin::process::ExecResult, String> {
+    let output = process::execute(
+        state,
+        program,
+        args,
+        process::ExecOptions {
+            cwd: options.cwd,
+            env: options.env,
+            timeout_ms: options.timeout_ms,
+        },
+        input,
+    )
+    .await?;
+    Ok(cognia::plugin::process::ExecResult {
+        code: output.code,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
 }
 
 // =============================================================================
@@ -385,6 +381,57 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    #[tokio::test]
+    async fn legacy_exec_errors_remain_compatible_and_stdin_errors_are_coded() {
+        let mut denied = crate::wasm::store::test_host_state("legacy", &[]);
+        let expected = process::check(&denied).unwrap_err();
+        let options = || cognia::plugin::process::ExecOptions {
+            cwd: None,
+            env: vec![],
+            timeout_ms: None,
+        };
+        let original =
+            cognia::plugin::process::Host::exec(&mut denied, "missing".into(), vec![], options())
+                .await
+                .unwrap_err();
+        assert_eq!(original, expected);
+        let extended = cognia::plugin::process::Host::exec_with_stdin(
+            &mut denied,
+            "missing".into(),
+            vec![],
+            options(),
+            vec![],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(extended, format!("CAPABILITY_DENIED: {original}"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_drains_both_pipes_before_waiting_for_exit() {
+        let mut state = crate::wasm::store::test_host_state("pipes", &["process:spawn"]);
+        state.shell_allowlist = vec!["sh".into()];
+        let output = cognia::plugin::process::Host::exec(
+            &mut state,
+            "/bin/sh".into(),
+            vec![
+                "-c".into(),
+                "/usr/bin/head -c 131072 /dev/zero; /usr/bin/head -c 131072 /dev/zero >&2".into(),
+            ],
+            cognia::plugin::process::ExecOptions {
+                cwd: None,
+                env: vec![],
+                timeout_ms: Some(1000),
+            },
+        )
+        .await
+        .expect("pipe-sized output must not deadlock");
+        assert_eq!(output.code, 0);
+        assert_eq!(output.stdout.len(), 131072);
+        assert_eq!(output.stderr.len(), 131072);
+    }
     use crate::wasm::bridge::{
         CancelReason, WasmRendererBridge, WasmRendererResponse, MAX_BODY_BYTES, REQUEST_EVENT,
     };

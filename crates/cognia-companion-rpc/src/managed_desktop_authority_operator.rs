@@ -111,15 +111,7 @@ async fn renewed_frame(
     permit: &ExplicitPaidSmokeAuthorization,
 ) -> Result<(ManagedControlLease, ManagedControlFrame)> {
     let lease = service
-        .control_renew_smoke(
-            p,
-            &desktop.id,
-            desktop.generation,
-            &lease.token,
-            lease.fence,
-            authority,
-            permit,
-        )
+        .control_renew_smoke(p, &desktop.id, desktop.generation, cognia_automation::cua_sandbox::managed::ManagedControlLeaseRef { token: &lease.token, fence: lease.fence }, authority, permit)
         .await?;
     let frame = service
         .control_frame_smoke(p, &desktop.id, desktop.generation, authority, permit)

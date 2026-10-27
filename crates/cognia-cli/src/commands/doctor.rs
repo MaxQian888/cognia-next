@@ -219,7 +219,7 @@ fn cargo_component_check(present: bool, need: Need) -> Check {
 fn wasm_target_check(rustup_targets: Option<&str>, need: Need) -> Check {
     match rustup_targets {
         None => Check {
-            name: "wasm32-wasip2 target",
+            name: "wasm32-wasip1 target",
             status: CheckStatus::Warn,
             detail: "rustup not detected; wasm target unverified (cargo-component may manage it)"
                 .into(),
@@ -227,14 +227,14 @@ fn wasm_target_check(rustup_targets: Option<&str>, need: Need) -> Check {
             auto_fixable: false,
         },
         Some(list) => {
-            if list.lines().any(|l| l.trim() == "wasm32-wasip2") {
-                Check::ok("wasm32-wasip2 target", "installed")
+            if list.lines().any(|l| l.trim() == "wasm32-wasip1") {
+                Check::ok("wasm32-wasip1 target", "installed")
             } else {
                 Check {
-                    name: "wasm32-wasip2 target",
+                    name: "wasm32-wasip1 target",
                     status: need.missing_status(),
                     detail: "not installed — required to build wasm plugins".into(),
-                    fix: Some("rustup target add wasm32-wasip2".into()),
+                    fix: Some("rustup target add wasm32-wasip1".into()),
                     auto_fixable: true,
                 }
             }
@@ -339,9 +339,9 @@ fn apply_fixes(cwd: &Path, checks: &mut [Check]) {
             continue;
         }
         match check.name {
-            "wasm32-wasip2 target" => {
+            "wasm32-wasip1 target" => {
                 let ok = Command::new("rustup")
-                    .args(["target", "add", "wasm32-wasip2"])
+                    .args(["target", "add", "wasm32-wasip1"])
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn wasm_target_check_reads_rustup_list() {
         assert_eq!(
-            wasm_target_check(Some("x86_64-apple-darwin\nwasm32-wasip2\n"), Need::Required).status,
+            wasm_target_check(Some("x86_64-apple-darwin\nwasm32-wasip1\n"), Need::Required).status,
             CheckStatus::Ok
         );
         let missing = wasm_target_check(Some("x86_64-apple-darwin\n"), Need::Required);
@@ -452,6 +452,20 @@ mod tests {
         assert_eq!(
             wasm_target_check(None, Need::Required).status,
             CheckStatus::Warn
+        );
+    }
+
+    #[test]
+    fn wasm_target_check_matches_cargo_component_build_target() {
+        assert_eq!(
+            wasm_target_check(Some("wasm32-wasip1\n"), Need::Required).status,
+            CheckStatus::Ok
+        );
+        let missing = wasm_target_check(Some("wasm32-wasip2\n"), Need::Required);
+        assert_eq!(missing.status, CheckStatus::Fail);
+        assert_eq!(
+            missing.fix.as_deref(),
+            Some("rustup target add wasm32-wasip1")
         );
     }
 

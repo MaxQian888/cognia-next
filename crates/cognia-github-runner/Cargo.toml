@@ -3,6 +3,7 @@ name = "cognia-github-runner"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -15,7 +16,7 @@ aes-gcm = { workspace = true, features = ["aes"] }
 p256 = { version = "0.14", features = ["ecdh"] }
 hkdf = "0.13"
 sha2.workspace = true
-zip = { workspace = true, features = ["deflate"] }
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 url.workspace = true
 chrono.workspace = true
 async-trait = "0.1"

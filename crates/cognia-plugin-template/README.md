@@ -11,7 +11,7 @@ is meant to be handled.
 ## Prerequisites
 
 ```bash
-rustup target add wasm32-wasip2
+rustup target add wasm32-wasip1
 cargo install --locked cargo-component
 ```
 
@@ -22,14 +22,18 @@ cargo component build --release
 ```
 
 The artifact lands at
-`target/wasm32-wasip2/release/cognia_plugin_template.wasm`.
+`target/wasm32-wasip1/release/cognia_plugin_template.wasm`.
+`cargo-component` adapts the Preview 1 build target into a Preview 2 component
+for the host. Package it with `cognia plugin build --skip-build` to embed the
+required `cognia:api-version` section and produce an installable ZIP. Running
+`cognia plugin build` performs both steps.
 
 ## Install in cognia
 
 1. Open cognia → Settings → Plugins.
-2. Click **Install local WASM plugin**.
-3. Pick the `.wasm` file produced above (or the `.zip` bundle if you
-   ran `cognia plugin build` from the cognia CLI).
+2. Open **Install** → **WASM bundle** → **From local file…**.
+3. Pick `target/cognia/cognia-plugin-template-0.1.0.zip` produced by
+   `cognia plugin build`.
 4. Review the capability grant sheet and confirm.
 
 ## Layout
@@ -66,5 +70,5 @@ The artifact lands at
 | Symptom                                  | Fix                                                                                          |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `cargo-component not found`              | `cargo install --locked cargo-component`                                                     |
-| `unknown target wasm32-wasip2`           | `rustup target add wasm32-wasip2` (needs Rust ≥ 1.82)                                        |
+| `unknown target wasm32-wasip1`           | `rustup target add wasm32-wasip1` (needs Rust ≥ 1.82)                                        |
 | `error: failed to resolve cognia:plugin` | Make sure `wit/world.wit` matches the cognia version listed in `plugin.json.engines.cognia`. |

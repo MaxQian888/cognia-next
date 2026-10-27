@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -7,9 +8,11 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex as SyncMutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex, OwnedMappedMutexGuard, OwnedMutexGuard};
 use uuid::Uuid;
 
 use crate::api::AppState;
@@ -20,7 +23,7 @@ use crate::chat::{
 use crate::chat_store::{
     ChatAttachment, ChatSessionInvite, NewBreakGlassGrant, NewChatApprovalRequest,
     NewChatAttachment, NewChatRunLease, NewChatRunQueueItem, NewChatSessionInvite, NewSessionEvent,
-    NewSharedSession,
+    NewSharedSession, RunWrite,
 };
 use crate::socket_hub::{Channels, Expiring, TicketBook};
 use crate::store::{AuthorizationAuditEvent, StoreError};
@@ -34,6 +37,11 @@ const LEASE_HEARTBEAT_TTL_MS: i64 = 90_000;
 const ATTACHMENT_TICKET_TTL_MS: i64 = 60_000;
 pub(crate) const MAX_ATTACHMENT_BYTES: i64 = 52_428_800;
 const SHARED_CHAT_PROTOCOL_VERSION: u32 = crate::admission::COLLAB_PROTOCOL_VERSION;
+const MAX_LIVE_BODY_BYTES: usize = 256 * 1024;
+const TRANSCRIPT_LIVE_MAX_BYTES: usize = 200 * 1024;
+const TRANSCRIPT_LIVE_MAX_ID: usize = 256;
+type LiveFrame = serde_json::Value;
+
 const MAX_PENDING_TICKETS: usize = 8_192;
 
 #[derive(Debug, Clone)]
@@ -72,10 +80,16 @@ impl Expiring for AttachmentTicket {
     }
 }
 
+type SessionRedactions = Arc<Mutex<Option<HashSet<String>>>>;
+type RunMessages = HashMap<(String, String, String), (HashSet<String>, i64)>;
+
 /// Session streams plus the tickets that open them, on the shared hub pieces
 /// (`socket_hub.rs`, ADR-0206).
 pub struct ChatHub {
     channels: Channels<String, SessionEvent>,
+    live_channels: Channels<String, LiveFrame>,
+    run_messages: SyncMutex<RunMessages>,
+    redacted: SyncMutex<HashMap<(String, String), SessionRedactions>>,
     tickets: TicketBook<SocketTicket>,
     attachment_tickets: TicketBook<AttachmentTicket>,
 }
@@ -84,6 +98,9 @@ impl Default for ChatHub {
     fn default() -> Self {
         Self {
             channels: Channels::new(256),
+            live_channels: Channels::new(32),
+            run_messages: SyncMutex::new(HashMap::new()),
+            redacted: SyncMutex::new(HashMap::new()),
             tickets: TicketBook::new("st_", MAX_PENDING_TICKETS),
             attachment_tickets: TicketBook::new("att_", MAX_PENDING_TICKETS),
         }
@@ -93,6 +110,106 @@ impl Default for ChatHub {
 impl ChatHub {
     fn sender(&self, session_id: &str) -> broadcast::Sender<SessionEvent> {
         self.channels.sender(&session_id.to_owned())
+    }
+
+    fn prune_idle(&self) {
+        let mut sessions = self.redacted.lock();
+        self.channels.prune_idle();
+        self.live_channels.prune_idle();
+        sessions.retain(|(_, session_id), redacted| {
+            // An in-flight seed, publisher or reader must keep the shared lock.
+            Arc::strong_count(redacted) > 1
+                || self.channels.has_subscribers(session_id)
+                || self.live_channels.has_subscribers(session_id)
+        });
+    }
+
+    async fn redacted_set(
+        &self,
+        org_id: &str,
+        session_id: &str,
+        seed: impl std::future::Future<Output = Result<Vec<String>, StoreError>>,
+    ) -> Result<OwnedMappedMutexGuard<Option<HashSet<String>>, HashSet<String>>, StoreError> {
+        let session = {
+            let mut sessions = self.redacted.lock();
+            sessions
+                .entry((org_id.to_owned(), session_id.to_owned()))
+                .or_insert_with(|| Arc::new(Mutex::new(None)))
+                .clone()
+        };
+        let mut redacted = session.lock_owned().await;
+        if redacted.is_none() {
+            *redacted = Some(seed.await?.into_iter().collect());
+        }
+        Ok(OwnedMutexGuard::map(redacted, |redacted| {
+            redacted
+                .as_mut()
+                .expect("redactions were seeded under this lock")
+        }))
+    }
+
+    /// Read the same session tombstones used by stored-event and live egress.
+    pub async fn redacted_snapshot(
+        &self,
+        store: &dyn crate::chat_store::ChatStore,
+        org_id: &str,
+        session_id: &str,
+    ) -> Result<HashSet<String>, StoreError> {
+        Ok(self
+            .redacted_set(
+                org_id,
+                session_id,
+                store.redacted_message_ids(org_id, session_id),
+            )
+            .await?
+            .clone())
+    }
+
+    async fn project_stream_event(
+        &self,
+        store: &dyn crate::chat_store::ChatStore,
+        org_id: &str,
+        event: SessionEvent,
+    ) -> Result<SessionEvent, StoreError> {
+        let redacted = self
+            .redacted_set(
+                org_id,
+                &event.session_id,
+                store.redacted_message_ids(org_id, &event.session_id),
+            )
+            .await?;
+        Ok(project_redacted_event(event, &redacted))
+    }
+
+    async fn broadcast_event(
+        &self,
+        store: &dyn crate::chat_store::ChatStore,
+        org_id: &str,
+        event: SessionEvent,
+    ) -> Result<(), StoreError> {
+        if event.kind == "message.redacted" {
+            let mut redacted = self
+                .redacted_set(
+                    org_id,
+                    &event.session_id,
+                    store.redacted_message_ids(org_id, &event.session_id),
+                )
+                .await?;
+            if let Some(target) = event
+                .payload
+                .get("targetMessageId")
+                .and_then(serde_json::Value::as_str)
+            {
+                redacted.insert(target.to_owned());
+            }
+            // Egress takes this same lock, even if the redaction is still queued.
+            let _ = self.sender(&event.session_id).send(event);
+            drop(redacted);
+            self.prune_idle();
+        } else {
+            let _ = self.sender(&event.session_id).send(event);
+        }
+        Ok(())
     }
 
     fn issue_ticket(&self, ticket: SocketTicket) -> Result<String, ChatFailure> {
@@ -230,6 +347,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/steer",
             post(steer_run),
+        )
+        .route(
+            "/v1/orgs/{org_id}/chat-sessions/{session_id}/runs/{run_id}/live",
+            post(post_run_live).layer(DefaultBodyLimit::max(MAX_LIVE_BODY_BYTES)),
         )
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/runs/{run_id}/events",
@@ -618,6 +739,7 @@ async fn authorize_export(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PatchSessionBody {
+    tool_detail: Option<crate::chat::ToolDetail>,
     title: Option<String>,
     status: Option<SessionStatus>,
     operation_id: String,
@@ -630,7 +752,7 @@ async fn patch_session(
     headers: HeaderMap,
     Json(body): Json<PatchSessionBody>,
 ) -> Result<Json<crate::chat::SharedSession>, ChatFailure> {
-    visible(
+    let (before, member) = visible(
         &state,
         &headers,
         &org_id,
@@ -645,21 +767,29 @@ async fn patch_session(
     {
         return Err(ChatFailure::BadRequest("title must not be blank".into()));
     }
-    Ok(Json(
-        state
-            .chat_store
-            .patch_session(
-                &org_id,
-                &session_id,
-                body.title.as_deref().map(str::trim),
-                body.status,
-                &body.operation_id,
-                body.base_revision,
-                (state.now)(),
-            )
-            .await
-            .map_err(ChatFailure::Store)?,
-    ))
+    let updated = state
+        .chat_store
+        .patch_session(
+            &org_id,
+            &session_id,
+            body.title.as_deref().map(str::trim),
+            body.status,
+            body.tool_detail
+                .map(|detail| (detail, member.user_id.as_str())),
+            &body.operation_id,
+            body.base_revision,
+            (state.now)(),
+        )
+        .await
+        .map_err(ChatFailure::Store)?;
+    if updated.policy_revision != before.policy_revision {
+        let _ = state.chat_hub.sender(&session_id).send(policy_event(
+            &session_id,
+            &member.user_id,
+            (state.now)(),
+        ));
+    }
+    Ok(Json(updated))
 }
 
 #[derive(Deserialize)]
@@ -690,6 +820,7 @@ async fn delete_session(
             &session_id,
             None,
             Some(SessionStatus::Deleting),
+            None,
             &query.operation_id,
             query.base_revision,
             (state.now)(),
@@ -1234,28 +1365,30 @@ fn project_redacted_events(
 ) -> Vec<SessionEvent> {
     events
         .into_iter()
-        .map(|mut event| {
-            let message_id = event
-                .payload
-                .get("messageId")
-                .and_then(serde_json::Value::as_str);
-            let target_message_id = event
-                .payload
-                .get("targetMessageId")
-                .and_then(serde_json::Value::as_str);
-            let sanitized_id = message_id
-                .filter(|id| redacted.contains(*id))
-                .or_else(|| target_message_id.filter(|id| redacted.contains(*id)));
-            if let Some(message_id) = sanitized_id {
-                event.payload = if event.kind == "message.created" {
-                    serde_json::json!({"messageId": message_id, "redacted": true})
-                } else {
-                    serde_json::json!({"targetMessageId": message_id, "redacted": true})
-                };
-            }
-            event
-        })
+        .map(|event| project_redacted_event(event, redacted))
         .collect()
+}
+
+fn project_redacted_event(mut event: SessionEvent, redacted: &HashSet<String>) -> SessionEvent {
+    let message_id = event
+        .payload
+        .get("messageId")
+        .and_then(serde_json::Value::as_str);
+    let target_message_id = event
+        .payload
+        .get("targetMessageId")
+        .and_then(serde_json::Value::as_str);
+    let sanitized_id = message_id
+        .filter(|id| redacted.contains(*id))
+        .or_else(|| target_message_id.filter(|id| redacted.contains(*id)));
+    if let Some(message_id) = sanitized_id {
+        event.payload = if event.kind == "message.created" {
+            serde_json::json!({"messageId": message_id, "redacted": true})
+        } else {
+            serde_json::json!({"targetMessageId": message_id, "redacted": true})
+        };
+    }
+    event
 }
 
 #[derive(Deserialize)]
@@ -1671,10 +1804,11 @@ async fn append_event(
     let event = state
         .chat_store
         .append_session_event(NewSessionEvent {
+            tool_detail_revision: None,
             id: body
                 .id
                 .unwrap_or_else(|| format!("evt_{}", Uuid::new_v4().simple())),
-            org_id,
+            org_id: org_id.clone(),
             workspace_id: session.workspace_id,
             session_id: session_id.clone(),
             kind: body.kind,
@@ -1694,7 +1828,11 @@ async fn append_event(
         state.chat_metrics.event_append_failed();
     }
     let event = event.map_err(ChatFailure::Store)?;
-    let _ = state.chat_hub.sender(&session_id).send(event.clone());
+    state
+        .chat_hub
+        .broadcast_event(state.chat_store.as_ref(), &org_id, event.clone())
+        .await
+        .map_err(ChatFailure::Store)?;
     Ok((StatusCode::CREATED, Json(event)))
 }
 
@@ -1746,10 +1884,20 @@ async fn stream_events(
         return Err(ChatFailure::Hidden);
     }
     state.chat_metrics.stream_connected();
-    let sender = state.chat_hub.sender(&session_id);
+    let receiver = state.chat_hub.channels.subscribe(&session_id);
+    let live = offered
+        .split(',')
+        .any(|value| value.trim() == "cognia.chat.v2");
+    let live_receiver = live.then(|| state.chat_hub.live_channels.subscribe(&session_id));
     Ok(ws
-        .protocols(["cognia.chat.v1"])
-        .on_upgrade(move |socket| stream_loop(socket, state, ticket, sender.subscribe()))
+        .protocols(["cognia.chat.v2", "cognia.chat.v1"])
+        .on_upgrade(move |socket| async move {
+            if live {
+                stream_loop_with_live(socket, state, ticket, receiver, live_receiver).await;
+            } else {
+                stream_loop(socket, state, ticket, receiver).await;
+            }
+        })
         .into_response())
 }
 async fn stream_visible(state: &AppState, ticket: &SocketTicket) -> bool {
@@ -1758,58 +1906,139 @@ async fn stream_visible(state: &AppState, ticket: &SocketTicket) -> bool {
 }
 
 async fn stream_loop(
-    mut socket: WebSocket,
+    socket: WebSocket,
+    state: AppState,
+    ticket: SocketTicket,
+    receiver: broadcast::Receiver<SessionEvent>,
+) {
+    stream_loop_with_live(socket, state, ticket, receiver, None).await;
+}
+
+async fn receive_live(
+    receiver: &mut Option<broadcast::Receiver<LiveFrame>>,
+) -> Result<LiveFrame, broadcast::error::RecvError> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+const STREAM_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn send_stream_message<S>(socket: &mut S, message: Message) -> bool
+where
+    S: futures_util::Sink<Message, Error = axum::Error> + Unpin,
+{
+    matches!(
+        tokio::time::timeout(STREAM_SEND_TIMEOUT, socket.send(message)).await,
+        Ok(Ok(()))
+    )
+}
+
+async fn stream_loop_with_live<S>(
+    mut socket: S,
     state: AppState,
     ticket: SocketTicket,
     mut receiver: broadcast::Receiver<SessionEvent>,
-) {
-    let tick_period = std::time::Duration::from_secs(5);
+    mut live_receiver: Option<broadcast::Receiver<LiveFrame>>,
+) where
+    S: futures_util::Stream<Item = Result<Message, axum::Error>>
+        + futures_util::Sink<Message, Error = axum::Error>
+        + Unpin,
+{
+    let v2 = live_receiver.is_some();
+    let tick_period = std::time::Duration::from_secs(if v2 { 1 } else { 5 });
     let mut standing_tick = tokio::time::interval_at(tokio::time::Instant::now() + tick_period, tick_period);
     standing_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Do not trust the ticket's earlier standing on a newly upgraded socket.
+    let mut standing_checked = None::<tokio::time::Instant>;
     loop {
         let event = tokio::select! {
             _ = standing_tick.tick() => {
                 if !stream_visible(&state, &ticket).await {
-                    let _ = socket.send(Message::Close(None)).await;
+                    let _ = send_stream_message(&mut socket, Message::Close(None)).await;
                     break;
                 }
+                standing_checked = Some(tokio::time::Instant::now());
                 continue;
             }
-            incoming = socket.recv() => {
+            incoming = socket.next() => {
                 match incoming {
                     None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
-                    // Axum responds to ping frames; the stream is read-only.
                     Some(Ok(_)) => continue,
                 }
             }
+            frame = receive_live(&mut live_receiver) => {
+                let frame = match frame {
+                    Ok(frame) => frame,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::debug!(skipped, "shared chat live receiver skipped frames");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                // Consult committed tombstones even if the redaction event is
+                // still queued, then release the shared lock before socket I/O.
+                let Ok(redacted) = state.chat_hub.redacted_set(
+                    &ticket.org_id, &ticket.session_id,
+                    state.chat_store.redacted_message_ids(&ticket.org_id, &ticket.session_id),
+                ).await else { break };
+                let is_redacted = frame["messageId"].as_str().is_some_and(|id| redacted.contains(id));
+                drop(redacted);
+                if is_redacted { continue; }
+                if standing_checked.is_none_or(|checked| checked.elapsed() >= std::time::Duration::from_secs(1)) {
+                    if !stream_visible(&state, &ticket).await {
+                        let _ = send_stream_message(&mut socket, Message::Close(None)).await;
+                        break;
+                    }
+                    standing_checked = Some(tokio::time::Instant::now());
+                }
+                let text = serde_json::json!({"type":"live", "frame":frame}).to_string();
+                // This loop sends sequentially: any later redaction event can
+                // only reach this socket after the frame that passed the check.
+                if !send_stream_message(&mut socket, Message::Text(text.into())).await { break; }
+                continue;
+            }
             event = receiver.recv() => match event {
                 Ok(event) => event,
-                // The existing client reconnects and catches up from its durable
-                // cursor. Never silently skip events when a receiver lags.
+                // Stored-event lag still requires cursor recovery.
                 Err(_) => {
-                    let _ = socket.send(Message::Close(None)).await;
+                    let _ = send_stream_message(&mut socket, Message::Close(None)).await;
                     break;
                 }
             }
         };
-        if state
-            .chat_store
-            .visible_session(&ticket.org_id, &ticket.session_id, &ticket.user_id)
-            .await
-            .ok()
-            .flatten()
-            .is_none()
-        {
-            let _ = socket.send(Message::Close(None)).await;
+        if !stream_visible(&state, &ticket).await {
+            let _ = send_stream_message(&mut socket, Message::Close(None)).await;
             break;
         }
-        let Ok(text) = serde_json::to_string(&event) else {
-            continue;
+        // Includes member.updated: its policy change invalidates live standing
+        // immediately, while every durable event retains its own check.
+        standing_checked = Some(tokio::time::Instant::now());
+        let Ok(event) = state
+            .chat_hub
+            .project_stream_event(state.chat_store.as_ref(), &ticket.org_id, event)
+            .await
+        else {
+            let _ = send_stream_message(&mut socket, Message::Close(None)).await;
+            break;
         };
-        if socket.send(Message::Text(text.into())).await.is_err() {
+        let text = if v2 {
+            serde_json::to_string(&serde_json::json!({"type":"event", "event":event}))
+        } else {
+            serde_json::to_string(&event)
+        };
+        let Ok(text) = text else { continue };
+        if !send_stream_message(&mut socket, Message::Text(text.into())).await {
             break;
         }
     }
+    drop(receiver);
+    drop(live_receiver);
+    state.chat_hub.prune_idle();
+    // A peer that stopped reading may also stall the close handshake. Bound
+    // that attempt too; dropping the socket then releases the transport.
+    let _ = tokio::time::timeout(STREAM_SEND_TIMEOUT, socket.close()).await;
 }
 
 #[derive(Deserialize)]
@@ -2130,6 +2359,7 @@ async fn enqueue_run_input(
     let event = state
         .chat_store
         .append_session_event(NewSessionEvent {
+            tool_detail_revision: None,
             id: format!("evt_{}", Uuid::new_v4().simple()),
             org_id,
             workspace_id: session.workspace_id,
@@ -2199,6 +2429,7 @@ async fn steer_run(
     let event = state
         .chat_store
         .append_session_event(NewSessionEvent {
+            tool_detail_revision: None,
             id: format!("evt_{}", Uuid::new_v4().simple()),
             org_id,
             workspace_id: session.workspace_id,
@@ -2219,7 +2450,110 @@ async fn steer_run(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RunLiveBody {
+    frame: LiveFrame,
+    tool_detail_revision: u64,
+}
+
+fn is_live_frame(frame: &LiveFrame) -> bool {
+    let id = |key| {
+        frame
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|v| !v.is_empty() && v.encode_utf16().count() <= TRANSCRIPT_LIVE_MAX_ID)
+    };
+    let count = |key, minimum| {
+        frame
+            .get(key)
+            .and_then(serde_json::Value::as_f64)
+            .is_some_and(|v| {
+                v >= minimum as f64 && v <= 9_007_199_254_740_991_f64 && v.fract() == 0.0
+            })
+    };
+    let Some(keyframe) = frame.get("keyframe").and_then(serde_json::Value::as_bool) else {
+        return false;
+    };
+    let Some(state) = frame.get("state").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let Some(parts) = frame.get("parts").and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    id("sessionId")
+        && id("messageId")
+        && id("replyTo")
+        && count("seq", 1)
+        && count("base", 0)
+        && matches!(state, "streaming" | "settled" | "reset")
+        && parts.iter().all(serde_json::Value::is_object)
+        && (!keyframe || frame["base"].as_f64() == Some(0.0))
+        && (state != "settled" || keyframe)
+        && (state != "reset" || parts.is_empty())
+        && (frame.get("afterRevision").is_none()
+            || (state == "settled" && count("afterRevision", 0)))
+        && serde_json::to_vec(frame).is_ok_and(|bytes| bytes.len() <= TRANSCRIPT_LIVE_MAX_BYTES)
+}
+
+async fn post_run_live(
+    State(state): State<AppState>,
+    Path((org_id, session_id, run_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<RunLiveBody>,
+) -> Result<StatusCode, ChatFailure> {
+    require_shared_chat_protocol(&headers)?;
+    if !is_live_frame(&body.frame) || body.frame["sessionId"].as_str() != Some(&session_id) {
+        return Err(ChatFailure::BadRequest("invalid live frame".into()));
+    }
+    let token = headers
+        .get("x-cognia-run-token")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(ChatFailure::Unauthorized)?;
+    let message_id = body.frame["messageId"].as_str().expect("validated id");
+    // Admission is uncached, even when the durable message ownership is cached.
+    state
+        .chat_store
+        .admit_live_frame(
+            RunWrite {
+                org_id: &org_id,
+                session_id: &session_id,
+                run_id: &run_id,
+                token_hash: &token_hash(token),
+                now: (state.now)(),
+            },
+            message_id,
+            body.tool_detail_revision,
+        )
+        .await
+        .map_err(ChatFailure::Store)?;
+    let key = (session_id.clone(), format!("run:{run_id}"), run_id.clone());
+    let known = {
+        let mut runs = state.chat_hub.run_messages.lock();
+        runs.retain(|_, (_, expires)| *expires > (state.now)());
+        runs.get(&key)
+            .is_some_and(|(ids, _)| ids.contains(message_id))
+    };
+    if !known {
+        let event = state
+            .chat_store
+            .get_message_event(&org_id, &session_id, message_id)
+            .await
+            .map_err(ChatFailure::Store)?;
+        if event.kind != "message.created" || event.actor_id != format!("run:{run_id}") {
+            return Err(ChatFailure::Forbidden);
+        }
+        // Cache is filled only by append_run_event. Lookup-only requests cannot grow it.
+    }
+    state
+        .chat_hub
+        .live_channels
+        .publish(&session_id, body.frame);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AppendRunEventBody {
+    tool_detail_revision: Option<u64>,
     kind: String,
     payload: serde_json::Value,
     operation_id: String,
@@ -2294,6 +2628,7 @@ async fn append_run_event(
         .chat_store
         .append_session_run_event(
             NewSessionEvent {
+                tool_detail_revision: body.tool_detail_revision,
                 id: format!("evt_{}", Uuid::new_v4().simple()),
                 org_id,
                 workspace_id: session.workspace_id,
@@ -2311,6 +2646,23 @@ async fn append_run_event(
         )
         .await
         .map_err(ChatFailure::Store)?;
+    let key = (event.session_id.clone(), event.actor_id.clone(), run_id);
+    if event.kind == "message.created" {
+        if let Some(message_id) = event
+            .payload
+            .get("messageId")
+            .and_then(serde_json::Value::as_str)
+        {
+            let mut runs = state.chat_hub.run_messages.lock();
+            runs.retain(|_, (_, expires)| *expires > (state.now)());
+            runs.entry(key)
+                .or_insert_with(|| (HashSet::new(), lease.token_expires_at))
+                .0
+                .insert(message_id.to_owned());
+        }
+    } else if matches!(event.kind.as_str(), "run.completed" | "run.failed") {
+        state.chat_hub.run_messages.lock().remove(&key);
+    }
     let _ = state.chat_hub.sender(&session_id).send(event.clone());
     Ok((StatusCode::CREATED, Json(event)))
 }
@@ -2393,6 +2745,7 @@ async fn create_approval(
     let event = state
         .chat_store
         .append_session_event(NewSessionEvent {
+            tool_detail_revision: None,
             id: format!("evt_{}", Uuid::new_v4().simple()),
             org_id,
             workspace_id: session.workspace_id.clone(),
@@ -2536,6 +2889,7 @@ async fn resolve_approval(
     let event = state
         .chat_store
         .append_session_event(NewSessionEvent {
+            tool_detail_revision: None,
             id: format!("evt_{}", Uuid::new_v4().simple()),
             org_id,
             workspace_id: session.workspace_id,
@@ -2964,6 +3318,8 @@ mod tests {
     fn ordinary_posts_bind_the_author_and_only_explicit_imports_preserve_roles() {
         use super::*;
         let mut session = crate::chat::SharedSession {
+            tool_detail: crate::chat::ToolDetail::Summary,
+            tool_detail_revision: 0,
             contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: "session".into(),
             org_id: "org".into(),
@@ -3810,6 +4166,1387 @@ mod tests {
         };
         assert!(message_owned_by(&human, "author"));
         assert!(!message_owned_by(&human, "importer"));
+    }
+
+    #[tokio::test]
+    async fn redaction_seed_does_not_block_another_sessions_egress() {
+        let (state, _) = notification_fixture().await;
+        let started = tokio::sync::Notify::new();
+        let release = tokio::sync::Notify::new();
+        let seed = state.chat_hub.redacted_set(NOTICE_ORG, "pending", async {
+            started.notify_one();
+            release.notified().await;
+            Ok(vec!["hidden".into()])
+        });
+        tokio::pin!(seed);
+        tokio::select! {
+            _ = started.notified() => {},
+            _ = &mut seed => panic!("seed did not wait"),
+        }
+        state.chat_hub.prune_idle();
+        let event = policy_event("session", ADA, 10);
+        let projected = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            state.chat_hub.project_stream_event(
+                state.chat_store.as_ref(),
+                NOTICE_ORG,
+                event.clone(),
+            ),
+        )
+        .await;
+        release.notify_one();
+        drop(seed.await.unwrap());
+        let ids = state
+            .chat_hub
+            .redacted_set(NOTICE_ORG, "pending", async { Ok(vec!["reseeded".into()]) })
+            .await
+            .unwrap();
+        assert_eq!(*ids, HashSet::from(["hidden".to_owned()]));
+        assert_eq!(
+            projected
+                .expect("another session's seed blocked egress")
+                .unwrap(),
+            event
+        );
+    }
+
+    #[tokio::test]
+    async fn redaction_prune_evicts_idle_sessions_but_keeps_subscribers_and_pending_seeds() {
+        let (state, _) = notification_fixture().await;
+        let active = state.chat_hub.sender("active").subscribe();
+        for session in ["active", "idle"] {
+            drop(
+                state
+                    .chat_hub
+                    .redacted_set(NOTICE_ORG, session, async { Ok(vec!["cached".into()]) })
+                    .await
+                    .unwrap(),
+            );
+        }
+        let pending = state
+            .chat_hub
+            .redacted_set(NOTICE_ORG, "pending", async { Ok(vec!["pending".into()]) })
+            .await
+            .unwrap();
+        state.chat_hub.prune_idle();
+        drop(pending);
+        for (session, expected) in [
+            ("active", vec!["cached"]),
+            ("idle", vec!["reseeded"]),
+            ("pending", vec!["pending"]),
+        ] {
+            let ids = state
+                .chat_hub
+                .redacted_set(NOTICE_ORG, session, async { Ok(vec!["reseeded".into()]) })
+                .await
+                .unwrap();
+            assert_eq!(
+                *ids,
+                expected.into_iter().map(str::to_owned).collect(),
+                "{session}"
+            );
+        }
+        drop(active);
+        state.chat_hub.prune_idle();
+        let ids = state
+            .chat_hub
+            .redacted_set(NOTICE_ORG, "active", async { Ok(vec!["reseeded".into()]) })
+            .await
+            .unwrap();
+        assert_eq!(*ids, HashSet::from(["reseeded".to_owned()]));
+    }
+
+    #[tokio::test]
+    async fn redaction_history_reads_the_store_independently_of_the_stream_cache() {
+        let (state, grant) = notification_fixture().await;
+        assert!(state
+            .chat_hub
+            .redacted_snapshot(state.chat_store.as_ref(), NOTICE_ORG, "session")
+            .await
+            .unwrap()
+            .is_empty());
+        let original = NewSessionEvent {
+            tool_detail_revision: None,
+            id: "created".into(),
+            org_id: NOTICE_ORG.into(),
+            workspace_id: "workspace".into(),
+            session_id: "session".into(),
+            kind: "message.created".into(),
+            actor_kind: "human".into(),
+            actor_id: ADA.into(),
+            actor_label: None,
+            payload: serde_json::json!({"messageId":"secret","parts":[{"type":"text","text":"raw"}]}),
+            now: 2,
+            operation_id: "created".into(),
+        };
+        state
+            .chat_store
+            .append_session_event(original.clone())
+            .await
+            .unwrap();
+        let mut redaction = original;
+        redaction.id = "redact".into();
+        redaction.operation_id = "redact".into();
+        redaction.kind = "message.redacted".into();
+        redaction.payload = serde_json::json!({"targetMessageId":"secret"});
+        state
+            .chat_store
+            .append_session_event(redaction)
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", grant(ADA).parse().unwrap());
+        headers.insert("x-cognia-collab-protocol", "2".parse().unwrap());
+        let Json(events) = list_events(
+            State(state),
+            Path((NOTICE_ORG.into(), "session".into())),
+            headers,
+            Query(EventQuery {
+                after_sequence: 0,
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            events[0].payload,
+            serde_json::json!({"messageId":"secret","redacted":true})
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_projection_hides_queued_corrections_and_pre_redaction_replays() {
+        let (state, grant) = notification_fixture().await;
+        let original = state.chat_store.append_session_event(NewSessionEvent {
+            tool_detail_revision: None,
+id: "created".into(), org_id: NOTICE_ORG.into(), workspace_id: "workspace".into(),
+            session_id: "session".into(), kind: "message.created".into(), actor_kind: "agent".into(),
+            actor_id: "run:run".into(), actor_label: None,
+            payload: serde_json::json!({"messageId":"secret","parts":[{"type":"text","text":"raw original"}]}),
+            now: 2, operation_id: "created".into(),
+        }).await.unwrap();
+        let before = state
+            .chat_hub
+            .project_stream_event(state.chat_store.as_ref(), NOTICE_ORG, original.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_string(&before).unwrap(),
+            serde_json::to_string(&original).unwrap()
+        );
+        let mut receiver = state.chat_hub.sender("session").subscribe();
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", grant(ADA).parse().unwrap());
+        headers.insert("x-cognia-collab-protocol", "2".parse().unwrap());
+        let _ = append_event(
+            State(state.clone()),
+            Path((NOTICE_ORG.into(), "session".into())),
+            headers.clone(),
+            Json(AppendEventBody {
+                id: None,
+                kind: "message.redacted".into(),
+                payload: serde_json::json!({"targetMessageId":"secret"}),
+                operation_id: "redact".into(),
+                actor_label: None,
+            }),
+        )
+        .await
+        .unwrap();
+        // Leave the redaction queued: egress must consult the hub, not what this receiver has seen.
+        let mut correction = original.clone();
+        correction.kind = "message.corrected".into();
+        correction.payload = serde_json::json!({"targetMessageId":"secret","parts":[{"type":"text","text":"raw correction"}]});
+        state
+            .chat_hub
+            .sender("session")
+            .send(correction.clone())
+            .unwrap();
+        let projected = state
+            .chat_hub
+            .project_stream_event(state.chat_store.as_ref(), NOTICE_ORG, correction)
+            .await
+            .unwrap();
+        assert_eq!(
+            projected.payload,
+            serde_json::json!({"targetMessageId":"secret","redacted":true})
+        );
+        let replay = state
+            .chat_hub
+            .project_stream_event(state.chat_store.as_ref(), NOTICE_ORG, original.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            replay.payload,
+            serde_json::json!({"messageId":"secret","redacted":true})
+        );
+        // A fresh hub seeds persisted tombstones, including events queued before redaction.
+        let restarted = ChatHub::default()
+            .project_stream_event(state.chat_store.as_ref(), NOTICE_ORG, original)
+            .await
+            .unwrap();
+        assert_eq!(restarted.payload, replay.payload);
+        let Json(history) = list_events(
+            State(state.clone()),
+            Path((NOTICE_ORG.into(), "session".into())),
+            headers,
+            Query(EventQuery {
+                after_sequence: 0,
+                limit: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(history[0].payload, replay.payload);
+        assert_eq!(receiver.try_recv().unwrap().kind, "message.redacted");
+    }
+
+    #[tokio::test]
+    async fn redacted_correction_routes_return_conflict_for_members_and_runs() {
+        use axum::{
+            body::{to_bytes, Body},
+            http::Request,
+        };
+        use tower::ServiceExt;
+        for run in [false, true] {
+            let (state, grant) = notification_fixture().await;
+            state
+                .chat_store
+                .acquire_run_lease(NewChatRunLease {
+                    id: "lease".into(),
+                    org_id: NOTICE_ORG.into(),
+                    workspace_id: "workspace".into(),
+                    session_id: "session".into(),
+                    run_id: "run".into(),
+                    holder_user_id: ADA.into(),
+                    holder_device_id: "device".into(),
+                    token_hash: token_hash("token"),
+                    token_expires_at: 100,
+                    heartbeat_expires_at: 100,
+                    now: 2,
+                    operation_id: "lease".into(),
+                })
+                .await
+                .unwrap();
+            state
+                .chat_store
+                .append_session_event(NewSessionEvent {
+                    tool_detail_revision: None,
+                    id: "created".into(),
+                    org_id: NOTICE_ORG.into(),
+                    workspace_id: "workspace".into(),
+                    session_id: "session".into(),
+                    kind: "message.created".into(),
+                    actor_kind: if run { "agent" } else { "human" }.into(),
+                    actor_id: if run { "run:run" } else { ADA }.into(),
+                    actor_label: None,
+                    payload: serde_json::json!({"messageId":"secret","parts":[]}),
+                    now: 3,
+                    operation_id: "created".into(),
+                })
+                .await
+                .unwrap();
+            let app = routes().with_state(state.clone());
+            let request = |suffix: &str, kind: &str, operation: &str| {
+                Request::builder().method("POST")
+                .uri(format!("/v1/orgs/{NOTICE_ORG}/chat-sessions/session/{suffix}"))
+                .header("authorization", grant(ADA)).header("x-cognia-collab-protocol", "2")
+                .header("x-cognia-run-token", "token").header("content-type", "application/json")
+                .body(Body::from(serde_json::json!({"kind":kind,"operationId":operation,"payload":{"targetMessageId":"secret","parts":[{"type":"text","text":"raw"}]}}).to_string())).unwrap()
+            };
+            assert_eq!(
+                app.clone()
+                    .oneshot(request("events", "message.redacted", "redact"))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::CREATED
+            );
+            assert!(state.chat_hub.redacted.lock().is_empty());
+            assert!(state.chat_hub.channels.is_empty());
+            let response = app
+                .oneshot(request(
+                    if run { "runs/run/events" } else { "events" },
+                    "message.corrected",
+                    "correct",
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CONFLICT, "run={run}");
+            let body: serde_json::Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            assert_eq!(body["authoritative"]["reason"], "message_redacted");
+            assert_eq!(
+                state
+                    .chat_store
+                    .list_session_events(NOTICE_ORG, "session", 0, 100)
+                    .await
+                    .unwrap()
+                    .len(),
+                2
+            );
+        }
+    }
+
+    async fn live_fixture() -> (AppState, impl Fn(&str) -> String) {
+        let (state, grant) = notification_fixture().await;
+        state
+            .chat_store
+            .acquire_run_lease(NewChatRunLease {
+                id: "lease".into(),
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                run_id: "run".into(),
+                holder_user_id: ADA.into(),
+                holder_device_id: "device".into(),
+                token_hash: token_hash("token"),
+                token_expires_at: 100,
+                heartbeat_expires_at: 100,
+                now: 2,
+                operation_id: "lease".into(),
+            })
+            .await
+            .unwrap();
+        state
+            .chat_store
+            .append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
+                id: "created".into(),
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                kind: "message.created".into(),
+                actor_kind: "agent".into(),
+                actor_id: "run:run".into(),
+                actor_label: None,
+                payload: serde_json::json!({"messageId":"reply","parts":[]}),
+                now: 3,
+                operation_id: "created".into(),
+            })
+            .await
+            .unwrap();
+        (state, grant)
+    }
+
+    fn live_frame() -> serde_json::Value {
+        serde_json::json!({"sessionId":"session","messageId":"reply","replyTo":"question",
+            "seq":1,"base":0,"keyframe":true,"state":"streaming","parts":[]})
+    }
+
+    async fn live_request(
+        state: &AppState,
+        frame: serde_json::Value,
+        revision: u64,
+        token: Option<&str>,
+    ) -> Response {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/v1/orgs/{NOTICE_ORG}/chat-sessions/session/runs/run/live"
+            ))
+            .header("x-cognia-collab-protocol", "2")
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("x-cognia-run-token", token);
+        }
+        routes()
+            .with_state(state.clone())
+            .oneshot(
+                request
+                    .body(Body::from(
+                        serde_json::json!({"frame":frame,"toolDetailRevision":revision})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn live_route_broadcasts_without_persisting() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let (state, _) = live_fixture().await;
+        let mut live = state
+            .chat_hub
+            .live_channels
+            .subscribe(&"session".to_owned());
+        let app = routes().with_state(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/v1/orgs/{NOTICE_ORG}/chat-sessions/session/runs/run/live"
+                    ))
+                    .header("x-cognia-collab-protocol", "2")
+                    .header("x-cognia-run-token", "token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"frame":{
+                "sessionId":"session","messageId":"reply","replyTo":"question",
+                "seq":1,"base":0,"keyframe":true,"state":"streaming","parts":[]
+            },"toolDetailRevision":0})
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(live.try_recv().unwrap(), live_frame());
+        assert_eq!(
+            state
+                .chat_store
+                .list_session_events(NOTICE_ORG, "session", 0, 100)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn transcript_live_frame_v1_contract() {
+        let contract: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../protocol/transcript-live-frame-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(contract["maxIdLength"], TRANSCRIPT_LIVE_MAX_ID);
+        assert_eq!(contract["maxFrameBytes"], TRANSCRIPT_LIVE_MAX_BYTES);
+        for (index, frame) in contract["valid"].as_array().unwrap().iter().enumerate() {
+            assert!(is_live_frame(frame), "rejected valid frame {index}");
+        }
+        for case in contract["invalid"].as_array().unwrap() {
+            assert!(!is_live_frame(&case["frame"]), "accepted {}", case["why"]);
+        }
+    }
+
+    #[test]
+    fn live_shape_matches_the_codec_constraints() {
+        assert!(is_live_frame(&live_frame()));
+        for (key, value) in [
+            ("sessionId", serde_json::json!("")),
+            ("messageId", serde_json::json!("a".repeat(257))),
+            ("replyTo", serde_json::json!(null)),
+            ("seq", serde_json::json!(0)),
+            ("seq", serde_json::json!(1.5)),
+            ("base", serde_json::json!(-1)),
+            ("seq", serde_json::json!(9_007_199_254_740_992_u64)),
+            ("keyframe", serde_json::json!("yes")),
+            ("base", serde_json::json!(1)),
+            ("state", serde_json::json!("other")),
+            ("parts", serde_json::json!([[]])),
+            ("parts", serde_json::json!([null])),
+            ("afterRevision", serde_json::json!(0)),
+        ] {
+            let mut frame = live_frame();
+            frame[key] = value;
+            assert!(!is_live_frame(&frame), "{frame}");
+        }
+        let mut frame = live_frame();
+        frame["state"] = serde_json::json!("settled");
+        frame["afterRevision"] = serde_json::json!(0);
+        assert!(is_live_frame(&frame));
+        frame["keyframe"] = serde_json::json!(false);
+        assert!(!is_live_frame(&frame));
+        frame["keyframe"] = serde_json::json!(true);
+        frame["afterRevision"] = serde_json::json!(-1);
+        assert!(!is_live_frame(&frame));
+        frame = live_frame();
+        frame["state"] = serde_json::json!("reset");
+        assert!(is_live_frame(&frame));
+        frame["parts"] = serde_json::json!([{}]);
+        assert!(!is_live_frame(&frame));
+    }
+
+    #[tokio::test]
+    async fn live_route_refuses_bad_identity_shape_target_and_redaction() {
+        use axum::body::to_bytes;
+        let (mut state, _) = live_fixture().await;
+        for token in [None, Some("wrong")] {
+            assert!(live_request(&state, live_frame(), 0, token)
+                .await
+                .status()
+                .is_client_error());
+        }
+        for (key, value, expected) in [
+            (
+                "sessionId",
+                serde_json::json!("foreign"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "seq",
+                serde_json::json!(0),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "messageId",
+                serde_json::json!("unknown"),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                "parts",
+                serde_json::json!([{"text":"a".repeat(MAX_LIVE_BODY_BYTES)}]),
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
+        ] {
+            let mut frame = live_frame();
+            frame[key] = value;
+            assert_eq!(
+                live_request(&state, frame, 0, Some("token")).await.status(),
+                expected
+            );
+        }
+        let mut foreign = state
+            .chat_store
+            .get_message_event(NOTICE_ORG, "session", "reply")
+            .await
+            .unwrap();
+        foreign.id = "foreign".into();
+        foreign.operation_id = "foreign".into();
+        foreign.actor_id = "run:other".into();
+        foreign.payload["messageId"] = serde_json::json!("foreign");
+        state
+            .chat_store
+            .append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
+                id: foreign.id,
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                kind: foreign.kind,
+                actor_kind: foreign.actor_kind,
+                actor_id: foreign.actor_id,
+                actor_label: None,
+                payload: foreign.payload,
+                now: 4,
+                operation_id: foreign.operation_id,
+            })
+            .await
+            .unwrap();
+        let mut frame = live_frame();
+        frame["messageId"] = serde_json::json!("foreign");
+        assert_eq!(
+            live_request(&state, frame, 0, Some("token")).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        state.now = Arc::new(|| 101);
+        assert!(live_request(&state, live_frame(), 0, Some("token"))
+            .await
+            .status()
+            .is_client_error());
+        state.now = Arc::new(|| 10);
+        state
+            .chat_store
+            .append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
+                id: "redact".into(),
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                kind: "message.redacted".into(),
+                actor_kind: "human".into(),
+                actor_id: ADA.into(),
+                actor_label: None,
+                payload: serde_json::json!({"targetMessageId":"reply"}),
+                now: 5,
+                operation_id: "redact".into(),
+            })
+            .await
+            .unwrap();
+        let response = live_request(&state, live_frame(), 0, Some("token")).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"error":"conflict","authoritative":{"reason":"message_redacted"}})
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_detail_patch_is_revisioned_authorized_and_broadcast() {
+        use axum::{
+            body::{to_bytes, Body},
+            http::Request,
+        };
+        use tower::ServiceExt;
+        let (state, grant) = live_fixture().await;
+        state
+            .chat_store
+            .put_member(
+                NOTICE_ORG,
+                "session",
+                "workspace",
+                BOB,
+                SessionRole::Member,
+                false,
+                false,
+                ADA,
+                4,
+            )
+            .await
+            .unwrap();
+        let initial = state
+            .chat_store
+            .admin_session(NOTICE_ORG, "session")
+            .await
+            .unwrap();
+        assert_eq!(initial.tool_detail, crate::chat::ToolDetail::Summary);
+        assert_eq!(initial.tool_detail_revision, 0);
+        let mut events = state.chat_hub.channels.subscribe(&"session".to_owned());
+        let app = routes().with_state(state.clone());
+        let request = |user: &str, detail: &str, operation: &str, revision: i64| {
+            Request::builder().method("PATCH")
+            .uri(format!("/v1/orgs/{NOTICE_ORG}/chat-sessions/session"))
+            .header("authorization",grant(user)).header("x-cognia-collab-protocol","2").header("content-type","application/json")
+            .body(Body::from(serde_json::json!({"toolDetail":detail,"operationId":operation,"baseRevision":revision}).to_string())).unwrap()
+        };
+        assert_eq!(
+            app.clone()
+                .oneshot(request(BOB, "full", "refused", initial.revision))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let response = app
+            .clone()
+            .oneshot(request(ADA, "full", "full", initial.revision))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let full: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(full["toolDetail"], "full");
+        assert_eq!(full["toolDetailRevision"], 1);
+        assert_eq!(full["policyRevision"], initial.policy_revision + 1);
+        assert_eq!(events.try_recv().unwrap().kind, "member.updated");
+        let response = live_request(&state, live_frame(), 0, Some("token")).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let stale: serde_json::Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            stale,
+            serde_json::json!({"error":"conflict","authoritative":{"reason":"tool_detail_stale","toolDetail":"full","toolDetailRevision":1}})
+        );
+        assert_eq!(
+            live_request(&state, live_frame(), 1, Some("token"))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        let unchanged = app
+            .clone()
+            .oneshot(request(
+                ADA,
+                "full",
+                "same",
+                full["revision"].as_i64().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(unchanged.status(), StatusCode::OK);
+        assert!(events.try_recv().is_err());
+        let unchanged: serde_json::Value =
+            serde_json::from_slice(&to_bytes(unchanged.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(unchanged, full);
+        // A maintainer can downgrade, and a cached run-message id still cannot bypass the revision.
+        state
+            .store
+            .set_workspace_member(
+                NOTICE_ORG,
+                "workspace",
+                BOB,
+                WorkspaceRole::Maintainer,
+                revocation_context(),
+            )
+            .await
+            .unwrap();
+        state
+            .chat_store
+            .put_member(
+                NOTICE_ORG,
+                "session",
+                "workspace",
+                BOB,
+                SessionRole::Maintainer,
+                false,
+                false,
+                ADA,
+                6,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            app.oneshot(request(
+                BOB,
+                "summary",
+                "summary",
+                full["revision"].as_i64().unwrap()
+            ))
+            .await
+            .unwrap()
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            state
+                .chat_store
+                .admin_session(NOTICE_ORG, "session")
+                .await
+                .unwrap()
+                .tool_detail_revision,
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn run_event_http_revision_and_cached_live_message_cannot_bypass_a_downgrade() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let (state, _) = live_fixture().await;
+        let app = routes().with_state(state.clone());
+        let append = |kind: &str, id: &str, revision: Option<u64>| {
+            let mut body = serde_json::json!({"kind":kind,"operationId":id,"payload":{"messageId":"second","targetMessageId":"second","parts":[]}});
+            if let Some(revision) = revision {
+                body["toolDetailRevision"] = serde_json::json!(revision);
+            }
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/v1/orgs/{NOTICE_ORG}/chat-sessions/session/runs/run/events"
+                ))
+                .header("x-cognia-collab-protocol", "2")
+                .header("x-cognia-run-token", "token")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone()
+                .oneshot(append("message.created", "second", Some(0)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::CREATED
+        );
+        assert_eq!(state.chat_hub.run_messages.lock().len(), 1);
+        let initial = state
+            .chat_store
+            .admin_session(NOTICE_ORG, "session")
+            .await
+            .unwrap();
+        let full = state
+            .chat_store
+            .patch_session(
+                NOTICE_ORG,
+                "session",
+                None,
+                None,
+                Some((crate::chat::ToolDetail::Full, ADA)),
+                "full",
+                initial.revision,
+                6,
+            )
+            .await
+            .unwrap();
+        state
+            .chat_store
+            .patch_session(
+                NOTICE_ORG,
+                "session",
+                None,
+                None,
+                Some((crate::chat::ToolDetail::Summary, ADA)),
+                "summary",
+                full.revision,
+                7,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            app.clone()
+                .oneshot(append("message.corrected", "stale", Some(1)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            app.clone()
+                .oneshot(append("message.corrected", "old-executor", None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::CREATED
+        );
+        let mut frame = live_frame();
+        frame["messageId"] = serde_json::json!("second");
+        assert_eq!(
+            live_request(&state, frame.clone(), 1, Some("token"))
+                .await
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            live_request(&state, frame, 2, Some("token")).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            app.oneshot(append("run.completed", "terminal", None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::CREATED
+        );
+        assert!(state.chat_hub.run_messages.lock().is_empty());
+    }
+
+    struct SocketServer(tokio::task::JoinHandle<()>);
+    impl Drop for SocketServer {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    type TestSocket = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
+
+    async fn open_live_socket(state: &AppState, v2: bool) -> (TestSocket, SocketServer) {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let ticket = state
+            .chat_hub
+            .issue_ticket(SocketTicket {
+                org_id: NOTICE_ORG.into(),
+                session_id: "session".into(),
+                user_id: ADA.into(),
+                expires_at: 30_010,
+            })
+            .unwrap();
+        let app = routes().with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = SocketServer(tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap()
+        }));
+        let mut request =
+            format!("ws://{address}/v1/orgs/{NOTICE_ORG}/chat-sessions/session/stream")
+                .into_client_request()
+                .unwrap();
+        request.headers_mut().insert(
+            "sec-websocket-protocol",
+            format!(
+                "cognia.chat.v1, {}, {ticket}",
+                if v2 { "cognia.chat.v2" } else { "unused" }
+            )
+            .parse()
+            .unwrap(),
+        );
+        let (socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
+        assert_eq!(
+            response.headers()["sec-websocket-protocol"],
+            if v2 {
+                "cognia.chat.v2"
+            } else {
+                "cognia.chat.v1"
+            }
+        );
+        (socket, server)
+    }
+
+    async fn socket_json(socket: &mut TestSocket) -> serde_json::Value {
+        use futures_util::StreamExt;
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(frame.to_text().unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn v1_stays_raw_and_v2_negotiates_both_envelope_kinds() {
+        use futures_util::StreamExt;
+        let (state, _) = live_fixture().await;
+        let (mut v1, _server1) = open_live_socket(&state, false).await;
+        let (mut v2, _server2) = open_live_socket(&state, true).await;
+        assert_eq!(
+            live_request(&state, live_frame(), 0, Some("token"))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            socket_json(&mut v2).await,
+            serde_json::json!({"type":"live","frame":live_frame()})
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), v1.next())
+                .await
+                .is_err()
+        );
+        let event = policy_event("session", ADA, 10);
+        state
+            .chat_hub
+            .sender("session")
+            .send(event.clone())
+            .unwrap();
+        assert_eq!(
+            socket_json(&mut v1).await,
+            serde_json::to_value(&event).unwrap()
+        );
+        assert_eq!(
+            socket_json(&mut v2).await,
+            serde_json::json!({"type":"event","event":event})
+        );
+    }
+
+    struct LoopSocket {
+        incoming: tokio::sync::mpsc::UnboundedReceiver<Result<Message, axum::Error>>,
+        outgoing: tokio::sync::mpsc::UnboundedSender<Message>,
+    }
+    impl futures_util::Stream for LoopSocket {
+        type Item = Result<Message, axum::Error>;
+        fn poll_next(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            self.incoming.poll_recv(cx)
+        }
+    }
+    impl futures_util::Sink<Message> for LoopSocket {
+        type Error = axum::Error;
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn start_send(self: std::pin::Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
+            self.outgoing.send(message).map_err(axum::Error::new)
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+    struct LoopClient {
+        _incoming: tokio::sync::mpsc::UnboundedSender<Result<Message, axum::Error>>,
+        outgoing: tokio::sync::mpsc::UnboundedReceiver<Message>,
+    }
+
+    // A peer that never accepts a send, but can still be closed by the server.
+    struct StalledSocket {
+        sending: Arc<tokio::sync::Notify>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl futures_util::Stream for StalledSocket {
+        type Item = Result<Message, axum::Error>;
+        fn poll_next(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Self::Item>> {
+            std::task::Poll::Pending
+        }
+    }
+    impl futures_util::Sink<Message> for StalledSocket {
+        type Error = axum::Error;
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            self.sending.notify_one();
+            std::task::Poll::Pending
+        }
+        fn start_send(self: std::pin::Pin<&mut Self>, _: Message) -> Result<(), Self::Error> {
+            panic!("a stalled sink is never ready")
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    async fn stalled_send_does_not_block_session_and_closes(live: bool) {
+        let (state, _) = live_fixture().await;
+        let sending = Arc::new(tokio::sync::Notify::new());
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let socket = StalledSocket {
+            sending: sending.clone(),
+            closed: closed.clone(),
+        };
+        let events = state.chat_hub.channels.subscribe(&"session".to_owned());
+        let frames = live.then(|| {
+            state
+                .chat_hub
+                .live_channels
+                .subscribe(&"session".to_owned())
+        });
+        let mut stalled = SocketServer(tokio::spawn(stream_loop_with_live(
+            socket,
+            state.clone(),
+            SocketTicket {
+                org_id: NOTICE_ORG.into(),
+                session_id: "session".into(),
+                user_id: ADA.into(),
+                expires_at: 30_010,
+            },
+            events,
+            frames,
+        )));
+        let event = state
+            .chat_store
+            .list_session_events(NOTICE_ORG, "session", 0, 100)
+            .await
+            .unwrap()
+            .remove(0);
+        if live {
+            state
+                .chat_hub
+                .live_channels
+                .publish(&"session".to_owned(), live_frame());
+        } else {
+            state
+                .chat_hub
+                .sender("session")
+                .send(event.clone())
+                .unwrap();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(1), sending.notified())
+            .await
+            .expect("stalled socket must start sending");
+
+        // All three operations must finish while the first send is still pending.
+        let (mut healthy, start, _server) = gated_loop_socket(&state, true);
+        start.notify_one();
+        state
+            .chat_hub
+            .live_channels
+            .publish(&"session".to_owned(), live_frame());
+        assert_eq!(loop_json(&mut healthy).await["type"], "live");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            state.chat_hub.project_stream_event(
+                state.chat_store.as_ref(),
+                NOTICE_ORG,
+                event.clone(),
+            ),
+        )
+        .await
+        .expect("stalled send must not block stored projection")
+        .unwrap();
+        let redaction = state
+            .chat_store
+            .append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
+                id: "redact".into(),
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                kind: "message.redacted".into(),
+                actor_kind: "human".into(),
+                actor_id: ADA.into(),
+                actor_label: None,
+                payload: serde_json::json!({"targetMessageId":"reply"}),
+                now: 5,
+                operation_id: "redact".into(),
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            state
+                .chat_hub
+                .broadcast_event(state.chat_store.as_ref(), NOTICE_ORG, redaction),
+        )
+        .await
+        .expect("stalled send must not block redaction broadcast")
+        .unwrap();
+        assert_eq!(
+            loop_json(&mut healthy).await["event"]["kind"],
+            "message.redacted"
+        );
+        let projected = state
+            .chat_hub
+            .project_stream_event(state.chat_store.as_ref(), NOTICE_ORG, event)
+            .await
+            .unwrap();
+        assert_eq!(
+            projected.payload,
+            serde_json::json!({"messageId":"reply","redacted":true})
+        );
+        assert!(
+            !stalled.0.is_finished(),
+            "other sockets must progress before the timeout"
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(6), &mut stalled.0)
+            .await
+            .expect("stalled socket must time out")
+            .unwrap();
+        assert!(
+            closed.load(std::sync::atomic::Ordering::SeqCst),
+            "timed-out socket must close"
+        );
+    }
+
+    #[tokio::test]
+    async fn stalled_live_send_does_not_block_session_and_closes() {
+        stalled_send_does_not_block_session_and_closes(true).await;
+    }
+
+    #[tokio::test]
+    async fn stalled_event_send_does_not_block_session_and_closes() {
+        stalled_send_does_not_block_session_and_closes(false).await;
+    }
+
+    async fn loop_json(client: &mut LoopClient) -> serde_json::Value {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), client.outgoing.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match frame {
+            Message::Text(text) => serde_json::from_str(&text).unwrap(),
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+    fn gated_loop_socket(
+        state: &AppState,
+        v2: bool,
+    ) -> (LoopClient, Arc<tokio::sync::Notify>, SocketServer) {
+        let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (output_tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
+        let start = Arc::new(tokio::sync::Notify::new());
+        let gate = start.clone();
+        let state = state.clone();
+        let events = state.chat_hub.channels.subscribe(&"session".to_owned());
+        let live = v2.then(|| {
+            state
+                .chat_hub
+                .live_channels
+                .subscribe(&"session".to_owned())
+        });
+        let task = SocketServer(tokio::spawn(async move {
+            gate.notified().await;
+            stream_loop_with_live(
+                LoopSocket {
+                    incoming: input_rx,
+                    outgoing: output_tx,
+                },
+                state,
+                SocketTicket {
+                    org_id: NOTICE_ORG.into(),
+                    session_id: "session".into(),
+                    user_id: ADA.into(),
+                    expires_at: 30_010,
+                },
+                events,
+                live,
+            )
+            .await;
+        }));
+        (
+            LoopClient {
+                _incoming: input_tx,
+                outgoing: output_rx,
+            },
+            start,
+            task,
+        )
+    }
+
+    #[tokio::test]
+    async fn v1_loop_stays_raw_and_v2_loop_sends_both_envelope_kinds() {
+        let (state, _) = live_fixture().await;
+        let (mut v1, start1, _task1) = gated_loop_socket(&state, false);
+        let (mut v2, start2, _task2) = gated_loop_socket(&state, true);
+        start1.notify_one();
+        start2.notify_one();
+        state
+            .chat_hub
+            .live_channels
+            .publish(&"session".to_owned(), live_frame());
+        assert_eq!(
+            loop_json(&mut v2).await,
+            serde_json::json!({"type":"live","frame":live_frame()})
+        );
+        let event = policy_event("session", ADA, 10);
+        state
+            .chat_hub
+            .sender("session")
+            .send(event.clone())
+            .unwrap();
+        assert_eq!(
+            loop_json(&mut v1).await,
+            serde_json::to_value(&event).unwrap()
+        );
+        assert_eq!(
+            loop_json(&mut v2).await,
+            serde_json::json!({"type":"event","event":event})
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), v1.outgoing.recv())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_live_is_dropped_before_the_socket_consumes_redaction() {
+        let (state, _) = live_fixture().await;
+        let (mut socket, start, _server) = gated_loop_socket(&state, true);
+        assert!(state
+            .chat_hub
+            .redacted_snapshot(state.chat_store.as_ref(), NOTICE_ORG, "session")
+            .await
+            .unwrap()
+            .is_empty());
+        state
+            .chat_hub
+            .live_channels
+            .publish(&"session".to_owned(), live_frame());
+        let redaction = state
+            .chat_store
+            .append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
+                id: "redact".into(),
+                org_id: NOTICE_ORG.into(),
+                workspace_id: "workspace".into(),
+                session_id: "session".into(),
+                kind: "message.redacted".into(),
+                actor_kind: "human".into(),
+                actor_id: ADA.into(),
+                actor_label: None,
+                payload: serde_json::json!({"targetMessageId":"reply"}),
+                now: 5,
+                operation_id: "redact".into(),
+            })
+            .await
+            .unwrap();
+        state
+            .chat_hub
+            .broadcast_event(state.chat_store.as_ref(), NOTICE_ORG, redaction.clone())
+            .await
+            .unwrap();
+        start.notify_one();
+        assert_eq!(
+            loop_json(&mut socket).await,
+            serde_json::json!({"type":"event","event":project_redacted_event(redaction, &HashSet::from(["reply".to_owned()]))})
+        );
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            socket.outgoing.recv()
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn lagged_live_skips_frames_and_keeps_the_event_stream() {
+        let (state, _) = live_fixture().await;
+        let (mut socket, start, _server) = gated_loop_socket(&state, true);
+        for seq in 1..=100 {
+            let mut frame = live_frame();
+            frame["seq"] = serde_json::json!(seq);
+            state
+                .chat_hub
+                .live_channels
+                .publish(&"session".to_owned(), frame);
+        }
+        let event = policy_event("session", ADA, 10);
+        state
+            .chat_hub
+            .sender("session")
+            .send(event.clone())
+            .unwrap();
+        start.notify_one();
+        let mut saw_event = false;
+        let mut saw_latest = false;
+        for _ in 0..=32 {
+            let value = loop_json(&mut socket).await;
+            if value["type"] == "event" {
+                assert_eq!(value["event"], serde_json::to_value(&event).unwrap());
+                saw_event = true;
+            }
+            if value["type"] == "live" && value["frame"]["seq"] == 100 {
+                saw_latest = true;
+            }
+            if saw_event && saw_latest {
+                break;
+            }
+        }
+        assert!(saw_event && saw_latest);
+        state
+            .chat_hub
+            .sender("session")
+            .send(event.clone())
+            .unwrap();
+        assert_eq!(
+            loop_json(&mut socket).await,
+            serde_json::json!({"type":"event","event":event})
+        );
+    }
+
+    #[tokio::test]
+    async fn revoked_live_member_is_rechecked_within_one_second_and_on_policy_events() {
+        for notice in [false, true] {
+            let (state, _) = live_fixture().await;
+            let (mut socket, start, _server) = gated_loop_socket(&state, true);
+            start.notify_one();
+            state
+                .chat_hub
+                .live_channels
+                .publish(&"session".to_owned(), live_frame());
+            assert_eq!(loop_json(&mut socket).await["type"], "live");
+            state
+                .store
+                .remove_workspace_member(NOTICE_ORG, "workspace", ADA, revocation_context())
+                .await
+                .unwrap();
+            if notice {
+                state
+                    .chat_hub
+                    .sender("session")
+                    .send(policy_event("session", ADA, 11))
+                    .unwrap();
+            }
+            let timeout = if notice {
+                std::time::Duration::from_millis(100)
+            } else {
+                std::time::Duration::from_millis(1100)
+            };
+            let received = tokio::time::timeout(timeout, socket.outgoing.recv())
+                .await
+                .expect("revoked socket must close within its standing refresh");
+            assert!(received.is_none() || matches!(received, Some(Message::Close(_))));
+        }
     }
 
     #[test]

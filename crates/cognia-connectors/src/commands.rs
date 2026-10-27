@@ -282,6 +282,16 @@ pub async fn connectors_keyring_get(
 }
 
 #[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn connectors_keyring_get_snapshot(
+    adapter_id: String,
+    credential: String,
+) -> Result<Option<cognia_secrets::host_secrets::HostSecretSnapshot>, String> {
+    tokio::task::spawn_blocking(move || super::keyring::get_snapshot(&adapter_id, &credential))
+        .await
+        .map_err(|_| "Credential snapshot task failed".to_string())?
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_keyring_delete(
     adapter_id: String,
     credential: String,
@@ -302,7 +312,43 @@ pub async fn connectors_keyring_list(
 // ---------------------------------------------------------------------------
 
 #[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn connectors_wechat_oa_inbound_list(
+    adapter_id: String,
+) -> Result<Vec<super::wechat_oa_ingress::PendingWechatOaInbound>, String> {
+    tokio::task::spawn_blocking(move || super::wechat_oa_ingress::list(&adapter_id))
+        .await
+        .map_err(|_| "OA ingress task failed".to_string())?
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn connectors_wechat_oa_inbound_claim(
+    adapter_id: String,
+    id: String,
+) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || super::wechat_oa_ingress::claim(&adapter_id, &id))
+        .await
+        .map_err(|_| "OA ingress task failed".to_string())?
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
+pub async fn connectors_wechat_oa_inbound_ack(
+    adapter_id: String,
+    id: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || super::wechat_oa_ingress::acknowledge(&adapter_id, &id))
+        .await
+        .map_err(|_| "OA ingress task failed".to_string())?
+}
+
+#[cfg_attr(feature = "tauri-host", tauri::command)]
 pub async fn connectors_http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, String> {
+    if req.headers.as_ref().is_some_and(|headers| {
+        headers
+            .iter()
+            .any(|(key, value)| key.eq_ignore_ascii_case("x-cognia-avatar-policy") && value == "1")
+    }) {
+        return super::attachments::avatar_http_request(req).await;
+    }
     super::http_client::http_request(req).await
 }
 
@@ -620,10 +666,71 @@ pub async fn connectors_google_docs_auth(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn avatar_metadata_requests_use_the_avatar_network_boundary() {
+        let req = serde_json::from_value(serde_json::json!({
+            "url": "http://127.0.0.1/profile",
+            "method": "GET",
+            "headers": {"X-Cognia-Avatar-Policy": "1"}
+        }))
+        .unwrap();
+        assert_eq!(
+            super::connectors_http_request(req).await.unwrap_err(),
+            "avatar_destination_denied"
+        );
+    }
     use super::*;
     use std::collections::HashMap;
     use wiremock::matchers::{body_bytes, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn credential_snapshot_shell_tracks_same_value_replacement_and_deletion() {
+        let adapter = "credential-snapshot-command".to_string();
+        let credential = "botToken".to_string();
+        super::super::keyring::set(&adapter, &credential, "test-token").unwrap();
+        let first = connectors_keyring_get_snapshot(adapter.clone(), credential.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        super::super::keyring::set(&adapter, &credential, "test-token").unwrap();
+        let second = connectors_keyring_get_snapshot(adapter.clone(), credential.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first.value == second.value);
+        assert_ne!(first.revision, second.revision);
+        super::super::keyring::delete(&adapter, &credential).unwrap();
+        assert!(connectors_keyring_get_snapshot(adapter, credential)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn wechat_oa_command_shells_replay_and_release_exactly_one_row() {
+        let adapter = "oa-command-shell";
+        let first = super::super::wechat_oa_ingress::enqueue(adapter, "<xml>first</xml>").unwrap();
+        let next = super::super::wechat_oa_ingress::enqueue(adapter, "<xml>next</xml>").unwrap();
+        let rows = connectors_wechat_oa_inbound_list(adapter.to_string())
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![first.clone(), next.clone()]);
+        assert!(
+            connectors_wechat_oa_inbound_claim(adapter.to_string(), first.id.clone())
+                .await
+                .unwrap()
+        );
+        connectors_wechat_oa_inbound_ack(adapter.to_string(), first.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            connectors_wechat_oa_inbound_list(adapter.to_string())
+                .await
+                .unwrap(),
+            vec![next]
+        );
+    }
 
     #[tokio::test]
     async fn connectors_lark_callback_respond_resolves_pending_reply_once() {

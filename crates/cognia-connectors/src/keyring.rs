@@ -20,7 +20,38 @@ pub fn account_key(adapter_id: &str, credential: &str) -> String {
 
 /// Store `value` for `(adapter_id, credential)`.
 pub fn set(adapter_id: &str, credential: &str, value: &str) -> Result<(), String> {
-    secret_store::set(SERVICE, &account_key(adapter_id, credential), value)
+    set_with_writer(
+        adapter_id,
+        credential,
+        value,
+        None,
+        chrono::Utc::now().timestamp_millis(),
+    )
+}
+
+/// Seal a connector credential, write generation and its actual writer in
+/// one transaction. Callers must not append a separate metadata-only write.
+pub fn set_with_writer(
+    adapter_id: &str,
+    credential: &str,
+    value: &str,
+    writer: Option<cognia_secrets::host_secrets::SecretWriter>,
+    now_ms: i64,
+) -> Result<(), String> {
+    let write = || {
+        cognia_secrets::host_secrets::set(
+            cognia_secrets::host_secrets::HostSecretKind::Connector,
+            &account_key(adapter_id, credential),
+            value,
+            writer,
+            now_ms,
+        )
+    };
+    if matches!(credential, "token" | "encodingAesKey" | "appId") {
+        super::wechat_oa_ingress::replace_token(adapter_id, write)
+    } else {
+        write()
+    }
 }
 
 /// Retrieve the stored value for `(adapter_id, credential)`.
@@ -30,11 +61,34 @@ pub fn get(adapter_id: &str, credential: &str) -> Result<Option<String>, String>
     secret_store::get(SERVICE, &account_key(adapter_id, credential))
 }
 
+/// Host-only atomic value/revision capture used to fence asynchronous work.
+pub fn get_snapshot(
+    adapter_id: &str,
+    credential: &str,
+) -> Result<Option<cognia_secrets::host_secrets::HostSecretSnapshot>, String> {
+    cognia_secrets::host_secrets::snapshot(
+        cognia_secrets::host_secrets::HostSecretKind::Connector,
+        &account_key(adapter_id, credential),
+    )
+}
+
 /// Delete the entry for `(adapter_id, credential)`.
 ///
 /// Returns `Ok(())` even when the entry did not exist.
 pub fn delete(adapter_id: &str, credential: &str) -> Result<(), String> {
-    secret_store::delete(SERVICE, &account_key(adapter_id, credential))
+    let delete = || {
+        cognia_secrets::host_secrets::delete(
+            cognia_secrets::host_secrets::HostSecretKind::Connector,
+            &account_key(adapter_id, credential),
+        )
+    };
+    if credential == "token" {
+        super::wechat_oa_ingress::delete_token_and_clear(adapter_id, delete)
+    } else if matches!(credential, "encodingAesKey" | "appId") {
+        super::wechat_oa_ingress::replace_token(adapter_id, delete)
+    } else {
+        delete()
+    }
 }
 
 /// Probe each name in `accounts` for the given `adapter_id` and return the
@@ -58,6 +112,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn indexed_connector_writes_keep_the_actual_owner_and_revision_together() {
+        use cognia_secrets::host_secrets::{self, HostSecretKind, SecretWriter};
+        let adapter = "atomic-keyring-owner";
+        let writer = |device: &str| {
+            Some(SecretWriter {
+                device_id: device.into(),
+                label: None,
+            })
+        };
+        set_with_writer(adapter, "token", "same", writer("keyring-owner-old"), 1).unwrap();
+        let first = get_snapshot(adapter, "token").unwrap().unwrap();
+        set_with_writer(adapter, "token", "same", writer("keyring-owner-new"), 2).unwrap();
+        let fresh = get_snapshot(adapter, "token").unwrap().unwrap();
+        assert_ne!(first.revision, fresh.revision);
+        host_secrets::forget_device("keyring-owner-old").unwrap();
+        assert_eq!(
+            get_snapshot(adapter, "token").unwrap().unwrap().revision,
+            fresh.revision
+        );
+        let entry = host_secrets::list()
+            .unwrap()
+            .into_iter()
+            .find(|entry| {
+                entry.kind == HostSecretKind::Connector
+                    && entry.name == account_key(adapter, "token")
+            })
+            .unwrap();
+        assert_eq!(entry.set_by, writer("keyring-owner-new"));
+        delete(adapter, "token").unwrap();
+        assert!(get_snapshot(adapter, "token").unwrap().is_none());
+    }
+
+    #[test]
     fn account_key_joins_adapter_and_credential() {
         assert_eq!(
             account_key("tg-personal", "botToken"),
@@ -67,6 +154,26 @@ mod tests {
             account_key("", "attachment-master-key"),
             ":attachment-master-key"
         );
+    }
+
+    #[test]
+    fn deleting_oa_token_purges_pending_callbacks_but_other_credentials_do_not() {
+        let adapter = "oa-inbox-delete-token";
+        set(adapter, "token", "verified-token").unwrap();
+        set(adapter, "appSecret", "other").unwrap();
+        super::super::wechat_oa_ingress::enqueue(adapter, "<xml>pending</xml>").unwrap();
+        delete(adapter, "appSecret").unwrap();
+        assert_eq!(
+            super::super::wechat_oa_ingress::list(adapter)
+                .unwrap()
+                .len(),
+            1
+        );
+        delete(adapter, "token").unwrap();
+        assert!(super::super::wechat_oa_ingress::list(adapter)
+            .unwrap()
+            .is_empty());
+        assert_eq!(get(adapter, "token").unwrap(), None);
     }
 
     #[test]

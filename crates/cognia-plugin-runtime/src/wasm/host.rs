@@ -59,10 +59,26 @@ pub struct WasmFsBlock {
 /// active plugin live separately in [`WasmPluginState::activated`].
 pub struct LoadedPlugin {
     pub generation: String,
+    pub process_cancel: super::capabilities::process::ProcessCancellation,
+    pub pending_activations: Vec<super::capabilities::process::ProcessCancellation>,
     pub manifest: WasmManifestSlice,
     pub plugin_path: PathBuf,
     pub component: Component,
     pub plugin_api_version: String,
+}
+
+impl LoadedPlugin {
+    /// Called while holding the loaded registry's write lock, together with
+    /// publishing the new Store. An active token must never remain pending.
+    pub(super) fn commit_activation(
+        &mut self,
+        candidate: &super::capabilities::process::ProcessCancellation,
+    ) {
+        self.pending_activations
+            .retain(|pending| !pending.same_execution(candidate));
+        self.process_cancel.cancel();
+        self.process_cancel = candidate.clone();
+    }
 }
 
 /// The live, post-`init` instance for an activated plugin: the `Store` (holding
@@ -180,6 +196,8 @@ impl WasmPluginHost {
         let id = manifest.id.clone();
         let entry = LoadedPlugin {
             generation: uuid::Uuid::now_v7().to_string(),
+            process_cancel: Default::default(),
+            pending_activations: Vec::new(),
             manifest,
             plugin_path,
             component,
@@ -191,6 +209,12 @@ impl WasmPluginHost {
         let mut loaded = state.loaded.write();
         let mut pres = state.pres.write();
         let mut activated = state.activated.write();
+        if let Some(previous) = loaded.get(&id) {
+            previous.process_cancel.cancel();
+            for pending in &previous.pending_activations {
+                pending.cancel();
+            }
+        }
         activated.remove(&id);
         loaded.insert(id.clone(), entry);
         pres.insert(id, Arc::new(plugin_pre));
@@ -315,10 +339,19 @@ impl WasmPluginHost {
     }
 
     pub fn unload(state: &WasmPluginState, plugin_id: &str) -> bool {
+        let mut loaded = state.loaded.write();
+        if let Some(entry) = loaded.get(plugin_id) {
+            entry.process_cancel.cancel();
+            for pending in &entry.pending_activations {
+                pending.cancel();
+            }
+        }
+        if let Some(bridge) = Self::renderer_bridge(state) {
+            bridge.cancel_plugin(plugin_id, CancelReason::Unload);
+        }
         state.pres.write().remove(plugin_id);
-        // Drop any live instance first so its Store (guest memory) is freed.
         state.activated.write().remove(plugin_id);
-        state.loaded.write().remove(plugin_id).is_some()
+        loaded.remove(plugin_id).is_some()
     }
 
     pub fn unload_generation(
@@ -333,6 +366,10 @@ impl WasmPluginHost {
         if entry.generation != generation {
             return Err(format!("stale WASM generation for {plugin_id}"));
         }
+        entry.process_cancel.cancel();
+        for pending in &entry.pending_activations {
+            pending.cancel();
+        }
         if let Some(bridge) = Self::renderer_bridge(state) {
             bridge.cancel_plugin(plugin_id, CancelReason::Unload);
         }
@@ -346,6 +383,16 @@ impl WasmPluginHost {
     /// Drop the live instance for a plugin (if activated). Returns whether an
     /// instance was present. The compiled component stays loaded.
     pub fn deactivate(state: &WasmPluginState, plugin_id: &str) -> bool {
+        let loaded = state.loaded.write();
+        if let Some(entry) = loaded.get(plugin_id) {
+            entry.process_cancel.cancel();
+            for pending in &entry.pending_activations {
+                pending.cancel();
+            }
+        }
+        if let Some(bridge) = Self::renderer_bridge(state) {
+            bridge.cancel_plugin(plugin_id, CancelReason::Deactivate);
+        }
         state.activated.write().remove(plugin_id).is_some()
     }
 }
@@ -526,6 +573,8 @@ mod tests {
                 "z-plugin".into(),
                 LoadedPlugin {
                     generation: "generation-z".into(),
+                    process_cancel: Default::default(),
+                    pending_activations: Vec::new(),
                     manifest: WasmManifestSlice {
                         id: "z-plugin".into(),
                         version: "0.0.1".into(),
@@ -547,6 +596,8 @@ mod tests {
                 "a-plugin".into(),
                 LoadedPlugin {
                     generation: "generation-a".into(),
+                    process_cancel: Default::default(),
+                    pending_activations: Vec::new(),
                     manifest: WasmManifestSlice {
                         id: "a-plugin".into(),
                         version: "0.0.1".into(),
@@ -584,6 +635,31 @@ mod tests {
     }
 
     #[test]
+    fn committed_activation_is_not_canceled_by_a_subsequent_pending_attempt() {
+        let candidate = super::super::capabilities::process::ProcessCancellation::default();
+        let mut loaded = LoadedPlugin {
+            generation: "active".into(),
+            process_cancel: Default::default(),
+            pending_activations: vec![candidate.clone()],
+            manifest: manifest_v02(),
+            plugin_path: PathBuf::new(),
+            plugin_api_version: "0.2.0".into(),
+            component: Component::from_binary(engine(), b"\0asm\x0d\0\x01\0").unwrap(),
+        };
+        let previous = loaded.process_cancel.clone();
+        loaded.commit_activation(&candidate);
+        assert!(previous.is_cancelled());
+        assert!(loaded.pending_activations.is_empty());
+        for pending in &loaded.pending_activations {
+            pending.cancel();
+        }
+        assert!(
+            !candidate.is_cancelled(),
+            "a later failed attempt cannot cancel the active token"
+        );
+    }
+
+    #[test]
     fn deactivate_returns_false_when_not_activated() {
         let state = WasmPluginState::default();
         assert!(!WasmPluginHost::deactivate(&state, "ghost"));
@@ -609,6 +685,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let plugin = LoadedPlugin {
             generation: "generation-demo".into(),
+            process_cancel: Default::default(),
+            pending_activations: Vec::new(),
             manifest: manifest_v02(),
             plugin_path: tmp.path().to_path_buf(),
             component,

@@ -3094,12 +3094,25 @@ def rewrite(payload):
         assert_eq!(json["generation"], "python-gen-1");
         assert_eq!(json["tool_count"], 5);
         assert_eq!(json["hook_count"], 6);
-        assert_eq!(json["protocol_version"], "2.0.0");
+        assert_eq!(
+            json["protocol_version"],
+            crate::contract::protocol_version()
+        );
+        assert_eq!(json["sdk_version"], crate::contract::sdk_version());
+        assert_eq!(
+            json["contract_version"],
+            crate::contract::contract_version()
+        );
         assert_eq!(json["runtime_id"], "python");
 
         let host = rendered_host_script();
-        assert!(host.contains(r#""sdk_version": "0.3.0""#));
-        assert!(host.contains(r#""contract_version": "1.2.0""#));
+        for (key, expected) in [
+            ("sdk_version", crate::contract::sdk_version()),
+            ("protocol_version", crate::contract::protocol_version()),
+            ("contract_version", crate::contract::contract_version()),
+        ] {
+            assert!(host.contains(&format!(r#""{key}": "{expected}""#)), "{key}");
+        }
         assert!(!host.contains("__COGNIA_"));
     }
 

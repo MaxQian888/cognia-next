@@ -428,8 +428,7 @@ fn assemble_candidates(
             let mut kind = ev.kind;
             let mut version: Option<String> = None;
             let mut controller_secured: Option<bool> = None;
-            let label;
-            match ev.client {
+            let label = match ev.client {
                 Some(id) => {
                     let name = clients::client_def(id).name;
                     match client_controller_status(id, discovered, statuses) {
@@ -442,7 +441,7 @@ fn assemble_candidates(
                         }
                         _ => {}
                     }
-                    label = format!("{name} @ 127.0.0.1:{port}");
+                    format!("{name} @ 127.0.0.1:{port}")
                 }
                 None => {
                     let mut display = ev.generic_label.unwrap_or("Proxy").to_string();
@@ -457,9 +456,9 @@ fn assemble_candidates(
                             display = format!("Clash / Mihomo (v{v})");
                         }
                     }
-                    label = format!("{display} @ 127.0.0.1:{port}");
+                    format!("{display} @ 127.0.0.1:{port}")
                 }
-            }
+            };
             ProxyCandidate {
                 kind,
                 host: "127.0.0.1".to_string(),

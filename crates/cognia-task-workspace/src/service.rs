@@ -11445,18 +11445,14 @@ mod tests {
             let root = capture::working_root(&mut store, workspace.path()).unwrap();
             let source = capture::run_source(&mut store, &root, &patch, None).unwrap();
             let adoptions = capture::adoption_units(&patch, &source, &[], AdoptionState::Applied);
-            capture::prepare(
-                &mut store, &root, "service-crash-after-write", "apply",
-                &[capture::CapturePath {
+            capture::prepare(&mut store, &root, capture::CaptureOperation { key: "service-crash-after-write", kind: "apply", now: now_ms() }, &[capture::CapturePath {
                     path: "story.txt".into(), old_path: None,
                     before: Some(b"before\n".to_vec()), after: Some(b"agent\n".to_vec()),
                     segments: Some(vec![crate::line_map::Segment {
                         start_line: 1, end_line: 2, provenance_id: source,
                         mapping_evidence: MappingEvidence::Exact,
                     }]),
-                }],
-                &adoptions, capture::Verification::Disk { root: root.canonical_root.clone() }, Some(&patch), now_ms(),
-            ).unwrap();
+                }], &adoptions, capture::Verification::Disk { root: root.canonical_root.clone() }, Some(&patch)).unwrap();
             fs::write(workspace.path().join("story.txt"), "agent\n").unwrap();
             assert_eq!(store.provenance().mutation("service-crash-after-write").unwrap().unwrap().state, MutationCommitState::Prepared);
         }

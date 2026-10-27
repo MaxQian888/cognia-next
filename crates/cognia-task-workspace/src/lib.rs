@@ -61,8 +61,9 @@ pub use lifecycle::{
     WorktreeLifecycleEmitter, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 pub use revision_patch::{
-    apply_revision_patch, list_revision_files, read_confined_text, read_report_file,
-    workspace_revision, ConfinedFileRead, ConfinedReadStatus, RevisionApplyOutcome,
+    apply_revision_patch, apply_revision_patch_bounded, list_revision_files,
+    list_revision_files_bounded, read_confined_text, read_report_file, workspace_revision,
+    workspace_revision_bounded, ConfinedFileRead, ConfinedReadStatus, RevisionApplyOutcome,
     RevisionApplyStatus, RevisionFile, RevisionFileList, RevisionPatch, RevisionPatchAction,
     RevisionPatchFile, WorkspaceRevision, DEFAULT_CONFINED_READ_BYTES, DEFAULT_LIST_LIMIT,
     DEFAULT_REPORT_BYTES, MAX_CONFINED_READ_BYTES, MAX_LIST_LIMIT, MAX_PATCH_FILES,

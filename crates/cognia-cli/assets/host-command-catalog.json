@@ -19422,6 +19422,75 @@
       "outputTyped": true
     },
     {
+      "name": "connectors_keyring_get_snapshot",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "connectors_keyring_get_snapshot (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "credential"
+        ],
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "credential": {
+            "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "connectors_keyring_list",
       "category": "connectors",
       "resource": "connectors",
@@ -21008,6 +21077,183 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_wechat_oa_inbound_ack",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_wechat_oa_inbound_ack (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_wechat_oa_inbound_claim",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "summary": "connectors_wechat_oa_inbound_claim (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "connectors_wechat_oa_inbound_list",
+      "category": "connectors",
+      "resource": "connectors",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
+      "summary": "connectors_wechat_oa_inbound_list (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: critical.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "adapter_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "adapter_id"
+                ]
+              },
+              {
+                "required": [
+                  "adapterId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "xml",
+            "receivedAt"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "xml": {
+              "type": "string"
+            },
+            "receivedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "admitted": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "outputTyped": true
     },
@@ -102690,5 +102936,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "425f45082870ff81d67305eeac933506c9c87c5b5e8a67868fe189dddce1b7a0"
+  "catalogHash": "02b564ba6c2cf68e848a87e2464b1a04dd113a3499e64d92f47e642007b6167f"
 }

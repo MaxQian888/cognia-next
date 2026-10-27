@@ -47,6 +47,8 @@ pub(crate) fn automation_state(app: &App) {
     // consumes.
     crate::automation::events::wire_uia_event_sink(app.handle().clone());
     let cua_registry = crate::cua_sandbox::CuaSandboxRegistry::default();
+    app.state::<crate::account_auth::AccountSecuritySession>()
+        .attach_lume(cua_registry.clone());
     app.manage(cua_registry.clone());
     app.manage(crate::automation::commands::AutomationState::new(
         worker,

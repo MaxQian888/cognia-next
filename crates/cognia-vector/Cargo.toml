@@ -47,7 +47,6 @@ once_cell.workspace = true
 tempfile.workspace = true
 # HTTP mock server for the cloud backend tests (chroma/milvus/pinecone/weaviate).
 wiremock.workspace = true
-urlencoding = "2"
 
 [lints]
 workspace = true

@@ -1,5 +1,5 @@
-//! Full-color character tray icons. Renderer rasters add status and usage
-//! badges to the bootstrap character; native swaps must preserve their colors.
+//! Platform-aware tray icons: macOS templates follow the menu bar appearance;
+//! other desktops retain the character artwork and colored status/usage badges.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,6 +8,15 @@ use parking_lot::Mutex;
 use tauri::{image::Image, AppHandle, Manager, Runtime};
 
 use super::dto::TrayIconState;
+
+pub const ICON_AS_TEMPLATE: bool = cfg!(target_os = "macos");
+
+#[cfg(target_os = "macos")]
+fn macos_template_icon() -> Result<Image<'static>, String> {
+    Image::from_bytes(include_bytes!("../../icons/tray-template.png"))
+        .map(Image::to_owned)
+        .map_err(|e| format!("decode macOS tray template: {e}"))
+}
 
 /// Shared mutable handle to the current icon state plus the renderer-pushed
 /// PNG buffers keyed by state. Lives in `app.manage(...)` so commands can
@@ -22,7 +31,7 @@ struct TrayIconStateInner {
     current: TrayIconState,
     /// Renderer-rendered PNG bytes for each state. The renderer pushes
     /// these once at boot via `tray_register_icon`; `apply()` reads from
-    /// here before falling back to the default window icon.
+    /// here before falling back to the platform's bootstrap icon.
     rasters: HashMap<TrayIconState, Arc<Vec<u8>>>,
 }
 
@@ -48,20 +57,20 @@ impl TrayIconStateStore {
 
 /// Apply `state` to the main tray icon. Resolution order:
 ///   1. Renderer-rendered PNG bytes pushed via `tray_register_icon` (the
-///      character + corner badge — see `lib/tray/icon-builder.ts`).
-///   2. Built-in resource path `icons/tray/<state>.png` if shipped.
-///   3. Default window icon as a last-resort fallback.
+///      see `lib/tray/icon-builder.ts`).
+///   2. Embedded template on macOS, including before renderer startup.
+///   3. Built-in resource path `icons/tray/<state>.png` on other desktops.
+///   4. Default window icon as a last-resort fallback on other desktops.
 ///
-/// Preserve the character artwork's colors on macOS. A template image uses
-/// only alpha and would turn the full-color character into a silhouette.
+/// Set the image and template flag atomically to avoid a full-color flash
+/// during swaps. AppKit owns light/dark and highlighted template rendering.
 pub fn apply<R: Runtime>(app: &AppHandle<R>, state: TrayIconState) -> Result<(), String> {
     let tray = app
         .tray_by_id("main-tray")
         .ok_or_else(|| "main-tray icon not registered".to_string())?;
     let image = load_image_for(app, state)?;
-    tray.set_icon(Some(image))
+    tray.set_icon_with_as_template(Some(image), ICON_AS_TEMPLATE)
         .map_err(|e| format!("set_icon failed: {e}"))?;
-    let _ = tray.set_icon_as_template(false);
 
     if let Some(store) = app.try_state::<Arc<TrayIconStateStore>>() {
         store.set(state);
@@ -85,11 +94,11 @@ pub fn apply_on_main<R: Runtime>(app: &AppHandle<R>, state: TrayIconState) -> Re
     .map_err(|e| e.to_string())
 }
 
-fn load_image_for<R: Runtime>(
+pub(super) fn load_image_for<R: Runtime>(
     app: &AppHandle<R>,
     state: TrayIconState,
 ) -> Result<Image<'static>, String> {
-    // 1) Renderer-pushed character and badge PNG bytes. Decode via
+    // 1) Renderer-pushed platform-specific PNG bytes. Decode via
     //    `Image::from_bytes` which the project already enables through the
     //    `image-png` feature on `tauri`.
     if let Some(store) = app.try_state::<Arc<TrayIconStateStore>>() {
@@ -100,31 +109,37 @@ fn load_image_for<R: Runtime>(
         }
     }
 
-    // 2) Bundled asset path: `<resource>/icons/tray/<state>.png`. Still
-    //    useful for installs that pre-ship rasters; lives next to existing
-    //    Tauri resources.
-    let file = match state {
-        TrayIconState::Idle => "icons/tray/idle.png",
-        TrayIconState::Busy => "icons/tray/busy.png",
-        TrayIconState::Error => "icons/tray/error.png",
-        TrayIconState::Muted => "icons/tray/muted.png",
-    };
-    if let Ok(resolved) = app
-        .path()
-        .resolve(file, tauri::path::BaseDirectory::Resource)
-    {
-        if resolved.exists() {
-            return Image::from_path(&resolved)
-                .map(Image::to_owned)
-                .map_err(|e| format!("load tray icon {file}: {e}"));
-        }
-    }
+    #[cfg(target_os = "macos")]
+    return macos_template_icon();
 
-    // 3) Last-resort fallback: app's default window icon.
-    let icon = app
-        .default_window_icon()
-        .ok_or_else(|| "no default window icon available".to_string())?;
-    Ok(icon.clone().to_owned())
+    #[cfg(not(target_os = "macos"))]
+    {
+        // 2) Bundled asset path: `<resource>/icons/tray/<state>.png`. Still
+        //    useful for installs that pre-ship rasters; lives next to existing
+        //    Tauri resources.
+        let file = match state {
+            TrayIconState::Idle => "icons/tray/idle.png",
+            TrayIconState::Busy => "icons/tray/busy.png",
+            TrayIconState::Error => "icons/tray/error.png",
+            TrayIconState::Muted => "icons/tray/muted.png",
+        };
+        if let Ok(resolved) = app
+            .path()
+            .resolve(file, tauri::path::BaseDirectory::Resource)
+        {
+            if resolved.exists() {
+                return Image::from_path(&resolved)
+                    .map(Image::to_owned)
+                    .map_err(|e| format!("load tray icon {file}: {e}"));
+            }
+        }
+
+        // 3) Last-resort fallback: app's default window icon.
+        let icon = app
+            .default_window_icon()
+            .ok_or_else(|| "no default window icon available".to_string())?;
+        Ok(icon.clone().to_owned())
+    }
 }
 
 #[cfg(test)]
@@ -132,12 +147,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_character_contains_color_that_must_not_be_templated() {
+    fn non_macos_character_retains_its_color_artwork() {
         let image = Image::from_bytes(include_bytes!("../../icons/128x128.png")).unwrap();
         assert!(image
             .rgba()
             .chunks_exact(4)
             .any(|pixel| { pixel[3] > 0 && (pixel[0] != pixel[1] || pixel[1] != pixel[2]) }));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn bootstrap_template_has_visible_strokes_and_transparent_interior() {
+        let image = macos_template_icon().unwrap();
+        assert_eq!((image.width(), image.height()), (36, 36));
+        let pixels = image.rgba();
+        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] == 255));
+        assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] == 0));
+        assert!(pixels
+            .chunks_exact(4)
+            .filter(|p| p[3] > 0)
+            .all(|p| p[..3] == [0, 0, 0]));
+        // A filled square/character silhouette would have opaque center alpha.
+        assert_eq!(pixels[(18 * 36 + 18) * 4 + 3], 0);
     }
 
     #[test]

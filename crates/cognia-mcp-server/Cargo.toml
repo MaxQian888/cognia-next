@@ -49,7 +49,6 @@ sha2.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
-tower = { workspace = true, features = ["util", "limit", "timeout"] }
 # http_server integration tests drive the live listener over HTTP.
 reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }

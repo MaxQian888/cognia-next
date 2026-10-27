@@ -728,20 +728,112 @@ fn parse_query(raw: &str) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-/// Pull the inner text of a CDATA-wrapped XML field, e.g.
-/// `<Encrypt><![CDATA[abc]]></Encrypt>` → `abc`. Falls back to a bare
-/// `<Encrypt>abc</Encrypt>` when CDATA is absent.
-fn extract_xml_field(xml: &str, field: &str) -> Option<String> {
-    let open = format!("<{field}>");
-    let close = format!("</{field}>");
-    let start = xml.find(&open)? + open.len();
-    let end = xml[start..].find(&close)? + start;
-    let inner = xml[start..end].trim();
-    let inner = inner
-        .strip_prefix("<![CDATA[")
-        .and_then(|s| s.strip_suffix("]]>"))
-        .unwrap_or(inner);
-    Some(inner.trim().to_string())
+/// Read a direct member of the official `<xml>` envelope. CDATA/comments
+/// cannot introduce an Encrypt field, and malformed/duplicate envelopes fail
+/// closed instead of being reinterpreted as a different signature mode.
+fn extract_xml_field(xml: &str, field: &str) -> Result<Option<String>, ()> {
+    let xml = xml.strip_prefix('\u{feff}').unwrap_or(xml);
+    let mut offset = 0;
+    let mut stack: Vec<&str> = Vec::new();
+    let mut root_seen = false;
+    let mut field_start = None;
+    let mut found = None;
+    while offset < xml.len() {
+        let next = xml[offset..]
+            .find('<')
+            .map(|index| offset + index)
+            .unwrap_or(xml.len());
+        if stack.is_empty() && !xml[offset..next].trim().is_empty() {
+            return Err(());
+        }
+        if next == xml.len() {
+            break;
+        }
+        let remaining = &xml[next..];
+        if remaining.starts_with("<![CDATA[") {
+            if stack.is_empty() {
+                return Err(());
+            }
+            let end = remaining.find("]]>").ok_or(())?;
+            offset = next + end + 3;
+            continue;
+        }
+        if remaining.starts_with("<!--") {
+            let end = remaining.find("-->").ok_or(())?;
+            offset = next + end + 3;
+            continue;
+        }
+        if (remaining.starts_with("<?xml ") || remaining.starts_with("<?xml?>"))
+            && stack.is_empty()
+            && !root_seen
+        {
+            offset = next + remaining.find("?>").ok_or(())? + 2;
+            continue;
+        }
+        let end = next + remaining.find('>').ok_or(())?;
+        let token = xml[next + 1..end].trim();
+        let closing = token.starts_with('/');
+        let self_closing = token.ends_with('/');
+        let name = token.trim_start_matches('/').trim_end_matches('/').trim();
+        // Official callback member names are bare ASCII names; reject DTDs,
+        // attributes and other XML dialects rather than guessing at boundaries.
+        if !name
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            || !name
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return Err(());
+        }
+        if closing {
+            if self_closing || stack.last().copied() != Some(name) {
+                return Err(());
+            }
+            if stack.len() == 2 && name == field {
+                let inner = xml[field_start.take().ok_or(())?..next].trim();
+                let value = if let Some(cdata) = inner.strip_prefix("<![CDATA[") {
+                    cdata.strip_suffix("]]>").ok_or(())?
+                } else {
+                    if inner.contains('<') {
+                        return Err(());
+                    }
+                    inner
+                };
+                found = Some(value.trim().to_string());
+            }
+            stack.pop();
+        } else {
+            if stack.is_empty() {
+                if root_seen || name != "xml" {
+                    return Err(());
+                }
+                root_seen = true;
+            }
+            if stack.len() == 1 && name == field {
+                if found.is_some() || field_start.is_some() {
+                    return Err(());
+                }
+                if self_closing {
+                    found = Some(String::new());
+                } else {
+                    field_start = Some(end + 1);
+                }
+            }
+            if !self_closing {
+                stack.push(name);
+            }
+            if stack.len() > 32 {
+                return Err(());
+            }
+        }
+        offset = end + 1;
+    }
+    if !root_seen || !stack.is_empty() {
+        return Err(());
+    }
+    Ok(found)
 }
 
 /// WeChat Official Account webhook handler.
@@ -763,16 +855,22 @@ async fn wechat_oa_handler(
     let timestamp = params.get("timestamp").map(String::as_str).unwrap_or("");
     let nonce = params.get("nonce").map(String::as_str).unwrap_or("");
 
-    let token = match super::keyring::get(adapter_id, "token") {
-        Ok(Some(t)) => t,
-        Ok(None) => return error_response(StatusCode::UNAUTHORIZED, "token not configured"),
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"),
+    let credential_adapter = adapter_id.to_string();
+    let credentials = match tokio::task::spawn_blocking(move || {
+        super::wechat_oa_ingress::verification_credentials(&credential_adapter)
+    })
+    .await
+    {
+        Ok(Ok(Some(t))) => t,
+        Ok(Ok(None)) => return error_response(StatusCode::UNAUTHORIZED, "token not configured"),
+        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"),
     };
+    let token = credentials.token();
 
     if method == Method::GET {
         let signature = params.get("signature").map(String::as_str).unwrap_or("");
         let echostr = params.get("echostr").cloned().unwrap_or_default();
-        return match super::sigverify::wechat::verify_signature(&token, timestamp, nonce, signature)
+        return match super::sigverify::wechat::verify_signature(token, timestamp, nonce, signature)
         {
             Ok(()) => text_response(echostr),
             Err(_) => error_response(StatusCode::UNAUTHORIZED, "signature verification failed"),
@@ -785,13 +883,17 @@ async fn wechat_oa_handler(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "body is not UTF-8"),
     };
 
-    if let Some(encrypt) = extract_xml_field(xml, "Encrypt") {
+    let encrypt = match extract_xml_field(xml, "Encrypt") {
+        Ok(value) => value,
+        Err(()) => return error_response(StatusCode::BAD_REQUEST, "invalid XML envelope"),
+    };
+    if let Some(encrypt) = encrypt {
         let msg_signature = params
             .get("msg_signature")
             .map(String::as_str)
             .unwrap_or("");
         if super::sigverify::wechat::verify_msg_signature(
-            &token,
+            token,
             timestamp,
             nonce,
             &encrypt,
@@ -801,48 +903,62 @@ async fn wechat_oa_handler(
         {
             return error_response(StatusCode::UNAUTHORIZED, "signature verification failed");
         }
-        let aes_key = match super::keyring::get(adapter_id, "encodingAesKey") {
-            Ok(Some(k)) => k,
-            Ok(None) => {
+        let aes_key = match credentials.encoding_aes_key() {
+            Some(key) => key,
+            None => {
                 return error_response(StatusCode::UNAUTHORIZED, "encoding aes key not configured")
             }
-            Err(_) => {
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed")
-            }
         };
-        match super::sigverify::wechat::decrypt(&aes_key, &encrypt) {
+        match super::sigverify::wechat::decrypt(aes_key, &encrypt) {
             Ok((msg_xml, appid)) => {
-                // Cross-check the decrypted appid against the adapter's stored
-                // `appId` when one is configured. This is a secondary check on
-                // top of the msg_signature + AES decrypt (both already keyed to
-                // this adapter), so a missing entry — or a transient keyring
-                // read failure — skips the check rather than dropping messages.
-                match super::keyring::get(adapter_id, "appId") {
-                    Ok(Some(expected)) if expected != appid => {
-                        return error_response(StatusCode::UNAUTHORIZED, "appid mismatch");
-                    }
-                    Ok(Some(_)) => {}
-                    Ok(None) => {
-                        log::debug!("wechat-oa {adapter_id}: no appId in keyring, skipping check");
-                    }
-                    Err(e) => {
-                        log::debug!("wechat-oa {adapter_id}: appId keyring read failed ({e})");
-                    }
+                // Use the same credential snapshot that verified/decrypted
+                // the callback. Admission rechecks its complete generation.
+                if credentials
+                    .app_id()
+                    .is_some_and(|expected| expected != appid)
+                {
+                    return error_response(StatusCode::UNAUTHORIZED, "appid mismatch");
                 }
-                emitter.emit_webhook(adapter_id, &serde_json::json!({ "xml": msg_xml }));
-                text_response("success".to_string())
+                accept_wechat_oa_inbound(adapter_id, msg_xml, &credentials, emitter).await
             }
             Err(_) => error_response(StatusCode::UNAUTHORIZED, "decryption failed"),
         }
     } else {
         // Plaintext mode — verify the plain signature, emit the raw XML.
         let signature = params.get("signature").map(String::as_str).unwrap_or("");
-        if super::sigverify::wechat::verify_signature(&token, timestamp, nonce, signature).is_err()
-        {
+        if super::sigverify::wechat::verify_signature(token, timestamp, nonce, signature).is_err() {
             return error_response(StatusCode::UNAUTHORIZED, "signature verification failed");
         }
-        emitter.emit_webhook(adapter_id, &serde_json::json!({ "xml": xml }));
-        text_response("success".to_string())
+        accept_wechat_oa_inbound(adapter_id, xml.to_string(), &credentials, emitter).await
+    }
+}
+
+async fn accept_wechat_oa_inbound(
+    adapter_id: &str,
+    xml: String,
+    credentials: &super::wechat_oa_ingress::WechatOaVerification,
+    emitter: &dyn EventEmitter,
+) -> Response {
+    let id = adapter_id.to_string();
+    let verified = credentials.clone();
+    match tokio::task::spawn_blocking(move || {
+        super::wechat_oa_ingress::enqueue_verified(&id, &xml, &verified)
+    })
+    .await
+    {
+        Ok(Ok(row)) => {
+            emitter.emit_webhook(
+                adapter_id,
+                &serde_json::json!({
+                    "xml": row.xml, "ingressId": row.id,
+                }),
+            );
+            text_response("success".to_string())
+        }
+        _ => error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "durable ingress unavailable",
+        ),
     }
 }
 
@@ -2664,8 +2780,143 @@ mod tests {
         let events = emitter.events.lock();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].1["xml"], xml);
+        assert!(
+            events[0].1["ingressId"].is_string(),
+            "an ACKed OA callback needs a durable replay identity"
+        );
+        let retained = super::super::wechat_oa_ingress::list(adapter_id).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].id, events[0].1["ingressId"].as_str().unwrap());
+        assert_eq!(retained[0].xml, xml);
 
         super::super::keyring::delete(adapter_id, "token").unwrap();
+    }
+
+    #[test]
+    fn wechat_encrypt_field_requires_one_valid_top_level_envelope() {
+        for xml in [
+            "<xml><Encrypt>a</Encrypt><Encrypt>b</Encrypt></xml>",
+            "<xml><Encrypt>a</xml>",
+            "<xml/><xml><Encrypt>a</Encrypt></xml>",
+            "<xml><Content><![CDATA[unfinished</Content></xml>",
+            "<!DOCTYPE xml><xml/>",
+        ] {
+            assert!(extract_xml_field(xml, "Encrypt").is_err());
+        }
+        assert_eq!(
+            extract_xml_field(
+                "<xml><Content><![CDATA[<Encrypt>x</Encrypt>]]></Content></xml>",
+                "Encrypt"
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            extract_xml_field(
+                "<xml><!--<Encrypt>x</Encrypt>--><Encrypt><![CDATA[abc]]></Encrypt></xml>",
+                "Encrypt"
+            ),
+            Ok(Some("abc".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn wechat_removed_credentials_refuse_an_already_verified_callback() {
+        let adapter = "oa-inbox-inflight-deleted";
+        super::super::keyring::set(adapter, "token", "old-token").unwrap();
+        let verified_token = super::super::wechat_oa_ingress::verification_credentials(adapter)
+            .unwrap()
+            .unwrap();
+        super::super::keyring::delete(adapter, "token").unwrap();
+        let emitter = RecordingEmitter::default();
+        let response = accept_wechat_oa_inbound(
+            adapter,
+            "<xml>pending</xml>".to_string(),
+            &verified_token,
+            &emitter,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(emitter.events.lock().is_empty());
+        assert!(super::super::wechat_oa_ingress::list(adapter)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn wechat_rotated_verification_keys_refuse_success_without_losing_accepted_rows() {
+        for credential in ["encodingAesKey", "appId"] {
+            let adapter = format!("oa-http-rotated-{credential}");
+            super::super::keyring::set(&adapter, "token", "token").unwrap();
+            super::super::keyring::set(&adapter, credential, "old").unwrap();
+            let captured = super::super::wechat_oa_ingress::verification_credentials(&adapter)
+                .unwrap()
+                .unwrap();
+            let accepted = super::super::wechat_oa_ingress::enqueue_verified(
+                &adapter,
+                "<xml>accepted</xml>",
+                &captured,
+            )
+            .unwrap();
+            super::super::keyring::set(&adapter, credential, "new").unwrap();
+            let emitter = RecordingEmitter::default();
+            let response = accept_wechat_oa_inbound(
+                &adapter,
+                "<xml>obsolete</xml>".into(),
+                &captured,
+                &emitter,
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert!(emitter.events.lock().is_empty());
+            assert_eq!(
+                super::super::wechat_oa_ingress::list(&adapter).unwrap(),
+                vec![accepted]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn wechat_unavailable_durable_inbox_refuses_success_and_emission() {
+        let adapter = "oa-inbox-http-full";
+        super::super::keyring::set(adapter, "token", "full-token").unwrap();
+        let credentials = super::super::wechat_oa_ingress::verification_credentials(adapter)
+            .unwrap()
+            .unwrap();
+        for index in 0..256 {
+            super::super::wechat_oa_ingress::enqueue(adapter, &format!("<xml>{index}</xml>"))
+                .unwrap();
+        }
+        let emitter = RecordingEmitter::default();
+        let response = accept_wechat_oa_inbound(
+            adapter,
+            "<xml>overflow</xml>".to_string(),
+            &credentials,
+            &emitter,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(emitter.events.lock().is_empty());
+        assert_eq!(
+            super::super::wechat_oa_ingress::list(adapter)
+                .unwrap()
+                .len(),
+            256
+        );
+    }
+
+    #[tokio::test]
+    async fn wechat_plaintext_cdata_does_not_select_the_encrypted_envelope() {
+        let adapter = "oa-encrypt-in-cdata";
+        super::super::keyring::set(adapter, "token", "cdata-token").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, adapter, "wechat-oa");
+        let (app, emitter) = test_router_with(state);
+        let sig = wechat_sig(&mut ["cdata-token", "1", "n"]);
+        let uri = format!("/webhook/wechat-oa/{adapter}?signature={sig}&timestamp=1&nonce=n");
+        let xml = "<xml><Content><![CDATA[<Encrypt>spoof</Encrypt>]]></Content></xml>";
+        let response = post_webhook(app, &uri, vec![], xml.to_string()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(emitter.events.lock()[0].1["xml"], xml);
     }
 
     #[tokio::test]

@@ -478,6 +478,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    "connectors_wechat_oa_inbound_list",
+    "connectors_keyring_get_snapshot",
+    "connectors_wechat_oa_inbound_claim",
+    "connectors_wechat_oa_inbound_ack",
     "connectors_runtime_lease_acquire",
     "connectors_runtime_lease_renew",
     "connectors_runtime_lease_release",
@@ -1576,6 +1580,8 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "get_external_agent_status",
     // ADR-0059 R12 — read-only projection of the webhook ingress registry.
     "connectors_list_adapters",
+    "connectors_wechat_oa_inbound_list",
+    "connectors_keyring_get_snapshot",
     // Integration reads must never be served from the idempotency cache:
     // the public URL appears after listener startup and the spool changes
     // whenever a webhook is accepted or acknowledged.
@@ -2658,6 +2664,10 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "connectors_register",
     "connectors_unregister",
     "connectors_list_adapters",
+    "connectors_wechat_oa_inbound_list",
+    "connectors_keyring_get_snapshot",
+    "connectors_wechat_oa_inbound_claim",
+    "connectors_wechat_oa_inbound_ack",
     "integration_ingress_register",
     "integration_ingress_unregister",
     "integration_ingress_get_url",
@@ -4039,6 +4049,22 @@ fn changeset_and_integration_commands_have_matching_remote_control_classificatio
         assert_eq!(is_control_command(command), !read_only, "{command}");
         assert!(!is_service_only_command(command), "{command}");
         assert!(filesystem::COMMANDS.contains(&command), "{command}");
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn wechat_oa_ingress_commands_stay_service_only_and_only_list_is_read_only() {
+    for (command, read_only) in [
+        ("connectors_wechat_oa_inbound_list", true),
+        ("connectors_keyring_get_snapshot", true),
+        ("connectors_wechat_oa_inbound_claim", false),
+        ("connectors_wechat_oa_inbound_ack", false),
+    ] {
+        assert!(known_commands().contains(&command));
+        assert!(is_service_only_command(command));
+        assert!(service_plane::COMMANDS.contains(&command));
+        assert_eq!(READ_ONLY_COMMANDS_SET.contains(command), read_only);
     }
 }
 

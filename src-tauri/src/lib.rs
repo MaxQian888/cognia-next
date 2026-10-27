@@ -108,6 +108,7 @@ mod parse;
 mod perf;
 mod pet_window;
 mod pi_extension;
+mod native_agent_bridge;
 mod pi_sessions;
 // ADR-0067 Tier B — extracted to `crates/cognia-plugin-runtime` (isolates
 // wasmtime/cranelift); re-aliased so `crate::plugin_api::…` (companion_api,
@@ -165,7 +166,6 @@ pub mod shutdown;
 // resolves unchanged.
 pub use cognia_skills as skills;
 mod provider_diagnostics;
-mod magpie;
 mod subscription;
 pub mod task_workspace;
 // ADR-0067 Tier C — extracted alongside `logging`; re-aliased so
@@ -801,7 +801,7 @@ pub fn run() {
             provider_diagnostics::provider_diagnostics_migrate_balance_token,
             provider_diagnostics::provider_diagnostics_clear_balance_token,
             provider_diagnostics::provider_diagnostics_run_balance_script,
-            magpie::magpie_gateway_port,
+            provider_diagnostics::magpie_gateway_port,
             subscription::volcengine::subscription_volcengine_usage,
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
@@ -1292,6 +1292,7 @@ pub fn run() {
             external_agent::commands::external_agent_probe_runtime_version,
             external_agent::commands::external_agent_detect_runtimes,
             pi_extension::resolve_pi_extension,
+            native_agent_bridge::resolve_bundled_agent_bridge,
             pi_sessions::list_pi_sessions,
             logging::commands::native_logging_get_readiness,
             logging::commands::native_logging_get_log_directory,
@@ -1505,8 +1506,12 @@ pub fn run() {
             connectors::commands::connectors_stop_server,
             connectors::commands::connectors_keyring_set,
             connectors::commands::connectors_keyring_get,
+            connectors::commands::connectors_keyring_get_snapshot,
             connectors::commands::connectors_keyring_delete,
             connectors::commands::connectors_keyring_list,
+            connectors::commands::connectors_wechat_oa_inbound_list,
+            connectors::commands::connectors_wechat_oa_inbound_claim,
+            connectors::commands::connectors_wechat_oa_inbound_ack,
             connectors::commands::connectors_http_request,
             connectors::commands::connectors_google_docs_auth,
             connectors::commands::connectors_ws_open,
@@ -1735,6 +1740,7 @@ pub fn run() {
             cua_sandbox::cua_sandbox_desktop_stream_open,
             cua_sandbox::cua_sandbox_desktop_stream_claim,
             cua_sandbox::cua_sandbox_desktop_stream_close,
+            cua_sandbox::lume::lume_sandbox_local_call,
             cua_sandbox::cua_sandbox_create,
             cua_sandbox::cua_sandbox_start,
             cua_sandbox::cua_sandbox_suspend,

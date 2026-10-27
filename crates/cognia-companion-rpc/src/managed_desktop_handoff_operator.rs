@@ -189,7 +189,9 @@ pub async fn run(
         };
         evidence_write(&directory, p, move |s,owner,host| s.register(owner,host,binding).map(|_| ())).await?;
         let launch = handoff::parse_launch(&input.request.argv).map_err(|_| refused("managed_desktop_handoff_invalid_launch"))?;
-        let installed = service.install_handoff_smoke(p, &desktop, &prepared, &input.operation_id, launch.as_ref(), &budget, check.clone()).await?;
+        let installed = service.install_handoff_smoke(p, &desktop, cognia_automation::cua_sandbox::managed::HandoffTransfer {
+            prepared: &prepared, operation_id: &input.operation_id, launch: launch.as_ref(), budget: &budget, source_current: check.clone(),
+        }).await?;
         // Reopen the same exclusive Host journal before reconnecting. This
         // proves persisted generation admission rather than a cloned cache.
         drop(service);

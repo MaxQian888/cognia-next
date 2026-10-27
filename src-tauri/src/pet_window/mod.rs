@@ -776,9 +776,15 @@ fn close_pet_window_inner<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> 
 /// second caller (the boot reconcile, a double-pressed hotkey) re-open — and
 /// prematurely reveal — a window that was already on its way.
 fn is_pet_window_open_inner<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.get_webview_window("pet").is_some()
-        && !macos_panel::panel_is_destroying(macos_panel::PetPanelRole::Sprite)
-        && macos_panel::panel_open_intent_is_set(macos_panel::PetPanelRole::Sprite)
+    pet_window_is_open(
+        app.get_webview_window("pet").is_some(),
+        macos_panel::panel_is_destroying(macos_panel::PetPanelRole::Sprite),
+        macos_panel::panel_open_intent_is_set(macos_panel::PetPanelRole::Sprite),
+    )
+}
+
+fn pet_window_is_open(window_exists: bool, destroying: bool, open_intent: bool) -> bool {
+    window_exists && !destroying && open_intent
 }
 
 /// Open the desktop pet window, or order it in front if it already exists.
@@ -922,7 +928,9 @@ pub(crate) fn set_pet_click_through_inner<R: Runtime>(
 ) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("pet") {
         apply_click_through(&window, ignore)?;
-        let open = window.is_visible().unwrap_or(false);
+        // A newly created panel is intentionally hidden until first paint.
+        // Reporting it closed here cancels the open through settings sync.
+        let open = is_pet_window_open_inner(app);
         emit_pet_state(app, open, ignore);
     }
     Ok(())
@@ -1182,6 +1190,22 @@ pub async fn show_main_window(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pet_open_state_tracks_lifecycle_instead_of_first_paint_visibility() {
+        assert!(pet_window_is_open(true, false, true));
+        for (exists, destroying, intent) in [
+            (false, false, false),
+            (false, false, true),
+            (false, true, false),
+            (false, true, true),
+            (true, false, false),
+            (true, true, false),
+            (true, true, true),
+        ] {
+            assert!(!pet_window_is_open(exists, destroying, intent));
+        }
+    }
 
     #[test]
     fn reveal_grace_starts_after_the_pet_document_finishes_loading() {

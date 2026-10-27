@@ -59,8 +59,12 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_health",
     "connectors_keyring_set",
     "connectors_keyring_get",
+    "connectors_keyring_get_snapshot",
     "connectors_keyring_delete",
     "connectors_keyring_list",
+    "connectors_wechat_oa_inbound_list",
+    "connectors_wechat_oa_inbound_claim",
+    "connectors_wechat_oa_inbound_ack",
     // ADR-0224 A6 — secrets a paired device keeps on this host.
     "host_secret_list",
     "org_model_credential_list",
@@ -1693,12 +1697,11 @@ pub(super) async fn dispatch(
             // credential is listed under "Secrets on this host" and goes when
             // that device is revoked.
             let writer = secret_writer(device_id, tenant_id, scope);
-            let name = cognia_connectors::keyring::account_key(&adapter_id, &credential);
             tokio::task::spawn_blocking(move || {
-                cognia_connectors::keyring::set(&adapter_id, &credential, &value)?;
-                cognia_secrets::host_secrets::note_written(
-                    cognia_secrets::host_secrets::HostSecretKind::Connector,
-                    &name,
+                cognia_connectors::keyring::set_with_writer(
+                    &adapter_id,
+                    &credential,
+                    &value,
                     writer,
                     now_ms(),
                 )
@@ -1707,6 +1710,18 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
             Ok(Value::Null)
+        }
+
+        "connectors_keyring_get_snapshot" => {
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let credential: String = required(&args, "credential")?;
+            let snapshot = tokio::task::spawn_blocking(move || {
+                cognia_connectors::keyring::get_snapshot(&adapter_id, &credential)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            to_json(snapshot)
         }
 
         "connectors_keyring_get" => {
@@ -1724,13 +1739,8 @@ pub(super) async fn dispatch(
         "connectors_keyring_delete" => {
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
-            let name = cognia_connectors::keyring::account_key(&adapter_id, &credential);
             tokio::task::spawn_blocking(move || {
-                cognia_connectors::keyring::delete(&adapter_id, &credential)?;
-                cognia_secrets::host_secrets::note_deleted(
-                    cognia_secrets::host_secrets::HostSecretKind::Connector,
-                    &name,
-                )
+                cognia_connectors::keyring::delete(&adapter_id, &credential)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -1748,6 +1758,40 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)?;
             to_json(present)
+        }
+
+        "connectors_wechat_oa_inbound_claim" => {
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let id: String = required(&args, "id")?;
+            let claimed = tokio::task::spawn_blocking(move || {
+                cognia_connectors::wechat_oa_ingress::claim(&adapter_id, &id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            to_json(claimed)
+        }
+
+        "connectors_wechat_oa_inbound_list" => {
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let pending = tokio::task::spawn_blocking(move || {
+                cognia_connectors::wechat_oa_ingress::list(&adapter_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            to_json(pending)
+        }
+        "connectors_wechat_oa_inbound_ack" => {
+            let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
+            let id: String = required(&args, "id")?;
+            tokio::task::spawn_blocking(move || {
+                cognia_connectors::wechat_oa_ingress::acknowledge(&adapter_id, &id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)?;
+            Ok(Value::Null)
         }
 
         // ── Host secrets (ADR-0224 A6) ─────────────────────────────────────

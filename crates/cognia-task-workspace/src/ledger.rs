@@ -117,7 +117,7 @@ pub fn apply(
     patch.reversible = persist_plan_blobs(store, &plans, options.now, options.allow_irreversible)?;
     let mut captured_patch = patch.clone();
     fill_applied_patch(&mut captured_patch, &plans, selection, options.revision);
-    let capture = prepare_capture(workspace_root, scratch_root, store, &captured_patch, &plans, selection, options.revision, options.now, "apply");
+    let capture = prepare_capture(PreflightContext { workspace_root, scratch_root, store, now: options.now }, &captured_patch, &plans, selection, options.revision, "apply");
     if let Err(error) = commit_plans(workspace_root, &plans) {
         finish_failed_capture(store, capture.as_deref(), &error);
         return Err(error);
@@ -253,7 +253,7 @@ pub fn undo(
     }
     let mut captured_patch = patch.clone();
     captured_patch.state = PatchState::Reverted;
-    let capture = prepare_capture(workspace_root, scratch_root, store, &captured_patch, &plans, &patch.applied_selection, revision, now, "undo");
+    let capture = prepare_capture(PreflightContext { workspace_root, scratch_root, store, now }, &captured_patch, &plans, &patch.applied_selection, revision, "undo");
     if let Err(error) = commit_plans(workspace_root, &plans) {
         finish_failed_capture(store, capture.as_deref(), &error);
         return Err(error);
@@ -347,7 +347,7 @@ pub fn force_apply(
     patch.reversible = persist_plan_blobs(store, &plans, options.now, options.allow_irreversible)?;
     let mut captured_patch = patch.clone();
     fill_applied_patch(&mut captured_patch, &plans, selection, options.revision);
-    let capture = prepare_capture(workspace_root, scratch_root, store, &captured_patch, &plans, selection, options.revision, options.now, "force");
+    let capture = prepare_capture(PreflightContext { workspace_root, scratch_root, store, now: options.now }, &captured_patch, &plans, selection, options.revision, "force");
     if let Err(error) = commit_plans(workspace_root, &plans) {
         finish_failed_capture(store, capture.as_deref(), &error);
         return Err(error);
@@ -414,8 +414,9 @@ fn finish_failed_capture(store: &mut WorkspaceStore, key: Option<&str>, error: &
     }
 }
 
-fn prepare_capture(root_path: &Path, scratch: &Path, store: &mut WorkspaceStore, patch: &PatchSet,
-    plans: &[PlannedWrite], selection: &[PatchSelection], revision: u64, now: i64, kind: &str) -> Option<String> {
+fn prepare_capture(context: PreflightContext<'_>, patch: &PatchSet,
+    plans: &[PlannedWrite], selection: &[PatchSelection], revision: u64, kind: &str) -> Option<String> {
+    let PreflightContext { workspace_root: root_path, scratch_root: scratch, store, now } = context;
     use crate::provenance::{capture, content_hash, AdoptionState, MappingEvidence};
     let selection_hash = content_hash(serde_json::to_string(selection).unwrap_or_default().as_bytes());
     let key = format!("{kind}:{}:{}:{revision}:{selection_hash}", patch.run_id, patch.created_at);
@@ -442,7 +443,7 @@ fn prepare_capture(root_path: &Path, scratch: &Path, store: &mut WorkspaceStore,
             let segments = if kind == "undo" {
                 let intent = inverse.as_ref().ok_or("missing persisted inverse provenance")?;
                 let current_segments = capture::map_before(store, &root, old_path.as_deref().unwrap_or(&plan.path), current, now)?;
-                capture::undo_map(store, intent, &plan.path, current, &current_segments, actual, &unknown, now)?
+                capture::undo_map(store, intent, &plan.path, capture::MappedContent { bytes: current, segments: &current_segments }, actual, &unknown, now)?
             } else {
                 let file = patch.files.iter().find(|f| f.path == plan.path).ok_or("missing captured patch file")?;
                 let baseline = file.before_hash.as_ref().map(|h| store.get_blob(h, now)).transpose()?.unwrap_or_default();
@@ -474,8 +475,7 @@ fn prepare_capture(root_path: &Path, scratch: &Path, store: &mut WorkspaceStore,
             let originally = capture::adoption_units(patch, &source, selection, AdoptionState::Applied);
             adoptions.retain(|a| originally.iter().any(|o| o.unit_key == a.unit_key && o.state != AdoptionState::Discarded));
         }
-        capture::prepare(store, &root, &key, kind, &paths, &adoptions,
-            capture::Verification::Disk { root: root.canonical_root.clone() }, Some(patch), now)
+        capture::prepare(store, &root, capture::CaptureOperation { key: &key, kind, now }, &paths, &adoptions, capture::Verification::Disk { root: root.canonical_root.clone() }, Some(patch))
     };
     match attempt() {
         Ok(key) => Some(key),
@@ -1144,10 +1144,10 @@ mod tests {
         let workspace = TempDir::new().unwrap();
         let mut store = WorkspaceStore::open(data.path(), 1024 * 1024).unwrap();
         let root = capture::working_root(&mut store, workspace.path()).unwrap();
-        let key = capture::prepare(&mut store, &root, "failed-apply", "apply", &[capture::CapturePath {
+        let key = capture::prepare(&mut store, &root, capture::CaptureOperation { key: "failed-apply", kind: "apply", now: 1 }, &[capture::CapturePath {
             path: "result".into(), old_path: None, before: None,
             after: Some(b"residual agent output\n".to_vec()), segments: None,
-        }], &[], capture::Verification::Disk { root: root.canonical_root.clone() }, None, 1).unwrap();
+        }], &[], capture::Verification::Disk { root: root.canonical_root.clone() }, None).unwrap();
         // A failed compensation can leave bytes matching the desired result;
         // those bytes alone do not turn a failed operation into an adoption.
         fs::write(workspace.path().join("result"), b"residual agent output\n").unwrap();

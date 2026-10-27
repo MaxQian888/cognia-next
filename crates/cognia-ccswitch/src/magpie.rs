@@ -1,4 +1,4 @@
-//! Read-only desktop discovery of Magpie's configured gateway port.
+//! Read-only provider-relay discovery of Magpie's configured gateway port.
 //! Kept separate from CCSwitch's SQLite reader: Magpie owns its own JSON config.
 
 use std::{
@@ -50,15 +50,13 @@ fn read_port(path: &Path) -> Result<u16, String> {
     }
 }
 
-#[tauri::command]
-pub async fn magpie_gateway_port() -> Result<u16, String> {
+/// Read Magpie's device-local relay settings without consulting CCSwitch SQLite.
+pub fn gateway_port() -> Result<u16, String> {
     let path = settings_path(
         std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
         dirs::home_dir(),
     )?;
-    tokio::task::spawn_blocking(move || read_port(&path))
-        .await
-        .map_err(|e| e.to_string())?
+    read_port(&path)
 }
 
 #[cfg(test)]

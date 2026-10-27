@@ -57,6 +57,7 @@
       "../sidecar/mcp-stdio-relay.mjs",
       "../sidecar/codex-app-control/**/*",
       "../sidecar/pi-extension/**/*",
+      "../sidecar/native-agents/**/*",
       "../packages/agent-pi/src/subagent-models.ts",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",
@@ -79,7 +80,7 @@
       "../hooks/builtin/cost-quota-guard.mjs",
       "../hooks/builtin/pii-safety-guard.mjs",
       "../hooks/builtin/tool-provenance-guard.mjs",
-      "../runtime/deepseek-harness/*",
+      "../packages/agent-dsh/runtime/*",
       "../lib/ai/code-mode/limits.json",
       "../lib/ai/providers/models-dev-capabilities.json",
       "../lib/settings/builtin-tools-data.json"

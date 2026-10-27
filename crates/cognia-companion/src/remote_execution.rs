@@ -1500,7 +1500,7 @@ mod tests {
 
     #[tokio::test]
     async fn p5d_partition_capability_and_approval_do_not_change_legacy_calls() {
-        for arm in ["host_state_status", "host_state_snapshot", "host_state_submit", "host_feature_manifest", "session_attach", "session_detach"] {
+        for arm in ["host_state_status", "host_state_snapshot", "host_state_submit", "host_feature_manifest", "session_attach", "session_detach", "session_mark_read", "session_mark_unread"] {
             let descriptor = super::super::command_manifest::descriptor(arm).unwrap();
             let mut request = execution_request("device", Some(vec!["client.read".into(), "client.write".into()]));
             request.command = arm.into();
@@ -1516,6 +1516,10 @@ mod tests {
                     assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
                     request.args = json!({"callerPartition":true, "mode":"observe"});
                     assert!(authorize_capability(&request, descriptor).is_ok());
+                }
+                if matches!(arm, "session_mark_read" | "session_mark_unread") {
+                    request.principal.authorization_capabilities = Some(vec!["client.read".into()]);
+                    assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");
                 }
                 request.principal.authorization_capabilities = Some(vec![]);
                 assert_eq!(authorize_capability(&request, descriptor).unwrap_err().code, "missing_capability");

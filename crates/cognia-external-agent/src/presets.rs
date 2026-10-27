@@ -71,6 +71,8 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "opencode",
     "cursor-agent",
     "gemini",
+    "agy_acp_server.par",
+    "agy_acp_server",
     "qwen",
     "copilot",
     "kiro-cli",
@@ -83,6 +85,22 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "goose",
     "grok",
     "aider",
+    "auggie",
+    "autohand",
+    "codebuddy",
+    "commandcode",
+    "kilo",
+    "vibe-acp",
+    "mimo",
+    "hermes",
+    "omp",
+    "muse-acp",
+    "amp-acp",
+    "zcode-acp",
+    "openclaude",
+    "crush",
+    "cn",
+    "acli",
     // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
     "pi",
 ];
@@ -104,6 +122,8 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
 
 /// Exact env keys always allowed through.
 const ENV_KEY_ALLOWLIST: &[&str] = &[
+    "COGNIA_HERMES_ACP_BOOTSTRAP",
+    "AGY_ACP_FORCE_FILE_STORAGE",
     "XAI_API_KEY",
     "GROK_HOME",
     "GROK_DISABLE_AUTOUPDATER",
@@ -185,6 +205,22 @@ const ENV_KEY_ALLOWLIST: &[&str] = &[
 
 /// Env key prefixes allowed through (provider credentials + agent config).
 const ENV_PREFIX_ALLOWLIST: &[&str] = &[
+    "AUGMENT_",
+    "AUTOHAND_",
+    "CODEBUDDY_",
+    "KILO_",
+    "MISTRAL_",
+    "VIBE_",
+    "MIMOCODE_",
+    "HERMES_",
+    "OMP_",
+    "MUSE_",
+    "AMP_",
+    "ZCODE_",
+    "OPENCLAUDE_",
+    "CONTINUE_",
+    "CODEBUFF_",
+    "ROVODEV_",
     "ANTHROPIC_",
     "CLAUDE_",
     "OPENAI_",
@@ -391,6 +427,7 @@ impl SpawnPolicy {
     ) -> Result<ValidatedSpawn, PolicyViolation> {
         self.validate_sandbox_policy(&config, true)?;
         self.validate_command(&config.command, &config.args)?;
+        crate::native_bridge::validate_network_requirement(&config).map_err(PolicyViolation)?;
         crate::devin_mcp_config::validate_target(&config.command, &config.args, &config.env)
             .map_err(PolicyViolation)?;
         config.cwd = Some(self.validate_cwd(config.cwd.as_deref())?);
@@ -435,6 +472,7 @@ impl SpawnPolicy {
     ) -> Result<ValidatedSpawn, PolicyViolation> {
         self.validate_sandbox_policy(&config, false)?;
         self.validate_command(&config.command, &config.args)?;
+        crate::native_bridge::validate_network_requirement(&config).map_err(PolicyViolation)?;
         crate::devin_mcp_config::validate_target(&config.command, &config.args, &config.env)
             .map_err(PolicyViolation)?;
         config.cwd = match config
@@ -472,6 +510,11 @@ impl SpawnPolicy {
         let trimmed = command.trim();
         if trimmed.is_empty() {
             return Err(PolicyViolation("empty command".into()));
+        }
+        if crate::native_bridge::permits_registered_invocation(trimmed, args)
+            .map_err(PolicyViolation)?
+        {
+            return Ok(());
         }
         if trimmed.contains('/') || trimmed.contains('\\') {
             let configured_node = crate::command_resolver::resolve_command_path("node")
@@ -919,6 +962,26 @@ fn filter_env_with_additions(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn new_native_commands_and_config_prefixes_keep_node_and_loader_defaults_closed() {
+        let (_tmp, policy) = policy(false);
+        for command in ["openclaude", "crush", "cn", "acli"] {
+            assert!(policy.validate(config(command, &[])).is_ok());
+        }
+        for command in ["node", "cmd", "curl", "nc", "python"] {
+            assert!(policy.validate(config(command, &["--eval", "evil"])).is_err());
+        }
+        let env = HashMap::from([
+            ("OPENCLAUDE_HOME".into(), "/owned/openclaude".into()),
+            ("CONTINUE_API_KEY".into(), "synthetic".into()),
+            ("CODEBUFF_API_KEY".into(), "synthetic".into()),
+            ("ROVODEV_API_TOKEN".into(), "synthetic".into()),
+            ("NODE_OPTIONS".into(), "--eval evil".into()),
+        ]);
+        let (kept, dropped) = filter_env(env);
+        assert_eq!(kept.len(), 4);
+        assert_eq!(dropped, ["NODE_OPTIONS"]);
+    }
+    #[test]
     fn sandbox_remote_policy_cannot_widen_host_ceiling() {
         use crate::process::{ExternalAgentSandboxPolicy, SandboxNetworkMode};
         let (_tmp, policy) = policy(false);
@@ -983,6 +1046,20 @@ mod tests {
             tmp,
             policy.with_operator_allowlists(Ok(commands.into()), Ok(keys.into())),
         )
+    }
+
+    #[test]
+    fn antigravity_admits_only_the_official_acp_server_not_the_interactive_cli() {
+        let (_tmp, policy) = policy(false);
+        for command in ["agy_acp_server.par", "agy_acp_server.exe"] {
+            assert!(policy.validate(config(command, &[])).is_ok(), "{command}");
+        }
+        assert!(policy.validate(config("agy", &[])).is_err());
+        let mut request = config("agy_acp_server.par", &[]);
+        request.env.insert("ANTIGRAVITY_HARNESS_PATH".into(), "/untrusted/helper".into());
+        let validated = policy.validate(request).unwrap();
+        assert!(!validated.config.env.contains_key("ANTIGRAVITY_HARNESS_PATH"));
+        assert_eq!(validated.dropped_env_keys, ["ANTIGRAVITY_HARNESS_PATH"]);
     }
 
     #[test]
@@ -1425,6 +1502,30 @@ mod tests {
         // Windows shims normalize.
         assert!(p.validate(config("claude.CMD", &[])).is_ok());
         assert!(p.validate(config("codex.exe", &[])).is_ok());
+    }
+
+    #[test]
+    fn new_acp_credentials_survive_without_admitting_system_shells() {
+        let (_tmp, policy) = policy(false);
+        let mut input = config("commandcode", &["acp"]);
+        input.env = HashMap::from([
+            ("AUGMENT_SESSION_AUTH".into(), "synthetic".into()),
+            ("CODEBUDDY_API_KEY".into(), "synthetic".into()),
+            ("KILO_API_KEY".into(), "synthetic".into()),
+            ("MISTRAL_API_KEY".into(), "synthetic".into()),
+            ("MIMOCODE_HOME".into(), "/owned/mimo".into()),
+            ("HERMES_HOME".into(), "/owned/hermes".into()),
+            ("AMP_API_KEY".into(), "synthetic".into()),
+            ("NODE_OPTIONS".into(), "--import /injected.mjs".into()),
+        ]);
+        for validated in [policy.validate(input.clone()).unwrap(), policy.validate_desktop(input).unwrap()] {
+            assert_eq!(validated.config.env["AUGMENT_SESSION_AUTH"], "synthetic");
+            assert_eq!(validated.config.env["MIMOCODE_HOME"], "/owned/mimo");
+            assert_eq!(validated.config.env["HERMES_HOME"], "/owned/hermes");
+            assert!(!validated.config.env.contains_key("NODE_OPTIONS"));
+        }
+        assert!(policy.validate(config("cmd", &["/c", "anything"])).is_err());
+        assert!(policy.validate(config("bash", &["-c", "anything"])).is_err());
     }
 
     #[test]

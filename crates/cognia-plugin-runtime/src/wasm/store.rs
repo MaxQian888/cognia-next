@@ -22,6 +22,9 @@ use super::services::WasmHostServices;
 /// Default linear-memory cap in MiB. Override via `manifest.wasm.memoryLimitMb`.
 pub const DEFAULT_MEMORY_LIMIT_MB: u32 = 64;
 pub const DEFAULT_TABLE_ELEMENTS: u32 = 10_000;
+/// A component may contain the guest, WASI adapter and canonical ABI shims.
+/// This counts core instances inside ONE component, not activated plugins.
+pub const MAX_CORE_INSTANCES: usize = 64;
 pub const DEFAULT_CALL_TIMEOUT_MS: u64 = 30_000;
 /// One epoch tick = 100 ms. 30 s / 100 ms = 300 ticks.
 pub const fn deadline_from_timeout_ms(ms: u64) -> u64 {
@@ -71,6 +74,8 @@ impl CapabilitySet {
 /// access.
 pub struct HostState {
     pub plugin_id: String,
+    pub process_cancel: super::capabilities::process::ProcessCancellation,
+    pub process_grants: Option<super::capabilities::process::LiveProcessGrants>,
     pub capabilities: CapabilitySet,
     /// Declared shell-command allowlist (program names) from the plugin's
     /// manifest `shellCommands`, mirrored from `PluginRuntimeState` at
@@ -138,7 +143,7 @@ pub fn build_store(
     let limits = StoreLimitsBuilder::new()
         .memory_size(memory_bytes)
         .table_elements(DEFAULT_TABLE_ELEMENTS as usize)
-        .instances(1)
+        .instances(MAX_CORE_INSTANCES)
         .tables(4)
         .memories(1)
         .build();
@@ -147,6 +152,8 @@ pub fn build_store(
         engine(),
         HostState {
             plugin_id,
+            process_cancel: Default::default(),
+            process_grants: None,
             capabilities,
             // Empty by default; `build_activation_store` mirrors the plugin's
             // declared `shellCommands` in after construction.
@@ -205,6 +212,8 @@ pub(crate) fn test_host_state_with(
 ) -> HostState {
     HostState {
         plugin_id: plugin_id.into(),
+        process_cancel: Default::default(),
+        process_grants: None,
         capabilities: CapabilitySet::from_iter(caps.iter().map(|s| (*s).to_string())),
         shell_allowlist: Vec::new(),
         call_timeout_ms,
@@ -283,5 +292,45 @@ mod tests {
         // `build_store` is the headless-safe constructor: host surfaces are
         // installed later, by `build_activation_store`, only when one exists.
         assert!(store.data().services.is_none());
+    }
+
+    #[tokio::test]
+    async fn store_allows_component_modules_without_removing_resource_caps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = build_store(
+            "component",
+            tmp.path(),
+            &[],
+            CapabilitySet::default(),
+            1,
+            5000,
+        )
+        .unwrap();
+        let module = wasmtime::Module::new(engine(), b"\0asm\x01\0\0\0").unwrap();
+        for _ in 0..MAX_CORE_INSTANCES {
+            wasmtime::Instance::new_async(&mut store, &module, &[])
+                .await
+                .unwrap();
+        }
+        assert!(wasmtime::Instance::new_async(&mut store, &module, &[])
+            .await
+            .is_err());
+        // The adapter shares guest memory. Keep the single-memory limit and
+        // the manifest's byte budget instead of multiplying it per module.
+        let memory = wasmtime::Memory::new(&mut store, wasmtime::MemoryType::new(1, None)).unwrap();
+        assert!(memory.grow(&mut store, 16).is_err(), "1 MiB cap must hold");
+        // Count guest module memories rather than host-created handles.
+        let mut memory_store =
+            build_store("memory", tmp.path(), &[], CapabilitySet::default(), 1, 5000).unwrap();
+        let memory_module =
+            wasmtime::Module::new(engine(), b"\0asm\x01\0\0\0\x05\x03\x01\x00\x01").unwrap();
+        wasmtime::Instance::new_async(&mut memory_store, &memory_module, &[])
+            .await
+            .unwrap();
+        assert!(
+            wasmtime::Instance::new_async(&mut memory_store, &memory_module, &[])
+                .await
+                .is_err()
+        );
     }
 }

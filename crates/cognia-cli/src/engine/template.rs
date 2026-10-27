@@ -218,7 +218,7 @@ pub fn files_for(kind: TemplateKind, plugin_name: &str) -> Vec<TemplateFile> {
             },
             TemplateFile {
                 rel_path: PathBuf::from("README.md"),
-                content: wasm::README.into(),
+                content: substitute_wasm_name(wasm::README, plugin_name),
             },
             TemplateFile {
                 rel_path: PathBuf::from(".gitignore"),
@@ -421,7 +421,7 @@ pub fn next_steps(kind: TemplateKind, target_dir: &Path) -> Vec<String> {
     match kind {
         TemplateKind::Wasm => vec![
             cd,
-            "rustup target add wasm32-wasip2".into(),
+            "rustup target add wasm32-wasip1".into(),
             "cargo install --locked cargo-component".into(),
             "cognia plugin doctor   # verify the toolchain is ready".into(),
             "cognia plugin lint".into(),
@@ -480,7 +480,7 @@ fn substitute_wasm_name(content: &str, target_name: &str) -> String {
         // cargo-component normalizes `-` → `_` in the emitted artifact name,
         // and `wasmMain` must name that artifact (e.g. `hello_wasm.wasm`),
         // not the hyphenated package name — otherwise `plugin build` can't
-        // find the module by its declared name. wasm32-wasip2 applies the
+        // find the module by its declared name. wasm32-wasip1 applies the
         // same normalization inside the component itself.
         .replace("cognia_plugin_template", &target_name.replace('-', "_"))
         .replace("Cognia Plugin Template", &humanize(target_name))
@@ -1278,10 +1278,24 @@ mod tests {
     #[test]
     fn next_steps_includes_cargo_for_wasm() {
         let steps = next_steps(TemplateKind::Wasm, Path::new("/tmp/x"));
+        assert!(steps.iter().any(|s| s == "rustup target add wasm32-wasip1"));
         assert!(steps.iter().any(|s| s.contains("cargo-component")));
         assert!(steps.iter().any(|s| s.contains("cognia plugin build")));
         // Wasm previously skipped lint in its next-steps; it now includes it.
         assert!(steps.iter().any(|s| s.contains("cognia plugin lint")));
+    }
+
+    #[test]
+    fn wasm_readme_names_the_scaffolded_artifact_and_bundle() {
+        let files = files_for(TemplateKind::Wasm, "hello-wasm");
+        let readme = &files
+            .iter()
+            .find(|f| f.rel_path == Path::new("README.md"))
+            .unwrap()
+            .content;
+        assert!(readme.contains("target/wasm32-wasip1/release/hello_wasm.wasm"));
+        assert!(readme.contains("target/cognia/hello-wasm-0.1.0.zip"));
+        assert!(!readme.contains("cognia-plugin-template"));
     }
 
     #[test]

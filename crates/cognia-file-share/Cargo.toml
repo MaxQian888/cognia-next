@@ -47,7 +47,6 @@ schemars.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time"] }
 tokio-util = "0.7"
-thiserror.workspace = true
 parking_lot.workspace = true
 log.workspace = true
 sha2.workspace = true

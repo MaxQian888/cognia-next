@@ -14,6 +14,8 @@
 
 pub mod commands;
 pub mod db;
+// Independent read-only interop with a second local provider relay.
+pub mod magpie;
 pub mod paths;
 pub mod watcher;
 

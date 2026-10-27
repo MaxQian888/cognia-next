@@ -1127,8 +1127,7 @@ fn freeze_changeset_provenance(store: &mut WorkspaceStore, record: &AgentChanges
         adoptions.push(AdoptionInput { provenance_id: source.clone(), unit_key: format!("file:{}", file.path),
             state: AdoptionState::Pending, details: serde_json::json!({"changesetId": record.changeset_id}) });
     }
-    capture::prepare(store, &root, &operation_key, "changesetSnapshot", &paths, &adoptions,
-        capture::Verification::GitRef { repo: record.repo_common_dir.clone(), reference: record.change_ref.clone(), expected_sha: record.head_sha.clone() }, None, now_ms())?;
+    capture::prepare(store, &root, capture::CaptureOperation { key: &operation_key, kind: "changesetSnapshot", now: now_ms() }, &paths, &adoptions, capture::Verification::GitRef { repo: record.repo_common_dir.clone(), reference: record.change_ref.clone(), expected_sha: record.head_sha.clone() }, None)?;
     capture::record_applied_patch(store, &operation_key)
 }
 
@@ -2972,9 +2971,9 @@ mod tests {
                 }).unwrap();
                 segments.push(Segment { start_line: index + 1, end_line: index + 2, provenance_id: id, mapping_evidence: MappingEvidence::Exact });
             }
-            capture::prepare(&mut store, &root, "seed-execution", "snapshot", &[capture::CapturePath {
+            capture::prepare(&mut store, &root, capture::CaptureOperation { key: "seed-execution", kind: "snapshot", now: 1 }, &[capture::CapturePath {
                 path: "one.txt".into(), old_path: None, before: None, after: Some(b"earlier\nlater\n".to_vec()), segments: Some(segments),
-            }], &[], capture::Verification::Disk { root: fixture.workspace.execution_root.clone() }, None, 1).unwrap();
+            }], &[], capture::Verification::Disk { root: fixture.workspace.execution_root.clone() }, None).unwrap();
             capture::record_applied_patch(&mut store, "seed-execution").unwrap();
         }
         let record = fixture.capture();

@@ -238,7 +238,9 @@ impl ConnectorsState {
         self.acquire_runtime_lease_outcome_at(owner_id, ttl_ms, Instant::now())
     }
 
-    /// Renew an unexpired lease held by `owner_id`.
+    /// Renew the unchanged owner, even after a scheduling delay past its TTL.
+    /// Expiry permits takeover; a late renewal cannot reclaim a slot that was
+    /// released, taken over, or reserved for a live handoff.
     pub fn renew_runtime_lease(&self, owner_id: &str, ttl_ms: u64) -> Result<bool, String> {
         self.renew_runtime_lease_at(owner_id, ttl_ms, Instant::now())
     }
@@ -399,27 +401,30 @@ impl ConnectorsState {
         let Some(lease) = inner.runtime_lease.as_mut() else {
             return Ok(false);
         };
-        // A preempted owner learns it lost here: renew answers false and the
-        // caller tears its transports down, exactly as on TTL loss.
-        if lease.expires_at <= now {
-            if let Some(pending) = lease
-                .pending_handoff
-                .take()
-                .filter(|pending| pending.expires_at > now)
-            {
-                lease.owner_id = pending.owner_id;
-                lease.expires_at = lease_expiry(now, pending.ttl_ms)?;
-            } else {
-                inner.runtime_lease = None;
-            }
-            return Ok(false);
-        }
+        // Check identity before mutating anything: a stale caller must never
+        // clear or refresh a newer owner's slot, even when that slot expired.
         if lease.owner_id != owner_id {
             return Ok(false);
         }
-        if lease.pending_handoff.is_some() {
+        if lease
+            .pending_handoff
+            .as_ref()
+            .is_some_and(|pending| pending.expires_at <= now)
+        {
+            lease.pending_handoff = None;
+        }
+        if let Some(pending) = lease.pending_handoff.take() {
+            if lease.expires_at <= now {
+                lease.owner_id = pending.owner_id;
+                lease.expires_at = lease_expiry(now, pending.ttl_ms)?;
+            } else {
+                lease.pending_handoff = Some(pending);
+            }
             return Ok(false);
         }
+        // A renderer may be throttled or suspended while its native transports
+        // stay alive. With no takeover/handoff, this mutex still identifies the
+        // same sole owner; extending it avoids an unnecessary teardown cycle.
         lease.expires_at = expires_at;
         Ok(true)
     }
@@ -508,6 +513,95 @@ mod tests {
         assert!(state.release_runtime_lease("brain-a").unwrap());
         assert!(state
             .acquire_runtime_lease_at("brain-b", 15_000, start + Duration::from_millis(1_001))
+            .unwrap());
+    }
+
+    #[test]
+    fn late_runtime_renew_preserves_the_uncontended_owner() {
+        for gap_ms in [15_001, 120_000] {
+            let state = ConnectorsState::new();
+            let start = Instant::now();
+            assert!(state
+                .acquire_runtime_lease_at("desktop:one", 15_000, start)
+                .unwrap());
+            let later = start + Duration::from_millis(gap_ms);
+            assert!(state
+                .renew_runtime_lease_at("desktop:one", 15_000, later)
+                .unwrap());
+            assert!(!state
+                .acquire_runtime_lease_at("desktop:two", 15_000, later)
+                .unwrap());
+        }
+    }
+
+    #[test]
+    fn late_runtime_renew_cannot_reclaim_a_taken_over_or_released_slot() {
+        let state = ConnectorsState::new();
+        let start = Instant::now();
+        assert!(state
+            .acquire_runtime_lease_at("desktop:old", 15_000, start)
+            .unwrap());
+        let later = start + Duration::from_millis(15_001);
+        assert!(state
+            .acquire_runtime_lease_at("brain:new", 15_000, later)
+            .unwrap());
+        assert!(!state
+            .renew_runtime_lease_at("desktop:old", 15_000, later)
+            .unwrap());
+        assert!(state
+            .renew_runtime_lease_at("brain:new", 15_000, later)
+            .unwrap());
+        assert!(state.release_runtime_lease_at("brain:new", later).unwrap());
+        assert!(!state
+            .renew_runtime_lease_at("brain:new", 15_000, later)
+            .unwrap());
+    }
+
+    #[test]
+    fn runtime_renew_discards_only_expired_handoff_reservations() {
+        for owner_ttl_ms in [15_000, 60_000] {
+            let state = ConnectorsState::new();
+            let start = Instant::now();
+            assert!(state
+                .acquire_runtime_lease_at("desktop:one", owner_ttl_ms, start)
+                .unwrap());
+            assert_eq!(
+                state
+                    .acquire_runtime_lease_outcome_at(
+                        "brain:gone",
+                        5_000,
+                        start + Duration::from_millis(1)
+                    )
+                    .unwrap(),
+                RuntimeLeaseAcquireOutcome::HandoffPending
+            );
+            let later = start + Duration::from_millis(20_000);
+            assert!(state
+                .renew_runtime_lease_at("desktop:one", 15_000, later)
+                .unwrap());
+            assert_eq!(
+                state
+                    .acquire_runtime_lease_outcome_at("desktop:two", 15_000, later)
+                    .unwrap(),
+                RuntimeLeaseAcquireOutcome::Busy
+            );
+        }
+    }
+
+    #[test]
+    fn foreign_runtime_renew_does_not_clear_an_expired_owner_slot() {
+        let state = ConnectorsState::new();
+        let start = Instant::now();
+        assert!(state
+            .acquire_runtime_lease_at("desktop:owner", 15_000, start)
+            .unwrap());
+        let later = start + Duration::from_millis(15_001);
+        assert!(!state
+            .renew_runtime_lease_at("desktop:foreign", 15_000, later)
+            .unwrap());
+        // A failed foreign renewal must not erase the owner's identity.
+        assert!(state
+            .renew_runtime_lease_at("desktop:owner", 15_000, later)
             .unwrap());
     }
 

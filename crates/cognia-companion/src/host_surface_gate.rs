@@ -1331,6 +1331,25 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn member_unread_writes_require_a_partition_and_live_membership() {
+        for arm in ["session_mark_read", "session_mark_unread"] {
+            let member = Fake { result: 1, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+            for execution in [false, true] {
+                decide_with_person_fleet(DeploymentMode::MultiTenant, execution, false, &member,
+                    "host.observe", Some(arm), &device("device"), Some("forged"), true).await.unwrap();
+            }
+            assert!(member.workspaces.lock().iter().all(Option::is_none));
+            assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &member,
+                "host.observe", Some(arm), &device("device"), None, false).await.unwrap_err().code, "host_surface_forbidden");
+            for (result, code) in [(3, "host_principal_unbound"), (4, "host_surface_forbidden")] {
+                let provider = Fake { result, calls: AtomicUsize::new(0), workspaces: Mutex::new(vec![]) };
+                assert_eq!(decide_with_person_fleet(DeploymentMode::MultiTenant, true, false, &provider,
+                    "host.observe", Some(arm), &device("device"), None, true).await.unwrap_err().code, code);
+            }
+        }
+    }
+
     struct Fake { result: u8, calls: AtomicUsize, workspaces: Mutex<Vec<Option<String>>> }
     #[async_trait::async_trait]
     impl StandingProvider for Fake {

@@ -191,6 +191,14 @@ pub fn atomic_write_with_mtime_check(
     plan: &AtomicWritePlan,
     contents: &[u8],
 ) -> Result<AtomicWriteResult, AtomicWriteError> {
+    atomic_write_with_sync(plan, contents, fs::File::sync_all)
+}
+
+fn atomic_write_with_sync(
+    plan: &AtomicWritePlan,
+    contents: &[u8],
+    sync_file: impl FnOnce(&fs::File) -> std::io::Result<()>,
+) -> Result<AtomicWriteResult, AtomicWriteError> {
     // 1. mtime drift check.
     if let Some(expected) = plan.expected_mtime {
         if plan.path.exists() {
@@ -236,10 +244,14 @@ pub fn atomic_write_with_mtime_check(
         format!("{}.{}", ext, plan.tmp_suffix)
     };
     let tmp_path = plan.path.with_extension(tmp_suffix);
-    {
-        let mut f = fs::File::create(&tmp_path)?;
-        f.write_all(contents)?;
-        f.sync_all().ok();
+    let mut file = fs::File::create(&tmp_path)?;
+    let staged = file.write_all(contents).and_then(|()| sync_file(&file));
+    // Close before cleanup so a failed write/sync can release its temporary
+    // file on platforms that forbid removing open files.
+    drop(file);
+    if let Err(error) = staged {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(AtomicWriteError::Io(error));
     }
 
     // 4. Rename atomically.
@@ -472,6 +484,57 @@ mod tests {
         assert!(out.backup_path.is_none());
         assert_eq!(fs::read_to_string(&path).unwrap(), "{}\n");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delayed_enospc_from_sync_preserves_destination_and_cleans_stage() {
+        let dir = tmpdir();
+        let path = dir.join("secrets.json");
+        fs::write(&path, "old secret store").unwrap();
+        let plan = AtomicWritePlan {
+            path: path.clone(),
+            expected_mtime: None,
+            tmp_suffix: "tmp".into(),
+            backup_suffix: "bak".into(),
+        };
+        let result = atomic_write_with_sync(&plan, b"new secret store", |file| {
+            // The write succeeded; the filesystem reports delayed ENOSPC at
+            // fsync, before atomic publication is allowed to happen.
+            assert_eq!(file.metadata().unwrap().len(), 16);
+            assert_eq!(fs::read_to_string(&path).unwrap(), "old secret store");
+            Err(std::io::Error::from_raw_os_error(28))
+        });
+        let destination = fs::read_to_string(&path).unwrap();
+        let staged_exists = path.with_extension("json.tmp").exists();
+        fs::remove_dir_all(dir).unwrap();
+        assert!(
+            matches!(result, Err(AtomicWriteError::Io(error)) if error.raw_os_error() == Some(28))
+        );
+        assert_eq!(destination, "old secret store");
+        assert!(!staged_exists);
+    }
+
+    #[test]
+    fn sync_failure_does_not_publish_a_new_destination() {
+        let dir = tmpdir();
+        let path = dir.join("secrets.json");
+        let plan = AtomicWritePlan {
+            path: path.clone(),
+            expected_mtime: None,
+            tmp_suffix: "tmp".into(),
+            backup_suffix: "bak".into(),
+        };
+        let result = atomic_write_with_sync(&plan, b"first secret store", |_| {
+            Err(std::io::Error::from_raw_os_error(28))
+        });
+        let destination_exists = path.exists();
+        let staged_exists = path.with_extension("json.tmp").exists();
+        fs::remove_dir_all(dir).unwrap();
+        assert!(
+            matches!(result, Err(AtomicWriteError::Io(error)) if error.raw_os_error() == Some(28))
+        );
+        assert!(!destination_exists);
+        assert!(!staged_exists);
     }
 
     #[test]

@@ -1,16 +1,19 @@
 # Cognia plugin template — minimal starter for a `type: "wasm"` plugin
-# compiled to a WebAssembly component against the cognia v0.1 WIT
+# compiled to a WebAssembly component against the cognia v0.2 WIT
 # contract. Authors typically run `cognia plugin new <name>` (CLI) which
 # stamps a copy of this directory into the working tree with the
 # requested name substituted into `id`, `name`, and the crate name.
 #
 # After scaffolding:
-#   rustup target add wasm32-wasip2
+#   rustup target add wasm32-wasip1
 #   cargo install --locked cargo-component
 #   cargo component build --release
 #
-# Then point cognia at the produced `.wasm` via the "Install local WASM
-# plugin" button.
+# Package with `cognia plugin build` to embed the API version and produce
+# the installable ZIP bundle.
+
+# Keep scaffolded plugins independent when created inside another workspace.
+[workspace]
 
 [package]
 name = "cognia-plugin-template"

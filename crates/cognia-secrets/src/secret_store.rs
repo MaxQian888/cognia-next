@@ -170,6 +170,21 @@ struct SecretStore {
     legacy_reads: BTreeMap<String, Result<Option<String>, String>>,
 }
 
+/// One member of an atomic encrypted-store update. Values are intentionally
+/// not Debug: a caller must never log a batch containing credentials.
+#[derive(Clone, Copy)]
+pub enum SecretMutation<'a> {
+    Set {
+        service: &'a str,
+        account: &'a str,
+        value: &'a str,
+    },
+    Delete {
+        service: &'a str,
+        account: &'a str,
+    },
+}
+
 impl SecretStore {
     /// Open (or initialize) a file-backed store. An existing file is decrypted
     /// and parsed; a missing file yields an empty store. A present-but-corrupt
@@ -284,6 +299,45 @@ impl SecretStore {
             }
         }
         self.legacy_reads.insert(key, Ok(None));
+        Ok(())
+    }
+
+    fn apply_batch(&mut self, mutations: &[SecretMutation<'_>]) -> Result<(), String> {
+        self.apply_batch_with(mutations, Self::persist)
+    }
+
+    fn apply_batch_with(
+        &mut self,
+        mutations: &[SecretMutation<'_>],
+        persist: impl FnOnce(&Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let previous_cache = self.cache.clone();
+        let previous_legacy_reads = self.legacy_reads.clone();
+        for mutation in mutations {
+            match *mutation {
+                SecretMutation::Set {
+                    service,
+                    account,
+                    value,
+                } => {
+                    let key = composite(service, account);
+                    self.cache.insert(key.clone(), value.to_string());
+                    self.legacy_reads.remove(&key);
+                }
+                SecretMutation::Delete { service, account } => {
+                    let key = composite(service, account);
+                    self.cache.remove(&key);
+                    self.legacy_reads.insert(key, Ok(None));
+                }
+            }
+        }
+        if self.cache != previous_cache {
+            if let Err(error) = persist(self) {
+                self.cache = previous_cache;
+                self.legacy_reads = previous_legacy_reads;
+                return Err(error);
+            }
+        }
         Ok(())
     }
 
@@ -1257,9 +1311,58 @@ pub fn list_accounts(service: &str) -> Result<Vec<String>, String> {
         .collect())
 }
 
+#[cfg(any(test, feature = "test-inmemory"))]
+static TEST_MUTATION_FAILURES: Mutex<BTreeMap<String, ()>> = Mutex::new(BTreeMap::new());
+
+/// Hermetic, exact-account failpoint for dependency transaction regressions.
+#[cfg(any(test, feature = "test-inmemory"))]
+pub fn fail_next_mutation_for_test(service: &str, account: &str) {
+    TEST_MUTATION_FAILURES
+        .lock()
+        .insert(composite(service, account), ());
+}
+
+#[cfg(any(test, feature = "test-inmemory"))]
+fn check_mutation_failure(service: &str, account: &str) -> Result<(), String> {
+    if TEST_MUTATION_FAILURES
+        .lock()
+        .remove(&composite(service, account))
+        .is_some()
+    {
+        return Err("injected secret-store mutation failure".into());
+    }
+    Ok(())
+}
+
 /// Upsert a secret.
 pub fn set(service: &str, account: &str, value: &str) -> Result<(), String> {
+    #[cfg(any(test, feature = "test-inmemory"))]
+    check_mutation_failure(service, account)?;
     global()?.write().set(service, account, value)
+}
+
+/// Commit related credential, metadata and dependency changes as one
+/// encrypted-file replacement. On failure no member is published in memory.
+pub fn apply_batch(mutations: &[SecretMutation<'_>]) -> Result<(), String> {
+    #[cfg(any(test, feature = "test-inmemory"))]
+    for mutation in mutations {
+        let (SecretMutation::Set {
+            service, account, ..
+        }
+        | SecretMutation::Delete { service, account }) = *mutation;
+        check_mutation_failure(service, account)?;
+    }
+    global()?.write().apply_batch(mutations)?;
+    if legacy_enabled() {
+        for mutation in mutations {
+            if let SecretMutation::Delete { service, account } = *mutation {
+                if let Err(error) = legacy_keyring_delete(service, account) {
+                    log::warn!("secret batch committed but legacy cleanup deferred: {error}");
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Remove a secret. Idempotent. Also clears any lingering legacy keyring item
@@ -1271,6 +1374,8 @@ pub fn set(service: &str, account: &str, value: &str) -> Result<(), String> {
 /// not wait behind a Keychain call. The store records the deletion in
 /// `legacy_reads`, so this process never migrates the item back either way.
 pub fn delete(service: &str, account: &str) -> Result<(), String> {
+    #[cfg(any(test, feature = "test-inmemory"))]
+    check_mutation_failure(service, account)?;
     global()?.write().delete(service, account)?;
     if legacy_enabled() {
         if let Err(error) = legacy_keyring_delete(service, account) {
@@ -1992,6 +2097,94 @@ mod tests {
     }
 
     #[test]
+    fn failed_batch_commit_retains_credential_owner_epoch_and_legacy_tombstones() {
+        let path = tmp_path();
+        let key = [71u8; 32];
+        let mut store = SecretStore::open(path.clone(), key).unwrap();
+        store.set("batch", "credential", "old-value").unwrap();
+        store.set("batch", "owner", "old-owner").unwrap();
+        store.set("batch", "epoch", "old-epoch").unwrap();
+        store
+            .legacy_reads
+            .insert(composite("batch", "credential"), Ok(None));
+        let mutations = [
+            SecretMutation::Set {
+                service: "batch",
+                account: "credential",
+                value: "new-value",
+            },
+            SecretMutation::Set {
+                service: "batch",
+                account: "owner",
+                value: "new-owner",
+            },
+            SecretMutation::Delete {
+                service: "batch",
+                account: "epoch",
+            },
+        ];
+        let result = store.apply_batch_with(&mutations, |_| {
+            Err("injected pre-publish I/O failure".into())
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            store.peek("batch", "credential").as_deref(),
+            Some("old-value")
+        );
+        assert_eq!(store.peek("batch", "owner").as_deref(), Some("old-owner"));
+        assert_eq!(store.peek("batch", "epoch").as_deref(), Some("old-epoch"));
+        assert_eq!(
+            store.legacy_reads.get(&composite("batch", "credential")),
+            Some(&Ok(None))
+        );
+        let reopened = SecretStore::open(path, key).unwrap();
+        assert_eq!(reopened.cache, store.cache);
+    }
+
+    #[test]
+    fn successful_batch_publishes_one_complete_restart_snapshot() {
+        let path = tmp_path();
+        let key = [72u8; 32];
+        let mut store = SecretStore::open(path.clone(), key).unwrap();
+        store.set("batch-reopen", "credential", "old").unwrap();
+        store.set("batch-reopen", "owner", "old-owner").unwrap();
+        let mutations = [
+            SecretMutation::Set {
+                service: "batch-reopen",
+                account: "credential",
+                value: "new",
+            },
+            SecretMutation::Set {
+                service: "batch-reopen",
+                account: "owner",
+                value: "new-owner",
+            },
+            SecretMutation::Delete {
+                service: "batch-reopen",
+                account: "epoch",
+            },
+        ];
+        let mut commits = 0;
+        store
+            .apply_batch_with(&mutations, |store| {
+                commits += 1;
+                store.persist()
+            })
+            .unwrap();
+        assert_eq!(commits, 1);
+        let reopened = SecretStore::open(path, key).unwrap();
+        assert_eq!(
+            reopened.peek("batch-reopen", "credential").as_deref(),
+            Some("new")
+        );
+        assert_eq!(
+            reopened.peek("batch-reopen", "owner").as_deref(),
+            Some("new-owner")
+        );
+        assert_eq!(reopened.peek("batch-reopen", "epoch"), None);
+    }
+
+    #[test]
     fn failed_persistence_does_not_publish_an_uncommitted_secret() {
         let parent = tmp_path();
         std::fs::write(&parent, b"not a directory").unwrap();
@@ -2172,7 +2365,12 @@ mod tests {
             .collect();
         resolve_master_key_with(
             &|name| vars.get(name).cloned(),
-            &|path| files.get(path).cloned().ok_or_else(|| "no such file".to_string()),
+            &|path| {
+                files
+                    .get(path)
+                    .cloned()
+                    .ok_or_else(|| "no such file".to_string())
+            },
             &|| keychain.clone(),
         )
     }
@@ -2190,10 +2388,16 @@ mod tests {
             ("CREDENTIALS_DIRECTORY", "/run/creds"),
             (MASTER_KEY_SOURCE_ENV, "keychain"),
         ];
-        let files = [("/k/file", two.as_str()), (credential.as_str(), three.as_str())];
+        let files = [
+            ("/k/file", two.as_str()),
+            (credential.as_str(), three.as_str()),
+        ];
         let keychain = Ok(Some(four.clone()));
 
-        assert_eq!(resolve_with(&all_vars, &files, keychain.clone()), Ok(Some([1u8; 32])));
+        assert_eq!(
+            resolve_with(&all_vars, &files, keychain.clone()),
+            Ok(Some([1u8; 32]))
+        );
         assert_eq!(
             resolve_with(&all_vars[1..], &files, keychain.clone()),
             Ok(Some([2u8; 32]))
@@ -2219,11 +2423,10 @@ mod tests {
 
     #[test]
     fn a_keychain_source_without_its_item_or_an_unknown_source_is_an_error() {
-        let missing = resolve_with(&[(MASTER_KEY_SOURCE_ENV, "keychain")], &[], Ok(None))
-            .unwrap_err();
+        let missing =
+            resolve_with(&[(MASTER_KEY_SOURCE_ENV, "keychain")], &[], Ok(None)).unwrap_err();
         assert!(missing.contains("cognia-server init --keychain"));
-        let unknown =
-            resolve_with(&[(MASTER_KEY_SOURCE_ENV, "vault")], &[], Ok(None)).unwrap_err();
+        let unknown = resolve_with(&[(MASTER_KEY_SOURCE_ENV, "vault")], &[], Ok(None)).unwrap_err();
         assert!(unknown.contains("not a known master key source"));
         let denied = resolve_with(
             &[(MASTER_KEY_SOURCE_ENV, "keychain")],

@@ -175,7 +175,8 @@ pub struct RevisionApplyOutcome {
     /// The revision the patch declared it was cut from.
     pub base_revision: String,
     /// `applied`: the revision after the write. `conflict`: the revision the
-    /// workspace is actually at. `refused`: null.
+    /// workspace is actually at. `refused`: null. Bounded apply also returns
+    /// null after a successful publication if the next capture exceeds budget.
     pub current_revision: Option<String>,
     /// Paths written, in patch order. Empty unless `applied`.
     pub written: Vec<String>,
@@ -258,8 +259,15 @@ impl ConfinedFileRead {
 
 /// The revision of `root` right now.
 pub fn workspace_revision(root: &Path) -> Result<WorkspaceRevision, String> {
+    workspace_revision_profile(root, false)
+}
+/// The same revision scheme, with replica capture budgets applied before IO.
+pub fn workspace_revision_bounded(root: &Path) -> Result<WorkspaceRevision, String> {
+    workspace_revision_profile(root, true)
+}
+fn workspace_revision_profile(root: &Path, bounded: bool) -> Result<WorkspaceRevision, String> {
     let confined = ConfinedRoot::open(root)?;
-    let snapshot = capture(confined.path())?;
+    let snapshot = capture_profile(confined.path(), bounded)?;
     Ok(WorkspaceRevision {
         revision: revision_of(&snapshot),
         file_count: snapshot.entries.len() as u64,
@@ -272,8 +280,24 @@ pub fn list_revision_files(
     prefix: &str,
     limit: Option<usize>,
 ) -> Result<RevisionFileList, String> {
+    list_revision_files_profile(root, prefix, limit, false)
+}
+/// Bounded counterpart of `list_revision_files`; oversize capture is refused.
+pub fn list_revision_files_bounded(
+    root: &Path,
+    prefix: &str,
+    limit: Option<usize>,
+) -> Result<RevisionFileList, String> {
+    list_revision_files_profile(root, prefix, limit, true)
+}
+fn list_revision_files_profile(
+    root: &Path,
+    prefix: &str,
+    limit: Option<usize>,
+    bounded: bool,
+) -> Result<RevisionFileList, String> {
     let confined = ConfinedRoot::open(root)?;
-    let snapshot = capture(confined.path())?;
+    let snapshot = capture_profile(confined.path(), bounded)?;
     let limit = limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT);
     let normalized = prefix.trim().replace('\\', "/");
     let normalized = normalized.trim_matches('/');
@@ -322,13 +346,20 @@ impl From<CaptureError> for String {
     }
 }
 
-fn capture(canonical_root: &Path) -> Result<WorkspaceSnapshot, CaptureError> {
+fn capture_profile(
+    canonical_root: &Path,
+    bounded: bool,
+) -> Result<WorkspaceSnapshot, CaptureError> {
     let policy = ResourceTrackingPolicy {
         generated_output_roots: Vec::new(),
         auto_detect: false,
         self_contained: false,
     };
-    match crate::snapshot::capture_with_policy(canonical_root, &policy) {
+    match crate::snapshot::capture_with_budget(
+        canonical_root,
+        &policy,
+        bounded.then(crate::snapshot::CaptureBudget::replica),
+    ) {
         Ok((snapshot, _blobs)) => Ok(snapshot),
         Err(message) if message.contains("escapes workspace") => Err(CaptureError::Escape(message)),
         Err(message) => Err(CaptureError::Failed(message)),
@@ -355,7 +386,7 @@ fn revision_of(snapshot: &WorkspaceSnapshot) -> String {
         hasher.update(entry.hash.as_bytes());
         hasher.update([0]);
         hasher.update(if executable(entry.mode) { b"x" } else { b"-" });
-        hasher.update([b'\n']);
+        hasher.update(b"\n");
     }
     format!("{REVISION_SCHEME}:{}", hex::encode(hasher.finalize()))
 }
@@ -387,6 +418,29 @@ struct StagedFile {
 pub fn apply_revision_patch(
     root: &Path,
     patch: &RevisionPatch,
+) -> Result<RevisionApplyOutcome, String> {
+    apply_revision_patch_profile(root, patch, false)
+}
+/// CAS with bounded capture and validation reads. A successful write is never
+/// reported as failed merely because the post-publication revision grew.
+pub fn apply_revision_patch_bounded(
+    root: &Path,
+    patch: &RevisionPatch,
+) -> Result<RevisionApplyOutcome, String> {
+    apply_revision_patch_profile(root, patch, true)
+}
+fn apply_revision_patch_profile(
+    root: &Path,
+    patch: &RevisionPatch,
+    bounded: bool,
+) -> Result<RevisionApplyOutcome, String> {
+    apply_revision_patch_profile_with_hook(root, patch, bounded, || {})
+}
+fn apply_revision_patch_profile_with_hook(
+    root: &Path,
+    patch: &RevisionPatch,
+    bounded: bool,
+    before_validation: impl FnOnce(),
 ) -> Result<RevisionApplyOutcome, String> {
     let confined = ConfinedRoot::open(root)?;
     let lock = root_lock(confined.path());
@@ -541,7 +595,7 @@ pub fn apply_revision_patch(
     }
 
     // 3. The compare half of the swap.
-    let snapshot = match capture(confined.path()) {
+    let snapshot = match capture_profile(confined.path(), bounded) {
         Ok(snapshot) => snapshot,
         Err(CaptureError::Escape(message)) => {
             return Ok(RevisionApplyOutcome::refused(
@@ -559,6 +613,8 @@ pub fn apply_revision_patch(
         ));
     }
 
+    before_validation();
+    let mut validation_budget = bounded.then(crate::snapshot::CaptureBudget::replica);
     // 4. Every target must be exactly what the revision says it is. The
     //    revision already proved the whole tree, so this only narrows the
     //    window between the capture and the write.
@@ -602,12 +658,11 @@ pub fn apply_revision_patch(
                 ),
             ));
         }
-        let bytes =
-            fs::read(&target.path).map_err(|error| format!("read {}: {error}", target.relative))?;
+        let bytes = crate::snapshot::capture_read(&target.path, &mut validation_budget)?;
         if hash_in(&bytes, &entry.hash)? != entry.hash {
             return Ok(RevisionApplyOutcome::conflict(
                 &patch.base_revision,
-                workspace_revision(confined.path())?.revision,
+                workspace_revision_profile(confined.path(), bounded)?.revision,
             ));
         }
     }
@@ -675,10 +730,19 @@ pub fn apply_revision_patch(
         .filter(|entry| entry.action == RevisionPatchAction::Delete)
         .map(|entry| entry.relative.clone())
         .collect();
+    // Publication already succeeded. The bounded profile must report that
+    // fact even if an external writer makes a new revision too large to read.
+    let current_revision = if bounded {
+        workspace_revision_profile(confined.path(), true)
+            .ok()
+            .map(|value| value.revision)
+    } else {
+        Some(workspace_revision(confined.path())?.revision)
+    };
     Ok(RevisionApplyOutcome {
         status: RevisionApplyStatus::Applied,
         base_revision: patch.base_revision.clone(),
-        current_revision: Some(workspace_revision(confined.path())?.revision),
+        current_revision,
         written,
         deleted,
         refusal: None,
@@ -961,6 +1025,60 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+    #[test]
+    fn bounded_apply_refuses_target_growth_after_capture_before_any_publication() {
+        let root = workspace();
+        let patch = RevisionPatch {
+            format: REVISION_PATCH_FORMAT.into(),
+            base_revision: workspace_revision_bounded(root.path()).unwrap().revision,
+            files: vec![write("src/a.ts", "updated"), write("created", "new")],
+        };
+        let result = apply_revision_patch_profile_with_hook(root.path(), &patch, true, || {
+            fs::OpenOptions::new()
+                .write(true)
+                .open(root.path().join("src/a.ts"))
+                .unwrap()
+                .set_len(1024 * 1024 * 1024)
+                .unwrap();
+        });
+        assert!(result.unwrap_err().contains("budget exceeded"));
+        assert!(!root.path().join("created").exists());
+        assert_eq!(
+            fs::read_to_string(root.path().join("src/b.ts")).unwrap(),
+            "const b = 2\n"
+        );
+    }
+    #[test]
+    fn bounded_replica_revision_and_apply_keep_the_existing_cas_contract() {
+        let root = workspace();
+        let revision = workspace_revision_bounded(root.path()).unwrap();
+        assert_eq!(revision, workspace_revision(root.path()).unwrap());
+        assert_eq!(
+            list_revision_files_bounded(root.path(), "", None).unwrap(),
+            list_revision_files(root.path(), "", None).unwrap()
+        );
+        let patch = RevisionPatch {
+            format: REVISION_PATCH_FORMAT.into(),
+            base_revision: revision.revision,
+            files: vec![write("src/a.ts", "changed")],
+        };
+        fs::File::create(root.path().join("large"))
+            .unwrap()
+            .set_len(1024 * 1024 * 1024)
+            .unwrap();
+        assert!(apply_revision_patch_bounded(root.path(), &patch).is_err());
+        assert_eq!(
+            fs::read_to_string(root.path().join("src/a.ts")).unwrap(),
+            "const a = 1\n"
+        );
+        fs::remove_file(root.path().join("large")).unwrap();
+        assert_eq!(
+            apply_revision_patch_bounded(root.path(), &patch)
+                .unwrap()
+                .status,
+            RevisionApplyStatus::Applied
+        );
+    }
 
     fn workspace() -> TempDir {
         let dir = TempDir::new().unwrap();

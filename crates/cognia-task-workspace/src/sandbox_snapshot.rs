@@ -538,11 +538,11 @@ impl TaskWorkspaceService {
             tx.commit().map_err(|e| e.to_string())?;
             Ok(checkpoint)
         })();
-        if capture.is_err() {
+        if let Err(error) = &capture {
             if let Err(cleanup) = fs::remove_dir_all(&directory) {
                 return Err(format!(
                     "{}; checkpoint compensation failed: {cleanup}",
-                    capture.unwrap_err()
+                    error
                 ));
             }
         }
@@ -933,13 +933,13 @@ impl TaskWorkspaceService {
                 port_lease: lease,
             })
         })();
-        if result.is_err() {
+        if let Err(error) = &result {
             if let Err(cleanup) =
                 self.discard_sandbox_snapshot_fork_inner(deployment, id, &workspace_id)
             {
                 return Err(format!(
                     "{}; fork compensation failed: {cleanup}",
-                    result.unwrap_err()
+                    error
                 ));
             }
         }
@@ -1282,7 +1282,7 @@ impl TaskWorkspaceService {
         let started = payload
             .as_ref()
             .map(|payload| {
-                serde_json::from_str::<serde_json::Value>(&payload)
+                serde_json::from_str::<serde_json::Value>(payload)
                     .map(|value| value["materializationStarted"].as_bool().unwrap_or(true))
                     .map_err(|e| e.to_string())
             })

@@ -20,7 +20,7 @@ sha2.workspace = true
 hex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-zip = { workspace = true, features = ["deflate"] }
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 anyhow.workspace = true
 # RFC 8785 canonicalizer for Character Pack signatures (shared leaf).
 cognia-canonical-json = { version = "0.1.0", path = "../cognia-canonical-json" }

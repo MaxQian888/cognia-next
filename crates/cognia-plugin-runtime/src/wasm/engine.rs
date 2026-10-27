@@ -2,7 +2,7 @@
 //!
 //! Every WASM plugin instance shares one `Engine` (compilation cache).
 //! Each instance gets its own `Store<HostState>`. The ticker is a single
-//! tokio task that calls `engine.increment_epoch()` every 100 ms; combined
+//! process-lifetime thread that calls `engine.increment_epoch()` every 100 ms; combined
 //! with `Store::set_epoch_deadline`, this implements cheap cooperative
 //! interruption (~10 % overhead in published wasmtime benchmarks).
 
@@ -39,25 +39,16 @@ fn build_engine() -> wasmtime::Result<Engine> {
     Engine::new(&cfg)
 }
 
-/// Spawn the background ticker that bumps the engine's epoch counter.
-/// Detached: dropping the JoinHandle is intentional — the ticker lives
-/// for the lifetime of the engine, which is the lifetime of the process.
+/// A process-wide ticker must outlive individual async runtimes and must also
+/// start when the engine is first used by a synchronous caller.
 fn spawn_epoch_ticker(engine: Engine) {
-    // The ticker only runs if a tokio runtime is available. In tests
-    // (`#[tokio::test]`) it is; in production `tauri::async_runtime`
-    // provides one. If neither exists, ticking is a no-op and the only
-    // observable effect is that `epoch_deadline` traps stop firing —
-    // which is fine, because no one is calling into wasm anyway.
-    if tokio::runtime::Handle::try_current().is_err() {
-        return;
-    }
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(EPOCH_TICK_MS));
-        loop {
-            interval.tick().await;
+    std::thread::Builder::new()
+        .name("cognia-wasm-epoch".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(EPOCH_TICK_MS));
             engine.increment_epoch();
-        }
-    });
+        })
+        .expect("start WASM epoch ticker");
 }
 
 /// Extract the embedded `cognia:api-version` custom-section payload from a
@@ -78,6 +69,20 @@ pub fn parse_plugin_api_version(bytes: &[u8]) -> wasmtime::Result<String> {
             }
         };
         match payload {
+            // The parent parser has already advanced past this section, but
+            // its payload bytes remain in `buf`. Only the OUTER component's
+            // version is authoritative; skip nested binaries in full.
+            wasmparser::Payload::ModuleSection {
+                unchecked_range, ..
+            }
+            | wasmparser::Payload::ComponentSection {
+                unchecked_range, ..
+            } => {
+                let len = (unchecked_range.end - unchecked_range.start) as usize;
+                buf = buf
+                    .get(len..)
+                    .ok_or_else(|| wasmtime::Error::msg("truncated nested WASM section"))?;
+            }
             wasmparser::Payload::CustomSection(reader) if reader.name() == API_VERSION_SECTION => {
                 let v = String::from_utf8(reader.data().to_vec())
                     .map_err(|e| wasmtime::Error::msg(format!("invalid api-version utf8: {e}")))?;
@@ -125,6 +130,34 @@ fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn epoch_ticker_runs_without_an_async_runtime() {
+        let engine = build_engine().unwrap();
+        spawn_epoch_ticker(engine.clone());
+        let worker_engine = engine.clone();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            // Minimal core module exporting a function that loops forever.
+            let binary = b"\0asm\x01\0\0\0\x01\x04\x01\x60\0\0\x03\x02\x01\0\x07\x08\x01\x04spin\0\0\x0a\x09\x01\x07\0\x03\x40\x0c\0\x0b\x0b";
+            let module = wasmtime::Module::new(&worker_engine, binary).unwrap();
+            let mut store = wasmtime::Store::new(&worker_engine, ());
+            store.set_epoch_deadline(1);
+            let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+            let spin = instance
+                .get_typed_func::<(), ()>(&mut store, "spin")
+                .unwrap();
+            assert!(spin.call(&mut store, ()).is_err());
+            send.send(()).unwrap();
+        });
+        let automatic = receive.recv_timeout(Duration::from_secs(2)).is_ok();
+        if !automatic {
+            // A broken ticker must fail the assertion, never hang cargo test.
+            engine.increment_epoch();
+        }
+        worker.join().unwrap();
+        assert!(automatic, "epoch checks must tick outside tokio");
+    }
 
     #[test]
     fn engine_is_singleton_per_process() {
@@ -195,5 +228,40 @@ mod tests {
         bytes.extend_from_slice(&payload);
         let v = parse_plugin_api_version(&bytes).expect("section parses");
         assert_eq!(v, "0.1.0");
+    }
+
+    fn version_section(version: &str) -> Vec<u8> {
+        let mut payload = vec![API_VERSION_SECTION.len() as u8];
+        payload.extend_from_slice(API_VERSION_SECTION.as_bytes());
+        payload.extend_from_slice(version.as_bytes());
+        let mut section = vec![0, payload.len() as u8];
+        section.extend(payload);
+        section
+    }
+
+    #[test]
+    fn parse_plugin_api_version_skips_nested_module_and_component_sections() {
+        for (section_id, header) in [(1, b"\0asm\x01\0\0\0"), (4, b"\0asm\x0d\0\x01\0")] {
+            let mut nested = header.to_vec();
+            nested.extend(version_section("9.9.9"));
+            let mut component = b"\0asm\x0d\0\x01\0".to_vec();
+            component.extend([section_id, nested.len() as u8]);
+            component.extend(&nested);
+            component.extend(version_section("0.2.0"));
+            assert_eq!(parse_plugin_api_version(&component).unwrap(), "0.2.0");
+            component.truncate(component.len() - version_section("0.2.0").len());
+            assert!(
+                parse_plugin_api_version(&component).is_err(),
+                "nested versions are not authoritative"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_plugin_api_version_rejects_truncated_nested_module() {
+        let mut component = b"\0asm\x0d\0\x01\0".to_vec();
+        component.extend([1, 20]);
+        component.extend(b"\0asm\x01\0\0\0");
+        assert!(parse_plugin_api_version(&component).is_err());
     }
 }

@@ -316,10 +316,10 @@ const OCCUPANCY_SETTLE_INTERVAL: Duration = Duration::from_millis(20);
 
 // A concurrently forked child can briefly inherit a just-closed probe socket.
 // Only exhausted allocation and idle release wait; ordinary allocation stays fast.
-fn settle_occupancy<'a, T>(
-    candidates: &'a [T],
+fn settle_occupancy<T>(
+    candidates: &[T],
     available: impl FnMut(&T) -> Result<bool, PortLeaseError>,
-) -> Result<Option<&'a T>, PortLeaseError> {
+) -> Result<Option<&T>, PortLeaseError> {
     let start = Instant::now();
     settle_occupancy_with_clock(
         candidates,
@@ -329,12 +329,12 @@ fn settle_occupancy<'a, T>(
     )
 }
 
-fn settle_occupancy_with_clock<'a, T>(
-    candidates: &'a [T],
+fn settle_occupancy_with_clock<T>(
+    candidates: &[T],
     mut available: impl FnMut(&T) -> Result<bool, PortLeaseError>,
     mut elapsed: impl FnMut() -> Duration,
     mut sleep: impl FnMut(Duration),
-) -> Result<Option<&'a T>, PortLeaseError> {
+) -> Result<Option<&T>, PortLeaseError> {
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -888,7 +888,7 @@ fn inspect(
         .get_workspace_lifecycle_policy()
         .map_err(PortLeaseError::Store)?
         .unwrap_or_default();
-    let leases = list(&tx)?;
+    let leases = list(tx)?;
     let mut diagnostics = Vec::new();
     for (index, lease) in leases.iter().enumerate() {
         let missing = match std::fs::metadata(&lease.canonical_root) {

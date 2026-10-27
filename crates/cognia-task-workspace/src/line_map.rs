@@ -155,13 +155,13 @@ fn diff_slices(old: &[&[u8]], new: &[&[u8]]) -> Vec<LineOp> {
             continue;
         }
         let mut occurrences: BTreeMap<&[u8], (usize, usize, usize, usize)> = BTreeMap::new();
-        for i in a..ae {
-            let entry = occurrences.entry(old[i]).or_default();
+        for (i, line) in old.iter().enumerate().take(ae).skip(a) {
+            let entry = occurrences.entry(line).or_default();
             entry.0 += 1;
             entry.1 = i;
         }
-        for i in b..be {
-            let entry = occurrences.entry(new[i]).or_default();
+        for (i, line) in new.iter().enumerate().take(be).skip(b) {
+            let entry = occurrences.entry(line).or_default();
             entry.2 += 1;
             entry.3 = i;
         }

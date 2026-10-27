@@ -53,6 +53,7 @@ pub enum SandboxError {
     InvalidKimiConfigDir,
     InvalidGrokConfigDir,
     InvalidMiniMaxConfigDir,
+    InvalidAntigravityConfigDir,
     /// The configuration asked for a private state root
     /// ([`crate::state_isolation`]) and it could not be provided. Refusing is
     /// the only safe answer: launching anyway would hand the agent the user's
@@ -93,6 +94,7 @@ impl std::fmt::Display for SandboxError {
             Self::InvalidPolicy(reason) => write!(f, "Invalid external-agent sandbox policy: {reason}"),
             Self::InvalidClineConfigDir => write!(f, "Cline ACP requires a nonempty --config or CLINE_DIR inside the Bot state directory when isolated; --data-dir is unsupported in ACP."),
             Self::InvalidMiniMaxConfigDir => write!(f, "MiniMax state directory must stay inside the Bot state directory when isolated."),
+            Self::InvalidAntigravityConfigDir => write!(f, "Antigravity ACP Gemini home must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidGrokConfigDir => write!(f, "Grok state directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidKimiConfigDir => write!(f, "Kimi state directory must be nonempty and stay inside the Bot state directory when isolated."),
             Self::InvalidQoderConfigDir => write!(f, "Qoder config directory must be nonempty and stay inside the Bot state directory when isolated."),
@@ -164,13 +166,17 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     if target.contains("codex") {
         roots.push(home.join(".codex"));
     }
-    if target.contains("claude") {
+    if ["claude", "claude-agent-acp", "claude-code-acp", "@agentclientprotocol/claude-agent-acp", "@anthropic-ai/claude-code", "@zed-industries/claude-code-acp"].contains(&target.as_str()) {
         roots.push(home.join(".claude"));
         roots.push(home.join(".claude.json"));
         roots.push(home.join(".claude.json.backup"));
     }
     if target.contains("gemini") {
         roots.push(home.join(".gemini"));
+    }
+    if super::command_resolver::is_antigravity_acp_command(command) {
+        roots.push(home.join(".gemini/antigravity-acp"));
+        roots.push(home.join(".gemini/artifacts"));
     }
     if target.contains("qwen") {
         roots.push(home.join(".qwen"));
@@ -197,7 +203,47 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     if base == "qoder" {
         roots.push(home.join(".qoder"));
     }
-    if base == "goose" {
+    // Native ACP products retain separate account/session roots inside the process sandbox.
+    match base.as_str() {
+        "openclaude" => { roots.push(home.join(".openclaude")); roots.push(home.join(".openclaude.json")); }
+        "crush" => { roots.push(home.join(".config/crush")); roots.push(home.join(".local/share/crush")); roots.push(home.join(".local/state/crush")); roots.push(home.join(".cache/crush")); }
+        "cn" => roots.push(home.join(".continue")),
+        "acli" => { roots.push(home.join(".config/acli")); roots.push(home.join(".rovodev")); }
+        "auggie" => roots.push(home.join(".augment")),
+        "autohand" => roots.push(home.join(".autohand")),
+        "codebuddy" => roots.push(home.join(".codebuddy")),
+        "commandcode" => roots.push(home.join(".commandcode")),
+        "kilo" => {
+            roots.push(home.join(".config/kilo"));
+            roots.push(home.join(".local/share/kilo"));
+            roots.push(home.join(".local/state/kilo"));
+            roots.push(home.join(".cache/kilo"));
+        }
+        "vibe-acp" => roots.push(home.join(".vibe")),
+        "mimo" => {
+            roots.push(home.join(".config/mimocode"));
+            roots.push(home.join(".local/share/mimocode"));
+            roots.push(home.join(".local/state/mimocode"));
+            roots.push(home.join(".cache/mimocode"));
+        }
+        "hermes" => roots.push(home.join(".hermes")),
+        "omp" => roots.push(home.join(".omp")),
+        "muse-acp" => {
+            roots.push(home.join(".config/muse"));
+            roots.push(home.join(".local/state/muse-acp"));
+        }
+        "amp-acp" => {
+            roots.push(home.join(".config/amp"));
+            roots.push(home.join(".local/share/amp"));
+            roots.push(home.join(".local/state/amp-acp"));
+        }
+        "zcode-acp" => {
+            roots.push(home.join(".zcode"));
+            roots.push(home.join(".zcode-acp"));
+        }
+        _ => {}
+    }
+    if base.rsplit(['/', '\\']).next() == Some("goose") {
         roots.push(home.join(".config/goose"));
         roots.push(home.join(".local/share/goose"));
         roots.push(home.join(".local/state/goose"));
@@ -298,7 +344,7 @@ pub fn codex_extra_writable_roots(config: &ExternalAgentSpawnConfig) -> Vec<Path
 fn is_state_file_root(root: &Path) -> bool {
     root.file_name()
         .and_then(|name| name.to_str())
-        .map(|name| name.starts_with(".claude.json"))
+        .map(|name| name.starts_with(".claude.json") || name.starts_with(".openclaude.json"))
         .unwrap_or(false)
 }
 
@@ -1071,6 +1117,41 @@ fn native_state_root(
     Ok(Some(normalized))
 }
 
+/// Native home overrides replace shared write grants instead of adding authority.
+fn additional_native_home(config: &ExternalAgentSpawnConfig, home: &Path) -> Result<Option<(&'static str, PathBuf)>, SandboxError> {
+    let (key, default) = match base_command(&config.command).as_str() {
+        "openclaude" => ("OPENCLAUDE_CONFIG_DIR", ".openclaude"),
+        "vibe-acp" => ("VIBE_HOME", ".vibe"),
+        "mimo" => ("MIMOCODE_HOME", ".local/share/mimocode"),
+        "hermes" => ("HERMES_HOME", ".hermes"),
+        _ => return Ok(None),
+    };
+    let selected = config.env.get(key).cloned().or_else(|| std::env::var(key).ok());
+    // Without a relocation, preserve native XDG/global-file defaults.
+    if selected.is_none() { return Ok(None); }
+    let root = native_state_root(config, home, selected, default,
+        SandboxError::InvalidPolicy(format!("{key} must be nonempty and remain inside owned Bot state when isolated")))?;
+    Ok(root.map(|root| (key, root)))
+}
+
+fn antigravity_config_root(
+    config: &ExternalAgentSpawnConfig,
+    home: &Path,
+) -> Result<Option<PathBuf>, SandboxError> {
+    if !super::command_resolver::is_antigravity_acp_command(&config.command) {
+        return Ok(None);
+    }
+    let selected = config.env.get("GEMINI_HOME").cloned()
+        .or_else(|| std::env::var("GEMINI_HOME").ok())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value == "~" { home.to_string_lossy().into_owned() }
+            else if let Some(relative) = value.strip_prefix("~/") { home.join(relative).to_string_lossy().into_owned() }
+            else { value }
+        });
+    native_state_root(config, home, selected, ".gemini", SandboxError::InvalidAntigravityConfigDir)
+}
+
 /// Remove every `--writable <root>` pair naming exactly `root`.
 fn drop_writable(args: &mut Vec<String>, root: &Path) {
     let root = root.to_string_lossy();
@@ -1186,29 +1267,44 @@ pub fn wrap_with_sandbox(
         .ok_or(SandboxError::MissingCwd)?;
 
     let mut config = config;
+    super::command_resolver::configure_antigravity_platform_args(
+        &config.command, &mut config.args, host.os(),
+    );
     config.sandbox_policy.validate().map_err(SandboxError::InvalidPolicy)?;
+    if super::command_resolver::is_antigravity_acp_command(&config.command)
+        && config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1")
+    {
+        return Err(SandboxError::StateIsolation("Antigravity ACP Bot isolation is unavailable: its native keychain accounts are shared".into()));
+    }
     crate::process::scope_grok_credentials(&mut config);
-    let isolation = crate::state_isolation::apply_state_isolation(
-        &mut config,
-        host.agent_state_data_dir().as_deref(),
-        &host_home,
-    )
-    .map_err(SandboxError::StateIsolation)?;
+    let native_bridge_root = crate::native_bridge::registered_native_bridge_root(&config.command, &config.args).map_err(SandboxError::InvalidPolicy)?;
+    let crush_bridge = native_bridge_root.is_some() && config.args.get(1).map(String::as_str) == Some("--cognia-crush-bridge");
+    let hermes_probe_root = crate::native_bridge::hermes_probe_state_root(&config.command, &config.args, &config.env, host.agent_state_data_dir().as_deref()).map_err(SandboxError::InvalidPolicy)?;
+    let isolation = if let Some(root) = &hermes_probe_root {
+        config.env.remove(crate::state_isolation::AGENT_STATE_KEY_ENV);
+        config.env.insert("HERMES_HOME".into(), root.join("hermes").to_string_lossy().into_owned());
+        config.sandbox_policy.readable_scope = SandboxReadableScope::Workspace;
+        None
+    } else {
+        crate::state_isolation::apply_state_isolation(&mut config, host.agent_state_data_dir().as_deref(), &host_home).map_err(SandboxError::StateIsolation)?
+    };
 
     let minimax_root = minimax_config_root(&config, &home)?;
     let kimi_root = kimi_config_root(&config, &home)?;
     let grok_root = grok_config_root(&config, &home)?;
     let cline_root = cline_config_root(&config, &home)?;
     let qoder_root = qoder_config_root(&config, &home)?;
+    let antigravity_root = antigravity_config_root(&config, &home)?;
+    let additional_home = additional_native_home(&config, &home)?;
     let tool_host_dir = tool_host_runtime_dir(&host.temp_dir(), host.uid());
-    for root in cline_root
-        .clone()
+    for root in additional_home.as_ref().map(|(_, root)| root.clone()).or_else(|| cline_root.clone())
         .or_else(|| qoder_root.clone())
         .or_else(|| kimi_root.clone())
         .or_else(|| grok_root.clone())
         .or_else(|| minimax_root.clone())
+        .or_else(|| antigravity_root.clone())
         .map(|root| vec![root])
-        .unwrap_or_else(|| agent_state_writable_roots(&config.command, &config.args, &home))
+        .unwrap_or_else(|| agent_state_writable_roots(if crush_bridge { "crush" } else { &config.command }, &config.args, &home))
     {
         // An isolated launch must not (re)create the user's own login roots.
         if isolation
@@ -1370,6 +1466,15 @@ pub fn wrap_with_sandbox(
         }
     }
 
+    if crush_bridge {
+        for root in agent_state_writable_roots("crush", &[], &home) {
+            args.splice(0..0, ["--writable".into(), root.to_string_lossy().into_owned()]);
+        }
+    }
+    for root in native_bridge_root.iter().chain(hermes_probe_root.iter()) {
+        args.splice(0..0, ["--readable".into(), root.to_string_lossy().into_owned()]);
+    }
+
     for root in codex_extra_writable_roots(&config) {
         args.splice(0..0, ["--writable".to_string(), root.to_string_lossy().into_owned()]);
     }
@@ -1411,6 +1516,30 @@ pub fn wrap_with_sandbox(
     }
 
     let mut env = config.env.clone();
+    if crush_bridge {
+        // The private socket child stays in an already mounted, short host temp scope.
+        for key in ["TMPDIR", "TMP", "TEMP"] { env.insert(key.into(), tool_host_dir.to_string_lossy().into_owned()); }
+    }
+    if let Some(root) = antigravity_root {
+        for relative in ["antigravity-acp", "artifacts"] {
+            drop_writable(&mut args, &home.join(".gemini").join(relative));
+            let state = root.join(relative);
+            host.ensure_dir(&state);
+            if !bot_isolation {
+                args.splice(0..0, ["--writable".into(), state.to_string_lossy().into_owned()]);
+            }
+        }
+        env.insert("GEMINI_HOME".into(), root.to_string_lossy().into_owned());
+        let server = super::command_resolver::resolve_command_path(&config.command)
+            .ok_or_else(|| SandboxError::InvalidPolicy("Antigravity ACP server is not installed".into()))?;
+        let helper = super::command_resolver::antigravity_harness_path(&server)
+            .map_err(SandboxError::InvalidPolicy)?
+            .ok_or_else(|| SandboxError::InvalidPolicy("Invalid Antigravity ACP server".into()))?;
+        let resolved = server.canonicalize().map_err(|error| SandboxError::InvalidPolicy(error.to_string()))?;
+        let target = args.iter().position(|arg| arg == "--").expect("target separator") + 1;
+        args[target] = resolved.to_string_lossy().into_owned();
+        env.insert("ANTIGRAVITY_HARNESS_PATH".into(), helper.to_string_lossy().into_owned());
+    }
     env.remove(CODEX_WRITABLE_ROOTS_ENV);
     env.remove(CODEX_WRITABLE_CEILING_ENV);
     // Only this host supplies the upstream policy, never the caller's env.
@@ -1431,6 +1560,17 @@ pub fn wrap_with_sandbox(
                 path.to_string_lossy().into_owned(),
             );
         }
+    }
+    if let Some((key, root)) = additional_home {
+        for shared in agent_state_writable_roots(&config.command, &config.args, &home) {
+            drop_writable(&mut args, &shared);
+        }
+        host.ensure_dir(&root);
+        if !bot_isolation { args.splice(0..0, ["--writable".into(), root.to_string_lossy().into_owned()]); }
+        env.insert(key.into(), root.to_string_lossy().into_owned());
+        let temp = root.join("tmp");
+        host.ensure_dir(&temp);
+        for key in ["TMPDIR", "TMP", "TEMP"] { env.insert(key.into(), temp.to_string_lossy().into_owned()); }
     }
     if let Some(root) = minimax_root {
         drop_writable(&mut args, &home.join(".minimax"));
@@ -1539,10 +1679,15 @@ pub fn wrap_with_sandbox(
             }
         }
     }
-    if config.command == "goose" && !bot_isolation {
+    if base_command(&config.command).rsplit(['/', '\\']).next() == Some("goose") && !bot_isolation
+    {
         // Goose creates platform-extension temp files while opening a session.
         // Keep them under an existing scoped write root, not ambient macOS temp.
-        let temp = home.join(".local/state/goose/tmp");
+        let temp = if isolation.is_some() {
+            Path::new(&config.env["GOOSE_PATH_ROOT"]).join("state/tmp")
+        } else {
+            home.join(".local/state/goose/tmp")
+        };
         host.ensure_dir(&temp);
         for key in ["TMPDIR", "TMP", "TEMP"] {
             env.insert(key.into(), temp.to_string_lossy().into_owned());
@@ -1588,6 +1733,90 @@ pub fn wrap_with_sandbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_openclaude_global_configuration_is_prepared_as_a_file() {
+        let host = FakeHost::new("macos");
+        wrap_with_sandbox(config("openclaude", &[], Some("/workspace")), &host).unwrap();
+        assert!(host.files.borrow().contains(&PathBuf::from("/home/dev/.openclaude.json")));
+        assert!(!host.dirs.borrow().contains(&PathBuf::from("/home/dev/.openclaude.json")));
+    }
+
+    #[test]
+    fn additional_native_state_is_separate_and_relocated_without_shared_grants() {
+        let home = Path::new("/home/dev");
+        assert_eq!(agent_state_writable_roots("openclaude", &[], home), vec![home.join(".openclaude"), home.join(".openclaude.json")]);
+        assert!(!agent_state_writable_roots("not-claude", &[], home).contains(&home.join(".claude")));
+        for (command, key, shared) in [("openclaude", "OPENCLAUDE_CONFIG_DIR", ".openclaude"), ("vibe-acp", "VIBE_HOME", ".vibe"), ("mimo", "MIMOCODE_HOME", ".local/share/mimocode"), ("hermes", "HERMES_HOME", ".hermes")] {
+            let mut cfg = config(command, &[], Some("/workspace"));
+            cfg.env.insert(key.into(), "/owned/native".into());
+            assert_eq!(additional_native_home(&cfg, home).unwrap(), Some((key, PathBuf::from("/owned/native"))));
+            let wrapped = wrap_with_sandbox(cfg.clone(), &FakeHost::new("macos")).unwrap();
+            assert!(!wrapped.args.contains(&home.join(shared).to_string_lossy().into_owned()));
+            assert_eq!(wrapped.env.get(key).map(String::as_str), Some("/owned/native"));
+            cfg.env.insert(key.into(), "".into());
+            assert!(additional_native_home(&cfg, home).is_err());
+        }
+    }
+
+    #[test]
+    fn antigravity_grants_only_its_owned_state_and_artifact_subtrees() {
+        for command in ["agy_acp_server.par", "agy_acp_server.exe"] {
+            assert_eq!(agent_state_writable_roots(command, &[], Path::new("/home/dev")), [
+                PathBuf::from("/home/dev/.gemini/antigravity-acp"),
+                PathBuf::from("/home/dev/.gemini/artifacts"),
+            ]);
+        }
+        assert!(agent_state_writable_roots("agy", &[], Path::new("/home/dev")).is_empty());
+    }
+
+    #[test]
+    fn antigravity_explicit_home_uses_the_existing_native_state_boundary() {
+        let mut request = config("agy_acp_server.par", &[], Some("/work/project"));
+        request.env.insert("GEMINI_HOME".into(), "state".into());
+        assert_eq!(antigravity_config_root(&request, Path::new("/home/dev")).unwrap(), Some(PathBuf::from("/work/project/state")));
+        request.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        request.env.insert("COGNIA_BOT_STATE_DIR".into(), "/work/bot-state".into());
+        assert!(matches!(antigravity_config_root(&request, Path::new("/home/dev")), Err(SandboxError::InvalidAntigravityConfigDir)));
+    }
+
+    #[test]
+    fn antigravity_bot_wrapper_refuses_even_when_file_storage_is_requested() {
+        let host = FakeHost::new("macos");
+        let mut request = config("agy_acp_server.par", &[], Some("/work/project"));
+        request.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        request.env.insert("AGY_ACP_FORCE_FILE_STORAGE".into(), "1".into());
+        let error = wrap_with_sandbox(request, &host).unwrap_err();
+        assert_eq!(error.reason_code(), "state_isolation_failed");
+        assert!(error.to_string().contains("native keychain accounts are shared"));
+        assert!(host.dirs.borrow().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_wrapper_rebinds_the_companion_and_scopes_custom_state() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let server = temp.path().join("agy_acp_server.par");
+        let helper = temp.path().join("localharness_external");
+        std::fs::write(&server, "server").unwrap();
+        std::fs::write(&helper, "helper").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut request = config(server.to_str().unwrap(), &[], Some("/work/project"));
+        request.env.insert("ANTIGRAVITY_HARNESS_PATH".into(), "/untrusted/helper".into());
+        request.env.insert("GEMINI_HOME".into(), "/work/selected-gemini".into());
+        let wrapped = wrap_with_sandbox(request, &FakeHost::new("macos")).unwrap();
+        assert_eq!(wrapped.env["ANTIGRAVITY_HARNESS_PATH"], helper.canonicalize().unwrap().to_string_lossy());
+        assert_eq!(wrapped.env["GEMINI_HOME"], "/work/selected-gemini");
+        let writable = pairs(&wrapped.args, "--writable");
+        assert!(writable.contains(&"/work/selected-gemini/antigravity-acp"));
+        assert!(writable.contains(&"/work/selected-gemini/artifacts"));
+        assert!(!writable.contains(&"/home/dev/.gemini"));
+        assert!(!writable.contains(&"/home/dev/.gemini/antigravity-acp"));
+        assert!(!writable.contains(&"/work/selected-gemini"));
+        let target = wrapped.args.iter().position(|arg| arg == "--").unwrap() + 1;
+        assert_eq!(wrapped.args[target], server.canonicalize().unwrap().to_string_lossy());
+    }
 
     #[test]
     fn managed_dsh_grants_only_its_state_directories() {
@@ -2458,6 +2687,39 @@ mod tests {
             .args
             .iter()
             .any(|arg| arg == "/ambient/tmp" || arg == "/untrusted"));
+    }
+
+    #[test]
+    fn goose_absolute_binary_keeps_isolated_temp_and_keyring_inside_its_configuration() {
+        let data = tempfile::tempdir().unwrap();
+        let mut host = FakeHost::new("macos");
+        host.state_data_dir = Some(data.path().to_path_buf());
+        let mut original = config("/opt/goose", &["acp"], Some("/work/project"));
+        original.env.insert(
+            crate::state_isolation::AGENT_STATE_KEY_ENV.into(),
+            "goose-private".into(),
+        );
+        original
+            .env
+            .insert("GOOSE_DISABLE_KEYRING".into(), "0".into());
+        let wrapped = wrap_with_sandbox(original, &host).unwrap();
+        let root = data.path().join("cognia/external-agents/goose-private");
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            assert_eq!(
+                wrapped.env[key],
+                root.join("goose/state/tmp").to_string_lossy()
+            );
+        }
+        assert_eq!(wrapped.env["GOOSE_DISABLE_KEYRING"], "1");
+        assert!(pairs(&wrapped.args, "--writable").contains(&root.to_str().unwrap()));
+        for shared in [
+            "/home/dev/.config/goose",
+            "/home/dev/.local/share/goose",
+            "/home/dev/.local/state/goose",
+        ] {
+            assert!(!pairs(&wrapped.args, "--writable").contains(&shared));
+            assert!(pairs(&wrapped.args, "--deny-readable").contains(&shared));
+        }
     }
 
     /// A real directory tree for the Pi package root tests. Created under the

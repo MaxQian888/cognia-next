@@ -161,10 +161,10 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let menu_state_for_menu = menu_state.clone();
     let _tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
         .icon(
-            app.default_window_icon()
-                .cloned()
-                .ok_or_else(|| tauri::Error::AssetNotFound("tray icon".into()))?,
+            icon_state::load_image_for(handle, dto::TrayIconState::Idle)
+                .map_err(tauri::Error::AssetNotFound)?,
         )
+        .icon_as_template(icon_state::ICON_AS_TEMPLATE)
         .tooltip("Cognia")
         .menu(&menu)
         .show_menu_on_left_click(false)

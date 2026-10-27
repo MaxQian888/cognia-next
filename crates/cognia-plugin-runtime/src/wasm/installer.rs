@@ -1189,6 +1189,46 @@ mod tests {
     }
 
     #[test]
+    fn compressed_bundles_preserve_unicode_names_and_binary_assets() {
+        let manifest = br#"{"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.2.0"}}"#;
+        let payload = b"\0\xffZIP asset\r\n";
+        for (method, level) in [
+            (zip::CompressionMethod::Stored, None),
+            (zip::CompressionMethod::Deflated, Some(1)),
+            (zip::CompressionMethod::Deflated, Some(6)),
+            (zip::CompressionMethod::Deflated, Some(9)),
+            (zip::CompressionMethod::Bzip2, None),
+        ] {
+            let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(method)
+                .compression_level(level);
+            for (name, bytes) in [
+                ("plugin.json", manifest.as_slice()),
+                ("main.wasm", b"wasm".as_slice()),
+                ("assets/说明.txt", payload.as_slice()),
+            ] {
+                writer.start_file(name, options).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            let bundle = writer.finish().unwrap().into_inner();
+            let root = tempfile::tempdir().unwrap();
+            let installed =
+                install_downloaded_wasm_bundle(root.path(), &bundle, None, false, None, None)
+                    .unwrap_or_else(|error| panic!("{method:?}/{level:?}: {error}"));
+            assert_eq!(installed.manifest["id"], "demo.wasm");
+            assert_eq!(
+                std::fs::read(root.path().join("demo.wasm/assets/说明.txt")).unwrap(),
+                payload
+            );
+            assert_eq!(
+                std::fs::read(root.path().join("demo.wasm/main.wasm")).unwrap(),
+                b"wasm"
+            );
+        }
+    }
+
+    #[test]
     fn preview_does_not_create_or_replace_installation() {
         let manifest = r#"{"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
         let bundle = make_test_zip(manifest, b"new");

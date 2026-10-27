@@ -129,7 +129,12 @@ impl<K: Eq + Hash + Clone, F: Clone> Channels<K, F> {
     }
 
     pub fn subscribe(&self, key: &K) -> broadcast::Receiver<F> {
-        self.sender(key).subscribe()
+        // Subscribe before releasing the map lock so pruning cannot detach it.
+        self.senders
+            .write()
+            .entry(key.clone())
+            .or_insert_with(|| broadcast::channel(self.capacity).0)
+            .subscribe()
     }
 
     /// Send to whoever is listening on `key`. Returns how many receivers got
@@ -140,6 +145,13 @@ impl<K: Eq + Hash + Clone, F: Clone> Channels<K, F> {
             Some(sender) => sender.send(frame).unwrap_or(0),
             None => 0,
         }
+    }
+
+    pub fn has_subscribers(&self, key: &K) -> bool {
+        self.senders
+            .read()
+            .get(key)
+            .is_some_and(|sender| sender.receiver_count() > 0)
     }
 
     /// Forget channels nobody listens on, so keys that come and go (sessions,
@@ -177,6 +189,22 @@ mod tests {
 
     fn ticket(user: &'static str, expires_at: i64) -> Ticket {
         Ticket { user, expires_at }
+    }
+
+    #[test]
+    fn subscriber_checks_do_not_create_channels() {
+        let channels = Channels::<String, String>::new(2);
+        let key = "session".to_owned();
+        assert!(!channels.has_subscribers(&key));
+        assert!(channels.is_empty());
+        let receiver = channels.subscribe(&key);
+        assert!(channels.has_subscribers(&key));
+        channels.prune_idle();
+        assert_eq!(channels.len(), 1);
+        drop(receiver);
+        assert!(!channels.has_subscribers(&key));
+        channels.prune_idle();
+        assert!(channels.is_empty());
     }
 
     #[test]

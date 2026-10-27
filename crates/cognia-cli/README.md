@@ -150,7 +150,7 @@ Read `support`, `pythonExecution`, `execution`, point `status`/`stability`, UI `
 
 ```bash
 # One-time setup
-rustup target add wasm32-wasip2
+rustup target add wasm32-wasip1
 cargo install --locked cargo-component
 
 # Per-plugin setup
@@ -271,7 +271,7 @@ The command always enforces the SHA-256 entry from `checksums.txt`. Use `--artif
 ## Toolchain requirements
 
 - **All plugins:** Rust ≥ 1.82 (the MSRV for the CLI itself).
-- **WASM plugins:** `wasm32-wasip2` rustup target + `cargo-component ≥ 0.21`.
+- **WASM plugins:** `wasm32-wasip1` rustup target + `cargo-component ≥ 0.21`.
 - **Frontend plugins:** Node.js (any LTS) + a package manager (pnpm / npm / yarn) installed and on `$PATH`. The CLI invokes `npx --no-install esbuild`.
 - **Python / hybrid / VS Code-extension plugins:** no CLI-managed compiler; check or build the declared entry files with your own toolchain before running `cognia plugin build`.
 

@@ -160,6 +160,7 @@ mod tests {
             }).await.unwrap();
             state.chat_store.put_member(ORG, "s", "w", MEMBER, SessionRole::Member, false, false, OWNER, 2).await.unwrap();
             state.chat_store.append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
                 id: "message".into(), org_id: ORG.into(), workspace_id: "w".into(), session_id: "s".into(),
                 kind: "message.created".into(), actor_kind: "human".into(), actor_id: OWNER.into(), actor_label: None,
                 payload: json!({"messageId":"message", "role":"user", "parts":[]}), now: 3, operation_id: "message".into(),
@@ -205,6 +206,23 @@ mod tests {
             }).await.unwrap();
         }
     }
+    #[tokio::test]
+    async fn live_write_stops_when_deployment_is_off_but_terminal_can_drain() {
+        use crate::chat_store::RunWrite;
+        let f = Fixture::new().await;
+        f.execution().await;
+        scope(Context {chat:false,..Default::default()},async {
+            assert!(matches!(f.state.chat_store.admit_live_frame(RunWrite {
+                org_id:ORG,session_id:"s",run_id:"run",token_hash:&crate::chat_api::token_hash("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),now:10,
+            },"message",0).await,Err(StoreError::FeatureUnavailable(d)) if d.state==FeatureState::Off));
+            f.state.chat_store.append_session_run_event(NewSessionEvent {
+                tool_detail_revision:None,id:"terminal".into(),org_id:ORG.into(),workspace_id:"w".into(),session_id:"s".into(),
+                kind:"run.completed".into(),actor_kind:"agent".into(),actor_id:"run:run".into(),actor_label:None,
+                payload:json!({}),now:10,operation_id:"terminal".into(),
+            },"run",&crate::chat_api::token_hash("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")).await.unwrap();
+        }).await;
+    }
+
     fn refused(result: &(StatusCode, Value), key: FeatureKey, reason: FeatureReason) {
         assert_eq!(result.0, StatusCode::FORBIDDEN, "{result:?}");
         assert_eq!(result.1["error"], "feature_unavailable");

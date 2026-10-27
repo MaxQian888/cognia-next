@@ -114,9 +114,10 @@ impl Guest for Plugin {
     }
 
     /// `workflow-node-execute` runs the custom node this plugin declares in
-    /// `manifest.workflows.nodes[]`. `node_kind` is the namespaced kind the
-    /// workflow runtime dispatches with, so it carries the plugin id and the
-    /// suffix is what to match on. `inputs` is the resolved params object.
+    /// `manifest.workflows.nodes[]`. `node_kind` is the declared manifest
+    /// kind; the host manages the registry's plugin-id prefix. Match the
+    /// suffix here. `inputs` contains the host's
+    /// `{ kind, params, upstream }` envelope.
     fn workflow_node_execute(node_kind: String, inputs: Vec<u8>) -> Result<Vec<u8>, String> {
         logger::log(
             logger::LogLevel::Info,
@@ -126,22 +127,45 @@ impl Guest for Plugin {
         if !node_kind.ends_with(".echo") {
             return Err(format!("INVALID_REQUEST: unknown node kind '{node_kind}'"));
         }
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&inputs).map_err(|e| format!("INVALID_REQUEST: {e}"))?;
-        let message = parsed
-            .get("message")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        serde_json::to_vec(&serde_json::json!({ "output": { "message": message } }))
-            .map_err(|e| e.to_string())
+        echo_workflow_inputs(&inputs)
     }
+}
+
+fn echo_workflow_inputs(inputs: &[u8]) -> Result<Vec<u8>, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_slice(inputs).map_err(|e| format!("INVALID_REQUEST: {e}"))?;
+    let message = parsed
+        .get("params")
+        .and_then(|params| params.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    serde_json::to_vec(&serde_json::json!({ "output": { "message": message } }))
+        .map_err(|e| e.to_string())
 }
 
 bindings::export!(Plugin with_types_in bindings);
 
 #[cfg(test)]
 mod tests {
-    use super::split_host_error;
+    use super::{echo_workflow_inputs, split_host_error};
+
+    #[test]
+    fn workflow_echo_reads_the_host_params_envelope() {
+        let response = echo_workflow_inputs(
+            br#"{"kind":"action.echo","message":"wrong level","params":{"message":"hello"},"upstream":{}}"#,
+        ).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&response).unwrap(),
+            serde_json::json!({"output":{"message":"hello"}})
+        );
+    }
+
+    #[test]
+    fn workflow_echo_rejects_invalid_json() {
+        assert!(echo_workflow_inputs(b"not JSON")
+            .unwrap_err()
+            .starts_with("INVALID_REQUEST:"));
+    }
 
     #[test]
     fn splits_a_prefixed_host_error() {

@@ -22,7 +22,7 @@ path = "src/lib.rs"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
 
 # Local files server + dev-server discovery (worker F).
@@ -45,7 +45,7 @@ uuid = { workspace = true, features = ["v4"] }
 sha2.workspace = true
 base64.workspace = true
 dirs.workspace = true
-zip = { workspace = true, features = ["deflate"] }
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 # CRX3 proof verification (RSA PKCS#1 v1.5 / ECDSA P-256 over SHA-256). Already
 # in the lock through rustls; declared locally because fewer than three members
 # name it directly.

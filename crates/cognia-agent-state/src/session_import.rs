@@ -809,6 +809,133 @@ fn read_cline_sessions(home: &str) -> Result<Vec<Value>, String> {
     Ok(out)
 }
 
+fn build_goose_sessions(conn: &Connection) -> Result<Vec<Value>, String> {
+    // Check before materializing rows, not after allocating an unbounded table.
+    for (table, limit) in [("sessions", 10_000_i64), ("messages", 1_000_000_i64)] {
+        let count: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .map_err(|e| format!("Goose {table}: {e}"))?;
+        if count > limit {
+            return Err("Goose history exceeds import bounds".into());
+        }
+    }
+    let sessions =
+        rows_as_maps_checked(conn, "sessions").map_err(|e| format!("Goose sessions: {e}"))?;
+    let mut messages =
+        rows_as_maps_checked(conn, "messages").map_err(|e| format!("Goose messages: {e}"))?;
+    if sessions.len() > 10_000 || messages.len() > 1_000_000 {
+        return Err("Goose history exceeds import bounds".into());
+    }
+    messages.sort_by_key(|m| {
+        (
+            m.get("created_timestamp")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            m.get("id").and_then(Value::as_i64).unwrap_or(0),
+        )
+    });
+    let mut grouped = std::collections::HashMap::<String, Vec<Value>>::new();
+    for mut message in messages {
+        let session_id = first_str(&message, &["session_id"])
+            .ok_or("Goose message has no session id")?
+            .to_string();
+        parse_json_column(&mut message, "content_json");
+        parse_json_column(&mut message, "metadata_json");
+        if !message.get("content_json").is_some_and(Value::is_array) {
+            return Err("Goose message content_json must be a valid JSON array".into());
+        }
+        if message
+            .get("metadata_json")
+            .is_some_and(|value| !value.is_object() && !value.is_null())
+        {
+            return Err("Goose message metadata_json must be a valid JSON object".into());
+        }
+        grouped.entry(session_id).or_default().push(json!({
+            "id": message.get("message_id"), "role": message.get("role"),
+            "created": message.get("created_timestamp"), "content": message.get("content_json"),
+            "metadata": message.get("metadata_json"),
+        }));
+    }
+    let mut out = Vec::new();
+    for mut session in sessions {
+        parse_json_column(&mut session, "model_config_json");
+        let id = first_str(&session, &["id"])
+            .ok_or("Goose session has no id")?
+            .to_string();
+        session.insert(
+            "model_config".into(),
+            session
+                .get("model_config_json")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        session.insert(
+            "conversation".into(),
+            Value::Array(grouped.remove(&id).unwrap_or_default()),
+        );
+        out.push(Value::Object(session));
+    }
+    Ok(out)
+}
+
+fn read_goose_sessions(home: &str) -> Result<Vec<Value>, String> {
+    let home = PathBuf::from(home);
+    if !home.exists() {
+        return Ok(Vec::new());
+    }
+    let home = home
+        .canonicalize()
+        .map_err(|e| format!("Goose history home: {e}"))?;
+    let mut candidates = vec![
+        home.join(".local/share/goose/sessions/sessions.db"),
+        home.join("Library/Application Support/Block/goose/sessions/sessions.db"),
+    ];
+    // Cognia-owned private roots are separate from Goose's shared default store.
+    for root in [
+        home.join(".local/share/cognia/external-agents"),
+        home.join("Library/Application Support/cognia/external-agents"),
+    ] {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(&root).map_err(|e| format!("Goose private roots: {e}"))? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+                candidates.push(entry.path().join("goose/data/sessions/sessions.db"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for path in candidates {
+        if !path.exists() {
+            continue;
+        }
+        // Confine any on-disk symlink to the current user's history tree.
+        let resolved = path.canonicalize().map_err(|e| e.to_string())?;
+        let root = home.canonicalize().map_err(|e| e.to_string())?;
+        if !resolved.starts_with(root) || resolved != path {
+            return Err("Goose history escapes its designated store".into());
+        }
+        let conn = Connection::open_with_flags(&resolved, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("Goose history open: {e}"))?;
+        let store = path
+            .strip_prefix(&home)
+            .map_err(|e| e.to_string())?
+            .to_string_lossy()
+            .into_owned();
+        for mut session in build_goose_sessions(&conn)? {
+            session
+                .as_object_mut()
+                .ok_or("Invalid Goose session projection")?
+                .insert("_cognia_store".into(), Value::String(store.clone()));
+            out.push(session);
+        }
+    }
+    Ok(out)
+}
+
 fn read_copilot_sessions(home: &str) -> Result<Vec<Value>, String> {
     read_generic_database(&PathBuf::from(home).join(".copilot/session-store.db"))
 }
@@ -817,6 +944,7 @@ fn read_copilot_sessions(home: &str) -> Result<Vec<Value>, String> {
 /// Full file artifacts remain authoritative; this supplies database-only rows.
 pub fn read_external_agent_sessions(source: String, home: String) -> Result<Vec<Value>, String> {
     match source.as_str() {
+        "goose" => read_goose_sessions(&home),
         "cursor" => read_cursor_sessions(&home),
         "cline" => read_cline_sessions(&home),
         "copilot-cli" => read_copilot_sessions(&home),
@@ -1548,6 +1676,59 @@ mod tests {
         .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0]["sessionId"], "copilot-db");
+    }
+
+    #[test]
+    fn public_goose_reader_preserves_order_content_and_parent_without_writing() {
+        let root = TestRoot::new("goose");
+        let db = root.0.join(".local/share/goose/sessions/sessions.db");
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(r#"
+            CREATE TABLE sessions (id TEXT, name TEXT, working_dir TEXT, session_type TEXT, parent_session_id TEXT, model_config_json TEXT);
+            CREATE TABLE messages (id INTEGER, message_id TEXT, session_id TEXT, role TEXT, content_json TEXT, created_timestamp INTEGER, metadata_json TEXT);
+            INSERT INTO sessions VALUES ('child', 'Task', '/repo', 'sub_agent', 'parent', '{"model":"test"}');
+            INSERT INTO messages VALUES (2, 'm2', 'child', 'assistant', '[{"type":"text","text":"second"}]', 5, '{"userVisible":true}');
+            INSERT INTO messages VALUES (1, 'm1', 'child', 'user', '[{"type":"text","text":"first"}]', 5, '{"userVisible":true}');
+        "#).unwrap();
+        drop(conn);
+        let before = std::fs::read(&db).unwrap();
+        let result =
+            read_external_agent_sessions("goose".into(), root.0.to_string_lossy().into_owned())
+                .unwrap();
+        assert_eq!(result[0]["parent_session_id"], "parent");
+        assert_eq!(
+            result[0]["_cognia_store"],
+            ".local/share/goose/sessions/sessions.db"
+        );
+        assert_eq!(result[0]["model_config"]["model"], "test");
+        assert_eq!(result[0]["conversation"][0]["id"], "m1");
+        assert_eq!(result[0]["conversation"][1]["content"][0]["text"], "second");
+        assert_eq!(before, std::fs::read(db).unwrap());
+        let conn =
+            Connection::open(root.0.join(".local/share/goose/sessions/sessions.db")).unwrap();
+        conn.execute(
+            "UPDATE messages SET content_json = 'corrupt' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let error =
+            read_external_agent_sessions("goose".into(), root.0.to_string_lossy().into_owned())
+                .unwrap_err();
+        assert!(error.contains("content_json must be a valid JSON array"));
+        let conn =
+            Connection::open(root.0.join(".local/share/goose/sessions/sessions.db")).unwrap();
+        conn.execute(
+            "UPDATE messages SET content_json = '[]', metadata_json = 'corrupt' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let error =
+            read_external_agent_sessions("goose".into(), root.0.to_string_lossy().into_owned())
+                .unwrap_err();
+        assert!(error.contains("metadata_json must be a valid JSON object"));
     }
 
     #[test]

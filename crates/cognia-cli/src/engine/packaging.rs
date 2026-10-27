@@ -164,11 +164,11 @@ pub fn plan_bundle(crate_root: &Path, manifest: &serde_json::Value) -> Result<Bu
     let candidate_dirs = [
         crate_root
             .join("target")
-            .join("wasm32-wasip2")
+            .join("wasm32-wasip1")
             .join("release"),
         crate_root
             .join("target")
-            .join("wasm32-wasip1")
+            .join("wasm32-wasip2")
             .join("release"),
     ];
     let wasm_path = candidate_dirs
@@ -410,6 +410,22 @@ fn write_existing_entry_bundle(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn plan_bundle_prefers_the_cli_build_target_over_stale_wasip2_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest = json!({"wasmMain":"plugin.wasm"});
+        let old_dir = tmp.path().join("target/wasm32-wasip2/release");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        let old = old_dir.join("plugin.wasm");
+        std::fs::write(&old, b"old component").unwrap();
+        assert_eq!(plan_bundle(tmp.path(), &manifest).unwrap().wasm_path, old);
+        let new_dir = tmp.path().join("target/wasm32-wasip1/release");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let fresh = new_dir.join("plugin.wasm");
+        std::fs::write(&fresh, b"new component").unwrap();
+        assert_eq!(plan_bundle(tmp.path(), &manifest).unwrap().wasm_path, fresh);
+    }
 
     fn min_wasm() -> Vec<u8> {
         // Minimal valid wasm module: magic + version + nothing else.

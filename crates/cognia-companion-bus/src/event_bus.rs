@@ -22,6 +22,8 @@
 //!   ring buffer ([`LagRecovery`], [`LiveReceiver`]) and only reports the lag
 //!   when the buffer has already dropped a frame it missed: one producer's
 //!   burst no longer ends every subscriber's stream.
+//!   Person brains instead use partition-filtered, non-lossy queues: process
+//!   stdout cannot be reconstructed by resyncing persisted application data.
 //! - **Ring buffer**: capped at [`BUFFER_CAPACITY`] entries *and* entries
 //!   older than [`RETENTION_MS`] are pruned periodically and on subscribe.
 //!   This keeps the replay window bounded in both count and time without an
@@ -124,11 +126,11 @@ impl EventFrame {
 // ---------------------------------------------------------------------------
 
 /// Returned by [`EventBus::subscribe`].
-pub enum SubscribeResult {
+pub enum SubscribeResult<R = tokio::sync::broadcast::Receiver<EventFrame>> {
     /// The subscription was established successfully.
     Ok {
         /// Live receiver — forward every new frame to the WS client.
-        receiver: tokio::sync::broadcast::Receiver<EventFrame>,
+        receiver: R,
         /// Frames with `seq > since` still within the retention window.
         replay: Vec<EventFrame>,
         /// Last sequence included in the replay snapshot. The WebSocket layer
@@ -147,6 +149,9 @@ pub enum SubscribeResult {
 /// Shared bridge between Tauri events and WebSocket subscribers.
 pub struct EventBus {
     tx: tokio::sync::broadcast::Sender<EventFrame>,
+    // Serializes publication with person subscription snapshots, preserving
+    // order and an exact replay/live boundary for their non-lossy queues.
+    person_subscribers: Mutex<Vec<PersonSubscriber>>,
     buffer: Mutex<VecDeque<EventFrame>>,
     seq_counter: AtomicU64,
     last_prune_ms: AtomicI64,
@@ -155,12 +160,32 @@ pub struct EventBus {
     evicted_through: AtomicU64,
 }
 
+struct PersonSubscriber {
+    account_id: String,
+    device_id: String,
+    tx: tokio::sync::mpsc::UnboundedSender<EventFrame>,
+}
+
+impl PersonSubscriber {
+    fn accepts(&self, frame: &EventFrame) -> bool {
+        frame.partition_account_id.as_deref() == Some(self.account_id.as_str())
+            && frame.visible_to(&self.device_id)
+    }
+}
+
+fn forward_person_frame(subscribers: &mut Vec<PersonSubscriber>, frame: &EventFrame) {
+    subscribers.retain(|subscriber| {
+        !subscriber.tx.is_closed()
+            && (!subscriber.accepts(frame) || subscriber.tx.send(frame.clone()).is_ok())
+    });
+}
 impl EventBus {
     /// Create a new `EventBus` and return it wrapped in an [`Arc`].
     pub fn new() -> Arc<Self> {
         let (tx, _) = tokio::sync::broadcast::channel(BROADCAST_CAPACITY);
         Arc::new(Self {
             tx,
+            person_subscribers: Mutex::new(Vec::new()),
             buffer: Mutex::new(VecDeque::with_capacity(BUFFER_CAPACITY)),
             seq_counter: AtomicU64::new(0),
             last_prune_ms: AtomicI64::new(0),
@@ -200,6 +225,7 @@ impl EventBus {
     }
 
     fn publish_targeted(&self, event_type: String, payload: Value, destination: Option<String>, partition_account_id: Option<String>) -> EventFrame {
+        let mut subscribers = self.person_subscribers.lock();
         let seq = self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let ts_ms = now_ms();
         register_remote_pending_request(&payload);
@@ -249,6 +275,7 @@ impl EventBus {
 
         // Broadcast — errors only occur when no receivers exist (fine).
         let _ = self.tx.send(frame.clone());
+        forward_person_frame(&mut subscribers, &frame);
 
         frame
     }
@@ -262,6 +289,7 @@ impl EventBus {
         payload: Value,
         target_device_id: String,
     ) -> EventFrame {
+        let mut subscribers = self.person_subscribers.lock();
         let frame = EventFrame {
             event_type,
             seq: self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1,
@@ -271,6 +299,7 @@ impl EventBus {
             partition_account_id: None,
         };
         let _ = self.tx.send(frame.clone());
+        forward_person_frame(&mut subscribers, &frame);
         frame
     }
 
@@ -291,6 +320,7 @@ impl EventBus {
         payload: Value,
         account_id: String,
     ) -> EventFrame {
+        let mut subscribers = self.person_subscribers.lock();
         let frame = EventFrame {
             event_type,
             seq: self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1,
@@ -300,7 +330,48 @@ impl EventBus {
             partition_account_id: Some(account_id),
         };
         let _ = self.tx.send(frame.clone());
+        forward_person_frame(&mut subscribers, &frame);
         frame
+    }
+
+    /// Non-lossy live relay for an authenticated person brain's own events.
+    /// Unrelated partitions and frames targeted at its devices never enter
+    /// this queue. The socket must still apply its usual audience predicates.
+    /// Queued frames are released when the socket drops its receiver; closed
+    /// senders are removed on the next publication. Unlike persisted data,
+    /// process stdout cannot tolerate bounded-queue eviction or replay gaps.
+    pub fn subscribe_person(
+        &self,
+        since: Option<u64>,
+        now_ms: i64,
+        account_id: &str,
+    ) -> SubscribeResult<tokio::sync::mpsc::UnboundedReceiver<EventFrame>> {
+        let mut subscribers = self.person_subscribers.lock();
+        let (replay, replay_cursor) = match self.subscribe(since, now_ms) {
+            SubscribeResult::Ok {
+                replay,
+                replay_cursor,
+                ..
+            } => (replay, replay_cursor),
+            SubscribeResult::ResyncRequired => return SubscribeResult::ResyncRequired,
+        };
+        let (tx, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let subscriber = PersonSubscriber {
+            account_id: account_id.to_owned(),
+            device_id: format!("brain-{account_id}"),
+            tx,
+        };
+        let replay = replay
+            .into_iter()
+            .filter(|frame| subscriber.accepts(frame))
+            .collect();
+        subscribers.retain(|subscriber| !subscriber.tx.is_closed());
+        subscribers.push(subscriber);
+        SubscribeResult::Ok {
+            receiver,
+            replay,
+            replay_cursor,
+        }
     }
 
     /// Subscribe to the bus.
@@ -622,6 +693,138 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn person_stdout_survives_bursts_beyond_broadcast_and_replay_capacity() {
+        let bus = EventBus::new();
+        let SubscribeResult::Ok { mut receiver, .. } =
+            bus.subscribe_person(None, now_ms(), "person-a")
+        else {
+            panic!("subscribe");
+        };
+        let chunks = ["{\"usage\":1.", "25,\"text\":\"", "reply\"}"];
+        for chunk in chunks {
+            bus.publish_person_to(
+                "external-agent://stdout".into(),
+                json!({"data":chunk}),
+                "brain-person-a".into(),
+                "person-a".into(),
+            );
+            for _ in 0..(BUFFER_CAPACITY + 1) {
+                bus.publish_person_ephemeral(
+                    "transcript://live".into(),
+                    json!({}),
+                    "person-b".into(),
+                );
+                bus.publish_person_to(
+                    "sync://invalidate".into(),
+                    json!({}),
+                    "device-a".into(),
+                    "person-a".into(),
+                );
+            }
+        }
+        let mut stdout = String::new();
+        for _ in chunks {
+            let frame = receiver
+                .try_recv()
+                .expect("stdout must survive unrelated bursts");
+            stdout.push_str(frame.payload["data"].as_str().unwrap());
+        }
+        assert_eq!(
+            serde_json::from_str::<Value>(&stdout).unwrap(),
+            json!({"usage":1.25,"text":"reply"})
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "no unrelated frames or duplicate stdout"
+        );
+    }
+
+    #[test]
+    fn person_subscription_has_an_exact_replay_live_boundary_during_publication() {
+        let bus = EventBus::new();
+        let publisher = bus.clone();
+        let task = std::thread::spawn(move || {
+            for i in 0..600 {
+                publisher.publish_person_to(
+                    "external-agent://stdout".into(),
+                    json!({"data":i}),
+                    "brain-person-a".into(),
+                    "person-a".into(),
+                );
+            }
+        });
+        let SubscribeResult::Ok {
+            mut receiver,
+            replay,
+            replay_cursor,
+        } = bus.subscribe_person(Some(0), now_ms(), "person-a")
+        else {
+            panic!("subscribe");
+        };
+        task.join().unwrap();
+        assert_eq!(replay_cursor, replay.last().map_or(0, |frame| frame.seq));
+        let mut received = replay;
+        while let Ok(frame) = receiver.try_recv() {
+            received.push(frame);
+        }
+        assert_eq!(received.len(), 600);
+        for (i, frame) in received.iter().enumerate() {
+            assert_eq!(frame.seq, i as u64 + 1);
+            assert_eq!(frame.payload["data"], i);
+        }
+    }
+
+    #[test]
+    fn person_relay_filters_replay_and_ephemeral_frames_and_releases_closed_queues() {
+        let bus = EventBus::new();
+        let own = bus.publish_person_to(
+            "external-agent://stdout".into(),
+            json!({}),
+            "brain-person-a".into(),
+            "person-a".into(),
+        );
+        bus.publish_person_to(
+            "external-agent://stdout".into(),
+            json!({}),
+            "device-a".into(),
+            "person-a".into(),
+        );
+        bus.publish("external-agent://stdout".into(), json!({}));
+        let SubscribeResult::Ok {
+            mut receiver,
+            replay,
+            replay_cursor,
+        } = bus.subscribe_person(Some(0), now_ms(), "person-a")
+        else {
+            panic!("subscribe");
+        };
+        assert_eq!(
+            replay.iter().map(|frame| frame.seq).collect::<Vec<_>>(),
+            vec![own.seq]
+        );
+        assert_eq!(replay_cursor, 3, "boundary includes filtered history");
+        assert!(receiver.try_recv().is_err());
+        bus.publish_person_ephemeral("transcript://live".into(), json!({}), "person-b".into());
+        bus.publish_ephemeral_to(
+            "oauth://callback".into(),
+            json!({}),
+            "brain-person-a".into(),
+        );
+        let ephemeral =
+            bus.publish_person_ephemeral("transcript://live".into(), json!({}), "person-a".into());
+        assert_eq!(receiver.try_recv().unwrap().seq, ephemeral.seq);
+        assert!(receiver.try_recv().is_err());
+        drop(receiver);
+        bus.publish("tick".into(), json!({}));
+        assert!(bus.person_subscribers.lock().is_empty());
+        assert!(matches!(
+            bus.subscribe_person(Some(u64::MAX), now_ms(), "person-a"),
+            SubscribeResult::ResyncRequired
+        ));
+        assert!(bus.person_subscribers.lock().is_empty());
+    }
 
     // ── publish increments seq, buffers frame, broadcasts ────────────────────
 

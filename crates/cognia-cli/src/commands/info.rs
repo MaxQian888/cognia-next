@@ -461,6 +461,15 @@ fn find_custom_section(wasm: &[u8], target_name: &str) -> Option<String> {
             Ok(wasmparser::Chunk::Parsed { consumed, payload }) => {
                 buf = &buf[consumed..];
                 match payload {
+                    wasmparser::Payload::ModuleSection {
+                        unchecked_range, ..
+                    }
+                    | wasmparser::Payload::ComponentSection {
+                        unchecked_range, ..
+                    } => {
+                        let len = (unchecked_range.end - unchecked_range.start) as usize;
+                        buf = buf.get(len..)?;
+                    }
                     wasmparser::Payload::CustomSection(reader) if reader.name() == target_name => {
                         return Some(String::from_utf8_lossy(reader.data()).into_owned());
                     }
@@ -828,6 +837,23 @@ mod tests {
     #[test]
     fn find_custom_section_returns_none_on_non_wasm() {
         assert!(find_custom_section(b"not wasm at all", "cognia:api-version").is_none());
+    }
+
+    #[test]
+    fn find_custom_section_uses_the_outer_component_version() {
+        for (id, header) in [(1, b"\0asm\x01\0\0\0"), (4, b"\0asm\x0d\0\x01\0")] {
+            let nested = crate::engine::packaging::embed_api_version(header, "9.9.9").unwrap();
+            let mut component = b"\0asm\x0d\0\x01\0".to_vec();
+            component.extend([id, nested.len() as u8]);
+            component.extend(nested);
+            assert_eq!(find_custom_section(&component, API_VERSION_SECTION), None);
+            let component =
+                crate::engine::packaging::embed_api_version(&component, "0.2.0").unwrap();
+            assert_eq!(
+                find_custom_section(&component, API_VERSION_SECTION).as_deref(),
+                Some("0.2.0")
+            );
+        }
     }
 
     #[test]

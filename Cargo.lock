@@ -1778,6 +1778,7 @@ dependencies = [
  "cognia-net",
  "cognia-remote-desktop",
  "cognia-secrets",
+ "cognia-task-workspace",
  "core-foundation 0.10.1",
  "core-graphics",
  "dirs 7.0.0",
@@ -1793,7 +1794,6 @@ dependencies = [
  "objc2-app-kit",
  "objc2-application-services",
  "objc2-core-foundation",
- "objc2-foundation",
  "once_cell",
  "parking_lot",
  "rand 0.10.3",
@@ -1802,6 +1802,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "sysinfo",
  "tauri",
  "tauri-plugin-clipboard-manager",
  "tempfile",
@@ -1976,7 +1977,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.30.0",
- "tower",
  "url",
  "uuid",
  "zip",
@@ -2390,11 +2390,14 @@ name = "cognia-desktop-guest"
 version = "0.1.0"
 dependencies = [
  "cognia-exec-sandbox",
+ "fs2",
  "hex",
  "libc",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tokio",
+ "unicode-normalization",
  "uuid",
 ]
 
@@ -2550,7 +2553,6 @@ dependencies = [
  "sha2 0.11.0",
  "tauri",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "unicode-normalization",
@@ -2700,7 +2702,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
- "tempfile",
  "tokio",
 ]
 
@@ -2827,7 +2828,6 @@ dependencies = [
  "tauri",
  "thiserror 2.0.21",
  "tokio",
- "tower",
  "tower-http 0.7.1",
  "uuid",
 ]
@@ -2843,6 +2843,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "uuid",
+ "webp",
 ]
 
 [[package]]
@@ -2853,6 +2854,9 @@ dependencies = [
  "dirs 7.0.0",
  "futures-util",
  "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "rcgen",
  "regex",
  "reqwest 0.13.5",
@@ -2875,11 +2879,9 @@ dependencies = [
 name = "cognia-next"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "anyhow",
  "async-trait",
  "axum",
- "axum-server",
  "base64 0.23.1",
  "block2",
  "bytes",
@@ -2894,7 +2896,6 @@ dependencies = [
  "cognia-companion",
  "cognia-companion-bus",
  "cognia-companion-connectivity",
- "cognia-companion-contract",
  "cognia-companion-rpc",
  "cognia-companion-security",
  "cognia-connectors",
@@ -2906,12 +2907,9 @@ dependencies = [
  "cognia-fleet",
  "cognia-gateway",
  "cognia-git",
- "cognia-git-mirror",
  "cognia-github-runner",
- "cognia-headless-contract",
  "cognia-hooks",
  "cognia-host-installer",
- "cognia-host-service",
  "cognia-instrument",
  "cognia-jobs",
  "cognia-local-browser",
@@ -2948,13 +2946,9 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac 0.13.0",
- "hyper",
- "hyper-util",
- "jsonwebtoken",
  "keyring",
  "libc",
  "liteparse",
- "local-ip-address",
  "log",
  "notify",
  "objc2",
@@ -2966,15 +2960,11 @@ dependencies = [
  "parking_lot",
  "rand 0.10.3",
  "rcgen",
- "regex",
  "reqwest 0.13.5",
- "rusqlite",
  "rustls",
  "schemars 1.2.2",
  "serde",
  "serde_json",
- "serde_urlencoded",
- "sha1 0.11.0",
  "sha2 0.11.0",
  "subtle",
  "sysinfo",
@@ -3005,14 +2995,12 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-tungstenite 0.30.0",
  "toml_edit 0.25.16+spec-1.1.0",
  "tower",
  "tower-http 0.7.1",
  "tracing",
  "url",
  "uuid",
- "wait-timeout",
  "webrtc",
  "windows 0.62.2",
  "wiremock",
@@ -3079,7 +3067,6 @@ dependencies = [
  "log",
  "oar-ocr",
  "objc2",
- "objc2-core-foundation",
  "objc2-foundation",
  "objc2-vision",
  "ocrs",
@@ -3614,7 +3601,6 @@ dependencies = [
  "cognia-secrets",
  "futures-util",
  "log",
- "parking_lot",
  "reqwest 0.13.5",
  "serde",
  "serde_json",
@@ -3665,7 +3651,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "urlencoding",
  "wiremock",
 ]
 
@@ -7153,7 +7138,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -8164,12 +8149,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "leb128"
-version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c83bff1d572d6b9aeef67ddfc8448e4a3737909cb28e81f97c791b9018703e52"
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8358,6 +8337,16 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "libwebp-sys"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54cd30df7c7165ce74a456e4ca9732c603e8dc5e60784558c1c6dc047f876733"
+dependencies = [
+ "cc",
+ "glob",
 ]
 
 [[package]]
@@ -11558,7 +11547,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -15688,7 +15677,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -16514,12 +16502,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "urlencoding"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
-
-[[package]]
 name = "urlpattern"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16903,7 +16885,6 @@ dependencies = [
  "async-trait",
  "bitflags 2.13.2",
  "bumpalo",
- "bytes",
  "cc",
  "encoding_rs",
  "futures",
@@ -17116,7 +17097,6 @@ dependencies = [
  "url",
  "wasmtime",
  "wasmtime-wasi-io",
- "wiggle",
  "windows-sys 0.61.2",
  "winx",
 ]
@@ -17132,15 +17112,6 @@ dependencies = [
  "futures",
  "tracing",
  "wasmtime",
-]
-
-[[package]]
-name = "wast"
-version = "35.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ef140f1b49946586078353a453a1d28ba90adfc54dde75710bc1931de204d68"
-dependencies = [
- "leb128",
 ]
 
 [[package]]
@@ -17308,6 +17279,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "webp"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c071456adef4aca59bf6a583c46b90ff5eb0b4f758fc347cea81290288f37ce1"
+dependencies = [
+ "libwebp-sys",
+]
+
+[[package]]
 name = "webpki-root-certs"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17427,46 +17407,6 @@ name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
-
-[[package]]
-name = "wiggle"
-version = "49.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af3872869836d404f722e2361f869c09630e43a73fcc7060f7892a929b74b6a3"
-dependencies = [
- "bitflags 2.13.2",
- "thiserror 2.0.21",
- "tracing",
- "wasmtime",
- "wasmtime-environ",
- "wiggle-macro",
-]
-
-[[package]]
-name = "wiggle-generate"
-version = "49.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf7e31dec6de37e7e848aecbad54777dd246cd440a1a547ab1a1e31c27f55e49"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "wasmtime-environ",
- "witx",
-]
-
-[[package]]
-name = "wiggle-macro"
-version = "49.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2af323f33b28ea84b24e2bccef19e51c7a75aa1d2929280ad1a4865f2877dcc"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "wiggle-generate",
-]
 
 [[package]]
 name = "wildmatch"
@@ -18172,18 +18112,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "witx"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e366f27a5cabcddb2706a78296a40b8fcc451e1a6aba2fc1d94b4a01bdaaef4b"
-dependencies = [
- "anyhow",
- "log",
- "thiserror 1.0.69",
- "wast",
-]
-
-[[package]]
 name = "wl-clipboard-rs"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18709,7 +18637,6 @@ dependencies = [
  "memchr",
  "nix 0.31.3",
  "typed-path",
- "zopfli",
 ]
 
 [[package]]
@@ -18723,18 +18650,6 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zopfli"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
-dependencies = [
- "bumpalo",
- "crc32fast",
- "log",
- "simd-adler32",
-]
 
 [[package]]
 name = "zstd"

@@ -189,9 +189,27 @@ pub struct SessionMembership {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolDetail {
+    Summary,
+    Full,
+}
+
+impl ToolDetail {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Full => "full",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedSession {
+    pub tool_detail: ToolDetail,
+    pub tool_detail_revision: i64,
     pub contract_version: i32,
     pub id: String,
     pub org_id: String,
@@ -314,6 +332,16 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    #[test]
+    fn tool_detail_wire_values_are_closed_and_lowercase() {
+        for detail in [ToolDetail::Summary, ToolDetail::Full] {
+            let wire = serde_json::to_value(detail).unwrap();
+            assert_eq!(wire, detail.as_str());
+            assert_eq!(serde_json::from_value::<ToolDetail>(wire).unwrap(), detail);
+        }
+        assert!(serde_json::from_str::<ToolDetail>("\"other\"").is_err());
     }
 
     #[test]

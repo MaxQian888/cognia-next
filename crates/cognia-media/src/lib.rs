@@ -16,11 +16,418 @@ use tokio::process::Command;
 
 mod editing;
 
+#[cfg(test)]
+mod animation_sheet_tests {
+    use super::*;
+    #[tokio::test]
+    async fn animation_sheet_rejects_an_unregistered_source_token() {
+        assert!(service::video_animation_sheet(
+            &MediaSourceRegistry::default(),
+            "not-authorized".into(),
+            VideoAnimationSheetOptions {
+                fps: 2,
+                frame_count: 2,
+                max_edge: 64,
+                format: AnimationSheetFormat::Png
+            }
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn animation_sheet_decodes_real_vp8_and_vp9_alpha_and_keeps_legacy_frame_wire() {
+        if std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_err()
+        {
+            eprintln!(
+                "FFmpeg unavailable: real alpha fixture requires the native media dependency"
+            );
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let raw = directory.path().join("source.rgba");
+        let mut pixels = Vec::new();
+        for _ in 0..2 {
+            for _ in 0..64 {
+                for x in 0..64 {
+                    pixels.extend_from_slice(&[
+                        255,
+                        0,
+                        0,
+                        if x < 21 {
+                            0
+                        } else if x < 42 {
+                            128
+                        } else {
+                            255
+                        },
+                    ]);
+                }
+            }
+        }
+        std::fs::write(&raw, pixels).unwrap();
+        for encoder in ["libvpx", "libvpx-vp9"] {
+            let source = directory.path().join(format!("{encoder}.webm"));
+            let generated = std::process::Command::new("ffmpeg")
+                .args([
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "rgba",
+                    "-video_size",
+                    "64x64",
+                    "-framerate",
+                    "2",
+                    "-i",
+                ])
+                .arg(&raw)
+                .args([
+                    "-frames:v",
+                    "2",
+                    "-c:v",
+                    encoder,
+                    "-auto-alt-ref",
+                    "0",
+                    "-pix_fmt",
+                    "yuva420p",
+                    "-threads",
+                    "1",
+                ])
+                .arg(&source)
+                .output()
+                .unwrap();
+            assert!(
+                generated.status.success(),
+                "{}",
+                String::from_utf8_lossy(&generated.stderr)
+            );
+            let registry = MediaSourceRegistry::default();
+            let info = service::video_get_info(&registry, source.to_string_lossy().into_owned())
+                .await
+                .unwrap();
+            for format in [AnimationSheetFormat::Png, AnimationSheetFormat::Webp] {
+                let sheet = service::video_animation_sheet(
+                    &registry,
+                    info.source_token.clone(),
+                    VideoAnimationSheetOptions {
+                        fps: 2,
+                        frame_count: 2,
+                        max_edge: 64,
+                        format,
+                    },
+                )
+                .await
+                .unwrap();
+                let (image, extension) = if format == AnimationSheetFormat::Webp {
+                    assert_eq!(u32::from_le_bytes(sheet[..4].try_into().unwrap()), 128);
+                    assert_eq!(u32::from_le_bytes(sheet[4..8].try_into().unwrap()), 64);
+                    assert_eq!(&sheet[8..12], b"RIFF");
+                    assert_eq!(&sheet[16..20], b"WEBP");
+                    (&sheet[8..], "webp")
+                } else {
+                    assert!(sheet.starts_with(b"\x89PNG\r\n\x1a\n"));
+                    (sheet.as_slice(), "png")
+                };
+                let png = directory.path().join(format!("{encoder}.{extension}"));
+                std::fs::write(&png, image).unwrap();
+                let decoded = std::process::Command::new("ffmpeg")
+                    .args(["-nostdin", "-v", "error", "-i"])
+                    .arg(&png)
+                    .args([
+                        "-frames:v",
+                        "1",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        "rgba",
+                        "-threads",
+                        "1",
+                        "pipe:1",
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(decoded.status.success());
+                assert_eq!(decoded.stdout.len(), 128 * 64 * 4);
+                for cell in [0, 64] {
+                    for (x, alpha) in [(8, 0), (32, 128), (56, 255)] {
+                        // VP8's lossy alpha encoder can quantize the middle band by one.
+                        let actual = decoded.stdout[((32 * 128 + cell + x) * 4) + 3];
+                        assert!(
+                            actual.abs_diff(alpha) <= 2,
+                            "{encoder} alpha at {x}: {actual}"
+                        );
+                    }
+                }
+            }
+            let legacy = service::plugin_media_get_video_frame(&registry, info.source_token, 0.0)
+                .await
+                .unwrap();
+            assert_eq!(legacy.len(), 8 + 64 * 64 * 4);
+        }
+    }
+    fn info() -> NativeVideoInfo {
+        NativeVideoInfo {
+            duration_ms: 10_042,
+            width: 640,
+            height: 360,
+            fps: 24.0,
+            codec: "vp9".into(),
+            file_size: 1,
+            has_audio: false,
+            source_token: String::new(),
+        }
+    }
+    #[test]
+    fn sheet_format_is_additive_and_rejects_unknown_encoders() {
+        let mut request = serde_json::json!({ "fps": 24, "frameCount": 240, "maxEdge": 256 });
+        let old: VideoAnimationSheetOptions = serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(old.format, AnimationSheetFormat::Png);
+        request["format"] = serde_json::json!("webp");
+        let compressed: VideoAnimationSheetOptions =
+            serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(compressed.format, AnimationSheetFormat::Webp);
+        request["format"] = serde_json::json!("unknown");
+        assert!(serde_json::from_value::<VideoAnimationSheetOptions>(request).is_err());
+    }
+    #[test]
+    fn sheet_rejects_oversized_source_before_decode() {
+        let options = VideoAnimationSheetOptions {
+            fps: 24,
+            frame_count: 240,
+            max_edge: 256,
+            format: AnimationSheetFormat::Webp,
+        };
+        for (width, height) in [(8192, 8192), (4097, 16), (16, 4097), (0, 360)] {
+            let mut source = info();
+            source.width = width;
+            source.height = height;
+            assert!(animation_sheet_filter(&source, &options).is_err());
+        }
+    }
+    #[test]
+    fn animation_sheet_preserves_alpha_and_bounds_frame_grid() {
+        let (filter, width, height) = animation_sheet_filter(
+            &info(),
+            &VideoAnimationSheetOptions {
+                fps: 24,
+                frame_count: 241,
+                max_edge: 256,
+                format: AnimationSheetFormat::Png,
+            },
+        )
+        .unwrap();
+        assert_eq!((width, height), (4096, 2304));
+        assert!(filter.contains("format=rgba"));
+        assert!(filter.contains("tile=16x16:nb_frames=241:color=0x00000000"));
+    }
+    #[test]
+    fn animation_sheet_rejects_unbounded_or_inconsistent_requests() {
+        for options in [
+            VideoAnimationSheetOptions {
+                fps: 0,
+                frame_count: 1,
+                max_edge: 256,
+                format: AnimationSheetFormat::Png,
+            },
+            VideoAnimationSheetOptions {
+                fps: 24,
+                frame_count: 361,
+                max_edge: 256,
+                format: AnimationSheetFormat::Png,
+            },
+            VideoAnimationSheetOptions {
+                fps: 24,
+                frame_count: 300,
+                max_edge: 256,
+                format: AnimationSheetFormat::Png,
+            },
+            VideoAnimationSheetOptions {
+                fps: 24,
+                frame_count: 241,
+                max_edge: 257,
+                format: AnimationSheetFormat::Png,
+            },
+        ] {
+            assert!(animation_sheet_filter(&info(), &options).is_err());
+        }
+        let mut long = info();
+        long.duration_ms = 30_000;
+        assert!(animation_sheet_filter(
+            &long,
+            &VideoAnimationSheetOptions {
+                fps: 24,
+                frame_count: 241,
+                max_edge: 256,
+                format: AnimationSheetFormat::Png
+            }
+        )
+        .is_err());
+    }
+}
+
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const FRAME_TIMEOUT: Duration = Duration::from_secs(120);
 const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(600);
 const TRIM_TIMEOUT: Duration = Duration::from_secs(1_200);
 const MAX_FRAME_EDGE: u32 = 2048;
+
+/// Bounded, alpha-preserving sheet for local animated-pet imports. The existing
+/// single-frame wire response is unchanged when this option is absent.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AnimationSheetFormat {
+    #[default]
+    Png,
+    Webp,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoAnimationSheetOptions {
+    pub fps: u32,
+    pub frame_count: u32,
+    pub max_edge: u32,
+    #[serde(default)]
+    pub format: AnimationSheetFormat,
+}
+
+fn animation_sheet_filter(
+    metadata: &NativeVideoInfo,
+    options: &VideoAnimationSheetOptions,
+) -> Result<(String, u32, u32), VideoError> {
+    if !(1..=30).contains(&options.fps)
+        || !(1..=360).contains(&options.frame_count)
+        || !(64..=256).contains(&options.max_edge)
+        || !(1..=4096).contains(&metadata.width)
+        || !(1..=4096).contains(&metadata.height)
+        || metadata.duration_ms == 0
+        || metadata.duration_ms > 15_100
+        || options.frame_count > ((metadata.duration_ms * u64::from(options.fps)) / 1000 + 1) as u32
+    {
+        return Err(VideoError::InvalidInput {
+            message: "animation sheet exceeds frame, duration or resolution limits".into(),
+        });
+    }
+    let (width, height) =
+        calculate_frame_dimensions(metadata.width, metadata.height, options.max_edge);
+    if width == 0 || height == 0 {
+        return Err(VideoError::InvalidMetadata {
+            message: "animation dimensions must be positive".into(),
+        });
+    }
+    let columns = options.frame_count.min(16);
+    let rows = options.frame_count.div_ceil(columns);
+    let sheet_width = width * columns;
+    let sheet_height = height * rows;
+    if u64::from(sheet_width) * u64::from(sheet_height) * 4 > 64 * 1024 * 1024 {
+        return Err(VideoError::InvalidInput {
+            message: "animation sheet exceeds pixel budget".into(),
+        });
+    }
+    Ok((format!("fps={}:round=up,scale={width}:{height},format=rgba,tpad=stop_mode=clone:stop_duration=1,trim=end_frame={},tile={columns}x{rows}:nb_frames={}:color=0x00000000", options.fps, options.frame_count, options.frame_count), sheet_width, sheet_height))
+}
+
+async fn extract_animation_sheet(
+    path: &Path,
+    metadata: &NativeVideoInfo,
+    options: VideoAnimationSheetOptions,
+) -> Result<Vec<u8>, VideoError> {
+    let (filter, width, height) = animation_sheet_filter(metadata, &options)?;
+    let mut args = vec![
+        OsString::from("-nostdin"),
+        OsString::from("-v"),
+        OsString::from("error"),
+    ];
+    // FFmpeg's default VP8/VP9 decoders discard the auxiliary WebM alpha plane.
+    match metadata.codec.as_str() {
+        "vp9" => args.extend([OsString::from("-c:v"), OsString::from("libvpx-vp9")]),
+        "vp8" => args.extend([OsString::from("-c:v"), OsString::from("libvpx")]),
+        _ => {
+            return Err(VideoError::InvalidInput {
+                message: "animated pet source must use VP8 or VP9".into(),
+            })
+        }
+    }
+    args.extend([
+        OsString::from("-threads"),
+        OsString::from("2"),
+        OsString::from("-i"),
+        path.as_os_str().to_owned(),
+        OsString::from("-vf"),
+        OsString::from(filter),
+        OsString::from("-frames:v"),
+        OsString::from("1"),
+        OsString::from("-threads"),
+        OsString::from("1"),
+        OsString::from("-c:v"),
+        OsString::from(if options.format == AnimationSheetFormat::Webp {
+            "rawvideo"
+        } else {
+            "png"
+        }),
+        OsString::from("-f"),
+        OsString::from(if options.format == AnimationSheetFormat::Webp {
+            "rawvideo"
+        } else {
+            "image2pipe"
+        }),
+        OsString::from("pipe:1"),
+    ]);
+    let output = run_process("ffmpeg", &args, FRAME_TIMEOUT).await?;
+    let bytes = output.stdout;
+    if options.format == AnimationSheetFormat::Webp {
+        if bytes.len() as u64 != u64::from(width) * u64::from(height) * 4 {
+            return Err(VideoError::InvalidMetadata {
+                message: "animation decoder returned inconsistent RGBA dimensions".into(),
+            });
+        }
+        return tokio::task::spawn_blocking(move || {
+            let mut config = webp::WebPConfig::new().map_err(|_| VideoError::InvalidMetadata {
+                message: "could not initialize the bundled WebP encoder".into(),
+            })?;
+            config.quality = 85.0;
+            config.alpha_quality = 100;
+            let encoded = webp::Encoder::from_rgba(&bytes, width, height)
+                .encode_advanced(&config)
+                .map_err(|error| VideoError::InvalidMetadata {
+                    message: format!("animation WebP encoding failed: {error:?}"),
+                })?;
+            if encoded.len() > 64 * 1024 * 1024 {
+                return Err(VideoError::InvalidMetadata {
+                    message: "animation encoder exceeded the output budget".into(),
+                });
+            }
+            // WebP can use VP8, VP8L or VP8X headers. Keep dimensions explicit
+            // instead of duplicating its bitstream parser in the WebView.
+            let mut result = Vec::with_capacity(8 + encoded.len());
+            result.extend_from_slice(&width.to_le_bytes());
+            result.extend_from_slice(&height.to_le_bytes());
+            result.extend_from_slice(&encoded);
+            Ok(result)
+        })
+        .await
+        .map_err(|error| VideoError::InvalidMetadata {
+            message: format!("animation encoder task failed: {error}"),
+        })?;
+    }
+    if bytes.len() < 24
+        || bytes.len() > 64 * 1024 * 1024
+        || !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || u32::from_be_bytes(bytes[16..20].try_into().unwrap()) != width
+        || u32::from_be_bytes(bytes[20..24].try_into().unwrap()) != height
+    {
+        return Err(VideoError::InvalidMetadata {
+            message: "animation decoder returned an invalid sheet".into(),
+        });
+    }
+    Ok(bytes)
+}
 
 #[derive(Debug, Error, Serialize)]
 #[serde(tag = "code", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -1088,6 +1495,16 @@ pub mod service {
         Ok(pack_frame_response(frame))
     }
 
+    pub async fn video_animation_sheet(
+        state: &MediaSourceRegistry,
+        source_token: String,
+        options: super::VideoAnimationSheetOptions,
+    ) -> Result<Vec<u8>, VideoError> {
+        let path = state.resolve(&source_token)?;
+        let metadata = probe_video(&path).await?;
+        super::extract_animation_sheet(&path, &metadata, options).await
+    }
+
     /// Encoded frames let the Node brain store images without a DOM canvas.
     pub async fn video_frame_png(
         state: &MediaSourceRegistry,
@@ -1258,7 +1675,13 @@ pub mod commands {
         state: State<'_, MediaSourceRegistry>,
         source_token: String,
         time: f64,
+        animation_sheet: Option<super::VideoAnimationSheetOptions>,
     ) -> Result<Response, VideoError> {
+        if let Some(options) = animation_sheet {
+            return super::service::video_animation_sheet(state.inner(), source_token, options)
+                .await
+                .map(Response::new);
+        }
         super::service::plugin_media_get_video_frame(state.inner(), source_token, time)
             .await
             .map(Response::new)

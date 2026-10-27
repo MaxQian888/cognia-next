@@ -52,7 +52,7 @@
   },
   "wasmMain": "cognia_plugin_template.wasm",
   "wasm": {
-    "apiVersion": "0.2.0",
+    "apiVersion": "0.2.1",
     "memoryLimitMb": 16,
     "callTimeoutMs": 5000
   },

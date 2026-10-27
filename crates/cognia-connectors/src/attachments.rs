@@ -66,6 +66,7 @@ use cognia_net::proxy_config;
 /// constrained devices while covering realistic payloads. Mirrors the
 /// capped-streaming pattern in `media_upload.rs` (100 MiB there).
 const MAX_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
+const MAX_AVATAR_BYTES: usize = 512 * 1024;
 
 /// Remote fetch timeout — same order as `media_upload.rs` (120 s for uploads);
 /// 60 s is plenty for a 50 MiB download without letting a stalled connection
@@ -231,6 +232,15 @@ async fn fetch_attachment_into_with_transform<F>(
 where
     F: FnOnce(Vec<u8>) -> Result<Vec<u8>, String>,
 {
+    // The avatar namespace is display-only and cannot inherit chat media's
+    // redirect policy or larger byte budget. Existing media keeps its policy.
+    let avatar = remote_ref.starts_with("avatar:");
+    let max_bytes = if avatar {
+        validate_avatar_destination(source_url)?;
+        max_bytes.min(MAX_AVATAR_BYTES)
+    } else {
+        max_bytes
+    };
     std::fs::create_dir_all(cache_dir).map_err(|e| format!("create cache dir failed: {e}"))?;
 
     let cache_key = compute_cache_key(adapter_id, &remote_ref);
@@ -241,7 +251,12 @@ where
     // or corrupt entry is removed so the fetch below rewrites it cleanly.
     if enc_path.exists() {
         match read_meta(&enc_path, &cache_key) {
-            Ok(meta) if !meta.is_expired(now) => {
+            Ok(meta)
+                if !meta.is_expired(now)
+                    && (!avatar
+                        || (meta.size_bytes <= max_bytes as u64
+                            && avatar_cached_payload_valid(&enc_path, &cache_key))) =>
+            {
                 let touched = touch_meta(&enc_path, &cache_key, meta, now)?;
                 return Ok(touched.into_ref(remote_ref, true));
             }
@@ -253,45 +268,47 @@ where
         }
     }
 
-    // Cache miss — fetch (proxy-aware, timed out, size-capped), encrypt, write.
-    let client = build_client(source_url)?;
-    let mut request = client.get(source_url);
-    for (name, value) in headers.unwrap_or_default() {
-        request = request.header(name, value);
-    }
-    let mut resp = request
-        .send()
-        .await
-        .map_err(|e| format!("fetch failed: {e}"))?
-        // A non-2xx body (auth error page, rate-limit JSON …) must never be
-        // cached: a cached error body would shadow the real attachment until
-        // its TTL lapsed.
-        .error_for_status()
-        .map_err(|e| format!("fetch failed: {e}"))?;
-
-    // Reject early when the server advertises an oversized body.
-    if let Some(len) = resp.content_length() {
-        if len > max_bytes as u64 {
-            return Err(format!(
-                "attachment is {len} bytes, exceeding the {max_bytes}-byte cap"
-            ));
+    // Avatar downloads use the shared checked-IP proxy/redirect transport.
+    // Existing chat media retains its current client and byte budget.
+    let bytes = if avatar {
+        fetch_avatar_bytes(source_url, headers, max_bytes).await?
+    } else {
+        let client = build_client(source_url)?;
+        let mut request = client.get(source_url);
+        for (name, value) in headers.unwrap_or_default() {
+            request = request.header(name, value);
         }
-    }
-    // Stream with a hard cap so a missing / lying Content-Length can't buffer
-    // an unbounded amount of memory (same pattern as media_upload.rs).
-    let mut bytes: Vec<u8> = Vec::new();
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| format!("body read failed: {e}"))?
-    {
-        if bytes.len() + chunk.len() > max_bytes {
-            return Err(format!("attachment exceeds the {max_bytes}-byte cap"));
+        let mut resp = request
+            .send()
+            .await
+            .map_err(|e| format!("fetch failed: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("fetch failed: {e}"))?;
+        if let Some(len) = resp.content_length() {
+            if len > max_bytes as u64 {
+                return Err(format!(
+                    "attachment is {len} bytes, exceeding the {max_bytes}-byte cap"
+                ));
+            }
         }
-        bytes.extend_from_slice(&chunk);
-    }
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| format!("body read failed: {e}"))?
+        {
+            if bytes.len() + chunk.len() > max_bytes {
+                return Err(format!("attachment exceeds the {max_bytes}-byte cap"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        bytes
+    };
 
     validate_wechat_media_response(&remote_ref, &bytes)?;
+    if avatar {
+        validate_avatar_bytes(&bytes)?;
+    }
 
     // Encrypted Matrix media is transformed here, before the shared at-rest
     // encryption/cache write. Plain fetches pass the identity transform.
@@ -1010,12 +1027,325 @@ fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
     proxy_config::managed_client(builder, target_url).map_err(|error| error.to_string())
 }
 
+fn validate_avatar_destination(source_url: &str) -> Result<(), String> {
+    let url =
+        reqwest::Url::parse(source_url).map_err(|_| "avatar_destination_denied".to_string())?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || cognia_net::guarded_http::host_is_private(source_url)
+    {
+        return Err("avatar_destination_denied".into());
+    }
+    Ok(())
+}
+
+fn validate_avatar_bytes(bytes: &[u8]) -> Result<(), String> {
+    let raster = bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(&[0xff, 0xd8, 0xff])
+        || bytes.starts_with(b"GIF8")
+        || bytes.starts_with(b"BM")
+        || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"));
+    if bytes.len() > MAX_AVATAR_BYTES || !raster {
+        return Err("avatar_content_invalid".into());
+    }
+    Ok(())
+}
+
+fn avatar_cached_payload_valid(path: &Path, cache_key: &str) -> bool {
+    read_payload(path, cache_key).is_ok_and(|bytes| validate_avatar_bytes(&bytes).is_ok())
+}
+
+/// Public pictures may delegate to a checked HTTPS CDN. Telegram embeds the
+/// bot token in its path, so it is confined to the original origin.
+async fn fetch_avatar_bytes(
+    source_url: &str,
+    headers: Option<HashMap<String, String>>,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    use cognia_net::guarded_http::{send_pinned_public, PublicRedirects};
+    tokio::time::timeout(FETCH_TIMEOUT, async {
+        let source = reqwest::Url::parse(source_url).map_err(|_| "avatar_destination_denied")?;
+        let redirects = if source.host_str() == Some("api.telegram.org") {
+            PublicRedirects::SameOrigin
+        } else {
+            PublicRedirects::Delegated
+        };
+        let client = build_avatar_builder(source_url)?
+            .build()
+            .map_err(|_| "avatar_client_failed")?;
+        let mut request = client.get(source_url);
+        for (name, value) in headers.unwrap_or_default() {
+            if !name.eq_ignore_ascii_case("referer")
+                && !name.eq_ignore_ascii_case("x-cognia-avatar-policy")
+            {
+                request = request.header(name, value);
+            }
+        }
+        let response = send_pinned_public(request, redirects, build_avatar_builder, FETCH_TIMEOUT)
+            .await
+            .map_err(|_| "avatar_download_failed")?
+            .error_for_status()
+            .map_err(|_| "avatar_download_failed")?;
+        cognia_net::http_download::read_bounded_response(response, max_bytes)
+            .await
+            .map_err(|_| "avatar_download_failed".to_string())
+    })
+    .await
+    .map_err(|_| "avatar_request_timed_out".to_string())?
+}
+
+fn avatar_profile_request_valid(req: &super::types::TauriHttpRequest) -> bool {
+    if req.method == "GET" {
+        return req.body.is_none();
+    }
+    if req.method != "POST" {
+        return false;
+    }
+    // This is a read-only legacy DingTalk profile API. Other avatar-marked
+    // writes are not accepted by the display-only network boundary.
+    let Ok(url) = reqwest::Url::parse(&req.url) else {
+        return false;
+    };
+    if url.scheme() != "https"
+        || url.host_str() != Some("oapi.dingtalk.com")
+        || url.port_or_known_default() != Some(443)
+        || url.path() != "/topapi/v2/user/get"
+        || !url
+            .query_pairs()
+            .any(|(key, value)| key == "access_token" && !value.is_empty())
+    {
+        return false;
+    }
+    let Some(body) = req.body.as_deref().filter(|body| body.len() <= 2048) else {
+        return false;
+    };
+    let Ok(serde_json::Value::Object(body)) = serde_json::from_str(body) else {
+        return false;
+    };
+    body.len() == 1
+        && body
+            .get("userid")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| {
+                !id.trim().is_empty() && id.len() <= 256 && !id.starts_with("$:LWCP_v1:$")
+            })
+}
+
+/// Profile responses stay within their API origin and use the same checked-IP
+/// transport and bounded reader. Internal policy headers are never forwarded.
+pub(crate) async fn avatar_http_request(
+    mut req: super::types::TauriHttpRequest,
+) -> Result<super::types::TauriHttpResponse, String> {
+    use cognia_net::guarded_http::{send_pinned_public, PublicRedirects};
+    validate_avatar_destination(&req.url)?;
+    if !avatar_profile_request_valid(&req) {
+        return Err("avatar_request_invalid".into());
+    }
+    let timeout = Duration::from_millis(req.timeout_ms.unwrap_or(8000).clamp(1, 30000));
+    tokio::time::timeout(timeout, async move {
+        let client = build_avatar_builder(&req.url)?
+            .build()
+            .map_err(|_| "avatar_client_failed")?;
+        let method = req
+            .method
+            .parse::<reqwest::Method>()
+            .map_err(|_| "avatar_request_invalid")?;
+        let mut request = client.request(method, &req.url);
+        if let Some(body) = req.body.take() {
+            request = request.body(body);
+        }
+        for (name, value) in req.headers.take().unwrap_or_default() {
+            if !name.eq_ignore_ascii_case("x-cognia-avatar-policy")
+                && !name.eq_ignore_ascii_case("referer")
+            {
+                request = request.header(name, value);
+            }
+        }
+        let redirects = if req.method == "POST" {
+            PublicRedirects::None
+        } else {
+            PublicRedirects::SameOrigin
+        };
+        let response = send_pinned_public(request, redirects, build_avatar_builder, timeout)
+            .await
+            .map_err(|_| "avatar_download_failed")?;
+        let status = response.status().as_u16();
+        let bytes = cognia_net::http_download::read_bounded_response(response, MAX_AVATAR_BYTES)
+            .await
+            .map_err(|_| "avatar_response_too_large")?;
+        let body = String::from_utf8(bytes).map_err(|_| "avatar_response_invalid")?;
+        Ok(super::types::TauriHttpResponse {
+            status,
+            body,
+            headers: HashMap::new(),
+        })
+    })
+    .await
+    .map_err(|_| "avatar_request_timed_out".to_string())?
+}
+
+fn build_avatar_builder(target_url: &str) -> Result<reqwest::ClientBuilder, String> {
+    proxy_config::ensure_crypto_provider();
+    let builder = reqwest::Client::builder()
+        .timeout(FETCH_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .referer(false);
+    let (builder, _) = proxy_config::apply_reqwest_policy(builder, target_url)
+        .map_err(|_| "avatar_proxy_policy_failed".to_string())?;
+    Ok(builder)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn avatar_profile_post_is_limited_to_the_readonly_dingtalk_employee_lookup() {
+        let request = |url: &str, method: &str, body: Option<&str>| {
+            serde_json::from_value::<super::super::types::TauriHttpRequest>(serde_json::json!({
+                "url":url,"method":method,"body":body
+            }))
+            .unwrap()
+        };
+        let url = "https://oapi.dingtalk.com/topapi/v2/user/get?access_token=SECRET";
+        assert!(super::avatar_profile_request_valid(&request(
+            url,
+            "POST",
+            Some(r#"{"userid":"staff"}"#)
+        )));
+        for (url, method, body) in [
+            (
+                "https://oapi.dingtalk.com/topapi/v2/user/delete?access_token=SECRET",
+                "POST",
+                Some(r#"{"userid":"staff"}"#),
+            ),
+            (
+                "https://other.example/topapi/v2/user/get?access_token=SECRET",
+                "POST",
+                Some(r#"{"userid":"staff"}"#),
+            ),
+            (url, "DELETE", None),
+            (url, "POST", Some(r#"{"userid":"$:LWCP_v1:$opaque"}"#)),
+            (url, "POST", Some(r#"{"userid":"staff","write":true}"#)),
+            (url, "GET", Some("{}")),
+        ] {
+            assert!(!super::avatar_profile_request_valid(&request(
+                url, method, body
+            )));
+        }
+    }
+
+    #[test]
+    fn avatar_cache_hits_reject_old_nonimage_and_corrupt_payloads() {
+        let dir = tempfile::tempdir().unwrap();
+        for (remote_ref, bytes) in [
+            ("avatar:old-html", b"<html>error</html>".as_slice()),
+            ("avatar:old-svg", b"<svg/>".as_slice()),
+        ] {
+            let key = write_test_envelope(dir.path(), "test-adapter", remote_ref, bytes, 1, 1, 0);
+            assert!(!super::avatar_cached_payload_valid(
+                &dir.path().join(format!("{key}.enc")),
+                &key
+            ));
+        }
+        let key = write_test_envelope(
+            dir.path(),
+            "test-adapter",
+            "avatar:valid",
+            b"\x89PNG\r\n\x1a\n",
+            1,
+            1,
+            0,
+        );
+        let path = dir.path().join(format!("{key}.enc"));
+        assert!(super::avatar_cached_payload_valid(&path, &key));
+        std::fs::write(&path, b"corrupt").unwrap();
+        assert!(!super::avatar_cached_payload_valid(&path, &key));
+    }
+    #[test]
+    fn avatar_content_rejects_error_pages_svg_and_over_budget_bytes() {
+        for bytes in [
+            b"<html>rate limited</html>".as_slice(),
+            b"<svg/>".as_slice(),
+        ] {
+            assert_eq!(
+                super::validate_avatar_bytes(bytes),
+                Err("avatar_content_invalid".into())
+            );
+        }
+        let mut oversized = vec![0; super::MAX_AVATAR_BYTES + 1];
+        oversized[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        assert_eq!(
+            super::validate_avatar_bytes(&oversized),
+            Err("avatar_content_invalid".into())
+        );
+        assert!(super::validate_avatar_bytes(b"\x89PNG\r\n\x1a\n").is_ok());
+    }
+    #[test]
+    fn avatar_sources_require_public_https_without_url_credentials() {
+        for source in [
+            "http://q1.qlogo.cn/g",
+            "https://127.0.0.1/private",
+            "https://localhost/private",
+            "https://user:secret@q1.qlogo.cn/g",
+            "file:///etc/passwd",
+        ] {
+            assert_eq!(
+                super::validate_avatar_destination(source),
+                Err("avatar_destination_denied".into())
+            );
+        }
+        assert!(super::validate_avatar_destination("https://q1.qlogo.cn/g?b=qq").is_ok());
+    }
+
+    #[tokio::test]
+    async fn avatar_fetch_rejects_private_destination_before_a_request() {
+        init_proxy();
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&mock_server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let error = fetch_into(dir.path(), "avatar:blocked", &mock_server.uri(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error, "avatar_destination_denied");
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn avatar_client_does_not_follow_redirects_or_refer_a_signed_path() {
+        init_proxy();
+        let destination = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&destination)
+            .await;
+        let source = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", destination.uri()))
+            .expect(1)
+            .mount(&source)
+            .await;
+        let client = super::build_avatar_builder(&source.uri())
+            .unwrap()
+            .build()
+            .unwrap();
+        let response = client
+            .get(format!("{}/file/botSECRET/avatar", source.uri()))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+        destination.verify().await;
+        source.verify().await;
+    }
     #[test]
     fn wechat_media_errors_are_rejected_before_cache_write() {
         assert!(super::validate_wechat_media_response(

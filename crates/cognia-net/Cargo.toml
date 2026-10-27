@@ -41,6 +41,11 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 rustls-native-certs.workspace = true
 # join_all over the detect-stage probe futures.
 futures-util = { workspace = true }
+# HTTP/1 framing over an IP-pinned CONNECT/SOCKS tunnel; versions are shared
+# with cognia-companion/cognia-docker-proxy and already present in the lockfile.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 # Proxy-client detection: process snapshot + per-client config-file discovery;
 # `network` for `net_meter`'s interface byte counters.
 sysinfo = { workspace = true, features = ["system", "network"] }

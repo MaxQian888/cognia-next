@@ -84,10 +84,18 @@ pub fn map_before(store: &mut WorkspaceStore, root: &ProvenanceRoot, path: &str,
     line_map::carry_forward(&segments, &line_map::diff_lines(&old, bytes).map_err(|e| e.to_string())?, |_| (unknown.clone(), MappingEvidence::Unknown)).map_err(|e| e.to_string())
 }
 
+/// Identity and observation time of one capture operation.
+pub struct CaptureOperation<'a> {
+    pub key: &'a str,
+    pub kind: &'a str,
+    pub now: i64,
+}
+
 /// Build a fully replayable intent and pin every before/after body before writing.
-pub fn prepare(store: &mut WorkspaceStore, root: &ProvenanceRoot, operation_key: &str, kind: &str,
+pub fn prepare(store: &mut WorkspaceStore, root: &ProvenanceRoot, operation: CaptureOperation<'_>,
     paths: &[CapturePath], adoptions: &[AdoptionInput], verification: Verification,
-    patch: Option<&PatchSet>, now: i64) -> std::result::Result<String, String> {
+    patch: Option<&PatchSet>) -> std::result::Result<String, String> {
+    let CaptureOperation { key: operation_key, kind, now } = operation;
     if let Some(intent) = store.provenance().mutation_intent(operation_key).map_err(|e| e.to_string())? {
         if intent.root_id != root.root_id || intent.kind != kind { return Err("capture retry scope differs".into()); }
         let saved: Manifest = serde_json::from_value(intent.manifest).map_err(|e| e.to_string())?;
@@ -338,8 +346,7 @@ fn record_adoption_only(store: &mut WorkspaceStore, patch: &PatchSet, root: &Pat
     let source = run_source(store, &root, patch, None)?;
     let key = format!("{kind}:{}:{}:{}:{revision}", root.root_id, patch.run_id, patch.created_at);
     let adoptions = adoption_units(patch, &source, &[], state);
-    prepare(store, &root, &key, kind, &[], &adoptions, Verification::Disk { root: root.canonical_root.clone() },
-        (state != AdoptionState::Pending).then_some(patch), now)?;
+    prepare(store, &root, CaptureOperation { key: &key, kind, now }, &[], &adoptions, Verification::Disk { root: root.canonical_root.clone() }, (state != AdoptionState::Pending).then_some(patch))?;
     record_applied_patch(store, &key)
 }
 
@@ -352,9 +359,15 @@ pub(crate) fn applied_intent(store: &mut WorkspaceStore, patch: &PatchSet, root_
 
 /// Carry the current map across undo; only restored lines consult the saved
 /// before-map. Independent later changes retain their already observed origins.
+pub(crate) struct MappedContent<'a> {
+    pub bytes: &'a [u8],
+    pub segments: &'a [Segment],
+}
+
 pub(crate) fn undo_map(store: &mut WorkspaceStore, intent: &MutationIntent, path: &str,
-    current: &[u8], current_segments: &[Segment], actual: &[u8], unknown: &str, now: i64,
+    current: MappedContent<'_>, actual: &[u8], unknown: &str, now: i64,
 ) -> std::result::Result<Vec<Segment>, String> {
+    let MappedContent { bytes: current, segments: current_segments } = current;
     let manifest: Manifest = serde_json::from_value(intent.manifest.clone()).map_err(|e| e.to_string())?;
     let saved = manifest.paths.iter().find(|p| p.path == path || p.old_path.as_deref() == Some(path)).ok_or("missing inverse provenance path")?;
     let bytes = saved.before_blob.as_ref().map(|b| store.get_blob(b, now)).transpose()?.unwrap_or_default();
@@ -433,9 +446,8 @@ mod tests {
         let b_map = line_map::carry_forward(&a_map, &line_map::diff_lines(&a, &b).unwrap(),
             |_| ("run-b".into(), MappingEvidence::Exact)).unwrap();
         let persist = |store: &mut WorkspaceStore, key: &str, before: Option<Vec<u8>>, after: &[u8], segments: Vec<Segment>| {
-            prepare(store, &root, key, "test", &[CapturePath { path: "file".into(), old_path: None,
-                before, after: Some(after.to_vec()), segments: Some(segments) }], &[],
-                Verification::Disk { root: root.canonical_root.clone() }, None, 1).unwrap();
+            prepare(store, &root, CaptureOperation { key, kind: "test", now: 1 }, &[CapturePath { path: "file".into(), old_path: None,
+                before, after: Some(after.to_vec()), segments: Some(segments) }], &[], Verification::Disk { root: root.canonical_root.clone() }, None).unwrap();
             std::fs::write(workspace.path().join("file"), after).unwrap();
             record_applied_patch(store, key).unwrap();
         };
@@ -456,7 +468,7 @@ mod tests {
         b_lines[1] = lines[1].clone();
         let reverted = b_lines.concat().into_bytes();
         let intent = store.provenance().mutation_intent("apply-a").unwrap().unwrap();
-        let restored = undo_map(&mut store, &intent, "file", &current, &current_map, &reverted, &unknown, 2).unwrap();
+        let restored = undo_map(&mut store, &intent, "file", MappedContent { bytes: &current, segments: &current_map }, &reverted, &unknown, 2).unwrap();
         let source_at = |line| restored.iter().find(|segment| segment.start_line <= line && segment.end_line > line).unwrap().provenance_id.as_str();
         assert_eq!(source_at(2), "earlier-origin");
         assert_eq!(source_at(18), "run-b");
@@ -478,16 +490,16 @@ mod tests {
         let root = working_root(&mut store, workspace.path()).unwrap();
         let input = CapturePath { path: "a".into(), old_path: None, before: Some(b"before\n".to_vec()), after: Some(b"after\n".to_vec()), segments: None };
         let verification = Verification::Disk { root: root.canonical_root.clone() };
-        prepare(&mut store, &root, "retry", "test", &[input.clone()], &[], verification.clone(), None, 1).unwrap();
+        prepare(&mut store, &root, CaptureOperation { key: "retry", kind: "test", now: 1 }, &[input.clone()], &[], verification.clone(), None).unwrap();
         let mut changed = input.clone();
         changed.after = Some(b"other\n".to_vec());
-        assert!(prepare(&mut store, &root, "retry", "test", &[changed], &[], verification.clone(), None, 2).unwrap_err().contains("payload differs"));
+        assert!(prepare(&mut store, &root, CaptureOperation { key: "retry", kind: "test", now: 2 }, &[changed], &[], verification.clone(), None).unwrap_err().contains("payload differs"));
         let mut remapped = input.clone();
         remapped.segments = Some(vec![Segment { start_line: 1, end_line: 2,
             provenance_id: unknown_source(&mut store, &root).unwrap(), mapping_evidence: MappingEvidence::Exact }]);
-        assert!(prepare(&mut store, &root, "retry", "test", &[remapped], &[], verification.clone(), None, 2).unwrap_err().contains("payload differs"));
+        assert!(prepare(&mut store, &root, CaptureOperation { key: "retry", kind: "test", now: 2 }, &[remapped], &[], verification.clone(), None).unwrap_err().contains("payload differs"));
         let wrong_target = Verification::Disk { root: workspace.path().join("other").to_string_lossy().into_owned() };
-        assert!(prepare(&mut store, &root, "retry", "test", &[input], &[], wrong_target, None, 2).unwrap_err().contains("payload differs"));
+        assert!(prepare(&mut store, &root, CaptureOperation { key: "retry", kind: "test", now: 2 }, &[input], &[], wrong_target, None).unwrap_err().contains("payload differs"));
         reconcile(&mut store).unwrap();
         assert_eq!(store.provenance().mutation("retry").unwrap().unwrap().state, MutationCommitState::ReconcileRequired);
         assert!(store.provenance().current_version(&root.root_id, "a").unwrap().is_none());

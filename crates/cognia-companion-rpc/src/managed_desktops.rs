@@ -834,11 +834,9 @@ async fn execute_input_inner(
             return Err(error);
         }
         let delivery = if let Some(permit) = smoke {
-            service.control_input_smoke(p, &a.desktop_id, a.generation, &a.token,
-                a.fence, &a.frame_id, a.point, a.action, authority, permit).await
+            service.control_input_smoke(p, &a.desktop_id, a.generation, cognia_automation::cua_sandbox::managed::ManagedControlInput { token: &a.token, fence: a.fence, frame_id: &a.frame_id, point: a.point, action: a.action }, authority, permit).await
         } else {
-            service.control_input(p, &a.desktop_id, a.generation, &a.token,
-                a.fence, &a.frame_id, a.point, a.action, authority).await
+            service.control_input(p, &a.desktop_id, a.generation, cognia_automation::cua_sandbox::managed::ManagedControlInput { token: &a.token, fence: a.fence, frame_id: &a.frame_id, point: a.point, action: a.action }, authority).await
         };
         delivery
             .map_err(|error| AutomationError::BackendError {

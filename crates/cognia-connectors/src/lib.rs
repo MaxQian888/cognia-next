@@ -25,6 +25,7 @@ pub mod server_lifecycle;
 pub mod sigverify;
 pub mod state;
 pub mod types;
+pub mod wechat_oa_ingress;
 pub mod ws_client;
 pub mod ws_server;
 

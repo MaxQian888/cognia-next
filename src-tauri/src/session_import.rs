@@ -53,6 +53,8 @@ fn history_read_roots(
             ".cline/sessions",
             ".cline/data",
             ".copilot/session-state",
+            ".local/share/goose/sessions",
+            "Library/Application Support/Block/goose/sessions",
             ".qwen/sessions",
             ".qwen/tmp",
             ".qwen/projects",
@@ -163,6 +165,8 @@ mod tests {
             "/relocated/pi-history",
             "/home/user/.qwen/projects",
             "/home/user/.copilot/session-state",
+            "/home/user/.local/share/goose/sessions",
+            "/home/user/Library/Application Support/Block/goose/sessions",
             "/home/user/.gemini/tmp",
             "/home/user/.continue/sessions",
         ] {
@@ -176,6 +180,7 @@ mod tests {
             "/home/user/.pi/agent/auth.json",
             "/home/user/.qwen/settings.json",
             "/home/user/.cline/auth.json",
+            "/home/user/.config/goose/secrets.yaml",
         ] {
             assert!(
                 !allowed.iter().any(|root| Path::new(path).starts_with(root)),

@@ -95,6 +95,70 @@ pub fn capture_with_policy(
     root: &Path,
     policy: &ResourceTrackingPolicy,
 ) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8>>), String> {
+    capture_with_budget(root, policy, None)
+}
+
+/// Bound reads before allocation, including a file growing after metadata.
+/// Used by replica transport; the ordinary workspace capture keeps its profile.
+#[derive(Default)]
+pub(crate) struct CaptureBudget {
+    pub remaining: u64,
+    pub max_file: u64,
+    pub max_entries: usize,
+}
+impl CaptureBudget {
+    pub fn replica() -> Self {
+        Self {
+            remaining: 32 * 1024 * 1024,
+            max_file: 8 * 1024 * 1024,
+            max_entries: 5000,
+        }
+    }
+}
+pub(crate) fn capture_read(
+    path: &Path,
+    budget: &mut Option<CaptureBudget>,
+) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    if let Some(budget) = budget {
+        let limit = budget.remaining.min(budget.max_file);
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let file = options.open(path).map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file() || metadata.len() > limit {
+            return Err("workspace capture budget exceeded".into());
+        }
+        let mut bytes = Vec::new();
+        file.take(limit + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > limit {
+            return Err("workspace capture budget exceeded".into());
+        }
+        budget.remaining -= bytes.len() as u64;
+        Ok(bytes)
+    } else {
+        fs::read(path).map_err(|e| e.to_string())
+    }
+}
+fn check_capture_entries(entries: usize, budget: &Option<CaptureBudget>) -> Result<(), String> {
+    if budget.as_ref().is_some_and(|b| entries > b.max_entries) {
+        Err("workspace capture entry limit exceeded".into())
+    } else {
+        Ok(())
+    }
+}
+pub(crate) fn capture_with_budget(
+    root: &Path,
+    policy: &ResourceTrackingPolicy,
+    mut budget: Option<CaptureBudget>,
+) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8>>), String> {
     // Every acquisition pays this walk, and it reads each file whole into
     // memory before hashing it, so the span is the one number that says
     // whether provisioning cost is dominated by the snapshot or by git.
@@ -107,7 +171,7 @@ pub fn capture_with_policy(
     // Falls through to the walk below whenever the root is not a usable Git
     // worktree — no repository, an unborn branch, a broken `git`.
     if !policy.self_contained {
-        if let Some(captured) = capture_git_backed(&canonical_root, policy)? {
+        if let Some(captured) = capture_git_backed(&canonical_root, policy, &mut budget)? {
             return Ok(captured);
         }
     }
@@ -125,6 +189,7 @@ pub fn capture_with_policy(
         .follow_links(false);
 
     for item in builder.build() {
+        check_capture_entries(entries.len(), &budget)?;
         let entry = item.map_err(|error| format!("walk {}: {error}", canonical_root.display()))?;
         let path = entry.path();
         if path == canonical_root
@@ -152,10 +217,7 @@ pub fn capture_with_policy(
                 target.to_string_lossy().as_bytes().to_vec(),
             )
         } else if file_type.is_file() {
-            (
-                EntryKind::File,
-                fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?,
-            )
+            (EntryKind::File, capture_read(path, &mut budget)?)
         } else if policy.self_contained {
             return Err(format!(
                 "unsupported scratch archive entry: {}",
@@ -185,9 +247,10 @@ pub fn capture_with_policy(
     let generated_entries = if policy.self_contained {
         BTreeMap::new()
     } else {
-        capture_worktree_includes(&canonical_root, &mut entries, &mut blobs)?;
+        capture_worktree_includes(&canonical_root, &mut entries, &mut blobs, &mut budget)?;
         capture_generated(&canonical_root, &policy.generated_output_roots)?
     };
+    check_capture_entries(entries.len(), &budget)?;
     Ok((
         WorkspaceSnapshot {
             entries,
@@ -340,6 +403,53 @@ fn git_stdout(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
     output.status.success().then_some(output.stdout)
 }
 
+fn capture_git_stdout(
+    root: &Path,
+    args: &[&str],
+    budget: &Option<CaptureBudget>,
+) -> Result<Option<Vec<u8>>, String> {
+    use std::{io::Read, process::Stdio};
+    if budget.is_none() {
+        return Ok(git_stdout(root, args));
+    }
+    let Ok(mut child) = Command::new("git")
+        .args([
+            "--no-optional-locks",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.untrackedCache=false",
+        ])
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    let result = child
+        .stdout
+        .take()
+        .ok_or("git capture pipe")?
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes);
+    if result.is_err() || bytes.len() > 4 * 1024 * 1024 {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("workspace capture metadata budget exceeded".into());
+    }
+    Ok(child
+        .wait()
+        .ok()
+        .filter(|status| status.success())
+        .map(|_| bytes))
+}
+
 /// One row of `git ls-tree -r --long -z`.
 struct GitTreeRow {
     oid: String,
@@ -445,8 +555,9 @@ type GitBackedCapture = (WorkspaceSnapshot, HashMap<String, Vec<u8>>);
 fn capture_git_backed(
     canonical_root: &Path,
     policy: &ResourceTrackingPolicy,
+    budget: &mut Option<CaptureBudget>,
 ) -> Result<Option<GitBackedCapture>, String> {
-    let Some(head) = git_stdout(canonical_root, &["rev-parse", "HEAD"]) else {
+    let Some(head) = capture_git_stdout(canonical_root, &["rev-parse", "HEAD"], budget)? else {
         return Ok(None);
     };
     let commit = String::from_utf8_lossy(&head).trim().to_string();
@@ -459,16 +570,25 @@ fn capture_git_backed(
     // rows carry SHA-256 ids would put two incomparable hash spaces in one
     // entry map, so such a repository takes the walk instead. They are rare;
     // a wrong answer here would not be.
-    match git_stdout(canonical_root, &["rev-parse", "--show-object-format"]) {
+    match capture_git_stdout(
+        canonical_root,
+        &["rev-parse", "--show-object-format"],
+        budget,
+    )? {
         Some(raw) if String::from_utf8_lossy(&raw).trim() != "sha1" => return Ok(None),
         None => return Ok(None),
         _ => {}
     }
     let format = git2::ObjectFormat::Sha1;
-    let Some(tree) = git_stdout(canonical_root, &["ls-tree", "-r", "--long", "-z", &commit]) else {
+    let Some(tree) = capture_git_stdout(
+        canonical_root,
+        &["ls-tree", "-r", "--long", "-z", &commit],
+        budget,
+    )?
+    else {
         return Ok(None);
     };
-    let Some(status) = git_stdout(
+    let Some(status) = capture_git_stdout(
         canonical_root,
         &[
             "status",
@@ -477,7 +597,9 @@ fn capture_git_backed(
             "--untracked-files=all",
             "--no-renames",
         ],
-    ) else {
+        budget,
+    )?
+    else {
         return Ok(None);
     };
 
@@ -485,6 +607,7 @@ fn capture_git_backed(
     let mut blobs: HashMap<String, Vec<u8>> = HashMap::new();
 
     for row in parse_ls_tree(&tree) {
+        check_capture_entries(entries.len(), budget)?;
         let absolute = canonical_root.join(&row.path);
         if excluded(&absolute, canonical_root, &policy.generated_output_roots) {
             continue;
@@ -530,6 +653,7 @@ fn capture_git_backed(
     // Overlay everything the working tree disagrees with HEAD about. This is
     // the only set whose bytes are read, and on a healthy checkout it is tiny.
     for path in parse_status_paths(&status) {
+        check_capture_entries(entries.len(), budget)?;
         let absolute = canonical_root.join(&path);
         if excluded(&absolute, canonical_root, &policy.generated_output_roots) {
             continue;
@@ -548,11 +672,7 @@ fn capture_git_backed(
                 target.to_string_lossy().as_bytes().to_vec(),
             )
         } else if meta.file_type().is_file() {
-            (
-                EntryKind::File,
-                fs::read(&absolute)
-                    .map_err(|error| format!("read {}: {error}", absolute.display()))?,
-            )
+            (EntryKind::File, capture_read(&absolute, budget)?)
         } else {
             continue;
         };
@@ -574,8 +694,9 @@ fn capture_git_backed(
         blobs.entry(hash).or_insert(bytes);
     }
 
-    capture_worktree_includes(canonical_root, &mut entries, &mut blobs)?;
+    capture_worktree_includes(canonical_root, &mut entries, &mut blobs, budget)?;
     let generated_entries = capture_generated(canonical_root, &policy.generated_output_roots)?;
+    check_capture_entries(entries.len(), budget)?;
     Ok(Some((
         WorkspaceSnapshot {
             entries,
@@ -682,10 +803,19 @@ fn capture_worktree_includes(
     root: &Path,
     entries: &mut BTreeMap<String, SnapshotEntry>,
     blobs: &mut HashMap<String, Vec<u8>>,
+    budget: &mut Option<CaptureBudget>,
 ) -> Result<(), String> {
     let allowlist = root.join(".worktreeinclude");
-    let Ok(text) = fs::read_to_string(&allowlist) else {
-        return Ok(());
+    let text = if budget.is_some() {
+        if !allowlist.exists() {
+            return Ok(());
+        }
+        String::from_utf8(capture_read(&allowlist, budget)?).map_err(|e| e.to_string())?
+    } else {
+        let Ok(text) = fs::read_to_string(&allowlist) else {
+            return Ok(());
+        };
+        text
     };
     for (line_index, raw) in text.lines().enumerate() {
         let value = raw.trim().replace('\\', "/");
@@ -737,10 +867,10 @@ fn capture_worktree_includes(
                 if item.path() == candidate || item.file_type().is_some_and(|kind| kind.is_dir()) {
                     continue;
                 }
-                capture_included_entry(root, item.path(), entries, blobs)?;
+                capture_included_entry(root, item.path(), entries, blobs, budget)?;
             }
         } else {
-            capture_included_entry(root, &candidate, entries, blobs)?;
+            capture_included_entry(root, &candidate, entries, blobs, budget)?;
         }
     }
     Ok(())
@@ -751,7 +881,9 @@ fn capture_included_entry(
     path: &Path,
     entries: &mut BTreeMap<String, SnapshotEntry>,
     blobs: &mut HashMap<String, Vec<u8>>,
+    budget: &mut Option<CaptureBudget>,
 ) -> Result<(), String> {
+    check_capture_entries(entries.len(), budget)?;
     let rel = path
         .strip_prefix(root)
         .map_err(|_| format!("included path escapes workspace: {}", path.display()))?;
@@ -783,10 +915,7 @@ fn capture_included_entry(
             target.to_string_lossy().as_bytes().to_vec(),
         )
     } else if metadata.is_file() {
-        (
-            EntryKind::File,
-            fs::read(path).map_err(|error| format!("read included path {rel_path}: {error}"))?,
-        )
+        (EntryKind::File, capture_read(path, budget)?)
     } else {
         return Ok(());
     };
@@ -1149,6 +1278,69 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::fs;
+    #[cfg(unix)]
+    #[test]
+    fn bounded_git_capture_never_executes_repository_fsmonitor_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(root.path())
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success())
+        };
+        git(&["init", "-q"]);
+        fs::write(root.path().join("a"), "source").unwrap();
+        git(&["add", "a"]);
+        git(&[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ]);
+        let hook = root.path().join("monitor");
+        fs::write(&hook, b"#!/bin/sh\ntouch sentinel\nprintf '\\0'\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        git(&["config", "core.fsmonitor", hook.to_str().unwrap()]);
+        let policy = ResourceTrackingPolicy {
+            generated_output_roots: vec![],
+            auto_detect: false,
+            self_contained: false,
+        };
+        let (snapshot, _) =
+            capture_with_budget(root.path(), &policy, Some(CaptureBudget::replica())).unwrap();
+        assert!(matches!(snapshot.base, SnapshotBase::GitCommit { .. }));
+        assert!(!root.path().join("sentinel").exists());
+    }
+    #[test]
+    fn replica_capture_budget_refuses_sparse_files_before_allocating_their_length() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("large");
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(1024 * 1024 * 1024)
+            .unwrap();
+        let mut budget = Some(CaptureBudget::replica());
+        assert!(capture_read(&path, &mut budget)
+            .unwrap_err()
+            .contains("budget exceeded"));
+        assert_eq!(budget.unwrap().remaining, 32 * 1024 * 1024);
+        fs::write(&path, b"1234").unwrap();
+        let mut budget = Some(CaptureBudget {
+            remaining: 6,
+            max_file: 4,
+            max_entries: 2,
+        });
+        assert_eq!(capture_read(&path, &mut budget).unwrap(), b"1234");
+        assert!(capture_read(&path, &mut budget).is_err());
+    }
     use tempfile::TempDir;
 
     #[test]

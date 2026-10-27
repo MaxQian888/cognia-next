@@ -1365,11 +1365,7 @@ fn route_person_respond(state: &SharedState, account_id: &str, bridges: &PersonB
                 _ => return,
             };
             let Some(person) = super::person_partition::fleet().and_then(|fleet| fleet.person(account_id)) else { return; };
-            let Some(store) = super::security_store::security_store() else { return; };
-            let Ok(devices) = store.person_devices(&person.org_id, &person.user_id) else { return; };
-            for device in devices {
-                state.event_bus.publish_person_to(topic.to_string(), event.clone(), device, account_id.to_string());
-            }
+            state.event_bus.publish_person(topic.to_string(), event, person.account_id);
         }
         // The brain's HostState: every confirmed change to its member's
         // conversations. This arm was missing, so the changes were dropped
@@ -1584,8 +1580,8 @@ fn transcript_revision_envelope(event: &Value) -> Option<Value> {
 const TRANSCRIPT_LIVE_TOPIC: &str = "transcript://live";
 /// The largest live reply frame a person brain may publish. The brain keeps
 /// its own frames under 200 KiB (`lib/chat/transcript/live-frames.ts`) and
-/// sends `reset` instead of a bigger one; this is the Host's hard ceiling.
-const TRANSCRIPT_LIVE_MAX_BYTES: usize = 256 * 1024;
+/// sends `reset` instead of a bigger one. The shared contract pins this budget.
+const TRANSCRIPT_LIVE_MAX_BYTES: usize = 200 * 1024;
 /// Ids in a live frame are session and message ids, never content.
 const TRANSCRIPT_LIVE_MAX_ID: usize = 256;
 
@@ -1599,31 +1595,49 @@ const TRANSCRIPT_LIVE_MAX_ID: usize = 256;
 /// the persisted transcript. The frame is rebuilt from these keys only, and a
 /// frame that is malformed, inconsistent or over the size ceiling is refused.
 fn transcript_live_envelope(event: &Value) -> Option<Value> {
-    let id = |key: &str| event.get(key).and_then(Value::as_str)
-        .filter(|id| !id.is_empty() && id.len() <= TRANSCRIPT_LIVE_MAX_ID).map(str::to_string);
+    let id = |key: &str| {
+        event
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty() && id.encode_utf16().count() <= TRANSCRIPT_LIVE_MAX_ID)
+            .map(str::to_string)
+    };
+    // Match JavaScript's Number.isSafeInteger, including JSON numbers like 1.0.
+    let count = |key: &str, minimum: u64| {
+        event.get(key).and_then(Value::as_f64).filter(|value| {
+            *value >= minimum as f64 && *value <= 9_007_199_254_740_991_f64 && value.fract() == 0.0
+        })
+    };
     let (session_id, message_id, reply_to) = (id("sessionId")?, id("messageId")?, id("replyTo")?);
-    let seq = event.get("seq").and_then(Value::as_u64).filter(|seq| *seq >= 1)?;
-    let base = event.get("base").and_then(Value::as_u64)?;
+    let seq = count("seq", 1)? as u64;
+    let base = count("base", 0)? as u64;
     let keyframe = event.get("keyframe").and_then(Value::as_bool)?;
-    let state = event.get("state").and_then(Value::as_str)
+    let state = event
+        .get("state")
+        .and_then(Value::as_str)
         .filter(|state| matches!(*state, "streaming" | "settled" | "reset"))?;
     let parts = event.get("parts").and_then(Value::as_array)?;
     let after_revision = match event.get("afterRevision") {
-        None | Some(Value::Null) => None,
-        Some(value) => Some(value.as_u64().filter(|_| state == "settled")?),
+        None => None,
+        Some(_) if state == "settled" => Some(count("afterRevision", 0)? as u64),
+        Some(_) => return None,
     };
     if parts.iter().any(|part| !part.is_object())
         || (keyframe && base != 0)
         || (state == "settled" && !keyframe)
-        || (state == "reset" && !parts.is_empty()) {
+        || (state == "reset" && !parts.is_empty())
+        || serde_json::to_vec(event).ok()?.len() > TRANSCRIPT_LIVE_MAX_BYTES
+    {
         return None;
     }
     let mut envelope = serde_json::json!({
         "sessionId": session_id, "messageId": message_id, "replyTo": reply_to,
         "seq": seq, "base": base, "keyframe": keyframe, "state": state, "parts": parts,
     });
-    if let Some(revision) = after_revision { envelope["afterRevision"] = Value::from(revision); }
-    (serde_json::to_vec(&envelope).ok()?.len() <= TRANSCRIPT_LIVE_MAX_BYTES).then_some(envelope)
+    if let Some(revision) = after_revision {
+        envelope["afterRevision"] = Value::from(revision);
+    }
+    Some(envelope)
 }
 
 /// Streaming frames closer together than this, per person and session, are
@@ -1831,6 +1845,76 @@ mod tests {
             rate_limiter: rate_limit::RateLimiter::with_defaults(),
             push_tokens: push::PushTokenRegistry::new(),
         })
+    }
+
+    #[test]
+    fn person_invalidations_and_revisions_publish_one_replayable_partition_frame() {
+        let _guard = crate::security_store::test_guard();
+        let person =
+            crate::person_partition::PersonPartition::new("org".into(), "bridge-burst".into());
+        let (_installed, _) =
+            crate::person_partition::person_test_support::Installed::new(vec![person.clone()]);
+        let state = test_state();
+        let bridges = PersonBridges {
+            writes: crate::desktop_writes_bridge::DesktopWritesBridge::new(),
+            messages: crate::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            sync: SyncBridge::new(),
+        };
+        let super::super::event_bus::SubscribeResult::Ok { mut receiver, .. } =
+            state.event_bus.subscribe(None, 0)
+        else {
+            panic!("subscribe");
+        };
+        for (topic, event, expected) in [
+            (
+                "sync://invalidate",
+                json!({"table":"messages"}),
+                json!({"table":"messages"}),
+            ),
+            (
+                TRANSCRIPT_REVISION_TOPIC,
+                json!({"sessionId":"revision-session","revision":4,"parts":["private"]}),
+                json!({"sessionId":"revision-session","revision":4}),
+            ),
+        ] {
+            route_person_respond(
+                &state,
+                &person.account_id,
+                &bridges,
+                "companion_event_publish",
+                json!({"topic":topic,"event":event}),
+            );
+            let frame = receiver.try_recv().expect("one partition frame");
+            assert_eq!(frame.event_type, topic);
+            assert_eq!(frame.payload, expected);
+            assert_eq!(
+                frame.partition_account_id.as_deref(),
+                Some(person.account_id.as_str())
+            );
+            assert!(frame.target_device_id.is_none());
+            assert!(receiver.try_recv().is_err(), "no per-device copies");
+            assert!(crate::person_chat::person_connection_visible(
+                &frame,
+                &format!("brain-{}", person.account_id),
+                Some(&person.account_id)
+            ));
+            assert!(!crate::person_chat::person_connection_visible(
+                &frame,
+                "__service__",
+                Some("operator")
+            ));
+            assert!(!crate::person_chat::person_connection_visible(
+                &frame,
+                "brain-other",
+                Some("other")
+            ));
+        }
+        let super::super::event_bus::SubscribeResult::Ok { replay, .. } =
+            state.event_bus.subscribe(Some(0), 0)
+        else {
+            panic!("replay");
+        };
+        assert_eq!(replay.len(), 2);
     }
 
     /// Bind the bridge route on an ephemeral loopback port. Uses
@@ -2771,6 +2855,29 @@ mod tests {
         route_person_respond(&state, "pb_not_running", &bridges, "companion_host_state_publish",
             json!({"topic":"host-state://action","event":event}));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn transcript_live_frame_v1_contract() {
+        let contract: Value = serde_json::from_str(include_str!(
+            "../../../protocol/transcript-live-frame-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(contract["maxIdLength"], TRANSCRIPT_LIVE_MAX_ID);
+        assert_eq!(contract["maxFrameBytes"], TRANSCRIPT_LIVE_MAX_BYTES);
+        for (index, frame) in contract["valid"].as_array().unwrap().iter().enumerate() {
+            assert!(
+                transcript_live_envelope(frame).is_some(),
+                "rejected valid frame {index}"
+            );
+        }
+        for case in contract["invalid"].as_array().unwrap() {
+            assert!(
+                transcript_live_envelope(&case["frame"]).is_none(),
+                "accepted {}",
+                case["why"]
+            );
+        }
     }
 
     #[test]

@@ -582,7 +582,7 @@ fn build_wasm(
 
     if !skip_build {
         // Preflight the toolchain BEFORE shelling out to cargo so a missing
-        // cargo-component / wasm32-wasip2 target surfaces actionable install
+        // cargo-component / wasm32-wasip1 target surfaces actionable install
         // guidance instead of cargo's bare `no such command: component`.
         if let Err(err) = preflight_wasm_toolchain() {
             if report_mode.emits_json() {
@@ -694,13 +694,17 @@ fn run_cargo_component_build(crate_root: &Path) -> Result<()> {
     cmd.current_dir(crate_root)
         .arg("component")
         .arg("build")
+        // cargo-component adapts this core target into a WASI Preview 2
+        // component. Match preflight even if a Cargo config overrides target.
+        .arg("--target")
+        .arg("wasm32-wasip1")
         .arg("--release");
     run_streaming(cmd, "cargo component build")
 }
 
 /// Probe the host for the WASM build toolchain and bail with an actionable
 /// message if it's incomplete. Checks (a) `cargo component` is runnable and
-/// (b) the `wasm32-wasip2` rustup target is installed (only when `rustup`
+/// (b) the `wasm32-wasip1` rustup target is installed (only when `rustup`
 /// itself is present — non-rustup installs are left to cargo-component).
 fn preflight_wasm_toolchain() -> Result<()> {
     let cargo_component_ok = Command::new("cargo")
@@ -739,11 +743,11 @@ fn wasm_toolchain_problem(
         );
     }
     if let Some(list) = installed_targets {
-        let has_target = list.lines().any(|line| line.trim() == "wasm32-wasip2");
+        let has_target = list.lines().any(|line| line.trim() == "wasm32-wasip1");
         if !has_target {
             return Some(
-                "the wasm32-wasip2 compilation target is not installed.\n\
-                 Add it with:\n    rustup target add wasm32-wasip2\n\
+                "the wasm32-wasip1 compilation target is not installed.\n\
+                 Add it with:\n    rustup target add wasm32-wasip1\n\
                  then re-run `cognia plugin build`."
                     .to_string(),
             );
@@ -868,7 +872,7 @@ mod tests {
 
     #[test]
     fn wasm_preflight_flags_missing_cargo_component() {
-        let problem = wasm_toolchain_problem(false, Some("wasm32-wasip2\n"));
+        let problem = wasm_toolchain_problem(false, Some("wasm32-wasip1\n"));
         let msg = problem.expect("missing cargo-component should be flagged");
         assert!(msg.contains("cargo-component"), "got: {msg}");
         assert!(msg.contains("cargo install"), "got: {msg}");
@@ -881,14 +885,14 @@ mod tests {
             Some("wasm32-unknown-unknown\nx86_64-pc-windows-msvc\n"),
         );
         let msg = problem.expect("missing target should be flagged");
-        assert!(msg.contains("wasm32-wasip2"), "got: {msg}");
+        assert!(msg.contains("wasm32-wasip1"), "got: {msg}");
         assert!(msg.contains("rustup target add"), "got: {msg}");
     }
 
     #[test]
     fn wasm_preflight_passes_when_toolchain_complete() {
         assert!(
-            wasm_toolchain_problem(true, Some("wasm32-wasip2\nx86_64-pc-windows-msvc\n")).is_none()
+            wasm_toolchain_problem(true, Some("wasm32-wasip1\nx86_64-pc-windows-msvc\n")).is_none()
         );
     }
 
@@ -898,6 +902,16 @@ mod tests {
         // the target, only on cargo-component being present.
         assert!(wasm_toolchain_problem(true, None).is_none());
         assert!(wasm_toolchain_problem(false, None).is_some());
+    }
+
+    #[test]
+    fn wasm_preflight_accepts_cargo_component_target() {
+        assert!(wasm_toolchain_problem(true, Some("wasm32-wasip1\n")).is_none());
+    }
+
+    #[test]
+    fn wasm_preflight_rejects_only_the_native_component_target() {
+        assert!(wasm_toolchain_problem(true, Some("wasm32-wasip2\n")).is_some());
     }
 
     #[test]

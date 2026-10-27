@@ -81,9 +81,6 @@ cognia-provider-diagnostics = { path = "../crates/cognia-provider-diagnostics" }
 # discovery, the cloudflared tunnel, reachability/signaling config and the
 # WebRTC peer, envelope and framing. `companion_api` re-exports each module at
 # its old path.
-# ADR-0196 P4 — the companion wire contract (generated command table, settings
-# allowlist, paging); `companion_api` re-exports each module at its old path.
-cognia-companion-contract = { path = "../crates/cognia-companion-contract" }
 cognia-companion-connectivity = { path = "../crates/cognia-companion-connectivity" }
 # ADR-0196 P4 — the companion's event bus, push delivery, store bridges and
 # remote execution contexts. `tauri-host` adds the two Tauri adapters
@@ -100,9 +97,6 @@ cognia-remote-desktop = { path = "../crates/cognia-remote-desktop", features = [
 cognia-companion = { path = "../crates/cognia-companion", features = ["tauri-host"] }
 # Keep-awake assertions; `power_assertion.rs` is its facade (ADR-0196).
 cognia-power = { path = "../crates/cognia-power" }
-# `cognia-server init` / `service` (ADR-0224 A1): the always-on host's master
-# key file and its launchd / systemd service.
-cognia-host-service = { path = "../crates/cognia-host-service" }
 cognia-sidecar = { path = "../crates/cognia-sidecar" }
 cognia-companion-rpc = { path = "../crates/cognia-companion-rpc", features = ["tauri-host"] }
 cognia-github-runner = { path = "../crates/cognia-github-runner" }
@@ -147,7 +141,6 @@ cognia-observability = { path = "../crates/cognia-observability", features = ["d
 # `capabilities/default.json` asks for `log:default`. Dropping it fails the
 # build with `Permission log:default not found`.
 tauri-plugin-log = "2"
-cognia-headless-contract = { path = "../crates/cognia-headless-contract" }
 # ADR-0175. The single error document on every companion plane.
 cognia-problem = { path = "../crates/cognia-problem", features = ["axum"] }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
@@ -206,10 +199,6 @@ cognia-instrument = { path = "../crates/cognia-instrument" }
 # git2/vendored-libgit2 C compile isolates. Re-aliased as `crate::git` in
 # lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
 cognia-git = { path = "../crates/cognia-git", features = ["tauri-host"] }
-# ADR-0176. The shared bare-mirror object cache. This crate owns the
-# credential policy and the git runner that `github/workspace.rs` used to
-# carry itself; the app now only points the cache root at the data dir.
-cognia-git-mirror = { path = "../crates/cognia-git-mirror" }
 cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 # ADR-0067 Tier C — multi-agent MCP config IO (owns `toml_edit`).
 cognia-agents = { path = "../crates/cognia-agents", features = ["tauri-host"] }
@@ -289,7 +278,6 @@ parking_lot.workspace = true
 # ADR-0059 R13 — bollard (docker) and kube moved to
 # `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
 # features below forward to that crate's own features.
-rusqlite = { workspace = true, features = ["backup", "bundled"] }
 # ADR-0067 Tier B — the Matrix E2EE stack (`matrix-sdk-crypto` /
 # `matrix-sdk-sqlite` / `ruma`) moved to `crates/cognia-connectors`; these
 # declarations outlived the move and kept the stack in app_lib's dep graph.
@@ -302,7 +290,6 @@ cognia-vector = { path = "../crates/cognia-vector", features = ["tauri-host"] }
 # ADR-0067 Tier C — `gray_matter` moved to `crates/cognia-files` with the
 # slash-command / skill front-matter parsing; no `src-tauri/src` file
 # references it.
-wait-timeout.workspace = true
 # ADR-0067 Tier B — `portable-pty` moved to `crates/cognia-terminal` together
 # with `src-tauri/src/terminal/` (the path this comment named no longer exists).
 # System font enumeration for the appearance / terminal font pickers
@@ -311,7 +298,6 @@ wait-timeout.workspace = true
 # fixed-pitch families. The webview can't do this (WKWebView has no Local
 # Font Access API).
 fontdb = "0.24"
-regex.workspace = true
 toml_edit = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart", "form"] }
 # `tokio-socks` / `tokio-rustls` were direct declarations no `src-tauri/src`
@@ -335,7 +321,6 @@ bytes.workspace = true
 # target below (windows-native / apple-native / sync-secret-service); the base
 # entry stays default-free so Android/iOS fall back to mock intentionally.
 keyring = { version = "4", default-features = false }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "connect"] }
 uuid = { workspace = true, features = ["v4", "v7"] }
 base64.workspace = true
 # ADR-0067 Tier B — `prost` (the Feishu/Lark `pbbp2.Frame` codec) moved to
@@ -351,31 +336,16 @@ cognia-scheduling = { path = "../crates/cognia-scheduling", features = ["tauri-h
 # bridge): axum for the routers, subtle for constant-time token comparison in
 # the codeserver relay, tower-http for body-size limits.
 axum = { workspace = true, features = ["macros", "multipart", "ws"] }
-hyper = { version = "1", features = ["client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-# axum-server (M2.9) — TLS termination for the companion API. `tls-rustls`
-# pulls in rustls + ring; matches the project's existing tokio-rustls path.
-axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 subtle.workspace = true
 tower = { workspace = true, features = ["util", "limit", "timeout"] }
 tower-http = { workspace = true, features = ["limit", "trace", "cors"] }
 hmac.workspace = true
-sha1 = "0.11"
 sha2.workspace = true
 p256 = { version = "0.14", features = ["ecdsa", "ecdh"] }
 ed25519-dalek.workspace = true
 hex.workspace = true
 url.workspace = true
-aes-gcm = { workspace = true, features = ["aes"] }
 rand.workspace = true
-jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
-serde_urlencoded = "0.7"
-
-# Local IP detection — used by `companion_issue_pair_jwt` to render the
-# QR-encoded LAN URL when the companion server is bound to 0.0.0.0.
-# Falls back to loopback if no usable interface is present (e.g., headless
-# CI). Pure-Rust, MIT-licensed, no transitive system deps.
-local-ip-address = "0.6"
 
 # `notify` watches imported agent-session directories
 # (`session_import_watch.rs`); `flate2` + `tar` read and write the gzipped
@@ -389,7 +359,7 @@ tar.workspace = true
 tempfile.workspace = true
 # Zip archives in `cli_bridge` (plugin bundles the `cognia plugin build` CLI
 # emits) and `codeserver`. Pure-Rust, no system zlib dep.
-zip = { workspace = true, features = ["deflate", "bzip2"] }
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs", "bzip2"] }
 
 # ADR-0067 Tier B — the WASM plugin runtime (ADR-0013) moved to
 # `crates/cognia-plugin-runtime`, which owns `wasmtime`/`wasmtime-wasi`/
@@ -545,9 +515,6 @@ cognia-power = { path = "../crates/cognia-power", features = ["test-support"] }
 # Fleet's test mode (no recovery file, no `git` capture) and the runtime lock
 # the companion RPC tests hold.
 cognia-fleet = { path = "../crates/cognia-fleet", features = ["test-support"] }
-# Host archives laid out like `package-host-archive.mjs` writes them, for the
-# `cognia-server stage` tests.
-cognia-host-service = { path = "../crates/cognia-host-service", features = ["test-support"] }
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)

@@ -1736,10 +1736,12 @@ mod p5_tests {
         let person = PersonPartition::new("org-p5d".into(), "user-p5d".into());
         let mut operator = test_support::install_socket_for_testing(&state);
         let mut personal = test_support::install_person_socket_for_testing(&state, &person.account_id);
+        let other = PersonPartition::new("org-p5d".into(), "other-user-p5d".into());
+        let mut other_personal = test_support::install_person_socket_for_testing(&state, &other.account_id);
         for partitioned in [false, true] {
-            for command in ["host_feature_manifest", "session_attach", "session_detach"] {
+            for command in ["host_feature_manifest", "session_attach", "session_detach", "session_mark_read", "session_mark_unread"] {
                 scope(partitioned.then_some(person.clone()), async {
-                    let args = json!({"sessionId":"s-p5d", "callerDeviceId":"spoofed-device",
+                    let args = json!({"sessionId":"s-p5d", "readThrough":20, "callerDeviceId":"spoofed-device",
                         "callerDeviceGrants":["host.admin"], "callerEventStreams":[{"leaseId":"spoofed-stream"}]});
                     let receive = async {
                         let socket = if partitioned { &mut personal } else { &mut operator };
@@ -1749,7 +1751,7 @@ mod p5_tests {
                         let request = &frame["payload"];
                         assert_eq!(request["command"], command);
                         let payload = &request["payload"];
-                        if partitioned {
+                        if partitioned && !matches!(command, "session_mark_read" | "session_mark_unread") {
                             assert_eq!(payload["callerAccountId"], person.account_id);
                             assert_eq!(payload["callerPartition"], true);
                             assert_eq!(payload["callerDeviceId"], "p5d-dispatch-device");
@@ -1774,6 +1776,7 @@ mod p5_tests {
         }
         assert!(personal.try_recv().is_err());
         assert!(operator.try_recv().is_err());
+        assert!(other_personal.try_recv().is_err(), "unread writes never reach another person's brain");
     }
 
     #[tokio::test]

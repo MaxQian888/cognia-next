@@ -49,6 +49,7 @@ pub struct AccountSecuritySession {
     /// grants and nothing while locked, bound from here rather than trusted
     /// from the renderer.
     file_share: parking_lot::Mutex<Option<std::sync::Arc<cognia_file_share::FileShareService>>>,
+    lume: parking_lot::Mutex<Option<crate::cua_sandbox::CuaSandboxRegistry>>,
     active: parking_lot::RwLock<Option<ActiveAccountSecuritySession>>,
     siwc: parking_lot::Mutex<Option<crate::siwc::SiwcState>>,
     throttle: parking_lot::Mutex<HashMap<String, PasswordThrottleRecord>>,
@@ -70,6 +71,7 @@ impl AccountSecuritySession {
         Self {
             gateway: parking_lot::Mutex::new(None),
             file_share: parking_lot::Mutex::new(None),
+            lume: parking_lot::Mutex::new(None),
             active: parking_lot::RwLock::new(None),
             siwc: parking_lot::Mutex::new(None),
             throttle: parking_lot::Mutex::new(throttle),
@@ -103,6 +105,22 @@ impl AccountSecuritySession {
         }
     }
 
+    pub fn attach_lume(&self, registry: crate::cua_sandbox::CuaSandboxRegistry) {
+        let principal = self
+            .active
+            .read()
+            .as_ref()
+            .map(|session| (session.local_account_id.clone(), session.generation.clone()));
+        registry.set_lume_account(principal);
+        *self.lume.lock() = Some(registry);
+    }
+
+    fn bind_lume(&self, principal: Option<(String, String)>) {
+        if let Some(registry) = self.lume.lock().as_ref() {
+            registry.set_lume_account(principal);
+        }
+    }
+
     fn data_dir(&self) -> Option<&std::path::Path> {
         self.data_dir.as_deref()
     }
@@ -124,6 +142,11 @@ impl AccountSecuritySession {
             generation: uuid::Uuid::new_v4().to_string(),
         });
         self.bind_file_share(Some(local_account_id.to_owned()));
+        self.bind_lume(
+            active
+                .as_ref()
+                .map(|session| (session.local_account_id.clone(), session.generation.clone())),
+        );
     }
 
     fn clear(&self) {
@@ -139,6 +162,7 @@ impl AccountSecuritySession {
         }
         *active = None;
         self.bind_file_share(None);
+        self.bind_lume(None);
     }
 
     fn require_active(&self) -> Result<ActiveAccountSecuritySession, String> {
@@ -905,6 +929,20 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lume_account_hooks_are_safe_from_synchronous_unlock_commands() {
+        let session = super::AccountSecuritySession::new(None);
+        session.attach_lume(crate::cua_sandbox::CuaSandboxRegistry::default());
+        session.activate("lume-fixture", "verifier".into());
+        let previous = session.unlock_generation("lume-fixture").unwrap();
+        session.activate("lume-fixture", "rotated".into());
+        assert!(session
+            .assert_unlock_generation("lume-fixture", &previous)
+            .is_err());
+        session.clear();
+        assert!(session.unlock_generation("lume-fixture").is_err());
+    }
+
     #[test]
     fn siwc_unlock_generation_rejects_lock_and_same_account_reunlock() {
         let session = super::AccountSecuritySession::new(None);

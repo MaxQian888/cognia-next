@@ -59,7 +59,7 @@ pub use host::{WasmPluginHost, WasmPluginState};
 /// The semver of the WIT contract the host links against. Plugins compiled
 /// against a different MAJOR.MINOR are rejected at load time; PATCH is
 /// considered backward-compatible. v0.x bumps minor for breaking changes.
-pub const HOST_API_VERSION: &str = "0.2.0";
+pub const HOST_API_VERSION: &str = "0.2.1";
 
 /// Name of the WASM custom section the build pipeline injects (mirrors
 /// Zed's `zed:api-version`). Read by `engine::parse_plugin_api_version`.
@@ -89,8 +89,8 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     #[test]
-    fn host_api_version_is_0_2_0() {
-        assert_eq!(HOST_API_VERSION, "0.2.0");
+    fn host_api_version_is_0_2_1() {
+        assert_eq!(HOST_API_VERSION, "0.2.1");
     }
 
     #[test]

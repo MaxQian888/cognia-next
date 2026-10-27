@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Files copied from `runtime/deepseek-harness/` into the runtime home.
+/// Files copied from `packages/agent-dsh/runtime/` into the runtime home.
 const RUNTIME_ARTIFACTS: &[&str] = &[
     "package.json",
     "launcher.mjs",
@@ -115,7 +115,16 @@ pub fn host_node_version() -> String {
         .unwrap_or_default()
 }
 
-/// Where the shipped `runtime/deepseek-harness/` artifacts live on this host.
+#[cfg(any(feature = "tauri-host", test))]
+fn source_dir_from_root(root: &Path) -> Option<PathBuf> {
+    // Array-form Tauri resources encode the source's `../` as `_up_/`.
+    [root.to_path_buf(), root.join("_up_")]
+        .into_iter()
+        .map(|base| base.join("packages/agent-dsh/runtime"))
+        .find(|candidate| candidate.is_dir())
+}
+
+/// Where the shipped `packages/agent-dsh/runtime/` artifacts live on this host.
 ///
 /// Bundled as a Tauri resource in a packaged app; in `tauri dev` the resource
 /// dir holds no such folder, so fall back to the repo checkout via the
@@ -125,8 +134,7 @@ pub fn host_node_version() -> String {
 pub fn host_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("runtime").join(RUNTIME_DIR);
-        if candidate.is_dir() {
+        if let Some(candidate) = source_dir_from_root(&resource_dir) {
             return Ok(candidate);
         }
     }
@@ -134,8 +142,7 @@ pub fn host_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .parent()
         .and_then(|p| p.parent())
     {
-        let candidate = root.join("runtime").join(RUNTIME_DIR);
-        if candidate.is_dir() {
+        if let Some(candidate) = source_dir_from_root(root) {
             return Ok(candidate);
         }
     }
@@ -426,6 +433,37 @@ pub fn remove_runtime(data_root: &Path, active_session_count: u32) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_dir_resolves_direct_and_tauri_parent_resource_layouts() {
+        for prefix in ["", "_up_"] {
+            let root = tempfile::tempdir().unwrap();
+            let source = root.path().join(prefix).join("packages/agent-dsh/runtime");
+            std::fs::create_dir_all(&source).unwrap();
+            seed_source(&source);
+            assert_eq!(source_dir_from_root(root.path()), Some(source));
+        }
+    }
+
+    #[test]
+    fn source_dir_is_absent_without_the_managed_runtime_payload() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(source_dir_from_root(root.path()), None);
+    }
+
+    #[test]
+    fn package_owned_source_contains_every_install_artifact() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let source = source_dir_from_root(&root).expect("package-owned DSH runtime source");
+        for artifact in RUNTIME_ARTIFACTS {
+            assert!(source.join(artifact).is_file(), "missing {artifact}");
+        }
+    }
 
     fn seed_source(dir: &Path) {
         for artifact in RUNTIME_ARTIFACTS {

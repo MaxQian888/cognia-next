@@ -17,8 +17,10 @@
 //! `lib/ai/agent/external/runtime-version.ts`, shared by every host — the same
 //! split `dsh_runtime` uses, and for the same reason.
 
+use std::io::Read;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -68,7 +70,8 @@ pub struct RuntimeVersionProbe {
     pub output: Option<String>,
     /// The executable that was actually run, after PATH resolution.
     pub executable_path: Option<String>,
-    /// SHA-256 of that executable. Absent for package runners, where the
+    /// SHA-256 of that executable, or the Antigravity server/helper composite
+    /// identity. Absent for package runners, where the
     /// resolved file is `npx`, not the runtime — recording npx's digest as the
     /// runtime's identity would make every unpinned runtime look stable while
     /// the package under it changed on every launch.
@@ -90,6 +93,47 @@ fn entry(runtime_id: &str) -> Option<&'static CatalogEntry> {
         .runtimes
         .iter()
         .find(|entry| entry.runtime_id == runtime_id)
+}
+
+fn selected_codebuff_node(
+    configured: Option<Result<PathBuf, String>>,
+    registered: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    let node = match configured {
+        Some(result) => result?,
+        None => registered.ok_or(
+            "Codebuff requires Cognia's configured host Node runtime; PATH Node is not used",
+        )?,
+    };
+    if !node.is_absolute() {
+        return Err("Codebuff host Node runtime must be absolute".into());
+    }
+    node.canonicalize()
+        .map_err(|error| format!("Codebuff host Node unavailable: {error}"))
+}
+
+fn resolve_probe_program(entry: &CatalogEntry) -> Result<Option<PathBuf>, String> {
+    if entry.runtime_id != "codebuff" {
+        return Ok(entry
+            .system_command
+            .as_deref()
+            .and_then(super::command_resolver::resolve_command_path));
+    }
+    let spec = entry
+        .version_probe
+        .as_ref()
+        .ok_or("Codebuff host Node version probe missing")?;
+    if entry.system_command.as_deref() != Some("node") || spec.args != ["--version"] {
+        return Err("Codebuff host Node probe must be exactly node --version".into());
+    }
+    let configured = cognia_core::node_runtime::configured_node_executable()
+        .map(|result| result.map_err(|error| error.to_string()));
+    let registered = if configured.is_none() {
+        crate::native_bridge::registered_host_node("codebuff")?
+    } else {
+        None
+    };
+    selected_codebuff_node(configured, registered).map(Some)
 }
 
 /// Is this command a package runner rather than the runtime's own executable?
@@ -120,9 +164,55 @@ fn truncate_output(mut text: String) -> String {
     text
 }
 
-fn digest_of(path: &PathBuf) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    Some(hex::encode(Sha256::digest(bytes)))
+fn digest_reader(mut reader: impl Read, cancelled: &AtomicBool) -> Option<String> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
+        let read = match reader.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return None,
+        };
+        if read == 0 {
+            return Some(hex::encode(hasher.finalize()));
+        }
+        hasher.update(&buffer[..read]);
+    }
+}
+
+fn digest_of(path: &PathBuf, cancelled: &AtomicBool) -> Option<String> {
+    digest_reader(std::fs::File::open(path).ok()?, cancelled)
+}
+
+/// Antigravity executes a companion from the same release. Consent must bind
+/// both byte sequences, not merely the ACP wrapper that starts the companion.
+fn runtime_digest_of(
+    program: &PathBuf,
+    helper: Option<&PathBuf>,
+    cancelled: &AtomicBool,
+) -> Option<String> {
+    let server_digest = digest_of(program, cancelled)?;
+    match helper {
+        None => Some(server_digest),
+        Some(helper) => {
+            let helper_digest = digest_of(helper, cancelled)?;
+            let identity = format!("antigravity-acp-v1\n{server_digest}\n{helper_digest}\n");
+            Some(hex::encode(Sha256::digest(identity.as_bytes())))
+        }
+    }
+}
+
+/// A cancelled future cannot abort a running spawn_blocking closure. Ask its
+/// bounded read loop to stop, including when the caller drops the whole probe.
+struct CancelIdentityOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelIdentityOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Run one runtime's catalogued version probe.
@@ -151,7 +241,16 @@ pub async fn probe_runtime_version(runtime_id: &str) -> Result<RuntimeVersionPro
         });
     };
 
-    let Some(resolved) = super::command_resolver::resolve_command_path(command) else {
+    let resolved = match resolve_probe_program(entry) {
+        Ok(path) => path,
+        Err(detail) => {
+            return Ok(RuntimeVersionProbe {
+                detail: Some(detail),
+                ..Default::default()
+            });
+        }
+    };
+    let Some(resolved) = resolved else {
         return Ok(RuntimeVersionProbe {
             detail: Some(format!(
                 "{command} is not on PATH or any known install root"
@@ -160,14 +259,50 @@ pub async fn probe_runtime_version(runtime_id: &str) -> Result<RuntimeVersionPro
         });
     };
 
-    let executable_path = resolved.to_string_lossy().into_owned();
-    let executable_digest = if is_package_runner(command) {
-        None
-    } else {
-        digest_of(&resolved)
+    let unresolved_path = resolved.to_string_lossy().into_owned();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancel_on_drop = CancelIdentityOnDrop(cancelled.clone());
+    let identity = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let helper = super::command_resolver::antigravity_harness_path(&resolved)?;
+        let path = if helper.is_some() {
+            resolved.canonicalize().map_err(|error| error.to_string())?
+        } else {
+            resolved
+        };
+        let digest = if is_package_runner(command) {
+            None
+        } else {
+            runtime_digest_of(&path, helper.as_ref(), &cancelled)
+        };
+        Ok((path.to_string_lossy().into_owned(), helper, digest))
+    });
+    let identity_result =
+        match tokio::time::timeout(Duration::from_millis(spec.timeout_ms), identity).await {
+            Ok(joined) => joined
+                .map_err(|error| format!("runtime identity task failed: {error}"))
+                .and_then(|identity| identity),
+            Err(_) => Err(format!(
+                "runtime identity timed out after {}ms",
+                spec.timeout_ms
+            )),
+        };
+    let (executable_path, antigravity_helper, executable_digest) = match identity_result {
+        Ok(identity) => identity,
+        Err(detail) => {
+            return Ok(RuntimeVersionProbe {
+                output: Some(String::new()),
+                executable_path: Some(unresolved_path),
+                detail: Some(detail),
+                ..RuntimeVersionProbe::default()
+            });
+        }
     };
+    drop(cancel_on_drop);
 
-    let mut cmd = tokio::process::Command::new(&resolved);
+    let mut cmd = tokio::process::Command::new(&executable_path);
+    if let Some(helper) = antigravity_helper {
+        cmd.env("ANTIGRAVITY_HARNESS_PATH", helper);
+    }
     cmd.args(&spec.args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -309,7 +444,20 @@ async fn detect_one(entry: &'static CatalogEntry) -> DetectedRuntime {
             )),
         };
     }
-    let Some(resolved) = super::command_resolver::resolve_command_path(command) else {
+    let resolved = match resolve_probe_program(entry) {
+        Ok(path) => path,
+        Err(detail) => {
+            return DetectedRuntime {
+                runtime_id: runtime_id.into(),
+                command: Some(command.into()),
+                resolution: RUNTIME_MISSING.into(),
+                executable_path: None,
+                version_output: None,
+                detail: Some(detail),
+            };
+        }
+    };
+    let Some(resolved) = resolved else {
         return DetectedRuntime {
             runtime_id: runtime_id.to_string(),
             command: Some(command.to_string()),
@@ -361,7 +509,115 @@ pub async fn detect_runtimes() -> DetectedRuntimesReport {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn codebuff_uses_configured_or_registered_host_node_without_path_fallback() {
+        let configured = tempfile::NamedTempFile::new().unwrap();
+        let registered = tempfile::NamedTempFile::new().unwrap();
+        assert_eq!(
+            selected_codebuff_node(
+                Some(Ok(configured.path().to_path_buf())),
+                Some(registered.path().to_path_buf())
+            )
+            .unwrap(),
+            configured.path().canonicalize().unwrap()
+        );
+        assert_eq!(
+            selected_codebuff_node(None, Some(registered.path().to_path_buf())).unwrap(),
+            registered.path().canonicalize().unwrap()
+        );
+        assert!(
+            selected_codebuff_node(
+                Some(Err("configured runtime unavailable".into())),
+                Some(registered.path().to_path_buf())
+            )
+            .unwrap_err()
+            .contains("unavailable")
+        );
+        assert!(
+            selected_codebuff_node(None, None)
+                .unwrap_err()
+                .contains("PATH Node is not used")
+        );
+        assert!(selected_codebuff_node(Some(Ok(PathBuf::from("node"))), None).is_err());
+        let codebuff = entry("codebuff").unwrap();
+        assert_eq!(codebuff.system_command.as_deref(), Some("node"));
+        assert_eq!(codebuff.version_probe.as_ref().unwrap().args, ["--version"]);
+    }
     use super::*;
+
+    #[test]
+    fn antigravity_consent_digest_changes_when_the_companion_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let server = temp.path().join("agy_acp_server.par");
+        let helper = temp.path().join("localharness_external");
+        std::fs::write(&server, "server-v1").unwrap();
+        std::fs::write(&helper, "helper-v1").unwrap();
+        let cancelled = AtomicBool::new(false);
+        let before = runtime_digest_of(&server, Some(&helper), &cancelled).unwrap();
+        let identity = format!(
+            "antigravity-acp-v1\n{}\n{}\n",
+            digest_of(&server, &cancelled).unwrap(),
+            digest_of(&helper, &cancelled).unwrap()
+        );
+        assert_eq!(before, hex::encode(Sha256::digest(identity.as_bytes())));
+        std::fs::write(&helper, "helper-v2").unwrap();
+        assert_ne!(
+            runtime_digest_of(&server, Some(&helper), &cancelled).unwrap(),
+            before
+        );
+        std::fs::remove_file(&helper).unwrap();
+        assert!(runtime_digest_of(&server, Some(&helper), &cancelled).is_none());
+    }
+
+    #[test]
+    fn identity_hashing_reads_bounded_chunks_and_observes_cancellation() {
+        struct Chunked<'a> {
+            cancelled: &'a AtomicBool,
+            reads: usize,
+            stop_after_first: bool,
+        }
+        impl Read for Chunked<'_> {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                assert!(buffer.len() <= 64 * 1024);
+                self.reads += 1;
+                if self.reads > 2 {
+                    return Ok(0);
+                }
+                buffer.fill(b'x');
+                if self.stop_after_first {
+                    self.cancelled.store(true, Ordering::Relaxed);
+                }
+                Ok(buffer.len())
+            }
+        }
+        let cancelled = AtomicBool::new(false);
+        let reader = Chunked {
+            cancelled: &cancelled,
+            reads: 0,
+            stop_after_first: false,
+        };
+        assert_eq!(
+            digest_reader(reader, &cancelled),
+            Some(hex::encode(Sha256::digest(vec![b'x'; 128 * 1024])))
+        );
+        let mut reader = Chunked {
+            cancelled: &cancelled,
+            reads: 0,
+            stop_after_first: true,
+        };
+        assert!(digest_reader(&mut reader, &cancelled).is_none());
+        assert_eq!(reader.reads, 1);
+    }
+
+    #[test]
+    fn dropping_probe_identity_work_requests_cooperative_cancellation() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let guard = CancelIdentityOnDrop(cancelled.clone());
+        assert!(!cancelled.load(Ordering::Relaxed));
+        drop(guard);
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert!(digest_reader(std::io::empty(), &cancelled).is_none());
+    }
 
     #[tokio::test]
     async fn detection_answers_for_every_catalogued_runtime_in_catalog_order() {
@@ -536,9 +792,12 @@ mod tests {
         let file = dir.path().join("runtime");
         std::fs::write(&file, b"abc").unwrap();
         assert_eq!(
-            digest_of(&file).as_deref(),
+            digest_of(&file, &AtomicBool::new(false)).as_deref(),
             Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         );
-        assert_eq!(digest_of(&dir.path().join("missing")), None);
+        assert_eq!(
+            digest_of(&dir.path().join("missing"), &AtomicBool::new(false)),
+            None
+        );
     }
 }

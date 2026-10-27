@@ -26,9 +26,72 @@ use super::bridge::{CancelReason, WasmRendererResponse};
 use super::host::{
     ActivateOutcome, ActivatedPlugin, WasmManifestSlice, WasmPluginHost, WasmPluginSnapshot,
 };
-use super::store::{deadline_from_timeout_ms, HostState};
+use super::store::HostState;
 use super::wit::since_v0_2;
 use super::WasmPluginState;
+
+/// Epoch checks yield back to the async executor; the outer wall-clock timer
+/// owns the deadline. A host import must be able to lower its TIMEOUT response
+/// without immediately trapping in canonical ABI allocation.
+fn prepare_async_store(store: &mut wasmtime::Store<HostState>) {
+    store.set_epoch_deadline(1);
+    store.epoch_deadline_async_yield_and_update(1);
+}
+
+struct PendingActivation {
+    state: WasmPluginState,
+    plugin_id: String,
+    generation: String,
+    cancellation: super::capabilities::process::ProcessCancellation,
+}
+
+struct RetainedCallGuard {
+    state: WasmPluginState,
+    plugin_id: String,
+    instance: Arc<tokio::sync::Mutex<ActivatedPlugin>>,
+    cancellation: super::capabilities::process::ProcessCancellation,
+    completed: bool,
+}
+
+fn remove_instance_if_current<T>(
+    entries: &parking_lot::RwLock<std::collections::HashMap<String, Arc<T>>>,
+    plugin_id: &str,
+    expected: &Arc<T>,
+) -> bool {
+    let mut entries = entries.write();
+    if entries
+        .get(plugin_id)
+        .is_some_and(|current| Arc::ptr_eq(current, expected))
+    {
+        entries.remove(plugin_id);
+        true
+    } else {
+        false
+    }
+}
+
+impl Drop for RetainedCallGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.cancellation.cancel();
+            remove_instance_if_current(&self.state.activated, &self.plugin_id, &self.instance);
+        }
+    }
+}
+
+impl Drop for PendingActivation {
+    fn drop(&mut self) {
+        let mut loaded = self.state.loaded.write();
+        if let Some(entry) = loaded
+            .get_mut(&self.plugin_id)
+            .filter(|entry| entry.generation == self.generation)
+        {
+            entry
+                .pending_activations
+                .retain(|pending| !pending.same_execution(&self.cancellation));
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,7 +162,13 @@ fn granted_permissions(runtime: &PluginRuntimeState, plugin_id: &str) -> Vec<Str
         .permissions
         .read()
         .get(plugin_id)
-        .map(|grants| grants.iter().map(|g| g.permission.clone()).collect())
+        .map(|grants| {
+            grants
+                .iter()
+                .filter(|grant| !crate::grant_expired(grant))
+                .map(|g| g.permission.clone())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -162,10 +231,10 @@ pub async fn plugin_wasm_activate_generation_for_state(
     // their locks across the `.await` below. The typed pre-instantiation
     // handle (built once at load) carries the linker + import resolution, so
     // per call we only build a fresh permission-scoped Store and instantiate.
-    let (manifest, plugin_api_version, plugin_pre) = {
-        let map = state.loaded.read();
+    let (manifest, plugin_api_version, plugin_pre, process_cancel) = {
+        let mut map = state.loaded.write();
         let entry = map
-            .get(&plugin_id)
+            .get_mut(&plugin_id)
             .ok_or_else(|| format!("plugin not loaded: {plugin_id}"))?;
         if entry.generation != generation {
             return Err(format!("stale WASM generation for {plugin_id}"));
@@ -176,13 +245,27 @@ pub async fn plugin_wasm_activate_generation_for_state(
             .get(&plugin_id)
             .cloned()
             .ok_or_else(|| format!("plugin not instantiable (no pre): {plugin_id}"))?;
+        let pending = super::capabilities::process::ProcessCancellation::default();
+        // Supersede earlier pending initializations without stopping the
+        // working instance until this candidate successfully commits.
+        for previous in &entry.pending_activations {
+            previous.cancel();
+        }
+        entry.pending_activations.push(pending.clone());
         (
             entry.manifest.clone(),
             entry.plugin_api_version.clone(),
             plugin_pre,
+            pending,
         )
     };
 
+    let _pending = PendingActivation {
+        state: state.clone(),
+        plugin_id: plugin_id.clone(),
+        generation: generation.clone(),
+        cancellation: process_cancel.clone(),
+    };
     let perms = granted_permissions(runtime, &plugin_id);
     let shell_allow = granted_shell_commands(runtime, &plugin_id);
     let data_dir = runtime.plugin_dir(&plugin_id).join("data");
@@ -195,31 +278,46 @@ pub async fn plugin_wasm_activate_generation_for_state(
         services,
     )?;
 
-    let bindings = plugin_pre
-        .instantiate_async(&mut store)
-        .await
-        .map_err(|e| format!("instantiate component: {e}"))?;
-
-    // Call init(config bytes) and bubble guest errors back to TS.
-    let config_bytes = config_json.into_bytes();
-    bindings
-        .call_init(&mut store, &config_bytes)
-        .await
-        .map_err(|e| format!("guest init host error: {e}"))?
-        .map_err(|e| format!("guest init returned error: {e}"))?;
+    store.data_mut().process_cancel = process_cancel.clone();
+    store.data_mut().process_grants = Some(super::capabilities::process::LiveProcessGrants::new(
+        runtime, &plugin_id,
+    ));
+    prepare_async_store(&mut store);
+    let timeout_ms = store.data().call_timeout_ms;
+    let initialize = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async {
+        let bindings = plugin_pre
+            .instantiate_async(&mut store)
+            .await
+            .map_err(|e| format!("instantiate component: {e}"))?;
+        bindings
+            .call_init(&mut store, config_json.as_bytes())
+            .await
+            .map_err(|e| format!("guest init host error: {e}"))?
+            .map_err(|e| format!("guest init returned error: {e}"))?;
+        Ok::<_, String>(bindings)
+    });
+    let bindings = tokio::select! {
+        biased;
+        _ = process_cancel.cancelled() => return Err("CANCELLED: WASM activation was stopped".into()),
+        result = initialize => result.map_err(|_| "TIMEOUT: WASM activation exceeded its deadline".to_string())??,
+    };
 
     // Retain the live post-init instance so subsequent calls reuse it (state set
     // up in `init` persists) instead of re-instantiating a fresh, un-init'd
     // store. Replaces any prior activation for this id (re-activate = reset).
     let call_timeout_ms = store.data().call_timeout_ms;
-    if state
-        .loaded
-        .read()
+    let mut loaded = state.loaded.write();
+    if loaded
         .get(&plugin_id)
         .is_none_or(|entry| entry.generation != generation)
     {
         return Err(format!("stale WASM generation for {plugin_id}"));
     }
+    if process_cancel.is_cancelled() {
+        return Err("CANCELLED: plugin was stopped during activation".into());
+    }
+    let entry = loaded.get_mut(&plugin_id).expect("generation was checked");
+    entry.commit_activation(&process_cancel);
     state.activated.write().insert(
         plugin_id.clone(),
         Arc::new(tokio::sync::Mutex::new(ActivatedPlugin {
@@ -270,20 +368,18 @@ pub async fn plugin_wasm_deactivate_generation_for_state(
     plugin_id: String,
     generation: String,
 ) -> Result<bool, String> {
-    let activated = state.activated.read().get(&plugin_id).cloned();
-    if let Some(current) = &activated {
-        let guard = current.lock().await;
-        if guard.generation != generation {
-            return Err(format!("stale WASM generation for {plugin_id}"));
-        }
-    }
-    let loaded = state.loaded.read();
-    if loaded
+    // Never acquire the instance mutex before signalling cancellation: the
+    // running host import holds it while waiting for a process or renderer.
+    let loaded = state.loaded.write();
+    let entry = loaded
         .get(&plugin_id)
-        .is_none_or(|entry| entry.generation != generation)
-    {
-        return Err(format!("stale WASM generation for {plugin_id}"));
+        .filter(|entry| entry.generation == generation)
+        .ok_or_else(|| format!("stale WASM generation for {plugin_id}"))?;
+    entry.process_cancel.cancel();
+    for pending in &entry.pending_activations {
+        pending.cancel();
     }
+    let activated = state.activated.read().get(&plugin_id).cloned();
     // Cancel first, THEN drop. An in-flight bridge round trip holds the
     // instance's async mutex for up to 30 s; without this the store stays alive
     // (and the guest stays blocked) long after the user disabled the plugin.
@@ -296,13 +392,7 @@ pub async fn plugin_wasm_deactivate_generation_for_state(
     // component stays loaded so a later activate is cheap. Returns whether the
     // plugin is still loaded (mirrors the prior contract).
     if let Some(current) = activated {
-        let mut entries = state.activated.write();
-        if entries
-            .get(&plugin_id)
-            .is_some_and(|entry| Arc::ptr_eq(entry, &current))
-        {
-            entries.remove(&plugin_id);
-        }
+        remove_instance_if_current(&state.activated, &plugin_id, &current);
     }
     Ok(true)
 }
@@ -450,11 +540,38 @@ pub async fn plugin_wasm_call_generation_for_state(
             if ap.generation != generation {
                 return Err(format!("stale WASM generation for {plugin_id}"));
             }
-            // The retained store's epoch countdown was consumed by prior calls;
-            // reset it so THIS call gets a full timeout window.
-            let deadline = deadline_from_timeout_ms(ap.call_timeout_ms);
-            ap.store.set_epoch_deadline(deadline);
-            dispatch_export(&ap.bindings, &mut ap.store, &export_name, &payload_bytes).await
+            if !state
+                .activated
+                .read()
+                .get(&plugin_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &activated))
+            {
+                return Err(format!("WASM activation changed for {plugin_id}"));
+            }
+            let mut running = RetainedCallGuard {
+                state: state.clone(),
+                plugin_id: plugin_id.clone(),
+                instance: activated.clone(),
+                cancellation: ap.store.data().process_cancel.clone(),
+                completed: false,
+            };
+            ap.store.data_mut().capabilities = granted_permissions(runtime, &plugin_id)
+                .into_iter()
+                .collect();
+            ap.store.data_mut().shell_allowlist = granted_shell_commands(runtime, &plugin_id);
+            prepare_async_store(&mut ap.store);
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(ap.call_timeout_ms),
+                dispatch_export(&ap.bindings, &mut ap.store, &export_name, &payload_bytes),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                Err(DispatchError::Trap(
+                    "TIMEOUT: WASM call exceeded its deadline".into(),
+                ))
+            });
+            running.completed = true;
+            result
             // `guard` (and its &mut into the Store) drops here.
         };
         return match result {
@@ -466,14 +583,7 @@ pub async fn plugin_wasm_call_generation_for_state(
                     // instead of reusing indeterminate guest memory. A stateful
                     // guest must be re-activated to restore its state (the
                     // poisoned state was unusable anyway).
-                    let should_remove = state
-                        .activated
-                        .read()
-                        .get(&plugin_id)
-                        .is_some_and(|current| Arc::ptr_eq(current, &activated));
-                    if should_remove {
-                        state.activated.write().remove(&plugin_id);
-                    }
+                    remove_instance_if_current(&state.activated, &plugin_id, &activated);
                 }
                 Err(err.into_message())
             }
@@ -484,7 +594,7 @@ pub async fn plugin_wasm_call_generation_for_state(
     // throw-away store + instance for this one call from the cached pre. This
     // does NOT run `init`, so a stateful guest should be activated first; kept
     // for ad-hoc exports.
-    let (manifest, plugin_pre) = {
+    let (manifest, plugin_pre, process_cancel) = {
         let map = state.loaded.read();
         let entry = map
             .get(&plugin_id)
@@ -498,7 +608,11 @@ pub async fn plugin_wasm_call_generation_for_state(
             .get(&plugin_id)
             .cloned()
             .ok_or_else(|| format!("plugin not instantiable (no pre): {plugin_id}"))?;
-        (entry.manifest.clone(), plugin_pre)
+        (
+            entry.manifest.clone(),
+            plugin_pre,
+            entry.process_cancel.clone(),
+        )
     };
 
     let perms = granted_permissions(runtime, &plugin_id);
@@ -513,17 +627,24 @@ pub async fn plugin_wasm_call_generation_for_state(
         services,
     )?;
 
-    let bindings = plugin_pre
-        .instantiate_async(&mut store)
-        .await
-        .map_err(|e| format!("instantiate component: {e}"))?;
-
-    // Throw-away store — a trap here poisons nothing retained, so both error
-    // classes collapse to a plain message.
-    let bytes = dispatch_export(&bindings, &mut store, &export_name, &payload_bytes)
-        .await
-        .map_err(DispatchError::into_message)?;
-    Ok(encode_output(bytes))
+    store.data_mut().process_cancel = process_cancel.clone();
+    store.data_mut().process_grants = Some(super::capabilities::process::LiveProcessGrants::new(
+        runtime, &plugin_id,
+    ));
+    prepare_async_store(&mut store);
+    let timeout_ms = store.data().call_timeout_ms;
+    tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async {
+        let bindings = plugin_pre
+            .instantiate_async(&mut store)
+            .await
+            .map_err(|e| format!("instantiate component: {e}"))?;
+        let bytes = dispatch_export(&bindings, &mut store, &export_name, &payload_bytes)
+            .await
+            .map_err(DispatchError::into_message)?;
+        Ok(encode_output(bytes))
+    })
+    .await
+    .map_err(|_| "TIMEOUT: WASM call exceeded its deadline".to_string())?
 }
 
 /// Extract a `"kind": "..."` field from a JSON payload byte slice for the
@@ -615,6 +736,113 @@ pub async fn plugin_wasm_list_for_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_cleanup_preserves_a_replacement_instance() {
+        let old = Arc::new(());
+        let replacement = Arc::new(());
+        let entries = parking_lot::RwLock::new(std::collections::HashMap::from([(
+            "plugin".to_string(),
+            replacement.clone(),
+        )]));
+        assert!(!remove_instance_if_current(&entries, "plugin", &old));
+        assert!(Arc::ptr_eq(
+            entries.read().get("plugin").unwrap(),
+            &replacement
+        ));
+        assert!(remove_instance_if_current(&entries, "plugin", &replacement));
+        assert!(entries.read().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_a_generation_cancels_its_process_but_stale_stops_do_not() {
+        use super::super::capabilities::process::{execute, ExecOptions};
+        use super::super::host::LoadedPlugin;
+        for unload in [false, true] {
+            let state = WasmPluginState::default();
+            let manifest: WasmManifestSlice = serde_json::from_value(serde_json::json!({
+                "id":"process-stop", "version":"1.0.0", "wasmMain":"plugin.wasm",
+                "wasm":{"apiVersion":"0.2.0"}
+            }))
+            .unwrap();
+            let cancellation = super::super::capabilities::process::ProcessCancellation::default();
+            state.loaded.write().insert(
+                "process-stop".into(),
+                LoadedPlugin {
+                    generation: "current".into(),
+                    process_cancel: cancellation.clone(),
+                    pending_activations: vec![],
+                    manifest,
+                    plugin_path: PathBuf::new(),
+                    component: wasmtime::component::Component::from_binary(
+                        super::super::engine::engine(),
+                        b"\0asm\x0d\0\x01\0",
+                    )
+                    .unwrap(),
+                    plugin_api_version: "0.2.0".into(),
+                },
+            );
+            let stale = if unload {
+                plugin_wasm_unload_generation_for_state(
+                    &state,
+                    "process-stop".into(),
+                    "stale".into(),
+                )
+                .await
+            } else {
+                plugin_wasm_deactivate_generation_for_state(
+                    &state,
+                    "process-stop".into(),
+                    "stale".into(),
+                )
+                .await
+            };
+            assert!(stale.unwrap_err().contains("stale"));
+            assert!(
+                !cancellation.is_cancelled(),
+                "stale teardown cannot stop the current generation"
+            );
+            let mut host = super::super::store::test_host_state("process-stop", &["process:spawn"]);
+            host.shell_allowlist = vec!["sleep".into()];
+            host.process_cancel = cancellation.clone();
+            let task = tokio::spawn(async move {
+                execute(
+                    &mut host,
+                    "/bin/sleep".into(),
+                    vec!["10".into()],
+                    ExecOptions::default(),
+                    Some(vec![]),
+                )
+                .await
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            if unload {
+                plugin_wasm_unload_generation_for_state(
+                    &state,
+                    "process-stop".into(),
+                    "current".into(),
+                )
+                .await
+                .unwrap();
+            } else {
+                plugin_wasm_deactivate_generation_for_state(
+                    &state,
+                    "process-stop".into(),
+                    "current".into(),
+                )
+                .await
+                .unwrap();
+            }
+            assert!(cancellation.is_cancelled());
+            let error = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert!(error.starts_with("CANCELLED:"));
+        }
+    }
 
     #[test]
     fn extract_kind_returns_kind_field() {

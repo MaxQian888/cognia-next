@@ -9,7 +9,7 @@ use tokio_postgres::Row;
 
 use crate::chat::{
     authorize_session_action, SessionAction, SessionEvent, SessionMembership, SessionRole,
-    SessionStatus, SharedSession,
+    SessionStatus, SharedSession, ToolDetail,
 };
 use crate::store::{PgStore, StoreError};
 
@@ -27,6 +27,7 @@ pub struct NewSharedSession {
 
 #[derive(Debug, Clone)]
 pub struct NewSessionEvent {
+    pub tool_detail_revision: Option<u64>,
     pub id: String,
     pub org_id: String,
     pub workspace_id: String,
@@ -222,9 +223,70 @@ pub struct NewChatRunQueueItem {
     pub operation_id: String,
 }
 
+/// A run's write identity; admission is repeated under each store's resource lock.
+pub struct RunWrite<'a> {
+    pub org_id: &'a str,
+    pub session_id: &'a str,
+    pub run_id: &'a str,
+    pub token_hash: &'a str,
+    pub now: i64,
+}
+
+impl<'a> RunWrite<'a> {
+    fn event(input: &'a NewSessionEvent, run_id: &'a str, token_hash: &'a str) -> Self {
+        Self {
+            org_id: &input.org_id,
+            session_id: &input.session_id,
+            run_id,
+            token_hash,
+            now: input.now,
+        }
+    }
+}
+
+const LIVE_REQUIREMENTS: &[(FeatureKey, Requirement)] = &[
+    (FeatureKey::SharedChatExecution, Requirement::Write),
+    (FeatureKey::SharedChat, Requirement::Write),
+];
+
+fn run_requirements(input: &NewSessionEvent) -> Vec<(FeatureKey, Requirement)> {
+    let mut requirements = vec![(FeatureKey::SharedChatExecution, event_requirement(input))];
+    if input.kind.starts_with("message.") {
+        requirements.push((FeatureKey::SharedChat, Requirement::Write));
+    }
+    requirements
+}
+
+fn require_tool_detail_manager(member: Option<&SessionMembership>) -> Result<(), StoreError> {
+    if member.is_some_and(|m| matches!(m.role, SessionRole::Owner | SessionRole::Maintainer)) {
+        Ok(())
+    } else {
+        Err(StoreError::Policy(
+            "tool detail requires owner or maintainer".into(),
+        ))
+    }
+}
+
+fn check_tool_detail(session: &SharedSession, revision: Option<u64>) -> Result<(), StoreError> {
+    if revision.is_some_and(|revision| revision < session.tool_detail_revision as u64) {
+        return Err(conflict(serde_json::json!({
+            "reason":"tool_detail_stale", "toolDetail":session.tool_detail,
+            "toolDetailRevision":session.tool_detail_revision,
+        })));
+    }
+    Ok(())
+}
+
 #[async_trait]
 #[allow(clippy::too_many_arguments)]
 pub trait ChatStore: Send + Sync {
+    /// Validate one ephemeral publication; never inserts or updates a row.
+    async fn admit_live_frame(
+        &self,
+        input: RunWrite<'_>,
+        message_id: &str,
+        tool_detail_revision: u64,
+    ) -> Result<(), StoreError>;
     async fn admit_session_write(&self, org: &str, session: &str) -> Result<(), StoreError>;
     /// Read/drain delivery bypasses rollout while retaining the pinned contract.
     async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError>;
@@ -241,6 +303,7 @@ pub trait ChatStore: Send + Sync {
         session_id: &str,
         title: Option<&str>,
         status: Option<SessionStatus>,
+        tool_detail: Option<(ToolDetail, &str)>,
         operation_id: &str,
         base_revision: i64,
         now: i64,
@@ -586,6 +649,38 @@ impl InMemoryChatStore {
         Ok(report)
     }
 
+    fn admit_run_write(
+        tables: &crate::store::Tables,
+        input: &RunWrite<'_>,
+        requirements: &[(FeatureKey, Requirement)],
+    ) -> Result<(), StoreError> {
+        let holder = tables
+            .chat
+            .leases
+            .values()
+            .find(|(lease, org, token, _)| {
+                org == input.org_id
+                    && lease.session_id == input.session_id
+                    && lease.run_id == input.run_id
+                    && token == input.token_hash
+                    && lease.status == "active"
+                    && lease.token_expires_at > input.now
+                    && lease.heartbeat_expires_at > input.now
+            })
+            .map(|(lease, _, _, _)| lease.holder_user_id.clone())
+            .ok_or(StoreError::NotFound)?;
+        if !can_act(
+            memory_member(tables, input.org_id, input.session_id, &holder).as_ref(),
+            SessionAction::StartRun,
+        ) {
+            return Err(StoreError::NotFound);
+        }
+        for &(feature, requirement) in requirements {
+            admission::memory_chat(tables, input.org_id, input.session_id, feature, requirement)?;
+        }
+        Ok(())
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -885,6 +980,34 @@ pub(crate) async fn pg_revoke_member_work(
 
 #[async_trait]
 impl ChatStore for InMemoryChatStore {
+    async fn admit_live_frame(
+        &self,
+        input: RunWrite<'_>,
+        message_id: &str,
+        tool_detail_revision: u64,
+    ) -> Result<(), StoreError> {
+        let tables = self.tables.read();
+        Self::admit_run_write(&tables, &input, LIVE_REQUIREMENTS)?;
+        let session = tables
+            .chat
+            .sessions
+            .get(input.session_id)
+            .ok_or(StoreError::NotFound)?;
+        check_tool_detail(session, Some(tool_detail_revision))?;
+        let events = tables
+            .chat
+            .events
+            .get(input.session_id)
+            .ok_or(StoreError::NotFound)?;
+        if events.iter().any(|e| {
+            e.kind == "message.redacted"
+                && e.payload["targetMessageId"].as_str() == Some(message_id)
+        }) {
+            return Err(conflict(serde_json::json!({"reason":"message_redacted"})));
+        }
+        Ok(())
+    }
+
     async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError> {
         admission::memory_chat(&self.tables.read(), org, session, FeatureKey::SharedChat, Requirement::ContractOnly)
     }
@@ -907,6 +1030,8 @@ impl ChatStore for InMemoryChatStore {
             return tables.chat.sessions.get(id).cloned().ok_or(StoreError::NotFound);
         }
         let session = SharedSession {
+            tool_detail: crate::chat::ToolDetail::Summary,
+            tool_detail_revision: 0,
             contract_version: crate::admission::COLLAB_PROTOCOL_VERSION as i32,
             id: input.id,
             org_id: input.org_id.clone(),
@@ -964,12 +1089,18 @@ impl ChatStore for InMemoryChatStore {
         session_id: &str,
         title: Option<&str>,
         status: Option<SessionStatus>,
+        tool_detail: Option<(ToolDetail, &str)>,
         operation_id: &str,
         base_revision: i64,
         now: i64,
     ) -> Result<SharedSession, StoreError> {
         let mut tables = self.tables.write();
         admission::memory_chat(&tables, org_id, session_id, FeatureKey::SharedChat, if status == Some(SessionStatus::Deleting) { Requirement::ContractOnly } else if status == Some(SessionStatus::Active) && tables.chat.sessions.get(session_id).is_some_and(|s| s.status == SessionStatus::Importing) { Requirement::New } else { Requirement::Write })?;
+        if let Some((_, actor)) = tool_detail {
+            require_tool_detail_manager(
+                memory_member(&tables, org_id, session_id, actor).as_ref(),
+            )?;
+        }
         if let Some(id) = tables
             .chat.operations
             .get(&(org_id.to_owned(), operation_id.to_owned()))
@@ -989,6 +1120,14 @@ impl ChatStore for InMemoryChatStore {
         }
         if let Some(status) = status {
             session.status = status;
+        }
+        if let Some((detail, _)) = tool_detail {
+            if session.tool_detail != detail {
+                session.tool_detail = detail;
+                session.tool_detail_revision += 1;
+            } else if title.is_none() && status.is_none() {
+                return Ok(session.clone());
+            }
         }
         session.revision += 1;
         session.policy_revision += 1;
@@ -1345,6 +1484,24 @@ impl ChatStore for InMemoryChatStore {
             })
             .ok_or(StoreError::NotFound)?;
         let events = tables.chat.events.entry(input.session_id.clone()).or_default();
+        if input.kind == "message.corrected" {
+            if let Some(target) = input
+                .payload
+                .get("targetMessageId")
+                .and_then(serde_json::Value::as_str)
+            {
+                if events.iter().any(|event| {
+                    event.kind == "message.redacted"
+                        && event
+                            .payload
+                            .get("targetMessageId")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(target)
+                }) {
+                    return Err(conflict(serde_json::json!({"reason":"message_redacted"})));
+                }
+            }
+        }
         if let Some(existing) = events
             .iter()
             .find(|event| event.operation_id == input.operation_id)
@@ -1392,25 +1549,19 @@ impl ChatStore for InMemoryChatStore {
         token_hash: &str,
     ) -> Result<SessionEvent, StoreError> {
         let mut tables = self.tables.write();
-        let holder = tables
-            .chat.leases
-            .values()
-            .find(|(lease, org, token, _)| {
-                org == &input.org_id
-                    && lease.session_id == input.session_id
-                    && lease.run_id == run_id
-                    && token == token_hash
-                    && lease.status == "active"
-                    && lease.token_expires_at > input.now
-                    && lease.heartbeat_expires_at > input.now
-            })
-            .map(|(lease, _, _, _)| lease.holder_user_id.clone())
-            .ok_or(StoreError::NotFound)?;
-        if !can_act(memory_member(&tables, &input.org_id, &input.session_id, &holder).as_ref(), SessionAction::StartRun) {
-            return Err(StoreError::NotFound);
+        Self::admit_run_write(
+            &tables,
+            &RunWrite::event(&input, run_id, token_hash),
+            &run_requirements(&input),
+        )?;
+        if matches!(input.kind.as_str(), "message.created" | "message.corrected") {
+            let session = tables
+                .chat
+                .sessions
+                .get(&input.session_id)
+                .ok_or(StoreError::NotFound)?;
+            check_tool_detail(session, input.tool_detail_revision)?;
         }
-        admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, event_requirement(&input))?;
-        if input.kind.starts_with("message.") { admission::memory_chat(&tables, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write)?; }
         tables
             .chat.sessions
             .get(&input.session_id)
@@ -1419,6 +1570,24 @@ impl ChatStore for InMemoryChatStore {
             })
             .ok_or(StoreError::NotFound)?;
         let events = tables.chat.events.entry(input.session_id.clone()).or_default();
+        if input.kind == "message.corrected" {
+            if let Some(target) = input
+                .payload
+                .get("targetMessageId")
+                .and_then(serde_json::Value::as_str)
+            {
+                if events.iter().any(|event| {
+                    event.kind == "message.redacted"
+                        && event
+                            .payload
+                            .get("targetMessageId")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(target)
+                }) {
+                    return Err(conflict(serde_json::json!({"reason":"message_redacted"})));
+                }
+            }
+        }
         if let Some(existing) = events
             .iter()
             .find(|event| event.operation_id == input.operation_id)
@@ -2326,6 +2495,12 @@ impl ChatStore for InMemoryChatStore {
 
 fn session_from_row(row: &Row) -> Result<SharedSession, StoreError> {
     Ok(SharedSession {
+        tool_detail: match row.get::<_, String>("tool_detail").as_str() {
+            "summary" => ToolDetail::Summary,
+            "full" => ToolDetail::Full,
+            other => return Err(StoreError::Corrupt(format!("unknown tool detail {other}"))),
+        },
+        tool_detail_revision: row.get("tool_detail_revision"),
         contract_version: row.get("contract_version"),
         id: row.get("id"),
         org_id: row.get("org_id"),
@@ -2404,7 +2579,7 @@ fn qualified_session_columns() -> String {
         .join(", ")
 }
 
-const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision, contract_version";
+const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision, contract_version, tool_detail, tool_detail_revision";
 pub(crate) const MEMBER_JOINS: &str = "FROM chat_session_memberships m JOIN chat_sessions s ON s.org_id=m.org_id AND s.id=m.session_id LEFT JOIN users u ON u.id=m.user_id LEFT JOIN org_memberships om ON om.org_id=s.org_id AND om.user_id=m.user_id LEFT JOIN workspace_memberships wm ON wm.org_id=s.org_id AND wm.workspace_id=s.workspace_id AND wm.user_id=m.user_id";
 
 pub(crate) fn effective_member_from_row(row: &Row) -> Result<Option<SessionMembership>, StoreError> {
@@ -2512,6 +2687,42 @@ enum InviteKey<'a> {
 }
 
 impl PgStore {
+    async fn admit_run_write(
+        &self,
+        tx: &tokio_postgres::Transaction<'_>,
+        input: &RunWrite<'_>,
+        requirements: &[(FeatureKey, Requirement)],
+    ) -> Result<SharedSession, StoreError> {
+        tx.query_opt(
+            "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
+            &[&input.org_id, &input.session_id],
+        )
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?
+        .ok_or(StoreError::NotFound)?;
+        let holder: String = tx.query_opt("SELECT holder_user_id FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 AND run_id=$3 AND token_hash=$4 AND status='active' AND token_expires_at>$5 AND heartbeat_expires_at>$5 FOR UPDATE", &[&input.org_id,&input.session_id,&input.run_id,&input.token_hash,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?.get(0);
+        if !can_act(
+            pg_member(tx, input.org_id, input.session_id, &holder)
+                .await?
+                .as_ref(),
+            SessionAction::StartRun,
+        ) {
+            return Err(StoreError::NotFound);
+        }
+        for &(feature, requirement) in requirements {
+            self.admit_chat(tx, input.org_id, input.session_id, feature, requirement)
+                .await?;
+        }
+        let row = tx
+            .query_one(
+                &format!("SELECT {SESSION_COLUMNS} FROM chat_sessions WHERE org_id=$1 AND id=$2"),
+                &[&input.org_id, &input.session_id],
+            )
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+        session_from_row(&row)
+    }
+
     async fn accept_invite_by(
         &self,
         org_id: &str,
@@ -2565,6 +2776,23 @@ impl PgStore {
 
 #[async_trait]
 impl ChatStore for PgStore {
+    async fn admit_live_frame(
+        &self,
+        input: RunWrite<'_>,
+        message_id: &str,
+        tool_detail_revision: u64,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, input.org_id).await?;
+        let session = self.admit_run_write(&tx, &input, LIVE_REQUIREMENTS).await?;
+        check_tool_detail(&session, Some(tool_detail_revision))?;
+        if tx.query_opt("SELECT id FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND kind='message.redacted' AND payload->>'targetMessageId'=$3 LIMIT 1", &[&input.org_id,&input.session_id,&message_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.is_some() {
+            return Err(conflict(serde_json::json!({"reason":"message_redacted"})));
+        }
+        // Dropping this read-only transaction persists nothing.
+        Ok(())
+    }
+
     async fn admit_session_contract(&self, org: &str, session: &str) -> Result<(), StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org).await?;
@@ -2642,6 +2870,7 @@ impl ChatStore for PgStore {
         session_id: &str,
         title: Option<&str>,
         status: Option<SessionStatus>,
+        tool_detail: Option<(ToolDetail, &str)>,
         operation_id: &str,
         base_revision: i64,
         now: i64,
@@ -2657,6 +2886,9 @@ impl ChatStore for PgStore {
             .map_err(|error| StoreError::Database(error.to_string()))?
             .ok_or(StoreError::NotFound)?;
         self.admit_chat(&tx, org_id, session_id, FeatureKey::SharedChat, if status == Some(SessionStatus::Deleting) { Requirement::ContractOnly } else if status == Some(SessionStatus::Active) && existing.get::<_, String>("status") == "importing" { Requirement::New } else { Requirement::Write }).await?;
+        if let Some((_, actor)) = tool_detail {
+            require_tool_detail_manager(pg_member(&tx, org_id, session_id, actor).await?.as_ref())?;
+        }
         if existing.get::<_, String>("last_operation_id") == operation_id {
             return session_from_row(&existing);
         }
@@ -2664,11 +2896,18 @@ impl ChatStore for PgStore {
         if current.revision != base_revision {
             return Err(conflict(current));
         }
+        if tool_detail.is_some_and(|(detail, _)| detail == current.tool_detail)
+            && title.is_none()
+            && status.is_none()
+        {
+            return Ok(current);
+        }
+        let detail_text = tool_detail.map(|(detail, _)| detail.as_str());
         let status_text = status.map(|value| format!("{value:?}").to_lowercase());
         let row = tx
             .query_one(
-                &format!("UPDATE chat_sessions SET title=COALESCE($3,title),status=COALESCE($4,status),updated_at=$5,revision=revision+1,policy_revision=policy_revision+1,last_operation_id=$6 WHERE org_id=$1 AND id=$2 RETURNING {SESSION_COLUMNS}"),
-                &[&org_id, &session_id, &title, &status_text, &now, &operation_id],
+                &format!("UPDATE chat_sessions SET title=COALESCE($3,title),status=COALESCE($4,status),tool_detail_revision=tool_detail_revision+CASE WHEN $7::text IS NOT NULL AND tool_detail<>$7 THEN 1 ELSE 0 END,tool_detail=COALESCE($7,tool_detail),updated_at=$5,revision=revision+1,policy_revision=policy_revision+1,last_operation_id=$6 WHERE org_id=$1 AND id=$2 RETURNING {SESSION_COLUMNS}"),
+                &[&org_id, &session_id, &title, &status_text, &now, &operation_id, &detail_text],
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
@@ -2938,6 +3177,21 @@ impl ChatStore for PgStore {
         .await
         .map_err(|e| StoreError::Database(e.to_string()))?
         .ok_or(StoreError::NotFound)?;
+        if input.kind == "message.corrected" {
+            if let Some(target) = input
+                .payload
+                .get("targetMessageId")
+                .and_then(serde_json::Value::as_str)
+            {
+                let redacted = tx.query_opt(
+                        "SELECT id FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND kind='message.redacted' AND payload->>'targetMessageId'=$3 LIMIT 1",
+                        &[&input.org_id, &input.session_id, &target],
+                    ).await.map_err(|e| StoreError::Database(e.to_string()))?;
+                if redacted.is_some() {
+                    return Err(conflict(serde_json::json!({"reason":"message_redacted"})));
+                }
+            }
+        }
         if let Some(row)=tx.query_opt(&format!("SELECT {EVENT_COLUMNS} FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? { return replay_event(event_from_row(&row), &input); }
         if input.kind == "message.created" {
             if let Some(message_id) = input
@@ -2966,19 +3220,31 @@ impl ChatStore for PgStore {
     ) -> Result<SessionEvent, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
-        tx.query_opt(
-            "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
-            &[&input.org_id, &input.session_id],
-        )
-        .await
-        .map_err(|e| StoreError::Database(e.to_string()))?
-        .ok_or(StoreError::NotFound)?;
-        let holder: String = tx.query_opt("SELECT holder_user_id FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 AND run_id=$3 AND token_hash=$4 AND status='active' AND token_expires_at>$5 AND heartbeat_expires_at>$5 FOR UPDATE", &[&input.org_id,&input.session_id,&run_id,&token_hash,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?.get(0);
-        if !can_act(pg_member(&tx, &input.org_id, &input.session_id, &holder).await?.as_ref(), SessionAction::StartRun) {
-            return Err(StoreError::NotFound);
+        let session = self
+            .admit_run_write(
+                &tx,
+                &RunWrite::event(&input, run_id, token_hash),
+                &run_requirements(&input),
+            )
+            .await?;
+        if matches!(input.kind.as_str(), "message.created" | "message.corrected") {
+            check_tool_detail(&session, input.tool_detail_revision)?;
         }
-        self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChatExecution, event_requirement(&input)).await?;
-        if input.kind.starts_with("message.") { self.admit_chat(&tx, &input.org_id, &input.session_id, FeatureKey::SharedChat, Requirement::Write).await?; }
+        if input.kind == "message.corrected" {
+            if let Some(target) = input
+                .payload
+                .get("targetMessageId")
+                .and_then(serde_json::Value::as_str)
+            {
+                let redacted = tx.query_opt(
+                        "SELECT id FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND kind='message.redacted' AND payload->>'targetMessageId'=$3 LIMIT 1",
+                        &[&input.org_id, &input.session_id, &target],
+                    ).await.map_err(|e| StoreError::Database(e.to_string()))?;
+                if redacted.is_some() {
+                    return Err(conflict(serde_json::json!({"reason":"message_redacted"})));
+                }
+            }
+        }
         if let Some(row)=tx.query_opt(&format!("SELECT {EVENT_COLUMNS} FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? { return replay_event(event_from_row(&row), &input); }
         if input.kind == "message.created" {
             if let Some(message_id) = input
@@ -3593,9 +3859,281 @@ mod tests {
     }
 
 
+    fn live_write(token: &str, now: i64) -> RunWrite<'_> {
+        RunWrite {
+            org_id: "org_1",
+            session_id: "ses_1",
+            run_id: "run",
+            token_hash: token,
+            now,
+        }
+    }
+
+    #[tokio::test]
+    async fn live_admission_rechecks_rollout_and_terminal_events_can_drain() {
+        use crate::rollout::Phase;
+        for feature in [FeatureKey::SharedChat, FeatureKey::SharedChatExecution] {
+            for (phase, kill) in [
+                (Phase::Paused, false),
+                (Phase::Off, false),
+                (Phase::General, true),
+            ] {
+                let store = fixture_store();
+                store.create_session(session("create")).await.unwrap();
+                store
+                    .acquire_run_lease(replay_lease("usr_owner"))
+                    .await
+                    .unwrap();
+                store.append_session_event(replay_event()).await.unwrap();
+                assert!(store
+                    .admit_live_frame(live_write("hash", 5), "message", 0)
+                    .await
+                    .is_ok());
+                let mut policy = crate::rollout::tests::policy();
+                policy.feature_key = feature;
+                policy.phase = phase;
+                policy.kill = kill;
+                store
+                    .tables
+                    .write()
+                    .feature_policies
+                    .insert(feature, policy);
+                let result = store
+                    .admit_live_frame(live_write("hash", 5), "message", 0)
+                    .await;
+                if kill {
+                    assert!(matches!(result, Err(StoreError::FeatureUnavailable(_))));
+                } else {
+                    assert!(
+                        result.is_ok(),
+                        "paused/off policy preserves existing writes: {result:?}"
+                    );
+                }
+                let mut terminal = replay_event();
+                terminal.kind = "run.completed".into();
+                terminal.actor_id = "run:run".into();
+                terminal.actor_kind = "agent".into();
+                terminal.id = "terminal".into();
+                terminal.operation_id = "terminal".into();
+                store
+                    .append_session_run_event(terminal, "run", "hash")
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn live_admission_rejects_invalid_expired_and_revoked_holders() {
+        let store = fixture_store();
+        store.create_session(session("create")).await.unwrap();
+        assert!(store
+            .admit_live_frame(live_write("hash", 5), "message", 0)
+            .await
+            .is_err());
+        store
+            .acquire_run_lease(replay_lease("usr_owner"))
+            .await
+            .unwrap();
+        assert!(store
+            .admit_live_frame(live_write("wrong", 5), "message", 0)
+            .await
+            .is_err());
+        assert!(store
+            .admit_live_frame(live_write("hash", 100), "message", 0)
+            .await
+            .is_err());
+        store
+            .tables
+            .write()
+            .chat
+            .memberships
+            .get_mut(&("ses_1".into(), "usr_owner".into()))
+            .unwrap()
+            .role = SessionRole::Viewer;
+        assert!(store
+            .admit_live_frame(live_write("hash", 5), "message", 0)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn tool_detail_store_checks_are_atomic_and_old_executors_remain_compatible() {
+        let store = fixture_store();
+        let initial = store.create_session(session("create")).await.unwrap();
+        assert_eq!(
+            (initial.tool_detail, initial.tool_detail_revision),
+            (ToolDetail::Summary, 0)
+        );
+        store
+            .put_member(
+                "org_1",
+                "ses_1",
+                "ws_1",
+                "member",
+                SessionRole::Member,
+                false,
+                false,
+                "usr_owner",
+                2,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .patch_session(
+                    "org_1",
+                    "ses_1",
+                    None,
+                    None,
+                    Some((ToolDetail::Full, "member")),
+                    "denied",
+                    1,
+                    3
+                )
+                .await,
+            Err(StoreError::Policy(_))
+        ));
+        let full = store
+            .patch_session(
+                "org_1",
+                "ses_1",
+                None,
+                None,
+                Some((ToolDetail::Full, "usr_owner")),
+                "full",
+                1,
+                3,
+            )
+            .await
+            .unwrap();
+        assert_eq!(full.tool_detail_revision, 1);
+        assert_eq!(full.policy_revision, initial.policy_revision + 2);
+        let same = store
+            .patch_session(
+                "org_1",
+                "ses_1",
+                None,
+                None,
+                Some((ToolDetail::Full, "usr_owner")),
+                "same",
+                full.revision,
+                3,
+            )
+            .await
+            .unwrap();
+        assert_eq!(same, full);
+        store
+            .acquire_run_lease(replay_lease("usr_owner"))
+            .await
+            .unwrap();
+        let mut event = replay_event();
+        event.actor_kind = "agent".into();
+        event.actor_id = "run:run".into();
+        event.tool_detail_revision = Some(0);
+        assert!(
+            matches!(store.append_session_run_event(event.clone(),"run","hash").await,Err(StoreError::Conflict(v)) if v["reason"]=="tool_detail_stale" && v["toolDetail"]=="full" && v["toolDetailRevision"]==1)
+        );
+        event.tool_detail_revision = None;
+        store
+            .append_session_run_event(event.clone(), "run", "hash")
+            .await
+            .unwrap();
+        assert!(
+            matches!(store.admit_live_frame(live_write("hash",5),"message",0).await,Err(StoreError::Conflict(v)) if v["reason"]=="tool_detail_stale")
+        );
+        assert!(store
+            .admit_live_frame(live_write("hash", 5), "message", 1)
+            .await
+            .is_ok());
+        let before = store
+            .list_session_events("org_1", "ses_1", 0, 100)
+            .await
+            .unwrap();
+        assert_eq!(before.len(), 1);
+        event.kind = "message.corrected".into();
+        event.id = "correction".into();
+        event.operation_id = "correction".into();
+        event.payload = serde_json::json!({"targetMessageId":"message","parts":[]});
+        event.tool_detail_revision = Some(0);
+        assert!(
+            matches!(store.append_session_run_event(event.clone(),"run","hash").await,Err(StoreError::Conflict(v)) if v["reason"]=="tool_detail_stale")
+        );
+        event.tool_detail_revision = Some(1);
+        store
+            .append_session_run_event(event, "run", "hash")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .list_session_events("org_1", "ses_1", 0, 100)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn redacted_corrections_are_rejected_inside_both_memory_append_paths() {
+        for run in [false, true] {
+            let store = fixture_store();
+            store.create_session(session("create")).await.unwrap();
+            store
+                .acquire_run_lease(replay_lease("usr_owner"))
+                .await
+                .unwrap();
+            let original = replay_event();
+            store.append_session_event(original.clone()).await.unwrap();
+            let mut correction = original.clone();
+            correction.id = "correct".into();
+            correction.operation_id = "correct".into();
+            correction.kind = "message.corrected".into();
+            correction.payload = serde_json::json!({"targetMessageId":"message","parts":[{"type":"text","text":"corrected"}]});
+            if run {
+                correction.actor_kind = "agent".into();
+                correction.actor_id = "run:run".into();
+            }
+            let append = |input| async {
+                if run {
+                    store.append_session_run_event(input, "run", "hash").await
+                } else {
+                    store.append_session_event(input).await
+                }
+            };
+            append(correction.clone()).await.unwrap();
+            let mut redaction = original;
+            redaction.id = "redact".into();
+            redaction.operation_id = "redact".into();
+            redaction.kind = "message.redacted".into();
+            redaction.payload = serde_json::json!({"targetMessageId":"message"});
+            store.append_session_event(redaction).await.unwrap();
+            for replay in [false, true] {
+                let mut input = correction.clone();
+                if !replay {
+                    input.id = "late".into();
+                    input.operation_id = "late".into();
+                }
+                let result = append(input).await;
+                assert!(
+                    matches!(result, Err(StoreError::Conflict(ref value)) if value["reason"] == "message_redacted"),
+                    "run={run} replay={replay}: {result:?}"
+                );
+            }
+            assert_eq!(
+                store
+                    .list_session_events("org_1", "ses_1", 0, 100)
+                    .await
+                    .unwrap()
+                    .len(),
+                3
+            );
+        }
+    }
+
     #[test]
     fn session_discovery_qualifies_whole_columns_without_corrupting_identifiers() {
-        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision, s.contract_version");
+        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision, s.contract_version, s.tool_detail, s.tool_detail_revision");
     }
 
     fn session(operation_id: &str) -> NewSharedSession {
@@ -3613,6 +4151,7 @@ mod tests {
 
     fn replay_event() -> NewSessionEvent {
         NewSessionEvent {
+            tool_detail_revision: None,
             id: "event".into(),
             org_id: "org_1".into(),
             workspace_id: "ws_1".into(),
@@ -4309,6 +4848,7 @@ mod tests {
         let lease = store.acquire_run_lease(input.clone()).await.unwrap();
         assert_eq!(store.acquire_run_lease(input.clone()).await.unwrap(), lease);
         let original = NewSessionEvent {
+            tool_detail_revision: None,
             id: "original".into(),
             org_id: "org_1".into(),
             workspace_id: "ws_1".into(),
@@ -4437,6 +4977,7 @@ mod tests {
                 "ses_1",
                 None,
                 Some(SessionStatus::Archived),
+                None,
                 "op_patch",
                 1,
                 2,
@@ -4453,6 +4994,7 @@ mod tests {
                     "ses_1",
                     None,
                     Some(SessionStatus::Archived),
+                    None,
                     "op_patch",
                     1,
                     3,
@@ -4463,7 +5005,16 @@ mod tests {
         );
         assert!(matches!(
             store
-                .patch_session("org_1", "ses_1", Some("stale"), None, "op_stale", 1, 3)
+                .patch_session(
+                    "org_1",
+                    "ses_1",
+                    Some("stale"),
+                    None,
+                    None,
+                    "op_stale",
+                    1,
+                    3
+                )
                 .await,
             Err(StoreError::Conflict(_))
         ));
@@ -4637,6 +5188,7 @@ mod tests {
         store.create_session(session("op")).await.unwrap();
         store
             .append_session_event(NewSessionEvent {
+                tool_detail_revision: None,
                 id: "context".into(),
                 org_id: "org_1".into(),
                 workspace_id: "ws_1".into(),
@@ -4717,6 +5269,7 @@ mod tests {
         assert!(store
             .append_session_run_event(
                 NewSessionEvent {
+                    tool_detail_revision: None,
                     id: "late".into(),
                     org_id: "org_1".into(),
                     workspace_id: "ws_1".into(),

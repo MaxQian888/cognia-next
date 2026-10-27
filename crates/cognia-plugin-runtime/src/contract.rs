@@ -457,11 +457,25 @@ mod tests {
 
     #[test]
     fn exposes_protocol_versions_from_the_canonical_catalog() {
-        assert_eq!(contract_version(), "1.2.0");
-        assert_eq!(protocol_version(), "2.0.0");
-        assert_eq!(sdk_version(), "0.3.0");
-        assert_eq!(gateway_client_version(), "2.0.0");
-        assert_eq!(minimum_gateway_client_version(), "1.0.0");
+        let catalog: Value = serde_json::from_str(include_str!(
+            "../../../packages/plugin-contract/contract/catalog.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            Some(contract_version()),
+            catalog["contractVersion"].as_str()
+        );
+        for (key, actual) in [
+            ("version", protocol_version()),
+            ("sdkVersion", sdk_version()),
+            ("gatewayClientVersion", gateway_client_version()),
+            (
+                "minimumGatewayClientVersion",
+                minimum_gateway_client_version(),
+            ),
+        ] {
+            assert_eq!(Some(actual), catalog["protocol"][key].as_str(), "{key}");
+        }
     }
 
     #[test]

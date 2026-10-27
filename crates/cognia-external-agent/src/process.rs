@@ -13,6 +13,7 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use std::collections::HashMap;
+use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::Stdio;
@@ -377,7 +378,16 @@ impl ExternalAgentProcessManager {
             }
         }
 
+        config = crate::native_bridge::harden_process_launch(config)?;
         scope_grok_credentials(&mut config);
+        super::command_resolver::configure_antigravity_platform_args(
+            &config.command, &mut config.args, std::env::consts::OS,
+        );
+        if super::command_resolver::is_antigravity_acp_command(&config.command)
+            && config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1")
+        {
+            return Err("Antigravity ACP Bot isolation is unavailable: its native keychain accounts are shared".into());
+        }
 
         // A private state root (ADR-0216) is honoured by every route that
         // reaches this process table. The desktop sandbox wrapper normally
@@ -466,7 +476,14 @@ impl ExternalAgentProcessManager {
         } else {
             None
         };
+        let helper = super::command_resolver::antigravity_harness_path(Path::new(&program))?;
+        let program = if helper.is_some() {
+            Path::new(&program).canonicalize().map_err(|error| error.to_string())?.to_string_lossy().into_owned()
+        } else { program };
         let mut cmd = Command::new(&program);
+        if let Some(helper) = helper {
+            config.env.insert("ANTIGRAVITY_HARNESS_PATH".into(), helper.to_string_lossy().into_owned());
+        }
         let protected_siwc = config.env.contains_key("COGNIA_AGENT_SIWC_CAPABILITY");
         if protected_siwc {
             configure_siwc_environment(&mut cmd);
@@ -581,6 +598,7 @@ impl ExternalAgentProcessManager {
         super::proc_group::apply_process_group(&mut cmd);
 
         // Spawn the process
+        crate::native_bridge::validate_final_process_launch(&program, &config.args)?;
         let mut child = cmd.spawn().map_err(|e| {
             log::error!("Failed to spawn external agent {}: {}", id, e);
             format!("Failed to spawn process: {}", e)
@@ -903,6 +921,57 @@ fn configure_kimi_environment(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bridge_hardening_preserves_ordinary_process_config() {
+        let config: crate::process::ExternalAgentSpawnConfig = serde_json::from_value(serde_json::json!({
+            "id":"ordinary-codex", "command":"codex", "args":["app-server"], "env":{"CODEX_HOME":"/owned/codex"}
+        })).unwrap();
+        let hardened = crate::native_bridge::harden_process_launch(config).unwrap();
+        assert_eq!(hardened.command, "codex");
+        assert_eq!(hardened.args, ["app-server"]);
+        assert_eq!(hardened.env["CODEX_HOME"], "/owned/codex");
+        assert!(crate::native_bridge::validate_final_process_launch(&hardened.command, &hardened.args).is_ok());
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn antigravity_spawn_uses_the_release_companion_instead_of_a_caller_override() {
+        use std::os::unix::fs::PermissionsExt;
+        let cwd = crate::workspace_env_fixture("none");
+        let server = cwd.path().join("agy_acp_server.par");
+        let helper = cwd.path().join("localharness_external");
+        std::fs::write(&server, "#!/bin/sh\nprintf '%s\\n' \"$ANTIGRAVITY_HARNESS_PATH\"\ncat\n").unwrap();
+        std::fs::write(&helper, "#!/bin/sh\n").unwrap();
+        for path in [&server, &helper] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut request = echo_config("antigravity-helper");
+        request.command = server.to_string_lossy().into_owned();
+        request.cwd = Some(cwd.path().to_string_lossy().into_owned());
+        request.env.insert("ANTIGRAVITY_HARNESS_PATH".into(), "/untrusted/helper".into());
+        let manager = ExternalAgentProcessManager::new();
+        let sink = Arc::new(CollectorSink::default());
+        manager.spawn(request, sink.clone()).await.unwrap();
+        for _ in 0..200 {
+            if !sink.stdout.lock().unwrap().is_empty() { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(3), manager.kill("antigravity-helper"))
+            .await.unwrap().unwrap();
+        assert_eq!(sink.stdout.lock().unwrap().first().map(String::as_str), Some(helper.canonicalize().unwrap().to_str().unwrap()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn antigravity_bot_isolation_refuses_before_spawning_or_reading_keychain() {
+        let manager = ExternalAgentProcessManager::new();
+        let mut request = echo_config("antigravity-bot");
+        request.command = "agy_acp_server.par".into();
+        request.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
+        let error = manager.spawn(request, Arc::new(CollectorSink::default())).await.unwrap_err();
+        assert!(error.contains("native keychain accounts are shared"));
+        assert!(manager.list().await.is_empty());
+    }
+
     #[tokio::test]
     async fn p4_admitted_tenant_execution_refuses_the_host_process_path() {
         use crate::spawn_authority::{with_execution_admission, ExecutionAdmission, PlacementBinding};

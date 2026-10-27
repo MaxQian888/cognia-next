@@ -292,9 +292,17 @@ mod tests {
         assert_eq!(audience(&frame), vec![brain.clone(), "p6e-owner-phone".to_string(), "p6e-owner-web".to_string()]);
         // Delivery re-reads standing: a device moved to someone else stops receiving.
         store.assign_device_user("p6e-tenant", "p6e-owner-web", Some(other.user_id.as_str()), 102).unwrap();
-        assert_eq!(audience(&frame), vec![brain, "p6e-owner-phone".to_string()]);
+        assert_eq!(audience(&frame), vec![brain.clone(), "p6e-owner-phone".to_string()]);
         let crate::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
         assert!(replay.is_empty());
+
+        person_publish_to(&bus, "sync://invalidate", &serde_json::json!({"table":"messages"}), &person);
+        let invalidation = receiver.try_recv().expect("partition invalidation");
+        assert!(receiver.try_recv().is_err());
+        let crate::event_bus::SubscribeResult::Ok { replay, .. } = bus.subscribe(Some(0), 0) else { panic!("replay"); };
+        assert_eq!(replay.len(), 1);
+        assert_eq!(replay[0].seq, invalidation.seq);
+        assert_eq!(audience(&replay[0]), vec![format!("brain-{}", person.account_id), "p6e-owner-phone".to_string()]);
     }
 
     #[test]

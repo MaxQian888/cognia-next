@@ -349,6 +349,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     if state.shared_chat_enabled {
         features.push("shared-chat");
         features.push("shared-chat-execution-v2");
+        features.push("shared-chat-live-v1");
     }
     if state.canvas_enabled {
         features.push("canvas");
@@ -3490,6 +3491,9 @@ mod tests {
         let (status, body) = call(app(InMemoryStore::new()), get("/health", "")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["rls"], "bypassed");
+        let features = body["features"].as_array().unwrap();
+        assert!(features.contains(&serde_json::json!("shared-chat-execution-v2")));
+        assert!(features.contains(&serde_json::json!("shared-chat-live-v1")));
     }
 
     #[tokio::test]

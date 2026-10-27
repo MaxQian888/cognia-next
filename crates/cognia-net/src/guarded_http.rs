@@ -66,6 +66,153 @@ impl DownloadPolicy {
     }
 }
 
+/// Rust-only policy for an origin that explicitly delegates image delivery.
+/// This does not expand the JSON DownloadPolicy used by bridge callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicRedirects {
+    None,
+    SameOrigin,
+    Delegated,
+}
+
+fn validate_public_hop(
+    target: &Url,
+    initial: &url::Origin,
+    redirects: PublicRedirects,
+) -> Result<(), String> {
+    if redirects == PublicRedirects::SameOrigin && target.origin() != *initial {
+        return Err("public_redirect_denied".into());
+    }
+    DownloadPolicy {
+        allowed_origins: vec![target.origin().ascii_serialization()],
+        max_bytes: MAX_DOWNLOAD_BYTES,
+    }
+    .validate(target)
+}
+
+async fn resolve_public_host(url: Url, timeout: Duration) -> Result<CheckedHost, String> {
+    let checked = resolve_before_timeout(&url, Some(timeout), CheckedHost::resolve(&url))
+        .await
+        .map_err(|_| "public_destination_denied".to_string())?;
+    if checked
+        .addrs
+        .iter()
+        .any(|addr| crate::egress::is_forbidden_dest_ip(&addr.ip()))
+    {
+        return Err("public_destination_denied".into());
+    }
+    Ok(checked)
+}
+
+/// A small buffered request over direct DNS pinning or a checked-IP proxy
+/// tunnel. Callers own body limits and a total deadline enclosing body reads.
+/// Every hop re-evaluates proxy/bypass policy. Delegated hops discard ALL
+/// original headers; same-origin policy is required for token-bearing paths.
+pub async fn send_pinned_public<F>(
+    request: RequestBuilder,
+    redirects: PublicRedirects,
+    make_builder: F,
+    timeout: Duration,
+) -> Result<Response, String>
+where
+    F: Fn(&str) -> Result<ClientBuilder, String>,
+{
+    let request = request.build().map_err(|_| "public_request_invalid")?;
+    if request
+        .body()
+        .is_some_and(|body| body.as_bytes().is_none_or(|bytes| bytes.len() > 64 * 1024))
+    {
+        return Err("public_request_invalid".into());
+    }
+    tokio::time::timeout(
+        timeout,
+        send_pinned_with_policy(
+            request,
+            redirects,
+            make_builder,
+            |url| resolve_public_host(url, timeout),
+            || crate::proxy_config::current().map_err(|_| "public_proxy_policy_failed".into()),
+        ),
+    )
+    .await
+    .map_err(|_| "public_request_timed_out".to_string())?
+    .map_err(|_| "public_request_failed".to_string())
+}
+
+async fn send_pinned_with_policy<F, R, Fut, P>(
+    mut request: Request,
+    redirects: PublicRedirects,
+    make_builder: F,
+    resolve: R,
+    proxy: P,
+) -> Result<Response, String>
+where
+    F: Fn(&str) -> Result<ClientBuilder, String>,
+    R: Fn(Url) -> Fut,
+    Fut: Future<Output = Result<CheckedHost, String>>,
+    P: Fn() -> Result<crate::proxy_config::ProxyConfig, String>,
+{
+    let initial = request.url().origin();
+    for hop in 0..=MAX_REDIRECTS {
+        validate_public_hop(request.url(), &initial, redirects)?;
+        request.headers_mut().remove(REFERER);
+        request.headers_mut().remove(HOST);
+        request.headers_mut().remove(PROXY_AUTHORIZATION);
+        let checked = resolve(request.url().clone()).await?;
+        let policy = proxy()?;
+        let route = policy
+            .route_for(request.url().as_str())
+            .map_err(|_| "public_proxy_policy_failed")?;
+        let mut next = request.try_clone().ok_or("public_request_not_replayable")?;
+        let response = match route {
+            crate::proxy_config::ProxyRouteSummary::Proxy { .. } => {
+                crate::pinned_http::execute(request, &policy, &checked).await?
+            }
+            crate::proxy_config::ProxyRouteSummary::Direct { .. } => {
+                // Preserve this hop's policy snapshot even if another window
+                // rotates proxy settings while a client is being constructed.
+                let builder = make_builder(request.url().as_str())?
+                    .redirect(reqwest::redirect::Policy::none());
+                let (builder, _) = policy
+                    .apply_reqwest_policy(builder, request.url().as_str())
+                    .map_err(|_| "public_proxy_policy_failed")?;
+                checked
+                    .pin(builder)
+                    .build()
+                    .map_err(|_| "public_client_failed")?
+                    .execute(request)
+                    .await
+                    .map_err(|_| "public_request_failed")?
+            }
+        };
+        if !is_redirect(response.status()) {
+            return Ok(response);
+        }
+        if redirects == PublicRedirects::None {
+            return Err("public_redirect_denied".into());
+        }
+        if hop == MAX_REDIRECTS {
+            return Err("public_redirect_limit".into());
+        }
+        let target = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| response.url().join(value).ok())
+            .ok_or("public_redirect_invalid")?;
+        // Authorize and validate before resolving or contacting the next host.
+        validate_public_hop(&target, &initial, redirects)?;
+        let cross_origin = next.url().origin() != target.origin();
+        prepare_redirect(&mut next, response.status(), target);
+        if cross_origin {
+            next.headers_mut().clear();
+        }
+        next.headers_mut().remove(REFERER);
+        request = next;
+    }
+    unreachable!("redirect limit returns before the loop ends")
+}
+
 /// The builder must preserve host proxy policy and reject proxy routes whose
 /// remote DNS cannot enforce the checked destination. Errors never expose URLs.
 pub async fn send_download<F>(
@@ -166,12 +313,15 @@ fn ipv6_is_private(v6: Ipv6Addr) -> bool {
 
 /// A DNS override that can only be constructed after checking every answer.
 #[derive(Debug, PartialEq, Eq)]
-struct CheckedHost {
+pub(crate) struct CheckedHost {
     host: String,
     addrs: Vec<SocketAddr>,
 }
 
 impl CheckedHost {
+    pub(crate) fn addresses(&self) -> &[SocketAddr] {
+        &self.addrs
+    }
     async fn resolve(url: &Url) -> Result<Self, String> {
         Self::resolve_with(url, |host, port| async move {
             tokio::net::lookup_host((host.as_str(), port))
@@ -388,6 +538,227 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn public_redirects_are_https_only_and_scope_token_paths() {
+        let initial = Url::parse("https://api.telegram.org/file/botSECRET/photo")
+            .unwrap()
+            .origin();
+        assert!(validate_public_hop(
+            &Url::parse("https://api.telegram.org/file/new").unwrap(),
+            &initial,
+            PublicRedirects::SameOrigin
+        )
+        .is_ok());
+        assert!(validate_public_hop(
+            &Url::parse("https://cdn.example/photo").unwrap(),
+            &initial,
+            PublicRedirects::SameOrigin
+        )
+        .is_err());
+        assert!(validate_public_hop(
+            &Url::parse("https://cdn.example/photo").unwrap(),
+            &initial,
+            PublicRedirects::Delegated
+        )
+        .is_ok());
+        for target in [
+            "http://cdn.example/image",
+            "https://127.0.0.1/image",
+            "https://user:SECRET@cdn.example/image",
+        ] {
+            let error = validate_public_hop(
+                &Url::parse(target).unwrap(),
+                &initial,
+                PublicRedirects::Delegated,
+            )
+            .unwrap_err();
+            assert!(!error.contains("SECRET"));
+        }
+    }
+
+    #[tokio::test]
+    async fn delegated_public_images_clear_all_headers_before_the_cdn_hop() {
+        let (second, second_cert, second_task) = tls_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nDATA".to_vec(),
+        )
+        .await;
+        let redirect = format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: https://public.test:{}/image\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", second.port());
+        let (first, first_cert, first_task) = tls_response(redirect.into_bytes()).await;
+        let builder = |_: &str| {
+            Ok(reqwest::Client::builder()
+                .no_proxy()
+                .add_root_certificate(first_cert.clone())
+                .add_root_certificate(second_cert.clone()))
+        };
+        let request = builder("")
+            .unwrap()
+            .build()
+            .unwrap()
+            .get(format!("https://public.test:{}/media", first.port()))
+            .header(AUTHORIZATION, "Bearer secret")
+            .header(COOKIE, "cookie=secret")
+            .header("x-private-token", "secret")
+            .header(REFERER, "https://source.test/token")
+            .build()
+            .unwrap();
+        let response = send_pinned_with_policy(
+            request,
+            PublicRedirects::Delegated,
+            builder,
+            |url| async move {
+                Ok(CheckedHost {
+                    host: "public.test".into(),
+                    addrs: vec![SocketAddr::from(([127, 0, 0, 1], url.port().unwrap()))],
+                })
+            },
+            || Ok(crate::proxy_config::ProxyConfig::default()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            crate::http_download::read_bounded_response(response, 4)
+                .await
+                .unwrap(),
+            b"DATA"
+        );
+        let first_request = String::from_utf8(first_task.await.unwrap())
+            .unwrap()
+            .to_lowercase();
+        assert!(first_request.contains("authorization: bearer secret"));
+        assert!(!first_request.contains("referer:"));
+        let second_request = String::from_utf8(second_task.await.unwrap())
+            .unwrap()
+            .to_lowercase();
+        for header in ["authorization:", "cookie:", "x-private-token:", "referer:"] {
+            assert!(!second_request.contains(header));
+        }
+    }
+
+    #[tokio::test]
+    async fn token_path_redirect_is_refused_before_resolving_the_other_origin() {
+        let (first, cert, task) = tls_response(b"HTTP/1.1 302 Found\r\nLocation: https://other.test/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()).await;
+        let builder = |_: &str| {
+            Ok(reqwest::Client::builder()
+                .no_proxy()
+                .add_root_certificate(cert.clone()))
+        };
+        let request = builder("")
+            .unwrap()
+            .build()
+            .unwrap()
+            .get(format!(
+                "https://public.test:{}/botSECRET/photo",
+                first.port()
+            ))
+            .build()
+            .unwrap();
+        let resolutions = AtomicUsize::new(0);
+        let error = send_pinned_with_policy(
+            request,
+            PublicRedirects::SameOrigin,
+            builder,
+            |url| {
+                resolutions.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    Ok(CheckedHost {
+                        host: url.host_str().unwrap().into(),
+                        addrs: vec![first],
+                    })
+                }
+            },
+            || Ok(crate::proxy_config::ProxyConfig::default()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "public_redirect_denied");
+        assert_eq!(resolutions.load(Ordering::SeqCst), 1);
+        assert!(!error.contains("SECRET"));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pinned_public_redirect_checks_dns_again_before_a_same_host_retry() {
+        let (first, cert, task) = tls_response(b"HTTP/1.1 308 Permanent Redirect\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()).await;
+        let builder = |_: &str| {
+            Ok(reqwest::Client::builder()
+                .no_proxy()
+                .add_root_certificate(cert.clone()))
+        };
+        let request = builder("")
+            .unwrap()
+            .build()
+            .unwrap()
+            .get(format!("https://public.test:{}/first", first.port()))
+            .build()
+            .unwrap();
+        let resolutions = AtomicUsize::new(0);
+        let error = send_pinned_with_policy(
+            request,
+            PublicRedirects::Delegated,
+            builder,
+            |url| {
+                let attempt = resolutions.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if attempt > 0 {
+                        return Err("public_destination_denied".into());
+                    }
+                    Ok(CheckedHost {
+                        host: url.host_str().unwrap().into(),
+                        addrs: vec![first],
+                    })
+                }
+            },
+            || Ok(crate::proxy_config::ProxyConfig::default()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "public_destination_denied");
+        assert_eq!(resolutions.load(Ordering::SeqCst), 2);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_readonly_post_cannot_follow_307_to_another_same_origin_endpoint() {
+        let (first,cert,task)=tls_response(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /write-endpoint\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()).await;
+        let builder = |_: &str| {
+            Ok(reqwest::Client::builder()
+                .no_proxy()
+                .add_root_certificate(cert.clone()))
+        };
+        let request = builder("")
+            .unwrap()
+            .build()
+            .unwrap()
+            .post(format!(
+                "https://public.test:{}/read-endpoint",
+                first.port()
+            ))
+            .body(r#"{"userid":"staff"}"#)
+            .build()
+            .unwrap();
+        let resolutions = AtomicUsize::new(0);
+        let error = send_pinned_with_policy(
+            request,
+            PublicRedirects::None,
+            builder,
+            |url| {
+                resolutions.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    Ok(CheckedHost {
+                        host: url.host_str().unwrap().into(),
+                        addrs: vec![first],
+                    })
+                }
+            },
+            || Ok(crate::proxy_config::ProxyConfig::default()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "public_redirect_denied");
+        assert_eq!(resolutions.load(Ordering::SeqCst), 1);
+        task.await.unwrap();
+    }
 
     #[test]
     fn download_policy_rejects_ungranted_insecure_and_credentialed_urls() {

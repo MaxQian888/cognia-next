@@ -83,8 +83,8 @@ pub const AGENT_STATE_ISOLATION_RULES: &[AgentStateIsolationRule] = &[
         deny_readable: &[".codex"],
     },
     AgentStateIsolationRule {
-        match_kind: IsolationMatch::Contains,
-        values: &["claude"],
+        match_kind: IsolationMatch::Target,
+        values: &["claude", "claude-agent-acp", "claude-code-acp", "@agentclientprotocol/claude-agent-acp", "@anthropic-ai/claude-code", "@zed-industries/claude-code-acp"],
         env: &[("CLAUDE_CONFIG_DIR", "claude")],
         shared_roots: &[".claude", ".claude.json", ".claude.json.backup"],
         deny_readable: &[".claude", ".claude.json", ".claude.json.backup"],
@@ -153,6 +153,17 @@ pub const AGENT_STATE_ISOLATION_RULES: &[AgentStateIsolationRule] = &[
         shared_roots: &[".config/opencode", ".local/share/opencode"],
         deny_readable: &[".config/opencode", ".local/share/opencode"],
     },
+    AgentStateIsolationRule {
+        match_kind: IsolationMatch::Base,
+        values: &["goose"],
+        env: &[("GOOSE_PATH_ROOT", "goose")],
+        shared_roots: &[".config/goose", ".local/share/goose", ".local/state/goose", "Library/Application Support/Block/goose"],
+        deny_readable: &[".config/goose", ".local/share/goose", ".local/state/goose", "Library/Application Support/Block/goose"],
+    },
+    AgentStateIsolationRule { match_kind: IsolationMatch::Base, values: &["openclaude"], env: &[("OPENCLAUDE_CONFIG_DIR", "openclaude")], shared_roots: &[".openclaude", ".openclaude.json"], deny_readable: &[".openclaude", ".openclaude.json"] },
+    AgentStateIsolationRule { match_kind: IsolationMatch::Base, values: &["vibe-acp"], env: &[("VIBE_HOME", "vibe")], shared_roots: &[".vibe"], deny_readable: &[".vibe"] },
+    AgentStateIsolationRule { match_kind: IsolationMatch::Base, values: &["mimo"], env: &[("MIMOCODE_HOME", "mimocode")], shared_roots: &[".config/mimocode", ".local/share/mimocode", ".local/state/mimocode", ".cache/mimocode"], deny_readable: &[".config/mimocode", ".local/share/mimocode", ".local/state/mimocode", ".cache/mimocode"] },
+    AgentStateIsolationRule { match_kind: IsolationMatch::Base, values: &["hermes"], env: &[("HERMES_HOME", "hermes")], shared_roots: &[".hermes"], deny_readable: &[".hermes"] },
 ];
 
 /// The merged isolation rule for one launch. Several matching rows merge (a
@@ -298,7 +309,13 @@ fn rule_matches(rule: &AgentStateIsolationRule, base: &str, target: &str) -> boo
 /// documented home variable and so cannot be isolated. Same semantics as
 /// `agentStateIsolationFor` in the TypeScript policy accessor.
 pub fn isolation_rule_for(command: &str, args: &[String]) -> Option<ResolvedAgentStateIsolation> {
-    let (base, target) = launch_target(command, args);
+    let normalized = base_command(command);
+    let isolation_command = if normalized.rsplit(['/', '\\']).next() == Some("goose") {
+        "goose"
+    } else {
+        command
+    };
+    let (base, target) = launch_target(isolation_command, args);
     let mut resolved: Option<ResolvedAgentStateIsolation> = None;
     for rule in AGENT_STATE_ISOLATION_RULES {
         if !rule_matches(rule, &base, &target) {
@@ -458,6 +475,9 @@ pub fn apply_state_isolation(
         config
             .env
             .insert(env_key.clone(), path.to_string_lossy().into_owned());
+    }
+    if config.env.contains_key("GOOSE_PATH_ROOT") && rule.env.iter().any(|(key, _)| key == "GOOSE_PATH_ROOT") {
+        config.env.insert("GOOSE_DISABLE_KEYRING".into(), "1".into());
     }
     Ok(Some(IsolationPlan {
         shared_roots: rule
@@ -679,7 +699,6 @@ mod tests {
         // No documented home variable, no isolation.
         for command in [
             "gemini",
-            "goose",
             "devin",
             "kiro-cli",
             "droid",
@@ -769,6 +788,30 @@ mod tests {
     }
 
     #[test]
+    fn goose_isolation_disables_shared_keyring_and_overrides_caller_root() {
+        let data = tempfile::tempdir().unwrap();
+        let mut input = config("goose", &["acp"], &[]);
+        input
+            .env
+            .insert(AGENT_STATE_KEY_ENV.into(), "goose-cfg".into());
+        input
+            .env
+            .insert("GOOSE_PATH_ROOT".into(), "/foreign".into());
+        input.env.insert("GOOSE_DISABLE_KEYRING".into(), "0".into());
+        let plan = apply_state_isolation(&mut input, Some(data.path()), Path::new("/home/dev"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            input.env["GOOSE_PATH_ROOT"],
+            plan.root.join("goose").to_string_lossy()
+        );
+        assert_eq!(input.env["GOOSE_DISABLE_KEYRING"], "1");
+        assert!(plan
+            .deny_readable
+            .contains(&PathBuf::from("/home/dev/.config/goose")));
+    }
+
+    #[test]
     fn isolation_maps_env_creates_private_dirs_and_strips_the_key() {
         let data = tempfile::tempdir().unwrap();
         let mut input = config(
@@ -830,6 +873,15 @@ mod tests {
             None
         );
         assert_eq!(input.env, before);
+    }
+
+    #[test]
+    fn antigravity_does_not_claim_isolation_without_a_keychain_boundary() {
+        let data = tempfile::tempdir().unwrap();
+        let mut request = config("agy_acp_server.par", &[], &[(AGENT_STATE_KEY_ENV, "agy-private")]);
+        assert_eq!(apply_state_isolation(&mut request, Some(data.path()), Path::new("/home/dev")).unwrap_err(),
+            "state isolation unsupported for agy_acp_server.par");
+        assert!(!data.path().join("cognia").exists());
     }
 
     #[test]

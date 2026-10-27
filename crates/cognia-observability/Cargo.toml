@@ -90,7 +90,7 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4", "serde"] }
-zip = { workspace = true, features = ["deflate"] }
+zip = { workspace = true, features = ["deflate-flate2-zlib-rs"] }
 zstd = "0.14"
 
 # --- ADR-0067 Tier C: the `desktop-host` cluster (all optional) ---

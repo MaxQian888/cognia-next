@@ -266,6 +266,58 @@ pub(crate) fn release_device_authority_if_disconnected(
     super::host_consent::forget_device(device_id);
 }
 
+/// Person brains cannot recover process output from an application resync.
+enum SocketEventReceiver {
+    Broadcast(tokio::sync::broadcast::Receiver<EventFrame>),
+    Person(tokio::sync::mpsc::UnboundedReceiver<EventFrame>),
+}
+
+impl SocketEventReceiver {
+    async fn recv(&mut self) -> Result<EventFrame, tokio::sync::broadcast::error::RecvError> {
+        match self {
+            Self::Broadcast(receiver) => receiver.recv().await,
+            Self::Person(receiver) => receiver
+                .recv()
+                .await
+                .ok_or(tokio::sync::broadcast::error::RecvError::Closed),
+        }
+    }
+}
+
+fn subscribe_socket_events(
+    bus: &super::event_bus::EventBus,
+    since: Option<u64>,
+    now_ms: i64,
+    person_account: Option<&str>,
+) -> SubscribeResult<SocketEventReceiver> {
+    if let Some(account) = person_account {
+        match bus.subscribe_person(since, now_ms, account) {
+            SubscribeResult::Ok {
+                receiver,
+                replay,
+                replay_cursor,
+            } => SubscribeResult::Ok {
+                receiver: SocketEventReceiver::Person(receiver),
+                replay,
+                replay_cursor,
+            },
+            SubscribeResult::ResyncRequired => SubscribeResult::ResyncRequired,
+        }
+    } else {
+        match bus.subscribe(since, now_ms) {
+            SubscribeResult::Ok {
+                receiver,
+                replay,
+                replay_cursor,
+            } => SubscribeResult::Ok {
+                receiver: SocketEventReceiver::Broadcast(receiver),
+                replay,
+                replay_cursor,
+            },
+            SubscribeResult::ResyncRequired => SubscribeResult::ResyncRequired,
+        }
+    }
+}
 /// Drive the WebSocket connection for one client.
 async fn handle_socket(
     mut socket: WebSocket,
@@ -313,7 +365,9 @@ async fn handle_socket(
         .as_millis() as i64;
 
     // 1. Subscribe to the event bus (or bail if cursor is too old).
-    let (mut receiver, replay, replay_cursor) = match state.event_bus.subscribe(since, now_ms) {
+    let (mut receiver, replay, replay_cursor) = match subscribe_socket_events(
+        &state.event_bus, since, now_ms, person_generation.as_ref().map(|(account, _)| account.as_str()),
+    ) {
         SubscribeResult::Ok {
             receiver,
             replay,
@@ -672,6 +726,178 @@ mod tests {
         assert!(!person_frame_visible(&frame, Some("operator"), "__service__", ConnectionScope::Service));
         assert!(person_frame_visible(&frame, Some("pb_owner"), "brain-pb_owner", ConnectionScope::Device));
         assert!(!person_frame_visible(&frame, Some("pb_other"), "brain-pb_other", ConnectionScope::Device));
+    }
+
+    #[tokio::test]
+    async fn person_socket_relay_survives_lag_and_keeps_delivery_guards() {
+        let bus = EventBus::new();
+        let SubscribeResult::Ok { mut receiver, .. } =
+            subscribe_socket_events(&bus, None, 0, Some("pb_owner"))
+        else {
+            panic!("person subscription");
+        };
+        let SubscribeResult::Ok {
+            receiver: mut device,
+            ..
+        } = subscribe_socket_events(&bus, None, 0, None)
+        else {
+            panic!("device subscription");
+        };
+        for i in 0..600 {
+            bus.publish_person_to(
+                "external-agent://stdout".into(),
+                json!({"data":i}),
+                "brain-pb_owner".into(),
+                "pb_owner".into(),
+            );
+            bus.publish_person_ephemeral("transcript://live".into(), json!({}), "pb_other".into());
+            bus.publish_person_to(
+                "external-agent://stdout".into(),
+                json!({}),
+                "owner-device".into(),
+                "pb_owner".into(),
+            );
+        }
+        assert!(matches!(
+            device.recv().await,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
+        ));
+        for i in 0..600 {
+            let frame = receiver.recv().await.unwrap();
+            assert_eq!(frame.payload["data"], i);
+            assert!(person_frame_visible(
+                &frame,
+                Some("pb_owner"),
+                "brain-pb_owner",
+                ConnectionScope::Device
+            ));
+            assert!(!person_frame_visible(
+                &frame,
+                Some("operator"),
+                "__service__",
+                ConnectionScope::Service
+            ));
+            assert!(!person_frame_visible(
+                &frame,
+                Some("pb_other"),
+                "brain-pb_other",
+                ConnectionScope::Device
+            ));
+        }
+        let SocketEventReceiver::Person(mut receiver) = receiver else {
+            panic!("non-lossy relay");
+        };
+        assert!(
+            receiver.try_recv().is_err(),
+            "unrelated or duplicate frames"
+        );
+    }
+
+    #[tokio::test]
+    async fn person_internal_socket_delivers_intact_stdout_through_a_burst() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+        let _guard = crate::security_store::test_guard();
+        let person =
+            crate::person_partition::PersonPartition::new("org".into(), "socket-burst".into());
+        let (_installed, fleet) =
+            crate::person_partition::person_test_support::Installed::new(vec![person.clone()]);
+        let (state, bus) = test_state_with_bus();
+        let (token, _) = crate::jwt::issue_person_brain_jwt(
+            &state.secret.read(),
+            &person.account_id,
+            &fleet.generation,
+        )
+        .unwrap();
+        let router = axum::Router::new()
+            .route("/internal/events", axum::routing::any(internal_ws_handler))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::middleware::require_device_jwt,
+            ))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/internal/events?token={token}"))
+                .await
+                .unwrap();
+        let ready = socket.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(ready.to_text().unwrap()).unwrap()["type"],
+            "stream_ready"
+        );
+        socket
+            .send(WsMessage::Text(
+                json!({"type":"subscribe","mode":"replace","channels":["external-agent://stdout"]})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let subscribed = socket.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(subscribed.to_text().unwrap()).unwrap()["type"],
+            "subscribed"
+        );
+
+        let chunks = ["{\"usage\":1.", "25,\"text\":\"", "reply\"}"];
+        let mut expected_seqs = Vec::new();
+        // No await: the current-thread runtime cannot drain the socket's bus
+        // receiver until this entire over-capacity burst has been published.
+        for chunk in chunks {
+            let frame = bus.publish_person_to(
+                "external-agent://stdout".into(),
+                json!({"data":chunk}),
+                format!("brain-{}", person.account_id),
+                person.account_id.clone(),
+            );
+            expected_seqs.push(frame.seq);
+            for _ in 0..600 {
+                bus.publish_person_ephemeral(
+                    "transcript://live".into(),
+                    json!({}),
+                    "pb_other".into(),
+                );
+            }
+        }
+        let mut stdout = String::new();
+        let mut received_seqs = Vec::new();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while received_seqs.len() < chunks.len() {
+                let message = socket.next().await.expect("socket remains open").unwrap();
+                let value: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                let frames = if value["type"] == "event_batch" {
+                    value["frames"].as_array().unwrap().clone()
+                } else {
+                    vec![value]
+                };
+                for frame in frames {
+                    assert_eq!(frame["type"], "external-agent://stdout");
+                    stdout.push_str(frame["payload"]["data"].as_str().unwrap());
+                    received_seqs.push(frame["seq"].as_u64().unwrap());
+                }
+            }
+        })
+        .await
+        .expect("stdout arrives without reconnecting");
+        assert_eq!(received_seqs, expected_seqs);
+        assert_eq!(
+            serde_json::from_str::<Value>(&stdout).unwrap(),
+            json!({"usage":1.25,"text":"reply"})
+        );
+        socket.close(None).await.unwrap();
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
     }
 
     #[test]
