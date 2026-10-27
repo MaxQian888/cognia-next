@@ -14,6 +14,7 @@ import {
   type EvalPersistenceScope,
 } from "@/lib/db/eval-lab"
 import { getDb } from "@/lib/db/schema"
+import { createSeededRandom } from "@cognia/eval-core/seeded-random"
 
 type EvalEnvironmentChecker = (project: EvalProject) => Promise<EvalEnvironmentCompatibility>
 
@@ -22,6 +23,7 @@ export interface EvalProjectServiceOptions {
   now?: () => number
   newId?: () => string
   checkEnvironment?: EvalEnvironmentChecker
+  readTargetDependency?: (variant: EvalVariant) => Promise<unknown>
 }
 
 export interface EvalStartOptions {
@@ -29,9 +31,11 @@ export interface EvalStartOptions {
   scorerVersions: Record<string, string>
   randomSeed: number
   environmentCompatibility: EvalEnvironmentCompatibility
+  executionProtocol?: EvalExperimentManifest["executionProtocol"]
 }
 
 function canonicalJson(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify(value.toISOString())
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
@@ -42,7 +46,7 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
-async function digest(value: unknown): Promise<string> {
+export async function digestEvalDependency(value: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(canonicalJson(value))
   const hash = await crypto.subtle.digest(
     "SHA-256",
@@ -53,18 +57,24 @@ async function digest(value: unknown): Promise<string> {
     .join("")}`
 }
 
-function estimateWorstCaseCost(
+export function estimateEvalTaskCost(
   variant: EvalVariant,
   judgePolicy: EvalProject["judgePolicy"]
 ): number {
   const inputTokens = Number(variant.parameters?.estimatedInputTokens ?? 8_192)
   const outputTokens = Number(variant.parameters?.maxOutputTokens ?? 4_096)
+  const configuredCap = variant.parameters?.maxCostUsd
   const targetCost =
-    variant.isLocal || !variant.price
-      ? 0
-      : (inputTokens * variant.price.inputPerMillion +
-          outputTokens * variant.price.outputPerMillion) /
-        1_000_000
+    variant.kind === "team" &&
+    typeof configuredCap === "number" &&
+    Number.isFinite(configuredCap) &&
+    configuredCap > 0
+      ? configuredCap
+      : variant.isLocal || !variant.price
+        ? 0
+        : (inputTokens * variant.price.inputPerMillion +
+            outputTokens * variant.price.outputPerMillion) /
+          1_000_000
   if (!judgePolicy.enabled || judgePolicy.isLocal || !judgePolicy.price) return targetCost
   const judgeInputTokens = inputTokens + outputTokens
   const judgeOutputTokens = judgePolicy.maxOutputTokens ?? 300
@@ -82,6 +92,61 @@ function estimateWorstCaseCost(
             judgeOutputTokens * judgePolicy.secondJudgePrice.outputPerMillion)) /
         1_000_000
   return targetCost + primaryJudgeCost + secondJudgeCost
+}
+
+/** Hash the live definition and published prompt revisions, never persist content. */
+export async function readEvalTargetDependency(
+  variant: EvalVariant,
+  scope?: EvalPersistenceScope
+): Promise<unknown> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
+  const { getSettings } = await import("@/lib/db/settings")
+  const settings = await getSettings(scope)
+  // Only the digest is persisted. Execution-affecting provider/prompt/tool
+  // settings are compared without retaining their contents or credentials.
+  const executionSettings = Object.fromEntries(
+    Object.entries(settings).filter(([key]) =>
+      /provider|model|prompt|agent|permission|routing|twin|tool|skill|mcp|hook/i.test(key)
+    )
+  )
+  if (variant.kind === "model") {
+    scope?.assertActive()
+    return { variant, executionSettings }
+  }
+  const bindings = (await db.promptOverrides.toArray()).filter(
+    (binding) => binding.activeRevisionId
+  )
+  const revisions = await db.promptOverrideRevisions.bulkGet(
+    bindings.map((binding) => binding.activeRevisionId!)
+  )
+  let definition: unknown
+  if (variant.kind === "team") {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const store = useAgentTeamStore.getState()
+    definition = {
+      team: store.getTeam(variant.targetId ?? ""),
+      teammates: store.getTeammates(variant.targetId ?? ""),
+      tasks: store.getTeamTasks(variant.targetId ?? ""),
+    }
+  } else if (variant.kind === "chat") {
+    definition = variant.targetId ? await db.characters.get(variant.targetId) : null
+  } else {
+    const versionId = variant.parameters?.workflowVersionId
+    definition =
+      typeof versionId === "string"
+        ? await db.workflowVersions.get(versionId)
+        : await db.workflows.get(variant.targetId ?? "")
+  }
+  scope?.assertActive()
+  return {
+    variant,
+    executionSettings,
+    definition,
+    prompts: bindings
+      .map((binding, index) => ({ binding, revision: revisions[index] }))
+      .sort((a, b) => a.binding.id.localeCompare(b.binding.id)),
+  }
 }
 
 export class EvalProjectService {
@@ -141,6 +206,15 @@ export class EvalProjectService {
   }
 
   async start(projectId: string, options: EvalStartOptions): Promise<EvalExperimentRow> {
+    if (
+      options.executionProtocol &&
+      (options.executionProtocol.kind !== "balanced" ||
+        ![1, 2, 3].includes(options.executionProtocol.repetitions) ||
+        options.executionProtocol.outerConcurrency !== 1)
+    )
+      throw new Error(
+        "Balanced evaluation requires one to three repetitions and outer concurrency one"
+      )
     const db = this.database()
     const project = await db.evalProjects.get(projectId)
     if (!project) throw new Error(`Evaluation project ${projectId} not found`)
@@ -167,7 +241,7 @@ export class EvalProjectService {
     const manifest: EvalExperimentManifest = {
       id: experimentId,
       projectId: project.id,
-      projectRevision: await digest(project),
+      projectRevision: await digestEvalDependency(project),
       dataset: structuredClone(projectWithRuntime.dataset),
       variants: structuredClone(compatible),
       mode: projectWithRuntime.mode,
@@ -180,25 +254,77 @@ export class EvalProjectService {
       decisionPolicy: structuredClone(projectWithRuntime.decisionPolicy),
       retentionDays: projectWithRuntime.retentionDays,
       adaptiveRepetitions: { stageOne: 1, maximum: 3 },
+      ...(options.executionProtocol
+        ? { executionProtocol: structuredClone(options.executionProtocol) }
+        : {}),
+      caseDigests: Object.fromEntries(
+        await Promise.all(
+          preflight.effectiveCaseIds.map(
+            async (caseId) =>
+              [
+                caseId,
+                await digestEvalDependency((await db.evalCases.get(caseId)) ?? null),
+              ] as const
+          )
+        )
+      ),
+      targetDigests: Object.fromEntries(
+        await Promise.all(
+          compatible.map(
+            async (variant) =>
+              [
+                variant.id,
+                await digestEvalDependency(
+                  await (this.options.readTargetDependency?.(variant) ??
+                    readEvalTargetDependency(variant, this.options.scope))
+                ),
+              ] as const
+          )
+        )
+      ),
       environmentCompatibility: structuredClone(options.environmentCompatibility),
       createdAt,
     }
     await createEvalExperiment(manifest, this.options.scope)
-    const tasks = compatible.flatMap((variant) =>
-      preflight.effectiveCaseIds.map((caseId) => ({
-        id: this.newId(),
-        experimentId,
-        variantId: variant.id,
-        caseId,
-        repetition: 1 as const,
-        state: "queued" as const,
-        attempt: 0,
-        reservedCost: 0,
-        estimatedWorstCaseCost: estimateWorstCaseCost(variant, project.judgePolicy),
-        providerId: variant.providerId,
-        updatedAt: createdAt,
-      }))
-    )
+    const repetitions = options.executionProtocol?.repetitions ?? 1
+    const random = createSeededRandom(options.randomSeed)
+    const shuffle = <T>(values: T[]): T[] => {
+      for (let index = values.length - 1; index > 0; index--) {
+        const other = Math.floor(random() * (index + 1))
+        ;[values[index], values[other]] = [values[other], values[index]]
+      }
+      return values
+    }
+    const blocks = options.executionProtocol
+      ? Array.from({ length: repetitions }, (_, repetition) =>
+          shuffle([...preflight.effectiveCaseIds]).flatMap((caseId) =>
+            shuffle([...compatible]).map((variant) => ({
+              variant,
+              caseId,
+              repetition: (repetition + 1) as 1 | 2 | 3,
+            }))
+          )
+        ).flat()
+      : compatible.flatMap((variant) =>
+          preflight.effectiveCaseIds.map((caseId) => ({ variant, caseId, repetition: 1 as const }))
+        )
+    const tasks = blocks.map(({ variant, caseId, repetition }, scheduleOrder) => ({
+      id: this.newId(),
+      experimentId,
+      variantId: variant.id,
+      caseId,
+      repetition,
+      state: "queued" as const,
+      attempt: 0,
+      reservedCost: 0,
+      estimatedWorstCaseCost: estimateEvalTaskCost(variant, project.judgePolicy),
+      ...(variant.kind === "team" && variant.targetId
+        ? { concurrencyKey: `team:${variant.targetId}` }
+        : {}),
+      ...(options.executionProtocol ? { scheduleOrder } : {}),
+      providerId: variant.providerId,
+      updatedAt: createdAt,
+    }))
     await db.transaction("rw", [db.evalTasks, db.evalExperiments], async () => {
       this.options.scope?.assertActive()
       if (tasks.length) await db.evalTasks.bulkAdd(tasks)

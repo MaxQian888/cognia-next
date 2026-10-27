@@ -87,7 +87,13 @@ export async function loadEvalReportView(
       )
       return {
         case: artifact.case,
-        sample: artifact.sample,
+        sample: {
+          ...artifact.sample,
+          ...(sampleRow.executionStatus ? { executionStatus: sampleRow.executionStatus } : {}),
+          ...(sampleRow.metricAvailability
+            ? { metricAvailability: sampleRow.metricAvailability }
+            : {}),
+        },
         variantId: artifact.variantId,
         repetition: artifact.repetition,
         sampleId: sampleRow.id,
@@ -96,5 +102,47 @@ export async function loadEvalReportView(
       }
     })
   )
-  return buildEvalReportView({ experiment, tasks, samples, scores, recommendations, cases })
+  const normalizedRecommendations = recommendations.map((row) => {
+    const comparisons = row.pairedComparisons?.filter(
+      (
+        comparison
+      ): comparison is typeof comparison & {
+        pairedCaseCount: number
+        leftGradedCaseCount: number
+        rightGradedCaseCount: number
+      } =>
+        typeof comparison.pairedCaseCount === "number" &&
+        typeof comparison.leftGradedCaseCount === "number" &&
+        typeof comparison.rightGradedCaseCount === "number"
+    )
+    const expectedPairs =
+      (experiment.manifest.variants.length * (experiment.manifest.variants.length - 1)) / 2
+    const legacyCountsUnknown =
+      row.pairedComparisons === undefined ||
+      comparisons?.length !== row.pairedComparisons.length ||
+      (comparisons?.length ?? 0) < expectedPairs
+    return {
+      ...row,
+      pairedComparisons: comparisons,
+      ...(experiment.manifest.decisionPolicy.formal && legacyCountsUnknown
+        ? {
+            result: {
+              status: "no_conclusion" as const,
+              reason: "insufficient_cases" as const,
+              paretoVariantIds: [],
+              utilityByVariant: {},
+              excluded: [],
+            },
+          }
+        : {}),
+    }
+  })
+  return buildEvalReportView({
+    experiment,
+    tasks,
+    samples,
+    scores,
+    recommendations: normalizedRecommendations,
+    cases,
+  })
 }

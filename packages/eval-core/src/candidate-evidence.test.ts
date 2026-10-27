@@ -73,8 +73,10 @@ test("does not count measurement or nonapplicable scores as grading", () => {
   expect(buildEvalCandidateEvidence(manifest, input)[0].metrics).toEqual({
     quality: 0,
     reliability: 0,
-    cost: 0,
-    latency: 0,
+    attemptReliability: 0,
+    allRepeatReliability: 0,
+    cost: 0.5,
+    latency: 0.5,
   })
 })
 
@@ -117,4 +119,181 @@ test("pairs only common cases and averages repetitions before comparison", () =>
   })
   expect(buildPairedQualityComparisons(manifest, input)).toEqual(comparisons)
   expect(buildPairedQualityComparisons(manifest, { samples: [], scores: [] })).toEqual([])
+})
+
+test("includes wholly ungraded attempts in resource accounting without grading them", () => {
+  const input = rows()
+  input.samples = [
+    { id: "a1", variantId: "a", caseId: "one", actualCost: 1, latencyMs: 100 },
+    { id: "a2", variantId: "a", caseId: "two", actualCost: 100, latencyMs: 10_000 },
+    { id: "b1", variantId: "b", caseId: "one", actualCost: 2, latencyMs: 200 },
+  ]
+  input.scores = [
+    { sampleId: "a1", scorerId: "oracle", value: 1, passed: true, status: "scored" },
+    { sampleId: "a2", scorerId: "oracle", value: 0, passed: false, status: "errored" },
+    { sampleId: "b1", scorerId: "oracle", value: 1, passed: true, status: "scored" },
+  ]
+  const evidence = buildEvalCandidateEvidence(manifest, input)
+  expect(evidence[0].metrics.cost).toBe(1)
+  expect(evidence[1].metrics.cost).toBeCloseTo(2 / 50.5)
+  expect(evidence[0].observationCounts).toMatchObject({ attemptedSamples: 2, gradedSamples: 1 })
+  expect(evidence[0].resourceTotals?.costUsd).toBe(101)
+})
+
+test("clusters repetitions by case rather than over-weighting repeated easy tasks", () => {
+  const input = rows()
+  input.samples = [
+    { id: "a1", variantId: "a", caseId: "one", actualCost: 1, latencyMs: 1 },
+    { id: "a2", variantId: "a", caseId: "one", actualCost: 1, latencyMs: 1 },
+    { id: "a3", variantId: "a", caseId: "one", actualCost: 1, latencyMs: 1 },
+    { id: "a4", variantId: "a", caseId: "two", actualCost: 1, latencyMs: 1 },
+  ]
+  input.scores = input.samples.map((item, index) => ({
+    sampleId: item.id,
+    scorerId: "oracle",
+    value: index === 3 ? 1 : 0,
+    passed: index === 3,
+    status: "scored",
+  }))
+  const evidence = buildEvalCandidateEvidence(manifest, input)[0]
+  expect(evidence.metrics.quality).toBe(0.5)
+  expect(evidence.metrics.allRepeatReliability).toBe(0.5)
+})
+
+test("execution failure cannot produce positive candidate quality from a passing scorer", () => {
+  const input = rows()
+  input.samples = [
+    {
+      id: "a1",
+      variantId: "a",
+      caseId: "one",
+      actualCost: 1,
+      latencyMs: 100,
+      executionStatus: "failed",
+    },
+  ]
+  input.scores = [{ sampleId: "a1", scorerId: "oracle", value: 1, passed: true, status: "scored" }]
+  const candidate = buildEvalCandidateEvidence(manifest, input)[0]
+  expect(candidate.metrics.quality).toBe(0)
+  expect(candidate.metrics.reliability).toBe(0)
+  expect(candidate.observationCounts?.executionFailures).toBe(1)
+})
+
+test("marks resource evidence partial instead of treating unknown zero as free", () => {
+  const input = rows()
+  input.samples = [
+    {
+      id: "a1",
+      variantId: "a",
+      caseId: "one",
+      actualCost: 0,
+      latencyMs: 100,
+      metricAvailability: { usage: "unavailable", cost: "unavailable", latency: "known" },
+    },
+    { id: "b1", variantId: "b", caseId: "one", actualCost: 1, latencyMs: 100 },
+  ]
+  const candidates = buildEvalCandidateEvidence(manifest, input)
+  expect(candidates[0].resourceAvailability?.cost).toBe("unavailable")
+  expect(candidates[1].resourceAvailability?.cost).toBe("known")
+})
+
+test("does not inflate all-repeat reliability by dropping partially observed case clusters", () => {
+  const input = rows()
+  input.samples = [
+    {
+      id: "a1",
+      variantId: "a",
+      caseId: "one",
+      actualCost: 1,
+      latencyMs: 1,
+      expectedRepetitions: 2,
+    },
+    {
+      id: "a2",
+      variantId: "a",
+      caseId: "one",
+      actualCost: 1,
+      latencyMs: 1,
+      expectedRepetitions: 2,
+    },
+    {
+      id: "a3",
+      variantId: "a",
+      caseId: "two",
+      actualCost: 1,
+      latencyMs: 1,
+      expectedRepetitions: 2,
+    },
+  ]
+  input.scores = input.samples.map((item) => ({
+    sampleId: item.id,
+    scorerId: "oracle",
+    value: 1,
+    passed: true,
+    status: "scored",
+  }))
+  const candidate = buildEvalCandidateEvidence(manifest, input)[0]
+  expect(candidate.metrics.allRepeatReliability).toBe(0.5)
+  expect(candidate.observationCounts?.incompleteCases).toBe(1)
+})
+
+test("keeps all-attempt resources separate from final-output grading", () => {
+  const input = rows()
+  input.resourceSamples = [
+    {
+      id: "task-a",
+      variantId: "a",
+      caseId: "one",
+      actualCost: 100,
+      latencyMs: 1000,
+      executionStatus: "failed",
+      metricAvailability: { usage: "unavailable", cost: "partial", latency: "known" },
+    },
+    { id: "task-b", variantId: "b", caseId: "one", actualCost: 2, latencyMs: 20 },
+  ]
+  const candidate = buildEvalCandidateEvidence(manifest, input)[0]
+  expect(candidate.resourceTotals?.costUsd).toBe(100)
+  expect(candidate.resourceTotals?.latencyMs).toBe(1000)
+  expect(candidate.resourceAvailability?.cost).toBe("partial")
+  expect(candidate.observationCounts?.executionFailures).toBe(1)
+  expect(candidate.effectiveCases).toBe(2)
+})
+
+test("keeps a terminal failed case in paired quality even without a final output", () => {
+  const input: EvalEvidenceInput = {
+    samples: [
+      { id: "a1", taskId: "ta1", variantId: "a", caseId: "one", actualCost: 1, latencyMs: 1 },
+      { id: "b1", taskId: "tb1", variantId: "b", caseId: "one", actualCost: 1, latencyMs: 1 },
+      { id: "b2", taskId: "tb2", variantId: "b", caseId: "two", actualCost: 1, latencyMs: 1 },
+    ],
+    scores: ["a1", "b1", "b2"].map((id) => ({
+      sampleId: id,
+      scorerId: "oracle",
+      value: 1,
+      passed: true,
+      status: "scored",
+    })),
+    resourceSamples: [
+      { id: "ra1", taskId: "ta1", variantId: "a", caseId: "one", actualCost: 1, latencyMs: 1 },
+      {
+        id: "ra2",
+        taskId: "ta2",
+        variantId: "a",
+        caseId: "two",
+        actualCost: 2,
+        latencyMs: 2,
+        executionStatus: "failed",
+      },
+      { id: "rb1", taskId: "tb1", variantId: "b", caseId: "one", actualCost: 1, latencyMs: 1 },
+      { id: "rb2", taskId: "tb2", variantId: "b", caseId: "two", actualCost: 1, latencyMs: 1 },
+    ],
+  }
+  const a = buildEvalCandidateEvidence(manifest, input)[0]
+  expect(a.metrics.quality).toBe(0.5)
+  expect(a.metrics.allRepeatReliability).toBe(0.5)
+  expect(a.effectiveCases).toBe(2)
+  expect(buildPairedQualityComparisons(manifest, input)[0]).toMatchObject({
+    pairedCaseCount: 2,
+    result: { meanDifference: -0.5 },
+  })
 })

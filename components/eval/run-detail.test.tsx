@@ -80,7 +80,7 @@ const RUN = {
   totalCostUsd: 0.12,
   avgLatencyMs: 800,
   createdAt: 1717400000000,
-  scoringVersion: 2 as const,
+  scoringVersion: 3 as const,
 }
 
 function agg(scorerId: string, over: Record<string, number> = {}) {
@@ -186,6 +186,73 @@ describe("RunDetail", () => {
     expect(screen.queryByText("gatePassed")).not.toBeInTheDocument()
     expect(screen.queryByText("gateFailed")).not.toBeInTheDocument()
   })
+
+  it("shows unknown legacy provenance and Team limits from the recorded configuration", async () => {
+    ;(getRun as jest.Mock).mockResolvedValue({
+      ...RUN,
+      scoringVersion: undefined,
+      config: { targetKind: "team", scorerIds: [], k: 1 },
+    })
+    ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([])
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByText("lab.executionProfile.label")).toBeVisible()
+    expect(screen.getByText("lab.executionProfile.unknown")).toBeVisible()
+    expect(screen.getByText("lab.executionProfile.teamNoticeTitle")).toBeVisible()
+    expect(screen.getByText("lab.executionProfile.teamNoticeDescription")).toBeVisible()
+    expect(
+      screen.queryByText("lab.executionProfile.profiles.isolated-text")
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not display unavailable cost and latency as measured zeros", async () => {
+    ;(getRun as jest.Mock).mockResolvedValue({
+      ...RUN,
+      totalCostUsd: 0,
+      avgLatencyMs: 0,
+      metricAvailability: { cost: "unavailable", latency: "unavailable" },
+    })
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findAllByText("lab.review.metricUnavailable")).toHaveLength(2)
+    expect(screen.queryByText("$0.0000")).not.toBeInTheDocument()
+    expect(screen.queryByText('latency:{"ms":0}')).not.toBeInTheDocument()
+  })
+
+  it("marks retained partial cost and latency as incomplete measurements", async () => {
+    ;(getRun as jest.Mock).mockResolvedValue({
+      ...RUN,
+      metricAvailability: { cost: "partial", latency: "partial" },
+    })
+    render(<RunDetail runId="r1" onBack={jest.fn()} />)
+    expect(await screen.findByText('lab.review.partialMetric:{"value":"$0.1200"}')).toBeVisible()
+    expect(
+      screen.getByText('lab.review.partialMetric:{"value":"latency:{\\"ms\\":800}"}')
+    ).toBeVisible()
+  })
+
+  it.each(["isolated-text", "desktop-chat", "pure-model"] as const)(
+    "displays persisted %s provenance in the run summary and expandable sample",
+    async (executionProfile) => {
+      ;(useEvalRunCaseResults as jest.Mock).mockReturnValue([
+        {
+          id: "r1::c1",
+          runId: "r1",
+          caseId: "c1",
+          scores: {},
+          verdict: "ungraded",
+          passAt1: false,
+          executionProfile,
+        },
+      ])
+      render(<RunDetail runId="r1" onBack={jest.fn()} />)
+      await screen.findByRole("table")
+      expect(screen.getAllByText(`lab.executionProfile.profiles.${executionProfile}`)).toHaveLength(
+        3
+      )
+      fireEvent.click(table().getByRole("button", { name: "first prompt" }))
+      expect(table().getByText("lab.executionProfile.label")).toBeVisible()
+      expect(table().getByText(`lab.executionProfile.profiles.${executionProfile}`)).toBeVisible()
+    }
+  )
 
   it("expands a case to the agent's answer and each judge's reasoning", async () => {
     // A failing case used to be a dead end: a score and a red cell, with no way

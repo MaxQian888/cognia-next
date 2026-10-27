@@ -35,6 +35,7 @@ export interface RunsListViewProps {
 /** Presentational run history — data-free, so it's previewable in isolation. */
 export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
   const t = useTranslations("eval.runsList")
+  const evalT = useTranslations("eval")
 
   if (runs.length === 0) {
     return <p className="text-muted-foreground text-sm">{t("empty")}</p>
@@ -76,7 +77,15 @@ export function RunsListView({ runs, gate, onOpenRun }: RunsListViewProps) {
                     {t("ungraded", { count: run.ungradedCaseCount ?? 0 })}
                   </Badge>
                 )}
-                <Badge variant="secondary">${run.totalCostUsd.toFixed(2)}</Badge>
+                <Badge variant="secondary">
+                  {run.metricAvailability?.cost === "unavailable"
+                    ? evalT("lab.review.metricUnavailable")
+                    : run.metricAvailability?.cost === "partial"
+                      ? evalT("lab.review.partialMetric", {
+                          value: `$${run.totalCostUsd.toFixed(2)}`,
+                        })
+                      : `$${run.totalCostUsd.toFixed(2)}`}
+                </Badge>
                 {legacy && (
                   <Badge variant="outline" data-testid="runs-list-legacy">
                     {t("legacyScoring")}

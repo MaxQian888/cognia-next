@@ -22,7 +22,7 @@ const RUN = {
   totalCostUsd: 0.5,
   avgLatencyMs: 100,
   createdAt: 1717400000000,
-  scoringVersion: 2 as const,
+  scoringVersion: 3 as const,
   status: "completed" as const,
 }
 
@@ -42,6 +42,17 @@ describe("RunsList", () => {
     expect(screen.getByText("gateFailed")).toBeInTheDocument() // 0.9 < 0.95
     fireEvent.click(screen.getByLabelText('openRun:{"label":"opus"}'))
     expect(onOpen).toHaveBeenCalledWith("r1")
+  })
+
+  it("marks unavailable and partial history cost instead of presenting measured zero", () => {
+    ;(useEvalRuns as jest.Mock).mockReturnValueOnce([
+      { ...RUN, runId: "unknown", totalCostUsd: 0, metricAvailability: { cost: "unavailable" } },
+      { ...RUN, runId: "partial", metricAvailability: { cost: "partial" } },
+    ])
+    render(<RunsList datasetId="d1" onOpenRun={jest.fn()} />)
+    expect(screen.getByText("lab.review.metricUnavailable")).toBeVisible()
+    expect(screen.getByText('lab.review.partialMetric:{"value":"$0.50"}')).toBeVisible()
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument()
   })
 
   it("shows a passing gate badge and no gate badge without thresholds", () => {

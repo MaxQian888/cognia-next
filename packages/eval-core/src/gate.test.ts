@@ -31,7 +31,7 @@ function report(overrides: Partial<EvalReport> = {}): EvalReport {
     totalCostUsd: 0.1,
     avgLatencyMs: 100,
     createdAt: 0,
-    scoringVersion: 2,
+    scoringVersion: 3,
     ...overrides,
   }
 }
@@ -70,6 +70,23 @@ describe("evaluateGate", () => {
     const result = evaluateGate(report({ totalCostUsd: 5 }), { maxTotalCostUsd: 1 })
     expect(result.passed).toBe(false)
     expect(result.failures.join(" ")).toContain("cost")
+  })
+
+  it("cannot pass an unknown cost as zero under a cost cap", () => {
+    const result = evaluateGate(
+      report({ totalCostUsd: 0, metricAvailability: { cost: "unavailable", latency: "known" } }),
+      { maxTotalCostUsd: 1 }
+    )
+    expect(result.verdict).toBe("inconclusive")
+    expect(result.inconclusiveReasons.join(" ")).toContain("cost")
+  })
+
+  it("does not issue a passing verdict for incomplete repetitions", () => {
+    const result = evaluateGate(report({ status: "aborted", incompleteCaseCount: 1 }), {
+      minPassHatK: 0.9,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.verdict).toBe("inconclusive")
   })
 
   it("ignores scorers absent from the report when a per-scorer floor names them", () => {

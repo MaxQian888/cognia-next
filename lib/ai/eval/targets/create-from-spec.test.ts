@@ -120,4 +120,16 @@ describe("createTargetFromSpec", () => {
     await wf.run(evalCase)
     expect((deps.workflow.runWorkflow as jest.Mock).mock.calls[0][0].timeoutMs).toBe(7000)
   })
+
+  it("forwards an explicit Team case spend cap and its price provenance", async () => {
+    const price = { inputPerMillion: 1, outputPerMillion: 2, currency: "USD" }
+    const target = createTargetFromSpec(
+      { kind: "team", label: "budgeted", teamId: "tm", maxCostUsd: 0.5, price },
+      deps
+    )
+    await target.run(evalCase)
+    expect(deps.team.runTeam).toHaveBeenLastCalledWith(
+      expect.objectContaining({ maxCostUsd: 0.5, price })
+    )
+  })
 })

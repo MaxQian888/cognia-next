@@ -211,6 +211,19 @@ describe("evaluation experiment finalization", () => {
       expect(await getDb().evalExperiments.get(manifest.id)).toMatchObject({ state: "queued" })
     })
 
+    it("does not schedule adaptive repetitions for a pre-registered balanced experiment", async () => {
+      await persistStage(0.8, 0.8)
+      await getDb().evalExperiments.update(manifest.id, {
+        manifest: {
+          ...manifest,
+          executionProtocol: { kind: "balanced", repetitions: 1, outerConcurrency: 1 },
+        },
+      })
+      await expect(prepareNextEvalStage(manifest.id)).resolves.toBe(false)
+      expect(await getDb().evalTasks.count()).toBe(60)
+      expect(await getDb().evalRecommendations.count()).toBe(1)
+    })
+
     it("refreshes a review recommendation without scheduling another execution stage", async () => {
       await persistStage(0.8, 0.8)
 

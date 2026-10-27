@@ -33,6 +33,7 @@ function repository(
   const rows = new Map(tasks.map((item) => [item.id, item]))
   let reserved = 0
   let spent = 0
+  const accounted = new Map<string, number>()
   const states: EvalExperimentState[] = []
   return {
     states,
@@ -52,8 +53,19 @@ function repository(
       },
       completeTask: async (row, result) => {
         reserved -= row.reservedCost
-        spent += result.actualCost
+        spent += result.actualCost - (accounted.get(`${row.id}:${row.attempt}`) ?? 0)
         Object.assign(rows.get(row.id)!, { state: "completed", reservedCost: 0 })
+      },
+      recordAttempt: async (row, observation) => {
+        const key = `${row.id}:${row.attempt}`
+        const cost = observation.capturedCostUsd ?? 0
+        spent += cost - (accounted.get(key) ?? 0)
+        accounted.set(key, cost)
+        const stored = rows.get(row.id)!
+        stored.attempts = [
+          ...(stored.attempts ?? []).filter((item) => item.attempt !== row.attempt),
+          observation,
+        ]
       },
       releaseTaskReservation: async (id) => {
         const row = rows.get(id)!
@@ -137,6 +149,60 @@ describe("durable evaluation orchestrator", () => {
     expect(maxA).toBe(1)
     expect(maxTotal).toBe(2)
     expect(states.at(-1)).toBe("completed")
+  })
+
+  it("serializes cases that use the same runtime target even when provider concurrency permits two", async () => {
+    const { repo } = repository(
+      [
+        task({ id: "a1", concurrencyKey: "team:shared" }),
+        task({ id: "a2", caseId: "case-2", concurrencyKey: "team:shared" }),
+      ],
+      5
+    )
+    let active = 0
+    let peak = 0
+    const orchestrator = new DurableEvalOrchestrator(
+      repo,
+      async () => {
+        peak = Math.max(peak, ++active)
+        await Promise.resolve()
+        active -= 1
+        return { actualCost: 0.1, value: "ok" }
+      },
+      { providerConcurrency: { "provider-a": 2 } }
+    )
+    await orchestrator.run("experiment-1")
+    expect(peak).toBe(1)
+  })
+
+  it("executes shuffled balanced tasks by scheduleOrder with persisted outer concurrency one", async () => {
+    const { repo } = repository(
+      [
+        task({ id: "third", scheduleOrder: 2 }),
+        task({ id: "first", scheduleOrder: 0 }),
+        task({ id: "second", scheduleOrder: 1 }),
+      ],
+      5
+    )
+    const getExperiment = repo.getExperiment
+    repo.getExperiment = async (id) => ({ ...(await getExperiment(id))!, concurrencyLimit: 1 })
+    let active = 0
+    let peak = 0
+    const order: string[] = []
+    const orchestrator = new DurableEvalOrchestrator(
+      repo,
+      async (row) => {
+        order.push(row.id)
+        peak = Math.max(peak, ++active)
+        await Promise.resolve()
+        active -= 1
+        return { actualCost: 0.1, value: "ok" }
+      },
+      { maxConcurrentTasks: 8, providerConcurrency: { "provider-a": 8 } }
+    )
+    await orchestrator.run("experiment-1")
+    expect(order).toEqual(["first", "second", "third"])
+    expect(peak).toBe(1)
   })
 
   it("honors Retry-After and then retries without reserving the same spend twice", async () => {
@@ -314,7 +380,7 @@ describe("classifyEvalRetry", () => {
 })
 
 describe("execution owner races", () => {
-  it("shares concurrent run calls and discards a late success after cancel", async () => {
+  it("shares concurrent run calls and retains captured spend from a late success after cancel", async () => {
     const harness = repository([task()], 1)
     let resolve!: (value: { actualCost: number; value: string }) => void
     let started!: () => void
@@ -335,8 +401,11 @@ describe("execution owner races", () => {
     resolve({ actualCost: 0.2, value: "late result" })
     await Promise.all([first, second])
     expect(execute).toHaveBeenCalledTimes(1)
-    expect(harness.spent()).toBe(0)
+    expect(harness.spent()).toBe(0.2)
     expect(harness.states.at(-1)).toBe("cancelled")
+    expect((await harness.repo.listTasks("experiment-1"))[0].attempts).toEqual([
+      expect.objectContaining({ state: "cancelled", capturedCostUsd: 0.2 }),
+    ])
   })
 
   it("interrupts without persisting a late provider success or retry", async () => {

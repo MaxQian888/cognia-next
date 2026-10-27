@@ -5,6 +5,8 @@ import {
   type EvalProject,
   type EvalExperimentState,
   type EvalReportView,
+  type EvalExperimentManifest,
+  type EvalMode,
 } from "@cognia/eval-core"
 import type { AppSettings } from "@cognia/agent-config-types"
 import { APP_VERSION } from "@/lib/app-version"
@@ -27,6 +29,13 @@ import { loadEvalAppSettings } from "./runtime-context"
 import { loadEvalReportView } from "./report-view"
 import { recoverEvalQueueOnStartup } from "./recovery"
 import { createEvalReviewService, type EvalReviewService } from "./review-service"
+
+export interface EvalRuntimeStartOptions {
+  /** Omit to use balanced Agent runs or adaptive model runs; null opts into adaptive. */
+  executionProtocol?: EvalExperimentManifest["executionProtocol"] | null
+  /** Explicit reproducible seed, otherwise generated from the platform crypto source. */
+  randomSeed?: number
+}
 
 export class EvalRuntimeScopeError extends Error {
   readonly code = "EVAL_RUNTIME_SCOPE_CHANGED"
@@ -154,18 +163,21 @@ export class EvalExecutionRuntime {
     this.ownership = undefined
   }
 
-  private async createEngine(): Promise<Engine> {
+  private async createEngine(mode: EvalMode): Promise<Engine> {
     const [artifactKey, appSettings] = await Promise.all([
       this.artifactKey(),
       (this.options.loadSettings ?? loadEvalAppSettings)(),
     ])
     this.assertActive()
     if (!appSettings) throw new Error("Evaluation settings are unavailable")
-    return (this.options.createOrchestrator ?? createBrowserEvalOrchestrator)({
-      artifactKey,
-      appSettings,
-      scope: this.persistence,
-    })
+    return (this.options.createOrchestrator ?? createBrowserEvalOrchestrator)(
+      {
+        artifactKey,
+        appSettings,
+        scope: this.persistence,
+      },
+      { mode }
+    )
   }
 
   private launch(id: string, engine: Engine): void {
@@ -209,20 +221,20 @@ export class EvalExecutionRuntime {
     this.runs.set(id, running)
   }
 
-  start(project: EvalProject): Promise<string> {
+  start(project: EvalProject, options: EvalRuntimeStartOptions = {}): Promise<string> {
     this.assertActive()
     const existing = this.starts.get(project.id)
     if (existing) return existing
-    const starting = this.startOnce(project).finally(() => this.starts.delete(project.id))
+    const starting = this.startOnce(project, options).finally(() => this.starts.delete(project.id))
     this.starts.set(project.id, starting)
     return starting
   }
 
-  private async startOnce(project: EvalProject): Promise<string> {
+  private async startOnce(project: EvalProject, options: EvalRuntimeStartOptions): Promise<string> {
     this.controls++
     try {
       if (!(await this.own())) throw new Error("Another window owns evaluation execution")
-      const engine = await this.createEngine()
+      const engine = await this.createEngine(project.mode)
       const environment = await (
         this.options.checkEnvironment ?? checkEvalEnvironmentCompatibility
       )(project)
@@ -250,8 +262,14 @@ export class EvalExecutionRuntime {
         scorerVersions: Object.fromEntries(
           deterministicScorers().map((scorer) => [scorer.id, String(SCORING_VERSION)])
         ),
-        randomSeed: crypto.getRandomValues(new Uint32Array(1))[0],
+        randomSeed: options.randomSeed ?? crypto.getRandomValues(new Uint32Array(1))[0],
         environmentCompatibility: environment,
+        executionProtocol:
+          options.executionProtocol === undefined
+            ? project.mode === "agent"
+              ? { kind: "balanced", repetitions: 3, outerConcurrency: 1 }
+              : undefined
+            : (options.executionProtocol ?? undefined),
       })
       this.assertActive()
       this.launch(experiment.id, engine)
@@ -291,12 +309,12 @@ export class EvalExecutionRuntime {
     this.controls++
     try {
       if (!(await this.own())) throw new Error("Another window owns evaluation execution")
-      const engine = await this.createEngine()
-      this.assertActive()
       const experiment = await this.options.db.evalExperiments.get(id)
       this.assertActive()
       if (!experiment) throw new Error(`Evaluation experiment ${id} not found`)
       if (["completed", "cancelled", "failed"].includes(experiment.state)) return
+      const engine = await this.createEngine(experiment.manifest.mode)
+      this.assertActive()
       if (experiment.state === "running") await recoverInterruptedEvalWork(id, this.persistence)
       this.assertActive()
       await this.projectService.resume(id)

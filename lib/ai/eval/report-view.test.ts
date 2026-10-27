@@ -74,6 +74,47 @@ const envelope = (ciphertext: string) => ({
 })
 
 describe("evaluation report view", () => {
+  it("does not display a formal winner when legacy paired-case counts are unavailable", async () => {
+    const experiment: EvalExperimentRow = {
+      id: manifest.id,
+      projectId: manifest.projectId,
+      manifest: { ...manifest, decisionPolicy: { ...manifest.decisionPolicy, formal: true } },
+      state: "completed",
+      spentCost: 0,
+      reservedCost: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const recommendation: EvalRecommendationRow = {
+      id: "legacy",
+      experimentId: manifest.id,
+      evidenceDigest: "old",
+      createdAt: 1,
+      result: {
+        status: "recommended",
+        recommendedVariantId: "variant",
+        paretoVariantIds: ["variant"],
+        utilityByVariant: { variant: 1 },
+        excluded: [],
+      },
+    }
+    const view = await loadEvalReportView(manifest.id, new Uint8Array(32), {
+      loadExperiment: async () => experiment,
+      loadTasks: async () => [],
+      loadSamples: async () => [],
+      loadScores: async () => [],
+      loadRecommendations: async () => [recommendation],
+      decryptArtifact: async () => {
+        throw new Error("No artifact expected")
+      },
+    })
+    expect(view.recommendation?.result).toMatchObject({
+      status: "no_conclusion",
+      reason: "insufficient_cases",
+    })
+    expect(view.recommendation?.pairedComparisons).toBeUndefined()
+  })
+
   it("decrypts case evidence and combines recommendation, cost, errors, and provenance", async () => {
     const experiment: EvalExperimentRow = {
       id: manifest.id,
@@ -177,7 +218,12 @@ describe("evaluation report view", () => {
     expect(view.cases[0].scores[0]).not.toHaveProperty("encryptedReasoning")
     expect(JSON.stringify(view)).not.toContain("ciphertext")
     expect(view.recommendation?.result.recommendedVariantId).toBe("variant")
-    expect(view.cost).toEqual({ actual: 0.02, estimatedWorstCase: 0.5, hardCap: 2 })
+    expect(view.cost).toEqual({
+      actual: 0.02,
+      estimatedWorstCase: 0.5,
+      hardCap: 2,
+      availability: "known",
+    })
     expect(view.providerErrors).toEqual([
       { taskId: "task", providerId: "provider", error: "retried once" },
     ])

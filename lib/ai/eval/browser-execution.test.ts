@@ -3,9 +3,11 @@
 import "fake-indexeddb/auto"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { EvalExperimentManifest, EvalTask, EvalVariant } from "@cognia/eval-core"
+import { llmScorers } from "@cognia/eval-core"
 import type { EvalCase, EvalSample, Scorer } from "@/types/eval/eval"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createEvalExperiment } from "@/lib/db/eval-lab"
+import { digestEvalDependency } from "./project-service"
 import {
   createBrowserEvalOrchestrator,
   createBrowserEvalTaskExecutor,
@@ -37,6 +39,10 @@ jest.mock("./artifact-crypto", () => ({
   ...jest.requireActual("./artifact-crypto"),
   decryptEvalArtifact: (...args: unknown[]) => mockDecryptArtifact(...args),
 }))
+jest.mock("@cognia/eval-core", () => {
+  const actual = jest.requireActual("@cognia/eval-core")
+  return { ...actual, llmScorers: jest.fn(actual.llmScorers) }
+})
 
 const variant: EvalVariant = {
   id: "variant-a",
@@ -578,7 +584,8 @@ describe("browser evaluation task execution", () => {
         price: { currency: "USD", inputPerMillion: 10, outputPerMillion: 20 },
         secondJudgeProviderId: "second-provider",
         secondJudgeModelId: "second-model",
-        secondJudgeIsLocal: true,
+        secondJudgeIsLocal: false,
+        secondJudgePrice: { currency: "USD", inputPerMillion: 10, outputPerMillion: 20 },
         calibrated: true,
         anchorCount: 30,
         kappa: 0.7,
@@ -613,7 +620,15 @@ describe("browser evaluation task execution", () => {
     const completeJudge = jest.fn(async () =>
       JSON.stringify({ pass: true, reasoning: "ok", score: 1, relevant: true, faithful: true })
     )
-    mockRendererClient.mockReturnValue({ complete: completeJudge, getUsageSnapshot })
+    mockRendererClient
+      .mockReturnValueOnce({ complete: completeJudge, getUsageSnapshot })
+      .mockReturnValueOnce({
+        complete: completeJudge,
+        getUsageSnapshot: jest
+          .fn()
+          .mockReturnValueOnce({ inputTokens: 0, outputTokens: 0, totalTokens: 0 })
+          .mockReturnValue({ inputTokens: 100, outputTokens: 50, totalTokens: 150 }),
+      })
     const judgeController = new AbortController()
     const result = await createBrowserEvalTaskExecutor(
       { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
@@ -621,16 +636,20 @@ describe("browser evaluation task execution", () => {
     )(task, judgeController.signal)
     expect(completeJudge).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ abortSignal: judgeController.signal })
+      expect.objectContaining({
+        abortSignal: judgeController.signal,
+        maxRetries: 0,
+        maxTokens: expect.any(Number),
+      })
     )
     expect(result.value.scores.some((score) => score.scorerId.startsWith("judge-"))).toBe(true)
     expect(result.value.sample).toMatchObject({
-      judgeInputTokens: 100,
-      judgeOutputTokens: 50,
-      judgeCost: 0.002,
-      actualCost: sample.costUsd + 0.002,
+      judgeInputTokens: 200,
+      judgeOutputTokens: 100,
+      judgeCost: 0.004,
+      actualCost: sample.costUsd + 0.004,
     })
-    expect(result.actualCost).toBe(sample.costUsd + 0.002)
+    expect(result.actualCost).toBe(sample.costUsd + 0.004)
 
     mockRendererClient.mockReset()
     mockRendererClient
@@ -657,13 +676,216 @@ describe("browser evaluation task execution", () => {
     )
 
     mockRendererClient.mockReturnValue(null)
-    await expect(
-      createBrowserEvalTaskExecutor(
-        { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
-        overrides
-      )(task, new AbortController().signal)
-    ).rejects.toThrow("judge is unavailable")
+    const ungraded = await createBrowserEvalTaskExecutor(
+      { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
+      overrides
+    )(task, new AbortController().signal)
+    expect(ungraded.value.sample.actualCost).toBeGreaterThan(0)
+    expect(ungraded.value.scores).toEqual([
+      expect.objectContaining({
+        scorerId: "evaluation-configuration",
+        status: "errored",
+        error: expect.stringContaining("judge is unavailable"),
+      }),
+    ])
   })
+
+  it("retains a returned sample and measured spend when cancellation arrives during execution", async () => {
+    const controller = new AbortController()
+    const score = jest.fn()
+    const result = await createBrowserEvalTaskExecutor(
+      { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
+      {
+        loadExperiment: async () => ({
+          id: manifest.id,
+          projectId: manifest.projectId,
+          manifest,
+          state: "running",
+          spentCost: 0,
+          reservedCost: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+        loadCase: async () => evalCase,
+        buildTarget: () => ({
+          label: "late",
+          run: async () => {
+            controller.abort()
+            return { ...sample, costUsd: 0.25 }
+          },
+        }),
+        resolveScorers: score,
+        encryptArtifact: async () => ({
+          version: "cognia-eval-encrypted/v1",
+          algorithm: "AES-GCM",
+          iv: "iv",
+          ciphertext: "ciphertext",
+        }),
+      }
+    )(task, controller.signal)
+    expect(result.actualCost).toBe(0.25)
+    expect(result.executionStatus).toBe("cancelled")
+    expect(result.value.sample.executionStatus).toBe("cancelled")
+    expect(score).not.toHaveBeenCalled()
+  })
+
+  it("refuses judge calls before dispatch when captured target spend exhausts the reservation", async () => {
+    const complete = jest.fn(async () => JSON.stringify({ pass: true }))
+    mockRendererClient.mockReturnValue({
+      complete,
+      getUsageSnapshot: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+    })
+    const judged = {
+      ...manifest,
+      judgePolicy: {
+        ...manifest.judgePolicy,
+        enabled: true,
+        providerId: "judge",
+        modelId: "judge-model",
+        isLocal: false,
+        price: { inputPerMillion: 1, outputPerMillion: 2, currency: "USD" },
+      },
+    }
+    const result = await createBrowserEvalTaskExecutor(
+      { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
+      {
+        loadExperiment: async () => ({
+          id: manifest.id,
+          projectId: manifest.projectId,
+          manifest: judged,
+          state: "running",
+          spentCost: 0,
+          reservedCost: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+        loadCase: async () => evalCase,
+        buildTarget: () => ({ label: "captured", run: async () => ({ ...sample, costUsd: 0.1 }) }),
+        encryptArtifact: async () => ({
+          version: "cognia-eval-encrypted/v1",
+          algorithm: "AES-GCM",
+          iv: "iv",
+          ciphertext: "ciphertext",
+        }),
+      }
+    )({ ...task, reservedCost: 0.05 }, new AbortController().signal)
+    expect(complete).not.toHaveBeenCalled()
+    expect(result.value.sample.actualCost).toBe(0.1)
+    expect(result.value.scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "errored",
+          error: expect.stringContaining("reserved budget"),
+        }),
+      ])
+    )
+  })
+
+  it("PII-gates the final composed judge prompt immediately before the provider call", async () => {
+    const complete = jest.fn(async () => "unexpected")
+    mockRendererClient.mockReturnValue({ complete })
+    jest.mocked(llmScorers).mockImplementationOnce(({ client }) => [
+      {
+        id: "judge-controlled",
+        dimension: "response-quality",
+        requiresLlm: true,
+        gating: true,
+        score: async () => {
+          await client.complete("Contact jane@example.com before scoring.")
+          return {
+            scorerId: "judge-controlled",
+            dimension: "response-quality",
+            status: "scored",
+            value: 1,
+            passed: true,
+          }
+        },
+      },
+    ])
+    const judged = {
+      ...manifest,
+      judgePolicy: {
+        ...manifest.judgePolicy,
+        enabled: true,
+        providerId: "judge",
+        modelId: "judge-model",
+        isLocal: false,
+        price: { inputPerMillion: 1, outputPerMillion: 2, currency: "USD" },
+      },
+    }
+    const result = await createBrowserEvalTaskExecutor(
+      { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
+      {
+        loadExperiment: async () => ({
+          id: manifest.id,
+          projectId: manifest.projectId,
+          manifest: judged,
+          state: "running",
+          spentCost: 0,
+          reservedCost: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+        loadCase: async () => evalCase,
+        buildTarget: () => ({ label: "safe", run: async () => sample }),
+        encryptArtifact: async () => ({
+          version: "cognia-eval-encrypted/v1",
+          algorithm: "AES-GCM",
+          iv: "iv",
+          ciphertext: "ciphertext",
+        }),
+      }
+    )(task, new AbortController().signal)
+    expect(complete).not.toHaveBeenCalled()
+    expect(result.value.scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scorerId: "judge-controlled",
+          status: "errored",
+          error: expect.stringContaining("PII gate"),
+        }),
+      ])
+    )
+  })
+
+  it.each(["case", "target"] as const)(
+    "refuses a changed %s dependency before dispatch",
+    async (kind) => {
+      const pinned = { revision: "pinned" }
+      const frozenManifest = {
+        ...manifest,
+        ...(kind === "case"
+          ? {
+              caseDigests: {
+                [evalCase.id]: await digestEvalDependency({ ...evalCase, input: "old" }),
+              },
+            }
+          : { targetDigests: { [variant.id]: await digestEvalDependency(pinned) } }),
+      }
+      const run = jest.fn(async () => sample)
+      await expect(
+        createBrowserEvalTaskExecutor(
+          { appSettings: {} as AppSettings, artifactKey: new Uint8Array(32) },
+          {
+            loadExperiment: async () => ({
+              id: manifest.id,
+              projectId: manifest.projectId,
+              manifest: frozenManifest,
+              state: "running",
+              spentCost: 0,
+              reservedCost: 0,
+              createdAt: 1,
+              updatedAt: 1,
+            }),
+            loadCase: async () => evalCase,
+            readTargetDependency: async () => ({ revision: "changed" }),
+            buildTarget: () => ({ label: "unreachable", run }),
+          }
+        )(task, new AbortController().signal)
+      ).rejects.toThrow("changed since the manifest")
+      expect(run).not.toHaveBeenCalled()
+    }
+  )
 
   it("constructs the durable browser orchestrator with production dependencies", () => {
     expect(
@@ -686,6 +908,22 @@ describe("Dexie evaluation orchestrator repository", () => {
     await createEvalExperiment(manifest)
     await getDb().evalExperiments.update(manifest.id, { state: "queued" })
   }, 30_000)
+
+  it("restores the persisted balanced protocol concurrency limit", async () => {
+    const balancedManifest: EvalExperimentManifest = {
+      ...manifest,
+      id: "balanced-experiment",
+      mode: "agent",
+      executionProtocol: { kind: "balanced", repetitions: 3, outerConcurrency: 1 },
+    }
+    await createEvalExperiment(balancedManifest)
+    const repository = new DexieEvalOrchestratorRepository()
+
+    await expect(repository.getExperiment(balancedManifest.id)).resolves.toMatchObject({
+      hardCap: 1,
+      concurrencyLimit: 1,
+    })
+  })
 
   it("atomically reserves only work that fits under the hard cap", async () => {
     await getDb().evalTasks.bulkAdd([

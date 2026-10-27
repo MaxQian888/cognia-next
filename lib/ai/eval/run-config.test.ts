@@ -174,6 +174,21 @@ describe("runConfiguredEval", () => {
     expect(firstRow.scores["always-pass"]).toEqual({ value: 1, passed: true, status: "scored" })
   })
 
+  it("preserves actual execution provenance on compact case rows", async () => {
+    const { deps, savedCases } = makeDeps({
+      buildTarget: () => ({
+        label: "Team",
+        run: async () => ({ ...sample, executionProfile: "isolated-text" }),
+      }),
+    })
+    await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "team", label: "Team", teamId: "team-1" }], scorerIds: [], k: 1 },
+      deps
+    )
+    expect(savedCases.mock.calls[0][0]).toMatchObject({ executionProfile: "isolated-text" })
+  })
+
   it("awaits every case checkpoint before writing the completed run", async () => {
     let release!: () => void
     let entered!: () => void
@@ -345,6 +360,31 @@ describe("runConfiguredEval", () => {
     expect(reports[0].ungradedCaseCount).toBe(3)
     expect(reports[0].gradedCaseCount).toBe(0)
     expect(reports[0].passAt1).toBe(0)
+  })
+
+  it("persists a partial repeated case and its captured spend after interruption", async () => {
+    const controller = new AbortController()
+    const { deps, savedCases } = makeDeps({
+      buildTarget: () => ({
+        label: "partial",
+        run: async () => {
+          controller.abort()
+          return { ...sample, costUsd: 2 }
+        },
+      }),
+    })
+    const reports = await runConfiguredEval(
+      "d",
+      { targets: [{ kind: "chat", label: "partial", model: "m" }], scorerIds: [], k: 3 },
+      deps,
+      controller.signal
+    )
+    expect(reports[0].caseCount).toBe(1)
+    expect(reports[0].attemptedRepetitionCount).toBe(1)
+    expect(reports[0].totalCostUsd).toBe(2)
+    expect(reports[0].passHatK).toBe(0)
+    expect(reports[0].status).toBe("aborted")
+    expect(savedCases).toHaveBeenCalledTimes(1)
   })
 
   it("applies the case subset before running", async () => {

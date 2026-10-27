@@ -36,6 +36,8 @@ export function createTargetFromSpec(spec: TargetSpec, deps: TargetDepsBundle): 
           label: spec.label,
           teamId: spec.teamId,
           ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
+          ...(spec.maxCostUsd !== undefined ? { maxCostUsd: spec.maxCostUsd } : {}),
+          ...(spec.price ? { price: spec.price } : {}),
         },
         deps.team
       )

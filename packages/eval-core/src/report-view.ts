@@ -1,4 +1,5 @@
 import type { EvalCase, EvalSample, Score } from "./domain/eval"
+import { sampleExecutionFailed } from "./report"
 import type {
   EvalCandidateEvidence,
   EvalExperimentManifest,
@@ -8,6 +9,8 @@ import type {
 } from "./types"
 import {
   buildEvalCandidateEvidence,
+  projectEvalTaskEvidence,
+  type EvalEvidenceTask,
   type EvalEvidenceInput,
   type EvalPairedComparison,
 } from "./candidate-evidence"
@@ -55,14 +58,24 @@ export interface EvalReportView {
   recommendation?: EvalReportRecommendation
   evidence: EvalCandidateEvidence[]
   cases: EvalReportCaseEvidence[]
-  cost: { actual: number; estimatedWorstCase: number; hardCap: number }
+  cost: {
+    /** Captured cost, not invoice reconciliation; partial totals are lower bounds. */
+    actual: number
+    estimatedWorstCase: number
+    hardCap: number
+    availability?: "known" | "partial" | "unavailable"
+  }
   providerErrors: Array<{ taskId: string; providerId?: string; error: string }>
 }
 
 export interface EvalReportInput extends EvalEvidenceInput {
   experiment: EvalReportExperiment & { budgetCap?: number }
   tasks: ReadonlyArray<
-    Pick<EvalTask, "id" | "estimatedWorstCaseCost"> & { providerId?: string; lastError?: string }
+    EvalEvidenceTask &
+      Pick<EvalTask, "estimatedWorstCaseCost"> & {
+        providerId?: string
+        lastError?: string
+      }
   >
   recommendations: readonly EvalReportRecommendation[]
   cases: readonly EvalReportCaseInput[]
@@ -70,8 +83,37 @@ export interface EvalReportInput extends EvalEvidenceInput {
 
 /** Project an explicit report DTO; never spread persisted or decrypted row objects. */
 export function buildEvalReportView(input: EvalReportInput): EvalReportView {
-  const { experiment, tasks, samples, scores } = input
+  const { experiment, tasks, samples } = input
   const recommendation = [...input.recommendations].sort((a, b) => b.createdAt - a.createdAt)[0]
+  const ledgerTaskIds = new Set(
+    tasks.filter((task) => task.attempts?.length).map((task) => task.id)
+  )
+  const taskBySample = new Map(input.cases.map((item) => [item.sampleId, item.taskId]))
+  const evidenceInput = projectEvalTaskEvidence(experiment.manifest, {
+    ...input,
+    samples: samples.map((sample) => ({
+      ...sample,
+      taskId: sample.taskId ?? taskBySample.get(sample.id),
+    })),
+  })
+  const costs = [
+    ...tasks.flatMap((task) =>
+      (task.attempts ?? []).map((attempt) => ({
+        value: attempt.capturedCostUsd ?? 0,
+        status: attempt.costStatus,
+      }))
+    ),
+    ...samples
+      .filter((sample) => !ledgerTaskIds.has(sample.taskId ?? taskBySample.get(sample.id) ?? ""))
+      .map((sample) => ({
+        value: sample.actualCost,
+        status: sample.metricAvailability?.cost ?? "estimated",
+      })),
+  ]
+  const knownCosts = costs.filter(
+    (cost) =>
+      cost.status !== "unavailable" && cost.status !== "partial" && Number.isFinite(cost.value)
+  ).length
   return {
     experiment: {
       id: experiment.id,
@@ -90,7 +132,7 @@ export function buildEvalReportView(input: EvalReportInput): EvalReportView {
           createdAt: recommendation.createdAt,
         }
       : undefined,
-    evidence: buildEvalCandidateEvidence(experiment.manifest, { samples, scores }),
+    evidence: buildEvalCandidateEvidence(experiment.manifest, evidenceInput),
     cases: input.cases.map((item) => {
       const reportScores: EvalReportScore[] = item.scores.map((score) => ({
         id: score.id,
@@ -115,7 +157,8 @@ export function buildEvalReportView(input: EvalReportInput): EvalReportView {
         taskId: item.taskId,
         scores: reportScores,
         status:
-          item.sample.error || reportScores.some((score) => score.status === "errored")
+          sampleExecutionFailed(item.sample) ||
+          reportScores.some((score) => score.status === "errored")
             ? "errored"
             : scored.length > 0 && scored.every((score) => score.passed)
               ? "passed"
@@ -123,9 +166,15 @@ export function buildEvalReportView(input: EvalReportInput): EvalReportView {
       }
     }),
     cost: {
-      actual: samples.reduce((sum, sample) => sum + sample.actualCost, 0),
+      actual: costs.reduce((sum, cost) => sum + (Number.isFinite(cost.value) ? cost.value : 0), 0),
       estimatedWorstCase: tasks.reduce((sum, task) => sum + (task.estimatedWorstCaseCost ?? 0), 0),
       hardCap: experiment.budgetCap ?? experiment.manifest.budget.hardCap,
+      availability:
+        knownCosts === costs.length && costs.length > 0
+          ? "known"
+          : knownCosts > 0 || costs.some((cost) => cost.status === "partial")
+            ? "partial"
+            : "unavailable",
     },
     providerErrors: tasks.flatMap((task) =>
       task.lastError

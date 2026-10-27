@@ -3,7 +3,12 @@
 import "fake-indexeddb/auto"
 
 import type { EvalEnvironmentCompatibility, EvalProject } from "@cognia/eval-core"
-import { EvalProjectService } from "./project-service"
+import {
+  EvalProjectService,
+  digestEvalDependency,
+  readEvalTargetDependency,
+} from "./project-service"
+import { getSettings } from "@/lib/db/settings"
 import { saveEvalProject } from "@/lib/db/eval-lab"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 
@@ -202,5 +207,68 @@ describe("EvalProjectService v2", () => {
     })
     expect(updated?.manifest.budget.hardCap).toBe(10)
     await expect(service.extendBudget(experiment.id, 15)).rejects.toThrow("greater")
+  })
+
+  it("freezes a balanced seeded schedule and fingerprints cases and target definitions", async () => {
+    const frozenCase = {
+      id: "case-0",
+      datasetId: "dataset-1",
+      input: "frozen input",
+      capability: "text",
+      source: "handwritten" as const,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    await getDb().evalCases.put(frozenCase)
+    const service = new EvalProjectService({
+      readTargetDependency: async (variant) => ({ id: variant.id, revision: "pinned" }),
+    })
+    const start = (seed: number) =>
+      service.start("project-1", {
+        appVersion: "test",
+        scorerVersions: {},
+        randomSeed: seed,
+        environmentCompatibility: environment,
+        executionProtocol: { kind: "balanced", repetitions: 3, outerConcurrency: 1 },
+      })
+    const first = await start(42)
+    const second = await start(42)
+    const third = await start(7)
+    const schedule = async (id: string) =>
+      (await getDb().evalTasks.where("experimentId").equals(id).toArray())
+        .sort((a, b) => a.scheduleOrder! - b.scheduleOrder!)
+        .map((row) => `${row.caseId}:${row.variantId}:${row.repetition}`)
+    const firstOrder = await schedule(first.id)
+    expect(firstOrder).toHaveLength(180)
+    expect(new Set(firstOrder).size).toBe(180)
+    expect(await schedule(second.id)).toEqual(firstOrder)
+    expect(await schedule(third.id)).not.toEqual(firstOrder)
+    expect(first.manifest.caseDigests?.[frozenCase.id]).toBe(await digestEvalDependency(frozenCase))
+    expect(first.manifest.targetDigests?.a).toBe(
+      await digestEvalDependency({ id: "a", revision: "pinned" })
+    )
+    expect(first.manifest.executionProtocol).toEqual({
+      kind: "balanced",
+      repetitions: 3,
+      outerConcurrency: 1,
+    })
+  })
+
+  it("fingerprints execution settings without persisting their contents in a manifest", async () => {
+    const settings = await getSettings()
+    await getDb().settings.put({ ...settings, defaultModel: "frozen-default-model" })
+    const variant = project().variants[0]
+    const first = await digestEvalDependency(await readEvalTargetDependency(variant))
+    await getDb().settings.update("singleton", { defaultModel: "changed-default-model" })
+    const second = await digestEvalDependency(await readEvalTargetDependency(variant))
+    expect(second).not.toBe(first)
+    const experiment = await new EvalProjectService().start("project-1", {
+      appVersion: "test",
+      scorerVersions: {},
+      randomSeed: 1,
+      environmentCompatibility: environment,
+    })
+    expect(JSON.stringify(experiment.manifest)).not.toContain("changed-default-model")
+    expect(experiment.manifest.targetDigests?.[variant.id]).toMatch(/^sha256:/)
   })
 })

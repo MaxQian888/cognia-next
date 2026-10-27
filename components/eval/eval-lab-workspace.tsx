@@ -2048,12 +2048,31 @@ function EvalLabWorkspaceContent({
     }
     if (step === "run") {
       const progressValue = progress.total > 0 ? (progress.completed / progress.total) * 100 : 0
+      const recordedCost = format.number(progress.spentCost, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
+      })
+      const costAvailability =
+        reportView?.cost.availability === "unavailable"
+          ? "unavailable"
+          : reportView?.cost.availability === "partial" || progress.reservedCost > 0
+            ? "partial"
+            : "known"
       return (
         <div className="mx-auto w-full max-w-4xl space-y-5">
           <div>
             <h2 className="text-xl font-semibold">{t("lab.run.title")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{t("lab.run.description")}</p>
           </div>
+          {resolvedVariants.some((variant) => variant.kind === "team") ? (
+            <Alert>
+              <ShieldCheckIcon />
+              <AlertTitle>{t("lab.executionProfile.teamNoticeTitle")}</AlertTitle>
+              <AlertDescription>{t("lab.executionProfile.teamNoticeDescription")}</AlertDescription>
+            </Alert>
+          ) : null}
           {runError ? (
             <Alert variant="destructive">
               <ShieldCheckIcon />
@@ -2140,14 +2159,13 @@ function EvalLabWorkspaceContent({
           <div className="grid gap-3 sm:grid-cols-3">
             <Card className="py-4">
               <CardContent>
-                <p className="text-xs text-muted-foreground">{t("lab.run.spent")}</p>
+                <p className="text-xs text-muted-foreground">{t("lab.review.actualCost")}</p>
                 <p className="mt-1 text-xl font-semibold">
-                  {format.number(progress.spentCost, {
-                    style: "currency",
-                    currency: "USD",
-                    minimumFractionDigits: 4,
-                    maximumFractionDigits: 4,
-                  })}
+                  {costAvailability === "unavailable"
+                    ? t("lab.review.metricUnavailable")
+                    : costAvailability === "partial"
+                      ? t("lab.review.partialMetric", { value: recordedCost })
+                      : recordedCost}
                 </p>
               </CardContent>
             </Card>

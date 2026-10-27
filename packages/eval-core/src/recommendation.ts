@@ -47,13 +47,32 @@ export function recommendVariants(
   candidates: readonly EvalCandidateEvidence[]
 ): EvalRecommendationResult {
   const excluded: EvalRecommendationResult["excluded"] = []
+  const minimumEffectiveCases = policy.formal
+    ? Math.max(30, policy.minimumEffectiveCases)
+    : policy.minimumEffectiveCases
   const sufficient = candidates.filter((candidate) => {
-    if (candidate.effectiveCases < policy.minimumEffectiveCases) {
+    if (candidate.effectiveCases < minimumEffectiveCases) {
       excluded.push({ variantId: candidate.variantId, reason: "insufficient_cases" })
       return false
     }
     if (!candidate.calibrationPassed) {
       excluded.push({ variantId: candidate.variantId, reason: "calibration_failed" })
+      return false
+    }
+    const requiredMetrics = [
+      ...policy.dimensions
+        .filter((dimension) => dimension.weight > 0)
+        .map((dimension) => dimension.metric),
+      ...policy.constraints.map((constraint) => constraint.metric),
+    ]
+    if (
+      requiredMetrics.some((metric) => {
+        if (metric !== "cost" && metric !== "latency") return false
+        const availability = candidate.resourceAvailability?.[metric]
+        return availability !== undefined && availability !== "known"
+      })
+    ) {
+      excluded.push({ variantId: candidate.variantId, reason: "constraint_failed" })
       return false
     }
     if (!policy.constraints.every((constraint) => satisfies(candidate, constraint))) {
@@ -72,7 +91,7 @@ export function recommendVariants(
   })
 
   if (!sufficient.length) {
-    if (candidates.some((candidate) => candidate.effectiveCases < policy.minimumEffectiveCases)) {
+    if (candidates.some((candidate) => candidate.effectiveCases < minimumEffectiveCases)) {
       return emptyResult("insufficient_cases")
     }
     if (candidates.some((candidate) => !candidate.calibrationPassed)) {

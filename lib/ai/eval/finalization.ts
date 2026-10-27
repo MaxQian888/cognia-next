@@ -2,6 +2,7 @@ import {
   recommendVariants,
   buildEvalCandidateEvidence,
   buildPairedQualityComparisons,
+  projectEvalTaskEvidence,
   selectAdaptiveRepetitions,
   type EvalAdaptivePlanItem,
   type EvalCandidateEvidence,
@@ -183,9 +184,12 @@ export async function prepareNextEvalStage(
   ])
   scope.assertActive()
   const completedRepetition = Math.max(1, ...tasks.map((task) => task.repetition))
-  const evidence = buildEvalCandidateEvidence(experiment.manifest, { samples, scores })
+  const evidenceInput = projectEvalTaskEvidence(experiment.manifest, { samples, scores, tasks })
+  const evidence = buildEvalCandidateEvidence(experiment.manifest, evidenceInput)
   const plan =
-    options.forceRecommendation || tasks.some((task) => task.state !== "completed")
+    options.forceRecommendation ||
+    experiment.manifest.executionProtocol?.kind === "balanced" ||
+    tasks.some((task) => task.state !== "completed")
       ? []
       : planAdaptiveStage(experiment.manifest, evidence, completedRepetition)
   if (plan.length) {
@@ -247,16 +251,26 @@ export async function prepareNextEvalStage(
       },
     }
   })
-  const recommendation = reviewQuality.pending
-    ? {
-        status: "no_conclusion" as const,
-        reason: "review_pending" as const,
-        paretoVariantIds: [],
-        utilityByVariant: {},
-        excluded: [],
-      }
-    : recommendVariants(experiment.manifest.decisionPolicy, reviewedEvidence)
-  const pairedComparisons = buildPairedQualityComparisons(experiment.manifest, { samples, scores })
+  const pairedComparisons = buildPairedQualityComparisons(experiment.manifest, evidenceInput)
+  const formalCaseCount = Math.max(30, experiment.manifest.dataset.holdoutCaseIds.length)
+  const requiredPairCount =
+    (experiment.manifest.variants.length * (experiment.manifest.variants.length - 1)) / 2
+  const insufficientPairs =
+    experiment.manifest.decisionPolicy.formal &&
+    (pairedComparisons.length < requiredPairCount ||
+      pairedComparisons.some((comparison) => comparison.pairedCaseCount < formalCaseCount))
+  const recommendation =
+    reviewQuality.pending || insufficientPairs
+      ? {
+          status: "no_conclusion" as const,
+          reason: reviewQuality.pending
+            ? ("review_pending" as const)
+            : ("insufficient_cases" as const),
+          paretoVariantIds: [],
+          utilityByVariant: {},
+          excluded: [],
+        }
+      : recommendVariants(experiment.manifest.decisionPolicy, reviewedEvidence)
   const recommendationRow = {
     id: crypto.randomUUID(),
     experimentId,

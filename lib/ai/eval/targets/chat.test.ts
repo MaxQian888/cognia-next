@@ -3,10 +3,11 @@ import type { EvalCase } from "@/types/eval/eval"
 import { assembleSampleFromSpans, createChatTarget } from "./chat"
 
 function span(overrides: Partial<AgentTraceSpan>): AgentTraceSpan {
+  const id = overrides.id ?? "sp_" + Math.random().toString(36).slice(2)
   return {
-    id: overrides.id ?? "sp_" + Math.random().toString(36).slice(2),
+    id,
     traceId: "tr1",
-    spanId: overrides.id ?? "sp1",
+    spanId: overrides.spanId ?? id,
     startTime: 0,
     operationName: "chat",
     providerName: "anthropic",
@@ -30,6 +31,69 @@ function makeCase(input = "do x", history?: EvalCase["history"]): EvalCase {
 }
 
 describe("assembleSampleFromSpans", () => {
+  it("marks absent accounting unavailable instead of measured zero", () => {
+    const sample = assembleSampleFromSpans([], { output: "done" })
+    expect(sample.metricAvailability).toEqual({
+      usage: "unavailable",
+      cost: "unavailable",
+      latency: "unavailable",
+      steps: "unavailable",
+    })
+  })
+
+  it("counts repeated span rows once and excludes explicitly inclusive aggregate accounting", () => {
+    const root = span({
+      id: "root",
+      spanId: "root",
+      metadata: { accountingScope: "aggregate", role: "squad-run" },
+      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      costUsdEstimate: 0.02,
+    })
+    const child = span({
+      id: "child",
+      spanId: "child",
+      parentSpanId: "root",
+      metadata: { accountingScope: "call" },
+      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      costUsdEstimate: 0.02,
+    })
+    const sample = assembleSampleFromSpans([root, child, child], { output: "done" })
+    expect(sample.usage.inputTokens).toBe(10)
+    expect(sample.costUsd).toBe(0.02)
+  })
+
+  it("keeps partial call measurements as lower bounds with explicit availability", () => {
+    const sample = assembleSampleFromSpans(
+      [
+        span({
+          id: "partial-call",
+          metadata: { accountingScope: "call", usageKnown: false, costKnown: false },
+          usage: { inputTokens: 7, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0 },
+          costUsdEstimate: 0.01,
+        }),
+      ],
+      { output: "partial" }
+    )
+    expect(sample.usage.inputTokens).toBe(7)
+    expect(sample.costUsd).toBe(0.01)
+    expect(sample.metricAvailability).toMatchObject({ usage: "partial", cost: "partial" })
+  })
+
+  it("deduplicates aggregate usage and cost separately when descendants omit one metric", () => {
+    const sample = assembleSampleFromSpans(
+      [
+        span({
+          id: "aggregate",
+          metadata: { accountingScope: "aggregate" },
+          usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        }),
+        span({ id: "priced-only", parentSpanId: "aggregate", costUsdEstimate: 0.01 }),
+      ],
+      { output: "done" }
+    )
+    expect(sample.usage.inputTokens).toBe(10)
+    expect(sample.costUsd).toBe(0.01)
+  })
   it("extracts tool calls in start-time order with args parsed from inputPreview", () => {
     const spans = [
       span({

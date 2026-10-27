@@ -38,6 +38,20 @@ export function EvalReportPanel({
   const t = useTranslations("eval")
   const format = useFormatter()
   const recommendation = reportView?.recommendation?.result
+  const resourceMetric = (value: number, availability?: "known" | "partial" | "unavailable") =>
+    availability === "unavailable"
+      ? t("lab.review.metricUnavailable")
+      : availability === "partial"
+        ? t("lab.review.partialMetric", { value: value.toFixed(3) })
+        : value.toFixed(3)
+  const recordedCost = reportView
+    ? format.number(reportView.cost.actual, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
+      })
+    : ""
   const filteredReportCases = useMemo(
     () =>
       reportView
@@ -85,12 +99,11 @@ export function EvalReportPanel({
             <div>
               <p className="text-xs text-muted-foreground">{t("lab.review.actualCost")}</p>
               <p className="mt-1 font-semibold">
-                {format.number(reportView.cost.actual, {
-                  style: "currency",
-                  currency: "USD",
-                  minimumFractionDigits: 4,
-                  maximumFractionDigits: 4,
-                })}
+                {reportView.cost.availability === "unavailable"
+                  ? t("lab.review.metricUnavailable")
+                  : reportView.cost.availability === "partial"
+                    ? t("lab.review.partialMetric", { value: recordedCost })
+                    : recordedCost}
               </p>
             </div>
             <div>
@@ -154,10 +167,13 @@ export function EvalReportPanel({
                       {candidate.metrics.reliability.toFixed(3)}
                     </TableCell>
                     <TableCell className="p-2 tabular-nums">
-                      {candidate.metrics.cost.toFixed(3)}
+                      {resourceMetric(candidate.metrics.cost, candidate.resourceAvailability?.cost)}
                     </TableCell>
                     <TableCell className="p-2 tabular-nums">
-                      {candidate.metrics.latency.toFixed(3)}
+                      {resourceMetric(
+                        candidate.metrics.latency,
+                        candidate.resourceAvailability?.latency
+                      )}
                     </TableCell>
                     <TableCell className="p-2 tabular-nums">{candidate.effectiveCases}</TableCell>
                   </TableRow>
@@ -239,6 +255,21 @@ export function EvalReportPanel({
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-3 grid gap-3 text-sm">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {t("lab.executionProfile.label")}
+                    </p>
+                    <p className="mt-1">
+                      {item.sample.executionProfile
+                        ? t(`lab.executionProfile.profiles.${item.sample.executionProfile}`)
+                        : t("lab.executionProfile.unknown")}
+                    </p>
+                    {item.sample.executionProfile === "isolated-text" ? (
+                      <p className="mt-1 text-muted-foreground">
+                        {t("lab.executionProfile.teamNoticeDescription")}
+                      </p>
+                    ) : null}
+                  </div>
                   <div>
                     <p className="text-xs font-medium text-muted-foreground">
                       {t("lab.review.input")}

@@ -29,7 +29,14 @@ jest.mock("@/lib/ai/model-options", () => ({
 jest.mock("@/lib/db/characters", () => ({
   listCharacters: async () => [{ id: "ch1", name: "Ava" }],
 }))
-jest.mock("@/lib/db/teams", () => ({ listTeams: async () => [{ id: "tm1", name: "Core" }] }))
+jest.mock("@/lib/db/teams", () => ({
+  listTeams: jest.fn(async () => [{ id: "chat-team", name: "Conversation room" }]),
+}))
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: jest.fn((selector: (state: unknown) => unknown) =>
+    selector({ teams: { squad1: { id: "squad1", name: "Core Squad" } } })
+  ),
+}))
 jest.mock("@/lib/db/workflows", () => ({
   listWorkflowsByUpdated: async () => [{ id: "wf1", name: "Pipeline" }],
 }))
@@ -41,7 +48,7 @@ it("folds models, characters, teams and workflows into RunConfigOptions", async 
   // duplicate model ids across providers are de-duplicated
   expect(result.current.models).toEqual(["claude-opus-4-8"])
   expect(result.current.characters).toEqual([{ id: "ch1", name: "Ava" }])
-  expect(result.current.teams).toEqual([{ id: "tm1", name: "Core" }])
+  expect(result.current.teams).toEqual([{ id: "squad1", name: "Core Squad" }])
   expect(result.current.twins).toEqual([{ id: "tw1", name: "Alice" }])
 })
 

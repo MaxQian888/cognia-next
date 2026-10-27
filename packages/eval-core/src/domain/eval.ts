@@ -44,6 +44,18 @@ export interface EvalUsage {
   cacheCreationTokens: number
 }
 
+/** Execution outcome is independent of whether an output scorer succeeded. */
+export type EvalExecutionStatus =
+  "completed" | "failed" | "cancelled" | "timed_out" | "blocked" | "interrupted"
+
+/** Missing telemetry must never be interpreted as measured zero resource use. */
+export interface EvalMetricAvailability {
+  usage: "known" | "partial" | "unavailable"
+  cost: "known" | "estimated" | "partial" | "unavailable"
+  latency: "known" | "unavailable"
+  steps?: "known" | "unavailable"
+}
+
 /**
  * The captured trajectory of one agent run against one {@link EvalCase}. This
  * is the unit every {@link Scorer} consumes — assembled from `AgentTraceSpan`s
@@ -72,6 +84,12 @@ export interface EvalSample {
   redactionDigest?: string
   /** Set when the run itself failed (vs. a clean but low-quality answer). */
   error?: string
+  /** Absent on legacy samples; an error still always means failed execution. */
+  executionStatus?: EvalExecutionStatus
+  /** Captured execution capability profile; never inferred from a passing score. */
+  executionProfile?: "isolated-text" | "desktop-chat" | "pure-model"
+  /** Absent only on legacy captures whose metrics predate availability metadata. */
+  metricAvailability?: EvalMetricAvailability
 }
 
 /** Reference values a case may carry for reference-based scoring. */
@@ -239,6 +257,10 @@ export interface EvalRepetition {
 export interface EvalCaseResult {
   caseId: string
   repetitions: EvalRepetition[]
+  /** Fixed repetition count requested before this case was dispatched. */
+  expectedRepetitions?: number
+  /** Partial observations retain incurred resource usage but cannot prove pass^k. */
+  status?: "completed" | "partial"
 }
 
 /** Per-repetition verdict derived from its `scored` observations. */
@@ -283,30 +305,44 @@ export interface EvalReport {
   k: number
   caseCount: number
   /**
-   * Cases that produced at least one `scored` observation on repetition 1 —
-   * the DENOMINATOR of {@link passAt1} / {@link passHatK}. A case no selected
-   * scorer could grade is neither a pass nor a failure; counting it either way
-   * is a lie, so it is excluded here and reported in {@link ungradedCaseCount}.
+   * Cases with a verdict on repetition 1: a graded answer or an explicit
+   * execution failure. This is the denominator of {@link passAt1}; complete
+   * all-repeat reliability has its own {@link reliabilityCaseCount}.
    */
   gradedCaseCount: number
   /** Cases no selected scorer could grade. `caseCount - gradedCaseCount`. */
   ungradedCaseCount: number
+  /** Number of attempted repetitions, including retained interrupted cases. */
+  attemptedRepetitionCount?: number
+  /** Repetitions with a verdict (execution failures are failed verdicts). */
+  gradedRepetitionCount?: number
+  /** Cases with fewer than the requested k returned observations. */
+  incompleteCaseCount?: number
+  /** Attempted case clusters with a verdict; incomplete cases cannot count as all-k passes. */
+  reliabilityCaseCount?: number
+  /** Attempt outcomes, separate from scorer failures and output quality. */
+  executionFailureCount?: number
+  executionOutcomes?: Record<EvalExecutionStatus, number>
+  /** Availability of aggregate resource observations; partial totals are lower bounds. */
+  metricAvailability?: {
+    cost: "known" | "estimated" | "partial" | "unavailable"
+    latency: "known" | "partial" | "unavailable"
+  }
   scorers: Record<string, ScorerAggregate>
   /** Fraction of GRADED cases passing every scored scorer on the FIRST repetition. */
   passAt1: number
-  /** Fraction of GRADED cases passing on ALL k repetitions (reliability). */
+  /** Fraction of attempted, verdict-bearing cases completing ALL requested repetitions successfully. */
   passHatK: number
   totalCostUsd: number
   avgLatencyMs: number
   createdAt: number
   /**
-   * Scoring-semantics version. `2` = the {@link ScoreStatus} model (only
-   * `scored` observations decide a verdict, ungraded cases leave the
-   * denominator). Absent on rows written before that change, whose `passAt1`
-   * is inflated and NOT comparable — the UI badges those as legacy and
-   * withholds their gate verdict.
+   * Scoring-semantics version. `2` introduced ScoreStatus. `3` separates
+   * execution failure, partial-case reliability and metric availability.
+   * Earlier reports remain readable, but their rates and resource metrics are
+   * not comparable with version 3 and cannot issue a current gate verdict.
    */
-  scoringVersion?: 2
+  scoringVersion?: 2 | 3
   /**
    * How far the run got. Written as `"running"` BEFORE the first case, then
    * overwritten when it settles.

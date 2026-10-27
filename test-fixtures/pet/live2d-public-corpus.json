@@ -83,6 +83,16 @@
         "path": "motions/Hiyori_m10.motion3.json",
         "sha256": "ba0ba6764a80459432ffd48d6bd5ba261fd25f196208ade3016be74efb9d3dfc",
         "bytes": 9604
+      },
+      {
+        "path": "Hiyori.userdata3.json",
+        "bytes": 623,
+        "sha256": "75fe50a89ea695b46c98dce8991c2f3d67e3d7a479786e6310460289b552d29b"
+      },
+      {
+        "path": "Hiyori.cdi3.json",
+        "bytes": 9660,
+        "sha256": "0fc3fc76b7a68136056c8832c930c8af9f93899f359eded7349b481ea2342d03"
       }
     ]
   },
@@ -210,6 +220,16 @@
         "path": "sounds/haru_Info_04.wav",
         "sha256": "df9bdccee25492b1787bde80877a0bbbe442c71385083ce63987ff4d7aba456d",
         "bytes": 111354
+      },
+      {
+        "path": "Haru.userdata3.json",
+        "bytes": 313,
+        "sha256": "6d001365965cdabd9fb36cffa9583c9e3eff20331d791c00064c4f9246ca2893"
+      },
+      {
+        "path": "Haru.cdi3.json",
+        "bytes": 5536,
+        "sha256": "f0b7b68e8404fb2a327f77515388f9f2418d038e3eb98a7ecff89818c3dd4e97"
       }
     ]
   }

@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation"
 import { PlusIcon, Trash2Icon, PlayIcon, Loader2Icon, ScaleIcon, SettingsIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -103,12 +104,18 @@ export function RunConfigDialog({
   // warning. Null until the dataset has at least one prior run.
   const datasetRuns = useEvalRuns(datasetId)
   const cases = useEvalCases(datasetId)
-  const costPerUnit = useMemo(() => {
+  const lastRun = useMemo(() => {
     let last: (typeof datasetRuns)[number] | undefined
     for (const r of datasetRuns) if (!last || r.createdAt > last.createdAt) last = r
-    if (!last) return null
-    return last.totalCostUsd / Math.max(1, last.caseCount * last.k)
+    return last
   }, [datasetRuns])
+  const costUnavailable =
+    lastRun?.metricAvailability?.cost === "unavailable" ||
+    lastRun?.metricAvailability?.cost === "partial"
+  const costPerUnit =
+    lastRun && !costUnavailable
+      ? lastRun.totalCostUsd / Math.max(1, lastRun.caseCount * lastRun.k)
+      : null
 
   const targetCount = Math.max(1, targets.filter((d) => d.ref.trim()).length)
   const estimatedCost =
@@ -294,6 +301,14 @@ export function RunConfigDialog({
         </Button>
       </div>
 
+      {targets.some((target) => target.kind === "team") ? (
+        <Alert>
+          <ScaleIcon />
+          <AlertTitle>{t("lab.executionProfile.teamNoticeTitle")}</AlertTitle>
+          <AlertDescription>{t("lab.executionProfile.teamNoticeDescription")}</AlertDescription>
+        </Alert>
+      ) : null}
+
       {/* k + subset */}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <label className="flex flex-col gap-1 text-sm">
@@ -365,6 +380,11 @@ export function RunConfigDialog({
             : ""}
         </p>
       )}
+      {costUnavailable ? (
+        <p className="text-xs text-muted-foreground">
+          {t("lab.scoring.metrics.cost")}: <span>{t("lab.review.metricUnavailable")}</span>
+        </p>
+      ) : null}
 
       {/* The first click over budget confirms rather than launches, so it needs
           feedback of its own — a label change alone reads as a dead button. */}

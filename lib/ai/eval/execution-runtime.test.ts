@@ -152,6 +152,27 @@ describe("scope-owned evaluation execution", () => {
     done.resolve()
   })
 
+  it("pre-registers the production Agent run as a seeded balanced three-repetition experiment", async () => {
+    const { runtime, engine, done, createOrchestrator } = setup()
+    const agentProject = {
+      ...project(),
+      mode: "agent" as const,
+      variants: project().variants.map((variant) => ({ ...variant, kind: "chat" as const })),
+    }
+    const id = await runtime.start(agentProject, { randomSeed: 42 })
+    const experiment = await getDb().evalExperiments.get(id)
+    expect(experiment?.manifest.executionProtocol).toEqual({
+      kind: "balanced",
+      repetitions: 3,
+      outerConcurrency: 1,
+    })
+    expect(experiment?.manifest.randomSeed).toBe(42)
+    expect(await getDb().evalTasks.where("experimentId").equals(id).count()).toBe(180)
+    expect(engine.run).toHaveBeenCalledWith(id)
+    expect(createOrchestrator.mock.calls[0][1]).toEqual({ mode: "agent" })
+    done.resolve()
+  })
+
   it("reattaches observers to the live owner without treating its run as crashed", async () => {
     const { runtime, engine } = setup()
     const id = await runtime.start(project())

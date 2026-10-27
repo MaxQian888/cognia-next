@@ -8,6 +8,7 @@
 
 import type { EvalReport, ScorerAggregate } from "./domain/eval"
 import type { GateThresholds, GateResult, GateVerdict } from "./domain/gate"
+import { isLegacyScoring, isPartialRun } from "./report"
 
 export type { GateThresholds, GateResult, GateVerdict } from "./domain/gate"
 
@@ -27,6 +28,10 @@ function graded(agg: ScorerAggregate): boolean {
 export function evaluateGate(report: EvalReport, thresholds: GateThresholds): GateResult {
   const failures: string[] = []
   const inconclusiveReasons: string[] = []
+  const partial = isPartialRun(report) || (report.incompleteCaseCount ?? 0) > 0
+  if (partial)
+    inconclusiveReasons.push("run has incomplete repetitions; reliability is not established")
+  if (isLegacyScoring(report)) inconclusiveReasons.push("report uses legacy scoring semantics")
 
   // A run that graded nothing reports `passAt1: 0`, which every floor below
   // would read as total failure. No evidence is not a failing grade — say so
@@ -40,7 +45,7 @@ export function evaluateGate(report: EvalReport, thresholds: GateThresholds): Ga
     )
   }
 
-  if (!noGradedCases) {
+  if (!noGradedCases && !partial) {
     if (thresholds.minPassHatK !== undefined && report.passHatK < thresholds.minPassHatK) {
       failures.push(`passHatK ${report.passHatK.toFixed(3)} < ${thresholds.minPassHatK}`)
     }
@@ -83,6 +88,13 @@ export function evaluateGate(report: EvalReport, thresholds: GateThresholds): Ga
     report.totalCostUsd > thresholds.maxTotalCostUsd
   ) {
     failures.push(`cost ${report.totalCostUsd.toFixed(4)} > ${thresholds.maxTotalCostUsd}`)
+  }
+  if (
+    thresholds.maxTotalCostUsd !== undefined &&
+    (report.metricAvailability?.cost === "partial" ||
+      report.metricAvailability?.cost === "unavailable")
+  ) {
+    inconclusiveReasons.push("cost measurement is incomplete or unavailable")
   }
 
   // Guards against a high pass rate measured over almost nothing. Legacy

@@ -4,6 +4,7 @@ import type {
   EvalExperimentState,
   EvalTask,
   EvalVariant,
+  EvalAttemptObservation,
 } from "@cognia/eval-core"
 import type { EvalCase, EvalSample, Score, Scorer } from "@/types/eval/eval"
 import type { TargetSpec } from "@/types/eval/run-config"
@@ -18,6 +19,7 @@ import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { applyPiiGate } from "@/lib/workflow/nodes/ai/pii-gate"
 import {
   completeEvalTask,
+  recordEvalAttempt,
   type EvalExperimentRow,
   type EvalSampleRow,
   type EvalScoreRow,
@@ -41,6 +43,12 @@ import { createPureModelEvalTarget } from "./targets/model"
 import { defaultTeamTargetDeps } from "./targets/team-default-deps"
 import { defaultWorkflowTargetDeps } from "./targets/workflow-default-deps"
 import { isConfirmedLocalProvider } from "./provider-locality"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import {
+  digestEvalDependency,
+  estimateEvalTaskCost,
+  readEvalTargetDependency,
+} from "./project-service"
 
 const DAY_MS = 24 * 60 * 60 * 1_000
 const TARGET_PART_SEPARATOR = "\u001eCOGNIA_EVAL_TARGET_PART\u001e"
@@ -62,18 +70,35 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
   }
   async getExperiment(
     id: string
-  ): Promise<{ state: EvalExperimentState; hardCap: number } | undefined> {
+  ): Promise<
+    { state: EvalExperimentState; hardCap: number; concurrencyLimit?: number } | undefined
+  > {
     const experiment = await this.database().evalExperiments.get(id)
     return experiment
       ? {
           state: experiment.state,
           hardCap: experiment.budgetCap ?? experiment.manifest.budget.hardCap,
+          concurrencyLimit: experiment.manifest.executionProtocol?.outerConcurrency,
         }
       : undefined
   }
 
-  listTasks(experimentId: string) {
-    return this.database().evalTasks.where("experimentId").equals(experimentId).toArray()
+  async listTasks(experimentId: string) {
+    const db = this.database()
+    const [rows, experiment] = await Promise.all([
+      db.evalTasks.where("experimentId").equals(experimentId).toArray(),
+      db.evalExperiments.get(experimentId),
+    ])
+    this.scope?.assertActive()
+    return rows.map((task) => {
+      const variant = experiment?.manifest.variants.find((item) => item.id === task.variantId)
+      return {
+        ...task,
+        ...(variant?.kind === "team" && variant.targetId
+          ? { concurrencyKey: `team:${variant.targetId}` }
+          : {}),
+      }
+    })
   }
 
   async setExperimentState(
@@ -152,6 +177,21 @@ export class DexieEvalOrchestratorRepository implements EvalOrchestratorReposito
     )
   }
 
+  async recordAttempt(
+    task: EvalTask,
+    observation: EvalAttemptObservation,
+    result?: EvalTaskExecutionResult<EvalExecutedTaskArtifacts>
+  ): Promise<void> {
+    await recordEvalAttempt(
+      {
+        task,
+        observation,
+        ...(result ? { sample: result.value.sample, scores: result.value.scores } : {}),
+      },
+      this.scope
+    )
+  }
+
   async releaseTaskReservation(taskId: string): Promise<void> {
     const db = this.database()
     await db.transaction("rw", [db.evalTasks, db.evalExperiments], async () => {
@@ -188,11 +228,12 @@ interface BuildTargetInput {
 export interface BrowserEvalExecutorDependencies {
   loadExperiment(id: string): Promise<EvalExperimentRow | undefined>
   loadCase(id: string): Promise<EvalCase | undefined>
+  readTargetDependency(variant: EvalVariant): Promise<unknown>
   buildTarget(input: BuildTargetInput): EvalTarget
   resolveScorers(
     manifest: EvalExperimentManifest,
     appSettings: AppSettings,
-    execution?: { signal: AbortSignal; assertActive(): void }
+    execution?: { signal: AbortSignal; assertActive(): void; costLimitUsd?: number }
   ): Scorer[] | ResolvedEvalScorers
   encryptArtifact: typeof encryptEvalArtifact
   now(): number
@@ -206,7 +247,10 @@ interface JudgeUsage {
 
 interface ResolvedEvalScorers {
   scorers: Scorer[]
-  getJudgeAccounting?: () => JudgeUsage & { cost: number }
+  getJudgeAccounting?: () => JudgeUsage & {
+    cost: number
+    costStatus?: EvalAttemptObservation["costStatus"]
+  }
 }
 
 export interface BrowserEvalExecutorOptions {
@@ -244,6 +288,10 @@ function agentTargetSpec(variant: EvalVariant): TargetSpec {
       kind: "team",
       label: variant.name,
       teamId: required(variant.targetId, "Team id"),
+      ...(typeof variant.parameters?.maxCostUsd === "number"
+        ? { maxCostUsd: variant.parameters.maxCostUsd }
+        : {}),
+      ...(variant.price ? { price: variant.price } : {}),
     }
   }
   if (variant.kind === "workflow") {
@@ -401,13 +449,21 @@ async function prepareAgentTargetCase(
 }
 
 function confirmedVariantLocality(variant: EvalVariant, appSettings: AppSettings): boolean {
-  if ((variant.kind !== "model" && variant.kind !== "chat") || !variant.providerId) return false
+  if (variant.kind !== "model" && variant.kind !== "chat") return false
+  return confirmedProviderLocality(variant.providerId, appSettings)
+}
+
+function confirmedProviderLocality(
+  providerId: string | undefined,
+  appSettings: AppSettings
+): boolean {
+  if (!providerId) return false
   const resolution = resolveFeatureProvider(
     {
       featureId: "eval.locality",
       routeProfile: "capability-bound",
       selectionMode: "explicit-provider",
-      providerId: variant.providerId,
+      providerId,
       fallbackMode: "none",
       executionMode: "direct-model",
       proxyMode: "never",
@@ -420,7 +476,7 @@ function confirmedVariantLocality(variant: EvalVariant, appSettings: AppSettings
 function defaultResolveScorers(
   manifest: EvalExperimentManifest,
   appSettings: AppSettings,
-  execution?: { signal: AbortSignal; assertActive(): void }
+  execution?: { signal: AbortSignal; assertActive(): void; costLimitUsd?: number }
 ): Scorer[] | ResolvedEvalScorers {
   const scorers = deterministicScorers()
   if (!manifest.judgePolicy.enabled) return scorers
@@ -449,18 +505,77 @@ function defaultResolveScorers(
   ) {
     throw new Error("The configured second evaluation judge is unavailable")
   }
-  const scopedJudge = (judge: NonNullable<typeof client>) => ({
+  let admittedJudgeCost = 0
+  let admittedJudgeCalls = 0
+  let ambiguousJudgeSpend = false
+  const scopedJudge = (
+    judge: NonNullable<typeof client>,
+    price: EvalExperimentManifest["judgePolicy"]["price"]
+  ) => ({
     ...judge,
-    complete(prompt: string, options?: Parameters<typeof judge.complete>[1]) {
+    async complete(prompt: string, options?: Parameters<typeof judge.complete>[1]) {
       execution?.assertActive()
-      return judge.complete(prompt, {
-        ...options,
-        ...(execution ? { abortSignal: execution.signal } : {}),
-      })
+      const maxTokens = options?.maxTokens ?? manifest.judgePolicy.maxOutputTokens ?? 300
+      if (!Number.isInteger(maxTokens) || maxTokens <= 0)
+        throw new Error("Evaluation judge requires a bounded output token limit")
+      // A loopback endpoint can forward to a paid cloud provider. Explicit
+      // prices (including an explicitly configured zero rate) are required.
+      if (
+        !price ||
+        !Number.isFinite(price.inputPerMillion) ||
+        price.inputPerMillion < 0 ||
+        !Number.isFinite(price.outputPerMillion) ||
+        price.outputPerMillion < 0 ||
+        !execution ||
+        !Number.isFinite(execution.costLimitUsd) ||
+        execution.costLimitUsd! < 0
+      ) {
+        throw new Error("Evaluation judge requires an explicit priced per-call budget")
+      }
+      // A byte upper bound avoids optimistic character/token ratios. Keep
+      // provider framing overhead in the reservation and turn SDK retries
+      // off so one admission cannot silently buy several requests.
+      const inputBound = new TextEncoder().encode(prompt + (options?.system ?? "")).byteLength + 512
+      const reservation =
+        (inputBound * price.inputPerMillion + maxTokens * price.outputPerMillion) / 1_000_000
+      if (
+        !Number.isFinite(reservation) ||
+        reservation < 0 ||
+        admittedJudgeCost + reservation > execution.costLimitUsd!
+      ) {
+        throw new Error("Evaluation judge call exceeds its reserved budget")
+      }
+      admittedJudgeCost += reservation
+      if (!hasNoLeakingPiiDeep({ prompt, system: options?.system })) {
+        throw new Error("Evaluation judge prompt blocked by the PII gate")
+      }
+      if (price.inputPerMillion + price.outputPerMillion > 0) admittedJudgeCalls += 1
+      try {
+        const result = await judge.complete(prompt, {
+          ...options,
+          maxTokens,
+          maxRetries: 0,
+          ...(execution ? { abortSignal: execution.signal } : {}),
+        })
+        if (price.inputPerMillion + price.outputPerMillion > 0 && !judge.getUsageSnapshot)
+          ambiguousJudgeSpend = true
+        return result
+      } catch (error) {
+        // A failed HTTP/client response does not prove the provider did not
+        // perform billable work. Preserve uncertainty instead of booking zero.
+        if (price.inputPerMillion + price.outputPerMillion > 0) ambiguousJudgeSpend = true
+        throw error
+      }
     },
   })
-  const primaryScorers = llmScorers({ client: scopedJudge(client) })
-  const secondaryScorers = secondClient ? llmScorers({ client: scopedJudge(secondClient) }) : []
+  const primaryScorers = llmScorers({
+    client: scopedJudge(client, manifest.judgePolicy.price),
+  })
+  const secondaryScorers = secondClient
+    ? llmScorers({
+        client: scopedJudge(secondClient, manifest.judgePolicy.secondJudgePrice),
+      })
+    : []
   const escalatedScorers = primaryScorers.map((primary, index): Scorer => {
     const secondary = secondaryScorers[index]
     if (!secondary) return primary
@@ -510,7 +625,6 @@ function defaultResolveScorers(
   })
   const accountingFor = (
     judgeClient: NonNullable<typeof client>,
-    local: boolean | undefined,
     price: EvalExperimentManifest["judgePolicy"]["price"]
   ) => {
     const usage = judgeClient.getUsageSnapshot?.()
@@ -519,32 +633,32 @@ function defaultResolveScorers(
     return {
       inputTokens,
       outputTokens,
-      cost:
-        local || !price
-          ? 0
-          : (inputTokens * price.inputPerMillion + outputTokens * price.outputPerMillion) /
-            1_000_000,
+      cost: !price
+        ? 0
+        : (inputTokens * price.inputPerMillion + outputTokens * price.outputPerMillion) / 1_000_000,
     }
   }
   return {
     scorers: [...scorers, ...escalatedScorers],
     getJudgeAccounting: () => {
-      const primary = accountingFor(
-        client,
-        manifest.judgePolicy.isLocal,
-        manifest.judgePolicy.price
-      )
+      const primary = accountingFor(client, manifest.judgePolicy.price)
       const secondary = secondClient
-        ? accountingFor(
-            secondClient,
-            manifest.judgePolicy.secondJudgeIsLocal,
-            manifest.judgePolicy.secondJudgePrice
-          )
+        ? accountingFor(secondClient, manifest.judgePolicy.secondJudgePrice)
         : { inputTokens: 0, outputTokens: 0, cost: 0 }
       return {
         inputTokens: primary.inputTokens + secondary.inputTokens,
         outputTokens: primary.outputTokens + secondary.outputTokens,
         cost: primary.cost + secondary.cost,
+        costStatus:
+          ambiguousJudgeSpend ||
+          (admittedJudgeCalls > 0 &&
+            primary.inputTokens +
+              primary.outputTokens +
+              secondary.inputTokens +
+              secondary.outputTokens ===
+              0)
+            ? "partial"
+            : "estimated",
       }
     },
   }
@@ -609,6 +723,7 @@ export function createBrowserEvalTaskExecutor(
   const dependencies: BrowserEvalExecutorDependencies = {
     loadExperiment: (id) => (options.scope?.db ?? getDb()).evalExperiments.get(id),
     loadCase: options.scope ? (id) => options.scope!.db.evalCases.get(id) : getCase,
+    readTargetDependency: (variant) => readEvalTargetDependency(variant, options.scope),
     buildTarget: defaultBuildTarget,
     resolveScorers: defaultResolveScorers,
     encryptArtifact: encryptEvalArtifact,
@@ -618,6 +733,7 @@ export function createBrowserEvalTaskExecutor(
   }
 
   return async (task, signal) => {
+    const assertScope = () => options.scope?.assertActive()
     const assertActive = () => {
       options.scope?.assertActive()
       signal.throwIfAborted()
@@ -631,10 +747,51 @@ export function createBrowserEvalTaskExecutor(
     const evalCase = await dependencies.loadCase(task.caseId)
     assertActive()
     if (!evalCase) throw new Error(`Evaluation case ${task.caseId} not found`)
+    const caseDigest = experiment.manifest.caseDigests?.[task.caseId]
+    if (caseDigest && caseDigest !== (await digestEvalDependency(evalCase))) {
+      throw new Error(`Evaluation case ${task.caseId} changed since the manifest was created`)
+    }
+    const targetDigest = experiment.manifest.targetDigests?.[variant.id]
+    if (
+      targetDigest &&
+      targetDigest !==
+        (await digestEvalDependency(await dependencies.readTargetDependency(variant)))
+    ) {
+      throw new Error(`Evaluation target ${variant.id} changed since the manifest was created`)
+    }
+    const caseReservation =
+      Number.isFinite(task.reservedCost) && task.reservedCost > 0
+        ? task.reservedCost
+        : Math.max(
+            0,
+            (experiment.budgetCap ?? experiment.manifest.budget.hardCap) -
+              experiment.spentCost -
+              experiment.reservedCost
+          )
+    const judgeReservation = estimateEvalTaskCost(
+      { ...variant, kind: "model", isLocal: true },
+      experiment.manifest.judgePolicy
+    )
+    const targetLimit = Math.max(0, caseReservation - judgeReservation)
+    const boundedVariant =
+      variant.kind === "team"
+        ? {
+            ...variant,
+            parameters: {
+              ...variant.parameters,
+              maxCostUsd: Math.min(
+                typeof variant.parameters?.maxCostUsd === "number"
+                  ? variant.parameters.maxCostUsd
+                  : targetLimit,
+                targetLimit
+              ),
+            },
+          }
+        : variant
     const confirmedLocal = confirmedVariantLocality(variant, options.appSettings)
     const target = dependencies.buildTarget({
       manifest: experiment.manifest,
-      variant,
+      variant: boundedVariant,
       appSettings: options.appSettings,
       artifactKey: options.artifactKey,
       confirmedLocal,
@@ -647,19 +804,47 @@ export function createBrowserEvalTaskExecutor(
     const targetCase = preparedAgentCase?.evalCase ?? evalCase
     assertActive()
     const targetSample = await target.run(targetCase, signal)
-    assertActive()
+    // An abort after model work must not discard returned usage or elapsed
+    // time. Account scope still fences persistence to the owning account.
+    assertScope()
+    const capturedSample: EvalSample = {
+      ...targetSample,
+      executionStatus: signal.aborted
+        ? "cancelled"
+        : (targetSample.executionStatus ?? (targetSample.error ? "failed" : "completed")),
+      ...(signal.aborted
+        ? { error: targetSample.error ?? "Evaluation cancelled after execution" }
+        : {}),
+    }
     const sample = preparedAgentCase
       ? {
-          ...targetSample,
+          ...capturedSample,
           redactionPolicy: preparedAgentCase.policy,
           redactionDigest: preparedAgentCase.digest,
         }
-      : targetSample
-    const resolvedScorers = dependencies.resolveScorers(experiment.manifest, options.appSettings, {
-      signal,
-      assertActive,
-    })
-    const scorers = Array.isArray(resolvedScorers) ? resolvedScorers : resolvedScorers.scorers
+      : capturedSample
+    let resolutionError: unknown
+    let resolvedScorers: Scorer[] | ResolvedEvalScorers = []
+    if (!signal.aborted) {
+      try {
+        resolvedScorers = dependencies.resolveScorers(experiment.manifest, options.appSettings, {
+          signal,
+          assertActive,
+          costLimitUsd:
+            sample.metricAvailability?.cost === "unavailable" ||
+            sample.metricAvailability?.cost === "partial"
+              ? 0
+              : Math.max(0, caseReservation - sample.costUsd),
+        })
+      } catch (error) {
+        resolutionError = error
+      }
+    }
+    const scorers = signal.aborted
+      ? []
+      : Array.isArray(resolvedScorers)
+        ? resolvedScorers
+        : resolvedScorers.scorers
     const judgeUsageBefore = Array.isArray(resolvedScorers)
       ? { inputTokens: 0, outputTokens: 0, cost: 0 }
       : (resolvedScorers.getJudgeAccounting?.() ?? {
@@ -669,7 +854,7 @@ export function createBrowserEvalTaskExecutor(
         })
     const judgeEvidence = redactJudgeEvidence(evalCase, sample)
     const judgeRedactionDigest = await digestTargetPayload(judgeEvidence)
-    assertActive()
+    assertScope()
     const scores = await Promise.all(
       scorers.map(async (scorer) => {
         try {
@@ -683,7 +868,16 @@ export function createBrowserEvalTaskExecutor(
         }
       })
     )
-    assertActive()
+    if (resolutionError)
+      scores.push({
+        scorerId: "evaluation-configuration",
+        dimension: "response-quality",
+        status: "errored",
+        value: 0,
+        passed: false,
+        error: resolutionError instanceof Error ? resolutionError.message : String(resolutionError),
+      })
+    assertScope()
     const judgeUsageAfter = Array.isArray(resolvedScorers)
       ? judgeUsageBefore
       : (resolvedScorers.getJudgeAccounting?.() ?? judgeUsageBefore)
@@ -693,6 +887,16 @@ export function createBrowserEvalTaskExecutor(
     }
     const actualJudgeCost = Math.max(0, judgeUsageAfter.cost - judgeUsageBefore.cost)
     const actualCost = sample.costUsd + actualJudgeCost
+    const judgeCostUnknown =
+      "costStatus" in judgeUsageAfter &&
+      (judgeUsageAfter.costStatus === "partial" || judgeUsageAfter.costStatus === "unavailable")
+    if (judgeCostUnknown)
+      sample.metricAvailability = {
+        usage: sample.metricAvailability?.usage ?? "known",
+        latency: sample.metricAvailability?.latency ?? "known",
+        ...sample.metricAvailability,
+        cost: "partial",
+      }
     const createdAt = dependencies.now()
     const sampleId = dependencies.newId()
     const encryptedArtifact = await dependencies.encryptArtifact(options.artifactKey, {
@@ -701,7 +905,7 @@ export function createBrowserEvalTaskExecutor(
       variantId: variant.id,
       repetition: task.repetition,
     })
-    assertActive()
+    assertScope()
     const scoreRows: EvalScoreRow[] = await Promise.all(
       scores.map(async (score) => ({
         id: dependencies.newId(),
@@ -725,7 +929,7 @@ export function createBrowserEvalTaskExecutor(
         createdAt,
       }))
     )
-    assertActive()
+    assertScope()
     const persistedSample: EvalSampleRow = {
       id: sampleId,
       experimentId: experiment.id,
@@ -743,11 +947,16 @@ export function createBrowserEvalTaskExecutor(
       judgeRedactionPolicy: "redacted",
       judgeRedactionDigest,
       actualCost,
+      executionStatus: sample.executionStatus,
+      metricAvailability: sample.metricAvailability,
+      attempt: task.attempt,
       createdAt,
       expiresAt: createdAt + experiment.manifest.retentionDays * DAY_MS,
     }
     return {
       actualCost,
+      costStatus: sample.metricAvailability?.cost ?? "estimated",
+      executionStatus: sample.executionStatus,
       value: { sample: persistedSample, scores: scoreRows },
     }
   }

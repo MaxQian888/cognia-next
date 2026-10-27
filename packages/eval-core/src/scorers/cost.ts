@@ -53,6 +53,32 @@ export function makeCostScorer(budget: CostBudget = {}): Scorer {
         stepCount: sample.stepCount,
         inputTokens: sample.usage.inputTokens,
         outputTokens: sample.usage.outputTokens,
+        ...(sample.metricAvailability ? { metricAvailability: sample.metricAvailability } : {}),
+      }
+
+      const unavailable = [
+        budget.maxCostUsd !== undefined &&
+        (sample.metricAvailability?.cost === "unavailable" ||
+          sample.metricAvailability?.cost === "partial")
+          ? "cost"
+          : undefined,
+        budget.maxLatencyMs !== undefined && sample.metricAvailability?.latency === "unavailable"
+          ? "latency"
+          : undefined,
+        budget.maxSteps !== undefined && sample.metricAvailability?.steps === "unavailable"
+          ? "steps"
+          : undefined,
+      ].filter((metric): metric is string => metric !== undefined)
+      if (unavailable.length) {
+        return {
+          scorerId: "cost",
+          dimension: "cost",
+          status: "errored",
+          value: 0,
+          passed: false,
+          error: `metric-unavailable: ${unavailable.join(", ")}`,
+          metadata,
+        }
       }
 
       if (ratios.length === 0) {

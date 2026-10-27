@@ -16,6 +16,8 @@ import type { EvalCase, EvalSample, EvalToolCall, EvalRetrievedChunk } from "@/t
 import type { EvalTarget } from "@cognia/eval-core"
 import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
 import Dexie from "dexie"
+import { createEvalDeadline } from "./deadline"
+import { waitForEvalTracePersistence } from "./trace-persistence"
 
 function parseArgs(span: AgentTraceSpan): Record<string, unknown> {
   // Prefer structured metadata, fall back to the (PII-gated) inputPreview JSON.
@@ -51,16 +53,19 @@ function extractChunks(span: AgentTraceSpan): EvalRetrievedChunk[] {
 export interface AssembleOptions {
   output: string
   degraded?: boolean
+  /** Measured around the entire target operation, not just the span envelope. */
+  wallTimeMs?: number
 }
-
-const STEP_OPS = new Set<AgentTraceSpan["operationName"]>(["execute_tool", "chat", "invoke_agent"])
 
 /** Fold a run's spans + final text into the Sample scorers consume. */
 export function assembleSampleFromSpans(
   spans: AgentTraceSpan[],
   options: AssembleOptions
 ): EvalSample {
-  const toolSpans = spans
+  const unique = [
+    ...new Map(spans.map((span) => [`${span.traceId}:${span.spanId ?? span.id}`, span])).values(),
+  ]
+  const toolSpans = unique
     .filter((s) => s.operationName === "execute_tool")
     .sort((a, b) => a.startTime - b.startTime)
   const toolCalls: EvalToolCall[] = toolSpans.map((s, index) => ({
@@ -70,7 +75,7 @@ export function assembleSampleFromSpans(
     ...(s.errorType || s.errorMessage ? { errored: true } : {}),
   }))
 
-  const retrievedChunks = spans
+  const retrievedChunks = unique
     .filter((s) => s.operationName === "retrieval")
     .sort((a, b) => a.startTime - b.startTime)
     .flatMap(extractChunks)
@@ -80,21 +85,66 @@ export function assembleSampleFromSpans(
   let minStart = Number.POSITIVE_INFINITY
   let maxEnd = Number.NEGATIVE_INFINITY
   let stepCount = 0
-  for (const s of spans) {
-    if (s.usage) {
+  const isAggregate = (span: AgentTraceSpan) =>
+    span.metadata?.accountingScope === "aggregate" || span.metadata?.role === "squad-run"
+  const bySpanId = new Map(unique.map((span) => [span.spanId ?? span.id, span]))
+  const coveredBy = (child: AgentTraceSpan, aggregate: AgentTraceSpan) => {
+    if (child.traceId !== aggregate.traceId || child === aggregate) return false
+    if (aggregate.metadata?.role === "squad-run") return true
+    const visited = new Set<string>()
+    let parentId = child.parentSpanId
+    while (parentId && !visited.has(parentId)) {
+      if (parentId === (aggregate.spanId ?? aggregate.id)) return true
+      visited.add(parentId)
+      parentId = bySpanId.get(parentId)?.parentSpanId
+    }
+    return false
+  }
+  const usageAccounting = unique.filter(
+    (span) => !isAggregate(span) || !unique.some((child) => coveredBy(child, span) && child.usage)
+  )
+  const costAccounting = unique.filter(
+    (span) =>
+      !isAggregate(span) ||
+      !unique.some((child) => coveredBy(child, span) && typeof child.costUsdEstimate === "number")
+  )
+  const usageIds = new Set(usageAccounting.map((span) => span.id))
+  const costIds = new Set(costAccounting.map((span) => span.id))
+  let usageRows = 0
+  let costRows = 0
+  let billableRows = 0
+  let partialUsage = false
+  let partialCost = false
+  for (const s of unique) {
+    const orchestrationOnly =
+      s.metadata?.accountingScope === "aggregate" ||
+      ["squad-run", "squad-review", "squad-recovery"].includes(String(s.metadata?.role))
+    const billable =
+      !orchestrationOnly && (s.operationName === "chat" || s.operationName === "invoke_agent")
+    if (billable) {
+      billableRows += 1
+      if (s.metadata?.usageKnown === false) partialUsage = true
+      if (s.metadata?.costKnown === false) partialCost = true
+    }
+    if (usageIds.has(s.id) && s.usage) {
+      usageRows += 1
       usage.inputTokens += s.usage.inputTokens
       usage.outputTokens += s.usage.outputTokens
       usage.cacheReadTokens += s.usage.cacheReadTokens
       usage.cacheCreationTokens += s.usage.cacheCreationTokens
     }
-    if (typeof s.costUsdEstimate === "number") costUsd += s.costUsdEstimate
+    if (costIds.has(s.id) && typeof s.costUsdEstimate === "number") {
+      costRows += 1
+      costUsd += s.costUsdEstimate
+    }
     if (s.startTime < minStart) minStart = s.startTime
     const end = s.endTime ?? s.startTime
     if (end > maxEnd) maxEnd = end
-    if (STEP_OPS.has(s.operationName)) stepCount += 1
+    if (billable || s.operationName === "execute_tool") stepCount += 1
   }
 
-  const latencyMs = Number.isFinite(minStart) && Number.isFinite(maxEnd) ? maxEnd - minStart : 0
+  const knownSpanTime = unique.length > 0 && Number.isFinite(minStart) && Number.isFinite(maxEnd)
+  const latencyMs = options.wallTimeMs ?? (knownSpanTime ? maxEnd - minStart : 0)
 
   return {
     output: options.output,
@@ -105,7 +155,38 @@ export function assembleSampleFromSpans(
     latencyMs,
     stepCount,
     degraded: options.degraded ?? false,
+    metricAvailability: {
+      usage:
+        usageRows === 0
+          ? "unavailable"
+          : partialUsage || usageRows < billableRows
+            ? "partial"
+            : "known",
+      cost:
+        costRows === 0
+          ? "unavailable"
+          : partialCost || costRows < billableRows
+            ? "partial"
+            : "estimated",
+      latency: options.wallTimeMs !== undefined || knownSpanTime ? "known" : "unavailable",
+      steps: unique.length > 0 ? "known" : "unavailable",
+    },
   }
+}
+
+/** Shared text rendering so Chat and Squad candidates receive equivalent input. */
+export function renderEvalTextPrompt(evalCase: EvalCase): string {
+  if (evalCase.contentParts?.some((part) => part.type === "asset")) {
+    throw new Error("Team evaluation does not support asset content")
+  }
+  const text = evalCase.contentParts?.length
+    ? evalCase.contentParts.map((part) => (part.type === "text" ? part.text : "")).join("\n")
+    : evalCase.input
+  if (!evalCase.history?.length) return text
+  const prior = evalCase.history
+    .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
+    .join("\n")
+  return `${prior}\n\n${text}`
 }
 
 /** Render the case (history + prompt) into a single driving prompt string. */
@@ -113,10 +194,8 @@ async function renderPrompt(
   evalCase: EvalCase,
   resolveAsset?: ChatTargetDeps["resolveAsset"]
 ): Promise<SendContent> {
-  if (!evalCase.contentParts?.length) {
-    if (!evalCase.history?.length) return evalCase.input
-    const prior = evalCase.history.map((t) => `${t.role.toUpperCase()}: ${t.content}`).join("\n")
-    return `${prior}\n\n${evalCase.input}`
+  if (!evalCase.contentParts?.some((part) => part.type === "asset")) {
+    return renderEvalTextPrompt(evalCase)
   }
   const blocks: SendContentBlock[] = []
   if (evalCase.history?.length) {
@@ -180,22 +259,37 @@ export function createChatTarget(config: ChatTargetConfig, deps: ChatTargetDeps)
   return {
     label: config.label,
     async run(evalCase: EvalCase, signal?: AbortSignal): Promise<EvalSample> {
-      const prompt = await renderPrompt(evalCase, deps.resolveAsset)
-      const { text, sessionId } = await deps.runTurn({
-        prompt,
-        ...(config.providerId ? { providerId: config.providerId } : {}),
-        model: config.model,
-        ...(config.characterId ? { characterId: config.characterId } : {}),
-        ...(config.character ? { character: config.character } : {}),
-        ...(config.cwd ? { cwd: config.cwd } : {}),
-        ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}),
-        ...(signal ? { signal } : {}),
-      })
+      const startedAt = Date.now()
+      const deadline = createEvalDeadline(signal, config.timeoutMs)
+      let sessionId: string | undefined
       try {
-        const spans = await deps.fetchSpans(sessionId)
-        return assembleSampleFromSpans(spans, { output: text, degraded: !deps.isToolCapable() })
+        const prompt = await renderPrompt(evalCase, deps.resolveAsset)
+        const result = await deadline.run(() =>
+          deps.runTurn({
+            prompt,
+            ...(config.providerId ? { providerId: config.providerId } : {}),
+            model: config.model,
+            ...(config.characterId ? { characterId: config.characterId } : {}),
+            ...(config.character ? { character: config.character } : {}),
+            ...(config.cwd ? { cwd: config.cwd } : {}),
+            ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}),
+            signal: deadline.signal,
+          })
+        )
+        sessionId = result.sessionId
+        const spans = await deadline.run(() => deps.fetchSpans(result.sessionId))
+        return {
+          ...assembleSampleFromSpans(spans, {
+            output: result.text,
+            degraded: !deps.isToolCapable(),
+            wallTimeMs: Math.max(0, Date.now() - startedAt),
+          }),
+          executionStatus: "completed",
+          executionProfile: "desktop-chat",
+        }
       } finally {
-        await deps.cleanupSession?.(sessionId)
+        deadline.dispose()
+        if (sessionId) await deps.cleanupSession?.(sessionId)
       }
     },
   }
@@ -312,6 +406,8 @@ export function defaultChatTargetDeps(scope?: EvalPersistenceScope): ChatTargetD
     },
     async fetchSpans(sessionId: string) {
       scope?.assertActive()
+      await waitForEvalTracePersistence()
+      scope?.assertActive()
       const { queryBySession } = await import("@/lib/db/agent-traces")
       scope?.assertActive()
       const spans = await (scope
@@ -319,9 +415,8 @@ export function defaultChatTargetDeps(scope?: EvalPersistenceScope): ChatTargetD
             .where("[sessionId+startTime]")
             .between([sessionId, Dexie.minKey], [sessionId, Dexie.maxKey])
             .reverse()
-            .limit(500)
             .toArray()
-        : queryBySession(sessionId))
+        : queryBySession(sessionId, Number.MAX_SAFE_INTEGER))
       scope?.assertActive()
       return spans
     },

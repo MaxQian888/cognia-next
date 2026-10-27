@@ -130,7 +130,12 @@ test("projects costs, errors and public fields without returning persistence int
     experiment,
     cases: [{ ...evidenceCase, scores: [score] }],
   })
-  expect(view.cost).toEqual({ actual: 0.02, estimatedWorstCase: 0.5, hardCap: 3 })
+  expect(view.cost).toEqual({
+    actual: 0.02,
+    estimatedWorstCase: 0.5,
+    hardCap: 3,
+    availability: "known",
+  })
   expect(buildEvalReportView(source).cost.hardCap).toBe(2)
   expect(view.providerErrors).toEqual([
     { taskId: "task", providerId: "provider", error: "retried" },
@@ -178,6 +183,7 @@ test("preserves legacy-score, ungraded, failed and errored case statuses", () =>
     { ...evidenceCase, scores: [] },
     { ...evidenceCase, sample: { ...evidenceCase.sample, error: "provider error" } },
     { ...evidenceCase, scores: [{ ...score, status: "errored" }] },
+    { ...evidenceCase, sample: { ...evidenceCase.sample, executionStatus: "cancelled" } },
   ]
   expect(buildEvalReportView({ ...source, cases }).cases.map((item) => item.status)).toEqual([
     "passed",
@@ -186,7 +192,122 @@ test("preserves legacy-score, ungraded, failed and errored case statuses", () =>
     "failed",
     "errored",
     "errored",
+    "errored",
   ])
+})
+
+test("does not expose unavailable cost as an unqualified zero", () => {
+  const source = input()
+  source.samples = [
+    {
+      ...source.samples[0],
+      actualCost: 0,
+      metricAvailability: { usage: "unavailable", cost: "unavailable", latency: "known" },
+    },
+  ]
+  expect(buildEvalReportView(source).cost.availability).toBe("unavailable")
+})
+
+test("adds failed-attempt captured cost without counting the final sample twice", () => {
+  const source = input()
+  source.tasks = [
+    {
+      id: "task",
+      attempts: [
+        {
+          attempt: 1,
+          startedAt: 0,
+          endedAt: 1,
+          elapsedMs: 1,
+          state: "failed",
+          capturedCostUsd: 0.03,
+          costStatus: "partial",
+        },
+        {
+          attempt: 2,
+          startedAt: 1,
+          endedAt: 2,
+          elapsedMs: 1,
+          state: "completed",
+          capturedCostUsd: 0.02,
+          costStatus: "estimated",
+        },
+      ],
+    },
+  ]
+  const cost = buildEvalReportView(source).cost
+  expect(cost.actual).toBe(0.05)
+  expect(cost.availability).toBe("partial")
+})
+
+test("uses all task attempts and planned repetitions for candidate evidence", () => {
+  const source = input()
+  source.experiment = {
+    ...source.experiment,
+    manifest: {
+      ...manifest,
+      executionProtocol: { kind: "balanced", repetitions: 3, outerConcurrency: 1 },
+    },
+  }
+  source.tasks = [
+    {
+      id: "task",
+      variantId: "variant",
+      caseId: "case",
+      repetition: 1,
+      state: "completed",
+      attempts: [
+        {
+          attempt: 1,
+          startedAt: 0,
+          endedAt: 200,
+          elapsedMs: 200,
+          state: "failed",
+          capturedCostUsd: 0.05,
+          costStatus: "estimated",
+        },
+        {
+          attempt: 2,
+          startedAt: 200,
+          endedAt: 300,
+          elapsedMs: 100,
+          state: "completed",
+          capturedCostUsd: 0.02,
+          costStatus: "estimated",
+        },
+      ],
+    },
+    {
+      id: "failed-task",
+      variantId: "variant",
+      caseId: "case",
+      repetition: 2,
+      state: "failed",
+      lastError: "provider unavailable",
+      attempts: [
+        {
+          attempt: 1,
+          startedAt: 300,
+          endedAt: 600,
+          elapsedMs: 300,
+          state: "failed",
+          capturedCostUsd: 0.03,
+          costStatus: "estimated",
+        },
+      ],
+    },
+  ]
+  const view = buildEvalReportView(source)
+  expect(view.evidence[0].resourceTotals?.costUsd).toBeCloseTo(0.1)
+  expect(view.evidence[0].resourceTotals?.latencyMs).toBe(600)
+  expect(view.evidence[0].metrics.quality).toBe(0.5)
+  expect(view.evidence[0].metrics.allRepeatReliability).toBe(0)
+  expect(view.evidence[0].observationCounts).toMatchObject({
+    attemptedSamples: 2,
+    gradedSamples: 2,
+    executionFailures: 1,
+    incompleteCases: 1,
+  })
 })
 
 test("filters every report dimension with combined AND semantics", () => {

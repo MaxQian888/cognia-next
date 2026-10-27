@@ -19,6 +19,7 @@ import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, ArrowLeftIcon, ChevronDownIcon, ScaleIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -65,10 +66,13 @@ function CaseCell({
   scorerIds: string[]
 }) {
   const t = useTranslations("eval.runDetail")
+  const evalT = useTranslations("eval")
   const reasoned = scorerIds
     .map((id) => ({ id, score: row.scores[id] }))
     .filter((x) => x.score?.reasoning)
-  const hasDetail = Boolean(row.output || row.sampleError || reasoned.length > 0)
+  const hasDetail = Boolean(
+    row.output || row.sampleError || row.executionProfile || reasoned.length > 0
+  )
 
   if (!hasDetail) return <span className="line-clamp-2">{label}</span>
 
@@ -81,6 +85,14 @@ function CaseCell({
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent forceMount className="mt-2 flex flex-col gap-2 text-xs">
+        <div>
+          <p className="text-muted-foreground font-medium">{evalT("lab.executionProfile.label")}</p>
+          <p>
+            {row.executionProfile
+              ? evalT(`lab.executionProfile.profiles.${row.executionProfile}`)
+              : evalT("lab.executionProfile.unknown")}
+          </p>
+        </div>
         {row.sampleError && (
           <p className="text-destructive" role="alert">
             {t("sampleError", { error: row.sampleError })}
@@ -277,6 +289,7 @@ export interface RunDetailProps {
 
 export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
   const t = useTranslations("eval.runDetail")
+  const evalT = useTranslations("eval")
   const rows = useEvalRunCaseResults(runId)
   const [run, setRun] = useState<EvalRunRow | null>(null)
 
@@ -323,6 +336,10 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
     for (const row of rows) for (const id of Object.keys(row.scores)) ids.add(id)
     return [...ids].sort()
   }, [rows])
+  const executionProfiles = useMemo(
+    () => [...new Set(rows.length ? rows.map((row) => row.executionProfile) : [undefined])],
+    [rows]
+  )
 
   if (!run) {
     return (
@@ -332,6 +349,15 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
       </div>
     )
   }
+  const resourceMeasurement = (
+    value: string,
+    availability?: "known" | "estimated" | "partial" | "unavailable"
+  ) =>
+    availability === "unavailable"
+      ? evalT("lab.review.metricUnavailable")
+      : availability === "partial"
+        ? evalT("lab.review.partialMetric", { value })
+        : value
 
   return (
     <div className="flex flex-col gap-3" data-testid="run-detail">
@@ -353,8 +379,15 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
             })}
           </Badge>
         )}
-        <Badge variant="secondary">${run.totalCostUsd.toFixed(4)}</Badge>
-        <Badge variant="secondary">{t("latency", { ms: Math.round(run.avgLatencyMs) })}</Badge>
+        <Badge variant="secondary">
+          {resourceMeasurement(`$${run.totalCostUsd.toFixed(4)}`, run.metricAvailability?.cost)}
+        </Badge>
+        <Badge variant="secondary">
+          {resourceMeasurement(
+            t("latency", { ms: Math.round(run.avgLatencyMs) }),
+            run.metricAvailability?.latency
+          )}
+        </Badge>
         {legacy && (
           <Badge variant="outline" data-testid="legacy-scoring">
             {t("legacyScoring")}
@@ -371,6 +404,26 @@ export function RunDetail({ runId, gate, onBack }: RunDetailProps) {
           </Badge>
         )}
       </div>
+
+      <dl className="flex flex-wrap items-center gap-2 text-xs">
+        <dt className="font-medium text-muted-foreground">{evalT("lab.executionProfile.label")}</dt>
+        <dd className="flex flex-wrap gap-1">
+          {executionProfiles.map((profile) => (
+            <Badge key={profile ?? "unknown"} variant="outline">
+              {profile
+                ? evalT(`lab.executionProfile.profiles.${profile}`)
+                : evalT("lab.executionProfile.unknown")}
+            </Badge>
+          ))}
+        </dd>
+      </dl>
+      {run.config?.targetKind === "team" || executionProfiles.includes("isolated-text") ? (
+        <Alert>
+          <ScaleIcon />
+          <AlertTitle>{evalT("lab.executionProfile.teamNoticeTitle")}</AlertTitle>
+          <AlertDescription>{evalT("lab.executionProfile.teamNoticeDescription")}</AlertDescription>
+        </Alert>
+      ) : null}
 
       {legacy && <p className="text-muted-foreground text-xs">{t("legacyScoringHint")}</p>}
       {partial && (

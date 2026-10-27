@@ -173,6 +173,17 @@ describe("RunConfigDialog", () => {
     expect(config.targets[1]).toMatchObject({ kind: "workflow", workflowId: "wf1" })
   })
 
+  it("explains isolated Team capabilities before any legacy matrix launch", async () => {
+    renderDialog({ datasetId: "d", appSettings: null, onClose: jest.fn() })
+    expect(screen.queryByText("lab.executionProfile.teamNoticeTitle")).not.toBeInTheDocument()
+    await selectOption(screen.getByLabelText("runConfig.targetKind"), "team")
+    expect(screen.getByText("lab.executionProfile.teamNoticeTitle")).toBeVisible()
+    expect(screen.getByText("lab.executionProfile.teamNoticeDescription")).toBeVisible()
+    expect(runEvalService).not.toHaveBeenCalled()
+    await selectOption(screen.getByLabelText("runConfig.targetKind"), "workflow")
+    expect(screen.queryByText("lab.executionProfile.teamNoticeTitle")).not.toBeInTheDocument()
+  })
+
   it("builds a Twin target with a registry id and model", async () => {
     renderDialog({
       datasetId: "d",
@@ -289,6 +300,16 @@ describe("RunConfigDialog", () => {
       // 0.20/unit × 2 cases × k1 × 1 target
       expect(screen.getByText(/cost\.estimate/)).toHaveTextContent('{"cost":"0.40"}')
     })
+
+    it.each(["unavailable", "partial"])(
+      "does not extrapolate %s prior cost into a cheap launch estimate",
+      (costAvailability) => {
+        evalRuns.mockReturnValue([{ ...priorRun, metricAvailability: { cost: costAvailability } }])
+        renderDialog({ datasetId: "d", appSettings: settings(100), onClose: jest.fn() })
+        expect(screen.getByText("lab.review.metricUnavailable")).toBeVisible()
+        expect(screen.queryByText(/cost\.estimate/)).not.toBeInTheDocument()
+      }
+    )
 
     it("requires a second click to run once the estimate exceeds the guard", async () => {
       evalRuns.mockReturnValue([priorRun])

@@ -145,6 +145,9 @@ export async function runConfiguredEval(
           ...(cap > 0 && raw.length > 0 ? { output: truncated ? raw.slice(0, cap) : raw } : {}),
           ...(truncated ? { outputTruncated: true } : {}),
           ...(rep0.sample.error ? { sampleError: rep0.sample.error } : {}),
+          ...(rep0.sample.executionProfile
+            ? { executionProfile: rep0.sample.executionProfile }
+            : {}),
         })
       },
     })

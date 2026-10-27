@@ -21,6 +21,9 @@ export interface TeamTargetSpec {
   label: string
   teamId: string
   timeoutMs?: number
+  /** Total monetary ceiling shared by all billable calls in this isolated run. */
+  maxCostUsd?: number
+  price?: { inputPerMillion: number; outputPerMillion: number; currency: string }
 }
 
 export interface WorkflowTargetSpec {

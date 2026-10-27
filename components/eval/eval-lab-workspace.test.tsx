@@ -1,7 +1,7 @@
 import { selectOption } from "@/lib/testing/select-option"
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mockListDatasetSummaries = jest.fn<Promise<unknown>, unknown[]>(
@@ -222,6 +222,44 @@ describe("EvalLabWorkspace", () => {
     await waitFor(() => expect(mockServiceResume).toHaveBeenCalledWith("queued-run"))
     expect(mockServiceStart).not.toHaveBeenCalled()
   })
+
+  it.each(["unavailable", "partial"])(
+    "keeps %s recorded cost explicit on the live run page",
+    async (availability) => {
+      mockAccountId = "account-1"
+      mockRecoverQueue.mockResolvedValue([{ experimentId: "failed-run", state: "failed" }])
+      mockServiceStatus.mockResolvedValue({
+        experiment: { state: "failed", spentCost: 0.12, reservedCost: 0, budgetCap: 10 },
+        tasks: { failed: 1 },
+      })
+      mockLoadReport.mockResolvedValue({ cost: { actual: 0.12, availability } })
+      render(<EvalLabWorkspace />)
+      fireEvent.click(screen.getByRole("button", { name: "lab.steps.run" }))
+      const label = screen.getByText("lab.review.actualCost")
+      await waitFor(() =>
+        expect(
+          within(label.parentElement!).getByText(
+            availability === "unavailable"
+              ? "lab.review.metricUnavailable"
+              : "lab.review.partialMetric"
+          )
+        ).toBeVisible()
+      )
+    }
+  )
+
+  it("marks recorded cost incomplete while a spend reservation remains unsettled", async () => {
+    mockAccountId = "account-1"
+    mockRecoverQueue.mockResolvedValue([{ experimentId: "paused-run", state: "paused" }])
+    mockServiceStatus.mockResolvedValue({
+      experiment: { state: "paused", spentCost: 0.12, reservedCost: 1, budgetCap: 10 },
+      tasks: { paused: 1 },
+    })
+    mockLoadReport.mockResolvedValue(null)
+    render(<EvalLabWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: "lab.steps.run" }))
+    expect(await screen.findByText("lab.review.partialMetric")).toBeVisible()
+  })
   it("renders the complete guided project flow and switches modes", () => {
     render(<EvalLabWorkspace />)
 
@@ -437,6 +475,23 @@ describe("EvalLabWorkspace", () => {
     expect(screen.queryByLabelText("lab.variants.topP")).not.toBeInTheDocument()
     expect(screen.queryByLabelText("lab.variants.maxOutputTokens")).not.toBeInTheDocument()
     expect(screen.queryByLabelText("lab.variants.systemPrompt")).not.toBeInTheDocument()
+  })
+
+  it("explains the isolated Team execution limits before launch", async () => {
+    const user = userEvent.setup()
+    render(<EvalLabWorkspace />)
+    await user.click(screen.getByRole("button", { name: "lab.steps.run" }))
+    expect(screen.queryByText("lab.executionProfile.teamNoticeTitle")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "lab.steps.goal" }))
+    await user.click(screen.getByRole("button", { name: "lab.mode.agent" }))
+    await user.click(screen.getByRole("button", { name: "lab.steps.variants" }))
+    await selectOption(screen.getAllByLabelText("lab.variants.agentTarget")[0], "team")
+    await user.click(screen.getByRole("button", { name: "lab.steps.run" }))
+
+    expect(screen.getByText("lab.executionProfile.teamNoticeTitle")).toBeVisible()
+    expect(screen.getByText("lab.executionProfile.teamNoticeDescription")).toBeVisible()
+    expect(screen.getByRole("button", { name: "lab.run.start" })).toBeInTheDocument()
+    expect(mockServiceStart).not.toHaveBeenCalled()
   })
 
   it("manages candidates and offers provider-scoped model and Agent target choices", async () => {

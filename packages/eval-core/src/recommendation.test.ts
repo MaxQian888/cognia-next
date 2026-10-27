@@ -22,6 +22,12 @@ const evidence = (overrides: Partial<EvalCandidateEvidence>): EvalCandidateEvide
 })
 
 describe("recommendVariants", () => {
+  it("cannot bypass the formal evidence floor with a smaller configured minimum", () => {
+    expect(
+      recommendVariants({ ...policy, minimumEffectiveCases: 1 }, [evidence({ effectiveCases: 1 })])
+    ).toMatchObject({ status: "no_conclusion", reason: "insufficient_cases" })
+  })
+
   it("selects by utility only after constraints and Pareto filtering", () => {
     const result = recommendVariants(policy, [
       evidence({
@@ -97,5 +103,22 @@ describe("recommendVariants", () => {
     ])
 
     expect(result).toMatchObject({ status: "recommended", recommendedVariantId: "a" })
+  })
+
+  it("does not choose an unmeasured free-looking candidate when cost determines the decision", () => {
+    const result = recommendVariants(policy, [
+      evidence({
+        variantId: "unknown",
+        metrics: { quality: 1, cost: 0 },
+        resourceAvailability: { cost: "unavailable", latency: "known" },
+      }),
+      evidence({
+        variantId: "measured",
+        metrics: { quality: 0.9, cost: 1 },
+        resourceAvailability: { cost: "known", latency: "known" },
+      }),
+    ])
+    expect(result.recommendedVariantId).not.toBe("unknown")
+    expect(result.excluded).toContainEqual({ variantId: "unknown", reason: "constraint_failed" })
   })
 })

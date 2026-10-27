@@ -145,6 +145,15 @@ export interface EvalExperimentManifest {
   decisionPolicy: EvalDecisionPolicy
   retentionDays: number
   adaptiveRepetitions: { stageOne: 1; maximum: 3 }
+  /** Explicit pre-registered protocol; absence preserves legacy adaptive runs. */
+  executionProtocol?: {
+    kind: "balanced"
+    repetitions: 1 | 2 | 3
+    outerConcurrency: 1
+  }
+  /** Content fingerprints checked immediately before dispatch. */
+  caseDigests?: Record<string, string>
+  targetDigests?: Record<string, string>
   environmentCompatibility: EvalEnvironmentCompatibility
   createdAt: number
 }
@@ -168,6 +177,20 @@ export interface EvalEnvironmentCompatibility {
 export type EvalTaskState =
   "queued" | "running" | "paused" | "interrupted" | "completed" | "failed" | "cancelled"
 
+/** Captured work survives failure, cancellation, retry and a missing final score. */
+export interface EvalAttemptObservation {
+  attempt: number
+  startedAt: number
+  endedAt: number
+  elapsedMs: number
+  state: "completed" | "failed" | "cancelled" | "interrupted"
+  capturedCostUsd?: number
+  costStatus: "known" | "estimated" | "partial" | "unavailable"
+  reservedCostUsd?: number
+  unsettledCostUsd?: number
+  error?: string
+}
+
 export interface EvalTask {
   id: string
   experimentId: string
@@ -182,6 +205,13 @@ export interface EvalTask {
   providerRequestId?: string
   idempotencyKey?: string
   interruptionSpendAmbiguous?: boolean
+  /** Serialize a shared runtime target independently of provider capacity. */
+  concurrencyKey?: string
+  /** Stable order in the pre-registered, seeded execution schedule. */
+  scheduleOrder?: number
+  attempts?: EvalAttemptObservation[]
+  /** Unresolved billable work keeps its committed capacity across retries. */
+  unsettledCostReservation?: number
   updatedAt: number
 }
 
@@ -235,6 +265,22 @@ export interface EvalCandidateEvidence {
   metrics: Record<string, number>
   intervals: Record<string, EvalMetricInterval>
   calibrationPassed: boolean
+  /** Explicit denominators for interpreting graded quality and operational reliability. */
+  observationCounts?: {
+    attemptedCases: number
+    attemptedSamples: number
+    gradedCases: number
+    gradedSamples: number
+    ungradedSamples: number
+    executionFailures: number
+    incompleteCases: number
+  }
+  /** Captured resources include ungraded attempts; partial totals are not a spend guarantee. */
+  resourceTotals?: { costUsd: number; latencyMs: number }
+  resourceAvailability?: {
+    cost: "known" | "partial" | "unavailable"
+    latency: "known" | "partial" | "unavailable"
+  }
 }
 
 export type EvalNoConclusionReason =

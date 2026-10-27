@@ -126,6 +126,23 @@ describe("runEval", () => {
     expect(results[0].repetitions[0].scores.find((s) => s.scorerId === "ok")?.passed).toBe(true)
   })
 
+  it("distinguishes a timeout from an ordinary execution failure without inventing its cost", async () => {
+    const error = new Error("deadline exceeded")
+    error.name = "TimeoutError"
+    const results = await runEval({
+      cases: [makeCase("timeout")],
+      scorers: [],
+      target: {
+        label: "timeout",
+        run: async () => {
+          throw error
+        },
+      },
+    })
+    expect(results[0].repetitions[0].sample.executionStatus).toBe("timed_out")
+    expect(results[0].repetitions[0].sample.metricAvailability?.cost).toBe("unavailable")
+  })
+
   it("invokes onCaseComplete with each result and index", async () => {
     const target: EvalTarget = { label: "t", run: async () => makeSample() }
     const seen: number[] = []
@@ -184,7 +201,7 @@ describe("runEval", () => {
     expect(results).toHaveLength(0)
   })
 
-  it("drops a case whose repetitions are cut short by an abort mid-run", async () => {
+  it("retains incurred spend and persists a case cut short by an abort mid-run", async () => {
     const controller = new AbortController()
     const target: EvalTarget = {
       label: "t",
@@ -193,15 +210,19 @@ describe("runEval", () => {
         return makeSample()
       },
     }
+    const onCaseComplete = jest.fn()
     const results = await runEval({
       cases: [makeCase("a")],
       scorers: [],
       target,
       k: 3,
       signal: controller.signal,
+      onCaseComplete,
     })
-    // k=3 requested but aborted after rep 0 → incomplete case is dropped
-    expect(results).toHaveLength(0)
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({ expectedRepetitions: 3, status: "partial" })
+    expect(results[0].repetitions[0].sample.costUsd).toBe(0.01)
+    expect(onCaseComplete).toHaveBeenCalledWith(results[0], 0)
   })
 
   it("floors k to at least 1", async () => {

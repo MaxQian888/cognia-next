@@ -32,17 +32,28 @@ export interface RunEvalOptions {
   onCaseComplete?: (result: EvalCaseResult, index: number) => void | Promise<void>
 }
 
-function erroredSample(message: string): EvalSample {
+function erroredSample(
+  message: string,
+  status: EvalSample["executionStatus"],
+  elapsedMs = 0
+): EvalSample {
   return {
     output: "",
     toolCalls: [],
     retrievedChunks: [],
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
     costUsd: 0,
-    latencyMs: 0,
+    latencyMs: elapsedMs,
     stepCount: 0,
     degraded: true,
     error: message,
+    executionStatus: status,
+    metricAvailability: {
+      usage: "unavailable",
+      cost: "unavailable",
+      latency: "known",
+      steps: "unavailable",
+    },
   }
 }
 
@@ -51,10 +62,19 @@ async function safeRun(
   evalCase: EvalCase,
   signal?: AbortSignal
 ): Promise<EvalSample> {
+  const startedAt = Date.now()
   try {
     return await target.run(evalCase, signal)
   } catch (err) {
-    return erroredSample(err instanceof Error ? err.message : String(err))
+    return erroredSample(
+      err instanceof Error ? err.message : String(err),
+      err instanceof Error && err.name === "TimeoutError"
+        ? "timed_out"
+        : signal?.aborted || (err instanceof Error && err.name === "AbortError")
+          ? "cancelled"
+          : "failed",
+      Math.max(0, Date.now() - startedAt)
+    )
   }
 }
 
@@ -101,12 +121,18 @@ export async function runEval(options: RunEvalOptions): Promise<EvalCaseResult[]
       const scores = await Promise.all(scorers.map((s) => safeScore(s, sample, evalCase)))
       repetitions.push({ sample, scores })
     }
-    // A case interrupted mid-repetitions (abort) is dropped — partial pass^k is
-    // meaningless. Only fully-completed cases are reported.
-    if (repetitions.length < k) break
-    const result: EvalCaseResult = { caseId: evalCase.id, repetitions }
+    if (repetitions.length === 0) break
+    // Partial samples retain billed work and elapsed time. Reliability only
+    // uses complete k-case results; interruption cannot erase accounting.
+    const result: EvalCaseResult = {
+      caseId: evalCase.id,
+      repetitions,
+      expectedRepetitions: k,
+      status: repetitions.length === k ? "completed" : "partial",
+    }
     results.push(result)
     await onCaseComplete?.(result, i)
+    if (repetitions.length < k) break
   }
 
   return results

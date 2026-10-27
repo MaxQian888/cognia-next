@@ -1,4 +1,10 @@
-import type { EvalExperimentState, EvalMode, EvalTask, EvalTaskState } from "@cognia/eval-core"
+import type {
+  EvalAttemptObservation,
+  EvalExperimentState,
+  EvalMode,
+  EvalTask,
+  EvalTaskState,
+} from "@cognia/eval-core"
 
 /**
  * The evaluation modes the durable orchestrator drives.
@@ -27,11 +33,15 @@ export function isDurableEvalMode(value: EvalMode | string): value is DurableEva
 
 export interface EvalTaskExecutionResult<T = unknown> {
   actualCost: number
+  costStatus?: EvalAttemptObservation["costStatus"]
+  executionStatus?: "completed" | "failed" | "cancelled" | "timed_out" | "blocked" | "interrupted"
   value: T
 }
 
 export interface EvalOrchestratorRepository<T = unknown> {
-  getExperiment(id: string): Promise<{ state: EvalExperimentState; hardCap: number } | undefined>
+  getExperiment(
+    id: string
+  ): Promise<{ state: EvalExperimentState; hardCap: number; concurrencyLimit?: number } | undefined>
   listTasks(experimentId: string): Promise<Array<EvalTask & { providerId?: string }>>
   setExperimentState(
     id: string,
@@ -41,6 +51,12 @@ export interface EvalOrchestratorRepository<T = unknown> {
   updateTask(id: string, patch: Partial<EvalTask> & { lastError?: string }): Promise<void>
   reserveTask(taskId: string, worstCaseCost: number): Promise<boolean>
   completeTask(task: EvalTask, result: EvalTaskExecutionResult<T>): Promise<void>
+  /** Independent accounting: terminal state must not discard an incurred attempt. */
+  recordAttempt?(
+    task: EvalTask,
+    observation: EvalAttemptObservation,
+    result?: EvalTaskExecutionResult<T>
+  ): Promise<void>
   releaseTaskReservation(taskId: string): Promise<void>
   /** Persist adaptive follow-up tasks or the terminal recommendation. */
   prepareNextStage?(experimentId: string): Promise<boolean>
@@ -84,6 +100,7 @@ export interface EvalOrchestratorOptions {
   /** Which kind of experiment this instance drives; `model` when unset. */
   mode?: DurableEvalMode
   providerConcurrency?: Record<string, number>
+  maxConcurrentTasks?: number
   maxAttempts?: number
   baseRetryMs?: number
   now?: () => number
@@ -127,6 +144,8 @@ export class DurableEvalOrchestrator<T = unknown> {
     this.mode = options.mode ?? "model"
     this.options = {
       providerConcurrency: options.providerConcurrency ?? {},
+      maxConcurrentTasks:
+        options.maxConcurrentTasks ?? (this.mode === "agent" ? 1 : Number.POSITIVE_INFINITY),
       maxAttempts: options.maxAttempts ?? 3,
       baseRetryMs: options.baseRetryMs ?? 500,
       now: options.now ?? Date.now,
@@ -219,9 +238,9 @@ export class DurableEvalOrchestrator<T = unknown> {
       }
 
       const now = this.options.now()
-      const ready = unfinished.filter(
-        (task) => task.state === "queued" && (task.nextAttemptAt ?? 0) <= now
-      )
+      const ready = unfinished
+        .filter((task) => task.state === "queued" && (task.nextAttemptAt ?? 0) <= now)
+        .sort((left, right) => (left.scheduleOrder ?? 0) - (right.scheduleOrder ?? 0))
       if (!ready.length) {
         const nextAttempt = Math.min(
           ...unfinished
@@ -239,8 +258,18 @@ export class DurableEvalOrchestrator<T = unknown> {
       }
 
       const providerCounts = new Map<string, number>()
+      const runtimeTargets = new Set<string>()
       const batch: Array<EvalTask & { providerId?: string }> = []
       for (const task of ready) {
+        if (
+          batch.length >=
+          Math.min(
+            this.options.maxConcurrentTasks,
+            experiment.concurrencyLimit ?? Number.POSITIVE_INFINITY
+          )
+        )
+          break
+        if (task.concurrencyKey && runtimeTargets.has(task.concurrencyKey)) continue
         const providerId = task.providerId ?? "unknown"
         const limit = Math.max(1, this.options.providerConcurrency[providerId] ?? 2)
         const count = providerCounts.get(providerId) ?? 0
@@ -253,6 +282,7 @@ export class DurableEvalOrchestrator<T = unknown> {
         task.reservedCost = Math.max(task.reservedCost, task.estimatedWorstCaseCost ?? 0)
         batch.push(task)
         providerCounts.set(providerId, count + 1)
+        if (task.concurrencyKey) runtimeTargets.add(task.concurrencyKey)
       }
 
       if (this.interrupted || this.cancelled.has(experimentId)) return
@@ -269,6 +299,8 @@ export class DurableEvalOrchestrator<T = unknown> {
     const controller = new AbortController()
     this.activeControllers.set(task.id, controller)
     const attempt = task.attempt + 1
+    const startedAt = this.options.now()
+    const activeTask = { ...task, attempt, state: "running" as const }
     await this.repository.updateTask(task.id, {
       state: "running",
       attempt,
@@ -277,11 +309,64 @@ export class DurableEvalOrchestrator<T = unknown> {
     })
     try {
       if (this.interrupted || this.cancelled.has(task.experimentId)) return
-      const result = await this.execute({ ...task, attempt, state: "running" }, controller.signal)
+      const result = await this.execute(activeTask, controller.signal)
+      const endedAt = this.options.now()
+      const interrupted = this.interrupted || controller.signal.aborted
+      const cancelled = this.cancelled.has(task.experimentId)
+      await this.repository.recordAttempt?.(
+        activeTask,
+        {
+          attempt,
+          startedAt,
+          endedAt,
+          elapsedMs: Math.max(0, endedAt - startedAt),
+          state: cancelled
+            ? "cancelled"
+            : interrupted
+              ? "interrupted"
+              : result.executionStatus === "failed" ||
+                  result.executionStatus === "timed_out" ||
+                  result.executionStatus === "blocked"
+                ? "failed"
+                : result.executionStatus === "cancelled"
+                  ? "cancelled"
+                  : result.executionStatus === "interrupted"
+                    ? "interrupted"
+                    : "completed",
+          ...(result.costStatus !== "unavailable" &&
+          Number.isFinite(result.actualCost) &&
+          result.actualCost >= 0
+            ? { capturedCostUsd: result.actualCost }
+            : {}),
+          costStatus: result.costStatus ?? "estimated",
+        },
+        result
+      )
       if (this.interrupted || this.cancelled.has(task.experimentId) || controller.signal.aborted)
         return
-      await this.repository.completeTask({ ...task, attempt, state: "running" }, result)
+      await this.repository.completeTask(activeTask, result)
     } catch (error) {
+      const endedAt = this.options.now()
+      const reportedCost = (error as { capturedCostUsd?: unknown } | null)?.capturedCostUsd
+      await this.repository.recordAttempt?.(activeTask, {
+        attempt,
+        startedAt,
+        endedAt,
+        elapsedMs: Math.max(0, endedAt - startedAt),
+        state: this.cancelled.has(task.experimentId)
+          ? "cancelled"
+          : this.interrupted || controller.signal.aborted
+            ? "interrupted"
+            : "failed",
+        ...(typeof reportedCost === "number" && Number.isFinite(reportedCost) && reportedCost >= 0
+          ? { capturedCostUsd: reportedCost }
+          : {}),
+        costStatus:
+          typeof reportedCost === "number" && Number.isFinite(reportedCost) && reportedCost >= 0
+            ? "partial"
+            : "unavailable",
+        error: error instanceof Error ? error.message : String(error),
+      })
       if (this.interrupted || this.cancelled.has(task.experimentId)) return
       if (error instanceof DOMException && error.name === "AbortError") {
         const experiment = await this.repository.getExperiment(task.experimentId)

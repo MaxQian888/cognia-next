@@ -40,7 +40,7 @@ const run = (runId: string, passAt1: number, legacy = false): EvalRunRow =>
     totalCostUsd: 0,
     avgLatencyMs: 0,
     createdAt: 0,
-    ...(legacy ? {} : { scoringVersion: 2 }),
+    ...(legacy ? {} : { scoringVersion: 3 }),
   }) as EvalRunRow
 
 describe("RunComparisonView", () => {

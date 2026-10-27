@@ -1,52 +1,30 @@
-const getTeam = jest.fn((id: string) => ({ id, task: "original objective", config: {} }))
-const getTeammates = jest.fn(() => [])
-const getTeamTasks = jest.fn(() => [])
-const addMessage = jest.fn()
-const setTaskStatus = jest.fn()
-const updateTeammate = jest.fn()
-const runTeamLifecycle = jest.fn(
-  async (_teamId: string, _deps: unknown, _signal?: AbortSignal) => ({
-    runId: "run_1",
-    status: "completed" as const,
+jest.mock("@/lib/ai/eval/team-execution", () => ({
+  runIsolatedTeamEval: jest.fn(async () => ({
+    runId: "isolated-run",
+    status: "completed",
     output: { report: "final answer" },
     traceId: "tr",
-  })
-)
-
-jest.mock("@/stores/agent/agent-team-store", () => ({
-  useAgentTeamStore: {
-    getState: () => ({
-      getTeam,
-      getTeammates,
-      getTeamTasks,
-      addMessage,
-      setTaskStatus,
-      updateTeammate,
-      setFinalResult: jest.fn(),
-    }),
-  },
-}))
-jest.mock("@/lib/ai/agent/team/agent-team-runtime", () => ({ runTeamLifecycle }))
-jest.mock("@/lib/ai/agent/team/agent-team-runtime-deps", () => ({
-  buildAgentTeamRuntimeDeps: jest.fn(() => ({
-    runLeadPlanning: undefined,
-    notifierDeps: undefined,
+    spans: [],
+    wallTimeMs: 10,
+    costKnown: false,
   })),
 }))
-jest.mock("@/lib/ai/agent/agent-executor", () => ({
-  executeAgent: jest.fn(async () => ({ text: "done" })),
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: { getState: jest.fn() },
 }))
-jest.mock("@/lib/db/settings", () => ({ getSettings: jest.fn(async () => ({})) }))
-jest.mock("@/lib/db/agent-traces", () => ({ queryByTrace: jest.fn(async () => []) }))
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+jest.mock("@/lib/db/agent-traces", () => ({
+  queryByTrace: jest.fn(async () => []),
+}))
+jest.mock("./trace-persistence", () => ({
+  waitForEvalTracePersistence: jest.fn(async () => undefined),
+}))
 
 import { defaultTeamTargetDeps, extractTeamText } from "./team-default-deps"
+import { runIsolatedTeamEval } from "@/lib/ai/eval/team-execution"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { queryByTrace } from "@/lib/db/agent-traces"
+import { waitForEvalTracePersistence } from "./trace-persistence"
 import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
-import {
-  buildAgentTeamRuntimeDeps,
-  type BuildAgentTeamRuntimeDepsOptions,
-} from "@/lib/ai/agent/team/agent-team-runtime-deps"
-import { executeAgent } from "@/lib/ai/agent/agent-executor"
 
 describe("extractTeamText", () => {
   it("prefers an ultracode report, then string, then JSON", () => {
@@ -57,47 +35,40 @@ describe("extractTeamText", () => {
   })
 })
 
-describe("defaultTeamTargetDeps.runTeam", () => {
+describe("defaultTeamTargetDeps", () => {
   beforeEach(() => jest.clearAllMocks())
 
-  it("fences every live-store callback after its account becomes inactive", async () => {
-    let active = true
-    const scope = {
-      db: {},
-      assertActive: () => {
-        if (!active) throw new Error("Evaluation scope changed")
-      },
-    } as EvalPersistenceScope
-    await defaultTeamTargetDeps(scope).runTeam({ teamId: "tm1", prompt: "private", traceId: "tr" })
-    const passed = runTeamLifecycle.mock.calls[0][1] as {
-      storeReader: {
-        getTeam(id: string): unknown
-        getTeammates(id: string): unknown
-        getTeamTasks(id: string): unknown
-      }
-      storeWriter: {
-        addMessage(input: unknown): unknown
-        setTaskStatus(id: string, status: string): unknown
-        updateTeammate(id: string, input: unknown): unknown
-      }
-    }
-    active = false
-    for (const read of Object.values(passed.storeReader)) {
-      expect(() => read("tm1")).toThrow("Evaluation scope changed")
-    }
-    expect(() => passed.storeWriter.addMessage({ teamId: "tm1" })).toThrow(
-      "Evaluation scope changed"
-    )
-    expect(() => passed.storeWriter.setTaskStatus("task1", "completed")).toThrow(
-      "Evaluation scope changed"
-    )
-    expect(() => passed.storeWriter.updateTeammate("mate1", {})).toThrow("Evaluation scope changed")
-    expect(getTeam).not.toHaveBeenCalled()
-    expect(getTeammates).not.toHaveBeenCalled()
-    expect(getTeamTasks).not.toHaveBeenCalled()
-    expect(addMessage).not.toHaveBeenCalled()
-    expect(setTaskStatus).not.toHaveBeenCalled()
-    expect(updateTeammate).not.toHaveBeenCalled()
+  it("delegates the case to isolated execution rather than mutating live store callbacks", async () => {
+    const scope = { db: {}, assertActive: jest.fn() } as unknown as EvalPersistenceScope
+    const signal = new AbortController().signal
+    const price = { inputPerMillion: 1, outputPerMillion: 2, currency: "USD" }
+    const result = await defaultTeamTargetDeps(scope).runTeam({
+      teamId: "tm1",
+      prompt: "eval prompt",
+      traceId: "tr",
+      timeoutMs: 1000,
+      maxCostUsd: 0.2,
+      price,
+      signal,
+    })
+    expect(runIsolatedTeamEval).toHaveBeenCalledWith({
+      teamId: "tm1",
+      prompt: "eval prompt",
+      traceId: "tr",
+      timeoutMs: 1000,
+      maxCostUsd: 0.2,
+      price,
+      signal,
+      scope,
+    })
+    expect(useAgentTeamStore.getState).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      text: "final answer",
+      traceId: "tr",
+      spans: [],
+      costKnown: false,
+      executionProfile: "isolated-text",
+    })
   })
 
   it("does not dispatch a team when imports finish after cancellation", async () => {
@@ -110,64 +81,70 @@ describe("defaultTeamTargetDeps.runTeam", () => {
     })
     controller.abort()
     await expect(run).rejects.toThrow()
-    expect(runTeamLifecycle).not.toHaveBeenCalled()
+    expect(runIsolatedTeamEval).not.toHaveBeenCalled()
   })
 
-  it("fences the lead provider dispatch after its async planning work", async () => {
+  it("fences dispatch when the account scope is already inactive", async () => {
+    const scope = {
+      db: {},
+      assertActive() {
+        throw new Error("Evaluation scope changed")
+      },
+    } as unknown as EvalPersistenceScope
+    await expect(
+      defaultTeamTargetDeps(scope).runTeam({
+        teamId: "tm1",
+        prompt: "private",
+        traceId: "tr",
+      })
+    ).rejects.toThrow("Evaluation scope changed")
+    expect(runIsolatedTeamEval).not.toHaveBeenCalled()
+  })
+
+  it("does not publish an isolated result after its account changes", async () => {
     let active = true
     const scope = {
       db: {},
-      assertActive: () => {
+      assertActive() {
         if (!active) throw new Error("Evaluation scope changed")
       },
-    } as EvalPersistenceScope
-    await defaultTeamTargetDeps(scope).runTeam({ teamId: "tm1", prompt: "private", traceId: "tr" })
-    const options = jest.mocked(buildAgentTeamRuntimeDeps).mock
-      .calls[0][0] as BuildAgentTeamRuntimeDepsOptions
-    await Promise.resolve()
-    active = false
-    expect(() => options.executeAgent!("private", {} as never)).toThrow("Evaluation scope changed")
-    expect(executeAgent).not.toHaveBeenCalled()
-  })
-
-  it("overrides the team objective with the eval prompt and threads the trace id", async () => {
-    const deps = defaultTeamTargetDeps()
-    const out = await deps.runTeam({ teamId: "tm1", prompt: "eval prompt", traceId: "tr" })
-    expect(out.text).toBe("final answer")
-    expect(out.traceId).toBe("tr")
-    // the storeReader handed to runTeamLifecycle injects the prompt as task
-    const passedDeps = runTeamLifecycle.mock.calls[0][1] as {
-      traceId: string
-      storeReader: { getTeam: (id: string) => { task: string } }
-    }
-    expect(passedDeps.traceId).toBe("tr")
-    expect(passedDeps.storeReader.getTeam("tm1").task).toBe("eval prompt")
-  })
-
-  it("reports tool capability via isTauri", () => {
-    expect(defaultTeamTargetDeps().isToolCapable()).toBe(true)
-  })
-
-  it("wires storeReader + storeWriter closures through to the live store", async () => {
-    const deps = defaultTeamTargetDeps()
-    await deps.runTeam({ teamId: "tm1", prompt: "p", traceId: "tr" })
-    const passed = runTeamLifecycle.mock.calls[0][1] as {
-      storeReader: { getTeammates: (id: string) => unknown; getTeamTasks: (id: string) => unknown }
-      storeWriter: {
-        addMessage: (i: unknown) => void
-        setTaskStatus: (a: string, b: string, c?: string, d?: string) => void
-        updateTeammate: (a: string, b: unknown) => void
+    } as unknown as EvalPersistenceScope
+    jest.mocked(runIsolatedTeamEval).mockImplementationOnce(async () => {
+      active = false
+      return {
+        runId: "r",
+        status: "completed",
+        output: "private result",
+        traceId: "tr",
+        spans: [],
+        wallTimeMs: 1,
+        costKnown: false,
+        executionProfile: "isolated-text",
       }
-    }
-    passed.storeReader.getTeammates("tm1")
-    passed.storeReader.getTeamTasks("tm1")
-    passed.storeWriter.addMessage({ teamId: "tm1" })
-    passed.storeWriter.setTaskStatus("task", "completed", "res")
-    passed.storeWriter.updateTeammate("mate", { name: "x" })
-    expect(getTeammates).toHaveBeenCalledWith("tm1")
-    expect(getTeamTasks).toHaveBeenCalledWith("tm1")
-    expect(addMessage).toHaveBeenCalledWith({ teamId: "tm1" })
-    expect(setTaskStatus).toHaveBeenCalledWith("task", "completed", "res", undefined)
-    expect(updateTeammate).toHaveBeenCalledWith("mate", { name: "x" })
+    })
+    await expect(
+      defaultTeamTargetDeps(scope).runTeam({
+        teamId: "tm1",
+        prompt: "private",
+        traceId: "tr",
+      })
+    ).rejects.toThrow("Evaluation scope changed")
+  })
+
+  it("reports the supported text-only profile without claiming desktop tools", () => {
+    expect(defaultTeamTargetDeps().isToolCapable()).toBe(false)
+  })
+
+  it("acknowledges buffered trace writes before a fallback persistent query", async () => {
+    let committed = false
+    jest.mocked(waitForEvalTracePersistence).mockImplementationOnce(async () => {
+      committed = true
+    })
+    jest.mocked(queryByTrace).mockImplementationOnce(async () => {
+      expect(committed).toBe(true)
+      return []
+    })
+    await defaultTeamTargetDeps().fetchSpansByTrace("tr")
+    expect(queryByTrace).toHaveBeenCalledWith("tr")
   })
 })

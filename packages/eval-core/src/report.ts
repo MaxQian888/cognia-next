@@ -8,7 +8,8 @@
  * `passHatK` (fraction passing on EVERY try, the honest reliability figure for
  * an agent users run repeatedly).
  *
- * Only `scored` observations decide a verdict. `not-applicable` (the case
+ * Execution failure always fails a repetition. Otherwise only `scored`
+ * observations decide a verdict. `not-applicable` (the case
  * carried no matching reference), `errored` (the scorer itself failed) and
  * `measurement` (unbudgeted cost, zero tool calls) are all excluded — they are
  * not agent failures, and counting the measurement ones as passes is exactly
@@ -29,25 +30,25 @@ import type {
   EvalCaseResult,
   EvalReport,
   EvalRepetition,
+  EvalSample,
+  EvalExecutionStatus,
   RepetitionVerdict,
   Score,
   ScorerAggregate,
 } from "./domain/eval"
 
 /** The current scoring semantics — stamped on every report this file builds. */
-export const SCORING_VERSION = 2 as const
+export const SCORING_VERSION = 3 as const
 
 /**
- * True for reports written before {@link SCORING_VERSION} existed. Their
- * `passAt1` counted measurement-only scorers as passes, so it is inflated and
- * NOT comparable with newer runs — the UI badges them and withholds their gate
- * verdict rather than showing a green tick derived from the old semantics.
+ * Earlier reports use different outcome/reliability semantics and cannot be
+ * compared with current runs. They remain readable and labeled legacy.
  *
  * Lives here rather than in a component so the run list, the run detail and the
  * comparison grid all answer this the same way.
  */
 export function isLegacyScoring(report: Pick<EvalReport, "scoringVersion">): boolean {
-  return report.scoringVersion === undefined
+  return report.scoringVersion !== SCORING_VERSION
 }
 
 /**
@@ -87,11 +88,22 @@ export function gatingScores(rep: EvalRepetition): Score[] {
   return rep.scores.filter((s) => s.status === "scored")
 }
 
+/** A scorer cannot turn failed or cancelled execution into a successful run. */
+export function sampleExecutionFailed(
+  sample: Pick<EvalSample, "error" | "executionStatus">
+): boolean {
+  return (
+    Boolean(sample.error) ||
+    (sample.executionStatus !== undefined && sample.executionStatus !== "completed")
+  )
+}
+
 /**
  * `pass` / `fail` / `ungraded` for one repetition. `ungraded` means no selected
  * scorer could grade this case at all — report it, do not invent a verdict.
  */
 export function repetitionVerdict(rep: EvalRepetition): RepetitionVerdict {
+  if (sampleExecutionFailed(rep.sample)) return "fail"
   const gating = gatingScores(rep)
   if (gating.length === 0) return "ungraded"
   return gating.every((s) => s.passed) ? "pass" : "fail"
@@ -118,12 +130,44 @@ export function buildReport(input: BuildReportInput): EvalReport {
   let totalCostUsd = 0
   let latencySum = 0
   let sampleCount = 0
+  let latencySampleCount = 0
+  let costSampleCount = 0
+  let estimatedCostCount = 0
+  let gradedRepetitionCount = 0
+  let executionFailureCount = 0
+  const executionOutcomes: Record<EvalExecutionStatus, number> = {
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+    timed_out: 0,
+    blocked: 0,
+    interrupted: 0,
+  }
 
   for (const result of results) {
     for (const rep of result.repetitions) {
-      totalCostUsd += rep.sample.costUsd
-      latencySum += rep.sample.latencyMs
+      if (Number.isFinite(rep.sample.costUsd)) totalCostUsd += rep.sample.costUsd
+      const availability = rep.sample.metricAvailability
+      if (
+        availability?.cost !== "unavailable" &&
+        availability?.cost !== "partial" &&
+        Number.isFinite(rep.sample.costUsd)
+      )
+        costSampleCount += 1
+      if (availability?.cost === "estimated") estimatedCostCount += 1
+      if (availability?.latency !== "unavailable" && Number.isFinite(rep.sample.latencyMs)) {
+        latencySum += rep.sample.latencyMs
+        latencySampleCount += 1
+      }
       sampleCount += 1
+      if (repetitionVerdict(rep) !== "ungraded") gradedRepetitionCount += 1
+      const failed = sampleExecutionFailed(rep.sample)
+      if (failed) executionFailureCount += 1
+      const outcome =
+        failed && rep.sample.executionStatus === "completed"
+          ? "failed"
+          : (rep.sample.executionStatus ?? (failed ? "failed" : "completed"))
+      executionOutcomes[outcome] += 1
       for (const score of rep.scores) {
         const slot = acc.get(score.scorerId) ?? {
           dimension: score.dimension,
@@ -172,19 +216,32 @@ export function buildReport(input: BuildReportInput): EvalReport {
     }
   }
 
-  // pass@1 / pass^k are rates over GRADED cases only. A case whose first
-  // repetition is ungraded contributes to neither numerator nor denominator.
+  // pass@1 uses first-attempt verdicts. pass^k uses complete, fully judged
+  // case clusters; partial observations retain resources but not reliability.
   let gradedCaseCount = 0
   let passAt1Count = 0
   let passHatKCount = 0
+  let incompleteCaseCount = 0
+  let reliabilityCaseCount = 0
   for (const result of results) {
+    const expected = result.expectedRepetitions ?? input.k
+    const complete =
+      expected > 0 && result.status !== "partial" && result.repetitions.length === expected
+    if (!complete) incompleteCaseCount += 1
+    const allJudged = result.repetitions.every((rep) => repetitionVerdict(rep) !== "ungraded")
+    if (result.repetitions.some((rep) => repetitionVerdict(rep) !== "ungraded")) {
+      reliabilityCaseCount += 1
+      if (
+        complete &&
+        allJudged &&
+        result.repetitions.every((rep) => repetitionVerdict(rep) === "pass")
+      )
+        passHatKCount += 1
+    }
     const first = result.repetitions[0]
     if (!first || repetitionVerdict(first) === "ungraded") continue
     gradedCaseCount += 1
     if (repetitionVerdict(first) === "pass") passAt1Count += 1
-    if (result.repetitions.every((rep) => repetitionVerdict(rep) === "pass")) {
-      passHatKCount += 1
-    }
   }
 
   return {
@@ -196,12 +253,35 @@ export function buildReport(input: BuildReportInput): EvalReport {
     caseCount,
     gradedCaseCount,
     ungradedCaseCount: caseCount - gradedCaseCount,
+    attemptedRepetitionCount: sampleCount,
+    gradedRepetitionCount,
+    incompleteCaseCount,
+    reliabilityCaseCount,
+    executionFailureCount,
+    executionOutcomes,
+    metricAvailability: {
+      cost:
+        costSampleCount === sampleCount && sampleCount > 0
+          ? estimatedCostCount > 0
+            ? "estimated"
+            : "known"
+          : costSampleCount > 0
+            ? "partial"
+            : "unavailable",
+      latency:
+        latencySampleCount === sampleCount && sampleCount > 0
+          ? "known"
+          : latencySampleCount > 0
+            ? "partial"
+            : "unavailable",
+    },
     scorers,
     passAt1: gradedCaseCount > 0 ? passAt1Count / gradedCaseCount : 0,
-    passHatK: gradedCaseCount > 0 ? passHatKCount / gradedCaseCount : 0,
+    passHatK: reliabilityCaseCount > 0 ? passHatKCount / reliabilityCaseCount : 0,
     totalCostUsd,
-    avgLatencyMs: sampleCount > 0 ? latencySum / sampleCount : 0,
+    avgLatencyMs: latencySampleCount > 0 ? latencySum / latencySampleCount : 0,
     createdAt: input.createdAt,
     scoringVersion: SCORING_VERSION,
+    ...(incompleteCaseCount > 0 ? { status: "aborted" as const } : {}),
   }
 }

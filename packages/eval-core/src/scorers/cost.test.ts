@@ -45,6 +45,19 @@ describe("costScorer (measurement-only default)", () => {
 })
 
 describe("makeCostScorer (budgeted)", () => {
+  it("does not pass a missing cost measurement as a free run", async () => {
+    const score = await makeCostScorer({ maxCostUsd: 1 }).score(
+      sample({
+        costUsd: 0,
+        metricAvailability: { usage: "unavailable", cost: "unavailable", latency: "known" },
+      }),
+      CASE
+    )
+    expect(score.status).toBe("errored")
+    expect(score.passed).toBe(false)
+    expect(score.error).toContain("unavailable")
+  })
+
   it("passes when all measurements are within budget", async () => {
     const scorer = makeCostScorer({ maxCostUsd: 0.1, maxLatencyMs: 2000, maxSteps: 5 })
     const score = await scorer.score(sample(), CASE)

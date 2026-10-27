@@ -128,7 +128,10 @@ export function runProjectPreflight(
     issues.push(issue("RETENTION_INVALID", "Evidence retention must be a positive day count"))
   }
   if (project.decisionPolicy.formal) {
-    if (project.dataset.holdoutCaseIds.length < project.decisionPolicy.minimumEffectiveCases) {
+    if (
+      new Set(project.dataset.holdoutCaseIds).size <
+      Math.max(30, project.decisionPolicy.minimumEffectiveCases)
+    ) {
       issues.push(issue("HOLDOUT_TOO_SMALL", "Formal recommendations require enough holdout cases"))
     }
     if (

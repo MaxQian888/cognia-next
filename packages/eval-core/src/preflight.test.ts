@@ -78,6 +78,23 @@ const project = (): EvalProject => ({
 })
 
 describe("runProjectPreflight", () => {
+  it("enforces the formal holdout floor even when the configured minimum is lowered", () => {
+    const input = project()
+    input.decisionPolicy.minimumEffectiveCases = 1
+    input.dataset.holdoutCaseIds = input.dataset.holdoutCaseIds.slice(0, 1)
+    expect(runProjectPreflight(input, environment).issues).toContainEqual(
+      expect.objectContaining({ code: "HOLDOUT_TOO_SMALL" })
+    )
+  })
+
+  it("does not count duplicate holdout IDs as independent evidence", () => {
+    const input = project()
+    input.dataset.holdoutCaseIds = Array.from({ length: 30 }, () => "case-0")
+    expect(runProjectPreflight(input, environment).issues).toContainEqual(
+      expect.objectContaining({ code: "HOLDOUT_TOO_SMALL" })
+    )
+  })
+
   it("returns a compatible common case set when all gates pass", () => {
     const result = runProjectPreflight(project(), environment)
     expect(result.ok).toBe(true)

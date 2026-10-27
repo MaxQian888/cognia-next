@@ -61,6 +61,7 @@ it("renders report costs, provider failures and expandable evidence from public 
   expect(screen.getByText("Prompt A")).toBeVisible()
   expect(screen.getByText("Answer A")).toBeVisible()
   expect(screen.getByText("exact: 1.00")).toBeVisible()
+  expect(screen.getByText("lab.executionProfile.unknown")).toBeVisible()
 })
 
 it("filters evidence and reports filter changes to its owner", async () => {
@@ -83,3 +84,64 @@ it("renders the existing empty state without report data", () => {
   expect(screen.getByText("lab.review.awaitingEvidence")).toBeInTheDocument()
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
 })
+
+it("shows unavailable cost explicitly instead of displaying a measured zero", () => {
+  render(
+    <EvalReportPanel
+      {...props()}
+      reportView={{ ...report, cost: { ...report.cost, actual: 0, availability: "unavailable" } }}
+    />
+  )
+  expect(screen.getByText("lab.review.metricUnavailable")).toBeInTheDocument()
+  expect(screen.queryByText("$0")).not.toBeInTheDocument()
+})
+
+it("marks a partial captured cost and unavailable candidate resource metrics", () => {
+  render(
+    <EvalReportPanel
+      {...props()}
+      reportView={{
+        ...report,
+        cost: { ...report.cost, availability: "partial" },
+        evidence: [
+          {
+            variantId: "a",
+            effectiveCases: 1,
+            metrics: { quality: 1, reliability: 1, cost: 0, latency: 0 },
+            intervals: { quality: { low: 1, high: 1 } },
+            calibrationPassed: true,
+            resourceAvailability: { cost: "unavailable", latency: "unavailable" },
+          },
+        ],
+      }}
+    />
+  )
+  expect(screen.getByText("lab.review.partialMetric")).toBeInTheDocument()
+  expect(screen.getAllByText("lab.review.metricUnavailable")).toHaveLength(2)
+})
+
+it.each(["isolated-text", "desktop-chat", "pure-model"] as const)(
+  "displays the recorded %s execution profile on sample evidence",
+  (executionProfile) => {
+    render(
+      <EvalReportPanel
+        {...props()}
+        reportView={{
+          ...report,
+          cases: [
+            {
+              ...report.cases[0],
+              sample: { ...report.cases[0].sample, executionProfile },
+            },
+          ],
+        }}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /case-a/ }))
+    expect(screen.getByText("lab.executionProfile.label")).toBeVisible()
+    expect(screen.getByText(`lab.executionProfile.profiles.${executionProfile}`)).toBeVisible()
+    if (executionProfile === "isolated-text") {
+      expect(screen.getByText("lab.executionProfile.teamNoticeDescription")).toBeVisible()
+    }
+  }
+)

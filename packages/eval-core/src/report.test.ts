@@ -85,6 +85,13 @@ describe("repetitionVerdict", () => {
     expect(repetitionVerdict(rep([nonScored("judge", "errored")]))).toBe("ungraded")
   })
 
+  it("cannot pass an execution failure even when a scorer accepts its partial output", () => {
+    expect(
+      repetitionVerdict(rep([sc("oracle", 1, true)], sample({ error: "failed after output" })))
+    ).toBe("fail")
+    expect(repetitionVerdict(rep([], sample({ executionStatus: "cancelled" })))).toBe("fail")
+  })
+
   it("exposes the gating subset", () => {
     const scores = [sc("s1", 1, true), nonScored("s2", "measurement")]
     expect(gatingScores(rep(scores)).map((s) => s.scorerId)).toEqual(["s1"])
@@ -94,7 +101,8 @@ describe("repetitionVerdict", () => {
 describe("isLegacyScoring", () => {
   it("treats a missing scoringVersion as legacy", () => {
     expect(isLegacyScoring({ scoringVersion: undefined })).toBe(true)
-    expect(isLegacyScoring({ scoringVersion: 2 })).toBe(false)
+    expect(isLegacyScoring({ scoringVersion: 2 })).toBe(true)
+    expect(isLegacyScoring({ scoringVersion: 3 })).toBe(false)
   })
 
   it("never flags a freshly built report", () => {
@@ -261,5 +269,95 @@ describe("buildReport", () => {
     expect(report.passHatK).toBe(0)
     expect(report.avgLatencyMs).toBe(0)
     expect(report.totalCostUsd).toBe(0)
+  })
+
+  it("retains partial-run spend without claiming all-k reliability", () => {
+    const report = build(
+      [
+        {
+          caseId: "partial",
+          expectedRepetitions: 3,
+          status: "partial",
+          repetitions: [rep([sc("oracle", 1, true)], sample({ costUsd: 2 }))],
+        },
+      ],
+      3
+    )
+    expect(report.totalCostUsd).toBe(2)
+    expect(report.attemptedRepetitionCount).toBe(1)
+    expect(report.incompleteCaseCount).toBe(1)
+    expect(report.reliabilityCaseCount).toBe(1)
+    expect(report.passHatK).toBe(0)
+    expect(report.status).toBe("aborted")
+  })
+
+  it("keeps partial attempted cases in the all-repeat reliability denominator", () => {
+    const report = build(
+      [
+        {
+          caseId: "complete",
+          expectedRepetitions: 2,
+          repetitions: [rep([sc("oracle", 1, true)]), rep([sc("oracle", 1, true)])],
+        },
+        {
+          caseId: "partial",
+          expectedRepetitions: 2,
+          status: "partial",
+          repetitions: [rep([sc("oracle", 1, true)])],
+        },
+      ],
+      2
+    )
+    expect(report.reliabilityCaseCount).toBe(2)
+    expect(report.passHatK).toBe(0.5)
+    expect(report.incompleteCaseCount).toBe(1)
+  })
+
+  it("does not infer completed execution or all-repeat success from inconsistent empty results", () => {
+    const errored = build([
+      {
+        caseId: "failed",
+        repetitions: [
+          rep(
+            [sc("oracle", 1, true)],
+            sample({ executionStatus: "completed", error: "late failure" })
+          ),
+        ],
+      },
+    ])
+    expect(errored.executionOutcomes?.failed).toBe(1)
+    expect(errored.executionOutcomes?.completed).toBe(0)
+    expect(errored.passAt1).toBe(0)
+    const empty = build([{ caseId: "empty", repetitions: [] }], 0)
+    expect(empty.reliabilityCaseCount).toBe(0)
+    expect(empty.passHatK).toBe(0)
+  })
+
+  it("marks unknown cost explicitly and does not average unavailable latency as zero", () => {
+    const report = build([
+      {
+        caseId: "a",
+        repetitions: [
+          rep(
+            [sc("oracle", 1, true)],
+            sample({
+              costUsd: 0,
+              latencyMs: 0,
+              metricAvailability: {
+                usage: "unavailable",
+                cost: "unavailable",
+                latency: "unavailable",
+              },
+            })
+          ),
+        ],
+      },
+      {
+        caseId: "b",
+        repetitions: [rep([sc("oracle", 1, true)], sample({ costUsd: 1, latencyMs: 100 }))],
+      },
+    ])
+    expect(report.metricAvailability).toMatchObject({ cost: "partial", latency: "partial" })
+    expect(report.avgLatencyMs).toBe(100)
   })
 })

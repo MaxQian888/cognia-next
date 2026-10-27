@@ -35,6 +35,7 @@ import { createSession, deleteSession } from "@/lib/db/sessions"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { getSettings } from "@/lib/db/settings"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
+import { queryBySession } from "@/lib/db/agent-traces"
 import type { EvalPersistenceScope } from "@/lib/db/eval-lab"
 
 describe("defaultChatTargetDeps", () => {
@@ -161,6 +162,7 @@ describe("defaultChatTargetDeps", () => {
   it("fetches spans by session and reports tool capability", async () => {
     const deps = defaultChatTargetDeps()
     expect(await deps.fetchSpans("ses-eval")).toHaveLength(1)
+    expect(queryBySession).toHaveBeenCalledWith("ses-eval", Number.MAX_SAFE_INTEGER)
     expect(deps.isToolCapable()).toBe(true)
   })
 })
