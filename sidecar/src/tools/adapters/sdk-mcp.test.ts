@@ -7,6 +7,31 @@ import { buildCogniaToolsServer, toSdkMcpToolDefinition, wrapNativeToolResults }
 import { tool } from "../kernel/define.ts"
 import type { CallableTool } from "../../../test-support/tool-result.ts"
 
+test("builtin residency overrides pin available tools without registering absent categories", async () => {
+  const server = buildCogniaToolsServer({
+    enabled: { git: true },
+    alwaysLoadTools: new Set(["git_diff", "terminal_repl_spawn"]),
+  })!
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: "resident-policy-test", version: "1" })
+  await server.instance.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const tools = (await client.listTools()).tools
+    assert.equal(
+      tools.find((entry) => entry.name === "git_diff")?._meta?.["anthropic/alwaysLoad"],
+      true
+    )
+    assert.equal(
+      tools.some((entry) => entry.name === "terminal_repl_spawn"),
+      false
+    )
+  } finally {
+    await client.close()
+    await server.instance.close()
+  }
+})
+
 test("real MCP discovery preserves record-valued schemas and rejects invalid values", async () => {
   const server = buildCogniaToolsServer({ enabled: { terminalRepl: true } })!
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()

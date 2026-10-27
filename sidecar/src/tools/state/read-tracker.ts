@@ -10,6 +10,7 @@
 // tool defs by `src/tools/builtin/core-files/index.ts`.
 
 import path from "node:path"
+import { createHash } from "node:crypto"
 
 /** The stat fields a read records and a write checks. */
 export interface ReadStat {
@@ -22,6 +23,9 @@ export interface ReadTracker {
   hasRead(absPath: string): boolean
   assertReadBefore(absPath: string, stat: ReadStat): void
   clear(): void
+  /** Receipts for actual built-in read results; never a freshness or write grant. */
+  recordOutput?(absPath: string, output: string): void
+  isObservedOutput?(absPath: string, output: string): boolean
 }
 
 /**
@@ -40,6 +44,8 @@ export function canonicalKey(p: string): string {
 
 export function createReadTracker(): ReadTracker {
   const seen = new Map<string, ReadStat>()
+  const outputs = new Map<string, Set<string>>()
+  const digest = (output: string) => createHash("sha256").update(output).digest("hex")
 
   return {
     record(absPath, stat) {
@@ -72,6 +78,16 @@ export function createReadTracker(): ReadTracker {
 
     clear() {
       seen.clear()
+      outputs.clear()
+    },
+    recordOutput(absPath, output) {
+      const key = canonicalKey(absPath)
+      const receipts = outputs.get(key) ?? new Set<string>()
+      receipts.add(digest(output))
+      outputs.set(key, receipts)
+    },
+    isObservedOutput(absPath, output) {
+      return outputs.get(canonicalKey(absPath))?.has(digest(output)) === true
     },
   }
 }

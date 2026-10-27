@@ -391,6 +391,66 @@ test("creating hosts installs no process handlers and isolates observers", async
   assert.equal(process.listenerCount("uncaughtException"), uncaught)
 })
 
+test(
+  "pre-send rejection retains the replacement transcript generation",
+  { timeout: 20_000 },
+  async () => {
+    const { spawn } = await import("node:child_process")
+    const { createInterface } = await import("node:readline")
+    const { once } = await import("node:events")
+    const child = spawn(
+      process.execPath,
+      [new URL("../../agent-host.mjs", import.meta.url).pathname],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, COGNIA_SIDECAR_ENGINES: "ai-sdk" },
+      }
+    )
+    const exited = once(child, "exit")
+    const lines = createInterface({ input: child.stdout })
+    child.stderr.resume()
+    try {
+      const ended = await new Promise<FixtureFrame>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("host rejection timed out")), 15_000)
+        lines.on("line", (line) => {
+          let frame: FixtureFrame
+          try {
+            frame = JSON.parse(line)
+          } catch {
+            return
+          }
+          if (frame.type === "ready")
+            child.stdin.write(
+              JSON.stringify({
+                type: "send",
+                sessionId: "rejected-replacement",
+                prompt: "must not run",
+                options: {
+                  provider: "openai",
+                  turnId: "replacement-turn",
+                  transcriptInvalidationId: "replacement-generation",
+                  subagentRuntime: { contextMode: "fork" },
+                },
+              }) + "\n"
+            )
+          if (frame.type === "session_ended") {
+            clearTimeout(timer)
+            resolve(frame)
+          }
+        })
+      })
+      assert.match(String(ended.error), /unsupported capability/)
+      assert.equal(ended.transcriptInvalidationId, "replacement-generation")
+      assert.equal(ended.turnId, "replacement-turn")
+    } finally {
+      lines.close()
+      child.stdin.end()
+      child.kill()
+      await exited
+    }
+  }
+)
+
 test("loadConfiguredEngines rejects an unknown engine list instead of throwing", async () => {
   const { loadConfiguredEngines } = await import("./index.ts")
   let pending: Promise<void> | undefined

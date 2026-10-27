@@ -28,6 +28,46 @@ const fakeTracker: ReadTracker = {
   clear() {},
 }
 
+test("coding discovery keeps read/write primitives resident while management tools remain discoverable", () => {
+  const defs = collectCogniaToolDefs({
+    enabled: { coreFiles: true },
+    readTracker: fakeTracker,
+    cwd: ".",
+    dispatchPath: "ai-sdk",
+    planTools: true,
+  })
+  for (const name of [
+    "read",
+    "bash",
+    "glob",
+    "grep",
+    "ls",
+    "write",
+    "edit",
+    "multi_edit",
+    "apply_patch",
+  ]) {
+    assert.equal(
+      defs.find((def) => def.name === name)?.alwaysLoad,
+      true,
+      `${name} must stay resident`
+    )
+  }
+  for (const name of [
+    "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "create_plan",
+    "update_plan",
+  ]) {
+    const def = defs.find((candidate) => candidate.name === name)
+    assert.ok(def, `${name} must stay available`)
+    assert.notEqual(def.alwaysLoad, true, `${name} should load on demand`)
+  }
+})
+
 test("coreFiles suite is included on the ai-sdk path when enabled + tracked", () => {
   const defs = collectCogniaToolDefs({
     enabled: { coreFiles: true },

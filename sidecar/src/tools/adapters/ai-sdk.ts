@@ -47,6 +47,7 @@ import type { DoomLoopGuard } from "../../policy/doom-loop.ts"
 import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
 import type { LazyLspResolver } from "../../services/lsp/lazy-resolver.ts"
 import type { CodeGraphIndex } from "../../services/code-graph/index-service.ts"
+import type { VerificationBudget } from "../../shared/verification-budget.ts"
 
 /** An AI SDK tool as this adapter builds it. */
 type AiSdkTool = Tool
@@ -338,6 +339,7 @@ export function buildAiSdkTools({
   taskStore,
   doomGuard: providedDoomGuard,
   reviewToolOutput,
+  verificationBudget,
 }: {
   sendOptions: AiSdkToolSendOptions
   emit: (frame: Record<string, unknown>) => void
@@ -353,6 +355,7 @@ export function buildAiSdkTools({
   /** A caller-owned guard, so the session can reset it per turn. */
   doomGuard?: DoomLoopGuard | undefined
   reviewToolOutput?: ToolOutputReview | undefined
+  verificationBudget?: VerificationBudget | undefined
 }): Record<string, AiSdkTool> {
   // An empty `allowedTools` array means "no filtering" on this path. Honor the
   // explicit runtime-wide deny-all contract before collecting any built-in or
@@ -429,7 +432,20 @@ export function buildAiSdkTools({
       ? sendOptions.toolExecutionTimeoutMs
       : DEFAULT_BUILTIN_TOOL_TIMEOUT_MS
 
+  const bashPalette = ["bash", `mcp__${SERVER_NAME}__bash`, "Bash"]
+  const bashVisible = () =>
+    !bashPalette.some((name) => disallowed.has(name)) && passesAllowList(allowSet, bashPalette)
+
   for (const def of collectCogniaToolDefs({
+    ...(bashVisible() && verificationBudget
+      ? {
+          verificationBudget,
+          authorizeVerificationCommand: async (input: unknown, signal?: AbortSignal) => {
+            if (!bashVisible()) throw new Error("Bash is not allowed in this tool surface")
+            return gate(`mcp__${SERVER_NAME}__bash`, input, signal)
+          },
+        }
+      : {}),
     enabled: sendOptions.builtinTools,
     // The send spec carries the whole launch policy, a ProcessSandboxScope.
     builtinProcessSandbox: (sendOptions.builtinProcessSandbox ?? undefined) as

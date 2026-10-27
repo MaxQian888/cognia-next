@@ -152,15 +152,13 @@ export function createPlanTools() {
       CREATE_PLAN_TOOL_NAME,
       "Create a structured, trackable plan for a multi-step job. The user sees it as a live checklist and can approve, edit, or reject it. A rejected plan is closed for good — if the user then asks for another attempt, create a new plan that addresses their reason rather than updating the rejected one. Use this when the work has several distinct steps worth tracking — not for a single action, and not to ask a question.",
       createPlanShape,
-      execCreatePlan,
-      { alwaysLoad: true }
+      execCreatePlan
     ),
     tool(
       UPDATE_PLAN_TOOL_NAME,
       "Update the plan you created: rename it, replace its steps while it is still a draft, or report progress (`stepUpdates`) as you finish each step. Keep it current — the user is watching this checklist. This acknowledgement only means the update was received: it has no effect on a plan the user rejected or cancelled.",
       updatePlanShape,
-      execUpdatePlan,
-      { alwaysLoad: true }
+      execUpdatePlan
     ),
   ]
 }

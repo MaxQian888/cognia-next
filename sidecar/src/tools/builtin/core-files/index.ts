@@ -29,6 +29,7 @@ import { createApplyPatchTool } from "./apply-patch.ts"
 import { createMonitorTools, MONITOR_TOOL_NAMES } from "./monitor.ts"
 import type { SessionTaskStore } from "../../state/tasks.ts"
 import type { CoreFileToolContext } from "./context.ts"
+import { createVerificationBatchTool, VERIFICATION_BATCH_NAME } from "./verification-batch.ts"
 
 /**
  * Fixed registration order — do not reorder (prompt-cache stability). New
@@ -70,6 +71,7 @@ export const CORE_MUTATING_TOOL_NAMES = Object.freeze([
   "apply_patch",
   "Monitor",
   "kill_shell",
+  VERIFICATION_BATCH_NAME,
 ])
 
 /**
@@ -87,6 +89,8 @@ export function createCoreTools({
   sessionId,
   model,
   provider,
+  verificationBudget,
+  authorizeVerificationCommand,
 }: CoreFileToolContext & { taskStore?: SessionTaskStore | undefined } = {}) {
   const ctx: CoreFileToolContext = {
     cwd,
@@ -98,6 +102,8 @@ export function createCoreTools({
     sessionId,
     model,
     provider,
+    verificationBudget,
+    authorizeVerificationCommand,
   }
   const tools = [
     createGrepTool(ctx),
@@ -125,5 +131,9 @@ export function createCoreTools({
       )
     }
   }
-  return tools
+  // Optional tools append after the stable core prefix. Other rails/hosts do
+  // not expose an executable batch without a nested command authorization seam.
+  return verificationBudget?.snapshot().enabled && authorizeVerificationCommand
+    ? [...tools, createVerificationBatchTool(ctx)]
+    : tools
 }

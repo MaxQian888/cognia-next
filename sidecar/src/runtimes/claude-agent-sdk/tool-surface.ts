@@ -132,6 +132,7 @@ export function buildToolSurface({
     enabled: builtinEnabled,
     builtinProcessSandbox: sendOptions.builtinProcessSandbox,
     alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
+    alwaysLoadTools: alwaysLoadToolNames,
     ...toolSession.toolContext(),
     cwd: sendOptions.cwd,
     dispatchPath: "anthropic",

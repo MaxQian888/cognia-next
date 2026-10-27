@@ -357,6 +357,6 @@ test("explicit sidecar host uses local jobs despite an RPC object", async () => 
     assert.deepEqual(registry.killByPid(2147483647), { matched: false })
     assert.equal(registry.killByPid(entry.pid!).matched, true)
   } finally {
-    registry.killAll()
+    await registry.killAll()
   }
 })

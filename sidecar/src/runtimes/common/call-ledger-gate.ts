@@ -482,15 +482,16 @@ export async function runLedgeredSideCall<T>(
  * tool calls, or a provider error.
  *
  * @param {{ fullStream: AsyncIterable<any>, usage?: unknown, response?: unknown }} run
- * @param {{ withBilling?: boolean }} [options]
+ * @param {{ withBilling?: boolean, collectUsage?: boolean }} [options]
  */
 export async function drainSideCallStream(
   run: { fullStream: AsyncIterable<unknown>; usage?: unknown; response?: unknown },
-  { withBilling = false } = {}
+  { withBilling = false, collectUsage = false } = {}
 ) {
   let text = ""
   let error: unknown = null
   let finishReason: string | null = null
+  let streamedUsage: unknown = null
   for await (const event of run.fullStream) {
     const evt = record(event)
     if (evt?.type === "text-delta") text += evt.text ?? evt.textDelta ?? evt.delta ?? ""
@@ -498,14 +499,19 @@ export async function drainSideCallStream(
     else if (
       (evt?.type === "finish" || evt?.type === "finish-step") &&
       typeof evt.finishReason === "string"
-    )
+    ) {
       finishReason = evt.finishReason
+      streamedUsage = evt.totalUsage ?? evt.usage ?? streamedUsage
+    }
   }
   const outcome = {
     ...(finishReason ? { finishReason } : {}),
     ...(error ? { error } : {}),
   }
-  if (!withBilling) return { value: text, ...outcome }
+  // Observation must not introduce another result-getter wait after the stream
+  // ends. AI SDK finish/finish-step already carries normalized usage.
+  if (!withBilling)
+    return { value: text, ...(collectUsage ? { usage: streamedUsage } : {}), ...outcome }
   // Each AI SDK result getter returns a fresh promise that rejects on a failed
   // call: read each exactly once, inside the try.
   let usage: unknown = null

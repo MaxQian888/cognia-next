@@ -10,7 +10,9 @@ import type { ProtocolAdapter } from "../../providers/protocol-adapters/types.ts
 import {
   parseProgressCheckpoint,
   renderProgressCheckpoint,
+  type ProgressCheckpoint,
 } from "../../context/progress-checkpoint.ts"
+import { record } from "./messages.ts"
 
 function fixture(
   options: {
@@ -20,9 +22,11 @@ function fixture(
     effort?: SendOptions["effort"]
     answerHook?: boolean
     hookContext?: () => string
+    isObservedReadOutput?: (path: string, output: string) => boolean
     fail?: boolean
     /** Stream parts for the Nth (1-based) summary call; default one text delta. */
     script?: (call: number) => Record<string, unknown>[]
+    usage?: (args: Parameters<ProtocolAdapter["start"]>[0], call: number) => unknown
     hostRpc?: Parameters<typeof createCompactor>[0]["hostRpc"]
     streamTextOverride?: Parameters<typeof createCompactor>[0]["streamTextOverride"]
   } = {}
@@ -36,6 +40,7 @@ function fixture(
     complete = resolve
   })
   const events: Record<string, unknown>[] = []
+  const logs: string[] = []
   const pendingHooks: PendingPluginHooks = new Map()
   const conversation: ConversationMessage[] = Array.from({ length: 8 }, (_, i) => ({
     role: i % 2 ? "assistant" : "user",
@@ -63,19 +68,23 @@ function fixture(
       calls++
       const call = calls
       starts.push(args)
+      const usage = options.usage?.(args, call)
       signal = args.abortSignal
       started()
       return {
+        usage: Promise.resolve(usage),
         fullStream: (async function* () {
           await gate
           if (options.fail) throw new Error("synthetic provider failure")
           if (options.script) yield* options.script(call)
           else yield { type: "text-delta", text: "prepared summary" }
+          if (usage) yield { type: "finish", finishReason: "stop", totalUsage: usage }
         })(),
       }
     },
   }
   const compact = createCompactor({
+    isObservedReadOutput: options.isObservedReadOutput,
     state,
     conversation,
     sendOptions: {
@@ -107,7 +116,9 @@ function fixture(
           })
       } else events.push(event)
     },
-    log() {},
+    log(_level, message) {
+      logs.push(message)
+    },
     isCancelled: () => false,
   })
   return {
@@ -121,6 +132,7 @@ function fixture(
     starts,
     signal: () => signal,
     pendingHooks,
+    logs,
   }
 }
 
@@ -720,7 +732,7 @@ test("continuation retires summarized tool results while preserving the exact re
     )
     await forceCompact(f)
     assert.deepEqual(
-      boundaries(f.events)[0]!.event.compact_metadata.continuation_tool_result_ids,
+      record(record(boundaries(f.events)[0]!.event).compact_metadata).continuation_tool_result_ids,
       useAI ? ["covered"] : []
     )
     assertResumable(f.conversation)
@@ -1750,7 +1762,7 @@ test("complete retained budget includes provider framing and concurrent appends"
 })
 
 test("retained checkpoint budget is independent of the generated delta cap", async () => {
-  const checkpoint = {
+  const checkpoint: ProgressCheckpoint = {
     goal: "Inspect",
     constraints: [],
     items: [
@@ -1788,7 +1800,7 @@ test("retained checkpoint budget is independent of the generated delta cap", asy
   const merged = parseProgressCheckpoint(String(f.conversation[0]?.content))!
   assert.match(merged.items[0]!.summary, /established fact/)
   assert.match(merged.items[0]!.summary, /New finding/)
-  assert.equal(f.starts[0]!.modelParams.maxOutputTokens, 200)
+  assert.equal(f.starts[0]!.modelParams?.maxOutputTokens, 200)
 })
 
 test("default cumulative state grows into available retained input while an explicit cap stays fixed", async () => {
@@ -1827,7 +1839,11 @@ test("default cumulative state grows into available retained input while an expl
     assert.equal(boundaries(f.events).length, adaptive ? 1 : 0)
     if (adaptive) {
       assert.match(String(f.conversation[0]!.content), /Verified behavior/)
-      assert.ok(boundaries(f.events)[0]!.event.compact_metadata.checkpoint_token_budget > 50)
+      const metadata = record(record(boundaries(f.events)[0]!.event).compact_metadata)
+      assert.ok(
+        typeof metadata.checkpoint_token_budget === "number" &&
+          metadata.checkpoint_token_budget > 50
+      )
     }
   }
 })
@@ -1876,8 +1892,8 @@ test("Anthropic summary text plus enabled thinking respects the same generation 
   )
   f.complete()
   await waiting
-  assert.equal(f.starts[0]!.modelParams.maxOutputTokens, 976)
-  assert.deepEqual(f.starts[0]!.modelParams.providerOptions, {
+  assert.equal(f.starts[0]!.modelParams?.maxOutputTokens, 976)
+  assert.deepEqual(f.starts[0]!.modelParams?.providerOptions, {
     anthropic: { thinking: { type: "enabled", budgetTokens: 1024 } },
   })
 })
@@ -1950,7 +1966,7 @@ for (const model of ["claude-sonnet-5-5", "claude-fable-5", "claude-fable-5-1"])
       { force: true }
     )
     assert.equal(f.calls(), 1)
-    assert.equal(f.starts[0]!.modelParams.maxOutputTokens, 4096)
+    assert.equal(f.starts[0]!.modelParams?.maxOutputTokens, 4096)
   })
 
 test("an oversized checkpoint gets one bounded refinement without resending source history", async () => {
@@ -2171,4 +2187,656 @@ test("invalid checkpoint drafts get one format repair without a second source su
   assert.doesNotMatch(String(f.starts[1]!.messages[1]!.content), /message 0 source evidence/)
   const next = parseProgressCheckpoint(String(f.conversation[0]!.content))!
   assert.equal(next.items[0]!.facts!.length, 2)
+})
+
+test("consolidation reads navigation metadata without resending committed fact statements", async () => {
+  const prior = {
+    goal: "Inspect",
+    constraints: ["No edits"],
+    items: [
+      {
+        id: "work",
+        status: "pending" as const,
+        summary: "Old navigation",
+        remaining: "Next source",
+        evidence: [],
+        facts: [
+          { id: "old", statement: "COMMITTED_FACT_BODY ".repeat(180), evidence: ["old.ts:1"] },
+        ],
+        verbatim: ["KEEP_LITERAL"],
+      },
+    ],
+  }
+  const update = {
+    goal: "Inspect",
+    constraints: [],
+    items: [
+      {
+        id: "work",
+        status: "pending",
+        summary: "Latest navigation",
+        evidence: [],
+        facts: [{ id: "new", statement: "New behavior", evidence: ["new.ts:1"] }],
+      },
+    ],
+  }
+  const f = fixture({
+    compaction: {
+      contextWindow: 10000,
+      checkpointFormat: "progress-v1",
+      checkpointTokenBudget: 2500,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(update) }],
+  })
+  f.conversation.unshift(makeSummaryMessage(renderProgressCheckpoint(prior), 1))
+  await forceCompact(f)
+  assert.equal(f.calls(), 1)
+  const input = JSON.stringify(f.starts[0]!.messages)
+  assert.doesNotMatch(input, /COMMITTED_FACT_BODY/)
+  assert.match(input, /old.ts:1/)
+  const result = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.equal(result.items[0]!.facts![0]!.statement, prior.items[0]!.facts[0]!.statement)
+  assert.equal(result.items[0]!.summary, "Latest navigation")
+  assert.deepEqual(result.items[0]!.verbatim, ["KEEP_LITERAL"])
+})
+
+test("missing checkpoint navigation does not bill a format repair", async () => {
+  const f = fixture({
+    compaction: { contextWindow: 10000, checkpointFormat: "progress-v1" },
+    script: () => [
+      {
+        type: "text-delta",
+        text: JSON.stringify({
+          goal: "Inspect",
+          constraints: [],
+          items: [
+            {
+              id: "work",
+              status: "done",
+              evidence: [],
+              facts: [{ id: "source", statement: "Source behavior", evidence: ["source.ts:1"] }],
+            },
+          ],
+        }),
+      },
+    ],
+  })
+  await forceCompact(f)
+  assert.equal(f.calls(), 1)
+  assert.equal(boundaries(f.events).length, 1)
+})
+
+test("summary input calibration reuses measured usage with headroom and resets across deployment or text changes", async () => {
+  const f = fixture({
+    compaction: { contextWindow: 10000, summaryInputBudget: 1000, maxSummaryTokens: 100 },
+    usage: () => ({ inputTokens: 100, outputTokens: 20 }),
+  })
+  const original = structuredClone(f.conversation)
+  await forceCompact(f)
+  assert.equal(f.calls(), 1)
+  const base = estimatePromptTokens(f.starts[0]!.messages.map((message) => message.content))
+  const larger = structuredClone(original)
+  larger[0]!.content += "x".repeat(Math.max(0, 1120 - base) * 3)
+  f.conversation.splice(0, f.conversation.length, ...structuredClone(larger))
+  await forceCompact(f)
+  assert.equal(
+    f.calls(),
+    2,
+    "measured input plus safety headroom avoids a conservative extra partition"
+  )
+  f.conversation.splice(0, f.conversation.length, ...structuredClone(larger))
+  const changedAt = f.calls()
+  await f.compact({ baseURL: "https://another.example.invalid" }, {}, { force: true })
+  assert.ok(
+    f.calls() > changedAt + 1,
+    "a different endpoint must partition using its conservative estimate"
+  )
+  assert.ok(
+    estimatePromptTokens(f.starts[changedAt]!.messages.map((message) => message.content)) < 1000
+  )
+  const multilingual = structuredClone(larger)
+  multilingual[0]!.content = "中".repeat(String(larger[0]!.content).length)
+  f.conversation.splice(0, f.conversation.length, ...multilingual)
+  const multilingualAt = f.calls()
+  await forceCompact(f)
+  assert.ok(
+    f.calls() > multilingualAt + 1,
+    "a materially different character mix keeps conservative input protection"
+  )
+  assert.ok(
+    estimatePromptTokens(f.starts[multilingualAt]!.messages.map((message) => message.content)) <
+      1000
+  )
+})
+
+test("ignored summary thinking control is reported once without retrying inference", async () => {
+  const f = fixture({
+    provider: "deepseek",
+    model: "ark-deepseek-v4.1-flash",
+    usage: () => ({ inputTokens: 100, outputTokens: 30, reasoningTokens: 20 }),
+  })
+  const original = structuredClone(f.conversation)
+  await forceCompact(f)
+  f.conversation.splice(0, f.conversation.length, ...original)
+  await forceCompact(f)
+  assert.equal(f.calls(), 2)
+  assert.equal(f.logs.filter((message) => message.includes("despite thinking=disabled")).length, 1)
+})
+
+test("late usage after invalidation cannot repopulate calibration or thinking diagnostics", async () => {
+  const f = fixture({
+    provider: "deepseek",
+    model: "ark-deepseek-v4.1-flash",
+    usage: () => ({ inputTokens: 100, outputTokens: 30, reasoningTokens: 20 }),
+  })
+  const original = structuredClone(f.conversation)
+  await f.compact({}, {})
+  await waitFor(f.summaryStarted)
+  f.compact.invalidate()
+  f.complete()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(f.logs.filter((message) => message.includes("despite thinking=disabled")).length, 0)
+  f.conversation.splice(0, f.conversation.length, ...original)
+  await forceCompact(f)
+  assert.equal(f.logs.filter((message) => message.includes("despite thinking=disabled")).length, 1)
+})
+
+test("delta anchors are inherited locally and repair usage cannot poison source input calibration", async () => {
+  const valid: ProgressCheckpoint = {
+    goal: "Inspect",
+    constraints: ["No edits"],
+    items: [
+      {
+        id: "work",
+        status: "pending",
+        summary: "Continue",
+        evidence: [],
+        facts: [{ id: "old", statement: "Committed behavior", evidence: ["old.ts:1"] }],
+      },
+    ],
+  }
+  const f = fixture({
+    compaction: {
+      contextWindow: 20000,
+      summaryInputBudget: 3000,
+      checkpointTokenBudget: 2000,
+      checkpointFormat: "progress-v1",
+    },
+    usage: (_args, call) => ({ inputTokens: call === 2 ? 5000 : 100, outputTokens: 20 }),
+    script: (call) => [
+      {
+        type: "text-delta",
+        text:
+          call === 1
+            ? "invalid JSON draft"
+            : JSON.stringify(
+                call <= 3
+                  ? valid
+                  : {
+                      items: [
+                        {
+                          id: "work",
+                          status: "pending",
+                          evidence: [],
+                          facts: [{ id: "new", statement: "New behavior", evidence: ["new.ts:1"] }],
+                        },
+                      ],
+                    }
+              ),
+      },
+    ],
+  })
+  const original = structuredClone(f.conversation)
+  await forceCompact(f)
+  assert.equal(f.calls(), 2)
+  const sourceBase = estimatePromptTokens(f.starts[0]!.messages.map((message) => message.content))
+  const larger = structuredClone(original)
+  larger[0]!.content += "x".repeat(Math.max(0, 3300 - sourceBase) * 3)
+  f.conversation.splice(0, f.conversation.length, ...larger)
+  await forceCompact(f)
+  assert.equal(f.calls(), 3, "repair token density must not force extra source partitions")
+  f.conversation.splice(
+    0,
+    f.conversation.length,
+    makeSummaryMessage(renderProgressCheckpoint(valid), 2),
+    ...structuredClone(original)
+  )
+  await forceCompact(f)
+  assert.equal(f.calls(), 4, "absent delta goal/constraints/navigation need no repair call")
+  const result = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.equal(result.goal, valid.goal)
+  assert.deepEqual(result.constraints, valid.constraints)
+  assert.equal(result.items[0]!.facts!.length, 2)
+})
+
+test("first checkpoint repair cannot replace the original task with the JSON repair instruction", async () => {
+  const original = {
+    goal: "Investigate all original workstreams",
+    constraints: ["Keep original source evidence"],
+    items: [
+      {
+        id: "work",
+        status: "pending",
+        summary: "Read next",
+        evidence: [],
+        facts: [
+          { id: "one", statement: "First behavior", evidence: ["first.ts:1"] },
+          { id: "one", statement: "Second behavior", evidence: ["second.ts:1"] },
+        ],
+      },
+    ],
+  }
+  const f = fixture({
+    compaction: { contextWindow: 10000, checkpointFormat: "progress-v1" },
+    script: (call) => [
+      {
+        type: "text-delta",
+        text: JSON.stringify(
+          call === 1
+            ? original
+            : {
+                ...original,
+                goal: "Repair only this UNPUBLISHED JSON draft",
+                constraints: ["Return JSON only"],
+                items: [
+                  {
+                    ...original.items[0],
+                    facts: original.items[0]!.facts.map((fact, i) => ({
+                      ...fact,
+                      id: `fixed-${i}`,
+                    })),
+                  },
+                ],
+              }
+        ),
+      },
+    ],
+  })
+  await forceCompact(f)
+  assert.equal(f.calls(), 2)
+  const result = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.equal(result.goal, original.goal)
+  assert.deepEqual(result.constraints, original.constraints)
+  assert.equal(result.items[0]!.facts!.length, 2)
+})
+
+test("a malformed first draft repairs against the actual user task instead of a replacement goal", async () => {
+  const f = fixture({
+    compaction: { contextWindow: 10000, checkpointFormat: "progress-v1" },
+    script: (call) => [
+      {
+        type: "text-delta",
+        text:
+          call === 1
+            ? "malformed draft"
+            : JSON.stringify({
+                goal: "Repair this JSON",
+                constraints: ["JSON only"],
+                items: [{ id: "work", status: "pending", summary: "Continue", evidence: [] }],
+              }),
+      },
+    ],
+  })
+  const task = String(f.conversation[0]!.content)
+  await forceCompact(f)
+  assert.equal(f.calls(), 2)
+  const result = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.equal(result.goal, task)
+  assert.deepEqual(result.constraints, [])
+})
+
+test("first compaction preserves observed source literals and coverage even when the model omits them", async () => {
+  const update = {
+    goal: "Investigate source",
+    constraints: [],
+    items: [
+      { id: "work", status: "pending", summary: "Continue next source", evidence: [], facts: [] },
+    ],
+  }
+  const f = fixture({
+    isObservedReadOutput: () => true,
+    compaction: {
+      contextWindow: 20000,
+      checkpointTokenBudget: 4000,
+      checkpointFormat: "progress-v1",
+      keepRecent: 0,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(update) }],
+  })
+  const source = {
+    path: "/repo/alpha.ts",
+    version: "a".repeat(64),
+    start: 1,
+    end: 3,
+    totalLines: 3,
+    complete: true,
+  }
+  f.conversation.splice(
+    0,
+    f.conversation.length,
+    {
+      role: "user",
+      content: "Retain release_... identifiers, source notes and provenance exactly.",
+    },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "source",
+          toolName: "read",
+          input: { file_path: source.path },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "source",
+          toolName: "read",
+          output: {
+            type: "text",
+            value: `[Read: ${JSON.stringify(source)}]\n1\t// Ticket: TICKET_ORIGINAL_9ac\n2\tconst token = 'release_b42';\n3\t// Origin: lib/alpha.ts:81`,
+          },
+        },
+      ],
+    },
+    { role: "assistant", content: "Continue" }
+  )
+  await forceCompact(f)
+  assert.equal(f.calls(), 1, "literal retention must not need another inference")
+  const saved = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.equal(saved.sources!.length, 1)
+  assert.equal(saved.sources![0]!.complete, true)
+  assert.deepEqual(
+    saved.sources![0]!.literals.map((literal) => literal.text),
+    ["// Ticket: TICKET_ORIGINAL_9ac", "release_b42", "// Origin: lib/alpha.ts:81"]
+  )
+  assert.deepEqual(saved.literalFamilies, ["release_"])
+  f.conversation.push(
+    { role: "user", content: "Continue only missing work" },
+    { role: "assistant", content: "Continue" }
+  )
+  await forceCompact(f)
+  assert.equal(f.calls(), 2)
+  assert.doesNotMatch(
+    JSON.stringify(f.starts[1]!.messages),
+    /TICKET_ORIGINAL_9ac|release_b42/,
+    "retained source literals must not be resummarized"
+  )
+  const next = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.deepEqual(next.sources, saved.sources)
+})
+
+test("source observations cannot bypass the explicit checkpoint budget", async () => {
+  const update = {
+    goal: "Inspect",
+    constraints: [],
+    items: [{ id: "work", status: "pending", summary: "Continue", evidence: [] }],
+  }
+  const f = fixture({
+    isObservedReadOutput: () => true,
+    compaction: {
+      contextWindow: 20000,
+      checkpointTokenBudget: 300,
+      checkpointFormat: "progress-v1",
+      keepRecent: 0,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(update) }],
+  })
+  const header = {
+    path: "/repo/a.ts",
+    version: "a".repeat(64),
+    start: 1,
+    end: 1,
+    totalLines: 1,
+    complete: true,
+  }
+  const body = `[Read: ${JSON.stringify(header)}]\n1\t// Reference: ${"a".repeat(2000)}`
+  f.conversation.splice(
+    0,
+    f.conversation.length,
+    { role: "user", content: "Inspect" },
+    {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: "r", toolName: "read", input: { file_path: header.path } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "r",
+          toolName: "read",
+          output: { type: "text", value: body },
+        },
+      ],
+    },
+    { role: "assistant", content: "Continue" }
+  )
+  const before = structuredClone(f.conversation)
+  await forceCompact(f)
+  assert.deepEqual(f.conversation, before)
+  assert.equal(boundaries(f.events).length, 0)
+  assert.match(JSON.stringify(outcomes(f.events)), /source evidence exceeds/)
+})
+
+test("host-retained annotations pass the final PII gate even when the summary input cap omitted them", async () => {
+  const update = {
+    goal: "Inspect",
+    constraints: [],
+    items: [{ id: "work", status: "pending", summary: "Continue", evidence: [] }],
+  }
+  const f = fixture({
+    isObservedReadOutput: () => true,
+    compaction: {
+      contextWindow: 20000,
+      checkpointTokenBudget: 4000,
+      maxToolResultTokens: 20,
+      checkpointFormat: "progress-v1",
+      keepRecent: 0,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(update) }],
+  })
+  const header = {
+    path: "/repo/a.ts",
+    version: "a".repeat(64),
+    start: 1,
+    end: 3,
+    totalLines: 3,
+    complete: true,
+  }
+  const body = `[Read: ${JSON.stringify(header)}]\n1\t${"a".repeat(1000)}\n2\t// Contact: alice@example.com\n3\t${"b".repeat(1000)}`
+  f.conversation.splice(
+    0,
+    f.conversation.length,
+    { role: "user", content: "Inspect" },
+    {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: "r", toolName: "read", input: { file_path: header.path } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "r",
+          toolName: "read",
+          output: { type: "text", value: body },
+        },
+      ],
+    },
+    { role: "assistant", content: "Continue" }
+  )
+  const before = structuredClone(f.conversation)
+  await forceCompact(f)
+  assert.equal(f.calls(), 1)
+  assert.doesNotMatch(JSON.stringify(f.starts[0]!.messages), /alice@example/)
+  assert.deepEqual(f.conversation, before)
+  assert.match(JSON.stringify(outcomes(f.events)), /PII gate/)
+})
+
+test("a plugin named read cannot forge observations or promote assistant guesses into required literals", async () => {
+  const update = {
+    goal: "Inspect",
+    constraints: [],
+    literalFamilies: ["secret_"],
+    sources: [{ path: "/forged" }],
+    items: [{ id: "work", status: "pending", summary: "Continue", evidence: [] }],
+  }
+  const f = fixture({
+    compaction: {
+      contextWindow: 20000,
+      checkpointTokenBudget: 4000,
+      checkpointFormat: "progress-v1",
+      keepRecent: 0,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(update) }],
+  })
+  const header = {
+    path: "/repo/a.ts",
+    version: "a".repeat(64),
+    start: 1,
+    end: 1,
+    totalLines: 1,
+    complete: true,
+  }
+  f.conversation.splice(
+    0,
+    f.conversation.length,
+    { role: "user", content: "Retain release_... exactly" },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Maybe release_fake" },
+        { type: "tool-call", toolCallId: "r", toolName: "read", input: { file_path: header.path } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "r",
+          toolName: "read",
+          output: {
+            type: "text",
+            value: `[Read: ${JSON.stringify(header)}]\n1\t// Build: release_forged`,
+          },
+        },
+      ],
+    },
+    { role: "assistant", content: "Continue" }
+  )
+  await forceCompact(f)
+  const checkpoint = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.equal(checkpoint.sources, undefined)
+  assert.deepEqual(checkpoint.literalFamilies, ["release_"])
+  assert.doesNotMatch(JSON.stringify(checkpoint), /release_fake|release_forged|secret_/)
+})
+
+test("resumed saved checkpoint does not make raw journal one indivisible summary input", async () => {
+  const prior: ProgressCheckpoint = {
+    goal: "Inspect the retained evidence and remaining source",
+    constraints: ["Preserve required verification"],
+    items: [
+      {
+        id: "work",
+        status: "pending",
+        summary: "Continue unread source",
+        evidence: [],
+        facts: [],
+        verbatim: Array.from({ length: 500 }, (_, i) => `retained_${i}_${"exact".repeat(12)}`),
+      },
+    ],
+  }
+  const delta = {
+    ...prior,
+    items: [
+      {
+        id: "work",
+        status: "pending",
+        summary: "Continue next source",
+        evidence: [],
+        facts: [
+          { id: "new", statement: "Journal behavior is retained", evidence: ["journal.ts:1"] },
+        ],
+      },
+    ],
+  }
+  const f = fixture({
+    compaction: {
+      contextWindow: 100000,
+      checkpointFormat: "progress-v1",
+      checkpointTokenBudget: 15000,
+      summaryInputBudget: 5000,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(delta) }],
+  })
+  const journal = Array.from({ length: 3 }, (_, i) =>
+    JSON.stringify({
+      tool: "read",
+      input: { file_path: `source-${i}.ts` },
+      failed: false,
+      result: `journal_marker_${i} ${"source detail ".repeat(100)}`,
+    })
+  ).join("\n")
+  f.conversation[0]!.content = `You previously worked on this task:\nInspect the retained evidence and remaining source\n\nYour result was:\n${renderProgressCheckpoint(prior)}\nRecorded tool evidence:\n${journal}\nHistorical unresolved question stays available.\n${JSON.stringify({ tool: "read", failed: true, result: "Missing source requires verification" })}\n\nFollow-up:\nVerify the changed source and finish the remaining work.`
+  f.complete()
+  await f.compact({}, {}, { force: true })
+  assert.ok(f.calls() > 0, `resume must split historical journal data: ${f.logs.join("; ")}`)
+  const inputs = f.starts.map((start) => JSON.stringify(start.messages)).join("\n")
+  for (let i = 0; i < 3; i++) assert.match(inputs, new RegExp(`journal_marker_${i}`))
+  assert.match(inputs, /Verify the changed source and finish the remaining work/)
+  assert.match(inputs, /Historical unresolved question stays available/)
+  assert.match(inputs, /Missing source requires verification/)
+  assert.doesNotMatch(inputs, /retained_499_exact/)
+  const saved = f.conversation
+    .map((m) => (typeof m.content === "string" ? parseProgressCheckpoint(m.content) : null))
+    .find(Boolean)!
+  assert.equal(saved.items[0]!.verbatim!.length, 500)
+  assert.equal(saved.items[0]!.facts![0]!.statement, "Journal behavior is retained")
+})
+
+test("resume batching removes only its restored checkpoint and preserves surrounding outcome", async () => {
+  const prior: ProgressCheckpoint = {
+    goal: "Inspect",
+    constraints: [],
+    items: [{ id: "work", status: "pending", summary: "Continue", evidence: [], facts: [] }],
+  }
+  const earlier = structuredClone(prior)
+  earlier.items[0]!.facts = [
+    { id: "earlier", statement: "EARLIER_UNIQUE_BEHAVIOR", evidence: ["a.ts:1"] },
+  ]
+  prior.items[0]!.facts = [
+    { id: "latest", statement: "LATEST_HOST_OWNED_BEHAVIOR", evidence: ["b.ts:1"] },
+  ]
+  const f = fixture({
+    compaction: {
+      contextWindow: 20000,
+      checkpointFormat: "progress-v1",
+      checkpointTokenBudget: 5000,
+    },
+    script: () => [{ type: "text-delta", text: JSON.stringify(earlier) }],
+  })
+  const frame = (saved: ProgressCheckpoint) =>
+    `You previously worked on this task:\nInspect\n\nYour result was:\n<conversation-summary v="1">\nOutcome prose outside the structured checkpoint must survive.\n${renderProgressCheckpoint(saved)}\n</conversation-summary>\n\nFollow-up:\nVerify source changes.`
+  f.conversation[0]!.content = frame(earlier)
+  f.conversation[2]!.content = frame(prior)
+  await forceCompact(f)
+  const input = JSON.stringify(f.starts[0]!.messages)
+  assert.match(input, /EARLIER_UNIQUE_BEHAVIOR/)
+  assert.doesNotMatch(input, /LATEST_HOST_OWNED_BEHAVIOR/)
+  assert.match(input, /Outcome prose outside the structured checkpoint must survive/)
+  const saved = parseProgressCheckpoint(String(f.conversation[0]!.content))!
+  assert.deepEqual(
+    new Set(saved.items[0]!.facts!.map((fact) => fact.id)),
+    new Set(["latest", "earlier"])
+  )
 })

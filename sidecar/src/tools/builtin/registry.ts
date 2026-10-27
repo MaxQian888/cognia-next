@@ -35,9 +35,13 @@ import type { HostRpcCaller, SessionBgShellRegistry } from "../state/host-backgr
 import type { ProcessSandboxScope } from "../../platform/process/exec.ts"
 import type { LazyLspResolver } from "../../services/lsp/lazy-resolver.ts"
 import type { CodeGraphIndex } from "../../services/code-graph/index-service.ts"
+import type { VerificationBudget } from "../../shared/verification-budget.ts"
 
 /** What `collectCogniaToolDefs` assembles a session's built-in surface from. */
 export interface CollectToolDefsOptions {
+  verificationBudget?: VerificationBudget | undefined
+  authorizeVerificationCommand?:
+    ((input: unknown, signal?: AbortSignal) => Promise<unknown>) | undefined
   /** Category toggles by id (`git`, `coreFiles`, …). */
   enabled?: Readonly<Record<string, boolean | undefined>> | null | undefined
   lspResolver?: LazyLspResolver | null | undefined

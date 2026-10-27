@@ -143,6 +143,21 @@ function sha(text: string): string {
 
 /** Replace the temp roots so the golden is the same on every machine. */
 function normalize(text: string): string {
+  const cap = "\n... (tool result truncated to fit the context window)"
+  const start = text.indexOf("[Read: ")
+  const end = start < 0 ? -1 : text.indexOf(cap, start)
+  if (end >= 0) {
+    // The 20-token fixture may cut anywhere inside a machine-specific path.
+    // Assert the actual bound instead of pinning those incidental path bytes.
+    assert.ok(end > start && end - start <= 80, "20-token read preview exceeds its bound")
+    text = `${text.slice(0, start)}[Read: <bounded page preview>]${text.slice(end)}`
+  }
+  for (const [root, replacement] of [
+    [ROOT, "<root>"],
+    [OUTSIDE, "<outside>"],
+  ]) {
+    text = text.split(JSON.stringify(root).slice(1, -1)).join(replacement)
+  }
   return text.split(ROOT).join("<root>").split(OUTSIDE).join("<outside>")
 }
 

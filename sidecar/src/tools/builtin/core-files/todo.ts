@@ -46,7 +46,6 @@ export function createTodoWriteTool() {
     TODO_WRITE_NAME,
     "Update the session task list shown to the user. Pass the complete list every time (it replaces the previous one). Use it to plan multi-step work and mark progress.",
     todoWriteShape,
-    execTodoWrite,
-    { alwaysLoad: true }
+    execTodoWrite
   )
 }

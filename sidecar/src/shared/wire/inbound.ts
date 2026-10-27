@@ -9,6 +9,7 @@ import type {
   AgentSubagentRuntimeOptions,
 } from "@cognia/agent-contracts/session-operations"
 import type { ConversationMessage } from "./conversation.ts"
+import type { VerificationBudgetStamp } from "@cognia/agent-config-types/execution-budget"
 import type {
   AgentEffortLevel,
   AgentPermissionMode,
@@ -22,6 +23,7 @@ import type {
 
 /** Host-visible fields; rail-owned options remain additive on the wire. */
 export interface SendOptions {
+  verificationBudget?: VerificationBudgetStamp
   turnId?: string
   cwd?: string
   provider?: string

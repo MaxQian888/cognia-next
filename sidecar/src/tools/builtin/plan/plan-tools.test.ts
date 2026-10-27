@@ -17,7 +17,10 @@ import {
 } from "./plan-tools.ts"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const planTypes = readFileSync(path.join(here, "../../../../../types/agent/plan.ts"), "utf8")
+const planTypes = readFileSync(
+  path.join(here, "../../../../../packages/plugin-contract/src/types/agent/plan.ts"),
+  "utf8"
+)
 
 /** String literals of one `export type X = | "a" | "b"` union in plan.ts. */
 function unionMembers(typeName: string): string[] {

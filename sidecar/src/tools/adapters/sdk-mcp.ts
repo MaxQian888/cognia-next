@@ -33,6 +33,8 @@ export interface BuildToolsServerOptions extends CollectToolDefsOptions {
    * active, this server's tools defer until discovered.
    */
   alwaysLoad?: boolean | undefined
+  /** Pin existing built-ins only; category and permission filtering remain authoritative. */
+  alwaysLoadTools?: ReadonlySet<unknown> | undefined
   /** Read-only tool deadline; `0` disables it, absent means the default. */
   toolExecutionTimeoutMs?: number | undefined
   /** Result-text budget; no cap unless the renderer resolved one. */
@@ -64,7 +66,14 @@ export function buildCogniaToolsServer(options: BuildToolsServerOptions) {
   return createSdkMcpServer({
     name: BUILTIN_SERVER_NAME,
     version: BUILTIN_SERVER_VERSION,
-    tools: wrapNativeToolResults(capped).map(toSdkMcpToolDefinition),
+    tools: wrapNativeToolResults(capped).map((definition) =>
+      toSdkMcpToolDefinition(
+        options.alwaysLoadTools?.has(definition.name) ||
+          options.alwaysLoadTools?.has(`mcp__${BUILTIN_SERVER_NAME}__${definition.name}`)
+          ? { ...definition, alwaysLoad: true }
+          : definition
+      )
+    ),
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
 }

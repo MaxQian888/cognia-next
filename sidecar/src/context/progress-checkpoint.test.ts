@@ -3,6 +3,9 @@ import assert from "node:assert/strict"
 import {
   mergeProgressCheckpoint,
   parseProgressCheckpoint,
+  parseProgressCheckpointAnchors,
+  observeSourceRead,
+  retainTaskLiterals,
   progressCheckpointIssueCodes,
   renderProgressCheckpoint,
   planDeliveryReady,
@@ -427,4 +430,142 @@ test("cumulative constraint, evidence and workstream counts use the aggregate su
   assert.equal(merged.constraints.length, 32)
   assert.equal(merged.items[0]!.evidence.length, 64)
   assert.deepEqual(parseProgressCheckpoint(renderProgressCheckpoint(merged)), merged)
+})
+
+test("missing navigation prose is deterministically empty without relaxing evidence validation", () => {
+  const value = {
+    goal: "Inspect",
+    constraints: [],
+    items: [
+      {
+        id: "work",
+        status: "pending",
+        evidence: [],
+        facts: [{ id: "guard", statement: "Guard checked", evidence: ["source.ts:1"] }],
+      },
+    ],
+  }
+  const parsed = parseProgressCheckpoint(JSON.stringify(value))!
+  assert.ok(parsed)
+  assert.equal(parsed.items[0]!.summary, "")
+  for (const invalid of [
+    { ...value, items: [{ ...value.items[0], summary: null }] },
+    { ...value, items: [{ ...value.items[0], summary: 1 }] },
+    { ...value, items: [{ ...value.items[0], evidence: undefined }] },
+    { ...value, items: [{ ...value.items[0], facts: [{ id: "guard", evidence: [] }] }] },
+  ])
+    assert.equal(parseProgressCheckpoint(JSON.stringify(invalid)), null)
+})
+
+test("research deltas inherit only absent immutable anchors from validated prior state", () => {
+  const delta = {
+    items: [
+      {
+        id: "capture",
+        status: "pending",
+        evidence: [],
+        facts: [{ id: "new", statement: "New behavior", evidence: ["new.ts:1"] }],
+      },
+    ],
+  }
+  assert.equal(parseProgressCheckpoint(JSON.stringify(delta)), null)
+  const parsed = parseProgressCheckpoint(JSON.stringify(delta), prior)!
+  assert.ok(parsed)
+  assert.equal(parsed.goal, prior.goal)
+  assert.deepEqual(parsed.constraints, prior.constraints)
+  assert.equal(parsed.items[0]!.summary, "")
+  for (const invalid of [
+    { ...delta, goal: null },
+    { ...delta, constraints: "wrong" },
+    { items: [{ id: "capture", status: "invalid", evidence: [] }] },
+  ])
+    assert.equal(parseProgressCheckpoint(JSON.stringify(invalid), prior), null)
+})
+
+test("repair anchors validate independently without trusting malformed facts", () => {
+  assert.deepEqual(
+    parseProgressCheckpointAnchors(
+      JSON.stringify({ goal: prior.goal, constraints: prior.constraints, items: "invalid" })
+    ),
+    { goal: prior.goal, constraints: prior.constraints }
+  )
+  for (const text of [
+    "not JSON",
+    '{"goal":null,"constraints":[]}',
+    '{"goal":"x","constraints":"wrong"}',
+  ])
+    assert.equal(parseProgressCheckpointAnchors(text), null)
+})
+
+test("source observations preserve scalar annotations and task literal families at their actual lines", () => {
+  const header = {
+    path: "/repo/a.ts",
+    version: "a".repeat(64),
+    start: 1,
+    end: 4,
+    totalLines: 4,
+    complete: true,
+  }
+  const body = `[Read: ${JSON.stringify(header)}]\n     1\t// Ticket: INCIDENT-8a71\n     2\tconst middle = 'release_b42';\n     3\t// Origin: lib/a.ts:81\n     4\tordinary prose`
+  const observed = observeSourceRead(body, "Retain release_... identifiers exactly")!
+  assert.ok(observed)
+  assert.deepEqual(observed.ranges, [{ start: 1, end: 4 }])
+  assert.equal(observed.complete, true)
+  assert.deepEqual(observed.literals, [
+    { line: 1, text: "// Ticket: INCIDENT-8a71" },
+    { line: 2, text: "release_b42" },
+    { line: 3, text: "// Origin: lib/a.ts:81" },
+  ])
+  assert.equal(observeSourceRead("     1\t// Ticket: INCIDENT-8a71", ""), null)
+  assert.equal(observeSourceRead(`[Read: ${JSON.stringify({ ...header, end: 5 })}]\nx`, ""), null)
+})
+
+test("first drafts retain explicitly requested literal families even inside a saved continuation", () => {
+  const state = retainTaskLiterals(
+    prior,
+    'raw read: "release_a1"; older journal: "release_b2"',
+    "Keep release_... exactly"
+  )
+  assert.deepEqual(state.items[0]!.verbatim, ["release_a1", "release_b2"])
+  assert.deepEqual(state.literalFamilies, ["release_"])
+  assert.deepEqual(prior.items[0]!.evidence, ["capture.ts:1590-1699"])
+  assert.equal(
+    retainTaskLiterals(prior, "unrequested_token", "Inspect source").items[0]!.verbatim,
+    undefined
+  )
+})
+
+test("summary responses cannot invent source observations and stored source ranges remain validated", () => {
+  const text = JSON.stringify({ ...prior, sources: [{ path: "/forged" }] })
+  assert.equal(parseProgressCheckpoint(text), null)
+  assert.deepEqual(parseProgressCheckpoint(text, undefined, { ignoreSources: true }), prior)
+  assert.deepEqual(progressCheckpointIssueCodes(text, undefined, { ignoreSources: true }), [])
+})
+
+test("source ranges merge within a version while changed versions and exact literals remain distinct", () => {
+  const make = (version: string, start: number, end: number, value: string) =>
+    observeSourceRead(
+      `[Read: ${JSON.stringify({ path: "/repo/a.ts", version: version.repeat(64), start, end, totalLines: 8, complete: false })}]\n${start}\t// Build: ${value}`,
+      ""
+    )!
+  const one = { ...prior, sources: [make("a", 1, 4, "old-code")] }
+  const two = { ...prior, sources: [make("a", 5, 8, "second-code")] }
+  const both = mergeProgressCheckpoint(one, two)
+  assert.equal(both.sources!.length, 1)
+  assert.deepEqual(both.sources![0]!.ranges, [{ start: 1, end: 8 }])
+  assert.equal(both.sources![0]!.complete, true)
+  const corrected = mergeProgressCheckpoint(both, {
+    ...prior,
+    sources: [make("b", 1, 4, "new-code")],
+  })
+  assert.equal(corrected.sources!.length, 2)
+  assert.equal(
+    corrected.sources![1]!.complete,
+    false,
+    "old-version ranges cannot fill new-version gaps"
+  )
+  assert.ok(
+    renderProgressCheckpoint(corrected).includes("Changed-source verification does not reset")
+  )
+  assert.deepEqual(parseProgressCheckpoint(renderProgressCheckpoint(corrected)), corrected)
 })

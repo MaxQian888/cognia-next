@@ -380,3 +380,29 @@ test("a side call that broke after sending is UNKNOWN; a refused one is failed",
   assert.equal(events[3]!.status, "failed")
   assert.equal(events[3]!.errorClass, "rate_limited")
 })
+
+test("summary usage observation uses stream metadata without awaiting result getters", async () => {
+  const run = {
+    fullStream: (async function* () {
+      yield { type: "text-delta", text: "checkpoint" }
+      yield {
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 200, outputTokens: 20 },
+      }
+    })(),
+    get usage() {
+      throw new Error("usage getter must remain untouched")
+    },
+    get response() {
+      throw new Error("response getter must remain untouched")
+    },
+  }
+  const result = await drainSideCallStream(run, { collectUsage: true })
+  assert.equal(result.value, "checkpoint")
+  assert.deepEqual(result.usage, { inputTokens: 200, outputTokens: 20 })
+  assert.deepEqual(await drainSideCallStream(fakeRun([]), { collectUsage: true }), {
+    value: "",
+    usage: null,
+  })
+})

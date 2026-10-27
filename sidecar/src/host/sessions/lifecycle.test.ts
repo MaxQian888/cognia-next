@@ -681,10 +681,28 @@ test("a loop with no ledger seam still takes the prompt", async () => {
   assert.deepEqual(pushed, ["hi"])
 })
 
+test("each send refreshes or clears the verification deadline before the prompt", async () => {
+  const order: unknown[] = []
+  const loop = {
+    setNextTurnVerificationBudget: (stamp: unknown) => order.push(["budget", stamp]),
+    pushUserMessage: (prompt: unknown) => order.push(["prompt", prompt]),
+  }
+  const stamp = { startedAtEpochMs: 1000, deadlineEpochMs: 361_000 }
+  await routeSendIntoLiveLoop(loop, { verificationBudget: stamp }, "verify")
+  await routeSendIntoLiveLoop(loop, {}, "next")
+  assert.deepEqual(order, [
+    ["budget", stamp],
+    ["prompt", "verify"],
+    ["budget", undefined],
+    ["prompt", "next"],
+  ])
+})
+
 test("portable permission and subagent changes cannot reuse an older session policy", () => {
   const existing = { multiTurn: true, q: { active: false }, sendOptions: { provider: "anthropic" } }
   assert.equal(restartReason(existing, { subagentRuntime: { contextMode: "isolated" } }), null)
   for (const options of [
+    { toolSearchEnabled: true },
     { subagentRuntime: { contextMode: "fork" as const } },
     { toolPermissionRules: [{ tool: "mcp__notes__write", decision: "ask" as const }] },
     {
@@ -698,4 +716,27 @@ test("portable permission and subagent changes cannot reuse an older session pol
     },
   ])
     assert.equal(restartReason(existing, options), "runtime feature policy changed")
+  const discovery = {
+    ...existing,
+    sendOptions: {
+      provider: "openai",
+      toolSearchEnabled: true,
+      alwaysLoadTools: ["write", "read"],
+    },
+  }
+  assert.equal(
+    restartReason(discovery, { toolSearchEnabled: false }),
+    "runtime feature policy changed"
+  )
+  assert.equal(
+    restartReason(discovery, { toolSearchEnabled: true, alwaysLoadTools: ["write"] }),
+    "runtime feature policy changed"
+  )
+  assert.equal(
+    restartReason(discovery, {
+      toolSearchEnabled: true,
+      alwaysLoadTools: ["read", "write", "read"],
+    }),
+    null
+  )
 })

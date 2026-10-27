@@ -256,6 +256,7 @@ export async function routeSendIntoLiveLoop(
   // got a fresh ref, and the loop it replaced keeps its own.
   if (existing.turnRef) existing.turnRef.id = options?.turnId
   existing.setNextTurnLedger?.(options?.ledger, options?.remoteExecutionContext)
+  existing.setNextTurnVerificationBudget?.(options?.verificationBudget)
   existing.turnPending = true
   existing.pushUserMessage!(prompt)
   return true

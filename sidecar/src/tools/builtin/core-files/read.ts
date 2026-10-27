@@ -6,6 +6,7 @@
 // write/edit can enforce read-before-write.
 
 import path from "node:path"
+import { createHash } from "node:crypto"
 import fsp from "node:fs/promises"
 import { z } from "zod"
 import type { Stats } from "node:fs"
@@ -26,7 +27,7 @@ import type { CoreFileToolContext } from "./context.ts"
 
 export const DEFAULT_LIMIT = 2000
 export const MAX_LINE_CHARS = 2000
-export const MAX_OUTPUT_BYTES = 256 * 1024
+export const MAX_OUTPUT_BYTES = 50 * 1024
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg"])
 
@@ -191,7 +192,19 @@ export function createReadTool({ cwd, readTracker, model, provider }: CoreFileTo
       // Record the read for read-before-write enforcement.
       readTracker?.record(abs, st)
 
-      return toolText(`${body}${hint}`)
+      const truncated = clipped || window.some((line) => line.length > MAX_LINE_CHARS)
+      const observed = {
+        path: abs,
+        version: createHash("sha256").update(buf).digest("hex"),
+        start,
+        end: lastShown,
+        totalLines: allLines.length,
+        complete: start === 1 && !hasMore && !truncated,
+        truncated,
+      }
+      const output = `[Read: ${JSON.stringify(observed)}]\n${body}${hint}`
+      readTracker?.recordOutput?.(abs, output)
+      return toolText(output)
     } catch (err) {
       return toolError(err, "read")
     }
@@ -199,7 +212,7 @@ export function createReadTool({ cwd, readTracker, model, provider }: CoreFileTo
 
   return tool(
     "read",
-    "Read a text file with line numbers (cat -n style). Supports offset/limit paging for large files; lists directories; detects binary files. Always read a file before editing it.",
+    "Read a text file with line numbers (cat -n style), up to 50 KiB per page. Follow the returned offset to continue large files; use local computation for bulk data analysis. Lists directories; detects binary files. Always read a file before editing it.",
     readShape,
     execRead,
     { alwaysLoad: true }

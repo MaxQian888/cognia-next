@@ -7,6 +7,7 @@ import { buildAiSdkTools, __testing__ } from "./ai-sdk.ts"
 import { createAiSdkToolSearchController } from "./ai-sdk-tool-search.ts"
 import { createSessionTaskStore } from "../state/tasks.ts"
 import type { ReadTracker } from "../state/read-tracker.ts"
+import { createVerificationBudget } from "../../shared/verification-budget.ts"
 
 /** An AI SDK tool as these tests call it: execute without options, toModelOutput with the output alone. */
 interface TestAiTool {
@@ -969,4 +970,48 @@ test("fileCheckpointFrames reports a sandboxed editor's target before its plugin
   const exec_ = emitted[1] as { toolUseId: string }
   pendingPluginToolCalls.get(exec_.toolUseId).resolve({ result: "ok" })
   await exec
+})
+
+function budgetTools(sendOptions: Parameters<typeof buildAiSdkTools>[0]["sendOptions"]) {
+  const budget = createVerificationBudget()
+  budget.reset({ startedAtEpochMs: Date.now(), deadlineEpochMs: Date.now() + 360_000 })
+  return build({
+    sendOptions: { builtinTools: { coreFiles: true }, ...sendOptions },
+    emit: () => {},
+    sessionId: "budget-test",
+    verificationBudget: budget,
+    readTracker: { record() {}, hasRead: () => false, assertReadBefore() {}, clear() {} },
+  })
+}
+
+test("verification batch cannot expand a Bash or batch palette restriction", () => {
+  for (const denied of ["bash", "Bash", "mcp__cognia-tools__bash", "verification_batch"]) {
+    assert.equal(budgetTools({ disallowedTools: [denied] }).verification_batch, undefined)
+  }
+  assert.equal(budgetTools({ allowedTools: ["verification_batch"] }).verification_batch, undefined)
+  assert.equal(budgetTools({ allowedTools: ["Bash"] }).verification_batch, undefined)
+  assert.ok(budgetTools({ allowedTools: ["Bash", "verification_batch"] }).verification_batch)
+})
+
+test("verification batch applies nested Bash deny rules and plan restrictions", async () => {
+  const commands = [{ label: "blocked", command: "echo MUST_NOT_EXECUTE" }]
+  const denied = budgetTools({ permissionRuleset: { "*": "allow", Bash: "deny" } })
+  const result = JSON.stringify(await denied.verification_batch!.execute({ commands }))
+  assert.match(result, /denied_or_invalid/)
+  assert.doesNotMatch(result, /\"status\":\"passed\"/)
+  const plan = budgetTools({ permissionMode: "plan" })
+  await assert.rejects(plan.verification_batch!.execute({ commands }), /plan|denied|approval/i)
+})
+
+test("verification batch aggregate stdout and stderr retain the output PII gate", async () => {
+  const tools = budgetTools({ permissionMode: "bypassPermissions" })
+  const commands = [
+    {
+      label: "redaction",
+      command: "printf 'alice'; printf '@example.com'; printf 'bob' >&2; printf '@example.com' >&2",
+    },
+  ]
+  const result = JSON.stringify(await tools.verification_batch!.execute({ commands }))
+  assert.match(result, /batch_passed/)
+  assert.doesNotMatch(result, /alice@example\.com|bob@example\.com/)
 })

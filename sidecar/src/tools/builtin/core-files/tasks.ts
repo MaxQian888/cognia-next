@@ -87,8 +87,7 @@ export function createSessionTaskTools(store = createSessionTaskStore()) {
       } catch (error) {
         return toolError(error, "TaskCreate")
       }
-    },
-    { alwaysLoad: true }
+    }
   )
 
   const getTool = tool(
@@ -103,16 +102,14 @@ export function createSessionTaskTools(store = createSessionTaskStore()) {
       } catch (error) {
         return toolError(error, "TaskGet")
       }
-    },
-    { alwaysLoad: true }
+    }
   )
 
   const listTool = tool(
     "TaskList",
     "List every task in this Agent session with status and dependency state. Use this to recover task ids and choose the next unblocked task.",
     {},
-    async () => jsonResult({ tasks: store.list() }),
-    { alwaysLoad: true }
+    async () => jsonResult({ tasks: store.list() })
   )
 
   const updateTool = tool(
@@ -126,8 +123,7 @@ export function createSessionTaskTools(store = createSessionTaskStore()) {
       } catch (error) {
         return toolError(error, "TaskUpdate")
       }
-    },
-    { alwaysLoad: true }
+    }
   )
 
   return [createTool, getTool, listTool, updateTool]

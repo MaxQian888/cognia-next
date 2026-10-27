@@ -87,6 +87,7 @@ export function classifyPathForConfinement(
 // therefore be listed, or it silently bypasses both the out-of-root "ask" and
 // the credential hard-deny (including under `acceptEdits`/`bypassPermissions`).
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "verification_batch",
   // core file suite (ai-sdk bare + SDK PascalCase spellings)
   "write",
   "edit",
@@ -292,7 +293,7 @@ export function collectPathTargets(
     if (!Array.isArray(arr)) continue
     for (const v of arr as unknown[]) if (typeof v === "string" && v.trim()) out.push(v)
   }
-  for (const key of ["edits", "files", "operations"]) {
+  for (const key of ["edits", "files", "operations", "commands"]) {
     const list = obj[key]
     if (Array.isArray(list)) {
       for (const entry of list as unknown[]) {

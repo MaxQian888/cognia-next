@@ -4,6 +4,7 @@
 import type { ProcessSandboxScope } from "../../../platform/process/exec.ts"
 import type { HostRpcCaller, SessionBgShellRegistry } from "../../state/host-background-shells.ts"
 import type { ReadTracker } from "../../state/read-tracker.ts"
+import type { VerificationBudget } from "../../../shared/verification-budget.ts"
 
 /** The slice of an LSP resolver the post-write diagnostics read. */
 export interface DiagnosticsSource {
@@ -11,6 +12,10 @@ export interface DiagnosticsSource {
 }
 
 export interface CoreFileToolContext {
+  verificationBudget?: VerificationBudget | undefined
+  /** Same command-level Bash gate; never a new permission authority. */
+  authorizeVerificationCommand?:
+    ((input: unknown, signal?: AbortSignal) => Promise<unknown>) | undefined
   /** The session working directory; relative tool paths resolve against it. */
   cwd?: string | undefined
   /** Records reads so write/edit can enforce read-before-write. */

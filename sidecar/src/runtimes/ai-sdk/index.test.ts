@@ -20,6 +20,43 @@ function makeFakeStream(
   })
 }
 
+test(
+  "retained sessions exclude idle gaps and include every leg in the turn clock",
+  { timeout: 10000 },
+  async (t) => {
+    let now = 1000
+    t.mock.method(Date, "now", () => now)
+    const { events, emit } = captureEmit()
+    let legs = 0
+    const session = startSession({
+      provider: "openai",
+      sessionId: "turn-clock",
+      firstPrompt: "first",
+      sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+      emit,
+      log: () => {},
+      streamText: () => {
+        legs++
+        now += 1000
+        return makeFakeStream([
+          { type: "text-delta", text: "ok" },
+          { type: "finish", finishReason: legs === 2 ? "tool-calls" : "stop" },
+        ])()
+      },
+    })
+    t.after(() => session.closeInput())
+    const results = () =>
+      events.filter((event) => event.type === "event" && event.event.type === "result")
+    await waitForEvent(events, () => results().length === 1)
+    assert.equal(results()[0]!.event.duration_ms, 1000)
+    now += 600000
+    session.pushUserMessage("second")
+    await waitForEvent(events, () => results().length === 2)
+    assert.equal(legs, 3)
+    assert.equal(results()[1]!.event.duration_ms, 2000)
+  }
+)
+
 test("chargeLegSteps: a failed steps read charges 1, not the full per-leg cap (F13)", () => {
   const { chargeLegSteps } = __testing__
   // Read failed → conservative 1 (the leg ran at least once), never the cap.
@@ -258,10 +295,23 @@ test("AI SDK dispatch wires ToolSearch into prepareStep and retains discoveries"
   const call = captured.calls[0]
   assert.ok(call!.tools.ToolSearch)
   assert.equal(typeof call!.prepareStep, "function")
-  assert.ok(!call!.prepareStep().activeTools.includes("write"), "mutating tools start deferred")
+  assert.ok(call!.prepareStep().activeTools.includes("write"), "core writing remains resident")
+  assert.ok(
+    !call!.prepareStep().activeTools.includes("TaskCreate"),
+    "management tools start deferred"
+  )
+  assert.ok(
+    call!.instructions.some((message) =>
+      String(message.content).includes("Tools available through ToolSearch:")
+    ),
+    "opt-in discovery advertises the permitted catalog below the provider cap"
+  )
 
-  await call!.tools.ToolSearch.execute({ query: "select:write" })
-  assert.ok(call!.prepareStep().activeTools.includes("write"), "discovery persists for later steps")
+  await call!.tools.ToolSearch.execute({ query: "select:TaskCreate" })
+  assert.ok(
+    call!.prepareStep().activeTools.includes("TaskCreate"),
+    "discovery persists for later steps"
+  )
 })
 
 test("AI SDK dispatch restores successful tool discoveries with the saved conversation", async () => {
@@ -286,7 +336,7 @@ test("AI SDK dispatch restores successful tool discoveries with the saved conver
               toolName: "ToolSearch",
               output: {
                 type: "text",
-                value: JSON.stringify({ activated: ["write", "not_permitted"] }),
+                value: JSON.stringify({ activated: ["TaskCreate", "not_permitted"] }),
               },
             },
           ],
@@ -299,7 +349,7 @@ test("AI SDK dispatch restores successful tool discoveries with the saved conver
   })
   await waitForEvent(events, (event) => event.type === "session_ended")
   const active = captured.calls[0]!.prepareStep().activeTools
-  assert.ok(active.includes("write"), "saved activation must survive restart")
+  assert.ok(active.includes("TaskCreate"), "saved activation must survive restart")
   assert.ok(!active.includes("not_permitted"), "history cannot restore unavailable tools")
 })
 
@@ -2118,6 +2168,90 @@ test("interrupt ends the current turn but keeps the multi-turn session for the n
   assert.equal(turn, 2)
 })
 
+test(
+  "interrupted partial results exclude idle between retained-session turns (V31)",
+  { timeout: 10000 },
+  async (t) => {
+    let now = 1000
+    t.mock.method(Date, "now", () => now)
+    const { events, emit } = captureEmit()
+    let turn = 0
+    let completedStep!: () => void
+    const partialReady = new Promise<void>((resolve) => {
+      completedStep = resolve
+    })
+    const session = startSession({
+      provider: "openai",
+      sessionId: "partial-turn-clock",
+      firstPrompt: "first turn",
+      sendOptions: {
+        model: "gpt-x",
+        providerCredentials: { apiKey: "k", protocol: "openai" },
+      },
+      emit,
+      log: () => {},
+      streamText: (args: Record<string, unknown>) => {
+        turn += 1
+        if (turn === 1) {
+          now += 1000
+          return makeFakeStream([
+            { type: "text-delta", text: "first reply" },
+            { type: "finish", finishReason: "stop" },
+          ])()
+        }
+        return {
+          fullStream: (async function* () {
+            now += 250
+            yield { type: "text-delta", text: "partial reply" }
+            yield {
+              type: "finish-step",
+              usage: { inputTokens: 120, outputTokens: 30, cachedInputTokens: 40 },
+            }
+            completedStep()
+            const signal = args.abortSignal as AbortSignal
+            await new Promise<void>((resolve) => {
+              if (signal.aborted) resolve()
+              else signal.addEventListener("abort", () => resolve(), { once: true })
+            })
+            throw new DOMException("Aborted", "AbortError")
+          })(),
+          usage: Promise.resolve({}),
+        }
+      },
+    })
+    t.after(async () => {
+      session.closeInput()
+      await session.closed
+    })
+    const results = () =>
+      events.filter((event) => event.type === "event" && event.event.type === "result")
+    const ended = () => events.filter((event) => event.type === "session_ended")
+    await waitForEvent(events, () => ended().length === 1)
+    assert.equal(results()[0]!.event.duration_ms, 1000)
+
+    now += 600000
+    session.pushUserMessage("second turn")
+    await partialReady
+    now += 500
+    await session.q.interrupt()
+    await waitForEvent(events, () => ended().length === 2)
+
+    assert.equal(results().length, 2, "the interrupted turn emits its partial usage result")
+    const result = results()[1]!.event
+    assert.equal(result.duration_ms, 750)
+    assert.equal(result.duration_api_ms, 750)
+    assert.equal(result.usage.input_tokens, 120)
+    assert.equal(result.usage.output_tokens, 30)
+    assert.equal(result.usage.context_input_tokens, 120)
+    assert.equal(result.usage.cache_read_input_tokens, 40)
+    assert.equal(ended()[1]!.error, undefined, "interrupt remains a clean terminal outcome")
+    assert.equal(
+      events.some((event) => event.type === "session_closed"),
+      false
+    )
+  }
+)
+
 test("interrupt preserves usage from completed steps before the abort", async () => {
   const { events, emit } = captureEmit()
   const stream = (args: Record<string, unknown>) => ({
@@ -2247,6 +2381,109 @@ test("requestCompact() forces a manual boundary between turns", async () => {
   const boundary = events.find((e) => e.event?.subtype === "compact_boundary")
   assert.ok(boundary, "a manual compact boundary is emitted")
   assert.equal(boundary.event.compact_metadata.trigger, "manual")
+})
+
+test("manual research compaction uses the actual built-in reader receipt to retain exact source evidence", async () => {
+  const fsp = await import("node:fs/promises")
+  const os = await import("node:os")
+  const path = await import("node:path")
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "checkpoint-read-"))
+  const file = path.join(dir, "source.ts")
+  await fsp.writeFile(file, "// Build: build_8a71\nconst enabled = true\n")
+  const { events, emit } = captureEmit()
+  const session = startSession({
+    provider: "openai",
+    sessionId: "observed-source",
+    firstPrompt: "Inspect this source and retain build_... identifiers exactly.",
+    sendOptions: {
+      model: "gpt-4o",
+      agentKind: "subagent",
+      agentRef: "Explore",
+      builtinTools: { coreFiles: true },
+      permissionMode: "bypassPermissions",
+      cwd: dir,
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      compaction: {
+        enabled: true,
+        trigger: "manual",
+        keepRecent: 0,
+        checkpointTokenBudget: 4000,
+        checkpointFormat: "progress-v1",
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: (raw) => {
+      const args = raw as {
+        tools?: Record<string, { execute: (input: unknown, options: unknown) => Promise<unknown> }>
+      }
+      if (!args.tools?.read)
+        return {
+          fullStream: (async function* () {
+            yield {
+              type: "text-delta",
+              text: JSON.stringify({
+                goal: "Inspect source",
+                constraints: [],
+                items: [{ id: "work", status: "pending", summary: "Continue", evidence: [] }],
+              }),
+            }
+            yield { type: "finish", finishReason: "stop" }
+          })(),
+          usage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
+        }
+      const executed = args.tools.read.execute(
+        { file_path: file },
+        { toolCallId: "r", messages: [] }
+      )
+      return {
+        fullStream: (async function* () {
+          await executed
+          yield { type: "text-delta", text: "Read complete" }
+          yield { type: "finish", finishReason: "stop" }
+        })(),
+        response: executed.then((output) => ({
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "r",
+                  toolName: "read",
+                  input: { file_path: file },
+                },
+              ],
+            },
+            {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-result",
+                  toolCallId: "r",
+                  toolName: "read",
+                  output: { type: "text", value: output },
+                },
+              ],
+            },
+          ],
+        })),
+        usage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
+      }
+    },
+  })
+  try {
+    await waitForEvent(events, (event) => event.type === "session_ended")
+    await session.requestCompact()
+    const boundary = events.find((event) => event.event?.subtype === "compact_boundary")
+    assert.ok(boundary)
+    const summary = String(boundary.event.compact_metadata.continuation_summary)
+    assert.match(summary, /build_8a71/)
+    assert.match(summary, /"complete":true/)
+  } finally {
+    session.closeInput()
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
 })
 
 test("requestCompact() with nothing older than the kept messages reports it instead of staying silent", async () => {
@@ -3110,6 +3347,15 @@ test("a tool leg yields for compaction using current step usage and explicit thr
       compaction.enabled && compaction.trigger !== "manual",
       "new tool output must yield before it can overflow the next SDK request"
     )
+    for (const inputTokens of ["20", {}]) {
+      assert.equal(
+        captured!.stopWhen({
+          steps: [{ usage: { inputTokens }, toolResults: [{ output: "source ".repeat(1000) }] }],
+        }),
+        compaction.enabled && compaction.trigger !== "manual",
+        "malformed usage must not suppress the estimate of new tool output"
+      )
+    }
     for (const delta of [
       { text: "Large assistant explanation. ".repeat(300) },
       { toolCalls: [{ toolName: "write", input: { content: "source ".repeat(1000) } }] },
@@ -4232,3 +4478,158 @@ test("each turn reports itself running before any model output", async () => {
     false
   )
 })
+
+test("verification feedback composes discovery and resets or clears across live turns", async () => {
+  const { events, emit } = captureEmit()
+  const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+  const now = Date.now()
+  const clients: Array<{ closes: number }> = []
+  const session = startSession({
+    provider: "openai",
+    sessionId: "budget-turns",
+    firstPrompt: "first",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { coreFiles: true },
+      toolSearchEnabled: true,
+      mcpServers: { control: { type: "sse", url: "https://control.invalid/sse" } },
+      verificationBudget: { startedAtEpochMs: now, deadlineEpochMs: now + 360_000 },
+    },
+    emit,
+    log: () => {},
+    streamText: captured.fn,
+    buildMcpTools: async () => {
+      const client = { closes: 0 }
+      clients.push(client)
+      return {
+        tools: {},
+        close: async () => {
+          client.closes++
+        },
+      }
+    },
+  })
+  const wait = async (n: number) => {
+    for (let i = 0; i < 500; i++) {
+      if (events.filter((e) => e.type === "session_ended").length >= n) return
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw new Error("budget turn did not finish")
+  }
+  try {
+    await wait(1)
+    const first = captured.calls[0]!
+    assert.ok(first.tools.verification_batch)
+    const prepare = (call: TestStreamArgs) =>
+      call.prepareStep as unknown as (options: {
+        initialInstructions: unknown
+        messages: TestMessage[]
+      }) => Promise<{ activeTools: string[]; instructions?: unknown; messages: TestMessage[] }>
+    const prepared = await prepare(first)({
+      initialInstructions: first.instructions,
+      messages: first.messages,
+    })
+    assert.ok(prepared.activeTools.includes("ToolSearch"))
+    assert.equal(prepared.activeTools.includes("verification_batch"), false)
+    assert.equal(prepared.instructions, undefined)
+    assert.doesNotMatch(JSON.stringify(first.instructions), /Runtime execution budget/)
+    assert.match(JSON.stringify(prepared.messages.at(-1)), /remaining 35[0-9]s/)
+    await first.tools.ToolSearch!.execute({ query: "select:verification_batch" })
+    assert.ok(
+      (
+        await prepare(first)({ initialInstructions: first.instructions, messages: first.messages })
+      ).activeTools.includes("verification_batch")
+    )
+    session.setNextTurnVerificationBudget!({
+      startedAtEpochMs: Date.now(),
+      deadlineEpochMs: Date.now() + 30_000,
+    })
+    session.pushUserMessage("second")
+    await wait(2)
+    const second = captured.calls[1]!
+    const next = await prepare(second)({
+      initialInstructions: second.instructions,
+      messages: second.messages,
+    })
+    assert.match(JSON.stringify(next.messages.at(-1)), /remaining 2[0-9]s/)
+    assert.equal((JSON.stringify(next.messages).match(/Runtime execution budget/g) ?? []).length, 1)
+    session.setNextTurnVerificationBudget!(undefined)
+    session.pushUserMessage("third")
+    await wait(3)
+    const third = captured.calls[2]!
+    assert.equal(third.tools.verification_batch, undefined)
+    assert.doesNotMatch(JSON.stringify(third.instructions), /Runtime execution budget/)
+    assert.doesNotMatch(JSON.stringify(third.messages), /Runtime execution budget/)
+    assert.doesNotMatch(JSON.stringify(third.prepareStep()), /Runtime execution budget/)
+  } finally {
+    session.closeInput()
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(clients.length, 2)
+  assert.deepEqual(
+    clients.map((client) => client.closes),
+    [1, 1]
+  )
+})
+
+for (const action of ["interrupt", "close"] as const)
+  test(`budget toggle remains cancelled during MCP disconnect: ${action}`, async () => {
+    const { events, emit } = captureEmit()
+    const captured = capturingStream([{ type: "finish", finishReason: "stop" }])
+    let opens = 0
+    let release!: () => void
+    let started!: () => void
+    const disconnectStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const disconnectWait = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const session = startSession({
+      provider: "openai",
+      sessionId: `budget-disconnect-${action}`,
+      firstPrompt: "first",
+      sendOptions: {
+        model: "gpt-x",
+        providerCredentials: { apiKey: "k", protocol: "openai" },
+        builtinTools: { coreFiles: true },
+        verificationBudget: { startedAtEpochMs: Date.now(), deadlineEpochMs: Date.now() + 360_000 },
+        mcpServers: { control: { type: "sse", url: "https://control.invalid/sse" } },
+      },
+      emit,
+      log: () => {},
+      streamText: captured.fn,
+      buildMcpTools: async () => {
+        opens++
+        return {
+          tools: {},
+          close: async () => {
+            started()
+            await disconnectWait
+          },
+        }
+      },
+    })
+    try {
+      await waitForEvent(events, (event) => event.type === "session_ended")
+      session.setNextTurnVerificationBudget!(undefined)
+      session.pushUserMessage("second")
+      await disconnectStarted
+      if (action === "interrupt") await session.q.interrupt()
+      else session.closeInput()
+      // Cancellation finishes before the transport's close resolves.
+      for (let i = 0; i < 100 && events.filter((e) => e.type === "session_ended").length < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      assert.equal(events.filter((e) => e.type === "session_ended").length, 2)
+      assert.equal(captured.calls.length, 1)
+      assert.equal(opens, 1)
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      assert.equal(captured.calls.length, 1)
+    } finally {
+      release()
+      session.closeInput()
+    }
+  })

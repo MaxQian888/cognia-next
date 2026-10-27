@@ -674,17 +674,25 @@ export function createEventAdapter(ctx: EventAdapterContext) {
      * renderer can attach metadata to the final assistant message.
      *
      */
-    finish(info?: { totalCostUsd?: number; usage?: unknown; budgetExhausted?: boolean }) {
+    finish(info?: {
+      totalCostUsd?: number
+      usage?: unknown
+      budgetExhausted?: boolean
+      startedAt?: number
+    }) {
       const out: TranslatedEvent[] = []
       emitInitIfNeeded(out)
       const usage = info?.usage ?? lastUsage ?? {}
+      // One adapter survives multiple turns; a leg reset must not reset the
+      // caller's turn clock or include the idle gap since session creation.
+      const durationMs = Math.max(0, Date.now() - (info?.startedAt ?? startedAt))
       const result = {
         type: "result",
         subtype: info?.budgetExhausted ? "error_max_turns" : "success",
         session_id: ctx.sdkSessionId,
         is_error: info?.budgetExhausted === true,
-        duration_ms: Date.now() - startedAt,
-        duration_api_ms: Date.now() - startedAt,
+        duration_ms: durationMs,
+        duration_api_ms: durationMs,
         num_turns: 1,
         total_cost_usd: info?.totalCostUsd ?? 0,
         // Alias normalization lives in one place (mirrored at

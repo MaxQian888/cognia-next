@@ -141,21 +141,21 @@ codegraph_explore desc=cc33ede1e2c5 schema=0e24c7cb554d
 codegraph_files desc=c1fecdf5848c schema=7a014b717a77
 grep desc=721aded0ff7e schema=27abe2e37880 meta={"anthropic/alwaysLoad":true}
 glob desc=eef0c30d76fa schema=ae58400eb697 meta={"anthropic/alwaysLoad":true}
-read desc=83aa0bdb912f schema=daac3d6c21ae meta={"anthropic/alwaysLoad":true}
+read desc=c733e94f40be schema=daac3d6c21ae meta={"anthropic/alwaysLoad":true}
 ls desc=71cfa8e8975e schema=8bba93bfe3f6 meta={"anthropic/alwaysLoad":true}
-edit desc=3924e7da46b8 schema=f87708e943ed
-multi_edit desc=dd6821e2e6d2 schema=239b1950c570
-write desc=c80185684013 schema=087ee36d9441
-bash desc=7730587ae323 schema=a266048afa80
-TodoWrite desc=929c53e641b3 schema=70aa8e2dc68a meta={"anthropic/alwaysLoad":true}
+edit desc=3924e7da46b8 schema=f87708e943ed meta={"anthropic/alwaysLoad":true}
+multi_edit desc=dd6821e2e6d2 schema=239b1950c570 meta={"anthropic/alwaysLoad":true}
+write desc=c80185684013 schema=087ee36d9441 meta={"anthropic/alwaysLoad":true}
+bash desc=7730587ae323 schema=a266048afa80 meta={"anthropic/alwaysLoad":true}
+TodoWrite desc=929c53e641b3 schema=70aa8e2dc68a
 bash_output desc=5d68e3b7a98b schema=1efe6a729bff
 kill_shell desc=91b20de9af7c schema=6a99dbc04636
 NotebookEdit desc=9b2dab768743 schema=304dcce3ad06
-apply_patch desc=3eb017483d6e schema=4cb109f2c3c9
-TaskCreate desc=85933eefe500 schema=7ffa9db9d765 meta={"anthropic/alwaysLoad":true}
-TaskGet desc=0228efcf91f5 schema=6945b4716bb7 meta={"anthropic/alwaysLoad":true}
-TaskList desc=25dfd032c99b schema=7a014b717a77 meta={"anthropic/alwaysLoad":true}
-TaskUpdate desc=39d3b499aaa7 schema=58a4868babdc meta={"anthropic/alwaysLoad":true}
+apply_patch desc=3baccb480c56 schema=4cb109f2c3c9 meta={"anthropic/alwaysLoad":true}
+TaskCreate desc=85933eefe500 schema=7ffa9db9d765
+TaskGet desc=0228efcf91f5 schema=6945b4716bb7
+TaskList desc=25dfd032c99b schema=7a014b717a77
+TaskUpdate desc=39d3b499aaa7 schema=58a4868babdc
 list_shells desc=78b6cecc09ba schema=7a014b717a77 meta={"anthropic/alwaysLoad":true}
 Monitor desc=6b93edb09991 schema=09b5184952b1
 monitor_cancel desc=1c4d587f0b41 schema=6f3fe33d1f04
@@ -198,7 +198,7 @@ TaskGet desc=0228efcf91f5 schema=d3b83710c536
 TaskList desc=25dfd032c99b schema=f973399805c1
 TaskUpdate desc=39d3b499aaa7 schema=e762cfb7279c
 TodoWrite desc=929c53e641b3 schema=8ce34f8faae3
-apply_patch desc=3eb017483d6e schema=09a6ca3aa333
+apply_patch desc=3baccb480c56 schema=09a6ca3aa333
 ast_grep_replace desc=612e484480f0 schema=23277fd6308d
 ast_grep_search desc=c4c77c7c1a08 schema=866b3c6d29ee
 bash desc=7730587ae323 schema=b1d636712e9f
@@ -264,7 +264,7 @@ monitor_cancel desc=1c4d587f0b41 schema=47fe3864d51f
 monitor_list desc=93efc5d3c1b7 schema=f973399805c1
 multi_edit desc=dd6821e2e6d2 schema=8d72a7dabca9
 notes_search desc=a51166b4569b schema=1dc63095e867
-read desc=83aa0bdb912f schema=bedc6dc8f639
+read desc=c733e94f40be schema=bedc6dc8f639
 search_processes desc=b7d521d6701f schema=a1833e8299be
 shell_execute_advanced desc=139255ee0334 schema=76c8d6cadec2
 start_process desc=09da2721fd36 schema=fbcfdac464a5
@@ -279,8 +279,8 @@ update_plan desc=c8bd5a3347f9 schema=b92d0220ee52
 web_clone desc=4cf34fab165e schema=4130d37d52eb
 web_clone_convert desc=c82fb94f175e schema=64c7554f4cb0
 write desc=c80185684013 schema=0f00ee612e30
-resident: TaskCreate TaskGet TaskList TaskUpdate TodoWrite ToolSearch create_plan current_time exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls read system_info update_plan
-resident with cognia-plugin-tools always loaded: TaskCreate TaskGet TaskList TaskUpdate TodoWrite ToolSearch create_plan current_time dispatch_agent exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls notes_search read system_info update_plan
+resident: ToolSearch apply_patch bash current_time edit exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls multi_edit read system_info write
+resident with cognia-plugin-tools always loaded: ToolSearch apply_patch bash current_time dispatch_agent edit exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls multi_edit notes_search read system_info write
 
 ## ai-sdk · all categories, ollama, no plan tools
 Monitor desc=6b93edb09991 schema=84099a2ff8e3
@@ -290,7 +290,7 @@ TaskGet desc=0228efcf91f5 schema=d3b83710c536
 TaskList desc=25dfd032c99b schema=f973399805c1
 TaskUpdate desc=39d3b499aaa7 schema=e762cfb7279c
 TodoWrite desc=929c53e641b3 schema=8ce34f8faae3
-apply_patch desc=3eb017483d6e schema=09a6ca3aa333
+apply_patch desc=3baccb480c56 schema=09a6ca3aa333
 ast_grep_replace desc=612e484480f0 schema=23277fd6308d
 ast_grep_search desc=c4c77c7c1a08 schema=866b3c6d29ee
 bash desc=7730587ae323 schema=b1d636712e9f
@@ -353,7 +353,7 @@ lsp_hover desc=bcf61082b111 schema=5b414330c901
 monitor_cancel desc=1c4d587f0b41 schema=47fe3864d51f
 monitor_list desc=93efc5d3c1b7 schema=f973399805c1
 multi_edit desc=dd6821e2e6d2 schema=8d72a7dabca9
-read desc=83aa0bdb912f schema=bedc6dc8f639
+read desc=c733e94f40be schema=bedc6dc8f639
 search_processes desc=b7d521d6701f schema=a1833e8299be
 shell_execute_advanced desc=139255ee0334 schema=76c8d6cadec2
 start_process desc=09da2721fd36 schema=fbcfdac464a5
@@ -367,13 +367,13 @@ top_memory_processes desc=e3b54e52ba99 schema=bb9f4d2b7732
 web_clone desc=4cf34fab165e schema=4130d37d52eb
 web_clone_convert desc=c82fb94f175e schema=64c7554f4cb0
 write desc=c80185684013 schema=0f00ee612e30
-resident: TaskCreate TaskGet TaskList TaskUpdate TodoWrite ToolSearch current_time exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls read system_info
-resident with cognia-plugin-tools always loaded: TaskCreate TaskGet TaskList TaskUpdate TodoWrite ToolSearch current_time exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls read system_info
+resident: ToolSearch apply_patch bash current_time edit exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls multi_edit read system_info write
+resident with cognia-plugin-tools always loaded: ToolSearch apply_patch bash current_time edit exit_plan_mode file_diff file_exists file_hash file_info get_env git_status glob grep list_env list_shells ls multi_edit read system_info write
 
 ## ai-sdk · allow list in Claude Code names + deny list
 file_hash desc=d02be58b25a4 schema=ffbdcd8ab9ee
 git_status desc=8d370e937fa9 schema=34da52334877
-read desc=83aa0bdb912f schema=bedc6dc8f639
+read desc=c733e94f40be schema=bedc6dc8f639
 resident: ToolSearch file_hash git_status read
 resident with cognia-plugin-tools always loaded: ToolSearch file_hash git_status read
 
@@ -441,7 +441,7 @@ codegraph_explore desc=cc33ede1e2c5 schema=3d0f4a0f6955
 codegraph_files desc=c1fecdf5848c schema=93ab7499dc3c
 grep desc=721aded0ff7e schema=a241447e8299
 glob desc=eef0c30d76fa schema=059ea1e9f851
-read desc=83aa0bdb912f schema=816f3ea71261
+read desc=c733e94f40be schema=816f3ea71261
 ls desc=71cfa8e8975e schema=646a87d74d58
 edit desc=3924e7da46b8 schema=f0a3d8923bec
 multi_edit desc=dd6821e2e6d2 schema=51f37792af82
@@ -451,7 +451,7 @@ TodoWrite desc=929c53e641b3 schema=aee01a54a293
 bash_output desc=5d68e3b7a98b schema=2e655d501946
 kill_shell desc=91b20de9af7c schema=6cd368620c32
 NotebookEdit desc=9b2dab768743 schema=e5793712b819
-apply_patch desc=3eb017483d6e schema=4ce0529306d6
+apply_patch desc=3baccb480c56 schema=4ce0529306d6
 TaskCreate desc=85933eefe500 schema=fdbed30e3f46
 TaskGet desc=0228efcf91f5 schema=2ab841bc4d7f
 TaskList desc=25dfd032c99b schema=93ab7499dc3c
@@ -464,10 +464,10 @@ dispatch_agent desc=f9e8991ed5f1 schema=efddc7bd8bbc
 
 ## calls
 ### anthropic read, capped to 20 tokens
-       1	alpha line: contact <EMAIL_001> for access
-       2	beta line
+  [Read: <bounded page preview>]
   ... (tool result truncated to fit the context window)
 ### anthropic read, uncapped
+  [Read: {"path":"<root>/notes.txt","version":"efd25a37e232b40b8ddfdb577b381c97f7d9251a40b251600af5d8576d7720d2","start":1,"end":7,"totalLines":7,"complete":true,"truncated":false}]
        1	alpha line: contact <EMAIL_001> for access
        2	beta line: call +1 <PHONE_001> after five
        3	filler 0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -476,13 +476,15 @@ dispatch_agent desc=f9e8991ed5f1 schema=efddc7bd8bbc
        6	filler 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
        7	omega line: <EMAIL_002> closes the file
 ### anthropic read outside the writable roots
+  [Read: {"path":"<outside>/secret.txt","version":"de62a538a946587853c55c2234c998618d05b0f8d14ed15c7e1585f12ad6bb99","start":1,"end":2,"totalLines":2,"complete":true,"truncated":false}]
        1	outside the roots
        2	
 ### anthropic write outside the writable roots
   isError write: workspace sandbox refused write: <outside>/escape.txt is outside sandbox.policy.writableRoots or is protected. Add the required directory to sandbox.policy.writableRoots and retry; approval cannot widen this fixed scope.
   [invalid-args] Do not repeat this call unchanged — fix the arguments first.
 ### ai-sdk read (no result cap on this rail)
-  asked for mcp__cognia-tools__read, allowed;      1	alpha line: contact <EMAIL_001> for access
+  asked for mcp__cognia-tools__read, allowed; [Read: {"path":"<root>/notes.txt","version":"efd25a37e232b40b8ddfdb577b381c97f7d9251a40b251600af5d8576d7720d2","start":1,"end":7,"totalLines":7,"complete":true,"truncated":false}]
+       1	alpha line: contact <EMAIL_001> for access
        2	beta line: call +1 <PHONE_001> after five
        3	filler 0 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
        4	filler 1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -490,13 +492,13 @@ dispatch_agent desc=f9e8991ed5f1 schema=efddc7bd8bbc
        6	filler 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
        7	omega line: <EMAIL_002> closes the file
 ### ai-sdk read outside the writable roots
-  asked for mcp__cognia-tools__read, allowed;      1	outside the roots
+  asked for mcp__cognia-tools__read, allowed; [Read: {"path":"<outside>/secret.txt","version":"de62a538a946587853c55c2234c998618d05b0f8d14ed15c7e1585f12ad6bb99","start":1,"end":2,"totalLines":2,"complete":true,"truncated":false}]
+       1	outside the roots
        2	
 ### ai-sdk write outside the writable roots
   threw workspace sandbox refused mcp__cognia-tools__write: <outside>/escape.txt is outside sandbox.policy.writableRoots or is protected. Add the required directory to sandbox.policy.writableRoots and retry; approval cannot widen this fixed scope.
 ### bridge read, capped to 20 tokens
-       1	alpha line: contact <EMAIL_001> for access
-       2	beta line
+  [Read: <bounded page preview>]
   ... (tool result truncated to fit the context window)
 
 ## read-only deadline

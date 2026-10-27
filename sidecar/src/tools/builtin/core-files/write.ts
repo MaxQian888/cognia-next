@@ -105,6 +105,7 @@ export function createWriteTool({ cwd, readTracker, lspResolver }: CoreFileToolC
     "write",
     "Create a new file or overwrite an existing one with the given content. Overwriting requires the file to have been read this session.",
     writeShape,
-    execWrite
+    execWrite,
+    { alwaysLoad: true }
   )
 }

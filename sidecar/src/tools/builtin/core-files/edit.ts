@@ -155,7 +155,8 @@ export function createEditTool({ cwd, readTracker, lspResolver }: CoreFileToolCo
     "edit",
     "Replace an exact string in a file. The match falls back through whitespace-tolerant strategies when the exact text is not found. Requires the file to have been read this session. Use replace_all for bulk renames.",
     editShape,
-    execEdit
+    execEdit,
+    { alwaysLoad: true }
   )
 }
 
@@ -218,6 +219,7 @@ export function createMultiEditTool({ cwd, readTracker, lspResolver }: CoreFileT
     "multi_edit",
     "Apply multiple string replacements to ONE file in a single atomic operation. Edits run in order against the result of the previous edit; if any edit fails nothing is written. Requires the file to have been read this session.",
     multiEditShape,
-    execMultiEdit
+    execMultiEdit,
+    { alwaysLoad: true }
   )
 }

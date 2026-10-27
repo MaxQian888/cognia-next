@@ -2,6 +2,31 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { providerVisibleSendPayloadIsSafe, retainedRuntimeSendIsSafe } from "./send.ts"
 
+test("discovery changes cannot discard retained history or bypass restored-history PII", () => {
+  const current = {
+    multiTurn: true,
+    q: { active: false },
+    sendOptions: { provider: "openai", toolSearchEnabled: true },
+  }
+  const options = { provider: "openai", toolSearchEnabled: false }
+  assert.equal(retainedRuntimeSendIsSafe(current, options), false)
+  const restored = {
+    ...options,
+    initialConversation: [{ role: "user" as const, content: "Retain the task constraints" }],
+  }
+  assert.equal(retainedRuntimeSendIsSafe(current, restored), true)
+  assert.equal(
+    providerVisibleSendPayloadIsSafe({
+      prompt: "continue",
+      options: {
+        ...restored,
+        initialConversation: [{ role: "user", content: "private@example.com" }],
+      },
+    }),
+    false
+  )
+})
+
 test("a headless policy change cannot replace retained history without an explicit restore", () => {
   const current = { multiTurn: true, q: { active: false }, sendOptions: { provider: "openai" } }
   const options = {

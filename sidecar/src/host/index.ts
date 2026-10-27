@@ -207,6 +207,9 @@ export function createAgentHost({
           type: "session_ended",
           sessionId,
           ...(msg.options?.turnId ? { turnId: msg.options.turnId } : {}),
+          ...(msg.options?.transcriptInvalidationId
+            ? { transcriptInvalidationId: msg.options.transcriptInvalidationId }
+            : {}),
           error: `send failed: ${reason}`,
         })
       }
@@ -247,6 +250,9 @@ export function createAgentHost({
         sessionId,
         error: errorMessage(error),
         ...(options?.turnId ? { turnId: options.turnId } : {}),
+        ...(options?.transcriptInvalidationId
+          ? { transcriptInvalidationId: options.transcriptInvalidationId }
+          : {}),
       })
       return
     }

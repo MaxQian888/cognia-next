@@ -578,7 +578,7 @@ export function createBashTool({
     }
   }
 
-  return tool("bash", bashToolDescription(descriptor), bashShape, execBash)
+  return tool("bash", bashToolDescription(descriptor), bashShape, execBash, { alwaysLoad: true })
 }
 
 /** A background-shell read from either registry. */

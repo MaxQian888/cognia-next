@@ -19,6 +19,44 @@ async function fixture() {
   return { dir, file }
 }
 
+test("large UTF-8 reads page within 50 KiB without losing or duplicating lines", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "read-pages-"))
+  const file = path.join(dir, "large.txt")
+  const lines = Array.from({ length: 600 }, (_, i) => `${i}:${"数据".repeat(100)}`)
+  const tracker = createReadTracker()
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
+  await fsp.writeFile(file, lines.join("\n"))
+  try {
+    let offset = 1
+    const delivered: string[] = []
+    const versions = new Set<string>()
+    while (offset <= lines.length) {
+      const text = textOf(await tool.handler({ file_path: file, offset }, {}))
+      const header = text.match(/^\[Read: (\{[^\n]+\})\]\n/)!
+      const meta = JSON.parse(header[1]!)
+      const body = text.slice(header[0].length).split("\n\n(showing lines")[0]!
+      assert.ok(Buffer.byteLength(body) <= 50 * 1024, "page body must respect the byte cap")
+      assert.equal(meta.start, offset)
+      assert.ok(meta.end >= offset)
+      versions.add(meta.version)
+      for (const line of body.split("\n")) delivered.push(line.replace(/^\s*\d+\t/, ""))
+      assert.equal(tracker.isObservedOutput!(file, text), true)
+      if (meta.end < lines.length) {
+        assert.equal(meta.complete, false)
+        assert.equal(meta.truncated, true)
+        assert.ok(text.includes(`continue with offset=${meta.end + 1}`))
+      }
+      offset = meta.end + 1
+    }
+    assert.equal(versions.size, 1)
+    assert.deepEqual(delivered, lines)
+    await fsp.utimes(file, new Date(0), new Date(1))
+    assert.throws(() => tracker.assertReadBefore(file, { mtimeMs: 1, size: 1 }), /changed on disk/)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("read returns cat -n numbered content and records into the tracker", async () => {
   const { dir, file } = await fixture()
   const tracker = createReadTracker()
@@ -29,6 +67,40 @@ test("read returns cat -n numbered content and records into the tracker", async 
     assert.match(text, /^ {5}1\talpha/m)
     assert.match(text, /^ {5}4\tdelta/m)
     assert.equal(tracker.hasRead(file), true)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("parallel reads identify their own delivered range and file version without preventing fresh reads", async () => {
+  const { dir, file } = await fixture()
+  const second = path.join(dir, "second.txt")
+  await fsp.writeFile(second, "different\n")
+  const tracker = createReadTracker()
+  const tool = asCallable(createReadTool({ cwd: dir, readTracker: tracker }))
+  try {
+    const results = await Promise.all([
+      tool.handler({ file_path: file }, {}),
+      tool.handler({ file_path: second, limit: 1 }, {}),
+    ])
+    const metadata = results.map((result) => {
+      const match = textOf(result).match(/^\[Read: (\{[^\n]+\})\]\n/)
+      assert.ok(match, "each result must identify its actual source")
+      return JSON.parse(match[1]!)
+    })
+    assert.equal(metadata[0].path, file)
+    assert.equal(metadata[0].complete, true)
+    assert.equal(metadata[0].start, 1)
+    assert.equal(metadata[0].end, metadata[0].totalLines)
+    assert.equal(metadata[1].path, second)
+    assert.equal(tracker.isObservedOutput!(file, textOf(results[0]!)), true)
+    assert.equal(tracker.isObservedOutput!(second, textOf(results[0]!)), false)
+    assert.equal(metadata[1].complete, false, "a limited window is not complete coverage")
+    await fsp.writeFile(file, "changed\n")
+    const changed = textOf(await tool.handler({ file_path: file }, {}))
+    assert.match(changed, /changed/)
+    const current = JSON.parse(changed.match(/^\[Read: (\{[^\n]+\})\]/)![1]!)
+    assert.notEqual(current.version, metadata[0].version)
   } finally {
     await fsp.rm(dir, { recursive: true, force: true })
   }

@@ -10,6 +10,7 @@ import { asCallable, firstJson } from "../../../../test-support/tool-result.ts"
 import type { CallableTool } from "../../../../test-support/tool-result.ts"
 import { MONITOR_TOOL_NAMES } from "./monitor.ts"
 import { z } from "zod"
+import { createVerificationBudget } from "../../../shared/verification-budget.ts"
 
 test("createCoreTools emits tools in the fixed CORE_TOOL_NAMES order", () => {
   const tools = createCoreTools({ cwd: ".", readTracker: createReadTracker() })
@@ -35,9 +36,36 @@ test("mutating subset includes the shell-capable Monitor tool", () => {
     [...CORE_MUTATING_TOOL_NAMES],
     // kill_shell terminates an OS process — the same action class as
     // terminate_process, which has always been approval-gated.
-    ["edit", "multi_edit", "write", "bash", "NotebookEdit", "apply_patch", "Monitor", "kill_shell"]
+    [
+      "edit",
+      "multi_edit",
+      "write",
+      "bash",
+      "NotebookEdit",
+      "apply_patch",
+      "Monitor",
+      "kill_shell",
+      "verification_batch",
+    ]
   )
-  for (const n of CORE_MUTATING_TOOL_NAMES) assert.ok(CORE_TOOL_NAMES.includes(n))
+  for (const n of CORE_MUTATING_TOOL_NAMES)
+    assert.ok([...CORE_TOOL_NAMES, "verification_batch"].includes(n))
+})
+
+test("verification batches append only with an active budget and nested Bash authorization", () => {
+  const budget = createVerificationBudget({ epoch: () => 1000, monotonic: () => 0 })
+  budget.reset({ startedAtEpochMs: 1000, deadlineEpochMs: 361_000 })
+  assert.equal(
+    createCoreTools({ verificationBudget: budget }).some((t) => t.name === "verification_batch"),
+    false
+  )
+  assert.deepEqual(
+    createCoreTools({
+      verificationBudget: budget,
+      authorizeVerificationCommand: async (args) => args,
+    }).map((t) => t.name),
+    [...CORE_TOOL_NAMES, "verification_batch"]
+  )
 })
 
 test("new session task and monitor tools are appended after apply_patch (prompt-cache stability)", () => {

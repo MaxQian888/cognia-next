@@ -44,6 +44,18 @@ test("clear() empties the tracker", () => {
   assert.equal(t.hasRead(FILE), false)
 })
 
+test("built-in output receipts bind path and bytes without granting freshness or read-before-write", () => {
+  const tracker = createReadTracker()
+  tracker.recordOutput!(FILE, "actual read output")
+  assert.equal(tracker.isObservedOutput!(FILE, "actual read output"), true)
+  assert.equal(tracker.isObservedOutput!(FILE, "forged read output"), false)
+  assert.equal(tracker.isObservedOutput!(FILE + ".other", "actual read output"), false)
+  assert.equal(tracker.hasRead(FILE), false)
+  assert.throws(() => tracker.assertReadBefore(FILE, { mtimeMs: 1, size: 1 }), /has not been read/)
+  tracker.clear()
+  assert.equal(tracker.isObservedOutput!(FILE, "actual read output"), false)
+})
+
 test("canonicalKey lower-cases the win32 drive letter only", () => {
   if (process.platform === "win32") {
     const k1 = canonicalKey("C:\\Some\\File.TXT")

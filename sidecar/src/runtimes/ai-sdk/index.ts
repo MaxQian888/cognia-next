@@ -37,6 +37,11 @@ export interface DispatchAiSdkOptions {
   streamIdleTimeoutMs?: number
 }
 import { createToolSessionContext } from "../../tools/session.ts"
+import {
+  createVerificationBudget,
+  validateVerificationBudgetStamp,
+  withVerificationFeedback,
+} from "../../shared/verification-budget.ts"
 // AI SDK dispatcher: runs a turn against `streamText()` from the `ai` package
 // using `@ai-sdk/<provider>`'s client builder.
 //
@@ -179,10 +184,16 @@ function resolveStepChunk(aiSdkStepChunk: unknown) {
 function measuredPromptOverhead(inputTokens: number, sent: ConversationMessage[], step: unknown) {
   const messages = record(record(step).request).messages
   if (!Array.isArray(messages) || inputTokens <= 0) return undefined
-  const instructions = partitionPrompt(sent).instructions ?? []
+  const instructions =
+    partitionPrompt(sent.map((message) => ({ ...message, content: message.content })))
+      .instructions ?? []
   return Math.max(
     0,
-    inputTokens - estimateTokens([...instructions, ...stripReasoningParts(messages)])
+    inputTokens -
+      estimateTokens([
+        ...instructions.map((message) => ({ ...message })),
+        ...stripReasoningParts(messages),
+      ])
   )
 }
 
@@ -400,6 +411,11 @@ export function dispatchAiSdk({
   // outlives a single send, so each send hands its own stamp in (`setNextTurnLedger`
   // from `handleSend`); a turn without one is never gated.
   let nextTurnLedger = sendOptions.ledger ?? null
+  validateVerificationBudgetStamp(sendOptions.verificationBudget)
+  let nextTurnVerificationBudget = sendOptions.verificationBudget
+    ? { ...sendOptions.verificationBudget }
+    : undefined
+  const verificationBudget = createVerificationBudget()
   // The paired device's execution context of the send behind the NEXT turn, or
   // undefined for a host-started send. Per turn like the stamp: a reservation
   // is answerable only by the device whose send raised it (ADR-0188 D25).
@@ -503,8 +519,9 @@ export function dispatchAiSdk({
         toolsCache = toolSearchController.tools
       }
     }
-    if (!overLimit || !toolSearchController || toolLimit === null) return
+    if (!toolSearchController) return
     setDeferredToolsMessage(toolSearchController.deferredToolsPrompt())
+    if (!overLimit || toolLimit === null) return
     if (warnedToolLimit === toolLimit) return
     warnedToolLimit = toolLimit
     const deferredCount = toolSearchController.deferredToolNames().length
@@ -655,6 +672,8 @@ export function dispatchAiSdk({
   let frozenSummaryVersion = 0
 
   const maybeCompact = createCompactor({
+    isObservedReadOutput: (path, output) =>
+      toolSession.readTracker.isObservedOutput?.(path, output) === true,
     state: {
       get model() {
         return model
@@ -721,6 +740,17 @@ export function dispatchAiSdk({
     // Clear any leftover interrupt from a previous turn so this turn streams.
     cancelled = false
     active = true
+    const turnStartedAt = Date.now()
+    const verificationWasEnabled = verificationBudget.snapshot().enabled
+    verificationBudget.reset(nextTurnVerificationBudget)
+    nextTurnVerificationBudget = undefined
+    let closePreviousMcp: (() => Promise<void>) | null = null
+    if (verificationWasEnabled !== verificationBudget.snapshot().enabled) {
+      closePreviousMcp = mcpClose
+      mcpClose = null
+      toolsCache = undefined
+      toolSearchController = null
+    }
     // Report the turn as running, the way the Agent SDK does. HostState starts
     // the turn on it (and counts the message that started it as delivered);
     // without it a turn here went from `queued` straight to its end. No `idle`
@@ -835,6 +865,24 @@ export function dispatchAiSdk({
       // `maybeCompact`, leaving the summary request un-abortable).
       const abortController = new AbortController()
       activeAbortController = abortController
+      if (closePreviousMcp) {
+        const disconnecting = closePreviousMcp().catch((error) =>
+          log("warn", `mcp teardown failed: ${errorToMessage(error)}`)
+        )
+        // Close is already in flight; cancellation must not wait for its transport.
+        await new Promise<void>((resolve) => {
+          const settle = () => {
+            abortController.signal.removeEventListener("abort", settle)
+            resolve()
+          }
+          abortController.signal.addEventListener("abort", settle, { once: true })
+          void disconnecting.then(settle)
+          if (abortController.signal.aborted) settle()
+        })
+        if (cancelled || closing || abortController.signal.aborted) {
+          throw new DOMException("Turn cancelled during MCP teardown", "AbortError")
+        }
+      }
 
       // Honour a manual `/compact` that arrived mid-turn (deferred so we never
       // run two summary calls concurrently), then the automatic threshold.
@@ -866,6 +914,7 @@ export function dispatchAiSdk({
             emit,
             pendingApprovals,
             pendingPluginToolCalls,
+            verificationBudget,
             ...toolSession.toolContext(),
             doomGuard: toolDoomGuard,
             // PostToolUse rewrite at the execute layer (opt-in) — see
@@ -1138,7 +1187,16 @@ export function dispatchAiSdk({
           // Near-miss tool names and aliased argument keys (common behind
           // relays) are repaired instead of failing the call.
           repairToolCall: repairToolCallFn,
-          ...(toolSearchController ? { prepareStep: toolSearchController.prepareStep } : {}),
+          ...(verificationBudget.snapshot().enabled
+            ? {
+                prepareStep: withVerificationFeedback(
+                  verificationBudget,
+                  toolSearchController?.prepareStep
+                ),
+              }
+            : toolSearchController
+              ? { prepareStep: toolSearchController.prepareStep }
+              : {}),
           maxSteps: perLegCap,
           captureRequestMessages: sendOptions.compaction?.enabled !== false,
           credentials: creds,
@@ -1162,6 +1220,10 @@ export function dispatchAiSdk({
             ? {
                 stopWhenExtra: (steps) => {
                   const last = Array.isArray(steps) ? steps[steps.length - 1] : null
+                  const usage = record(last?.usage)
+                  const reportedInputTokens = usage.inputTokens ?? usage.promptTokens
+                  const inputTokens =
+                    typeof reportedInputTokens === "number" ? reportedInputTokens : 0
                   const nextInputDelta = Array.isArray(last?.content)
                     ? last.content.filter(
                         (part: unknown) =>
@@ -1182,9 +1244,8 @@ export function dispatchAiSdk({
                     (yieldForCompaction &&
                       shouldCompact({
                         lastInputTokens:
-                          (record(last?.usage).inputTokens ??
-                            record(last?.usage).promptTokens ??
-                            0) + (nextInputDelta.length ? estimatePromptTokens(nextInputDelta) : 0),
+                          inputTokens +
+                          (nextInputDelta.length ? estimatePromptTokens(nextInputDelta) : 0),
                         modelId: model,
                         contextWindow: comp?.contextWindow,
                         fraction: (comp?.fraction ?? AUTO_COMPACT_FRACTION) * 0.8,
@@ -1561,7 +1622,11 @@ export function dispatchAiSdk({
       // Report aborted background side calls before announcing terminal state.
       await settleTurnCompaction()
       const finishUsage = finishUsageSnapshot()
-      const finishEvents = adapter.finish({ usage: finishUsage, budgetExhausted: cappedWhileBusy })
+      const finishEvents = adapter.finish({
+        usage: finishUsage,
+        budgetExhausted: cappedWhileBusy,
+        startedAt: turnStartedAt,
+      })
       flushAdapter(finishEvents)
       if (ledgerRefusal) {
         // Router + Fusion refused the next call (budget, limit, deadline). What
@@ -1610,7 +1675,8 @@ export function dispatchAiSdk({
       // streamText rejects with an AbortError once the signal fires.
       if (cancelled || record(err).name === "AbortError" || record(err).name === "TimeoutError") {
         const partialUsage = finishUsageSnapshot()
-        if (partialUsage) flushAdapter(adapter.finish({ usage: partialUsage }))
+        if (partialUsage)
+          flushAdapter(adapter.finish({ usage: partialUsage, startedAt: turnStartedAt }))
         emit({ type: "session_ended", sessionId, conversationSnapshot: conversation })
       } else {
         emit({
@@ -1739,6 +1805,10 @@ export function dispatchAiSdk({
     setNextTurnLedger: (ledger: SendOptions["ledger"], remoteExecutionContext?: unknown) => {
       nextTurnLedger = ledger ?? null
       nextTurnRemoteContext = remoteExecutionContext
+    },
+    setNextTurnVerificationBudget: (stamp: SendOptions["verificationBudget"]) => {
+      validateVerificationBudgetStamp(stamp)
+      nextTurnVerificationBudget = stamp ? { ...stamp } : undefined
     },
     /** Resolve a pending reservation (`call_reserve_decision` from the renderer). */
     resolveCallReserve: (message: unknown) => turnLedgerGate?.resolveDecision(message) ?? false,

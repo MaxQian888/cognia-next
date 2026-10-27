@@ -104,6 +104,29 @@ test("classifyToolCallConfinement: bash workdir escape asks, default workdir is 
   assert.equal(classifyToolCallConfinement(policy, "bash", { command: "ls" }, root), null)
 })
 
+test("verification batch confinement checks every explicit command workdir", () => {
+  const root = mkRoot()
+  const policy = { enabled: true, roots: [root] }
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "verification_batch",
+      { commands: [{ command: "echo safe" }, { workdir: mkRoot(), command: "echo outside" }] },
+      root
+    ),
+    "ask"
+  )
+  assert.equal(
+    classifyToolCallConfinement(
+      policy,
+      "verification_batch",
+      { commands: [{ workdir: path.join(os.homedir(), ".ssh"), command: "echo denied" }] },
+      root
+    ),
+    "deny"
+  )
+})
+
 test("classifyToolCallConfinement returns null when inapplicable", () => {
   const root = mkRoot()
   const policy = { enabled: true, roots: [root] }

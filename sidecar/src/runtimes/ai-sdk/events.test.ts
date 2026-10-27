@@ -13,6 +13,28 @@ const baseCtx = () => ({
   startedAt: 1000,
 })
 
+test("finish measures each turn independently of session idle time and leg resets", (t) => {
+  t.mock.method(Date, "now", () => 1000)
+  const adapter = createEventAdapter(baseCtx())
+  t.mock.method(Date, "now", () => 3000)
+  assert.equal(
+    adapter.finish({ startedAt: 1000 }).find((event) => event.type === "result")!.duration_ms,
+    2000
+  )
+  // Another turn begins ten minutes later, then executes two model/tool legs.
+  const turnStartedAt = 603000
+  adapter.reset()
+  t.mock.method(Date, "now", () => 604000)
+  adapter.handle({ type: "text-delta", text: "first leg" })
+  adapter.reset()
+  t.mock.method(Date, "now", () => 606000)
+  const result = adapter
+    .finish({ startedAt: turnStartedAt })
+    .find((event) => event.type === "result")!
+  assert.equal(result.duration_ms, 3000)
+  assert.equal(result.duration_api_ms, 3000)
+})
+
 test("emits a system init message before the first content event", () => {
   const adapter = createEventAdapter(baseCtx())
   const out = adapter.handle({ type: "text-delta", textDelta: "hello" })

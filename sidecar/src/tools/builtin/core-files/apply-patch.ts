@@ -306,6 +306,7 @@ export function createApplyPatchTool({ cwd, readTracker, lspResolver }: CoreFile
       "A commit I/O failure can leave partial changes; inspect the reported effects before retrying. " +
       "Prefer this over multiple edit calls when one change touches several files.",
     applyPatchShape,
-    execApplyPatch
+    execApplyPatch,
+    { alwaysLoad: true }
   )
 }
