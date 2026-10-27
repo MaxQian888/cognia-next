@@ -63,6 +63,18 @@ describe("resolveEffectiveSkin", () => {
 })
 
 it("builds a typed effective asset selection", () => {
+  expect(
+    resolveEffectiveSkin("media", {
+      coreReady: false,
+      hasActiveModel: false,
+      mediaPackId: "mp_whale",
+    })
+  ).toBe("media")
+  expect(selectionFromEffectiveSkin("media", { mediaPackId: "mp_whale" })).toEqual({
+    skinId: "media",
+    packId: "mp_whale",
+  })
+  expect(selectionFromEffectiveSkin("media", {})).toEqual({ skinId: "svg" })
   expect(selectionFromEffectiveSkin("live2d", { modelId: "m1" })).toEqual({
     skinId: "live2d",
     modelId: "m1",

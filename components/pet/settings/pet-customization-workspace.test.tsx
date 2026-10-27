@@ -185,6 +185,24 @@ describe("PetCustomizationWorkspace", () => {
     expect(runtime.assetDiagnostic("live2d:m1")).toBeUndefined()
   })
 
+  it("uses the animation pack in configuration preview and retries its failure", () => {
+    settingsValue = {
+      petSettings: { ...DEFAULT_PET_SETTINGS, skinId: "media", activeMediaPackId: "mp_whale" },
+    }
+    mockPetValue = { profile: { stage: "adult" }, view: { effectiveBones: {}, mood: "content" } }
+    const runtime = getPetSkinRuntime()
+    runtime.recordAssetFailure("media:mp_whale", "renderFailed")
+    render(<PetCustomizationWorkspace />)
+    expect(rendererProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skinId: "media",
+        selection: { skinId: "media", packId: "mp_whale" },
+      })
+    )
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(runtime.assetDiagnostic("media:mp_whale")).toBeUndefined()
+  })
+
   it("gives the customization preview the configuration renderer lease priority", () => {
     mockPetValue = {
       profile: { stage: "adult" },

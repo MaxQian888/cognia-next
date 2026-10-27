@@ -27,7 +27,7 @@ describe("live2d constants", () => {
 
     for (const model of SAMPLE_MODEL_CATALOG) {
       expect(model.baseUrl).toMatch(
-        /^https:\/\/raw\.githubusercontent\.com\/Live2D\/CubismWebSamples\/develop\/Samples\/Resources\/.+\/$/
+        /^https:\/\/raw\.githubusercontent\.com\/Live2D\/CubismWebSamples\/[0-9a-f]{40}\/Samples\/Resources\/.+\/$/
       )
       // The settings file is listed among the files to download.
       expect(model.files).toContain(model.settingsFile)
@@ -42,6 +42,14 @@ describe("live2d constants", () => {
   it("has no duplicate file references", () => {
     for (const model of SAMPLE_MODEL_CATALOG) {
       expect(new Set(model.files).size).toBe(model.files.length)
+    }
+  })
+
+  it("includes the UserData and DisplayInfo referenced by both official samples", () => {
+    for (const model of SAMPLE_MODEL_CATALOG) {
+      const name = model.settingsFile.replace(".model3.json", "")
+      expect(model.files).toContain(`${name}.userdata3.json`)
+      expect(model.files).toContain(`${name}.cdi3.json`)
     }
   })
 

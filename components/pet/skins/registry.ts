@@ -7,6 +7,7 @@ import type { PetSkin } from "@/types/pet"
 import { svgSkin } from "./svg-skin"
 import { live2dSkin } from "./live2d-skin"
 import { spriteV2Skin } from "./sprite-v2-skin"
+import { mediaSkin } from "./media-skin"
 
 export const DEFAULT_SKIN_ID = "svg"
 
@@ -17,6 +18,7 @@ const skins = new Map<string, PetSkin>([
   [svgSkin.id, svgSkin],
   [live2dSkin.id, live2dSkin],
   [spriteV2Skin.id, spriteV2Skin],
+  [mediaSkin.id, mediaSkin],
 ])
 
 export function registerSkin(skin: PetSkin): void {

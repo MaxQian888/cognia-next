@@ -89,10 +89,12 @@ export function PetOverlayView() {
     hasActiveModel: Boolean(modelId),
     modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+    mediaPackId: preferredSelection.skinId === "media" ? preferredSelection.packId : undefined,
   })
   const selection = selectionFromEffectiveSkin(skinId, {
     modelId,
     packId: activeSpritePack?.id,
+    mediaPackId: preferredSelection.skinId === "media" ? preferredSelection.packId : undefined,
   })
 
   const osReduced = useReducedMotion()

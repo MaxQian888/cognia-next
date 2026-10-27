@@ -8,6 +8,18 @@ import { createDefaultProfile } from "@/lib/pet/defaults"
 import { generateBones } from "@/lib/pet/bones/generate"
 import type { PetBubble } from "@/stores/pet/pet-store"
 import type { PetLookTarget, PetOneShot, PetSkinSelection, PetVisualState } from "@/types/pet"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { startMainLive2dAssets } from "@/lib/pet/live2d/asset-bridge"
+import { startMainMediaAssets } from "@/lib/pet/media-packs/asset-bridge"
+jest.mock("@/lib/pet/media-packs/asset-bridge", () => ({
+  startMainMediaAssets: jest.fn(() => ({ sync: jest.fn(), dispose: jest.fn() })),
+}))
+
+jest.mock("@/lib/pet/window-role", () => ({ getPetWindowRole: jest.fn(() => "web") }))
+jest.mock("@/lib/pet/live2d/asset-bridge", () => ({
+  startMainLive2dAssets: jest.fn(() => ({ sync: jest.fn(), dispose: jest.fn() })),
+  isLive2dAssetMirror: () => false,
+}))
 
 // A fake channel that records posts and lets the test deliver inbound messages.
 class FakeChannel implements BroadcastChannelLike {
@@ -93,6 +105,67 @@ function makeStore() {
 }
 
 describe("startMainPetBridge", () => {
+  it("authorizes selected media only while main owns an unlocked profile", () => {
+    jest.mocked(getPetWindowRole).mockReturnValue("main")
+    const store = makeStore()
+    store.__state.appearanceSelection = { skinId: "media", packId: "mp_whale" }
+    const stop = startMainPetBridge({ channel: new FakeChannel(), store: store as never })
+    try {
+      const deps = jest.mocked(startMainMediaAssets).mock.calls.at(-1)![0]
+      const bridge = jest.mocked(startMainMediaAssets).mock.results.at(-1)!.value
+      expect(deps.selectedPack()).toBeUndefined()
+      store.emit({
+        profileSnapshot: {
+          profile: {
+            ...createDefaultProfile("account", 0),
+            mirroredBones: generateBones("account"),
+          },
+          binding: null,
+        },
+      })
+      expect(deps.selectedPack()).toBe("mp_whale")
+      expect(bridge.sync).toHaveBeenCalledTimes(1)
+      store.emit({ profileSnapshot: null })
+      expect(deps.selectedPack()).toBeUndefined()
+      expect(bridge.sync).toHaveBeenCalledTimes(2)
+      stop()
+      expect(bridge.dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      stop()
+      jest.mocked(getPetWindowRole).mockReturnValue("web")
+    }
+  })
+  it("owns the asset projection and revokes authorization when the account profile is absent", () => {
+    jest.mocked(getPetWindowRole).mockReturnValue("main")
+    const channel = new FakeChannel(),
+      store = makeStore()
+    store.__state.appearanceSelection = { skinId: "live2d", modelId: "m1" }
+    const stop = startMainPetBridge({ channel, store: store as never })
+    try {
+      const deps = jest.mocked(startMainLive2dAssets).mock.calls.at(-1)![0]
+      const bridge = jest.mocked(startMainLive2dAssets).mock.results.at(-1)!.value
+      expect(deps.selectedModel()).toBeUndefined()
+      store.emit({
+        profileSnapshot: {
+          profile: {
+            ...createDefaultProfile("account", 0),
+            mirroredBones: generateBones("account"),
+          },
+          binding: null,
+        },
+      })
+      expect(deps.selectedModel()).toBe("m1")
+      expect(bridge.sync).toHaveBeenCalledTimes(1)
+      store.emit({ profileSnapshot: null })
+      expect(deps.selectedModel()).toBeUndefined()
+      expect(bridge.sync).toHaveBeenCalledTimes(2)
+      stop()
+      expect(bridge.dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      stop()
+      jest.mocked(getPetWindowRole).mockReturnValue("web")
+    }
+  })
   it("catches up an overlay that requested its profile before main started", () => {
     const mainChannel = new FakeChannel()
     const overlayChannel = new FakeChannel()

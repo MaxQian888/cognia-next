@@ -64,6 +64,24 @@ describe("PetSkinRuntime", () => {
     expect(runtime.diagnostics()).toMatchObject({ activeLiveRenderers: 0, objectUrls: 0 })
   })
 
+  it("owns frame URLs under their pack and releases them together", () => {
+    const createObjectURL = jest
+      .fn()
+      .mockReturnValueOnce("blob:a")
+      .mockReturnValueOnce("blob:b")
+      .mockReturnValueOnce("blob:other")
+    const revokeObjectURL = jest.fn()
+    const runtime = new PetSkinRuntime({ createObjectURL, revokeObjectURL })
+    const blob = new Blob(["frame"])
+    expect(runtime.objectUrl("media:mp_whale", blob, "a.webp")).toBe("blob:a")
+    expect(runtime.objectUrl("media:mp_whale", blob, "a.webp")).toBe("blob:a")
+    expect(runtime.objectUrl("media:mp_whale", blob, "b.webp")).toBe("blob:b")
+    runtime.objectUrl("media:mp_other", blob, "a.webp")
+    runtime.invalidateAsset("media:mp_whale")
+    expect(revokeObjectURL.mock.calls).toEqual([["blob:a"], ["blob:b"]])
+    expect(runtime.diagnostics().objectUrls).toBe(1)
+  })
+
   it("permits one automatic context recovery before degrading", () => {
     const runtime = new PetSkinRuntime()
     expect(runtime.recordContextLoss("live2d:m1")).toEqual({ action: "retry", delayMs: 250 })
@@ -112,6 +130,40 @@ describe("PetSkinRuntime", () => {
     expect(loader).toHaveBeenCalledTimes(2)
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:atlas")
   })
+
+  it("retries missing assets instead of retaining a fulfilled absent value", async () => {
+    const runtime = new PetSkinRuntime()
+    const load = jest.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce("ready")
+    expect(await runtime.loadAsset("live2d:m1", load)).toBeUndefined()
+    expect(await runtime.loadAsset("live2d:m1", load)).toBe("ready")
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(["missing", "rejected"])(
+    "does not evict replacement bytes when a superseded load is %s",
+    async (outcome) => {
+      const runtime = new PetSkinRuntime()
+      let resolve!: (value: undefined) => void, reject!: (error: Error) => void
+      const old = runtime.loadAsset(
+        "live2d:m1",
+        () =>
+          new Promise<undefined>((yes, no) => {
+            resolve = yes
+            reject = no
+          })
+      )
+      const settled = old.catch(() => undefined)
+      runtime.retryAsset("live2d:m1")
+      const fresh = jest.fn(async () => "new-account-blob")
+      await runtime.loadAsset("live2d:m1", fresh)
+      if (outcome === "missing") resolve(undefined)
+      else reject(new Error("old request failed"))
+      await settled
+      expect(await runtime.loadAsset("live2d:m1", fresh)).toBe("new-account-blob")
+      expect(fresh).toHaveBeenCalledTimes(1)
+      expect(runtime.retryGeneration("live2d:m1")).toBe(1)
+    }
+  )
 
   it("returns every active resource counter to baseline after repeated cycles", () => {
     const runtime = new PetSkinRuntime({

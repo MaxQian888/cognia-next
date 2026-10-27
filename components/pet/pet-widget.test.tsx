@@ -204,6 +204,17 @@ describe("PetWidget", () => {
     expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("live2d")
   })
 
+  it("keeps imported animation selected in the interaction panel", () => {
+    withPet()
+    render(
+      <PetWidget
+        settings={{ ...DEFAULT_PET_SETTINGS, skinId: "media", activeMediaPackId: "mp_whale" }}
+      />
+    )
+    fireEvent.click(screen.getByTestId("pet-handle"))
+    expect(screen.getByTestId("pet-interaction-panel").dataset.skin).toBe("media")
+  })
+
   it("renders the unwell visual from the decayed care condition even while the store rests", () => {
     // Store visual state is a benign resting `idle`, but the lazily-decayed view
     // reports an unwell pet — the widget must overlay it immediately.
@@ -318,7 +329,7 @@ describe("PetWidget", () => {
     })
     await user.click(screen.getByText("Show desktop pet"))
     expect(openPetWindow).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 128 + 96, height: 128 + 160, clickThrough: true })
+      expect.objectContaining({ width: 256 + 96, height: 256 + 160, clickThrough: true })
     )
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({

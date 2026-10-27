@@ -19,6 +19,12 @@ export interface Live2dModelLike {
   expression(id?: number | string): unknown
   internalModel?: {
     motionManager?: {
+      expressionManager?: {
+        defaultExpression?: unknown
+        currentExpression?: unknown
+        reserveExpressionIndex?: number
+        resetExpression?: () => void
+      }
       stopAllMotions?: () => void
       on?(event: string, handler: () => void): unknown
       off?(event: string, handler: () => void): unknown
@@ -47,6 +53,17 @@ function applyPlan(
 ): void {
   if (plan.expressionId !== undefined) {
     model.expression(plan.expressionId)
+  } else {
+    // Returning to an unconfigured/neutral plan must release the old expression.
+    // The engine does not clear expressions for Idle-priority motions.
+    const manager = model.internalModel?.motionManager?.expressionManager
+    if (manager?.resetExpression) {
+      // resetExpression alone is transient: later motions restore currentExpression,
+      // and an in-flight expression load can still win its reservation.
+      manager.reserveExpressionIndex = -1
+      manager.currentExpression = manager.defaultExpression
+      manager.resetExpression()
+    }
   }
   // parameterFallback === true means no motion matched: leave the engine's
   // native breathing / eye-blink in control rather than forcing a motion.

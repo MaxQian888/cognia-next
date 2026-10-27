@@ -223,7 +223,7 @@ function PetConsoleBody({
       modelReady: activeModel?.compatibility?.status !== "invalid",
       hasActiveSpritePack: Boolean(activeSpritePack),
     },
-    { modelId, packId: activeSpritePack?.id }
+    { modelId, packId: activeSpritePack?.id, mediaPackId: pet.activeMediaPackId }
   )
   const runtime = getPetSkinRuntime()
   useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
@@ -232,7 +232,9 @@ function PetConsoleBody({
       ? `live2d:${modelId}`
       : pet.skinId === "sprite-v2" && activeSpritePack?.id
         ? `sprite-v2:${activeSpritePack.id}`
-        : undefined
+        : pet.skinId === "media" && pet.activeMediaPackId
+          ? `media:${pet.activeMediaPackId}`
+          : undefined
   const diagnostics: PetAssetDiagnostic[] = [
     ...skinResolution.diagnostics,
     ...(activeModel?.compatibility

@@ -91,8 +91,8 @@ export const PetRenderer = memo(function PetRenderer({
   const assetKey =
     resolvedSelection.skinId === "live2d"
       ? `live2d:${resolvedSelection.modelId}`
-      : resolvedSelection.skinId === "sprite-v2"
-        ? `sprite-v2:${resolvedSelection.packId}`
+      : "packId" in resolvedSelection
+        ? `${resolvedSelection.skinId}:${resolvedSelection.packId}`
         : "svg"
   const [lease, setLease] = useState<PetRuntimeLease | null>(null)
   useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)

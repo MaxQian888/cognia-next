@@ -139,11 +139,12 @@ export class PetSkinRuntime {
     this.emit()
   }
 
-  objectUrl(assetKey: string, blob: Blob): string {
-    const cached = this.objectUrls.get(assetKey)
+  objectUrl(assetKey: string, blob: Blob, partKey?: string): string {
+    const key = partKey === undefined ? assetKey : `${assetKey}\0${partKey}`
+    const cached = this.objectUrls.get(key)
     if (cached) return cached
     const url = this.createObjectURL(blob)
-    this.objectUrls.set(assetKey, url)
+    this.objectUrls.set(key, url)
     this.counters.objectUrls = this.objectUrls.size
     this.markAssetLoaded(assetKey)
     return url
@@ -159,19 +160,33 @@ export class PetSkinRuntime {
     const cached = this.assetPromises.get(assetKey) as Promise<T> | undefined
     if (cached) return cached
     this.markAssetLoaded(assetKey)
-    const pending = loader().catch((error) => {
+    const forgetIfCurrent = () => {
+      // A revoked load may settle after its replacement. It must not evict
+      // the new account/session's bytes or reset that renderer's retry state.
+      if (this.assetPromises.get(assetKey) !== pending) return
       this.assetPromises.delete(assetKey)
       this.loadedAssets.delete(assetKey)
-      throw error
-    })
+    }
+    const pending = loader().then(
+      (value) => {
+        if (value === undefined) forgetIfCurrent()
+        return value
+      },
+      (error) => {
+        forgetIfCurrent()
+        throw error
+      }
+    )
     this.assetPromises.set(assetKey, pending)
     return pending
   }
 
   private clearCachedAsset(assetKey: string): void {
-    const url = this.objectUrls.get(assetKey)
-    if (url) this.revokeObjectURL(url)
-    this.objectUrls.delete(assetKey)
+    for (const [key, url] of this.objectUrls) {
+      if (key !== assetKey && !key.startsWith(`${assetKey}\0`)) continue
+      this.revokeObjectURL(url)
+      this.objectUrls.delete(key)
+    }
     this.snapshots.delete(assetKey)
     this.loadedAssets.delete(assetKey)
     this.assetPromises.delete(assetKey)

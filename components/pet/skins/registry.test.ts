@@ -9,7 +9,8 @@ describe("skin registry", () => {
   })
 
   it("ships the svg, live2d, and v2 sprite skins", () => {
-    expect(listSkinIds()).toEqual(expect.arrayContaining(["svg", "live2d", "sprite-v2"]))
+    expect(listSkinIds()).toEqual(expect.arrayContaining(["svg", "live2d", "sprite-v2", "media"]))
+    expect(getSkin("media").id).toBe("media")
     expect(getSkin("live2d").id).toBe("live2d")
     expect(getSkin("sprite-v2").id).toBe("sprite-v2")
   })

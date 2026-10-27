@@ -44,6 +44,15 @@ describe("cross-window-protocol", () => {
     { v: 1, t: "open-console", tab: "shop" },
     { v: 1, t: "open-console", tab: "achievements" },
     { v: 1, t: "appearance", selection: { skinId: "live2d", modelId: "m1" } },
+    { v: 1, t: "appearance", selection: { skinId: "media", packId: "mp_whale" } },
+    {
+      v: 1,
+      t: "profile",
+      snapshot: {
+        ...profileSnapshot,
+        binding: { characterId: "c", skin: { skinId: "media", packId: "mp_whale" }, updatedAt: "" },
+      },
+    },
     {
       v: 1,
       t: "look-target",

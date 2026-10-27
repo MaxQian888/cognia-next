@@ -146,4 +146,11 @@ describe("live2dSkin", () => {
     act(() => getPetSkinRuntime().retryAsset("live2d:m1"))
     await waitFor(() => expect(screen.getByTestId("live2d-canvas")).toHaveTextContent("m1"))
   })
+
+  it("remounts a healthy canvas when its model asset session is replaced", async () => {
+    render(<>{live2dSkin.render(baseProps)}</>)
+    const previous = await screen.findByTestId("live2d-canvas")
+    act(() => getPetSkinRuntime().retryAsset("live2d:m1"))
+    await waitFor(() => expect(screen.getByTestId("live2d-canvas")).not.toBe(previous))
+  })
 })

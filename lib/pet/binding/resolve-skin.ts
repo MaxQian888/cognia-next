@@ -13,7 +13,10 @@ export function migrateLegacyPetBinding(
 }
 
 export function resolveCharacterSkinSelection(
-  settings: Pick<PetSettings, "skinId" | "activeLive2dModelId" | "activeSpritePackId">,
+  settings: Pick<
+    PetSettings,
+    "skinId" | "activeLive2dModelId" | "activeSpritePackId" | "activeMediaPackId"
+  >,
   binding: PetCharacterBinding | null | undefined
 ): PetSkinSelection {
   const migrated = binding ? migrateLegacyPetBinding(binding) : undefined
@@ -24,5 +27,7 @@ export function resolveCharacterSkinSelection(
   if (settings.skinId === "sprite-v2" && settings.activeSpritePackId) {
     return { skinId: "sprite-v2", packId: settings.activeSpritePackId }
   }
+  if (settings.skinId === "media" && settings.activeMediaPackId)
+    return { skinId: "media", packId: settings.activeMediaPackId }
   return { skinId: "svg" }
 }

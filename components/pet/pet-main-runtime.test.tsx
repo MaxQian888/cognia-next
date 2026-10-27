@@ -155,6 +155,23 @@ describe("PetMainRuntime", () => {
     })
   })
 
+  it("publishes and updates imported media for the desktop projection", () => {
+    const { rerender } = renderRuntime({ skinId: "media", activeMediaPackId: "mp_first" })
+    expect(usePetStore.getState().appearanceSelection).toEqual({
+      skinId: "media",
+      packId: "mp_first",
+    })
+    rerender(
+      <PetMainRuntime
+        settings={{ ...DEFAULT_PET_SETTINGS, skinId: "media", activeMediaPackId: "mp_next" }}
+      />
+    )
+    expect(usePetStore.getState().appearanceSelection).toEqual({
+      skinId: "media",
+      packId: "mp_next",
+    })
+  })
+
   it("republishes only when the resolved appearance changes", () => {
     const spy = jest.spyOn(usePetStore.getState(), "setAppearanceSelection")
     const { rerender } = renderRuntime()

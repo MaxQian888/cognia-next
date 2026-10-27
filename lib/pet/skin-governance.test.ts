@@ -22,10 +22,29 @@ describe("pet skin governance", () => {
     )
   })
 
-  it("publishes an explicit capability matrix for all three families", () => {
-    expect(Object.keys(PET_SKIN_CAPABILITIES)).toEqual(["svg", "live2d", "sprite-v2"])
+  it("publishes an explicit capability matrix for all skin families", () => {
+    expect(Object.keys(PET_SKIN_CAPABILITIES).sort()).toEqual([
+      "live2d",
+      "media",
+      "sprite-v2",
+      "svg",
+    ])
     expect(PET_SKIN_CAPABILITIES.live2d).toMatchObject({ gaze: true, lowPower: true })
     expect(PET_SKIN_CAPABILITIES["sprite-v2"]).toMatchObject({ gaze: true, facing: true })
+  })
+
+  it("requires an imported media id and retains its pause and drag capabilities", () => {
+    expect(normalizePetSkinSelection("media", { mediaPackId: "mp_whale" }).selection).toEqual({
+      skinId: "media",
+      packId: "mp_whale",
+    })
+    expect(normalizePetSkinSelection("media", {}).selection).toEqual({ skinId: "svg" })
+    expect(PET_SKIN_CAPABILITIES.media).toMatchObject({
+      heldPose: true,
+      pause: true,
+      reducedMotion: true,
+      lowPower: true,
+    })
   })
 
   it("applies the shared precedence policy", () => {

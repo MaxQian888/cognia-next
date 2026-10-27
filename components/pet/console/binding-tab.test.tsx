@@ -12,6 +12,7 @@ jest.mock("@/lib/db/pet", () => ({
 }))
 jest.mock("@/lib/db/pet-models", () => ({ listPetModels: jest.fn() }))
 jest.mock("@/lib/db/pet-sprite-packs", () => ({ listPetSpritePacks: jest.fn() }))
+jest.mock("@/lib/db/pet-media-packs", () => ({ listPetMediaPacks: jest.fn() }))
 
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -32,7 +33,8 @@ function mockQueries(
   characters: unknown[] | undefined,
   bindings: unknown[] = [],
   models: unknown[] | undefined = [],
-  packs: unknown[] | undefined = []
+  packs: unknown[] | undefined = [],
+  mediaPacks: unknown[] | undefined = []
 ) {
   liveQuery.mockImplementation((fn: () => unknown) => {
     const src = String(fn)
@@ -40,11 +42,28 @@ function mockQueries(
       return characters === undefined ? undefined : { characters, bindings }
     }
     if (src.includes("listPetModels")) return models
+    if (src.includes("listPetMediaPacks")) return mediaPacks
     return packs
   })
 }
 
 describe("BindingTab", () => {
+  it("saves an imported animation pack as a character override", async () => {
+    mockQueries(
+      [{ id: "c1", name: "Coder" }],
+      [],
+      [],
+      [],
+      [{ id: "mp_whale", displayName: "Whale" }]
+    )
+    const user = userEvent.setup()
+    render(<BindingTab />)
+    await user.click(screen.getByRole("combobox", { name: /skin.*coder/i }))
+    await user.click(screen.getByRole("option", { name: /Whale/i }))
+    expect(upsertPetBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ characterId: "c1", skin: { skinId: "media", packId: "mp_whale" } })
+    )
+  })
   it("shows a placeholder, not the empty state, while loading", () => {
     mockQueries(undefined)
     render(<BindingTab />)

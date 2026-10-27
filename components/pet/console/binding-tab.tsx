@@ -61,6 +61,7 @@ import {
 import { deletePetBinding, listPetBindingsWithCharacters, upsertPetBinding } from "@/lib/db/pet"
 import { listPetModels } from "@/lib/db/pet-models"
 import { listPetSpritePacks } from "@/lib/db/pet-sprite-packs"
+import { listPetMediaPacks } from "@/lib/db/pet-media-packs"
 import { ALL_PET_SPECIES } from "@/lib/pet/skins/species-traits"
 import type { PetCharacterBinding, PetSkinSelection, PetSpecies } from "@/types/pet"
 import { PetTabSkeleton } from "./pet-console-skeleton"
@@ -72,6 +73,7 @@ function selectionValue(binding: PetCharacterBinding | undefined): string {
   if (binding?.skin?.skinId === "svg") return "svg"
   if (binding?.skin?.skinId === "live2d") return `live2d:${binding.skin.modelId}`
   if (binding?.skin?.skinId === "sprite-v2") return `sprite-v2:${binding.skin.packId}`
+  if (binding?.skin?.skinId === "media") return `media:${binding.skin.packId}`
   return binding?.live2dModelId ? `live2d:${binding.live2dModelId}` : INHERIT
 }
 
@@ -80,6 +82,7 @@ function parseSelection(value: string | null): PetSkinSelection | undefined {
   if (value === "svg") return { skinId: "svg" }
   if (value.startsWith("live2d:")) return { skinId: "live2d", modelId: value.slice(7) }
   if (value.startsWith("sprite-v2:")) return { skinId: "sprite-v2", packId: value.slice(10) }
+  if (value.startsWith("media:")) return { skinId: "media", packId: value.slice(6) }
   return undefined
 }
 
@@ -93,9 +96,15 @@ export function BindingTab({ readOnly = false }: BindingTabProps = {}) {
   const data = useLiveQuery(() => listPetBindingsWithCharacters(), [])
   const models = useLiveQuery(() => listPetModels(), [])
   const packs = useLiveQuery(() => listPetSpritePacks(), [])
+  const mediaPacks = useLiveQuery(() => listPetMediaPacks(), [])
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
 
-  if (data === undefined || models === undefined || packs === undefined) {
+  if (
+    data === undefined ||
+    models === undefined ||
+    packs === undefined ||
+    mediaPacks === undefined
+  ) {
     return <PetTabSkeleton testId="pet-binding-loading" count={4} />
   }
 
@@ -162,6 +171,10 @@ export function BindingTab({ readOnly = false }: BindingTabProps = {}) {
       const name = models.find((model) => `live2d:${model.id}` === value)?.name
       return name ? t("binding.live2dOption", { name }) : t("console.remote.binding.live2d")
     }
+    if (value.startsWith("media:")) {
+      const name = mediaPacks.find((pack) => `media:${pack.id}` === value)?.displayName
+      return name ? t("binding.mediaOption", { name }) : t("console.remote.binding.media")
+    }
     const name = packs.find((pack) => `sprite-v2:${pack.id}` === value)?.displayName
     return name ? t("binding.spriteOption", { name }) : t("console.remote.binding.sprite")
   }
@@ -214,6 +227,7 @@ export function BindingTab({ readOnly = false }: BindingTabProps = {}) {
               ? t("binding.useSvg")
               : (models.find((model) => `live2d:${model.id}` === skinValue)?.name ??
                 packs.find((pack) => `sprite-v2:${pack.id}` === skinValue)?.displayName ??
+                mediaPacks.find((pack) => `media:${pack.id}` === skinValue)?.displayName ??
                 t("binding.inheritAppearance"))
 
         return (
@@ -280,6 +294,11 @@ export function BindingTab({ readOnly = false }: BindingTabProps = {}) {
                       {packs.map((pack) => (
                         <ComboboxItem key={pack.id} value={`sprite-v2:${pack.id}`}>
                           {t("binding.spriteOption", { name: pack.displayName })}
+                        </ComboboxItem>
+                      ))}
+                      {mediaPacks.map((pack) => (
+                        <ComboboxItem key={pack.id} value={`media:${pack.id}`}>
+                          {t("binding.mediaOption", { name: pack.displayName })}
                         </ComboboxItem>
                       ))}
                     </ComboboxList>

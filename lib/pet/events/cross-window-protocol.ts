@@ -129,6 +129,7 @@ const profileSnapshotSchema: z.ZodType<PetBridgeProfileSnapshot> = z.object({
           z.object({ skinId: z.literal("svg") }),
           z.object({ skinId: z.literal("live2d"), modelId: z.string().max(200) }),
           z.object({ skinId: z.literal("sprite-v2"), packId: z.string().max(200) }),
+          z.object({ skinId: z.literal("media"), packId: z.string().max(200) }),
         ])
         .optional(),
     })
@@ -224,11 +225,11 @@ function decodeSelection(value: unknown): PetSkinSelection | null {
     return { skinId: "live2d", modelId: value.modelId }
   }
   if (
-    value.skinId === "sprite-v2" &&
+    (value.skinId === "sprite-v2" || value.skinId === "media") &&
     typeof value.packId === "string" &&
     value.packId.length <= 200
   ) {
-    return { skinId: "sprite-v2", packId: value.packId }
+    return { skinId: value.skinId, packId: value.packId }
   }
   return null
 }

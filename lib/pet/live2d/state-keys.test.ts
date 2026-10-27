@@ -1,3 +1,5 @@
+import en from "@/i18n/messages/en/settings/pet.json"
+import zh from "@/i18n/messages/zh-CN/settings/pet.json"
 import {
   ALL_MAPPING_ROWS,
   ONE_SHOT_KEYS,
@@ -8,6 +10,15 @@ import {
 } from "./state-keys"
 
 describe("state-keys", () => {
+  it.each([en, zh])("localizes every authorable state and one-shot", (messages) => {
+    for (const state of STATE_KEYS) {
+      expect(messages.live2d.stateLabels).toHaveProperty(state, expect.stringMatching(/\S/))
+    }
+    for (const shot of ONE_SHOT_KEYS) {
+      expect(messages.live2d.oneShotLabels).toHaveProperty(shot, expect.stringMatching(/\S/))
+    }
+  })
+
   it("covers all 12 states and 12 one-shots", () => {
     expect(STATE_KEYS).toHaveLength(12)
     expect(ONE_SHOT_KEYS).toHaveLength(12)

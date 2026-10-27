@@ -54,6 +54,33 @@ function setup(initial: Args) {
 }
 
 describe("useLive2dMotion", () => {
+  it("clears the previous expression when saved overrides reset to engine defaults", () => {
+    const { model } = makeModel()
+    const resetExpression = jest.fn()
+    const neutral = { name: "neutral" }
+    const expressionManager = {
+      resetExpression,
+      defaultExpression: neutral,
+      currentExpression: { name: "happy" },
+      reserveExpressionIndex: 0,
+    }
+    Object.assign(model.internalModel!.motionManager!, { expressionManager })
+    const initial: Args = {
+      model,
+      state: "idle",
+      oneShot: null,
+      caps,
+      reducedMotion: false,
+      overrides: { idle: { expressionId: "happy" } },
+    }
+    const view = setup(initial)
+    expect(model.expression).toHaveBeenCalledWith("happy")
+    view.rerender({ ...initial, overrides: {} })
+    expect(resetExpression).toHaveBeenCalledTimes(1)
+    expect(expressionManager.currentExpression).toBe(neutral)
+    expect(expressionManager.reserveExpressionIndex).toBe(-1)
+  })
+
   it("applies an idle-priority motion for the resting idle state", () => {
     const { model } = makeModel()
     setup({ model, state: "idle", oneShot: null, caps, reducedMotion: false })

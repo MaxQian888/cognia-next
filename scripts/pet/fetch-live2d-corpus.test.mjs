@@ -14,10 +14,19 @@ test("the public corpus is revision-pinned and every asset has an integrity", as
     await readFile(new URL("../../test-fixtures/pet/live2d-public-corpus.json", import.meta.url))
   )
 
-  assert.deepEqual(validateCorpusCatalog(catalog), { models: 2, files: 40 })
+  assert.deepEqual(validateCorpusCatalog(catalog), { models: 2, files: 44 })
   for (const model of Object.values(catalog)) {
     assert.match(model.revision, /^[0-9a-f]{40}$/)
     assert.ok(model.baseUrl.includes(model.revision))
+    const name = model.files
+      .find((file) => file.path.endsWith(".model3.json"))
+      .path.replace(".model3.json", "")
+    for (const metadata of [`${name}.userdata3.json`, `${name}.cdi3.json`]) {
+      assert.ok(
+        model.files.some((file) => file.path === metadata),
+        `missing sample metadata: ${metadata}`
+      )
+    }
   }
 })
 

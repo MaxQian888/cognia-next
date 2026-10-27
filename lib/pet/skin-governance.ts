@@ -6,6 +6,20 @@ import type {
 } from "@/types/pet"
 
 export const PET_SKIN_CAPABILITIES: Readonly<Record<PetSkinId, PetSkinCapabilities>> = {
+  media: {
+    semanticStates: true,
+    oneShots: true,
+    locomotion: true,
+    facing: true,
+    heldPose: true,
+    speaking: false,
+    mood: false,
+    flavor: false,
+    gaze: false,
+    pause: true,
+    reducedMotion: true,
+    lowPower: true,
+  },
   svg: {
     semanticStates: true,
     oneShots: true,
@@ -56,6 +70,7 @@ export interface NormalizeSelectionAssets {
   coreReady?: boolean
   modelReady?: boolean
   packReady?: boolean
+  mediaPackId?: string
 }
 
 export interface NormalizedPetSkinSelection {
@@ -101,17 +116,18 @@ export function normalizePetSkinSelection(
       diagnostics: [],
     }
   }
-  if (requested === "sprite-v2") {
-    if (!assets.packId || assets.packReady === false) {
+  if (requested === "sprite-v2" || requested === "media") {
+    const packId = requested === "media" ? assets.mediaPackId : assets.packId
+    if (!packId || (requested === "sprite-v2" && assets.packReady === false)) {
       return {
         requestedSkinId: requested,
         selection: { skinId: "svg" },
-        diagnostics: [fallbackDiagnostic("assetMissing", assets.packId)],
+        diagnostics: [fallbackDiagnostic("assetMissing", packId)],
       }
     }
     return {
       requestedSkinId: requested,
-      selection: { skinId: "sprite-v2", packId: assets.packId },
+      selection: { skinId: requested, packId },
       diagnostics: [],
     }
   }

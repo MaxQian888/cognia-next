@@ -25,6 +25,12 @@ import {
   type PetBridgeMessage,
 } from "./cross-window-protocol"
 import type { PetConsoleTab } from "@/lib/pet/console-tabs"
+import { liveQuery } from "dexie"
+import { getPetModel } from "@/lib/db/pet-models"
+import { loadLive2dSkinAsset } from "@/lib/pet/skin-assets"
+import { startMainLive2dAssets } from "@/lib/pet/live2d/asset-bridge"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { startMainMediaAssets } from "@/lib/pet/media-packs/asset-bridge"
 
 /** Minimal `BroadcastChannel` surface for DI in tests. */
 export interface BroadcastChannelLike {
@@ -74,6 +80,36 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   if (!channel) return () => {}
   const store = deps.store ?? usePetStore
   const emit = deps.emit ?? emitPetEvent
+  const mediaAssets =
+    getPetWindowRole() === "main"
+      ? startMainMediaAssets({
+          selectedPack: () => {
+            const state = store.getState()
+            return state.profileSnapshot && state.appearanceSelection?.skinId === "media"
+              ? state.appearanceSelection.packId
+              : undefined
+          },
+        })
+      : undefined
+  const assets =
+    getPetWindowRole() === "main"
+      ? startMainLive2dAssets({
+          selectedModel: () => {
+            const state = store.getState()
+            return state.profileSnapshot && state.appearanceSelection?.skinId === "live2d"
+              ? state.appearanceSelection.modelId
+              : undefined
+          },
+          readAsset: loadLive2dSkinAsset,
+          watchRow: (id, next) => {
+            const subscription = liveQuery(() => getPetModel(id)).subscribe({
+              next,
+              error: () => next(undefined),
+            })
+            return () => subscription.unsubscribe()
+          },
+        })
+      : undefined
 
   // Broadcast the current snapshot so a late-opening overlay catches up.
   const broadcastSnapshot = () => {
@@ -88,6 +124,8 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   }
 
   const unsub = store.subscribe((state, prev) => {
+    assets?.sync()
+    mediaAssets?.sync()
     if (state.profileSnapshot !== prev.profileSnapshot) {
       post(channel, { v: 1, t: "profile", snapshot: state.profileSnapshot })
     }
@@ -134,6 +172,8 @@ export function startMainPetBridge(deps: MainPetBridgeDeps = {}): () => void {
   broadcastSnapshot()
 
   return () => {
+    assets?.dispose()
+    mediaAssets?.dispose()
     post(channel, { v: 1, t: "profile", snapshot: null })
     unsub()
     channel.onmessage = null

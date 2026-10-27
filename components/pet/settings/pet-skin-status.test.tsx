@@ -2,6 +2,20 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { PetSkinStatus } from "./pet-skin-status"
 
 describe("PetSkinStatus", () => {
+  it("names the animation family and offers recovery when imported bytes fail", () => {
+    const retry = jest.fn()
+    render(
+      <PetSkinStatus
+        requestedSkinId="media"
+        effectiveSkinId="svg"
+        diagnostics={[{ code: "renderFailed", severity: "error", recoverable: true }]}
+        onRetry={retry}
+      />
+    )
+    expect(screen.getByText(/requested.*video|requested.*animation/i)).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
   it("shows requested and effective skins with an exact resource diagnostic", () => {
     render(
       <PetSkinStatus

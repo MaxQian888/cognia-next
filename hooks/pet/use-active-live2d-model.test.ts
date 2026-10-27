@@ -1,10 +1,24 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import {
   useActiveLive2dModel,
   useCubismCoreAvailable,
   resetCubismCoreProbe,
+  useLive2dModelRow,
 } from "./use-active-live2d-model"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
+import type { PetModelRow } from "@/lib/db/pet-models"
+
+let mirrored = false
+let mirroredRow: PetModelRow | undefined
+const mirrorListeners = new Set<() => void>()
+jest.mock("@/lib/pet/live2d/asset-bridge", () => ({
+  isLive2dAssetMirror: () => mirrored,
+  getMirroredLive2dRow: () => mirroredRow,
+  subscribeLive2dMirror: (listener: () => void) => {
+    mirrorListeners.add(listener)
+    return () => mirrorListeners.delete(listener)
+  },
+}))
 
 // The gate now resolves through the loader's script-injection path, not a HEAD
 // fetch. Mock that seam so we control readiness without touching the DOM.
@@ -63,6 +77,27 @@ beforeEach(() => {
   resetCubismCoreProbe()
   ensureCubismCore.mockResolvedValue(true)
   getPetModel.mockResolvedValue(row)
+  mirrored = false
+  mirroredRow = undefined
+})
+
+it("observes projected overlay metadata without opening a local account database", async () => {
+  mirrored = true
+  const { result, unmount } = renderHook(() => useLive2dModelRow("m1"))
+  expect(result.current).toBeUndefined()
+  act(() => {
+    mirroredRow = { ...row, transform: { scale: 0.65, offsetX: 0.15, offsetY: 0 } }
+    for (const listener of mirrorListeners) listener()
+  })
+  expect(result.current?.transform?.scale).toBe(0.65)
+  act(() => {
+    mirroredRow = undefined
+    for (const listener of mirrorListeners) listener()
+  })
+  expect(result.current).toBeUndefined()
+  expect(getPetModel).not.toHaveBeenCalled()
+  unmount()
+  expect(mirrorListeners.size).toBe(0)
 })
 
 describe("useCubismCoreAvailable", () => {

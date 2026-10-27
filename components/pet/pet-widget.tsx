@@ -82,10 +82,12 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
     hasActiveModel: Boolean(modelId),
     modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+    mediaPackId: preferredSelection.skinId === "media" ? preferredSelection.packId : undefined,
   })
   const selection = selectionFromEffectiveSkin(effectiveSkin, {
     modelId,
     packId: activeSpritePack?.id,
+    mediaPackId: preferredSelection.skinId === "media" ? preferredSelection.packId : undefined,
   })
   const { state, oneShot } = usePetAnimationState(
     reduced,

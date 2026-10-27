@@ -126,7 +126,7 @@ export function PetDesktopControls({ pet }: PetControlsProps) {
         <Slider
           id="pet-desktop-size"
           min={96}
-          max={256}
+          max={512}
           step={16}
           value={[shownSize]}
           onValueChange={([size]) => setSizeDraft(size)}

@@ -74,18 +74,20 @@ export function PetMainRuntime({ settings, activeCharacterId }: PetMainRuntimePr
     coreReady,
   } = useActiveLive2dModel(settings, preferredSelection)
   const { row: activeSpritePack } = useActiveSpritePack(settings, preferredSelection)
+  const mediaPackId = preferredSelection.skinId === "media" ? preferredSelection.packId : undefined
   const skinId = resolveEffectiveSkin(preferredSelection.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
     modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+    mediaPackId,
   })
   const packId = activeSpritePack?.id
   useEffect(() => {
     usePetStore
       .getState()
-      .setAppearanceSelection(selectionFromEffectiveSkin(skinId, { modelId, packId }))
-  }, [skinId, modelId, packId])
+      .setAppearanceSelection(selectionFromEffectiveSkin(skinId, { modelId, packId, mediaPackId }))
+  }, [skinId, modelId, packId, mediaPackId])
 
   return null
 }

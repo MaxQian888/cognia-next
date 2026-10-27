@@ -36,7 +36,7 @@ jest.mock("@/lib/pet/settings-sync", () => ({
 }))
 
 import { PetDesktopControls } from "./pet-desktop-controls"
-import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
+import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 
 beforeEach(() => {
   openPetWindow.mockClear()
@@ -63,6 +63,18 @@ const WANDER = {
 }
 
 describe("PetDesktopControls", () => {
+  it("uses a larger default without replacing an existing saved size", () => {
+    expect(DEFAULT_PET_DESKTOP_OVERLAY.size).toBe(256)
+    render(
+      <PetDesktopControls
+        pet={withDesktop({ enabled: true, clickThrough: false, size: 128, position: null })}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.getAllByRole("slider")[0]).toHaveAttribute("aria-valuenow", "128")
+    expect(screen.getAllByRole("slider")[0]).toHaveAttribute("aria-valuemax", "512")
+    expect(desktopWrites).toHaveLength(0)
+  })
   it("links to the shortcuts settings section to configure the toggle hotkey", () => {
     render(<PetDesktopControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />)
     const link = screen.getByRole("link", { name: /configure a global hotkey/i })
@@ -182,9 +194,9 @@ describe("PetDesktopControls", () => {
     // Pointer drags fire change per step and commit once on pointer-up; the
     // label follows the draft immediately.
     fireEvent.keyDown(slider, { key: "End" })
-    expect(screen.getByText(/256px/)).toBeInTheDocument()
+    expect(screen.getByText(/512px/)).toBeInTheDocument()
     expect(desktopWrites).toHaveLength(1)
-    expect(desktopWrites[0]).toEqual(expect.objectContaining({ size: 256 }))
+    expect(desktopWrites[0]).toEqual(expect.objectContaining({ size: 512 }))
   })
 
   it("disables the climb-windows toggle on Linux with an explanatory hint", () => {

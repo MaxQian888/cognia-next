@@ -76,15 +76,18 @@ export function PetPopupView() {
   const preferredSelection = bridgedSelection ?? resolveCharacterSkinSelection(pet, undefined)
   const { modelId, row: activeModel, coreReady } = useActiveLive2dModel(pet, preferredSelection)
   const { row: activeSpritePack } = useActiveSpritePack(pet, preferredSelection)
+  const mediaPackId = preferredSelection.skinId === "media" ? preferredSelection.packId : undefined
   const effectiveSkin = resolveEffectiveSkin(preferredSelection.skinId, {
     coreReady,
     hasActiveModel: Boolean(modelId),
     modelReady: activeModel?.compatibility?.status !== "invalid",
     hasActiveSpritePack: Boolean(activeSpritePack),
+    mediaPackId,
   })
   const selection = selectionFromEffectiveSkin(effectiveSkin, {
     modelId,
     packId: activeSpritePack?.id,
+    mediaPackId,
   })
 
   // Paint through to the desktop while mounted (transparent page background).
@@ -181,11 +184,11 @@ export function PetPopupView() {
   // Overlay-only window actions. Each closes the popup afterwards so the
   // action feels like selecting a menu item.
   const onClickThrough = () => {
-    void setPetClickThrough(true)
-    // Merged into the persisted record under the cross-window lock: this
-    // window's copy may predate changes made in the main window.
+    // Wait for the main account to save before disabling native mouse input.
     void updateDesktopPetSettings(() => ({ clickThrough: true }), DEFAULT_PET_DESKTOP_OVERLAY)
-    void closePetPopup()
+      .then(() => setPetClickThrough(true))
+      .finally(() => closePetPopup())
+      .catch(() => {})
   }
   // Hiding the sprite window also hides this popup (handled in Rust), so no
   // explicit close call is needed here.

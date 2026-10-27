@@ -173,9 +173,11 @@ let bubbleValue: {
 } | null = null
 const mockEnqueueOneShot = jest.fn()
 const mockSetBubble = jest.fn()
+let appearanceSelection: unknown = null
 jest.mock("@/stores/pet/pet-store", () => ({
   usePetStore: Object.assign(
-    (selector: (s: { bubble: unknown }) => unknown) => selector({ bubble: bubbleValue }),
+    (selector: (s: { bubble: unknown; appearanceSelection: unknown }) => unknown) =>
+      selector({ bubble: bubbleValue, appearanceSelection }),
     { getState: () => ({ enqueueOneShot: mockEnqueueOneShot, setBubble: mockSetBubble }) }
   ),
 }))
@@ -405,13 +407,27 @@ describe("PetOverlayView", () => {
     )
   })
 
+  it("renders the projected media pack while preserving the saved desktop size", () => {
+    withPet()
+    appearanceSelection = { skinId: "media", packId: "mp_whale" }
+    render(<PetOverlayView />)
+    expect(rendererProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skinId: "media",
+        selection: { skinId: "media", packId: "mp_whale" },
+        size: 160,
+      })
+    )
+    appearanceSelection = null
+  })
+
   it("falls back to DEFAULT_PET_SETTINGS when settings are unloaded", () => {
     withPet()
     settingsValue = undefined
     render(<PetOverlayView />)
-    // DEFAULT_PET_DESKTOP_OVERLAY.size === 128
+    // New profiles use the larger desktop default.
     expect(rendererProps).toHaveBeenCalledWith(
-      expect.objectContaining({ size: 128, skinId: "svg" })
+      expect.objectContaining({ size: 256, skinId: "svg" })
     )
   })
 
@@ -586,7 +602,7 @@ describe("PetOverlayView", () => {
       },
     }
     render(<PetOverlayView />)
-    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ size: 128 }))
+    expect(rendererProps).toHaveBeenCalledWith(expect.objectContaining({ size: 256 }))
   })
 
   it("dragging beyond the threshold moves the window and persists the resting position", async () => {

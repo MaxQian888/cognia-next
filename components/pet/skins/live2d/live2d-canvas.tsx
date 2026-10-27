@@ -12,6 +12,8 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import type { PetModelRow } from "@/lib/db/pet-models"
+import { useLive2dModelRow } from "@/hooks/pet/use-active-live2d-model"
 import { createLive2dLoader } from "@/lib/pet/live2d/loader"
 import { loadLive2dSkinAsset } from "@/lib/pet/skin-assets"
 import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
@@ -156,12 +158,15 @@ export default function Live2dCanvas({
     motionGroups: [],
     expressionIds: [],
   })
-  const [assetTransform, setAssetTransform] = useState<Live2dTransform | undefined>()
-  const [assetMotionOverrides, setAssetMotionOverrides] = useState<
-    Live2dMotionOverrides | undefined
-  >()
+  // Account metadata reaches secondary windows through the pet asset projection.
+  // Keep the loaded row only as the initial fallback; drafts still take priority.
+  const savedModel = useLive2dModelRow(modelId)
+  const [loadedModelRow, setLoadedModelRow] = useState<PetModelRow>()
+  const customization = savedModel ?? loadedModelRow
+  const assetTransform = customization?.transform
+  const assetMotionOverrides = customization?.motionOverrides
   const [parameterIds, setParameterIds] = useState<string[]>([])
-  const [assetParameterMapping, setAssetParameterMapping] = useState<Live2dParameterMapping>()
+  const assetParameterMapping = customization?.parameterMapping
   const parameterMapping = useMemo(
     () =>
       resolveLive2dParameterMapping(
@@ -349,15 +354,13 @@ export default function Live2dCanvas({
           expressionIds: row.expressionIds,
           motionGroupCounts,
         })
-        setAssetTransform(row.transform)
-        setAssetMotionOverrides(row.motionOverrides)
+        setLoadedModelRow(row)
         const core = (
           loaded as unknown as {
             internalModel?: { coreModel?: Parameters<typeof readLive2dParameterIds>[0] }
           }
         ).internalModel?.coreModel
         setParameterIds(readLive2dParameterIds(core))
-        setAssetParameterMapping(row.parameterMapping as Live2dParameterMapping | undefined)
         setModel(loaded)
         snapshotFrame = requestAnimationFrame(() => {
           try {
@@ -464,7 +467,7 @@ export default function Live2dCanvas({
     speaking && !paused,
     reducedMotion,
     undefined,
-    parameterMapping.mouthOpen
+    parameterMapping.mouthOpen ?? null
   )
 
   useLive2dGaze(

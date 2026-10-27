@@ -134,7 +134,7 @@ export function PetCustomizationWorkspace() {
       modelReady: activeModel?.compatibility?.status !== "invalid",
       hasActiveSpritePack: Boolean(activeSpritePack),
     },
-    { modelId, packId: activeSpritePack?.id }
+    { modelId, packId: activeSpritePack?.id, mediaPackId: pet.activeMediaPackId }
   )
   const runtime = getPetSkinRuntime()
   useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
@@ -143,7 +143,9 @@ export function PetCustomizationWorkspace() {
       ? `live2d:${modelId}`
       : pet.skinId === "sprite-v2" && activeSpritePack?.id
         ? `sprite-v2:${activeSpritePack.id}`
-        : undefined
+        : pet.skinId === "media" && pet.activeMediaPackId
+          ? `media:${pet.activeMediaPackId}`
+          : undefined
   const diagnostics: PetAssetDiagnostic[] = [
     ...skinResolution.diagnostics,
     ...(activeModel?.compatibility
@@ -182,13 +184,17 @@ export function PetCustomizationWorkspace() {
           description={
             skinId === "live2d"
               ? tc("look.descriptionLive2d")
-              : skinId === "sprite-v2"
-                ? tc("look.descriptionSprite")
-                : tc("look.description")
+              : skinId === "media"
+                ? tc("look.descriptionMedia")
+                : skinId === "sprite-v2"
+                  ? tc("look.descriptionSprite")
+                  : tc("look.description")
           }
         >
           {skinId === "live2d" ? (
             <PetLive2dLookControls pet={pet} />
+          ) : skinId === "media" ? (
+            <FieldDescription>{tc("look.mediaManagedBelow")}</FieldDescription>
           ) : skinId === "sprite-v2" ? (
             <FieldDescription>{tc("look.spriteManagedBelow")}</FieldDescription>
           ) : (

@@ -26,7 +26,7 @@ export function PetSkinStatus({
   if (!isFallback && diagnostics.length === 0) return null
 
   const skinName = (id: string) =>
-    id === "svg" || id === "live2d" || id === "sprite-v2" ? t(`skins.${id}`) : id
+    id === "svg" || id === "live2d" || id === "sprite-v2" || id === "media" ? t(`skins.${id}`) : id
 
   return (
     <Alert>

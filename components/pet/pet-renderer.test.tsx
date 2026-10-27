@@ -2,7 +2,7 @@ import { render, waitFor } from "@testing-library/react"
 import { PetRenderer } from "./pet-renderer"
 import type { PetBones } from "@/types/pet"
 import { getSkin, registerSkin } from "./skins/registry"
-import { resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
+import { getPetSkinRuntime, resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 function makeBones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -21,6 +21,25 @@ function makeBones(overrides: Partial<PetBones> = {}): PetBones {
 
 describe("PetRenderer", () => {
   beforeEach(() => resetPetSkinRuntimeForTests())
+
+  it("resolves non-owning media previews against the selected pack's snapshot", () => {
+    const runtime = getPetSkinRuntime()
+    const owner = runtime.acquireLease("owner", "configuration", "media:mp_whale")
+    runtime.publishSnapshot("media:mp_whale", "data:image/png;base64,whale")
+    const { container, unmount } = render(
+      <PetRenderer
+        bones={makeBones()}
+        stage="adult"
+        state="idle"
+        skinId="media"
+        selection={{ skinId: "media", packId: "mp_whale" }}
+        renderPriority="thumbnail"
+      />
+    )
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,whale")
+    unmount()
+    owner.release()
+  })
 
   it("renders the svg skin by default", () => {
     const { container } = render(<PetRenderer bones={makeBones()} stage="baby" state="idle" />)

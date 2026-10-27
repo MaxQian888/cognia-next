@@ -7,11 +7,32 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getPetModel, type PetModelRow } from "@/lib/db/pet-models"
 import { ensureCubismCore, resetCubismCoreLoaderForTests } from "@/lib/pet/live2d/core-loader"
 import type { PetSettings, PetSkinSelection } from "@/types/pet"
+import {
+  getMirroredLive2dRow,
+  isLive2dAssetMirror,
+  subscribeLive2dMirror,
+} from "@/lib/pet/live2d/asset-bridge"
+
+/** Read account-owned metadata locally, or its read-only overlay projection. */
+export function useLive2dModelRow(modelId: string | undefined): PetModelRow | undefined {
+  const mirrored = isLive2dAssetMirror()
+  const local = useLiveQuery(
+    () => (!mirrored && modelId ? getPetModel(modelId) : Promise.resolve(undefined)),
+    [mirrored, modelId],
+    undefined
+  )
+  const remote = useSyncExternalStore(
+    subscribeLive2dMirror,
+    () => (mirrored && modelId ? getMirroredLive2dRow(modelId) : undefined),
+    () => undefined
+  )
+  return mirrored ? remote : local
+}
 
 export interface ActiveLive2dModel {
   modelId: string | undefined
@@ -77,11 +98,7 @@ export function useActiveLive2dModel(
       : selection
         ? undefined
         : settings.activeLive2dModelId
-  const row = useLiveQuery(
-    () => (modelId ? getPetModel(modelId) : Promise.resolve(undefined)),
-    [modelId],
-    undefined
-  )
+  const row = useLive2dModelRow(modelId)
   // Only load the core when this user has the Live2D skin selected AND an active
   // model — otherwise the gate is moot (`resolveEffectiveSkin` returns "svg")
   // and SVG users must not download the core.

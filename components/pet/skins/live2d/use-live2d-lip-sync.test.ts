@@ -62,6 +62,27 @@ describe("useLive2dLipSync", () => {
     expect(on).not.toHaveBeenCalled()
   })
 
+  it("does not subscribe or write when the mouth parameter is explicitly disabled", () => {
+    const { model, on, setParameterValueById } = makeModel()
+    renderHook(() => useLive2dLipSync(model, true, false, () => 1000, null))
+    expect(on).not.toHaveBeenCalled()
+    expect(setParameterValueById).not.toHaveBeenCalled()
+  })
+
+  it("unsubscribes and closes the old mouth when its mapping is disabled", () => {
+    const { model, on, off, setParameterValueById } = makeModel()
+    const { rerender } = renderHook(
+      ({ parameterId }: { parameterId: string | null }) =>
+        useLive2dLipSync(model, true, false, undefined, parameterId),
+      { initialProps: { parameterId: "CustomMouth" as string | null } }
+    )
+    expect(on).toHaveBeenCalledTimes(1)
+    rerender({ parameterId: null })
+    expect(off).toHaveBeenCalledWith("beforeModelUpdate", expect.any(Function))
+    expect(on).toHaveBeenCalledTimes(1)
+    expect(setParameterValueById).toHaveBeenLastCalledWith("CustomMouth", 0)
+  })
+
   it("is a no-op when the model lacks the engine surface", () => {
     const bare: Live2dLipSyncModel = { internalModel: { motionManager: {} } as never }
     expect(() => renderHook(() => useLive2dLipSync(bare, true, false))).not.toThrow()

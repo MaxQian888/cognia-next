@@ -15,11 +15,12 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { PetModelManager } from "@/components/settings/pet/pet-model-manager"
 import { PetSpritePackManager } from "@/components/settings/pet/pet-sprite-pack-manager"
+import { PetMediaPackManager } from "@/components/settings/pet/pet-media-pack-manager"
 import { useCubismCoreAvailable } from "@/hooks/pet/use-active-live2d-model"
 import type { PetMotionPreference, PetSettings, PetSkinId } from "@/types/pet"
 
 const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
-const SKINS: PetSkinId[] = ["svg", "live2d", "sprite-v2"]
+const SKINS: PetSkinId[] = ["svg", "live2d", "sprite-v2", "media"]
 
 export interface PetControlsProps {
   pet: PetSettings
@@ -110,6 +111,7 @@ export function PetAppearanceControls({ pet, patch }: PetControlsProps) {
         <PetModelManager settings={pet} onPatch={patch} coreReady={coreReady} />
       ) : null}
       {skinId === "sprite-v2" ? <PetSpritePackManager settings={pet} onPatch={patch} /> : null}
+      {skinId === "media" ? <PetMediaPackManager settings={pet} onPatch={patch} /> : null}
     </FieldGroup>
   )
 }

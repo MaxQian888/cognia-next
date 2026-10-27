@@ -10,6 +10,9 @@ jest.mock("@/components/settings/pet/pet-model-manager", () => ({
 jest.mock("@/components/settings/pet/pet-sprite-pack-manager", () => ({
   PetSpritePackManager: () => <div data-testid="pet-sprite-pack-manager" />,
 }))
+jest.mock("@/components/settings/pet/pet-media-pack-manager", () => ({
+  PetMediaPackManager: () => <div data-testid="pet-media-pack-manager" />,
+}))
 
 import { PetAppearanceControls } from "./pet-appearance-controls"
 import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
@@ -19,6 +22,18 @@ beforeEach(() => {
 })
 
 describe("PetAppearanceControls", () => {
+  it("offers the media importer without requiring the Live2D runtime", () => {
+    coreAvailable = false
+    const patch = jest.fn()
+    const { rerender } = render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
+    fireEvent.click(screen.getByRole("radio", { name: /video|frame animation/i }))
+    expect(patch).toHaveBeenCalledWith({ skinId: "media" })
+    rerender(
+      <PetAppearanceControls pet={{ ...DEFAULT_PET_SETTINGS, skinId: "media" }} patch={patch} />
+    )
+    expect(screen.getByTestId("pet-media-pack-manager")).toBeVisible()
+    expect(screen.queryByText(/runtime isn't ready/i)).toBeNull()
+  })
   it("patches motion and skin", () => {
     const patch = jest.fn()
     render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)

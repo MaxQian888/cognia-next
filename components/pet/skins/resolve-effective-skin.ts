@@ -17,6 +17,7 @@ export interface EffectiveSkinOpts {
   modelReady?: boolean
   /** Whether the selected v2 sprite pack still exists in local storage. */
   hasActiveSpritePack?: boolean
+  mediaPackId?: string
 }
 
 export function resolveEffectiveSkin(
@@ -29,6 +30,7 @@ export function resolveEffectiveSkin(
     modelReady: opts.modelReady,
     packId: opts.hasActiveSpritePack === false ? undefined : "__active__",
     packReady: opts.hasActiveSpritePack,
+    mediaPackId: opts.mediaPackId,
   }).selection.skinId
 }
 
@@ -36,7 +38,7 @@ export function resolveEffectiveSkin(
 export function resolveEffectiveSkinSelection(
   skinId: string | undefined,
   opts: EffectiveSkinOpts,
-  assets: { modelId?: string; packId?: string }
+  assets: { modelId?: string; packId?: string; mediaPackId?: string }
 ): NormalizedPetSkinSelection {
   return normalizePetSkinSelection(skinId, {
     modelId: opts.hasActiveModel ? assets.modelId : undefined,
@@ -44,15 +46,17 @@ export function resolveEffectiveSkinSelection(
     modelReady: opts.modelReady,
     packId: opts.hasActiveSpritePack === false ? undefined : assets.packId,
     packReady: opts.hasActiveSpritePack,
+    mediaPackId: assets.mediaPackId,
   })
 }
 
 /** Turn the already-governed effective family into the asset-carrying contract. */
 export function selectionFromEffectiveSkin(
   skinId: PetSkinId,
-  assets: { modelId?: string; packId?: string }
+  assets: { modelId?: string; packId?: string; mediaPackId?: string }
 ): PetSkinSelection {
   if (skinId === "live2d" && assets.modelId) return { skinId, modelId: assets.modelId }
   if (skinId === "sprite-v2" && assets.packId) return { skinId, packId: assets.packId }
+  if (skinId === "media" && assets.mediaPackId) return { skinId, packId: assets.mediaPackId }
   return { skinId: "svg" }
 }

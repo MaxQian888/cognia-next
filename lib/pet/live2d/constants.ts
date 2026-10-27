@@ -38,22 +38,17 @@ export interface SampleModelEntry {
 }
 
 const SAMPLE_BASE =
-  "https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/"
+  "https://raw.githubusercontent.com/Live2D/CubismWebSamples/b1de66b0b1f1cb881d95fb6158622aeb6a2827bd/Samples/Resources/"
 
 /**
  * Official Cubism sample models. This is data only — the real file set is
  * verified at download time by `validateLive2dImport`, so a stale entry fails
  * loudly rather than silently rendering a broken model. Seeded from the
- * CubismWebSamples `develop` branch (verified 2026-06-23).
+ * CubismWebSamples revision shared with the pinned test corpus (verified 2026-10-23).
  *
- * `files` MUST list EVERY asset the model3.json references — not only the
- * mandatory moc/textures. Motions and expressions load lazily when a state
- * plays them, so a missing motion3.json/exp3.json (or a motion's referenced
- * `Sound`) is NOT caught by `validateLive2dImport` (it guards moc + textures
- * only). At play time the engine's `ModelSettings.replaceFiles` falls back to
- * the raw relative path when a reference has no downloaded blob, which then
- * 404s from the web root. Each list below is the complete FileReferences set
- * of its `*.model3.json`.
+ * `files` includes every FileReferences asset, including optional metadata.
+ * Missing optional assets are sanitized by the importer, so an incomplete
+ * catalog would unnecessarily degrade an otherwise complete official model.
  */
 export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
   {
@@ -67,6 +62,8 @@ export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
       "Hiyori.moc3",
       "Hiyori.physics3.json",
       "Hiyori.pose3.json",
+      "Hiyori.userdata3.json",
+      "Hiyori.cdi3.json",
       "Hiyori.2048/texture_00.png",
       "Hiyori.2048/texture_01.png",
       "motions/Hiyori_m01.motion3.json",
@@ -93,6 +90,8 @@ export const SAMPLE_MODEL_CATALOG: SampleModelEntry[] = [
       "Haru.moc3",
       "Haru.physics3.json",
       "Haru.pose3.json",
+      "Haru.userdata3.json",
+      "Haru.cdi3.json",
       "Haru.2048/texture_00.png",
       "Haru.2048/texture_01.png",
       "expressions/F01.exp3.json",

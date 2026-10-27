@@ -40,7 +40,7 @@ export function useLive2dLipSync(
   speaking: boolean,
   reducedMotion: boolean,
   now: () => number = defaultNow,
-  parameterId: string | undefined = LIP_SYNC_PARAM
+  parameterId: string | null | undefined = LIP_SYNC_PARAM
 ): void {
   useEffect(() => {
     if (!model || reducedMotion || !speaking || !parameterId) return

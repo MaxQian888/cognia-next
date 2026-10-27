@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -57,7 +57,7 @@ jest.mock("./pet-interaction-panel", () => ({
       data-selection={
         selection?.skinId === "live2d"
           ? `${selection.skinId}:${selection.modelId}`
-          : selection?.skinId === "sprite-v2"
+          : selection?.skinId === "sprite-v2" || selection?.skinId === "media"
             ? `${selection.skinId}:${selection.packId}`
             : selection?.skinId
       }
@@ -153,6 +153,15 @@ import { usePetStore } from "@/stores/pet/pet-store"
 
 const PROFILE = { stage: "baby" }
 const VIEW = { effectiveBones: { eyes: "dot" }, needs: { energy: 80, mood: 70, bond: 60 } }
+
+it("keeps the mirrored media selection in the popup preview", () => {
+  usePetStore.getState().setAppearanceSelection({ skinId: "media", packId: "mp_whale" })
+  render(<PetPopupView />)
+  expect(screen.getByTestId("pet-interaction-panel")).toHaveAttribute(
+    "data-selection",
+    "media:mp_whale"
+  )
+})
 
 // ResizeObserver shim that runs the callback once on observe (jsdom lacks it).
 class MockResizeObserver {
@@ -323,10 +332,10 @@ describe("PetPopupView", () => {
     expect(bridgeSendInteraction).toHaveBeenCalledWith("treated", undefined)
   })
 
-  it("click-through enables the OS flag, persists clickThrough=true, and closes the popup", () => {
+  it("click-through enables the OS flag, persists clickThrough=true, and closes the popup", async () => {
     render(<PetPopupView />)
     fireEvent.click(screen.getByText("clickThrough"))
-    expect(setPetClickThrough).toHaveBeenCalledWith(true)
+    await waitFor(() => expect(setPetClickThrough).toHaveBeenCalledWith(true))
     expect(saveMock).toHaveBeenCalledWith(
       expect.objectContaining({
         petSettings: expect.objectContaining({
@@ -334,7 +343,15 @@ describe("PetPopupView", () => {
         }),
       })
     )
-    expect(closePetPopup).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(closePetPopup).toHaveBeenCalledTimes(1))
+  })
+
+  it("keeps mouse input enabled if the owning account rejects the write", async () => {
+    saveMock.mockRejectedValueOnce(new Error("account changed"))
+    render(<PetPopupView />)
+    fireEvent.click(screen.getByText("clickThrough"))
+    await waitFor(() => expect(closePetPopup).toHaveBeenCalledTimes(1))
+    expect(setPetClickThrough).not.toHaveBeenCalled()
   })
 
   it("hide closes the sprite window; show-main restores the app and closes the popup", () => {
@@ -416,11 +433,11 @@ describe("PetPopupView", () => {
     expect(resizePetPopup).toHaveBeenCalledWith(316, 416)
   })
 
-  it("falls back gracefully when settings.petSettings is absent", () => {
+  it("falls back gracefully when settings.petSettings is absent", async () => {
     settingsValue = {}
     render(<PetPopupView />)
     fireEvent.click(screen.getByText("clickThrough"))
-    expect(setPetClickThrough).toHaveBeenCalledWith(true)
+    await waitFor(() => expect(setPetClickThrough).toHaveBeenCalledWith(true))
     // Persists against the default desktop overlay shape.
     expect(saveMock).toHaveBeenCalled()
   })

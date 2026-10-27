@@ -1,5 +1,9 @@
 import { render, waitFor, act } from "@testing-library/react"
+import { useLiveQuery } from "dexie-react-hooks"
 import type { PetBones, PetStage } from "@/types/pet"
+
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
+jest.mock("@/lib/db/pet-models", () => ({ getPetModel: jest.fn() }))
 
 // pixi.js and the engine loader are WebGL/Cubism runtimes jsdom can't host.
 // Mock the loader module and the DB; pixi.js is mocked inline with shared
@@ -91,6 +95,7 @@ const row = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  jest.mocked(useLiveQuery).mockReturnValue(undefined)
   tickerState.maxFPS = undefined
   loadLive2dSkinAsset.mockResolvedValue({
     row,
@@ -154,6 +159,86 @@ describe("Live2dCanvas", () => {
     renderCanvas({ speaking: true, paused: true })
     await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
     expect(loaded.internalModel.on).not.toHaveBeenCalled()
+  })
+
+  it("does not drive a mouth role disabled in the parameter mapping", async () => {
+    const loaded = makeLoadedModel()
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ speaking: true, parameterMappingOverrides: { mouthOpen: null } })
+    await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
+    expect(loaded.internalModel.on).not.toHaveBeenCalled()
+  })
+
+  it("does not drive a mouth parameter absent from the model's enumerated parameters", async () => {
+    const loaded = makeLoadedModel()
+    Object.assign(loaded.internalModel.coreModel, {
+      getParameterCount: () => 1,
+      getParameterId: () => "ParamAngleX",
+    })
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({ speaking: true })
+    await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
+    expect(loaded.internalModel.on).not.toHaveBeenCalled()
+  })
+
+  it("keeps empty draft mappings and transforms ahead of saved customization", async () => {
+    const loaded = makeLoadedModel()
+    jest.mocked(useLiveQuery).mockReturnValue({
+      ...row,
+      transform: { scale: 2, offsetX: 0.2, offsetY: 0.2 },
+      motionOverrides: { idle: { motionGroup: "Tap" } },
+      parameterMapping: { mouthOpen: null },
+    })
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    renderCanvas({
+      speaking: true,
+      transform: { scale: 1, offsetX: 0, offsetY: 0 },
+      motionOverrides: {},
+      parameterMappingOverrides: {},
+    })
+    await waitFor(() => expect(loaded.motion).toHaveBeenCalledWith("Idle", 0, 1))
+    expect(loaded.scale.set).toHaveBeenLastCalledWith(0.24, 0.24)
+    expect(loaded.position.set).toHaveBeenLastCalledWith(48, 48)
+    expect(loaded.internalModel.on).toHaveBeenCalledWith("beforeModelUpdate", expect.any(Function))
+  })
+
+  it("applies saved transform, motion and parameter changes without rebuilding the model", async () => {
+    const loaded = makeLoadedModel()
+    const initial = {
+      ...row,
+      transform: { scale: 1, offsetX: 0, offsetY: 0 },
+      motionOverrides: {},
+      parameterMapping: {},
+    }
+    jest.mocked(useLiveQuery).mockReturnValue(initial)
+    load.mockResolvedValue({ ok: true, model: loaded, dispose: jest.fn() })
+    const view = renderCanvas({ speaking: true })
+    await waitFor(() => expect(addChild).toHaveBeenCalledWith(loaded))
+    const saved = {
+      ...initial,
+      transform: { scale: 2, offsetX: 0.1, offsetY: -0.1 },
+      motionOverrides: { idle: { motionGroup: "Tap" } },
+      parameterMapping: { mouthOpen: null },
+    }
+    jest.mocked(useLiveQuery).mockReturnValue(saved)
+    view.rerender(
+      <Live2dCanvas
+        modelId="m1"
+        bones={bones}
+        stage={stage}
+        state="idle"
+        oneShot={null}
+        reducedMotion={false}
+        size={96}
+        speaking
+      />
+    )
+    await waitFor(() => expect(loaded.scale.set).toHaveBeenLastCalledWith(0.48, 0.48))
+    expect(loaded.position.set).toHaveBeenLastCalledWith(57.6, 38.4)
+    expect(loaded.motion).toHaveBeenLastCalledWith("Tap", 0, 1)
+    expect(loaded.internalModel.off).toHaveBeenCalledWith("beforeModelUpdate", expect.any(Function))
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(appInit).toHaveBeenCalledTimes(1)
   })
 
   it("falls back to scale 1 for a zero-sized model", async () => {

@@ -4,10 +4,24 @@
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn(),
+  saveSettings: jest.fn(),
 }))
+jest.mock("@/lib/db/schema", () => {
+  const db = { name: "test-owner" }
+  return { getDb: jest.fn(() => db) }
+})
+import { getDb } from "@/lib/db/schema"
+import { getSettings, saveSettings } from "@/lib/db/settings"
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: { getState: jest.fn(), setState: jest.fn() },
+  useSettingsStore: {
+    getState: jest.fn(),
+    setState: jest.fn(),
+    subscribe: jest.fn(() => () => {}),
+  },
 }))
+jest.mock("@/lib/pet/window-role", () => ({ getPetWindowRole: jest.fn(() => "web") }))
+import { getPetWindowRole } from "@/lib/pet/window-role"
+beforeEach(() => jest.mocked(getPetWindowRole).mockReturnValue("web"))
 
 import {
   PET_SETTINGS_CHANNEL,
@@ -73,6 +87,77 @@ function makeStore(initial: PetSettings) {
 const flush = async () => {
   for (let i = 0; i < 6; i++) await Promise.resolve()
 }
+
+it("projects only presentation settings from main for a late secondary window", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("main")
+  const bus = createBus(),
+    store = makeStore({
+      ...DEFAULT_PET_SETTINGS,
+      desktopPet: { ...DEFAULT_PET_DESKTOP_OVERLAY, size: 256 },
+      activeMediaPackId: "mp_whale",
+      llmSpeak: { enabled: true },
+      customBubbles: ["private phrase"],
+    })
+  const stop = startPetSettingsFollower({
+    readPersisted: store.readPersisted,
+    openChannel: bus.open,
+  })
+  bus.deliver(PET_SETTINGS_CHANNEL, { v: 1, kind: "pet-settings-request", from: "late-overlay" })
+  await flush()
+  expect(bus.posted).toContainEqual(
+    expect.objectContaining({
+      presentation: expect.objectContaining({
+        desktopPet: expect.objectContaining({ size: 256 }),
+        activeMediaPackId: "mp_whale",
+      }),
+    })
+  )
+  expect(JSON.stringify(bus.posted)).not.toContain("private phrase")
+  expect(JSON.stringify(bus.posted)).not.toContain("llmSpeak")
+  stop()
+})
+
+it("applies validated main presentation without reopening a secondary account database", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("overlay")
+  const bus = createBus(),
+    readPersisted = jest.fn(),
+    applyLocal = jest.fn()
+  const stop = startPetSettingsFollower({ readPersisted, applyLocal, openChannel: bus.open })
+  expect(bus.posted).toContainEqual(expect.objectContaining({ kind: "pet-settings-request" }))
+  const message = {
+    v: 1,
+    kind: "pet-settings-changed",
+    from: "main",
+    presentationRevision: 2,
+    presentation: {
+      ...DEFAULT_PET_SETTINGS,
+      desktopPet: { ...DEFAULT_PET_DESKTOP_OVERLAY, size: 256 },
+      customBubbles: ["do not project"],
+    },
+  }
+  bus.deliver(PET_SETTINGS_CHANNEL, message)
+  bus.deliver(PET_SETTINGS_CHANNEL, {
+    ...message,
+    presentationRevision: 1,
+    presentation: {
+      ...message.presentation,
+      desktopPet: { ...DEFAULT_PET_DESKTOP_OVERLAY, size: 128 },
+    },
+  })
+  bus.deliver(PET_SETTINGS_CHANNEL, {
+    ...message,
+    presentationRevision: 3,
+    presentation: { ...message.presentation, size: NaN },
+  })
+  await flush()
+  expect(readPersisted).not.toHaveBeenCalled()
+  expect(applyLocal).toHaveBeenCalledTimes(1)
+  expect(applyLocal).toHaveBeenCalledWith(
+    expect.objectContaining({ desktopPet: expect.objectContaining({ size: 256 }) })
+  )
+  expect(applyLocal.mock.calls[0][0]).not.toHaveProperty("customBubbles")
+  stop()
+})
 
 describe("updatePetSettings", () => {
   it("applies the updater to the PERSISTED record, not a caller snapshot", async () => {
@@ -387,4 +472,161 @@ describe("default deps", () => {
     expect(save).toHaveBeenCalledWith({ petSettings: { ...DEFAULT_PET_SETTINGS, size: 111 } })
     expect(next.size).toBe(111)
   })
+})
+
+it("saves only allowed desktop patches in the owning account and rejects stale scopes", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("main")
+  const bus = createBus(),
+    store = makeStore({
+      ...DEFAULT_PET_SETTINGS,
+      desktopPet: { ...DEFAULT_PET_DESKTOP_OVERLAY, size: 256 },
+    })
+  let account = "owner-db"
+  const stop = startPetSettingsFollower({
+    accountScope: () => account,
+    readPersisted: store.readPersisted,
+    write: store.write,
+    withLock: (task) => task(),
+    openChannel: bus.open,
+  })
+  await flush()
+  const first = bus.posted[0] as { from: string; presentationScope: string }
+  const request = {
+    v: 1,
+    kind: "pet-desktop-patch",
+    from: "secondary",
+    owner: first.from,
+    scope: first.presentationScope,
+    requestId: "position",
+    patch: { position: { x: 100, y: 200, space: "desktop" } },
+  }
+  bus.deliver(PET_SETTINGS_CHANNEL, request)
+  await flush()
+  await flush()
+  expect(store.get().desktopPet).toMatchObject({ size: 256, position: { x: 100, y: 200 } })
+  expect(bus.posted).toContainEqual(
+    expect.objectContaining({
+      kind: "pet-desktop-result",
+      requestId: "position",
+      presentation: expect.objectContaining({ desktopPet: expect.objectContaining({ size: 256 }) }),
+    })
+  )
+  bus.deliver(PET_SETTINGS_CHANNEL, { ...request, requestId: "forbidden", patch: { size: 128 } })
+  account = "another-account"
+  bus.deliver(PET_SETTINGS_CHANNEL, {
+    ...request,
+    requestId: "stale",
+    patch: { clickThrough: false },
+  })
+  await flush()
+  expect(store.write).toHaveBeenCalledTimes(1)
+  expect(bus.posted).toContainEqual(expect.objectContaining({ requestId: "stale", error: true }))
+  stop()
+})
+
+it("retains an early projection and reapplies it after local hydration", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("overlay")
+  const bus = createBus(),
+    applyLocal = jest.fn()
+  let hydrated!: () => void
+  const unwatch = jest.fn()
+  const stop = startPetSettingsFollower({
+    openChannel: bus.open,
+    applyLocal,
+    watchLocalSettings: (callback) => {
+      hydrated = callback
+      return unwatch
+    },
+  })
+  bus.deliver(PET_SETTINGS_CHANNEL, {
+    v: 1,
+    kind: "pet-settings-changed",
+    from: "main",
+    presentationRevision: 1,
+    presentation: {
+      ...DEFAULT_PET_SETTINGS,
+      desktopPet: { ...DEFAULT_PET_DESKTOP_OVERLAY, size: 256 },
+    },
+  })
+  hydrated()
+  expect(applyLocal).toHaveBeenCalledTimes(2)
+  expect(applyLocal.mock.calls[1][0].desktopPet.size).toBe(256)
+  stop()
+  expect(unwatch).toHaveBeenCalledTimes(1)
+})
+
+it("passes a captured database and active guard through the serialized settings queue", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("main")
+  const owner = { name: "owner-A" } as ReturnType<typeof getDb>
+  jest.mocked(getDb).mockReturnValue(owner)
+  jest.mocked(getSettings).mockResolvedValue({ petSettings: DEFAULT_PET_SETTINGS } as never)
+  let resume!: () => void
+  jest.mocked(saveSettings).mockImplementation(async (_input, options) => {
+    expect(options?.scope?.db).toBe(owner)
+    await new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    options!.scope!.assertActive()
+    return { petSettings: DEFAULT_PET_SETTINGS } as never
+  })
+  const pending = updatePetSettings((latest) => ({ ...latest, mutedBubbles: true }))
+  const rejected = expect(pending).rejects.toThrow("Pet account changed")
+  await flush()
+  expect(resume).toBeDefined()
+  jest.mocked(getDb).mockReturnValue({ name: "owner-B" } as ReturnType<typeof getDb>)
+  resume()
+  await rejected
+})
+
+it("rejects late RPC replies from a retired account and cancels pending writes on disposal", async () => {
+  jest.mocked(getPetWindowRole).mockReturnValue("overlay")
+  const bus = createBus(),
+    original = globalThis.BroadcastChannel
+  globalThis.BroadcastChannel = jest.fn((name: string) =>
+    bus.open(name)
+  ) as unknown as typeof BroadcastChannel
+  const stop = startPetSettingsFollower({ openChannel: bus.open, applyLocal: jest.fn() })
+  const presentation = {
+    ...DEFAULT_PET_SETTINGS,
+    desktopPet: { ...DEFAULT_PET_DESKTOP_OVERLAY, size: 256 },
+  }
+  const message = {
+    v: 1,
+    kind: "pet-settings-changed",
+    from: "main",
+    presentationRevision: 1,
+    presentationScope: "old-scope",
+    presentation,
+  }
+  try {
+    bus.deliver(PET_SETTINGS_CHANNEL, message)
+    const pending = updateDesktopPetSettings(
+      () => ({ clickThrough: false }),
+      DEFAULT_PET_DESKTOP_OVERLAY
+    )
+    const rejected = expect(pending).rejects.toThrow("Pet presentation changed")
+    const request = bus.posted.at(-1) as { requestId: string }
+    bus.deliver(PET_SETTINGS_CHANNEL, {
+      ...message,
+      presentationRevision: 2,
+      presentationScope: "new-scope",
+    })
+    bus.deliver(PET_SETTINGS_CHANNEL, {
+      ...message,
+      kind: "pet-desktop-result",
+      requestId: request.requestId,
+    })
+    await rejected
+    const next = updateDesktopPetSettings(
+      () => ({ clickThrough: true }),
+      DEFAULT_PET_DESKTOP_OVERLAY
+    )
+    const cancelled = expect(next).rejects.toThrow("disposed")
+    expect(bus.posted.at(-1)).toMatchObject({ scope: "new-scope" })
+    stop()
+    await cancelled
+  } finally {
+    stop()
+    globalThis.BroadcastChannel = original
+  }
 })

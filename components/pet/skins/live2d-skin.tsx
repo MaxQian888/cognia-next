@@ -105,6 +105,7 @@ function Live2dSkinBoundary(props: PetSkinRenderProps) {
       }}
     >
       <Live2dErrorBoundary
+        key={attemptKey}
         fallback={fallback}
         onError={() => runtime.recordAssetFailure(assetKey, "renderFailed")}
       >

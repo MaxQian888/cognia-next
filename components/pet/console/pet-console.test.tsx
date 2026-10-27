@@ -307,6 +307,22 @@ describe("PetConsole", () => {
     expect(runtime.assetDiagnostic("sprite-v2:s1")).toBeUndefined()
   })
 
+  it("retries an imported animation pack from the console", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    settingsValue = { petSettings: { skinId: "media", activeMediaPackId: "mp_whale" } }
+    const runtime = getPetSkinRuntime()
+    runtime.recordAssetFailure("media:mp_whale", "renderFailed")
+    render(<PetConsole />)
+    expect(rendererProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skinId: "media",
+        selection: { skinId: "media", packId: "mp_whale" },
+      })
+    )
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(runtime.assetDiagnostic("media:mp_whale")).toBeUndefined()
+  })
+
   it("hides the plugins tab until a pet.console.tab extension registers", () => {
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
     render(<PetConsole />)
@@ -391,6 +407,9 @@ describe("hosts where the pet cannot run", () => {
 })
 
 describe("desktop toggle in the console header", () => {
+  beforeEach(() => {
+    settingsValue = { petSettings: { desktopPet: { enabled: false } } }
+  })
   const hatched = () =>
     mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
 
