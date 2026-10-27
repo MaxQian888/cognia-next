@@ -1051,6 +1051,16 @@
   },
   "personHostStateCommands": [
     {
+      "arm": "session_mark_read",
+      "capability": "client.write",
+      "reason": "Clear unread state only in the caller's person partition, with live org membership and the device's write grant; retain host.observe outside a partitioned Host."
+    },
+    {
+      "arm": "session_mark_unread",
+      "capability": "client.write",
+      "reason": "Mark a session unread only in the caller's person partition, with live org membership and the device's write grant; retain host.observe outside a partitioned Host."
+    },
+    {
       "arm": "session_attach",
       "capability": "client.read",
       "reason": "P5d: attach to the caller's person brain and negotiate its data-only supportedActions; live event leases still govern control, and host.observe applies outside a partitioned Host."

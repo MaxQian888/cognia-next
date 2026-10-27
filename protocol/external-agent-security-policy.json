@@ -10,31 +10,50 @@
   "binaryAllowlist": {
     "note": "Bare binary names an external-agent spawn may execute (no path separators). Every entry must be justified: either a shipped preset names it as `process.command`, or it appears under `manualOnly` WITH a reason. An entry that is neither is attack surface the headless spawn RPC exposes and no Cognia code path can ask for.",
     "commands": [
+      "acli",
+      "agy_acp_server",
+      "agy_acp_server.par",
       "aider",
-      "cline",
+      "amp-acp",
+      "auggie",
+      "autohand",
       "claude",
       "claude-agent-acp",
       "claude-code-acp",
+      "cline",
+      "cn",
+      "codebuddy",
       "codex",
       "codex-acp",
+      "commandcode",
       "copilot",
+      "crush",
       "cursor-agent",
       "devin",
       "droid",
       "gemini",
       "goose",
       "grok",
+      "hermes",
+      "kilo",
+      "kimi",
       "kiro-cli",
+      "mcode",
+      "mimo",
+      "muse-acp",
+      "omp",
+      "openclaude",
       "opencode",
       "pi",
       "qoder",
-      "kimi",
-      "mcode",
-      "qwen"
+      "qwen",
+      "vibe-acp",
+      "zcode-acp"
     ],
     "manualOnly": {
       "claude": "The Claude Code CLI itself. No preset spawns it (the `claude-code` preset uses the ACP adapter binary), but hand-configured agents and the container/kube backends do.",
-      "claude-code-acp": "Zed's ACP bridge, installed globally by users who prefer it over the first-party adapter. It is also the default command in `container_backend.rs` / `kube_backend.rs`."
+      "claude-code-acp": "Zed's ACP bridge, installed globally by users who prefer it over the first-party adapter. It is also the default command in `container_backend.rs` / `kube_backend.rs`.",
+      "agy_acp_server": "Official Antigravity ACP Windows basename; native resolver maps the preset .par name to .exe. Windows hosting still requires a supported sandbox."
     }
   },
   "npxPackageAllowlist": {
@@ -53,13 +72,26 @@
   "agentStateWritableRoots": {
     "note": "Home-relative paths each agent family must be able to write inside the sandbox. Matching runs against the RESOLVED target: for `npx <package>` that is the package, otherwise the base command with any Windows executable suffix stripped. `match` is either \"contains\" (substring of the target), \"target\" (target equals one of `values`) or \"base\" (the base command equals one of `values`) -- Pi needs `base` rather than \"contains\" because \"copilot\" contains \"pi\". No rule uses \"target\" today: its only user was the `pi-acp` npx bridge, removed with that runtime. The mode is kept because it is the only correct match for an npx package name, which the next bridge will need. A missing root does not fail the launch; it silently breaks whatever the agent stores there, which is how OpenCode's absence went unnoticed while its session resume started over every time.",
     "rules": [
-      { "match": "base", "values": ["grok"], "roots": [".grok"] },
+      {
+        "match": "base",
+        "values": ["agy_acp_server.par", "agy_acp_server"],
+        "roots": [".gemini/antigravity-acp", ".gemini/artifacts"]
+      },
+      {
+        "match": "base",
+        "values": ["grok"],
+        "roots": [".grok"]
+      },
       {
         "match": "base",
         "values": ["cline"],
         "roots": [".cline"]
       },
-      { "match": "base", "values": ["mcode"], "roots": [".minimax"] },
+      {
+        "match": "base",
+        "values": ["mcode"],
+        "roots": [".minimax"]
+      },
       {
         "match": "base",
         "values": ["kimi"],
@@ -86,8 +118,15 @@
         "roots": [".codex"]
       },
       {
-        "match": "contains",
-        "values": ["claude"],
+        "match": "target",
+        "values": [
+          "claude",
+          "claude-agent-acp",
+          "claude-code-acp",
+          "@agentclientprotocol/claude-agent-acp",
+          "@anthropic-ai/claude-code",
+          "@zed-industries/claude-code-acp"
+        ],
         "roots": [".claude", ".claude.json", ".claude.json.backup"]
       },
       {
@@ -139,16 +178,103 @@
         "match": "base",
         "values": ["npx"],
         "roots": [".npm"]
+      },
+      {
+        "match": "base",
+        "values": ["auggie"],
+        "roots": [".augment"]
+      },
+      {
+        "match": "base",
+        "values": ["autohand"],
+        "roots": [".autohand"]
+      },
+      {
+        "match": "base",
+        "values": ["codebuddy"],
+        "roots": [".codebuddy"]
+      },
+      {
+        "match": "base",
+        "values": ["commandcode"],
+        "roots": [".commandcode"]
+      },
+      {
+        "match": "base",
+        "values": ["kilo"],
+        "roots": [".config/kilo", ".local/share/kilo", ".local/state/kilo", ".cache/kilo"]
+      },
+      {
+        "match": "base",
+        "values": ["vibe-acp"],
+        "roots": [".vibe"]
+      },
+      {
+        "match": "base",
+        "values": ["mimo"],
+        "roots": [
+          ".config/mimocode",
+          ".local/share/mimocode",
+          ".local/state/mimocode",
+          ".cache/mimocode"
+        ]
+      },
+      {
+        "match": "base",
+        "values": ["hermes"],
+        "roots": [".hermes"]
+      },
+      {
+        "match": "base",
+        "values": ["omp"],
+        "roots": [".omp"]
+      },
+      {
+        "match": "base",
+        "values": ["muse-acp"],
+        "roots": [".config/muse", ".local/state/muse-acp"]
+      },
+      {
+        "match": "base",
+        "values": ["amp-acp"],
+        "roots": [".config/amp", ".local/share/amp", ".local/state/amp-acp"]
+      },
+      {
+        "match": "base",
+        "values": ["zcode-acp"],
+        "roots": [".zcode", ".zcode-acp"]
+      },
+      {
+        "match": "base",
+        "values": ["openclaude"],
+        "roots": [".openclaude", ".openclaude.json"]
+      },
+      {
+        "match": "base",
+        "values": ["crush"],
+        "roots": [".config/crush", ".local/share/crush", ".local/state/crush", ".cache/crush"]
+      },
+      {
+        "match": "base",
+        "values": ["cn"],
+        "roots": [".continue"]
+      },
+      {
+        "match": "base",
+        "values": ["acli"],
+        "roots": [".config/acli", ".rovodev"]
       }
     ]
   },
   "agentStateIsolation": {
-    "note": "Per-configuration state roots (ADR-0216). When a configuration is `isolated`, the TS launch path sets COGNIA_AGENT_STATE_KEY=<configId> and each spawn backend resolves <data_dir>/cognia/external-agents/<key>, creates it, maps every `env` key to `<root>/<relative>`, and under the sandbox replaces the rule's `sharedRoots` writable grants with the root and adds `denyReadable` (home-relative) so the CLI cannot fall back to the user's own login. `match`/`values` resolve exactly like agentStateWritableRoots. A runtime with no rule here cannot be isolated and the launch is refused with `state_isolation_unsupported`. Only documented home variables are listed: Gemini, Goose, Devin, Kiro, Droid, Cursor, Aider and DeepSeek Harness have none Cognia can rely on. Qoder keeps its login root readable because its own binary is installed under it.",
+    "note": "Per-configuration state roots (ADR-0216). When a configuration is `isolated`, the TS launch path sets COGNIA_AGENT_STATE_KEY=<configId> and each spawn backend resolves <data_dir>/cognia/external-agents/<key>, creates it, maps every `env` key to `<root>/<relative>`, and under the sandbox replaces the rule's `sharedRoots` writable grants with the root and adds `denyReadable` (home-relative) so the CLI cannot fall back to the user's own login. `match`/`values` resolve exactly like agentStateWritableRoots. A runtime with no rule here cannot be isolated and the launch is refused with `state_isolation_unsupported`. Only documented home variables are listed: Gemini, Devin, Kiro, Droid, Cursor, Aider and DeepSeek Harness have none Cognia can rely on. Qoder keeps its login root readable because its own binary is installed under it.",
     "rules": [
       {
         "match": "base",
         "values": ["grok"],
-        "env": { "GROK_HOME": "grok" },
+        "env": {
+          "GROK_HOME": "grok"
+        },
         "sharedRoots": [".grok"],
         "denyReadable": [".grok"]
       },
@@ -162,8 +288,15 @@
         "denyReadable": [".codex"]
       },
       {
-        "match": "contains",
-        "values": ["claude"],
+        "match": "target",
+        "values": [
+          "claude",
+          "claude-agent-acp",
+          "claude-code-acp",
+          "@agentclientprotocol/claude-agent-acp",
+          "@anthropic-ai/claude-code",
+          "@zed-industries/claude-code-acp"
+        ],
         "env": {
           "CLAUDE_CONFIG_DIR": "claude"
         },
@@ -192,7 +325,10 @@
       {
         "match": "base",
         "values": ["mcode"],
-        "env": { "MINIMAX_DATA_DIR": "minimax", "MAVIS_DATA_DIR": "minimax" },
+        "env": {
+          "MINIMAX_DATA_DIR": "minimax",
+          "MAVIS_DATA_DIR": "minimax"
+        },
         "sharedRoots": [".minimax"],
         "denyReadable": [".minimax"]
       },
@@ -243,11 +379,95 @@
         },
         "sharedRoots": [".config/opencode", ".local/share/opencode"],
         "denyReadable": [".config/opencode", ".local/share/opencode"]
+      },
+      {
+        "match": "base",
+        "values": ["goose"],
+        "env": {
+          "GOOSE_PATH_ROOT": "goose"
+        },
+        "sharedRoots": [
+          ".config/goose",
+          ".local/share/goose",
+          ".local/state/goose",
+          "Library/Application Support/Block/goose"
+        ],
+        "denyReadable": [
+          ".config/goose",
+          ".local/share/goose",
+          ".local/state/goose",
+          "Library/Application Support/Block/goose"
+        ]
+      },
+      {
+        "match": "base",
+        "values": ["openclaude"],
+        "env": {
+          "OPENCLAUDE_CONFIG_DIR": "openclaude"
+        },
+        "sharedRoots": [".openclaude", ".openclaude.json"],
+        "denyReadable": [".openclaude", ".openclaude.json"]
+      },
+      {
+        "match": "base",
+        "values": ["vibe-acp"],
+        "env": {
+          "VIBE_HOME": "vibe"
+        },
+        "sharedRoots": [".vibe"],
+        "denyReadable": [".vibe"]
+      },
+      {
+        "match": "base",
+        "values": ["mimo"],
+        "env": {
+          "MIMOCODE_HOME": "mimocode"
+        },
+        "sharedRoots": [
+          ".config/mimocode",
+          ".local/share/mimocode",
+          ".local/state/mimocode",
+          ".cache/mimocode"
+        ],
+        "denyReadable": [
+          ".config/mimocode",
+          ".local/share/mimocode",
+          ".local/state/mimocode",
+          ".cache/mimocode"
+        ]
+      },
+      {
+        "match": "base",
+        "values": ["hermes"],
+        "env": {
+          "HERMES_HOME": "hermes"
+        },
+        "sharedRoots": [".hermes"],
+        "denyReadable": [".hermes"]
       }
     ]
   },
   "fileRoots": {
     "note": "Roots that are FILES rather than directories; a sandbox scope naming a path that does not exist is not the same as one naming an empty file.",
-    "prefixes": [".claude.json"]
+    "prefixes": [".claude.json", ".openclaude.json"]
+  },
+  "bundledNodeBridges": {
+    "codebuff": {
+      "file": "codebuff.cjs",
+      "args": ["--cognia-codebuff-bridge"]
+    },
+    "crush-http": {
+      "file": "crush-http.cjs",
+      "args": ["--cognia-crush-bridge"]
+    },
+    "hermes-probe": {
+      "file": "hermes-probe.cjs",
+      "args": ["--hermes-gateway-probe"]
+    },
+    "hermes-acp": {
+      "file": "hermes-acp.cjs",
+      "args": ["--cognia-hermes-acp"],
+      "hostEnvironment": ["COGNIA_HERMES_ACP_BOOTSTRAP"]
+    }
   }
 }

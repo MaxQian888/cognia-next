@@ -2101,6 +2101,1209 @@
           "evidence": "none"
         }
       }
+    },
+    "openclaude-cli": {
+      "label": "OpenClaude native stream-json",
+      "note": "Published OpenClaude CLI control protocol over a confined process per conversation. Native text/thinking/tool JSON, inline images, explicit resume, MCP, PreToolUse policy and user forms. No ACP inference, cold history discovery, native subagent inspection, arbitrary attachment loading or JSON-schema output control. Provider authentication and installed-runtime acceptance are separate from adapter tests.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.parallel": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.fragmented-json": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "mcp": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.set-mode": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "cogniaHookRuntime"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "thinking": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "images": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "subagents.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.manage": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.elicitation": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "input.dialog": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "extensions.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.permission-policy": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "cogniaHookRuntime"
+        },
+        "subagents.context-fork": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.auto-compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.logs": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "rate-limit-reporting": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "web.search": {
+          "level": "unknown",
+          "evidence": "none"
+        }
+      }
+    },
+    "crush-http": {
+      "label": "Crush (Charm)",
+      "note": "Native HTTP service with session-bound tool approvals and cancellation. Host MCP injection and unimplemented optional controls are rejected.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.parallel": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.fragmented-json": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.set-mode": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "thinking": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "images": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "subagents.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.manage": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "extensions.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.permission-policy": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.context-fork": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.auto-compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.model-selection": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "continue-cli": {
+      "label": "Continue CLI",
+      "note": "Published headless JSON output with host history replay and fixed readonly/automatic permissions. No native tool-event or approval channel.",
+      "capabilities": {
+        "streaming": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.multi-turn": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "continueCliBridge"
+        },
+        "session.resume": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "continueCliBridge"
+        },
+        "tools.ordinary": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.parallel": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.fragmented-json": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.results": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.errors": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.interrupt-resume": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.set-mode": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "images": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "subagents.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.store": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "continueCliBridge"
+        },
+        "session.manage": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "continueCliBridge"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "extensions.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.permission-policy": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.context-fork": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.auto-compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.model-selection": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "rovo-http": {
+      "label": "Rovo Dev",
+      "note": "Native HTTP service with session-bound tool approvals and cancellation. Host MCP injection and unimplemented optional controls are rejected.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.parallel": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.fragmented-json": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.errors": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.set-mode": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "images": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "subagents.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.manage": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "extensions.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.permission-policy": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.context-fork": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.auto-compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.model-selection": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "codebuff-sdk": {
+      "label": "Codebuff SDK",
+      "note": "Official SDK in a separate Node bridge; host-brokered permissions/network and persisted SDK RunState. Unsupported MCP is rejected.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "session.multi-turn": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "codebuffSdkBridge"
+        },
+        "session.resume": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "codebuffSdkBridge"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.parallel": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.fragmented-json": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.errors": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.set-mode": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "thinking": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "images": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "subagents.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "codebuffSdkBridge"
+        },
+        "session.manage": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "codebuffSdkBridge"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "extensions.dynamic": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.permission-policy": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.context-fork": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.auto-compaction": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.model-selection": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        },
+        "web.search": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
     }
   },
   "presetRefinements": {

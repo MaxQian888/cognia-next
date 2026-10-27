@@ -15301,6 +15301,33 @@
     "connectors_discord_upload": {
       "$ref": "#/$defs/StringResult"
     },
+    "connectors_wechat_oa_inbound_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "xml", "receivedAt"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "xml": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "admitted": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "connectors_wechat_oa_inbound_claim": { "type": "boolean" },
+    "connectors_wechat_oa_inbound_ack": {
+      "$ref": "#/$defs/NullResult"
+    },
     "connectors_health": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -15312,6 +15339,15 @@
     },
     "connectors_keyring_get": {
       "$ref": "#/$defs/NullableString"
+    },
+    "connectors_keyring_get_snapshot": {
+      "type": ["object", "null"],
+      "properties": {
+        "value": { "type": "string" },
+        "revision": { "type": "string" }
+      },
+      "required": ["value", "revision"],
+      "additionalProperties": false
     },
     "connectors_keyring_list": {
       "$ref": "#/$defs/StringList"

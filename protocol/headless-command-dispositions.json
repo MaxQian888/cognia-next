@@ -504,6 +504,7 @@
         "crash_take_pending",
         "crash_withdraw_submission",
         "cua_sandbox_create",
+        "lume_sandbox_local_call",
         "cua_sandbox_delete",
         "cua_sandbox_exec",
         "cua_sandbox_health",
@@ -902,7 +903,8 @@
         "code_result_receive_write_chunk",
         "code_result_receive_commit",
         "code_result_receive_cancel",
-        "code_result_apply"
+        "code_result_apply",
+        "resolve_bundled_agent_bridge"
       ],
       "commandReasons": {
         "account_bind_person": "Writes the local profile's person binding after a verified sign-in. The unlocked profile lives in this process; a remote caller has no unlocked session to bind.",
@@ -1011,7 +1013,8 @@
         "code_result_receive_write_chunk": "Writes one chunk of the work coming back from an always-on host into this device's staging area. The bytes are only ever applied here.",
         "code_result_receive_commit": "Seals the received bundle or tar in this device's staging area and checks it against its hash. Nothing reads it but code_result_apply here.",
         "code_result_receive_cancel": "Drops a half-received bundle or tar from this device's staging area.",
-        "code_result_apply": "Adds a worktree (or folder) of THIS device's repository holding the work an always-on host exported, fetching with this user's own git credentials (ADR-0224 A11c). The repository it lands in exists only here."
+        "code_result_apply": "Adds a worktree (or folder) of THIS device's repository holding the work an always-on host exported, fetching with this user's own git credentials (ADR-0224 A11c). The repository it lands in exists only here.",
+        "resolve_bundled_agent_bridge": "Resolves locally packaged native agent bridge assets on this execution host; a remote client must not resolve local executable paths for another host."
       }
     },
     {

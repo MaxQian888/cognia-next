@@ -12,6 +12,31 @@
   },
   "runtimes": [
     {
+      "runtimeId": "antigravity-acp",
+      "presetIds": ["antigravity-acp"],
+      "displayName": "Antigravity (ACP)",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "agy_acp_server.par",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "antigravity-build-label",
+        "timeoutMs": 30000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://antigravity.google/docs/ide/extensions/zed/",
+      "notes": {
+        "certification": "Official ACP 1.4.3 archive inspected; authenticated acceptance is tracked in docs/evidence/2026-10-24-gemini-antigravity-cli-support-audit.md. System-owned install with identity-bound uncertified-runtime consent; no certification claimed. Separate server/helper and login from agy CLI. Windows hosting remains unsupported by the mandatory sandbox."
+      }
+    },
+    {
       "runtimeId": "grok",
       "presetIds": ["grok"],
       "displayName": "Grok Build",
@@ -188,7 +213,10 @@
       },
       "docsUrl": "https://goose-docs.ai/docs/getting-started/installation/",
       "supportedRange": ">=1.52.0 <2.0.0",
-      "certifiedVersions": ["1.52.0"]
+      "certifiedVersions": ["1.52.0"],
+      "notes": {
+        "certification": "Official 1.56.0 macOS binary passed isolated Cognia ACP, Boa, approval, failed/cancelled child recovery and native concurrency checks with a local deterministic provider on 2026-10-25. Authenticated provider acceptance remains pending; 1.56.0 still requires identity-bound uncertified-runtime consent. Windows hosting is unsupported by the mandatory sandbox."
+      }
     },
     {
       "runtimeId": "devin",
@@ -559,6 +587,390 @@
         "windowsExceptionEligible": false
       },
       "docsUrl": "https://github.com/deepseek-ai/deepseek-harness"
+    },
+    {
+      "runtimeId": "auggie",
+      "presetIds": ["auggie"],
+      "displayName": "Auggie",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "auggie",
+      "launchArgs": ["--acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://docs.augmentcode.com/cli/acp/agent"
+    },
+    {
+      "runtimeId": "autohand-code",
+      "presetIds": ["autohand-code"],
+      "displayName": "Autohand Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "autohand",
+      "launchArgs": ["--acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/autohandai/code-cli/blob/v0.9.8/docs/guides/ACP.md"
+    },
+    {
+      "runtimeId": "codebuddy",
+      "presetIds": ["codebuddy"],
+      "displayName": "CodeBuddy",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "codebuddy",
+      "launchArgs": ["--acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://www.codebuddy.ai/docs/cli/acp"
+    },
+    {
+      "runtimeId": "command-code",
+      "presetIds": ["command-code"],
+      "displayName": "Command Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "commandcode",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://commandcode.ai/docs/acp"
+    },
+    {
+      "runtimeId": "kilocode",
+      "presetIds": ["kilocode"],
+      "displayName": "Kilo Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "kilo",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://kilo.ai/docs/code-with-ai/platforms/cli"
+    },
+    {
+      "runtimeId": "mistral-vibe",
+      "presetIds": ["mistral-vibe"],
+      "displayName": "Mistral Vibe",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "vibe-acp",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/mistralai/mistral-vibe/blob/v3.0.1/docs/acp-setup.md"
+    },
+    {
+      "runtimeId": "mimo-code",
+      "presetIds": ["mimo-code"],
+      "displayName": "MiMo Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "mimo",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/XiaomiMiMo/MiMo-Code"
+    },
+    {
+      "runtimeId": "hermes-agent",
+      "presetIds": ["hermes-agent"],
+      "displayName": "Hermes Agent",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "hermes",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["acp", "--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/acp.md"
+    },
+    {
+      "runtimeId": "oh-my-pi",
+      "presetIds": ["oh-my-pi"],
+      "displayName": "oh-my-pi",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "omp",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/can1357/oh-my-pi"
+    },
+    {
+      "runtimeId": "muse",
+      "presetIds": ["muse"],
+      "displayName": "Meta Muse Code",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "muse-acp",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/BrokkAi/muse-acp"
+    },
+    {
+      "runtimeId": "amp",
+      "presetIds": ["amp"],
+      "displayName": "Amp",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "amp-acp",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/tao12345666333/amp-acp"
+    },
+    {
+      "runtimeId": "zcode",
+      "presetIds": ["zcode"],
+      "displayName": "ZCode",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin"],
+      "systemCommand": "zcode-acp",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 15000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/Liang-HZ/zcode-acp"
+    },
+    {
+      "runtimeId": "openclaude",
+      "presetIds": ["openclaude"],
+      "displayName": "OpenClaude",
+      "ownership": "system",
+      "protocol": "openclaude-cli",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux", "win32"],
+      "systemCommand": "openclaude",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "supportedRange": ">=0.33.0 <0.34.0",
+      "certifiedVersions": [],
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/Twigpine/openclaude"
+    },
+    {
+      "runtimeId": "crush",
+      "presetIds": ["crush"],
+      "displayName": "Crush (Charm)",
+      "ownership": "system",
+      "protocol": "crush-http",
+      "transport": "http",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "crush",
+      "launchArgs": ["server"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "supportedRange": ">=0.98.2 <0.99.0",
+      "certifiedVersions": [],
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://github.com/charmbracelet/crush"
+    },
+    {
+      "runtimeId": "continue-dev",
+      "presetIds": ["continue-dev"],
+      "displayName": "Continue CLI",
+      "ownership": "system",
+      "protocol": "continue-cli",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "cn",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "supportedRange": ">=1.5.47 <1.6.0",
+      "certifiedVersions": [],
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://docs.continue.dev/cli/quickstart"
+    },
+    {
+      "runtimeId": "rovo-dev",
+      "presetIds": ["rovo-dev"],
+      "displayName": "Rovo Dev",
+      "ownership": "system",
+      "protocol": "rovo-http",
+      "transport": "http",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "acli",
+      "launchArgs": ["rovodev", "serve"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "certifiedVersions": [],
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://support.atlassian.com/rovo/docs/use-server-mode-in-rovo-dev-cli/"
+    },
+    {
+      "runtimeId": "codebuff",
+      "bundledBridgeId": "codebuff",
+      "presetIds": ["codebuff"],
+      "displayName": "Codebuff SDK",
+      "ownership": "system",
+      "protocol": "codebuff-sdk",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "node",
+      "launchArgs": [],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "supportedRange": ">=26.0.0",
+      "certifiedVersions": [],
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://www.codebuff.com/docs/advanced/sdk"
     }
   ]
 }

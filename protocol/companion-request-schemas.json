@@ -5632,6 +5632,22 @@
       },
       "additionalProperties": false
     },
+    "connectors_keyring_get_snapshot": {
+      "type": "object",
+      "required": [
+        "adapterId",
+        "credential"
+      ],
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "credential": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "connectors_keyring_list": {
       "type": "object",
       "required": [
@@ -6155,6 +6171,50 @@
       ],
       "properties": {
         "adapter_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_wechat_oa_inbound_ack": {
+      "type": "object",
+      "required": [
+        "adapterId",
+        "id"
+      ],
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_wechat_oa_inbound_claim": {
+      "type": "object",
+      "required": [
+        "adapterId",
+        "id"
+      ],
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectors_wechat_oa_inbound_list": {
+      "type": "object",
+      "required": [
+        "adapterId"
+      ],
+      "properties": {
+        "adapterId": {
           "type": "string"
         }
       },
